@@ -89,8 +89,14 @@ int main(int argc, char const ** argv) {
     // read from fasta stream 
     CharString id;
     String<Dna5> seq;
-    Map<Pair<String<Dna5>, TVertexDescriptor> > kmer_map;
+    Shape<Dna5, UngappedShape<11> > hash_func;
+    typedef Value<Shape<Dna5, UngappedShape<11> > >::Type THash;
+    Map<Pair<THash, TVertexDescriptor> > kmer_map;
     TGraph g;
+
+    unsigned int cnt_first = 0;
+    unsigned int cnt_recurr = 0;
+
     while (!atEnd(stream)) {
         if (readRecord(id, seq, stream) != 0) {
             std::cerr << "ERROR while reading from " << config.fname << std::endl;
@@ -98,19 +104,37 @@ int main(int argc, char const ** argv) {
         }
 
         // iterate over k-mers of current sequence
-        Shape<Dna5, UngappedShape<31> > kmer_hash;
-        hashInit(kmer_hash, begin(seq));
+        THash hash;
+        hashInit(hash_func, begin(seq));
         TVertexDescriptor last_node;
-        for (unsigned i = 1; i < length(seq) - length(kmer_hash) + 1; ++i) {
-            if (i % 1000000 == 0)
-                fprintf(stdout, "%i\n", i);
-            TVertexDescriptor current_node = addVertex(g);
-            add(kmer_map, hashNext(kmer_hash, begin(seq) + i), current_node);
+        TVertexDescriptor current_node;
+        for (unsigned i = 0; i < length(seq) - length(hash_func) + 1; ++i) {
+            //if (i > 0 && i % 1000 == 0)
+            //    return 0;
+            if (i > 0 && i % 100000 == 0) {
+                std::cout << "." << std::flush;
+                //fprintf(stdout, ".");
+                if (i % 1000000 == 0)
+                    fprintf(stdout, "%i\n", i);
+            }
+            hash = hashNext(hash_func, begin(seq) + i);
+            //std::cout << hash << " " << infix(seq, i, i+4) << " ";
+            if (!hasKey(kmer_map, hash)) {
+                current_node = addVertex(g);
+                add(kmer_map, hash, current_node);
+                ++cnt_first;
+                //std::cout << "new" << std::endl;
+            } else {
+                current_node = kmer_map[hash];
+                ++cnt_recurr;
+                //std::cout << "recurr" << std::endl;
+            }
             if (i > 1)
                 addEdge(g, last_node, current_node);
             last_node = current_node;
         }
-
+        std::cout << std::endl << "k-mers opening new nodes: " << cnt_first << std::endl;
+        std::cout << "k-mers already present in nodes: " << cnt_recurr << std::endl;
         //std::cout << id << ":" << seq << std::endl;
     }
 
