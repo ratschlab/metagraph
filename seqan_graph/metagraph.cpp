@@ -13,6 +13,13 @@
 #include <vector>
 #include <string>
 
+#include <btree_map.h>
+#include <dbg_seqan.hpp>
+#include <dbg_succinct.hpp>
+#include <unix_tools.hpp>
+
+//#include <lemon/list_graph.h>
+
 using namespace seqan;
 
 struct CFG 
@@ -81,27 +88,22 @@ int main(int argc, char const ** argv) {
         std::cout << CharString("Welcome to MetaGraph") << std::endl;
 
     // build the graph from the k-mers in the string
-    typedef unsigned int TCargo;
-    typedef Graph<Directed<TCargo> > TGraph;
-    typedef VertexDescriptor<TGraph>::Type TVertexDescriptor;
+    //typedef unsigned int TCargo;
+    //typedef Graph<Directed<TCargo> > TGraph; // --> we can use this when we want to have edge weights
+
+    // create graph object
+    //DBG_seqan* graph = new DBG_seqan(config.k);
+    DBG_succ* graph = new DBG_succ(config.k);
 
     // read from fasta stream 
     CharString id;
     String<Dna5> seq;
-    Shape<Dna5, SimpleShape> hash_func;
-    resize(hash_func, config.k);
-    typedef Value<Shape<Dna5, SimpleShape> >::Type THash;
-    Map<Pair<THash, TVertexDescriptor> > kmer_map;
-    TGraph g;
-
-    unsigned int cnt_first = 0;
-    unsigned int cnt_recurr = 0;
 
     // iterate over input files
     for (unsigned int f = 0; f < length(config.fname); ++f) {
 
         if (config.verbose) {
-            std::cout << "Parsing " << config.fname[f] << std::endl;
+            std::cout << std::endl << "Parsing " << config.fname[f] << std::endl;
         }
 
         // open stream to fasta file
@@ -117,39 +119,15 @@ int main(int argc, char const ** argv) {
                 std::cerr << "ERROR while reading from " << config.fname.at(f) << std::endl;
                 return 1;
             }
-
-            // iterate over k-mers of current sequence
-            THash hash;
-            hashInit(hash_func, begin(seq));
-            TVertexDescriptor last_node;
-            TVertexDescriptor current_node;
-            for (unsigned i = 0; i < length(seq) - length(hash_func) + 1; ++i) {
-                if (i > 0 && i % 100000 == 0) {
-                    std::cout << "." << std::flush;
-                    if (i % 1000000 == 0)
-                        fprintf(stdout, "%i\n", i);
-                }
-                hash = hashNext(hash_func, begin(seq) + i);
-                //std::cout << hash << " " << infix(seq, i, i+4) << " ";
-                if (!hasKey(kmer_map, hash)) {
-                    current_node = addVertex(g);
-                    add(kmer_map, hash, current_node);
-                    ++cnt_first;
-                    //std::cout << "new" << std::endl;
-                } else {
-                    current_node = kmer_map[hash];
-                    ++cnt_recurr;
-                    //std::cout << "recurr" << std::endl;
-                }
-                if (i > 1)
-                    addEdge(g, last_node, current_node);
-                last_node = current_node;
-            }
+            // add all k-mers of seq to the graph
+            graph->add_seq(seq);
         }
+        //graph->update_counters();
+        //graph->print_stats();
+        fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
     }
-    std::cout << std::endl << "k-mers opening new nodes: " << cnt_first << std::endl;
-    std::cout << "k-mers already present in nodes: " << cnt_recurr << std::endl;
-    //std::cout << id << ":" << seq << std::endl;
+
+    delete graph;
 
     return 0;
 }

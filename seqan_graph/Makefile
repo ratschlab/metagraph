@@ -1,18 +1,18 @@
-CXX=g++ #-std=c++11
+CXX=g++ -std=c++11 -O2
 CXXFLAGS+= -W -Wall -Wno-long-long -pedantic -Wno-variadic-macros
 #CXXFLAGS+= -I/cbio/grlab/home/akahles/seqan/seqan-seqan-v2.0.0/include 
-CXXFLAGS+= -I/cbio/grlab/home/akahles/seqan/seqan-1.4.2/core/include
-LDFGLAS=-lrt
+CXXFLAGS+= -I/cbio/grlab/home/akahles/seqan/seqan-1.4.2/core/include -I /cbio/grlab/home/akahles/software/cpp-btree-1.0.1 -I/cbio/grlab/home/akahles/software/sdsl-lite-lib/include -I. -L/cbio/grlab/home/akahles/software/sdsl-lite-lib/lib
+LDFLAGS=-lrt -lsdsl -ldivsufsort -ldivsufsort64
 
 default: all
 
 all: metagraph
 
-metagraph: metagraph.o
-	$(CXX) $(LDFLAGS) -o metagraph metagraph.o
+metagraph: metagraph.o dbg_seqan.hpp dbg_succinct.hpp unix_tools.hpp
+	$(CXX) $(CXXFLAGS) -o metagraph metagraph.o $(LDFLAGS)
 
-metagraph.o: metagraph.cpp
-	$(CXX) $(CXXFLAGS) -c -o metagraph.o $(LDFLAGS) metagraph.cpp
+metagraph.o: metagraph.cpp dbg_seqan.hpp dbg_succinct.hpp
+	$(CXX) $(CXXFLAGS) -c -o metagraph.o metagraph.cpp $(LDFLAGS)
 
 clean:
 	rm -f metagraph.o metagraph
