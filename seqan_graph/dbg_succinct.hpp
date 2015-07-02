@@ -39,7 +39,7 @@ using namespace sdsl;
 class DBG_succ {
 
     // define an extended alphabet for W --> somehow this does not work properly as expected
-   // typedef ModifiedAlphabet<Dna5, ModExpand<'$'> > Dna5F; 
+    typedef ModifiedAlphabet<Dna5, ModExpand<'X'> > Dna5F; 
    // typedef ModifiedAlphabet<Dna5F, ModExpand<'B'> > tmp_alph2; //A- 
    // typedef ModifiedAlphabet<tmp_alph2, ModExpand<'D'> > tmp_alph3; //C-
    // typedef ModifiedAlphabet<tmp_alph3, ModExpand<'H'> > tmp_alph4; //G-
@@ -65,7 +65,7 @@ class DBG_succ {
         // number of edges in the graph
         size_t m;
         // alphabet size
-        size_t alph_size = 12;
+        size_t alph_size = 7;
     
     public:
         DBG_succ(unsigned k) : k(k) {
@@ -90,10 +90,11 @@ class DBG_succ {
 
         void
         add_seq (
-            String<Dna5> seq
+            String<Dna5F> seq
         ) {
-            for (size_t j = 0; j < k - 1; j++)
-                append_pos(0);
+            print_seq();
+            print_state();
+            cout << "======================================" << endl;
 
             for (unsigned i = 0; i < length(seq); ++i) {
                 //if (i > 0 && i % 100000 == 0) {
@@ -106,45 +107,52 @@ class DBG_succ {
                 //cerr << "seq[i] " << seq[i] << endl;
                 //cerr << "seq[i] ord " << ordValue(seq[i]) + 1 << endl;
                 append_pos((TAlphabet) ordValue(seq[i]) + 1);
+                print_seq();
+                print_state();
+                cout << "======================================" << endl;
             }
-            print_seq();
 
-            for (size_t j = 0; j < k - 1; j++)
-                append_pos(0);
+            for (size_t j = 0; j < k - 1; j++) {
+                append_pos(6);
+                print_seq();
+                print_state();
+                cout << "======================================" << endl;
+            }
 
+            String<Dna5F> test = "CCT";
+            fprintf(stdout, "\nindex of CCT: %i\n", (int) index(test));
 
         }
 
     private:
     
         /** 
-         * Gets a reference to the array W, a position i in W and a character c
+         * Uses the object's array W, a given position i in W and a character c
          * from the alphabet and returns the number of occurences of c in W up to
          * position i.
          */
-         //size_t rank_W(String<unsigned short> &W, size_t i, unsigned short &c) {
-         size_t rank_W(String<TAlphabet> &W, size_t i, TAlphabet c) {
+         size_t rank_W(size_t i, TAlphabet c) {
 
             // deal with  border conditions
             if (i <= 0)
                 return 0;
-            if (i > length(W) - 1)
-                return length(W) - 1;
+            if (i > length(this->W) - 1)
+                return length(this->W) - 1;
 
             // count occurences of c and store them in cnt
             size_t cnt = 0;
             for (size_t j = 1; j <= i; j++)
-                cnt += (W[j] == c); 
+                cnt += (this->W[j] == c); 
             // return occurences
             return cnt;
         }
 
         /**
-         * Gets a reference to the array W, a count i and a character c from 
+         * Uses the array W and gets a count i and a character c from 
          * the alphabet and returns the positions of the i-th occurence of c 
          * in W.
          */
-        size_t select_W(String<TAlphabet> &W, size_t i, TAlphabet c) {
+        size_t select_W(size_t i, TAlphabet c) {
             
             // deal with  border conditions
             if (i <= 0)
@@ -153,8 +161,8 @@ class DBG_succ {
             // count occurences of c and store them in cnt
             size_t cnt = 0;
             size_t j;
-            for (j = 1; j < length(W); j++) {
-                cnt += (W[j] == c); 
+            for (j = 1; j < length(this->W); j++) {
+                cnt += (this->W[j] == c); 
                 if (cnt == i)
                     return j;
             }
@@ -163,50 +171,50 @@ class DBG_succ {
              * The length of W is one more than we have elements - this is to offset counting 
              * from 0.
              */
-            return j;
+            return length(this->W);
         }
 
         /**
-         * This is a convenience function that returns for a given array W, a position i and 
+         * This is a convenience function that returns for array W, a position i and 
          * a character c the last index of a character c preceding in W[1..i].
          */
-        size_t pred_W(String<TAlphabet> &W, size_t i, TAlphabet c) {
-            return select_W(W, rank_W(W, i, c), c);
+        size_t pred_W(size_t i, TAlphabet c) {
+            return select_W(rank_W(i, c), c);
         }
 
         /**
-         * This is a convenience function that returns for a given array W, a position i and 
+         * This is a convenience function that returns for array W, a position i and 
          * a character c the first index of a character c in W[i..N].
          */
-        size_t succ_W(String<TAlphabet> &W, size_t i, TAlphabet c) {
-            return select_W(W, rank_W(W, i - 1, c) + 1, c);
+        size_t succ_W(size_t i, TAlphabet c) {
+            return select_W(rank_W(i - 1, c) + 1, c);
         }
 
         /** 
-         * Gets a reference to the array last and a position and
+         * Uses the object's array last and a position and
          * returns the number of set bits up to that postion.
          */
-         size_t rank_last(String<bool> &last, size_t i) {
+         size_t rank_last(size_t i) {
 
             // deal with  border conditions
             if (i <= 0)
                 return 0;
-            if (i > length(last) - 1)
-                return length(last) - 1;
+            if (i > length(this->last) - 1)
+                return length(this->last) - 1;
 
             // count occurences of c and store them in cnt
             size_t cnt = 0;
             for (size_t j = 1; j <= i; j++)
-                cnt += last[j];
+                cnt += this->last[j];
             // return occurences
             return cnt;
         }
 
         /**
-         * Gets a reference to the array last and a position i and
+         * Uses the object's array last and a given position i and
          * returns the position of the i-th set bit in last[1..i].
          */
-        size_t select_last(String<bool> &last, size_t i) {
+        size_t select_last(size_t i) {
             
             // deal with  border conditions
             if (i <= 0)
@@ -214,29 +222,60 @@ class DBG_succ {
 
             // count occurences of c and store them in cnt
             size_t cnt = 0, j = 0;
-            for (j = 1; j < length(last); j++) {
-                cnt += (last[j]);
+            for (j = 1; j < length(this->last); j++) {
+                cnt += (this->last[j]);
                 if (cnt == i)
                     return j;
             }
-            // if i is greater than the rank of c at end of W, return length(W)
+            // if i is greater than the rank of c at end of last, return length(last)
+            return length(this->last);
+        }
+
+        /**
+         * This is a convenience function that returns for the object's array last
+         * and a given position i the position of the last set bit in last[1..i].
+         */
+        size_t pred_last(size_t i) {
+            return select_last(rank_last(i));
+        }
+
+        /**
+         * This is a convenience function that returns for the object's array last
+         * and a given position i the position of the first set bit in last[i..N].
+         */
+        size_t succ_last(size_t i) {
+            return select_last(rank_last(i - 1) + 1);
+        }
+
+
+        /**
+         * Given a position i in W and an edge label c, this function returns the
+         * index of the node the edge is pointing to.
+         */
+        size_t outgoing(size_t i, TAlphabet c) {
+            size_t j1 = pred_W(i, c);
+            size_t j2 = pred_W(i, c + alph_size);
+            //fprintf(stdout, "i %i, c %i, j1 %i, j2 %i\n", (int) i, (int) c, (int) j1, (int) j2);
+            size_t j = (j1 < j2) ? j2 : j1;
+            if (j == 0 || j == length(W))
+                return 0;
+            j = fwd(j);
+            if (j == 0 || j == length(W))
+                return 0;
             return j;
         }
 
-        /**
-         * This is a convenience function that returns for a given binary array last
-         * and a position i the position of the last set bit in last[1..i].
-         */
-        size_t pred_last(String<bool> &last, size_t i) {
-            return select_last(last, rank_last(last, i));
-        }
-
-        /**
-         * This is a convenience function that returns for a given binary array last
-         * and a position i the position of the first set bit in last[i..N].
-         */
-        size_t succ_last(String<bool> &last, size_t i) {
-            return select_last(last, rank_last(last, i - 1) + 1);
+        size_t index(String<Dna5F> &s) {
+            // init range
+            size_t rl = succ_last(F[(TAlphabet) ordValue(s[0]) + 1] + 1); // lower bound
+            size_t ru = F[(TAlphabet) ordValue(s[0]) + 2];                // upper bound
+            // update range iteratively while scanning through s
+            for (size_t i = 1; i < length(s); i++) {
+                rl = outgoing(rl, (TAlphabet) ordValue(s[i]) + 1);
+                ru = outgoing(ru, (TAlphabet) ordValue(s[i]) + 1);
+               // fprintf(stdout, "char: %i rl: %i ru: %i\n", (int) ordValue(s[i]) + 1, (int) rl, (int) ru);
+            }
+            return (ru > rl) ? ru : rl;
         }
 
 
@@ -245,10 +284,14 @@ class DBG_succ {
          * position of node i.
          */
         TAlphabet get_node_end_value(size_t i) {
-            for (TAlphabet j = 0; j < F.size(); j++)
+            if (i == 0)
+                return 0;
+            for (TAlphabet j = 0; j < F.size(); j++) {
                 if (F[j] >= i)
                     return j - 1;
-            return F.size();
+            }
+            //fprintf(stderr, "This does not make sense: %i\n", (int) i);
+            return F.size() - 1;
         }
 
 
@@ -262,7 +305,7 @@ class DBG_succ {
             // get the offset for the last position in node i
             size_t o = F[c];
             // compute the offset for this position in W and select it
-            return select_W(W, rank_last(last, i) - rank_last(last, o), c);
+            return select_W(rank_last(i) - rank_last(o), c);
         }
 
 
@@ -276,10 +319,9 @@ class DBG_succ {
             // get the offset for position c
             size_t o = F[c];
             // get the rank of c in W at position i
-            size_t r = rank_W(W, i, c);
-            //fprintf(stderr, "i %i, c %i, o %i, r %i\n", (int) i, (int) c, (int) o, (int) r);
+            size_t r = rank_W(i, c);
             // select the index of the position in last that is rank many positions after offset
-            return select_last(last, rank_last(last, o) + r);
+            return select_last(rank_last(o) + r);
         }
 
         /**
@@ -287,7 +329,7 @@ class DBG_succ {
          * of nodes identical to node i (ignoring the values in W).
          */
         pair<size_t, size_t> get_equal_node_range(size_t i) {
-            return make_pair(pred_last(last, i-1) + 1, succ_last(last, i));
+            return make_pair(pred_last(i - 1) + 1, succ_last(i));
         }
 
         /**
@@ -326,98 +368,136 @@ class DBG_succ {
             TAlphabet c_p = get_node_end_value(p);
             // get range of identical nodes (without W) pos current end position
             pair<size_t, size_t> R = get_equal_node_range(this->p);
-            //print_state();
+            //fprintf(stdout, "range [%i %i]\n", (int) R.first, (int) R.second);
 
             // get position of first occurence of c in W after p
-            size_t pc = succ_W(W, p, c);
+            size_t next_c = succ_W(p, c);
+            //fprintf(stdout, "p %i, c %i, next_c %i\n", (int) p, (int) c, (int) next_c);
             // check if c is part of range
-            bool exist_c = (pc <= R.second);
-            if (~exist_c) {
+            bool exist_c = (next_c <= R.second); // && W[next_c] != 0 && !is_terminal_node(next_c));
+            bool skip = false;
+            if (!exist_c) {
                 // get position of first occurence of c- in W after p
-                pc = succ_W(W, p, c + alph_size);
+                next_c = succ_W(p, c + alph_size);
                 // check if c- is part of range
-                exist_c = (pc <= R.second);
+                exist_c = (next_c <= R.second);
+                //skip = (next_c <= R.second); // --> node already exists - we are in a self-loop
             }
 
             /**
              * if the character already exists in the range, we delete the terminal symbol
-             * at p, insert c at fwd(pc) and update p.
+             * at p, insert c at fwd(next_c) and update p.
              */
+            //fprintf(stdout, "exist_c %i\n", (int) exist_c);
             if (exist_c) {
-                size_t p_new = fwd(pc);
+                // we need an addtional pred_W here as fwd is not defined if next_c is element of the minus set
+                size_t p_new = fwd(pred_W(next_c, c));
                 // remove old terminal symbol
                 erase(last, p);
                 erase(W, p);
                 // adapt position if altered by previous deletion
                 p_new -= (p < p_new);
-                // insert new terminal symbal 
-                insert(last, p_new, false);
+                // insert new terminal symbol 
+                // we have to insert 0 into last as the node already existed in the range 
+                // and the terminal symbol is always first
+                insert(last, p_new, p == p_new);
                 insert(W, p_new, 0);
                 // update new terminal position
                 p = p_new;
                 // take care of updating the offset array F
                 update_F(c_p, false);
+                //assert(get_node_end_value(p) == c);
                 update_F(c, true);
-            } else {
+            } else if (!skip) {
                 /**
                  * We found that c does not yet exist in the current range and now have to
                  * figure out if we need to add c or c- to the range.
                  * To do this, we check if there is a previous position j1 with W[j1] == c
-                 * having the same node sequence. If yes, we add c- instead of c.
+                 * whose node shares a k-1 suffix with the current node. If yes, we add c- 
+                 * instead of c.
                  */
-                size_t j1 = pred_W(W, p - 1, c);
-                if (j1 > 0) {
-                    size_t x = fwd(j1);
+                // get position of last occurence of c before p (including p - 1)
+                size_t last_c = pred_W(p - 1, c);
+                // if this position exists
+                if (last_c > 0) {
+                    size_t x = fwd(last_c);
                     assert(last[x]); // this should always be true - unless x is 0 - I do not get the logic in the reference implementation
 
                     // check, if there are any c or c- symbols following after position p
-                    size_t j2 = succ_W(W, p + 1, c);
-                    size_t j3 = succ_W(W, p + 1, c + 6);
-                    // there is no c between p and j3 and j3 is a c- ==> we should minus a c- 
-                    bool minus1 = (j3 < j2);
-                    // check, if we share a k-1 suffix with j1
-                    if (~minus1) {
-                        minus1 = compare_node_suffix(p, j1);
+                    size_t next_c = succ_W(p + 1, c);
+                    size_t next_cm = succ_W(p + 1, c + alph_size);
+                    // there is no c between p and next_cm and next_cm is a c- ==> we should add a c- 
+                    // all nodes between W[i] = c and W[j] = c- share a common suffix of length k-1
+                    bool minus1 = (next_cm < next_c);
+                    // check, if we share a k-1 suffix with last_c
+                    if (!minus1) {
+                        minus1 = compare_node_suffix(p, last_c);
                     }
-                    if (minus1)
-                        W[p] = c + 6;
-                    else
-                        W[p] = c;
+                    W[p] = minus1 ? c + alph_size : c;
 
-                    bool minus2 = compare_node_suffix(p, j2);
-                    if ((j2 < m) && minus2) {
-                        W[j2] = (W[j2] % 6) + 6;
+                    // after we are done, assert that the order within the range we created 
+                    // is still valid within W
+                    if (p - R.second > 0) {
+                        sort_W_locally(p, R.second);
                     }
+                    
+                    // adding a new node can influence following nodes that share a k-1 suffix with the
+                    // new node -> need to adapt the respektive cc to a cc-
+                    bool minus2 = false;
+                    if (next_c < length(W)) {
+                        minus2 = compare_node_suffix(p, next_c);
+                        if (minus2)
+                            W[next_c] += alph_size;
+                    }
+
+                    // if one of the minuses is true, at least one node shares a k-1 suffix with last_c
+                    // and has the same character in W --> this the fwd(last_c) creates a node that is not unique
+                    // as we insert at the beginning of the range, last is false. We insert at position x
+                    // as this is the beginning of the range (last_c)
                     if (minus1 || minus2) {
+                        p = x;
                         insert(last, x, false, Generous());
                         insert(W, x, 0, Generous());
-                        p = x;
+                    // no node shares a k-1 suffix with last_c and thus the new node comes after
+                    // the forward of last_c (as the current node came after last_c as well)
                     } else {
+                        p = x + 1;
                         insert(last, x + 1, true, Generous());
                         insert(W, x + 1, 0, Generous());
-                        p = x + 1;
                     }
                 } else {
                     size_t x = F[c];
-                    size_t j2 = succ_W(W, p + 1, c);
+                    size_t next_c = succ_W(p + 1, c);
                     bool minus = false;
-                    if (j2 < length(W)) {
-                        minus = compare_node_suffix(p, j2);
+                    if (next_c < length(W)) {
+                        minus = compare_node_suffix(p, next_c);
                     }
                     W[p] = c;
-                    //fprintf(stderr, "c %i\n", (int) c);
-                    //fprintf(stderr, "j2 %i\n", (int) j2);
+                    if (p - R.second > 0) {
+                        sort_W_locally(p, R.second);
+                    }
+                    p = x + 1;
                     if (minus) {
-                        W[j2] = c + 6;
+                        W[next_c] += alph_size;
                         insert(last, x + 1, 0, Generous());
                     } else {
                         insert(last, x + 1, 1, Generous());
                     }
                     insert(W, x + 1, 0, Generous());
-                    p = x + 1;
                 }
                 m++;
                 update_F(c, true);
+            }
+            // update sorting at new location of p
+            // with this we assert that $ is always inserted at the first position 
+            // of a range of equal nodes --> this will help us to prevent multiple insertions
+            // of already existing nodes
+            R = get_equal_node_range(this->p);
+            if (R.first - R.second > 0) {
+                sort_W_locally(R.first, R.second);
+                if (W[p] != 0)
+                    p--;
+                assert(W[p] == 0);
             }
         }
 
@@ -427,16 +507,24 @@ class DBG_succ {
          * node labels share a k-1 suffix.
          */
         bool compare_node_suffix(size_t i1, size_t i2) {
-            bool share_suffix = true;
             for (size_t ii = 0; ii < k-1; ii++) {
                 if (get_node_end_value(i1) != get_node_end_value(i2)) {
-                    share_suffix = false;
-                    break;
+                    return false;
                 }
-                i1 = bwd(i1);
-                i2 = bwd(i2);
+                i1 = bwd(succ_last(i1));
+                i2 = bwd(succ_last(i2));
             }
-            return share_suffix;
+            return true;
+        }
+
+        bool is_terminal_node(size_t i) {
+            for (size_t ii = 0; ii < k-1; ii++) {
+                if (get_node_end_value(i) % alph_size != 0) {
+                    return false;
+                }
+                i = bwd(i);
+            }
+            return true;
         }
 
 
@@ -445,7 +533,7 @@ class DBG_succ {
          * all following values by +1 is positive is true and by -1 otherwise.
          */
         void update_F(TAlphabet c, bool positive) {
-            for (TAlphabet i = c+1; i < (TAlphabet) alph_size; i++)
+            for (TAlphabet i = c+1; i < F.size(); i++)
                 F[i] += (2 * (TAlphabet) positive - 1);
         }
 
@@ -455,12 +543,66 @@ class DBG_succ {
         void print_seq() {
             for (size_t i = 1; i < length(W); i++) {
             //while (i > 0 && get_node_end_value(i) > 0) {
-                if (W[i] == 0)
+                if (W[i] % alph_size == 0)
                     fprintf(stdout, "$");
                 else
-                    cout << Dna5((W[i] % 6) - 1);
+                    cout << Dna5F((W[i] % alph_size) - 1);
             }
             cout << endl;
+
+            for (size_t i = 1; i < length(W); i++) {
+                if (p == i)
+                    fprintf(stdout, "*");
+                else
+                    fprintf(stdout, " ");
+            }
+            cout << endl;
+
+            size_t j;
+            for (size_t i = 1; i < length(W); i++) {
+                j = get_node_end_value(i);
+                if (j % alph_size == 0)
+                    fprintf(stdout, "$");
+                else
+                    cout << Dna5F((j % alph_size) - 1);
+            }
+            cout << endl;
+            for (size_t i = 1; i < length(W); i++) {
+                j = get_node_end_value(bwd(succ_last(i)));
+                if (j % alph_size == 0)
+                    fprintf(stdout, "$");
+                else
+                    cout << Dna5F((j % alph_size) - 1);
+            }
+            cout << endl;
+            for (size_t i = 1; i < length(W); i++) {
+                j = get_node_end_value(bwd(succ_last(bwd(succ_last(i)))));
+                if (j % alph_size == 0)
+                    fprintf(stdout, "$");
+                else
+                    cout << Dna5F((j % alph_size) - 1);
+            }
+            cout << endl;
+            for (size_t i = 1; i < length(last); i++) {
+                fprintf(stdout, "%i", (int) last[i]);
+            }
+            cout << endl;
+        }
+
+        /**
+         * This function gets a local range in W from lower bound l
+         * to upper bound u and swaps the inserted element to the
+         * righ location.
+         */
+        void sort_W_locally(size_t l, size_t u) {
+            for (size_t s = l; s < u; s++) {
+                TAlphabet tmp;
+                if ((W[s+1] % alph_size) < (W[s] % alph_size)) {
+                    tmp = W[s];
+                    W[s] = W[s+1];
+                    W[s+1] = tmp;
+                }
+            }
         }
 };
 #endif
