@@ -66,6 +66,8 @@ class DBG_succ {
         size_t m;
         // alphabet size
         size_t alph_size = 7;
+
+        bool debug = false; //true;
     
     public:
         DBG_succ(unsigned k) : k(k) {
@@ -92,36 +94,42 @@ class DBG_succ {
         add_seq (
             String<Dna5F> seq
         ) {
-            print_seq();
-            print_state();
-            cout << "======================================" << endl;
+            if (debug) {
+                print_seq();
+                print_state();
+                cout << "======================================" << endl;
+            }
 
             for (unsigned i = 0; i < length(seq); ++i) {
                 //if (i > 0 && i % 100000 == 0) {
-                if (i > 0 && i % 1000 == 0) {
+                if (i > 0 && i % 100 == 0) {
                     std::cout << "." << std::flush;
-                    if (i % 1000000 == 0)
-                        fprintf(stdout, "%i\n", i);
+                    if (i % 1000 == 0)
+                        fprintf(stdout, "%i - edges %i / nodes %i\n", i, (int) length(W) - 1, (int) rank_last((length(last) - 1)));
                 }
                 //fprintf(stdout, "appending %i\n", (int) ordValue(seq[i]));
                 //cerr << "seq[i] " << seq[i] << endl;
                 //cerr << "seq[i] ord " << ordValue(seq[i]) + 1 << endl;
                 append_pos((TAlphabet) ordValue(seq[i]) + 1);
-                print_seq();
-                print_state();
-                cout << "======================================" << endl;
+                if (debug) {
+                    print_seq();
+                    print_state();
+                    cout << "======================================" << endl;
+                }
             }
 
             for (size_t j = 0; j < k - 1; j++) {
                 append_pos(6);
-                print_seq();
-                print_state();
-                cout << "======================================" << endl;
+                if (debug) {
+                    print_seq();
+                    print_state();
+                    cout << "======================================" << endl;
+                }
             }
 
-            String<Dna5F> test = "CCT";
-            fprintf(stdout, "\nindex of CCT: %i\n", (int) index(test));
-
+            fprintf(stdout, "edges %i / nodes %i\n", (int) length(W) - 1, (int) rank_last((length(last) - 1)));
+            //String<Dna5F> test = "CCT";
+            //fprintf(stdout, "\nindex of CCT: %i\n", (int) index(test));
         }
 
     private:
@@ -304,6 +312,7 @@ class DBG_succ {
             TAlphabet c = get_node_end_value(i);
             // get the offset for the last position in node i
             size_t o = F[c];
+            //fprintf(stdout, "i %i c %i o %i rank(i) %i rank(o) %i\n", (int) i, (int) c, (int) o, (int) rank_last(i), (int) rank_last(o));
             // compute the offset for this position in W and select it
             return select_W(rank_last(i) - rank_last(o), c);
         }
@@ -400,7 +409,7 @@ class DBG_succ {
                 // insert new terminal symbol 
                 // we have to insert 0 into last as the node already existed in the range 
                 // and the terminal symbol is always first
-                insert(last, p_new, p == p_new);
+                insert(last, p_new, false);//p == p_new);
                 insert(W, p_new, 0);
                 // update new terminal position
                 p = p_new;
@@ -433,14 +442,7 @@ class DBG_succ {
                     if (!minus1) {
                         minus1 = compare_node_suffix(p, last_c);
                     }
-                    W[p] = minus1 ? c + alph_size : c;
 
-                    // after we are done, assert that the order within the range we created 
-                    // is still valid within W
-                    if (p - R.second > 0) {
-                        sort_W_locally(p, R.second);
-                    }
-                    
                     // adding a new node can influence following nodes that share a k-1 suffix with the
                     // new node -> need to adapt the respektive cc to a cc-
                     bool minus2 = false;
@@ -448,6 +450,13 @@ class DBG_succ {
                         minus2 = compare_node_suffix(p, next_c);
                         if (minus2)
                             W[next_c] += alph_size;
+                    }
+
+                    W[p] = minus1 ? c + alph_size : c;
+                    // after we are done, assert that the order within the range we created 
+                    // is still valid within W
+                    if (p - R.second > 0) {
+                        sort_W_locally(p, R.second);
                     }
 
                     // if one of the minuses is true, at least one node shares a k-1 suffix with last_c
@@ -493,9 +502,9 @@ class DBG_succ {
             // of a range of equal nodes --> this will help us to prevent multiple insertions
             // of already existing nodes
             R = get_equal_node_range(this->p);
-            if (R.first - R.second > 0) {
+            if (R.second - R.first > 0) {
                 sort_W_locally(R.first, R.second);
-                if (W[p] != 0)
+                while (W[p] != 0)
                     p--;
                 assert(W[p] == 0);
             }
@@ -508,9 +517,12 @@ class DBG_succ {
          */
         bool compare_node_suffix(size_t i1, size_t i2) {
             for (size_t ii = 0; ii < k-1; ii++) {
+                //cout << "node1 - " << i1 << ": " << Dna5F(get_node_end_value(i1) % alph_size - 1) << endl; 
+                //cout << "node2 - " << i2 << ": " << Dna5F(get_node_end_value(i2) % alph_size - 1) << endl; 
                 if (get_node_end_value(i1) != get_node_end_value(i2)) {
                     return false;
                 }
+                //cout << "succ (i1): " << succ_last(i1) << " succ (i2): " << succ_last(i2) << endl;
                 i1 = bwd(succ_last(i1));
                 i2 = bwd(succ_last(i2));
             }
@@ -595,12 +607,12 @@ class DBG_succ {
          * righ location.
          */
         void sort_W_locally(size_t l, size_t u) {
-            for (size_t s = l; s < u; s++) {
+            for (size_t s = u; s > l; s--) {
                 TAlphabet tmp;
-                if ((W[s+1] % alph_size) < (W[s] % alph_size)) {
-                    tmp = W[s];
-                    W[s] = W[s+1];
-                    W[s+1] = tmp;
+                if ((W[s] % alph_size) < (W[s-1] % alph_size)) {
+                    tmp = W[s-1];
+                    W[s-1] = W[s];
+                    W[s] = tmp;
                 }
             }
         }
