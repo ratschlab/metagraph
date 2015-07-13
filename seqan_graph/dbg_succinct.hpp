@@ -22,7 +22,7 @@
 #include <seqan/basic.h>
 using namespace seqan;
 
-/** In future we would like to loose some efficient low level implementation 
+/** In future we would like to use some efficient low level implementation 
  * of rank and select on the arrays but for now we go the straighforward way to
  * see if the concept works for us. 
  *

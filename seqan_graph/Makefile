@@ -8,10 +8,10 @@ default: all
 
 all: metagraph
 
-metagraph: metagraph.o dbg_seqan.hpp dbg_succinct.hpp unix_tools.hpp
+metagraph: metagraph.o dbg_seqan.hpp dbg_succinct.hpp unix_tools.hpp dmm_tree.hpp
 	$(CXX) $(CXXFLAGS) -o metagraph metagraph.o $(LDFLAGS)
 
-metagraph.o: metagraph.cpp dbg_seqan.hpp dbg_succinct.hpp
+metagraph.o: metagraph.cpp dbg_seqan.hpp dbg_succinct.hpp dmm_tree.hpp
 	$(CXX) $(CXXFLAGS) -c -o metagraph.o metagraph.cpp $(LDFLAGS)
 
 clean:
