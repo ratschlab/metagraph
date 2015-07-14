@@ -15,8 +15,8 @@
 
 #include <btree_map.h>
 #include <dbg_seqan.hpp>
-#include <dbg_succinct.hpp>
-#include <dmm_tree.hpp>
+#include <dbg_succinct_libmaus.hpp>
+//#include <dmm_tree.hpp>
 #include <unix_tools.hpp>
 
 //#include <lemon/list_graph.h>
