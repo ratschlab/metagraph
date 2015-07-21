@@ -12,6 +12,7 @@
  */
 
 #include <vector>
+#include <stack>
 #include <assert.h>
 #include <iostream>
 
@@ -31,7 +32,7 @@ class DBG_succ {
 
     // define an extended alphabet for W --> somehow this does not work properly as expected
     typedef ModifiedAlphabet<Dna5, ModExpand<'X'> > Dna5F; 
-   typedef uint64_t TAlphabet;
+    typedef uint64_t TAlphabet;
 
     private:
         // the bit array indicating the last outgoing edge of a node
@@ -55,7 +56,7 @@ class DBG_succ {
 
         uint64_t W2_size = 0;
 
-        bool debug = false; //true;
+        bool debug = true;
     
     public:
         DBG_succ(size_t k) : k(k) {
@@ -115,6 +116,8 @@ class DBG_succ {
             }
 
             fprintf(stdout, "edges %lu / nodes %lu\n", W2_size - 1, rank_last2((last2->size() - 1)));
+
+            toSQL();
             //String<Dna5F> test = "CCT";
             //fprintf(stdout, "\nindex of CCT: %i\n", (int) index(test));
         }
@@ -211,10 +214,6 @@ class DBG_succ {
          * and a given position i the position of the first set bit in last[i..N].
          */
         uint64_t succ_last2(uint64_t i) {
-            //if (i > 65000) {
-            //    fprintf(stderr, "i: %lu ", i-1);
-            //    fprintf(stderr, "rank: %lu\n", rank_last2(i - 1));
-            //}
             return select_last2(rank_last2(i - 1) + 1);
         }
 
@@ -223,18 +222,83 @@ class DBG_succ {
          * index of the node the edge is pointing to.
          */
         uint64_t outgoing(uint64_t i, TAlphabet c) {
-            uint64_t j1 = pred_W2(i, c);
-            uint64_t j2 = pred_W2(i, c + alph_size);
-            //fprintf(stdout, "i %i, c %i, j1 %i, j2 %i\n", (int) i, (int) c, (int) j1, (int) j2);
+            if (i >= W2_size - 1)
+                return 0;
+            pair<uint64_t, uint64_t> R = get_equal_node_range(i);
+
+            uint64_t j1 = pred_W2(R.second, c);
+            uint64_t j2 = pred_W2(R.second, c + alph_size);
             uint64_t j = (j1 < j2) ? j2 : j1;
-            if (j == 0 || j == W2_size)
+            if (j < R.first || j >= W2_size - 1)
                 return 0;
             j = fwd(j);
+            //j = fwd(pred_W2(j, (*W2)[j] % alph_size));
             if (j == 0 || j == W2_size)
                 return 0;
+            if (j > 36000)
+                fprintf(stdout, "i %i, c %i, j1 %i, j2 %i size W %i\n", (int) i, (int) c, (int) j1, (int) j2, W2_size);
             return j;
         }
 
+
+        /**
+         * Given a node index i and an edge label c, this function returns the
+         * index of the node the incoming edge belongs to.
+         */
+        uint64_t incoming(uint64_t i, TAlphabet c) {
+            if (i == 1)
+                return 0;
+            c %= alph_size;
+            TAlphabet d = get_node_end_value(i);
+            uint64_t x = bwd(i);
+            if (get_node_begin_value(x) == c) {
+                return succ_last2(x);
+            }
+            uint64_t y = succ_W2(x + 1, d);
+            while (true) {
+                x = succ_W2(x+1, d + alph_size);
+                if (x >= y) {
+                    break;
+                }
+                if (get_node_begin_value(x) == c) {
+                    return succ_last2(x);
+                }
+            }
+            return 0;
+        }
+
+
+        /**
+         * Given a node index i, this function returns the number of outgoing
+         * edges from node i.
+         */
+        uint64_t outdegree(uint64_t i) {
+            return (i < W2_size - 1) ? succ_last2(i) - pred_last2(i - 1) : 0;
+        }
+
+
+        /**
+         * Given a node index i, this function returns the number of incoming
+         * edges to node i.
+         */
+        uint64_t indegree(uint64_t i) {
+            if (i < 2)
+                return 0;
+            uint64_t x = bwd(succ_last2(i));
+            TAlphabet d = get_node_end_value(i);
+            uint64_t y = succ_W2(x + 1, d);
+            assert((d % alph_size) == x);
+            if (y < W2_size)
+                return 1 + rank_W2(y, d + alph_size) - rank_W2(x, d + alph_size);
+            else
+                return 1;
+        }
+
+
+        /**
+         * Given a node label s, this function returns the index
+         * of the corresponding node, if this node exists and 0 otherwise.
+         */
         uint64_t index(String<Dna5F> &s) {
             // init range
             uint64_t rl = succ_last2(F[(TAlphabet) ordValue(s[0]) + 1] + 1);
@@ -260,8 +324,24 @@ class DBG_succ {
                 if (F[j] >= i)
                     return j - 1;
             }
-            //fprintf(stderr, "This does not make sense: %i\n", (int) i);
             return F.size() - 1;
+        }
+
+        
+        /**
+         * Given index of node i, the function returns the 
+         * first character of the node.
+         */
+        TAlphabet get_node_begin_value(uint64_t i) {
+            if (i == 1)
+                return 0;
+
+            for (size_t j = 0; j < k-1; ++j) {
+                i = bwd(succ_last2(i));
+                if (i == 1)
+                    return 0;
+            }
+            return get_node_end_value(i);
         }
 
 
@@ -274,11 +354,7 @@ class DBG_succ {
             TAlphabet c = get_node_end_value(i);
             // get the offset for the last position in node i
             uint64_t o = F[c];
-            if (select_W2(rank_last2(i) - rank_last2(o), c) > 1000000) {
-                uint64_t tmp = rank_last2(i) - rank_last2(o);
-                fprintf(stdout, "%lu %lu\n", select_W2(tmp, c), select_W2(rank_last2(i) - rank_last2(o), c));
-                fprintf(stdout, "i %lu c %i o %lu rank(i) %lu rank(o) %lu difference %lu\n", i, (int) c, o, rank_last2(i), rank_last2(o), rank_last2(i) - rank_last2(o));
-            }
+            //fprintf(stdout, "i %lu c %i o %lu rank(i) %lu rank(o) %lu difference %lu\n", i, (int) c, o, rank_last2(i), rank_last2(o), rank_last2(i) - rank_last2(o));
             // compute the offset for this position in W and select it
             return select_W2(rank_last2(i) - rank_last2(o), c);
         }
@@ -290,7 +366,7 @@ class DBG_succ {
          */
         uint64_t fwd(uint64_t i) {
             // get value of W at position i
-            TAlphabet c = (*W2)[i]; 
+            TAlphabet c = (*W2)[i] % alph_size; 
             // get the offset for position c
             uint64_t o = F[c];
             // get the rank of c in W at position i
@@ -361,10 +437,10 @@ class DBG_succ {
              * if the character already exists in the range, we delete the terminal symbol
              * at p, insert c at fwd(next_c) and update p.
              */
-            //fprintf(stdout, "exist_c %i\n", (int) exist_c);
             if (exist_c) {
                 // we need an addtional pred_W here as fwd is not defined if next_c is element of the minus set
-                uint64_t p_new = fwd(pred_W2(next_c, c));
+                //uint64_t p_new = fwd(pred_W2(next_c, c));
+                uint64_t p_new = fwd(next_c);
                 // remove old terminal symbol
                 last2->deleteBit(p);
                 W2->remove(p);
@@ -519,8 +595,22 @@ class DBG_succ {
                 F[i] += (2 * (TAlphabet) positive - 1);
         }
 
+
+        /**
+         * Given index i of a node and a value k, this function 
+         * will return the k-th last character of node i.
+         */
+        TAlphabet get_minus_k_value(uint64_t i, uint64_t k) {
+            for (; k > 0; --k)
+                i = bwd(succ_last2(i));
+            return get_node_end_value(i);
+        }
+
+
         /*
-         * Returns the sequence stored in W
+         * Returns the sequence stored in W and prints the node
+         * information in an overview. 
+         * Useful for debugging purposes.
          */
         void print_seq() {
 
@@ -541,35 +631,56 @@ class DBG_succ {
             cout << endl;
 
             size_t j;
-            for (uint64_t i = 1; i < W2_size; i++) {
-                j = get_node_end_value(i);
-                if (j % alph_size == 0)
-                    fprintf(stdout, "$");
-                else
-                    cout << Dna5F((j % alph_size) - 1);
-            }
-            cout << endl;
-            for (uint64_t i = 1; i < W2_size; i++) {
-                j = get_node_end_value(bwd(succ_last2(i)));
-                if (j % alph_size == 0)
-                    fprintf(stdout, "$");
-                else
-                    cout << Dna5F((j % alph_size) - 1);
-            }
-            cout << endl;
-            for (uint64_t i = 1; i < W2_size; i++) {
-                j = get_node_end_value(bwd(succ_last2(bwd(succ_last2(i)))));
-                if (j % alph_size == 0)
-                    fprintf(stdout, "$");
-                else
-                    cout << Dna5F((j % alph_size) - 1);
+            for (size_t l = 0; l < k; l++) {
+                for (uint64_t i = 1; i < W2_size; i++) {
+                    j = get_minus_k_value(i, l);
+                    if (j % alph_size == 0)
+                        cout << "$";
+                    else
+                        cout << Dna5F((j % alph_size) - 1);
+                }
+                cout << endl;
             }
             cout << endl;
             for (uint64_t i = 1; i < last2->size(); i++) {
                 fprintf(stdout, "%i", (int) (*last2)[i]);
             }
             cout << endl;
+            cout << endl;
+
+            for (uint64_t i = 1; i < W2_size; ++i) {
+                cout << indegree(i);  
+            }
+            cout << endl;
+            for (uint64_t i = 1; i < W2_size; ++i) {
+                cout << outdegree(i);  
+            }
+            cout << endl;
+            cout << endl;
+            /*for (TAlphabet c = 0; c <= 5; ++c) {
+                if (c == 0)
+                    cout << "$";
+                else
+                    cout << Dna5F(c - 1);
+                for (uint64_t i = 1; i < W2_size; ++i) {
+                    cout << " " << incoming(i, c);  
+                }
+                cout << endl;
+            }*/
+            /*for (TAlphabet c = 1; c <= 6; ++c) {
+                if (c == 0)
+                    cout << "$";
+                else
+                    cout << Dna5F(c - 1);
+                for (uint64_t i = 1; i < W2_size; ++i) {
+                    cout << " " << outgoing(i, c);  
+                }
+                cout << endl;
+            }*/
+
+
         }
+
 
         /**
          * This function gets a local range in W from lower bound l
@@ -587,12 +698,113 @@ class DBG_succ {
             }
         }
 
-        /** This is a convenience function to replace value at
+
+        /** 
+         * This is a convenience function to replace the value at
          * position i in W with val.
          */
         void replaceW(size_t i, TAlphabet val) {
             W2->remove(i);
             W2->insert(val, i);
+        }
+
+
+        /**
+         * Take the current graph content and return it in SQL
+         * format (GA4GH Spec).
+         *
+         * We start at the sink and walk back until we hit the source.
+         * This will be our reference string. We record branches on the
+         * way.
+         */
+        void toSQL() {
+            
+            // store all branch nodes on the way
+            stack<uint64_t> branchnodes;
+            vector<bool> visited(last2->size());
+            for (vector<bool>::iterator it = visited.begin(); it != visited.end(); ++it) {
+                *it = false;
+            }
+            // start at the source node (i == 1)
+            uint64_t i = 1;
+            size_t out = outdegree(i);
+            TAlphabet val;
+            while (out > 0 || branchnodes.size() > 0) {
+
+                // we have reached the sink but there are unvisited nodes left
+                if (out == 0) {
+                    cout << endl;
+                    if (branchnodes.size() == 0)
+                        break;
+                    i = branchnodes.top();
+                    branchnodes.pop();
+                    out = outdegree(i);
+                }
+                    
+                if (!visited.at(i)) {
+                    visited.at(i) = true;
+                    //fprintf(stderr, "visited %lu\n", i);
+                    val = get_node_end_value(i);
+                    if (val % alph_size == 0)
+                        fprintf(stdout, "$");
+                    else
+                        cout << Dna5F((val % alph_size) - 1);
+                }
+                // there is only one child
+                if (out == 1) {
+                    //uint64_t next = fwd(pred_W2(i, (*W2)[i] % alph_size));
+                    uint64_t next = fwd(i);
+                    //fprintf(stderr, "there was one child -- i: %lu next: %lu", i, next);
+                    // this is a new node
+                    if (!visited.at(next)) {
+                        i = next;
+                    // we  did see that node before
+                    } else {
+                        // there are no branches left
+                        if (branchnodes.size() == 0)
+                            break;
+                        // otherwise go back to last branch
+                        i = branchnodes.top();
+                        //fprintf(stderr, " popped %lu ", i);
+                        branchnodes.pop();
+                        cout << endl;
+                    }
+                    //fprintf(stderr, " new i: %lu\n", i);
+                // there are several children
+                } else {
+                    //fprintf(stderr, "there were %lu children -- i: %lu", out, i);
+                    size_t cnt = 0;
+                    bool updated = false;
+                    for (TAlphabet c = 1; c < alph_size; ++c) {
+                        uint64_t next = outgoing(i, c);
+                        if (next > 0) {
+                            cnt++;
+                            if (!visited.at(next)) {
+                                if (cnt < out) {
+                                    branchnodes.push(i);
+                                    //fprintf(stderr, " pushed %lu ", i);
+                                }
+                                i = next;
+                                updated = true;
+                                break;
+                            }
+                        }
+                    }
+                    // we are done with this branch
+                    if (!updated) {
+                        // there are no branches left
+                        if (branchnodes.size() == 0)
+                            break;
+                        // otherwise go back to last branch
+                        i = branchnodes.top();
+                        //fprintf(stderr, " popped %lu ", i);
+                        branchnodes.pop();
+                        cout << endl;
+                    }
+                    //fprintf(stderr, " new i: %lu\n", i);
+                }
+                out = outdegree(i);
+            }
         }
 };
 #endif
