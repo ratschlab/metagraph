@@ -26,7 +26,7 @@
 #include <seqan/basic.h>
 using namespace seqan;
 
-using namespace std;
+//using namespace std;
 
 class DBG_succ {
 
@@ -43,7 +43,7 @@ class DBG_succ {
         libmaus::wavelet::DynamicWaveletTree<6, 64> *W2 = new libmaus::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
 
         // the offset array to mark the offsets for the last column in the implicit node list
-        vector<TAlphabet> F; 
+        std::vector<TAlphabet> F; 
 
         // k-mer size
         size_t k;
@@ -68,7 +68,7 @@ class DBG_succ {
             W2->insert(0, 0);
             W2_size += 2;
 
-            //F = vector<unsigned int>(5, 0);
+            //F = std::vector<unsigned int>(5, 0);
             F.push_back(0);
             for (size_t j = 1; j < alph_size; j++)
                 F.push_back(1);
@@ -84,7 +84,7 @@ class DBG_succ {
             if (debug) {
                 print_seq();
                 print_state();
-                cout << "======================================" << endl;
+                std::cout << "======================================" << std::endl;
             }
 
             for (uint64_t i = 0; i < length(seq); ++i) {
@@ -96,13 +96,13 @@ class DBG_succ {
                     }
                 }
                 //fprintf(stdout, "appending %i\n", (int) ordValue(seq[i]));
-                //cerr << "seq[i] " << seq[i] << endl;
-                //cerr << "seq[i] ord " << ordValue(seq[i]) + 1 << endl;
+                //cerr << "seq[i] " << seq[i] << std::endl;
+                //cerr << "seq[i] ord " << ordValue(seq[i]) + 1 << std::endl;
                 append_pos((TAlphabet) ordValue(seq[i]) + 1);
                 if (debug) {
                     print_seq();
                     print_state();
-                    cout << "======================================" << endl;
+                    std::cout << "======================================" << std::endl;
                 }
             }
 
@@ -111,7 +111,7 @@ class DBG_succ {
                 if (debug) {
                     print_seq();
                     print_state();
-                    cout << "======================================" << endl;
+                    std::cout << "======================================" << std::endl;
                 }
             }
 
@@ -152,7 +152,7 @@ class DBG_succ {
 
             // count occurences of c and store them in cnt
             //fprintf(stderr, "query select W2 -- c: %i i: %lu return: %lu \n", c, i-1+(c==0), W2->select(c, i-1+(c==0)));
-            return min(W2->select(c, i - 1 + (c == 0)), W2_size);
+            return std::min(W2->select(c, i - 1 + (c == 0)), W2_size);
         }
 
         /**
@@ -224,7 +224,7 @@ class DBG_succ {
         uint64_t outgoing(uint64_t i, TAlphabet c) {
             if (i >= W2_size - 1)
                 return 0;
-            pair<uint64_t, uint64_t> R = get_equal_node_range(i);
+            std::pair<uint64_t, uint64_t> R = get_equal_node_range(i);
 
             uint64_t j1 = pred_W2(R.second, c);
             uint64_t j2 = pred_W2(R.second, c + alph_size);
@@ -232,11 +232,10 @@ class DBG_succ {
             if (j < R.first || j >= W2_size - 1)
                 return 0;
             j = fwd(j);
-            //j = fwd(pred_W2(j, (*W2)[j] % alph_size));
             if (j == 0 || j == W2_size)
                 return 0;
-            if (j > 36000)
-                fprintf(stdout, "i %i, c %i, j1 %i, j2 %i size W %i\n", (int) i, (int) c, (int) j1, (int) j2, W2_size);
+            //if (j > 36000)
+            //    fprintf(stdout, "i %i, c %i, j1 %i, j2 %i size W %i\n", (int) i, (int) c, (int) j1, (int) j2, W2_size);
             return j;
         }
 
@@ -379,8 +378,8 @@ class DBG_succ {
          * Given a position i, this function returns the boundaries of the interval
          * of nodes identical to node i (ignoring the values in W).
          */
-        pair<uint64_t, uint64_t> get_equal_node_range(uint64_t i) {
-            return make_pair(pred_last2(i - 1) + 1, succ_last2(i));
+        std::pair<uint64_t, uint64_t> get_equal_node_range(uint64_t i) {
+            return std::make_pair(pred_last2(i - 1) + 1, succ_last2(i));
         }
 
         /**
@@ -418,7 +417,7 @@ class DBG_succ {
             assert((*W2)[p] == 0);
             TAlphabet c_p = get_node_end_value(p);
             // get range of identical nodes (without W) pos current end position
-            pair<uint64_t, uint64_t> R = get_equal_node_range(this->p);
+            std::pair<uint64_t, uint64_t> R = get_equal_node_range(this->p);
             //fprintf(stdout, "range [%i %i]\n", (int) R.first, (int) R.second);
 
             // get position of first occurence of c in W after p
@@ -563,12 +562,12 @@ class DBG_succ {
          */
         bool compare_node_suffix(uint64_t i1, uint64_t i2) {
             for (size_t ii = 0; ii < k-1; ii++) {
-                //cout << "node1 - " << i1 << ": " << Dna5F(get_node_end_value(i1) % alph_size - 1) << endl; 
-                //cout << "node2 - " << i2 << ": " << Dna5F(get_node_end_value(i2) % alph_size - 1) << endl; 
+                //std::cout << "node1 - " << i1 << ": " << Dna5F(get_node_end_value(i1) % alph_size - 1) << std::endl; 
+                //std::cout << "node2 - " << i2 << ": " << Dna5F(get_node_end_value(i2) % alph_size - 1) << std::endl; 
                 if (get_node_end_value(i1) != get_node_end_value(i2)) {
                     return false;
                 }
-                //cout << "succ (i1): " << succ_last(i1) << " succ (i2): " << succ_last(i2) << endl;
+                //std::cout << "succ (i1): " << succ_last(i1) << " succ (i2): " << succ_last(i2) << std::endl;
                 i1 = bwd(succ_last2(i1));
                 i2 = bwd(succ_last2(i2));
             }
@@ -618,9 +617,9 @@ class DBG_succ {
                 if ((*W2)[i] % alph_size == 0)
                     fprintf(stdout, "$");
                 else
-                    cout << Dna5F(((*W2)[i] % alph_size) - 1);
+                    std::cout << Dna5F(((*W2)[i] % alph_size) - 1);
             }
-            cout << endl;
+            std::cout << std::endl;
 
             for (uint64_t i = 1; i < W2_size; i++) {
                 if (p == i)
@@ -628,54 +627,54 @@ class DBG_succ {
                 else
                     fprintf(stdout, " ");
             }
-            cout << endl;
+            std::cout << std::endl;
 
             size_t j;
             for (size_t l = 0; l < k; l++) {
                 for (uint64_t i = 1; i < W2_size; i++) {
                     j = get_minus_k_value(i, l);
                     if (j % alph_size == 0)
-                        cout << "$";
+                        std::cout << "$";
                     else
-                        cout << Dna5F((j % alph_size) - 1);
+                        std::cout << Dna5F((j % alph_size) - 1);
                 }
-                cout << endl;
+                std::cout << std::endl;
             }
-            cout << endl;
+            std::cout << std::endl;
             for (uint64_t i = 1; i < last2->size(); i++) {
                 fprintf(stdout, "%i", (int) (*last2)[i]);
             }
-            cout << endl;
-            cout << endl;
+            std::cout << std::endl;
+            std::cout << std::endl;
 
             for (uint64_t i = 1; i < W2_size; ++i) {
-                cout << indegree(i);  
+                std::cout << indegree(i);  
             }
-            cout << endl;
+            std::cout << std::endl;
             for (uint64_t i = 1; i < W2_size; ++i) {
-                cout << outdegree(i);  
+                std::cout << outdegree(i);  
             }
-            cout << endl;
-            cout << endl;
+            std::cout << std::endl;
+            std::cout << std::endl;
             /*for (TAlphabet c = 0; c <= 5; ++c) {
                 if (c == 0)
-                    cout << "$";
+                    std::cout << "$";
                 else
-                    cout << Dna5F(c - 1);
+                    std::cout << Dna5F(c - 1);
                 for (uint64_t i = 1; i < W2_size; ++i) {
-                    cout << " " << incoming(i, c);  
+                    std::cout << " " << incoming(i, c);  
                 }
-                cout << endl;
+                std::cout << std::endl;
             }*/
             /*for (TAlphabet c = 1; c <= 6; ++c) {
                 if (c == 0)
-                    cout << "$";
+                    std::cout << "$";
                 else
-                    cout << Dna5F(c - 1);
+                    std::cout << Dna5F(c - 1);
                 for (uint64_t i = 1; i < W2_size; ++i) {
-                    cout << " " << outgoing(i, c);  
+                    std::cout << " " << outgoing(i, c);  
                 }
-                cout << endl;
+                std::cout << std::endl;
             }*/
 
 
@@ -720,9 +719,9 @@ class DBG_succ {
         void toSQL() {
             
             // store all branch nodes on the way
-            stack<uint64_t> branchnodes;
-            vector<bool> visited(last2->size());
-            for (vector<bool>::iterator it = visited.begin(); it != visited.end(); ++it) {
+            std::stack<uint64_t> branchnodes;
+            std::vector<bool> visited(last2->size());
+            for (std::vector<bool>::iterator it = visited.begin(); it != visited.end(); ++it) {
                 *it = false;
             }
             // start at the source node (i == 1)
@@ -733,7 +732,7 @@ class DBG_succ {
 
                 // we have reached the sink but there are unvisited nodes left
                 if (out == 0) {
-                    cout << endl;
+                    std::cout << std::endl;
                     if (branchnodes.size() == 0)
                         break;
                     i = branchnodes.top();
@@ -746,9 +745,9 @@ class DBG_succ {
                     //fprintf(stderr, "visited %lu\n", i);
                     val = get_node_end_value(i);
                     if (val % alph_size == 0)
-                        fprintf(stdout, "$");
+                        std::cout << "$";
                     else
-                        cout << Dna5F((val % alph_size) - 1);
+                        std::cout << Dna5F((val % alph_size) - 1);
                 }
                 // there is only one child
                 if (out == 1) {
@@ -765,9 +764,8 @@ class DBG_succ {
                             break;
                         // otherwise go back to last branch
                         i = branchnodes.top();
-                        //fprintf(stderr, " popped %lu ", i);
                         branchnodes.pop();
-                        cout << endl;
+                        std::cout << std::endl;
                     }
                     //fprintf(stderr, " new i: %lu\n", i);
                 // there are several children
@@ -782,7 +780,6 @@ class DBG_succ {
                             if (!visited.at(next)) {
                                 if (cnt < out) {
                                     branchnodes.push(i);
-                                    //fprintf(stderr, " pushed %lu ", i);
                                 }
                                 i = next;
                                 updated = true;
@@ -797,14 +794,14 @@ class DBG_succ {
                             break;
                         // otherwise go back to last branch
                         i = branchnodes.top();
-                        //fprintf(stderr, " popped %lu ", i);
                         branchnodes.pop();
-                        cout << endl;
+                        std::cout << std::endl;
                     }
                     //fprintf(stderr, " new i: %lu\n", i);
                 }
                 out = outdegree(i);
             }
+            std::cout << std::endl;
         }
 };
 #endif
