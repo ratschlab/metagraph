@@ -13,7 +13,7 @@
 #include <vector>
 #include <string>
 
-#include <btree_map.h>
+//#include <btree_map.h>
 #include <dbg_seqan.hpp>
 #include <dbg_succinct_libmaus.hpp>
 //#include <dmm_tree.hpp>
@@ -127,6 +127,7 @@ int main(int argc, char const ** argv) {
         //graph->print_stats();
         fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
     }
+    graph->toSQL();
 
     delete graph;
 
