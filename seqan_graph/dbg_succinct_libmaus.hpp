@@ -19,8 +19,8 @@
 #include <iostream>
 #include <fstream>
 
-#include <libmaus/bitbtree/bitbtree.hpp>
-#include <libmaus/wavelet/DynamicWaveletTree.hpp>
+#include <libmaus2/bitbtree/bitbtree.hpp>
+#include <libmaus2/wavelet/DynamicWaveletTree.hpp>
 
 /** 
  * We use seqan for an efficient representation of our alphabet.
@@ -36,10 +36,10 @@ class DBG_succ {
 
     private:
         // the bit array indicating the last outgoing edge of a node
-        libmaus::bitbtree::BitBTree<6, 64> *last = new libmaus::bitbtree::BitBTree<6, 64>();
+        libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();
 
         // the array containing the edge labels
-        libmaus::wavelet::DynamicWaveletTree<6, 64> *W = new libmaus::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
+        libmaus2::wavelet::DynamicWaveletTree<6, 64> *W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
 
         // the offset array to mark the offsets for the last column in the implicit node list
         std::vector<TAlphabet> F; 
@@ -190,10 +190,6 @@ class DBG_succ {
             // deal with  border conditions
             if (i <= 0)
                 return 0;
-            //if (i > last->size() - 1) {
-            //    fprintf(stderr, "i %lu size %lu\n", i, last->size());
-            //    return last->size() - 1;
-            //}
             return last->rank1(i);
         }
 
@@ -205,10 +201,7 @@ class DBG_succ {
             // deal with  border conditions
             if (i <= 0)
                 return 0;
-            //fprintf(stderr, "i %lu size %lu\n", i, last->size());
-            //if (i >= last->size())
-            //    return last->size();
-            // for some reason the libmaus select is 0 based ...
+            // for some reason the libmaus2 select is 0 based ...
             return std::min(last->select1(i - 1), last->size());
         }
 
@@ -245,8 +238,6 @@ class DBG_succ {
             j = fwd(j);
             if (j == 0 || j == W_size)
                 return 0;
-            //if (j > 36000)
-            //    fprintf(stdout, "i %i, c %i, j1 %i, j2 %i size W %i\n", (int) i, (int) c, (int) j1, (int) j2, W_size);
             return j;
         }
 
@@ -381,6 +372,7 @@ class DBG_succ {
             return select_last(rank_last(o) + r);
         }
 
+
         /**
          * Given a position i, this function returns the boundaries of the interval
          * of nodes identical to node i (ignoring the values in W).
@@ -388,6 +380,7 @@ class DBG_succ {
         std::pair<uint64_t, uint64_t> get_equal_node_range(uint64_t i) {
             return std::make_pair(pred_last(i - 1) + 1, succ_last(i));
         }
+
 
         /**
          * This is a debug function that prints the current state of the graph arrays to
@@ -429,9 +422,8 @@ class DBG_succ {
 
             // get position of first occurence of c in W after p
             uint64_t next_c = succ_W(p, c);
-            //fprintf(stdout, "p %i, c %i, next_c %i\n", (int) p, (int) c, (int) next_c);
             // check if c is part of range
-            bool exist_c = (next_c <= R.second); // && W[next_c] != 0 && !is_terminal_node(next_c));
+            bool exist_c = (next_c <= R.second);
             if (!exist_c) {
                 // get position of first occurence of c- in W after p
                 next_c = succ_W(p, c + alph_size);
@@ -572,18 +564,19 @@ class DBG_succ {
          */
         bool compare_node_suffix(uint64_t i1, uint64_t i2) {
             for (size_t ii = 0; ii < k-1; ii++) {
-                //std::cout << "node1 - " << i1 << ": " << Dna5F(get_node_end_value(i1) % alph_size - 1) << std::endl; 
-                //std::cout << "node2 - " << i2 << ": " << Dna5F(get_node_end_value(i2) % alph_size - 1) << std::endl; 
                 if (get_node_end_value(i1) != get_node_end_value(i2)) {
                     return false;
                 }
-                //std::cout << "succ (i1): " << succ_last(i1) << " succ (i2): " << succ_last(i2) << std::endl;
                 i1 = bwd(succ_last(i1));
                 i2 = bwd(succ_last(i2));
             }
             return true;
         }
 
+
+        /**
+         * This function returns true if node i is a terminal node.
+         */
         bool is_terminal_node(uint64_t i) {
             for (size_t ii = 0; ii < k-1; ii++) {
                 if (get_node_end_value(i) % alph_size != 0) {
@@ -805,6 +798,9 @@ class DBG_succ {
             // for nodes with indegree > 1 we store sequence and index of the 
             // sequence that visited them, so we know where to anchor branches into it
             std::map<uint64_t, std::pair<uint64_t, uint64_t> > nodeId2seqPos; 
+            // we also store for each branching edge the join it creates.
+            // we will use this for allele traversal
+            std::map<std::pair<uint64_t, TAlphabet>, uint64_t> branchMap;
             uint64_t nodeId = 1; // start at source node
             uint64_t seqPos = 0; // position in currently traversed sequence, will increase with every visited node and be reset upon new branch
             uint64_t seqId = 1;  // first sequence ID is 1
@@ -814,13 +810,11 @@ class DBG_succ {
             BranchInfo branch;
             TAlphabet val;
             TAlphabet lastEdge = 0;
-           // std::cout << " (" << seqId << ":" << seqPos << ") ";
-           //
+
             while (out > 0 || branchnodes.size() > 0) {
 
                 // we have reached the sink but there are unvisited nodes left on the stack
                 if (out == 0) {
-                    //std::cout << " (sink)" << std::endl;
                     if (branchnodes.size() == 0)
                         break;
                     // get new branch
@@ -831,8 +825,7 @@ class DBG_succ {
                     if (debug)
                         fprintf(stderr, " -- popped %lu -- ", nodeId); 
                     joins.push_back(JoinInfo(branch.seqId, branch.seqPos, seqId, seqPos));
-                    //fprintf(stderr, "1: join %lu %lu %lu %lu -- lastEdge %lu\n", branch.seqId, branch.seqPos, seqId, seqPos, lastEdge);
-                    //std::cout << " (" << branch.seqId << ":" << branch.seqPos << ") ";
+                    branchMap.insert(std::make_pair(std::make_pair(nodeId, lastEdge + 1), joins.size()));
                 }
 
                 // we have not visited that node before
@@ -843,15 +836,12 @@ class DBG_succ {
                     val = get_node_end_value(nodeId);
                     if (val % alph_size == 0) {
                         seqan::append(sequence, "$");
-                        //std::cout << "$";
                     } else {
                         seqan::append(sequence, Dna5F((val % alph_size) - 1));
-                        //std::cout << Dna5F((val % alph_size) - 1);
                     }
                     // store seq position of this node (we will join to it later)
                     if (indegree(nodeId) > 1) {
                         nodeId2seqPos.insert(std::make_pair(nodeId, std::make_pair(seqId, seqPos)));
-                        //fprintf(stderr, "nodeId %lu seqId %lu seqPos %lu val %lu\n", nodeId, seqId, seqPos, val);
                     }
                 }
 
@@ -865,9 +855,8 @@ class DBG_succ {
                     // we have seen the next node before
                     } else {
                         // look up the sequence info of that node
-                        //std::cout << " (" << nodeId2seqPos[next].first << ":" << std::max(nodeId2seqPos[next].second, 1ul) - 1 << ") " << std::endl;
                         joins.push_back(JoinInfo(seqId, seqPos, nodeId2seqPos[next].first, nodeId2seqPos[next].second));
-                        //fprintf(stderr, "2: join %lu %lu %lu %lu\n", seqId, seqPos, nodeId2seqPos[next].first, nodeId2seqPos[next].second);
+                        branchMap.insert(std::make_pair(std::make_pair(nodeId, 1ul), joins.size()));
                         // there are no branches left
                         if (branchnodes.size() == 0)
                             break;
@@ -878,9 +867,8 @@ class DBG_succ {
                         out = outdegree(nodeId);
                         if (debug)
                             fprintf(stderr, " -- popped %lu -- ", nodeId); 
-                        //std::cout << " (" << branch.seqId << ":" << branch.seqPos << ") ";
                         joins.push_back(JoinInfo(branch.seqId, branch.seqPos, seqId, seqPos));
-                        //fprintf(stderr, "3: join %lu %lu %lu %lu\n", branch.seqId, branch.seqPos, seqId, seqPos);
+                        branchMap.insert(std::make_pair(std::make_pair(nodeId, lastEdge + 1), joins.size()));
                     }
                     if (debug)
                         fprintf(stderr, " new nodeId: %lu\n", nodeId);
@@ -910,12 +898,12 @@ class DBG_succ {
                                 break;
                             } else {
                                 // look up the sequence info of that node
-                                //std::cout << " -- (" << nodeId2seqPos[next].first << ":" << std::max(nodeId2seqPos[next].second, 1ul) - 1 << ") " << std::endl;
-                                if (nodeId == next) 
+                                if (nodeId == next) { 
                                     joins.push_back(JoinInfo(nodeId2seqPos[next].first, nodeId2seqPos[next].second, nodeId2seqPos[next].first, nodeId2seqPos[next].second));
-                                else
+                                } else {
                                     joins.push_back(JoinInfo(seqId, seqPos, nodeId2seqPos[next].first, nodeId2seqPos[next].second));
-                                //fprintf(stderr, "4: join %lu %lu %lu %lu next %lu\n", seqId, seqPos, nodeId2seqPos[next].first, nodeId2seqPos[next].second, next);
+                                }
+                                branchMap.insert(std::make_pair(std::make_pair(nodeId, 1ul), joins.size()));
                             }
                         }
                     }
@@ -932,9 +920,8 @@ class DBG_succ {
                         out = outdegree(nodeId);
                         if (debug)
                             fprintf(stderr, " -- popped %lu -- ", nodeId); 
-                        //std::cout << " (" << branch.seqId << ":" << branch.seqPos << ") ";
                         joins.push_back(JoinInfo(branch.seqId, branch.seqPos, seqId, seqPos));
-                        //fprintf(stderr, "5: join %lu %lu %lu %lu\n", branch.seqId, branch.seqPos, seqId, seqPos);
+                        branchMap.insert(std::make_pair(std::make_pair(nodeId, lastEdge + 1), joins.size()));
                     }
                     if (debug)
                         fprintf(stderr, " new nodeId: %lu\n", nodeId);
@@ -945,17 +932,15 @@ class DBG_succ {
             if (seqan::length(sequence) > 0)
                 finish_sequence(sequence);
 
+            // output joins
             for (size_t i = 0; i < joins.size(); ++i) {
                 std::cout << "(" << joins.at(i).seqId1 << ":" << joins.at(i).seqPos1 << "--" << joins.at(i).seqId2 << ":" << joins.at(i).seqPos2 << ")" << std::endl;
             }
-            /*if (out == 0 && branchnodes.size() == 0) {
-                std::cout << " (sink)" << std::endl;
-            } else {
-                std::cout << std::endl;
-            }*/
 
+            for (std::map<std::pair<uint64_t, uint64_t>, uint64_t>::iterator it = branchMap.begin(); it != branchMap.end(); ++it) {
+                std::cout << "[" << (*it).first.first << ", " << (*it).first.second << "] -- " << (*it).second << std::endl;
+            }
         }
-
 
 };
 #endif
