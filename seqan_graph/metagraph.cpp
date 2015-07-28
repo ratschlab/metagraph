@@ -18,12 +18,11 @@
 #include <dbg_succinct_libmaus.hpp>
 //#include <dmm_tree.hpp>
 #include <unix_tools.hpp>
+#include <config.hpp>
 
 //#include <lemon/list_graph.h>
 
-using namespace seqan;
-
-struct CFG 
+/*struct CFG 
 {
     //String<char> > fname;
     std::vector<std::string> fname;
@@ -33,7 +32,7 @@ struct CFG
     CFG() :
         verbose(false), k(31)
     {}
-};
+};*/
 
 // parse command line arguments and options
 ArgumentParser::ParseResult
@@ -127,7 +126,7 @@ int main(int argc, char const ** argv) {
         //graph->print_stats();
         fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
     }
-    graph->toSQL();
+    graph->toSQL(config);
 
     delete graph;
 

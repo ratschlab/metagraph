@@ -1,4 +1,4 @@
-CXX=g++ -std=c++11 -O3 -fopenmp
+CXX=g++ -std=c++11 -fopenmp -O3
 CXXFLAGS+= -W -Wall -Wno-long-long -pedantic -Wno-variadic-macros
 #CXXFLAGS+= -I/cbio/grlab/home/akahles/seqan/seqan-seqan-v2.0.0/include 
 #CXXFLAGS+= -I/cbio/grlab/home/akahles/software/sdsl-lite-lib/include -L/cbio/grlab/home/akahles/software/sdsl-lite-lib/lib 
@@ -12,10 +12,10 @@ all: metagraph
 
 debug: metagraph_debug
 
-metagraph: metagraph.cpp dbg_seqan.hpp dbg_succinct_libmaus.hpp unix_tools.hpp dmm_tree.hpp
+metagraph: metagraph.cpp dbg_seqan.hpp dbg_succinct_libmaus.hpp unix_tools.hpp dmm_tree.hpp config.hpp
 	$(CXX) $(CXXFLAGS) -o metagraph metagraph.cpp $(LDFLAGS)
 
-metagraph_debug: metagraph.cpp dbg_seqan.hpp dbg_succinct_libmaus.hpp unix_tools.hpp dmm_tree.hpp
+metagraph_debug: metagraph.cpp dbg_seqan.hpp dbg_succinct_libmaus.hpp unix_tools.hpp dmm_tree.hpp config.hpp
 	$(CXX) $(CXXFLAGS) -o metagraph metagraph.cpp $(LDFLAGS) -D DBGDEBUG
 
 #metagraph.o: metagraph.cpp dbg_seqan.hpp dbg_succinct_libmaus.hpp dmm_tree.hpp

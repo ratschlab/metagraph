@@ -21,12 +21,16 @@
 
 #include <libmaus2/bitbtree/bitbtree.hpp>
 #include <libmaus2/wavelet/DynamicWaveletTree.hpp>
+#include <libmaus2/digest/md5.hpp>
 
 /** 
  * We use seqan for an efficient representation of our alphabet.
  */
 #include <seqan/sequence.h>
 #include <seqan/basic.h>
+#include <seqan/seq_io.h>
+
+#include <config.hpp>
 
 class DBG_succ {
 
@@ -79,10 +83,8 @@ class DBG_succ {
             p = 1;
         }
 
-        void
-        add_seq (
-            String<Dna5F> seq
-        ) {
+        void add_seq (seqan::String<Dna5F> seq) {
+
             if (debug) {
                 print_seq();
                 print_state();
@@ -90,7 +92,7 @@ class DBG_succ {
             }
 
             if (W_size == 2) {
-                for (size_t j = 0; j < k - 1; j++) {
+                for (size_t j = 0; j < k; j++) {
                     append_pos(6);
                     if (debug) {
                         print_seq();
@@ -119,7 +121,7 @@ class DBG_succ {
                 }
             }
 
-            for (size_t j = 0; j < k - 1; j++) {
+            for (size_t j = 0; j < k; j++) {
                 append_pos(6);
                 if (debug) {
                     print_seq();
@@ -226,14 +228,14 @@ class DBG_succ {
          * index of the node the edge is pointing to.
          */
         uint64_t outgoing(uint64_t i, TAlphabet c) {
-            if (i >= W_size - 1)
+            if (i > W_size)
                 return 0;
             std::pair<uint64_t, uint64_t> R = get_equal_node_range(i);
 
             uint64_t j1 = pred_W(R.second, c);
             uint64_t j2 = pred_W(R.second, c + alph_size);
             uint64_t j = (j1 < j2) ? j2 : j1;
-            if (j < R.first || j >= W_size - 1)
+            if (j < R.first || j >= W_size)
                 return 0;
             j = fwd(j);
             if (j == 0 || j == W_size)
@@ -274,7 +276,7 @@ class DBG_succ {
          * edges from node i.
          */
         uint64_t outdegree(uint64_t i) {
-            return (i < W_size - 1) ? succ_last(i) - pred_last(i - 1) : 0;
+            return (i < W_size) ? succ_last(i) - pred_last(i - 1) : 0;
         }
 
 
@@ -698,6 +700,14 @@ class DBG_succ {
                     replaceW(s, tmp);
                 }
             }
+            for (uint64_t s = l; s < u; ++s) {
+                TAlphabet tmp;
+                if (((*W)[s] % alph_size) > ((*W)[s+1] % alph_size)) {
+                    tmp = (*W)[s+1];
+                    replaceW(s+1, (*W)[s]);
+                    replaceW(s, tmp);
+                }
+            }
         }
 
 
@@ -738,7 +748,7 @@ class DBG_succ {
             uint64_t seqId2;
             uint64_t seqPos2;
 
-            JoinInfo(uint64_t seqId1_, uint64_t seqPos1_, uint64_t seqId2_, uint64_t seqPos2_):
+            JoinInfo(uint64_t seqId1_ = 0, uint64_t seqPos1_ = 0, uint64_t seqId2_ = 0, uint64_t seqPos2_ = 0):
                 seqId1(seqId1_),
                 seqPos1(seqPos1_),
                 seqId2(seqId2_),
@@ -749,11 +759,13 @@ class DBG_succ {
         /**
          * This is a convenience function that pops the last branch and updates the traversal state.
          */
-        BranchInfo pop_branch(std::stack<BranchInfo> &branchnodes, uint64_t &seqPos, uint64_t &nodeId, uint64_t &lastEdge, bool &isFirst) {
+        BranchInfo pop_branch(std::stack<BranchInfo> &branchnodes, uint64_t &seqId, uint64_t &seqPos, uint64_t &nodeId, uint64_t &lastEdge, bool &isFirst) {
             BranchInfo branch = branchnodes.top();
             branchnodes.pop();
             isFirst = true;
-            seqPos = 0;
+            //seqPos = 0;
+            seqPos = branch.seqPos;
+            seqId = branch.seqId;
             lastEdge = branch.lastEdge;
             nodeId = branch.nodeId;
 
@@ -766,9 +778,36 @@ class DBG_succ {
             return stream
         }*/
 
-        bool finish_sequence(seqan::String<Dna5F> &sequence) {
+        bool finish_sequence(seqan::String<Dna5F> &sequence, uint64_t seqId, std::ofstream &SQLstream) {
             if (seqan::length(sequence) > 0) {
-                std::cout << sequence << std::endl;
+                if (seqId == 1)
+                    SQLstream << "INSERT INTO FASTA VALUES (1, 'sequence.fa');" << std::endl;
+                //std::ostringstream fname; 
+                //fname << "sequence" << seqId << ".fa";
+                std::ofstream stream;
+                if (seqId == 1)
+                    stream.open("sequence.fa");
+                else
+                    stream.open("sequence.fa", std::ofstream::app);
+                stream << ">seq" << seqId << std::endl;
+                uint64_t i = 0;
+                while ((i + 80) < seqan::length(sequence)) {
+                    stream << seqan::infix(sequence, i, i+80) << std::endl;
+                    i += 80;
+                }
+                if (i != seqan::length(sequence))
+                    stream << seqan::suffix(sequence, i) << std::endl;
+                stream.close();
+
+                if (debug)
+                    std::cout << sequence << std::endl;
+
+                std::string md5;
+                std::ostringstream test;
+                test << sequence;
+                libmaus2::util::MD5::md5(test.str(), md5);
+                SQLstream << "INSERT INTO Sequence VALUES (" << seqId << ", 1, 'seq" << seqId << "', '" << md5 << "', " << seqan::length(sequence) << ");" << std::endl;
+                //std::cout << seqId << ":" << md5 << std::endl;
                 seqan::clear(sequence);
                 return true;
             } else {
@@ -776,56 +815,57 @@ class DBG_succ {
             }
         }
 
-        /**
-         * Take the current graph content and return it in SQL
-         * format (GA4GH Spec).
-         *
-         * We will perform one depth first search traversal of the graph. While we will record
-         * one long reference string, we will output all sidepaths on the way.
-         */
-        public:
-        void toSQL() {
-            
+        size_t traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream) {
             // store all branch nodes on the way
             std::stack<BranchInfo> branchnodes;
+            std::map<uint64_t, std::pair<uint64_t, uint64_t> > nodeId2seqId;
+            // bool vector that keeps track of visited nodes
             std::vector<bool> visited(last->size());
             for (std::vector<bool>::iterator it = visited.begin(); it != visited.end(); ++it) {
                 *it = false;
             }
-            std::vector<JoinInfo> joins;
             seqan::String<Dna5F> sequence;
-
             // for nodes with indegree > 1 we store sequence and index of the 
             // sequence that visited them, so we know where to anchor branches into it
             std::map<uint64_t, std::pair<uint64_t, uint64_t> > nodeId2seqPos; 
-            // we also store for each branching edge the join it creates.
-            // we will use this for allele traversal
-            std::map<std::pair<uint64_t, TAlphabet>, uint64_t> branchMap;
+            // some initializations
             uint64_t nodeId = 1; // start at source node
             uint64_t seqPos = 0; // position in currently traversed sequence, will increase with every visited node and be reset upon new branch
             uint64_t seqId = 1;  // first sequence ID is 1
-            uint64_t seqCnt = 1; // number of total sequences
-            bool isFirst = true;
+            size_t seqCnt = 1; // number of total sequences
+            bool isFirst = true; // is this the first node in a new sequence?
             size_t out = outdegree(nodeId);
+            std::pair<uint64_t, uint64_t> branchPos;
             BranchInfo branch;
             TAlphabet val;
             TAlphabet lastEdge = 0;
+            TAlphabet joinEdge = 0;
+            bool joinOpen = false;
+            JoinInfo currJoin;
 
             while (out > 0 || branchnodes.size() > 0) {
 
+                //fprintf(stderr, "1: nodeId %lu out %lu\n", nodeId, out);
                 // we have reached the sink but there are unvisited nodes left on the stack
                 if (out == 0) {
                     if (branchnodes.size() == 0)
                         break;
                     // get new branch
-                    branch = pop_branch(branchnodes, seqPos, nodeId, lastEdge, isFirst);
-                    if (finish_sequence(sequence))
-                        seqId = seqCnt += 1;
+                    branch = pop_branch(branchnodes, seqId, seqPos, nodeId, lastEdge, isFirst);
+                    //if (finish_sequence(sequence, seqId, SQLstream))
+                    //    seqId = seqCnt += 1;
                     out = outdegree(nodeId);
                     if (debug)
                         fprintf(stderr, " -- popped %lu -- ", nodeId); 
-                    joins.push_back(JoinInfo(branch.seqId, branch.seqPos, seqId, seqPos));
-                    branchMap.insert(std::make_pair(std::make_pair(nodeId, lastEdge + 1), joins.size()));
+                    //branchPos = nodeId2seqId[nodeId];
+                    //currJoin = JoinInfo(branchPos.first, branchPos.second, seqId, seqPos);
+                    //fprintf(stderr, "currJoin 3: %lu %lu %lu %lu\n", currJoin.seqId1, currJoin.seqPos1, currJoin.seqId2, currJoin.seqPos2);
+                    joinOpen = true;
+                    //joins.push_back(JoinInfo(branchPos.first, branchPos.second, seqId, seqPos));
+                    //fprintf(stderr, "6: push join : %lu %lu %lu %lu\n", branchPos.first, branchPos.second, seqId, seqPos);
+                    //fprintf(stderr, "1: insert %lu at [%lu %lu]\n", joins.size() - 1, nodeId, lastEdge + 1);
+                    //branchMap.insert(std::make_pair(std::make_pair(nodeId, lastEdge + 1), joins.size() - 1));
+                    joinEdge = lastEdge + 1;
                 }
 
                 // we have not visited that node before
@@ -845,33 +885,57 @@ class DBG_succ {
                     }
                 }
 
+                //fprintf(stderr, "2: nodeId %lu out %lu\n", nodeId, out);
                 // there is only one child
                 if (out == 1) {
                     uint64_t next = fwd(nodeId);
                     // the next node is new
                     if (!visited.at(next)) {
+                        if (joinOpen) {
+                            if (length(sequence) > 0) {
+                                finish_sequence(sequence, seqCnt++, SQLstream);
+                            }
+                            //if (finish_sequence(sequence, seqId, SQLstream))
+                                //seqId = seqCnt += 1;
+                            seqId = seqCnt;
+                            seqPos = 0;
+                            branchPos = nodeId2seqId[nodeId];
+                            joins.push_back(JoinInfo(branchPos.first, branchPos.second, seqId, seqPos));
+                            joinOpen = false;
+                            //fprintf(stderr, "2: insert %lu at [%lu %lu]\n", joins.size() - 1, nodeId, joinEdge);
+                            branchMap.insert(std::make_pair(std::make_pair(nodeId, joinEdge), joins.size() - 1));
+                        }
                         nodeId = next;
                         lastEdge = 0;
                     // we have seen the next node before
                     } else {
                         // look up the sequence info of that node
                         joins.push_back(JoinInfo(seqId, seqPos, nodeId2seqPos[next].first, nodeId2seqPos[next].second));
-                        branchMap.insert(std::make_pair(std::make_pair(nodeId, 1ul), joins.size()));
+                        //fprintf(stderr, "5: push join : %lu %lu %lu %lu\n", seqId, seqPos, nodeId2seqPos[next].first, nodeId2seqPos[next].second);
+                        //fprintf(stderr, "2: insert %lu at [%lu %lu]\n", joins.size() - 1, nodeId, 1ul);
+                        branchMap.insert(std::make_pair(std::make_pair(nodeId, 1ul), joins.size() - 1));
                         // there are no branches left
                         if (branchnodes.size() == 0)
                             break;
                         // otherwise go back to last branch
-                        branch = pop_branch(branchnodes, seqPos, nodeId, lastEdge, isFirst);
-                        if (finish_sequence(sequence))
-                            seqId = seqCnt += 1;
+                        branch = pop_branch(branchnodes, seqId, seqPos, nodeId, lastEdge, isFirst);
+                        //if (finish_sequence(sequence, seqId, SQLstream))
+                        //    seqId = seqCnt += 1;
                         out = outdegree(nodeId);
                         if (debug)
                             fprintf(stderr, " -- popped %lu -- ", nodeId); 
-                        joins.push_back(JoinInfo(branch.seqId, branch.seqPos, seqId, seqPos));
-                        branchMap.insert(std::make_pair(std::make_pair(nodeId, lastEdge + 1), joins.size()));
+                        //branchPos = nodeId2seqId[nodeId];
+                        //currJoin = JoinInfo(branchPos.first, branchPos.second, seqId, seqPos);
+                        //fprintf(stderr, "currJoin 2: %lu %lu %lu %lu\n", currJoin.seqId1, currJoin.seqPos1, currJoin.seqId2, currJoin.seqPos2);
+                        joinOpen = true;
+                        joinEdge = lastEdge + 1;
+                        //joins.push_back(JoinInfo(branchPos.first, branchPos.second, seqId, seqPos));
+                        //fprintf(stderr, "4: push join : %lu %lu %lu %lu\n", branchPos.first, branchPos.second, seqId, seqPos);
+                       // fprintf(stderr, "3: insert %lu at [%lu %lu]\n", joins.size() - 1, nodeId, lastEdge + 1);
+                        //branchMap.insert(std::make_pair(std::make_pair(nodeId, lastEdge + 1), joins.size() - 1));
                     }
-                    if (debug)
-                        fprintf(stderr, " new nodeId: %lu\n", nodeId);
+                   // if (debug)
+                   //     fprintf(stderr, " new nodeId: %lu\n", nodeId);
                 // there are several children
                 } else {
                     size_t cnt = 0;
@@ -883,15 +947,37 @@ class DBG_succ {
                             // we already handled this edge erlier
                             if (cnt <= lastEdge)
                                 continue;
-                            lastEdge++;
 
+                            lastEdge++;
                             if (!visited.at(next)) {
                                 // there are remaining branches - push node to stack
                                 if (cnt < out && next != nodeId) {
+                                    // each node can branch from exactly one sequence ID
+                                    if (nodeId2seqId.find(nodeId) == nodeId2seqId.end())
+                                        nodeId2seqId.insert(std::make_pair(nodeId, std::make_pair(seqId, seqPos)));
+                                    // push node information to stack
                                     branchnodes.push(BranchInfo(nodeId, seqId, seqPos, lastEdge));
                                     if (debug)
-                                        fprintf(stderr, " -- pushed %lu -- ", nodeId); 
+                                        fprintf(stderr, " -- pushed %lu : seqId %lu seqPos %lu lastEdge %lu -- ", nodeId, seqId, seqPos, lastEdge); 
                                 }
+                                if (joinOpen) {
+                                    if (length(sequence) > 0) {
+                                        finish_sequence(sequence, seqCnt++, SQLstream);
+                                    }
+                                    //if (finish_sequence(sequence, seqId, SQLstream))
+                                    //    seqId = seqCnt += 1;
+                                    seqId = seqCnt;
+                                    seqPos = 0;
+                                    branchPos = nodeId2seqId[nodeId];
+                                    joins.push_back(JoinInfo(branchPos.first, branchPos.second, seqId, seqPos));
+                                    //joins.push_back(currJoin);
+                                    //fprintf(stderr, "pushed join %lu %lu %lu %lu\n", joins.back().seqId1, joins.back().seqPos1, joins.back().seqId2, joins.back().seqPos2);
+                                    joinOpen = false;
+                                    //fprintf(stderr, "3: insert %lu at [%lu %lu]\n", joins.size() - 1, nodeId, lastEdge);
+                                    //fprintf(stderr, "joinEdge %lu lastEdge %lu\n", joinEdge, lastEdge);
+                                    branchMap.insert(std::make_pair(std::make_pair(nodeId, lastEdge), joins.size() - 1));
+                                }
+
                                 nodeId = next;
                                 updated = true;
                                 lastEdge = 0;
@@ -899,47 +985,292 @@ class DBG_succ {
                             } else {
                                 // look up the sequence info of that node
                                 if (nodeId == next) { 
+                                   // if (restarted && cnt == out) {
+                                    //    fprintf(stderr, "erased %lu %lu %lu %lu", joins.back().seqId1, joins.back().seqPos1, joins.back().seqId2, joins.back().seqPos2);
+                                     //   joins.erase(joins.begin() + joins.size() - 1);
+                                   //}
+                                    //fprintf(stderr, "1: push join : %lu %lu %lu %lu\n", nodeId2seqPos[next].first, nodeId2seqPos[next].second, nodeId2seqPos[next].first, nodeId2seqPos[next].second);
                                     joins.push_back(JoinInfo(nodeId2seqPos[next].first, nodeId2seqPos[next].second, nodeId2seqPos[next].first, nodeId2seqPos[next].second));
                                 } else {
                                     joins.push_back(JoinInfo(seqId, seqPos, nodeId2seqPos[next].first, nodeId2seqPos[next].second));
+                                    //fprintf(stderr, "2: push join : %lu %lu %lu %lu\n", seqId, seqPos, nodeId2seqPos[next].first, nodeId2seqPos[next].second);
                                 }
-                                branchMap.insert(std::make_pair(std::make_pair(nodeId, 1ul), joins.size()));
+                               // fprintf(stderr, "4: insert %lu at [%lu %lu]\n", joins.size() - 1, nodeId, lastEdge);
+                               // fprintf(stderr, "joinEdge %lu lastEdge %lu\n", joinEdge, lastEdge);
+                                //if (branchMap.find(std::make_pair(nodeId, lastEdge)) != branchMap.end())
+                                //    fprintf(stderr, "already exists\n");
+                                branchMap.insert(std::make_pair(std::make_pair(nodeId, lastEdge), joins.size() - 1));
                             }
                         }
                     }
                     // we are done with this branch
-                    // we should end up here, when nodes branch to themselves
+                    // we should end up here, when nodes branch to themselves with their last edge
                     if (!updated) {
                         // there are no branches left
                         if (branchnodes.size() == 0)
                             break;
                         // otherwise go back to last branch
-                        branch = pop_branch(branchnodes, seqPos, nodeId, lastEdge, isFirst);
-                        if (finish_sequence(sequence))
-                            seqId = seqCnt += 1;
+                        branch = pop_branch(branchnodes, seqId, seqPos, nodeId, lastEdge, isFirst);
+                        //if (finish_sequence(sequence, seqId, SQLstream))
+                        //    seqId = seqCnt += 1;
                         out = outdegree(nodeId);
                         if (debug)
                             fprintf(stderr, " -- popped %lu -- ", nodeId); 
-                        joins.push_back(JoinInfo(branch.seqId, branch.seqPos, seqId, seqPos));
-                        branchMap.insert(std::make_pair(std::make_pair(nodeId, lastEdge + 1), joins.size()));
+
+                        //branchPos = nodeId2seqId[nodeId];
+                        //currJoin = JoinInfo(branchPos.first, branchPos.second, seqId, seqPos);
+                        //fprintf(stderr, "currJoin 1: %lu %lu %lu %lu\n", currJoin.seqId1, currJoin.seqPos1, currJoin.seqId2, currJoin.seqPos2);
+                        joinOpen = true;
+                        joinEdge = lastEdge + 1;
+                        //joins.push_back(JoinInfo(branchPos.first, branchPos.second, seqId, seqPos));
+                        //fprintf(stderr, "3: push join : %lu %lu %lu %lu\n", branchPos.first, branchPos.second, seqId, seqPos);
+                        //fprintf(stderr, "insert %lu at [%lu %lu]\n", joins.size() - 1, nodeId, lastEdge + 1);
+                        //branchMap.insert(std::make_pair(std::make_pair(nodeId, lastEdge + 1), joins.size() - 1));
                     }
-                    if (debug)
-                        fprintf(stderr, " new nodeId: %lu\n", nodeId);
+                    //if (debug)
+                    //    fprintf(stderr, " new nodeId: %lu\n", nodeId);
                 }
                 out = outdegree(nodeId);
+                //fprintf(stderr, "out of nodeId %lu is %lu\n", nodeId, out);
             }
             // for completeness
             if (seqan::length(sequence) > 0)
-                finish_sequence(sequence);
+                finish_sequence(sequence, seqCnt++, SQLstream);
+            else
+                seqCnt--;
 
-            // output joins
+            if (debug) {
+                // output joins
+                for (size_t i = 0; i < joins.size(); ++i) {
+                    std::cout << "(" << joins.at(i).seqId1 << ":" << joins.at(i).seqPos1 << "--" << joins.at(i).seqId2 << ":" << joins.at(i).seqPos2 << ")" << std::endl;
+                }
+                // output branches for tracking
+                for (std::map<std::pair<uint64_t, uint64_t>, uint64_t>::iterator it = branchMap.begin(); it != branchMap.end(); ++it) {
+                    std::cout << "[" << (*it).first.first << ", " << (*it).first.second << "] -- " << (*it).second << std::endl;
+                }
+            }
+
+            return seqCnt;
+        }
+
+
+        public:
+        /**
+         * Take the current graph content and return it in SQL
+         * format (GA4GH Spec).
+         *
+         * We will perform one depth first search traversal of the graph. While we will record
+         * one long reference string, we will output all sidepaths on the way.
+         */
+        void toSQL(CFG &config) {
+            
+            // this vector stores the joins between the sequence objects we wrote
+            std::vector<JoinInfo> joins;
+            // we also store for each branching edge the join it creates.
+            // we will use this for allele traversal
+            std::map<std::pair<uint64_t, TAlphabet>, uint64_t> branchMap;
+
+            // open sql filestream
+            std::ofstream SQLstream;
+            SQLstream.open("test.sql");
+
+            // traverse the graph, thereby filling joins vector, branchMap and 
+            // writing the sequences to individual fasta files
+            size_t seqNum = traverseGraph(joins, branchMap, SQLstream); 
+            
+            // write graph joins to SQL file
             for (size_t i = 0; i < joins.size(); ++i) {
-                std::cout << "(" << joins.at(i).seqId1 << ":" << joins.at(i).seqPos1 << "--" << joins.at(i).seqId2 << ":" << joins.at(i).seqPos2 << ")" << std::endl;
+                if (joins.at(i).seqId1 < joins.at(i).seqId2 || (joins.at(i).seqId1 == joins.at(i).seqId2 && joins.at(i).seqPos1 < joins.at(i).seqPos2)) {
+                    SQLstream << "INSERT INTO GraphJoin VALUES (" << i + 1 << ", " << joins.at(i).seqId1 << ", " << joins.at(i).seqPos1 << ", 'FALSE', " 
+                                                                  << joins.at(i).seqId2 << ", " << joins.at(i).seqPos2 << ", 'TRUE');" << std::endl;
+                } else {
+                    SQLstream << "INSERT INTO GraphJoin VALUES (" << i + 1 << ", " << joins.at(i).seqId2 << ", " << joins.at(i).seqPos2 << ", 'TRUE', " 
+                                                                  << joins.at(i).seqId1 << ", " << joins.at(i).seqPos1 << ", 'FALSE');" << std::endl;
+                }
             }
 
-            for (std::map<std::pair<uint64_t, uint64_t>, uint64_t>::iterator it = branchMap.begin(); it != branchMap.end(); ++it) {
-                std::cout << "[" << (*it).first.first << ", " << (*it).first.second << "] -- " << (*it).second << std::endl;
+            // for each input sequence traverse the graph once more and
+            // collect allele path information 
+            seqan::String<Dna5F> seq;
+            seqan::CharString id;
+            SequenceStream stream;
+            for (unsigned int f = 0; f < length(config.fname); ++f) {
+
+                // first traversal is for reference info
+                if (f == 0) {
+                    // open stream to fasta file
+                    open(stream, toCString(config.fname.at(f)), SequenceStream::READ, SequenceStream::FASTA);
+                    if (!isGood(stream))
+                        std::cerr << "ERROR while opening input file " << config.fname.at(f) << std::endl;
+
+                    while (!atEnd(stream)) {
+                        if (readRecord(id, seq, stream) != 0)
+                            std::cerr << "ERROR while reading from " << config.fname.at(f) << std::endl;
+                        allelesFromSeq(seq, f, joins, branchMap, SQLstream, true, seqNum);
+                    }
+                    close(stream);
+
+                    // open variant set
+                    SQLstream << "INSERT INTO VariantSet VALUES (1, 1, 'deBruijnGraph');" << std::endl;
+                }
+                // open stream to fasta file
+                open(stream, toCString(config.fname.at(f)), SequenceStream::READ, SequenceStream::FASTA);
+                if (!isGood(stream))
+                    std::cerr << "ERROR while opening input file " << config.fname.at(f) << std::endl;
+
+                while (!atEnd(stream)) {
+                    if (readRecord(id, seq, stream) != 0)
+                        std::cerr << "ERROR while reading from " << config.fname.at(f) << std::endl;
+                    allelesFromSeq(seq, f, joins, branchMap, SQLstream);
+                }
+                close(stream);
             }
+
+            // write call set (one per input file)
+            for (unsigned int f = 0; f < length(config.fname); ++f)
+                SQLstream << "INSERT INTO CallSet VALUES (" << f+1 <<", '" << config.fname.at(f) << "', 'DBG" << f + 1 << "');" << std::endl;
+            for (unsigned int f = 0; f < length(config.fname); ++f)
+                SQLstream << "INSERT INTO VariantSet_CallSet_Join VALUES (1, " << f + 1 << ");" << std::endl;
+            for (unsigned int f = 0; f < length(config.fname); ++f) {
+                for (unsigned int ff = 0; ff < length(config.fname); ++ff) {
+                    if (f == ff)
+                        SQLstream << "INSERT INTO AlleleCall VALUES (" << ff + 1 << ", " << f + 1 << ", 1);" << std::endl;
+                    else
+                        SQLstream << "INSERT INTO AlleleCall VALUES (" << ff + 1 << ", " << f + 1 << ", 0);" << std::endl;
+
+                }
+            }
+        }
+
+
+        void allelesFromSeq(seqan::String<Dna5F>seq, unsigned int f, std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream, bool isRefRun = false, size_t seqNum = 0) {
+            
+            uint64_t nodeId = 1;
+            uint64_t seqId = 1;
+            uint64_t seqPos = 0;
+            uint64_t alleleSeqPos = 0;
+            // iterate over nodes
+            uint64_t out = 0;
+            uint64_t edge = 0;
+            uint64_t currStart = 0;
+            unsigned int alleleCnt = 1;
+            TAlphabet seqVal, seqValNext;
+            TAlphabet nodeVal;
+            JoinInfo currJoin;
+            std::vector<bool> isRef;
+            bool isFirst = true;
+
+            if (!isRefRun) {
+                SQLstream << "INSERT INTO Allele VALUES (" << f+1 << ", 1, NULL);" << std::endl;
+            } else {
+                for (size_t i = 0; i < seqNum; ++i)
+                    isRef.push_back(false);
+            }
+            fprintf(stderr, "processing alleles for file %u\n", f);
+
+            while (true) {
+                nodeVal = get_node_end_value(nodeId);
+                //fprintf(stderr, "nodeId %lu nodeVal %lu seqVal %u\n", nodeId, nodeVal, ordValue(seq[seqPos]) + 1);
+                //if (nodeVal % alph_size == 6 || nodeVal == 0) {
+                if (nodeVal == 0) {
+                    nodeId = fwd(nodeId);
+                    alleleSeqPos++;
+                    continue;
+                }
+                seqVal = ordValue(seq[seqPos]) + 1;
+                    
+                //    std::cerr << "nodeVal " << nodeVal << " seqVal " << seqVal << " nodeId " << nodeId << " seqId " << seqId << " f " << f << std::endl;
+                //fprintf(stderr, "nodeVal %lu seqVal %lu nodeId %lu seqId %lu seqPos %lu alleleSeqPos %lu\n", nodeVal, seqVal, nodeId, seqId, seqPos, alleleSeqPos);
+                assert(nodeVal % alph_size == 6 || nodeVal % alph_size == seqVal);
+                if (seqPos + 1 == length(seq))
+                    break;
+                if (nodeVal % alph_size != 6) {
+                    seqPos++;
+                }
+                seqValNext = ordValue(seq[seqPos]) + 1;
+
+                // find edge to next node
+                out = outdegree(nodeId);
+                //fprintf(stderr, "out %lu nodeId %lu\n", out, nodeId);
+                if (out == 1) {
+                    if (branchMap.find(std::make_pair(nodeId, out)) != branchMap.end()) {
+                        currJoin = joins.at(branchMap[std::make_pair(nodeId, out)]);
+                        //fprintf(stderr, "cseqId1 %lu cseqId2 %lu cseqPos1 %lu cseqPos2 %lu seqId %lu alleleSeqPos %lu\n", currJoin.seqId1, currJoin.seqId2, currJoin.seqPos1, currJoin.seqPos2, seqId, alleleSeqPos);
+                        assert(currJoin.seqId1 == seqId);
+                        assert(currJoin.seqPos1 == alleleSeqPos);
+                        if (!isRefRun) {
+                            SQLstream << "INSERT INTO AllelePathItem VALUES (" << f+1 << ", " << alleleCnt++ << ", " << seqId << ", ";
+                            SQLstream << currStart << ", " << alleleSeqPos - currStart + 1 << ", 'TRUE')" << std::endl;
+                        } else {
+                            isRef[seqId - 1] = true;                 
+                        }
+                        //fprintf(stdout, "INSERT INTO AllelePathItem VALUES (%u, %u, %lu, %lu, %lu, 'TRUE')\n", f+1, alleleCnt++, seqId, currStart, alleleSeqPos - currStart + 1); 
+                        seqId = currJoin.seqId2;
+                        currStart = alleleSeqPos = currJoin.seqPos2;
+                        nodeId = outgoing(nodeId, seqValNext);
+                    } else {
+                        nodeId = fwd(nodeId);
+                        alleleSeqPos++;
+                    }
+                } else {
+                    // find edge corresponding to the proceding seqPos
+                    uint64_t start = pred_last(nodeId - 1);
+                    uint64_t stop = succ_last(nodeId);
+                    assert(stop - start == out);
+                    edge = 0;
+                    size_t k;
+                    for (k = start + 1; k <= stop; ++k) {
+                        if ((*W)[k] % alph_size == seqValNext) {
+                            edge = k - start;
+                            break;
+                        }
+                    }
+                    if (nodeVal % alph_size == 6)
+                        edge--;
+                    //fprintf(stderr, "seqValnext %lu edge %lu\n", seqValNext, edge);
+                    assert(edge > 0);
+                    if (branchMap.find(std::make_pair(nodeId, edge)) != branchMap.end()) {
+                        currJoin = joins.at(branchMap[std::make_pair(nodeId, edge)]);
+                        //fprintf(stderr, "cseqId1 %lu cseqId2 %lu cseqPos1 %lu cseqPos2 %lu seqId %lu seqPos %lu\n", currJoin.seqId1, currJoin.seqId2, currJoin.seqPos1, currJoin.seqPos2, seqId, alleleSeqPos);
+                        assert(currJoin.seqId1 == seqId);
+                        assert(currJoin.seqPos1 == alleleSeqPos);
+                        //fprintf(stdout, "INSERT INTO AllelePathItem VALUES (%u, %u, %lu, %lu, %lu, 'TRUE')\n", f+1, alleleCnt++, seqId, currStart, alleleSeqPos - currStart + 1); 
+                        if (!isRefRun) {
+                            SQLstream << "INSERT INTO AllelePathItem VALUES (" << f+1 << ", " << alleleCnt++ << ", " << seqId << ", ";
+                            SQLstream << currStart << ", " << alleleSeqPos - currStart + 1 << ", 'TRUE')" << std::endl;
+                        } else {
+                            isRef[seqId - 1] = true;
+                        }
+                        seqId = currJoin.seqId2;
+                        currStart = alleleSeqPos = currJoin.seqPos2;
+                        //fprintf(stderr, "nodeId: %lu ==> %lu\n", nodeId, outgoing(nodeId, seqValNext));
+                        nodeId = outgoing(nodeId, seqValNext);
+                    } else {
+                        nodeId = fwd(k);
+                        alleleSeqPos++;
+                    }
+                }
+            }
+            //fprintf(stdout, "INSERT INTO AllelePathItem VALUES (%u, %u, %lu, %lu, %lu, 'TRUE')\n", f+1, alleleCnt++, seqId, currStart, alleleSeqPos - currStart + 1);
+            if (!isRefRun) {
+                SQLstream << "INSERT INTO AllelePathItem VALUES (" << f+1 << ", " << alleleCnt++ << ", " << seqId << ", ";
+                SQLstream << currStart << ", " << alleleSeqPos - currStart + 1 << ", 'TRUE')" << std::endl;
+            } else {
+                isRef[seqId - 1] = true;
+                // write reference information to SQL stream 
+                for (size_t i = 0; i < isRef.size(); ++i) {
+                    if (isRef[i])
+                        SQLstream << "INSERT INTO Reference VALUES (1, 'seq" << i + 1 << "', date('now'), " << i + 1 << ", 0, NULL, NULL, NULL, NULL, NULL, 'TRUE');" << std::endl;
+                    else
+                        SQLstream << "INSERT INTO Reference VALUES (1, 'seq" << i + 1 << "', date('now'), " << i + 1 << ", 0, NULL, NULL, NULL, NULL, NULL, 'FALSE');" << std::endl;
+                }
+                SQLstream << "INSERT INTO ReferenceSet VALUES (1, NULL, NULL, 'normal', 'FALSE');" << std::endl;
+                for (size_t i = 0; i < isRef.size(); ++i)
+                    SQLstream << "INSERT INTO Reference_ReferenceSet_Join VALUES (" << i + 1 << ", 1);" << std::endl;
+                for (size_t i = 0; i < joins.size(); ++i)
+                    SQLstream << "INSERT INTO GraphJoin_ReferenceSet_Join VALUES (" << i + 1 << ", 1);" << std::endl;
+            }
+
         }
 
 };
