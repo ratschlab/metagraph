@@ -20,20 +20,6 @@
 #include <unix_tools.hpp>
 #include <config.hpp>
 
-//#include <lemon/list_graph.h>
-
-/*struct CFG 
-{
-    //String<char> > fname;
-    std::vector<std::string> fname;
-    bool verbose;
-    unsigned int k;
-
-    CFG() :
-        verbose(false), k(31)
-    {}
-};*/
-
 // parse command line arguments and options
 ArgumentParser::ParseResult
 parseCommandLine(CFG & config, int argc, char const ** argv) 
@@ -52,11 +38,20 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
                   "purposes.");
 
     // add arguments
-    addArgument(parser, ArgParseArgument(ArgParseArgument::STRING, "TEXT", 1));
+    addArgument(parser, seqan::ArgParseArgument(seqan::ArgParseArgument::STRING, "TEXT", true /*can be given multiple time*/, 1 /* min number of times*/));
 
     // add options
-    addOption(parser, ArgParseOption("v", "verbose", "Increase verbosity level of output"));
-    addOption(parser, ArgParseOption("k", "kmer_length", "Length of the k-mer to use", ArgParseArgument::INTEGER, "INT"));
+    addOption(parser, seqan::ArgParseOption("v", "verbose", "Increase verbosity level of output"));
+    addOption(parser, seqan::ArgParseOption("i", "integrate", "integrates fasta into given (-I) graph"));
+    addOption(parser, seqan::ArgParseOption("k", "kmer_length", "Length of the k-mer to use", seqan::ArgParseArgument::INTEGER, "INT"));
+    addOption(parser, seqan::ArgParseOption("O", "outfile_base", "basename for graph output files", seqan::ArgParseArgument::STRING, "TEXT"));
+    addOption(parser, seqan::ArgParseOption("S", "sql_base", "basename for SQL output files", seqan::ArgParseArgument::STRING, "TEXT"));
+    addOption(parser, seqan::ArgParseOption("I", "infile_base", "basename for loading graph input files", seqan::ArgParseArgument::STRING, "TEXT"));
+
+    // set defaults
+    setDefaultValue(parser, "O", "");
+    setDefaultValue(parser, "I", "");
+    setDefaultValue(parser, "S", "");
 
     // parse command line
     ArgumentParser::ParseResult res = parse(parser, argc, argv);
@@ -66,8 +61,12 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
         return res;
     
     // fill config object 
-    getOptionValue(config.verbose, parser, "verbose");
+    config.verbose = isSet(parser, "verbose");
+    config.integrate = isSet(parser, "integrate");
     getOptionValue(config.k, parser, "k");
+    getOptionValue(config.outfbase, parser, "O");
+    getOptionValue(config.infbase, parser, "I");
+    getOptionValue(config.sqlfbase, parser, "S");
     config.fname = getArgumentValues(parser, 0);
 
     // do any logic / error checking here (e.g., mutually exclusive options)
@@ -93,40 +92,50 @@ int main(int argc, char const ** argv) {
 
     // create graph object
     //DBG_seqan* graph = new DBG_seqan(config.k);
-    DBG_succ* graph = new DBG_succ(config.k);
+   DBG_succ* graph;
+    if (config.infbase.empty())
+        graph = new DBG_succ(config.k);
+    else
+        graph = new DBG_succ(config);
 
-    // read from fasta stream 
-    CharString id;
-    String<Dna5> seq;
+    if (config.infbase.empty() || config.integrate) {
+        // read from fasta stream 
+        CharString id;
+        String<Dna5> seq;
+        // iterate over input files
+        for (unsigned int f = 0; f < length(config.fname); ++f) {
 
-    // iterate over input files
-    for (unsigned int f = 0; f < length(config.fname); ++f) {
-
-        if (config.verbose) {
-            std::cout << std::endl << "Parsing " << config.fname[f] << std::endl;
-        }
-
-        // open stream to fasta file
-        SequenceStream stream;
-        open(stream, toCString(config.fname.at(f)), SequenceStream::READ, SequenceStream::FASTA);
-        if (!isGood(stream)) {
-            std::cerr << "ERROR while opening input file " << config.fname.at(f) << std::endl;
-            return 1;
-        }
-
-        while (!atEnd(stream)) {
-            if (readRecord(id, seq, stream) != 0) {
-                std::cerr << "ERROR while reading from " << config.fname.at(f) << std::endl;
-                return 1;
+            if (config.verbose) {
+                std::cout << std::endl << "Parsing " << config.fname[f] << std::endl;
             }
-            // add all k-mers of seq to the graph
-            graph->add_seq(seq);
+
+            // open stream to fasta file
+            SequenceStream stream;
+            open(stream, toCString(config.fname.at(f)), SequenceStream::READ, SequenceStream::FASTA);
+            if (!isGood(stream)) {
+                std::cerr << "ERROR while opening input file " << config.fname.at(f) << std::endl;
+                exit(1);
+            }
+
+            while (!atEnd(stream)) {
+                if (readRecord(id, seq, stream) != 0) {
+                    std::cerr << "!!!ERROR while reading from " << config.fname.at(f) << std::endl;
+                    exit(1);
+                }
+                // add all k-mers of seq to the graph
+                graph->add_seq(seq);
+            }
+            //graph->update_counters();
+            //graph->print_stats();
+            fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
         }
-        //graph->update_counters();
-        //graph->print_stats();
-        fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
     }
-    graph->toSQL(config);
+
+    // graph output
+    if (!config.sqlfbase.empty())
+        graph->toSQL(config);
+    if (!config.outfbase.empty())
+        graph->toFile(config);
 
     delete graph;
 

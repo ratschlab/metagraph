@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <assert.h>
 #include <iostream>
+#include <sstream>
 #include <fstream>
 
 #include <libmaus2/bitbtree/bitbtree.hpp>
@@ -53,12 +54,9 @@ class DBG_succ {
     size_t k;
     // index of position that marks end in graph
     uint64_t p;
-    // number of edges in the graph
-    uint64_t m;
     // alphabet size
     size_t alph_size = 7;
 
-    uint64_t W_size = 0;
 
 #ifdef DBGDEBUG
     bool debug = true;
@@ -75,14 +73,53 @@ class DBG_succ {
 
         W->insert(0, 0);
         W->insert(0, 0);
-        W_size += 2;
 
         F.push_back(0);
         for (size_t j = 1; j < alph_size; j++)
             F.push_back(1);
         
-        m = 1;
         p = 1;
+    }
+
+    DBG_succ(CFG &config) {
+
+        // load last array
+        std::ifstream instream((config.infbase + ".l.dbg").c_str());
+        last->deserialise(instream);
+        instream.close();
+
+        // load W array
+        //delete W;
+        instream.open((config.infbase + ".W.dbg").c_str());
+        W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(instream);
+        instream.close();
+
+        // load F and k and p
+        instream.open((config.infbase + ".F.dbg").c_str());
+        std::string line;
+        size_t mode = 0;
+        while (std::getline(instream, line)) {
+            if (strcmp(line.c_str(), ">F") == 0) {
+                mode = 1;
+            } else if (strcmp(line.c_str(), ">k") == 0) {
+                mode = 2;
+            } else if (strcmp(line.c_str(), ">p") == 0) {
+                mode = 3;
+            } else {
+                if (mode == 1) {
+                    F.push_back(std::strtoul(line.c_str(), NULL, 10));
+                } else if (mode == 2) {
+                    k = strtoul(line.c_str(), NULL, 10);
+                } else if (mode == 3) {
+                    p = strtoul(line.c_str(), NULL, 10);
+                } else {
+                    fprintf(stderr, "ERROR: input file corrupted\n");
+                    exit(1);
+                }
+            }
+        }
+        instream.close();
+
     }
 
     void add_seq (seqan::String<Dna5F> seq) {
@@ -93,7 +130,7 @@ class DBG_succ {
             std::cout << "======================================" << std::endl;
         }
 
-        if (W_size == 2) {
+        if (W->n == 2) {
             for (size_t j = 0; j < k; j++) {
                 append_pos(6);
                 if (debug) {
@@ -109,7 +146,7 @@ class DBG_succ {
             if (i > 0 && i % 1000 == 0) {
                 std::cout << "." << std::flush;
                 if (i % 10000 == 0) {
-                    fprintf(stdout, "%lu - edges %lu / nodes %lu\n", i, W_size - 1, rank_last((last->size() - 1)));
+                    fprintf(stdout, "%lu - edges %lu / nodes %lu\n", i, W->n - 1, rank_last((last->size() - 1)));
                 }
             }
             //fprintf(stdout, "appending %i\n", (int) ordValue(seq[i]));
@@ -132,7 +169,7 @@ class DBG_succ {
             }
         }
 
-        fprintf(stdout, "edges %lu / nodes %lu\n", W_size - 1, rank_last((last->size() - 1)));
+        fprintf(stdout, "edges %lu / nodes %lu\n", W->n - 1, rank_last((last->size() - 1)));
 
         //toSQL();
         //String<Dna5F> test = "CCT";
@@ -151,7 +188,7 @@ class DBG_succ {
         // deal with  border conditions
         if (i <= 0)
             return 0;
-        return W->rank(c, std::min(i, W_size - 1));
+        return W->rank(c, std::min(i, W->n - 1));
     }
 
     /**
@@ -167,7 +204,7 @@ class DBG_succ {
 
         // count occurences of c and store them in cnt
         //fprintf(stderr, "query select W -- c: %i i: %lu return: %lu \n", c, i-1+(c==0), W->select(c, i-1+(c==0)));
-        return std::min(W->select(c, i - 1 + (c == 0)), W_size);
+        return std::min(W->select(c, i - 1 + (c == 0)), W->n);
     }
 
     /**
@@ -230,17 +267,17 @@ class DBG_succ {
      * index of the node the edge is pointing to.
      */
     uint64_t outgoing(uint64_t i, TAlphabet c) {
-        if (i > W_size)
+        if (i > W->n)
             return 0;
         std::pair<uint64_t, uint64_t> R = get_equal_node_range(i);
 
         uint64_t j1 = pred_W(R.second, c);
         uint64_t j2 = pred_W(R.second, c + alph_size);
         uint64_t j = (j1 < j2) ? j2 : j1;
-        if (j < R.first || j >= W_size)
+        if (j < R.first || j >= W->n)
             return 0;
         j = fwd(j);
-        if (j == 0 || j == W_size)
+        if (j == 0 || j == W->n)
             return 0;
         return j;
     }
@@ -278,7 +315,7 @@ class DBG_succ {
      * edges from node i.
      */
     uint64_t outdegree(uint64_t i) {
-        return (i < W_size) ? succ_last(i) - pred_last(i - 1) : 0;
+        return (i < W->n) ? succ_last(i) - pred_last(i - 1) : 0;
     }
 
 
@@ -386,6 +423,7 @@ class DBG_succ {
     }
 
 
+    public:
     /**
      * This is a debug function that prints the current state of the graph arrays to
      * the screen.
@@ -393,7 +431,7 @@ class DBG_succ {
     void print_state() {
 
         fprintf(stderr, "W:\n");
-        for (uint64_t i = 0; i < W_size; i++) {
+        for (uint64_t i = 0; i < W->n; i++) {
             fprintf(stderr, "\t%lu", (*W)[i]);
             if (i == p)
                 fprintf(stderr, "*");
@@ -412,6 +450,7 @@ class DBG_succ {
 
     }
 
+    private:
     /** This function takes a character c and appends it to the end of the graph sequence
      * given that the corresponding note is not part of the graph yet.
      */
@@ -446,7 +485,7 @@ class DBG_succ {
             // remove old terminal symbol
             last->deleteBit(p);
             W->remove(p);
-            W_size--;
+            //W_size--;
             // adapt position if altered by previous deletion
             p_new -= (p < p_new);
             // insert new terminal symbol 
@@ -454,7 +493,7 @@ class DBG_succ {
             // and the terminal symbol is always first
             last->insertBit(p_new, false);
             W->insert(0, p_new);
-            W_size++;
+            //W_size++;
             // update new terminal position
             p = p_new;
             // take care of updating the offset array F
@@ -490,7 +529,7 @@ class DBG_succ {
                 // adding a new node can influence following nodes that share a k-1 suffix with the
                 // new node -> need to adapt the respektive cc to a cc-
                 bool minus2 = false;
-                if (next_c < W_size) {
+                if (next_c < W->n) {
                     minus2 = compare_node_suffix(p, next_c);
                     if (minus2) {
                         replaceW(next_c, (*W)[next_c] + alph_size);
@@ -523,12 +562,12 @@ class DBG_succ {
                     last->insertBit(x + 1, true);
                     W->insert(0, x + 1);
                 }
-                W_size++;
+                //W_size++;
             } else {
                 uint64_t x = F[c] + 1;
                 uint64_t next_c = succ_W(p + 1, c);
                 bool minus = false;
-                if (next_c < W_size) {
+                if (next_c < W->n) {
                     minus = compare_node_suffix(p, next_c);
                 }
                 replaceW(p, c);
@@ -543,9 +582,8 @@ class DBG_succ {
                     last->insertBit(x, true);
                 }
                 W->insert(0, x);
-                W_size++;
+                //W_size++;
             }
-            m++;
             update_F(c, true);
         }
         // update sorting at new location of p
@@ -620,7 +658,7 @@ class DBG_succ {
      */
     void print_seq() {
 
-        for (uint64_t i = 1; i < W_size; i++) {
+        for (uint64_t i = 1; i < W->n; i++) {
             if ((*W)[i] % alph_size == 0)
                 fprintf(stdout, "$");
             else
@@ -628,7 +666,7 @@ class DBG_succ {
         }
         std::cout << std::endl;
 
-        for (uint64_t i = 1; i < W_size; i++) {
+        for (uint64_t i = 1; i < W->n; i++) {
             if (p == i)
                 fprintf(stdout, "*");
             else
@@ -638,7 +676,7 @@ class DBG_succ {
 
         size_t j;
         for (size_t l = 0; l < k; l++) {
-            for (uint64_t i = 1; i < W_size; i++) {
+            for (uint64_t i = 1; i < W->n; i++) {
                 j = get_minus_k_value(i, l);
                 if (j % alph_size == 0)
                     std::cout << "$";
@@ -654,11 +692,11 @@ class DBG_succ {
         std::cout << std::endl;
         std::cout << std::endl;
 
-        for (uint64_t i = 1; i < W_size; ++i) {
+        for (uint64_t i = 1; i < W->n; ++i) {
             std::cout << indegree(i);  
         }
         std::cout << std::endl;
-        for (uint64_t i = 1; i < W_size; ++i) {
+        for (uint64_t i = 1; i < W->n; ++i) {
             std::cout << outdegree(i);  
         }
         std::cout << std::endl;
@@ -773,17 +811,15 @@ class DBG_succ {
         return branch;
     }
 
-    bool finish_sequence(seqan::String<Dna5F> &sequence, uint64_t seqId, std::ofstream &SQLstream) {
+    bool finish_sequence(seqan::String<Dna5F> &sequence, uint64_t seqId, std::ofstream &SQLstream, CFG &config) {
         if (seqan::length(sequence) > 0) {
             if (seqId == 1)
-                SQLstream << "INSERT INTO FASTA VALUES (1, 'sequence.fa');" << std::endl;
-            //std::ostringstream fname; 
-            //fname << "sequence" << seqId << ".fa";
+                SQLstream << "INSERT INTO FASTA VALUES (1, '" << config.sqlfbase << ".fa');" << std::endl;
             std::ofstream stream;
             if (seqId == 1)
-                stream.open("sequence.fa");
+                stream.open((config.sqlfbase + ".fa").c_str());
             else
-                stream.open("sequence.fa", std::ofstream::app);
+                stream.open((config.sqlfbase + ".fa").c_str(), std::ofstream::app);
             stream << ">seq" << seqId << std::endl;
             uint64_t i = 0;
             while ((i + 80) < seqan::length(sequence)) {
@@ -809,7 +845,7 @@ class DBG_succ {
         }
     }
 
-    size_t traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream) {
+    size_t traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream, CFG &config) {
         // store all branch nodes on the way
         std::stack<BranchInfo> branchnodes;
         std::map<uint64_t, std::pair<uint64_t, uint64_t> > nodeId2seqId;
@@ -877,7 +913,7 @@ class DBG_succ {
                 if (!visited.at(next)) {
                     if (joinOpen) {
                         if (length(sequence) > 0) {
-                            finish_sequence(sequence, seqCnt++, SQLstream);
+                            finish_sequence(sequence, seqCnt++, SQLstream, config);
                         }
                         seqId = seqCnt;
                         seqPos = 0;
@@ -932,7 +968,7 @@ class DBG_succ {
                             }
                             if (joinOpen) {
                                 if (length(sequence) > 0) {
-                                    finish_sequence(sequence, seqCnt++, SQLstream);
+                                    finish_sequence(sequence, seqCnt++, SQLstream, config);
                                 }
                                 seqId = seqCnt;
                                 seqPos = 0;
@@ -978,7 +1014,7 @@ class DBG_succ {
         }
         // for completeness
         if (seqan::length(sequence) > 0)
-            finish_sequence(sequence, seqCnt++, SQLstream);
+            finish_sequence(sequence, seqCnt++, SQLstream, config);
         else
             seqCnt--;
 
@@ -1139,11 +1175,11 @@ class DBG_succ {
 
         // open sql filestream
         std::ofstream SQLstream;
-        SQLstream.open("debruijn.sql");
+        SQLstream.open((config.sqlfbase + ".sql").c_str());
 
         // traverse the graph, thereby filling joins vector, branchMap and 
         // writing the sequences to individual fasta files
-        size_t seqNum = traverseGraph(joins, branchMap, SQLstream); 
+        size_t seqNum = traverseGraph(joins, branchMap, SQLstream, config); 
         
         // write graph joins to SQL file
         for (size_t i = 0; i < joins.size(); ++i) {
@@ -1215,6 +1251,26 @@ class DBG_succ {
      */
     void toFile(CFG &config) {
 
+        // write Wavelet Tree
+        std::ofstream outstream((config.outfbase + ".W.dbg").c_str());
+        W->serialise(outstream);
+        outstream.close();
+
+        // write last array
+        outstream.open((config.outfbase + ".l.dbg").c_str());
+        last->serialise(outstream);
+        outstream.close();
+
+        // write F values and k
+        outstream.open((config.outfbase + ".F.dbg").c_str());
+        outstream << ">F" << std::endl;
+        for (size_t i = 0; i < F.size(); ++i)
+            outstream << F.at(i) << std::endl;
+        outstream << ">k" << std::endl;
+        outstream << k << std::endl;
+        outstream << ">p" << std::endl;
+        outstream << p << std::endl;
+        outstream.close();
     }
 
 };

@@ -5,7 +5,11 @@
     {
         //String<char> > fname;
         std::vector<std::string> fname;
+        std::string outfbase;
+        std::string infbase;
+        std::string sqlfbase;
         bool verbose;
+        bool integrate;
         unsigned int k;
 
         CFG() :
