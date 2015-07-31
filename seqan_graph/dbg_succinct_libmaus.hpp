@@ -1013,7 +1013,7 @@ class DBG_succ {
 
             // open sql filestream
             std::ofstream SQLstream;
-            SQLstream.open("test.sql");
+            SQLstream.open("debruijn.sql");
 
             // traverse the graph, thereby filling joins vector, branchMap and 
             // writing the sequences to individual fasta files
@@ -1194,9 +1194,9 @@ class DBG_succ {
                 // write reference information to SQL stream 
                 for (size_t i = 0; i < isRef.size(); ++i) {
                     if (isRef[i])
-                        SQLstream << "INSERT INTO Reference VALUES (1, 'seq" << i + 1 << "', date('now'), " << i + 1 << ", 0, NULL, NULL, NULL, NULL, NULL, 'TRUE');" << std::endl;
+                        SQLstream << "INSERT INTO Reference VALUES (" << i + 1 << ", 'seq" << i + 1 << "', date('now'), " << i + 1 << ", 0, NULL, NULL, NULL, NULL, NULL, 'TRUE');" << std::endl;
                     else
-                        SQLstream << "INSERT INTO Reference VALUES (1, 'seq" << i + 1 << "', date('now'), " << i + 1 << ", 0, NULL, NULL, NULL, NULL, NULL, 'FALSE');" << std::endl;
+                        SQLstream << "INSERT INTO Reference VALUES (" << i + 1 << ", 'seq" << i + 1 << "', date('now'), " << i + 1 << ", 0, NULL, NULL, NULL, NULL, NULL, 'FALSE');" << std::endl;
                 }
                 SQLstream << "INSERT INTO ReferenceSet VALUES (1, NULL, NULL, 'normal', 'FALSE');" << std::endl;
                 for (size_t i = 0; i < isRef.size(); ++i)
