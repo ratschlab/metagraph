@@ -8,6 +8,7 @@
         std::string outfbase;
         std::string infbase;
         std::string sqlfbase;
+        std::string merge;
         bool verbose;
         bool integrate;
         unsigned int k;

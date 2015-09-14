@@ -20,6 +20,10 @@
 #include <sstream>
 #include <fstream>
 
+/**
+ * We use libmaus 2 for representing dynamic succint data structures
+ * such as the dynamic bit array and the dynamic wavelet tree.
+ */
 #include <libmaus2/bitbtree/bitbtree.hpp>
 #include <libmaus2/wavelet/DynamicWaveletTree.hpp>
 #include <libmaus2/digest/md5.hpp>
@@ -57,6 +61,12 @@ class DBG_succ {
     // alphabet size
     size_t alph_size = 7;
 
+    // infile base when loaded from file
+    std::string infbase;
+
+    // config object
+    CFG config;
+
 
 #ifdef DBGDEBUG
     bool debug = true;
@@ -66,7 +76,9 @@ class DBG_succ {
     
     public:
 
-    DBG_succ(size_t k) : k(k) {
+    DBG_succ(size_t k_, CFG config_) : 
+        k(k_),
+        config(config_) {
 
         last->insertBit(0, true);
         last->insertBit(0, false);
@@ -81,21 +93,23 @@ class DBG_succ {
         p = 1;
     }
 
-    DBG_succ(CFG &config) {
+    DBG_succ(std::string infbase_, CFG config_) : 
+        infbase(infbase_),
+        config(config_) {
 
         // load last array
-        std::ifstream instream((config.infbase + ".l.dbg").c_str());
+        std::ifstream instream((infbase + ".l.dbg").c_str());
         last->deserialise(instream);
         instream.close();
 
         // load W array
         //delete W;
-        instream.open((config.infbase + ".W.dbg").c_str());
+        instream.open((infbase + ".W.dbg").c_str());
         W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(instream);
         instream.close();
 
         // load F and k and p
-        instream.open((config.infbase + ".F.dbg").c_str());
+        instream.open((infbase + ".F.dbg").c_str());
         std::string line;
         size_t mode = 0;
         while (std::getline(instream, line)) {
@@ -119,8 +133,125 @@ class DBG_succ {
             }
         }
         instream.close();
-
     }
+
+    /*
+     * Given another graph structure G this function integrates G
+     * into the graph of this instance.
+     */
+/*    void merge(DBG_succ* G) {
+
+        // positions in the graph for respective traversal
+        uint64_t k1 = 1;
+        uint64_t k2 = 1;
+
+        // check if we can merge the given graphs
+        if (this->k != G->get_k()) {
+            fprintf(stderr, "Graphs have different k-mer lengths - cannot be merged!\n");
+            exit(1);
+        }
+
+        while (k1 < W->n || k2 < G->get_size()) {
+            std::cerr << "k1: " << k1 << " [" << (*W)[k1] << "] k2: " << k2 << " [" << G->get_W(k2) << "]" << std::endl;
+            // compare node k1 in graph 1 and k2 in graph 2
+            std::pair<TAlphabet, uint64_t> k1_val;
+            std::pair<TAlphabet, uint64_t> k2_val;
+            uint64_t k1_node = k1;
+            uint64_t k2_node = k2;
+            uint64_t curr_k = 0;
+            while (curr_k < this->k) {
+            //    std::cerr << "k1_node: " << k1_node << " k2_node: " << k2_node << std::endl;
+                k1_val = get_minus_k_value(k1_node, 0);
+                k2_val = G->get_minus_k_value(k2_node, 0);
+                if (k1_val.first == k2_val.first) {
+                    ++curr_k;
+                    k1_node = k1_val.second;
+                    k2_node = k2_val.second;
+                } else {
+                    break;
+                }
+            }
+            std::cerr << "k1_val: " << k1_val.first << " k2_val: " << k2_val.first << " curr_k:" << curr_k << std::endl;
+
+            uint64_t insert_pos = 0;
+            // the node sequences are identical
+            if (k1_val.first == k2_val.first) {
+                // scan ahead to the appropriate edge
+                while ((*W)[k1] < G->get_W(k2) && !(*last)[k1])
+                    ++k1;
+                // node and edge are the same
+                if ((*W)[k1] == G->get_W(k2)) {
+                    ++k2;
+                    ++k1;
+                    std::cerr << "a) identical - advance both" << std::endl;
+                // insert new node after k1
+                } else if ((*W)[k1] < G->get_W(k2)) {
+                    //last->set(k1, false);
+                    ++k1;
+                    //W->insert(G->get_W(k2), k1);
+                    //last->insertBit(k1, true);
+                    //update_F(G->get_node_end_value(k2), true);
+                    //insert_pos = k1;
+                    std::cerr << "b) inserting " << G->get_W(k2) << " from position " << k2 << " at position " << k1 << std::endl;
+                    ++k2;
+                // insert new node before k1
+                } else {
+                    //W->insert(G->get_W(k2), k1);
+                    //last->insertBit(k1, false);
+                    //update_F(G->get_node_end_value(k2), true);
+                    //insert_pos = k1;
+                    //std::cerr << "c) inserting " << G->get_W(k2) << " from position " << k2 << " at position " << k1 << std::endl;
+                    ++k2;
+                }
+            // the node in graph 1 is smaller
+            } else if (k1_val.first < k2_val.first) {
+                // we do k1+ implicitly below
+                if (k1 == W->n) {
+                    //W->insert(G->get_W(k2), k1);
+                    //last->insertBit(k1, false);
+                    //update_F(G->get_node_end_value(k2), true);
+                    //insert_pos = k1;
+                    std::cerr << "d) inserting " << G->get_W(k2) << " from position " << k2 << " at position " << k1 << std::endl;
+                    ++k2;
+                } else {
+                    std::cerr << "e) only advance k1" << std::endl;
+                }
+            // the node in graph 2 is smaller
+            } else {
+                k1--;
+                W->insert(G->get_W(k2), k1);
+                last->insertBit(k1, G->get_last(k2));
+                update_F(G->get_node_end_value(k2), true);
+                insert_pos = k1;
+                std::cerr << "f) inserting " << G->get_W(k2) << " from position " << k2 << " at position " << k1 << std::endl;
+                ++k2;
+            }
+            // move forward in graph 1
+            k1 += (k1 < W->n);
+
+            // postprocessing to adapt c to c- if necessary
+            if (insert_pos > 0) {
+                // no need for action if already c-
+                TAlphabet c = (*W)[insert_pos];
+                if (c % alph_size == c) {
+                    uint64_t next_c = succ_W(insert_pos + 1, c);
+                    uint64_t next_cm = succ_W(insert_pos + 1, c + alph_size);
+                    if (next_cm < next_c) {
+                        replaceW(insert_pos, c + alph_size);
+                    } else {
+                        uint64_t last_c = pred_W(insert_pos - 1, c);
+                        if (compare_node_suffix(insert_pos, last_c))
+                            replaceW(insert_pos, c + alph_size);
+                    }
+                } 
+                // adapt index of temrinal node
+                if (insert_pos < p)
+                    p++;
+                print_seq();
+            }
+        }
+    }*/
+
 
     void add_seq (seqan::String<Dna5F> seq) {
 
@@ -337,20 +468,41 @@ class DBG_succ {
      * Given a node label s, this function returns the index
      * of the corresponding node, if this node exists and 0 otherwise.
      */
-    uint64_t index(String<Dna5F> &s) {
+    uint64_t index(String<Dna5F> &s_) {
+        TAlphabet s = (TAlphabet) ordValue(s_[0]) + 1;
         // init range
-        uint64_t rl = succ_last(F[(TAlphabet) ordValue(s[0]) + 1] + 1);
-        uint64_t ru = F[(TAlphabet) ordValue(s[0]) + 2];                // upper bound
+        uint64_t rl = succ_last(F[s] + 1);
+        uint64_t ru = F[s + 1]; // upper bound
         // update range iteratively while scanning through s
         for (uint64_t i = 1; i < length(s); i++) {
-            rl = outgoing(rl, (TAlphabet) ordValue(s[i]) + 1);
-            ru = outgoing(ru, (TAlphabet) ordValue(s[i]) + 1);
+            rl = outgoing(std::min(succ_W(rl, s), succ_W(rl, s + alph_size)), s);
+            ru = outgoing(std::max(pred_W(ru, s), pred_W(ru, s + alph_size)), s);
            // fprintf(stdout, "char: %i rl: %i ru: %i\n", (int) ordValue(s[i]) + 1, (int) rl, (int) ru);
+        }
+        return (ru > rl) ? ru : rl;
+    }
+    uint64_t index(std::deque<TAlphabet> str) {
+        // get first 
+        TAlphabet s = str.front() % alph_size;
+        str.pop_front();
+        // init range
+        uint64_t rl = succ_last(F[s] + 1);
+        uint64_t ru = F[s + 1];                // upper bound
+        //fprintf(stderr, "char: %i rl: %i ru: %i\n", (int) s, (int) rl, (int) ru);
+        // update range iteratively while scanning through s
+        while (!str.empty()) {
+            s = str.front() % alph_size;
+            str.pop_front();
+            rl = outgoing(std::min(succ_W(rl, s), succ_W(rl, s + alph_size)), s);
+            ru = outgoing(std::max(pred_W(ru, s), pred_W(ru, s + alph_size)), s);
+            //fprintf(stderr, "char: %i rl: %i ru: %i\n", (int) s, (int) rl, (int) ru);
         }
         return (ru > rl) ? ru : rl;
     }
 
 
+
+    public:
     /**
      * Using the offset structure F this function returns the value of the last 
      * position of node i.
@@ -366,6 +518,7 @@ class DBG_succ {
     }
 
     
+    private:
     /**
      * Given index of node i, the function returns the 
      * first character of the node.
@@ -450,6 +603,44 @@ class DBG_succ {
 
     }
 
+    /**
+     * Given index i of a node and a value k, this function 
+     * will return the k-th last character of node i.
+     */
+    std::pair<TAlphabet, uint64_t> get_minus_k_value(uint64_t i, uint64_t k) {
+        for (; k > 0; --k)
+            i = bwd(succ_last(i));
+        return std::make_pair(get_node_end_value(i), bwd(succ_last(i)));
+    }
+
+    /**
+     * Return number of edges in the current graph.
+     */
+    uint64_t get_size() {
+        return W->n;
+    }
+
+    /**
+     * Return k-mer length of current graph.
+     */
+    uint64_t get_k() {
+        return this->k;
+    }
+
+    /**
+     * Return value of W at position k.
+     */
+    TAlphabet get_W(uint64_t k) {
+        return (*W)[k];
+    }
+
+    /**
+     * Return value of last at position k.
+     */
+    bool get_last(uint64_t k) {
+        return (*last)[k];
+    }
+
     private:
     /** This function takes a character c and appends it to the end of the graph sequence
      * given that the corresponding note is not part of the graph yet.
@@ -479,13 +670,10 @@ class DBG_succ {
          * at p, insert c at fwd(next_c) and update p.
          */
         if (exist_c) {
-            // we need an addtional pred_W here as fwd is not defined if next_c is element of the minus set
-            //uint64_t p_new = fwd(pred_W(next_c, c));
             uint64_t p_new = fwd(next_c);
             // remove old terminal symbol
             last->deleteBit(p);
             W->remove(p);
-            //W_size--;
             // adapt position if altered by previous deletion
             p_new -= (p < p_new);
             // insert new terminal symbol 
@@ -493,7 +681,6 @@ class DBG_succ {
             // and the terminal symbol is always first
             last->insertBit(p_new, false);
             W->insert(0, p_new);
-            //W_size++;
             // update new terminal position
             p = p_new;
             // take care of updating the offset array F
@@ -562,7 +749,6 @@ class DBG_succ {
                     last->insertBit(x + 1, true);
                     W->insert(0, x + 1);
                 }
-                //W_size++;
             } else {
                 uint64_t x = F[c] + 1;
                 uint64_t next_c = succ_W(p + 1, c);
@@ -582,7 +768,6 @@ class DBG_succ {
                     last->insertBit(x, true);
                 }
                 W->insert(0, x);
-                //W_size++;
             }
             update_F(c, true);
         }
@@ -640,23 +825,30 @@ class DBG_succ {
     }
 
 
-    /**
-     * Given index i of a node and a value k, this function 
-     * will return the k-th last character of node i.
-     */
-    TAlphabet get_minus_k_value(uint64_t i, uint64_t k) {
-        for (; k > 0; --k)
-            i = bwd(succ_last(i));
-        return get_node_end_value(i);
-    }
 
-
+    public:
     /*
      * Returns the sequence stored in W and prints the node
      * information in an overview. 
      * Useful for debugging purposes.
      */
     void print_seq() {
+
+        for (uint64_t i = 1; i < W->n; i++) {
+            if (i % 10 == 0)
+                fprintf(stdout, "%lu", (i / 10) % 10);
+            else
+                fprintf(stdout, " ");
+        }
+        std::cout << std::endl;
+
+        for (uint64_t i = 1; i < W->n; i++) {
+            if ((*W)[i] >= alph_size)
+                fprintf(stdout, "-");
+            else
+                fprintf(stdout, " ");
+        }
+        std::cout << std::endl;
 
         for (uint64_t i = 1; i < W->n; i++) {
             if ((*W)[i] % alph_size == 0)
@@ -677,7 +869,7 @@ class DBG_succ {
         size_t j;
         for (size_t l = 0; l < k; l++) {
             for (uint64_t i = 1; i < W->n; i++) {
-                j = get_minus_k_value(i, l);
+                j = get_minus_k_value(i, l).first;
                 if (j % alph_size == 0)
                     std::cout << "$";
                 else
@@ -726,6 +918,7 @@ class DBG_succ {
     }
 
 
+    private:
     /**
      * This function gets a local range in W from lower bound l
      * to upper bound u and swaps the inserted element to the
@@ -778,6 +971,23 @@ class DBG_succ {
             lastEdge(lastEdge_) {}
     };
 
+    /**
+     * This object collects information about branches during graph traversal for the
+     * purpose of merging, so we know where to jump back to when we reached a dead end.
+     */
+    struct BranchInfoMerge {
+        uint64_t nodeId;
+        TAlphabet lastEdge;
+        std::deque<TAlphabet> last_k;
+
+        BranchInfoMerge() {}
+
+        BranchInfoMerge(uint64_t nodeId_, TAlphabet lastEdge_, std::deque<TAlphabet> last_k_):
+            nodeId(nodeId_),
+            lastEdge(lastEdge_),
+            last_k(last_k_) {}
+    };
+
 
     /**
      * This will hold the graph edges that will be written to the SQL graph output.
@@ -810,8 +1020,18 @@ class DBG_succ {
 
         return branch;
     }
+    BranchInfoMerge pop_branch(std::stack<BranchInfoMerge> &branchnodes, uint64_t &nodeId, uint64_t &lastEdge, std::deque<TAlphabet> &last_k) {
+        BranchInfoMerge branch = branchnodes.top();
+        branchnodes.pop();
+        lastEdge = branch.lastEdge;
+        nodeId = branch.nodeId;
+        last_k = branch.last_k;
 
-    bool finish_sequence(seqan::String<Dna5F> &sequence, uint64_t seqId, std::ofstream &SQLstream, CFG &config) {
+        return branch;
+    }
+
+
+    bool finish_sequence(seqan::String<Dna5F> &sequence, uint64_t seqId, std::ofstream &SQLstream) {
         if (seqan::length(sequence) > 0) {
             if (seqId == 1)
                 SQLstream << "INSERT INTO FASTA VALUES (1, '" << config.sqlfbase << ".fa');" << std::endl;
@@ -845,7 +1065,7 @@ class DBG_succ {
         }
     }
 
-    size_t traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream, CFG &config) {
+    size_t traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream) {
         // store all branch nodes on the way
         std::stack<BranchInfo> branchnodes;
         std::map<uint64_t, std::pair<uint64_t, uint64_t> > nodeId2seqId;
@@ -913,7 +1133,7 @@ class DBG_succ {
                 if (!visited.at(next)) {
                     if (joinOpen) {
                         if (length(sequence) > 0) {
-                            finish_sequence(sequence, seqCnt++, SQLstream, config);
+                            finish_sequence(sequence, seqCnt++, SQLstream);
                         }
                         seqId = seqCnt;
                         seqPos = 0;
@@ -968,7 +1188,7 @@ class DBG_succ {
                             }
                             if (joinOpen) {
                                 if (length(sequence) > 0) {
-                                    finish_sequence(sequence, seqCnt++, SQLstream, config);
+                                    finish_sequence(sequence, seqCnt++, SQLstream);
                                 }
                                 seqId = seqCnt;
                                 seqPos = 0;
@@ -1014,7 +1234,7 @@ class DBG_succ {
         }
         // for completeness
         if (seqan::length(sequence) > 0)
-            finish_sequence(sequence, seqCnt++, SQLstream, config);
+            finish_sequence(sequence, seqCnt++, SQLstream);
         else
             seqCnt--;
 
@@ -1054,7 +1274,8 @@ class DBG_succ {
             for (size_t i = 0; i < seqNum; ++i)
                 isRef.push_back(false);
         }
-        fprintf(stderr, "processing alleles for file %u\n", f);
+        if (config.verbose)
+            fprintf(stderr, "processing alleles for file %u\n", f);
 
         while (true) {
             nodeVal = get_node_end_value(nodeId);
@@ -1165,7 +1386,7 @@ class DBG_succ {
      * We will perform one depth first search traversal of the graph. While we will record
      * one long reference string, we will output all sidepaths on the way.
      */
-    void toSQL(CFG &config) {
+    void toSQL() {
         
         // this vector stores the joins between the sequence objects we wrote
         std::vector<JoinInfo> joins;
@@ -1179,7 +1400,7 @@ class DBG_succ {
 
         // traverse the graph, thereby filling joins vector, branchMap and 
         // writing the sequences to individual fasta files
-        size_t seqNum = traverseGraph(joins, branchMap, SQLstream, config); 
+        size_t seqNum = traverseGraph(joins, branchMap, SQLstream); 
         
         // write graph joins to SQL file
         for (size_t i = 0; i < joins.size(); ++i) {
@@ -1249,7 +1470,7 @@ class DBG_succ {
      * Take the current graph content and store in a file.
      *
      */
-    void toFile(CFG &config) {
+    void toFile() {
 
         // write Wavelet Tree
         std::ofstream outstream((config.outfbase + ".W.dbg").c_str());
@@ -1272,6 +1493,230 @@ class DBG_succ {
         outstream << p << std::endl;
         outstream.close();
     }
+
+
+    void merge(DBG_succ* G) {
+
+        // store all branch nodes on the way
+        std::stack<BranchInfoMerge> branchnodes;
+        // bool vector that keeps track of visited nodes
+        std::vector<bool> visited(G->get_size());
+        for (std::vector<bool>::iterator it = visited.begin(); it != visited.end(); ++it) {
+            *it = false;
+        }
+
+        // some initializations
+        uint64_t nodeId = 1; // start at source node
+        size_t out = G->outdegree(nodeId);
+        BranchInfoMerge branch;
+        TAlphabet val;
+        TAlphabet lastEdge = 0;
+        // keep a running list of the last k-1 characters we have seen
+        std::deque<TAlphabet> last_k;
+        bool new_branch = false;
+        bool old_last = (*last)[p];
+        bool initial_k = true;
+
+        while (out > 0 || branchnodes.size() > 0) {
+
+            // we have reached the sink but there are unvisited nodes left on the stack
+            if (out == 0) {
+                if (branchnodes.size() == 0)
+                    break;
+                // get new branch
+                branch = pop_branch(branchnodes, nodeId, lastEdge, last_k);
+                out = G->outdegree(nodeId);
+                new_branch = true;
+            }
+            std::cerr << "starting loop with nodID " << nodeId << std::endl;
+
+            if (new_branch) {
+                // find node where to restart insertion
+                uint64_t ridx = this->index(last_k);
+                // put at the beginning of equal node range
+                ridx = this->pred_last(ridx - 1) + 1;
+                std::cerr << "ridx: " << ridx << std::endl;
+                std::cerr << "bef move " << std::endl;
+                this->print_seq();
+                assert(!(*last)[p]); // must not remove a dangling end
+                // move p to last position
+                W->remove(p);
+                last->deleteBit(p);
+                update_F(this->get_node_end_value(p), false);
+                std::cerr << "moving p from " << p << " to " << ridx << std::endl;
+                ridx -= (p < ridx);
+                p = ridx;
+                W->insert(0, p);
+                last->insertBit(p, 0); // it's at the beginning of a branch node
+                update_F(this->get_node_end_value(p), true);
+
+                new_branch = false;
+                std::cerr << "aft move " << std::endl;
+                this->print_seq();
+            }
+
+            // we have not visited that node before
+            if (!visited.at(nodeId)) {
+                visited.at(nodeId) = true;
+                val = G->get_W(nodeId) % alph_size;
+                std::cerr << "current val " << val % alph_size << " nodeID: " << nodeId << std::endl;
+                G->print_seq();
+                last_k.push_back(G->get_node_end_value(nodeId));
+                if (last_k.size() > k)
+                    last_k.pop_front();
+            }
+
+            // there is only one child
+            if (out == 1) {
+                uint64_t next = G->fwd(nodeId);
+                val = G->get_W(nodeId) % alph_size;
+                if ((val != 6 || !initial_k) && val != 0) {
+                    initial_k = false;
+                    this->append_pos(val % alph_size);
+                    std::cerr << "append " << val % alph_size << " nodeID: " << nodeId << std::endl;
+                    std::cerr << "p: " << p << " W size: " << W->n << std::endl;
+                    this->print_seq();
+                }
+
+                // the next node is new
+                if (!visited.at(next)) {
+                    nodeId = next;
+                    lastEdge = 0;
+                // we have seen the next node before
+                } else {
+                    // there are no branches left
+                    if (branchnodes.size() == 0)
+                        break;
+                    // append next node
+                    if ((*last)[p]) {
+                        val = G->get_W(next) % alph_size;
+                        if ((val != 6 || !initial_k) && val != 0) {
+                            initial_k = false;
+                            this->append_pos(val % alph_size);
+                            std::cerr << "..append " << val % alph_size << " nodeID: " << nodeId << std::endl;
+                            std::cerr << "p: " << p << " W size: " << W->n << std::endl;
+                            this->print_seq();
+                        }
+                    }
+                    // otherwise go back to last branch
+                    branch = pop_branch(branchnodes, nodeId, lastEdge, last_k);
+                    out = G->outdegree(nodeId);
+                    std::cerr << "new branch 1 - nodeID: " << nodeId << " next is " << next << std::endl;
+                    new_branch = true;
+                }
+            // there are several children
+            } else {
+                size_t cnt = 0;
+                bool updated = false;
+                if (G->get_W(nodeId) == 0)
+                    cnt++;
+                for (TAlphabet c = 1; c < alph_size; ++c) {
+                    uint64_t next = G->outgoing(nodeId, c);
+                    if (next > 0) {
+                        cnt++;
+                        // we already handled this edge erlier
+                        if (cnt <= lastEdge)
+                            continue;
+                        lastEdge++;
+
+                        val = c;
+                        std::cerr << "mult edge - val is now " << val << std::endl;
+                        uint64_t curr_p = p;
+                        if ((val != 6 || !initial_k) && val != 0) {
+                            initial_k = false;
+                            uint64_t old_size = W->n;
+                            std::cerr << "p (before): " << p << " W size: " << W->n << std::endl;
+                            this->print_seq();
+                            this->append_pos(val % alph_size);
+                            curr_p += (p <= curr_p);
+                            std::cerr << "append " << val % alph_size << " nodeID: " << nodeId << std::endl;
+                            std::cerr << "p: " << p << " W size: " << W->n << std::endl;
+                            this->print_seq();
+                        }
+
+                        if (!visited.at(next)) {
+                            // there are remaining branches - push node to stack
+                            if (cnt < out && next != nodeId) {
+                                // push node information to stack
+                                branchnodes.push(BranchInfoMerge(nodeId, lastEdge, last_k));
+                                std::cerr << "pushing nodeID " << nodeId << " onto stack" << std::endl;
+                            }
+                            nodeId = next;
+                            updated = true;
+                            lastEdge = 0;
+                            break;
+                        } else {
+                            std::cerr << "visited next before: " << next <<std::endl;
+                            // append next node
+                            if ((*last)[p]) {
+                                val = G->get_W(next) % alph_size;
+                                if ((val != 6 || !initial_k) && val != 0) {
+                                    initial_k = false;
+                                    this->append_pos(val % alph_size);
+                                    std::cerr << "...append " << val % alph_size << " nodeID: " << nodeId << std::endl;
+                                    std::cerr << "p: " << p << " W size: " << W->n << std::endl;
+                                    this->print_seq();
+                                }
+                            }
+                            // reset to previous position
+                            if (nodeId != next) {
+                                W->remove(p);
+                                last->deleteBit(p);
+                                update_F(this->get_node_end_value(p), false);
+                                curr_p -= (p < curr_p);
+                                std::cerr << ".moving p from " << p << " to " << curr_p << std::endl;
+                                p = curr_p;
+                                W->insert(0, p);
+                                last->insertBit(p, 0); // it's at the beginning of a branch node
+                                update_F(this->get_node_end_value(p), true);
+                                std::cerr << ".aft move " << std::endl;
+                                this->print_seq();
+                            }
+                        }
+                    }
+                }
+                // we are done with this branch
+                // we should end up here, when nodes branch to themselves with their last edge
+                if (!updated) {
+                    // there are no branches left
+                    if (branchnodes.size() == 0)
+                        break;
+                    // otherwise go back to last branch
+                    branch = pop_branch(branchnodes, nodeId, lastEdge, last_k);
+                    out = G->outdegree(nodeId);
+                    new_branch = true;
+                    std::cerr << "new branch 2" << std::endl;
+                }
+            }
+            out = G->outdegree(nodeId);
+        }
+        // bring graph into default state
+        std::deque<TAlphabet> tmp_p;
+        for (size_t t = 0; t < k; t++)
+            tmp_p.push_back(6);
+        uint64_t old_p = pred_last(this->index(tmp_p) - 1) + 1;
+
+        if (p < old_p)
+            old_p--;
+        W->remove(p);
+        last->deleteBit(p);
+        update_F(this->get_node_end_value(p), false);
+        p = old_p;
+        W->insert(0, p);
+        last->insertBit(p, old_last);
+
+        // locally update sorting
+        std::pair<uint64_t, uint64_t> R = get_equal_node_range(this->p);
+        if (R.second - R.first > 0) {
+            sort_W_locally(R.first, R.second);
+            while ((*W)[p] != 0)
+                p--;
+            assert((*W)[p] == 0);
+        }
+        update_F(this->get_node_end_value(p), true);
+    }
+
+
 
 };
 #endif

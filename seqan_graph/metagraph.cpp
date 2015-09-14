@@ -47,11 +47,13 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
     addOption(parser, seqan::ArgParseOption("O", "outfile_base", "basename for graph output files", seqan::ArgParseArgument::STRING, "TEXT"));
     addOption(parser, seqan::ArgParseOption("S", "sql_base", "basename for SQL output files", seqan::ArgParseArgument::STRING, "TEXT"));
     addOption(parser, seqan::ArgParseOption("I", "infile_base", "basename for loading graph input files", seqan::ArgParseArgument::STRING, "TEXT"));
+    addOption(parser, seqan::ArgParseOption("m", "merge", "list of graph file basenames used as input for merging", seqan::ArgParseArgument::STRING, "TEXT"));
 
     // set defaults
     setDefaultValue(parser, "O", "");
     setDefaultValue(parser, "I", "");
     setDefaultValue(parser, "S", "");
+    setDefaultValue(parser, "m", "");
 
     // parse command line
     ArgumentParser::ParseResult res = parse(parser, argc, argv);
@@ -67,6 +69,7 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
     getOptionValue(config.outfbase, parser, "O");
     getOptionValue(config.infbase, parser, "I");
     getOptionValue(config.sqlfbase, parser, "S");
+    getOptionValue(config.merge, parser, "m");
     config.fname = getArgumentValues(parser, 0);
 
     // do any logic / error checking here (e.g., mutually exclusive options)
@@ -92,50 +95,76 @@ int main(int argc, char const ** argv) {
 
     // create graph object
     //DBG_seqan* graph = new DBG_seqan(config.k);
-   DBG_succ* graph;
-    if (config.infbase.empty())
-        graph = new DBG_succ(config.k);
-    else
-        graph = new DBG_succ(config);
+    DBG_succ* graph = NULL;
 
-    if (config.infbase.empty() || config.integrate) {
-        // read from fasta stream 
-        CharString id;
-        String<Dna5> seq;
-        // iterate over input files
-        for (unsigned int f = 0; f < length(config.fname); ++f) {
-
-            if (config.verbose) {
-                std::cout << std::endl << "Parsing " << config.fname[f] << std::endl;
+    if (! config.merge.empty()) {
+        int cnt = 0;
+        std::string token;
+        std::stringstream mergelist(config.merge);
+        while (std::getline(mergelist, token, ',')) {
+            if (cnt == 0) {
+                std::cout << "Opening file " << token << std::endl;
+                graph = new DBG_succ(token, config);
+                //graph->print_seq();
+            } else {
+                std::cout << "Opening file for merging ..." << token << std::endl;
+                DBG_succ* graph_ = new DBG_succ(token, config);
+                //graph_->print_seq();
+                graph->merge(graph_);
+                std::cerr << "... done merging." << std::endl;
+                //graph->print_seq();
+                delete graph_;
             }
+            cnt++;
+        }
+        graph->print_seq();
+    } else {
+        if (! config.infbase.empty()) {
+            graph = new DBG_succ(config.infbase, config);
+        } else {
+            graph = new DBG_succ(config.k, config);
+        }
 
-            // open stream to fasta file
-            SequenceStream stream;
-            open(stream, toCString(config.fname.at(f)), SequenceStream::READ, SequenceStream::FASTA);
-            if (!isGood(stream)) {
-                std::cerr << "ERROR while opening input file " << config.fname.at(f) << std::endl;
-                exit(1);
-            }
+        if (config.infbase.empty() || config.integrate) {
+            // read from fasta stream 
+            CharString id;
+            String<Dna5> seq;
+            // iterate over input files
+            for (unsigned int f = 0; f < length(config.fname); ++f) {
 
-            while (!atEnd(stream)) {
-                if (readRecord(id, seq, stream) != 0) {
-                    std::cerr << "!!!ERROR while reading from " << config.fname.at(f) << std::endl;
+                if (config.verbose) {
+                    std::cout << std::endl << "Parsing " << config.fname[f] << std::endl;
+                }
+
+                // open stream to fasta file
+                SequenceStream stream;
+                open(stream, toCString(config.fname.at(f)), SequenceStream::READ, SequenceStream::FASTA);
+                if (!isGood(stream)) {
+                    std::cerr << "ERROR while opening input file " << config.fname.at(f) << std::endl;
                     exit(1);
                 }
-                // add all k-mers of seq to the graph
-                graph->add_seq(seq);
+
+                while (!atEnd(stream)) {
+                    if (readRecord(id, seq, stream) != 0) {
+                        std::cerr << "!!!ERROR while reading from " << config.fname.at(f) << std::endl;
+                        exit(1);
+                    }
+                    // add all k-mers of seq to the graph
+                    graph->add_seq(seq);
+                }
+                //graph->update_counters();
+                //graph->print_stats();
+                fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
             }
-            //graph->update_counters();
-            //graph->print_stats();
-            fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
+            graph->print_seq();
         }
     }
 
     // graph output
     if (!config.sqlfbase.empty())
-        graph->toSQL(config);
+        graph->toSQL();
     if (!config.outfbase.empty())
-        graph->toFile(config);
+        graph->toFile();
 
     delete graph;
 
