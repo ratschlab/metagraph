@@ -48,12 +48,14 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
     addOption(parser, seqan::ArgParseOption("S", "sql_base", "basename for SQL output files", seqan::ArgParseArgument::STRING, "TEXT"));
     addOption(parser, seqan::ArgParseOption("I", "infile_base", "basename for loading graph input files", seqan::ArgParseArgument::STRING, "TEXT"));
     addOption(parser, seqan::ArgParseOption("m", "merge", "list of graph file basenames used as input for merging", seqan::ArgParseArgument::STRING, "TEXT"));
+    addOption(parser, seqan::ArgParseOption("c", "compare", "list of graph file basenames used as input for comparison", seqan::ArgParseArgument::STRING, "TEXT"));
 
     // set defaults
     setDefaultValue(parser, "O", "");
     setDefaultValue(parser, "I", "");
     setDefaultValue(parser, "S", "");
     setDefaultValue(parser, "m", "");
+    setDefaultValue(parser, "c", "");
 
     // parse command line
     ArgumentParser::ParseResult res = parse(parser, argc, argv);
@@ -70,6 +72,7 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
     getOptionValue(config.infbase, parser, "I");
     getOptionValue(config.sqlfbase, parser, "S");
     getOptionValue(config.merge, parser, "m");
+    getOptionValue(config.compare, parser, "c");
     config.fname = getArgumentValues(parser, 0);
 
     // do any logic / error checking here (e.g., mutually exclusive options)
@@ -97,7 +100,28 @@ int main(int argc, char const ** argv) {
     //DBG_seqan* graph = new DBG_seqan(config.k);
     DBG_succ* graph = NULL;
 
-    if (! config.merge.empty()) {
+    if (! config.compare.empty()) {
+        int cnt = 0;
+        std::string token;
+        std::stringstream comparelist(config.compare);
+        while (std::getline(comparelist, token, ',')) {
+            if (cnt == 0) {
+                std::cout << "Opening file " << token << std::endl;
+                graph = new DBG_succ(token, config);
+            } else {
+                std::cout << "Opening file for comparison ..." << token << std::endl;
+                DBG_succ* graph_ = new DBG_succ(token, config);
+                bool identical = graph->compare(graph_);
+                if (identical) {
+                    std::cout << "Graphs are identical" << std::endl;
+                } else {
+                    std::cout << "Graphs are not identical" << std::endl;
+                }
+                delete graph_;
+            }
+            cnt++;
+        }
+    } else if (! config.merge.empty()) {
         int cnt = 0;
         std::string token;
         std::stringstream mergelist(config.merge);
@@ -117,7 +141,7 @@ int main(int argc, char const ** argv) {
             }
             cnt++;
         }
-        graph->print_seq();
+        //graph->print_seq();
     } else {
         if (! config.infbase.empty()) {
             graph = new DBG_succ(config.infbase, config);
@@ -156,7 +180,7 @@ int main(int argc, char const ** argv) {
                 //graph->print_stats();
                 fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
             }
-            graph->print_seq();
+            //graph->print_seq();
         }
     }
 

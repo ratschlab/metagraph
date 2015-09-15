@@ -135,123 +135,6 @@ class DBG_succ {
         instream.close();
     }
 
-    /*
-     * Given another graph structure G this function integrates G
-     * into the graph of this instance.
-     */
-/*    void merge(DBG_succ* G) {
-
-        // positions in the graph for respective traversal
-        uint64_t k1 = 1;
-        uint64_t k2 = 1;
-
-        // check if we can merge the given graphs
-        if (this->k != G->get_k()) {
-            fprintf(stderr, "Graphs have different k-mer lengths - cannot be merged!\n");
-            exit(1);
-        }
-
-        while (k1 < W->n || k2 < G->get_size()) {
-            std::cerr << "k1: " << k1 << " [" << (*W)[k1] << "] k2: " << k2 << " [" << G->get_W(k2) << "]" << std::endl;
-            // compare node k1 in graph 1 and k2 in graph 2
-            std::pair<TAlphabet, uint64_t> k1_val;
-            std::pair<TAlphabet, uint64_t> k2_val;
-            uint64_t k1_node = k1;
-            uint64_t k2_node = k2;
-            uint64_t curr_k = 0;
-            while (curr_k < this->k) {
-            //    std::cerr << "k1_node: " << k1_node << " k2_node: " << k2_node << std::endl;
-                k1_val = get_minus_k_value(k1_node, 0);
-                k2_val = G->get_minus_k_value(k2_node, 0);
-                if (k1_val.first == k2_val.first) {
-                    ++curr_k;
-                    k1_node = k1_val.second;
-                    k2_node = k2_val.second;
-                } else {
-                    break;
-                }
-            }
-            std::cerr << "k1_val: " << k1_val.first << " k2_val: " << k2_val.first << " curr_k:" << curr_k << std::endl;
-
-            uint64_t insert_pos = 0;
-            // the node sequences are identical
-            if (k1_val.first == k2_val.first) {
-                // scan ahead to the appropriate edge
-                while ((*W)[k1] < G->get_W(k2) && !(*last)[k1])
-                    ++k1;
-                // node and edge are the same
-                if ((*W)[k1] == G->get_W(k2)) {
-                    ++k2;
-                    ++k1;
-                    std::cerr << "a) identical - advance both" << std::endl;
-                // insert new node after k1
-                } else if ((*W)[k1] < G->get_W(k2)) {
-                    //last->set(k1, false);
-                    ++k1;
-                    //W->insert(G->get_W(k2), k1);
-                    //last->insertBit(k1, true);
-                    //update_F(G->get_node_end_value(k2), true);
-                    //insert_pos = k1;
-                    std::cerr << "b) inserting " << G->get_W(k2) << " from position " << k2 << " at position " << k1 << std::endl;
-                    ++k2;
-                // insert new node before k1
-                } else {
-                    //W->insert(G->get_W(k2), k1);
-                    //last->insertBit(k1, false);
-                    //update_F(G->get_node_end_value(k2), true);
-                    //insert_pos = k1;
-                    //std::cerr << "c) inserting " << G->get_W(k2) << " from position " << k2 << " at position " << k1 << std::endl;
-                    ++k2;
-                }
-            // the node in graph 1 is smaller
-            } else if (k1_val.first < k2_val.first) {
-                // we do k1+ implicitly below
-                if (k1 == W->n) {
-                    //W->insert(G->get_W(k2), k1);
-                    //last->insertBit(k1, false);
-                    //update_F(G->get_node_end_value(k2), true);
-                    //insert_pos = k1;
-                    std::cerr << "d) inserting " << G->get_W(k2) << " from position " << k2 << " at position " << k1 << std::endl;
-                    ++k2;
-                } else {
-                    std::cerr << "e) only advance k1" << std::endl;
-                }
-            // the node in graph 2 is smaller
-            } else {
-                k1--;
-                W->insert(G->get_W(k2), k1);
-                last->insertBit(k1, G->get_last(k2));
-                update_F(G->get_node_end_value(k2), true);
-                insert_pos = k1;
-                std::cerr << "f) inserting " << G->get_W(k2) << " from position " << k2 << " at position " << k1 << std::endl;
-                ++k2;
-            }
-            // move forward in graph 1
-            k1 += (k1 < W->n);
-
-            // postprocessing to adapt c to c- if necessary
-            if (insert_pos > 0) {
-                // no need for action if already c-
-                TAlphabet c = (*W)[insert_pos];
-                if (c % alph_size == c) {
-                    uint64_t next_c = succ_W(insert_pos + 1, c);
-                    uint64_t next_cm = succ_W(insert_pos + 1, c + alph_size);
-                    if (next_cm < next_c) {
-                        replaceW(insert_pos, c + alph_size);
-                    } else {
-                        uint64_t last_c = pred_W(insert_pos - 1, c);
-                        if (compare_node_suffix(insert_pos, last_c))
-                            replaceW(insert_pos, c + alph_size);
-                    }
-                } 
-                // adapt index of temrinal node
-                if (insert_pos < p)
-                    p++;
-                print_seq();
-            }
-        }
-    }*/
-
 
     void add_seq (seqan::String<Dna5F> seq) {
 
@@ -475,7 +358,7 @@ class DBG_succ {
         uint64_t ru = F[s + 1]; // upper bound
         // update range iteratively while scanning through s
         for (uint64_t i = 1; i < length(s); i++) {
-            rl = outgoing(std::min(succ_W(rl, s), succ_W(rl, s + alph_size)), s);
+            rl = outgoing(std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size)), s);
             ru = outgoing(std::max(pred_W(ru, s), pred_W(ru, s + alph_size)), s);
            // fprintf(stdout, "char: %i rl: %i ru: %i\n", (int) ordValue(s[i]) + 1, (int) rl, (int) ru);
         }
@@ -493,7 +376,7 @@ class DBG_succ {
         while (!str.empty()) {
             s = str.front() % alph_size;
             str.pop_front();
-            rl = outgoing(std::min(succ_W(rl, s), succ_W(rl, s + alph_size)), s);
+            rl = outgoing(std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size)), s);
             ru = outgoing(std::max(pred_W(ru, s), pred_W(ru, s + alph_size)), s);
             //fprintf(stderr, "char: %i rl: %i ru: %i\n", (int) s, (int) rl, (int) ru);
         }
@@ -632,6 +515,14 @@ class DBG_succ {
      */
     TAlphabet get_W(uint64_t k) {
         return (*W)[k];
+    }
+
+    /** 
+     * Return value of F vector at index k.
+     * The index is over the alphabet!
+     */
+    TAlphabet get_F(uint64_t k) {
+        return F.at(k);
     }
 
     /**
@@ -1516,8 +1407,16 @@ class DBG_succ {
         bool new_branch = false;
         bool old_last = (*last)[p];
         bool initial_k = true;
+        uint64_t added = 0;
 
         while (out > 0 || branchnodes.size() > 0) {
+
+            if (added > 0 && added % 1000 == 0) {
+                std::cout << "." << std::flush;
+                if (added % 10000 == 0) {
+                    fprintf(stdout, "merged %lu / %lu - edges %lu / nodes %lu\n", added, G->get_size(), W->n - 1, rank_last((last->size() - 1)));
+                }
+            }
 
             // we have reached the sink but there are unvisited nodes left on the stack
             if (out == 0) {
@@ -1528,39 +1427,39 @@ class DBG_succ {
                 out = G->outdegree(nodeId);
                 new_branch = true;
             }
-            std::cerr << "starting loop with nodID " << nodeId << std::endl;
+            //std::cerr << "starting loop with nodID " << nodeId << std::endl;
 
             if (new_branch) {
                 // find node where to restart insertion
                 uint64_t ridx = this->index(last_k);
                 // put at the beginning of equal node range
                 ridx = this->pred_last(ridx - 1) + 1;
-                std::cerr << "ridx: " << ridx << std::endl;
-                std::cerr << "bef move " << std::endl;
-                this->print_seq();
+                ridx -= (p < ridx);
+                //std::cerr << "ridx: " << ridx << std::endl;
+                //std::cerr << "bef move " << std::endl;
+                //this->print_seq();
                 assert(!(*last)[p]); // must not remove a dangling end
                 // move p to last position
                 W->remove(p);
                 last->deleteBit(p);
                 update_F(this->get_node_end_value(p), false);
-                std::cerr << "moving p from " << p << " to " << ridx << std::endl;
-                ridx -= (p < ridx);
+                //std::cerr << "moving p from " << p << " to " << ridx << std::endl;
                 p = ridx;
                 W->insert(0, p);
                 last->insertBit(p, 0); // it's at the beginning of a branch node
                 update_F(this->get_node_end_value(p), true);
 
                 new_branch = false;
-                std::cerr << "aft move " << std::endl;
-                this->print_seq();
+                //std::cerr << "aft move " << std::endl;
+                //this->print_seq();
             }
 
             // we have not visited that node before
             if (!visited.at(nodeId)) {
                 visited.at(nodeId) = true;
                 val = G->get_W(nodeId) % alph_size;
-                std::cerr << "current val " << val % alph_size << " nodeID: " << nodeId << std::endl;
-                G->print_seq();
+                //std::cerr << "current val " << val % alph_size << " nodeID: " << nodeId << std::endl;
+                //G->print_seq();
                 last_k.push_back(G->get_node_end_value(nodeId));
                 if (last_k.size() > k)
                     last_k.pop_front();
@@ -1573,9 +1472,10 @@ class DBG_succ {
                 if ((val != 6 || !initial_k) && val != 0) {
                     initial_k = false;
                     this->append_pos(val % alph_size);
-                    std::cerr << "append " << val % alph_size << " nodeID: " << nodeId << std::endl;
-                    std::cerr << "p: " << p << " W size: " << W->n << std::endl;
-                    this->print_seq();
+                    added++;
+                    //std::cerr << "append " << val % alph_size << " nodeID: " << nodeId << std::endl;
+                    //std::cerr << "p: " << p << " W size: " << W->n << std::endl;
+                    //this->print_seq();
                 }
 
                 // the next node is new
@@ -1593,15 +1493,16 @@ class DBG_succ {
                         if ((val != 6 || !initial_k) && val != 0) {
                             initial_k = false;
                             this->append_pos(val % alph_size);
-                            std::cerr << "..append " << val % alph_size << " nodeID: " << nodeId << std::endl;
-                            std::cerr << "p: " << p << " W size: " << W->n << std::endl;
-                            this->print_seq();
+                            added++;
+                            //std::cerr << "..append " << val % alph_size << " nodeID: " << nodeId << std::endl;
+                            //std::cerr << "p: " << p << " W size: " << W->n << std::endl;
+                            //this->print_seq();
                         }
                     }
                     // otherwise go back to last branch
                     branch = pop_branch(branchnodes, nodeId, lastEdge, last_k);
                     out = G->outdegree(nodeId);
-                    std::cerr << "new branch 1 - nodeID: " << nodeId << " next is " << next << std::endl;
+                    //std::cerr << "new branch 1 - nodeID: " << nodeId << " next is " << next << std::endl;
                     new_branch = true;
                 }
             // there are several children
@@ -1619,19 +1520,18 @@ class DBG_succ {
                             continue;
                         lastEdge++;
 
-                        val = c;
-                        std::cerr << "mult edge - val is now " << val << std::endl;
+                        //std::cerr << "mult edge - val is now " << c << std::endl;
                         uint64_t curr_p = p;
-                        if ((val != 6 || !initial_k) && val != 0) {
+                        if ((c != 6 || !initial_k) && c != 0) {
                             initial_k = false;
-                            uint64_t old_size = W->n;
-                            std::cerr << "p (before): " << p << " W size: " << W->n << std::endl;
-                            this->print_seq();
-                            this->append_pos(val % alph_size);
+                            //std::cerr << "p (before): " << p << " W size: " << W->n << std::endl;
+                            //this->print_seq();
+                            this->append_pos(c % alph_size);
+                            added++;
                             curr_p += (p <= curr_p);
-                            std::cerr << "append " << val % alph_size << " nodeID: " << nodeId << std::endl;
-                            std::cerr << "p: " << p << " W size: " << W->n << std::endl;
-                            this->print_seq();
+                            //std::cerr << "append " << c % alph_size << " nodeID: " << nodeId << std::endl;
+                            //std::cerr << "p: " << p << " W size: " << W->n << std::endl;
+                            //this->print_seq();
                         }
 
                         if (!visited.at(next)) {
@@ -1639,23 +1539,24 @@ class DBG_succ {
                             if (cnt < out && next != nodeId) {
                                 // push node information to stack
                                 branchnodes.push(BranchInfoMerge(nodeId, lastEdge, last_k));
-                                std::cerr << "pushing nodeID " << nodeId << " onto stack" << std::endl;
+                                //std::cerr << "pushing nodeID " << nodeId << " onto stack" << std::endl;
                             }
                             nodeId = next;
                             updated = true;
                             lastEdge = 0;
                             break;
                         } else {
-                            std::cerr << "visited next before: " << next <<std::endl;
+                            //std::cerr << "visited next before: " << next <<std::endl;
                             // append next node
                             if ((*last)[p]) {
-                                val = G->get_W(next) % alph_size;
-                                if ((val != 6 || !initial_k) && val != 0) {
+                                c = G->get_W(next) % alph_size;
+                                if ((c != 6 || !initial_k) && c != 0) {
                                     initial_k = false;
-                                    this->append_pos(val % alph_size);
-                                    std::cerr << "...append " << val % alph_size << " nodeID: " << nodeId << std::endl;
-                                    std::cerr << "p: " << p << " W size: " << W->n << std::endl;
-                                    this->print_seq();
+                                    this->append_pos(c % alph_size);
+                                    added++;
+                                    //std::cerr << "...append " << c % alph_size << " nodeID: " << nodeId << std::endl;
+                                    //std::cerr << "p: " << p << " W size: " << W->n << std::endl;
+                                    //this->print_seq();
                                 }
                             }
                             // reset to previous position
@@ -1664,13 +1565,13 @@ class DBG_succ {
                                 last->deleteBit(p);
                                 update_F(this->get_node_end_value(p), false);
                                 curr_p -= (p < curr_p);
-                                std::cerr << ".moving p from " << p << " to " << curr_p << std::endl;
+                                //std::cerr << ".moving p from " << p << " to " << curr_p << std::endl;
                                 p = curr_p;
                                 W->insert(0, p);
                                 last->insertBit(p, 0); // it's at the beginning of a branch node
                                 update_F(this->get_node_end_value(p), true);
-                                std::cerr << ".aft move " << std::endl;
-                                this->print_seq();
+                                //std::cerr << ".aft move " << std::endl;
+                                //this->print_seq();
                             }
                         }
                     }
@@ -1685,7 +1586,7 @@ class DBG_succ {
                     branch = pop_branch(branchnodes, nodeId, lastEdge, last_k);
                     out = G->outdegree(nodeId);
                     new_branch = true;
-                    std::cerr << "new branch 2" << std::endl;
+                    //std::cerr << "new branch 2" << std::endl;
                 }
             }
             out = G->outdegree(nodeId);
@@ -1696,8 +1597,7 @@ class DBG_succ {
             tmp_p.push_back(6);
         uint64_t old_p = pred_last(this->index(tmp_p) - 1) + 1;
 
-        if (p < old_p)
-            old_p--;
+        old_p -= (p < old_p);
         W->remove(p);
         last->deleteBit(p);
         update_F(this->get_node_end_value(p), false);
@@ -1716,7 +1616,33 @@ class DBG_succ {
         update_F(this->get_node_end_value(p), true);
     }
 
+    bool compare(DBG_succ* G) {
+        
+        // compare size
+        if (W->n != G->get_size())
+            return false;
+        
+        // compare W
+        for (size_t i = 0; i < W->n; ++i) {
+            if ((*W)[i] != G->get_W(i))
+                return false;
+        }
 
+        // compare last
+        for (size_t i = 0; i < W->n; ++i) {
+            if ((*last)[i] != G->get_last(i))
+                return false;
+        }
+
+        // compare F
+        for (size_t i = 0; i < F.size(); ++i) {
+            if (F.at(i) != G->get_F(i))
+                return false;
+        }
+
+        return true;
+
+    }
 
 };
 #endif
