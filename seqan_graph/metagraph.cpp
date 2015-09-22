@@ -17,7 +17,7 @@
 #include <dbg_seqan.hpp>
 #include <dbg_succinct_libmaus.hpp>
 //#include <dmm_tree.hpp>
-#include <unix_tools.hpp>
+//#include <unix_tools.hpp>
 #include <config.hpp>
 
 // parse command line arguments and options
@@ -132,12 +132,17 @@ int main(int argc, char const ** argv) {
                 //graph->print_seq();
             } else {
                 std::cout << "Opening file for merging ..." << token << std::endl;
+
                 DBG_succ* graph_ = new DBG_succ(token, config);
-                //graph_->print_seq();
-                graph->merge(graph_);
-                std::cerr << "... done merging." << std::endl;
-                //graph->print_seq();
+                //graph->merge(graph_);
+                
+                DBG_succ* graph__ = new DBG_succ(graph_->get_k(), config, false);
+                graph__->merge(graph, graph_);
+                delete graph;
+                graph = graph__;
+
                 delete graph_;
+                std::cerr << "... done merging." << std::endl;
             }
             cnt++;
         }
@@ -178,7 +183,8 @@ int main(int argc, char const ** argv) {
                 }
                 //graph->update_counters();
                 //graph->print_stats();
-                fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
+                
+                //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
             }
             //graph->print_seq();
         }

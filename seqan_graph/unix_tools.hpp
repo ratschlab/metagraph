@@ -14,7 +14,7 @@
  * http://nadeausoftware.com/articles/2012/07/c_c_tip_how_get_process_resident_set_size_physical_memory_use
  */
 size_t
-get_curr_mem () {
+get_curr_mem2 () {
     long rss = 0L;
     FILE* fp = NULL;
 
