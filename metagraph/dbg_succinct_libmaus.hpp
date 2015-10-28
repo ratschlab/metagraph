@@ -1390,6 +1390,7 @@ class DBG_succ {
         }
     }
 
+
     /**
      * Take the current graph content and store in a file.
      *
@@ -1419,6 +1420,11 @@ class DBG_succ {
     }
 
 
+    /**
+    * Heavily borrowing from the graph sequence traversal, this function gets a graph pointer G and merges its
+    * nodes into the current graph object. The edges of the graph G are fully traversed and nodes are added to
+    * the object graph if not existing yet. This function is well suited to merge small graphs into large ones.
+    */
     void merge(DBG_succ* G) {
 
         // store all branch nodes on the way
@@ -1651,6 +1657,13 @@ class DBG_succ {
         update_F(this->get_node_end_value(p), true);
     }
 
+
+    /**
+    * Given a pointer to a graph structure G, the function compares its elements to the
+    * current graph. It will perform an element wise comparison of the arrays W, last and
+    * F and will only check for identity. If any element differs, the function will return 
+    * false and true otherwise.
+    */
     bool compare(DBG_succ* G) {
         
         // compare size
@@ -1875,6 +1888,13 @@ class DBG_succ {
         p = succ_W(1, 0);
     }
 
+
+    /**
+    * This function takes a pointer to a graph structure G1 and a corresponding node index k1_node
+    * as well as a pointer to a second graph structure G2 and a corresponding node index k2_node. It
+    * returns a pair of bool with the first value set to true if G1(k1_node) < G2(k2_node) and the
+    * second value set to true if G2(k2_node) < G1(k1_node).
+    */
     std::pair<bool, bool> compare_nodes(DBG_succ *G1, uint64_t k1_node, DBG_succ *G2, uint64_t k2_node) {
     
         std::pair<TAlphabet, uint64_t> k1_val;
@@ -1896,6 +1916,10 @@ class DBG_succ {
     }
 
 
+    /**
+    * Given a node index k_node, this function returns the k-mer sequence of the
+    * node in a deque data structure.
+    */
     std::deque<TAlphabet> get_node_seq(uint64_t k_node) {
         std::deque<TAlphabet> ret;
         std::pair<TAlphabet, uint64_t> k_val;
@@ -1909,6 +1933,10 @@ class DBG_succ {
     }
 
 
+    /**
+    * Given a node index k_node, this function returns the k-mer sequence of the 
+    * node as a string.
+    */
     std::string get_node_str(uint64_t k_node) {
         std::stringstream ret;
         std::pair<TAlphabet, uint64_t> k_val;
@@ -1920,9 +1948,6 @@ class DBG_succ {
         }
         return ret.str();
     }
-
-
-
 
 };
 #endif
