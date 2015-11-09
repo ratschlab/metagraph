@@ -1207,6 +1207,7 @@ class DBG_succ {
             if (nodeVal == 0) {
                 nodeId = fwd(nodeId);
                 alleleSeqPos++;
+                currStart++;
                 continue;
             }
             seqVal = ordValue(seq[seqPos]) + 1;
@@ -1217,6 +1218,8 @@ class DBG_succ {
                 break;
             if (nodeVal % alph_size != 6) {
                 seqPos++;
+            } else {
+                currStart++;
             }
             seqValNext = ordValue(seq[seqPos]) + 1;
 
@@ -1230,8 +1233,10 @@ class DBG_succ {
                     assert(currJoin.seqId1 == seqId);
                     assert(currJoin.seqPos1 == alleleSeqPos);
                     if (!isRefRun) {
-                        SQLstream << "INSERT INTO AllelePathItem VALUES (" << f+1 << ", " << alleleCnt++ << ", " << seqId << ", ";
-                        SQLstream << currStart << ", " << alleleSeqPos - currStart + 1 << ", 'TRUE')" << std::endl;
+                        if (alleleSeqPos - currStart + 1 > 0) {
+                            SQLstream << "INSERT INTO AllelePathItem VALUES (" << f+1 << ", " << alleleCnt++ << ", " << seqId << ", ";
+                            SQLstream << currStart << ", " << alleleSeqPos - currStart + 1 << ", 'TRUE')" << std::endl;
+                        }
                     } else {
                         isRef[seqId - 1] = true;                 
                     }
@@ -1265,8 +1270,10 @@ class DBG_succ {
                     assert(currJoin.seqId1 == seqId);
                     assert(currJoin.seqPos1 == alleleSeqPos);
                     if (!isRefRun) {
-                        SQLstream << "INSERT INTO AllelePathItem VALUES (" << f+1 << ", " << alleleCnt++ << ", " << seqId << ", ";
-                        SQLstream << currStart << ", " << alleleSeqPos - currStart + 1 << ", 'TRUE')" << std::endl;
+                        if (alleleSeqPos - currStart + 1 > 0) {
+                            SQLstream << "INSERT INTO AllelePathItem VALUES (" << f+1 << ", " << alleleCnt++ << ", " << seqId << ", ";
+                            SQLstream << currStart << ", " << alleleSeqPos - currStart + 1 << ", 'TRUE')" << std::endl;
+                        }
                     } else {
                         isRef[seqId - 1] = true;
                     }
@@ -1280,8 +1287,10 @@ class DBG_succ {
             }
         }
         if (!isRefRun) {
-            SQLstream << "INSERT INTO AllelePathItem VALUES (" << f+1 << ", " << alleleCnt++ << ", " << seqId << ", ";
-            SQLstream << currStart << ", " << alleleSeqPos - currStart + 1 << ", 'TRUE')" << std::endl;
+            if (alleleSeqPos - currStart + 1 > 0) {
+                SQLstream << "INSERT INTO AllelePathItem VALUES (" << f+1 << ", " << alleleCnt++ << ", " << seqId << ", ";
+                SQLstream << currStart << ", " << alleleSeqPos - currStart + 1 << ", 'TRUE')" << std::endl;
+            }
         } else {
             isRef[seqId - 1] = true;
             // write reference information to SQL stream 
