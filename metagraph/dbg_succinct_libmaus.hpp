@@ -375,11 +375,8 @@ class DBG_succ {
                 return 0;
             if (rl > ru)
                 return 0;
-            //rl = outgoing(std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size)), s);
-            //ru = outgoing(std::max(pred_W(ru, s), pred_W(ru, s + alph_size)), s);
             rl = outgoing(rl, s);
             ru = outgoing(ru, s);
-           // fprintf(stdout, "char: %i rl: %i ru: %i\n", (int) ordValue(s[i]) + 1, (int) rl, (int) ru);
         }
         return (ru > rl) ? ru : rl;
     }
@@ -407,11 +404,8 @@ class DBG_succ {
                 return std::make_pair(0, 0);
             if (rl > ru)
                 return std::make_pair(0, 0);
-            //rl = outgoing(std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size)), s);
-            //ru = outgoing(std::max(pred_W(ru, s), pred_W(ru, s + alph_size)), s);
             rl = outgoing(rl, s);
             ru = outgoing(ru, s);
-            //fprintf(stderr, "char: %i rl: %i ru: %i\n", (int) s, (int) rl, (int) ru);
         }
         return std::make_pair(rl, ru);
     }
