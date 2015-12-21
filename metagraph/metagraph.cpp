@@ -14,17 +14,16 @@
 #include <string>
 
 //#include <btree_map.h>
-#include <dbg_seqan.hpp>
 #include <dbg_succinct_libmaus.hpp>
 //#include <dmm_tree.hpp>
 //#include <unix_tools.hpp>
 #include <config.hpp>
 
 // parse command line arguments and options
-ArgumentParser::ParseResult
+seqan::ArgumentParser::ParseResult
 parseCommandLine(CFG & config, int argc, char const ** argv) 
 {
-    ArgumentParser parser("metagraph");
+    seqan::ArgumentParser parser("metagraph");
 
     // add program meta information
     setShortDescription(parser, "A comprehensive graph represenatation of metagenome information");
@@ -58,10 +57,10 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
     setDefaultValue(parser, "c", "");
 
     // parse command line
-    ArgumentParser::ParseResult res = parse(parser, argc, argv);
+    seqan::ArgumentParser::ParseResult res = parse(parser, argc, argv);
 
     // everything correct?
-    if (res != ArgumentParser::PARSE_OK)
+    if (res != seqan::ArgumentParser::PARSE_OK)
         return res;
     
     // fill config object 
@@ -73,24 +72,24 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
     getOptionValue(config.sqlfbase, parser, "S");
     getOptionValue(config.merge, parser, "m");
     getOptionValue(config.compare, parser, "c");
-    config.fname = getArgumentValues(parser, 0);
+    config.fname = seqan::getArgumentValues(parser, 0);
 
     // do any logic / error checking here (e.g., mutually exclusive options)
 
     // return 
-    return ArgumentParser::PARSE_OK;
+    return seqan::ArgumentParser::PARSE_OK;
 }
 
 int main(int argc, char const ** argv) {
     
     // command line parsing
     CFG config;
-    ArgumentParser::ParseResult res = parseCommandLine(config, argc, argv);
-    if (res != ArgumentParser::PARSE_OK)
-        return res == ArgumentParser::PARSE_ERROR;
+    seqan::ArgumentParser::ParseResult res = parseCommandLine(config, argc, argv);
+    if (res != seqan::ArgumentParser::PARSE_OK)
+        return res == seqan::ArgumentParser::PARSE_ERROR;
 
     if (config.verbose)
-        std::cout << CharString("Welcome to MetaGraph") << std::endl;
+        std::cout << seqan::CharString("Welcome to MetaGraph") << std::endl;
 
     // build the graph from the k-mers in the string
     //typedef unsigned int TCargo;
@@ -156,25 +155,25 @@ int main(int argc, char const ** argv) {
 
         if (config.infbase.empty() || config.integrate) {
             // read from fasta stream 
-            CharString id;
-            String<Dna5> seq;
+            seqan::CharString id;
+            seqan::String<seqan::Dna5> seq;
             // iterate over input files
-            for (unsigned int f = 0; f < length(config.fname); ++f) {
+            for (unsigned int f = 0; f < seqan::length(config.fname); ++f) {
 
                 if (config.verbose) {
                     std::cout << std::endl << "Parsing " << config.fname[f] << std::endl;
                 }
 
                 // open stream to fasta file
-                SequenceStream stream;
-                open(stream, toCString(config.fname.at(f)), SequenceStream::READ, SequenceStream::FASTA);
-                if (!isGood(stream)) {
+                seqan::SequenceStream stream;
+                open(stream, seqan::toCString(config.fname.at(f)), seqan::SequenceStream::READ, seqan::SequenceStream::FASTA);
+                if (!seqan::isGood(stream)) {
                     std::cerr << "ERROR while opening input file " << config.fname.at(f) << std::endl;
                     exit(1);
                 }
 
-                while (!atEnd(stream)) {
-                    if (readRecord(id, seq, stream) != 0) {
+                while (!seqan::atEnd(stream)) {
+                    if (seqan::readRecord(id, seq, stream) != 0) {
                         std::cerr << "!!!ERROR while reading from " << config.fname.at(f) << std::endl;
                         exit(1);
                     }

@@ -1,0 +1,6 @@
+*.fa
+.history
+*/metagraph
+testrun*
+*.dbg
+*.fna

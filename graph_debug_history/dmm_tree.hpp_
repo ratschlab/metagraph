@@ -1,0 +1,516 @@
+#ifndef __DMM_TREE_HPP__
+#define __DMM_TREE_HPP__
+
+/**
+ * This class implements a dynamic min-max tree as it is described by
+ * Navarro and Sadakane here:
+ * http://dl.acm.org/citation.cfm?id=2601073
+ *
+ * We take some shortcuts for now for testing feasibility that can be improved
+ * later on.
+ */
+
+#include <assert.h>
+
+#include <vector>
+#include <list>
+
+using namespace std;
+
+// forward declarations
+class TreeNode;
+
+/**
+ * This class encapsulates a single storage cell that 
+ * can contain parts of up to three different storage segments
+ * each of length between L and 2L.
+ */
+class ListNode {
+
+    private:
+        size_t L;
+        bool *cell;
+        TreeNode *node, *node2;
+
+    public:
+        ListNode(size_t _L) : L(_L) {
+            cell = new bool[2*L]; 
+        }
+
+        bool get(size_t idx) {
+            return cell[idx];
+        }
+
+        void put(bool val, size_t idx) {
+            cell[idx] = val;
+        }
+
+        void setNode(size_t offset, TreeNode* _node) {
+            if (offset < L)
+                node = _node;
+            else
+                node2 = _node;
+        }
+
+        TreeNode* getNode(size_t offset) {
+            return (offset < L) ? node : node2;
+        }
+
+};
+
+class TreeNode {
+
+    private:
+        size_t i;
+        size_t j;
+        TreeNode *parent, *right, *left;
+        unsigned char segLen;
+        unsigned char offset;
+        list<ListNode*>::iterator cell;
+        
+        bool is_red;
+
+    public:
+        TreeNode() : i(0), j(0), parent(NULL), right(NULL), left(NULL), is_red(false) {}
+
+        TreeNode(size_t _i, size_t _j, TreeNode* _parent) : 
+            i(_i), 
+            j(_j), 
+            parent(_parent), 
+            right(NULL), 
+            left(NULL), 
+            is_red(true) {}
+
+        TreeNode(size_t _i, size_t _j, TreeNode* _parent, TreeNode* _left, TreeNode* _right) : 
+            i(_i), 
+            j(_j), 
+            parent(_parent), 
+            right(_right), 
+            left(_left), 
+            is_red(true) {}
+
+        /**
+         * Here start the setters ...
+         */
+        void setLeft(TreeNode *child) {
+            left = child;
+        }
+
+        void setRight(TreeNode *child) {
+            right = child;
+        }
+
+        void setOffset(unsigned char _offset) {
+            offset = _offset;
+        }
+
+        void setSegLen(unsigned char _segLen) {
+            segLen = _segLen;
+        }
+
+        void setCell(list<ListNode*>::iterator _cell) {
+            cell = _cell;
+        }
+
+        /**
+         * Here start the getters ...
+         */
+        TreeNode* getLeft() {
+            return left;
+        }
+
+        TreeNode* getRight() {
+            return right;
+        }
+
+        unsigned char getOffset() {
+            return offset;
+        }
+
+        unsigned char getSegLen() {
+            return segLen;
+        }
+
+        bool isRed() {
+            return is_red;
+        }
+
+        size_t getUpper() {
+            return j;
+        }
+
+        size_t getLower() {
+            return i;
+        }
+
+        list<ListNode*>::iterator getCell() {
+            return cell;
+        }
+};
+
+class SegmentStore {
+
+    private:
+        vector<list<ListNode*> > listVector;
+        vector<size_t> header;
+        size_t L;
+
+    public:
+        SegmentStore(size_t _L) : L(_L) {
+            // create list of segments
+            for (size_t i = 0; i <= L; i++) {
+                list<ListNode*> tmp;
+                tmp.push_back(new ListNode(L));
+                listVector.push_back(tmp);
+                header.push_back(0);
+            }
+        }
+
+        /** 
+         * Insert a full new segment that is taken from P[s, t). 
+         */
+        void insertSegment(list<bool> P, size_t s, size_t t, TreeNode *node) {
+            // get index of the list we want to add to (P has size between L and 2L)
+            size_t idx = (t - s) - L; 
+            // tell the node where it can find its segment
+            node->setOffset(header.at(idx));
+            list<ListNode*>::iterator it = listVector.at(idx).begin();
+            advance(it,listVector.at(idx).size() - 1);
+            node->setCell(it);
+            node->setSegLen(t - s);
+
+            size_t sidx = header.at(idx);
+            listVector.at(idx).back()->setNode(sidx, node);
+
+            list<bool>::iterator itP = P.begin();
+            advance(it, s);
+            for (size_t i = s; i < t; i++, itP++) {
+                listVector.at(idx).back()->put(*itP, sidx++);
+                if (sidx >= 2*L) {
+                    listVector.at(idx).push_back(new ListNode(L));
+                    sidx = 0;
+                }
+            }
+            // update header
+            header.at(idx) = sidx;
+        }
+
+        void move(ListNode *source, unsigned char s_idx, ListNode *target, unsigned char t_idx) {
+            target->put(source->get(s_idx), t_idx);
+        }
+
+        /** 
+         * Insert a value at idx into a segment of length segLen in cell cellIdx thereby
+         * moving the segment around.
+         */
+        //void insertValue(bool value, size_t idx, size_t cellIdx, unsigned char offset, unsigned char segLen) {
+        void insertValue(bool value, size_t idx, TreeNode *node) {
+
+            /**
+             * At first we move the segment from list i to list i+1 thereby
+             * integrating the new value at position idx.
+             */
+
+            // get the info the node has about its segment
+            size_t offset = node->getOffset();
+            size_t node_pos = offset;
+            list<ListNode*>::iterator cellIt = node->getCell();
+            list<ListNode*>::iterator cellItOrig = cellIt;
+            unsigned char segLen = node->getSegLen();
+
+            size_t idxOld = node_pos;
+            size_t idxNew = header.at(segLen + 1);
+
+            unsigned char moved = 0;
+    
+            // add the node information to the new segment position
+            listVector.at(segLen + 1).back()->setNode(idxNew, node);
+
+            while (moved < segLen) {
+                move(*cellIt, idxOld++, listVector.at(segLen + 1).back(), idxNew++);
+                moved++;
+                if (idxOld == 2*L) {
+                    cellIt++;
+                    idxOld = 0;
+                }
+                if (idxNew == 2*L) {
+                    listVector.at(segLen + 1).push_back(new ListNode(L));
+                    idxNew = 0;
+                }
+                if (moved == idx)
+                    listVector.at(segLen + 1).back()->put(value, idxNew++);
+                if (idxNew == 2*L) {
+                    listVector.at(segLen + 1).push_back(new ListNode(L));
+                    idxNew = 0;
+                }
+            }
+            // update tree node
+            node->setOffset(header.at(segLen + 1));
+            list<ListNode*>::iterator it = listVector.at(segLen + 1).begin();
+            advance(it, listVector.at(segLen + 1).size() - 1);
+            node->setCell(it);
+            // update header position
+            header.at(segLen + 1) = idxNew;
+            
+            /**
+             * As a second step, we move the previous header segment in cell i
+             * to the position that the segment we just moved has freed up.
+             * The node is now the node that resided at the head of the list!
+             */
+
+            bool freeCell = false;
+            moved = 0;
+            // set node and gather information
+            node = listVector.at(segLen).back()->getNode(idxOld);
+            idxNew = node->getOffset();
+            segLen = node->getSegLen();
+
+            list<ListNode*>::iterator cellItNew = cellIt;
+            list<ListNode*>::reverse_iterator cellItOld = listVector.at(segLen).rbegin();
+
+            if ((int) header.at(segLen) - segLen < 0) {
+                idxOld = 2*L - (segLen - header.at(segLen));
+                cellItOld++;
+                freeCell = true;
+            } else 
+                idxOld = header.at(segLen) - segLen;
+
+            // update node information
+            (*cellItNew)->setNode(idxNew, node);
+            // update header info
+            header.at(segLen) = idxOld;
+
+            // iterate over all values we want to insert
+            while (moved < segLen) {
+                move(*cellItOld, idxOld++, *cellItNew, idxNew++);
+                moved++;
+                if (idxOld == 2*L) {
+                    cellItOld--; // this is a reverse iterator
+                    idxOld = 0;
+                }
+                if (idxNew == 2*L) {
+                    cellItNew++;
+                    idxNew = 0;
+                }
+            }
+            // update associated tree node
+            node->setOffset(offset);
+            node->setCell(cellItOrig);
+
+            // clean up freed cells
+            if (freeCell) {
+                delete listVector.at(segLen).back();
+                listVector.pop_back();
+            }
+        }
+
+        /**
+         * Here we take the segment of node and split it into two new segments.
+         * These two segments will then be associated to two new nodes node1 and node2.
+         */
+        void splitSegment(TreeNode* node, TreeNode* &node1, TreeNode* &node2) {
+            
+            // extract information from the calling node
+            unsigned char offset = node->getOffset();
+            unsigned char segLen = node->getSegLen();
+            list<ListNode*>::iterator itSource = node->getCell();
+            list<ListNode*>::iterator itTarget = listVector.at(0).back();
+            unsigned char idxSource = offset;
+            unsigned char idxTarget = header.at(0);
+
+            // make sure this is the correct call
+            assert(listVector.size() == (segLen + 1));
+            assert(segLen == 2*L);
+
+            size_t moved = 0;
+            while (moved < segLen / 2) {
+                move(*itSource, idxSource++, *itTarget, idxTarget++);
+
+
+            }
+            
+
+        }
+};
+
+
+
+class DmmSubTree {
+
+    private:
+
+        // fix the min segment length to L (max segment length is 2 * L)
+        size_t L;
+        TreeNode *root;
+        SegmentStore *seg_store;
+        list<bool> P;
+        size_t currentN;
+
+    public:
+
+        DmmSubTree(size_t _L) : L(_L) {
+            // init array of linked lists storing segments
+            seg_store = new SegmentStore(L);
+            root = NULL;
+            currentN = 0;
+        }
+
+        /**
+         * Insert a new item into the tree. We handle a tree with less than
+         * L values as a special case as we can not reflect that few items in 
+         * our segment storage structure. Once P contains L values, we open
+         * the root node an start the first segment from P.
+         */
+        void insert(size_t idx, bool value) {
+            currentN++; 
+            // if we currently have less values than our min segment size we use the array P directly
+            if (currentN <= this->L) {
+                if (currentN == 0)
+                    P.push_front(value);
+                else {
+                    list<bool>::iterator it = P.begin();
+                    advance(it, idx);
+                    P.insert(it, value);
+                }
+            // we create the tree structure once we have reached minimal segment length
+            } else if (currentN == this->L) {
+                // create root node and insert the full segment
+                root = new TreeNode(1, 4, NULL);
+                seg_store->insertSegment(P, 0, L, root);
+            // start inserting at existing root node
+            } else
+                insert(this->root, idx, value);
+        }
+
+        size_t getLower() {
+            return (root == NULL) ? 0 : root->getLower();
+        }
+
+        size_t getUpper() {
+            return (root == NULL) ? 0 : root->getUpper();
+        }
+
+
+    private:
+
+        /**
+         * This function describes the internal red black tree logic that 
+         * adds values to existing segments, generates new nodes once they become
+         * necessary and balances the tree at the end of each insertion.
+         */
+        void insert(TreeNode *node, size_t idx, bool value) {
+            // we reached a leaf
+            // try to extend segment stored in the node
+            if (node->getLeft() == NULL) {
+                assert(node->getRight() == NULL); // no nodes with only one leaf by construction?
+
+                // current segment has not reached max size yet, we can keep adding to it
+                if (node->getSegLen() < 2*L) {
+                    seg_store->insertValue(value, idx, node);
+
+                // we need to split the node and add two children
+                } else {
+                    list<ListNode*>::iterator cell1, cell2;
+                    TreeNode *node1, *node2;
+                    seg_store->splitSegment(node, node1, node2);
+
+                }
+
+
+                // update the node values back to the root
+                //update_intervals(node);
+
+            // decide into which child we should proceed
+            } else {
+                if (idx <= node->getLeft()->getUpper()) {
+                    insert(node->getLeft(), idx, value);
+                } else {
+                    insert(node->getRight(), idx - node->getLeft()->getUpper(), value);
+                }
+            }
+        }
+};
+
+
+/**
+ * This is the tree master class that will hold the three dmmTrees that
+ * are needed for memory balancing when dynamically increasing / decreasing
+ * the number of elements in the array and we need to adapt the chunk size L.
+ */
+class DmmTree {
+
+    private:
+        DmmSubTree *current, *previous, *next;
+
+    public:
+        
+        // we begin with an empty tree and use P until length 4 is reached
+        DmmTree() : 
+            current(NULL),
+            previous(NULL),
+            next(NULL) {}
+
+        // insert value into the tree
+        void insert(bool value, size_t i) {
+            // decide in which sub tree to insert
+            if (current == NULL) {
+                current = new DmmSubTree(1);
+                current->insert(value, i);
+            } else {
+                // insert to previous
+                if (i < current->getLower()) {
+                    assert(previous != NULL);
+                    moveUp(previous, current);
+                    previous->insert(value, i); 
+                    moveUp(previous, current);
+                    moveUp(current, next);
+                    moveUp(current, next);
+                // insert into next
+                } else if (i > current->getUpper()) {
+                    assert(next != NULL);
+                    next->insert(value, i); 
+                    moveUp(previous, current);
+                    moveUp(current, next);
+                // insert into current
+                } else {
+                    moveUp(current, next);
+                    moveUp(current, next);
+                    current->insert(value, i);
+                    moveUp(previous, current); 
+                }
+
+                // check if the "current" sub tree is empty and we need to
+                // make either "previous" or "next" the new "current", create a new
+                // sub tree and delete the one no longer used.
+                // TODO
+            }
+        }
+
+    private:
+
+        /** This function moves the last bit of source to the 
+         * beginning of target.
+         */
+        void moveUp(DmmSubTree *source, DmmSubTree *target) {
+            // TODO
+        }
+
+        /** This function moves the first bit of source to the 
+         * end of target.
+         */
+        void moveDown(DmmSubTree *source, DmmSubTree *target) {
+            // TODO
+        }
+
+        /**
+         * Quick function to get the ceiling of log2 of 
+         * an unsigned int.
+         */
+        inline size_t ceilLog2(size_t val) {
+            size_t ret = 0;
+            while (val >>= 1)
+                ret++;
+            return ret;
+        }
+};
+#endif
