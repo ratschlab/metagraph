@@ -1,10 +1,10 @@
-SEQAN_DIR=/cbio/grlab/home/akahles/seqan/seqan-1.4.2/core/include
-LIBMAUS_DIR=/cbio/grlab/home/akahles/software/libmaus2-lib
+SEQAN_DIR=external-libraries/seqan-include
+LIBMAUS_DIR=external-libraries/libmaus2-lib
 
 CXX=g++ -std=c++11 -fopenmp -O3 #-pg
 CXXFLAGS+= -W -Wall -Wno-long-long -Wno-variadic-macros #-pedantic
-CXXFLAGS+= -I$(SEQAN_DIR) -I$(LIBMAUS_DIR)/include -I. -L$(LIBMAUS_DIR)/lib -L$(LIBMAUS_DIR)/lib/libmaus2/2.0.33
-LDFLAGS=-lrt -lmaus2 
+CXXFLAGS+= -I$(SEQAN_DIR) -I$(LIBMAUS_DIR)/include -I. -L$(LIBMAUS_DIR)/lib
+LDFLAGS=-lrt -lmaus2
 
 default: all
 

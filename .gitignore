@@ -4,3 +4,5 @@
 testrun*
 *.dbg
 *.fna
+metagraph/external-libraries/
+!metagraph/external-libraries/README
