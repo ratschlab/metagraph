@@ -48,6 +48,7 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
     addOption(parser, seqan::ArgParseOption("I", "infile_base", "basename for loading graph input files", seqan::ArgParseArgument::STRING, "TEXT"));
     addOption(parser, seqan::ArgParseOption("m", "merge", "list of graph file basenames used as input for merging", seqan::ArgParseArgument::STRING, "TEXT"));
     addOption(parser, seqan::ArgParseOption("c", "compare", "list of graph file basenames used as input for comparison", seqan::ArgParseArgument::STRING, "TEXT"));
+    addOption(parser, seqan::ArgParseOption("a", "align", "TODO", seqan::ArgParseArgument::STRING, "TEXT"));
 
     // set defaults
     setDefaultValue(parser, "O", "");
@@ -55,6 +56,7 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
     setDefaultValue(parser, "S", "");
     setDefaultValue(parser, "m", "");
     setDefaultValue(parser, "c", "");
+    setDefaultValue(parser, "a", "");
 
     // parse command line
     seqan::ArgumentParser::ParseResult res = parse(parser, argc, argv);
@@ -72,6 +74,7 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
     getOptionValue(config.sqlfbase, parser, "S");
     getOptionValue(config.merge, parser, "m");
     getOptionValue(config.compare, parser, "c");
+    getOptionValue(config.align, parser, "a");
     config.fname = seqan::getArgumentValues(parser, 0);
 
     // do any logic / error checking here (e.g., mutually exclusive options)
@@ -81,11 +84,10 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
 }
 
 int main(int argc, char const ** argv) {
-    
     typedef seqan::ModifiedAlphabet<seqan::Dna5, seqan::ModExpand<'X'> > Dna5F; 
 
-    // command line parsing
     CFG config;
+
     seqan::ArgumentParser::ParseResult res = parseCommandLine(config, argc, argv);
     if (res != seqan::ArgumentParser::PARSE_OK)
         return res == seqan::ArgumentParser::PARSE_ERROR;
@@ -148,12 +150,26 @@ int main(int argc, char const ** argv) {
             cnt++;
         }
         //graph->print_seq();
-    } else {
-        if (! config.infbase.empty()) {
-            graph = new DBG_succ(config.infbase, config);
-        } else {
-            graph = new DBG_succ(config.k, config);
-        }
+    }
+    else if (! config.align.empty()) {
+
+      // need these two inputs
+      if (config.align.empty() || config.infbase.empty()) {
+        return -1;
+      }
+
+      DBG_succ* graph = DBG_succ(config.infbase, config);
+      
+      // DBG_succ* graph2 = new DBG_succ(config.k, config);
+      // std::cout << "align:" << config.align << std::endl;
+      // std::cout << "infbase:" << config.infbase << std::endl;
+    }
+    else {
+      if (! config.infbase.empty()) {
+        graph = new DBG_succ(config.infbase, config);
+      } else {
+        graph = new DBG_succ(config.k, config);
+      }
 
         if (config.infbase.empty() || config.integrate) {
             // read from fasta stream 
