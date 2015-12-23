@@ -180,10 +180,8 @@ int main(int argc, char const ** argv) {
         }
 
         for (uint64_t i = 0; i < length(seq)-graph->get_k()+1; i++) {
-          for (uint64_t j=0; j<graph->get_k(); j++) {
-            std::cout << seq[i+j];
-          }
-          std::cout << std::endl;
+          seqan::Infix<seqan::String<seqan::Dna5> >::Type kmer = seqan::infix(seq, i,i+graph->get_k());
+          std::cout << kmer << std::endl;
         }
 
         // add all k-mers of seq to the graph
