@@ -155,14 +155,45 @@ int main(int argc, char const ** argv) {
 
       // need these two inputs
       if (config.align.empty() || config.infbase.empty()) {
-        return -1;
+        std::cerr << "Requires <fasta file> and a <de bruijn graph> to align reads." << config.align << std::endl;
+        exit(1);
       }
 
-      DBG_succ* graph = DBG_succ(config.infbase, config);
-      
-      // DBG_succ* graph2 = new DBG_succ(config.k, config);
-      // std::cout << "align:" << config.align << std::endl;
-      // std::cout << "infbase:" << config.infbase << std::endl;
+      DBG_succ* graph = new DBG_succ(config.infbase, config);
+
+      seqan::CharString id;
+      seqan::String<seqan::Dna5> seq;
+      seqan::SequenceStream stream;
+
+      // TODO how to close this stream?
+      open(stream, seqan::toCString(config.align), seqan::SequenceStream::READ, seqan::SequenceStream::FASTA);
+
+      if (!seqan::isGood(stream)) {
+        std::cerr << "ERROR while opening input file " << config.align << std::endl;
+        exit(1);
+      }
+           
+      while (!seqan::atEnd(stream)) {
+        if (seqan::readRecord(id, seq, stream) != 0) {
+          std::cerr << "!!!ERROR while reading from " << config.align << std::endl;
+          exit(1);
+        }
+
+        for (uint64_t i = 0; i < length(seq)-graph->get_k()+1; i++) {
+          for (uint64_t j=0; j<graph->get_k(); j++) {
+            std::cout << seq[i+j];
+          }
+          std::cout << std::endl;
+        }
+
+        // add all k-mers of seq to the graph
+        // graph->add_seq(seq);
+      }
+
+      // readRecord(id, seq, seqFileIn);
+      // std::cout << id << '\t' << seq << '\n';
+
+      // uint64_t DBG_succ::index(seqan::String<Dna5F> &s_)
     }
     else {
       if (! config.infbase.empty()) {
