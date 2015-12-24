@@ -179,13 +179,8 @@ int main(int argc, char const ** argv) {
           exit(1);
         }
 
-        for (uint64_t i = 0; i < length(seq)-graph->get_k()+1; i++) {
-          seqan::Infix<seqan::String<seqan::Dna5> >::Type kmer = seqan::infix(seq, i,i+graph->get_k());
-          std::cout << kmer << std::endl;
-        }
+        std::vector<uint64_t> graphindices = graph->align(seq);
 
-        // add all k-mers of seq to the graph
-        // graph->add_seq(seq);
       }
 
       // readRecord(id, seq, seqFileIn);

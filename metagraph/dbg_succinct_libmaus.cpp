@@ -613,6 +613,25 @@ bool DBG_succ::get_last(uint64_t k) {
     return (*last)[k];
 }
 
+std::vector<uint64_t> DBG_succ::align(seqan::String<seqan::Dna5> seq) {
+  uint64_t seq_length = seqan::length(seq);
+  uint64_t kmer_length = this->get_k()+1;
+  std::vector<uint64_t> indices (seq_length - kmer_length, -1);
+
+  for (uint64_t i = 0; i < length(seq)-kmer_length; i++) {
+    std::deque<TAlphabet> kmer;
+    for (uint64_t j = 0; j < kmer_length; j++) {
+      std::cout << seqan::ordValue(seq[i+j]) << std::endl;
+    }
+
+  }
+
+  // add all k-mers of seq to the graph
+  // graph->add_seq(seq);
+  
+  return indices;
+}
+
 
 //
 //
