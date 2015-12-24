@@ -82,6 +82,8 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
 
 int main(int argc, char const ** argv) {
     
+    typedef seqan::ModifiedAlphabet<seqan::Dna5, seqan::ModExpand<'X'> > Dna5F; 
+
     // command line parsing
     CFG config;
     seqan::ArgumentParser::ParseResult res = parseCommandLine(config, argc, argv);
@@ -186,6 +188,8 @@ int main(int argc, char const ** argv) {
                 //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
             }
             //graph->print_seq();
+            //seqan::String<Dna5F> test("ACC");
+            //std::cout << "ACC: " << graph->index(test) << std::endl;
         }
     }
 
