@@ -427,8 +427,7 @@ uint64_t DBG_succ::index(seqan::String<Dna5F> &s_) {
     uint64_t rl = succ_last(F[s] + 1);
     uint64_t ru = F[s + 1]; // upper bound
     // update range iteratively while scanning through s
-    for (uint64_t i = 1; i < seqan::length(s_); i++) {
-        s = (TAlphabet) seqan::ordValue(s_[i]) + 1;
+    for (uint64_t i = 1; i < seqan::length(s); i++) {
         rl = std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size));
         if (rl >= W->n)
             return 0;
@@ -615,19 +614,17 @@ bool DBG_succ::get_last(uint64_t k) {
 
 std::vector<uint64_t> DBG_succ::align(seqan::String<seqan::Dna5> seq) {
   uint64_t seq_length = seqan::length(seq);
-  uint64_t kmer_length = this->get_k()+1;
+  uint64_t kmer_length = this->get_k();
   std::vector<uint64_t> indices (seq_length - kmer_length, -1);
 
-  for (uint64_t i = 0; i < length(seq)-kmer_length; i++) {
-    std::deque<TAlphabet> kmer;
+  for (uint64_t i = 0; i < seq_length-kmer_length+1; i++) {
+    seqan::String<Dna5F> kmer;
+    seqan::resize(kmer, kmer_length);
     for (uint64_t j = 0; j < kmer_length; j++) {
-      std::cout << seqan::ordValue(seq[i+j]) << std::endl;
+      kmer[j] = (Dna5F) seq[i+j];
     }
 
   }
-
-  // add all k-mers of seq to the graph
-  // graph->add_seq(seq);
   
   return indices;
 }
