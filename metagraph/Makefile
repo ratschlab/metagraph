@@ -15,8 +15,8 @@ debug: metagraph_debug
 metagraph: metagraph.cpp dbg_succinct_libmaus.cpp dbg_succinct_libmaus.hpp config.hpp
 	$(CXX) $(CXXFLAGS) -o metagraph metagraph.cpp dbg_succinct_libmaus.cpp $(LDFLAGS)
 
-metagraph_debug: metagraph.cpp dbg_succinct_libmaus.hpp config.hpp
-	$(CXX) $(CXXFLAGS) -o metagraph metagraph.cpp $(LDFLAGS) -D DBGDEBUG
+metagraph_debug: metagraph.cpp dbg_succinct_libmaus.cpp dbg_succinct_libmaus.hpp config.hpp
+	$(CXX) $(CXXFLAGS) -o metagraph metagraph.cpp dbg_succinct_libmaus.cpp $(LDFLAGS) -D DBGDEBUG
 
 clean:
 	rm -f metagraph.o metagraph
