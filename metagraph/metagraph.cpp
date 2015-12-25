@@ -181,12 +181,15 @@ int main(int argc, char const ** argv) {
 
         std::vector<uint64_t> graphindices = graph->align(seq);
 
+        // print indices to cout
+        for (int i=0; i<graphindices.size(); ++i) {
+          for (int j=0; j<graph->get_k(); ++j) {
+            std::cout << seq[i+j];
+          }
+          std::cout << ": ";
+          std::cout << graphindices[i] << std::endl;
+        }
       }
-
-      // readRecord(id, seq, seqFileIn);
-      // std::cout << id << '\t' << seq << '\n';
-
-      // uint64_t DBG_succ::index(seqan::String<Dna5F> &s_)
     }
     else {
       if (! config.infbase.empty()) {

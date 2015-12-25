@@ -619,10 +619,10 @@ std::vector<uint64_t> DBG_succ::align(seqan::String<seqan::Dna5> seq) {
 
   std::vector<uint64_t> indices (no_kmers_in_seq, -1);
 
-  for (uint64_t i = 0; i < no_kmers_in_seq; i++) {
+  for (uint64_t i = 0; i < no_kmers_in_seq; ++i) {
     seqan::String<Dna5F> kmer;
     seqan::resize(kmer, kmer_length);
-    for (uint64_t j = 0; j < kmer_length; j++) {
+    for (uint64_t j = 0; j < kmer_length; ++j) {
       kmer[j] = (Dna5F) seq[i+j];
     }
 
