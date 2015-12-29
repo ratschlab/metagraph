@@ -179,6 +179,10 @@ int main(int argc, char const ** argv) {
                         std::cerr << "!!!ERROR while reading from " << config.fname.at(f) << std::endl;
                         exit(1);
                     }
+
+                    // add k-mers of seq to the annotation database.
+                    graph->add_annotation_for_seq(seq, id);
+                    
                     // add all k-mers of seq to the graph
                     graph->add_seq(seq);
                 }
