@@ -182,8 +182,8 @@ int main(int argc, char const ** argv) {
         std::vector<uint64_t> graphindices = graph->align(seq);
 
         // print indices to cout
-        for (int i=0; i<graphindices.size(); ++i) {
-          for (int j=0; j<graph->get_k(); ++j) {
+        for (size_t i=0; i<graphindices.size(); ++i) {
+          for (uint64_t j=0; j<graph->get_k(); ++j) {
             std::cout << seq[i+j];
           }
           std::cout << ": ";

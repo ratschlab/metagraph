@@ -427,7 +427,8 @@ uint64_t DBG_succ::index(seqan::String<Dna5F> &s_) {
     uint64_t rl = succ_last(F[s] + 1);
     uint64_t ru = F[s + 1]; // upper bound
     // update range iteratively while scanning through s
-    for (uint64_t i = 1; i < seqan::length(s); i++) {
+    for (uint64_t i = 1; i < seqan::length(s_); i++) {
+        s = (TAlphabet) seqan::ordValue(s_[i]) + 1;
         rl = std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size));
         if (rl >= W->n)
             return 0;
@@ -617,7 +618,7 @@ std::vector<uint64_t> DBG_succ::align(seqan::String<seqan::Dna5> seq) {
   uint64_t kmer_length = this->get_k();
   uint64_t no_kmers_in_seq = seq_length - kmer_length + 1;
 
-  std::vector<uint64_t> indices (no_kmers_in_seq, -1);
+  std::vector<uint64_t> indices (no_kmers_in_seq, 0);
 
   for (uint64_t i = 0; i < no_kmers_in_seq; ++i) {
     seqan::String<Dna5F> kmer;
