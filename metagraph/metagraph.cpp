@@ -48,6 +48,7 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
     addOption(parser, seqan::ArgParseOption("I", "infile_base", "basename for loading graph input files", seqan::ArgParseArgument::STRING, "TEXT"));
     addOption(parser, seqan::ArgParseOption("m", "merge", "list of graph file basenames used as input for merging", seqan::ArgParseArgument::STRING, "TEXT"));
     addOption(parser, seqan::ArgParseOption("c", "compare", "list of graph file basenames used as input for comparison", seqan::ArgParseArgument::STRING, "TEXT"));
+    addOption(parser, seqan::ArgParseOption("a", "align", "TODO", seqan::ArgParseArgument::STRING, "TEXT"));
 
     // set defaults
     setDefaultValue(parser, "O", "");
@@ -55,6 +56,7 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
     setDefaultValue(parser, "S", "");
     setDefaultValue(parser, "m", "");
     setDefaultValue(parser, "c", "");
+    setDefaultValue(parser, "a", "");
 
     // parse command line
     seqan::ArgumentParser::ParseResult res = parse(parser, argc, argv);
@@ -72,6 +74,7 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
     getOptionValue(config.sqlfbase, parser, "S");
     getOptionValue(config.merge, parser, "m");
     getOptionValue(config.compare, parser, "c");
+    getOptionValue(config.align, parser, "a");
     config.fname = seqan::getArgumentValues(parser, 0);
 
     // do any logic / error checking here (e.g., mutually exclusive options)
@@ -81,11 +84,10 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
 }
 
 int main(int argc, char const ** argv) {
-    
     typedef seqan::ModifiedAlphabet<seqan::Dna5, seqan::ModExpand<'X'> > Dna5F; 
 
-    // command line parsing
     CFG config;
+
     seqan::ArgumentParser::ParseResult res = parseCommandLine(config, argc, argv);
     if (res != seqan::ArgumentParser::PARSE_OK)
         return res == seqan::ArgumentParser::PARSE_ERROR;
@@ -148,12 +150,53 @@ int main(int argc, char const ** argv) {
             cnt++;
         }
         //graph->print_seq();
-    } else {
-        if (! config.infbase.empty()) {
-            graph = new DBG_succ(config.infbase, config);
-        } else {
-            graph = new DBG_succ(config.k, config);
+    }
+    else if (! config.align.empty()) {
+
+      // need these two inputs
+      if (config.align.empty() || config.infbase.empty()) {
+        std::cerr << "Requires <fasta file> and a <de bruijn graph> to align reads." << config.align << std::endl;
+        exit(1);
+      }
+
+      DBG_succ* graph = new DBG_succ(config.infbase, config);
+
+      seqan::CharString id;
+      seqan::String<seqan::Dna5> seq;
+      seqan::SequenceStream stream;
+
+      // TODO how to close this stream?
+      open(stream, seqan::toCString(config.align), seqan::SequenceStream::READ, seqan::SequenceStream::FASTA);
+
+      if (!seqan::isGood(stream)) {
+        std::cerr << "ERROR while opening input file " << config.align << std::endl;
+        exit(1);
+      }
+           
+      while (!seqan::atEnd(stream)) {
+        if (seqan::readRecord(id, seq, stream) != 0) {
+          std::cerr << "!!!ERROR while reading from " << config.align << std::endl;
+          exit(1);
         }
+
+        std::vector<uint64_t> graphindices = graph->align(seq);
+
+        // print indices to cout
+        for (size_t i=0; i<graphindices.size(); ++i) {
+          for (uint64_t j=0; j<graph->get_k(); ++j) {
+            std::cout << seq[i+j];
+          }
+          std::cout << ": ";
+          std::cout << graphindices[i] << std::endl;
+        }
+      }
+    }
+    else {
+      if (! config.infbase.empty()) {
+        graph = new DBG_succ(config.infbase, config);
+      } else {
+        graph = new DBG_succ(config.k, config);
+      }
 
         if (config.infbase.empty() || config.integrate) {
             // read from fasta stream 

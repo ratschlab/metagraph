@@ -295,6 +295,12 @@ class DBG_succ {
      */
     void append_pos(TAlphabet c);
 
+    /**
+     * Breaks the seq into k-mers and searches for the index of each
+     * k-mer in the graph. Returns these indices.
+     */
+    std::vector<uint64_t> align(seqan::String<seqan::Dna5> seq);
+
     //
     //
     // TRAVERSAL

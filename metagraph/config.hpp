@@ -10,6 +10,7 @@
         std::string sqlfbase;
         std::string merge;
         std::string compare;
+        std::string align;
         bool verbose;
         bool integrate;
         unsigned int k;

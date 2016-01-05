@@ -700,6 +700,26 @@ bool DBG_succ::get_last(uint64_t k) {
     return (*last)[k];
 }
 
+std::vector<uint64_t> DBG_succ::align(seqan::String<seqan::Dna5> seq) {
+  uint64_t seq_length = seqan::length(seq);
+  uint64_t kmer_length = this->get_k();
+  uint64_t no_kmers_in_seq = seq_length - kmer_length + 1;
+
+  std::vector<uint64_t> indices (no_kmers_in_seq, 0);
+
+  for (uint64_t i = 0; i < no_kmers_in_seq; ++i) {
+    seqan::String<Dna5F> kmer;
+    seqan::resize(kmer, kmer_length);
+    for (uint64_t j = 0; j < kmer_length; ++j) {
+      kmer[j] = (Dna5F) seq[i+j];
+    }
+
+    indices[i] = this->index(kmer);
+  }
+  
+  return indices;
+}
+
 
 //
 //
