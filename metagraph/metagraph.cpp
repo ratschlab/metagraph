@@ -43,6 +43,7 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
     addOption(parser, seqan::ArgParseOption("v", "verbose", "Increase verbosity level of output"));
     addOption(parser, seqan::ArgParseOption("i", "integrate", "integrates fasta into given (-I) graph"));
     addOption(parser, seqan::ArgParseOption("k", "kmer_length", "Length of the k-mer to use", seqan::ArgParseArgument::INTEGER, "INT"));
+    addOption(parser, seqan::ArgParseOption("d", "distance", "Max allowed alignment distance", seqan::ArgParseArgument::INTEGER, "INT"));
     addOption(parser, seqan::ArgParseOption("O", "outfile_base", "basename for graph output files", seqan::ArgParseArgument::STRING, "TEXT"));
     addOption(parser, seqan::ArgParseOption("S", "sql_base", "basename for SQL output files", seqan::ArgParseArgument::STRING, "TEXT"));
     addOption(parser, seqan::ArgParseOption("I", "infile_base", "basename for loading graph input files", seqan::ArgParseArgument::STRING, "TEXT"));
@@ -57,6 +58,7 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
     setDefaultValue(parser, "m", "");
     setDefaultValue(parser, "c", "");
     setDefaultValue(parser, "a", "");
+    setDefaultValue(parser, "d", 0);
 
     // parse command line
     seqan::ArgumentParser::ParseResult res = parse(parser, argc, argv);
@@ -75,6 +77,7 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
     getOptionValue(config.merge, parser, "m");
     getOptionValue(config.compare, parser, "c");
     getOptionValue(config.align, parser, "a");
+    getOptionValue(config.distance, parser, "d");
     config.fname = seqan::getArgumentValues(parser, 0);
 
     // do any logic / error checking here (e.g., mutually exclusive options)
@@ -165,7 +168,7 @@ int main(int argc, char const ** argv) {
       seqan::String<seqan::Dna5> seq;
       seqan::SequenceStream stream;
 
-      // TODO how to close this stream?
+      // open stream to unput fasta
       open(stream, seqan::toCString(config.align), seqan::SequenceStream::READ, seqan::SequenceStream::FASTA);
 
       if (!seqan::isGood(stream)) {
@@ -174,22 +177,42 @@ int main(int argc, char const ** argv) {
       }
            
       while (!seqan::atEnd(stream)) {
-        if (seqan::readRecord(id, seq, stream) != 0) {
-          std::cerr << "!!!ERROR while reading from " << config.align << std::endl;
-          exit(1);
-        }
-
-        std::vector<uint64_t> graphindices = graph->align(seq);
-
-        // print indices to cout
-        for (size_t i=0; i<graphindices.size(); ++i) {
-          for (uint64_t j=0; j<graph->get_k(); ++j) {
-            std::cout << seq[i+j];
+          if (seqan::readRecord(id, seq, stream) != 0) {
+              std::cerr << "!!!ERROR while reading from " << config.align << std::endl;
+              exit(1);
           }
-          std::cout << ": ";
-          std::cout << graphindices[i] << std::endl;
-        }
+
+          graph->print_seq();
+
+          if (config.distance > 0) {
+              std::vector<std::vector<uint64_t> > graphindices = graph->align_fuzzy(seq, config.distance);
+
+              for (size_t i = 0; i < graphindices.size(); ++i) {
+                  for (uint64_t j = 0; j < graph->get_k(); ++j) {
+                      std::cout << seq[i+j];
+                  }
+                  std::cout << ": ";
+                  for (size_t l = 0; l < graphindices.at(i).size(); ++l) {
+                      std::cout << graphindices.at(i).at(l) << " ";
+                  }
+                  std::cout << std::endl;
+              }
+
+          } else {
+              std::vector<uint64_t> graphindices = graph->align(seq);
+
+              for (size_t i = 0; i < graphindices.size(); ++i) {
+                  for (uint64_t j = 0; j < graph->get_k(); ++j) {
+                      std::cout << seq[i+j];
+                  }
+                  std::cout << ": " << graphindices[i] << std::endl;
+              }
+          }
+
       }
+
+      // close stream
+      seqan::close(stream);
     }
     else {
       if (! config.infbase.empty()) {

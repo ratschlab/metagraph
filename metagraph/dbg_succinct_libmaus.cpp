@@ -99,9 +99,9 @@ struct DBG_succ::HitInfo {
     uint64_t rl;
     uint64_t ru;
     uint64_t str_pos;
-    int distance;
+    uint64_t distance;
 
-    HitInfo(uint64_t rl_, uint64_t ru_, uint64_t str_pos_, int distance_):
+    HitInfo(uint64_t rl_, uint64_t ru_, uint64_t str_pos_, uint64_t distance_):
         rl(rl_),
         ru(ru_),
         str_pos(str_pos_),
@@ -116,8 +116,8 @@ public:
     }
 
     bool operator() (const HitInfo& lhs, const HitInfo& rhs) const {
-        if (is_reverse) return (lhs.distance > rhs.distance);
-        else return (lhs.distance < rhs.distance);
+        if (is_reverse) return (lhs.distance < rhs.distance);
+        else return (lhs.distance > rhs.distance);
     }
 };
 
@@ -472,12 +472,12 @@ uint64_t DBG_succ::index(seqan::String<Dna5F> &s_) {
 
 /** 
  * Given a string str and a maximal number of edit operations
- * eops, this function returns all nodes with labels at most
- * eops many edits away from str.
+ * max_distance, this function returns all nodes with labels at most
+ * max_distance many edits away from str.
  */
-std::stack<uint64_t> DBG_succ::index_fuzzy(seqan::String<Dna5F> &str, uint64_t eops) {
+std::vector<uint64_t> DBG_succ::index_fuzzy(seqan::String<Dna5F> &str, uint64_t max_distance) {
     
-    std::stack<uint64_t> result; 
+    std::vector<uint64_t> result; 
     std::priority_queue<HitInfo, std::vector<HitInfo>, HitInfoCompare> hits;
     std::priority_queue<HitInfo, std::vector<HitInfo>, HitInfoCompare> hits2;
     uint64_t rl;
@@ -491,37 +491,50 @@ std::stack<uint64_t> DBG_succ::index_fuzzy(seqan::String<Dna5F> &str, uint64_t e
     for (TAlphabet b = 1; b < 5; ++b) {
         rl = succ_last(F[b] + 1);
         ru = F[b + 1];
-        hits.push(HitInfo(rl, ru, 1, eops - (b == s)));
+        //std::cout << "pushing: rl " << rl << " ru " << ru << " str_pos 1 max_distance " << (uint64_t) (b != s) << std::endl;
+        //std::cout << "s " << s << " b " << b << std::endl;
+        hits.push(HitInfo(rl, ru, 1, (uint64_t) (b != s)));
     }
 
     // walk through pattern thereby extending all partial hits
     while (hits.size() > 0) {
-        HitInfo curr_hit = hits.top();
-        hits.pop();
+        while (hits.size() > 0) {
+            HitInfo curr_hit = hits.top();
+            hits.pop();
+            //std::cout << "loaded: rl " << curr_hit.rl << " ru " << curr_hit.ru << " dist " << curr_hit.distance << std::endl;
 
-        if (curr_hit.str_pos < seqan::length(str)) {
+            if (curr_hit.str_pos < seqan::length(str)) {
 
-            s = (TAlphabet) seqan::ordValue(str[curr_hit.str_pos]) + 1;
+                s = (TAlphabet) seqan::ordValue(str[curr_hit.str_pos]) + 1;
 
-            rl = std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size));
-            if (rl >= W->n)
-                continue;
+                for (TAlphabet b = 1; b < 5; ++b) {
+                    if (curr_hit.distance <= max_distance) {
 
-            ru = std::max(pred_W(ru, s), pred_W(ru, s + alph_size));
-            if ((ru >= W->n) || (rl > ru))
-                continue;
+                        // we cannot afford any more mismatches
+                        if ((curr_hit.distance + (b != s)) > max_distance)
+                            continue;
 
-            for (TAlphabet b = 1; b < 5; ++b) {
-                rl = outgoing(rl, b);
-                ru = outgoing(ru, b);
-                if (curr_hit.distance > 0) {
-                    hits2.push(HitInfo(rl, ru, curr_hit.str_pos + 1,  curr_hit.distance - (b == s)));
+                        // re-define range of nodes to check for outgoing nodes
+                        rl = std::min(succ_W(pred_last(curr_hit.rl - 1) + 1, b), succ_W(pred_last(curr_hit.rl - 1) + 1, b + alph_size));
+                        ru = std::max(pred_W(curr_hit.ru, b), pred_W(curr_hit.ru, b + alph_size));
+
+                        if ((rl >= W->n) || (curr_hit.ru >= W->n) || (rl > ru))
+                            continue;
+
+                        rl = outgoing(rl, b);
+                        ru = outgoing(ru, b);
+
+                        if ((rl == 0) && (ru == 0))
+                            continue;
+
+                        // add hit for extension in next step
+                        hits2.push(HitInfo(rl, ru, curr_hit.str_pos + 1, curr_hit.distance + (b != s)));
+                    }
                 }
+            } else {
+                // collect results
+                result.push_back(curr_hit.rl < curr_hit.ru ? curr_hit.ru : curr_hit.rl); 
             }
-        } else {
-            if (curr_hit.distance > 0) {
-               result.push(curr_hit.rl < curr_hit.ru ? curr_hit.ru : curr_hit.rl); 
-            } 
         }
         hits.swap(hits2);
     }
@@ -718,6 +731,26 @@ std::vector<uint64_t> DBG_succ::align(seqan::String<seqan::Dna5> seq) {
   }
   
   return indices;
+}
+
+std::vector<std::vector<uint64_t> > DBG_succ::align_fuzzy(seqan::String<seqan::Dna5> seq, uint64_t max_distance) {
+
+  uint64_t kmer_length = this->get_k();
+  uint64_t no_kmers_in_seq = seqan::length(seq) - kmer_length + 1;
+
+  std::vector<std::vector<uint64_t> > hit_list;
+
+  for (uint64_t i = 0; i < no_kmers_in_seq; ++i) {
+    seqan::String<Dna5F> kmer;
+    seqan::resize(kmer, kmer_length);
+    for (uint64_t j = 0; j < kmer_length; ++j) {
+      kmer[j] = (Dna5F) seq[i+j];
+    }
+
+    hit_list.push_back(this->index_fuzzy(kmer, max_distance));
+  }
+  
+  return hit_list;
 }
 
 

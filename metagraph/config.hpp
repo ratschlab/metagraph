@@ -14,6 +14,7 @@
         bool verbose;
         bool integrate;
         unsigned int k;
+        unsigned int distance;
 
         CFG() :
             verbose(false), k(31)

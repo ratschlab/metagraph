@@ -186,7 +186,7 @@ class DBG_succ {
 
     uint64_t index(std::deque<TAlphabet> str);
 
-    std::stack<uint64_t> index_fuzzy(seqan::String<Dna5F> &str, uint64_t eops);
+    std::vector<uint64_t> index_fuzzy(seqan::String<Dna5F> &str, uint64_t eops);
 
     std::pair<uint64_t, uint64_t> index_range(std::deque<TAlphabet> str);
 
@@ -300,6 +300,8 @@ class DBG_succ {
      * k-mer in the graph. Returns these indices.
      */
     std::vector<uint64_t> align(seqan::String<seqan::Dna5> seq);
+
+    std::vector<std::vector<uint64_t> > align_fuzzy(seqan::String<seqan::Dna5> seq, uint64_t max_distance);
 
     //
     //
