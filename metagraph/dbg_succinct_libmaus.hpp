@@ -63,8 +63,8 @@ class DBG_succ {
      */
     struct JoinInfo;
 
+    struct HitInfo;
 
-    
     // construct empty graph instance
     DBG_succ(size_t k_,
              CFG config_, 
@@ -185,6 +185,8 @@ class DBG_succ {
     uint64_t index(seqan::String<Dna5F> &s_);
 
     uint64_t index(std::deque<TAlphabet> str);
+
+    std::stack<uint64_t> index_fuzzy(seqan::String<Dna5F> &str, uint64_t eops);
 
     std::pair<uint64_t, uint64_t> index_range(std::deque<TAlphabet> str);
 

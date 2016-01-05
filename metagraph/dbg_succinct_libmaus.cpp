@@ -41,6 +41,7 @@ typedef uint64_t TAlphabet;
 typedef DBG_succ::BranchInfo BranchInfo;
 typedef DBG_succ::BranchInfoMerge BranchInfoMerge;
 typedef DBG_succ::JoinInfo JoinInfo;
+typedef DBG_succ::HitInfo HitInfo;
 
 /**
  * This object collects information about branches during graph traversal, so 
@@ -93,6 +94,32 @@ struct DBG_succ::JoinInfo {
         seqPos2(seqPos2_) {}
 };
 
+
+struct DBG_succ::HitInfo {
+    uint64_t rl;
+    uint64_t ru;
+    uint64_t str_pos;
+    int distance;
+
+    HitInfo(uint64_t rl_, uint64_t ru_, uint64_t str_pos_, int distance_):
+        rl(rl_),
+        ru(ru_),
+        str_pos(str_pos_),
+        distance(distance_) {}
+};
+
+class HitInfoCompare {
+    bool is_reverse;
+public:
+    HitInfoCompare(const bool& is_reverse_ = false) {
+        is_reverse = is_reverse_;
+    }
+
+    bool operator() (const HitInfo& lhs, const HitInfo& rhs) const {
+        if (is_reverse) return (lhs.distance > rhs.distance);
+        else return (lhs.distance < rhs.distance);
+    }
+};
 
 // the bit array indicating the last outgoing edge of a node
 libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();
@@ -443,6 +470,66 @@ uint64_t DBG_succ::index(seqan::String<Dna5F> &s_) {
     return (ru > rl) ? ru : rl;
 }
 
+/** 
+ * Given a string str and a maximal number of edit operations
+ * eops, this function returns all nodes with labels at most
+ * eops many edits away from str.
+ */
+std::stack<uint64_t> DBG_succ::index_fuzzy(seqan::String<Dna5F> &str, uint64_t eops) {
+    
+    std::stack<uint64_t> result; 
+    std::priority_queue<HitInfo, std::vector<HitInfo>, HitInfoCompare> hits;
+    std::priority_queue<HitInfo, std::vector<HitInfo>, HitInfoCompare> hits2;
+    uint64_t rl;
+    uint64_t ru;
+
+    // walk through pattern, thereby collecting possible partial matches
+    // once the end of the pattern is readched, add match to results
+    
+    // init
+    TAlphabet s = (TAlphabet) seqan::ordValue(str[0]) + 1;
+    for (TAlphabet b = 1; b < 5; ++b) {
+        rl = succ_last(F[b] + 1);
+        ru = F[b + 1];
+        hits.push(HitInfo(rl, ru, 1, eops - (b == s)));
+    }
+
+    // walk through pattern thereby extending all partial hits
+    while (hits.size() > 0) {
+        HitInfo curr_hit = hits.top();
+        hits.pop();
+
+        if (curr_hit.str_pos < seqan::length(str)) {
+
+            s = (TAlphabet) seqan::ordValue(str[curr_hit.str_pos]) + 1;
+
+            rl = std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size));
+            if (rl >= W->n)
+                continue;
+
+            ru = std::max(pred_W(ru, s), pred_W(ru, s + alph_size));
+            if ((ru >= W->n) || (rl > ru))
+                continue;
+
+            for (TAlphabet b = 1; b < 5; ++b) {
+                rl = outgoing(rl, b);
+                ru = outgoing(ru, b);
+                if (curr_hit.distance > 0) {
+                    hits2.push(HitInfo(rl, ru, curr_hit.str_pos + 1,  curr_hit.distance - (b == s)));
+                }
+            }
+        } else {
+            if (curr_hit.distance > 0) {
+               result.push(curr_hit.rl < curr_hit.ru ? curr_hit.ru : curr_hit.rl); 
+            } 
+        }
+        hits.swap(hits2);
+    }
+
+    return result;
+}
+
+
 uint64_t DBG_succ::index(std::deque<TAlphabet> str) {
     std::pair<uint64_t, uint64_t> tmp = index_range(str);
     return (tmp.second > tmp.first) ? tmp.second : tmp.first;
@@ -519,7 +606,7 @@ std::pair<bool, bool> DBG_succ::compare_nodes(DBG_succ *G1, uint64_t k1_node, DB
 }
 
 /** 
- * This function gets two node indices and returns if the
+ * This function gets two node indices and returns whether the
  * node labels share a k-1 suffix.
  */
 bool DBG_succ::compare_node_suffix(uint64_t i1, uint64_t i2) {
@@ -1291,8 +1378,10 @@ void DBG_succ::merge(DBG_succ* G) {
     bool initial_k = true;
     uint64_t added = 0;
 
+    // keep traversing until we reach the think and have worked off all branches from the stack
     while (out > 0 || branchnodes.size() > 0) {
 
+        // verbose output
         if (added > 0 && added % 1000 == 0) {
             std::cout << "." << std::flush;
             if (added % 10000 == 0) {
@@ -1500,8 +1589,9 @@ void DBG_succ::merge(DBG_succ* G) {
     update_F(this->get_node_end_value(p), true);
 }
 
+
 /*
- * Given two other graph structures G1 and G2, this function 
+ * Given two pointers to graph structures G1 and G2, this function 
  * integrate both into a new graph G.
  */
 void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint64_t n1, uint64_t n2) {
@@ -1521,9 +1611,6 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
     }
     
     bool k1_smaller, k2_smaller, advance_k1, advance_k2, insert_k1, insert_k2, identical;
-
-    //uint64_t k1_last = 0;
-    //uint64_t k2_last = 0;
 
     std::string k1_str, k2_str;
     
@@ -1547,17 +1634,6 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
         //G1->print_seq();
         //G2->print_seq();
         if (k1 < n1 && k2 < n2) {
-            //std::cerr << "k1: " << k1 << " [" << G1->get_W(k1) << "] k2: " << k2 << " [" << G2->get_W(k2) << "]" << std::endl;
-            // can we reuse the node string from previous iterations?
-            //if ((k1 != k1_last) && (k1 < 2 || G1->get_last(k1 - 1))) {
-            //    k1_str = G1->get_node_str(k1);
-            //}
-            //if ((k2 != k2_last) && (k2 < 2 || G2->get_last(k2 - 1))) {
-            //    k2_str = G2->get_node_str(k2);
-            //}
-            //k1_smaller = (k1_str < k2_str);
-            //k2_smaller = (k2_str < k1_str);
-
             std::pair<bool, bool> tmp = compare_nodes(G1, k1, G2, k2);
             k1_smaller = tmp.first;
             k2_smaller = tmp.second;
@@ -1603,9 +1679,10 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
             std::exit(1);
         }
 
-        // assert XOR of isert
+        // assert XOR of insert; we take a node from either G1 or G2
         assert(insert_k1 ^ insert_k2);
 
+        // insert node from G1
         if (insert_k1) {
             TAlphabet val = G1->get_W(k1);
             if (identical) {
@@ -1615,7 +1692,6 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
                 seq1.pop_front();
                 seq1.push_back(val);
                 uint64_t kidx2 = G2->index(seq1);
-                //std::cerr << "kidx1 " << kidx1 << " kidx2 " << kidx2 << std::endl; 
                 if (kidx2 > 0 && kidx2 < G2->get_size()) {
                     uint64_t kidx3 = G2->bwd(kidx2);
                     //std::cerr << "kidx3 " << kidx3 << std::endl;
@@ -1635,6 +1711,8 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
             }
             update_F(G1->get_node_end_value(k1), true);
         } 
+
+        // insert node from G2
         if (insert_k2) {
             TAlphabet val = G2->get_W(k2);
             if (val % alph_size == val) {
@@ -1678,15 +1756,11 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
         }
         last_added_k = insert_k1 ? k1 : k2;
         last_added_G = insert_k1 ? G1 : G2;
-        //k1_last = k1;
-        //k2_last = k2;
         k1 += advance_k1;
         k2 += advance_k2;
 
         ++added;
-        //print_seq();
     }
-
     p = succ_W(1, 0);
 }
 
