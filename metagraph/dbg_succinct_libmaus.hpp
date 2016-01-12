@@ -9,6 +9,7 @@
 #include <seqan/seq_io.h>
 
 #include <config.hpp>
+#include <datatypes.hpp>
 
 class DBG_succ {
 
@@ -62,8 +63,6 @@ class DBG_succ {
      * This will hold the graph edges that will be written to the SQL graph output.
      */
     struct JoinInfo;
-
-    struct HitInfo;
 
     // construct empty graph instance
     DBG_succ(size_t k_,
@@ -186,7 +185,7 @@ class DBG_succ {
 
     uint64_t index(std::deque<TAlphabet> str);
 
-    std::vector<uint64_t> index_fuzzy(seqan::String<Dna5F> &str, uint64_t eops);
+    std::vector<HitInfo> index_fuzzy(seqan::String<seqan::Dna5> &str, uint64_t eops);
 
     std::pair<uint64_t, uint64_t> index_range(std::deque<TAlphabet> str);
 
@@ -261,6 +260,18 @@ class DBG_succ {
      */
     bool get_last(uint64_t k);
 
+    // Given the alphabet index return the corresponding symbol
+    char get_alphabet_symbol(uint64_t s);
+
+    /**
+     * Breaks the seq into k-mers and searches for the index of each
+     * k-mer in the graph. Returns these indices.
+     */
+    std::vector<uint64_t> align(seqan::String<seqan::Dna5> seq);
+
+    std::vector<std::vector<HitInfo> > align_fuzzy(seqan::String<seqan::Dna5> seq, uint64_t max_distance = 0, uint64_t alignment_length = 0);
+
+
 
     //
     //
@@ -294,14 +305,6 @@ class DBG_succ {
      * given that the corresponding note is not part of the graph yet.
      */
     void append_pos(TAlphabet c);
-
-    /**
-     * Breaks the seq into k-mers and searches for the index of each
-     * k-mer in the graph. Returns these indices.
-     */
-    std::vector<uint64_t> align(seqan::String<seqan::Dna5> seq);
-
-    std::vector<std::vector<uint64_t> > align_fuzzy(seqan::String<seqan::Dna5> seq, uint64_t max_distance);
 
     //
     //

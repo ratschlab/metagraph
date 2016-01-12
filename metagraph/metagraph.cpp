@@ -13,10 +13,8 @@
 #include <vector>
 #include <string>
 
-//#include <btree_map.h>
+#include <datatypes.hpp>
 #include <dbg_succinct_libmaus.hpp>
-//#include <dmm_tree.hpp>
-//#include <unix_tools.hpp>
 #include <config.hpp>
 
 // parse command line arguments and options
@@ -87,6 +85,7 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
 }
 
 int main(int argc, char const ** argv) {
+
     typedef seqan::ModifiedAlphabet<seqan::Dna5, seqan::ModExpand<'X'> > Dna5F; 
 
     CFG config;
@@ -98,12 +97,7 @@ int main(int argc, char const ** argv) {
     if (config.verbose)
         std::cout << seqan::CharString("Welcome to MetaGraph") << std::endl;
 
-    // build the graph from the k-mers in the string
-    //typedef unsigned int TCargo;
-    //typedef Graph<Directed<TCargo> > TGraph; // --> we can use this when we want to have edge weights
-
     // create graph object
-    //DBG_seqan* graph = new DBG_seqan(config.k);
     DBG_succ* graph = NULL;
 
     if (! config.compare.empty()) {
@@ -184,16 +178,23 @@ int main(int argc, char const ** argv) {
 
           graph->print_seq();
 
+          uint64_t aln_len = seqan::length(seq);
+
           if (config.distance > 0) {
-              std::vector<std::vector<uint64_t> > graphindices = graph->align_fuzzy(seq, config.distance);
+              std::vector<std::vector<HitInfo> > graphindices = graph->align_fuzzy(seq, aln_len, config.distance);
 
               for (size_t i = 0; i < graphindices.size(); ++i) {
-                  for (uint64_t j = 0; j < graph->get_k(); ++j) {
-                      std::cout << seq[i+j];
-                  }
-                  std::cout << ": ";
+                 //#std::cout << seqan::infix(seq, i, i + graph->get_k()) << ": ";
+                  std::cout << seqan::infix(seq, i, i + aln_len) << ": ";
                   for (size_t l = 0; l < graphindices.at(i).size(); ++l) {
-                      std::cout << graphindices.at(i).at(l) << " ";
+                      HitInfo curr_hit(graphindices.at(i).at(l));
+                      for (size_t m = 0; m < curr_hit.path.size(); ++m) {
+                          std::cout << curr_hit.path.at(m) << ':';
+                      }
+                      for (size_t m = curr_hit.rl; m <= curr_hit.ru; ++m) {
+                          std::cout << m << " ";
+                      }
+                      std::cout << "[" << curr_hit.cigar << "] ";
                   }
                   std::cout << std::endl;
               }

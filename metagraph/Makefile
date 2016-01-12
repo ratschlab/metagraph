@@ -12,11 +12,11 @@ all: metagraph
 
 debug: metagraph_debug
 
-metagraph: metagraph.cpp dbg_succinct_libmaus.cpp dbg_succinct_libmaus.hpp config.hpp
-	$(CXX) $(CXXFLAGS) -o metagraph metagraph.cpp dbg_succinct_libmaus.cpp $(LDFLAGS)
+metagraph: dbg_succinct_libmaus.cpp dbg_succinct_libmaus.hpp config.hpp metagraph.cpp 
+	$(CXX) $(CXXFLAGS) -o metagraph dbg_succinct_libmaus.cpp metagraph.cpp $(LDFLAGS)
 
 metagraph_debug: metagraph.cpp dbg_succinct_libmaus.cpp dbg_succinct_libmaus.hpp config.hpp
-	$(CXX) $(CXXFLAGS) -o metagraph metagraph.cpp dbg_succinct_libmaus.cpp $(LDFLAGS) -D DBGDEBUG
+	$(CXX) $(CXXFLAGS) -o metagraph dbg_succinct_libmaus.cpp metagraph.cpp $(LDFLAGS) -D DBGDEBUG
 
 clean:
 	rm -f metagraph.o metagraph

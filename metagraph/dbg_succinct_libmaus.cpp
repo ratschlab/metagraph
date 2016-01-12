@@ -33,6 +33,7 @@
 #include <seqan/seq_io.h>
 
 #include <config.hpp>
+#include <datatypes.hpp>
 #include <dbg_succinct_libmaus.hpp>
 
 // define an extended alphabet for W --> somehow this does not work properly as expected
@@ -41,7 +42,6 @@ typedef uint64_t TAlphabet;
 typedef DBG_succ::BranchInfo BranchInfo;
 typedef DBG_succ::BranchInfoMerge BranchInfoMerge;
 typedef DBG_succ::JoinInfo JoinInfo;
-typedef DBG_succ::HitInfo HitInfo;
 
 /**
  * This object collects information about branches during graph traversal, so 
@@ -92,33 +92,6 @@ struct DBG_succ::JoinInfo {
         seqPos1(seqPos1_),
         seqId2(seqId2_),
         seqPos2(seqPos2_) {}
-};
-
-
-struct DBG_succ::HitInfo {
-    uint64_t rl;
-    uint64_t ru;
-    uint64_t str_pos;
-    uint64_t distance;
-
-    HitInfo(uint64_t rl_, uint64_t ru_, uint64_t str_pos_, uint64_t distance_):
-        rl(rl_),
-        ru(ru_),
-        str_pos(str_pos_),
-        distance(distance_) {}
-};
-
-class HitInfoCompare {
-    bool is_reverse;
-public:
-    HitInfoCompare(const bool& is_reverse_ = false) {
-        is_reverse = is_reverse_;
-    }
-
-    bool operator() (const HitInfo& lhs, const HitInfo& rhs) const {
-        if (is_reverse) return (lhs.distance < rhs.distance);
-        else return (lhs.distance > rhs.distance);
-    }
 };
 
 // the bit array indicating the last outgoing edge of a node
@@ -475,9 +448,9 @@ uint64_t DBG_succ::index(seqan::String<Dna5F> &s_) {
  * max_distance, this function returns all nodes with labels at most
  * max_distance many edits away from str.
  */
-std::vector<uint64_t> DBG_succ::index_fuzzy(seqan::String<Dna5F> &str, uint64_t max_distance) {
+std::vector<HitInfo> DBG_succ::index_fuzzy(seqan::String<seqan::Dna5> &str, uint64_t max_distance) {
     
-    std::vector<uint64_t> result; 
+    std::vector<HitInfo> result; 
     std::priority_queue<HitInfo, std::vector<HitInfo>, HitInfoCompare> hits;
     std::priority_queue<HitInfo, std::vector<HitInfo>, HitInfoCompare> hits2;
     uint64_t rl;
@@ -486,14 +459,24 @@ std::vector<uint64_t> DBG_succ::index_fuzzy(seqan::String<Dna5F> &str, uint64_t 
     // walk through pattern, thereby collecting possible partial matches
     // once the end of the pattern is readched, add match to results
     
-    // init
+    // init match/mismatch to first pattern position
     TAlphabet s = (TAlphabet) seqan::ordValue(str[0]) + 1;
     for (TAlphabet b = 1; b < 5; ++b) {
         rl = succ_last(F[b] + 1);
         ru = F[b + 1];
         //std::cout << "pushing: rl " << rl << " ru " << ru << " str_pos 1 max_distance " << (uint64_t) (b != s) << std::endl;
         //std::cout << "s " << s << " b " << b << std::endl;
-        hits.push(HitInfo(rl, ru, 1, (uint64_t) (b != s)));
+        std::vector<uint64_t> tmp;
+        hits.push(HitInfo(rl, ru, 1, 1, (uint64_t) (b != s), std::string(1, get_alphabet_symbol(b)), tmp));
+
+        // opening/extending a gap in the pattern starting with the first position
+        for (size_t p = 1; p < seqan::length(str) - 1; ++p) {
+            TAlphabet ss = (TAlphabet) seqan::ordValue(str[p]) + 1;
+            if ((p + (b != ss)) > max_distance)
+                break;
+            hits.push(HitInfo(rl, ru, p + 1, 1, p + (b != ss), std::string(p, 'd') + std::string(1, get_alphabet_symbol(b)), tmp));
+            //std::cout << "a) adding '-'" << std::endl;
+        }
     }
 
     // walk through pattern thereby extending all partial hits
@@ -504,9 +487,26 @@ std::vector<uint64_t> DBG_succ::index_fuzzy(seqan::String<Dna5F> &str, uint64_t 
             //std::cout << "loaded: rl " << curr_hit.rl << " ru " << curr_hit.ru << " dist " << curr_hit.distance << std::endl;
 
             if (curr_hit.str_pos < seqan::length(str)) {
+            
+                // opening/extending a gap in the graph, leaving current pattern position unmatched
+                if (curr_hit.distance < max_distance) {
+                    hits2.push(HitInfo(curr_hit.rl, curr_hit.ru, curr_hit.str_pos + 1, curr_hit.graph_pos, curr_hit.distance + 1, curr_hit.cigar + 'd', curr_hit.path));
+                    //std::cout << "b) " << curr_hit.cigar << " adding '-'" << std::endl;
+                }
 
                 s = (TAlphabet) seqan::ordValue(str[curr_hit.str_pos]) + 1;
 
+                // has the number of matches exceeded the node length?
+                // there are three possible scenarios for extension of the path:
+                //  1) pattern is shorter than the node length --> get an interval of matching nodes
+                //  2) pattern length exactly mathces the node length --> there is one correponding node
+                //  3) pattern is longer than the node length --> we append to a path 
+                if (curr_hit.graph_pos >= k) {
+                //    std::cout << "push back tp path " << curr_hit.rl << std::endl;
+                    curr_hit.path.push_back(curr_hit.rl);
+                }
+
+                // iterate through all possible extensions of current position
                 for (TAlphabet b = 1; b < 5; ++b) {
                     if (curr_hit.distance <= max_distance) {
 
@@ -518,22 +518,34 @@ std::vector<uint64_t> DBG_succ::index_fuzzy(seqan::String<Dna5F> &str, uint64_t 
                         rl = std::min(succ_W(pred_last(curr_hit.rl - 1) + 1, b), succ_W(pred_last(curr_hit.rl - 1) + 1, b + alph_size));
                         ru = std::max(pred_W(curr_hit.ru, b), pred_W(curr_hit.ru, b + alph_size));
 
-                        if ((rl >= W->n) || (curr_hit.ru >= W->n) || (rl > ru))
+                        // the current range in W does not contain our next symbol
+                        if ((rl >= W->n) || (ru >= W->n) || (rl > ru))
                             continue;
 
+                        // update the SA range with the current symbol b
                         rl = outgoing(rl, b);
                         ru = outgoing(ru, b);
 
+                        // range is empty
                         if ((rl == 0) && (ru == 0))
                             continue;
 
                         // add hit for extension in next step
-                        hits2.push(HitInfo(rl, ru, curr_hit.str_pos + 1, curr_hit.distance + (b != s)));
+                        hits2.push(HitInfo(rl, ru, curr_hit.str_pos + 1, curr_hit.graph_pos + 1, curr_hit.distance + (b != s), curr_hit.cigar + get_alphabet_symbol(b), curr_hit.path));
+                        //std::cout << "curr rl " << curr_hit.rl << " ru " << curr_hit.ru << std::endl;
+                        //std::cout << "c) " << curr_hit.cigar << " adding '" << get_alphabet_symbol(b) << "' - graph pos " << curr_hit.graph_pos + 1 << " rl " << rl << " ru " << ru << std::endl;
+                        
+                        // opening/extending a gap in the pattern, leaving current graph position unmatched 
+                        // --> choose any available mismatching next edge 
+                        if (b != s) {
+                            hits2.push(HitInfo(rl, ru, curr_hit.str_pos, curr_hit.graph_pos + 1, curr_hit.distance + 1, curr_hit.cigar + 'i', curr_hit.path));
+                        }
                     }
                 }
             } else {
                 // collect results
-                result.push_back(curr_hit.rl < curr_hit.ru ? curr_hit.ru : curr_hit.rl); 
+                //std::cout << "pushing " << curr_hit.cigar << "  " << curr_hit.distance << " rl " << curr_hit.rl << " ru " << curr_hit.ru << std::endl;
+                result.push_back(curr_hit); //std::make_pair(curr_hit.rl < curr_hit.ru ? curr_hit.ru : curr_hit.rl, curr_hit.cigar)); 
             }
         }
         hits.swap(hits2);
@@ -713,6 +725,33 @@ bool DBG_succ::get_last(uint64_t k) {
     return (*last)[k];
 }
 
+char DBG_succ::get_alphabet_symbol(uint64_t s) {
+    switch (s) {
+        case 0: 
+            return '$';
+        case 1:
+        case 1 + 7: 
+            return 'A';
+        case 2:
+        case 2 + 7:
+            return 'C';
+        case 3:
+        case 3 + 7:
+            return 'G';
+        case 4:
+        case 4 + 7:
+            return 'T';
+        case 5:
+        case 5 + 7:
+            return 'N';
+        case 6:
+        case 6 + 7:
+            return 'X';
+        default:
+            return 'n';
+    }
+}
+
 std::vector<uint64_t> DBG_succ::align(seqan::String<seqan::Dna5> seq) {
   uint64_t seq_length = seqan::length(seq);
   uint64_t kmer_length = this->get_k();
@@ -733,24 +772,28 @@ std::vector<uint64_t> DBG_succ::align(seqan::String<seqan::Dna5> seq) {
   return indices;
 }
 
-std::vector<std::vector<uint64_t> > DBG_succ::align_fuzzy(seqan::String<seqan::Dna5> seq, uint64_t max_distance) {
+std::vector<std::vector<HitInfo> > DBG_succ::align_fuzzy(seqan::String<seqan::Dna5> seq, uint64_t alignment_length, uint64_t max_distance) {
 
-  uint64_t kmer_length = this->get_k();
-  uint64_t no_kmers_in_seq = seqan::length(seq) - kmer_length + 1;
+    size_t seq_length = seqan::length(seq);
+    std::vector<std::vector<HitInfo> > hit_list;
 
-  std::vector<std::vector<uint64_t> > hit_list;
+    if (alignment_length == 0) {
 
-  for (uint64_t i = 0; i < no_kmers_in_seq; ++i) {
-    seqan::String<Dna5F> kmer;
-    seqan::resize(kmer, kmer_length);
-    for (uint64_t j = 0; j < kmer_length; ++j) {
-      kmer[j] = (Dna5F) seq[i+j];
+    } else {
+        alignment_length = alignment_length < 2 ? 2 : alignment_length;
+        alignment_length = alignment_length < seq_length ? alignment_length : seq_length;
+
+        for (uint64_t i = 0; i < seq_length - alignment_length + 1; ++i) {
+            seqan::String<seqan::Dna5> kmer = seqan::infix(seq, i, i + alignment_length);
+            hit_list.push_back(this->index_fuzzy(kmer, max_distance));
+
+       /* seqan::resize(kmer, kmer_length);
+        for (uint64_t j = 0; j < kmer_length; ++j) {
+          kmer[j] = (Dna5F) seq[i+j];
+        }*/
+        }
     }
-
-    hit_list.push_back(this->index_fuzzy(kmer, max_distance));
-  }
-  
-  return hit_list;
+    return hit_list;
 }
 
 
