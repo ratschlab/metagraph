@@ -7,34 +7,34 @@
 #include <seqan/seq_io.h>
 #include <seqan/sequence.h>
 
-// #include "rocksdb/db.h"
-// #include "rocksdb/slice.h"
-// #include "rocksdb/options.h"
+#include "rocksdb/db.h"
+#include "rocksdb/slice.h"
+#include "rocksdb/options.h"
 
-// using namespace rocksdb;
+using namespace rocksdb;
 
-// std::string kDBPath = "/cbio/grlab/projects/metagenome/database/dbg_rocks_100m";
+std::string kDBPath = "/tmp/rocksdb-test";
 
-int main() {
-  // // open DB
-  // Options options;
-  // options.create_if_missing = true;
+int main(int argc, char const ** argv) {
+    // open DB
+    rocksdb::Options options;
+    options.create_if_missing = true;
 
-  // DB* db;
-  // Status status = DB::Open(options, kDBPath, &db);
-  // assert(status.ok());
+    DB* db;
+    // Status status = DB::Open(options, kDBPath, &db);
+    // assert(status.ok());
 
-  // if (argc < 2) {
-  //     return 1;
-  // }
+    // if (argc < 2) {
+    //     return 1;
+    // }
 
-  // int n = std::stoi(argv[1]);
-  // std::string value;
-  // for (int i=1; i<n; ++i)
-  //     status = db->Get(ReadOptions(), Slice(std::to_string(i)), &value);
+    // int n = std::stoi(argv[1]);
+    // std::string value;
+    // for (int i=1; i<n; ++i)
+    //     status = db->Get(ReadOptions(), Slice(std::to_string(i)), &value);
 
-  // // close DB
-  // delete db;
+    // close DB
+    delete db;
 }
 
 // class IDatabaseImpl //: public IDatabase
