@@ -21,6 +21,9 @@ metagraph_debug: metagraph.cpp dbg_succinct_libmaus.cpp dbg_succinct_libmaus.hpp
 
 # TODO database task that creates a database.o object file.
 
+database:
+	$(CXX) $(CXXFLAGS) IDatabaseImpl.cpp $(LDFLAGS)
+
 database_test:
 	$(CXX) $(CXXFLAGS) TestDatabase.cpp MockDatabase.hpp MockDatabase.cpp $(LDFLAGS)
 	./a.out
