@@ -13,9 +13,10 @@
         bool verbose;
         bool integrate;
         unsigned int k;
+        std::string db_connect_string;
 
         CFG() :
-            verbose(false), k(31)
+            verbose(false), k(31), db_connect_string("")
         {}
     };
 

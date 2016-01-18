@@ -19,6 +19,8 @@
 //#include <unix_tools.hpp>
 #include <config.hpp>
 
+#include <IDatabaseImpl.cpp>
+
 // parse command line arguments and options
 seqan::ArgumentParser::ParseResult
 parseCommandLine(CFG & config, int argc, char const ** argv) 
@@ -48,6 +50,7 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
     addOption(parser, seqan::ArgParseOption("I", "infile_base", "basename for loading graph input files", seqan::ArgParseArgument::STRING, "TEXT"));
     addOption(parser, seqan::ArgParseOption("m", "merge", "list of graph file basenames used as input for merging", seqan::ArgParseArgument::STRING, "TEXT"));
     addOption(parser, seqan::ArgParseOption("c", "compare", "list of graph file basenames used as input for comparison", seqan::ArgParseArgument::STRING, "TEXT"));
+    addOption(parser, seqan::ArgParseOption("", "db_connect_string", "Specify the database to connect to", seqan::ArgParseArgument::STRING, "TEXT"));
 
     // set defaults
     setDefaultValue(parser, "O", "");
@@ -72,6 +75,7 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
     getOptionValue(config.sqlfbase, parser, "S");
     getOptionValue(config.merge, parser, "m");
     getOptionValue(config.compare, parser, "c");
+    getOptionValue(config.db_connect_string, parser, "db_connect_string");
     config.fname = seqan::getArgumentValues(parser, 0);
 
     // do any logic / error checking here (e.g., mutually exclusive options)
@@ -100,6 +104,10 @@ int main(int argc, char const ** argv) {
     // create graph object
     //DBG_seqan* graph = new DBG_seqan(config.k);
     DBG_succ* graph = NULL;
+
+    if (! config.db_connect_string.empty()) {
+        std::cout << config.db_connect_string << std::endl;
+    }
 
     if (! config.compare.empty()) {
         int cnt = 0;
