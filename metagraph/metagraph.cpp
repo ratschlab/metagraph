@@ -19,6 +19,7 @@
 //#include <unix_tools.hpp>
 #include <config.hpp>
 
+#include <IDatabase.hpp>
 #include <IDatabaseImpl.cpp>
 
 // parse command line arguments and options
@@ -105,10 +106,6 @@ int main(int argc, char const ** argv) {
     //DBG_seqan* graph = new DBG_seqan(config.k);
     DBG_succ* graph = NULL;
 
-    if (! config.db_connect_string.empty()) {
-        std::cout << config.db_connect_string << std::endl;
-    }
-
     if (! config.compare.empty()) {
         int cnt = 0;
         std::string token;
@@ -189,7 +186,8 @@ int main(int argc, char const ** argv) {
                     }
 
                     // add k-mers of seq to the annotation database.
-                    graph->add_annotation_for_seq(seq, id);
+                    IDatabaseImpl db;
+                    graph->add_annotation_for_seq(&db, seq, id);
                     
                     // add all k-mers of seq to the graph
                     graph->add_seq(seq);

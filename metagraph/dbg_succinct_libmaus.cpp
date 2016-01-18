@@ -36,6 +36,7 @@
 #include <dbg_succinct_libmaus.hpp>
 
 #include "MockDatabase.hpp"
+#include "IDatabase.hpp"
 
 // define an extended alphabet for W --> somehow this does not work properly as expected
 typedef seqan::ModifiedAlphabet<seqan::Dna5, seqan::ModExpand<'X'> > Dna5F; 
@@ -730,12 +731,11 @@ void DBG_succ::add_seq (seqan::String<Dna5F> seq) {
 
 using namespace dbg_database;
 
-void DBG_succ::add_annotation_for_seq(seqan::String<seqan::Dna5> seq,
+void DBG_succ::add_annotation_for_seq(IDatabase *db, seqan::String<seqan::Dna5> seq,
                                       seqan::CharString annotation) {
     uint64_t seq_length = seqan::length(seq);
     uint64_t kmer_length = this->get_k();
     uint64_t no_kmers_in_seq = seq_length - kmer_length + 1;
-    MockDatabase db;
 
     for (uint64_t i = 0; i < no_kmers_in_seq; ++i) {
         seqan::String<Dna5F> kmer;
@@ -750,7 +750,7 @@ void DBG_succ::add_annotation_for_seq(seqan::String<seqan::Dna5> seq,
         std::stringstream annotation_stream;
         annotation_stream << annotation;
 
-        db.annotate_kmer(kmer_stream.str(), annotation_stream.str());
+        db->annotate_kmer(kmer_stream.str(), annotation_stream.str());
     }
 }
 

@@ -11,11 +11,14 @@
 #include "rocksdb/slice.h"
 #include "rocksdb/options.h"
 
+// TODO what is the difference between `#include ".*"` and `#include <.*>"`
+#include "IDatabase.hpp"
+
 using namespace std;
 using namespace rocksdb;
 
-class IDatabaseImpl
-{
+class IDatabaseImpl : public IDatabase {
+
 private:
     string kDBPath = "/tmp/rocksdb-test";
     DB* db;
