@@ -14,30 +14,65 @@
 using namespace std;
 using namespace rocksdb;
 
-std::string kDBPath = "/tmp/rocksdb-test";
+class IDatabaseImpl
+{
+private:
+    string kDBPath = "/tmp/rocksdb-test";
+    DB* db;
+    Status status;
+    
+public:
+    IDatabaseImpl() {
+        rocksdb::Options options;
+        options.create_if_missing = true;
+        status = DB::Open(options, kDBPath, &db);
+    };
+
+    void annotate_kmer(string raw_kmer, string raw_tag) {
+        assert(status.ok());
+        db->Put(WriteOptions(), raw_kmer, raw_tag);
+        assert(status.ok());
+    }
+
+    string get_annotation(string raw_kmer) {
+        string ret;
+        assert(status.ok());
+        db->Get(ReadOptions(), raw_kmer, &ret);
+        assert(status.ok());
+        return ret;
+    }
+
+    // virtual int annotate_kmer(models::Kmer kmer, models::Annotation annotation) = 0;
+    // virtual models::Annotation get_annotation(models::Kmer kmer) = 0;
+};
 
 int main(int argc, char const ** argv) {
-    // open DB
-    rocksdb::Options options;
-    options.create_if_missing = true;
+    IDatabaseImpl database;
 
-    DB* db;
-    Status status = DB::Open(options, kDBPath, &db);
-    assert(status.ok());
+    database.annotate_kmer("TCGA", "cancer");
+    cout << database.get_annotation("TCGA") << endl;
 
-    std::string value;
+    // // open DB
+    // rocksdb::Options options;
+    // options.create_if_missing = true;
 
-    // db->Put(WriteOptions(), "akey", value);
-    db->Get(ReadOptions(), "akey", &value);
+    // DB* db;
+    // Status status = DB::Open(options, kDBPath, &db);
+    // assert(status.ok());
 
-    cout << value << endl;
+    // std::string value;
+
+    // // db->Put(WriteOptions(), "akey", value);
+    // db->Get(ReadOptions(), "akey", &value);
+
+    // cout << value << endl;
     
-    // rocksdb::Status s = db->Get(rocksdb::ReadOptions(), key1, &value);
-    // if (s.ok()) s = db->Put(rocksdb::WriteOptions(), key2, value);
-    // if (s.ok()) s = db->Delete(rocksdb::WriteOptions(), key1);
+    // // rocksdb::Status s = db->Get(rocksdb::ReadOptions(), key1, &value);
+    // // if (s.ok()) s = db->Put(rocksdb::WriteOptions(), key2, value);
+    // // if (s.ok()) s = db->Delete(rocksdb::WriteOptions(), key1);
 
-    // close DB
-    delete db;
+    // // close DB
+    // delete db;
 }
 
 // class IDatabaseImpl //: public IDatabase
