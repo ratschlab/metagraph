@@ -186,7 +186,7 @@ int main(int argc, char const ** argv) {
                     }
 
                     // add k-mers of seq to the annotation database.
-                    IDatabaseImpl db;
+                    IDatabaseImpl db (config.db_connect_string);
                     graph->add_annotation_for_seq(&db, seq, id);
                     
                     // add all k-mers of seq to the graph

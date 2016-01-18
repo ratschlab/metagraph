@@ -20,15 +20,15 @@ using namespace rocksdb;
 class IDatabaseImpl : public IDatabase {
 
 private:
-    string kDBPath = "/tmp/rocksdb-test";
+    string dbpath = "/tmp/graph-annotation-db";
     DB* db;
     Status status;
     
 public:
-    IDatabaseImpl() {
+    IDatabaseImpl(string the_dbpath) : dbpath(the_dbpath) {
         rocksdb::Options options;
         options.create_if_missing = true;
-        status = DB::Open(options, kDBPath, &db);
+        status = DB::Open(options, dbpath, &db);
     };
 
     void annotate_kmer(string raw_kmer, string raw_tag) {
