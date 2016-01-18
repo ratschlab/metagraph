@@ -11,6 +11,7 @@
 #include "rocksdb/slice.h"
 #include "rocksdb/options.h"
 
+using namespace std;
 using namespace rocksdb;
 
 std::string kDBPath = "/tmp/rocksdb-test";
@@ -21,17 +22,19 @@ int main(int argc, char const ** argv) {
     options.create_if_missing = true;
 
     DB* db;
-    // Status status = DB::Open(options, kDBPath, &db);
-    // assert(status.ok());
+    Status status = DB::Open(options, kDBPath, &db);
+    assert(status.ok());
 
-    // if (argc < 2) {
-    //     return 1;
-    // }
+    std::string value;
 
-    // int n = std::stoi(argv[1]);
-    // std::string value;
-    // for (int i=1; i<n; ++i)
-    //     status = db->Get(ReadOptions(), Slice(std::to_string(i)), &value);
+    // db->Put(WriteOptions(), "akey", value);
+    db->Get(ReadOptions(), "akey", &value);
+
+    cout << value << endl;
+    
+    // rocksdb::Status s = db->Get(rocksdb::ReadOptions(), key1, &value);
+    // if (s.ok()) s = db->Put(rocksdb::WriteOptions(), key2, value);
+    // if (s.ok()) s = db->Delete(rocksdb::WriteOptions(), key1);
 
     // close DB
     delete db;
