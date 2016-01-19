@@ -10,3 +10,4 @@ metagraph/external-libraries/seqan-include
 !metagraph/external-libraries/README
 a.out
 *.gch
+database-cli
