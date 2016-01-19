@@ -1,7 +1,6 @@
 #include "Models.hpp"
 
-using namespace std;
-
+// N.B. How do you do interfaces in C++? When you learn to do that, incorporate this interface.
 class IDatabase
 {
 public:
@@ -15,11 +14,11 @@ public:
      * annotation
      */
     virtual int annotate_kmer(models::Kmer kmer, models::Annotation annotation) = 0;
-    virtual int annotate_kmer(string kmer, string raw_tag) = 0;
+    virtual int annotate_kmer(std::string kmer, std::string raw_tag) = 0;
 
     /**
      * Looks up the annotation for a kmer.
      */
     virtual models::Annotation get_annotation(models::Kmer kmer) = 0;
-    virtual models::Annotation get_annotation(string raw_kmer) = 0;
+    virtual models::Annotation get_annotation(std::string raw_kmer) = 0;
 };

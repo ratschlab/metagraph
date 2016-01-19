@@ -8,12 +8,11 @@
 #include <seqan/seq_io.h>
 #include <seqan/sequence.h>
 
-// #include "IDatabase.hpp"
-
-class IDatabaseImpl //: public IDatabase
+class IDatabaseImpl
 {
 
 private:
+    // TODO hard coded.
     std::string connect_string = "dbname=succinct_debruijn_graph";
 
     /**
@@ -34,17 +33,6 @@ private:
             }
         }
     };
-
-    std::vector<int> get_tag_ids(std::vector<Tag> tags) {
-        // "SELECT id FROM tags WHERE tag IN ()";
-    }
-
-    int get_annotation_id(pqxx::connection* conn, Annotation Annotation) {
-        return 42;
-    };
-
-    std::string join(std::vector<std::string> strings, char delim) {
-    }
 
     template<typename T> std::vector<T> concat(std::vector<T> vec1, std::vector<T> vec2) {
         // http://stackoverflow.com/questions/3177241/what-is-the-best-way-to-concatenate-two-vectors

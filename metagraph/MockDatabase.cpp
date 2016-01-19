@@ -13,9 +13,6 @@
 
 #include "MockDatabase.hpp"
 
-using namespace seqan;
-using namespace std;
-
 // TODO this type definition is polluting everything.
 typedef seqan::ModifiedAlphabet<seqan::Dna5, seqan::ModExpand<'X'> > Dna5F; 
 
@@ -40,25 +37,25 @@ MockDatabase::MockDatabase() {};
  * annotation
  */
 int MockDatabase::annotate_kmer(models::Kmer kmer, models::Annotation annotation) {
-    vector<string> existing_tags = datastore[kmer.name];
+    std::vector<std::string> existing_tags = datastore[kmer.name];
 
     // extract tags as strings
-    vector<string> raw_tags;
+    std::vector<std::string> raw_tags;
     for (auto it = annotation.tags.begin(); it != annotation.tags.end(); ++it) {
         raw_tags.push_back(it->name);
     }
 
-    vector<string> tags = concat(existing_tags, raw_tags);
+    std::vector<std::string> tags = concat(existing_tags, raw_tags);
 
-    std::set<string> deduped(tags.begin(), tags.end());
+    std::set<std::string> deduped(tags.begin(), tags.end());
     tags.assign(deduped.begin(), deduped.end());
 
     datastore[kmer.name] = tags;
     return datastore.size();
 };
 
-int MockDatabase::annotate_kmer(string kmer, string raw_tag) {
-    vector<models::Tag> tags;
+int MockDatabase::annotate_kmer(std::string kmer, std::string raw_tag) {
+    std::vector<models::Tag> tags;
     tags.push_back((models::Tag) { raw_tag });
     return annotate_kmer((models::Kmer) {kmer}, (models::Annotation) {tags});
 };
@@ -67,9 +64,9 @@ int MockDatabase::annotate_kmer(string kmer, string raw_tag) {
  * Looks up the annotation for a kmer.
  */
 models::Annotation MockDatabase::get_annotation(models::Kmer kmer) {
-    vector<string> raw_tags = datastore[kmer.name];
+    std::vector<std::string> raw_tags = datastore[kmer.name];
 
-    vector<models::Tag> tags;
+    std::vector<models::Tag> tags;
     for (auto it = raw_tags.begin(); it != raw_tags.end(); ++it) {
         models::Tag tag;
         tag.name = *it;
@@ -81,14 +78,14 @@ models::Annotation MockDatabase::get_annotation(models::Kmer kmer) {
     return to_return;
 };
 
-     models::Annotation MockDatabase::get_annotation(string raw_kmer) {
+     models::Annotation MockDatabase::get_annotation(std::string raw_kmer) {
         return get_annotation( (models::Kmer) { raw_kmer });
     }
 
     /**
      * N.B. not in IDatabase.
      */
-    map<string, vector<string> > MockDatabase::getDatastore() {
+   std::map<std::string, std::vector<std::string> > MockDatabase::getDatastore() {
         return datastore;
     }
 
