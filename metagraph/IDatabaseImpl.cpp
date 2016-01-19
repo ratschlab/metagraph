@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 
 #include <seqan/basic.h>
 #include <seqan/index.h>
@@ -14,34 +15,45 @@
 // TODO what is the difference between `#include ".*"` and `#include <.*>"`
 #include "IDatabase.hpp"
 
-using namespace std;
-using namespace rocksdb;
+namespace dbg_database {
 
 class IDatabaseImpl : public IDatabase {
 
 private:
-    string dbpath;
-    DB* db;
-    Status status;
-    
+    std::string dbpath;
+    rocksdb::DB* db;
+    rocksdb::Status status;
+
+    template<typename T> std::vector<T> concat(std::vector<T> vec1, std::vector<T> vec2) {
+        // http://stackoverflow.com/questions/3177241/what-is-the-best-way-to-concatenate-two-vectors
+        std::vector<T> ret;
+        ret.reserve( vec1.size() + vec2.size() ); // preallocate memory
+        ret.insert( ret.end(), vec1.begin(), vec1.end() );
+        ret.insert( ret.end(), vec2.begin(), vec2.end() );
+
+        return ret;
+    }
+
 public:
-    IDatabaseImpl(string the_dbpath) : dbpath(the_dbpath) {
+    IDatabaseImpl(std::string the_dbpath) : dbpath(the_dbpath) {
         rocksdb::Options options;
         options.create_if_missing = true;
-        status = DB::Open(options, dbpath, &db);
+        status = rocksdb::DB::Open(options, dbpath, &db);
     };
 
-    void annotate_kmer(string raw_kmer, string raw_tag) {
+    void annotate_kmer(std::string raw_kmer, std::string raw_tag) {
         assert(status.ok());
-        db->Put(WriteOptions(), raw_kmer, raw_tag);
+        db->Put(rocksdb::WriteOptions(), raw_kmer, raw_tag);
         assert(status.ok());
     }
 
-    string get_annotation(string raw_kmer) {
-        string ret;
+    std::string get_annotation(std::string raw_kmer) {
+        std::string ret;
         assert(status.ok());
-        db->Get(ReadOptions(), raw_kmer, &ret);
+        db->Get(rocksdb::ReadOptions(), raw_kmer, &ret);
         assert(status.ok());
         return ret;
     }
 };
+
+} // namespace dbg_database

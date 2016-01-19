@@ -3,7 +3,7 @@
 
 #include <iostream>
 
-using namespace std;
+namespace dbg_database {
 
 class IDatabase
 {
@@ -18,14 +18,14 @@ public:
      * Does all the necessary work to associate a given k-mer with an
      * annotation
      */
-    // virtual int annotate_kmer(models::Kmer kmer, models::Annotation annotation) = 0;
-    virtual void annotate_kmer(string kmer, string raw_tag) = 0;
+    virtual void annotate_kmer(std::string kmer, std::string raw_tag) = 0;
 
-    // /**
-    //  * Looks up the annotation for a kmer.
-    //  */
-    // virtual models::Annotation get_annotation(models::Kmer kmer) = 0;
-    // virtual models::Annotation get_annotation(string raw_kmer) = 0;
+    /**
+     * Looks up the annotation for a kmer.
+     */
+    virtual std::string get_annotation(std::string raw_kmer) = 0;
 };
+
+} // dbg_database
 
 #endif

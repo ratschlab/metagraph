@@ -729,9 +729,7 @@ void DBG_succ::add_seq (seqan::String<Dna5F> seq) {
     //fprintf(stdout, "\nindex of CCT: %i\n", (int) index(test));
 }
 
-using namespace dbg_database;
-
-void DBG_succ::add_annotation_for_seq(IDatabase *db, seqan::String<seqan::Dna5> seq,
+void DBG_succ::add_annotation_for_seq(dbg_database::IDatabase *db, seqan::String<seqan::Dna5> seq,
                                       seqan::CharString annotation) {
     uint64_t seq_length = seqan::length(seq);
     uint64_t kmer_length = this->get_k();
@@ -744,6 +742,7 @@ void DBG_succ::add_annotation_for_seq(IDatabase *db, seqan::String<seqan::Dna5> 
             kmer[j] = (Dna5F) seq[i+j];
         }
 
+        // TODO, seqan::toCString(kmer)? Does this not play nice with a modified alphabet (e.g. Dna5F)?
         std::stringstream kmer_stream;
         kmer_stream << kmer;
 

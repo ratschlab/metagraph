@@ -18,4 +18,4 @@ typedef struct
     std::string name;
 } Kmer;
 
-}
+} // namespace dbg_database

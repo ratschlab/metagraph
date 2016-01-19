@@ -291,7 +291,7 @@ class DBG_succ {
 
     // register the annotation for kmers in the seq according to some
     // method method (either minimizers or other). TODO what method?
-    void add_annotation_for_seq(IDatabase *db, seqan::String<seqan::Dna5> seq, seqan::CharString annotation);
+    void add_annotation_for_seq(dbg_database::IDatabase *db, seqan::String<seqan::Dna5> seq, seqan::CharString annotation);
 
     /** This function takes a character c and appends it to the end of the graph sequence
      * given that the corresponding note is not part of the graph yet.

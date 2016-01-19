@@ -106,12 +106,12 @@ int main(int argc, char const ** argv) {
     //DBG_seqan* graph = new DBG_seqan(config.k);
     DBG_succ* graph = NULL;
 
-    string connect_string = config.db_connect_string;
+    std::string connect_string = config.db_connect_string;
     if (connect_string.empty()) {
         connect_string = "/tmp/debruin-graph-annotation-db";
     }
 
-    IDatabaseImpl *db = new IDatabaseImpl(connect_string);
+    dbg_database::IDatabaseImpl *db = new dbg_database::IDatabaseImpl(connect_string);
 
     if (! config.compare.empty()) {
         int cnt = 0;

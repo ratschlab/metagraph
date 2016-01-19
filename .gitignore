@@ -9,3 +9,4 @@ metagraph/external-libraries/libmaus2-lib
 metagraph/external-libraries/seqan-include
 !metagraph/external-libraries/README
 a.out
+*.gch
