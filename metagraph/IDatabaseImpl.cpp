@@ -20,7 +20,7 @@ using namespace rocksdb;
 class IDatabaseImpl : public IDatabase {
 
 private:
-    string dbpath = "/tmp/graph-annotation-db";
+    string dbpath;
     DB* db;
     Status status;
     

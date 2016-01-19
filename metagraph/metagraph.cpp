@@ -106,6 +106,13 @@ int main(int argc, char const ** argv) {
     //DBG_seqan* graph = new DBG_seqan(config.k);
     DBG_succ* graph = NULL;
 
+    string connect_string = config.db_connect_string;
+    if (connect_string.empty()) {
+        connect_string = "/tmp/debruin-graph-annotation-db";
+    }
+
+    IDatabaseImpl *db = new IDatabaseImpl(connect_string);
+
     if (! config.compare.empty()) {
         int cnt = 0;
         std::string token;
@@ -185,9 +192,7 @@ int main(int argc, char const ** argv) {
                         exit(1);
                     }
 
-                    // add k-mers of seq to the annotation database.
-                    IDatabaseImpl db (config.db_connect_string);
-                    graph->add_annotation_for_seq(&db, seq, id);
+                    graph->add_annotation_for_seq(db, seq, id);
                     
                     // add all k-mers of seq to the graph
                     graph->add_seq(seq);
@@ -209,6 +214,7 @@ int main(int argc, char const ** argv) {
     if (!config.outfbase.empty())
         graph->toFile();
 
+    delete db;
     delete graph;
 
     return 0;
