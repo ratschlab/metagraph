@@ -1,51 +1,44 @@
 #include <iostream>
 #include <assert.h>
 
-#include "MockDatabase.cpp"
+#include <vector>
+#include <string>
+#include <config.hpp>
 
+#include <dbg_succinct_libmaus.hpp>
+#include <MockDatabase.cpp>
+
+/**
+ * Tests that the mock database code is working properly.
+ */
 void test_MockDatabase() {
-    // dbg_database::MockDatabase db;
+    dbg_database::IDatabase *db = new dbg_database::MockDatabase();
 
-    // // test putting
-    // models::Kmer kmer;
-    // kmer.name = "TCGA";
-    // models::Annotation annotation;
-    // std::vector<models::Tag> tags;
-    // models::Tag tag1;
-    // models::Tag tag2;
-    // models::Tag tag3;
-    // tag1.name = "tag1";
-    // tag2.name = "tag2";
-    // tag3.name = "tag3";
-    // tags.push_back(tag1);
-    // tags.push_back(tag2);
-    // tags.push_back(tag3);
-    // annotation.tags = tags;
-    // assert(1 == db.annotate_kmer(kmer, annotation));
+    std::string kmer = "TCGA";
+    std::string annotation = "annotationA";
 
-    // // test getting
-    // models::Annotation gotten_annotation = db.get_annotation(kmer);
-    // auto sometags = gotten_annotation.tags;
-    // assert(3 == sometags.size());
-    // assert("tag1" == sometags[0].name);
+    db->annotate_kmer(kmer, annotation);
+    assert(annotation == db->get_annotation(kmer));
 
-    // // test putting more than one thing.
-    // models::Kmer kmer2;
-    // kmer2.name = "AAAA";
-    // assert(2 == db.annotate_kmer(kmer2, annotation));
+    auto datastore = ((dbg_database::MockDatabase *) db)->getDatastore();
+    assert(1 == datastore.size());
+}
 
-    // // test adding new annotations
-    // models::Annotation new_annotation;
-    // std::vector<models::Tag> new_tags;
-    // new_tags.push_back((models::Tag) {"tag1"});
-    // new_tags.push_back((models::Tag) {"new_tag1"});
-    // new_tags.push_back((models::Tag) {"new_tag2"});
-    // new_tags.push_back((models::Tag) {"new_tag3"});
-    // new_annotation.tags = new_tags;
-    // db.annotate_kmer(kmer, new_annotation);
-    // assert(6 == db.get_annotation(kmer).tags.size());
+/*
+ * Runs DBG graph construction on the given database and makes sure
+ * that the database is behaving properly.
+ */
+void test_Integration() {
+    CFG config;
+    DBG_succ* graph = new DBG_succ(config.k, config);
+    dbg_database::IDatabase *db = new dbg_database::MockDatabase();
+
+    seqan::String<seqan::Dna5> seq = "TCGA";
+    seqan::CharString annotation = "annotationA";
+    graph->add_annotation_for_seq(db, seq, annotation);
 }
 
 int main() {
     test_MockDatabase();
+    test_Integration();
 }

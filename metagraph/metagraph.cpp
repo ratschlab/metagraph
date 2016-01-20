@@ -111,7 +111,7 @@ int main(int argc, char const ** argv) {
         connect_string = "/tmp/debruin-graph-annotation-db";
     }
 
-    dbg_database::IDatabaseImpl *db = new dbg_database::IDatabaseImpl(connect_string);
+    dbg_database::IDatabase *db = new dbg_database::IDatabaseImpl(connect_string);
 
     if (! config.compare.empty()) {
         int cnt = 0;
@@ -166,6 +166,8 @@ int main(int argc, char const ** argv) {
         } else {
             graph = new DBG_succ(config.k, config);
         }
+        
+        std::cout << "HELLO WORLD" << std::endl;
 
         if (config.infbase.empty() || config.integrate) {
             // read from fasta stream 

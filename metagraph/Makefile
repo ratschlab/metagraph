@@ -27,8 +27,10 @@ metagraph_debug: metagraph.cpp dbg_succinct_libmaus.cpp dbg_succinct_libmaus.hpp
 database:
 	$(CXX) $(CXXFLAGS) -I $(ROCKSDB)/include IDatabaseImpl.cpp DatabaseCli.cpp -o database-cli $(ROCKSDB)/librocksdb.a -lpthread -lrt -lsnappy -lgflags -lz -lbz2 -llz4 -ljemalloc -DROCKSDB_PLATFORM_POSIX -DROCKSDB_LIB_IO_POSIX  -DOS_LINUX -fno-builtin-memcmp -DROCKSDB_FALLOCATE_PRESENT -DSNAPPY -DGFLAGS=gflags -DZLIB -DBZIP2 -DLZ4 -DROCKSDB_MALLOC_USABLE_SIZE -march=native -std=c++11  -DROCKSDB_PLATFORM_POSIX -DROCKSDB_LIB_IO_POSIX  -DOS_LINUX -fno-builtin-memcmp -DROCKSDB_FALLOCATE_PRESENT -DSNAPPY -DGFLAGS=gflags -DZLIB -DBZIP2 -DLZ4 -DROCKSDB_MALLOC_USABLE_SIZE -march=native $(LDFLAGS)
 
-database_test:
-	$(CXX) $(CXXFLAGS) TestDatabase.cpp MockDatabase.cpp $(LDFLAGS)
+database_test: 
+	$(CXX) $(CXXFLAGS) TestDatabase.cpp MockDatabase.cpp dbg_succinct_libmaus.cpp $(LDFLAGS)
+	./a.out
+	rm -f a.out
 
 clean:
 	rm -f a.out
