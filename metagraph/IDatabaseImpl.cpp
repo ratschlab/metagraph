@@ -41,16 +41,16 @@ public:
         status = rocksdb::DB::Open(options, dbpath, &db);
     };
 
-    void annotate_kmer(std::string raw_kmer, std::string raw_tag) {
+    void annotate_kmer(std::string kmer, std::string tag) {
         assert(status.ok());
-        db->Put(rocksdb::WriteOptions(), raw_kmer, raw_tag);
+        db->Put(rocksdb::WriteOptions(), kmer, tag);
         assert(status.ok());
     }
 
-    std::string get_annotation(std::string raw_kmer) {
+    std::string get_annotation(std::string kmer) {
         std::string ret;
         assert(status.ok());
-        db->Get(rocksdb::ReadOptions(), raw_kmer, &ret);
+        db->Get(rocksdb::ReadOptions(), kmer, &ret);
         assert(status.ok());
         return ret;
     }
