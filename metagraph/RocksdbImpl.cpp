@@ -17,7 +17,7 @@
 
 namespace dbg_database {
 
-class IDatabaseImpl : public IDatabase {
+class RocksdbImpl : public IDatabase {
 
 private:
     std::string dbpath;
@@ -35,7 +35,7 @@ private:
     }
 
 public:
-    IDatabaseImpl(std::string the_dbpath) : dbpath(the_dbpath) {
+    RocksdbImpl(std::string the_dbpath) : dbpath(the_dbpath) {
         rocksdb::Options options;
         options.create_if_missing = true;
         status = rocksdb::DB::Open(options, dbpath, &db);

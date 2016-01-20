@@ -20,7 +20,7 @@
 #include <config.hpp>
 
 #include <IDatabase.hpp>
-#include <IDatabaseImpl.cpp>
+#include <RocksdbImpl.cpp>
 
 // parse command line arguments and options
 seqan::ArgumentParser::ParseResult
@@ -110,7 +110,7 @@ int main(int argc, char const ** argv) {
         connect_string = "/tmp/debruin-graph-annotation-db";
     }
 
-    dbg_database::IDatabase *db = new dbg_database::IDatabaseImpl(connect_string);
+    dbg_database::IDatabase *db = new dbg_database::RocksdbImpl(connect_string);
 
     if (! config.compare.empty()) {
         int cnt = 0;
