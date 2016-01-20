@@ -35,7 +35,6 @@
 #include <config.hpp>
 #include <dbg_succinct_libmaus.hpp>
 
-#include "MockDatabase.hpp"
 #include "IDatabase.hpp"
 
 // define an extended alphabet for W --> somehow this does not work properly as expected

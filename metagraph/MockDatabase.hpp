@@ -6,7 +6,7 @@
 
 namespace dbg_database {
 
-class MockDatabase //: public IDatabase
+class MockDatabase : public IDatabase
 {
 
 private:
@@ -16,20 +16,9 @@ private:
 public:
     MockDatabase();
     
-    /**
-     * Does all the necessary work to associate a given k-mer with an
-     * annotation
-     */
-     int annotate_kmer(models::Kmer kmer, models::Annotation annotation);
+    void annotate_kmer(std::string kmer, std::string raw_tag);
 
-     int annotate_kmer(std::string kmer, std::string raw_tag);
-
-    /**
-     * Looks up the annotation for a kmer.
-     */
-    models::Annotation get_annotation(models::Kmer kmer);
-
-    models::Annotation get_annotation(std::string raw_kmer);
+    string get_annotation(std::string raw_kmer);
 
     /**
      * N.B. not in IDatabase.

@@ -17,7 +17,7 @@ debug: metagraph_debug
 
 # TODO cleanup rocks db deps.
 metagraph: metagraph.cpp dbg_succinct_libmaus.cpp dbg_succinct_libmaus.hpp config.hpp
-	$(CXX) $(CXXFLAGS) -I $(ROCKSDB)/include -o metagraph metagraph.cpp dbg_succinct_libmaus.cpp MockDatabase.hpp MockDatabase.cpp IDatabaseImpl.cpp $(ROCKSDB)/librocksdb.a -lpthread -lrt -lsnappy -lgflags -lz -lbz2 -llz4 -ljemalloc -DROCKSDB_PLATFORM_POSIX -DROCKSDB_LIB_IO_POSIX  -DOS_LINUX -fno-builtin-memcmp -DROCKSDB_FALLOCATE_PRESENT -DSNAPPY -DGFLAGS=gflags -DZLIB -DBZIP2 -DLZ4 -DROCKSDB_MALLOC_USABLE_SIZE -march=native -std=c++11  -DROCKSDB_PLATFORM_POSIX -DROCKSDB_LIB_IO_POSIX  -DOS_LINUX -fno-builtin-memcmp -DROCKSDB_FALLOCATE_PRESENT -DSNAPPY -DGFLAGS=gflags -DZLIB -DBZIP2 -DLZ4 -DROCKSDB_MALLOC_USABLE_SIZE -march=native $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) -I $(ROCKSDB)/include -o metagraph metagraph.cpp dbg_succinct_libmaus.cpp MockDatabase.cpp IDatabaseImpl.cpp $(ROCKSDB)/librocksdb.a -lpthread -lrt -lsnappy -lgflags -lz -lbz2 -llz4 -ljemalloc -DROCKSDB_PLATFORM_POSIX -DROCKSDB_LIB_IO_POSIX  -DOS_LINUX -fno-builtin-memcmp -DROCKSDB_FALLOCATE_PRESENT -DSNAPPY -DGFLAGS=gflags -DZLIB -DBZIP2 -DLZ4 -DROCKSDB_MALLOC_USABLE_SIZE -march=native -std=c++11  -DROCKSDB_PLATFORM_POSIX -DROCKSDB_LIB_IO_POSIX  -DOS_LINUX -fno-builtin-memcmp -DROCKSDB_FALLOCATE_PRESENT -DSNAPPY -DGFLAGS=gflags -DZLIB -DBZIP2 -DLZ4 -DROCKSDB_MALLOC_USABLE_SIZE -march=native $(LDFLAGS)
 
 metagraph_debug: metagraph.cpp dbg_succinct_libmaus.cpp dbg_succinct_libmaus.hpp config.hpp
 	$(CXX) $(CXXFLAGS) -o metagraph metagraph.cpp dbg_succinct_libmaus.cpp $(LDFLAGS) -D DBGDEBUG
@@ -28,9 +28,7 @@ database:
 	$(CXX) $(CXXFLAGS) -I $(ROCKSDB)/include IDatabaseImpl.cpp DatabaseCli.cpp -o database-cli $(ROCKSDB)/librocksdb.a -lpthread -lrt -lsnappy -lgflags -lz -lbz2 -llz4 -ljemalloc -DROCKSDB_PLATFORM_POSIX -DROCKSDB_LIB_IO_POSIX  -DOS_LINUX -fno-builtin-memcmp -DROCKSDB_FALLOCATE_PRESENT -DSNAPPY -DGFLAGS=gflags -DZLIB -DBZIP2 -DLZ4 -DROCKSDB_MALLOC_USABLE_SIZE -march=native -std=c++11  -DROCKSDB_PLATFORM_POSIX -DROCKSDB_LIB_IO_POSIX  -DOS_LINUX -fno-builtin-memcmp -DROCKSDB_FALLOCATE_PRESENT -DSNAPPY -DGFLAGS=gflags -DZLIB -DBZIP2 -DLZ4 -DROCKSDB_MALLOC_USABLE_SIZE -march=native $(LDFLAGS)
 
 database_test:
-	$(CXX) $(CXXFLAGS) TestDatabase.cpp MockDatabase.hpp MockDatabase.cpp $(LDFLAGS)
-	./a.out
-	rm -f a.out
+	$(CXX) $(CXXFLAGS) TestDatabase.cpp MockDatabase.cpp $(LDFLAGS)
 
 clean:
 	rm -f a.out
