@@ -86,7 +86,6 @@ parseCommandLine(CFG & config, int argc, char const ** argv)
 }
 
 int main(int argc, char const ** argv) {
-    
     typedef seqan::ModifiedAlphabet<seqan::Dna5, seqan::ModExpand<'X'> > Dna5F; 
 
     // command line parsing
@@ -166,8 +165,6 @@ int main(int argc, char const ** argv) {
         } else {
             graph = new DBG_succ(config.k, config);
         }
-        
-        std::cout << "HELLO WORLD" << std::endl;
 
         if (config.infbase.empty() || config.integrate) {
             // read from fasta stream 
