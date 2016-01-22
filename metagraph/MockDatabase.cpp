@@ -31,8 +31,10 @@ public:
         datastore[kmer] = tag;
     };
 
-    std::string get_annotation(std::string kmer) {
-        return datastore[kmer];
+    std::vector<std::string> get_annotation(std::string kmer) {
+        std::vector<std::string> ret;
+        ret.push_back(kmer);
+        return ret;
     };
 
     /**

@@ -23,7 +23,7 @@ public:
     /**
      * Looks up the annotation for a kmer.
      */
-    virtual std::string get_annotation(std::string raw_kmer) = 0;
+    virtual std::vector<std::string> get_annotation(std::string raw_kmer) = 0;
 };
 
 } // dbg_database

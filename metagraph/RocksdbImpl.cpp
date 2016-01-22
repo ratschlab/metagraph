@@ -37,29 +37,6 @@ private:
         return ret;
     }
 
-    void partition(std::vector<std::string> columns) {
-        rocksdb::Options options;
-        options.create_if_missing = true;
-
-        std::vector<rocksdb::ColumnFamilyDescriptor> column_families;
-        column_families.push_back(rocksdb::ColumnFamilyDescriptor(rocksdb::kDefaultColumnFamilyName,
-                                                                           rocksdb::ColumnFamilyOptions()));
-        // make the partition
-        for (auto it = columns.begin(); it < columns.end(); ++it) {
-            rocksdb::ColumnFamilyHandle* cf;
-            status = db->CreateColumnFamily(rocksdb::ColumnFamilyOptions(), *it, &cf);
-            column_families.push_back(rocksdb::ColumnFamilyDescriptor(*it, rocksdb::ColumnFamilyOptions()));
-            delete cf;
-        }
-
-        delete db;
-
-        // reopen with new column families
-        std::vector<rocksdb::ColumnFamilyHandle*> handles;
-        status = rocksdb::DB::Open(options, dbpath, column_families, &handles, &db);
-        assert(status.ok());
-    }
-
 public:
     RocksdbImpl(std::string the_dbpath) : dbpath(the_dbpath) {
         rocksdb::Options options;
@@ -68,12 +45,6 @@ public:
 
         std::vector<std::string> existing_column_families;
         rocksdb::DB::ListColumnFamilies(options, dbpath, &existing_column_families);
-        // if (existing_column_families.size() == 1) {
-        //     std::vector<std::string> column_names;
-        //     column_names.push_back(ANNOTATION_COLUMN);
-        //     column_names.push_back(KMER_COLUMN);
-        //     partition(column_names);
-        // }
     };
 
     void annotate_kmer(std::string kmer, std::string tag) {
@@ -86,25 +57,25 @@ public:
         assert(status.ok());
     }
 
-    std::string get_annotation(std::string kmer) {
+    std::vector<std::string> get_annotation(std::string kmer) {
         std::string ignored;
         db->Get(rocksdb::ReadOptions(), kmer, &ignored);
 
-        std::cout << "get_annotation: " << kmer << std::endl;
-        std::vector<std::string> ret;
-        ret.push_back("FOOBAR");
-
         auto it = db->NewIterator(rocksdb::ReadOptions());
         it->Seek(kmer);
-        std::cout << it->key().ToString() << std::endl;
-        // iter->Next();
-        // for (iter->Seek(kmer); iter->Valid(); iter->Next()) {
-        // std::cout << "within iter" << std::endl;
-        //     // do something
-        //     iter->key();
-        // }
+
+        std::vector<std::string> ret;
+        if (! it->Valid()) {
+            return ret;
+        }
+
+        for (it->Seek(kmer);
+             it->Valid() && (it->key().ToString().compare(0, kmer.length(), kmer) == 0);
+             it->Next()) {
+            ret.push_back(it->key().ToString().substr(kmer.length()+1));
+        }
         
-        return ret[0];
+        return ret;
     }
 };
 

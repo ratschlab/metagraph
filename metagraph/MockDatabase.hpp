@@ -16,7 +16,7 @@ public:
     
     void annotate_kmer(std::string kmer, std::string raw_tag);
 
-    string get_annotation(std::string raw_kmer);
+    std::vector<std::string> get_annotation(std::string raw_kmer);
 
     /**
      * N.B. not in IDatabase.
