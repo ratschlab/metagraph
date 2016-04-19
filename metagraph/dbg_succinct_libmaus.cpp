@@ -1685,6 +1685,31 @@ void DBG_succ::merge(DBG_succ* G) {
     update_F(this->get_node_end_value(p), true);
 }
 
+/* 
+ * Helper function to detemrine the bin boundaries, given 
+ * a number of threads.
+ */
+std::vector<uint64_t> DBG_succ::get_bins(uint64_t threads) {
+
+}
+
+/*
+ * Distribute the merging of two graph structures G1 and G2 over
+ * bins, such that n parallel threads are used. The number of bins
+ * is determined dynamically.
+ */
+void DBG_succ::merge_parallel(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint64_t n1, uint64_t n2, uint64_t threads) {
+    
+    std::vector<uint64_t> bins = get_bins(threads);
+}
+
+/*
+ * Helper function for parallel merge, representing the work of a
+ * single worker thread.
+ */
+void *DBG_succ::merge_parallel_helper(void *arg) {
+
+}
 
 /*
  * Given two pointers to graph structures G1 and G2, this function 
@@ -1692,24 +1717,30 @@ void DBG_succ::merge(DBG_succ* G) {
  */
 void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint64_t n1, uint64_t n2) {
 
-    // positions in the graph for respective traversal
-    n1 = (n1 == 0) ? G1->get_size() : n1;
-    n2 = (n2 == 0) ? G2->get_size() : n2;
-
-    uint64_t added = 0;
-    uint64_t last_added_k = 0;
-    DBG_succ* last_added_G = NULL;
-
-    // check if we can merge the given graphs
+    // check whether we can merge the given graphs
     if (G1->get_k() != G2->get_k()) {
         fprintf(stderr, "Graphs have different k-mer lengths - cannot be merged!\n");
         exit(1);
     }
     
+    // positions in the graph for respective traversal
+    n1 = (n1 == 0) ? G1->get_size() : n1;
+    n2 = (n2 == 0) ? G2->get_size() : n2;
+
+    // keep track on how many nodes we added and from which graph the 
+    // last node originated
+    uint64_t added = 0;
+    uint64_t last_added_k = 0;
+    DBG_succ* last_added_G = NULL;
+
     bool k1_smaller, k2_smaller, advance_k1, advance_k2, insert_k1, insert_k2, identical;
 
     std::string k1_str, k2_str;
     
+    // Send one pointer running through each of the two graphs, where k1 runs through 
+    // G1 and k2 through G2. At each step, compare the two graph nodes at positions 
+    // k1 and k2 with each other. Insert the lexicographically smaller one into the 
+    // common merge graph G. 
     while (k1 < n1 || k2 < n2) {
 
         if (added > 0 && added % 1000 == 0) {
