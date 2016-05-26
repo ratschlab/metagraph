@@ -11,7 +11,7 @@ Config::Config() {
 Config::Config(int argc, const char *argv[]) {
 
     init();
-    int i = 0;
+    int i = 1;
     if (argc == 1) {
         print_usage(std::string(argv[0]));
         exit(-1);

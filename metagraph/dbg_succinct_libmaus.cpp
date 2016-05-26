@@ -1972,7 +1972,7 @@ void DBG_succ::print_seq() {
             fprintf(stdout, "$");
         else
             //std::cout << Dna5F(((*W)[i] % alph_size) - 1);
-            std::cout << get_alphabet_symbol(((*W)[i] % alph_size) - 1);
+            std::cout << get_alphabet_symbol((*W)[i] % alph_size);
     }
     std::cout << std::endl;
 
@@ -1992,7 +1992,7 @@ void DBG_succ::print_seq() {
                 std::cout << "$";
             else
                 //std::cout << Dna5F((j % alph_size) - 1);
-                std::cout << get_alphabet_symbol((j % alph_size) - 1);
+                std::cout << get_alphabet_symbol(j % alph_size);
         }
         std::cout << std::endl;
     }
