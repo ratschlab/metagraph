@@ -11,11 +11,18 @@
 #include <vector>
 #include <map>
 #include <stack>
+#include <queue>
 #include <algorithm>
 #include <assert.h>
 #include <iostream>
 #include <sstream>
 #include <fstream>
+#include <string>
+#include <zlib.h>
+
+#include "kseq.h"
+
+KSEQ_INIT(gzFile, gzread)
 
 /**
  * We use libmaus 2 for representing dynamic succint data structures
@@ -25,19 +32,13 @@
 #include <libmaus2/wavelet/DynamicWaveletTree.hpp>
 #include <libmaus2/digest/md5.hpp>
 
-/** 
- * We use seqan for an efficient representation of our alphabet.
- */
-#include <seqan/sequence.h>
-#include <seqan/basic.h>
-#include <seqan/seq_io.h>
-
-#include <config.hpp>
-#include <datatypes.hpp>
-#include <dbg_succinct_libmaus.hpp>
+#include "config.hpp"
+#include "datatypes.hpp"
+#include "dbg_succinct_libmaus.hpp"
+// use Heng Li's kseq structure for string IO
+#include "kseq.h"
 
 // define an extended alphabet for W --> somehow this does not work properly as expected
-typedef seqan::ModifiedAlphabet<seqan::Dna5, seqan::ModExpand<'X'> > Dna5F; 
 typedef uint64_t TAlphabet;
 typedef DBG_succ::BranchInfo BranchInfo;
 typedef DBG_succ::BranchInfoMerge BranchInfoMerge;
@@ -109,12 +110,14 @@ size_t k;
 uint64_t p;
 // alphabet size
 size_t alph_size = 7;
+// alphabet
+const char alphabet[] = "$ACGTNX$ACGTNXn";
 
 // infile base when loaded from file
 std::string infbase;
 
 // config object
-CFG config;
+//CFG config;
 
 
 #ifdef DBGDEBUG
@@ -128,7 +131,7 @@ CFG config;
 // CONSTRUCTORS
 //
 //
-DBG_succ::DBG_succ(size_t k_, CFG config_, bool sentinel) : 
+DBG_succ::DBG_succ(size_t k_, Config* config_, bool sentinel) : 
     k(k_),
     config(config_) {
 
@@ -152,7 +155,7 @@ DBG_succ::DBG_succ(size_t k_, CFG config_, bool sentinel) :
     }
 }
 
-DBG_succ::DBG_succ(std::string infbase_, CFG config_) : 
+DBG_succ::DBG_succ(std::string infbase_, Config* config_) : 
     infbase(infbase_),
     config(config_) {
 
@@ -421,14 +424,14 @@ uint64_t DBG_succ::indegree(uint64_t i) {
  * Given a node label s, this function returns the index
  * of the corresponding node, if this node exists and 0 otherwise.
  */
-uint64_t DBG_succ::index(seqan::String<Dna5F> &s_) {
-    TAlphabet s = (TAlphabet) seqan::ordValue(s_[0]) + 1;
+uint64_t DBG_succ::index(std::string &s_) {
+    TAlphabet s = get_alphabet_number(s_[0]);
     // init range
     uint64_t rl = succ_last(F[s] + 1);
     uint64_t ru = F[s + 1]; // upper bound
     // update range iteratively while scanning through s
-    for (uint64_t i = 1; i < seqan::length(s_); i++) {
-        s = (TAlphabet) seqan::ordValue(s_[i]) + 1;
+    for (uint64_t i = 1; i < s_.length(); i++) {
+        s = get_alphabet_number(s_[i]);
         rl = std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size));
         if (rl >= W->n)
             return 0;
@@ -448,7 +451,7 @@ uint64_t DBG_succ::index(seqan::String<Dna5F> &s_) {
  * max_distance, this function returns all nodes with labels at most
  * max_distance many edits away from str.
  */
-std::vector<HitInfo> DBG_succ::index_fuzzy(seqan::String<seqan::Dna5> &str, uint64_t max_distance) {
+std::vector<HitInfo> DBG_succ::index_fuzzy(std::string &str, uint64_t max_distance) {
     
     std::vector<HitInfo> result; 
     std::priority_queue<HitInfo, std::vector<HitInfo>, HitInfoCompare> hits;
@@ -460,7 +463,7 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(seqan::String<seqan::Dna5> &str, uint
     // once the end of the pattern is readched, add match to results
     
     // init match/mismatch to first pattern position
-    TAlphabet s = (TAlphabet) seqan::ordValue(str[0]) + 1;
+    TAlphabet s = get_alphabet_number(str[0]);
     for (TAlphabet b = 1; b < 5; ++b) {
         rl = succ_last(F[b] + 1);
         ru = F[b + 1];
@@ -470,8 +473,8 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(seqan::String<seqan::Dna5> &str, uint
         hits.push(HitInfo(rl, ru, 1, 1, (uint64_t) (b != s), std::string(1, get_alphabet_symbol(b)), tmp));
 
         // opening/extending a gap in the pattern starting with the first position
-        for (size_t p = 1; p < seqan::length(str) - 1; ++p) {
-            TAlphabet ss = (TAlphabet) seqan::ordValue(str[p]) + 1;
+        for (size_t p = 1; p < str.length() - 1; ++p) {
+            TAlphabet ss = get_alphabet_number(str[p]);
             if ((p + (b != ss)) > max_distance)
                 break;
             hits.push(HitInfo(rl, ru, p + 1, 1, p + (b != ss), std::string(p, 'd') + std::string(1, get_alphabet_symbol(b)), tmp));
@@ -486,7 +489,7 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(seqan::String<seqan::Dna5> &str, uint
             hits.pop();
             //std::cout << "loaded: rl " << curr_hit.rl << " ru " << curr_hit.ru << " dist " << curr_hit.distance << std::endl;
 
-            if (curr_hit.str_pos < seqan::length(str)) {
+            if (curr_hit.str_pos < str.length()) {
             
                 // opening/extending a gap in the graph, leaving current pattern position unmatched
                 if (curr_hit.distance < max_distance) {
@@ -494,7 +497,7 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(seqan::String<seqan::Dna5> &str, uint
                     //std::cout << "b) " << curr_hit.cigar << " adding '-'" << std::endl;
                 }
 
-                s = (TAlphabet) seqan::ordValue(str[curr_hit.str_pos]) + 1;
+                s = get_alphabet_number(str[curr_hit.str_pos]);
 
                 // has the number of matches exceeded the node length?
                 // there are three possible scenarios for extension of the path:
@@ -726,7 +729,8 @@ bool DBG_succ::get_last(uint64_t k) {
 }
 
 char DBG_succ::get_alphabet_symbol(uint64_t s) {
-    switch (s) {
+    return s < strlen(alphabet) ? alphabet[s] : alphabet[14];
+    /*switch (s) {
         case 0: 
             return '$';
         case 1:
@@ -749,32 +753,28 @@ char DBG_succ::get_alphabet_symbol(uint64_t s) {
             return 'X';
         default:
             return 'n';
-    }
+    }*/
 }
 
-std::vector<uint64_t> DBG_succ::align(seqan::String<seqan::Dna5> seq) {
-  uint64_t seq_length = seqan::length(seq);
+std::vector<uint64_t> DBG_succ::align(kstring_t seq) {
+
   uint64_t kmer_length = this->get_k();
-  uint64_t no_kmers_in_seq = seq_length - kmer_length + 1;
+  uint64_t no_kmers_in_seq = seq.l - kmer_length + 1;
 
   std::vector<uint64_t> indices (no_kmers_in_seq, 0);
 
   for (uint64_t i = 0; i < no_kmers_in_seq; ++i) {
-    seqan::String<Dna5F> kmer;
-    seqan::resize(kmer, kmer_length);
-    for (uint64_t j = 0; j < kmer_length; ++j) {
-      kmer[j] = (Dna5F) seq[i+j];
-    }
-
+  // TODO make sure that kmer is shorter than seq.l
+    std::string kmer(seq.s + i, seq.s + i + kmer_length);
     indices[i] = this->index(kmer);
   }
   
   return indices;
 }
 
-std::vector<std::vector<HitInfo> > DBG_succ::align_fuzzy(seqan::String<seqan::Dna5> seq, uint64_t alignment_length, uint64_t max_distance) {
+std::vector<std::vector<HitInfo> > DBG_succ::align_fuzzy(kstring_t seq, uint64_t alignment_length, uint64_t max_distance) {
 
-    size_t seq_length = seqan::length(seq);
+    size_t seq_length = seq.l;
     std::vector<std::vector<HitInfo> > hit_list;
 
     if (alignment_length == 0) {
@@ -784,13 +784,9 @@ std::vector<std::vector<HitInfo> > DBG_succ::align_fuzzy(seqan::String<seqan::Dn
         alignment_length = alignment_length < seq_length ? alignment_length : seq_length;
 
         for (uint64_t i = 0; i < seq_length - alignment_length + 1; ++i) {
-            seqan::String<seqan::Dna5> kmer = seqan::infix(seq, i, i + alignment_length);
+            std::string kmer(seq.s + i, seq.s + i + alignment_length);
             hit_list.push_back(this->index_fuzzy(kmer, max_distance));
 
-       /* seqan::resize(kmer, kmer_length);
-        for (uint64_t j = 0; j < kmer_length; ++j) {
-          kmer[j] = (Dna5F) seq[i+j];
-        }*/
         }
     }
     return hit_list;
@@ -846,8 +842,26 @@ void DBG_succ::replaceW(size_t i, TAlphabet val) {
     W->insert(val, i);
 }
 
+
+TAlphabet DBG_succ::get_alphabet_number(char s) {
+
+     TAlphabet nt_lookup[128] = {
+        5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5, 
+        5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5, 
+        5, 5, 5, 5,  0, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+        5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5, 
+        5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5, 
+        5, 5, 5, 5,  4, 4, 5, 5,  6, 5, 5, 5,  5, 5, 5, 5, 
+        5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5, 
+        5, 5, 5, 5,  4, 4, 5, 5,  6, 5, 5, 5,  5, 5, 5, 5 
+    };
+
+    return nt_lookup[(int) s];
+}
+
+
 // add a full sequence to the graph
-void DBG_succ::add_seq (seqan::String<Dna5F> seq) {
+void DBG_succ::add_seq (kstring_t &seq) {
 
     if (debug) {
         print_seq();
@@ -870,7 +884,7 @@ void DBG_succ::add_seq (seqan::String<Dna5F> seq) {
     /** Iterate over input sequence and enumerae all
      * k-mers.
      */
-    for (uint64_t i = 0; i < length(seq); ++i) {
+    for (uint64_t i = 0; i < seq.l; ++i) {
         if (i > 0 && i % 1000 == 0) {
             std::cout << "." << std::flush;
             if (i % 10000 == 0) {
@@ -883,7 +897,7 @@ void DBG_succ::add_seq (seqan::String<Dna5F> seq) {
         //    cerr << "seq[i] ord " << ordValue(seq[i]) + 1 << std::endl;
         // }
 
-        append_pos((TAlphabet) ordValue(seq[i]) + 1);
+        append_pos(get_alphabet_number(seq.s[i]));
 
         if (debug) {
             print_seq();
@@ -1085,23 +1099,23 @@ BranchInfoMerge DBG_succ::pop_branch(std::stack<BranchInfoMerge> &branchnodes, u
 }
 
 
-bool DBG_succ::finish_sequence(seqan::String<Dna5F> &sequence, uint64_t seqId, std::ofstream &SQLstream) {
-    if (seqan::length(sequence) > 0) {
+bool DBG_succ::finish_sequence(std::string &sequence, uint64_t seqId, std::ofstream &SQLstream) {
+    if (sequence.length() > 0) {
         if (seqId == 1)
-            SQLstream << "INSERT INTO FASTA VALUES (1, '" << config.sqlfbase << ".fa');" << std::endl;
+            SQLstream << "INSERT INTO FASTA VALUES (1, '" << config->sqlfbase << ".fa');" << std::endl;
         std::ofstream stream;
         if (seqId == 1)
-            stream.open((config.sqlfbase + ".fa").c_str());
+            stream.open((config->sqlfbase + ".fa").c_str());
         else
-            stream.open((config.sqlfbase + ".fa").c_str(), std::ofstream::app);
+            stream.open((config->sqlfbase + ".fa").c_str(), std::ofstream::app);
         stream << ">seq" << seqId << std::endl;
         uint64_t i = 0;
-        while ((i + 80) < seqan::length(sequence)) {
-            stream << seqan::infix(sequence, i, i+80) << std::endl;
+        while ((i + 80) < sequence.length()) {
+            stream << sequence.substr(i, 80) << std::endl;
             i += 80;
         }
-        if (i != seqan::length(sequence))
-            stream << seqan::suffix(sequence, i) << std::endl;
+        if (i != sequence.length())
+            stream << sequence.substr(i) << std::endl;
         stream.close();
 
         if (debug)
@@ -1111,8 +1125,8 @@ bool DBG_succ::finish_sequence(seqan::String<Dna5F> &sequence, uint64_t seqId, s
         std::ostringstream test;
         test << sequence;
         libmaus2::util::MD5::md5(test.str(), md5);
-        SQLstream << "INSERT INTO Sequence VALUES (" << seqId << ", 1, 'seq" << seqId << "', '" << md5 << "', " << seqan::length(sequence) << ");" << std::endl;
-        seqan::clear(sequence);
+        SQLstream << "INSERT INTO Sequence VALUES (" << seqId << ", 1, 'seq" << seqId << "', '" << md5 << "', " << sequence.length() << ");" << std::endl;
+        sequence.clear();
         return true;
     } else {
         return false;
@@ -1128,7 +1142,7 @@ size_t DBG_succ::traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<
     for (std::vector<bool>::iterator it = visited.begin(); it != visited.end(); ++it) {
         *it = false;
     }
-    seqan::String<Dna5F> sequence;
+    std::string sequence;
     // for nodes with indegree > 1 we store sequence and index of the 
     // sequence that visited them, so we know where to anchor branches into it
     std::map<uint64_t, std::pair<uint64_t, uint64_t> > nodeId2seqPos; 
@@ -1169,11 +1183,7 @@ size_t DBG_succ::traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<
             seqPos += isFirst ? 0 : 1;
             isFirst = false;
             val = get_node_end_value(nodeId);
-            if (val % alph_size == 0) {
-                seqan::append(sequence, "$");
-            } else {
-                seqan::append(sequence, Dna5F((val % alph_size) - 1));
-            }
+            sequence.append(1, get_alphabet_symbol(val % alph_size));
             // store seq position of this node (we will join to it later)
             if (indegree(nodeId) > 1) {
                 nodeId2seqPos.insert(std::make_pair(nodeId, std::make_pair(seqId, seqPos)));
@@ -1186,7 +1196,7 @@ size_t DBG_succ::traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<
             // the next node is new
             if (!visited.at(next)) {
                 if (joinOpen) {
-                    if (length(sequence) > 0) {
+                    if (sequence.length() > 0) {
                         finish_sequence(sequence, seqCnt++, SQLstream);
                     }
                     seqId = seqCnt;
@@ -1241,7 +1251,7 @@ size_t DBG_succ::traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<
                                 fprintf(stderr, " -- pushed %lu : seqId %lu seqPos %lu lastEdge %lu -- ", nodeId, seqId, seqPos, lastEdge); 
                         }
                         if (joinOpen) {
-                            if (length(sequence) > 0) {
+                            if (sequence.length() > 0) {
                                 finish_sequence(sequence, seqCnt++, SQLstream);
                             }
                             seqId = seqCnt;
@@ -1287,7 +1297,7 @@ size_t DBG_succ::traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<
         out = outdegree(nodeId);
     }
     // for completeness
-    if (seqan::length(sequence) > 0)
+    if (sequence.length() > 0)
         finish_sequence(sequence, seqCnt++, SQLstream);
     else
         seqCnt--;
@@ -1306,7 +1316,7 @@ size_t DBG_succ::traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<
     return seqCnt;
 }
 
-void DBG_succ::allelesFromSeq(seqan::String<Dna5F>seq, unsigned int f, std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream, bool isRefRun, size_t seqNum) {
+void DBG_succ::allelesFromSeq(kstring_t &seq, unsigned int f, std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream, bool isRefRun, size_t seqNum) {
     
     uint64_t nodeId = 1;
     uint64_t seqId = 1;
@@ -1328,7 +1338,7 @@ void DBG_succ::allelesFromSeq(seqan::String<Dna5F>seq, unsigned int f, std::vect
         for (size_t i = 0; i < seqNum; ++i)
             isRef.push_back(false);
     }
-    if (config.verbose)
+    if (config->verbose)
         fprintf(stderr, "processing alleles for file %u\n", f);
 
     while (true) {
@@ -1340,18 +1350,18 @@ void DBG_succ::allelesFromSeq(seqan::String<Dna5F>seq, unsigned int f, std::vect
             currStart++;
             continue;
         }
-        seqVal = ordValue(seq[seqPos]) + 1;
+        seqVal = get_alphabet_number(seq.s[seqPos]);
             
         //fprintf(stderr, "nodeVal %lu seqVal %lu nodeId %lu seqId %lu seqPos %lu alleleSeqPos %lu\n", nodeVal, seqVal, nodeId, seqId, seqPos, alleleSeqPos);
         assert(nodeVal % alph_size == 6 || nodeVal % alph_size == seqVal);
-        if (seqPos + 1 == length(seq))
+        if (seqPos + 1 == seq.l)
             break;
         if (nodeVal % alph_size != 6) {
             seqPos++;
         } else {
             currStart++;
         }
-        seqValNext = ordValue(seq[seqPos]) + 1;
+        seqValNext = get_alphabet_number(seq.s[seqPos]) + 1;
 
         // find edge to next node
         out = outdegree(nodeId);
@@ -1992,7 +2002,8 @@ void DBG_succ::print_seq() {
         if ((*W)[i] % alph_size == 0)
             fprintf(stdout, "$");
         else
-            std::cout << Dna5F(((*W)[i] % alph_size) - 1);
+            //std::cout << Dna5F(((*W)[i] % alph_size) - 1);
+            std::cout << get_alphabet_symbol((*W)[i] % alph_size);
     }
     std::cout << std::endl;
 
@@ -2011,7 +2022,8 @@ void DBG_succ::print_seq() {
             if (j % alph_size == 0)
                 std::cout << "$";
             else
-                std::cout << Dna5F((j % alph_size) - 1);
+                //std::cout << Dna5F((j % alph_size) - 1);
+                std::cout << get_alphabet_symbol(j % alph_size);
         }
         std::cout << std::endl;
     }
@@ -2072,7 +2084,7 @@ void DBG_succ::toSQL() {
 
     // open sql filestream
     std::ofstream SQLstream;
-    SQLstream.open((config.sqlfbase + ".sql").c_str());
+    SQLstream.open((config->sqlfbase + ".sql").c_str());
 
     // traverse the graph, thereby filling joins vector, branchMap and 
     // writing the sequences to individual fasta files
@@ -2091,48 +2103,46 @@ void DBG_succ::toSQL() {
 
     // for each input sequence traverse the graph once more and
     // collect allele path information 
-    seqan::String<Dna5F> seq;
-    seqan::CharString id;
-    seqan::SequenceStream stream;
-    for (unsigned int f = 0; f < seqan::length(config.fname); ++f) {
+    for (unsigned int f = 0; f < config->fname.size(); ++f) {
 
         // first traversal is for reference info
         if (f == 0) {
             // open stream to fasta file
-            open(stream, seqan::toCString(config.fname.at(f)), seqan::SequenceStream::READ, seqan::SequenceStream::FASTA);
-            if (!seqan::isGood(stream))
-                std::cerr << "ERROR while opening input file " << config.fname.at(f) << std::endl;
+            gzFile input_p = gzopen(config->fname.at(f).c_str(), "r");
+            kseq_t *stream = kseq_init(input_p);
 
-            while (!seqan::atEnd(stream)) {
-                if (seqan::readRecord(id, seq, stream) != 0)
-                    std::cerr << "ERROR while reading from " << config.fname.at(f) << std::endl;
-                allelesFromSeq(seq, f, joins, branchMap, SQLstream, true, seqNum);
+            if (stream != NULL)
+                std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
+
+            while (kseq_read(stream) >= 0) {
+                allelesFromSeq(stream->seq, f, joins, branchMap, SQLstream, true, seqNum);
             }
-            close(stream);
+            kseq_destroy(stream);
+            gzclose(input_p);
 
             // open variant set
             SQLstream << "INSERT INTO VariantSet VALUES (1, 1, 'deBruijnGraph');" << std::endl;
         }
         // open stream to fasta file
-        open(stream, seqan::toCString(config.fname.at(f)), seqan::SequenceStream::READ, seqan::SequenceStream::FASTA);
-        if (!seqan::isGood(stream))
-            std::cerr << "ERROR while opening input file " << config.fname.at(f) << std::endl;
+        gzFile input_p = gzopen(config->fname.at(f).c_str(), "r");
+        kseq_t *stream = kseq_init(input_p);
+        if (stream != NULL)
+            std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
 
-        while (!seqan::atEnd(stream)) {
-            if (seqan::readRecord(id, seq, stream) != 0)
-                std::cerr << "ERROR while reading from " << config.fname.at(f) << std::endl;
-            allelesFromSeq(seq, f, joins, branchMap, SQLstream);
-        }
-        close(stream);
+        while (kseq_read(stream) >= 0) 
+            allelesFromSeq(stream->seq, f, joins, branchMap, SQLstream);
+
+        kseq_destroy(stream);
+        gzclose(input_p);
     }
 
     // write call set (one per input file)
-    for (unsigned int f = 0; f < seqan::length(config.fname); ++f)
-        SQLstream << "INSERT INTO CallSet VALUES (" << f+1 <<", '" << config.fname.at(f) << "', 'DBG" << f + 1 << "');" << std::endl;
-    for (unsigned int f = 0; f < seqan::length(config.fname); ++f)
+    for (unsigned int f = 0; f < config->fname.size(); ++f)
+        SQLstream << "INSERT INTO CallSet VALUES (" << f+1 <<", '" << config->fname.at(f) << "', 'DBG" << f + 1 << "');" << std::endl;
+    for (unsigned int f = 0; f < config->fname.size(); ++f)
         SQLstream << "INSERT INTO VariantSet_CallSet_Join VALUES (1, " << f + 1 << ");" << std::endl;
-    for (unsigned int f = 0; f < seqan::length(config.fname); ++f) {
-        for (unsigned int ff = 0; ff < seqan::length(config.fname); ++ff) {
+    for (unsigned int f = 0; f < config->fname.size(); ++f) {
+        for (unsigned int ff = 0; ff < config->fname.size(); ++ff) {
             if (f == ff)
                 SQLstream << "INSERT INTO AlleleCall VALUES (" << ff + 1 << ", " << f + 1 << ", 1);" << std::endl;
             else
@@ -2150,17 +2160,17 @@ void DBG_succ::toSQL() {
 void DBG_succ::toFile() {
 
     // write Wavelet Tree
-    std::ofstream outstream((config.outfbase + ".W.dbg").c_str());
+    std::ofstream outstream((config->outfbase + ".W.dbg").c_str());
     W->serialise(outstream);
     outstream.close();
 
     // write last array
-    outstream.open((config.outfbase + ".l.dbg").c_str());
+    outstream.open((config->outfbase + ".l.dbg").c_str());
     last->serialise(outstream);
     outstream.close();
 
     // write F values and k
-    outstream.open((config.outfbase + ".F.dbg").c_str());
+    outstream.open((config->outfbase + ".F.dbg").c_str());
     outstream << ">F" << std::endl;
     for (size_t i = 0; i < F.size(); ++i)
         outstream << F.at(i) << std::endl;

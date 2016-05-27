@@ -1,20 +1,19 @@
 #ifndef __DBG_SUCCINCT_LIBM_HPP__
 #define __DBG_SUCCINCT_LIBM_HPP__
 
+#include <zlib.h>
+
 #include <libmaus2/bitbtree/bitbtree.hpp>
 #include <libmaus2/wavelet/DynamicWaveletTree.hpp>
 
-#include <seqan/sequence.h>
-#include <seqan/basic.h>
-#include <seqan/seq_io.h>
+#include "config.hpp"
+#include "datatypes.hpp"
 
-#include <config.hpp>
-#include <datatypes.hpp>
+#include "kseq.h"
 
 class DBG_succ {
 
     // define an extended alphabet for W --> somehow this does not work properly as expected
-    typedef seqan::ModifiedAlphabet<seqan::Dna5, seqan::ModExpand<'X'> > Dna5F; 
     typedef uint64_t TAlphabet;
 
     public:
@@ -39,7 +38,7 @@ class DBG_succ {
     std::string infbase;
 
     // config object
-    CFG config;
+    Config* config;
 
 #ifdef DBGDEBUG
     bool debug = true;
@@ -66,12 +65,12 @@ class DBG_succ {
 
     // construct empty graph instance
     DBG_succ(size_t k_,
-             CFG config_, 
+             Config* config_, 
              bool sentinel = true);
 
     // load graph instance from a provided file name base
     DBG_succ(std::string infbase_, 
-             CFG config_);
+             Config* config_);
     
     //
     //
@@ -181,11 +180,11 @@ class DBG_succ {
      * Given a node label s, this function returns the index
      * of the corresponding node, if this node exists and 0 otherwise.
      */
-    uint64_t index(seqan::String<Dna5F> &s_);
+    uint64_t index(std::string &s_);
 
     uint64_t index(std::deque<TAlphabet> str);
 
-    std::vector<HitInfo> index_fuzzy(seqan::String<seqan::Dna5> &str, uint64_t eops);
+    std::vector<HitInfo> index_fuzzy(std::string &str, uint64_t eops);
 
     std::pair<uint64_t, uint64_t> index_range(std::deque<TAlphabet> str);
 
@@ -263,13 +262,16 @@ class DBG_succ {
     // Given the alphabet index return the corresponding symbol
     char get_alphabet_symbol(uint64_t s);
 
+    // Given the alphabet character return its corresponding number
+    TAlphabet get_alphabet_number(char s);
+
     /**
      * Breaks the seq into k-mers and searches for the index of each
      * k-mer in the graph. Returns these indices.
      */
-    std::vector<uint64_t> align(seqan::String<seqan::Dna5> seq);
+    std::vector<uint64_t> align(kstring_t seq);
 
-    std::vector<std::vector<HitInfo> > align_fuzzy(seqan::String<seqan::Dna5> seq, uint64_t max_distance = 0, uint64_t alignment_length = 0);
+    std::vector<std::vector<HitInfo> > align_fuzzy(kstring_t seq, uint64_t max_distance = 0, uint64_t alignment_length = 0);
 
 
 
@@ -299,7 +301,7 @@ class DBG_succ {
     void replaceW(size_t i, TAlphabet val);
 
     // add a full sequence to the graph
-    void add_seq (seqan::String<Dna5F> seq);
+    void add_seq (kstring_t &seq);
 
     /** This function takes a character c and appends it to the end of the graph sequence
      * given that the corresponding note is not part of the graph yet.
@@ -319,11 +321,11 @@ class DBG_succ {
 
     BranchInfoMerge pop_branch(std::stack<BranchInfoMerge> &branchnodes, uint64_t &nodeId, uint64_t &lastEdge, std::deque<TAlphabet> &last_k);
 
-    bool finish_sequence(seqan::String<Dna5F> &sequence, uint64_t seqId, std::ofstream &SQLstream); 
+    bool finish_sequence(std::string &sequence, uint64_t seqId, std::ofstream &SQLstream); 
 
     size_t traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream); 
 
-    void allelesFromSeq(seqan::String<Dna5F>seq, unsigned int f, std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream, bool isRefRun = false, size_t seqNum = 0);
+    void allelesFromSeq(kstring_t &seq, unsigned int f, std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream, bool isRefRun = false, size_t seqNum = 0);
 
 
     //
