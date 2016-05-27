@@ -166,13 +166,12 @@ int main(int argc, char const ** argv) {
                 }
                 kseq_destroy(read_stream);
                 gzclose(input_p);
-                //exit(1);
                 //graph->update_counters();
                 //graph->print_stats();
                 
                 //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
             }
-            //graph->print_seq();
+            graph->print_seq();
             //std::cout << "ACC: " << graph->index(test) << std::endl;
         }
     }
