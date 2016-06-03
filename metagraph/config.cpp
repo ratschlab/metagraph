@@ -81,46 +81,50 @@ void Config::print_usage(std::string prog_name, int identity) {
 
     switch (identity) {
         case noidentity: {
-            fprintf(stderr, "You called metagraph without command. Please choose from the list below.\n\n");
             fprintf(stderr, "Usage: %s <command> [command specific options]\n\n", prog_name.c_str());
             fprintf(stderr, "Available commands:\n");
             fprintf(stderr, "\tbuild\t\tconstruct a graph object from input sequence\n");
-            fprintf(stderr, "\t\t\t\tfiles in fast[a|q] formats or integrate sequence\n");
-            fprintf(stderr, "\t\t\t\tfiles in fast[a|q] formats into a given graph\n");
+            fprintf(stderr, "\t\t\tfiles in fast[a|q] formats or integrate sequence\n");
+            fprintf(stderr, "\t\t\tfiles in fast[a|q] formats into a given graph\n\n");
 
             fprintf(stderr, "\tmerge\t\tintegrate a given set of graph structures\n");
-            fprintf(stderr, "\t\t\t\tand output a new graph structure\n");
+            fprintf(stderr, "\t\t\tand output a new graph structure\n\n");
 
-            fprintf(stderr, "\tcompare\t\tcheck whethe two given graphs are identical\n");
+            fprintf(stderr, "\tcompare\t\tcheck whether two given graphs are identical\n\n");
 
             fprintf(stderr, "\talign\t\talign the reads provided in files in fast[a|q]\n");
-            fprintf(stderr, "\t\t\t\tformats to the graph");
-        } case build: {
+            fprintf(stderr, "\t\t\tformats to the graph\n\n");
+        } break;
+        case build: {
             fprintf(stderr, "Usage: %s build [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for build:\n");
             fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file [graph]\n");
             fprintf(stderr, "\t-S --sql-base [STR] \tbasename for SQL output file\n");
             fprintf(stderr, "\t-I --infile-base [STR] \tbasename for loading graph input file\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
-        } case align: {
+        } break;
+        case align: {
             fprintf(stderr, "Usage: %s align [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for align:\n");
             fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
-        } case compare: {
+        } break;
+        case compare: {
             fprintf(stderr, "Usage: %s compare [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for align:\n");
             fprintf(stderr, "\t-I --infile-base [STR] \tbasename for loading graph input file\n");
-        } case merge: {
+        } break;
+        case merge: {
             fprintf(stderr, "Usage: %s merge [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for merge:\n");
             fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file [graph]\n");
         }
     }
-    // Output Options
-    fprintf(stderr, "\n\tGeneral options:\n");
-    fprintf(stderr, "\t-v --verbose \t\tswitch on verbose output [off]\n");
-    fprintf(stderr, "\t-h --help \t\tprint usage info\n");
-    fprintf(stderr, "\n");
+    if (identity != noidentity) {
+        fprintf(stderr, "\n\tGeneral options:\n");
+        fprintf(stderr, "\t-v --verbose \t\tswitch on verbose output [off]\n");
+        fprintf(stderr, "\t-h --help \t\tprint usage info\n");
+        fprintf(stderr, "\n");
+    }
 }
 
 /*void Config::print_call(std::string prog_name) {
