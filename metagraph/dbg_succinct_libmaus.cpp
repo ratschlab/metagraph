@@ -1696,11 +1696,12 @@ void DBG_succ::merge(DBG_succ* G) {
 }
 
 /* 
- * Helper function to detemrine the bin boundaries, given 
+ * Helper function to determine the bin boundaries, given 
  * a number of threads.
  */
 std::vector<uint64_t> DBG_succ::get_bins(uint64_t threads) {
-
+    std::vector<uint64_t> tmp;
+    return tmp;
 }
 
 /*

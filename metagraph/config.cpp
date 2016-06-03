@@ -11,11 +11,29 @@ Config::Config() {
 Config::Config(int argc, const char *argv[]) {
 
     init();
-    int i = 1;
+    // provide help overview if no identity was given
     if (argc == 1) {
         print_usage(std::string(argv[0]));
         exit(-1);
     }
+
+    // parse identity from first command line argument
+    if (!strcmp(argv[1], "merge")) {
+        identity = merge;
+    } else if (!strcmp(argv[1], "compare")) {
+        identity = compare;
+    } else if (!strcmp(argv[1], "align")) {
+        identity = align;
+    } else if (!strcmp(argv[1], "build")) {
+        identity = build;
+    }
+    // provide help screen for chosen identity
+    if (argc == 2) {
+        print_usage(std::string(argv[0]), identity);
+        exit(-1);
+    }
+    // parse remaining command line items
+    int i = 2;
     while (i < argc) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
             verbose = true;
@@ -31,23 +49,17 @@ Config::Config(int argc, const char *argv[]) {
             sqlfbase = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-I") || !strcmp(argv[i], "--infile-base")) {
             infbase = std::string(argv[++i]);
-        } else if (!strcmp(argv[i], "-m") || !strcmp(argv[i], "--mergelist")) {
-            merge = std::string(argv[++i]);
-        } else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--compare")) {
-            compare = std::string(argv[++i]);
-        } else if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--align")) {
-            align = std::string(argv[++i]);
         //} else if (!strcmp(argv[i], "-t") || !strcmp(argv[i], "--threads")) {
         //    num_threads = atoi(argv[++i]);
         //} else if (!strcmp(argv[i], "--debug")) {
         //    debug = true;
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
-            print_usage(std::string(argv[0]));
+            print_usage(std::string(argv[0]), identity);
             exit(0);
         } else {
             if (argv[i][0] == '-') {
                 fprintf(stderr, "\nERROR: Unknown option %s\n", argv[i]);
-                print_usage(std::string(argv[0]));
+                print_usage(std::string(argv[0], identity));
                 exit(-1);
             }
             else {
@@ -58,31 +70,54 @@ Config::Config(int argc, const char *argv[]) {
     }
 }
 
-// nothing to destroy
+// nothing to destro
 Config::~Config() {}
 
-void Config::print_usage(std::string prog_name) {
+void Config::print_usage(std::string prog_name, int identity) {
     fprintf(stderr, "A comprehensive graph represenatation of metagenome information\nVersion 0.1\n\n");
     fprintf(stderr, "This program is the first implementation of a\n");
-    fprintf(stderr, "meta-metagenome graph for identifciation and annotation\n");
+    fprintf(stderr, "meta-metagenome graph for identification and annotation\n");
     fprintf(stderr, "purposes.\n\n");
-    fprintf(stderr, "Usage:\n");
-    fprintf(stderr, "\t%s -O OUTBASE [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
-    fprintf(stderr, "Available Options:\n\n");
-    // Input and threads
-    //fprintf(stderr, "\n\tInput handling and paralellization:\n");
-    fprintf(stderr, "\t-S --sql-base [STR] \tbasename for SQL output file\n");
-    fprintf(stderr, "\t-I --infile-base [STR] \tbasename for loading graph input files\n");
-    fprintf(stderr, "\t-i --integrate \t\tintegrates fasta into given (-I) graph [off]\n");
-    fprintf(stderr, "\t-k --kmer-length [INT] \tLength of the k-mer to use [3]\n");
-    // Filter options
-    //fprintf(stderr, "\n\tInput file filtering:\n");
-    fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
-    fprintf(stderr, "\t-m --merge \t\tlist of graph file basenames used as input for merging [off]]\n");
-    fprintf(stderr, "\t-c --compare \t\tlist of graph file basenames used as input for merging [off]\n");
-    fprintf(stderr, "\t-a --align\t\trun in alignment mode [off]\n");
+
+    switch (identity) {
+        case noidentity: {
+            fprintf(stderr, "You called metagraph without command. Please choose from the list below.\n\n");
+            fprintf(stderr, "Usage: %s <command> [command specific options]\n\n", prog_name.c_str());
+            fprintf(stderr, "Available commands:\n");
+            fprintf(stderr, "\tbuild\t\tconstruct a graph object from input sequence\n");
+            fprintf(stderr, "\t\t\t\tfiles in fast[a|q] formats or integrate sequence\n");
+            fprintf(stderr, "\t\t\t\tfiles in fast[a|q] formats into a given graph\n");
+
+            fprintf(stderr, "\tmerge\t\tintegrate a given set of graph structures\n");
+            fprintf(stderr, "\t\t\t\tand output a new graph structure\n");
+
+            fprintf(stderr, "\tcompare\t\tcheck whethe two given graphs are identical\n");
+
+            fprintf(stderr, "\talign\t\talign the reads provided in files in fast[a|q]\n");
+            fprintf(stderr, "\t\t\t\tformats to the graph");
+        } case build: {
+            fprintf(stderr, "Usage: %s build [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Available options for build:\n");
+            fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file [graph]\n");
+            fprintf(stderr, "\t-S --sql-base [STR] \tbasename for SQL output file\n");
+            fprintf(stderr, "\t-I --infile-base [STR] \tbasename for loading graph input file\n");
+            fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
+        } case align: {
+            fprintf(stderr, "Usage: %s align [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Available options for align:\n");
+            fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
+        } case compare: {
+            fprintf(stderr, "Usage: %s compare [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Available options for align:\n");
+            fprintf(stderr, "\t-I --infile-base [STR] \tbasename for loading graph input file\n");
+        } case merge: {
+            fprintf(stderr, "Usage: %s merge [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Available options for merge:\n");
+            fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file [graph]\n");
+        }
+    }
     // Output Options
-    fprintf(stderr, "\n\tGeneral:\n");
+    fprintf(stderr, "\n\tGeneral options:\n");
     fprintf(stderr, "\t-v --verbose \t\tswitch on verbose output [off]\n");
     fprintf(stderr, "\t-h --help \t\tprint usage info\n");
     fprintf(stderr, "\n");
@@ -129,8 +164,9 @@ void Config::print_usage(std::string prog_name) {
 // PRIVATE
 void Config::init() {
     verbose = false;
-    integrate = false;
     distance = 0;
     k = 3;
+    identity = noidentity;
+    outfbase = "graph";
 }
 

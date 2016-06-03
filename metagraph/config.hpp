@@ -12,7 +12,7 @@ class Config {
 
         ~Config();
        
-        void print_usage(std::string prog_name);
+        void print_usage(std::string prog_name, int identity = -1);
         //void print_call(string prog_name);
 
         bool verbose;
@@ -25,9 +25,13 @@ class Config {
         std::string outfbase;
         std::string infbase;
         std::string sqlfbase;
-        std::string merge;
-        std::string compare;
-        std::string align;
+
+        enum identities {noidentity = -1, 
+                         build = 1, 
+                         merge, 
+                         compare, 
+                         align};
+        int identity;
 
     private:
         void init();

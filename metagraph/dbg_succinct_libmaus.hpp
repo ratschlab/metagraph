@@ -355,6 +355,21 @@ class DBG_succ {
     */
     bool compare(DBG_succ* G); 
 
+    /* 
+     * Helper function to determine the bin boundaries, given 
+     * a number of threads.
+     */
+    std::vector<uint64_t> get_bins(uint64_t threads);
+
+    /*
+     * Distribute the merging of two graph structures G1 and G2 over
+     * bins, such that n parallel threads are used. The number of bins
+     * is determined dynamically.
+     */
+    void merge_parallel(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint64_t n1, uint64_t n2, uint64_t threads);
+    void *merge_parallel_helper(void *arg);
+
+
     //
     //
     // SERIALIZE
