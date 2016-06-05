@@ -69,15 +69,17 @@ int main(int argc, char const ** argv) {
         case Config::stats: {
             std::ofstream outstream;
             if (!config->outfbase.empty()) {
-                outstream.open((config->outfbase + "stats.dbg").c_str());
+                outstream.open((config->outfbase + ".stats.dbg").c_str());
                 outstream << "file\tnodes\tedges\tk" << std::endl;
             }
             for (unsigned int f = 0; f < config->fname.size(); ++f) {
-                std::cout << "Statistics for file " << config->fname.at(f) << std::endl;
                 DBG_succ* graph_ = new DBG_succ(config->fname.at(f), config);
-                std::cout << "nodes: " << graph_->get_node_count() << std::endl;
-                std::cout << "edges: " << graph_->get_edge_count() << std::endl;
-                std::cout << "k: " << graph_->get_k() << std::endl; 
+                if (!config->quiet) {
+                    std::cout << "Statistics for file " << config->fname.at(f) << std::endl;
+                    std::cout << "nodes: " << graph_->get_node_count() << std::endl;
+                    std::cout << "edges: " << graph_->get_edge_count() << std::endl;
+                    std::cout << "k: " << graph_->get_k() << std::endl; 
+                }
                 if (!config->outfbase.empty()) {
                     outstream << config->fname.at(f) << "\t" 
                               << graph_->get_node_count() << "\t" 
@@ -206,6 +208,7 @@ int main(int argc, char const ** argv) {
 
         delete graph;
     }
+    delete config;
 
     return 0;
 }

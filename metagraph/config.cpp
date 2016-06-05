@@ -39,6 +39,8 @@ Config::Config(int argc, const char *argv[]) {
     while (i < argc) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
             verbose = true;
+        } else if (!strcmp(argv[i], "-q") || !strcmp(argv[i], "--quiet")) {
+            quiet = true;
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--print-graph")) {
             print_graph = true;
         } else if (!strcmp(argv[i], "-k") || !strcmp(argv[i], "--kmer-length")) {
@@ -136,6 +138,7 @@ void Config::print_usage(std::string prog_name, int identity) {
     if (identity != noidentity) {
         fprintf(stderr, "\n\tGeneral options:\n");
         fprintf(stderr, "\t-v --verbose \t\tswitch on verbose output [off]\n");
+        fprintf(stderr, "\t-q --quiet \t\tproduce as little log output as posible [off]\n");
         fprintf(stderr, "\t-h --help \t\tprint usage info\n");
         fprintf(stderr, "\n");
     }
@@ -182,6 +185,7 @@ void Config::print_usage(std::string prog_name, int identity) {
 // PRIVATE
 void Config::init() {
     verbose = false;
+    quiet = false;
     print_graph = false;
     distance = 0;
     k = 3;

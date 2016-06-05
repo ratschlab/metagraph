@@ -16,6 +16,7 @@ class Config {
         //void print_call(string prog_name);
 
         bool verbose;
+        bool quiet;
         bool integrate;
         bool print_graph;
         
