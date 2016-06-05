@@ -197,6 +197,10 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
     instream.close();
 }
 
+DBG_succ::~DBG_succ() {
+    delete W;
+    delete last;
+}
 
 //
 //

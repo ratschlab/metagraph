@@ -71,6 +71,9 @@ class DBG_succ {
     // load graph instance from a provided file name base
     DBG_succ(std::string infbase_, 
              Config* config_);
+
+    // destructor
+    ~DBG_succ();
     
     //
     //
