@@ -26,6 +26,8 @@ Config::Config(int argc, const char *argv[]) {
         identity = align;
     } else if (!strcmp(argv[1], "build")) {
         identity = build;
+    } else if (!strcmp(argv[1], "stats")) {
+        identity = stats;
     }
     // provide help screen for chosen identity
     if (argc == 2) {
@@ -37,8 +39,8 @@ Config::Config(int argc, const char *argv[]) {
     while (i < argc) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
             verbose = true;
-        } else if (!strcmp(argv[i], "-i") || !strcmp(argv[i], "--integrate")) {
-            integrate = true;
+        } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--print-graph")) {
+            print_graph = true;
         } else if (!strcmp(argv[i], "-k") || !strcmp(argv[i], "--kmer-length")) {
             k = atoi(argv[i++]);
         } else if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--distance")) {
@@ -74,10 +76,10 @@ Config::Config(int argc, const char *argv[]) {
 Config::~Config() {}
 
 void Config::print_usage(std::string prog_name, int identity) {
-    fprintf(stderr, "A comprehensive graph represenatation of metagenome information\nVersion 0.1\n\n");
-    fprintf(stderr, "This program is the first implementation of a\n");
-    fprintf(stderr, "meta-metagenome graph for identification and annotation\n");
-    fprintf(stderr, "purposes.\n\n");
+    fprintf(stderr, "Comprehensive metagenome graph representation -- Version 0.1\n\n");
+    //fprintf(stderr, "This program is the first implementation of a\n");
+    //fprintf(stderr, "meta-metagenome graph for identification and annotation\n");
+    //fprintf(stderr, "purposes.\n\n");
 
     switch (identity) {
         case noidentity: {
@@ -94,14 +96,17 @@ void Config::print_usage(std::string prog_name, int identity) {
 
             fprintf(stderr, "\talign\t\talign the reads provided in files in fast[a|q]\n");
             fprintf(stderr, "\t\t\tformats to the graph\n\n");
+
+            fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s)\n\n");
         } break;
         case build: {
             fprintf(stderr, "Usage: %s build [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for build:\n");
-            fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file [graph]\n");
+            fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t-S --sql-base [STR] \tbasename for SQL output file\n");
             fprintf(stderr, "\t-I --infile-base [STR] \tbasename for loading graph input file\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
+            fprintf(stderr, "\t-p --print-graph \tprint graph table to the screen [off]\n");
         } break;
         case align: {
             fprintf(stderr, "Usage: %s align [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
@@ -110,14 +115,23 @@ void Config::print_usage(std::string prog_name, int identity) {
         } break;
         case compare: {
             fprintf(stderr, "Usage: %s compare [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
-            fprintf(stderr, "Available options for align:\n");
+            fprintf(stderr, "Available options for compare:\n");
             fprintf(stderr, "\t-I --infile-base [STR] \tbasename for loading graph input file\n");
         } break;
         case merge: {
             fprintf(stderr, "Usage: %s merge [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for merge:\n");
-            fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file [graph]\n");
-        }
+            fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file []\n");
+            fprintf(stderr, "\t-p --print-graph \tprint graph table to the screen [off]\n");
+        } break;
+        case stats: {
+            fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Available options for stats:\n");
+            fprintf(stderr, "\t-I --infile-base [STR] \tbasename for loading graph input file\n");
+            fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file []\n");
+            fprintf(stderr, "\t-p --print-graph \tprint graph table to the screen [off]\n");
+        } break;
+
     }
     if (identity != noidentity) {
         fprintf(stderr, "\n\tGeneral options:\n");
@@ -168,9 +182,9 @@ void Config::print_usage(std::string prog_name, int identity) {
 // PRIVATE
 void Config::init() {
     verbose = false;
+    print_graph = false;
     distance = 0;
     k = 3;
     identity = noidentity;
-    outfbase = "graph";
 }
 

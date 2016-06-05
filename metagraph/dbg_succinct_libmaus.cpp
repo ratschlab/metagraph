@@ -792,6 +792,19 @@ std::vector<std::vector<HitInfo> > DBG_succ::align_fuzzy(kstring_t seq, uint64_t
     return hit_list;
 }
 
+/*
+ * Returns the number of nodes on the current graph.
+ */
+uint64_t DBG_succ::get_node_count() {
+    return rank_last(last->size() - 1);
+}
+
+/*
+ * Return the number of edges in the current graph.
+ */
+uint64_t DBG_succ::get_edge_count() {
+    return W->n - 1;
+}
 
 //
 //
@@ -888,7 +901,7 @@ void DBG_succ::add_seq (kstring_t &seq) {
         if (i > 0 && i % 1000 == 0) {
             std::cout << "." << std::flush;
             if (i % 10000 == 0) {
-                fprintf(stdout, "%lu - edges %lu / nodes %lu\n", i, W->n - 1, rank_last((last->size() - 1)));
+                fprintf(stdout, "%lu - edges %lu / nodes %lu\n", i, get_edge_count(), get_node_count());
             }
         }
         // if (debug) {
@@ -916,7 +929,7 @@ void DBG_succ::add_seq (kstring_t &seq) {
         }
     }
 
-    fprintf(stdout, "edges %lu / nodes %lu\n", W->n - 1, rank_last((last->size() - 1)));
+    fprintf(stdout, "edges %lu / nodes %lu\n", get_edge_count(), get_node_count());
 
     //toSQL();
     //String<Dna5F> test = "CCT";
@@ -1983,89 +1996,74 @@ void DBG_succ::print_state() {
  */
 void DBG_succ::print_seq() {
 
-    for (uint64_t i = 1; i < W->n; i++) {
-        if (i % 10 == 0)
-            fprintf(stdout, "%lu", (i / 10) % 10);
-        else
-            fprintf(stdout, " ");
-    }
-    std::cout << std::endl;
+    uint64_t linelen = 80;
+    uint64_t start = 1;
+    uint64_t end = start + linelen < W->n ? start + linelen : W->n;
 
-    for (uint64_t i = 1; i < W->n; i++) {
-        if ((*W)[i] >= alph_size)
-            fprintf(stdout, "-");
-        else
-            fprintf(stdout, " ");
-    }
-    std::cout << std::endl;
-
-    for (uint64_t i = 1; i < W->n; i++) {
-        if ((*W)[i] % alph_size == 0)
-            fprintf(stdout, "$");
-        else
-            //std::cout << Dna5F(((*W)[i] % alph_size) - 1);
-            std::cout << get_alphabet_symbol((*W)[i] % alph_size);
-    }
-    std::cout << std::endl;
-
-    for (uint64_t i = 1; i < W->n; i++) {
-        if (p == i)
-            fprintf(stdout, "*");
-        else
-            fprintf(stdout, " ");
-    }
-    std::cout << std::endl;
-
-    size_t j;
-    for (size_t l = 0; l < k; l++) {
-        for (uint64_t i = 1; i < W->n; i++) {
-            j = get_minus_k_value(i, l).first;
-            if (j % alph_size == 0)
-                std::cout << "$";
+    while (start < W->n) {
+        for (uint64_t i = start; i < end; i++) {
+            if (i % 10 == 0)
+                fprintf(stdout, "%lu", (i / 10) % 10);
             else
-                //std::cout << Dna5F((j % alph_size) - 1);
-                std::cout << get_alphabet_symbol(j % alph_size);
+                fprintf(stdout, " ");
         }
         std::cout << std::endl;
-    }
-    std::cout << std::endl;
-    for (uint64_t i = 1; i < last->size(); i++) {
-        fprintf(stdout, "%i", (int) (*last)[i]);
-    }
-    std::cout << std::endl;
-    std::cout << std::endl;
 
-    for (uint64_t i = 1; i < W->n; ++i) {
-        std::cout << indegree(i);  
-    }
-    std::cout << std::endl;
-    for (uint64_t i = 1; i < W->n; ++i) {
-        std::cout << outdegree(i);  
-    }
-    std::cout << std::endl;
-    std::cout << std::endl;
+        for (uint64_t i = start; i < end; i++) {
+            if ((*W)[i] >= alph_size)
+                fprintf(stdout, "-");
+            else
+                fprintf(stdout, " ");
+        }
+        std::cout << std::endl;
 
-    // TODO: make usage of following code configurable
-    /*for (TAlphabet c = 0; c <= 5; ++c) {
-        if (c == 0)
-            std::cout << "$";
-        else
-            std::cout << Dna5F(c - 1);
-        for (uint64_t i = 1; i < W_size; ++i) {
-            std::cout << " " << incoming(i, c);  
+        for (uint64_t i = start; i < end; i++) {
+            if ((*W)[i] % alph_size == 0)
+                fprintf(stdout, "$");
+            else
+                std::cout << get_alphabet_symbol((*W)[i] % alph_size);
         }
         std::cout << std::endl;
-    }*/
-    /*for (TAlphabet c = 1; c <= 6; ++c) {
-        if (c == 0)
-            std::cout << "$";
-        else
-            std::cout << Dna5F(c - 1);
-        for (uint64_t i = 1; i < W_size; ++i) {
-            std::cout << " " << outgoing(i, c);  
+
+        for (uint64_t i = start; i < end; i++) {
+            if (p == i)
+                fprintf(stdout, "*");
+            else
+                fprintf(stdout, " ");
         }
         std::cout << std::endl;
-    }*/
+
+        size_t j;
+        for (size_t l = 0; l < k; l++) {
+            for (uint64_t i = start; i < end; i++) {
+                j = get_minus_k_value(i, l).first;
+                if (j % alph_size == 0)
+                    std::cout << "$";
+                else
+                    std::cout << get_alphabet_symbol(j % alph_size);
+            }
+            std::cout << std::endl;
+        }
+        std::cout << std::endl;
+        for (uint64_t i = start; i < end; i++) {
+            fprintf(stdout, "%i", (int) (*last)[i]);
+        }
+        std::cout << std::endl;
+        std::cout << std::endl;
+
+        for (uint64_t i = start; i < end; ++i) {
+            std::cout << indegree(i);  
+        }
+        std::cout << std::endl;
+        for (uint64_t i = start; i < end; ++i) {
+            std::cout << outdegree(i);  
+        }
+        std::cout << std::endl;
+        std::cout << std::endl;
+
+        start += linelen;
+        end = start + linelen < W->n ? start + linelen : W->n;
+    }
 }
 
 /**

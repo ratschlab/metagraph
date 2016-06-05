@@ -273,6 +273,9 @@ class DBG_succ {
 
     std::vector<std::vector<HitInfo> > align_fuzzy(kstring_t seq, uint64_t max_distance = 0, uint64_t alignment_length = 0);
 
+    uint64_t get_node_count();
+
+    uint64_t get_edge_count();
 
 
     //

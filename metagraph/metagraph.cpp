@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 
 #include <vector>
 #include <string>
@@ -65,8 +66,34 @@ int main(int argc, char const ** argv) {
             }
         } break;
 
-        case Config::align: {
+        case Config::stats: {
+            std::ofstream outstream;
+            if (!config->outfbase.empty()) {
+                outstream.open((config->outfbase + "stats.dbg").c_str());
+                outstream << "file\tnodes\tedges\tk" << std::endl;
+            }
+            for (unsigned int f = 0; f < config->fname.size(); ++f) {
+                std::cout << "Statistics for file " << config->fname.at(f) << std::endl;
+                DBG_succ* graph_ = new DBG_succ(config->fname.at(f), config);
+                std::cout << "nodes: " << graph_->get_node_count() << std::endl;
+                std::cout << "edges: " << graph_->get_edge_count() << std::endl;
+                std::cout << "k: " << graph_->get_k() << std::endl; 
+                if (!config->outfbase.empty()) {
+                    outstream << config->fname.at(f) << "\t" 
+                              << graph_->get_node_count() << "\t" 
+                              << graph_->get_edge_count() << "\t"
+                              << graph_->get_k() << std::endl;
+                }
+                if (config->print_graph)
+                    graph_->print_seq();
+                delete graph_;
+            }
+            if (!config->outfbase.empty())
+                outstream.close();
+        } break;
 
+
+        case Config::align: {
             // check required inputs
             if (config->infbase.empty()) {
               std::cerr << "Requires input <de bruijn graph> to align reads." << config->align << std::endl;
@@ -167,13 +194,18 @@ int main(int argc, char const ** argv) {
         } break;
     }
 
-    // graph output
-    if (!config->sqlfbase.empty())
-        graph->toSQL();
-    if (!config->outfbase.empty())
-        graph->toFile();
+    // output and cleanup
+    if (graph) {
+        // graph output
+        if (config->print_graph)
+            graph->print_seq();
+        if (!config->sqlfbase.empty())
+            graph->toSQL();
+        if (!config->outfbase.empty())
+            graph->toFile();
 
-    delete graph;
+        delete graph;
+    }
 
     return 0;
 }

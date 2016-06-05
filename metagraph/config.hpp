@@ -17,6 +17,7 @@ class Config {
 
         bool verbose;
         bool integrate;
+        bool print_graph;
         
         unsigned int k;
         unsigned int distance;
@@ -30,7 +31,8 @@ class Config {
                          build = 1, 
                          merge, 
                          compare, 
-                         align};
+                         align,
+                         stats};
         int identity;
 
     private:
