@@ -44,7 +44,7 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--print-graph")) {
             print_graph = true;
         } else if (!strcmp(argv[i], "-k") || !strcmp(argv[i], "--kmer-length")) {
-            k = atoi(argv[i++]);
+            k = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--distance")) {
             distance = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-O") || !strcmp(argv[i], "--outfile-base")) {

@@ -164,6 +164,7 @@ int main(int argc, char const ** argv) {
                 graph = new DBG_succ(config->k, config);
             }
 
+            fprintf(stderr, "k is %i\n", config->k);
             // iterate over input files
             for (unsigned int f = 0; f < config->fname.size(); ++f) {
 
