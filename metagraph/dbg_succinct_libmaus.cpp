@@ -580,20 +580,16 @@ std::pair<uint64_t, uint64_t> DBG_succ::index_range(std::deque<TAlphabet> str) {
     while (!str.empty()) {
         s = str.front() % alph_size;
         str.pop_front();
-        //std::cerr << "prio rl " << rl << " pred_last(rl - 1) " << pred_last(rl - 1) << " succ_W(pred_last(rl - 1) + 1, s) " << succ_W(pred_last(rl - 1) + 1, s) << " s " << s << std::endl;
         rl = std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size));
-        //std::cerr << "rl " << rl << " W->n " << W->n; 
         if (rl >= W->n)
             return std::make_pair(0, 0);
         ru = std::max(pred_W(ru, s), pred_W(ru, s + alph_size));
-        //std::cerr<< " ru " << ru << std::endl;
         if (ru >= W->n)
             return std::make_pair(0, 0);
         if (rl > ru)
             return std::make_pair(0, 0);
         rl = outgoing(rl, s);
         ru = outgoing(ru, s);
-        //std::cerr << "outg rl " << rl << " ru " << ru << std::endl;
     }
     return std::make_pair(rl, ru);
 }
@@ -739,30 +735,6 @@ bool DBG_succ::get_last(uint64_t k) {
 
 char DBG_succ::get_alphabet_symbol(uint64_t s) {
     return s < strlen(alphabet) ? alphabet[s] : alphabet[14];
-    /*switch (s) {
-        case 0: 
-            return '$';
-        case 1:
-        case 1 + 7: 
-            return 'A';
-        case 2:
-        case 2 + 7:
-            return 'C';
-        case 3:
-        case 3 + 7:
-            return 'G';
-        case 4:
-        case 4 + 7:
-            return 'T';
-        case 5:
-        case 5 + 7:
-            return 'N';
-        case 6:
-        case 6 + 7:
-            return 'X';
-        default:
-            return 'n';
-    }*/
 }
 
 std::vector<uint64_t> DBG_succ::align(kstring_t seq) {
@@ -1775,8 +1747,7 @@ std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t threads,
             idx.second = G->get_size() - 1;
         if (idx.first > 0)
             idx.first = G->pred_last(idx.first - 1) + 1;
-        //std::cerr << "idx first " << idx.first << " idx second " << idx.second << std::endl;
-        tmp.push_back(idx); //G->index_range(bin_id_to_string(i, binlen)));
+        tmp.push_back(idx);
     }
     return tmp;
 }
@@ -1790,17 +1761,6 @@ std::deque<TAlphabet> DBG_succ::bin_id_to_string(uint64_t bin_id, uint64_t binle
     }
     return str;
 }
-
-/*
- * Distribute the merging of two graph structures G1 and G2 over
- * bins, such that n parallel threads are used. The number of bins
- * is determined dynamically.
- */
-/*void DBG_succ::merge_parallel(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint64_t n1, uint64_t n2, uint64_t threads) {
-    
-    std::vector<std::pair<uint64_t, uint64_t> > bins1 = get_bins(threads, G1);
-    std::vector<std::pair<uint64_t, uint64_t> > bins2 = get_bins(threads, G2);
-}*/
 
 
 /*

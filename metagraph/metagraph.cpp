@@ -12,10 +12,6 @@
 #include "config.hpp"
 #include "kseq.h"
 
-//#include <libmaus2/bitbtree/bitbtree.hpp>
-//#include <libmaus2/wavelet/DynamicWaveletTree.hpp>
-//#include <libmaus2/digest/md5.hpp>
-
 KSEQ_INIT(gzFile, gzread)
 
 Config* config;
@@ -30,13 +26,16 @@ void parallel_merge_collect(DBG_succ* result) {
     for (size_t i = 0; i < merge_data->result.size(); ++i) {
         //std::cerr << "curr size " << result->get_size() << std::endl;
         result->append_graph(merge_data->result.at(i));
-        //std::cerr << i << ": F(1) " << merge_data->result.at(i)->F.at(1) << std::endl;
         delete merge_data->result.at(i);
     }
    result->p = result->succ_W(1, 0);
 }
 
-
+/*
+ * Distribute the merging of two graph structures G1 and G2 over
+ * bins, such that n parallel threads are used. The number of bins
+ * is determined dynamically.
+ */
 void *parallel_merge_wrapper(void *arg) {
 
     unsigned int curr_idx;
@@ -53,7 +52,6 @@ void *parallel_merge_wrapper(void *arg) {
             
             // collect bin data for merging and decide how to merge
             DBG_succ* graph = new DBG_succ(merge_data->k, config, false);
-            //std::cerr << "working on " << curr_idx << " G1 (" << merge_data->bins_g1.at(curr_idx).first << ":" << merge_data->bins_g1.at(curr_idx).second << ") G2 (" << merge_data->bins_g2.at(curr_idx).first << ":" << merge_data->bins_g2.at(curr_idx).second << ")" << std::endl;
             graph->merge(merge_data->graph1, 
                          merge_data->graph2, 
                          merge_data->bins_g1.at(curr_idx).first,
@@ -104,46 +102,6 @@ int main(int argc, char const ** argv) {
         } break;
 
         case Config::merge: {
-            //// fill bit btree
-            //libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();
-            //// fill wavelet tree
-            //libmaus2::wavelet::DynamicWaveletTree<6, 64> *W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
-
-            //clock_t start = std::clock();
-            //std::cerr << "filling one million into last" << std::endl;
-            //for (size_t i = 0; i < 1000000; ++i)
-            //    last->insertBit(i, (i % 17 == 0));
-            //std::cerr << "done - took " << (std::clock() - start) / CLOCKS_PER_SEC << " secs" << std::endl;
-
-            //start = std::clock();
-            //std::cerr << "filling one million into W" << std::endl;
-            //for (size_t i = 0; i < 1000000; ++i)
-            //    W->insert(i % 5, i);
-            //std::cerr << "done - took " << (std::clock() - start) / CLOCKS_PER_SEC << " secs" << std::endl;
-
-            //start = std::clock();
-            //std::cerr << "filling ten million into last" << std::endl;
-            //for (size_t i = 0; i < 10000000; ++i)
-            //    last->insertBit(i, (i % 17 == 0));
-            //std::cerr << "done - took " << (std::clock() - start) / CLOCKS_PER_SEC << " secs" << std::endl;
-
-            //start = std::clock();
-            //std::cerr << "filling ten million into W" << std::endl;
-            //for (size_t i = 0; i < 10000000; ++i)
-            //    W->insert(i % 5, i);
-            //std::cerr << "done - took " << (std::clock() - start) / CLOCKS_PER_SEC << " secs" << std::endl;
-
-            //start = std::clock();
-            //std::cerr << "filling hundred million" << std::endl;
-            //for (size_t i = 0; i < 100000000; ++i)
-            //    last->insertBit(i, (i % 17 == 0));
-            //std::cerr << "done - took " << (std::clock() - start) / CLOCKS_PER_SEC << " secs" << std::endl;
-
-            //start = std::clock();
-            //std::cerr << "filling one billion" << std::endl;
-            //for (size_t i = 0; i < 1000000000; ++i)
-            //    last->insertBit(i, (i % 17 == 0));
-            //std::cerr << "done - took " << (std::clock() - start) / CLOCKS_PER_SEC << " secs" << std::endl;
 
             for (unsigned int f = 0; f < config->fname.size(); ++f) {
                 if (f == 0) {
@@ -155,17 +113,6 @@ int main(int argc, char const ** argv) {
                     
                     DBG_succ* graph__ = new DBG_succ(graph_->get_k(), config, false);
                     
-                    //graph->print_seq();
-                    //std::vector<std::pair<uint64_t, uint64_t> > tut = graph__->get_bins(4, graph);
-                    //for (size_t i = 0; i < tut.size(); ++i) {
-                    //    std::cout << tut.at(i).first << "\t" << tut.at(i).second << std::endl;
-                    //}
-                    //graph_->print_seq();
-                    //tut = graph__->get_bins(4, graph_);
-                    //for (size_t i = 0; i < tut.size(); ++i) {
-                    //    std::cout << tut.at(i).first << "\t" << tut.at(i).second << std::endl;
-                    //}
-
                     if (config->parallel > 1) {
 
                         pthread_t* threads = NULL; 
@@ -217,10 +164,6 @@ int main(int argc, char const ** argv) {
                     }
 
                     //graph__->print_seq();
-                    /*tut = graph__->get_bins(4, graph__);
-                    for (size_t i = 0; i < tut.size(); ++i) {
-                        std::cout << tut.at(i).first << "\t" << tut.at(i).second << std::endl;
-                    }*/
                     delete graph;
                     graph = graph__;
 
