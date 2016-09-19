@@ -1,6 +1,6 @@
 LIBMAUS_DIR=external-libraries/libmaus2-lib
 
-CXX=g++ -std=c++11 -fopenmp -O3 #-pg
+CXX=g++ -std=c++11 -fopenmp -D_THREAD_SAFE -std=c++0x -pthread -O3 #-g -gdwarf-3 #-pg
 CXXFLAGS+= -W -Wall -Wno-long-long -Wno-variadic-macros #-pedantic
 CXXFLAGS+= -I$(LIBMAUS_DIR)/include -I. -L$(LIBMAUS_DIR)/lib
 LDFLAGS=-lrt -lmaus2
