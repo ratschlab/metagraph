@@ -19,6 +19,7 @@
 #include <fstream>
 #include <string>
 #include <zlib.h>
+#include <cmath>
 
 #include "kseq.h"
 
@@ -218,7 +219,7 @@ uint64_t DBG_succ::rank_W(uint64_t i, TAlphabet c) {
     // deal with  border conditions
     if (i <= 0)
         return 0;
-    return W->rank(c, std::min(i, W->n - 1));
+    return W->rank(c, std::min(i, W->n - 1)) - (c == 0);
 }
 
 /**
@@ -579,16 +580,20 @@ std::pair<uint64_t, uint64_t> DBG_succ::index_range(std::deque<TAlphabet> str) {
     while (!str.empty()) {
         s = str.front() % alph_size;
         str.pop_front();
+        //std::cerr << "prio rl " << rl << " pred_last(rl - 1) " << pred_last(rl - 1) << " succ_W(pred_last(rl - 1) + 1, s) " << succ_W(pred_last(rl - 1) + 1, s) << " s " << s << std::endl;
         rl = std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size));
+        //std::cerr << "rl " << rl << " W->n " << W->n; 
         if (rl >= W->n)
             return std::make_pair(0, 0);
         ru = std::max(pred_W(ru, s), pred_W(ru, s + alph_size));
+        //std::cerr<< " ru " << ru << std::endl;
         if (ru >= W->n)
             return std::make_pair(0, 0);
         if (rl > ru)
             return std::make_pair(0, 0);
         rl = outgoing(rl, s);
         ru = outgoing(ru, s);
+        //std::cerr << "outg rl " << rl << " ru " << ru << std::endl;
     }
     return std::make_pair(rl, ru);
 }
@@ -1082,6 +1087,28 @@ void DBG_succ::append_pos(TAlphabet c) {
     }
 }
 
+
+/** This function takes a pointer to a graph structure and concatenates the arrays W, last 
+ * and F to this graph's arrays. In almost all cases this will not produce a valid graph and 
+ * should only be used as a helper in the parallel merge procedure.
+ */
+void DBG_succ::append_graph(DBG_succ *g) {
+
+    size_t curr_pos = this->get_size();
+
+    // handle last and W
+    for (size_t j = 1; j < g->get_size(); ++j) {
+        this->last->insertBit(curr_pos, g->get_last(j));
+        this->W->insert(g->get_W(j), curr_pos);
+        ++curr_pos;
+    }
+
+    // handle F
+    assert(this->F.size() == g->F.size());
+    for (size_t j = 0; j < this->F.size(); ++j) {
+        this->F.at(j) += g->F.at(j);
+    }
+}
 
 //
 //
@@ -1716,9 +1743,52 @@ void DBG_succ::merge(DBG_succ* G) {
  * Helper function to determine the bin boundaries, given 
  * a number of threads.
  */
-std::vector<uint64_t> DBG_succ::get_bins(uint64_t threads) {
-    std::vector<uint64_t> tmp;
+std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t threads, DBG_succ* G) {
+
+    uint64_t binlen;
+
+    // depending on the number of threads, we will use a different length prefix
+    // to compute the bin boundaries
+    if (threads < alph_size)
+        binlen = 1;
+    else if (threads < (alph_size * alph_size))
+        binlen = 2;
+    else if (threads < (alph_size * alph_size * alph_size))
+        binlen = 3;
+    else if (threads < (alph_size * alph_size * alph_size * alph_size))
+        binlen = 4;
+    else
+        binlen = 5;
+
+    std::vector<std::pair<uint64_t, uint64_t> > tmp;
+    for (uint64_t i = 0; i < std::pow(alph_size, binlen); ++i) {
+        //std::deque<TAlphabet> ttt = bin_id_to_string(i, binlen);
+        //std::cerr << std::endl;
+        //for (size_t ii = 0; ii < ttt.size(); ++ii) {
+        //    std::cerr << ttt[ii] << get_alphabet_symbol(ttt[ii] % alph_size);
+        //}
+        //std::cerr << std::endl;
+        std::pair<uint64_t, uint64_t> idx = G->index_range(bin_id_to_string(i, binlen));
+        if (idx.first > idx.second)
+            idx.first = idx.second = 0;
+        if (idx.second >= G->get_size())
+            idx.second = G->get_size() - 1;
+        if (idx.first > 0)
+            idx.first = G->pred_last(idx.first - 1) + 1;
+        //std::cerr << "idx first " << idx.first << " idx second " << idx.second << std::endl;
+        tmp.push_back(idx); //G->index_range(bin_id_to_string(i, binlen)));
+    }
     return tmp;
+}
+
+std::deque<TAlphabet> DBG_succ::bin_id_to_string(uint64_t bin_id, uint64_t binlen) {
+    std::deque<TAlphabet> str;
+    while (str.size() < binlen) {
+        str.push_back(bin_id % alph_size);
+        bin_id -= (bin_id % alph_size);
+        bin_id /= alph_size;
+    }
+    return str;
 }
 
 /*
@@ -1726,18 +1796,12 @@ std::vector<uint64_t> DBG_succ::get_bins(uint64_t threads) {
  * bins, such that n parallel threads are used. The number of bins
  * is determined dynamically.
  */
-void DBG_succ::merge_parallel(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint64_t n1, uint64_t n2, uint64_t threads) {
+/*void DBG_succ::merge_parallel(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint64_t n1, uint64_t n2, uint64_t threads) {
     
-    std::vector<uint64_t> bins = get_bins(threads);
-}
+    std::vector<std::pair<uint64_t, uint64_t> > bins1 = get_bins(threads, G1);
+    std::vector<std::pair<uint64_t, uint64_t> > bins2 = get_bins(threads, G2);
+}*/
 
-/*
- * Helper function for parallel merge, representing the work of a
- * single worker thread.
- */
-void *DBG_succ::merge_parallel_helper(void *arg) {
-
-}
 
 /*
  * Given two pointers to graph structures G1 and G2, this function 
@@ -1755,7 +1819,11 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
     n1 = (n1 == 0) ? G1->get_size() : n1;
     n2 = (n2 == 0) ? G2->get_size() : n2;
 
-    // keep track on how many nodes we added and from which graph the 
+    // handle special cases where one or both input graphs are empty
+    k1 = (k1 == 0) ? G1->get_size() : k1;
+    k2 = (k2 == 0) ? G2->get_size() : k2;
+
+    // keep track of how many nodes we added and from which graph the 
     // last node originated
     uint64_t added = 0;
     uint64_t last_added_k = 0;
@@ -1765,13 +1833,13 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
 
     std::string k1_str, k2_str;
     
-    // Send one pointer running through each of the two graphs, where k1 runs through 
+    // Send two pointers running through each of the two graphs, where k1 runs through 
     // G1 and k2 through G2. At each step, compare the two graph nodes at positions 
     // k1 and k2 with each other. Insert the lexicographically smaller one into the 
     // common merge graph G. 
     while (k1 < n1 || k2 < n2) {
 
-        if (added > 0 && added % 1000 == 0) {
+        if (config->verbose && added > 0 && added % 1000 == 0) {
             std::cout << "." << std::flush;
             if (added % 10000 == 0) {
                 fprintf(stdout, "added %lu - G1: edge %lu/%lu - G2: edge %lu/%lu\n", added, k1, G1->get_size(), k2, G2->get_size());

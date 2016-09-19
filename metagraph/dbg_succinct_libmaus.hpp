@@ -314,6 +314,12 @@ class DBG_succ {
      */
     void append_pos(TAlphabet c);
 
+    /** This function takes a pointer to a graph structure and concatenates the arrays W, last 
+     * and F to this graph's arrays. In almost all cases this will not produce a valid graph and 
+     * should only be used as a helper in the parallel merge procedure.
+     */
+    void append_graph(DBG_succ *g);
+
     //
     //
     // TRAVERSAL
@@ -365,15 +371,20 @@ class DBG_succ {
      * Helper function to determine the bin boundaries, given 
      * a number of threads.
      */
-    std::vector<uint64_t> get_bins(uint64_t threads);
+    std::vector<std::pair<uint64_t, uint64_t> > get_bins(uint64_t threads, DBG_succ* G);
+
+    /*
+     * Helper function to generate the prefix corresponding to 
+     * a given bin ID.
+     */
+    std::deque<TAlphabet> bin_id_to_string(uint64_t bin_id, uint64_t binlen);
 
     /*
      * Distribute the merging of two graph structures G1 and G2 over
      * bins, such that n parallel threads are used. The number of bins
      * is determined dynamically.
      */
-    void merge_parallel(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint64_t n1, uint64_t n2, uint64_t threads);
-    void *merge_parallel_helper(void *arg);
+    //void merge_parallel(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint64_t n1, uint64_t n2, uint64_t threads);
 
 
     //

@@ -1,6 +1,8 @@
 #ifndef __DATATYPES_HPP__
 #define __DATATYPES_HPP__
 
+class DBG_succ;
+
 struct HitInfo {
     uint64_t rl;
     uint64_t ru;
@@ -42,5 +44,14 @@ public:
     }
 };
 
+struct ParallelMergeContainer {
+    std::vector<std::pair<uint64_t, uint64_t> > bins_g1;
+    std::vector<std::pair<uint64_t, uint64_t> > bins_g2;
+    std::vector<DBG_succ*> result;
+    DBG_succ* graph1;
+    DBG_succ* graph2;
+    unsigned int idx;
+    unsigned int k;
+};
 
 #endif

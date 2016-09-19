@@ -1,18 +1,75 @@
 #include <iostream>
 #include <fstream>
+#include <ctime>
 
 #include <vector>
 #include <string>
 #include <zlib.h>
+#include <pthread.h>
 
 #include "datatypes.hpp"
 #include "dbg_succinct_libmaus.hpp"
 #include "config.hpp"
 #include "kseq.h"
 
+//#include <libmaus2/bitbtree/bitbtree.hpp>
+//#include <libmaus2/wavelet/DynamicWaveletTree.hpp>
+//#include <libmaus2/digest/md5.hpp>
+
 KSEQ_INIT(gzFile, gzread)
 
 Config* config;
+ParallelMergeContainer* merge_data = new ParallelMergeContainer();
+
+pthread_mutex_t mutex_merge_result = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex_merge_idx = PTHREAD_MUTEX_INITIALIZER;
+pthread_attr_t attr;  
+
+void parallel_merge_collect(DBG_succ* result) {
+
+    for (size_t i = 0; i < merge_data->result.size(); ++i) {
+        //std::cerr << "curr size " << result->get_size() << std::endl;
+        result->append_graph(merge_data->result.at(i));
+        //std::cerr << i << ": F(1) " << merge_data->result.at(i)->F.at(1) << std::endl;
+        delete merge_data->result.at(i);
+    }
+   result->p = result->succ_W(1, 0);
+}
+
+
+void *parallel_merge_wrapper(void *arg) {
+
+    unsigned int curr_idx;
+
+    while (true) {
+        pthread_mutex_lock (&mutex_merge_idx);
+        if (merge_data->idx == merge_data->bins_g1.size()) {
+            pthread_mutex_unlock (&mutex_merge_idx);
+            break;
+        } else {
+            curr_idx = merge_data->idx;
+            merge_data->idx++;
+            pthread_mutex_unlock (&mutex_merge_idx);
+            
+            // collect bin data for merging and decide how to merge
+            DBG_succ* graph = new DBG_succ(merge_data->k, config, false);
+            //std::cerr << "working on " << curr_idx << " G1 (" << merge_data->bins_g1.at(curr_idx).first << ":" << merge_data->bins_g1.at(curr_idx).second << ") G2 (" << merge_data->bins_g2.at(curr_idx).first << ":" << merge_data->bins_g2.at(curr_idx).second << ")" << std::endl;
+            graph->merge(merge_data->graph1, 
+                         merge_data->graph2, 
+                         merge_data->bins_g1.at(curr_idx).first,
+                         merge_data->bins_g2.at(curr_idx).first,
+                         merge_data->bins_g1.at(curr_idx).second + 1,
+                         merge_data->bins_g2.at(curr_idx).second + 1);
+
+            pthread_mutex_lock (&mutex_merge_result);
+            merge_data->result.at(curr_idx) = graph;
+            pthread_mutex_unlock (&mutex_merge_result);
+        }
+    }
+    pthread_exit((void*) 0);
+}
+
+
 
 int main(int argc, char const ** argv) {
 
@@ -47,16 +104,123 @@ int main(int argc, char const ** argv) {
         } break;
 
         case Config::merge: {
+            //// fill bit btree
+            //libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();
+            //// fill wavelet tree
+            //libmaus2::wavelet::DynamicWaveletTree<6, 64> *W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
+
+            //clock_t start = std::clock();
+            //std::cerr << "filling one million into last" << std::endl;
+            //for (size_t i = 0; i < 1000000; ++i)
+            //    last->insertBit(i, (i % 17 == 0));
+            //std::cerr << "done - took " << (std::clock() - start) / CLOCKS_PER_SEC << " secs" << std::endl;
+
+            //start = std::clock();
+            //std::cerr << "filling one million into W" << std::endl;
+            //for (size_t i = 0; i < 1000000; ++i)
+            //    W->insert(i % 5, i);
+            //std::cerr << "done - took " << (std::clock() - start) / CLOCKS_PER_SEC << " secs" << std::endl;
+
+            //start = std::clock();
+            //std::cerr << "filling ten million into last" << std::endl;
+            //for (size_t i = 0; i < 10000000; ++i)
+            //    last->insertBit(i, (i % 17 == 0));
+            //std::cerr << "done - took " << (std::clock() - start) / CLOCKS_PER_SEC << " secs" << std::endl;
+
+            //start = std::clock();
+            //std::cerr << "filling ten million into W" << std::endl;
+            //for (size_t i = 0; i < 10000000; ++i)
+            //    W->insert(i % 5, i);
+            //std::cerr << "done - took " << (std::clock() - start) / CLOCKS_PER_SEC << " secs" << std::endl;
+
+            //start = std::clock();
+            //std::cerr << "filling hundred million" << std::endl;
+            //for (size_t i = 0; i < 100000000; ++i)
+            //    last->insertBit(i, (i % 17 == 0));
+            //std::cerr << "done - took " << (std::clock() - start) / CLOCKS_PER_SEC << " secs" << std::endl;
+
+            //start = std::clock();
+            //std::cerr << "filling one billion" << std::endl;
+            //for (size_t i = 0; i < 1000000000; ++i)
+            //    last->insertBit(i, (i % 17 == 0));
+            //std::cerr << "done - took " << (std::clock() - start) / CLOCKS_PER_SEC << " secs" << std::endl;
+
             for (unsigned int f = 0; f < config->fname.size(); ++f) {
                 if (f == 0) {
                     std::cout << "Opening file " << config->fname.at(f) << std::endl;
                     graph = new DBG_succ(config->fname.at(f), config);
                 } else {
-                    std::cout << "Opening file for merging ..." << config->fname.at(f) << std::endl;
+                    std::cout << "Opening file for merging: " << config->fname.at(f) << std::endl;
                     DBG_succ* graph_ = new DBG_succ(config->fname.at(f), config);
                     
                     DBG_succ* graph__ = new DBG_succ(graph_->get_k(), config, false);
-                    graph__->merge(graph, graph_);
+                    
+                    //graph->print_seq();
+                    //std::vector<std::pair<uint64_t, uint64_t> > tut = graph__->get_bins(4, graph);
+                    //for (size_t i = 0; i < tut.size(); ++i) {
+                    //    std::cout << tut.at(i).first << "\t" << tut.at(i).second << std::endl;
+                    //}
+                    //graph_->print_seq();
+                    //tut = graph__->get_bins(4, graph_);
+                    //for (size_t i = 0; i < tut.size(); ++i) {
+                    //    std::cout << tut.at(i).first << "\t" << tut.at(i).second << std::endl;
+                    //}
+
+                    if (config->parallel > 1) {
+
+                        pthread_t* threads = NULL; 
+
+                        // get bins in graphs according to required threads
+                        merge_data->bins_g1 = graph__->get_bins(config->parallel, graph);
+                        merge_data->bins_g2 = graph__->get_bins(config->parallel, graph_);
+                        assert(merge_data->bins_g1.size() == merge_data->bins_g2.size());
+                        //for (size_t ii = 0; ii < merge_data->bins_g1.size(); ++ii) {
+                        //    std::cerr << ii << ": " << merge_data->bins_g1.at(ii).first << "-" << merge_data->bins_g1.at(ii).second << " -- ";
+                        //    std::cerr << ": " << merge_data->bins_g2.at(ii).first << "-" << merge_data->bins_g2.at(ii).second << std::endl;
+                        //}
+                        //graph->print_seq();
+                        //graph_->print_seq();
+
+                        // prepare data shared by threads
+                        merge_data->idx = 0;
+                        merge_data->k = graph->get_k();
+                        merge_data->graph1 = graph;
+                        merge_data->graph2 = graph_;
+                        for (size_t i = 0; i < merge_data->bins_g1.size(); i++)
+                            merge_data->result.push_back(NULL);
+
+                        // create threads
+                        threads = new pthread_t[config->parallel]; 
+                        pthread_attr_init(&attr);
+                        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+
+                        // do the work
+                        for (size_t tid = 0; tid < config->parallel; tid++) {
+                           pthread_create(&threads[tid], &attr, parallel_merge_wrapper, (void *) NULL); 
+                           std::cerr << "starting thread " << tid << std::endl;
+                        }
+
+                        // join threads
+                        if (config->verbose)
+                            std::cout << "Waiting for threads to join" << std::endl;
+                        for (size_t tid = 0; tid < config->parallel; tid++) {
+                            pthread_join(threads[tid], NULL);
+                        }
+                        delete[] threads;
+
+                        // collect results
+                        std::cerr << "Collecting results" << std::endl;
+                        parallel_merge_collect(graph__);
+
+                    } else {
+                        graph__->merge(graph, graph_);
+                    }
+
+                    //graph__->print_seq();
+                    /*tut = graph__->get_bins(4, graph__);
+                    for (size_t i = 0; i < tut.size(); ++i) {
+                        std::cout << tut.at(i).first << "\t" << tut.at(i).second << std::endl;
+                    }*/
                     delete graph;
                     graph = graph__;
 
@@ -213,3 +377,6 @@ int main(int argc, char const ** argv) {
 
     return 0;
 }
+
+
+
