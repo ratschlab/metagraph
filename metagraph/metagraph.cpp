@@ -28,7 +28,8 @@ void parallel_merge_collect(DBG_succ* result) {
         result->append_graph(merge_data->result.at(i));
         delete merge_data->result.at(i);
     }
-   result->p = result->succ_W(1, 0);
+    merge_data->result.clear();
+    result->p = result->succ_W(1, 0);
 }
 
 /*
