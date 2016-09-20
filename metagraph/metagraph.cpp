@@ -29,6 +29,7 @@ void parallel_merge_collect(DBG_succ* result) {
         delete merge_data->result.at(i);
     }
     merge_data->result.clear();
+    merge_data->bins_done = 0;
     result->p = result->succ_W(1, 0);
 }
 
@@ -58,11 +59,16 @@ void *parallel_merge_wrapper(void *arg) {
                          merge_data->bins_g1.at(curr_idx).first,
                          merge_data->bins_g2.at(curr_idx).first,
                          merge_data->bins_g1.at(curr_idx).second + 1,
-                         merge_data->bins_g2.at(curr_idx).second + 1);
+                         merge_data->bins_g2.at(curr_idx).second + 1,
+                         true);
 
             pthread_mutex_lock (&mutex_merge_result);
             merge_data->result.at(curr_idx) = graph;
+            merge_data->bins_done++;
+            if (config->verbose)
+                std::cout << "finished bin " << curr_idx + 1 << " (" << merge_data->bins_done << "/" << merge_data->bins_g1.size() << ")" << std::endl;
             pthread_mutex_unlock (&mutex_merge_result);
+
         }
     }
     pthread_exit((void*) 0);
@@ -119,8 +125,8 @@ int main(int argc, char const ** argv) {
                         pthread_t* threads = NULL; 
 
                         // get bins in graphs according to required threads
-                        merge_data->bins_g1 = graph__->get_bins(config->parallel, graph);
-                        merge_data->bins_g2 = graph__->get_bins(config->parallel, graph_);
+                        merge_data->bins_g1 = graph__->get_bins(config->parallel, config->bins_per_thread, graph);
+                        merge_data->bins_g2 = graph__->get_bins(config->parallel, config->bins_per_thread, graph_);
                         assert(merge_data->bins_g1.size() == merge_data->bins_g2.size());
                         //for (size_t ii = 0; ii < merge_data->bins_g1.size(); ++ii) {
                         //    std::cerr << ii << ": " << merge_data->bins_g1.at(ii).first << "-" << merge_data->bins_g1.at(ii).second << " -- ";
@@ -136,6 +142,7 @@ int main(int argc, char const ** argv) {
                         merge_data->graph2 = graph_;
                         for (size_t i = 0; i < merge_data->bins_g1.size(); i++)
                             merge_data->result.push_back(NULL);
+                        merge_data->bins_done = 0;
 
                         // create threads
                         threads = new pthread_t[config->parallel]; 

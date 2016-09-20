@@ -23,6 +23,7 @@ class Config {
         unsigned int k;
         unsigned int distance;
         unsigned int parallel;
+        unsigned int bins_per_thread;
 
         std::vector<std::string> fname;
         std::string outfbase;

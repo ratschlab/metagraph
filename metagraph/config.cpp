@@ -45,6 +45,8 @@ Config::Config(int argc, const char *argv[]) {
             print_graph = true;
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
             parallel = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "-b") || !strcmp(argv[i], "--bins-per-thread")) {
+            bins_per_thread = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-k") || !strcmp(argv[i], "--kmer-length")) {
             k = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--distance")) {
@@ -127,6 +129,7 @@ void Config::print_usage(std::string prog_name, int identity) {
             fprintf(stderr, "Available options for merge:\n");
             fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [10]\n");
             fprintf(stderr, "\t-P --print-graph \tprint graph table to the screen [off]\n");
         } break;
         case stats: {
@@ -192,6 +195,7 @@ void Config::init() {
     print_graph = false;
     distance = 0;
     parallel = 1;
+    bins_per_thread = 10;
     k = 3;
     identity = noidentity;
 }

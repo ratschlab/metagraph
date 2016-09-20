@@ -1715,22 +1715,25 @@ void DBG_succ::merge(DBG_succ* G) {
  * Helper function to determine the bin boundaries, given 
  * a number of threads.
  */
-std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t threads, DBG_succ* G) {
+std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t threads, uint64_t bins_per_thread, DBG_succ* G) {
 
     uint64_t binlen;
+    uint64_t bins = threads * bins_per_thread;
 
     // depending on the number of threads, we will use a different length prefix
     // to compute the bin boundaries
-    if (threads < alph_size)
+    if (bins < alph_size)
         binlen = 1;
-    else if (threads < (alph_size * alph_size))
+    else if (bins < (alph_size * alph_size) || (k <= 2))
         binlen = 2;
-    else if (threads < (alph_size * alph_size * alph_size))
+    else if (bins < (alph_size * alph_size * alph_size) || (k <= 3))
         binlen = 3;
-    else if (threads < (alph_size * alph_size * alph_size * alph_size))
+    else if (bins < (alph_size * alph_size * alph_size * alph_size) || (k <= 4))
         binlen = 4;
-    else
+    else if (bins < (alph_size * alph_size * alph_size * alph_size * alph_size) || (k <= 5))
         binlen = 5;
+    else
+        binlen = 6;
 
     std::vector<std::pair<uint64_t, uint64_t> > tmp;
     for (uint64_t i = 0; i < std::pow(alph_size, binlen); ++i) {
@@ -1767,7 +1770,7 @@ std::deque<TAlphabet> DBG_succ::bin_id_to_string(uint64_t bin_id, uint64_t binle
  * Given two pointers to graph structures G1 and G2, this function 
  * integrate both into a new graph G.
  */
-void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint64_t n1, uint64_t n2) {
+void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint64_t n1, uint64_t n2, bool is_parallel) {
 
     // check whether we can merge the given graphs
     if (G1->get_k() != G2->get_k()) {
@@ -1799,7 +1802,7 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
     // common merge graph G. 
     while (k1 < n1 || k2 < n2) {
 
-        if (config->verbose && added > 0 && added % 1000 == 0) {
+        if (!is_parallel && config->verbose && added > 0 && added % 1000 == 0) {
             std::cout << "." << std::flush;
             if (added % 10000 == 0) {
                 fprintf(stdout, "added %lu - G1: edge %lu/%lu - G2: edge %lu/%lu\n", added, k1, G1->get_size(), k2, G2->get_size());

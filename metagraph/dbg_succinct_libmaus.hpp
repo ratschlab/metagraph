@@ -357,7 +357,7 @@ class DBG_succ {
      * Given two other graph structures G1 and G2, this function 
      * integrate both into a new graph G.
      */
-    void merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1 = 1, uint64_t k2 = 1, uint64_t n1 = 0, uint64_t n2 = 0); 
+    void merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1 = 1, uint64_t k2 = 1, uint64_t n1 = 0, uint64_t n2 = 0, bool is_parallel = false); 
 
     /**
     * Given a pointer to a graph structure G, the function compares its elements to the
@@ -371,7 +371,7 @@ class DBG_succ {
      * Helper function to determine the bin boundaries, given 
      * a number of threads.
      */
-    std::vector<std::pair<uint64_t, uint64_t> > get_bins(uint64_t threads, DBG_succ* G);
+    std::vector<std::pair<uint64_t, uint64_t> > get_bins(uint64_t threads, uint64_t bins_per_thread, DBG_succ* G);
 
     /*
      * Helper function to generate the prefix corresponding to 

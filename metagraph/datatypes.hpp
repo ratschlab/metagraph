@@ -52,6 +52,7 @@ struct ParallelMergeContainer {
     DBG_succ* graph2;
     unsigned int idx;
     unsigned int k;
+    unsigned int bins_done;
 };
 
 #endif
