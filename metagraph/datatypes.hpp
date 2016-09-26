@@ -1,6 +1,10 @@
 #ifndef __DATATYPES_HPP__
 #define __DATATYPES_HPP__
 
+#include <functional>
+#include <set>
+#include <unordered_set>
+
 class DBG_succ;
 
 struct HitInfo {
@@ -41,6 +45,25 @@ public:
     bool operator() (const HitInfo& lhs, const HitInfo& rhs) const {
         if (is_reverse) return (lhs.distance < rhs.distance);
         else return (lhs.distance > rhs.distance);
+    }
+};
+
+struct AnnotationSet {
+    std::set<std::string> annotation;
+};
+
+struct AnnotationHash {
+    std::uint16_t operator()(const std::set<std::string> &a) const {
+        std::set<std::string>::iterator it = a.begin();
+        std::uint16_t h1 = (uint16_t) std::hash<std::string>{}(*it);
+        it++;
+        if (a.size() > 1) {
+            for (; it != a.end(); ++it) {
+                std::uint16_t h2 = (uint16_t) std::hash<std::string>{}(*it);
+                h1 = h1 ^ (h2 << 1);
+            }
+        }
+        return h1;
     }
 };
 

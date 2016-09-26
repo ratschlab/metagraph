@@ -12,6 +12,7 @@
 #include <map>
 #include <stack>
 #include <queue>
+#include <deque>
 #include <algorithm>
 #include <assert.h>
 #include <iostream>
@@ -32,9 +33,11 @@ KSEQ_INIT(gzFile, gzread)
 #include <libmaus2/bitbtree/bitbtree.hpp>
 #include <libmaus2/wavelet/DynamicWaveletTree.hpp>
 #include <libmaus2/digest/md5.hpp>
+#include <libmaus2/util/NumberSerialisation.hpp>
 
 #include "config.hpp"
 #include "datatypes.hpp"
+#include "serialization.hpp"
 #include "dbg_succinct_libmaus.hpp"
 // use Heng Li's kseq structure for string IO
 #include "kseq.h"
@@ -1468,6 +1471,72 @@ void DBG_succ::allelesFromSeq(kstring_t &seq, unsigned int f, std::vector<JoinIn
 
 //
 //
+// ANNOTATE
+//
+//
+
+void DBG_succ::annotate_kmer(std::string &kmer, std::string &label) {
+
+    // get index of the k-mer we would like to annotate
+    uint64_t idx = this->index(kmer);
+    if (idx == 0)
+        return;
+
+    // get annotation of current kmer
+    size_t curr_hash = this->annotation[idx];
+    std::set<std::string> curr_anno;
+    if (curr_hash > 0) {
+        curr_anno = annotation_map.at(curr_hash);    
+    }
+
+    // check whether current label is already part of current annotation
+    // and add it if not
+    std::set<std::string>::const_iterator it = curr_anno.find(label); 
+    if (it == curr_anno.end()) {
+        curr_anno.insert(label);
+        curr_hash = AnnotationHash{}(curr_anno);
+        annotation_map[curr_hash] = curr_anno;
+        annotation[idx] = curr_hash;
+    }
+}
+
+//void annotate_kmers(rocksdb::DB* db, kstring_t &seq, kstring_t &label) {
+void DBG_succ::annotate_kmers(kstring_t &seq, kstring_t &label) {
+
+    std::string curr_kmer;
+    std::string label_str = std::string(label.s);
+    //rocksdb::Status s;
+
+    for (size_t i = 0; i < seq.l; ++i) {
+
+        if (config->verbose && i > 0 && i % 1000 == 0) {
+            std::cout << "." << std::flush;
+            if (i % 10000 == 0)
+                std::cout << i << " kmers added" << std::endl;
+        }
+
+        if (i < k) {
+            curr_kmer.push_back(seq.s[i]);
+            continue;
+        }
+
+        annotate_kmer(curr_kmer, label_str);
+        //db->Put(rocksdb::WriteOptions(), curr_kmer, label_str); 
+        
+        //std::cerr << curr_kmer << ":" << std::string(label.s) << std::endl;
+        curr_kmer.push_back(seq.s[i]);
+        curr_kmer = curr_kmer.substr(1, config->k);
+    }
+    // add last kmer and label to database
+    //db->Put(rocksdb::WriteOptions(), curr_kmer, label_str); 
+    annotate_kmer(curr_kmer, label_str);
+    //std::cerr << curr_kmer << ":" << std::string(label.s) << std::endl;
+}   
+
+
+
+//
+//
 // MERGE
 //
 //
@@ -2215,3 +2284,22 @@ void DBG_succ::toFile() {
     outstream.close();
 }
 
+// write annotation to disk
+void DBG_succ::annotationToFile() {
+    std::ofstream outstream((config->infbase + ".anno.dbg").c_str());
+    libmaus2::util::NumberSerialisation::serialiseNumberShortDeque<uint16_t>(outstream, annotation);
+    serialize_annotation_map(outstream, annotation_map);
+    outstream.close();
+}
+
+// read annotation from disk
+void DBG_succ::annotationFromFile() {
+    std::ifstream instream((config->infbase + ".anno.dbg").c_str());
+    if (instream.good()) {
+        annotation = libmaus2::util::NumberSerialisation::deserialiseNumberShortDeque<uint16_t>(instream);
+        annotation_map = deserialize_annotation_map(instream);
+    } else {
+        annotation.resize(get_size(), 0);
+    }
+    instream.close();
+}

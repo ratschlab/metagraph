@@ -2,6 +2,7 @@
 #define __DBG_SUCCINCT_LIBM_HPP__
 
 #include <zlib.h>
+#include <unordered_map>
 
 #include <libmaus2/bitbtree/bitbtree.hpp>
 #include <libmaus2/wavelet/DynamicWaveletTree.hpp>
@@ -39,6 +40,10 @@ class DBG_succ {
 
     // config object
     Config* config;
+
+    // annotation containers
+    std::deque<uint16_t> annotation;
+    std::unordered_map<uint16_t, std::set<std::string> > annotation_map;
 
 #ifdef DBGDEBUG
     bool debug = true;
@@ -342,6 +347,17 @@ class DBG_succ {
 
     //
     //
+    // ANNOTATE
+    //
+    //
+
+    void annotate_kmers(kstring_t &seq, kstring_t &label);
+
+    void annotate_kmer(std::string &kmer, std::string &label);
+
+
+    //
+    //
     // MERGE
     //
     //
@@ -420,6 +436,12 @@ class DBG_succ {
      *
      */
     void toFile(); 
+
+    /**
+     * Serialization and Deserialization of annotation content.
+     */
+    void annotationToFile();
+    void annotationFromFile();
 
 };
 #endif

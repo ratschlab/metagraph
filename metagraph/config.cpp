@@ -28,6 +28,8 @@ Config::Config(int argc, const char *argv[]) {
         identity = build;
     } else if (!strcmp(argv[1], "stats")) {
         identity = stats;
+    } else if (!strcmp(argv[1], "annotate")) {
+        identity = annotate;
     }
     // provide help screen for chosen identity
     if (argc == 2) {
@@ -53,6 +55,8 @@ Config::Config(int argc, const char *argv[]) {
             distance = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-O") || !strcmp(argv[i], "--outfile-base")) {
             outfbase = std::string(argv[++i]);
+        //} else if (!strcmp(argv[i], "-D") || !strcmp(argv[i], "--db-path")) {
+        //    dbpath = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-S") || !strcmp(argv[i], "--sql-base")) {
             sqlfbase = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-I") || !strcmp(argv[i], "--infile-base")) {
@@ -104,6 +108,9 @@ void Config::print_usage(std::string prog_name, int identity) {
             fprintf(stderr, "\t\t\tformats to the graph\n\n");
 
             fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s)\n\n");
+
+            fprintf(stderr, "\tannotate\tgiven a graph and a fast[a|q] file, annotate\n");
+            fprintf(stderr, "\t\t\tthe respective kmers\n\n");
         } break;
         case build: {
             fprintf(stderr, "Usage: %s build [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
@@ -135,9 +142,14 @@ void Config::print_usage(std::string prog_name, int identity) {
         case stats: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for stats:\n");
-            fprintf(stderr, "\t-I --infile-base [STR] \tbasename for loading graph input file\n");
             fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t-p --print-graph \tprint graph table to the screen [off]\n");
+        } break;
+        case annotate: {
+            fprintf(stderr, "Usage: %s annotate [options] PATH1 [[PATH2] ...]\n\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
+            fprintf(stderr, "Available options for annotate:\n");
+            //fprintf(stderr, "\t-D --db-path \tpath that is used to store the annotations database []\n");
+            fprintf(stderr, "\t-I --infile-base [STR] \tbasename for loading graph to be annotated\n");
         } break;
 
     }

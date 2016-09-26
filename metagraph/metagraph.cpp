@@ -3,9 +3,15 @@
 #include <ctime>
 
 #include <vector>
+#include <set>
+#include <deque>
 #include <string>
 #include <zlib.h>
 #include <pthread.h>
+
+//#include "rocksdb/db.h"
+//#include "rocksdb/slice.h"
+//#include "rocksdb/options.h"
 
 #include "datatypes.hpp"
 #include "dbg_succinct_libmaus.hpp"
@@ -31,6 +37,10 @@ void parallel_merge_collect(DBG_succ* result) {
     merge_data->result.clear();
     merge_data->bins_done = 0;
     result->p = result->succ_W(1, 0);
+}
+
+bool operator==(const AnnotationSet& lhs, const AnnotationSet& rhs) {
+    return (lhs.annotation == rhs.annotation); 
 }
 
 /*
@@ -73,8 +83,6 @@ void *parallel_merge_wrapper(void *arg) {
     }
     pthread_exit((void*) 0);
 }
-
-
 
 int main(int argc, char const ** argv) {
 
@@ -211,12 +219,12 @@ int main(int argc, char const ** argv) {
 
 
         case Config::align: {
-            // check required inputs
+
+            // load graph 
             if (config->infbase.empty()) {
               std::cerr << "Requires input <de bruijn graph> to align reads." << config->align << std::endl;
               exit(1);
             }
-
             DBG_succ* graph = new DBG_succ(config->infbase, config);
 
             for (unsigned int f = 0; f < config->fname.size(); ++f) {
@@ -279,7 +287,9 @@ int main(int argc, char const ** argv) {
                 graph = new DBG_succ(config->k, config);
             }
 
-            fprintf(stderr, "k is %i\n", config->k);
+            if (config->verbose)
+                std::cerr << "k is " << config->k << std::endl;
+
             // iterate over input files
             for (unsigned int f = 0; f < config->fname.size(); ++f) {
 
@@ -309,6 +319,52 @@ int main(int argc, char const ** argv) {
                 //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
             }
             //graph->print_seq();
+        } break;
+
+        case Config::annotate: {
+
+            // load graph 
+            if (config->infbase.empty()) {
+              std::cerr << "Requires input <de bruijn graph> for annotation. Use option -I. " << std::endl;
+              exit(1);
+            }
+            DBG_succ* graph = new DBG_succ(config->infbase, config);
+
+            // load annotatioun (if file does not exist, empty annotation is created)
+            graph->annotationFromFile();
+
+            // set up rocksdb
+           // rocksdb::Options options;
+           // options.create_if_missing = true;
+           // rocksdb::DB* db;
+           // rocksdb::Status status = rocksdb::DB::Open(options, config->dbpath, &db);
+
+            // iterate over input files
+            for (unsigned int f = 0; f < config->fname.size(); ++f) {
+
+                if (config->verbose) {
+                    std::cout << std::endl << "Parsing " << config->fname[f] << std::endl;
+                }
+
+                // open stream to fasta file
+                gzFile input_p = gzopen(config->fname[f].c_str(), "r");
+                kseq_t *read_stream = kseq_init(input_p);
+
+                if (read_stream == NULL) {
+                    std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
+                    exit(1);
+                }
+
+                while (kseq_read(read_stream) >= 0) {
+                    graph->annotate_kmers(read_stream->seq, read_stream->name);
+                }
+                kseq_destroy(read_stream);
+                gzclose(input_p);
+            }
+            //delete db;
+
+            graph->annotationToFile();
+
         } break;
     }
 

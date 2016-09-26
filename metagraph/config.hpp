@@ -29,13 +29,15 @@ class Config {
         std::string outfbase;
         std::string infbase;
         std::string sqlfbase;
+        std::string dbpath;
 
         enum identities {noidentity = -1, 
                          build = 1, 
                          merge, 
                          compare, 
                          align,
-                         stats};
+                         stats,
+                         annotate};
         int identity;
 
     private:
