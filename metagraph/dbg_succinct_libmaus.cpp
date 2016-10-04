@@ -169,15 +169,18 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
     instream.close();
 
     // load W array
-    //delete W;
+    delete W;
     instream.open((infbase + ".W.dbg").c_str());
     W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(instream);
     instream.close();
 
     // load F and k and p
+    for (size_t j = 0; j < alph_size; j++)
+        F.push_back(0);
     instream.open((infbase + ".F.dbg").c_str());
     std::string line;
     size_t mode = 0;
+    size_t fidx = 0;
     while (std::getline(instream, line)) {
         if (strcmp(line.c_str(), ">F") == 0) {
             mode = 1;
@@ -187,7 +190,9 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
             mode = 3;
         } else {
             if (mode == 1) {
-                F.push_back(std::strtoul(line.c_str(), NULL, 10));
+                F.at(fidx) += std::strtoul(line.c_str(), NULL, 10);
+                fidx++;
+                //F.push_back(std::strtoul(line.c_str(), NULL, 10));
             } else if (mode == 2) {
                 k = strtoul(line.c_str(), NULL, 10);
             } else if (mode == 3) {
@@ -576,8 +581,8 @@ std::pair<uint64_t, uint64_t> DBG_succ::index_range(std::deque<TAlphabet> str) {
     TAlphabet s = str.front() % alph_size;
     str.pop_front();
     // init range
-    uint64_t rl = succ_last(F[s] + 1);
-    uint64_t ru = F[s + 1];                // upper bound
+    uint64_t rl = succ_last(F.at(s) + 1);
+    uint64_t ru = (s < F.size() - 1) ? F.at(s + 1) : (W->n - 1);                // upper bound
     //fprintf(stderr, "char: %i rl: %i ru: %i\n", (int) s, (int) rl, (int) ru);
     // update range iteratively while scanning through s
     while (!str.empty()) {
@@ -1786,8 +1791,8 @@ void DBG_succ::merge(DBG_succ* G) {
  */
 std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t threads, uint64_t bins_per_thread, DBG_succ* G) {
 
-    uint64_t binlen;
-    uint64_t bins = threads * bins_per_thread;
+    uint64_t binlen = 0;
+    uint64_t bins = threads * bins_per_thread * 100;
 
     // depending on the number of threads, we will use a different length prefix
     // to compute the bin boundaries
@@ -1806,12 +1811,6 @@ std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t threads,
 
     std::vector<std::pair<uint64_t, uint64_t> > tmp;
     for (uint64_t i = 0; i < std::pow(alph_size, binlen); ++i) {
-        //std::deque<TAlphabet> ttt = bin_id_to_string(i, binlen);
-        //std::cerr << std::endl;
-        //for (size_t ii = 0; ii < ttt.size(); ++ii) {
-        //    std::cerr << ttt[ii] << get_alphabet_symbol(ttt[ii] % alph_size);
-        //}
-        //std::cerr << std::endl;
         std::pair<uint64_t, uint64_t> idx = G->index_range(bin_id_to_string(i, binlen));
         if (idx.first > idx.second)
             idx.first = idx.second = 0;
@@ -1820,6 +1819,14 @@ std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t threads,
         if (idx.first > 0)
             idx.first = G->pred_last(idx.first - 1) + 1;
         tmp.push_back(idx);
+        /*std::deque<TAlphabet> ttt = bin_id_to_string(i, binlen);
+        std::cerr << std::endl << "id: " << i << " ";
+        for (size_t ii = 0; ii < ttt.size(); ++ii) {
+            //std::cerr << ttt[ii] << get_alphabet_symbol(ttt[ii] % alph_size);
+            std::cerr << get_alphabet_symbol(ttt[ii] % alph_size);
+        }
+        std::cerr << " - " << idx.first << ":" << idx.second;
+        */
     }
     return tmp;
 }
@@ -2027,7 +2034,7 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
 * false and true otherwise.
 */
 bool DBG_succ::compare(DBG_succ* G) {
-    
+
     // compare size
     if (W->n != G->get_size())
         return false;
@@ -2036,6 +2043,8 @@ bool DBG_succ::compare(DBG_succ* G) {
     for (size_t i = 0; i < W->n; ++i) {
         if ((*W)[i] != G->get_W(i)) {
             std::cerr << "W differs at position " << i << std::endl;
+            std::cerr << "1: W[" << i << "] = " << (*W)[i]  << std::endl;
+            std::cerr << "2: W[" << i << "] = " << G->get_W(i) << std::endl;
             return false;
         }
     }
@@ -2044,6 +2053,8 @@ bool DBG_succ::compare(DBG_succ* G) {
     for (size_t i = 0; i < W->n; ++i) {
         if ((*last)[i] != G->get_last(i)) {
             std::cerr << "last differs at position " << i << std::endl;
+            std::cerr << "1: last[" << i << "] = " << (*last)[i]  << std::endl;
+            std::cerr << "2: last[" << i << "] = " << G->get_last(i) << std::endl;
             return false;
         }
     }
@@ -2052,6 +2063,8 @@ bool DBG_succ::compare(DBG_succ* G) {
     for (size_t i = 0; i < F.size(); ++i) {
         if (F.at(i) != G->get_F(i)) {
             std::cerr << "F differs at position " << i << std::endl;
+            std::cerr << "1: F[" << i << "] = " << F.at(i) << std::endl;
+            std::cerr << "2: F[" << i << "] = " << G->get_F(i) << std::endl;
             return false;
         }
     }

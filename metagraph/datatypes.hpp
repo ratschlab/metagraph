@@ -76,6 +76,81 @@ struct ParallelMergeContainer {
     unsigned int idx;
     unsigned int k;
     unsigned int bins_done;
+
+    /* Helper function to rebalance the bins for
+     * a somewhat equal distribution of sizes.
+     */
+    void rebalance_bins(uint64_t target_bins) {
+
+        std::vector<uint64_t> combined_bins;
+        uint64_t total_sum = 0;
+        size_t size1, size2;
+        for (size_t i = 0; i < bins_g1.size(); ++i) {
+            size1 = (bins_g1.at(i).first == 0) ? 0 : bins_g1.at(i).second - bins_g1.at(i).first + 1;
+            size2 = (bins_g2.at(i).first == 0) ? 0 : bins_g2.at(i).second - bins_g2.at(i).first + 1;
+            combined_bins.push_back(size1 + size2);
+            total_sum += combined_bins.back();
+            //std::cerr << "bin 1: " << bins_g1.at(i).first << " - " << bins_g1.at(i).second << " size: " << size1 << " --- " << "bin 2: " << bins_g2.at(i).first << " - " << bins_g2.at(i).second << " size: " << size2 << " total: " << size1 + size2 << std::endl; 
+        }
+        uint64_t target_bin_size = (total_sum / target_bins) + 1;
+
+        std::vector<std::pair<uint64_t, uint64_t> > new_bins_g1;
+        std::vector<std::pair<uint64_t, uint64_t> > new_bins_g2;
+
+        uint64_t start_g1 = 0, start_g2 = 0, end_g1 = 0, end_g2 = 0;
+        uint64_t cum_sum = 0;
+        for (size_t i = 0; i < combined_bins.size(); ++i) {
+            cum_sum += combined_bins.at(i);
+            if (start_g1 == 0 && bins_g1.at(i).first > 0) {
+                start_g1 = bins_g1.at(i).first;
+                end_g1 = bins_g1.at(i).second;
+            }
+            if (start_g2 == 0 && bins_g2.at(i).first > 0) {
+                start_g2 = bins_g2.at(i).first;
+                end_g2 = bins_g2.at(i).second;
+            }
+            end_g1 = std::max(end_g1, bins_g1.at(i).second);
+            end_g2 = std::max(end_g2, bins_g2.at(i).second);
+
+            if (cum_sum >= target_bin_size) {
+                new_bins_g1.push_back(std::make_pair(start_g1, end_g1));
+                new_bins_g2.push_back(std::make_pair(start_g2, end_g2));
+                cum_sum = 0;
+                start_g1 = start_g2 = end_g1 = end_g2 = 0;
+            }
+        }
+        if ((start_g1 > 0) || (start_g2 > 0)) {
+            new_bins_g1.push_back(std::make_pair(start_g1, end_g1));
+            new_bins_g2.push_back(std::make_pair(start_g2, end_g2));
+        }
+
+        bins_g1 = new_bins_g1;
+        bins_g2 = new_bins_g2;
+    }
+
+
+
+    void get_bin_stats() {
+        size_t min_bin = 0, max_bin = 0, total_bin = 0;
+        size_t curr_size, size1, size2;
+        for (size_t i = 0; i < bins_g1.size(); ++i) {
+            size1 = (bins_g1.at(i).first == 0) ? 0 : bins_g1.at(i).second - bins_g1.at(i).first + 1;
+            size2 = (bins_g2.at(i).first == 0) ? 0 : bins_g2.at(i).second - bins_g2.at(i).first + 1;
+            curr_size = (size1 + size2);
+            if (curr_size > 0) {
+                min_bin = (min_bin == 0) ? curr_size : std::min(min_bin, curr_size);
+                max_bin = (max_bin == 0) ? curr_size : std::max(max_bin, curr_size);
+            }
+            total_bin += curr_size;
+        }
+
+        std::cout << std::endl;
+        std::cout << "Total number of bins: " << bins_g1.size() << std::endl;
+        std::cout << "Total size: " << total_bin << std::endl;
+        std::cout << "Smallest bin: " << min_bin << std::endl;
+        std::cout << "Largest bin: " << max_bin << std::endl;
+        std::cout << "Average bin size: " << total_bin / bins_g1.size() << std::endl << std::endl;
+    }
 };
 
 #endif
