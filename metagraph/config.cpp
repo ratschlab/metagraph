@@ -136,7 +136,7 @@ void Config::print_usage(std::string prog_name, int identity) {
             fprintf(stderr, "Available options for merge:\n");
             fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
-            fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [10]\n");
+            fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [1]\n");
             fprintf(stderr, "\t-P --print-graph \tprint graph table to the screen [off]\n");
         } break;
         case stats: {
@@ -207,7 +207,7 @@ void Config::init() {
     print_graph = false;
     distance = 0;
     parallel = 1;
-    bins_per_thread = 10;
+    bins_per_thread = 1;
     k = 3;
     identity = noidentity;
 }
