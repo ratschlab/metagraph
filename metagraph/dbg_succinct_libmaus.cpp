@@ -11,11 +11,20 @@
 #include <vector>
 #include <map>
 #include <stack>
+#include <queue>
+#include <deque>
 #include <algorithm>
 #include <assert.h>
 #include <iostream>
 #include <sstream>
 #include <fstream>
+#include <string>
+#include <zlib.h>
+#include <cmath>
+
+#include "kseq.h"
+
+KSEQ_INIT(gzFile, gzread)
 
 /**
  * We use libmaus 2 for representing dynamic succint data structures
@@ -24,21 +33,18 @@
 #include <libmaus2/bitbtree/bitbtree.hpp>
 #include <libmaus2/wavelet/DynamicWaveletTree.hpp>
 #include <libmaus2/digest/md5.hpp>
+#include <libmaus2/util/NumberSerialisation.hpp>
 
-/** 
- * We use seqan for an efficient representation of our alphabet.
- */
-#include <seqan/sequence.h>
-#include <seqan/basic.h>
-#include <seqan/seq_io.h>
-
-#include <config.hpp>
-#include <dbg_succinct_libmaus.hpp>
+#include "config.hpp"
+#include "datatypes.hpp"
+#include "serialization.hpp"
+#include "dbg_succinct_libmaus.hpp"
+// use Heng Li's kseq structure for string IO
+#include "kseq.h"
 
 #include "IDatabase.hpp"
 
 // define an extended alphabet for W --> somehow this does not work properly as expected
-typedef seqan::ModifiedAlphabet<seqan::Dna5, seqan::ModExpand<'X'> > Dna5F; 
 typedef uint64_t TAlphabet;
 typedef DBG_succ::BranchInfo BranchInfo;
 typedef DBG_succ::BranchInfoMerge BranchInfoMerge;
@@ -95,7 +101,6 @@ struct DBG_succ::JoinInfo {
         seqPos2(seqPos2_) {}
 };
 
-
 // the bit array indicating the last outgoing edge of a node
 libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();
 
@@ -111,12 +116,14 @@ size_t k;
 uint64_t p;
 // alphabet size
 size_t alph_size = 7;
+// alphabet
+const char alphabet[] = "$ACGTNX$ACGTNXn";
 
 // infile base when loaded from file
 std::string infbase;
 
 // config object
-CFG config;
+//CFG config;
 
 
 #ifdef DBGDEBUG
@@ -130,7 +137,7 @@ CFG config;
 // CONSTRUCTORS
 //
 //
-DBG_succ::DBG_succ(size_t k_, CFG config_, bool sentinel) : 
+DBG_succ::DBG_succ(size_t k_, Config* config_, bool sentinel) : 
     k(k_),
     config(config_) {
 
@@ -154,7 +161,7 @@ DBG_succ::DBG_succ(size_t k_, CFG config_, bool sentinel) :
     }
 }
 
-DBG_succ::DBG_succ(std::string infbase_, CFG config_) : 
+DBG_succ::DBG_succ(std::string infbase_, Config* config_) : 
     infbase(infbase_),
     config(config_) {
 
@@ -164,15 +171,18 @@ DBG_succ::DBG_succ(std::string infbase_, CFG config_) :
     instream.close();
 
     // load W array
-    //delete W;
+    delete W;
     instream.open((infbase + ".W.dbg").c_str());
     W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(instream);
     instream.close();
 
     // load F and k and p
+    for (size_t j = 0; j < alph_size; j++)
+        F.push_back(0);
     instream.open((infbase + ".F.dbg").c_str());
     std::string line;
     size_t mode = 0;
+    size_t fidx = 0;
     while (std::getline(instream, line)) {
         if (strcmp(line.c_str(), ">F") == 0) {
             mode = 1;
@@ -182,7 +192,9 @@ DBG_succ::DBG_succ(std::string infbase_, CFG config_) :
             mode = 3;
         } else {
             if (mode == 1) {
-                F.push_back(std::strtoul(line.c_str(), NULL, 10));
+                F.at(fidx) += std::strtoul(line.c_str(), NULL, 10);
+                fidx++;
+                //F.push_back(std::strtoul(line.c_str(), NULL, 10));
             } else if (mode == 2) {
                 k = strtoul(line.c_str(), NULL, 10);
             } else if (mode == 3) {
@@ -196,6 +208,10 @@ DBG_succ::DBG_succ(std::string infbase_, CFG config_) :
     instream.close();
 }
 
+DBG_succ::~DBG_succ() {
+    delete W;
+    delete last;
+}
 
 //
 //
@@ -213,7 +229,7 @@ uint64_t DBG_succ::rank_W(uint64_t i, TAlphabet c) {
     // deal with  border conditions
     if (i <= 0)
         return 0;
-    return W->rank(c, std::min(i, W->n - 1));
+    return W->rank(c, std::min(i, W->n - 1)) - (c == 0);
 }
 
 /**
@@ -423,14 +439,14 @@ uint64_t DBG_succ::indegree(uint64_t i) {
  * Given a node label s, this function returns the index
  * of the corresponding node, if this node exists and 0 otherwise.
  */
-uint64_t DBG_succ::index(seqan::String<Dna5F> &s_) {
-    TAlphabet s = (TAlphabet) seqan::ordValue(s_[0]) + 1;
+uint64_t DBG_succ::index(std::string &s_) {
+    TAlphabet s = get_alphabet_number(s_[0]);
     // init range
     uint64_t rl = succ_last(F[s] + 1);
     uint64_t ru = F[s + 1]; // upper bound
     // update range iteratively while scanning through s
-    for (uint64_t i = 1; i < seqan::length(s_); i++) {
-        s = (TAlphabet) seqan::ordValue(s_[i]) + 1;
+    for (uint64_t i = 1; i < s_.length(); i++) {
+        s = get_alphabet_number(s_[i]);
         rl = std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size));
         if (rl >= W->n)
             return 0;
@@ -445,6 +461,118 @@ uint64_t DBG_succ::index(seqan::String<Dna5F> &s_) {
     return (ru > rl) ? ru : rl;
 }
 
+/** 
+ * Given a string str and a maximal number of edit operations
+ * max_distance, this function returns all nodes with labels at most
+ * max_distance many edits away from str.
+ */
+std::vector<HitInfo> DBG_succ::index_fuzzy(std::string &str, uint64_t max_distance) {
+    
+    std::vector<HitInfo> result; 
+    std::priority_queue<HitInfo, std::vector<HitInfo>, HitInfoCompare> hits;
+    std::priority_queue<HitInfo, std::vector<HitInfo>, HitInfoCompare> hits2;
+    uint64_t rl;
+    uint64_t ru;
+
+    // walk through pattern, thereby collecting possible partial matches
+    // once the end of the pattern is readched, add match to results
+    
+    // init match/mismatch to first pattern position
+    TAlphabet s = get_alphabet_number(str[0]);
+    for (TAlphabet b = 1; b < 5; ++b) {
+        rl = succ_last(F[b] + 1);
+        ru = F[b + 1];
+        //std::cout << "pushing: rl " << rl << " ru " << ru << " str_pos 1 max_distance " << (uint64_t) (b != s) << std::endl;
+        //std::cout << "s " << s << " b " << b << std::endl;
+        std::vector<uint64_t> tmp;
+        hits.push(HitInfo(rl, ru, 1, 1, (uint64_t) (b != s), std::string(1, get_alphabet_symbol(b)), tmp));
+
+        // opening/extending a gap in the pattern starting with the first position
+        for (size_t p = 1; p < str.length() - 1; ++p) {
+            TAlphabet ss = get_alphabet_number(str[p]);
+            if ((p + (b != ss)) > max_distance)
+                break;
+            hits.push(HitInfo(rl, ru, p + 1, 1, p + (b != ss), std::string(p, 'd') + std::string(1, get_alphabet_symbol(b)), tmp));
+            //std::cout << "a) adding '-'" << std::endl;
+        }
+    }
+
+    // walk through pattern thereby extending all partial hits
+    while (hits.size() > 0) {
+        while (hits.size() > 0) {
+            HitInfo curr_hit = hits.top();
+            hits.pop();
+            //std::cout << "loaded: rl " << curr_hit.rl << " ru " << curr_hit.ru << " dist " << curr_hit.distance << std::endl;
+
+            if (curr_hit.str_pos < str.length()) {
+            
+                // opening/extending a gap in the graph, leaving current pattern position unmatched
+                if (curr_hit.distance < max_distance) {
+                    hits2.push(HitInfo(curr_hit.rl, curr_hit.ru, curr_hit.str_pos + 1, curr_hit.graph_pos, curr_hit.distance + 1, curr_hit.cigar + 'd', curr_hit.path));
+                    //std::cout << "b) " << curr_hit.cigar << " adding '-'" << std::endl;
+                }
+
+                s = get_alphabet_number(str[curr_hit.str_pos]);
+
+                // has the number of matches exceeded the node length?
+                // there are three possible scenarios for extension of the path:
+                //  1) pattern is shorter than the node length --> get an interval of matching nodes
+                //  2) pattern length exactly mathces the node length --> there is one correponding node
+                //  3) pattern is longer than the node length --> we append to a path 
+                if (curr_hit.graph_pos >= k) {
+                //    std::cout << "push back tp path " << curr_hit.rl << std::endl;
+                    curr_hit.path.push_back(curr_hit.rl);
+                }
+
+                // iterate through all possible extensions of current position
+                for (TAlphabet b = 1; b < 5; ++b) {
+                    if (curr_hit.distance <= max_distance) {
+
+                        // we cannot afford any more mismatches
+                        if ((curr_hit.distance + (b != s)) > max_distance)
+                            continue;
+
+                        // re-define range of nodes to check for outgoing nodes
+                        rl = std::min(succ_W(pred_last(curr_hit.rl - 1) + 1, b), succ_W(pred_last(curr_hit.rl - 1) + 1, b + alph_size));
+                        ru = std::max(pred_W(curr_hit.ru, b), pred_W(curr_hit.ru, b + alph_size));
+
+                        // the current range in W does not contain our next symbol
+                        if ((rl >= W->n) || (ru >= W->n) || (rl > ru))
+                            continue;
+
+                        // update the SA range with the current symbol b
+                        rl = outgoing(rl, b);
+                        ru = outgoing(ru, b);
+
+                        // range is empty
+                        if ((rl == 0) && (ru == 0))
+                            continue;
+
+                        // add hit for extension in next step
+                        hits2.push(HitInfo(rl, ru, curr_hit.str_pos + 1, curr_hit.graph_pos + 1, curr_hit.distance + (b != s), curr_hit.cigar + get_alphabet_symbol(b), curr_hit.path));
+                        //std::cout << "curr rl " << curr_hit.rl << " ru " << curr_hit.ru << std::endl;
+                        //std::cout << "c) " << curr_hit.cigar << " adding '" << get_alphabet_symbol(b) << "' - graph pos " << curr_hit.graph_pos + 1 << " rl " << rl << " ru " << ru << std::endl;
+                        
+                        // opening/extending a gap in the pattern, leaving current graph position unmatched 
+                        // --> choose any available mismatching next edge 
+                        if (b != s) {
+                            hits2.push(HitInfo(rl, ru, curr_hit.str_pos, curr_hit.graph_pos + 1, curr_hit.distance + 1, curr_hit.cigar + 'i', curr_hit.path));
+                        }
+                    }
+                }
+            } else {
+                // collect results
+                //std::cout << "pushing " << curr_hit.cigar << "  " << curr_hit.distance << " rl " << curr_hit.rl << " ru " << curr_hit.ru << std::endl;
+                result.push_back(curr_hit); //std::make_pair(curr_hit.rl < curr_hit.ru ? curr_hit.ru : curr_hit.rl, curr_hit.cigar)); 
+            }
+        }
+        hits.swap(hits2);
+    }
+
+    return result;
+}
+
+
 uint64_t DBG_succ::index(std::deque<TAlphabet> str) {
     std::pair<uint64_t, uint64_t> tmp = index_range(str);
     return (tmp.second > tmp.first) ? tmp.second : tmp.first;
@@ -455,8 +583,8 @@ std::pair<uint64_t, uint64_t> DBG_succ::index_range(std::deque<TAlphabet> str) {
     TAlphabet s = str.front() % alph_size;
     str.pop_front();
     // init range
-    uint64_t rl = succ_last(F[s] + 1);
-    uint64_t ru = F[s + 1];                // upper bound
+    uint64_t rl = succ_last(F.at(s) + 1);
+    uint64_t ru = (s < F.size() - 1) ? F.at(s + 1) : (W->n - 1);                // upper bound
     //fprintf(stderr, "char: %i rl: %i ru: %i\n", (int) s, (int) rl, (int) ru);
     // update range iteratively while scanning through s
     while (!str.empty()) {
@@ -521,7 +649,7 @@ std::pair<bool, bool> DBG_succ::compare_nodes(DBG_succ *G1, uint64_t k1_node, DB
 }
 
 /** 
- * This function gets two node indices and returns if the
+ * This function gets two node indices and returns whether the
  * node labels share a k-1 suffix.
  */
 bool DBG_succ::compare_node_suffix(uint64_t i1, uint64_t i2) {
@@ -615,6 +743,59 @@ bool DBG_succ::get_last(uint64_t k) {
     return (*last)[k];
 }
 
+char DBG_succ::get_alphabet_symbol(uint64_t s) {
+    return s < strlen(alphabet) ? alphabet[s] : alphabet[14];
+}
+
+std::vector<uint64_t> DBG_succ::align(kstring_t seq) {
+
+  uint64_t kmer_length = this->get_k();
+  uint64_t no_kmers_in_seq = seq.l - kmer_length + 1;
+
+  std::vector<uint64_t> indices (no_kmers_in_seq, 0);
+
+  for (uint64_t i = 0; i < no_kmers_in_seq; ++i) {
+  // TODO make sure that kmer is shorter than seq.l
+    std::string kmer(seq.s + i, seq.s + i + kmer_length);
+    indices[i] = this->index(kmer);
+  }
+  
+  return indices;
+}
+
+std::vector<std::vector<HitInfo> > DBG_succ::align_fuzzy(kstring_t seq, uint64_t alignment_length, uint64_t max_distance) {
+
+    size_t seq_length = seq.l;
+    std::vector<std::vector<HitInfo> > hit_list;
+
+    if (alignment_length == 0) {
+
+    } else {
+        alignment_length = alignment_length < 2 ? 2 : alignment_length;
+        alignment_length = alignment_length < seq_length ? alignment_length : seq_length;
+
+        for (uint64_t i = 0; i < seq_length - alignment_length + 1; ++i) {
+            std::string kmer(seq.s + i, seq.s + i + alignment_length);
+            hit_list.push_back(this->index_fuzzy(kmer, max_distance));
+
+        }
+    }
+    return hit_list;
+}
+
+/*
+ * Returns the number of nodes on the current graph.
+ */
+uint64_t DBG_succ::get_node_count() {
+    return rank_last(last->size() - 1);
+}
+
+/*
+ * Return the number of edges in the current graph.
+ */
+uint64_t DBG_succ::get_edge_count() {
+    return W->n - 1;
+}
 
 //
 //
@@ -665,8 +846,26 @@ void DBG_succ::replaceW(size_t i, TAlphabet val) {
     W->insert(val, i);
 }
 
+
+TAlphabet DBG_succ::get_alphabet_number(char s) {
+
+     TAlphabet nt_lookup[128] = {
+        5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5, 
+        5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5, 
+        5, 5, 5, 5,  0, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+        5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5, 
+        5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5, 
+        5, 5, 5, 5,  4, 4, 5, 5,  6, 5, 5, 5,  5, 5, 5, 5, 
+        5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5, 
+        5, 5, 5, 5,  4, 4, 5, 5,  6, 5, 5, 5,  5, 5, 5, 5 
+    };
+
+    return nt_lookup[(int) s];
+}
+
+
 // add a full sequence to the graph
-void DBG_succ::add_seq (seqan::String<Dna5F> seq) {
+void DBG_succ::add_seq (kstring_t &seq) {
 
     if (debug) {
         print_seq();
@@ -689,11 +888,11 @@ void DBG_succ::add_seq (seqan::String<Dna5F> seq) {
     /** Iterate over input sequence and enumerae all
      * k-mers.
      */
-    for (uint64_t i = 0; i < length(seq); ++i) {
+    for (uint64_t i = 0; i < seq.l; ++i) {
         if (i > 0 && i % 1000 == 0) {
             std::cout << "." << std::flush;
             if (i % 10000 == 0) {
-                fprintf(stdout, "%lu - edges %lu / nodes %lu\n", i, W->n - 1, rank_last((last->size() - 1)));
+                fprintf(stdout, "%lu - edges %lu / nodes %lu\n", i, get_edge_count(), get_node_count());
             }
         }
         // if (debug) {
@@ -702,7 +901,7 @@ void DBG_succ::add_seq (seqan::String<Dna5F> seq) {
         //    cerr << "seq[i] ord " << ordValue(seq[i]) + 1 << std::endl;
         // }
 
-        append_pos((TAlphabet) ordValue(seq[i]) + 1);
+        append_pos(get_alphabet_number(seq.s[i]));
 
         if (debug) {
             print_seq();
@@ -721,7 +920,7 @@ void DBG_succ::add_seq (seqan::String<Dna5F> seq) {
         }
     }
 
-    fprintf(stdout, "edges %lu / nodes %lu\n", W->n - 1, rank_last((last->size() - 1)));
+    fprintf(stdout, "edges %lu / nodes %lu\n", get_edge_count(), get_node_count());
 
     //toSQL();
     //String<Dna5F> test = "CCT";
@@ -895,6 +1094,28 @@ void DBG_succ::append_pos(TAlphabet c) {
 }
 
 
+/** This function takes a pointer to a graph structure and concatenates the arrays W, last 
+ * and F to this graph's arrays. In almost all cases this will not produce a valid graph and 
+ * should only be used as a helper in the parallel merge procedure.
+ */
+void DBG_succ::append_graph(DBG_succ *g) {
+
+    size_t curr_pos = this->get_size();
+
+    // handle last and W
+    for (size_t j = 1; j < g->get_size(); ++j) {
+        this->last->insertBit(curr_pos, g->get_last(j));
+        this->W->insert(g->get_W(j), curr_pos);
+        ++curr_pos;
+    }
+
+    // handle F
+    assert(this->F.size() == g->F.size());
+    for (size_t j = 0; j < this->F.size(); ++j) {
+        this->F.at(j) += g->F.at(j);
+    }
+}
+
 //
 //
 // TRAVERSAL
@@ -928,23 +1149,23 @@ BranchInfoMerge DBG_succ::pop_branch(std::stack<BranchInfoMerge> &branchnodes, u
 }
 
 
-bool DBG_succ::finish_sequence(seqan::String<Dna5F> &sequence, uint64_t seqId, std::ofstream &SQLstream) {
-    if (seqan::length(sequence) > 0) {
+bool DBG_succ::finish_sequence(std::string &sequence, uint64_t seqId, std::ofstream &SQLstream) {
+    if (sequence.length() > 0) {
         if (seqId == 1)
-            SQLstream << "INSERT INTO FASTA VALUES (1, '" << config.sqlfbase << ".fa');" << std::endl;
+            SQLstream << "INSERT INTO FASTA VALUES (1, '" << config->sqlfbase << ".fa');" << std::endl;
         std::ofstream stream;
         if (seqId == 1)
-            stream.open((config.sqlfbase + ".fa").c_str());
+            stream.open((config->sqlfbase + ".fa").c_str());
         else
-            stream.open((config.sqlfbase + ".fa").c_str(), std::ofstream::app);
+            stream.open((config->sqlfbase + ".fa").c_str(), std::ofstream::app);
         stream << ">seq" << seqId << std::endl;
         uint64_t i = 0;
-        while ((i + 80) < seqan::length(sequence)) {
-            stream << seqan::infix(sequence, i, i+80) << std::endl;
+        while ((i + 80) < sequence.length()) {
+            stream << sequence.substr(i, 80) << std::endl;
             i += 80;
         }
-        if (i != seqan::length(sequence))
-            stream << seqan::suffix(sequence, i) << std::endl;
+        if (i != sequence.length())
+            stream << sequence.substr(i) << std::endl;
         stream.close();
 
         if (debug)
@@ -954,8 +1175,8 @@ bool DBG_succ::finish_sequence(seqan::String<Dna5F> &sequence, uint64_t seqId, s
         std::ostringstream test;
         test << sequence;
         libmaus2::util::MD5::md5(test.str(), md5);
-        SQLstream << "INSERT INTO Sequence VALUES (" << seqId << ", 1, 'seq" << seqId << "', '" << md5 << "', " << seqan::length(sequence) << ");" << std::endl;
-        seqan::clear(sequence);
+        SQLstream << "INSERT INTO Sequence VALUES (" << seqId << ", 1, 'seq" << seqId << "', '" << md5 << "', " << sequence.length() << ");" << std::endl;
+        sequence.clear();
         return true;
     } else {
         return false;
@@ -971,7 +1192,7 @@ size_t DBG_succ::traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<
     for (std::vector<bool>::iterator it = visited.begin(); it != visited.end(); ++it) {
         *it = false;
     }
-    seqan::String<Dna5F> sequence;
+    std::string sequence;
     // for nodes with indegree > 1 we store sequence and index of the 
     // sequence that visited them, so we know where to anchor branches into it
     std::map<uint64_t, std::pair<uint64_t, uint64_t> > nodeId2seqPos; 
@@ -1012,11 +1233,7 @@ size_t DBG_succ::traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<
             seqPos += isFirst ? 0 : 1;
             isFirst = false;
             val = get_node_end_value(nodeId);
-            if (val % alph_size == 0) {
-                seqan::append(sequence, "$");
-            } else {
-                seqan::append(sequence, Dna5F((val % alph_size) - 1));
-            }
+            sequence.append(1, get_alphabet_symbol(val % alph_size));
             // store seq position of this node (we will join to it later)
             if (indegree(nodeId) > 1) {
                 nodeId2seqPos.insert(std::make_pair(nodeId, std::make_pair(seqId, seqPos)));
@@ -1029,7 +1246,7 @@ size_t DBG_succ::traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<
             // the next node is new
             if (!visited.at(next)) {
                 if (joinOpen) {
-                    if (length(sequence) > 0) {
+                    if (sequence.length() > 0) {
                         finish_sequence(sequence, seqCnt++, SQLstream);
                     }
                     seqId = seqCnt;
@@ -1084,7 +1301,7 @@ size_t DBG_succ::traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<
                                 fprintf(stderr, " -- pushed %lu : seqId %lu seqPos %lu lastEdge %lu -- ", nodeId, seqId, seqPos, lastEdge); 
                         }
                         if (joinOpen) {
-                            if (length(sequence) > 0) {
+                            if (sequence.length() > 0) {
                                 finish_sequence(sequence, seqCnt++, SQLstream);
                             }
                             seqId = seqCnt;
@@ -1130,7 +1347,7 @@ size_t DBG_succ::traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<
         out = outdegree(nodeId);
     }
     // for completeness
-    if (seqan::length(sequence) > 0)
+    if (sequence.length() > 0)
         finish_sequence(sequence, seqCnt++, SQLstream);
     else
         seqCnt--;
@@ -1149,7 +1366,7 @@ size_t DBG_succ::traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<
     return seqCnt;
 }
 
-void DBG_succ::allelesFromSeq(seqan::String<Dna5F>seq, unsigned int f, std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream, bool isRefRun, size_t seqNum) {
+void DBG_succ::allelesFromSeq(kstring_t &seq, unsigned int f, std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream, bool isRefRun, size_t seqNum) {
     
     uint64_t nodeId = 1;
     uint64_t seqId = 1;
@@ -1171,7 +1388,7 @@ void DBG_succ::allelesFromSeq(seqan::String<Dna5F>seq, unsigned int f, std::vect
         for (size_t i = 0; i < seqNum; ++i)
             isRef.push_back(false);
     }
-    if (config.verbose)
+    if (config->verbose)
         fprintf(stderr, "processing alleles for file %u\n", f);
 
     while (true) {
@@ -1183,18 +1400,18 @@ void DBG_succ::allelesFromSeq(seqan::String<Dna5F>seq, unsigned int f, std::vect
             currStart++;
             continue;
         }
-        seqVal = ordValue(seq[seqPos]) + 1;
+        seqVal = get_alphabet_number(seq.s[seqPos]);
             
         //fprintf(stderr, "nodeVal %lu seqVal %lu nodeId %lu seqId %lu seqPos %lu alleleSeqPos %lu\n", nodeVal, seqVal, nodeId, seqId, seqPos, alleleSeqPos);
         assert(nodeVal % alph_size == 6 || nodeVal % alph_size == seqVal);
-        if (seqPos + 1 == length(seq))
+        if (seqPos + 1 == seq.l)
             break;
         if (nodeVal % alph_size != 6) {
             seqPos++;
         } else {
             currStart++;
         }
-        seqValNext = ordValue(seq[seqPos]) + 1;
+        seqValNext = get_alphabet_number(seq.s[seqPos]) + 1;
 
         // find edge to next node
         out = outdegree(nodeId);
@@ -1285,6 +1502,72 @@ void DBG_succ::allelesFromSeq(seqan::String<Dna5F>seq, unsigned int f, std::vect
 
 //
 //
+// ANNOTATE
+//
+//
+
+void DBG_succ::annotate_kmer(std::string &kmer, std::string &label) {
+
+    // get index of the k-mer we would like to annotate
+    uint64_t idx = this->index(kmer);
+    if (idx == 0)
+        return;
+
+    // get annotation of current kmer
+    size_t curr_hash = this->annotation[idx];
+    std::set<std::string> curr_anno;
+    if (curr_hash > 0) {
+        curr_anno = annotation_map.at(curr_hash);    
+    }
+
+    // check whether current label is already part of current annotation
+    // and add it if not
+    std::set<std::string>::const_iterator it = curr_anno.find(label); 
+    if (it == curr_anno.end()) {
+        curr_anno.insert(label);
+        curr_hash = AnnotationHash{}(curr_anno);
+        annotation_map[curr_hash] = curr_anno;
+        annotation[idx] = curr_hash;
+    }
+}
+
+//void annotate_kmers(rocksdb::DB* db, kstring_t &seq, kstring_t &label) {
+void DBG_succ::annotate_kmers(kstring_t &seq, kstring_t &label) {
+
+    std::string curr_kmer;
+    std::string label_str = std::string(label.s);
+    //rocksdb::Status s;
+
+    for (size_t i = 0; i < seq.l; ++i) {
+
+        if (config->verbose && i > 0 && i % 1000 == 0) {
+            std::cout << "." << std::flush;
+            if (i % 10000 == 0)
+                std::cout << i << " kmers added" << std::endl;
+        }
+
+        if (i < k) {
+            curr_kmer.push_back(seq.s[i]);
+            continue;
+        }
+
+        annotate_kmer(curr_kmer, label_str);
+        //db->Put(rocksdb::WriteOptions(), curr_kmer, label_str); 
+        
+        //std::cerr << curr_kmer << ":" << std::string(label.s) << std::endl;
+        curr_kmer.push_back(seq.s[i]);
+        curr_kmer = curr_kmer.substr(1, config->k);
+    }
+    // add last kmer and label to database
+    //db->Put(rocksdb::WriteOptions(), curr_kmer, label_str); 
+    annotate_kmer(curr_kmer, label_str);
+    //std::cerr << curr_kmer << ":" << std::string(label.s) << std::endl;
+}   
+
+
+
+//
+//
 // MERGE
 //
 //
@@ -1317,8 +1600,10 @@ void DBG_succ::merge(DBG_succ* G) {
     bool initial_k = true;
     uint64_t added = 0;
 
+    // keep traversing until we reach the think and have worked off all branches from the stack
     while (out > 0 || branchnodes.size() > 0) {
 
+        // verbose output
         if (added > 0 && added % 1000 == 0) {
             std::cout << "." << std::flush;
             if (added % 10000 == 0) {
@@ -1526,36 +1811,100 @@ void DBG_succ::merge(DBG_succ* G) {
     update_F(this->get_node_end_value(p), true);
 }
 
+/* 
+ * Helper function to determine the bin boundaries, given 
+ * a number of threads.
+ */
+std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t threads, uint64_t bins_per_thread, DBG_succ* G) {
+
+    uint64_t binlen = 0;
+    uint64_t bins = threads * bins_per_thread * 100;
+
+    // depending on the number of threads, we will use a different length prefix
+    // to compute the bin boundaries
+    if (bins < alph_size)
+        binlen = 1;
+    else if (bins < (alph_size * alph_size) || (k <= 2))
+        binlen = 2;
+    else if (bins < (alph_size * alph_size * alph_size) || (k <= 3))
+        binlen = 3;
+    else if (bins < (alph_size * alph_size * alph_size * alph_size) || (k <= 4))
+        binlen = 4;
+    else if (bins < (alph_size * alph_size * alph_size * alph_size * alph_size) || (k <= 5))
+        binlen = 5;
+    else
+        binlen = 6;
+
+    std::vector<std::pair<uint64_t, uint64_t> > tmp;
+    for (uint64_t i = 0; i < std::pow(alph_size, binlen); ++i) {
+        std::pair<uint64_t, uint64_t> idx = G->index_range(bin_id_to_string(i, binlen));
+        if (idx.first > idx.second)
+            idx.first = idx.second = 0;
+        if (idx.second >= G->get_size())
+            idx.second = G->get_size() - 1;
+        if (idx.first > 0)
+            idx.first = G->pred_last(idx.first - 1) + 1;
+        tmp.push_back(idx);
+        /*std::deque<TAlphabet> ttt = bin_id_to_string(i, binlen);
+        std::cerr << std::endl << "id: " << i << " ";
+        for (size_t ii = 0; ii < ttt.size(); ++ii) {
+            //std::cerr << ttt[ii] << get_alphabet_symbol(ttt[ii] % alph_size);
+            std::cerr << get_alphabet_symbol(ttt[ii] % alph_size);
+        }
+        std::cerr << " - " << idx.first << ":" << idx.second;
+        */
+    }
+    return tmp;
+}
+
+std::deque<TAlphabet> DBG_succ::bin_id_to_string(uint64_t bin_id, uint64_t binlen) {
+    std::deque<TAlphabet> str;
+    while (str.size() < binlen) {
+        str.push_back(bin_id % alph_size);
+        bin_id -= (bin_id % alph_size);
+        bin_id /= alph_size;
+    }
+    return str;
+}
+
+
 /*
- * Given two other graph structures G1 and G2, this function 
+ * Given two pointers to graph structures G1 and G2, this function 
  * integrate both into a new graph G.
  */
-void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint64_t n1, uint64_t n2) {
+void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint64_t n1, uint64_t n2, bool is_parallel) {
 
-    // positions in the graph for respective traversal
-    n1 = (n1 == 0) ? G1->get_size() : n1;
-    n2 = (n2 == 0) ? G2->get_size() : n2;
-
-    uint64_t added = 0;
-    uint64_t last_added_k = 0;
-    DBG_succ* last_added_G = NULL;
-
-    // check if we can merge the given graphs
+    // check whether we can merge the given graphs
     if (G1->get_k() != G2->get_k()) {
         fprintf(stderr, "Graphs have different k-mer lengths - cannot be merged!\n");
         exit(1);
     }
     
-    bool k1_smaller, k2_smaller, advance_k1, advance_k2, insert_k1, insert_k2, identical;
+    // positions in the graph for respective traversal
+    n1 = (n1 == 0) ? G1->get_size() : n1;
+    n2 = (n2 == 0) ? G2->get_size() : n2;
 
-    //uint64_t k1_last = 0;
-    //uint64_t k2_last = 0;
+    // handle special cases where one or both input graphs are empty
+    k1 = (k1 == 0) ? G1->get_size() : k1;
+    k2 = (k2 == 0) ? G2->get_size() : k2;
+
+    // keep track of how many nodes we added and from which graph the 
+    // last node originated
+    uint64_t added = 0;
+    uint64_t last_added_k = 0;
+    DBG_succ* last_added_G = NULL;
+
+    bool k1_smaller, k2_smaller, advance_k1, advance_k2, insert_k1, insert_k2, identical;
 
     std::string k1_str, k2_str;
     
+    // Send two pointers running through each of the two graphs, where k1 runs through 
+    // G1 and k2 through G2. At each step, compare the two graph nodes at positions 
+    // k1 and k2 with each other. Insert the lexicographically smaller one into the 
+    // common merge graph G. 
     while (k1 < n1 || k2 < n2) {
 
-        if (added > 0 && added % 1000 == 0) {
+        if (!is_parallel && config->verbose && added > 0 && added % 1000 == 0) {
             std::cout << "." << std::flush;
             if (added % 10000 == 0) {
                 fprintf(stdout, "added %lu - G1: edge %lu/%lu - G2: edge %lu/%lu\n", added, k1, G1->get_size(), k2, G2->get_size());
@@ -1573,17 +1922,6 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
         //G1->print_seq();
         //G2->print_seq();
         if (k1 < n1 && k2 < n2) {
-            //std::cerr << "k1: " << k1 << " [" << G1->get_W(k1) << "] k2: " << k2 << " [" << G2->get_W(k2) << "]" << std::endl;
-            // can we reuse the node string from previous iterations?
-            //if ((k1 != k1_last) && (k1 < 2 || G1->get_last(k1 - 1))) {
-            //    k1_str = G1->get_node_str(k1);
-            //}
-            //if ((k2 != k2_last) && (k2 < 2 || G2->get_last(k2 - 1))) {
-            //    k2_str = G2->get_node_str(k2);
-            //}
-            //k1_smaller = (k1_str < k2_str);
-            //k2_smaller = (k2_str < k1_str);
-
             std::pair<bool, bool> tmp = compare_nodes(G1, k1, G2, k2);
             k1_smaller = tmp.first;
             k2_smaller = tmp.second;
@@ -1629,9 +1967,10 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
             std::exit(1);
         }
 
-        // assert XOR of isert
+        // assert XOR of insert; we take a node from either G1 or G2
         assert(insert_k1 ^ insert_k2);
 
+        // insert node from G1
         if (insert_k1) {
             TAlphabet val = G1->get_W(k1);
             if (identical) {
@@ -1641,7 +1980,6 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
                 seq1.pop_front();
                 seq1.push_back(val);
                 uint64_t kidx2 = G2->index(seq1);
-                //std::cerr << "kidx1 " << kidx1 << " kidx2 " << kidx2 << std::endl; 
                 if (kidx2 > 0 && kidx2 < G2->get_size()) {
                     uint64_t kidx3 = G2->bwd(kidx2);
                     //std::cerr << "kidx3 " << kidx3 << std::endl;
@@ -1661,6 +1999,8 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
             }
             update_F(G1->get_node_end_value(k1), true);
         } 
+
+        // insert node from G2
         if (insert_k2) {
             TAlphabet val = G2->get_W(k2);
             if (val % alph_size == val) {
@@ -1704,15 +2044,11 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
         }
         last_added_k = insert_k1 ? k1 : k2;
         last_added_G = insert_k1 ? G1 : G2;
-        //k1_last = k1;
-        //k2_last = k2;
         k1 += advance_k1;
         k2 += advance_k2;
 
         ++added;
-        //print_seq();
     }
-
     p = succ_W(1, 0);
 }
 
@@ -1724,7 +2060,7 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
 * false and true otherwise.
 */
 bool DBG_succ::compare(DBG_succ* G) {
-    
+
     // compare size
     if (W->n != G->get_size())
         return false;
@@ -1733,6 +2069,8 @@ bool DBG_succ::compare(DBG_succ* G) {
     for (size_t i = 0; i < W->n; ++i) {
         if ((*W)[i] != G->get_W(i)) {
             std::cerr << "W differs at position " << i << std::endl;
+            std::cerr << "1: W[" << i << "] = " << (*W)[i]  << std::endl;
+            std::cerr << "2: W[" << i << "] = " << G->get_W(i) << std::endl;
             return false;
         }
     }
@@ -1741,6 +2079,8 @@ bool DBG_succ::compare(DBG_succ* G) {
     for (size_t i = 0; i < W->n; ++i) {
         if ((*last)[i] != G->get_last(i)) {
             std::cerr << "last differs at position " << i << std::endl;
+            std::cerr << "1: last[" << i << "] = " << (*last)[i]  << std::endl;
+            std::cerr << "2: last[" << i << "] = " << G->get_last(i) << std::endl;
             return false;
         }
     }
@@ -1749,6 +2089,8 @@ bool DBG_succ::compare(DBG_succ* G) {
     for (size_t i = 0; i < F.size(); ++i) {
         if (F.at(i) != G->get_F(i)) {
             std::cerr << "F differs at position " << i << std::endl;
+            std::cerr << "1: F[" << i << "] = " << F.at(i) << std::endl;
+            std::cerr << "2: F[" << i << "] = " << G->get_F(i) << std::endl;
             return false;
         }
     }
@@ -1797,87 +2139,74 @@ void DBG_succ::print_state() {
  */
 void DBG_succ::print_seq() {
 
-    for (uint64_t i = 1; i < W->n; i++) {
-        if (i % 10 == 0)
-            fprintf(stdout, "%lu", (i / 10) % 10);
-        else
-            fprintf(stdout, " ");
-    }
-    std::cout << std::endl;
+    uint64_t linelen = 80;
+    uint64_t start = 1;
+    uint64_t end = start + linelen < W->n ? start + linelen : W->n;
 
-    for (uint64_t i = 1; i < W->n; i++) {
-        if ((*W)[i] >= alph_size)
-            fprintf(stdout, "-");
-        else
-            fprintf(stdout, " ");
-    }
-    std::cout << std::endl;
-
-    for (uint64_t i = 1; i < W->n; i++) {
-        if ((*W)[i] % alph_size == 0)
-            fprintf(stdout, "$");
-        else
-            std::cout << Dna5F(((*W)[i] % alph_size) - 1);
-    }
-    std::cout << std::endl;
-
-    for (uint64_t i = 1; i < W->n; i++) {
-        if (p == i)
-            fprintf(stdout, "*");
-        else
-            fprintf(stdout, " ");
-    }
-    std::cout << std::endl;
-
-    size_t j;
-    for (size_t l = 0; l < k; l++) {
-        for (uint64_t i = 1; i < W->n; i++) {
-            j = get_minus_k_value(i, l).first;
-            if (j % alph_size == 0)
-                std::cout << "$";
+    while (start < W->n) {
+        for (uint64_t i = start; i < end; i++) {
+            if (i % 10 == 0)
+                fprintf(stdout, "%lu", (i / 10) % 10);
             else
-                std::cout << Dna5F((j % alph_size) - 1);
+                fprintf(stdout, " ");
         }
         std::cout << std::endl;
-    }
-    std::cout << std::endl;
-    for (uint64_t i = 1; i < last->size(); i++) {
-        fprintf(stdout, "%i", (int) (*last)[i]);
-    }
-    std::cout << std::endl;
-    std::cout << std::endl;
 
-    for (uint64_t i = 1; i < W->n; ++i) {
-        std::cout << indegree(i);  
-    }
-    std::cout << std::endl;
-    for (uint64_t i = 1; i < W->n; ++i) {
-        std::cout << outdegree(i);  
-    }
-    std::cout << std::endl;
-    std::cout << std::endl;
+        for (uint64_t i = start; i < end; i++) {
+            if ((*W)[i] >= alph_size)
+                fprintf(stdout, "-");
+            else
+                fprintf(stdout, " ");
+        }
+        std::cout << std::endl;
 
-    // TODO: make usage of following code configurable
-    /*for (TAlphabet c = 0; c <= 5; ++c) {
-        if (c == 0)
-            std::cout << "$";
-        else
-            std::cout << Dna5F(c - 1);
-        for (uint64_t i = 1; i < W_size; ++i) {
-            std::cout << " " << incoming(i, c);  
+        for (uint64_t i = start; i < end; i++) {
+            if ((*W)[i] % alph_size == 0)
+                fprintf(stdout, "$");
+            else
+                std::cout << get_alphabet_symbol((*W)[i] % alph_size);
         }
         std::cout << std::endl;
-    }*/
-    /*for (TAlphabet c = 1; c <= 6; ++c) {
-        if (c == 0)
-            std::cout << "$";
-        else
-            std::cout << Dna5F(c - 1);
-        for (uint64_t i = 1; i < W_size; ++i) {
-            std::cout << " " << outgoing(i, c);  
+
+        for (uint64_t i = start; i < end; i++) {
+            if (p == i)
+                fprintf(stdout, "*");
+            else
+                fprintf(stdout, " ");
         }
         std::cout << std::endl;
-    }*/
+
+        size_t j;
+        for (size_t l = 0; l < k; l++) {
+            for (uint64_t i = start; i < end; i++) {
+                j = get_minus_k_value(i, l).first;
+                if (j % alph_size == 0)
+                    std::cout << "$";
+                else
+                    std::cout << get_alphabet_symbol(j % alph_size);
+            }
+            std::cout << std::endl;
+        }
+        std::cout << std::endl;
+        for (uint64_t i = start; i < end; i++) {
+            fprintf(stdout, "%i", (int) (*last)[i]);
+        }
+        std::cout << std::endl;
+        std::cout << std::endl;
+
+        for (uint64_t i = start; i < end; ++i) {
+            std::cout << indegree(i);  
+        }
+        std::cout << std::endl;
+        for (uint64_t i = start; i < end; ++i) {
+            std::cout << outdegree(i);  
+        }
+        std::cout << std::endl;
+        std::cout << std::endl;
+
+        start += linelen;
+        end = start + linelen < W->n ? start + linelen : W->n;
+    }
 }
 
 /**
@@ -1897,7 +2226,7 @@ void DBG_succ::toSQL() {
 
     // open sql filestream
     std::ofstream SQLstream;
-    SQLstream.open((config.sqlfbase + ".sql").c_str());
+    SQLstream.open((config->sqlfbase + ".sql").c_str());
 
     // traverse the graph, thereby filling joins vector, branchMap and 
     // writing the sequences to individual fasta files
@@ -1916,48 +2245,46 @@ void DBG_succ::toSQL() {
 
     // for each input sequence traverse the graph once more and
     // collect allele path information 
-    seqan::String<Dna5F> seq;
-    seqan::CharString id;
-    seqan::SequenceStream stream;
-    for (unsigned int f = 0; f < seqan::length(config.fname); ++f) {
+    for (unsigned int f = 0; f < config->fname.size(); ++f) {
 
         // first traversal is for reference info
         if (f == 0) {
             // open stream to fasta file
-            open(stream, seqan::toCString(config.fname.at(f)), seqan::SequenceStream::READ, seqan::SequenceStream::FASTA);
-            if (!seqan::isGood(stream))
-                std::cerr << "ERROR while opening input file " << config.fname.at(f) << std::endl;
+            gzFile input_p = gzopen(config->fname.at(f).c_str(), "r");
+            kseq_t *stream = kseq_init(input_p);
 
-            while (!seqan::atEnd(stream)) {
-                if (seqan::readRecord(id, seq, stream) != 0)
-                    std::cerr << "ERROR while reading from " << config.fname.at(f) << std::endl;
-                allelesFromSeq(seq, f, joins, branchMap, SQLstream, true, seqNum);
+            if (stream != NULL)
+                std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
+
+            while (kseq_read(stream) >= 0) {
+                allelesFromSeq(stream->seq, f, joins, branchMap, SQLstream, true, seqNum);
             }
-            close(stream);
+            kseq_destroy(stream);
+            gzclose(input_p);
 
             // open variant set
             SQLstream << "INSERT INTO VariantSet VALUES (1, 1, 'deBruijnGraph');" << std::endl;
         }
         // open stream to fasta file
-        open(stream, seqan::toCString(config.fname.at(f)), seqan::SequenceStream::READ, seqan::SequenceStream::FASTA);
-        if (!seqan::isGood(stream))
-            std::cerr << "ERROR while opening input file " << config.fname.at(f) << std::endl;
+        gzFile input_p = gzopen(config->fname.at(f).c_str(), "r");
+        kseq_t *stream = kseq_init(input_p);
+        if (stream != NULL)
+            std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
 
-        while (!seqan::atEnd(stream)) {
-            if (seqan::readRecord(id, seq, stream) != 0)
-                std::cerr << "ERROR while reading from " << config.fname.at(f) << std::endl;
-            allelesFromSeq(seq, f, joins, branchMap, SQLstream);
-        }
-        close(stream);
+        while (kseq_read(stream) >= 0) 
+            allelesFromSeq(stream->seq, f, joins, branchMap, SQLstream);
+
+        kseq_destroy(stream);
+        gzclose(input_p);
     }
 
     // write call set (one per input file)
-    for (unsigned int f = 0; f < seqan::length(config.fname); ++f)
-        SQLstream << "INSERT INTO CallSet VALUES (" << f+1 <<", '" << config.fname.at(f) << "', 'DBG" << f + 1 << "');" << std::endl;
-    for (unsigned int f = 0; f < seqan::length(config.fname); ++f)
+    for (unsigned int f = 0; f < config->fname.size(); ++f)
+        SQLstream << "INSERT INTO CallSet VALUES (" << f+1 <<", '" << config->fname.at(f) << "', 'DBG" << f + 1 << "');" << std::endl;
+    for (unsigned int f = 0; f < config->fname.size(); ++f)
         SQLstream << "INSERT INTO VariantSet_CallSet_Join VALUES (1, " << f + 1 << ");" << std::endl;
-    for (unsigned int f = 0; f < seqan::length(config.fname); ++f) {
-        for (unsigned int ff = 0; ff < seqan::length(config.fname); ++ff) {
+    for (unsigned int f = 0; f < config->fname.size(); ++f) {
+        for (unsigned int ff = 0; ff < config->fname.size(); ++ff) {
             if (f == ff)
                 SQLstream << "INSERT INTO AlleleCall VALUES (" << ff + 1 << ", " << f + 1 << ", 1);" << std::endl;
             else
@@ -1975,17 +2302,17 @@ void DBG_succ::toSQL() {
 void DBG_succ::toFile() {
 
     // write Wavelet Tree
-    std::ofstream outstream((config.outfbase + ".W.dbg").c_str());
+    std::ofstream outstream((config->outfbase + ".W.dbg").c_str());
     W->serialise(outstream);
     outstream.close();
 
     // write last array
-    outstream.open((config.outfbase + ".l.dbg").c_str());
+    outstream.open((config->outfbase + ".l.dbg").c_str());
     last->serialise(outstream);
     outstream.close();
 
     // write F values and k
-    outstream.open((config.outfbase + ".F.dbg").c_str());
+    outstream.open((config->outfbase + ".F.dbg").c_str());
     outstream << ">F" << std::endl;
     for (size_t i = 0; i < F.size(); ++i)
         outstream << F.at(i) << std::endl;
@@ -1996,3 +2323,22 @@ void DBG_succ::toFile() {
     outstream.close();
 }
 
+// write annotation to disk
+void DBG_succ::annotationToFile() {
+    std::ofstream outstream((config->infbase + ".anno.dbg").c_str());
+    libmaus2::util::NumberSerialisation::serialiseNumberShortDeque<uint16_t>(outstream, annotation);
+    serialize_annotation_map(outstream, annotation_map);
+    outstream.close();
+}
+
+// read annotation from disk
+void DBG_succ::annotationFromFile() {
+    std::ifstream instream((config->infbase + ".anno.dbg").c_str());
+    if (instream.good()) {
+        annotation = libmaus2::util::NumberSerialisation::deserialiseNumberShortDeque<uint16_t>(instream);
+        annotation_map = deserialize_annotation_map(instream);
+    } else {
+        annotation.resize(get_size(), 0);
+    }
+    instream.close();
+}

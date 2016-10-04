@@ -1,26 +1,46 @@
 #ifndef __CONFIG_HPP__
 #define __CONFIG_HPP__
 
-    struct CFG 
-    {
-        //String<char> > fname;
+#include <cstring>
+#include <string>
+#include <vector>
+
+class Config {
+    public:
+        Config();
+        Config(int argc, const char *argv[]);
+
+        ~Config();
+       
+        void print_usage(std::string prog_name, int identity = -1);
+        //void print_call(string prog_name);
+
+        bool verbose;
+        bool quiet;
+        bool integrate;
+        bool print_graph;
+        
+        unsigned int k;
+        unsigned int distance;
+        unsigned int parallel;
+        unsigned int bins_per_thread;
+
         std::vector<std::string> fname;
         std::string outfbase;
         std::string infbase;
         std::string sqlfbase;
-        std::string merge;
-        std::string compare;
-        bool verbose;
-        bool integrate;
-        unsigned int k;
-        std::string db_connect_string;
+        std::string dbpath;
 
-        CFG() :
-            verbose(false), k(31), db_connect_string("")
-        {}
-    };
+        enum identities {noidentity = -1, 
+                         build = 1, 
+                         merge, 
+                         compare, 
+                         align,
+                         stats,
+                         annotate};
+        int identity;
 
-
-
-
+    private:
+        void init();
+};
 #endif

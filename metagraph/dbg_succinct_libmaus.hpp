@@ -1,20 +1,20 @@
 #ifndef __DBG_SUCCINCT_LIBM_HPP__
 #define __DBG_SUCCINCT_LIBM_HPP__
 
+#include <zlib.h>
+#include <unordered_map>
+
 #include <libmaus2/bitbtree/bitbtree.hpp>
 #include <libmaus2/wavelet/DynamicWaveletTree.hpp>
 
-#include <seqan/sequence.h>
-#include <seqan/basic.h>
-#include <seqan/seq_io.h>
+#include "config.hpp"
+#include "datatypes.hpp"
 
-#include <config.hpp>
-#include <IDatabase.hpp>
+#include "kseq.h"
 
 class DBG_succ {
 
     // define an extended alphabet for W --> somehow this does not work properly as expected
-    typedef seqan::ModifiedAlphabet<seqan::Dna5, seqan::ModExpand<'X'> > Dna5F; 
     typedef uint64_t TAlphabet;
 
     public:
@@ -39,7 +39,11 @@ class DBG_succ {
     std::string infbase;
 
     // config object
-    CFG config;
+    Config* config;
+
+    // annotation containers
+    std::deque<uint16_t> annotation;
+    std::unordered_map<uint16_t, std::set<std::string> > annotation_map;
 
 #ifdef DBGDEBUG
     bool debug = true;
@@ -64,16 +68,17 @@ class DBG_succ {
      */
     struct JoinInfo;
 
-
-    
     // construct empty graph instance
     DBG_succ(size_t k_,
-             CFG config_, 
+             Config* config_, 
              bool sentinel = true);
 
     // load graph instance from a provided file name base
     DBG_succ(std::string infbase_, 
-             CFG config_);
+             Config* config_);
+
+    // destructor
+    ~DBG_succ();
     
     //
     //
@@ -183,9 +188,11 @@ class DBG_succ {
      * Given a node label s, this function returns the index
      * of the corresponding node, if this node exists and 0 otherwise.
      */
-    uint64_t index(seqan::String<Dna5F> &s_);
+    uint64_t index(std::string &s_);
 
     uint64_t index(std::deque<TAlphabet> str);
+
+    std::vector<HitInfo> index_fuzzy(std::string &str, uint64_t eops);
 
     std::pair<uint64_t, uint64_t> index_range(std::deque<TAlphabet> str);
 
@@ -260,6 +267,24 @@ class DBG_succ {
      */
     bool get_last(uint64_t k);
 
+    // Given the alphabet index return the corresponding symbol
+    char get_alphabet_symbol(uint64_t s);
+
+    // Given the alphabet character return its corresponding number
+    TAlphabet get_alphabet_number(char s);
+
+    /**
+     * Breaks the seq into k-mers and searches for the index of each
+     * k-mer in the graph. Returns these indices.
+     */
+    std::vector<uint64_t> align(kstring_t seq);
+
+    std::vector<std::vector<HitInfo> > align_fuzzy(kstring_t seq, uint64_t max_distance = 0, uint64_t alignment_length = 0);
+
+    uint64_t get_node_count();
+
+    uint64_t get_edge_count();
+
 
     //
     //
@@ -287,7 +312,7 @@ class DBG_succ {
     void replaceW(size_t i, TAlphabet val);
 
     // add a full sequence to the graph
-    void add_seq (seqan::String<Dna5F> seq);
+    void add_seq (kstring_t &seq);
 
     // register the annotation for kmers in the seq according to some
     // method method (either minimizers or other). TODO what method?
@@ -297,6 +322,12 @@ class DBG_succ {
      * given that the corresponding note is not part of the graph yet.
      */
     void append_pos(TAlphabet c);
+
+    /** This function takes a pointer to a graph structure and concatenates the arrays W, last 
+     * and F to this graph's arrays. In almost all cases this will not produce a valid graph and 
+     * should only be used as a helper in the parallel merge procedure.
+     */
+    void append_graph(DBG_succ *g);
 
     //
     //
@@ -311,11 +342,22 @@ class DBG_succ {
 
     BranchInfoMerge pop_branch(std::stack<BranchInfoMerge> &branchnodes, uint64_t &nodeId, uint64_t &lastEdge, std::deque<TAlphabet> &last_k);
 
-    bool finish_sequence(seqan::String<Dna5F> &sequence, uint64_t seqId, std::ofstream &SQLstream); 
+    bool finish_sequence(std::string &sequence, uint64_t seqId, std::ofstream &SQLstream); 
 
     size_t traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream); 
 
-    void allelesFromSeq(seqan::String<Dna5F>seq, unsigned int f, std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream, bool isRefRun = false, size_t seqNum = 0);
+    void allelesFromSeq(kstring_t &seq, unsigned int f, std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream, bool isRefRun = false, size_t seqNum = 0);
+
+
+    //
+    //
+    // ANNOTATE
+    //
+    //
+
+    void annotate_kmers(kstring_t &seq, kstring_t &label);
+
+    void annotate_kmer(std::string &kmer, std::string &label);
 
 
     //
@@ -335,7 +377,7 @@ class DBG_succ {
      * Given two other graph structures G1 and G2, this function 
      * integrate both into a new graph G.
      */
-    void merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1 = 1, uint64_t k2 = 1, uint64_t n1 = 0, uint64_t n2 = 0); 
+    void merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1 = 1, uint64_t k2 = 1, uint64_t n1 = 0, uint64_t n2 = 0, bool is_parallel = false); 
 
     /**
     * Given a pointer to a graph structure G, the function compares its elements to the
@@ -344,6 +386,26 @@ class DBG_succ {
     * false and true otherwise.
     */
     bool compare(DBG_succ* G); 
+
+    /* 
+     * Helper function to determine the bin boundaries, given 
+     * a number of threads.
+     */
+    std::vector<std::pair<uint64_t, uint64_t> > get_bins(uint64_t threads, uint64_t bins_per_thread, DBG_succ* G);
+
+    /*
+     * Helper function to generate the prefix corresponding to 
+     * a given bin ID.
+     */
+    std::deque<TAlphabet> bin_id_to_string(uint64_t bin_id, uint64_t binlen);
+
+    /*
+     * Distribute the merging of two graph structures G1 and G2 over
+     * bins, such that n parallel threads are used. The number of bins
+     * is determined dynamically.
+     */
+    //void merge_parallel(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint64_t n1, uint64_t n2, uint64_t threads);
+
 
     //
     //
@@ -378,6 +440,12 @@ class DBG_succ {
      *
      */
     void toFile(); 
+
+    /**
+     * Serialization and Deserialization of annotation content.
+     */
+    void annotationToFile();
+    void annotationFromFile();
 
 };
 #endif

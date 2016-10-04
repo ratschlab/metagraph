@@ -1,13 +1,10 @@
 LIBMAUS_DIR=external-libraries/libmaus2-lib
-ROCKSDB=external-libraries/rocksdb
-SEQAN_DIR=external-libraries/seqan-include
+ROCKSDB_DIR=external-libraries/rocksdb
 
-#TODO revert these changes.
-CXX=g++ -std=c++11 -fopenmp #-O3 #-pg
-#TODO bring back Makefile to previous highly sensitive state.
-#CXXFLAGS+= -W -Wall -Wno-long-long -Wno-variadic-macros #-pedantic
-CXXFLAGS+= -I$(SEQAN_DIR) -I$(LIBMAUS_DIR)/include -I. -L$(LIBMAUS_DIR)/lib
-LDFLAGS=-lrt -lmaus2
+CXX=g++ -std=c++11 -fopenmp -D_THREAD_SAFE -std=c++0x -pthread -O3 #-g -gdwarf-3 #-pg
+CXXFLAGS+= -W -Wall -Wno-long-long -Wno-variadic-macros #-pedantic
+CXXFLAGS+= -I$(LIBMAUS_DIR)/include -I. -L$(LIBMAUS_DIR)/lib -I$(ROCKSDB_DIR)/include -L$(ROCKSDB_DIR)
+LDFLAGS=-lrt -lmaus2 -lrocksdb -lsnappy -lbz2
 
 default: all
 
@@ -15,13 +12,11 @@ all: metagraph
 
 debug: metagraph_debug
 
-# TODO cleanup rocks db deps.
-metagraph: metagraph.cpp dbg_succinct_libmaus.cpp dbg_succinct_libmaus.hpp config.hpp
-	#$(CXX) $(CXXFLAGS) -I $(ROCKSDB)/include -o metagraph metagraph.cpp dbg_succinct_libmaus.cpp MockDatabase.cpp RocksdbImpl.cpp $(ROCKSDB)/librocksdb.a -lpthread -lrt -lsnappy -lgflags -lz -lbz2 -llz4 -ljemalloc -DROCKSDB_PLATFORM_POSIX -DROCKSDB_LIB_IO_POSIX  -DOS_LINUX -fno-builtin-memcmp -DROCKSDB_FALLOCATE_PRESENT -DSNAPPY -DGFLAGS=gflags -DZLIB -DBZIP2 -DLZ4 -DROCKSDB_MALLOC_USABLE_SIZE -march=native -std=c++11  -DROCKSDB_PLATFORM_POSIX -DROCKSDB_LIB_IO_POSIX  -DOS_LINUX -fno-builtin-memcmp -DROCKSDB_FALLOCATE_PRESENT -DSNAPPY -DGFLAGS=gflags -DZLIB -DBZIP2 -DLZ4 -DROCKSDB_MALLOC_USABLE_SIZE -march=native $(LDFLAGS)
-	$(CXX) $(CXXFLAGS) -I $(ROCKSDB)/include -o metagraph metagraph.cpp dbg_succinct_libmaus.cpp MockDatabase.cpp RocksdbImpl.cpp $(ROCKSDB)/librocksdb.a -lpthread -lrt -lsnappy -lgflags -lz -lbz2 -ljemalloc -DROCKSDB_PLATFORM_POSIX -DROCKSDB_LIB_IO_POSIX  -DOS_LINUX -fno-builtin-memcmp -DROCKSDB_FALLOCATE_PRESENT -DSNAPPY -DGFLAGS=gflags -DZLIB -DBZIP2 -DROCKSDB_MALLOC_USABLE_SIZE -march=native -std=c++11  -DROCKSDB_PLATFORM_POSIX -DROCKSDB_LIB_IO_POSIX  -DOS_LINUX -fno-builtin-memcmp $(LDFLAGS)
+metagraph: dbg_succinct_libmaus.cpp dbg_succinct_libmaus.hpp config.hpp metagraph.cpp config.cpp serialization.hpp datatypes.hpp
+	$(CXX) $(CXXFLAGS) -o metagraph dbg_succinct_libmaus.cpp metagraph.cpp config.cpp $(LDFLAGS)
 
-metagraph_debug: metagraph.cpp dbg_succinct_libmaus.cpp dbg_succinct_libmaus.hpp config.hpp
-	$(CXX) $(CXXFLAGS) -o metagraph metagraph.cpp dbg_succinct_libmaus.cpp $(LDFLAGS) -D DBGDEBUG
+metagraph_debug: metagraph.cpp dbg_succinct_libmaus.cpp dbg_succinct_libmaus.hpp config.hpp serialization.hpp datatypes.hpp 
+	$(CXX) $(CXXFLAGS) -o metagraph dbg_succinct_libmaus.cpp metagraph.cpp config.cpp $(LDFLAGS) -D DBGDEBUG
 
 # TODO database task that creates a database.o object file.
 

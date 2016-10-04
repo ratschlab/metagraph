@@ -1,220 +1,410 @@
 #include <iostream>
-
-#include <seqan/basic.h>
-#include <seqan/sequence.h>
-#include <seqan/file.h>
-#include <seqan/graph_types.h>
-#include <seqan/graph_algorithms.h>
-#include <seqan/arg_parse.h>
-#include <seqan/seq_io.h>
-#include <seqan/map.h>
-#include <seqan/index.h>
+#include <fstream>
+#include <ctime>
 
 #include <vector>
+#include <set>
+#include <deque>
 #include <string>
+#include <zlib.h>
+#include <pthread.h>
 
-//#include <btree_map.h>
-#include <dbg_succinct_libmaus.hpp>
-//#include <dmm_tree.hpp>
-//#include <unix_tools.hpp>
-#include <config.hpp>
+//#include "rocksdb/db.h"
+//#include "rocksdb/slice.h"
+//#include "rocksdb/options.h"
 
-#include <IDatabase.hpp>
-#include <RocksdbImpl.cpp>
+#include "datatypes.hpp"
+#include "dbg_succinct_libmaus.hpp"
+#include "config.hpp"
+#include "kseq.h"
 
-// parse command line arguments and options
-seqan::ArgumentParser::ParseResult
-parseCommandLine(CFG & config, int argc, char const ** argv) 
-{
-    seqan::ArgumentParser parser("metagraph");
+KSEQ_INIT(gzFile, gzread)
 
-    // add program meta information
-    setShortDescription(parser, "A comprehensive graph represenatation of metagenome information");
-    setVersion(parser, "0.1");
+Config* config;
+ParallelMergeContainer* merge_data = new ParallelMergeContainer();
 
-    addUsageLine(parser,
-                 "[\\fIOPTIONS\\fP] <\\fIFasta filename\\fP>");
-    addDescription(parser,
-                  "This program is the first implementation of a "
-                  "meta-metagenome graph for identifciation and annotation "
-                  "purposes.");
+pthread_mutex_t mutex_merge_result = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex_merge_idx = PTHREAD_MUTEX_INITIALIZER;
+pthread_attr_t attr;  
 
-    // add arguments
-    addArgument(parser, seqan::ArgParseArgument(seqan::ArgParseArgument::STRING, "TEXT", true /*can be given multiple time*/, 1 /* min number of times*/));
+void parallel_merge_collect(DBG_succ* result) {
 
-    // add options
-    addOption(parser, seqan::ArgParseOption("v", "verbose", "Increase verbosity level of output"));
-    addOption(parser, seqan::ArgParseOption("i", "integrate", "integrates fasta into given (-I) graph"));
-    addOption(parser, seqan::ArgParseOption("k", "kmer_length", "Length of the k-mer to use", seqan::ArgParseArgument::INTEGER, "INT"));
-    addOption(parser, seqan::ArgParseOption("O", "outfile_base", "basename for graph output files", seqan::ArgParseArgument::STRING, "TEXT"));
-    addOption(parser, seqan::ArgParseOption("S", "sql_base", "basename for SQL output files", seqan::ArgParseArgument::STRING, "TEXT"));
-    addOption(parser, seqan::ArgParseOption("I", "infile_base", "basename for loading graph input files", seqan::ArgParseArgument::STRING, "TEXT"));
-    addOption(parser, seqan::ArgParseOption("m", "merge", "list of graph file basenames used as input for merging", seqan::ArgParseArgument::STRING, "TEXT"));
-    addOption(parser, seqan::ArgParseOption("c", "compare", "list of graph file basenames used as input for comparison", seqan::ArgParseArgument::STRING, "TEXT"));
-    addOption(parser, seqan::ArgParseOption("", "db_connect_string", "Specify the database to connect to", seqan::ArgParseArgument::STRING, "TEXT"));
+    for (size_t i = 0; i < merge_data->result.size(); ++i) {
+        //std::cerr << "curr size " << result->get_size() << std::endl;
+        if (merge_data->result.at(i)) {
+            result->append_graph(merge_data->result.at(i));
+            delete merge_data->result.at(i);
+        }
+    }
+    merge_data->result.clear();
+    merge_data->bins_done = 0;
+    result->p = result->succ_W(1, 0);
+}
 
-    // set defaults
-    setDefaultValue(parser, "O", "");
-    setDefaultValue(parser, "I", "");
-    setDefaultValue(parser, "S", "");
-    setDefaultValue(parser, "m", "");
-    setDefaultValue(parser, "c", "");
+bool operator==(const AnnotationSet& lhs, const AnnotationSet& rhs) {
+    return (lhs.annotation == rhs.annotation); 
+}
 
-    // parse command line
-    seqan::ArgumentParser::ParseResult res = parse(parser, argc, argv);
+/*
+ * Distribute the merging of two graph structures G1 and G2 over
+ * bins, such that n parallel threads are used. The number of bins
+ * is determined dynamically.
+ */
+void *parallel_merge_wrapper(void *arg) {
 
-    // everything correct?
-    if (res != seqan::ArgumentParser::PARSE_OK)
-        return res;
-    
-    // fill config object 
-    config.verbose = isSet(parser, "verbose");
-    config.integrate = isSet(parser, "integrate");
-    getOptionValue(config.k, parser, "k");
-    getOptionValue(config.outfbase, parser, "O");
-    getOptionValue(config.infbase, parser, "I");
-    getOptionValue(config.sqlfbase, parser, "S");
-    getOptionValue(config.merge, parser, "m");
-    getOptionValue(config.compare, parser, "c");
-    getOptionValue(config.db_connect_string, parser, "db_connect_string");
-    config.fname = seqan::getArgumentValues(parser, 0);
+    unsigned int curr_idx;
+    DBG_succ* graph;
 
-    // do any logic / error checking here (e.g., mutually exclusive options)
+    while (true) {
+        pthread_mutex_lock (&mutex_merge_idx);
+        if (merge_data->idx == merge_data->bins_g1.size()) {
+            pthread_mutex_unlock (&mutex_merge_idx);
+            break;
+        } else {
+            curr_idx = merge_data->idx;
+            merge_data->idx++;
+            pthread_mutex_unlock (&mutex_merge_idx);
+            
+            // collect bin data for merging and decide how to merge
+            if (merge_data->bins_g1.at(curr_idx).first > 0 || merge_data->bins_g2.at(curr_idx).first > 0) {
+                // creating each graph instance blocks off memory of around 60MB - try to reduce this
+                // we try to improve balancing by merging many smaller bins into larger bins (as many as requested)
+                graph = new DBG_succ(merge_data->k, config, false);
+                graph->merge(merge_data->graph1, 
+                             merge_data->graph2, 
+                             merge_data->bins_g1.at(curr_idx).first,
+                             merge_data->bins_g2.at(curr_idx).first,
+                             merge_data->bins_g1.at(curr_idx).second + 1,
+                             merge_data->bins_g2.at(curr_idx).second + 1,
+                             true);
+            } else {
+                graph = NULL;
+            }
+            pthread_mutex_lock (&mutex_merge_result);
+            merge_data->result.at(curr_idx) = graph;
+            merge_data->bins_done++;
+            if (config->verbose) 
+                std::cout << "finished bin " << curr_idx + 1 << " (" << merge_data->bins_done << "/" << merge_data->bins_g1.size() << ")" << std::endl;
+            pthread_mutex_unlock (&mutex_merge_result);
 
-    // return 
-    return seqan::ArgumentParser::PARSE_OK;
+        }
+    }
+    pthread_exit((void*) 0);
 }
 
 int main(int argc, char const ** argv) {
-    typedef seqan::ModifiedAlphabet<seqan::Dna5, seqan::ModExpand<'X'> > Dna5F; 
 
-    // command line parsing
-    CFG config;
-    seqan::ArgumentParser::ParseResult res = parseCommandLine(config, argc, argv);
-    if (res != seqan::ArgumentParser::PARSE_OK)
-        return res == seqan::ArgumentParser::PARSE_ERROR;
+    // parse command line arguments and options
+    config = new Config(argc, argv);
 
-    if (config.verbose)
-        std::cout << seqan::CharString("Welcome to MetaGraph") << std::endl;
+    if (config->verbose)
+        std::cout << "Welcome to MetaGraph" << std::endl;
 
-    // build the graph from the k-mers in the string
-    //typedef unsigned int TCargo;
-    //typedef Graph<Directed<TCargo> > TGraph; // --> we can use this when we want to have edge weights
-
-    // create graph object
-    //DBG_seqan* graph = new DBG_seqan(config.k);
+    // create graph pointer
     DBG_succ* graph = NULL;
 
-    std::string connect_string = config.db_connect_string;
-    if (connect_string.empty()) {
-        connect_string = "/tmp/debruin-graph-annotation-db";
-    }
+    switch (config->identity) {
 
-    dbg_database::IDatabase *db = new dbg_database::RocksdbImpl(connect_string);
-
-    if (! config.compare.empty()) {
-        int cnt = 0;
-        std::string token;
-        std::stringstream comparelist(config.compare);
-        while (std::getline(comparelist, token, ',')) {
-            if (cnt == 0) {
-                std::cout << "Opening file " << token << std::endl;
-                graph = new DBG_succ(token, config);
-            } else {
-                std::cout << "Opening file for comparison ..." << token << std::endl;
-                DBG_succ* graph_ = new DBG_succ(token, config);
-                bool identical = graph->compare(graph_);
-                if (identical) {
-                    std::cout << "Graphs are identical" << std::endl;
+        case Config::compare: {
+            for (unsigned int f = 0; f < config->fname.size(); ++f) {
+                if (f == 0) {
+                    std::cout << "Opening file " << config->fname.at(f) << std::endl;
+                    graph = new DBG_succ(config->fname.at(f), config);
                 } else {
-                    std::cout << "Graphs are not identical" << std::endl;
+                    std::cout << "Opening file for comparison ..." << config->fname.at(f) << std::endl;
+                    DBG_succ* graph_ = new DBG_succ(config->fname.at(f), config);
+                    bool identical = graph->compare(graph_);
+                    if (identical) {
+                        std::cout << "Graphs are identical" << std::endl;
+                    } else {
+                        std::cout << "Graphs are not identical" << std::endl;
+                    }
+                    delete graph_;
                 }
+            }
+        } break;
+
+        case Config::merge: {
+
+            for (unsigned int f = 0; f < config->fname.size(); ++f) {
+                if (f == 0) {
+                    std::cout << "Opening file " << config->fname.at(f) << std::endl;
+                    graph = new DBG_succ(config->fname.at(f), config);
+                } else {
+                    std::cout << "Opening file for merging: " << config->fname.at(f) << std::endl;
+                    DBG_succ* graph_to_merge = new DBG_succ(config->fname.at(f), config);
+                    
+                    DBG_succ* target_graph = new DBG_succ(graph_to_merge->get_k(), config, false);
+                    
+                    if (config->parallel > 1) {
+
+                        pthread_t* threads = NULL; 
+
+                        // get bins in graphs according to required threads
+                        merge_data->bins_g1 = target_graph->get_bins(config->parallel, config->bins_per_thread, graph);
+                        merge_data->bins_g2 = target_graph->get_bins(config->parallel, config->bins_per_thread, graph_to_merge);
+                        if (config->verbose) {
+                            merge_data->get_bin_stats();
+                            std::cout << "Rebalancing bins" << std::endl;
+                        }
+                        merge_data->rebalance_bins(config->parallel * config->bins_per_thread);
+                        if (config->verbose) {
+                            merge_data->get_bin_stats();
+                        }
+                        assert(merge_data->bins_g1.size() == merge_data->bins_g2.size());
+                        //for (size_t ii = 0; ii < merge_data->bins_g1.size(); ++ii) {
+                        //    std::cerr << ii << ": " << merge_data->bins_g1.at(ii).first << "-" << merge_data->bins_g1.at(ii).second << " -- ";
+                        //    std::cerr << ": " << merge_data->bins_g2.at(ii).first << "-" << merge_data->bins_g2.at(ii).second << std::endl;
+                        //}
+
+                        // prepare data shared by threads
+                        merge_data->idx = 0;
+                        merge_data->k = graph->get_k();
+                        merge_data->graph1 = graph;
+                        merge_data->graph2 = graph_to_merge;
+                        for (size_t i = 0; i < merge_data->bins_g1.size(); i++)
+                            merge_data->result.push_back(NULL);
+                        merge_data->bins_done = 0;
+
+                        // create threads
+                        threads = new pthread_t[config->parallel]; 
+                        pthread_attr_init(&attr);
+                        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+
+                        // do the work
+                        for (size_t tid = 0; tid < config->parallel; tid++) {
+                           pthread_create(&threads[tid], &attr, parallel_merge_wrapper, (void *) tid); 
+                           std::cerr << "starting thread " << tid << std::endl;
+                        }
+
+                        // join threads
+                        if (config->verbose)
+                            std::cout << "Waiting for threads to join" << std::endl;
+                        for (size_t tid = 0; tid < config->parallel; tid++) {
+                            pthread_join(threads[tid], NULL);
+                        }
+                        delete[] threads;
+
+                        // collect results
+                        std::cerr << "Collecting results" << std::endl;
+                        parallel_merge_collect(target_graph);
+                        //if (target_graph->get_size() >= 320029)
+                        //    std::deque<uint64_t> tut = target_graph->get_node_seq(320029);
+                    } else {
+                        target_graph->merge(graph, graph_to_merge);
+                    }
+
+                    //target_graph->print_seq(); 
+                    /*std::deque<uint64_t> tut;
+                    for (size_t ii = 1; ii < target_graph->last->size(); ++ii) {
+                        std::cerr << ii << "/" << target_graph->last->size() << std::endl;
+                        tut = target_graph->get_node_seq(ii);
+                    }*/
+
+                    delete graph_to_merge;
+                    delete graph;
+                    graph = target_graph;
+
+                    std::cerr << "... done merging." << std::endl;
+                }
+            }
+        } break;
+
+        case Config::stats: {
+            std::ofstream outstream;
+            if (!config->outfbase.empty()) {
+                outstream.open((config->outfbase + ".stats.dbg").c_str());
+                outstream << "file\tnodes\tedges\tk" << std::endl;
+            }
+            for (unsigned int f = 0; f < config->fname.size(); ++f) {
+                DBG_succ* graph_ = new DBG_succ(config->fname.at(f), config);
+                if (!config->quiet) {
+                    std::cout << "Statistics for file " << config->fname.at(f) << std::endl;
+                    std::cout << "nodes: " << graph_->get_node_count() << std::endl;
+                    std::cout << "edges: " << graph_->get_edge_count() << std::endl;
+                    std::cout << "k: " << graph_->get_k() << std::endl; 
+                }
+                if (!config->outfbase.empty()) {
+                    outstream << config->fname.at(f) << "\t" 
+                              << graph_->get_node_count() << "\t" 
+                              << graph_->get_edge_count() << "\t"
+                              << graph_->get_k() << std::endl;
+                }
+                if (config->print_graph)
+                    graph_->print_seq();
                 delete graph_;
             }
-            cnt++;
-        }
-    } else if (! config.merge.empty()) {
-        int cnt = 0;
-        std::string token;
-        std::stringstream mergelist(config.merge);
-        while (std::getline(mergelist, token, ',')) {
-            if (cnt == 0) {
-                std::cout << "Opening file " << token << std::endl;
-                graph = new DBG_succ(token, config);
-                //graph->print_seq();
+            if (!config->outfbase.empty())
+                outstream.close();
+        } break;
+
+
+        case Config::align: {
+
+            // load graph 
+            if (config->infbase.empty()) {
+              std::cerr << "Requires input <de bruijn graph> to align reads." << config->align << std::endl;
+              exit(1);
+            }
+            DBG_succ* graph = new DBG_succ(config->infbase, config);
+
+            for (unsigned int f = 0; f < config->fname.size(); ++f) {
+                std::cout << "Opening file for alignment ..." << config->fname.at(f) << std::endl;
+
+                // open stream to input fasta
+                gzFile input_p = gzopen(config->fname.at(f).c_str(), "r");
+                kseq_t *read_stream = kseq_init(input_p);
+                if (read_stream == NULL) {
+                  std::cerr << "ERROR while opening input file " << config->align << std::endl;
+                  exit(1);
+                }
+
+                while (kseq_read(read_stream) >= 0) {
+
+                    //graph->print_seq();
+                    uint64_t aln_len = read_stream->seq.l;
+
+                    if (config->distance > 0) {
+                        std::vector<std::vector<HitInfo> > graphindices = graph->align_fuzzy(read_stream->seq, aln_len, config->distance);
+
+                        for (size_t i = 0; i < graphindices.size(); ++i) {
+                            int print_len = (i + aln_len < read_stream->seq.l) ? aln_len : (read_stream->seq.l - i);
+                            printf("%.*s: ", print_len, read_stream->seq.s + i);
+
+                            for (size_t l = 0; l < graphindices.at(i).size(); ++l) {
+                                HitInfo curr_hit(graphindices.at(i).at(l));
+                                for (size_t m = 0; m < curr_hit.path.size(); ++m) {
+                                    std::cout << curr_hit.path.at(m) << ':';
+                                }
+                                for (size_t m = curr_hit.rl; m <= curr_hit.ru; ++m) {
+                                    std::cout << m << " ";
+                                }
+                                std::cout << "[" << curr_hit.cigar << "] ";
+                            }
+                            std::cout << std::endl;
+                        }
+                    } else {
+                        std::vector<uint64_t> graphindices = graph->align(read_stream->seq);
+
+                        for (size_t i = 0; i < graphindices.size(); ++i) {
+                            for (uint64_t j = 0; j < graph->get_k(); ++j) {
+                                std::cout << read_stream->seq.s[i+j];
+                            }
+                            std::cout << ": " << graphindices[i] << std::endl;
+                        }
+                    }
+                }
+
+                // close stream
+                kseq_destroy(read_stream);
+                gzclose(input_p);
+            }
+        } break;
+
+        case Config::build: {
+            if (!config->infbase.empty()) {
+                graph = new DBG_succ(config->infbase, config);
             } else {
-                std::cout << "Opening file for merging ..." << token << std::endl;
-
-                DBG_succ* graph_ = new DBG_succ(token, config);
-                //graph->merge(graph_);
-                
-                DBG_succ* graph__ = new DBG_succ(graph_->get_k(), config, false);
-                graph__->merge(graph, graph_);
-                delete graph;
-                graph = graph__;
-
-                delete graph_;
-                std::cerr << "... done merging." << std::endl;
+                graph = new DBG_succ(config->k, config);
             }
-            cnt++;
-        }
-        //graph->print_seq();
-    } else {
-        if (! config.infbase.empty()) {
-            graph = new DBG_succ(config.infbase, config);
-        } else {
-            graph = new DBG_succ(config.k, config);
-        }
 
-        if (config.infbase.empty() || config.integrate) {
-            // read from fasta stream 
-            seqan::CharString id;
-            seqan::String<seqan::Dna5> seq;
+            if (config->verbose)
+                std::cerr << "k is " << config->k << std::endl;
+
             // iterate over input files
-            for (unsigned int f = 0; f < seqan::length(config.fname); ++f) {
+            for (unsigned int f = 0; f < config->fname.size(); ++f) {
 
-                if (config.verbose) {
-                    std::cout << std::endl << "Parsing " << config.fname[f] << std::endl;
+                if (config->verbose) {
+                    std::cout << std::endl << "Parsing " << config->fname[f] << std::endl;
                 }
 
                 // open stream to fasta file
-                seqan::SequenceStream stream;
-                open(stream, seqan::toCString(config.fname.at(f)), seqan::SequenceStream::READ, seqan::SequenceStream::FASTA);
-                if (!seqan::isGood(stream)) {
-                    std::cerr << "ERROR while opening input file " << config.fname.at(f) << std::endl;
+                gzFile input_p = gzopen(config->fname[f].c_str(), "r");
+                kseq_t *read_stream = kseq_init(input_p);
+
+                if (read_stream == NULL) {
+                    std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
                     exit(1);
                 }
 
-                while (!seqan::atEnd(stream)) {
-                    if (seqan::readRecord(id, seq, stream) != 0) {
-                        std::cerr << "!!!ERROR while reading from " << config.fname.at(f) << std::endl;
-                        exit(1);
-                    }
-
-                    graph->add_annotation_for_seq(db, seq, id);
-                    
+                while (kseq_read(read_stream) >= 0) {
                     // add all k-mers of seq to the graph
-                    graph->add_seq(seq);
+                    graph->add_seq(read_stream->seq);
                 }
+                kseq_destroy(read_stream);
+                gzclose(input_p);
+
                 //graph->update_counters();
                 //graph->print_stats();
                 
                 //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
             }
             //graph->print_seq();
-            //seqan::String<Dna5F> test("ACC");
-            //std::cout << "ACC: " << graph->index(test) << std::endl;
-        }
+        } break;
+
+        case Config::annotate: {
+
+            // load graph 
+            if (config->infbase.empty()) {
+              std::cerr << "Requires input <de bruijn graph> for annotation. Use option -I. " << std::endl;
+              exit(1);
+            }
+            DBG_succ* graph = new DBG_succ(config->infbase, config);
+
+            // load annotatioun (if file does not exist, empty annotation is created)
+            graph->annotationFromFile();
+
+            // set up rocksdb
+           // rocksdb::Options options;
+           // options.create_if_missing = true;
+           // rocksdb::DB* db;
+           // rocksdb::Status status = rocksdb::DB::Open(options, config->dbpath, &db);
+
+            // iterate over input files
+            for (unsigned int f = 0; f < config->fname.size(); ++f) {
+
+                if (config->verbose) {
+                    std::cout << std::endl << "Parsing " << config->fname[f] << std::endl;
+                }
+
+                // open stream to fasta file
+                gzFile input_p = gzopen(config->fname[f].c_str(), "r");
+                kseq_t *read_stream = kseq_init(input_p);
+
+                if (read_stream == NULL) {
+                    std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
+                    exit(1);
+                }
+
+                while (kseq_read(read_stream) >= 0) {
+                    graph->annotate_kmers(read_stream->seq, read_stream->name);
+                }
+                kseq_destroy(read_stream);
+                gzclose(input_p);
+            }
+            //delete db;
+
+            graph->annotationToFile();
+
+        } break;
     }
 
-    // graph output
-    if (!config.sqlfbase.empty())
-        graph->toSQL();
-    if (!config.outfbase.empty())
-        graph->toFile();
+    // output and cleanup
+    if (graph) {
+        // graph output
+        if (config->print_graph)
+            graph->print_seq();
+        if (!config->sqlfbase.empty())
+            graph->toSQL();
+        if (!config->outfbase.empty())
+            graph->toFile();
 
-    delete db;
-    delete graph;
+        delete graph;
+    }
+    delete config;
 
     return 0;
 }
+
+
+
