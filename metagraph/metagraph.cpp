@@ -31,8 +31,10 @@ void parallel_merge_collect(DBG_succ* result) {
 
     for (size_t i = 0; i < merge_data->result.size(); ++i) {
         //std::cerr << "curr size " << result->get_size() << std::endl;
-        result->append_graph(merge_data->result.at(i));
-        delete merge_data->result.at(i);
+        if (merge_data->result.at(i)) {
+            result->append_graph(merge_data->result.at(i));
+            delete merge_data->result.at(i);
+        }
     }
     merge_data->result.clear();
     merge_data->bins_done = 0;
@@ -51,6 +53,7 @@ bool operator==(const AnnotationSet& lhs, const AnnotationSet& rhs) {
 void *parallel_merge_wrapper(void *arg) {
 
     unsigned int curr_idx;
+    DBG_succ* graph;
 
     while (true) {
         pthread_mutex_lock (&mutex_merge_idx);
@@ -63,19 +66,24 @@ void *parallel_merge_wrapper(void *arg) {
             pthread_mutex_unlock (&mutex_merge_idx);
             
             // collect bin data for merging and decide how to merge
-            DBG_succ* graph = new DBG_succ(merge_data->k, config, false);
-            graph->merge(merge_data->graph1, 
-                         merge_data->graph2, 
-                         merge_data->bins_g1.at(curr_idx).first,
-                         merge_data->bins_g2.at(curr_idx).first,
-                         merge_data->bins_g1.at(curr_idx).second + 1,
-                         merge_data->bins_g2.at(curr_idx).second + 1,
-                         true);
-
+            if (merge_data->bins_g1.at(curr_idx).first > 0 || merge_data->bins_g2.at(curr_idx).first > 0) {
+                // creating each graph instance blocks off memory of around 60MB - try to reduce this
+                // we try to improve balancing by merging many smaller bins into larger bins (as many as requested)
+                graph = new DBG_succ(merge_data->k, config, false);
+                graph->merge(merge_data->graph1, 
+                             merge_data->graph2, 
+                             merge_data->bins_g1.at(curr_idx).first,
+                             merge_data->bins_g2.at(curr_idx).first,
+                             merge_data->bins_g1.at(curr_idx).second + 1,
+                             merge_data->bins_g2.at(curr_idx).second + 1,
+                             true);
+            } else {
+                graph = NULL;
+            }
             pthread_mutex_lock (&mutex_merge_result);
             merge_data->result.at(curr_idx) = graph;
             merge_data->bins_done++;
-            if (config->verbose)
+            if (config->verbose) 
                 std::cout << "finished bin " << curr_idx + 1 << " (" << merge_data->bins_done << "/" << merge_data->bins_g1.size() << ")" << std::endl;
             pthread_mutex_unlock (&mutex_merge_result);
 
@@ -124,30 +132,36 @@ int main(int argc, char const ** argv) {
                     graph = new DBG_succ(config->fname.at(f), config);
                 } else {
                     std::cout << "Opening file for merging: " << config->fname.at(f) << std::endl;
-                    DBG_succ* graph_ = new DBG_succ(config->fname.at(f), config);
+                    DBG_succ* graph_to_merge = new DBG_succ(config->fname.at(f), config);
                     
-                    DBG_succ* graph__ = new DBG_succ(graph_->get_k(), config, false);
+                    DBG_succ* target_graph = new DBG_succ(graph_to_merge->get_k(), config, false);
                     
                     if (config->parallel > 1) {
 
                         pthread_t* threads = NULL; 
 
                         // get bins in graphs according to required threads
-                        merge_data->bins_g1 = graph__->get_bins(config->parallel, config->bins_per_thread, graph);
-                        merge_data->bins_g2 = graph__->get_bins(config->parallel, config->bins_per_thread, graph_);
+                        merge_data->bins_g1 = target_graph->get_bins(config->parallel, config->bins_per_thread, graph);
+                        merge_data->bins_g2 = target_graph->get_bins(config->parallel, config->bins_per_thread, graph_to_merge);
+                        if (config->verbose) {
+                            merge_data->get_bin_stats();
+                            std::cout << "Rebalancing bins" << std::endl;
+                        }
+                        merge_data->rebalance_bins(config->parallel * config->bins_per_thread);
+                        if (config->verbose) {
+                            merge_data->get_bin_stats();
+                        }
                         assert(merge_data->bins_g1.size() == merge_data->bins_g2.size());
                         //for (size_t ii = 0; ii < merge_data->bins_g1.size(); ++ii) {
                         //    std::cerr << ii << ": " << merge_data->bins_g1.at(ii).first << "-" << merge_data->bins_g1.at(ii).second << " -- ";
                         //    std::cerr << ": " << merge_data->bins_g2.at(ii).first << "-" << merge_data->bins_g2.at(ii).second << std::endl;
                         //}
-                        //graph->print_seq();
-                        //graph_->print_seq();
 
                         // prepare data shared by threads
                         merge_data->idx = 0;
                         merge_data->k = graph->get_k();
                         merge_data->graph1 = graph;
-                        merge_data->graph2 = graph_;
+                        merge_data->graph2 = graph_to_merge;
                         for (size_t i = 0; i < merge_data->bins_g1.size(); i++)
                             merge_data->result.push_back(NULL);
                         merge_data->bins_done = 0;
@@ -159,7 +173,7 @@ int main(int argc, char const ** argv) {
 
                         // do the work
                         for (size_t tid = 0; tid < config->parallel; tid++) {
-                           pthread_create(&threads[tid], &attr, parallel_merge_wrapper, (void *) NULL); 
+                           pthread_create(&threads[tid], &attr, parallel_merge_wrapper, (void *) tid); 
                            std::cerr << "starting thread " << tid << std::endl;
                         }
 
@@ -173,17 +187,24 @@ int main(int argc, char const ** argv) {
 
                         // collect results
                         std::cerr << "Collecting results" << std::endl;
-                        parallel_merge_collect(graph__);
-
+                        parallel_merge_collect(target_graph);
+                        //if (target_graph->get_size() >= 320029)
+                        //    std::deque<uint64_t> tut = target_graph->get_node_seq(320029);
                     } else {
-                        graph__->merge(graph, graph_);
+                        target_graph->merge(graph, graph_to_merge);
                     }
 
-                    //graph__->print_seq();
-                    delete graph;
-                    graph = graph__;
+                    //target_graph->print_seq(); 
+                    /*std::deque<uint64_t> tut;
+                    for (size_t ii = 1; ii < target_graph->last->size(); ++ii) {
+                        std::cerr << ii << "/" << target_graph->last->size() << std::endl;
+                        tut = target_graph->get_node_seq(ii);
+                    }*/
 
-                    delete graph_;
+                    delete graph_to_merge;
+                    delete graph;
+                    graph = target_graph;
+
                     std::cerr << "... done merging." << std::endl;
                 }
             }
