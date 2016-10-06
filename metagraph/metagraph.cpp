@@ -16,6 +16,7 @@
 #include "datatypes.hpp"
 #include "dbg_succinct_libmaus.hpp"
 #include "config.hpp"
+#include "helpers.hpp"
 #include "kseq.h"
 
 KSEQ_INIT(gzFile, gzread)
@@ -328,6 +329,10 @@ int main(int argc, char const ** argv) {
                 }
 
                 while (kseq_read(read_stream) >= 0) {
+                    // possibly reverse k-mers
+                    if (config->reverse)
+                        reverse_complement(read_stream->seq);                    
+
                     // add all k-mers of seq to the graph
                     graph->add_seq(read_stream->seq);
                 }

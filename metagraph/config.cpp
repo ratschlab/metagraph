@@ -45,6 +45,8 @@ Config::Config(int argc, const char *argv[]) {
             quiet = true;
         } else if (!strcmp(argv[i], "-P") || !strcmp(argv[i], "--print-graph")) {
             print_graph = true;
+        } else if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--reverse")) {
+            reverse = true;
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
             parallel = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-b") || !strcmp(argv[i], "--bins-per-thread")) {
@@ -119,6 +121,7 @@ void Config::print_usage(std::string prog_name, int identity) {
             fprintf(stderr, "\t-S --sql-base [STR] \tbasename for SQL output file\n");
             fprintf(stderr, "\t-I --infile-base [STR] \tbasename for loading graph input file\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
+            fprintf(stderr, "\t-r --reverse \tbuild graph from reverse complement of input [off]\n");
             fprintf(stderr, "\t-P --print-graph \tprint graph table to the screen [off]\n");
         } break;
         case align: {
@@ -143,7 +146,7 @@ void Config::print_usage(std::string prog_name, int identity) {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for stats:\n");
             fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file []\n");
-            fprintf(stderr, "\t-p --print-graph \tprint graph table to the screen [off]\n");
+            fprintf(stderr, "\t-P --print-graph \tprint graph table to the screen [off]\n");
         } break;
         case annotate: {
             fprintf(stderr, "Usage: %s annotate [options] PATH1 [[PATH2] ...]\n\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
@@ -162,49 +165,12 @@ void Config::print_usage(std::string prog_name, int identity) {
     }
 }
 
-/*void Config::print_call(std::string prog_name) {
-    fprintf(stdout, "%s has been started with the following parameters:\n\n", prog_name.c_str());
-    fprintf(stdout, "\t input file:           %s\n", infile.c_str()); 
-    fprintf(stdout, "\t output file:          %s\n", outfile.c_str()); 
-    fprintf(stdout, "\t strand specific:      %s\n", strand_specific?"yes":"no");
-    fprintf(stdout, "\t pre filter:           %s\n", pre_filter?"on":"off");
-    fprintf(stdout, "\t init on secondary:    %s\n", take_non_secondary_only?"off":"on");
-    if (pre_filter) {
-        fprintf(stdout, "\t filter dist:          %i\n", filter_distance);
-        fprintf(stdout, "\t use variants:         %s\n", use_variants?"on":"off");
-    }
-    fprintf(stdout, "\t max list length:      %i\n", max_list_length);
-    fprintf(stdout, "\t pair usage:           %s\n", use_pair_info?"on":"off");
-    if (use_pair_info) {
-        fprintf(stdout, "\t max frag size size:   %i\n", max_gen_frag_size);
-        fprintf(stdout, "\t max pair list length: %i\n", max_pair_list_length);
-    }
-    if (trim_id > 0)
-        fprintf(stdout, "\t trim read id by:      %i\n", trim_id);
-    fprintf(stdout, "\t print best only:      %s\n", print_best_only?"on":"off");
-    fprintf(stdout, "\t print unmapped:       %s\n", print_unmapped?"on":"off");
-    fprintf(stdout, "\t iterations:           %i\n", iterations);
-    fprintf(stdout, "\t 1 iteration burn in:  %s\n", burn_in?"on":"off");
-    if (use_brkpts) 
-        fprintf(stdout, "\t annotation file:      %s\n", annotation.c_str()); 
-    fprintf(stdout, "\t threads:              %i\n", num_threads);
-    if (use_mip_variance || ! use_mip_objective) {
-        fprintf(stdout, "\t window size:          %i\n", window_size);
-    } else {
-        fprintf(stdout, "\t use MiTie objective:    %s\n", use_mip_objective?"on":"off");
-        fprintf(stdout, "\t segment file:         %s\n", segmentfile.c_str()); 
-        fprintf(stdout, "\t loss file:            %s\n", lossfile.c_str()); 
-        fprintf(stdout, "\t read length:          %i\n", read_len); 
-        fprintf(stdout, "\t zero for unpred seg:  %s\n", zero_unpred?"yes":"no");
-        fprintf(stdout, "\t use variance if no MiTie-segment overlaps: %s\n", use_mip_variance?"on":"off");
-    }
-}*/
-
 // PRIVATE
 void Config::init() {
     verbose = false;
     quiet = false;
     print_graph = false;
+    reverse = false;
     distance = 0;
     parallel = 1;
     bins_per_thread = 1;

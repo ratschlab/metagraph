@@ -2316,3 +2316,4 @@ void DBG_succ::annotationFromFile() {
     }
     instream.close();
 }
+

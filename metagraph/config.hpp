@@ -19,6 +19,7 @@ class Config {
         bool quiet;
         bool integrate;
         bool print_graph;
+        bool reverse;
         
         unsigned int k;
         unsigned int distance;
