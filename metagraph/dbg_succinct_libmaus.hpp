@@ -353,7 +353,9 @@ class DBG_succ {
 
     void annotate_kmers(kstring_t &seq, kstring_t &label);
 
-    void annotate_kmer(std::string &kmer, std::string &label);
+    void annotate_kmer(std::string &kmer, std::string &label, uint64_t &previous);
+
+    void classify_read(kstring_t &seq, kstring_t &label);
 
 
     //

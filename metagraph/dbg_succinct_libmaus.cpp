@@ -473,7 +473,7 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(std::string &str, uint64_t max_distan
     uint64_t ru;
 
     // walk through pattern, thereby collecting possible partial matches
-    // once the end of the pattern is readched, add match to results
+    // once the end of the pattern is reached, add match to results
     
     // init match/mismatch to first pattern position
     TAlphabet s = get_alphabet_number(str[0]);
@@ -1480,10 +1480,21 @@ void DBG_succ::allelesFromSeq(kstring_t &seq, unsigned int f, std::vector<JoinIn
 //
 //
 
-void DBG_succ::annotate_kmer(std::string &kmer, std::string &label) {
+void DBG_succ::annotate_kmer(std::string &kmer, std::string &label, uint64_t &idx) {
 
-    // get index of the k-mer we would like to annotate
-    uint64_t idx = this->index(kmer);
+    // we just need to walk one step in the path
+    if (idx > 0) {
+        TAlphabet s = get_alphabet_number(kmer[kmer.length() - 1]);
+        uint64_t rl = std::min(succ_W(pred_last(idx - 1) + 1, s), succ_W(pred_last(idx - 1) + 1, s + alph_size));
+        uint64_t ru = std::max(pred_W(idx, s), pred_W(idx, s + alph_size));
+        rl = outgoing(rl, s);
+        ru = outgoing(ru, s);
+        idx = (ru > rl) ? ru : rl;
+    // we need to look up the full kmer
+    } else {
+        idx = this->index(kmer);
+    }
+    //std::cerr << "kmer: " << kmer << " idx: " << idx << std::endl;
     if (idx == 0)
         return;
 
@@ -1512,6 +1523,7 @@ void DBG_succ::annotate_kmers(kstring_t &seq, kstring_t &label) {
     std::string label_str = std::string(label.s);
     //rocksdb::Status s;
 
+    uint64_t previous_idx = 0;
     for (size_t i = 0; i < seq.l; ++i) {
 
         if (config->verbose && i > 0 && i % 1000 == 0) {
@@ -1525,7 +1537,7 @@ void DBG_succ::annotate_kmers(kstring_t &seq, kstring_t &label) {
             continue;
         }
 
-        annotate_kmer(curr_kmer, label_str);
+        annotate_kmer(curr_kmer, label_str, previous_idx);
         //db->Put(rocksdb::WriteOptions(), curr_kmer, label_str); 
         
         //std::cerr << curr_kmer << ":" << std::string(label.s) << std::endl;
@@ -1534,10 +1546,32 @@ void DBG_succ::annotate_kmers(kstring_t &seq, kstring_t &label) {
     }
     // add last kmer and label to database
     //db->Put(rocksdb::WriteOptions(), curr_kmer, label_str); 
-    annotate_kmer(curr_kmer, label_str);
+    annotate_kmer(curr_kmer, label_str, previous_idx);
     //std::cerr << curr_kmer << ":" << std::string(label.s) << std::endl;
 }   
 
+
+void DBG_succ::classify_read(kstring_t &seq, kstring_t &label) {
+
+    std::string curr_kmer;
+    std::string label_str = std::string(label.s);
+
+    uint64_t previous_idx = 0;
+    for (size_t i = 0; i < seq.l; ++i) {
+
+        if (i < k) {
+            curr_kmer.push_back(seq.s[i]);
+            continue;
+        }
+
+       // classify_kmer(curr_kmer, label_str, previous_idx);
+        
+        curr_kmer.push_back(seq.s[i]);
+        curr_kmer = curr_kmer.substr(1, config->k);
+    }
+    // add last kmer and label to database
+    //classify_kmer(curr_kmer, label_str, previous_idx);
+}
 
 
 //

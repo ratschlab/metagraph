@@ -30,6 +30,8 @@ Config::Config(int argc, const char *argv[]) {
         identity = stats;
     } else if (!strcmp(argv[1], "annotate")) {
         identity = annotate;
+    } else if (!strcmp(argv[1], "classify")) {
+        identity = classify;
     }
     // provide help screen for chosen identity
     if (argc == 2) {
@@ -153,6 +155,10 @@ void Config::print_usage(std::string prog_name, int identity) {
             fprintf(stderr, "Available options for annotate:\n");
             //fprintf(stderr, "\t-D --db-path \tpath that is used to store the annotations database []\n");
             fprintf(stderr, "\t-I --infile-base [STR] \tbasename for loading graph to be annotated\n");
+        } break;
+        case classify: {
+            fprintf(stderr, "Usage: %s classify [options] FILE1 [[FILE2] ...]\n\tEach read file is given in fasta or fastq format.\n\n", prog_name.c_str());
+            fprintf(stderr, "\t-I --infile-base [STR] \tbasename for graph with annotation used for classifying\n");
         } break;
 
     }

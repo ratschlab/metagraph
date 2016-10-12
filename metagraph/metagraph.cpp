@@ -392,6 +392,45 @@ int main(int argc, char const ** argv) {
             graph->annotationToFile();
 
         } break;
+
+        case Config::classify: {
+
+            // load graph 
+            if (config->infbase.empty()) {
+              std::cerr << "Requires input <de bruijn graph> for annotation. Use option -I. " << std::endl;
+              exit(1);
+            }
+            DBG_succ* graph = new DBG_succ(config->infbase, config);
+
+            // load annotatioun (if file does not exist, empty annotation is created)
+            graph->annotationFromFile();
+
+            // iterate over input files
+            for (unsigned int f = 0; f < config->fname.size(); ++f) {
+
+                if (config->verbose) {
+                    std::cout << std::endl << "Parsing " << config->fname[f] << std::endl;
+                }
+
+                // open stream to fasta file
+                gzFile input_p = gzopen(config->fname[f].c_str(), "r");
+                kseq_t *read_stream = kseq_init(input_p);
+
+                if (read_stream == NULL) {
+                    std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
+                    exit(1);
+                }
+
+                while (kseq_read(read_stream) >= 0) {
+                    graph->classify_read(read_stream->seq, read_stream->name);
+                }
+                kseq_destroy(read_stream);
+                gzclose(input_p);
+            }
+ 
+
+
+        } break;
     }
 
     // output and cleanup

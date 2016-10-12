@@ -38,7 +38,8 @@ class Config {
                          compare, 
                          align,
                          stats,
-                         annotate};
+                         annotate,
+                         classify};
         int identity;
 
     private:
