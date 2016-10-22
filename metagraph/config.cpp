@@ -45,7 +45,7 @@ Config::Config(int argc, const char *argv[]) {
             verbose = true;
         } else if (!strcmp(argv[i], "-q") || !strcmp(argv[i], "--quiet")) {
             quiet = true;
-        } else if (!strcmp(argv[i], "-P") || !strcmp(argv[i], "--print-graph")) {
+        } else if (!strcmp(argv[i], "-P") || !strcmp(argv[i], "--print")) {
             print_graph = true;
         } else if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--reverse")) {
             reverse = true;
@@ -124,7 +124,7 @@ void Config::print_usage(std::string prog_name, int identity) {
             fprintf(stderr, "\t-I --infile-base [STR] \tbasename for loading graph input file\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
             fprintf(stderr, "\t-r --reverse \tbuild graph from reverse complement of input [off]\n");
-            fprintf(stderr, "\t-P --print-graph \tprint graph table to the screen [off]\n");
+            fprintf(stderr, "\t-P --print \tprint graph table to the screen [off]\n");
         } break;
         case align: {
             fprintf(stderr, "Usage: %s align [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
@@ -140,21 +140,23 @@ void Config::print_usage(std::string prog_name, int identity) {
             fprintf(stderr, "Usage: %s merge [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for merge:\n");
             fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file []\n");
-            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [1]\n");
-            fprintf(stderr, "\t-P --print-graph \tprint graph table to the screen [off]\n");
+            fprintf(stderr, "\t-P --print \t\tprint graph table to the screen [off]\n");
         } break;
         case stats: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for stats:\n");
             fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file []\n");
-            fprintf(stderr, "\t-P --print-graph \tprint graph table to the screen [off]\n");
+            fprintf(stderr, "\t-P --print \tprint graph table to the screen [off]\n");
         } break;
         case annotate: {
             fprintf(stderr, "Usage: %s annotate [options] PATH1 [[PATH2] ...]\n\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for annotate:\n");
             //fprintf(stderr, "\t-D --db-path \tpath that is used to store the annotations database []\n");
             fprintf(stderr, "\t-I --infile-base [STR] \tbasename for loading graph to be annotated\n");
+            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [1]\n");
         } break;
         case classify: {
             fprintf(stderr, "Usage: %s classify [options] FILE1 [[FILE2] ...]\n\tEach read file is given in fasta or fastq format.\n\n", prog_name.c_str());

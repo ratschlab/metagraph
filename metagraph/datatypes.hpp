@@ -4,6 +4,8 @@
 #include <functional>
 #include <set>
 #include <unordered_set>
+#include <pthread.h>
+#include "kseq.h"
 
 class DBG_succ;
 
@@ -49,18 +51,26 @@ public:
 };
 
 struct AnnotationSet {
-    std::set<std::string> annotation;
+    std::set<uint32_t> annotation;
 };
 
 struct AnnotationHash {
-    std::uint16_t operator()(const std::set<std::string> &a) const {
-        std::set<std::string>::iterator it = a.begin();
-        std::uint16_t h1 = (uint16_t) std::hash<std::string>{}(*it);
+    
+    uint32_t knuth_hash(const uint32_t i) const {
+        return i * UINT32_C(2654435761);
+    };
+
+    std::uint32_t operator()(const std::set<uint32_t> &a) const {
+        std::set<uint32_t>::iterator it = a.begin();
+        //std::uint32_t h1 = (uint32_t) std::hash<uint32_t>{}(*it);
+        uint32_t h1 = knuth_hash(*it);
         it++;
         if (a.size() > 1) {
             for (; it != a.end(); ++it) {
-                std::uint16_t h2 = (uint16_t) std::hash<std::string>{}(*it);
+                //std::uint32_t h2 = (uint32_t) std::hash<uint32_t>{}(*it);
+                uint32_t h2 = knuth_hash(*it);
                 h1 = h1 ^ (h2 << 1);
+                //h1 = (h1 * h2);
             }
         }
         return h1;
@@ -151,6 +161,16 @@ struct ParallelMergeContainer {
         std::cout << "Largest bin: " << max_bin << std::endl;
         std::cout << "Average bin size: " << total_bin / bins_g1.size() << std::endl << std::endl;
     }
+};
+
+struct ParallelAnnotateContainer {
+    kstring_t* seq;
+    kstring_t* label;
+    DBG_succ* graph;
+    uint64_t idx;
+    uint64_t binsize;
+    uint64_t total_bins; 
+    pthread_mutex_t anno_mutex;
 };
 
 #endif

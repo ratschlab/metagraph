@@ -9,10 +9,6 @@
 #include <zlib.h>
 #include <pthread.h>
 
-//#include "rocksdb/db.h"
-//#include "rocksdb/slice.h"
-//#include "rocksdb/options.h"
-
 #include "datatypes.hpp"
 #include "dbg_succinct_libmaus.hpp"
 #include "config.hpp"
@@ -23,9 +19,11 @@ KSEQ_INIT(gzFile, gzread)
 
 Config* config;
 ParallelMergeContainer* merge_data = new ParallelMergeContainer();
+ParallelAnnotateContainer* anno_data = new ParallelAnnotateContainer();
 
 pthread_mutex_t mutex_merge_result = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t mutex_merge_idx = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex_bin_idx = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex_annotate = PTHREAD_MUTEX_INITIALIZER;
 pthread_attr_t attr;  
 
 void parallel_merge_collect(DBG_succ* result) {
@@ -47,6 +45,35 @@ bool operator==(const AnnotationSet& lhs, const AnnotationSet& rhs) {
 }
 
 /*
+ * Distribute the annotation of all k-mers in a sequence over 
+ * a number of parallel bins.
+ */
+void *parallel_annotate_wrapper(void *arg) {
+
+    uint64_t curr_idx, start, end;
+
+    while (true) {
+        pthread_mutex_lock (&mutex_bin_idx);
+        if (anno_data->idx == anno_data->total_bins) {
+            pthread_mutex_unlock (&mutex_bin_idx);
+            break;
+        } else {
+            curr_idx = anno_data->idx;
+            pthread_mutex_unlock (&mutex_bin_idx);
+            anno_data->idx++;
+            pthread_mutex_unlock (&mutex_bin_idx);
+            
+            start = curr_idx * anno_data->binsize;
+            end = std::min(((curr_idx + 1) * anno_data->binsize) + anno_data->graph->k - 1, anno_data->seq->l);
+            //std::cerr << "start " << start << " end " << end << std::endl;
+            anno_data->graph->annotate_seq(*(anno_data->seq), *(anno_data->label), start, end, &mutex_annotate);
+        }
+    }
+    pthread_exit((void*) 0);
+}
+
+
+/*
  * Distribute the merging of two graph structures G1 and G2 over
  * bins, such that n parallel threads are used. The number of bins
  * is determined dynamically.
@@ -57,14 +84,14 @@ void *parallel_merge_wrapper(void *arg) {
     DBG_succ* graph;
 
     while (true) {
-        pthread_mutex_lock (&mutex_merge_idx);
+        pthread_mutex_lock (&mutex_bin_idx);
         if (merge_data->idx == merge_data->bins_g1.size()) {
-            pthread_mutex_unlock (&mutex_merge_idx);
+            pthread_mutex_unlock (&mutex_bin_idx);
             break;
         } else {
             curr_idx = merge_data->idx;
             merge_data->idx++;
-            pthread_mutex_unlock (&mutex_merge_idx);
+            pthread_mutex_unlock (&mutex_bin_idx);
             
             // collect bin data for merging and decide how to merge
             if (merge_data->bins_g1.at(curr_idx).first > 0 || merge_data->bins_g2.at(curr_idx).first > 0) {
@@ -354,7 +381,7 @@ int main(int argc, char const ** argv) {
               std::cerr << "Requires input <de bruijn graph> for annotation. Use option -I. " << std::endl;
               exit(1);
             }
-            DBG_succ* graph = new DBG_succ(config->infbase, config);
+            graph = new DBG_succ(config->infbase, config);
 
             // load annotatioun (if file does not exist, empty annotation is created)
             graph->annotationFromFile();
@@ -364,6 +391,8 @@ int main(int argc, char const ** argv) {
            // options.create_if_missing = true;
            // rocksdb::DB* db;
            // rocksdb::Status status = rocksdb::DB::Open(options, config->dbpath, &db);
+            
+            uint64_t total_seqs = 0;
 
             // iterate over input files
             for (unsigned int f = 0; f < config->fname.size(); ++f) {
@@ -382,12 +411,63 @@ int main(int argc, char const ** argv) {
                 }
 
                 while (kseq_read(read_stream) >= 0) {
-                    graph->annotate_kmers(read_stream->seq, read_stream->name);
+
+                    if (config->reverse)
+                        reverse_complement(read_stream->seq);                    
+
+                    if (config->parallel > 1) {
+                        pthread_t* threads = NULL; 
+
+                        anno_data->seq = &(read_stream->seq);
+                        anno_data->label = &(read_stream->name);
+                        anno_data->graph = graph;
+                        anno_data->idx = 0;
+                        anno_data->binsize = (read_stream->seq.l + 1) / config->parallel * config->bins_per_thread;
+                        anno_data->total_bins = ((read_stream->seq.l + anno_data->binsize - 1) / anno_data->binsize); 
+                        anno_data->anno_mutex = mutex_annotate; 
+
+                        // create threads
+                        threads = new pthread_t[config->parallel]; 
+                        pthread_attr_init(&attr);
+                        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+
+                        // do the work
+                        for (size_t tid = 0; tid < config->parallel; tid++) {
+                           pthread_create(&threads[tid], &attr, parallel_annotate_wrapper, (void *) tid); 
+                           //std::cerr << "starting thread " << tid << std::endl;
+                        }
+
+                        // join threads
+                        //if (config->verbose)
+                        //    std::cout << "Waiting for threads to join" << std::endl;
+                        for (size_t tid = 0; tid < config->parallel; tid++) {
+                            pthread_join(threads[tid], NULL);
+                        }
+                        delete[] threads;
+
+                        total_seqs += 1;
+
+                        //if (config->verbose)
+                        //    std::cout << "added labels for " << total_seqs << " sequences, last was " << std::string(read_stream->name.s) << std::endl;
+                    } else {
+                        graph->annotate_seq(read_stream->seq, read_stream->name);
+                    }
+                    if (config->verbose)
+                        std::cout << "annotation map has " << graph->annotation_map.size() << " entries" << std::endl;
+                    /*for (std::unordered_map<uint32_t, std::set<uint32_t> >::iterator ittt = graph->annotation_map.begin(); ittt != graph->annotation_map.end(); ++ittt) {
+                        std::cerr << "map : " << ittt->first << ":";
+                        for (std::set<uint32_t>::iterator it4 = ittt->second.begin(); it4 != ittt->second.end(); ++it4) {
+                            std::cerr << " " << *it4;
+                        }
+                        std::cerr << std::endl;
+                    }*/
                 }
                 kseq_destroy(read_stream);
                 gzclose(input_p);
             }
-            //delete db;
+
+            if (config->print_graph)
+                graph->annotationToScreen();
 
             graph->annotationToFile();
 

@@ -42,8 +42,10 @@ class DBG_succ {
     Config* config;
 
     // annotation containers
-    std::deque<uint16_t> annotation;
-    std::unordered_map<uint16_t, std::set<std::string> > annotation_map;
+    std::deque<uint32_t> annotation;
+    std::vector<std::string> id_to_label;
+    std::unordered_map<std::string, uint32_t> label_to_id_map;
+    std::unordered_map<uint32_t, std::set<uint32_t> > annotation_map;
 
 #ifdef DBGDEBUG
     bool debug = true;
@@ -351,9 +353,9 @@ class DBG_succ {
     //
     //
 
-    void annotate_kmers(kstring_t &seq, kstring_t &label);
+    void annotate_seq(kstring_t &seq, kstring_t &label, uint64_t start=0, uint64_t end=0, pthread_mutex_t* anno_mutex=NULL);
 
-    void annotate_kmer(std::string &kmer, std::string &label, uint64_t &previous);
+    void annotate_kmer(std::string &kmer, uint32_t &label, uint64_t &previous, pthread_mutex_t* anno_mutex);
 
     void classify_read(kstring_t &seq, kstring_t &label);
 
@@ -440,8 +442,9 @@ class DBG_succ {
     void toFile(); 
 
     /**
-     * Serialization and Deserialization of annotation content.
+     * Visualization, Serialization and Deserialization of annotation content.
      */
+    void annotationToScreen();
     void annotationToFile();
     void annotationFromFile();
 

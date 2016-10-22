@@ -21,6 +21,7 @@
 #include <string>
 #include <zlib.h>
 #include <cmath>
+#include <pthread.h>
 
 #include "kseq.h"
 
@@ -157,6 +158,7 @@ DBG_succ::DBG_succ(size_t k_, Config* config_, bool sentinel) :
             F.push_back(0);
         p = 0;
     }
+    id_to_label.push_back("");
 }
 
 DBG_succ::DBG_succ(std::string infbase_, Config* config_) : 
@@ -204,6 +206,7 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
         }
     }
     instream.close();
+    id_to_label.push_back("");
 }
 
 DBG_succ::~DBG_succ() {
@@ -1480,7 +1483,7 @@ void DBG_succ::allelesFromSeq(kstring_t &seq, unsigned int f, std::vector<JoinIn
 //
 //
 
-void DBG_succ::annotate_kmer(std::string &kmer, std::string &label, uint64_t &idx) {
+void DBG_succ::annotate_kmer(std::string &kmer, uint32_t &label_id, uint64_t &idx, pthread_mutex_t* anno_mutex) {
 
     // we just need to walk one step in the path
     if (idx > 0) {
@@ -1495,58 +1498,103 @@ void DBG_succ::annotate_kmer(std::string &kmer, std::string &label, uint64_t &id
         idx = this->index(kmer);
     }
     //std::cerr << "kmer: " << kmer << " idx: " << idx << std::endl;
+    assert(idx > 0);
     if (idx == 0)
         return;
 
+    std::set<uint32_t> curr_anno;
+
+    if (anno_mutex)
+        pthread_mutex_lock(anno_mutex);
+
     // get annotation of current kmer
     size_t curr_hash = this->annotation[idx];
-    std::set<std::string> curr_anno;
-    if (curr_hash > 0) {
+    if (curr_hash > 0)
         curr_anno = annotation_map.at(curr_hash);    
-    }
+   
+    if (anno_mutex)
+        pthread_mutex_unlock(anno_mutex);
 
     // check whether current label is already part of current annotation
     // and add it if not
-    std::set<std::string>::const_iterator it = curr_anno.find(label); 
+    std::set<uint32_t>::const_iterator it = curr_anno.find(label_id); 
     if (it == curr_anno.end()) {
-        curr_anno.insert(label);
+        curr_anno.insert(label_id);
         curr_hash = AnnotationHash{}(curr_anno);
+        if (anno_mutex)
+            pthread_mutex_lock(anno_mutex);
+        //std::unordered_map<uint32_t, std::set<uint32_t> >::iterator it4 = annotation_map.find(curr_hash);
+        /*if (it4 != annotation_map.end()) {
+            for (std::set<uint32_t>::iterator it5 = annotation_map[curr_hash].begin(); it5 != annotation_map[curr_hash].end(); ++it5) {
+                if(curr_anno.find(*it5) == curr_anno.end()) {
+                    std::cerr << "hash collision for " << curr_hash << std::endl << "annotated:";
+                    for (std::set<uint32_t>::iterator it6 = annotation_map[curr_hash].begin(); it6 != annotation_map[curr_hash].end(); ++it6)
+                        std::cerr << " " << *it6;
+                    std::cerr << std::endl << "new:";
+                    for (std::set<uint32_t>::iterator it7 = curr_anno.begin(); it7 != curr_anno.end(); ++it7)
+                        std::cerr << " " << *it7;
+                    std::cerr << std::endl;
+                    exit(1);
+                }
+            }
+        }*/
         annotation_map[curr_hash] = curr_anno;
         annotation[idx] = curr_hash;
+        if (anno_mutex)
+            pthread_mutex_unlock(anno_mutex);
     }
 }
 
-//void annotate_kmers(rocksdb::DB* db, kstring_t &seq, kstring_t &label) {
-void DBG_succ::annotate_kmers(kstring_t &seq, kstring_t &label) {
+void DBG_succ::annotate_seq(kstring_t &seq, kstring_t &label, uint64_t start, uint64_t end, pthread_mutex_t* anno_mutex) {
 
     std::string curr_kmer;
     std::string label_str = std::string(label.s);
-    //rocksdb::Status s;
+    uint32_t label_id;
+
+    if (anno_mutex)
+        pthread_mutex_lock(anno_mutex);
+
+     // does the current label already have an ID?
+    std::unordered_map<std::string, uint32_t>::iterator id_it = label_to_id_map.find(label_str);
+    if (id_it == label_to_id_map.end()) {
+        label_id = (uint32_t) id_to_label.size();
+        id_to_label.push_back(label_str);
+        label_to_id_map[label_str] = label_id;
+        if (config->verbose)
+            std::cout << "added label ID " << label_id << " for label string " << label_str << std::endl;
+    } else { 
+        label_id = id_it->second;
+    }
+
+    if (anno_mutex)
+        pthread_mutex_unlock(anno_mutex);
+
+    end = (end == 0) ? seq.l : end;
 
     uint64_t previous_idx = 0;
-    for (size_t i = 0; i < seq.l; ++i) {
+    size_t i;
+    for (i = start; i < end; ++i) {
 
         if (config->verbose && i > 0 && i % 1000 == 0) {
             std::cout << "." << std::flush;
-            if (i % 10000 == 0)
+            if (!anno_mutex && (i % 10000 == 0))
                 std::cout << i << " kmers added" << std::endl;
         }
 
-        if (i < k) {
+        if (curr_kmer.size() < k) {
             curr_kmer.push_back(seq.s[i]);
             continue;
         }
-
-        annotate_kmer(curr_kmer, label_str, previous_idx);
-        //db->Put(rocksdb::WriteOptions(), curr_kmer, label_str); 
+        assert(curr_kmer.size() == k);
+        annotate_kmer(curr_kmer, label_id, previous_idx, anno_mutex);
         
         //std::cerr << curr_kmer << ":" << std::string(label.s) << std::endl;
         curr_kmer.push_back(seq.s[i]);
-        curr_kmer = curr_kmer.substr(1, config->k);
+        curr_kmer = curr_kmer.substr(1, k);
     }
     // add last kmer and label to database
-    //db->Put(rocksdb::WriteOptions(), curr_kmer, label_str); 
-    annotate_kmer(curr_kmer, label_str, previous_idx);
+    if (curr_kmer.size() == k)
+        annotate_kmer(curr_kmer, label_id, previous_idx, anno_mutex);
     //std::cerr << curr_kmer << ":" << std::string(label.s) << std::endl;
 }   
 
@@ -2331,11 +2379,28 @@ void DBG_succ::toFile() {
     outstream.close();
 }
 
+
+// write annotation to screen
+void DBG_succ::annotationToScreen() {
+    std::deque<uint32_t>::iterator ait = annotation.begin();
+    std::set<uint32_t>::iterator sit;
+    for (; ait != annotation.end(); ++ait) {
+        std::cout << *ait << " : ";
+        sit = annotation_map[*ait].begin();
+        for (; sit != annotation_map[*ait].end(); ++sit) {
+            std::cout << id_to_label.at(*sit) << " ";
+        }
+        std::cout << std::endl;
+    }
+}
+
 // write annotation to disk
 void DBG_succ::annotationToFile() {
     std::ofstream outstream((config->infbase + ".anno.dbg").c_str());
-    libmaus2::util::NumberSerialisation::serialiseNumberShortDeque<uint16_t>(outstream, annotation);
+    libmaus2::util::NumberSerialisation::serialiseNumber32Deque<uint32_t>(outstream, annotation);
     serialize_annotation_map(outstream, annotation_map);
+    serialize_annotation_id_vector(outstream, id_to_label);
+    serialize_label_to_id_map(outstream, label_to_id_map);
     outstream.close();
 }
 
@@ -2343,8 +2408,12 @@ void DBG_succ::annotationToFile() {
 void DBG_succ::annotationFromFile() {
     std::ifstream instream((config->infbase + ".anno.dbg").c_str());
     if (instream.good()) {
-        annotation = libmaus2::util::NumberSerialisation::deserialiseNumberShortDeque<uint16_t>(instream);
-        annotation_map = deserialize_annotation_map(instream);
+        std::cerr << "get deque from disk" << std::endl;
+        annotation = libmaus2::util::NumberSerialisation::deserialiseNumber32Deque<uint32_t>(instream);
+        std::cerr << "get map from disk" << std::endl;
+        deserialize_annotation_map(instream, annotation_map);
+        id_to_label = deserialize_annotation_id_vector(instream);
+        deserialize_label_to_id_map(instream, label_to_id_map);
     } else {
         annotation.resize(get_size(), 0);
     }
