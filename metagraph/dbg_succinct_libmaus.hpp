@@ -42,10 +42,12 @@ class DBG_succ {
     Config* config;
 
     // annotation containers
-    std::deque<uint32_t> annotation;
-    std::vector<std::string> id_to_label;
-    std::unordered_map<std::string, uint32_t> label_to_id_map;
-    std::unordered_map<uint32_t, std::set<uint32_t> > annotation_map;
+    std::deque<uint32_t> annotation; // list that associates each node in the graph with an annotation hash
+    std::vector<std::string> id_to_label; // maps the label ID back to the original string
+    std::unordered_map<std::string, uint32_t> label_to_id_map; // maps each label string to an integer ID
+    std::map<uint32_t, uint32_t> annotation_map; // maps the hash of a combination to the position in the combination vector
+    std::vector<uint32_t> combination_vector; // contains all known combinations
+    uint64_t combination_count = 0;
 
 #ifdef DBGDEBUG
     bool debug = true;

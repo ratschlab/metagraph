@@ -60,7 +60,21 @@ struct AnnotationHash {
         return i * UINT32_C(2654435761);
     };
 
-    std::uint32_t operator()(const std::set<uint32_t> &a) const {
+    std::uint32_t operator()(const std::vector<uint32_t> &a) const {
+        std::vector<uint32_t>::const_iterator it = a.begin();
+        uint32_t h1 = knuth_hash(*it);
+        it++;
+        if (a.size() > 1) {
+            for (; it != a.end(); ++it) {
+                uint32_t h2 = knuth_hash(*it);
+                h1 = h1 ^ (h2 << 1);
+            }
+        }
+        return h1;
+    };
+
+
+    /*std::uint32_t operator()(const std::set<uint32_t> &a) const {
         std::set<uint32_t>::iterator it = a.begin();
         //std::uint32_t h1 = (uint32_t) std::hash<uint32_t>{}(*it);
         uint32_t h1 = knuth_hash(*it);
@@ -74,7 +88,7 @@ struct AnnotationHash {
             }
         }
         return h1;
-    }
+    }*/
 };
 
 struct ParallelMergeContainer {
@@ -170,7 +184,7 @@ struct ParallelAnnotateContainer {
     uint64_t idx;
     uint64_t binsize;
     uint64_t total_bins; 
-    pthread_mutex_t anno_mutex;
+    //pthread_mutex_t* anno_mutex;
 };
 
 #endif

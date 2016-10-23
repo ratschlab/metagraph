@@ -59,7 +59,6 @@ void *parallel_annotate_wrapper(void *arg) {
             break;
         } else {
             curr_idx = anno_data->idx;
-            pthread_mutex_unlock (&mutex_bin_idx);
             anno_data->idx++;
             pthread_mutex_unlock (&mutex_bin_idx);
             
@@ -424,7 +423,6 @@ int main(int argc, char const ** argv) {
                         anno_data->idx = 0;
                         anno_data->binsize = (read_stream->seq.l + 1) / config->parallel * config->bins_per_thread;
                         anno_data->total_bins = ((read_stream->seq.l + anno_data->binsize - 1) / anno_data->binsize); 
-                        anno_data->anno_mutex = mutex_annotate; 
 
                         // create threads
                         threads = new pthread_t[config->parallel]; 
@@ -453,7 +451,7 @@ int main(int argc, char const ** argv) {
                         graph->annotate_seq(read_stream->seq, read_stream->name);
                     }
                     if (config->verbose)
-                        std::cout << "annotation map has " << graph->annotation_map.size() << " entries" << std::endl;
+                        std::cout << "entries in annotation map: " << graph->combination_count << std::endl << "length of combination vector: " << graph->combination_vector.size() << std::endl;
                     /*for (std::unordered_map<uint32_t, std::set<uint32_t> >::iterator ittt = graph->annotation_map.begin(); ittt != graph->annotation_map.end(); ++ittt) {
                         std::cerr << "map : " << ittt->first << ":";
                         for (std::set<uint32_t>::iterator it4 = ittt->second.begin(); it4 != ittt->second.end(); ++it4) {

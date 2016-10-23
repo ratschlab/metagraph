@@ -40,6 +40,7 @@ KSEQ_INIT(gzFile, gzread)
 #include "datatypes.hpp"
 #include "serialization.hpp"
 #include "dbg_succinct_libmaus.hpp"
+#include "annotation.hpp"
 // use Heng Li's kseq structure for string IO
 #include "kseq.h"
 
@@ -159,6 +160,7 @@ DBG_succ::DBG_succ(size_t k_, Config* config_, bool sentinel) :
         p = 0;
     }
     id_to_label.push_back("");
+    combination_vector.push_back(0);
 }
 
 DBG_succ::DBG_succ(std::string infbase_, Config* config_) : 
@@ -207,6 +209,7 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
     }
     instream.close();
     id_to_label.push_back("");
+    combination_vector.push_back(0);
 }
 
 DBG_succ::~DBG_succ() {
@@ -1502,7 +1505,7 @@ void DBG_succ::annotate_kmer(std::string &kmer, uint32_t &label_id, uint64_t &id
     if (idx == 0)
         return;
 
-    std::set<uint32_t> curr_anno;
+    std::vector<uint32_t> curr_combo;
 
     if (anno_mutex)
         pthread_mutex_lock(anno_mutex);
@@ -1510,39 +1513,31 @@ void DBG_succ::annotate_kmer(std::string &kmer, uint32_t &label_id, uint64_t &id
     // get annotation of current kmer
     size_t curr_hash = this->annotation[idx];
     if (curr_hash > 0)
-        curr_anno = annotation_map.at(curr_hash);    
+        curr_combo = get_curr_combination(combination_vector, annotation_map[curr_hash]);
    
-    if (anno_mutex)
-        pthread_mutex_unlock(anno_mutex);
+    //if (anno_mutex)
+    //    pthread_mutex_unlock(anno_mutex);
 
     // check whether current label is already part of current annotation
     // and add it if not
-    std::set<uint32_t>::const_iterator it = curr_anno.find(label_id); 
-    if (it == curr_anno.end()) {
-        curr_anno.insert(label_id);
-        curr_hash = AnnotationHash{}(curr_anno);
-        if (anno_mutex)
-            pthread_mutex_lock(anno_mutex);
-        //std::unordered_map<uint32_t, std::set<uint32_t> >::iterator it4 = annotation_map.find(curr_hash);
-        /*if (it4 != annotation_map.end()) {
-            for (std::set<uint32_t>::iterator it5 = annotation_map[curr_hash].begin(); it5 != annotation_map[curr_hash].end(); ++it5) {
-                if(curr_anno.find(*it5) == curr_anno.end()) {
-                    std::cerr << "hash collision for " << curr_hash << std::endl << "annotated:";
-                    for (std::set<uint32_t>::iterator it6 = annotation_map[curr_hash].begin(); it6 != annotation_map[curr_hash].end(); ++it6)
-                        std::cerr << " " << *it6;
-                    std::cerr << std::endl << "new:";
-                    for (std::set<uint32_t>::iterator it7 = curr_anno.begin(); it7 != curr_anno.end(); ++it7)
-                        std::cerr << " " << *it7;
-                    std::cerr << std::endl;
-                    exit(1);
-                }
-            }
-        }*/
-        annotation_map[curr_hash] = curr_anno;
+    if (!std::binary_search(curr_combo.begin(), curr_combo.end(), label_id)) {
+
+        curr_combo = add_to_combination(curr_combo, label_id); 
+        curr_hash = AnnotationHash{}(curr_combo);
+
+       // if (anno_mutex)
+       //     pthread_mutex_lock(anno_mutex);
+
         annotation[idx] = curr_hash;
+        //annotation_map[curr_hash] = curr_anno;
+        if (annotation_map.find(curr_hash) == annotation_map.end()) {
+            annotation_map[curr_hash] = insert_new_combination(combination_vector, curr_combo);
+            combination_count++;
+        }
+    }
         if (anno_mutex)
             pthread_mutex_unlock(anno_mutex);
-    }
+    //}
 }
 
 void DBG_succ::annotate_seq(kstring_t &seq, kstring_t &label, uint64_t start, uint64_t end, pthread_mutex_t* anno_mutex) {
@@ -2383,24 +2378,41 @@ void DBG_succ::toFile() {
 // write annotation to screen
 void DBG_succ::annotationToScreen() {
     std::deque<uint32_t>::iterator ait = annotation.begin();
-    std::set<uint32_t>::iterator sit;
+    //std::set<uint32_t>::iterator sit;
+    std::vector<uint32_t>::iterator vit;
+    std::vector<uint32_t> curr_comb;
     for (; ait != annotation.end(); ++ait) {
-        std::cout << *ait << " : ";
-        sit = annotation_map[*ait].begin();
-        for (; sit != annotation_map[*ait].end(); ++sit) {
-            std::cout << id_to_label.at(*sit) << " ";
+        std::cout << *ait << " : " << annotation_map[*ait] << " : ";
+        if (*ait > 0) {
+            curr_comb = get_curr_combination(combination_vector, annotation_map[*ait]);
+            //sit = annotation_map[*ait].begin();
+            for (vit = curr_comb.begin(); vit != curr_comb.end(); ++vit) {
+                std::cout << id_to_label.at(*vit) << " ";
+            }
         }
         std::cout << std::endl;
     }
+    //std::cerr << "ANNO MAP " << std::endl;
+    //for (std::unordered_map<uint32_t, uint32_t>::iterator itt = annotation_map.begin(); itt != annotation_map.end(); itt++)
+    //    std::cerr << itt->first << ":" << itt->second << "; ";
+    //std::cerr << std::endl;
 }
 
 // write annotation to disk
 void DBG_succ::annotationToFile() {
     std::ofstream outstream((config->infbase + ".anno.dbg").c_str());
+    //annotation
     libmaus2::util::NumberSerialisation::serialiseNumber32Deque<uint32_t>(outstream, annotation);
+    // annotation_map
     serialize_annotation_map(outstream, annotation_map);
+    //combination vector
+    serialize_combination_vector(outstream, combination_vector);
+    // id_to_label
     serialize_annotation_id_vector(outstream, id_to_label);
+    // label_to_id_map
     serialize_label_to_id_map(outstream, label_to_id_map);
+    // combination_count
+    libmaus2::util::NumberSerialisation::serialiseNumber(outstream, combination_count);
     outstream.close();
 }
 
@@ -2409,11 +2421,18 @@ void DBG_succ::annotationFromFile() {
     std::ifstream instream((config->infbase + ".anno.dbg").c_str());
     if (instream.good()) {
         std::cerr << "get deque from disk" << std::endl;
+        // annotation
         annotation = libmaus2::util::NumberSerialisation::deserialiseNumber32Deque<uint32_t>(instream);
         std::cerr << "get map from disk" << std::endl;
+        // annotation_map
         deserialize_annotation_map(instream, annotation_map);
+        // combination_vector
+        combination_vector = deserialize_combination_vector(instream);
+        // id_to_label
         id_to_label = deserialize_annotation_id_vector(instream);
+        // label_to_id_map
         deserialize_label_to_id_map(instream, label_to_id_map);
+        combination_count = libmaus2::util::NumberSerialisation::deserialiseNumber(instream);
     } else {
         annotation.resize(get_size(), 0);
     }
