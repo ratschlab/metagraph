@@ -58,7 +58,7 @@ uint32_t insert_new_combination(std::vector<uint32_t> &combination_vector, std::
     // we give up on the constant amortized cost, but this is ok for here
 
     if ((insert_pos + 1000) % 1000000000 == 0)
-        combination_vector.reshape(insert_pos + 1000 + 1000000000);
+        combination_vector.reserve(insert_pos + 1000 + 1000000000);
 
     combination_vector.push_back(new_combination.size());
     for (std::vector<uint32_t>::iterator it = new_combination.begin(); it != new_combination.end(); ++it)
