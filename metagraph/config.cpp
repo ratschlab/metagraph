@@ -161,6 +161,7 @@ void Config::print_usage(std::string prog_name, int identity) {
         case classify: {
             fprintf(stderr, "Usage: %s classify [options] FILE1 [[FILE2] ...]\n\tEach read file is given in fasta or fastq format.\n\n", prog_name.c_str());
             fprintf(stderr, "\t-I --infile-base [STR] \tbasename for graph with annotation used for classifying\n");
+            fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
         } break;
 
     }

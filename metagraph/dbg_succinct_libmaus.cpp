@@ -1594,26 +1594,67 @@ void DBG_succ::annotate_seq(kstring_t &seq, kstring_t &label, uint64_t start, ui
 }   
 
 
-void DBG_succ::classify_read(kstring_t &seq, kstring_t &label) {
+std::vector<uint32_t> DBG_succ::classify_path(std::vector<uint64_t> path) {
+    
+    uint32_t curr_anno;
+    std::vector<uint32_t> labels;
+    std::vector<uint32_t> current_combination;
+    std::map<uint32_t, uint64_t> label_counter;
 
-    std::string curr_kmer;
-    std::string label_str = std::string(label.s);
-
-    uint64_t previous_idx = 0;
-    for (size_t i = 0; i < seq.l; ++i) {
-
-        if (i < k) {
-            curr_kmer.push_back(seq.s[i]);
-            continue;
+    // collect all annotated combinations for the path
+    // take majority vote as consensus for now
+    for (size_t i = 0; i < path.size(); i++) {
+        curr_anno = annotation.at(path.at(i));
+        if (curr_anno > 0) {
+            current_combintion = get_curr_combination(annotation_map[curr_anno]);
+            for (std::vector<uint32_t>::iterator c = current_combination.begin(); c != current_combination.end(); c++) {
+                if (label_counter.find(*c) != label_counter.end()) {
+                    label_counter[*c] += 1;
+                } else {
+                    label_counter[*c] = 1;
+                }
+            }
         }
-
-       // classify_kmer(curr_kmer, label_str, previous_idx);
-        
-        curr_kmer.push_back(seq.s[i]);
-        curr_kmer = curr_kmer.substr(1, config->k);
     }
-    // add last kmer and label to database
-    //classify_kmer(curr_kmer, label_str, previous_idx);
+
+    // take majority vote as consensus for now
+    if (label_counter.size() == 1) {
+        labels.push_back(label_counter.begin()->first);
+    } else if (label_counter.size() > 0) {
+        uint32_t curr_max = 0;
+        for (std::map<uint32_t, uint64_t>::iterator c = label_counter.begin(); c != label_counter.end(); c++) {
+            if (c->second > curr_max) {
+                labels.clear();
+                curr_max = c=>second;
+            } 
+            if (c->second == curr_max) {
+                labels.push_back(c->first);
+            }
+        }
+    }
+
+    return labels;
+}
+
+
+std::set<uint32_t> DBG_succ::classify_read(kstring_t &read, uint64_t max_distance) {
+
+    // containers for label information
+    std::vector<uint32_t> path_labels;
+    std::set<uint32_t> all_labels;
+
+    // get alignment of the read to the graph
+    std::vector<HitInfo> alignment = index_fuzzy(std::string(read.s), max_distance);
+
+    // classify hits
+    for (size_t i = 0; i < alignment.size(); i++) {
+        path_labels = classify_path(alignment.path);
+        for (size_t j = 0; j < path_labels.size(); j++) {
+            all_labels.insert(path_labels.at(j));
+        }
+    }
+
+    return all_labels;
 }
 
 

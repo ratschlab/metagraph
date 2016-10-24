@@ -359,7 +359,9 @@ class DBG_succ {
 
     void annotate_kmer(std::string &kmer, uint32_t &label, uint64_t &previous, pthread_mutex_t* anno_mutex);
 
-    void classify_read(kstring_t &seq, kstring_t &label);
+    std::vector<uint32_t> classify_path(std::vector<uint64_t> path);
+
+    std::set<uint32_t> classify_read(kstring_t &read, uint64_t max_distance);
 
 
     //

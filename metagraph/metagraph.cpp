@@ -498,9 +498,22 @@ int main(int argc, char const ** argv) {
                     std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
                     exit(1);
                 }
-
+                
+                std::set<uint32_t> labels_fwd;
+                std::set<uint32_t> labels_rev;
                 while (kseq_read(read_stream) >= 0) {
-                    graph->classify_read(read_stream->seq, read_stream->name);
+
+                    std::cout << read_stream->name << "\t";
+                    labels_fwd = graph->classify_read(read_stream->seq, config->distance);
+                    for (std::set<uint32_t>::iterator it = labels_fwd.begin(); it != labels_fwd.end(); it++)
+                        std::cout << graph->id_to_label.at(*it) << ":";
+                    std::cout << "\t";
+
+                    reverse_complement(read_stream->seq);                    
+                    labels_rev = graph->classify_read(read_stream->seq, config->distance);
+                    for (std::set<uint32_t>::iterator it = labels_rev.begin(); it != labels_rev.end(); it++)
+                        std::cout << graph->id_to_label.at(*it) << ":";
+                    std::cout << std::endl;
                 }
                 kseq_destroy(read_stream);
                 gzclose(input_p);
