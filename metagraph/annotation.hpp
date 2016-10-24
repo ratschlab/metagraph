@@ -52,6 +52,14 @@ uint32_t insert_new_combination(std::vector<uint32_t> &combination_vector, std::
 
     uint32_t insert_pos = combination_vector.size();
     //std::cerr << "ins pos " << insert_pos << std::endl;
+
+    // are we close to the next billion? -> pre-allocate another billion entries
+    // this prevents the vector size from doubling with each re-allocation
+    // we give up on the constant amortized cost, but this is ok for here
+
+    if ((insert_pos + 1000) % 1000000000 == 0)
+        combination_vector.reshape(insert_pos + 1000 + 1000000000);
+
     combination_vector.push_back(new_combination.size());
     for (std::vector<uint32_t>::iterator it = new_combination.begin(); it != new_combination.end(); ++it)
         combination_vector.push_back(*it);
