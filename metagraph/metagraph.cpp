@@ -503,7 +503,7 @@ int main(int argc, char const ** argv) {
                 std::set<uint32_t> labels_rev;
                 while (kseq_read(read_stream) >= 0) {
 
-                    std::cout << read_stream->name << "\t";
+                    std::cout << std::string(read_stream->name.s) << "\t";
                     labels_fwd = graph->classify_read(read_stream->seq, config->distance);
                     for (std::set<uint32_t>::iterator it = labels_fwd.begin(); it != labels_fwd.end(); it++)
                         std::cout << graph->id_to_label.at(*it) << ":";

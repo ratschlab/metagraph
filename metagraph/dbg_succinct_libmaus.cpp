@@ -1606,7 +1606,7 @@ std::vector<uint32_t> DBG_succ::classify_path(std::vector<uint64_t> path) {
     for (size_t i = 0; i < path.size(); i++) {
         curr_anno = annotation.at(path.at(i));
         if (curr_anno > 0) {
-            current_combintion = get_curr_combination(annotation_map[curr_anno]);
+            current_combination = get_curr_combination(combination_vector, annotation_map[curr_anno]);
             for (std::vector<uint32_t>::iterator c = current_combination.begin(); c != current_combination.end(); c++) {
                 if (label_counter.find(*c) != label_counter.end()) {
                     label_counter[*c] += 1;
@@ -1625,7 +1625,7 @@ std::vector<uint32_t> DBG_succ::classify_path(std::vector<uint64_t> path) {
         for (std::map<uint32_t, uint64_t>::iterator c = label_counter.begin(); c != label_counter.end(); c++) {
             if (c->second > curr_max) {
                 labels.clear();
-                curr_max = c=>second;
+                curr_max = c->second;
             } 
             if (c->second == curr_max) {
                 labels.push_back(c->first);
@@ -1644,11 +1644,12 @@ std::set<uint32_t> DBG_succ::classify_read(kstring_t &read, uint64_t max_distanc
     std::set<uint32_t> all_labels;
 
     // get alignment of the read to the graph
-    std::vector<HitInfo> alignment = index_fuzzy(std::string(read.s), max_distance);
+    std::string read_str = std::string(read.s);
+    std::vector<HitInfo> alignment = index_fuzzy(read_str, max_distance);
 
     // classify hits
     for (size_t i = 0; i < alignment.size(); i++) {
-        path_labels = classify_path(alignment.path);
+        path_labels = classify_path(alignment.at(i).path);
         for (size_t j = 0; j < path_labels.size(); j++) {
             all_labels.insert(path_labels.at(j));
         }
