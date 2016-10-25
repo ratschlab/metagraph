@@ -1486,7 +1486,7 @@ void DBG_succ::allelesFromSeq(kstring_t &seq, unsigned int f, std::vector<JoinIn
 //
 //
 
-void DBG_succ::annotate_kmer(std::string &kmer, uint32_t &label_id, uint64_t &idx, pthread_mutex_t* anno_mutex) {
+void DBG_succ::annotate_kmer(std::string &kmer, uint32_t &label_id, uint64_t &idx, pthread_mutex_t* anno_mutex, bool ignore) {
 
     // we just need to walk one step in the path
     if (idx > 0) {
@@ -1501,8 +1501,8 @@ void DBG_succ::annotate_kmer(std::string &kmer, uint32_t &label_id, uint64_t &id
         idx = this->index(kmer);
     }
     //std::cerr << "kmer: " << kmer << " idx: " << idx << std::endl;
-    assert(idx > 0);
-    if (idx == 0)
+    //assert(idx > 0);
+    if ((idx == 0) || ignore)
         return;
 
     std::vector<uint32_t> curr_combo;
@@ -1581,7 +1581,7 @@ void DBG_succ::annotate_seq(kstring_t &seq, kstring_t &label, uint64_t start, ui
             continue;
         }
         assert(curr_kmer.size() == k);
-        annotate_kmer(curr_kmer, label_id, previous_idx, anno_mutex);
+        annotate_kmer(curr_kmer, label_id, previous_idx, anno_mutex, (i % config->frequency) > 0);
         
         //std::cerr << curr_kmer << ":" << std::string(label.s) << std::endl;
         curr_kmer.push_back(seq.s[i]);
@@ -1589,7 +1589,7 @@ void DBG_succ::annotate_seq(kstring_t &seq, kstring_t &label, uint64_t start, ui
     }
     // add last kmer and label to database
     if (curr_kmer.size() == k)
-        annotate_kmer(curr_kmer, label_id, previous_idx, anno_mutex);
+        annotate_kmer(curr_kmer, label_id, previous_idx, anno_mutex, (i % config->frequency) > 0);
     //std::cerr << curr_kmer << ":" << std::string(label.s) << std::endl;
 }   
 

@@ -28,6 +28,7 @@ class Config {
         unsigned int parts_total;
         unsigned int part_idx;
         unsigned int collect;
+        unsigned int frequency;
 
         std::vector<std::string> fname;
         std::string outfbase;

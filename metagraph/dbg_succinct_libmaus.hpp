@@ -357,7 +357,7 @@ class DBG_succ {
 
     void annotate_seq(kstring_t &seq, kstring_t &label, uint64_t start=0, uint64_t end=0, pthread_mutex_t* anno_mutex=NULL);
 
-    void annotate_kmer(std::string &kmer, uint32_t &label, uint64_t &previous, pthread_mutex_t* anno_mutex);
+    void annotate_kmer(std::string &kmer, uint32_t &label, uint64_t &previous, pthread_mutex_t* anno_mutex, bool ignore=false);
 
     std::vector<uint32_t> classify_path(std::vector<uint64_t> path);
 

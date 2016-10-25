@@ -59,6 +59,8 @@ Config::Config(int argc, const char *argv[]) {
             bins_per_thread = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-k") || !strcmp(argv[i], "--kmer-length")) {
             k = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
+            frequency = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--distance")) {
             distance = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-O") || !strcmp(argv[i], "--outfile-base")) {
@@ -151,6 +153,7 @@ void Config::print_usage(std::string prog_name, int identity) {
             fprintf(stderr, "\t-P --print \t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t   --part-idx [INT] \t\tidx to use when doing external merge []\n");
             fprintf(stderr, "\t   --parts-total [INT] \t\ttotal number of parts in external merge[]\n");
+            fprintf(stderr, "\t-C --collect [INT] \t\tinitiate collection of external merge, provide total number of splits [1]\n");
         } break;
         case stats: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
@@ -165,6 +168,7 @@ void Config::print_usage(std::string prog_name, int identity) {
             fprintf(stderr, "\t-I --infile-base [STR] \tbasename for loading graph to be annotated\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [1]\n");
+            fprintf(stderr, "\t-f --frequency [INT] \t\twhen a, annotate only every a-th kmer [1]\n");
         } break;
         case classify: {
             fprintf(stderr, "Usage: %s classify [options] FILE1 [[FILE2] ...]\n\tEach read file is given in fasta or fastq format.\n\n", prog_name.c_str());
@@ -194,6 +198,7 @@ void Config::init() {
     parts_total = 1;
     part_idx = 0;
     collect = 1;
+    frequency = 1;
     k = 3;
     identity = noidentity;
 }
