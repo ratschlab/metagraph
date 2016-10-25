@@ -443,7 +443,7 @@ class DBG_succ {
      * Take the current graph content and store in a file.
      *
      */
-    void toFile(); 
+    void toFile(unsigned int total = 1, unsigned int idx = 0); 
 
     /**
      * Visualization, Serialization and Deserialization of annotation content.

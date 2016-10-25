@@ -5,6 +5,7 @@
 #include <set>
 #include <unordered_set>
 #include <pthread.h>
+#include <assert.h>
 #include "kseq.h"
 
 class DBG_succ;
@@ -153,7 +154,9 @@ struct ParallelMergeContainer {
     }
 
 
-
+    /* Show an overview of the distribution of merging bin 
+     * sizes.
+     */
     void get_bin_stats() {
         size_t min_bin = 0, max_bin = 0, total_bin = 0;
         size_t curr_size, size1, size2;
@@ -174,6 +177,29 @@ struct ParallelMergeContainer {
         std::cout << "Smallest bin: " << min_bin << std::endl;
         std::cout << "Largest bin: " << max_bin << std::endl;
         std::cout << "Average bin size: " << total_bin / bins_g1.size() << std::endl << std::endl;
+    }
+
+    /* Helper function to subset the bins to the chunk
+     * computed in the current distributed compute.
+     */
+    void subset_bins(unsigned int idx, unsigned int total) {
+        assert(bins_g1.size() >= total);
+        // augment size of last bin until end of bins
+        size_t binsize = bins_g1.size() / total;
+
+        std::vector<std::pair<uint64_t, uint64_t> > new_bins_g1;
+        std::vector<std::pair<uint64_t, uint64_t> > new_bins_g2;
+
+        size_t start = binsize * idx;
+        size_t end = (idx == (total - 1)) ? bins_g1.size() : binsize * (idx + 1);
+
+        for (size_t i = start; i < end; i++) {
+            new_bins_g1.push_back(bins_g1.at(i));
+            new_bins_g2.push_back(bins_g2.at(i));
+        }
+
+        bins_g1 = new_bins_g1;
+        bins_g2 = new_bins_g2;
     }
 };
 

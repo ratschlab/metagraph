@@ -2392,20 +2392,25 @@ void DBG_succ::toSQL() {
  * Take the current graph content and store in a file.
  *
  */
-void DBG_succ::toFile() {
+void DBG_succ::toFile(unsigned int total, unsigned int idx) {
+
+    // adapt outbase depending on merging strategy
+    std::string outbase = config->outfbase;
+    if (total > 1)
+        outbase += "." + std::to_string(idx) + "_" + std::to_string(total);
 
     // write Wavelet Tree
-    std::ofstream outstream((config->outfbase + ".W.dbg").c_str());
+    std::ofstream outstream((outbase + ".W.dbg").c_str());
     W->serialise(outstream);
     outstream.close();
 
     // write last array
-    outstream.open((config->outfbase + ".l.dbg").c_str());
+    outstream.open((outbase + ".l.dbg").c_str());
     last->serialise(outstream);
     outstream.close();
 
     // write F values and k
-    outstream.open((config->outfbase + ".F.dbg").c_str());
+    outstream.open((outbase + ".F.dbg").c_str());
     outstream << ">F" << std::endl;
     for (size_t i = 0; i < F.size(); ++i)
         outstream << F.at(i) << std::endl;

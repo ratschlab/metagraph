@@ -51,6 +51,10 @@ Config::Config(int argc, const char *argv[]) {
             reverse = true;
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
             parallel = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--parts-total")) {
+            parts_total = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--part-idx")) {
+            part_idx = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-b") || !strcmp(argv[i], "--bins-per-thread")) {
             bins_per_thread = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-k") || !strcmp(argv[i], "--kmer-length")) {
@@ -65,6 +69,8 @@ Config::Config(int argc, const char *argv[]) {
             sqlfbase = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-I") || !strcmp(argv[i], "--infile-base")) {
             infbase = std::string(argv[++i]);
+        } else if (!strcmp(argv[i], "-C") || !strcmp(argv[i], "--collect")) {
+            collect = atoi(argv[++i]);
         //} else if (!strcmp(argv[i], "-t") || !strcmp(argv[i], "--threads")) {
         //    num_threads = atoi(argv[++i]);
         //} else if (!strcmp(argv[i], "--debug")) {
@@ -143,6 +149,8 @@ void Config::print_usage(std::string prog_name, int identity) {
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [1]\n");
             fprintf(stderr, "\t-P --print \t\tprint graph table to the screen [off]\n");
+            fprintf(stderr, "\t   --part-idx [INT] \t\tidx to use when doing external merge []\n");
+            fprintf(stderr, "\t   --parts-total [INT] \t\ttotal number of parts in external merge[]\n");
         } break;
         case stats: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
@@ -183,6 +191,9 @@ void Config::init() {
     distance = 0;
     parallel = 1;
     bins_per_thread = 1;
+    parts_total = 1;
+    part_idx = 0;
+    collect = 1;
     k = 3;
     identity = noidentity;
 }

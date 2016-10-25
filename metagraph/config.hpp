@@ -25,6 +25,9 @@ class Config {
         unsigned int distance;
         unsigned int parallel;
         unsigned int bins_per_thread;
+        unsigned int parts_total;
+        unsigned int part_idx;
+        unsigned int collect;
 
         std::vector<std::string> fname;
         std::string outfbase;
