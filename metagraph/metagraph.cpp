@@ -179,6 +179,10 @@ int main(int argc, char const ** argv) {
                         DBG_succ* graph_to_merge = new DBG_succ(config->fname.at(f), config);
                         
                         DBG_succ* target_graph = new DBG_succ(graph_to_merge->get_k(), config, false);
+
+                        // some preliminaries to make command line options consistent
+                        if ((config->parts_total > 1) && (config->parts_total > (config->parallel * config->bins_per_thread)))
+                            config->bins_per_thread = config->parts_total / config->parallel;
                         
                         if ((config->parallel > 1) || (config->parts_total > 1)) {
 
