@@ -182,7 +182,7 @@ int main(int argc, char const ** argv) {
 
                         // some preliminaries to make command line options consistent
                         if ((config->parts_total > 1) && (config->parts_total > (config->parallel * config->bins_per_thread)))
-                            config->bins_per_thread = config->parts_total / config->parallel;
+                            config->bins_per_thread = config->parts_total / config->parallel * 2;
                         
                         if ((config->parallel > 1) || (config->parts_total > 1)) {
 
@@ -193,7 +193,7 @@ int main(int argc, char const ** argv) {
                             merge_data->bins_g2 = target_graph->get_bins(config->parallel, config->bins_per_thread, graph_to_merge);
                             if (config->verbose) {
                                 merge_data->get_bin_stats();
-                                std::cout << "Rebalancing bins" << std::endl;
+                                std::cout << "Rebalancing bins to a target size of " << config->parallel * config->bins_per_thread << std::endl;
                             }
                             merge_data->rebalance_bins(config->parallel * config->bins_per_thread);
                             if (config->verbose) {

@@ -185,13 +185,22 @@ struct ParallelMergeContainer {
     void subset_bins(unsigned int idx, unsigned int total) {
         assert(bins_g1.size() >= total);
         // augment size of last bin until end of bins
-        size_t binsize = bins_g1.size() / total;
+        size_t binsize_min = bins_g1.size() / total;
+        size_t binsize_max = (bins_g1.size() + total - 1) / total;
+        size_t threshold = bins_g1.size() - (total * binsize_min);
 
         std::vector<std::pair<uint64_t, uint64_t> > new_bins_g1;
         std::vector<std::pair<uint64_t, uint64_t> > new_bins_g2;
 
-        size_t start = binsize * idx;
-        size_t end = (idx == (total - 1)) ? bins_g1.size() : binsize * (idx + 1);
+        size_t start;
+        size_t end;
+        if (idx < threshold) {
+            start = binsize_max * idx;
+            end = (idx == (total - 1)) ? bins_g1.size() : binsize_max * (idx + 1);
+        } else {
+            start = (threshold * binsize_max) + ((idx - threshold) * binsize_min);
+            end = (idx == (total - 1)) ? bins_g1.size() : (threshold * binsize_max) + ((idx - threshold + 1) * binsize_min);
+        }
 
         for (size_t i = start; i < end; i++) {
             new_bins_g1.push_back(bins_g1.at(i));
