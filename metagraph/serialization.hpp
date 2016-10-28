@@ -5,9 +5,48 @@
 #include <set>
 #include <unordered_map>
 #include <map>
+#include <cmath>
+#include <assert.h>
 
 #include <libmaus2/util/NumberSerialisation.hpp>
 #include <libmaus2/util/StringSerialisation.hpp>
+
+void serialise_annotation(std::ostream & out, std::deque<uint32_t> & D) {
+    libmaus2::util::NumberSerialisation::serialiseNumber(out, D.size()); 
+    std::map<uint32_t, uint32_t> MD;
+    std::map<uint32_t, uint32_t> DM;
+    for (std::deque<std::uint32_t>::iterator it = D.begin(); it != D.end(); it++) {
+        if (DM.find(*it) == DM.end()) {
+            MD.insert(std::make_pair(DM.size(), *it));
+            DM.insert(std::make_pair(*it, DM.size()));
+        }
+    }
+    assert(DM.size() == MD.size());
+
+    uint32_t bits = (uint32_t) std::ceil(std::log2((double) MD.size()));
+    size_t chunks = 64 / bits;
+
+    libmaus2::util::NumberSerialisation::serialiseNumber(out, bits); 
+
+    uint64_t value = 0;
+    size_t chunk = 0;
+    for (std::deque<std::uint32_t>::iterator it = D.begin(); it != D.end(); it++) {
+        if (chunk < chunks) {
+            for (size_t i = 0; i < bits; i++)
+                value |= ((1 << (chunk * bits + i)) & *it);
+            chunk++;
+        } else {
+            libmaus2::util::NumberSerialisation::serialiseNumber(out, value);         
+            value = 0;
+            chunk = 0;
+        }
+    }
+    if (chunk > 0)
+        libmaus2::util::NumberSerialisation::serialiseNumber(out, value);         
+
+    serilize_annotation_map(out, DM);
+    serilize_annotation_map(out, MD);
+}
 
 void serialize_combination_vector(std::ostream & out, std::vector<std::uint32_t> const & V) {
     libmaus2::util::NumberSerialisation::serialiseNumber32Vector(out, V);
