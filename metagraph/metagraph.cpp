@@ -419,7 +419,7 @@ int main(int argc, char const ** argv) {
            // rocksdb::Status status = rocksdb::DB::Open(options, config->dbpath, &db);
             
             uint64_t total_seqs = 0;
-
+            
             // iterate over input files
             for (unsigned int f = 0; f < config->fname.size(); ++f) {
 
@@ -477,8 +477,10 @@ int main(int argc, char const ** argv) {
                     } else {
                         graph->annotate_seq(read_stream->seq, read_stream->name);
                     }
-                    if (config->verbose)
+                    if (config->verbose) {
                         std::cout << "entries in annotation map: " << graph->combination_count << std::endl << "length of combination vector: " << graph->combination_vector.size() << std::endl;
+                        std::cout << "added labels for " << total_seqs << " sequences, last was " << std::string(read_stream->name.s) << std::endl;
+                    }
                     /*for (std::unordered_map<uint32_t, std::set<uint32_t> >::iterator ittt = graph->annotation_map.begin(); ittt != graph->annotation_map.end(); ++ittt) {
                         std::cerr << "map : " << ittt->first << ":";
                         for (std::set<uint32_t>::iterator it4 = ittt->second.begin(); it4 != ittt->second.end(); ++it4) {
