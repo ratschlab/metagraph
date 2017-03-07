@@ -11,6 +11,15 @@
 #include <libmaus2/util/NumberSerialisation.hpp>
 #include <libmaus2/util/StringSerialisation.hpp>
 
+void serialize_annotation_map(std::ostream & out, std::map<uint32_t, uint32_t> const & M) {
+    libmaus2::util::NumberSerialisation::serialiseNumber(out, M.size()); 
+    for (std::map<uint32_t, uint32_t>::const_iterator it = M.begin(); it != M.end(); ++it) {
+        libmaus2::util::NumberSerialisation::serialiseNumber32(out, it->first); 
+        libmaus2::util::NumberSerialisation::serialiseNumber32(out, it->second); 
+    }
+}
+
+
 void serialise_annotation(std::ostream & out, std::deque<uint32_t> & D) {
     libmaus2::util::NumberSerialisation::serialiseNumber(out, D.size()); 
     std::map<uint32_t, uint32_t> MD;
@@ -44,20 +53,12 @@ void serialise_annotation(std::ostream & out, std::deque<uint32_t> & D) {
     if (chunk > 0)
         libmaus2::util::NumberSerialisation::serialiseNumber(out, value);         
 
-    serilize_annotation_map(out, DM);
-    serilize_annotation_map(out, MD);
+    serialize_annotation_map(out, DM);
+    serialize_annotation_map(out, MD);
 }
 
 void serialize_combination_vector(std::ostream & out, std::vector<std::uint32_t> const & V) {
     libmaus2::util::NumberSerialisation::serialiseNumber32Vector(out, V);
-}
-
-void serialize_annotation_map(std::ostream & out, std::map<uint32_t, uint32_t> const & M) {
-    libmaus2::util::NumberSerialisation::serialiseNumber(out, M.size()); 
-    for (std::map<uint32_t, uint32_t>::const_iterator it = M.begin(); it != M.end(); ++it) {
-        libmaus2::util::NumberSerialisation::serialiseNumber32(out, it->first); 
-        libmaus2::util::NumberSerialisation::serialiseNumber32(out, it->second); 
-    }
 }
 
 /*void serialize_annotation_map(std::ostream & out, std::unordered_map<std::uint32_t, std::set<uint32_t> > const & M ) {
