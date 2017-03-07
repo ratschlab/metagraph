@@ -4,14 +4,15 @@ set -e
 
 k=27
 level=2
-stage=4
-mem=5G
+stage=8
+mem=1500
+cpus=24
 
-basedir=/cbio/grlab/projects/metagenome/bacteria/results/${k}_merge$(($stage - 1))
-outbase=/cbio/grlab/projects/metagenome/bacteria/results/${k}_merge${stage}
+basedir=/cluster/project/grlab/projects/metagenome/bacteria/results/${k}_merge$(($stage - 1))
+outbase=/cluster/project/grlab/projects/metagenome/bacteria/results/${k}_merge${stage}
 mkdir -p $outbase
 
-graphtool=/cbio/grlab/home/akahles/git/projects/2014/metagenome/seqan_graph/metagraph2
+graphtool=/cluster/project/grlab/home/akahles/git/projects/2014/metagenome/metagraph/metagraph
 cnt=0
 total=0
 for dd in $(ls -1 $basedir/*.done)
@@ -22,7 +23,7 @@ do
     then
         mergelist=${dd%.done}
     else
-        mergelist="${mergelist},${dd%.done}"
+        mergelist="${mergelist} ${dd%.done}"
     fi
     cnt=$(($cnt + 1))
     total=$(($total + 1))
@@ -37,8 +38,21 @@ do
     outfile="${outbase}/merge_${total}"
     if [ ! -f ${donefile} ]
     then
-        echo "time $graphtool -v -m $mergelist -O $outfile DUMMY && touch $donefile" | qsub -l nodes=1:ppn=1,mem=${mem},vmem=${mem},pmem=${mem},walltime=72:00:00 -N meta_${stage} -j oe -o $logfile
+        echo "time $graphtool merge -v --parallel $cpus --bins-per-thread 2 -O $outfile $mergelist && touch $donefile" | bsub -M $((${mem} * ${cpus})) -J metag -W 72:00 -o $logfile -n $cpus -R "rusage[mem=${mem}]" -R "span[hosts=1]" 
     else
         echo "$donefile already exists"
     fi
 done
+
+if [ "${cnt}" != "0" ]
+then
+    logfile=${outbase}/merge_${total}.log
+    donefile="${outbase}/merge_${total}.done"
+    outfile="${outbase}/merge_${total}"
+    if [ ! -f ${donefile} ]
+    then
+        echo "time $graphtool merge -v --parallel $cpus --bins-per-thread 2 -O $outfile $mergelist && touch $donefile" | bsub -M $((${mem} * ${cpus})) -J metag -W 72:00 -o $logfile -n $cpus -R "rusage[mem=${mem}]" -R "span[hosts=1]" 
+    else
+        echo "$donefile already exists"
+    fi
+fi
