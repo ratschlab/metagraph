@@ -376,7 +376,13 @@ class DBG_succ {
     * the object graph if not existing yet. This function is well suited to merge small graphs into large ones.
     */
     void merge(DBG_succ* G); 
+    
+    uint64_t next_non_zero(std::vector<uint64_t> v, uint64_t pos);
+    uint64_t next_non_zero(std::vector<std::pair<uint64_t, std::deque<TAlphabet> > > v, uint64_t pos);
 
+    void merge_bins(DBG_succ* G1, DBG_succ* G2, std::deque<TAlphabet>* curr_range, std::pair<uint64_t, uint64_t>& r1, std::pair<uint64_t, uint64_t>& r2);
+    
+    void merge_fast(DBG_succ* G1, DBG_succ* G2, uint64_t k1 = 1, uint64_t k2 = 1, uint64_t n1 = 0, uint64_t n2 = 0, bool is_parallel = false);
     /*
      * Given two other graph structures G1 and G2, this function 
      * integrate both into a new graph G.
@@ -390,6 +396,15 @@ class DBG_succ {
     * false and true otherwise.
     */
     bool compare(DBG_succ* G); 
+
+    /*
+     * Helper function that will split up a given range in the graph
+     * into bins, one for each character in the alphabet. The split is performed based
+     * on the k - d column of the node label. It is assumed that the all nodes in the
+     * given range share a common suffix of length d.
+     */
+    std::vector<uint64_t> split_range(uint64_t start, uint64_t end, uint64_t d /*depth*/);
+    void split_range(std::deque<TAlphabet>* str, std::pair<uint64_t, uint64_t>& range);
 
     /* 
      * Helper function to determine the bin boundaries, given 

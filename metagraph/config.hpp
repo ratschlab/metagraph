@@ -20,6 +20,7 @@ class Config {
         bool integrate;
         bool print_graph;
         bool reverse;
+        bool fast;
         
         unsigned int k;
         unsigned int distance;

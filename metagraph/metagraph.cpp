@@ -244,7 +244,11 @@ int main(int argc, char const ** argv) {
                             //if (target_graph->get_size() >= 320029)
                             //    std::deque<uint64_t> tut = target_graph->get_node_seq(320029);
                         } else {
-                            target_graph->merge(graph, graph_to_merge);
+                            if (config->fast) {
+                                target_graph->merge_fast(graph, graph_to_merge);
+                            } else {
+                                target_graph->merge(graph, graph_to_merge);
+                            }
                         }
 
                         //target_graph->print_seq(); 
@@ -286,10 +290,29 @@ int main(int argc, char const ** argv) {
                 }
                 if (config->print_graph)
                     graph_->print_seq();
+
+                /*std::cerr << graph_->get_edge_count() << std::endl;
+                std::vector<uint64_t> result = graph_->split_range(1, graph_->get_edge_count(), 0);
+                std::cout << "Results for d = 0" << std::endl;
+                for (size_t i = 0; i < result.size(); ++i) {
+                    std::cout << "  " << result.at(i) << std::endl;
+                }
+                result = graph_->split_range(2, 30, 1);
+                std::cout << "Results for d = 1" << std::endl;
+                for (size_t i = 0; i < result.size(); ++i) {
+                    std::cout << "  " << result.at(i) << std::endl;
+                }
+                result = graph_->split_range(12, 20, 2);
+                std::cout << "Results for d = 2" << std::endl;
+                for (size_t i = 0; i < result.size(); ++i) {
+                    std::cout << "  " << result.at(i) << std::endl;
+                }*/
+
                 delete graph_;
             }
             if (!config->outfbase.empty())
                 outstream.close();
+
         } break;
 
 
