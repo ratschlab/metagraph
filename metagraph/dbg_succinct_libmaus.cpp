@@ -44,8 +44,6 @@ KSEQ_INIT(gzFile, gzread)
 // use Heng Li's kseq structure for string IO
 #include "kseq.h"
 
-#include "IDatabase.hpp"
-
 // define an extended alphabet for W --> somehow this does not work properly as expected
 typedef uint64_t TAlphabet;
 typedef DBG_succ::BranchInfo BranchInfo;
@@ -931,30 +929,6 @@ void DBG_succ::add_seq (kstring_t &seq) {
     //toSQL();
     //String<Dna5F> test = "CCT";
     //fprintf(stdout, "\nindex of CCT: %i\n", (int) index(test));
-}
-
-void DBG_succ::add_annotation_for_seq(dbg_database::IDatabase *db, seqan::String<seqan::Dna5> seq,
-                                      seqan::CharString annotation) {
-    uint64_t seq_length = seqan::length(seq);
-    uint64_t kmer_length = this->get_k();
-    uint64_t no_kmers_in_seq = seq_length - kmer_length + 1;
-
-    for (uint64_t i = 0; i < no_kmers_in_seq; ++i) {
-        seqan::String<Dna5F> kmer;
-        seqan::resize(kmer, kmer_length);
-        for (uint64_t j = 0; j < kmer_length; ++j) {
-            kmer[j] = (Dna5F) seq[i+j];
-        }
-
-        // TODO, seqan::toCString(kmer)? Does this not play nice with a modified alphabet (e.g. Dna5F)?
-        std::stringstream kmer_stream;
-        kmer_stream << kmer;
-
-        std::stringstream annotation_stream;
-        annotation_stream << annotation;
-
-        db->annotate_kmer(kmer_stream.str(), annotation_stream.str());
-    }
 }
 
 /** This function takes a character c and appends it to the end of the graph sequence
