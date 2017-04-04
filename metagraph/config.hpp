@@ -19,11 +19,16 @@ class Config {
         bool quiet;
         bool integrate;
         bool print_graph;
+        bool reverse;
         
         unsigned int k;
         unsigned int distance;
         unsigned int parallel;
         unsigned int bins_per_thread;
+        unsigned int parts_total;
+        unsigned int part_idx;
+        unsigned int collect;
+        unsigned int frequency;
 
         std::vector<std::string> fname;
         std::string outfbase;
@@ -37,7 +42,8 @@ class Config {
                          compare, 
                          align,
                          stats,
-                         annotate};
+                         annotate,
+                         classify};
         int identity;
 
     private:

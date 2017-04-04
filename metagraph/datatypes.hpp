@@ -4,6 +4,9 @@
 #include <functional>
 #include <set>
 #include <unordered_set>
+#include <pthread.h>
+#include <assert.h>
+#include "kseq.h"
 
 class DBG_succ;
 
@@ -49,22 +52,44 @@ public:
 };
 
 struct AnnotationSet {
-    std::set<std::string> annotation;
+    std::set<uint32_t> annotation;
 };
 
 struct AnnotationHash {
-    std::uint16_t operator()(const std::set<std::string> &a) const {
-        std::set<std::string>::iterator it = a.begin();
-        std::uint16_t h1 = (uint16_t) std::hash<std::string>{}(*it);
+    
+    uint32_t knuth_hash(const uint32_t i) const {
+        return i * UINT32_C(2654435761);
+    };
+
+    std::uint32_t operator()(const std::vector<uint32_t> &a) const {
+        std::vector<uint32_t>::const_iterator it = a.begin();
+        uint32_t h1 = knuth_hash(*it);
         it++;
         if (a.size() > 1) {
             for (; it != a.end(); ++it) {
-                std::uint16_t h2 = (uint16_t) std::hash<std::string>{}(*it);
+                uint32_t h2 = knuth_hash(*it);
                 h1 = h1 ^ (h2 << 1);
             }
         }
         return h1;
-    }
+    };
+
+
+    /*std::uint32_t operator()(const std::set<uint32_t> &a) const {
+        std::set<uint32_t>::iterator it = a.begin();
+        //std::uint32_t h1 = (uint32_t) std::hash<uint32_t>{}(*it);
+        uint32_t h1 = knuth_hash(*it);
+        it++;
+        if (a.size() > 1) {
+            for (; it != a.end(); ++it) {
+                //std::uint32_t h2 = (uint32_t) std::hash<uint32_t>{}(*it);
+                uint32_t h2 = knuth_hash(*it);
+                h1 = h1 ^ (h2 << 1);
+                //h1 = (h1 * h2);
+            }
+        }
+        return h1;
+    }*/
 };
 
 struct ParallelMergeContainer {
@@ -129,7 +154,9 @@ struct ParallelMergeContainer {
     }
 
 
-
+    /* Show an overview of the distribution of merging bin 
+     * sizes.
+     */
     void get_bin_stats() {
         size_t min_bin = 0, max_bin = 0, total_bin = 0;
         size_t curr_size, size1, size2;
@@ -151,6 +178,48 @@ struct ParallelMergeContainer {
         std::cout << "Largest bin: " << max_bin << std::endl;
         std::cout << "Average bin size: " << total_bin / bins_g1.size() << std::endl << std::endl;
     }
+
+    /* Helper function to subset the bins to the chunk
+     * computed in the current distributed compute.
+     */
+    void subset_bins(unsigned int idx, unsigned int total) {
+        assert(bins_g1.size() >= total);
+        // augment size of last bin until end of bins
+        size_t binsize_min = bins_g1.size() / total;
+        size_t binsize_max = (bins_g1.size() + total - 1) / total;
+        size_t threshold = bins_g1.size() - (total * binsize_min);
+
+        std::vector<std::pair<uint64_t, uint64_t> > new_bins_g1;
+        std::vector<std::pair<uint64_t, uint64_t> > new_bins_g2;
+
+        size_t start;
+        size_t end;
+        if (idx < threshold) {
+            start = binsize_max * idx;
+            end = (idx == (total - 1)) ? bins_g1.size() : binsize_max * (idx + 1);
+        } else {
+            start = (threshold * binsize_max) + ((idx - threshold) * binsize_min);
+            end = (idx == (total - 1)) ? bins_g1.size() : (threshold * binsize_max) + ((idx - threshold + 1) * binsize_min);
+        }
+
+        for (size_t i = start; i < end; i++) {
+            new_bins_g1.push_back(bins_g1.at(i));
+            new_bins_g2.push_back(bins_g2.at(i));
+        }
+
+        bins_g1 = new_bins_g1;
+        bins_g2 = new_bins_g2;
+    }
+};
+
+struct ParallelAnnotateContainer {
+    kstring_t* seq;
+    kstring_t* label;
+    DBG_succ* graph;
+    uint64_t idx;
+    uint64_t binsize;
+    uint64_t total_bins; 
+    //pthread_mutex_t* anno_mutex;
 };
 
 #endif

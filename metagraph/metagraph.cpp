@@ -9,22 +9,21 @@
 #include <zlib.h>
 #include <pthread.h>
 
-//#include "rocksdb/db.h"
-//#include "rocksdb/slice.h"
-//#include "rocksdb/options.h"
-
 #include "datatypes.hpp"
 #include "dbg_succinct_libmaus.hpp"
 #include "config.hpp"
+#include "helpers.hpp"
 #include "kseq.h"
 
 KSEQ_INIT(gzFile, gzread)
 
 Config* config;
 ParallelMergeContainer* merge_data = new ParallelMergeContainer();
+ParallelAnnotateContainer* anno_data = new ParallelAnnotateContainer();
 
 pthread_mutex_t mutex_merge_result = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t mutex_merge_idx = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex_bin_idx = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex_annotate = PTHREAD_MUTEX_INITIALIZER;
 pthread_attr_t attr;  
 
 void parallel_merge_collect(DBG_succ* result) {
@@ -46,6 +45,34 @@ bool operator==(const AnnotationSet& lhs, const AnnotationSet& rhs) {
 }
 
 /*
+ * Distribute the annotation of all k-mers in a sequence over 
+ * a number of parallel bins.
+ */
+void *parallel_annotate_wrapper(void *arg) {
+
+    uint64_t curr_idx, start, end;
+
+    while (true) {
+        pthread_mutex_lock (&mutex_bin_idx);
+        if (anno_data->idx == anno_data->total_bins) {
+            pthread_mutex_unlock (&mutex_bin_idx);
+            break;
+        } else {
+            curr_idx = anno_data->idx;
+            anno_data->idx++;
+            pthread_mutex_unlock (&mutex_bin_idx);
+            
+            start = curr_idx * anno_data->binsize;
+            end = std::min(((curr_idx + 1) * anno_data->binsize) + anno_data->graph->k - 1, anno_data->seq->l);
+            //std::cerr << "start " << start << " end " << end << std::endl;
+            anno_data->graph->annotate_seq(*(anno_data->seq), *(anno_data->label), start, end, &mutex_annotate);
+        }
+    }
+    pthread_exit((void*) 0);
+}
+
+
+/*
  * Distribute the merging of two graph structures G1 and G2 over
  * bins, such that n parallel threads are used. The number of bins
  * is determined dynamically.
@@ -56,14 +83,14 @@ void *parallel_merge_wrapper(void *arg) {
     DBG_succ* graph;
 
     while (true) {
-        pthread_mutex_lock (&mutex_merge_idx);
+        pthread_mutex_lock (&mutex_bin_idx);
         if (merge_data->idx == merge_data->bins_g1.size()) {
-            pthread_mutex_unlock (&mutex_merge_idx);
+            pthread_mutex_unlock (&mutex_bin_idx);
             break;
         } else {
             curr_idx = merge_data->idx;
             merge_data->idx++;
-            pthread_mutex_unlock (&mutex_merge_idx);
+            pthread_mutex_unlock (&mutex_bin_idx);
             
             // collect bin data for merging and decide how to merge
             if (merge_data->bins_g1.at(curr_idx).first > 0 || merge_data->bins_g2.at(curr_idx).first > 0) {
@@ -126,86 +153,113 @@ int main(int argc, char const ** argv) {
 
         case Config::merge: {
 
-            for (unsigned int f = 0; f < config->fname.size(); ++f) {
-                if (f == 0) {
-                    std::cout << "Opening file " << config->fname.at(f) << std::endl;
-                    graph = new DBG_succ(config->fname.at(f), config);
-                } else {
-                    std::cout << "Opening file for merging: " << config->fname.at(f) << std::endl;
-                    DBG_succ* graph_to_merge = new DBG_succ(config->fname.at(f), config);
-                    
-                    DBG_succ* target_graph = new DBG_succ(graph_to_merge->get_k(), config, false);
-                    
-                    if (config->parallel > 1) {
-
-                        pthread_t* threads = NULL; 
-
-                        // get bins in graphs according to required threads
-                        merge_data->bins_g1 = target_graph->get_bins(config->parallel, config->bins_per_thread, graph);
-                        merge_data->bins_g2 = target_graph->get_bins(config->parallel, config->bins_per_thread, graph_to_merge);
-                        if (config->verbose) {
-                            merge_data->get_bin_stats();
-                            std::cout << "Rebalancing bins" << std::endl;
-                        }
-                        merge_data->rebalance_bins(config->parallel * config->bins_per_thread);
-                        if (config->verbose) {
-                            merge_data->get_bin_stats();
-                        }
-                        assert(merge_data->bins_g1.size() == merge_data->bins_g2.size());
-                        //for (size_t ii = 0; ii < merge_data->bins_g1.size(); ++ii) {
-                        //    std::cerr << ii << ": " << merge_data->bins_g1.at(ii).first << "-" << merge_data->bins_g1.at(ii).second << " -- ";
-                        //    std::cerr << ": " << merge_data->bins_g2.at(ii).first << "-" << merge_data->bins_g2.at(ii).second << std::endl;
-                        //}
-
-                        // prepare data shared by threads
-                        merge_data->idx = 0;
-                        merge_data->k = graph->get_k();
-                        merge_data->graph1 = graph;
-                        merge_data->graph2 = graph_to_merge;
-                        for (size_t i = 0; i < merge_data->bins_g1.size(); i++)
-                            merge_data->result.push_back(NULL);
-                        merge_data->bins_done = 0;
-
-                        // create threads
-                        threads = new pthread_t[config->parallel]; 
-                        pthread_attr_init(&attr);
-                        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-
-                        // do the work
-                        for (size_t tid = 0; tid < config->parallel; tid++) {
-                           pthread_create(&threads[tid], &attr, parallel_merge_wrapper, (void *) tid); 
-                           std::cerr << "starting thread " << tid << std::endl;
-                        }
-
-                        // join threads
-                        if (config->verbose)
-                            std::cout << "Waiting for threads to join" << std::endl;
-                        for (size_t tid = 0; tid < config->parallel; tid++) {
-                            pthread_join(threads[tid], NULL);
-                        }
-                        delete[] threads;
-
-                        // collect results
-                        std::cerr << "Collecting results" << std::endl;
-                        parallel_merge_collect(target_graph);
-                        //if (target_graph->get_size() >= 320029)
-                        //    std::deque<uint64_t> tut = target_graph->get_node_seq(320029);
+            // collect results on an external merge
+            if (config->collect > 1) {
+                std::string fname;
+                for (uint64_t f = 0; f < config->collect; f++) {
+                    fname = config->outfbase + "." + std::to_string(f) + "_" + std::to_string(config->collect);
+                    std::cout << "Opening file " << fname << std::endl;
+                    if (f == 0) {
+                        graph = new DBG_succ(fname, config);
                     } else {
-                        target_graph->merge(graph, graph_to_merge);
+                        DBG_succ* graph_to_append = new DBG_succ(fname, config);
+                        graph->append_graph(graph_to_append);
+                        delete graph_to_append;
                     }
+                }
+                graph->p = graph->succ_W(1, 0);
+            // run normal merge procedure
+            } else {
+                for (unsigned int f = 0; f < config->fname.size(); ++f) {
+                    if (f == 0) {
+                        std::cout << "Opening file " << config->fname.at(f) << std::endl;
+                        graph = new DBG_succ(config->fname.at(f), config);
+                    } else {
+                        std::cout << "Opening file for merging: " << config->fname.at(f) << std::endl;
+                        DBG_succ* graph_to_merge = new DBG_succ(config->fname.at(f), config);
+                        
+                        DBG_succ* target_graph = new DBG_succ(graph_to_merge->get_k(), config, false);
 
-                    //target_graph->print_seq(); 
-                    /*std::deque<uint64_t> tut;
-                    for (size_t ii = 1; ii < target_graph->last->size(); ++ii) {
-                        std::cerr << ii << "/" << target_graph->last->size() << std::endl;
-                        tut = target_graph->get_node_seq(ii);
-                    }*/
+                        // some preliminaries to make command line options consistent
+                        if ((config->parts_total > 1) && (config->parts_total > (config->parallel * config->bins_per_thread)))
+                            config->bins_per_thread = config->parts_total / config->parallel * 2;
+                        
+                        if ((config->parallel > 1) || (config->parts_total > 1)) {
 
-                    delete graph_to_merge;
-                    delete graph;
-                    graph = target_graph;
+                            pthread_t* threads = NULL; 
 
-                    std::cerr << "... done merging." << std::endl;
+                            // get bins in graphs according to required threads
+                            merge_data->bins_g1 = target_graph->get_bins(config->parallel, config->bins_per_thread, graph);
+                            merge_data->bins_g2 = target_graph->get_bins(config->parallel, config->bins_per_thread, graph_to_merge);
+                            if (config->verbose) {
+                                merge_data->get_bin_stats();
+                                std::cout << "Rebalancing bins to a target size of " << config->parallel * config->bins_per_thread << std::endl;
+                            }
+                            merge_data->rebalance_bins(config->parallel * config->bins_per_thread);
+                            if (config->verbose) {
+                                merge_data->get_bin_stats();
+                            }
+                            assert(merge_data->bins_g1.size() == merge_data->bins_g2.size());
+                            //for (size_t ii = 0; ii < merge_data->bins_g1.size(); ++ii) {
+                            //    std::cerr << ii << ": " << merge_data->bins_g1.at(ii).first << "-" << merge_data->bins_g1.at(ii).second << " -- ";
+                            //    std::cerr << ": " << merge_data->bins_g2.at(ii).first << "-" << merge_data->bins_g2.at(ii).second << std::endl;
+                            //}
+
+                            // only work on subset of the bins when requested
+                            if (config->parts_total > 1) {
+                                merge_data->subset_bins(config->part_idx, config->parts_total);
+                            }
+
+                            // prepare data shared by threads
+                            merge_data->idx = 0;
+                            merge_data->k = graph->get_k();
+                            merge_data->graph1 = graph;
+                            merge_data->graph2 = graph_to_merge;
+                            for (size_t i = 0; i < merge_data->bins_g1.size(); i++)
+                                merge_data->result.push_back(NULL);
+                            merge_data->bins_done = 0;
+
+                            // create threads
+                            threads = new pthread_t[config->parallel]; 
+                            pthread_attr_init(&attr);
+                            pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+
+                            // do the work
+                            for (size_t tid = 0; tid < config->parallel; tid++) {
+                               pthread_create(&threads[tid], &attr, parallel_merge_wrapper, (void *) tid); 
+                               std::cerr << "starting thread " << tid << std::endl;
+                            }
+
+                            // join threads
+                            if (config->verbose)
+                                std::cout << "Waiting for threads to join" << std::endl;
+                            for (size_t tid = 0; tid < config->parallel; tid++) {
+                                pthread_join(threads[tid], NULL);
+                            }
+                            delete[] threads;
+
+                            // collect results
+                            std::cerr << "Collecting results" << std::endl;
+                            parallel_merge_collect(target_graph);
+                            //if (target_graph->get_size() >= 320029)
+                            //    std::deque<uint64_t> tut = target_graph->get_node_seq(320029);
+                        } else {
+                            target_graph->merge(graph, graph_to_merge);
+                        }
+
+                        //target_graph->print_seq(); 
+                        /*std::deque<uint64_t> tut;
+                        for (size_t ii = 1; ii < target_graph->last->size(); ++ii) {
+                            std::cerr << ii << "/" << target_graph->last->size() << std::endl;
+                            tut = target_graph->get_node_seq(ii);
+                        }*/
+
+                        delete graph_to_merge;
+                        delete graph;
+                        graph = target_graph;
+
+                        std::cerr << "... done merging." << std::endl;
+                    }
                 }
             }
         } break;
@@ -328,6 +382,10 @@ int main(int argc, char const ** argv) {
                 }
 
                 while (kseq_read(read_stream) >= 0) {
+                    // possibly reverse k-mers
+                    if (config->reverse)
+                        reverse_complement(read_stream->seq);                    
+
                     // add all k-mers of seq to the graph
                     graph->add_seq(read_stream->seq);
                 }
@@ -349,7 +407,7 @@ int main(int argc, char const ** argv) {
               std::cerr << "Requires input <de bruijn graph> for annotation. Use option -I. " << std::endl;
               exit(1);
             }
-            DBG_succ* graph = new DBG_succ(config->infbase, config);
+            graph = new DBG_succ(config->infbase, config);
 
             // load annotatioun (if file does not exist, empty annotation is created)
             graph->annotationFromFile();
@@ -359,7 +417,9 @@ int main(int argc, char const ** argv) {
            // options.create_if_missing = true;
            // rocksdb::DB* db;
            // rocksdb::Status status = rocksdb::DB::Open(options, config->dbpath, &db);
-
+            
+            uint64_t total_seqs = 0;
+            
             // iterate over input files
             for (unsigned int f = 0; f < config->fname.size(); ++f) {
 
@@ -377,14 +437,118 @@ int main(int argc, char const ** argv) {
                 }
 
                 while (kseq_read(read_stream) >= 0) {
-                    graph->annotate_kmers(read_stream->seq, read_stream->name);
+
+                    if (config->reverse)
+                        reverse_complement(read_stream->seq);                    
+
+                    if (config->parallel > 1) {
+                        pthread_t* threads = NULL; 
+
+                        anno_data->seq = &(read_stream->seq);
+                        anno_data->label = &(read_stream->name);
+                        anno_data->graph = graph;
+                        anno_data->idx = 0;
+                        anno_data->binsize = (read_stream->seq.l + 1) / config->parallel * config->bins_per_thread;
+                        anno_data->total_bins = ((read_stream->seq.l + anno_data->binsize - 1) / anno_data->binsize); 
+
+                        // create threads
+                        threads = new pthread_t[config->parallel]; 
+                        pthread_attr_init(&attr);
+                        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+
+                        // do the work
+                        for (size_t tid = 0; tid < config->parallel; tid++) {
+                           pthread_create(&threads[tid], &attr, parallel_annotate_wrapper, (void *) tid); 
+                           //std::cerr << "starting thread " << tid << std::endl;
+                        }
+
+                        // join threads
+                        //if (config->verbose)
+                        //    std::cout << "Waiting for threads to join" << std::endl;
+                        for (size_t tid = 0; tid < config->parallel; tid++) {
+                            pthread_join(threads[tid], NULL);
+                        }
+                        delete[] threads;
+
+                        total_seqs += 1;
+
+                        //if (config->verbose)
+                        //    std::cout << "added labels for " << total_seqs << " sequences, last was " << std::string(read_stream->name.s) << std::endl;
+                    } else {
+                        graph->annotate_seq(read_stream->seq, read_stream->name);
+                    }
+                    if (config->verbose) {
+                        std::cout << "entries in annotation map: " << graph->combination_count << std::endl << "length of combination vector: " << graph->combination_vector.size() << std::endl;
+                        std::cout << "added labels for " << total_seqs << " sequences, last was " << std::string(read_stream->name.s) << std::endl;
+                    }
+                    /*for (std::unordered_map<uint32_t, std::set<uint32_t> >::iterator ittt = graph->annotation_map.begin(); ittt != graph->annotation_map.end(); ++ittt) {
+                        std::cerr << "map : " << ittt->first << ":";
+                        for (std::set<uint32_t>::iterator it4 = ittt->second.begin(); it4 != ittt->second.end(); ++it4) {
+                            std::cerr << " " << *it4;
+                        }
+                        std::cerr << std::endl;
+                    }*/
                 }
                 kseq_destroy(read_stream);
                 gzclose(input_p);
             }
-            //delete db;
+
+            if (config->print_graph)
+                graph->annotationToScreen();
 
             graph->annotationToFile();
+
+        } break;
+
+        case Config::classify: {
+
+            // load graph 
+            if (config->infbase.empty()) {
+              std::cerr << "Requires input <de bruijn graph> for annotation. Use option -I. " << std::endl;
+              exit(1);
+            }
+            DBG_succ* graph = new DBG_succ(config->infbase, config);
+
+            // load annotatioun (if file does not exist, empty annotation is created)
+            graph->annotationFromFile();
+
+            // iterate over input files
+            for (unsigned int f = 0; f < config->fname.size(); ++f) {
+
+                if (config->verbose) {
+                    std::cout << std::endl << "Parsing " << config->fname[f] << std::endl;
+                }
+
+                // open stream to fasta file
+                gzFile input_p = gzopen(config->fname[f].c_str(), "r");
+                kseq_t *read_stream = kseq_init(input_p);
+
+                if (read_stream == NULL) {
+                    std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
+                    exit(1);
+                }
+                
+                std::set<uint32_t> labels_fwd;
+                std::set<uint32_t> labels_rev;
+                while (kseq_read(read_stream) >= 0) {
+
+                    std::cout << std::string(read_stream->name.s) << "\t";
+                    labels_fwd = graph->classify_read(read_stream->seq, config->distance);
+                    for (std::set<uint32_t>::iterator it = labels_fwd.begin(); it != labels_fwd.end(); it++)
+                        std::cout << graph->id_to_label.at(*it) << ":";
+                    std::cout << "\t";
+
+                    reverse_complement(read_stream->seq);                    
+                    labels_rev = graph->classify_read(read_stream->seq, config->distance);
+                    for (std::set<uint32_t>::iterator it = labels_rev.begin(); it != labels_rev.end(); it++)
+                        std::cout << graph->id_to_label.at(*it) << ":";
+                    std::cout << std::endl;
+                }
+                kseq_destroy(read_stream);
+                gzclose(input_p);
+            }
+ 
+
 
         } break;
     }
@@ -397,7 +561,7 @@ int main(int argc, char const ** argv) {
         if (!config->sqlfbase.empty())
             graph->toSQL();
         if (!config->outfbase.empty())
-            graph->toFile();
+            graph->toFile(config->parts_total, config->part_idx);
 
         delete graph;
     }

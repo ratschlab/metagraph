@@ -42,8 +42,12 @@ class DBG_succ {
     Config* config;
 
     // annotation containers
-    std::deque<uint16_t> annotation;
-    std::unordered_map<uint16_t, std::set<std::string> > annotation_map;
+    std::deque<uint32_t> annotation; // list that associates each node in the graph with an annotation hash
+    std::vector<std::string> id_to_label; // maps the label ID back to the original string
+    std::unordered_map<std::string, uint32_t> label_to_id_map; // maps each label string to an integer ID
+    std::map<uint32_t, uint32_t> annotation_map; // maps the hash of a combination to the position in the combination vector
+    std::vector<uint32_t> combination_vector; // contains all known combinations
+    uint64_t combination_count = 0;
 
 #ifdef DBGDEBUG
     bool debug = true;
@@ -355,9 +359,13 @@ class DBG_succ {
     //
     //
 
-    void annotate_kmers(kstring_t &seq, kstring_t &label);
+    void annotate_seq(kstring_t &seq, kstring_t &label, uint64_t start=0, uint64_t end=0, pthread_mutex_t* anno_mutex=NULL);
 
-    void annotate_kmer(std::string &kmer, std::string &label);
+    void annotate_kmer(std::string &kmer, uint32_t &label, uint64_t &previous, pthread_mutex_t* anno_mutex, bool ignore=false);
+
+    std::vector<uint32_t> classify_path(std::vector<uint64_t> path);
+
+    std::set<uint32_t> classify_read(kstring_t &read, uint64_t max_distance);
 
 
     //
@@ -439,11 +447,12 @@ class DBG_succ {
      * Take the current graph content and store in a file.
      *
      */
-    void toFile(); 
+    void toFile(unsigned int total = 1, unsigned int idx = 0); 
 
     /**
-     * Serialization and Deserialization of annotation content.
+     * Visualization, Serialization and Deserialization of annotation content.
      */
+    void annotationToScreen();
     void annotationToFile();
     void annotationFromFile();
 

@@ -4,11 +4,11 @@ set -e
 
 k=27
 
-basedir=/cbio/shared/data/HMP/genbank/Bacteria/Bacterial_genomes/
-outbase=/cbio/grlab/projects/metagenome/bacteria/results/${k}
+basedir=/cluster/project/raetsch/lab/07/shared/data/HMP/genbank/Bacteria/Bacterial_genomes/
+outbase=/cluster/project/grlab/projects/metagenome/bacteria/results/${k}
 mkdir -p $outbase
 
-graphtool=/cbio/grlab/home/akahles/git/projects/2014/metagenome/seqan_graph/metagraph
+graphtool=/cluster/project/grlab/home/akahles/git/projects/2014/metagenome/metagraph/metagraph
 
 for dd in $(ls -1 $basedir)
 do
@@ -22,6 +22,6 @@ do
 
     if [ ! -f ${donefile} ]
     then
-        echo "time $graphtool -v -k ${k} -O $outdir ${basedir}$dd/*.fna && touch $donefile" | qsub -l nodes=1:ppn=1,mem=3G,vmem=3G,pmem=3G,walltime=4:00:00 -N meta -j oe -o $logfile
+        echo "time $graphtool build -v -k ${k} -O $outdir ${basedir}$dd/*.fna && touch $donefile" | bsub -M 3000 -J metag -W 12:00 -o $logfile -n 1 -R "rusage[mem=3000]" -R "span[hosts=1]" 
     fi
 done
