@@ -300,7 +300,7 @@ int main(int argc, char const ** argv) {
               std::cerr << "Requires input <de bruijn graph> to align reads." << config->align << std::endl;
               exit(1);
             }
-            DBG_succ* graph = new DBG_succ(config->infbase, config);
+            graph = new DBG_succ(config->infbase, config);
 
             for (unsigned int f = 0; f < config->fname.size(); ++f) {
                 std::cout << "Opening file for alignment ..." << config->fname.at(f) << std::endl;
@@ -507,7 +507,7 @@ int main(int argc, char const ** argv) {
               std::cerr << "Requires input <de bruijn graph> for annotation. Use option -I. " << std::endl;
               exit(1);
             }
-            DBG_succ* graph = new DBG_succ(config->infbase, config);
+            graph = new DBG_succ(config->infbase, config);
 
             // load annotatioun (if file does not exist, empty annotation is created)
             graph->annotationFromFile();
