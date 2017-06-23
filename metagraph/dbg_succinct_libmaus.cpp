@@ -2233,7 +2233,7 @@ void DBG_succ::print_adj_list() {
     while (R.first < W->n) {
         printf("%lu", n);
         for (uint64_t j = R.first; j<=R.second; ++j) {
-            fprintf(stdout, "\t%lu", rank_last(succ_last(fwd(j))));
+            fprintf(stdout, "\t%lu", rank_last(fwd(j)));
         }
         printf("\n");
         R.first = R.second+1;
