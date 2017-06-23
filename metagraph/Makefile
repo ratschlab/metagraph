@@ -1,4 +1,4 @@
-LIBMAUS_DIR=external-libraries/libmaus2-lib
+LIBMAUS_DIR=external-libraries/libmaus2-lib-hex
 ROCKSDB_DIR=external-libraries/rocksdb
 
 CXX=g++ -fopenmp -D_THREAD_SAFE -std=c++0x -pthread -O3 #-g -gdwarf-3 #-pg

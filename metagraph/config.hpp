@@ -43,6 +43,7 @@ class Config {
                          align,
                          stats,
                          annotate,
+                         dump,
                          classify};
         int identity;
 

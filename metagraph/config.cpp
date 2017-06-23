@@ -32,6 +32,8 @@ Config::Config(int argc, const char *argv[]) {
         identity = annotate;
     } else if (!strcmp(argv[1], "classify")) {
         identity = classify;
+    } else if (!strcmp(argv[1], "dump")) {
+        identity = dump;
     }
     // provide help screen for chosen identity
     if (argc == 2) {

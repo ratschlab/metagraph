@@ -2224,6 +2224,26 @@ void DBG_succ::print_state() {
 
 }
 
+void DBG_succ::print_adj_list() {
+    std::pair<uint64_t, uint64_t> R;
+    uint64_t i = 2;
+    R.first = i;
+    R.second = succ_last(R.first);
+    uint64_t n = rank_last(R.second);
+    while (R.first < W->n) {
+        printf("%lu", n);
+        for (uint64_t j = R.first; j<=R.second; ++j) {
+            fprintf(stdout, "\t%lu", rank_last(succ_last(fwd(j))));
+        }
+        printf("\n");
+        R.first = R.second+1;
+        if (R.first >= W->n)
+            break;
+        R.second = succ_last(R.first);
+        n++;
+    }
+}
+
 
 /*
  * Returns the sequence stored in W and prints the node

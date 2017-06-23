@@ -430,6 +430,8 @@ class DBG_succ {
      */
     void print_seq();
 
+    void print_adj_list();
+
     /**
      * Take the current graph content and return it in SQL
      * format (GA4GH Spec).

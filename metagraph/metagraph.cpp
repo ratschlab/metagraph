@@ -292,6 +292,14 @@ int main(int argc, char const ** argv) {
                 outstream.close();
         } break;
 
+        case Config::dump: {
+            for (unsigned int f = 0; f < config->fname.size(); ++f) {
+                DBG_succ* graph_ = new DBG_succ(config->fname.at(f), config);
+                graph_->print_adj_list();
+                delete graph_;
+            }
+        } break;
+
 
         case Config::align: {
 
