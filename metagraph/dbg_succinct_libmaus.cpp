@@ -1500,7 +1500,7 @@ void DBG_succ::annotate_kmer(std::string &kmer, uint32_t &label_id, uint64_t &id
     } else {
         idx = this->index(kmer);
     }
-    //std::cerr << "kmer: " << kmer << " idx: " << idx << std::endl;
+    //std::cerr << "kmer: " << kmer << " idx: " << idx << " ignore: " << (ignore?"yes":"no") << " label_id: " << label_id << std::endl;
     //assert(idx > 0);
     if ((idx == 0) || ignore)
         return;
@@ -1535,8 +1535,8 @@ void DBG_succ::annotate_kmer(std::string &kmer, uint32_t &label_id, uint64_t &id
             combination_count++;
         }
     }
-        if (anno_mutex)
-            pthread_mutex_unlock(anno_mutex);
+    if (anno_mutex)
+        pthread_mutex_unlock(anno_mutex);
     //}
 }
 
@@ -2231,10 +2231,14 @@ void DBG_succ::print_adj_list() {
     R.second = succ_last(R.first);
     uint64_t n = rank_last(R.second);
     while (R.first < W->n) {
-        printf("%lu", n);
+        printf("%lu\t", n);
         for (uint64_t j = R.first; j<=R.second; ++j) {
-            fprintf(stdout, "\t%lu", rank_last(fwd(j)));
+            if (j > R.first)
+                fprintf(stdout, ",");
+            fprintf(stdout, "%lu", rank_last(fwd(j)));
         }
+        if (this->annotation.size() > 0)
+            fprintf(stdout, "\t%u", this->annotation.at(n));
         printf("\n");
         R.first = R.second+1;
         if (R.first >= W->n)
@@ -2487,10 +2491,12 @@ void DBG_succ::annotationToFile() {
 void DBG_succ::annotationFromFile() {
     std::ifstream instream((config->infbase + ".anno.dbg").c_str());
     if (instream.good()) {
-        std::cerr << "get deque from disk" << std::endl;
+        if (config->verbose)
+            std::cerr << "get deque from disk" << std::endl;
         // annotation
         annotation = libmaus2::util::NumberSerialisation::deserialiseNumber32Deque<uint32_t>(instream);
-        std::cerr << "get map from disk" << std::endl;
+        if (config->verbose)
+            std::cerr << "get map from disk" << std::endl;
         // annotation_map
         deserialize_annotation_map(instream, annotation_map);
         // combination_vector

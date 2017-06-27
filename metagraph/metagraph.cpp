@@ -293,11 +293,14 @@ int main(int argc, char const ** argv) {
         } break;
 
         case Config::dump: {
-            for (unsigned int f = 0; f < config->fname.size(); ++f) {
-                DBG_succ* graph_ = new DBG_succ(config->fname.at(f), config);
+            //for (unsigned int f = 0; f < config->fname.size(); ++f) {
+                //DBG_succ* graph_ = new DBG_succ(config->fname.at(f), config);
+                DBG_succ* graph_ = new DBG_succ(config->infbase, config);
+                // checks whether annotation exists and creates an empty one if not
+                graph_->annotationFromFile();
                 graph_->print_adj_list();
                 delete graph_;
-            }
+            //}
         } break;
 
 
