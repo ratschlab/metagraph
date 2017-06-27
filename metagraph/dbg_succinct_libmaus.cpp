@@ -2226,7 +2226,7 @@ void DBG_succ::print_state() {
 
 void DBG_succ::print_adj_list() {
     std::pair<uint64_t, uint64_t> R;
-    uint64_t i = 2;
+    uint64_t i = 1;
     R.first = i;
     R.second = succ_last(R.first);
     uint64_t n = rank_last(R.second);
