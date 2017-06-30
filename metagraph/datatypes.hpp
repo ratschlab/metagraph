@@ -92,6 +92,17 @@ struct AnnotationHash {
     }*/
 };
 
+struct ParallelMergeContainer2 {
+    std::vector<std::pair<uint64_t, uint64_t> > ref_bins;
+    std::vector<std::vector<std::pair<uint64_t, uint64_t> > > bins;
+    std::vector<DBG_succ*> result;
+    std::vector<DBG_succ*> graphs;
+    unsigned int idx;
+    unsigned int k;
+    unsigned int bins_done;
+};
+
+
 struct ParallelMergeContainer {
     std::vector<std::pair<uint64_t, uint64_t> > bins_g1;
     std::vector<std::pair<uint64_t, uint64_t> > bins_g2;
@@ -183,6 +194,10 @@ struct ParallelMergeContainer {
      * computed in the current distributed compute.
      */
     void subset_bins(unsigned int idx, unsigned int total) {
+        if (bins_g1.size() < total)
+            std::cerr << "total number of possible bins is " << bins_g1.size() << std::endl
+                      << "current choice: " << total << std::endl
+                      << "Please use at max " << bins_g1.size() << " total bins" << std::endl;
         assert(bins_g1.size() >= total);
         // augment size of last bin until end of bins
         size_t binsize_min = bins_g1.size() / total;

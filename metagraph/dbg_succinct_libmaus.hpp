@@ -200,6 +200,8 @@ class DBG_succ {
 
     std::pair<uint64_t, uint64_t> index_range(std::deque<TAlphabet> str);
 
+    uint64_t index_predecessor(std::deque<TAlphabet> str);
+
     /**
      * Given a position i, this function returns the boundaries of the interval
      * of nodes identical to node i (ignoring the values in W).
@@ -220,11 +222,19 @@ class DBG_succ {
     */
     std::pair<bool, bool> compare_nodes(DBG_succ *G1, uint64_t k1_node, DBG_succ *G2, uint64_t k2_node); 
 
+    std::pair<std::vector<bool>, uint64_t> compare_nodes(std::vector<DBG_succ*> G, std::vector<uint64_t> k, std::vector<uint64_t> n, size_t &cnt);
+
     /** 
      * This function gets two node indices and returns if the
      * node labels share a k-1 suffix.
      */
     bool compare_node_suffix(uint64_t i1, uint64_t i2);
+
+    /**
+     *  This function checks whether two given strings given as deques are 
+     *  identical.
+     */
+    bool compare_seq(std::deque<TAlphabet> s1, std::deque<TAlphabet> s2, size_t start = 0);
 
     /**
      * This function returns true if node i is a terminal node.
@@ -348,6 +358,7 @@ class DBG_succ {
 
     void allelesFromSeq(kstring_t &seq, unsigned int f, std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream, bool isRefRun = false, size_t seqNum = 0);
 
+    void traversalHash();
 
     //
     //
@@ -388,6 +399,8 @@ class DBG_succ {
      * integrate both into a new graph G.
      */
     void merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1 = 1, uint64_t k2 = 1, uint64_t n1 = 0, uint64_t n2 = 0, bool is_parallel = false); 
+    void merge2(DBG_succ* G1, DBG_succ* G2, uint64_t k1 = 1, uint64_t k2 = 1, uint64_t n1 = 0, uint64_t n2 = 0, bool is_parallel = false); 
+    void merge3(std::vector<DBG_succ*> Gv, std::vector<uint64_t> kv, std::vector<uint64_t> nv, bool is_parallel = false);
 
     /**
     * Given a pointer to a graph structure G, the function compares its elements to the
@@ -411,6 +424,9 @@ class DBG_succ {
      * a number of threads.
      */
     std::vector<std::pair<uint64_t, uint64_t> > get_bins(uint64_t threads, uint64_t bins_per_thread, DBG_succ* G);
+    std::vector<std::pair<uint64_t, uint64_t> > get_bins(uint64_t threads, uint64_t bins_per_thread);
+
+    std::vector<std::pair<uint64_t, uint64_t> > get_bins_relative(DBG_succ* G, std::vector<std::pair<uint64_t, uint64_t> > ref_bins);
 
     /*
      * Helper function to generate the prefix corresponding to 
