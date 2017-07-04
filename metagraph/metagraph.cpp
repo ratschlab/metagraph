@@ -220,9 +220,10 @@ int main(int argc, char const ** argv) {
 
             // run normal merge procedure
             } else {
+
                 // some preliminaries to make command line options consistent
-                if ((config->parts_total > 1) && (config->parts_total > (config->parallel * config->bins_per_thread)))
-                    config->bins_per_thread = config->parts_total / config->parallel * 2;
+               // if ((config->parts_total > 1) && (config->parts_total > (config->parallel * config->bins_per_thread)))
+                //    config->bins_per_thread = config->parts_total / config->parallel;
                             
                 if (config->fast) {
                     std::vector<DBG_succ*> graphs;
@@ -242,23 +243,32 @@ int main(int argc, char const ** argv) {
                         merge_data2 = new ParallelMergeContainer2();
 
                         // get bins in graphs according to required threads
-                        merge_data2->ref_bins = graphs.front()->get_bins(config->parallel, config->bins_per_thread);
+                        if (config->verbose)
+                            std::cout << "Collecting reference bins" << std::endl;
+                        std::cerr << "parallel " << config->parallel << " per thread " << config->bins_per_thread << " parts total " << config->parts_total << std::endl;
+                        merge_data2->ref_bins = graphs.front()->get_bins(config->parallel * config->bins_per_thread * config->parts_total);
+
+                        // only work on subset of the bins when requested
+                        if (config->parts_total > 1) {
+                            merge_data2->subset_bins(config->part_idx, config->parts_total, config->parallel * config->bins_per_thread);
+                        }
                         merge_data2->bins.push_back(merge_data2->ref_bins);
+
+                        if (config->verbose)
+                            std::cout << "Collecting relative bins" << std::endl;
                         for (size_t i = 1; i < graphs.size(); i++)
-                            merge_data2->bins.push_back(graphs.at(i)->get_bins_relative(graphs.front(), merge_data2->ref_bins));
+                            merge_data2->bins.push_back(graphs.at(i)->get_bins_relative(graphs.front(), merge_data2->ref_bins, merge_data2->first, merge_data2->last));
                         for (size_t i = 0; i < graphs.size(); i++) {
                             for (size_t ii = 0; ii < merge_data2->bins.at(i).size(); ii++) {
                                 if (merge_data2->bins.at(i).at(ii).first > merge_data2->bins.at(i).at(ii).second)
                                    merge_data2->bins.at(i).at(ii) = std::make_pair(graphs.at(i)->get_size() - 1, graphs.at(i)->get_size() - 1); 
                             }
                         }
-                        // print bin stats
-                        for (size_t i = 0; i < graphs.size(); i++) {
-                            std::cerr << "graph " << i + 1<< std::endl;
-                            for (size_t ii = 0; ii < merge_data2->bins.at(i).size(); ii++)
-                                std::cerr << merge_data2->bins.at(i).at(ii).first << " - " << merge_data2->bins.at(i).at(ii).second << std::endl;
-                        }
 
+                        // print bin stats
+                        if (config->verbose) {
+                            merge_data2->get_bin_stats();
+                        }
 
                         // prepare data shared by threads
                         merge_data2->idx = 0;

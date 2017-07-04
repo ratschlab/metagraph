@@ -2340,9 +2340,8 @@ std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t threads,
     return tmp;
 }
 
-std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t threads, uint64_t bins_per_thread) {
+std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t bins) {
 
-    uint64_t bins = threads * bins_per_thread * 10;
     uint64_t nodes = this->rank_last(this->get_size() - 1);
     if (bins > nodes)
         bins = nodes;
@@ -2358,16 +2357,17 @@ std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t threads,
     return result;
 }
 
-std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins_relative(DBG_succ* G, std::vector<std::pair<uint64_t, uint64_t> > ref_bins) {
+std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins_relative(DBG_succ* G, std::vector<std::pair<uint64_t, uint64_t> > ref_bins, uint64_t first_pos, uint64_t last_pos) {
     
     std::vector<std::pair<uint64_t, uint64_t> > result;
-    uint64_t pos = 1;
+    uint64_t pos = (first_pos == 0) ? 1 : this->index_predecessor(G->get_node_seq(first_pos)) + 1;
     uint64_t upper;
     for (size_t i = 0; i < ref_bins.size(); i++) {
         upper = this->index_predecessor(G->get_node_seq(ref_bins.at(i).second));
         result.push_back(std::make_pair(pos, upper));
         pos = upper + 1;
     }
+    result.back().second = (last_pos == 0) ? this->get_size() - 1 : result.back().second;
     return result;
 }
 
@@ -2870,7 +2870,7 @@ void DBG_succ::merge3(std::vector<DBG_succ*> Gv, std::vector<uint64_t> kv, std::
     }
 
     // Send parallel pointers running through each of the graphs. At each step, compare all
-    // graph nodes at the respektive positions with each other. Insert the lexicographically 
+    // graph nodes at the respective positions with each other. Insert the lexicographically 
     // smallest one into the common merge graph G (this). 
     while (true) {
 

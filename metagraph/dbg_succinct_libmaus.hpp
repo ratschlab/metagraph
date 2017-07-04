@@ -424,9 +424,9 @@ class DBG_succ {
      * a number of threads.
      */
     std::vector<std::pair<uint64_t, uint64_t> > get_bins(uint64_t threads, uint64_t bins_per_thread, DBG_succ* G);
-    std::vector<std::pair<uint64_t, uint64_t> > get_bins(uint64_t threads, uint64_t bins_per_thread);
+    std::vector<std::pair<uint64_t, uint64_t> > get_bins(uint64_t bins);
 
-    std::vector<std::pair<uint64_t, uint64_t> > get_bins_relative(DBG_succ* G, std::vector<std::pair<uint64_t, uint64_t> > ref_bins);
+    std::vector<std::pair<uint64_t, uint64_t> > get_bins_relative(DBG_succ* G, std::vector<std::pair<uint64_t, uint64_t> > ref_bins, uint64_t first_pos, uint64_t last_pos);
 
     /*
      * Helper function to generate the prefix corresponding to 
