@@ -620,7 +620,7 @@ uint64_t DBG_succ::index_predecessor(std::deque<TAlphabet> str) {
     std::deque<TAlphabet>::iterator it = str.begin();
     TAlphabet s1 = *it % alph_size;
     it++;
-    bool before = false;
+    //bool before = false;
     // init range
     uint64_t rl = succ_last(F.at(s1) + 1);                           // lower bound
     uint64_t ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->n - 1);    // upper bound
@@ -641,7 +641,7 @@ uint64_t DBG_succ::index_predecessor(std::deque<TAlphabet> str) {
     }
 
     uint64_t pll, puu;
-    //fprintf(stderr, "char: %i rl: %i ru: %i\n", (int) s, (int) rl, (int) ru);
+    //fprintf(stderr, "char: %i rl: %i ru: %i\n", (int) s1, (int) rl, (int) ru);
     // update range iteratively while scanning through s
     for (; it != str.end(); it++) {
         s1 = *it % alph_size;
@@ -666,7 +666,7 @@ uint64_t DBG_succ::index_predecessor(std::deque<TAlphabet> str) {
                     }
                     if (s1 == 0) {
                         s1 = (*it % alph_size) + 1;
-                        before = true;
+                        //before = true;
                         while (s1 < alph_size) {
                             rl = std::min(succ_W(1, s1), succ_W(1 + alph_size, s1));
                             if (rl < W->n)
@@ -676,7 +676,7 @@ uint64_t DBG_succ::index_predecessor(std::deque<TAlphabet> str) {
                     }
                 } else {
                     s1 = (*W)[rl];
-                    before = true;
+                    //before = true;
                 }
             } else {
                 s1 = (*W)[rl];
@@ -692,7 +692,7 @@ uint64_t DBG_succ::index_predecessor(std::deque<TAlphabet> str) {
         rl = outgoing(rl, s1);
         ru = outgoing(ru, s1);
     }
-    return pred_last(rl) - before;
+    return pred_last(rl); // - before;
 }
 
 
@@ -827,6 +827,25 @@ bool DBG_succ::compare_seq(std::deque<TAlphabet> s1, std::deque<TAlphabet> s2, s
     }
     return (i == s1.size());
 }
+
+/**
+ *  This function checks whether string s1 is lexicographically inverse 
+ *  greater than s2.
+ */
+bool DBG_succ::seq_is_greater(std::deque<TAlphabet> s1, std::deque<TAlphabet> s2) {
+
+    size_t ss1 = s1.size();
+    size_t ss2 = s2.size();
+    size_t i = 0;
+    while (i < std::min(ss1, ss2)) {
+        i++;
+        if (s1.at(ss1 - i) == s2.at(ss2 - i))
+            continue;
+        return (s1.at(ss1 - i) > s2.at(ss2 - i));
+    }
+    return (ss1 > ss2);
+}
+
 
 
 /** 
@@ -1260,6 +1279,8 @@ void DBG_succ::append_graph(DBG_succ *g) {
 
     size_t curr_pos = this->get_size();
 
+    if (config->verbose)
+        std::cout << "    adding " << g->get_size() << " edges" << std::endl;
     // handle last and W
     for (size_t j = 1; j < g->get_size(); ++j) {
         this->last->insertBit(curr_pos, g->get_last(j));
@@ -2364,6 +2385,7 @@ std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins_relative(DBG_succ
     uint64_t upper;
     for (size_t i = 0; i < ref_bins.size(); i++) {
         upper = this->index_predecessor(G->get_node_seq(ref_bins.at(i).second));
+        //std::cerr << "ref bin " << ref_bins.at(i).second << " rel upper " << upper << std::endl;
         result.push_back(std::make_pair(pos, upper));
         pos = upper + 1;
     }
@@ -2856,12 +2878,28 @@ void DBG_succ::merge3(std::vector<DBG_succ*> Gv, std::vector<uint64_t> kv, std::
         nv.at(i) = (nv.at(i) == 0) ? Gv.at(i)->get_size() : nv.at(i);
         // handle special cases where one or both input graphs are empty
         kv.at(i) = (kv.at(i) == 0) ? Gv.at(i)->get_size() : kv.at(i);
+        //std::cerr << "k(" << i << ") " << kv.at(i) << " n(" << i << ") " << nv.at(i) << std::endl;
     }
 
     // keep track of how many nodes we added
     uint64_t added = 0;
     size_t cnt = 0;
     std::map<uint64_t, std::deque<TAlphabet> > last_added_nodes;
+    // init last added nodes, if not starting from the beginning
+    std::deque<TAlphabet> curr_seq;
+    for (size_t i = 0; i < Gv.size(); i++) {
+        if (kv.at(i) < 2)
+            continue;
+        for (size_t a = 0; a < alph_size; a++) {
+            uint64_t sl = std::max(Gv.at(i)->pred_W(kv.at(i) - 1, a), Gv.at(i)->pred_W(kv.at(i) - 1, a + alph_size));
+            if (sl == 0)
+                continue;
+            std::map<uint64_t, std::deque<TAlphabet> >::iterator la = last_added_nodes.find(a);
+            curr_seq = Gv.at(i)->get_node_seq(sl);
+            if (la == last_added_nodes.end() || seq_is_greater(curr_seq, la->second))
+                last_added_nodes[a] = curr_seq;
+        }
+    }
 
     if (config->verbose) {
         std::cout << "Size of bins to merge: " << std::endl;
@@ -2895,6 +2933,7 @@ void DBG_succ::merge3(std::vector<DBG_succ*> Gv, std::vector<uint64_t> kv, std::
         //std::cerr << "curr_k: " << curr_k << " kv: " << kv.at(curr_k) << " val: " << val << " smallest: " << smallest.second % alph_size << std::endl;
         assert(val == smallest.second % alph_size);
         
+        //std::cerr << "inserting into W" << std::endl;
         // check whether we already added a node whose outgoing edge points to the
         // same node as the current one
         std::map<uint64_t, std::deque<TAlphabet> >::iterator it = last_added_nodes.find(smallest.second % alph_size);

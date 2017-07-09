@@ -237,6 +237,12 @@ class DBG_succ {
     bool compare_seq(std::deque<TAlphabet> s1, std::deque<TAlphabet> s2, size_t start = 0);
 
     /**
+     *  This function checks whether string s1 is lexicographically inverse 
+     *  greater than s2.
+     */
+    bool seq_is_greater(std::deque<TAlphabet> s1, std::deque<TAlphabet> s2);
+
+    /**
      * This function returns true if node i is a terminal node.
      */
     bool is_terminal_node(uint64_t i);

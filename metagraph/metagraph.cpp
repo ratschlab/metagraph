@@ -261,10 +261,16 @@ int main(int argc, char const ** argv) {
                         for (size_t i = 0; i < graphs.size(); i++) {
                             for (size_t ii = 0; ii < merge_data2->bins.at(i).size(); ii++) {
                                 if (merge_data2->bins.at(i).at(ii).first > merge_data2->bins.at(i).at(ii).second)
-                                   merge_data2->bins.at(i).at(ii) = std::make_pair(graphs.at(i)->get_size() - 1, graphs.at(i)->get_size() - 1); 
+                                   merge_data2->bins.at(i).at(ii) = std::make_pair(graphs.at(i)->get_size(), graphs.at(i)->get_size() - 1); 
                             }
                         }
-
+                        /*for (size_t i = 0; i < merge_data2->bins.size(); i++) {
+                            std::cerr << "graph " << i << std::endl;
+                            for (size_t ii = 0; ii < merge_data2->bins.at(i).size(); ii++) {
+                                std::cerr << merge_data2->bins.at(i).at(ii).first << "-" << merge_data2->bins.at(i).at(ii).second << std::endl;
+                            }
+                        }*/
+    
                         // print bin stats
                         if (config->verbose) {
                             merge_data2->get_bin_stats();
