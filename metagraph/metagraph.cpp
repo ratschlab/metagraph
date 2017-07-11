@@ -260,8 +260,9 @@ int main(int argc, char const ** argv) {
                             merge_data2->bins.push_back(graphs.at(i)->get_bins_relative(graphs.front(), merge_data2->ref_bins, merge_data2->first, merge_data2->last));
                         for (size_t i = 0; i < graphs.size(); i++) {
                             for (size_t ii = 0; ii < merge_data2->bins.at(i).size(); ii++) {
-                                if (merge_data2->bins.at(i).at(ii).first > merge_data2->bins.at(i).at(ii).second)
+                                if (merge_data2->bins.at(i).at(ii).first > merge_data2->bins.at(i).at(ii).second) {
                                    merge_data2->bins.at(i).at(ii) = std::make_pair(graphs.at(i)->get_size(), graphs.at(i)->get_size() - 1); 
+                                    }
                             }
                         }
                         /*for (size_t i = 0; i < merge_data2->bins.size(); i++) {

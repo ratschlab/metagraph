@@ -108,6 +108,7 @@ struct ParallelMergeContainer2 {
      */
     void subset_bins(unsigned int idx, unsigned int total, unsigned int bins_per_part){
 
+        //std::cerr << "ref bins " << ref_bins.size() << " total " << total << " per part " << bins_per_part << std::endl;
         assert(ref_bins.size() == (total * bins_per_part));
 
         // augment size of last bin until end of bins

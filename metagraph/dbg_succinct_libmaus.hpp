@@ -266,6 +266,11 @@ class DBG_succ {
     uint64_t get_size();
 
     /**
+     * Return number of nodes in the current graph.
+     */
+    uint64_t get_nodes();
+
+    /**
      * Return k-mer length of current graph.
      * TODO: delete
      */

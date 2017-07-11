@@ -619,8 +619,6 @@ uint64_t DBG_succ::index_predecessor(std::deque<TAlphabet> str) {
     // get first 
     std::deque<TAlphabet>::iterator it = str.begin();
     TAlphabet s1 = *it % alph_size;
-    it++;
-    //bool before = false;
     // init range
     uint64_t rl = succ_last(F.at(s1) + 1);                           // lower bound
     uint64_t ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->n - 1);    // upper bound
@@ -629,7 +627,7 @@ uint64_t DBG_succ::index_predecessor(std::deque<TAlphabet> str) {
         rl = succ_last(F.at(s1) + 1);
         ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->n - 1);
     }
-    if (s1 == 0) {
+    /*if (s1 == 0) {
         s1 = *it % alph_size + 1;
         rl = succ_last(F.at(s1) + 1);
         ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->n - 1);
@@ -638,15 +636,19 @@ uint64_t DBG_succ::index_predecessor(std::deque<TAlphabet> str) {
             rl = succ_last(F.at(s1) + 1);
             ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->n - 1);
         }
-    }
+    }*/
+    //std::cerr << "s: " << s1 << " rl: " << rl << " ru: " << ru << std::endl;
 
+    it++;
     uint64_t pll, puu;
+    bool before = false;
     //fprintf(stderr, "char: %i rl: %i ru: %i\n", (int) s1, (int) rl, (int) ru);
     // update range iteratively while scanning through s
     for (; it != str.end(); it++) {
         s1 = *it % alph_size;
         pll = this->pred_last(rl - 1) + 1;
         puu = this->succ_last(ru);
+        before = false;
 
         //std::cerr << "s: " << s1 << " rl: " << rl << " ru: " << ru << " pll: " << pll << std::endl;
 
@@ -666,7 +668,7 @@ uint64_t DBG_succ::index_predecessor(std::deque<TAlphabet> str) {
                     }
                     if (s1 == 0) {
                         s1 = (*it % alph_size) + 1;
-                        //before = true;
+                        before = true;
                         while (s1 < alph_size) {
                             rl = std::min(succ_W(1, s1), succ_W(1 + alph_size, s1));
                             if (rl < W->n)
@@ -676,7 +678,7 @@ uint64_t DBG_succ::index_predecessor(std::deque<TAlphabet> str) {
                     }
                 } else {
                     s1 = (*W)[rl];
-                    //before = true;
+                    before = true;
                 }
             } else {
                 s1 = (*W)[rl];
@@ -692,7 +694,7 @@ uint64_t DBG_succ::index_predecessor(std::deque<TAlphabet> str) {
         rl = outgoing(rl, s1);
         ru = outgoing(ru, s1);
     }
-    return pred_last(rl); // - before;
+    return pred_last(rl) - before;
 }
 
 
@@ -912,6 +914,13 @@ std::string DBG_succ::get_node_str(uint64_t k_node) {
  */
 uint64_t DBG_succ::get_size() {
     return W->n;
+}
+
+/**
+ * Return number nodes in the current graph.
+ */
+uint64_t DBG_succ::get_nodes() {
+    return this->rank_last(this->get_size() - 1);
 }
 
 /**
@@ -2364,15 +2373,28 @@ std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t threads,
 std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t bins) {
 
     uint64_t nodes = this->rank_last(this->get_size() - 1);
-    if (bins > nodes)
+    uint64_t orig_bins = bins;
+    if (bins > nodes) {
+        std::cerr << "[WARNING] There are max " << nodes << " slots available for binning. Your current choice is " << bins << " which will create " << bins - nodes << " empty slots." << std::endl;
         bins = nodes;
+    }
 
     std::vector<std::pair<uint64_t, uint64_t> > result;
     uint64_t binsize = (nodes + bins - 1) / bins;
+    uint64_t thresh = (nodes - (bins / (nodes / bins))) * binsize;
     uint64_t pos = 1;
-    for (uint64_t i = 0; i < nodes; i += binsize) {
+    for (uint64_t i = 0; i < nodes;) {
+        if (i >= thresh)
+            binsize = nodes / bins;
+        //std::cerr << "push " << pos << " - " << this->select_last(std::min(nodes, i + binsize)) << std::endl;
         result.push_back(std::make_pair(pos, this->select_last(std::min(nodes, i + binsize))));
         pos = result.back().second + 1;
+        i += binsize;
+    }
+
+    for (uint64_t i = bins; i < orig_bins; i++) {
+        //result.push_back(std::make_pair(pos, pos));
+        result.push_back(std::make_pair(1, 0));
     }
     
     return result;
@@ -2384,10 +2406,14 @@ std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins_relative(DBG_succ
     uint64_t pos = (first_pos == 0) ? 1 : this->index_predecessor(G->get_node_seq(first_pos)) + 1;
     uint64_t upper;
     for (size_t i = 0; i < ref_bins.size(); i++) {
-        upper = this->index_predecessor(G->get_node_seq(ref_bins.at(i).second));
-        //std::cerr << "ref bin " << ref_bins.at(i).second << " rel upper " << upper << std::endl;
-        result.push_back(std::make_pair(pos, upper));
-        pos = upper + 1;
+        if (ref_bins.at(i).second == 0) { // this happens if we have more bins than nodes
+            result.push_back(std::make_pair(0, 0));
+        } else {
+            upper = this->index_predecessor(G->get_node_seq(ref_bins.at(i).second));
+            //std::cerr << "ref bin " << ref_bins.at(i).second << " rel upper " << upper << std::endl;
+            result.push_back(std::make_pair(pos, upper));
+            pos = upper + 1;
+        }
     }
     result.back().second = (last_pos == 0) ? this->get_size() - 1 : result.back().second;
     return result;
