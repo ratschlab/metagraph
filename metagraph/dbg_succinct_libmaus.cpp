@@ -44,6 +44,8 @@ KSEQ_INIT(gzFile, gzread)
 // use Heng Li's kseq structure for string IO
 #include "kseq.h"
 
+#include "dbg_succinct_boost.hpp"
+
 // define an extended alphabet for W --> somehow this does not work properly as expected
 typedef uint64_t TAlphabet;
 typedef DBG_succ::BranchInfo BranchInfo;
@@ -1125,6 +1127,86 @@ void DBG_succ::add_seq (kstring_t &seq) {
     //toSQL();
     //String<Dna5F> test = "CCT";
     //fprintf(stdout, "\nindex of CCT: %i\n", (int) index(test));
+}
+
+void DBG_succ::add_seq_alt (kstring_t &seq) {
+
+    if (debug) {
+        print_seq();
+        print_state();
+        std::cout << "======================================" << std::endl;
+    }
+
+    char *nt_lookup = (char*)malloc(128);
+    uint8_t def = 5;
+    memset(nt_lookup, def, 128);
+    for (size_t i=0;i<alph_size;++i) {
+        nt_lookup[(uint8_t)alphabet[i]]=i;
+        nt_lookup[(uint8_t)tolower(alphabet[i])]=i;
+    }
+
+    std::vector<ui256> kmers;
+    seqtokmer(kmers, "$", 1, k, nt_lookup);
+    kmers.push_back(stokmer(std::string(k-1,'X')+std::string("$$"), nt_lookup));
+    seqtokmer(kmers, seq.s, seq.l, k, nt_lookup);
+    uint8_t *W;
+    if (last)
+        delete last;
+    last = new libmaus2::bitbtree::BitBTree<6, 64>(kmers.size()+2, false);
+    W = (uint8_t*)malloc(kmers.size()+2);
+    //W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4);
+    
+    std::sort(kmers.begin(),kmers.end());
+
+    size_t j, sz=0, lastlet=0;
+    //last->set(0,false);
+    for (size_t i=0;i<kmers.size();++i) {
+        if (i+1 < kmers.size()) {
+            if (kmers[i] == kmers[i+1])
+                continue;
+            last->set(sz, !compare_kmer_suffix(kmers[i], kmers[i+1]));
+        } else {
+            last->set(sz, true);
+        }
+        char cF=getPos(kmers[i], k-1, alphabet, alph_size);
+        if (cF != alphabet[lastlet]) {
+            //TODO: fix dis hax
+            uint8_t newlast = std::string(alphabet).find(cF);
+            F[newlast]=sz-1;
+            for (size_t k=lastlet+1; k<newlast;++k)
+                F[k]=sz-1;
+            lastlet=newlast;
+        }
+        W[sz] = getW(kmers[i]);
+        if (!W[sz])
+            p=sz;
+        if (i) {
+            j=i-1;
+            while (compare_kmer_suffix(kmers[j], kmers[i], 1)) {
+                if (getW(kmers[j]) == W[sz]) {
+                    W[sz] += alph_size;
+                    break;
+                }
+                if (!j) {
+                    break;
+                } else {
+                    j--;
+                }
+            }
+        }
+        sz++;
+    }
+    //TODO: inefficient
+    for (size_t i=sz;i<last->size();++i)
+        last->deleteBit(i);
+    uint8_t *temp = (uint8_t*)realloc(W, sz);
+    if (temp) {
+        W = temp;
+    }
+    free(W);
+    free(nt_lookup);
+    //TODO: copy to dynamic structures
+    fprintf(stdout, "edges %lu / nodes %lu\n", get_edge_count(), get_node_count());
 }
 
 

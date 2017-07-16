@@ -562,7 +562,7 @@ int main(int argc, char const ** argv) {
                         reverse_complement(read_stream->seq);                    
 
                     // add all k-mers of seq to the graph
-                    graph->add_seq(read_stream->seq);
+                    graph->add_seq_alt(read_stream->seq);
                 }
                 kseq_destroy(read_stream);
                 gzclose(input_p);
