@@ -1317,12 +1317,12 @@ void DBG_succ::append_graph_static(DBG_succ *g) {
     if (config->verbose)
         std::cout << "    adding " << n << " edges" << std::endl;
 
-    size_t n_old = this->last_stat.size();
-    this->last_stat.resize(n_old + n);
-    this->W_stat.resize(n_old + n);
+    //size_t n_old = this->last_stat.size();
+    //this->last_stat.resize(n_old + n);
+    //this->W_stat.resize(n_old + n);
 
     size_t const b = 4;
-    std::vector<uint64_t> offsets ((1ull << (b - 1)) - 1, 0);
+    std::vector<uint64_t> offsets (1ull << b, 0);
     std::queue<uint64_t> blocks;
     std::queue<uint64_t> new_blocks;
     blocks.push(n);
@@ -1334,17 +1334,16 @@ void DBG_succ::append_graph_static(DBG_succ *g) {
             blocks.pop();
             uint64_t epos = pos + cnt;
             for ( ; pos < epos; ++pos) {
-                offsets[o] += !(*(g->W->R))[pos];
+                offsets.at(o) += !(*(g->W->R))[pos];
             }
             if (ib < b - 1) {
-                new_blocks.push(offsets[o]);
-                new_blocks.push(cnt - offsets[o]);
+                new_blocks.push(offsets.at(o));
+                new_blocks.push(cnt - offsets.at(o));
             }
             o++; 
         }
         if (ib < b - 1)
             blocks.swap(new_blocks);
-        std::cerr << "blocks: " << blocks.size() << " new blocks: " << new_blocks.size() << std::endl;
     }
 
     std::cerr << "R size: " << g->W->R->size() << std::endl;
@@ -1352,7 +1351,7 @@ void DBG_succ::append_graph_static(DBG_succ *g) {
     bool bit;
     std::vector<uint64_t> upto_offsets ((1ull << (b - 1)) - 1, 0);
     uint64_t p, co, v, m;
-   /* for (size_t i = 0; i < n; ++i) {
+    for (size_t i = 0; i < n; ++i) {
         m = (1ull << (b - 1));
         //v = (uint64_t) W_stat.at(i);
         v = 0;
@@ -1361,44 +1360,30 @@ void DBG_succ::append_graph_static(DBG_succ *g) {
         co = 0;
         for (size_t ib = 0; ib < b - 1; ++ib) {
             bit = (*(g->W->R))[ib * n + p + co];
-            //bit = m & v;
             if (bit) {
                 v |= m;
-                //tmp->setBitQuick(ib * n + p + co, true);
                 co += offsets.at(o);
                 p -= upto_offsets.at(o);
             } else {
                 p -= (p - upto_offsets.at(o)); 
                 upto_offsets.at(o) += 1;
             }
-            //dtd::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
             o = 2*o + 1 + bit;
             m >>= 1;
         }
         bit = (*(g->W->R))[(b - 1) * n + p + co];
-        //bit = m & v;
         if (bit) {
-           // std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
-            //tmp->setBitQuick((b - 1) * n + p + co, true); 
             v |= m;
         }
+        this->W_stat.push_back(v);
+        this->last_stat.push_back(g->get_last(i));
     }
-
-*/
-    // handle last and W
-    //for (size_t j = n_old; j < this->last_stat.size(); ++j) {
-    //    this->last_stat.at(j) = g->get_last(j - n_old);
-        //uint64_t tut = (*(g->W))[j - n_old];
-        //this->W_stat.at(j) = (uint8_t) g->get_W(j - n_old);
-        //bool bit = g->get_last(j - n_old); 
-    //}
 
     // handle F
     assert(this->F.size() == g->F.size());
     for (size_t j = 0; j < this->F.size(); ++j) {
         this->F.at(j) += g->F.at(j);
     }
-    std::cerr << "tut " << std::endl;
 }
 
 void DBG_succ::toDynamic() {
