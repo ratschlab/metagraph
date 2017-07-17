@@ -23,6 +23,7 @@
 #include <cmath>
 #include <pthread.h>
 
+// use Heng Li's kseq structure for string IO
 #include "kseq.h"
 
 KSEQ_INIT(gzFile, gzread)
@@ -41,8 +42,6 @@ KSEQ_INIT(gzFile, gzread)
 #include "serialization.hpp"
 #include "dbg_succinct_libmaus.hpp"
 #include "annotation.hpp"
-// use Heng Li's kseq structure for string IO
-#include "kseq.h"
 
 // define an extended alphabet for W --> somehow this does not work properly as expected
 typedef uint64_t TAlphabet;
@@ -162,6 +161,8 @@ DBG_succ::DBG_succ(size_t k_, Config* config_, bool sentinel) :
     id_to_label.push_back("");
     combination_vector.push_back(0);
 }
+
+
 
 DBG_succ::DBG_succ(std::string infbase_, Config* config_) : 
     infbase(infbase_),
@@ -1303,6 +1304,168 @@ void DBG_succ::append_graph(DBG_succ *g) {
         this->F.at(j) += g->F.at(j);
     }
 }
+
+/** 
+ * This function takes a pointer to a graph structure and concatenates the arrays W, last 
+ * and F to this graph's static containers last_stat and W_stat. In almost all cases 
+ * this will not produce a valid graph and should only be used as a helper in the 
+ * parallel merge procedure.
+ */
+void DBG_succ::append_graph_static(DBG_succ *g) {
+
+    size_t n = g->get_size();
+    if (config->verbose)
+        std::cout << "    adding " << n << " edges" << std::endl;
+
+    size_t n_old = this->last_stat.size();
+    this->last_stat.resize(n_old + n);
+    this->W_stat.resize(n_old + n);
+
+    size_t const b = 4;
+    std::vector<uint64_t> offsets ((1ull << (b - 1)) - 1, 0);
+    std::queue<uint64_t> blocks;
+    std::queue<uint64_t> new_blocks;
+    blocks.push(n);
+    size_t pos = 0;
+    uint64_t o = 0;
+    for (size_t ib = 0; ib < b; ++ib) {
+        while (!blocks.empty()) {
+            uint64_t cnt = blocks.front();
+            blocks.pop();
+            uint64_t epos = pos + cnt;
+            for ( ; pos < epos; ++pos) {
+                offsets[o] += !(*(g->W->R))[pos];
+            }
+            if (ib < b - 1) {
+                new_blocks.push(offsets[o]);
+                new_blocks.push(cnt - offsets[o]);
+            }
+            o++; 
+        }
+        if (ib < b - 1)
+            blocks.swap(new_blocks);
+        std::cerr << "blocks: " << blocks.size() << " new blocks: " << new_blocks.size() << std::endl;
+    }
+
+    std::cerr << "R size: " << g->W->R->size() << std::endl;
+
+    bool bit;
+    std::vector<uint64_t> upto_offsets ((1ull << (b - 1)) - 1, 0);
+    uint64_t p, co, v, m;
+   /* for (size_t i = 0; i < n; ++i) {
+        m = (1ull << (b - 1));
+        //v = (uint64_t) W_stat.at(i);
+        v = 0;
+        o = 0;
+        p = i;
+        co = 0;
+        for (size_t ib = 0; ib < b - 1; ++ib) {
+            bit = (*(g->W->R))[ib * n + p + co];
+            //bit = m & v;
+            if (bit) {
+                v |= m;
+                //tmp->setBitQuick(ib * n + p + co, true);
+                co += offsets.at(o);
+                p -= upto_offsets.at(o);
+            } else {
+                p -= (p - upto_offsets.at(o)); 
+                upto_offsets.at(o) += 1;
+            }
+            //dtd::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
+            o = 2*o + 1 + bit;
+            m >>= 1;
+        }
+        bit = (*(g->W->R))[(b - 1) * n + p + co];
+        //bit = m & v;
+        if (bit) {
+           // std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
+            //tmp->setBitQuick((b - 1) * n + p + co, true); 
+            v |= m;
+        }
+    }
+
+*/
+    // handle last and W
+    //for (size_t j = n_old; j < this->last_stat.size(); ++j) {
+    //    this->last_stat.at(j) = g->get_last(j - n_old);
+        //uint64_t tut = (*(g->W))[j - n_old];
+        //this->W_stat.at(j) = (uint8_t) g->get_W(j - n_old);
+        //bool bit = g->get_last(j - n_old); 
+    //}
+
+    // handle F
+    assert(this->F.size() == g->F.size());
+    for (size_t j = 0; j < this->F.size(); ++j) {
+        this->F.at(j) += g->F.at(j);
+    }
+    std::cerr << "tut " << std::endl;
+}
+
+void DBG_succ::toDynamic() {
+
+    size_t const b = 4;
+    size_t const n = W_stat.size();
+
+    // compute total offsets for the individual bins
+    std::vector<uint64_t> offsets ((1ull << (b - 1)) - 1, 0);
+    uint64_t v, m, o, p;
+    for (size_t i = 0; i < n; ++i) {
+        m = (1ull << (b - 1));
+        v = (uint64_t) W_stat.at(i);
+        o = 0;
+        for (size_t ib = 1; ib < b; ++ib) {
+            bool const bit  = m & v;
+            if (!bit)
+                offsets.at(o) += 1;
+            o = 2*o + 1 + bit;
+            m >>= 1;
+        }
+    }
+
+    libmaus2::bitbtree::BitBTree<6, 64> *tmp = new libmaus2::bitbtree::BitBTree<6, 64>(n * b, false);  
+
+    uint64_t co;
+    bool bit;
+    std::vector<uint64_t> upto_offsets ((1ull << (b - 1)) - 1, 0);
+    for (size_t i = 0; i < n; ++i) {
+        m = (1ull << (b - 1));
+        v = (uint64_t) W_stat.at(i);
+        o = 0;
+        p = i;
+        co = 0;
+        for (size_t ib = 0; ib < b - 1; ++ib) {
+            bit = m & v;
+            if (bit) {
+                tmp->setBitQuick(ib * n + p + co, true);
+                co += offsets.at(o);
+                p -= upto_offsets.at(o);
+            } else {
+                p -= (p - upto_offsets.at(o)); 
+                upto_offsets.at(o) += 1;
+            }
+            //dtd::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
+            o = 2*o + 1 + bit;
+            m >>= 1;
+        }
+        bit = m & v;
+        if (bit) {
+           // std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
+            tmp->setBitQuick((b - 1) * n + p + co, true); 
+        }
+    }
+    W_stat.clear();
+    delete W;
+    W = new libmaus2::wavelet::DynamicWaveletTree<6, 64> (tmp, b, n);
+
+    libmaus2::bitbtree::BitBTree<6, 64> *last_new = new libmaus2::bitbtree::BitBTree<6, 64>(last_stat.size(), false);
+    for (size_t i = 0; i < last_stat.size(); ++i)
+        if (last_stat.at(i))
+            last_new->setBitQuick(i, true);
+    last_stat.clear();
+    delete last;
+    last = last_new;
+}
+
 
 //
 //

@@ -14,6 +14,7 @@
 #include "config.hpp"
 #include "helpers.hpp"
 #include "kseq.h"
+#include "utils.hpp"
 
 KSEQ_INIT(gzFile, gzread)
 
@@ -208,13 +209,27 @@ int main(int argc, char const ** argv) {
                 for (uint64_t f = 0; f < config->collect; f++) {
                     fname = config->outfbase + "." + std::to_string(f) + "_" + std::to_string(config->collect);
                     std::cout << "Opening file " << fname << std::endl;
-                    if (f == 0) {
-                        graph = new DBG_succ(fname, config);
-                    } else {
+                    if (config->fast) {
+                        if (f == 0) {
+                            graph = new DBG_succ(kFromFile(fname), config, false);
+                            graph->last_stat.push_back(0);
+                            graph->W_stat.push_back(0);
+                        }
                         DBG_succ* graph_to_append = new DBG_succ(fname, config);
-                        graph->append_graph(graph_to_append);
+                        graph->append_graph_static(graph_to_append);
                         delete graph_to_append;
+                    } else {
+                        if (f == 0) {
+                            graph = new DBG_succ(fname, config);
+                        } else {
+                            DBG_succ* graph_to_append = new DBG_succ(fname, config);
+                            graph->append_graph(graph_to_append);
+                            delete graph_to_append;
+                        }
                     }
+                }
+                if (config->fast) {
+                    graph->toDynamic();
                 }
                 graph->p = graph->succ_W(1, 0);
 
@@ -421,6 +436,15 @@ int main(int argc, char const ** argv) {
             }
             for (unsigned int f = 0; f < config->fname.size(); ++f) {
                 DBG_succ* graph_ = new DBG_succ(config->fname.at(f), config);
+                graph_->W = new libmaus2::wavelet::DynamicWaveletTree<6, 64> (3);
+                graph_->W->insert(1ull, 0);
+                graph_->W->insert(7ull, 1);
+                graph_->W->insert(4ull, 2);
+                graph_->W->insert(3ull, 3);
+                graph_->W->insert(2ull, 4);
+                graph_->W->insert(5ull, 5);
+
+                exit(1);
                 if (!config->quiet) {
                     std::cout << "Statistics for file " << config->fname.at(f) << std::endl;
                     std::cout << "nodes: " << graph_->get_node_count() << std::endl;
@@ -443,6 +467,19 @@ int main(int argc, char const ** argv) {
                 }
                 if (config->print_graph)
                     graph_->print_seq();
+
+                /*DBG_succ* graph_tut = new DBG_succ(config->k, config);
+                std::cerr << "inserting step by step" << std::endl;
+                for (size_t i = 0; i < 10000000; ++i)
+                    graph_tut->last->insertBit(i % 2, i);
+                std::cerr << "done" << std::endl;
+
+                std::cerr << "construct anew" << std::endl;
+                graph_tut->last = new libmaus2::bitbtree::BitBTree<6, 64>(10000000ull, false); 
+                for (size_t i = 0; i < 10000000; ++i)
+                    graph_tut->last->setBitQuick(i, i % 2);
+                std::cerr << "done" << std::endl;
+                */
 
                 /*std::cerr << graph_->get_edge_count() << std::endl;
                 std::vector<uint64_t> result = graph_->split_range(1, graph_->get_edge_count(), 0);

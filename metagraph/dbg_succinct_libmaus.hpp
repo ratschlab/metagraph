@@ -25,6 +25,12 @@ class DBG_succ {
     // the array containing the edge labels
     libmaus2::wavelet::DynamicWaveletTree<6, 64> *W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
 
+    // the bit array indicating the last outgoing edge of a node (static container for full init)
+    std::vector<bool> last_stat;
+
+    // the array containing the edge labels
+    std::vector<uint8_t> W_stat;
+
     // the offset array to mark the offsets for the last column in the implicit node list
     std::vector<TAlphabet> F; 
 
@@ -349,6 +355,17 @@ class DBG_succ {
      * should only be used as a helper in the parallel merge procedure.
      */
     void append_graph(DBG_succ *g);
+
+    /** 
+     * This function takes a pointer to a graph structure and concatenates the arrays W, last 
+     * and F to this graph's static containers last_stat and W_stat. In almost all cases 
+     * this will not produce a valid graph and should only be used as a helper in the 
+     * parallel merge procedure.
+     */
+    void append_graph_static(DBG_succ *g);
+
+    void toDynamic();
+
 
     //
     //
