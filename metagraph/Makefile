@@ -1,10 +1,11 @@
 LIBMAUS_DIR=external-libraries/libmaus2-lib
 ROCKSDB_DIR=external-libraries/rocksdb
+SDSL_DIR=external-libraries/local
 
 CXX=g++ -std=c++11 -fopenmp -D_THREAD_SAFE -std=c++0x -pthread -O3 #-g -gdwarf-3 #-pg
 CXXFLAGS+= -W -Wall -Wno-long-long -Wno-variadic-macros #-pedantic
-CXXFLAGS+= -I$(LIBMAUS_DIR)/include -I. -L$(LIBMAUS_DIR)/lib #-I$(ROCKSDB_DIR)/include -L$(ROCKSDB_DIR)
-LDFLAGS=-lrt -lmaus2 -lmaus2_simd_align_128 -lmaus2_simd_align_256 #-lrocksdb -lsnappy -lbz2
+CXXFLAGS+= -I$(LIBMAUS_DIR)/include -I. -L$(LIBMAUS_DIR)/lib -I$(SDSL_DIR)/include -L$(SDSL_DIR)/lib #-I$(ROCKSDB_DIR)/include -L$(ROCKSDB_DIR)
+LDFLAGS=-lrt -lmaus2 -lmaus2_simd_align_128 -lmaus2_simd_align_256 -lsdsl#-lrocksdb -lsnappy -lbz2
 
 default: all
 

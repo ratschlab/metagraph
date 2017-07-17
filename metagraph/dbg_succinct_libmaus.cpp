@@ -45,6 +45,8 @@ KSEQ_INIT(gzFile, gzread)
 #include "kseq.h"
 
 #include "dbg_succinct_boost.hpp"
+#include <sdsl/int_vector.hpp>
+#include <sdsl/wavelet_trees.hpp>
 
 // define an extended alphabet for W --> somehow this does not work properly as expected
 typedef uint64_t TAlphabet;
@@ -1129,6 +1131,19 @@ void DBG_succ::add_seq (kstring_t &seq) {
     //fprintf(stdout, "\nindex of CCT: %i\n", (int) index(test));
 }
 
+class rs_bit_vector: public sdsl::bit_vector {
+    public:
+        sdsl::rank_support_v5<> rank;
+        sdsl::select_support_mcl<> select;
+        rs_bit_vector(size_t size, bool def):
+        sdsl::bit_vector(size, def) {
+        }
+        void init_rs() {
+            rank = sdsl::rank_support_v5<>(this);
+            select = sdsl::select_support_mcl<>(this);
+        }
+};
+
 void DBG_succ::add_seq_alt (kstring_t &seq) {
 
     if (debug) {
@@ -1146,24 +1161,33 @@ void DBG_succ::add_seq_alt (kstring_t &seq) {
     }
 
     std::vector<ui256> kmers;
-    seqtokmer(kmers, "$", 1, k, nt_lookup);
-    kmers.push_back(stokmer(std::string(k-1,'X')+std::string("$$"), nt_lookup));
+    if (W->n <= 2) {
+        seqtokmer(kmers, "$", 1, k, nt_lookup);
+        kmers.push_back(stokmer(std::string(k-1,'X')+std::string("$$"), nt_lookup));
+    }
     seqtokmer(kmers, seq.s, seq.l, k, nt_lookup);
-    uint8_t *W;
+    //uint8_t *W;
     if (last)
         delete last;
     last = new libmaus2::bitbtree::BitBTree<6, 64>(kmers.size()+2, false);
-    W = (uint8_t*)malloc(kmers.size()+2);
-    //W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4);
-    
+    /*
+    rs_bit_vector *last = new rs_bit_vector(kmers.size()+2, true);
+    (*last)[0]=false;
+    sdsl::int_vector<> *W = new sdsl::int_vector<>(kmers.size()+2, 0, strlen(alphabet));
+    */
+    //W = (uint8_t*)malloc(kmers.size()+2);
+    if (W)
+        delete W;
+    W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4);
+   
     std::sort(kmers.begin(),kmers.end());
-
     size_t j, sz=0, lastlet=0;
     //last->set(0,false);
     for (size_t i=0;i<kmers.size();++i) {
         if (i+1 < kmers.size()) {
             if (kmers[i] == kmers[i+1])
                 continue;
+            //(*last)[sz] = !compare_kmer_suffix(kmers[i], kmers[i+1]);
             last->set(sz, !compare_kmer_suffix(kmers[i], kmers[i+1]));
         } else {
             last->set(sz, true);
@@ -1177,14 +1201,21 @@ void DBG_succ::add_seq_alt (kstring_t &seq) {
                 F[k]=sz-1;
             lastlet=newlast;
         }
-        W[sz] = getW(kmers[i]);
-        if (!W[sz])
+        //(*W)[sz] = getW(kmers[i]);
+        W->insert(getW(kmers[i]), sz);
+        if (!(*W)[sz])
             p=sz;
         if (i) {
             j=i-1;
             while (compare_kmer_suffix(kmers[j], kmers[i], 1)) {
-                if (getW(kmers[j]) == W[sz]) {
-                    W[sz] += alph_size;
+                if (kmers[j] == kmers[i]) {
+                    j--;
+                    continue;
+                }
+                if (getW(kmers[j]) == (*W)[sz]) {
+                    //(*W)[sz] += alph_size;
+                    replaceW(sz,(*W)[sz]+alph_size);
+                    //W[sz] += alph_size;
                     break;
                 }
                 if (!j) {
@@ -1194,16 +1225,31 @@ void DBG_succ::add_seq_alt (kstring_t &seq) {
                 }
             }
         }
+        char *curseq = kmertos(kmers[i], alphabet, alph_size);
+        std::cout << sz << " " << (*last)[sz] << " " << curseq+1 << " " << curseq[0] << ((*W)[sz] >= alph_size ? "-":"") << "\n";
+        free(curseq);
         sz++;
     }
     //TODO: inefficient
-    for (size_t i=sz;i<last->size();++i)
-        last->deleteBit(i);
+    while (last->size() > sz) {
+        last->deleteBit(last->size()-1);
+    }
+    //last->resize(sz);
+    //last->init_rs();
+    //last->select(1);
+    //W->resize(sz);
+    //sdsl::wt_blcd<> *Wt = new sdsl::wt_blcd<>();
+    //sdsl::construct_im(*Wt, W, strlen(alphabet));
+    /*
     uint8_t *temp = (uint8_t*)realloc(W, sz);
     if (temp) {
         W = temp;
     }
     free(W);
+    */
+    //delete W;
+    //delete last;
+    //delete Wt;
     free(nt_lookup);
     //TODO: copy to dynamic structures
     fprintf(stdout, "edges %lu / nodes %lu\n", get_edge_count(), get_node_count());
