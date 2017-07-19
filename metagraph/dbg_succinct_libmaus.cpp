@@ -22,6 +22,7 @@
 #include <zlib.h>
 #include <cmath>
 #include <pthread.h>
+#include <ctime>
 
 #include "kseq.h"
 
@@ -45,7 +46,6 @@ KSEQ_INIT(gzFile, gzread)
 #include "kseq.h"
 
 #include "dbg_succinct_boost.hpp"
-#include <sdsl/int_vector.hpp>
 #include <sdsl/wavelet_trees.hpp>
 
 // define an extended alphabet for W --> somehow this does not work properly as expected
@@ -106,10 +106,10 @@ struct DBG_succ::JoinInfo {
 };
 
 // the bit array indicating the last outgoing edge of a node
-libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();
+//libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();
 
 // the array containing the edge labels
-libmaus2::wavelet::DynamicWaveletTree<6, 64> *W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
+//libmaus2::wavelet::DynamicWaveletTree<6, 64> *W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
 
 // the offset array to mark the offsets for the last column in the implicit node list
 std::vector<TAlphabet> F; 
@@ -1131,19 +1131,6 @@ void DBG_succ::add_seq (kstring_t &seq) {
     //fprintf(stdout, "\nindex of CCT: %i\n", (int) index(test));
 }
 
-class rs_bit_vector: public sdsl::bit_vector {
-    public:
-        sdsl::rank_support_v5<> rank;
-        sdsl::select_support_mcl<> select;
-        rs_bit_vector(size_t size, bool def):
-        sdsl::bit_vector(size, def) {
-        }
-        void init_rs() {
-            rank = sdsl::rank_support_v5<>(this);
-            select = sdsl::select_support_mcl<>(this);
-        }
-};
-
 void DBG_succ::add_seq_alt (kstring_t &seq) {
 
     if (debug) {
@@ -1160,98 +1147,87 @@ void DBG_succ::add_seq_alt (kstring_t &seq) {
         nt_lookup[(uint8_t)tolower(alphabet[i])]=i;
     }
 
+    clock_t start = clock();
     std::vector<ui256> kmers;
+    std::cerr << "Loading kmers\n";
     if (W->n <= 2) {
         seqtokmer(kmers, "$", 1, k, nt_lookup);
         kmers.push_back(stokmer(std::string(k-1,'X')+std::string("$$"), nt_lookup));
     }
     seqtokmer(kmers, seq.s, seq.l, k, nt_lookup);
-    //uint8_t *W;
+    std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
+    start=clock();
+    std::cerr << "Sorting kmers\t";
+    std::sort(kmers.begin(),kmers.end());
+    kmers.erase(std::unique(kmers.begin(), kmers.end() ), kmers.end() );
+    std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
+    start=clock();
+    std::cerr << "Constructing succinct representation\t";
+    //sdsl::bit_vector lbv(kmers.size(), true);
+    sdsl::int_vector<> wbv(kmers.size(), 0, strlen(alphabet));
     if (last)
         delete last;
-    last = new libmaus2::bitbtree::BitBTree<6, 64>(kmers.size()+2, false);
-    /*
-    rs_bit_vector *last = new rs_bit_vector(kmers.size()+2, true);
-    (*last)[0]=false;
-    sdsl::int_vector<> *W = new sdsl::int_vector<>(kmers.size()+2, 0, strlen(alphabet));
-    */
-    //W = (uint8_t*)malloc(kmers.size()+2);
-    if (W)
-        delete W;
-    W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4);
-   
-    std::sort(kmers.begin(),kmers.end());
-    size_t j, sz=0, lastlet=0;
-    //last->set(0,false);
-    for (size_t i=0;i<kmers.size();++i) {
-        if (i+1 < kmers.size()) {
-            if (kmers[i] == kmers[i+1])
-                continue;
-            //(*last)[sz] = !compare_kmer_suffix(kmers[i], kmers[i+1]);
-            last->set(sz, !compare_kmer_suffix(kmers[i], kmers[i+1]));
-        } else {
-            last->set(sz, true);
+    last = new BitBTree(kmers.size(), true);
+    bool lmaus = true;
+    if (lmaus) {
+        if (W)
+            delete W;
+        W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4);
+    }
+    size_t lastlet=0;
+    for (int i=0;i<(int)kmers.size();++i) {
+        //set last
+        if (i+1 < (int)kmers.size()) {
+            //if (lmaus)
+            last->setBitQuick(i, !compare_kmer_suffix(kmers[i], kmers[i+1]));
+            //lbv[i] = !compare_kmer_suffix(kmers[i], kmers[i+1]);
         }
+        //set F
         char cF=getPos(kmers[i], k-1, alphabet, alph_size);
         if (cF != alphabet[lastlet]) {
-            //TODO: fix dis hax
-            uint8_t newlast = std::string(alphabet).find(cF);
-            F[newlast]=sz-1;
-            for (size_t k=lastlet+1; k<newlast;++k)
-                F[k]=sz-1;
-            lastlet=newlast;
-        }
-        //(*W)[sz] = getW(kmers[i]);
-        W->insert(getW(kmers[i]), sz);
-        if (!(*W)[sz])
-            p=sz;
-        if (i) {
-            j=i-1;
-            while (compare_kmer_suffix(kmers[j], kmers[i], 1)) {
-                if (kmers[j] == kmers[i]) {
-                    j--;
-                    continue;
-                }
-                if (getW(kmers[j]) == (*W)[sz]) {
-                    //(*W)[sz] += alph_size;
-                    replaceW(sz,(*W)[sz]+alph_size);
-                    //W[sz] += alph_size;
+            for (lastlet++;lastlet<alph_size;lastlet++) {
+                F[lastlet]=i-1;
+                if (alphabet[lastlet]==cF) {
                     break;
-                }
-                if (!j) {
-                    break;
-                } else {
-                    j--;
                 }
             }
         }
+        //set W
+        wbv[i] = getW(kmers[i]);
+        if (lmaus)
+            W->insert(getW(kmers[i]), i);
+        if (!wbv[i])
+            p=i;
+        for (int j=i-1;j>=0 && compare_kmer_suffix(kmers[j], kmers[i], 1);--j) {
+            if ((wbv[j] % alph_size) == wbv[i]) {
+                wbv[i] += alph_size;
+                if (lmaus)
+                    replaceW(i,wbv[i]);
+                break;
+            }
+        }
+        /*
         char *curseq = kmertos(kmers[i], alphabet, alph_size);
         std::cout << sz << " " << (*last)[sz] << " " << curseq+1 << " " << curseq[0] << ((*W)[sz] >= alph_size ? "-":"") << "\n";
         free(curseq);
-        sz++;
+        */
     }
-    //TODO: inefficient
-    while (last->size() > sz) {
-        last->deleteBit(last->size()-1);
-    }
-    //last->resize(sz);
-    //last->init_rs();
-    //last->select(1);
-    //W->resize(sz);
-    //sdsl::wt_blcd<> *Wt = new sdsl::wt_blcd<>();
-    //sdsl::construct_im(*Wt, W, strlen(alphabet));
+    std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
+    start=clock();
     /*
-    uint8_t *temp = (uint8_t*)realloc(W, sz);
-    if (temp) {
-        W = temp;
-    }
-    free(W);
+    std::cerr << "Building rank and select support\t";
+    sdsl::rank_support_v5<> rankL(&lbv);
+    sdsl::select_support_mcl<> selectL(&lbv);
+    std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
+    start=clock();
     */
-    //delete W;
-    //delete last;
-    //delete Wt;
+
+    std::cerr << "Building wavelet tree\t";
+    sdsl::wt_int<> wwt;
+    sdsl::construct_im(wwt, wbv);
+    std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
+    start=clock();
     free(nt_lookup);
-    //TODO: copy to dynamic structures
     fprintf(stdout, "edges %lu / nodes %lu\n", get_edge_count(), get_node_count());
 }
 

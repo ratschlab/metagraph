@@ -11,6 +11,63 @@
 #include "datatypes.hpp"
 
 #include "kseq.h"
+#include <sdsl/wavelet_trees.hpp>
+
+class rs_bit_vector: public sdsl::bit_vector {
+    private:
+        sdsl::rank_support_v5<> rk;
+        sdsl::select_support_mcl<> slct;
+        bool update_rs = true;
+        void init_rs() {
+            rk = sdsl::rank_support_v5<>(this);
+            slct = sdsl::select_support_mcl<>(this);
+            update_rs = false;
+        }
+    public:
+        rs_bit_vector(size_t size, bool def) : sdsl::bit_vector(size, def) {
+        }
+        rs_bit_vector() : sdsl::bit_vector() {
+        }
+        void set(size_t id, bool val) {
+            this->operator[](id) = val;
+            update_rs = true;
+        }
+        void setBitQuick(size_t id, bool val) {
+            this->operator[](id) = val;
+            update_rs = true;
+        }
+        void insertBit(size_t id, bool val) {
+            this->resize(this->size()+1);
+            std::move(this->begin()+id,this->end()-1,this->begin()+id+1);
+            set(id, val);
+            update_rs = true;
+        }
+        void deleteBit(size_t id) {
+            std::move(this->begin()+id+1,this->end(),this->begin()+id);
+            this->resize(this->size()-1);
+            update_rs = true;
+        }
+        void deserialise(std::istream &in) {
+            this->load(in);
+        }
+        void serialise(std::ostream &out) {
+            this->serialize(out);
+        }
+        uint64_t select1(size_t id) {
+            if (update_rs)
+                init_rs();
+            return slct(id);
+        }
+        uint64_t rank1(size_t id) {
+            if (update_rs)
+                init_rs();
+            //the rank method in SDSL does not include id in the count
+            return rk(id+1);
+        }
+};
+
+//typedef libmaus2::bitbtree::BitBTree<6, 64> BitBTree;
+typedef rs_bit_vector BitBTree;
 
 class DBG_succ {
 
@@ -20,7 +77,8 @@ class DBG_succ {
     public:
 
     // the bit array indicating the last outgoing edge of a node
-    libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();
+    BitBTree *last = new BitBTree();
+    //libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();
 
     // the array containing the edge labels
     libmaus2::wavelet::DynamicWaveletTree<6, 64> *W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
