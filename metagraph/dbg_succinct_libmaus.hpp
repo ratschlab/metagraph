@@ -38,12 +38,14 @@ class rs_bit_vector: public sdsl::bit_vector {
         }
         void insertBit(size_t id, bool val) {
             this->resize(this->size()+1);
-            std::move(this->begin()+id,this->end()-1,this->begin()+id+1);
+            if (this->size() > 1)
+                std::copy_backward(this->begin()+id,(this->end())-1,this->end());
             set(id, val);
             update_rs = true;
         }
         void deleteBit(size_t id) {
-            std::move(this->begin()+id+1,this->end(),this->begin()+id);
+            if (this->size() > 1)
+                std::copy(this->begin()+id+1,this->end(),this->begin()+id);
             this->resize(this->size()-1);
             update_rs = true;
         }
@@ -56,18 +58,101 @@ class rs_bit_vector: public sdsl::bit_vector {
         uint64_t select1(size_t id) {
             if (update_rs)
                 init_rs();
+            //compensating for libmaus weirdness
+            id++;
+            size_t maxrank = rk(this->size());
+            if (id > maxrank) {
+                //TODO: should this line ever be reached?
+                return this->size();
+            }
             return slct(id);
         }
         uint64_t rank1(size_t id) {
             if (update_rs)
                 init_rs();
             //the rank method in SDSL does not include id in the count
-            return rk(id+1);
+            return rk(id >= this->size() ? this->size() : id+1);
         }
 };
 
-//typedef libmaus2::bitbtree::BitBTree<6, 64> BitBTree;
-typedef rs_bit_vector BitBTree;
+class dyn_wavelet: public sdsl::int_vector<> {
+    private:
+        sdsl::wt_int<> wwt;
+        size_t logsigma;
+        bool update_rs;
+        void init_wt() {
+            this->resize(n);
+            sdsl::construct_im(wwt, *this);
+            update_rs=false;
+        }
+    public:
+        size_t n;
+        dyn_wavelet(size_t logsigma, size_t size, uint64_t def) 
+            : sdsl::int_vector<>(2 * size + 1, def, 1<< logsigma) {
+            n = size;
+            update_rs = true;
+        }
+        dyn_wavelet(size_t logsigma)
+            : dyn_wavelet(logsigma, 0, 0) {
+        }
+        void deserialise(std::istream &in) {
+            wwt.load(in);
+            this->load(in);
+            n = this->size();
+        }
+        dyn_wavelet(std::istream &in) {
+            this->deserialise(in);
+        }
+        void insert(uint64_t val, size_t id) {
+            if (n == this->size()) {
+                this->resize(2*n+1);
+            }
+            n++;
+            if (this->size() > 1)
+                std::copy_backward(this->begin()+id,this->begin()+n-1,this->begin()+n);
+            this->operator[](id) = val;
+            update_rs = true;
+        }
+        void remove(size_t id) {
+            if (this->size() > 1)
+                std::copy(this->begin()+id+1,this->begin()+n,this->begin()+id);
+            n--;
+            update_rs = true;
+        }
+        uint64_t rank(uint64_t c, uint64_t i) {
+            if (update_rs)
+                init_wt();
+            return wwt.rank(i >= wwt.size() ? wwt.size() : i+1, c);
+        }
+        uint64_t select(uint64_t c, uint64_t i) {
+            if (update_rs)
+                init_wt();
+            i++;
+            uint64_t maxrank = wwt.rank(wwt.size(), c);
+            if (i > maxrank) {
+                //TODO: should this line ever be reached?
+                return wwt.size();
+            }
+            return wwt.select(i, c);
+        }
+        void serialise(std::ostream &out) {
+            this->resize(n);
+            wwt.serialize(out);
+            this->serialize(out);
+        }
+        sdsl::int_vector<>::reference operator[](const size_t id) {
+            update_rs = true;
+            return sdsl::int_vector<>::operator[](id);
+        }
+};
+
+//libmaus2 structures
+typedef libmaus2::bitbtree::BitBTree<6, 64> BitBTree;
+//typedef libmaus2::wavelet::DynamicWaveletTree<6, 64> WaveletTree;
+
+//SDSL-based structures
+//typedef rs_bit_vector BitBTree;
+typedef dyn_wavelet WaveletTree;
 
 class DBG_succ {
 
@@ -81,7 +166,8 @@ class DBG_succ {
     //libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();
 
     // the array containing the edge labels
-    libmaus2::wavelet::DynamicWaveletTree<6, 64> *W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
+    //libmaus2::wavelet::DynamicWaveletTree<6, 64> *W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
+    WaveletTree *W = new WaveletTree(4);
 
     // the offset array to mark the offsets for the last column in the implicit node list
     std::vector<TAlphabet> F; 

@@ -562,7 +562,10 @@ int main(int argc, char const ** argv) {
                         reverse_complement(read_stream->seq);                    
 
                     // add all k-mers of seq to the graph
+                    clock_t start = clock();
+                    //graph->add_seq(read_stream->seq);
                     graph->add_seq_alt(read_stream->seq);
+                    std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
                 }
                 kseq_destroy(read_stream);
                 gzclose(input_p);

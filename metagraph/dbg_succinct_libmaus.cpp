@@ -179,7 +179,8 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
     // load W array
     delete W;
     instream.open((infbase + ".W.dbg").c_str());
-    W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(instream);
+    W = new WaveletTree(instream);
+    //W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(instream);
     instream.close();
 
     // load F and k and p
@@ -1150,37 +1151,31 @@ void DBG_succ::add_seq_alt (kstring_t &seq) {
     clock_t start = clock();
     std::vector<ui256> kmers;
     std::cerr << "Loading kmers\n";
-    if (W->n <= 2) {
-        seqtokmer(kmers, "$", 1, k, nt_lookup);
-        kmers.push_back(stokmer(std::string(k-1,'X')+std::string("$$"), nt_lookup));
-    }
+    seqtokmer(kmers, "$", 1, k, nt_lookup);
+    kmers.push_back(stokmer(std::string(k-1,'X')+std::string("$$"), nt_lookup));
     seqtokmer(kmers, seq.s, seq.l, k, nt_lookup);
     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     start=clock();
+
     std::cerr << "Sorting kmers\t";
     std::sort(kmers.begin(),kmers.end());
     kmers.erase(std::unique(kmers.begin(), kmers.end() ), kmers.end() );
     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     start=clock();
+
     std::cerr << "Constructing succinct representation\t";
-    //sdsl::bit_vector lbv(kmers.size(), true);
     sdsl::int_vector<> wbv(kmers.size(), 0, strlen(alphabet));
     if (last)
         delete last;
     last = new BitBTree(kmers.size(), true);
-    bool lmaus = true;
-    if (lmaus) {
-        if (W)
-            delete W;
-        W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4);
-    }
+    if (W)
+        delete W;
+    W = new WaveletTree(4);
     size_t lastlet=0;
     for (int i=0;i<(int)kmers.size();++i) {
         //set last
         if (i+1 < (int)kmers.size()) {
-            //if (lmaus)
             last->setBitQuick(i, !compare_kmer_suffix(kmers[i], kmers[i+1]));
-            //lbv[i] = !compare_kmer_suffix(kmers[i], kmers[i+1]);
         }
         //set F
         char cF=getPos(kmers[i], k-1, alphabet, alph_size);
@@ -1193,16 +1188,13 @@ void DBG_succ::add_seq_alt (kstring_t &seq) {
             }
         }
         //set W
-        wbv[i] = getW(kmers[i]);
-        if (lmaus)
-            W->insert(getW(kmers[i]), i);
-        if (!wbv[i])
+        uint64_t curW = getW(kmers[i]);
+        W->insert(curW, i);
+        if (!curW)
             p=i;
         for (int j=i-1;j>=0 && compare_kmer_suffix(kmers[j], kmers[i], 1);--j) {
-            if ((wbv[j] % alph_size) == wbv[i]) {
-                wbv[i] += alph_size;
-                if (lmaus)
-                    replaceW(i,wbv[i]);
+            if (((*W)[j] % alph_size) == curW) {
+                replaceW(i,wbv[i]);
                 break;
             }
         }
@@ -1214,14 +1206,6 @@ void DBG_succ::add_seq_alt (kstring_t &seq) {
     }
     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     start=clock();
-    /*
-    std::cerr << "Building rank and select support\t";
-    sdsl::rank_support_v5<> rankL(&lbv);
-    sdsl::select_support_mcl<> selectL(&lbv);
-    std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
-    start=clock();
-    */
-
     std::cerr << "Building wavelet tree\t";
     sdsl::wt_int<> wwt;
     sdsl::construct_im(wwt, wbv);
@@ -1229,6 +1213,8 @@ void DBG_succ::add_seq_alt (kstring_t &seq) {
     start=clock();
     free(nt_lookup);
     fprintf(stdout, "edges %lu / nodes %lu\n", get_edge_count(), get_node_count());
+    //std::cerr << kmers.size() << " " << W->n << " " << last->size() << "\n";
+    //assert(W->n == last->size());
 }
 
 
