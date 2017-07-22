@@ -1168,9 +1168,12 @@ void DBG_succ::add_seq_alt (kstring_t &seq) {
     if (last)
         delete last;
     last = new BitBTree(kmers.size(), true);
+    /*
     if (W)
         delete W;
     W = new WaveletTree(4);
+    */
+    std::vector<uint8_t> *Wvec = new std::vector<uint8_t>(kmers.size());
     size_t lastlet=0;
     for (int i=0;i<(int)kmers.size();++i) {
         //set last
@@ -1189,12 +1192,14 @@ void DBG_succ::add_seq_alt (kstring_t &seq) {
         }
         //set W
         uint64_t curW = getW(kmers[i]);
-        W->insert(curW, i);
+        //W->insert(curW, i);
+        (*Wvec)[i] = curW;
         if (!curW)
             p=i;
         for (int j=i-1;j>=0 && compare_kmer_suffix(kmers[j], kmers[i], 1);--j) {
-            if (((*W)[j] % alph_size) == curW) {
-                replaceW(i,wbv[i]);
+            if (((*Wvec)[j] % alph_size) == curW) {
+                //replaceW(i,wbv[i]);
+                (*Wvec)[i] += alph_size;
                 break;
             }
         }
@@ -1207,8 +1212,14 @@ void DBG_succ::add_seq_alt (kstring_t &seq) {
     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     start=clock();
     std::cerr << "Building wavelet tree\t";
+    if (W)
+        delete W;
+    W = new WaveletTree(Wvec, 4);
+    delete Wvec;
+    /*
     sdsl::wt_int<> wwt;
     sdsl::construct_im(wwt, wbv);
+    */
     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     start=clock();
     free(nt_lookup);

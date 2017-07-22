@@ -146,13 +146,77 @@ class dyn_wavelet: public sdsl::int_vector<> {
         }
 };
 
+//Child of DynamicWaveletTree allowing for construction from an int vector
+class dyn_wavelet2 : public libmaus2::wavelet::DynamicWaveletTree<6, 64> {
+    public:
+        dyn_wavelet2(size_t b)
+            : libmaus2::wavelet::DynamicWaveletTree<6, 64>(b) {
+        }
+        dyn_wavelet2(std::istream &in)
+            : libmaus2::wavelet::DynamicWaveletTree<6, 64>(in) {
+        }
+        libmaus2::bitbtree::BitBTree<6, 64>* makeTree(std::vector<uint8_t> *W_stat, size_t b) {
+            size_t n = W_stat->size();
+            std::vector<uint64_t> offsets((1ull << (b-1)) - 1, 0);
+            uint64_t v, m, o, p;
+            for (size_t i=0;i<n;++i) {
+                m = (1ull << (b - 1));
+                v = (uint64_t) W_stat->at(i);
+                o = 0;
+                for (size_t ib = 1; ib < b; ++ib) {
+                    bool const bit = m & v;
+                    if (!bit)
+                        offsets.at(o) += 1;
+                    o = 2*o + 1 + bit;
+                    m >>= 1;
+                }
+            }
+            libmaus2::bitbtree::BitBTree<6, 64> *tmp = new libmaus2::bitbtree::BitBTree<6, 64>(n*b, false);
+            uint64_t co;
+            bool bit;
+            std::vector<uint64_t> upto_offsets ((1ull << (b - 1)) - 1, 0);
+            for (size_t i = 0; i < n; ++i) {
+                m = (1ull << (b - 1));
+                v = (uint64_t) W_stat->at(i);
+                o = 0;
+                p = i;
+                co = 0;
+                for (size_t ib = 0; ib < b - 1; ++ib) {
+                    bit = m & v;
+                    if (bit) {
+                        tmp->setBitQuick(ib * n + p + co, true);
+                        co += offsets.at(o);
+                        p -= upto_offsets.at(o);
+                    } else {
+                        p -= (p - upto_offsets.at(o)); 
+                        upto_offsets.at(o) += 1;
+                    }
+                    //dtd::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
+                    o = 2*o + 1 + bit;
+                    m >>= 1;
+                }
+                bit = m & v;
+                if (bit) {
+                   // std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
+                    tmp->setBitQuick((b - 1) * n + p + co, true); 
+                }
+            }
+            return tmp;
+        }
+
+        dyn_wavelet2(std::vector<uint8_t> *W_stat, size_t b)
+            : libmaus2::wavelet::DynamicWaveletTree<6, 64>(makeTree(W_stat, b), b, W_stat->size()) {
+        }
+};
+
 //libmaus2 structures
 typedef libmaus2::bitbtree::BitBTree<6, 64> BitBTree;
 //typedef libmaus2::wavelet::DynamicWaveletTree<6, 64> WaveletTree;
 
 //SDSL-based structures
 //typedef rs_bit_vector BitBTree;
-typedef dyn_wavelet WaveletTree;
+//typedef dyn_wavelet WaveletTree;
+typedef dyn_wavelet2 WaveletTree;
 
 class DBG_succ {
 
