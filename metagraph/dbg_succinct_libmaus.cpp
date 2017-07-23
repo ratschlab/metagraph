@@ -1132,7 +1132,7 @@ void DBG_succ::add_seq (kstring_t &seq) {
 }
 
 //TODO: support extension
-void DBG_succ::add_seq_alt (kstring_t &seq) {
+void DBG_succ::add_seq_alt (kstring_t &seq, bool bridge) {
 
     if (debug) {
         print_seq();
@@ -1148,14 +1148,14 @@ void DBG_succ::add_seq_alt (kstring_t &seq) {
         nt_lookup[(uint8_t)tolower(alphabet[i])]=i;
     }
 
-    clock_t start = clock();
-    std::cerr << "Loading kmers\n";
+    //clock_t start = clock();
+    //std::cerr << "Loading kmers\n";
     if (!kmers.size()) {
         seqtokmer(kmers, "$", 1, k, nt_lookup);
         kmers.push_back(stokmer(std::string(k-1,'X')+std::string("$$"), nt_lookup));
     }
-    seqtokmer(kmers, seq.s, seq.l, k, nt_lookup);
-    std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
+    seqtokmer(kmers, seq.s, seq.l, k, nt_lookup, bridge);
+    //std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     free(nt_lookup);
 }
 

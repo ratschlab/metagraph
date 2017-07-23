@@ -14,6 +14,7 @@
 #include "config.hpp"
 #include "helpers.hpp"
 #include "kseq.h"
+#include "vcfparse.h"
 
 KSEQ_INIT(gzFile, gzread)
 
@@ -549,6 +550,41 @@ int main(int argc, char const ** argv) {
 
                 // open stream to fasta file
                 gzFile input_p = gzopen(config->fname[f].c_str(), "r");
+                int dotind = config->fname.at(f).rfind(".");
+                std::string ext = "";
+                if (dotind >= 0) {
+                    if (config->fname.at(f).substr(dotind) == ".gz") {
+                        int nextind = config->fname.at(f).substr(0,dotind-1).rfind(".");
+                        ext = config->fname.at(f).substr(nextind, dotind-nextind);
+                    } else {
+                        ext = config->fname.at(f).substr(dotind);
+                    }
+
+                }
+                if (dotind >= 0 && ext == ".vcf") {
+                    uint64_t nbp = 0;
+                    uint64_t nbplast = 0;
+                    clock_t start = clock();
+                    clock_t timelast = clock();
+                    vcfparse *vcf = vcf_init(config->refpath.c_str(), config->fname.at(f).c_str(), graph->k);
+                    if (!vcf) {
+                        std::cerr << "ERROR reading VCF " << config->fname.at(f) << std::endl;
+                        exit(1);
+                    }
+                    for (size_t i=1; vcf_get_seq(vcf);++i) {
+                        if (i % 1000 == 0) {
+                            std::cout << "." << std::flush;
+                            if (i % 10000 == 0) {
+                                fprintf(stdout, "%lu - edges %lu / nodes %lu / bp %lu / runtime %lu / BPph %lu\n", i, graph->get_edge_count(), graph->get_node_count(), nbp, (clock() - start)/CLOCKS_PER_SEC, 60*60*CLOCKS_PER_SEC*(nbp-nbplast)/(clock()-timelast));
+                                nbplast = nbp;
+                                timelast = clock();
+                            }
+                        }
+                        nbp += vcf->seq.l;
+                        graph->add_seq_alt(vcf->seq, false);
+                    }
+                    vcf_destroy(vcf);
+                } else {
                 kseq_t *read_stream = kseq_init(input_p);
 
                 if (read_stream == NULL) {
@@ -567,8 +603,9 @@ int main(int argc, char const ** argv) {
                     graph->add_seq_alt(read_stream->seq);
                     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
                 }
-                graph->construct_succ();
                 kseq_destroy(read_stream);
+                }
+                graph->construct_succ();
                 gzclose(input_p);
 
                 //graph->update_counters();

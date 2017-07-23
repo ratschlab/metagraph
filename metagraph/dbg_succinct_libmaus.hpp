@@ -547,7 +547,7 @@ class DBG_succ {
 
     // add a full sequence to the graph
     void add_seq (kstring_t &seq);
-    void add_seq_alt (kstring_t &seq);
+    void add_seq_alt (kstring_t &seq, bool bridge=true);
     void construct_succ();
 
     /** This function takes a character c and appends it to the end of the graph sequence
