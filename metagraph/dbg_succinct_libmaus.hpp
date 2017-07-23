@@ -12,6 +12,9 @@
 
 #include "kseq.h"
 #include <sdsl/wavelet_trees.hpp>
+#include <boost/multiprecision/cpp_int.hpp>
+
+typedef boost::multiprecision::uint256_t ui256;
 
 class rs_bit_vector: public sdsl::bit_vector {
     private:
@@ -222,6 +225,9 @@ class DBG_succ {
 
     // define an extended alphabet for W --> somehow this does not work properly as expected
     typedef uint64_t TAlphabet;
+
+    private:
+    std::vector<ui256> kmers;
 
     public:
 
@@ -542,6 +548,7 @@ class DBG_succ {
     // add a full sequence to the graph
     void add_seq (kstring_t &seq);
     void add_seq_alt (kstring_t &seq);
+    void construct_succ();
 
     /** This function takes a character c and appends it to the end of the graph sequence
      * given that the corresponding note is not part of the graph yet.

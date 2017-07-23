@@ -24,6 +24,7 @@
 #include <pthread.h>
 #include <ctime>
 
+// use Heng Li's kseq structure for string IO
 #include "kseq.h"
 
 KSEQ_INIT(gzFile, gzread)
@@ -41,12 +42,10 @@ KSEQ_INIT(gzFile, gzread)
 #include "datatypes.hpp"
 #include "serialization.hpp"
 #include "dbg_succinct_libmaus.hpp"
-#include "annotation.hpp"
-// use Heng Li's kseq structure for string IO
-#include "kseq.h"
-
 #include "dbg_succinct_boost.hpp"
-#include <sdsl/wavelet_trees.hpp>
+#include "annotation.hpp"
+
+
 
 // define an extended alphabet for W --> somehow this does not work properly as expected
 typedef uint64_t TAlphabet;
@@ -1132,6 +1131,7 @@ void DBG_succ::add_seq (kstring_t &seq) {
     //fprintf(stdout, "\nindex of CCT: %i\n", (int) index(test));
 }
 
+//TODO: support extension
 void DBG_succ::add_seq_alt (kstring_t &seq) {
 
     if (debug) {
@@ -1149,30 +1149,32 @@ void DBG_succ::add_seq_alt (kstring_t &seq) {
     }
 
     clock_t start = clock();
-    std::vector<ui256> kmers;
     std::cerr << "Loading kmers\n";
-    seqtokmer(kmers, "$", 1, k, nt_lookup);
-    kmers.push_back(stokmer(std::string(k-1,'X')+std::string("$$"), nt_lookup));
+    if (!kmers.size()) {
+        seqtokmer(kmers, "$", 1, k, nt_lookup);
+        kmers.push_back(stokmer(std::string(k-1,'X')+std::string("$$"), nt_lookup));
+    }
     seqtokmer(kmers, seq.s, seq.l, k, nt_lookup);
     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
-    start=clock();
+    free(nt_lookup);
+}
 
+void DBG_succ::construct_succ() {
+    clock_t start=clock();
     std::cerr << "Sorting kmers\t";
     std::sort(kmers.begin(),kmers.end());
     kmers.erase(std::unique(kmers.begin(), kmers.end() ), kmers.end() );
     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     start=clock();
-
     std::cerr << "Constructing succinct representation\t";
-    sdsl::int_vector<> wbv(kmers.size(), 0, strlen(alphabet));
-    if (last)
-        delete last;
-    last = new BitBTree(kmers.size(), true);
-    /*
-    if (W)
+    if (W->n == 2) {
         delete W;
-    W = new WaveletTree(4);
-    */
+        W=NULL;
+        delete last;
+        last = new BitBTree(kmers.size(), true);
+    }
+    sdsl::int_vector<> wbv(kmers.size(), 0, strlen(alphabet));
+    
     std::vector<uint8_t> *Wvec = new std::vector<uint8_t>(kmers.size());
     size_t lastlet=0;
     for (int i=0;i<(int)kmers.size();++i) {
@@ -1212,9 +1214,8 @@ void DBG_succ::add_seq_alt (kstring_t &seq) {
     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     start=clock();
     std::cerr << "Building wavelet tree\t";
-    if (W)
-        delete W;
-    W = new WaveletTree(Wvec, 4);
+    if (!W)
+        W = new WaveletTree(Wvec, 4);
     delete Wvec;
     /*
     sdsl::wt_int<> wwt;
@@ -1222,11 +1223,12 @@ void DBG_succ::add_seq_alt (kstring_t &seq) {
     */
     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     start=clock();
-    free(nt_lookup);
     fprintf(stdout, "edges %lu / nodes %lu\n", get_edge_count(), get_node_count());
+    kmers.clear();
     //std::cerr << kmers.size() << " " << W->n << " " << last->size() << "\n";
     //assert(W->n == last->size());
 }
+
 
 
 /** This function takes a character c and appends it to the end of the graph sequence

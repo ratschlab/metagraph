@@ -567,6 +567,7 @@ int main(int argc, char const ** argv) {
                     graph->add_seq_alt(read_stream->seq);
                     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
                 }
+                graph->construct_succ();
                 kseq_destroy(read_stream);
                 gzclose(input_p);
 
