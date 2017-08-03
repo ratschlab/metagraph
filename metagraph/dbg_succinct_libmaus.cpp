@@ -1167,24 +1167,34 @@ void DBG_succ::construct_succ() {
     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     start=clock();
     std::cerr << "Constructing succinct representation\t";
-    if (W->n == 2) {
-        delete W;
-        W=NULL;
-        delete last;
-        last = new BitBTree(kmers.size(), true);
-    }
-    sdsl::int_vector<> wbv(kmers.size(), 0, strlen(alphabet));
     
-    std::vector<uint8_t> *Wvec = new std::vector<uint8_t>(kmers.size());
+    //if (W->n == 2) {
+    //    delete W;
+    //    W=NULL;
+        delete last;
+        delete W;
+        last = new BitBTree(kmers.size(), true);
+    //}
+    //sdsl::int_vector<> wbv(kmers.size(), 0, strlen(alphabet));
+    
+    //std::vector<uint8_t> *Wvec = new std::vector<uint8_t>(kmers.size());
+    std::vector<uint8_t> Wvec(kmers.size());
     size_t lastlet=0;
-    for (int i=0;i<(int)kmers.size();++i) {
+    std::cerr << "\n";
+    //std::cerr << getPos(kmers[10],k-1,alphabet,alph_size) << "-" << getPos(kmers[10],k,alphabet,alph_size) << "\n";
+    assert(getPos(kmers[10],k,alphabet,alph_size) == 0);
+    char *curseq;
+    for (size_t i=0;i<kmers.size();++i) {
         //set last
-        if (i+1 < (int)kmers.size()) {
+        if (i+1 < kmers.size()) {
             last->setBitQuick(i, !compare_kmer_suffix(kmers[i], kmers[i+1]));
         }
         //set F
+        //curseq = kmertos(kmers[i], alphabet, alph_size);
         char cF=getPos(kmers[i], k-1, alphabet, alph_size);
+        //std::cerr << curseq << " " << cF << " " << alphabet[lastlet] << " " << lastlet << "\n";
         if (cF != alphabet[lastlet]) {
+            std::cerr << cF << " " << lastlet << " " << i-1 << "\n";
             for (lastlet++;lastlet<alph_size;lastlet++) {
                 F[lastlet]=i-1;
                 if (alphabet[lastlet]==cF) {
@@ -1192,39 +1202,53 @@ void DBG_succ::construct_succ() {
                 }
             }
         }
+        //free(curseq);
         //set W
         uint64_t curW = getW(kmers[i]);
-        //W->insert(curW, i);
-        (*Wvec)[i] = curW;
+        //(*Wvec)[i] = curW;
+        Wvec[i] = curW;
         if (!curW)
             p=i;
+        if (i) {
         for (int j=i-1;j>=0 && compare_kmer_suffix(kmers[j], kmers[i], 1);--j) {
-            if (((*Wvec)[j] % alph_size) == curW) {
-                //replaceW(i,wbv[i]);
-                (*Wvec)[i] += alph_size;
+            //if (((*Wvec)[j] % alph_size) == curW) {
+            //    (*Wvec)[i] += alph_size;
+            if ((Wvec[j] % alph_size) == curW) {
+                Wvec[i] += alph_size;
                 break;
             }
+     
         }
-        /*
-        char *curseq = kmertos(kmers[i], alphabet, alph_size);
-        std::cout << sz << " " << (*last)[sz] << " " << curseq+1 << " " << curseq[0] << ((*W)[sz] >= alph_size ? "-":"") << "\n";
-        free(curseq);
-        */
+        }
     }
     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     start=clock();
     std::cerr << "Building wavelet tree\t";
-    if (!W)
+    //if (!W)
         W = new WaveletTree(Wvec, 4);
-    delete Wvec;
+    assert(W->size() == Wvec.size());
+    assert((*W)[3] == Wvec[3]);
+    Wvec.clear();
+    //delete Wvec;
+    kmers.clear();
     /*
-    sdsl::wt_int<> wwt;
-    sdsl::construct_im(wwt, wbv);
+    for (size_t i=0;i<W->size();++i) {
+        char *curseq = kmertos(kmers[i], alphabet, alph_size);
+        std::cout << i << " " << (*last)[i] << " " << curseq+1 << " " << curseq[0] << ((*Wvec)[i] >= alph_size ? "-":"") << " " << get_alphabet_symbol((*W)[i]) << "\n";
+        free(curseq);
+    }
     */
     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     start=clock();
-    fprintf(stdout, "edges %lu / nodes %lu\n", get_edge_count(), get_node_count());
-    kmers.clear();
+    FILE* sfile = fopen("/proc/self/status","r");
+    char line[128];
+    while (fgets(line, 128, sfile) != NULL) {
+        if (strncmp(line, "VmRSS:", 6) == 0) {
+            break;
+        }
+    }
+    fclose(sfile);
+    fprintf(stdout, "edges %lu / nodes %lu/ %s\n", get_edge_count(), get_node_count(), line);
     //std::cerr << kmers.size() << " " << W->n << " " << last->size() << "\n";
     //assert(W->n == last->size());
 }

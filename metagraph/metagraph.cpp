@@ -605,7 +605,6 @@ int main(int argc, char const ** argv) {
                 }
                 kseq_destroy(read_stream);
                 }
-                graph->construct_succ();
                 gzclose(input_p);
 
                 //graph->update_counters();
@@ -613,6 +612,7 @@ int main(int argc, char const ** argv) {
                 
                 //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
             }
+            graph->construct_succ();
             //graph->print_seq();
         } break;
 
