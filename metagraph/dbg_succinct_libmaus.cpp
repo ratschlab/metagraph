@@ -1297,6 +1297,8 @@ void DBG_succ::append_graph(DBG_succ *g) {
         this->W->insert(g->get_W(j), curr_pos);
         ++curr_pos;
     }
+    if (config->verbose)
+        std::cout << "new total edges: " << g->W->n << std::endl;
 
     // handle F
     assert(this->F.size() == g->F.size());
@@ -1346,7 +1348,7 @@ void DBG_succ::append_graph_static(DBG_succ *g) {
             blocks.swap(new_blocks);
     }
 
-    std::cerr << "R size: " << g->W->R->size() << std::endl;
+    //std::cerr << "R size: " << g->W->R->size() << std::endl;
 
     bool bit;
     std::vector<uint64_t> upto_offsets ((1ull << (b - 1)) - 1, 0);
@@ -1375,6 +1377,8 @@ void DBG_succ::append_graph_static(DBG_succ *g) {
         if (bit) {
             v |= m;
         }
+        if (i == 0)
+            continue;
         this->W_stat.push_back(v);
         this->last_stat.push_back(g->get_last(i));
     }
@@ -2522,6 +2526,7 @@ std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t bins) {
 
     uint64_t nodes = this->rank_last(this->get_size() - 1);
     uint64_t orig_bins = bins;
+    std::cerr << "working with " << orig_bins << " orig bins; " << nodes << " nodes" <<  std::endl;
     if (bins > nodes) {
         std::cerr << "[WARNING] There are max " << nodes << " slots available for binning. Your current choice is " << bins << " which will create " << bins - nodes << " empty slots." << std::endl;
         bins = nodes;
@@ -2529,11 +2534,12 @@ std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t bins) {
 
     std::vector<std::pair<uint64_t, uint64_t> > result;
     uint64_t binsize = (nodes + bins - 1) / bins;
-    uint64_t thresh = (nodes - (bins / (nodes / bins))) * binsize;
+    uint64_t thresh = (nodes - (bins * (nodes / bins))) * binsize;
     uint64_t pos = 1;
     for (uint64_t i = 0; i < nodes;) {
-        if (i >= thresh)
+        if (i >= thresh) {
             binsize = nodes / bins;
+        }
         //std::cerr << "push " << pos << " - " << this->select_last(std::min(nodes, i + binsize)) << std::endl;
         result.push_back(std::make_pair(pos, this->select_last(std::min(nodes, i + binsize))));
         pos = result.back().second + 1;
@@ -2545,6 +2551,7 @@ std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t bins) {
         result.push_back(std::make_pair(1, 0));
     }
     
+    std::cerr << "created " << result.size() << " bins" << std::endl;
     return result;
 }
 
@@ -2558,7 +2565,7 @@ std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins_relative(DBG_succ
             result.push_back(std::make_pair(0, 0));
         } else {
             upper = this->index_predecessor(G->get_node_seq(ref_bins.at(i).second));
-            //std::cerr << "ref bin " << ref_bins.at(i).second << " rel upper " << upper << std::endl;
+            std::cerr << "ref bin " << ref_bins.at(i).second << " rel upper " << upper << std::endl;
             result.push_back(std::make_pair(pos, upper));
             pos = upper + 1;
         }
@@ -3086,7 +3093,8 @@ void DBG_succ::merge3(std::vector<DBG_succ*> Gv, std::vector<uint64_t> kv, std::
     // smallest one into the common merge graph G (this). 
     while (true) {
 
-        if (!is_parallel && config->verbose && added > 0 && added % 1000 == 0) {
+        //if (!is_parallel && config->verbose && added > 0 && added % 1000 == 0) {
+        if (config->verbose && added > 0 && added % 1000 == 0) {
             std::cout << "." << std::flush;
             if (added % 10000 == 0) {
                 std::cout << "added " << added;
@@ -3104,7 +3112,12 @@ void DBG_succ::merge3(std::vector<DBG_succ*> Gv, std::vector<uint64_t> kv, std::
         std::deque<TAlphabet> seq1 = Gv.at(curr_k)->get_node_seq(kv.at(curr_k));
         uint64_t val = Gv.at(curr_k)->get_W(kv.at(curr_k)) % alph_size;
 
-        //std::cerr << "curr_k: " << curr_k << " kv: " << kv.at(curr_k) << " val: " << val << " smallest: " << smallest.second % alph_size << std::endl;
+        /*if (kv.at(62) > 10206700 && kv.at(62) < 10206750) {
+            std::cerr << "curr_k: " << curr_k << " kv: " << kv.at(curr_k) << " val: " << val << " smallest: " << smallest.second % alph_size << std::endl;
+            for (std::deque<TAlphabet>::iterator t = seq1.begin(); t != seq1.end(); t++)
+                std::cerr << *t;
+            std::cerr << std::endl;
+        }*/
         assert(val == smallest.second % alph_size);
         
         //std::cerr << "inserting into W" << std::endl;
@@ -3112,10 +3125,18 @@ void DBG_succ::merge3(std::vector<DBG_succ*> Gv, std::vector<uint64_t> kv, std::
         // same node as the current one
         std::map<uint64_t, std::deque<TAlphabet> >::iterator it = last_added_nodes.find(smallest.second % alph_size);
         if (it != last_added_nodes.end() && compare_seq(seq1, it->second, 1)) {
-            //std::cerr << "inserting " << val + alph_size << " from " << curr_k << " at " << kv.at(curr_k) << std::endl;
+            /*if (kv.at(62) > 10206700 && kv.at(62) < 10206800) {
+                std::cerr << "inserting " << val + alph_size << " from " << curr_k << " at " << kv.at(curr_k) << std::endl;
+                for (std::deque<TAlphabet>::iterator t = it->second.begin(); t != it->second.end(); t++)
+                    std::cerr << *t;
+                std::cerr << std::endl;
+            }*/
             W->insert(val + alph_size, W->n);
         } else {
-            //std::cerr << "inserting " << smallest.second << " from " << curr_k << " at " << kv.at(curr_k) << std::endl;
+            /*if (kv.at(62) > 10206700 && kv.at(62) < 10206800) {
+                std::cerr << "inserting " << smallest.second << " from " << curr_k << " at " << kv.at(curr_k) << std::endl;
+            }
+            */
             W->insert(smallest.second, W->n);
         }
         last_added_nodes[val] = seq1;
@@ -3156,31 +3177,50 @@ void DBG_succ::merge3(std::vector<DBG_succ*> Gv, std::vector<uint64_t> kv, std::
 */
 bool DBG_succ::compare(DBG_succ* G) {
 
+    bool is_same = true;
+    uint64_t cnt01 = 0;
+    uint64_t cnt02 = 0;
+
+    /*size_t top = std::min(W->n, G->W->n);
+    for (size_t i = 0; i < top; ++i) {
+        if (i > 0 && i % 10000 == 0) {
+            std::cerr << ".";
+            if (i % 100000 == 0) {
+                std::cerr << i << "/" << top << " - cnt: " << cnt01 << " " << cnt02 << std::endl;
+            }
+        }
+    }
+    std::cerr << "cnt01: " << cnt01 << std::endl;
+    std::cerr << "cnt02: " << cnt02 << std::endl;
+    */
+
     // compare size
     if (W->n != G->get_size()) {
         std::cerr << "sizes of graphs differ" << std::endl;
         std::cerr << "1: " << W->n << std::endl;
         std::cerr << "2: " << G->get_size() << std::endl;
-        return false;
+        is_same = false;
     }
     
-    // compare W
-    for (size_t i = 0; i < W->n; ++i) {
-        if ((*W)[i] != G->get_W(i)) {
-            std::cerr << "W differs at position " << i << std::endl;
-            std::cerr << "1: W[" << i << "] = " << (*W)[i]  << std::endl;
-            std::cerr << "2: W[" << i << "] = " << G->get_W(i) << std::endl;
-            return false;
-        }
-    }
-
     // compare last
     for (size_t i = 0; i < W->n; ++i) {
         if ((*last)[i] != G->get_last(i)) {
             std::cerr << "last differs at position " << i << std::endl;
             std::cerr << "1: last[" << i << "] = " << (*last)[i]  << std::endl;
             std::cerr << "2: last[" << i << "] = " << G->get_last(i) << std::endl;
-            return false;
+            is_same = false;
+            break;
+        }
+    }
+
+    // compare W
+    for (size_t i = 0; i < W->n; ++i) {
+        if ((*W)[i] != G->get_W(i)) {
+            std::cerr << "W differs at position " << i << std::endl;
+            std::cerr << "1: W[" << i << "] = " << (*W)[i]  << std::endl;
+            std::cerr << "2: W[" << i << "] = " << G->get_W(i) << std::endl;
+            is_same = false;
+            break;
         }
     }
 
@@ -3190,11 +3230,12 @@ bool DBG_succ::compare(DBG_succ* G) {
             std::cerr << "F differs at position " << i << std::endl;
             std::cerr << "1: F[" << i << "] = " << F.at(i) << std::endl;
             std::cerr << "2: F[" << i << "] = " << G->get_F(i) << std::endl;
-            return false;
+            is_same = false;
+            break;
         }
     }
 
-    return true;
+    return is_same;
 
 }
 

@@ -271,13 +271,15 @@ int main(int argc, char const ** argv) {
 
                         if (config->verbose)
                             std::cout << "Collecting relative bins" << std::endl;
-                        for (size_t i = 1; i < graphs.size(); i++)
+                        for (size_t i = 1; i < graphs.size(); i++) {
+                            std::cerr << "getting bins for " << i << ": " << config->fname.at(i) << std::endl; 
                             merge_data2->bins.push_back(graphs.at(i)->get_bins_relative(graphs.front(), merge_data2->ref_bins, merge_data2->first, merge_data2->last));
+                        }
                         for (size_t i = 0; i < graphs.size(); i++) {
                             for (size_t ii = 0; ii < merge_data2->bins.at(i).size(); ii++) {
                                 if (merge_data2->bins.at(i).at(ii).first > merge_data2->bins.at(i).at(ii).second) {
                                    merge_data2->bins.at(i).at(ii) = std::make_pair(graphs.at(i)->get_size(), graphs.at(i)->get_size() - 1); 
-                                    }
+                                }
                             }
                         }
                         /*for (size_t i = 0; i < merge_data2->bins.size(); i++) {
@@ -436,7 +438,7 @@ int main(int argc, char const ** argv) {
             }
             for (unsigned int f = 0; f < config->fname.size(); ++f) {
                 DBG_succ* graph_ = new DBG_succ(config->fname.at(f), config);
-                graph_->W = new libmaus2::wavelet::DynamicWaveletTree<6, 64> (3);
+                /*graph_->W = new libmaus2::wavelet::DynamicWaveletTree<6, 64> (3);
                 graph_->W->insert(1ull, 0);
                 graph_->W->insert(7ull, 1);
                 graph_->W->insert(4ull, 2);
@@ -445,6 +447,7 @@ int main(int argc, char const ** argv) {
                 graph_->W->insert(5ull, 5);
 
                 exit(1);
+                */
                 if (!config->quiet) {
                     std::cout << "Statistics for file " << config->fname.at(f) << std::endl;
                     std::cout << "nodes: " << graph_->get_node_count() << std::endl;
