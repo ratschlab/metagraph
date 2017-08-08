@@ -1,4 +1,4 @@
-LIBMAUS_DIR=external-libraries/libmaus2-lib-hex
+LIBMAUS_DIR=external-libraries/libmaus2-lib
 ROCKSDB_DIR=external-libraries/rocksdb
 SDSL_DIR=external-libraries/local
 

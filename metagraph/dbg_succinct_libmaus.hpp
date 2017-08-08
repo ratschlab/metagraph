@@ -224,6 +224,11 @@ class dyn_wavelet2 : public libmaus2::wavelet::DynamicWaveletTree<6, 64> {
         dyn_wavelet2(std::vector<uint8_t> &W_stat, size_t b, unsigned int parallel=1)
             : libmaus2::wavelet::DynamicWaveletTree<6, 64>(makeTree(W_stat, b, parallel), b, W_stat.size()) {
         }
+
+        dyn_wavelet2(libmaus2::bitbtree::BitBTree<6, 64>* bt, size_t b, size_t n)
+            : libmaus2::wavelet::DynamicWaveletTree<6, 64>(bt, b, n) {
+        }
+
 };
 
 //libmaus2 structures

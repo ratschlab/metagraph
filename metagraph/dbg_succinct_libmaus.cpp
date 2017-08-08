@@ -1580,7 +1580,8 @@ void DBG_succ::toDynamic() {
     }
     W_stat.clear();
     delete W;
-    W = new libmaus2::wavelet::DynamicWaveletTree<6, 64> (tmp, b, n);
+    //W = new libmaus2::wavelet::DynamicWaveletTree<6, 64> (tmp, b, n);
+    W = new WaveletTree(tmp, b, n);
 
     libmaus2::bitbtree::BitBTree<6, 64> *last_new = new libmaus2::bitbtree::BitBTree<6, 64>(last_stat.size(), false);
     for (size_t i = 0; i < last_stat.size(); ++i)
