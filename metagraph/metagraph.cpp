@@ -561,7 +561,9 @@ int main(int argc, char const ** argv) {
                     }
 
                 }
+
                 if (dotind >= 0 && ext == ".vcf") {
+                    //READ FROM VCF
                     uint64_t nbp = 0;
                     uint64_t nbplast = 0;
                     clock_t start = clock();
@@ -571,6 +573,7 @@ int main(int argc, char const ** argv) {
                         std::cerr << "ERROR reading VCF " << config->fname.at(f) << std::endl;
                         exit(1);
                     }
+                    std::cerr << "Loading VCF with " << config->parallel << " threads per line\n";
                     for (size_t i=1; vcf_get_seq(vcf);++i) {
                         if (i % 1000 == 0) {
                             std::cout << "." << std::flush;
@@ -581,29 +584,31 @@ int main(int argc, char const ** argv) {
                             }
                         }
                         nbp += vcf->seq.l;
-                        graph->add_seq_alt(vcf->seq, false);
+                        graph->add_seq_alt(vcf->seq, false, config->parallel, config->suffix);
                     }
                     vcf_destroy(vcf);
                 } else {
-                kseq_t *read_stream = kseq_init(input_p);
-
-                if (read_stream == NULL) {
-                    std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
-                    exit(1);
-                }
-
-                while (kseq_read(read_stream) >= 0) {
-                    // possibly reverse k-mers
-                    if (config->reverse)
-                        reverse_complement(read_stream->seq);                    
-
-                    // add all k-mers of seq to the graph
-                    clock_t start = clock();
-                    //graph->add_seq(read_stream->seq);
-                    graph->add_seq_alt(read_stream->seq);
-                    std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
-                }
-                kseq_destroy(read_stream);
+                    //READ FROM FASTA
+                    kseq_t *read_stream = kseq_init(input_p);
+    
+                    if (read_stream == NULL) {
+                        std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
+                        exit(1);
+                    }
+    
+                    while (kseq_read(read_stream) >= 0) {
+                        // possibly reverse k-mers
+                        if (config->reverse)
+                            reverse_complement(read_stream->seq);                    
+    
+                        // add all k-mers of seq to the graph
+                        clock_t start = clock();
+                        //graph->add_seq(read_stream->seq);
+                        std::cerr << "Loading next sequence with " << config->parallel << " threads\n";
+                        graph->add_seq_alt(read_stream->seq, true, config->parallel, config->suffix);
+                        std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
+                    }
+                    kseq_destroy(read_stream);
                 }
                 gzclose(input_p);
 
@@ -612,7 +617,7 @@ int main(int argc, char const ** argv) {
                 
                 //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
             }
-            graph->construct_succ();
+            graph->construct_succ(config->parallel);
             //graph->print_seq();
         } break;
 

@@ -23,6 +23,7 @@
 #include <cmath>
 #include <pthread.h>
 #include <ctime>
+#include <parallel/algorithm>
 
 // use Heng Li's kseq structure for string IO
 #include "kseq.h"
@@ -1131,8 +1132,7 @@ void DBG_succ::add_seq (kstring_t &seq) {
     //fprintf(stdout, "\nindex of CCT: %i\n", (int) index(test));
 }
 
-//TODO: support extension
-void DBG_succ::add_seq_alt (kstring_t &seq, bool bridge) {
+void DBG_succ::add_seq_alt (kstring_t &seq, bool bridge, unsigned int parallel, std::string suffix) {
 
     if (debug) {
         print_seq();
@@ -1154,47 +1154,76 @@ void DBG_succ::add_seq_alt (kstring_t &seq, bool bridge) {
         seqtokmer(kmers, "$", 1, k, nt_lookup);
         kmers.push_back(stokmer(std::string(k-1,'X')+std::string("$$"), nt_lookup));
     }
-    seqtokmer(kmers, seq.s, seq.l, k, nt_lookup, bridge);
+    seqtokmer(kmers, seq.s, seq.l, k, nt_lookup, bridge, parallel, suffix);
     //std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     free(nt_lookup);
 }
 
-void DBG_succ::construct_succ() {
+void DBG_succ::construct_succ(unsigned int parallel) {
     clock_t start=clock();
     std::cerr << "Sorting kmers\t";
+    //omp_set_num_threads(std::max((int)parallel-1,1));
+    //__gnu_parallel::sort(kmers.begin(),kmers.end());
     std::sort(kmers.begin(),kmers.end());
     kmers.erase(std::unique(kmers.begin(), kmers.end() ), kmers.end() );
     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     start=clock();
     std::cerr << "Constructing succinct representation\t";
     
-    //if (W->n == 2) {
-    //    delete W;
-    //    W=NULL;
-        delete last;
-        delete W;
-        last = new BitBTree(kmers.size(), true);
-    //}
+    delete last;
+    delete W;
+    last = new BitBTree(kmers.size(), true);
     //sdsl::int_vector<> wbv(kmers.size(), 0, strlen(alphabet));
     
-    //std::vector<uint8_t> *Wvec = new std::vector<uint8_t>(kmers.size());
     std::vector<uint8_t> Wvec(kmers.size());
     size_t lastlet=0;
     std::cerr << "\n";
     //std::cerr << getPos(kmers[10],k-1,alphabet,alph_size) << "-" << getPos(kmers[10],k,alphabet,alph_size) << "\n";
-    assert(getPos(kmers[10],k,alphabet,alph_size) == 0);
-    char *curseq;
-    for (size_t i=0;i<kmers.size();++i) {
-        //set last
-        if (i+1 < kmers.size()) {
-            last->setBitQuick(i, !compare_kmer_suffix(kmers[i], kmers[i+1]));
+    //assert(getPos(kmers[10],k,alphabet,alph_size) == 0);
+    #pragma omp parallel num_threads(parallel)
+    {
+        #pragma omp for
+        for (size_t i=0;i<kmers.size();++i) {
+            //set last
+            if (i+1 < kmers.size()) {
+                bool dup = compare_kmer_suffix(kmers[i], kmers[i+1]);
+                if (dup) {
+                    #pragma omp critical
+                    //last->setBitQuick(i, !compare_kmer_suffix(kmers[i], kmers[i+1]));
+                    last->setBitQuick(i, false);
+                }
+            }
+            //set F
+            //set W
+            uint64_t curW = getW(kmers[i]);
+            Wvec[i] = curW;
+            if (!curW && i)
+                p=i;
+            if (i) {
+                //uint64_t cF=get_alphabet_number(getPos(kmers[i], k-1, alphabet, alph_size));
+                //#pragma omp critical
+                //F[cF] = std::min(F[cF],i-1);
+                for (int j=i-1;j>=0 && compare_kmer_suffix(kmers[j], kmers[i], 1);--j) {
+                    if ((Wvec[j] % alph_size) == curW) {
+                        Wvec[i] += alph_size;
+                        break;
+                    }
+             
+                }
+            }
         }
-        //set F
-        //curseq = kmertos(kmers[i], alphabet, alph_size);
-        char cF=getPos(kmers[i], k-1, alphabet, alph_size);
-        //std::cerr << curseq << " " << cF << " " << alphabet[lastlet] << " " << lastlet << "\n";
+    }
+    F[0] = 0;
+//    uint64_t cF = get_alphabet_number(getPos(kmers[0], k-1, alphabet, alph_size));
+    for (size_t i=0;i<kmers.size();++i) {
+        uint64_t cF=getPos(kmers[i], k-1, alphabet, alph_size);
+        /*
+        char *curseq = kmertos(kmers[i], alphabet, alph_size);
+        std::cerr << "-" << (*last)[i] << " " << curseq << " " << get_alphabet_symbol(Wvec[i]) << (Wvec[i]>=alph_size ? "-" : "") << "\n"; 
+        free(curseq);
+        */
         if (cF != alphabet[lastlet]) {
-            std::cerr << cF << " " << lastlet << " " << i-1 << "\n";
+            //std::cerr << cF << " " << lastlet << " " << i-1 << "\n";
             for (lastlet++;lastlet<alph_size;lastlet++) {
                 F[lastlet]=i-1;
                 if (alphabet[lastlet]==cF) {
@@ -1202,34 +1231,15 @@ void DBG_succ::construct_succ() {
                 }
             }
         }
-        //free(curseq);
-        //set W
-        uint64_t curW = getW(kmers[i]);
-        //(*Wvec)[i] = curW;
-        Wvec[i] = curW;
-        if (!curW)
-            p=i;
-        if (i) {
-        for (int j=i-1;j>=0 && compare_kmer_suffix(kmers[j], kmers[i], 1);--j) {
-            //if (((*Wvec)[j] % alph_size) == curW) {
-            //    (*Wvec)[i] += alph_size;
-            if ((Wvec[j] % alph_size) == curW) {
-                Wvec[i] += alph_size;
-                break;
-            }
-     
-        }
-        }
     }
     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     start=clock();
+
     std::cerr << "Building wavelet tree\t";
-    //if (!W)
-        W = new WaveletTree(Wvec, 4);
+    W = new WaveletTree(Wvec, 4, parallel);
     assert(W->size() == Wvec.size());
     assert((*W)[3] == Wvec[3]);
     Wvec.clear();
-    //delete Wvec;
     kmers.clear();
     /*
     for (size_t i=0;i<W->size();++i) {

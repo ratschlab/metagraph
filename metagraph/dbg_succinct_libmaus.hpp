@@ -158,65 +158,71 @@ class dyn_wavelet2 : public libmaus2::wavelet::DynamicWaveletTree<6, 64> {
         dyn_wavelet2(std::istream &in)
             : libmaus2::wavelet::DynamicWaveletTree<6, 64>(in) {
         }
-        libmaus2::bitbtree::BitBTree<6, 64>* makeTree(std::vector<uint8_t> &W_stat, size_t b) {
+        libmaus2::bitbtree::BitBTree<6, 64>* makeTree(std::vector<uint8_t> &W_stat, size_t b, unsigned int parallel=1) {
             uint64_t n = W_stat.size();
             //uint64_t n = W_stat->size();
             std::vector<uint64_t> offsets((1ull << (b-1)) - 1, 0);
-            uint64_t v, m, o, p;
-            for (uint64_t i=0;i<n;++i) {
-                m = (1ull << (b - 1));
-                v = (uint64_t) W_stat.at(i);
-                //v = (uint64_t) W_stat->at(i);
-                o = 0;
-                for (uint64_t ib = 1; ib < b; ++ib) {
-                    bool const bit = m & v;
-                    if (!bit)
-                        offsets.at(o) += 1;
-                    o = 2*o + 1 + bit;
-                    m >>= 1;
+            //#pragma omp parallel num_threads(parallel) shared(offsets)
+            //{
+                //#pragma omp for
+                for (uint64_t i=0;i<n;++i) {
+                    uint64_t m = (1ull << (b - 1));
+                    uint64_t v = (uint64_t) W_stat.at(i);
+                    //v = (uint64_t) W_stat->at(i);
+                    uint64_t o = 0;
+                    for (uint64_t ib = 1; ib < b; ++ib) {
+                        bool const bit = m & v;
+                        if (!bit)
+                            offsets.at(o) += 1;
+                        o = 2*o + 1 + bit;
+                        m >>= 1;
+                    }
                 }
-            }
+            //}
             libmaus2::bitbtree::BitBTree<6, 64> *tmp = new libmaus2::bitbtree::BitBTree<6, 64>(n*b, false);
             //libmaus2::bitbtree::BitBTree<6, 64> tmp(n*b, false);
-            uint64_t co;
-            bool bit;
             std::vector<uint64_t> upto_offsets ((1ull << (b - 1)) - 1, 0);
-            for (uint64_t i = 0; i < n; ++i) {
-                m = (1ull << (b - 1));
-                v = (uint64_t) W_stat.at(i);
-                //v = (uint64_t) W_stat->at(i);
-                o = 0;
-                p = i;
-                co = 0;
-                for (uint64_t ib = 0; ib < b - 1; ++ib) {
+            //#pragma omp parallel num_threads(parallel)
+            //{
+                //#pragma omp for
+                for (uint64_t i = 0; i < n; ++i) {
+                    uint64_t m = (1ull << (b - 1));
+                    uint64_t v = (uint64_t) W_stat.at(i);
+                    //v = (uint64_t) W_stat->at(i);
+                    uint64_t o = 0;
+                    uint64_t p = i;
+                    uint64_t co = 0;
+                    bool bit;
+                    for (uint64_t ib = 0; ib < b - 1; ++ib) {
+                        bit = m & v;
+                        if (bit) {
+                            //tmp.setBitQuick(ib * n + p + co, true);
+                            tmp->setBitQuick(ib * n + p + co, true);
+                            //assert((*tmp)[ib * n + p + co]);
+                            co += offsets.at(o);
+                            p -= upto_offsets.at(o);
+                        } else {
+                            p -= (p - upto_offsets.at(o)); 
+                            upto_offsets.at(o) += 1;
+                        }
+                        //std::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
+                        o = 2*o + 1 + bit;
+                        m >>= 1;
+                    }
                     bit = m & v;
                     if (bit) {
-                        //tmp.setBitQuick(ib * n + p + co, true);
-                        tmp->setBitQuick(ib * n + p + co, true);
-                        assert((*tmp)[ib * n + p + co]);
-                        co += offsets.at(o);
-                        p -= upto_offsets.at(o);
-                    } else {
-                        p -= (p - upto_offsets.at(o)); 
-                        upto_offsets.at(o) += 1;
+                       // std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
+                        tmp->setBitQuick((b - 1) * n + p + co, true); 
+                        //tmp.setBitQuick((b - 1) * n + p + co, true); 
+                        //assert((*tmp)[(b - 1) * n + p + co]);
                     }
-                    //std::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
-                    o = 2*o + 1 + bit;
-                    m >>= 1;
                 }
-                bit = m & v;
-                if (bit) {
-                   // std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
-                    tmp->setBitQuick((b - 1) * n + p + co, true); 
-                    //tmp.setBitQuick((b - 1) * n + p + co, true); 
-                    assert((*tmp)[(b - 1) * n + p + co]);
-                }
-            }
+            //}
             return tmp;
         }
 
-        dyn_wavelet2(std::vector<uint8_t> &W_stat, size_t b)
-            : libmaus2::wavelet::DynamicWaveletTree<6, 64>(makeTree(W_stat, b), b, W_stat.size()) {
+        dyn_wavelet2(std::vector<uint8_t> &W_stat, size_t b, unsigned int parallel=1)
+            : libmaus2::wavelet::DynamicWaveletTree<6, 64>(makeTree(W_stat, b, parallel), b, W_stat.size()) {
         }
 };
 
@@ -555,8 +561,8 @@ class DBG_succ {
 
     // add a full sequence to the graph
     void add_seq (kstring_t &seq);
-    void add_seq_alt (kstring_t &seq, bool bridge=true);
-    void construct_succ();
+    void add_seq_alt (kstring_t &seq, bool bridge=true, unsigned int parallel=1, std::string suffix="");
+    void construct_succ(unsigned int parallel=1);
 
     /** This function takes a character c and appends it to the end of the graph sequence
      * given that the corresponding note is not part of the graph yet.

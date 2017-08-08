@@ -74,29 +74,30 @@ char* kmertos(ui256 kmer, const char *alphabet, const uint64_t &alph_size) {
     return seq;
 }
 
-void seqtokmer(std::vector<ui256> &kmers, const char *seq, const uint64_t &len, const uint64_t &k, const char *nt_lookup, bool add_bridge=true) {
+void seqtokmer(std::vector<ui256> &kmers, const char *seq, const uint64_t &len, const uint64_t &k, const char *nt_lookup, bool add_bridge=true, unsigned int parallel=1, std::string suffix="") {
     char *bridge = (char*)malloc(k+2);
     memset(bridge, 'X', k); 
     bridge[k] = seq[0];
     bridge[k+1] = 0;
-    size_t i;
+    size_t i=0;
     size_t j=kmers.size();
+    //std::cout << "Loading next sequence with " << parallel << " threads\n";
     kmers.resize(kmers.size()+len-k+(2*k*add_bridge));
     //std::cerr << "Memory reserved\n";
     if (add_bridge) {
-    for (i=0;i<std::min(k,len); ++i) {
-        /*
-        if (DEBUG) {
-            char *curseq = kmertos(stokmer(bridge, k+1));
-            std::cerr << bridge << " " << stokmer(bridge, k+1) << " " << curseq << "\n";
-            free(curseq);
-        } 
-        */
-        //kmers.insert(stokmer(bridge, k+1, nt_lookup));
-        kmers[j++]=stokmer(bridge, k+1, nt_lookup);
-        memmove(bridge, bridge+1, k); 
-        bridge[k]= (i+1 < len) ? seq[i+1] : 'X';
-    }
+        for (i=0;i<std::min(k,len); ++i) {
+            /*
+            if (DEBUG) {
+                char *curseq = kmertos(stokmer(bridge, k+1));
+                std::cerr << bridge << " " << stokmer(bridge, k+1) << " " << curseq << "\n";
+                free(curseq);
+            } 
+            */
+            //kmers.insert(stokmer(bridge, k+1, nt_lookup));
+            kmers[j++]=stokmer(bridge, k+1, nt_lookup);
+            memmove(bridge, bridge+1, k); 
+            bridge[k]= (i+1 < len) ? seq[i+1] : 'X';
+        }
     }
     if (k<len) {
         /*
@@ -116,35 +117,39 @@ void seqtokmer(std::vector<ui256> &kmers, const char *seq, const uint64_t &len, 
         free(testbuild);
         free(testbuild2);
         */
-        for (i=0; i+k < len; ++i) {
-            if (!((i+1) % 1000)) {
-                std::cout << "." << std::flush;
-                if (!((i+1) % 10000)) {
-                    std::cout << i+1 << "\n";
-                }   
-            } 
-            //kmers.insert(stokmer(seq+i, k+1, nt_lookup));
-            kmers[j++]=stokmer(seq+i, k+1, nt_lookup);
-        }   
+        #pragma omp parallel num_threads(parallel)
+        {
+            #pragma omp for
+            for (i=0; i < len-k; ++i) {
+                //if (!((i+1) % 1000)) {
+                //    std::cout << "." << std::flush;
+                    //if (!((i+1) % 100000)) {
+                    //    std::cout << i+1 << "\n";
+                    //} 
+                //}
+                kmers[i+j]=stokmer(seq+i, k+1, nt_lookup);
+            }   
+        }
         //std::cerr << "foo\n";
-        memcpy(bridge, seq+i, k); 
+        memcpy(bridge, seq+len-k, k); 
         bridge[k]='X';
+        j += len-k;
     }   
     //std::cerr << "\n";
     if (add_bridge) {
-    for (i=0;i<k;++i) {
-        /*
-        if (DEBUG) {
-            char *curseq = kmertos(stokmer(bridge, k+1));
-            std::cerr << bridge << " " << stokmer(bridge, k+1) << " " << curseq << "\n";
-            free(curseq);
-        } 
-        */
-        //kmers.insert(stokmer(bridge, k+1, nt_lookup));
-        kmers[j++]=stokmer(bridge, k+1, nt_lookup);
-        memmove(bridge, bridge+1, k); 
-        bridge[k]='X';
-    }
+        for (i=0;i<k;++i) {
+            /*
+            if (DEBUG) {
+                char *curseq = kmertos(stokmer(bridge, k+1));
+                std::cerr << bridge << " " << stokmer(bridge, k+1) << " " << curseq << "\n";
+                free(curseq);
+            } 
+            */
+            //kmers.insert(stokmer(bridge, k+1, nt_lookup));
+            kmers[j++]=stokmer(bridge, k+1, nt_lookup);
+            memmove(bridge, bridge+1, k); 
+            bridge[k]='X';
+        }
     }
     free(bridge);
 }
