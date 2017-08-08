@@ -69,6 +69,10 @@ Config::Config(int argc, const char *argv[]) {
             distance = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-O") || !strcmp(argv[i], "--outfile-base")) {
             outfbase = std::string(argv[++i]);
+        } else if (!strcmp(argv[i], "-R") || !strcmp(argv[i], "--reference")) {
+            refpath = std::string(argv[++i]);
+        } else if (!strcmp(argv[i], "-s") || !strcmp(argv[i], "--suffix")) {
+            suffix = std::string(argv[++i]);
         //} else if (!strcmp(argv[i], "-D") || !strcmp(argv[i], "--db-path")) {
         //    dbpath = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-S") || !strcmp(argv[i], "--sql-base")) {

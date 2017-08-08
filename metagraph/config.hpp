@@ -36,6 +36,8 @@ class Config {
         std::string infbase;
         std::string sqlfbase;
         std::string dbpath;
+        std::string refpath;
+        std::string suffix;
 
         enum identities {noidentity = -1, 
                          build = 1, 

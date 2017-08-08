@@ -22,6 +22,8 @@
 #include <zlib.h>
 #include <cmath>
 #include <pthread.h>
+#include <ctime>
+#include <parallel/algorithm>
 
 // use Heng Li's kseq structure for string IO
 #include "kseq.h"
@@ -41,6 +43,7 @@ KSEQ_INIT(gzFile, gzread)
 #include "datatypes.hpp"
 #include "serialization.hpp"
 #include "dbg_succinct_libmaus.hpp"
+#include "dbg_succinct_boost.hpp"
 #include "annotation.hpp"
 
 // define an extended alphabet for W --> somehow this does not work properly as expected
@@ -101,10 +104,10 @@ struct DBG_succ::JoinInfo {
 };
 
 // the bit array indicating the last outgoing edge of a node
-libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();
+//libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();
 
 // the array containing the edge labels
-libmaus2::wavelet::DynamicWaveletTree<6, 64> *W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
+//libmaus2::wavelet::DynamicWaveletTree<6, 64> *W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
 
 // the offset array to mark the offsets for the last column in the implicit node list
 std::vector<TAlphabet> F; 
@@ -176,7 +179,8 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
     // load W array
     delete W;
     instream.open((infbase + ".W.dbg").c_str());
-    W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(instream);
+    W = new WaveletTree(instream);
+    //W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(instream);
     instream.close();
 
     // load F and k and p
@@ -1136,6 +1140,138 @@ void DBG_succ::add_seq (kstring_t &seq) {
     //String<Dna5F> test = "CCT";
     //fprintf(stdout, "\nindex of CCT: %i\n", (int) index(test));
 }
+
+void DBG_succ::add_seq_alt (kstring_t &seq, bool bridge, unsigned int parallel, std::string suffix) {
+
+    if (debug) {
+        print_seq();
+        print_state();
+        std::cout << "======================================" << std::endl;
+    }
+
+    char *nt_lookup = (char*)malloc(128);
+    uint8_t def = 5;
+    memset(nt_lookup, def, 128);
+    for (size_t i=0;i<alph_size;++i) {
+        nt_lookup[(uint8_t)alphabet[i]]=i;
+        nt_lookup[(uint8_t)tolower(alphabet[i])]=i;
+    }
+
+    //clock_t start = clock();
+    //std::cerr << "Loading kmers\n";
+    if (!kmers.size()) {
+        seqtokmer(kmers, "$", 1, k, nt_lookup);
+        kmers.push_back(stokmer(std::string(k-1,'X')+std::string("$$"), nt_lookup));
+    }
+    seqtokmer(kmers, seq.s, seq.l, k, nt_lookup, bridge, parallel, suffix);
+    //std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
+    free(nt_lookup);
+}
+
+void DBG_succ::construct_succ(unsigned int parallel) {
+    clock_t start=clock();
+    std::cerr << "Sorting kmers\t";
+    //omp_set_num_threads(std::max((int)parallel-1,1));
+    //__gnu_parallel::sort(kmers.begin(),kmers.end());
+    std::sort(kmers.begin(),kmers.end());
+    kmers.erase(std::unique(kmers.begin(), kmers.end() ), kmers.end() );
+    std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
+    start=clock();
+    std::cerr << "Constructing succinct representation\t";
+    
+    delete last;
+    delete W;
+    last = new BitBTree(kmers.size(), true);
+    //sdsl::int_vector<> wbv(kmers.size(), 0, strlen(alphabet));
+    
+    std::vector<uint8_t> Wvec(kmers.size());
+    size_t lastlet=0;
+    std::cerr << "\n";
+    //std::cerr << getPos(kmers[10],k-1,alphabet,alph_size) << "-" << getPos(kmers[10],k,alphabet,alph_size) << "\n";
+    //assert(getPos(kmers[10],k,alphabet,alph_size) == 0);
+    #pragma omp parallel num_threads(parallel)
+    {
+        #pragma omp for
+        for (size_t i=0;i<kmers.size();++i) {
+            //set last
+            if (i+1 < kmers.size()) {
+                bool dup = compare_kmer_suffix(kmers[i], kmers[i+1]);
+                if (dup) {
+                    #pragma omp critical
+                    //last->setBitQuick(i, !compare_kmer_suffix(kmers[i], kmers[i+1]));
+                    last->setBitQuick(i, false);
+                }
+            }
+            //set F
+            //set W
+            uint64_t curW = getW(kmers[i]);
+            Wvec[i] = curW;
+            if (!curW && i)
+                p=i;
+            if (i) {
+                //uint64_t cF=get_alphabet_number(getPos(kmers[i], k-1, alphabet, alph_size));
+                //#pragma omp critical
+                //F[cF] = std::min(F[cF],i-1);
+                for (int j=i-1;j>=0 && compare_kmer_suffix(kmers[j], kmers[i], 1);--j) {
+                    if ((Wvec[j] % alph_size) == curW) {
+                        Wvec[i] += alph_size;
+                        break;
+                    }
+             
+                }
+            }
+        }
+    }
+    F[0] = 0;
+//    uint64_t cF = get_alphabet_number(getPos(kmers[0], k-1, alphabet, alph_size));
+    for (size_t i=0;i<kmers.size();++i) {
+        uint64_t cF=getPos(kmers[i], k-1, alphabet, alph_size);
+        /*
+        char *curseq = kmertos(kmers[i], alphabet, alph_size);
+        std::cerr << "-" << (*last)[i] << " " << curseq << " " << get_alphabet_symbol(Wvec[i]) << (Wvec[i]>=alph_size ? "-" : "") << "\n"; 
+        free(curseq);
+        */
+        if (cF != alphabet[lastlet]) {
+            //std::cerr << cF << " " << lastlet << " " << i-1 << "\n";
+            for (lastlet++;lastlet<alph_size;lastlet++) {
+                F[lastlet]=i-1;
+                if (alphabet[lastlet]==cF) {
+                    break;
+                }
+            }
+        }
+    }
+    std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
+    start=clock();
+
+    std::cerr << "Building wavelet tree\t";
+    W = new WaveletTree(Wvec, 4, parallel);
+    assert(W->size() == Wvec.size());
+    assert((*W)[3] == Wvec[3]);
+    Wvec.clear();
+    kmers.clear();
+    /*
+    for (size_t i=0;i<W->size();++i) {
+        char *curseq = kmertos(kmers[i], alphabet, alph_size);
+        std::cout << i << " " << (*last)[i] << " " << curseq+1 << " " << curseq[0] << ((*Wvec)[i] >= alph_size ? "-":"") << " " << get_alphabet_symbol((*W)[i]) << "\n";
+        free(curseq);
+    }
+    */
+    std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
+    start=clock();
+    FILE* sfile = fopen("/proc/self/status","r");
+    char line[128];
+    while (fgets(line, 128, sfile) != NULL) {
+        if (strncmp(line, "VmRSS:", 6) == 0) {
+            break;
+        }
+    }
+    fclose(sfile);
+    fprintf(stdout, "edges %lu / nodes %lu/ %s\n", get_edge_count(), get_node_count(), line);
+    //std::cerr << kmers.size() << " " << W->n << " " << last->size() << "\n";
+    //assert(W->n == last->size());
+}
+
 
 
 /** This function takes a character c and appends it to the end of the graph sequence

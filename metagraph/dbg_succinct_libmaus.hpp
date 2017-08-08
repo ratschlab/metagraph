@@ -11,19 +11,247 @@
 #include "datatypes.hpp"
 
 #include "kseq.h"
+#include <sdsl/wavelet_trees.hpp>
+#include <boost/multiprecision/cpp_int.hpp>
+
+typedef boost::multiprecision::uint256_t ui256;
+
+class rs_bit_vector: public sdsl::bit_vector {
+    private:
+        sdsl::rank_support_v5<> rk;
+        sdsl::select_support_mcl<> slct;
+        bool update_rs = true;
+        void init_rs() {
+            rk = sdsl::rank_support_v5<>(this);
+            slct = sdsl::select_support_mcl<>(this);
+            update_rs = false;
+        }
+    public:
+        rs_bit_vector(size_t size, bool def) : sdsl::bit_vector(size, def) {
+        }
+        rs_bit_vector() : sdsl::bit_vector() {
+        }
+        void set(size_t id, bool val) {
+            this->operator[](id) = val;
+            update_rs = true;
+        }
+        void setBitQuick(size_t id, bool val) {
+            this->operator[](id) = val;
+            update_rs = true;
+        }
+        void insertBit(size_t id, bool val) {
+            this->resize(this->size()+1);
+            if (this->size() > 1)
+                std::copy_backward(this->begin()+id,(this->end())-1,this->end());
+            set(id, val);
+            update_rs = true;
+        }
+        void deleteBit(size_t id) {
+            if (this->size() > 1)
+                std::copy(this->begin()+id+1,this->end(),this->begin()+id);
+            this->resize(this->size()-1);
+            update_rs = true;
+        }
+        void deserialise(std::istream &in) {
+            this->load(in);
+        }
+        void serialise(std::ostream &out) {
+            this->serialize(out);
+        }
+        uint64_t select1(size_t id) {
+            if (update_rs)
+                init_rs();
+            //compensating for libmaus weirdness
+            id++;
+            size_t maxrank = rk(this->size());
+            if (id > maxrank) {
+                //TODO: should this line ever be reached?
+                return this->size();
+            }
+            return slct(id);
+        }
+        uint64_t rank1(size_t id) {
+            if (update_rs)
+                init_rs();
+            //the rank method in SDSL does not include id in the count
+            return rk(id >= this->size() ? this->size() : id+1);
+        }
+};
+
+class dyn_wavelet: public sdsl::int_vector<> {
+    private:
+        sdsl::wt_int<> wwt;
+        size_t logsigma;
+        bool update_rs;
+        void init_wt() {
+            this->resize(n);
+            sdsl::construct_im(wwt, *this);
+            update_rs=false;
+        }
+    public:
+        size_t n;
+        dyn_wavelet(size_t logsigma, size_t size, uint64_t def) 
+            : sdsl::int_vector<>(2 * size + 1, def, 1<< logsigma) {
+            n = size;
+            update_rs = true;
+        }
+        dyn_wavelet(size_t logsigma)
+            : dyn_wavelet(logsigma, 0, 0) {
+        }
+        void deserialise(std::istream &in) {
+            wwt.load(in);
+            this->load(in);
+            n = this->size();
+        }
+        dyn_wavelet(std::istream &in) {
+            this->deserialise(in);
+        }
+        void insert(uint64_t val, size_t id) {
+            if (n == this->size()) {
+                this->resize(2*n+1);
+            }
+            n++;
+            if (this->size() > 1)
+                std::copy_backward(this->begin()+id,this->begin()+n-1,this->begin()+n);
+            this->operator[](id) = val;
+            update_rs = true;
+        }
+        void remove(size_t id) {
+            if (this->size() > 1)
+                std::copy(this->begin()+id+1,this->begin()+n,this->begin()+id);
+            n--;
+            update_rs = true;
+        }
+        uint64_t rank(uint64_t c, uint64_t i) {
+            if (update_rs)
+                init_wt();
+            return wwt.rank(i >= wwt.size() ? wwt.size() : i+1, c);
+        }
+        uint64_t select(uint64_t c, uint64_t i) {
+            if (update_rs)
+                init_wt();
+            i++;
+            uint64_t maxrank = wwt.rank(wwt.size(), c);
+            if (i > maxrank) {
+                //TODO: should this line ever be reached?
+                return wwt.size();
+            }
+            return wwt.select(i, c);
+        }
+        void serialise(std::ostream &out) {
+            this->resize(n);
+            wwt.serialize(out);
+            this->serialize(out);
+        }
+        sdsl::int_vector<>::reference operator[](const size_t id) {
+            update_rs = true;
+            return sdsl::int_vector<>::operator[](id);
+        }
+};
+
+//Child of DynamicWaveletTree allowing for construction from an int vector
+class dyn_wavelet2 : public libmaus2::wavelet::DynamicWaveletTree<6, 64> {
+    public:
+        dyn_wavelet2(size_t b)
+            : libmaus2::wavelet::DynamicWaveletTree<6, 64>(b) {
+        }
+        dyn_wavelet2(std::istream &in)
+            : libmaus2::wavelet::DynamicWaveletTree<6, 64>(in) {
+        }
+        libmaus2::bitbtree::BitBTree<6, 64>* makeTree(std::vector<uint8_t> &W_stat, size_t b, unsigned int parallel=1) {
+            uint64_t n = W_stat.size();
+            //uint64_t n = W_stat->size();
+            std::vector<uint64_t> offsets((1ull << (b-1)) - 1, 0);
+            //#pragma omp parallel num_threads(parallel) shared(offsets)
+            //{
+                //#pragma omp for
+                for (uint64_t i=0;i<n;++i) {
+                    uint64_t m = (1ull << (b - 1));
+                    uint64_t v = (uint64_t) W_stat.at(i);
+                    //v = (uint64_t) W_stat->at(i);
+                    uint64_t o = 0;
+                    for (uint64_t ib = 1; ib < b; ++ib) {
+                        bool const bit = m & v;
+                        if (!bit)
+                            offsets.at(o) += 1;
+                        o = 2*o + 1 + bit;
+                        m >>= 1;
+                    }
+                }
+            //}
+            libmaus2::bitbtree::BitBTree<6, 64> *tmp = new libmaus2::bitbtree::BitBTree<6, 64>(n*b, false);
+            //libmaus2::bitbtree::BitBTree<6, 64> tmp(n*b, false);
+            std::vector<uint64_t> upto_offsets ((1ull << (b - 1)) - 1, 0);
+            //#pragma omp parallel num_threads(parallel)
+            //{
+                //#pragma omp for
+                for (uint64_t i = 0; i < n; ++i) {
+                    uint64_t m = (1ull << (b - 1));
+                    uint64_t v = (uint64_t) W_stat.at(i);
+                    //v = (uint64_t) W_stat->at(i);
+                    uint64_t o = 0;
+                    uint64_t p = i;
+                    uint64_t co = 0;
+                    bool bit;
+                    for (uint64_t ib = 0; ib < b - 1; ++ib) {
+                        bit = m & v;
+                        if (bit) {
+                            //tmp.setBitQuick(ib * n + p + co, true);
+                            tmp->setBitQuick(ib * n + p + co, true);
+                            //assert((*tmp)[ib * n + p + co]);
+                            co += offsets.at(o);
+                            p -= upto_offsets.at(o);
+                        } else {
+                            p -= (p - upto_offsets.at(o)); 
+                            upto_offsets.at(o) += 1;
+                        }
+                        //std::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
+                        o = 2*o + 1 + bit;
+                        m >>= 1;
+                    }
+                    bit = m & v;
+                    if (bit) {
+                       // std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
+                        tmp->setBitQuick((b - 1) * n + p + co, true); 
+                        //tmp.setBitQuick((b - 1) * n + p + co, true); 
+                        //assert((*tmp)[(b - 1) * n + p + co]);
+                    }
+                }
+            //}
+            return tmp;
+        }
+
+        dyn_wavelet2(std::vector<uint8_t> &W_stat, size_t b, unsigned int parallel=1)
+            : libmaus2::wavelet::DynamicWaveletTree<6, 64>(makeTree(W_stat, b, parallel), b, W_stat.size()) {
+        }
+};
+
+//libmaus2 structures
+typedef libmaus2::bitbtree::BitBTree<6, 64> BitBTree;
+//typedef libmaus2::wavelet::DynamicWaveletTree<6, 64> WaveletTree;
+
+//SDSL-based structures
+//typedef rs_bit_vector BitBTree;
+//typedef dyn_wavelet WaveletTree;
+typedef dyn_wavelet2 WaveletTree;
 
 class DBG_succ {
 
     // define an extended alphabet for W --> somehow this does not work properly as expected
     typedef uint64_t TAlphabet;
 
+    private:
+    std::vector<ui256> kmers;
+
     public:
 
     // the bit array indicating the last outgoing edge of a node
-    libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();
+    BitBTree *last = new BitBTree();
+    //libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();
 
     // the array containing the edge labels
-    libmaus2::wavelet::DynamicWaveletTree<6, 64> *W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
+    //libmaus2::wavelet::DynamicWaveletTree<6, 64> *W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
+    WaveletTree *W = new WaveletTree(4);
 
     // the bit array indicating the last outgoing edge of a node (static container for full init)
     std::vector<bool> last_stat;
@@ -344,6 +572,8 @@ class DBG_succ {
 
     // add a full sequence to the graph
     void add_seq (kstring_t &seq);
+    void add_seq_alt (kstring_t &seq, bool bridge=true, unsigned int parallel=1, std::string suffix="");
+    void construct_succ(unsigned int parallel=1);
 
     /** This function takes a character c and appends it to the end of the graph sequence
      * given that the corresponding note is not part of the graph yet.
