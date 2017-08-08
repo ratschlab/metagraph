@@ -25,6 +25,12 @@ class DBG_succ {
     // the array containing the edge labels
     libmaus2::wavelet::DynamicWaveletTree<6, 64> *W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
 
+    // the bit array indicating the last outgoing edge of a node (static container for full init)
+    std::vector<bool> last_stat;
+
+    // the array containing the edge labels
+    std::vector<uint8_t> W_stat;
+
     // the offset array to mark the offsets for the last column in the implicit node list
     std::vector<TAlphabet> F; 
 
@@ -200,6 +206,8 @@ class DBG_succ {
 
     std::pair<uint64_t, uint64_t> index_range(std::deque<TAlphabet> str);
 
+    uint64_t index_predecessor(std::deque<TAlphabet> str);
+
     /**
      * Given a position i, this function returns the boundaries of the interval
      * of nodes identical to node i (ignoring the values in W).
@@ -220,11 +228,25 @@ class DBG_succ {
     */
     std::pair<bool, bool> compare_nodes(DBG_succ *G1, uint64_t k1_node, DBG_succ *G2, uint64_t k2_node); 
 
+    std::pair<std::vector<bool>, uint64_t> compare_nodes(std::vector<DBG_succ*> G, std::vector<uint64_t> k, std::vector<uint64_t> n, size_t &cnt);
+
     /** 
      * This function gets two node indices and returns if the
      * node labels share a k-1 suffix.
      */
     bool compare_node_suffix(uint64_t i1, uint64_t i2);
+
+    /**
+     *  This function checks whether two given strings given as deques are 
+     *  identical.
+     */
+    bool compare_seq(std::deque<TAlphabet> s1, std::deque<TAlphabet> s2, size_t start = 0);
+
+    /**
+     *  This function checks whether string s1 is lexicographically inverse 
+     *  greater than s2.
+     */
+    bool seq_is_greater(std::deque<TAlphabet> s1, std::deque<TAlphabet> s2);
 
     /**
      * This function returns true if node i is a terminal node.
@@ -248,6 +270,11 @@ class DBG_succ {
      * TODO: delete
      */
     uint64_t get_size();
+
+    /**
+     * Return number of nodes in the current graph.
+     */
+    uint64_t get_nodes();
 
     /**
      * Return k-mer length of current graph.
@@ -329,6 +356,17 @@ class DBG_succ {
      */
     void append_graph(DBG_succ *g);
 
+    /** 
+     * This function takes a pointer to a graph structure and concatenates the arrays W, last 
+     * and F to this graph's static containers last_stat and W_stat. In almost all cases 
+     * this will not produce a valid graph and should only be used as a helper in the 
+     * parallel merge procedure.
+     */
+    void append_graph_static(DBG_succ *g);
+
+    void toDynamic();
+
+
     //
     //
     // TRAVERSAL
@@ -348,6 +386,7 @@ class DBG_succ {
 
     void allelesFromSeq(kstring_t &seq, unsigned int f, std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream, bool isRefRun = false, size_t seqNum = 0);
 
+    void traversalHash();
 
     //
     //
@@ -376,12 +415,20 @@ class DBG_succ {
     * the object graph if not existing yet. This function is well suited to merge small graphs into large ones.
     */
     void merge(DBG_succ* G); 
+    
+    uint64_t next_non_zero(std::vector<uint64_t> v, uint64_t pos);
+    uint64_t next_non_zero(std::vector<std::pair<uint64_t, std::deque<TAlphabet> > > v, uint64_t pos);
 
+    void merge_bins(DBG_succ* G1, DBG_succ* G2, std::deque<TAlphabet>* curr_range, std::pair<uint64_t, uint64_t>& r1, std::pair<uint64_t, uint64_t>& r2);
+    
+    void merge_fast(DBG_succ* G1, DBG_succ* G2, uint64_t k1 = 1, uint64_t k2 = 1, uint64_t n1 = 0, uint64_t n2 = 0, bool is_parallel = false);
     /*
      * Given two other graph structures G1 and G2, this function 
      * integrate both into a new graph G.
      */
     void merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1 = 1, uint64_t k2 = 1, uint64_t n1 = 0, uint64_t n2 = 0, bool is_parallel = false); 
+    void merge2(DBG_succ* G1, DBG_succ* G2, uint64_t k1 = 1, uint64_t k2 = 1, uint64_t n1 = 0, uint64_t n2 = 0, bool is_parallel = false); 
+    void merge3(std::vector<DBG_succ*> Gv, std::vector<uint64_t> kv, std::vector<uint64_t> nv, bool is_parallel = false);
 
     /**
     * Given a pointer to a graph structure G, the function compares its elements to the
@@ -391,11 +438,23 @@ class DBG_succ {
     */
     bool compare(DBG_succ* G); 
 
+    /*
+     * Helper function that will split up a given range in the graph
+     * into bins, one for each character in the alphabet. The split is performed based
+     * on the k - d column of the node label. It is assumed that the all nodes in the
+     * given range share a common suffix of length d.
+     */
+    std::vector<uint64_t> split_range(uint64_t start, uint64_t end, uint64_t d /*depth*/);
+    void split_range(std::deque<TAlphabet>* str, std::pair<uint64_t, uint64_t>& range);
+
     /* 
      * Helper function to determine the bin boundaries, given 
      * a number of threads.
      */
     std::vector<std::pair<uint64_t, uint64_t> > get_bins(uint64_t threads, uint64_t bins_per_thread, DBG_succ* G);
+    std::vector<std::pair<uint64_t, uint64_t> > get_bins(uint64_t bins);
+
+    std::vector<std::pair<uint64_t, uint64_t> > get_bins_relative(DBG_succ* G, std::vector<std::pair<uint64_t, uint64_t> > ref_bins, uint64_t first_pos, uint64_t last_pos);
 
     /*
      * Helper function to generate the prefix corresponding to 

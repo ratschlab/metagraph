@@ -23,6 +23,7 @@
 #include <cmath>
 #include <pthread.h>
 
+// use Heng Li's kseq structure for string IO
 #include "kseq.h"
 
 KSEQ_INIT(gzFile, gzread)
@@ -41,8 +42,6 @@ KSEQ_INIT(gzFile, gzread)
 #include "serialization.hpp"
 #include "dbg_succinct_libmaus.hpp"
 #include "annotation.hpp"
-// use Heng Li's kseq structure for string IO
-#include "kseq.h"
 
 // define an extended alphabet for W --> somehow this does not work properly as expected
 typedef uint64_t TAlphabet;
@@ -162,6 +161,8 @@ DBG_succ::DBG_succ(size_t k_, Config* config_, bool sentinel) :
     id_to_label.push_back("");
     combination_vector.push_back(0);
 }
+
+
 
 DBG_succ::DBG_succ(std::string infbase_, Config* config_) : 
     infbase(infbase_),
@@ -584,17 +585,19 @@ uint64_t DBG_succ::index(std::deque<TAlphabet> str) {
 
 std::pair<uint64_t, uint64_t> DBG_succ::index_range(std::deque<TAlphabet> str) {
     // get first 
-    TAlphabet s = str.front() % alph_size;
-    str.pop_front();
+    std::deque<TAlphabet>::iterator it = str.begin();
+    TAlphabet s = *it % alph_size;
+    it++;
     // init range
     uint64_t rl = succ_last(F.at(s) + 1);
     uint64_t ru = (s < F.size() - 1) ? F.at(s + 1) : (W->n - 1);                // upper bound
+    uint64_t pl;
     //fprintf(stderr, "char: %i rl: %i ru: %i\n", (int) s, (int) rl, (int) ru);
     // update range iteratively while scanning through s
-    while (!str.empty()) {
-        s = str.front() % alph_size;
-        str.pop_front();
-        rl = std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size));
+    for (; it != str.end(); it++) {
+        s = *it % alph_size;
+        pl = pred_last(rl - 1) + 1;
+        rl = std::min(succ_W(pl, s), succ_W(pl, s + alph_size));
         if (rl >= W->n)
             return std::make_pair(0, 0);
         ru = std::max(pred_W(ru, s), pred_W(ru, s + alph_size));
@@ -607,6 +610,95 @@ std::pair<uint64_t, uint64_t> DBG_succ::index_range(std::deque<TAlphabet> str) {
     }
     return std::make_pair(rl, ru);
 }
+
+/**
+ * Given a node label s, this function returns the index
+ * of the corresponding node or the closest predecessor, if no node 
+ * with the sequence is not found.
+ */
+uint64_t DBG_succ::index_predecessor(std::deque<TAlphabet> str) {
+    // get first 
+    std::deque<TAlphabet>::iterator it = str.begin();
+    TAlphabet s1 = *it % alph_size;
+    // init range
+    uint64_t rl = succ_last(F.at(s1) + 1);                           // lower bound
+    uint64_t ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->n - 1);    // upper bound
+    while (rl > ru && s1 > 0) {
+        s1--;
+        rl = succ_last(F.at(s1) + 1);
+        ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->n - 1);
+    }
+    /*if (s1 == 0) {
+        s1 = *it % alph_size + 1;
+        rl = succ_last(F.at(s1) + 1);
+        ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->n - 1);
+        while (rl > ru && s1 < alph_size) {
+            s1++;
+            rl = succ_last(F.at(s1) + 1);
+            ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->n - 1);
+        }
+    }*/
+    //std::cerr << "s: " << s1 << " rl: " << rl << " ru: " << ru << std::endl;
+
+    it++;
+    uint64_t pll, puu;
+    bool before = false;
+    //fprintf(stderr, "char: %i rl: %i ru: %i\n", (int) s1, (int) rl, (int) ru);
+    // update range iteratively while scanning through s
+    for (; it != str.end(); it++) {
+        s1 = *it % alph_size;
+        pll = this->pred_last(rl - 1) + 1;
+        puu = this->succ_last(ru);
+        before = false;
+
+        //std::cerr << "s: " << s1 << " rl: " << rl << " ru: " << ru << " pll: " << pll << std::endl;
+
+        rl = std::min(succ_W(pll, s1), succ_W(pll, s1 + alph_size)); 
+        ru = std::max(pred_W(puu, s1), pred_W(puu, s1 + alph_size));
+        if (rl > puu) {
+            rl = std::max(pred_W(pll, s1), pred_W(pll, s1 + alph_size));
+            if (rl == 0) {
+                rl = std::min(succ_W(pll, s1), succ_W(pll, s1 + alph_size));
+                if (rl >= W->n) {
+                    s1--;
+                    while (s1 > 0) {
+                        rl = std::max(pred_W(W->n - 1, s1), pred_W(W->n - 1, s1));
+                        if (rl < W->n)
+                            break;
+                        s1--;
+                    }
+                    if (s1 == 0) {
+                        s1 = (*it % alph_size) + 1;
+                        before = true;
+                        while (s1 < alph_size) {
+                            rl = std::min(succ_W(1, s1), succ_W(1 + alph_size, s1));
+                            if (rl < W->n)
+                                break;
+                            s1++;
+                        }
+                    }
+                } else {
+                    s1 = (*W)[rl];
+                    before = true;
+                }
+            } else {
+                s1 = (*W)[rl];
+            }
+        }
+
+        if (ru == 0)
+            ru = rl;
+
+        //std::cerr << "endloop - rl: " << rl << " s1: " << s1 << " ru: " << ru << std::endl;
+        assert(rl <= ru);
+
+        rl = outgoing(rl, s1);
+        ru = outgoing(ru, s1);
+    }
+    return pred_last(rl) - before;
+}
+
+
 
 /**
  * Given a position i, this function returns the boundaries of the interval
@@ -640,17 +732,124 @@ std::pair<bool, bool> DBG_succ::compare_nodes(DBG_succ *G1, uint64_t k1_node, DB
     while (curr_k < this->k) {
         k1_val = G1->get_minus_k_value(k1_node, 0);
         k2_val = G2->get_minus_k_value(k2_node, 0);
-        if (k1_val.first == k2_val.first) {
-            ++curr_k;
-            k1_node = k1_val.second;
-            k2_node = k2_val.second;
-        } else {
+        if (k1_val.first != k2_val.first) {
             break;
         }
+        ++curr_k;
+        k1_node = k1_val.second;
+        k2_node = k2_val.second;
     }
     //std::cerr << "k1_val: " << k1_val.first << " k2_val: " << k2_val.first << " curr_k:" << curr_k << std::endl;
     return std::make_pair(k1_val.first < k2_val.first, k2_val.first < k1_val.first);
 }
+
+std::pair<std::vector<bool>, uint64_t> DBG_succ::compare_nodes(std::vector<DBG_succ*> G, std::vector<uint64_t> k, std::vector<uint64_t> n, size_t &cnt) {
+    
+    struct cmp {
+        bool operator() (std::pair<TAlphabet, uint64_t> a, std::pair<TAlphabet, uint64_t> b) {
+            return a.first < b.first;
+        }
+    } cmp;
+
+    std::vector<bool> result (G.size(), false);
+    std::vector<bool> ignore (G.size(), false);
+    std::vector<std::pair<TAlphabet, uint64_t> > k_val;
+    std::pair<TAlphabet, uint64_t> min;
+    std::vector<uint64_t> k_tmp (k);
+    size_t s = G.size();
+
+    uint64_t curr_k = 0;
+    while (curr_k < this->k) {
+        k_val.clear();
+        for (size_t i = 0; i < s; i++) {
+            //std::cerr << "curr_k: " << curr_k << " - i: " << i; 
+            if ((k.at(i) < n.at(i)) && !ignore.at(i)) {
+                k_val.push_back(G.at(i)->get_minus_k_value(k_tmp.at(i), 0));
+            } else {
+                k_val.push_back(std::make_pair(alph_size, 0));
+                ignore.at(i) = true;
+            }
+            //std::cerr << " k_val.first: " << k_val.back().first << " k_val.second: " << k_val.back().second << std::endl;
+        }
+        
+        min = *std::min_element(k_val.begin(), k_val.end(), cmp);
+        cnt = 0;
+        for (size_t i = 0; i < s; i++)
+            if ((k_val.at(i).first == min.first) && !ignore.at(i)) {
+                cnt++;
+            } else {
+                ignore.at(i) = true;
+            }
+        if (cnt == 1)
+            break;
+        ++curr_k;
+        for (size_t i = 0; i < s; i++) {
+            if (!ignore.at(i))
+                k_tmp.at(i) = k_val.at(i).second;
+        }
+    }
+
+    //std::cerr << "cnt: " << cnt << " s: " << s << std::endl;
+    if (cnt == 0) {
+        return std::make_pair(result, 0L);
+    } else {
+        uint64_t min_edge = alph_size;    
+        uint64_t max_edge_val = 0; 
+        // get minimal outgoing edge
+        for (size_t i = 0; i < s; i++) {
+            if ((k_val.at(i).first == min.first) && !ignore.at(i))
+                min_edge = std::min(min_edge, G.at(i)->get_W(k.at(i)) % alph_size);
+        }
+
+        for (size_t i = 0; i < s; i++) {
+            //std::cerr << "i: " << i << " k: " << k.at(i) << " W: " << G.at(i)->get_W(k.at(i)) << " min.f: " << min.first <<  " result: ";
+            result.at(i) = ((k_val.at(i).first == min.first) && (G.at(i)->get_W(k.at(i)) % alph_size <= min_edge) && !ignore.at(i));
+            //std::cerr << result.at(i) << std::endl;
+            if (result.at(i))
+                max_edge_val = std::max(max_edge_val, G.at(i)->get_W(k.at(i)));
+        }
+        return std::make_pair(result, max_edge_val);
+    }
+}
+
+
+/**
+ *  This function checks whether two given strings given as deques are 
+ *  identical.
+ */
+bool DBG_succ::compare_seq(std::deque<TAlphabet> s1, std::deque<TAlphabet> s2, size_t start) {
+
+    if (s1.size() != s2.size())
+        return false;
+
+    size_t i = start;
+    while (i < s1.size()) {
+        if (s1.at(i) != s2.at(i))
+            break;
+        i++;
+    }
+    return (i == s1.size());
+}
+
+/**
+ *  This function checks whether string s1 is lexicographically inverse 
+ *  greater than s2.
+ */
+bool DBG_succ::seq_is_greater(std::deque<TAlphabet> s1, std::deque<TAlphabet> s2) {
+
+    size_t ss1 = s1.size();
+    size_t ss2 = s2.size();
+    size_t i = 0;
+    while (i < std::min(ss1, ss2)) {
+        i++;
+        if (s1.at(ss1 - i) == s2.at(ss2 - i))
+            continue;
+        return (s1.at(ss1 - i) > s2.at(ss2 - i));
+    }
+    return (ss1 > ss2);
+}
+
+
 
 /** 
  * This function gets two node indices and returns whether the
@@ -716,6 +915,13 @@ std::string DBG_succ::get_node_str(uint64_t k_node) {
  */
 uint64_t DBG_succ::get_size() {
     return W->n;
+}
+
+/**
+ * Return number nodes in the current graph.
+ */
+uint64_t DBG_succ::get_nodes() {
+    return this->rank_last(this->get_size() - 1);
 }
 
 /**
@@ -931,6 +1137,7 @@ void DBG_succ::add_seq (kstring_t &seq) {
     //fprintf(stdout, "\nindex of CCT: %i\n", (int) index(test));
 }
 
+
 /** This function takes a character c and appends it to the end of the graph sequence
  * given that the corresponding note is not part of the graph yet.
  */
@@ -1082,11 +1289,98 @@ void DBG_succ::append_graph(DBG_succ *g) {
 
     size_t curr_pos = this->get_size();
 
+    if (config->verbose)
+        std::cout << "    adding " << g->get_size() << " edges" << std::endl;
     // handle last and W
     for (size_t j = 1; j < g->get_size(); ++j) {
         this->last->insertBit(curr_pos, g->get_last(j));
         this->W->insert(g->get_W(j), curr_pos);
         ++curr_pos;
+    }
+    if (config->verbose)
+        std::cout << "new total edges: " << g->W->n << std::endl;
+
+    // handle F
+    assert(this->F.size() == g->F.size());
+    for (size_t j = 0; j < this->F.size(); ++j) {
+        this->F.at(j) += g->F.at(j);
+    }
+}
+
+/** 
+ * This function takes a pointer to a graph structure and concatenates the arrays W, last 
+ * and F to this graph's static containers last_stat and W_stat. In almost all cases 
+ * this will not produce a valid graph and should only be used as a helper in the 
+ * parallel merge procedure.
+ */
+void DBG_succ::append_graph_static(DBG_succ *g) {
+
+    size_t n = g->get_size();
+    if (config->verbose)
+        std::cout << "    adding " << n << " edges" << std::endl;
+
+    //size_t n_old = this->last_stat.size();
+    //this->last_stat.resize(n_old + n);
+    //this->W_stat.resize(n_old + n);
+
+    size_t const b = 4;
+    std::vector<uint64_t> offsets (1ull << b, 0);
+    std::queue<uint64_t> blocks;
+    std::queue<uint64_t> new_blocks;
+    blocks.push(n);
+    size_t pos = 0;
+    uint64_t o = 0;
+    for (size_t ib = 0; ib < b; ++ib) {
+        while (!blocks.empty()) {
+            uint64_t cnt = blocks.front();
+            blocks.pop();
+            uint64_t epos = pos + cnt;
+            for ( ; pos < epos; ++pos) {
+                offsets.at(o) += !(*(g->W->R))[pos];
+            }
+            if (ib < b - 1) {
+                new_blocks.push(offsets.at(o));
+                new_blocks.push(cnt - offsets.at(o));
+            }
+            o++; 
+        }
+        if (ib < b - 1)
+            blocks.swap(new_blocks);
+    }
+
+    //std::cerr << "R size: " << g->W->R->size() << std::endl;
+
+    bool bit;
+    std::vector<uint64_t> upto_offsets ((1ull << (b - 1)) - 1, 0);
+    uint64_t p, co, v, m;
+    for (size_t i = 0; i < n; ++i) {
+        m = (1ull << (b - 1));
+        //v = (uint64_t) W_stat.at(i);
+        v = 0;
+        o = 0;
+        p = i;
+        co = 0;
+        for (size_t ib = 0; ib < b - 1; ++ib) {
+            bit = (*(g->W->R))[ib * n + p + co];
+            if (bit) {
+                v |= m;
+                co += offsets.at(o);
+                p -= upto_offsets.at(o);
+            } else {
+                p -= (p - upto_offsets.at(o)); 
+                upto_offsets.at(o) += 1;
+            }
+            o = 2*o + 1 + bit;
+            m >>= 1;
+        }
+        bit = (*(g->W->R))[(b - 1) * n + p + co];
+        if (bit) {
+            v |= m;
+        }
+        if (i == 0)
+            continue;
+        this->W_stat.push_back(v);
+        this->last_stat.push_back(g->get_last(i));
     }
 
     // handle F
@@ -1095,6 +1389,72 @@ void DBG_succ::append_graph(DBG_succ *g) {
         this->F.at(j) += g->F.at(j);
     }
 }
+
+void DBG_succ::toDynamic() {
+
+    size_t const b = 4;
+    size_t const n = W_stat.size();
+
+    // compute total offsets for the individual bins
+    std::vector<uint64_t> offsets ((1ull << (b - 1)) - 1, 0);
+    uint64_t v, m, o, p;
+    for (size_t i = 0; i < n; ++i) {
+        m = (1ull << (b - 1));
+        v = (uint64_t) W_stat.at(i);
+        o = 0;
+        for (size_t ib = 1; ib < b; ++ib) {
+            bool const bit  = m & v;
+            if (!bit)
+                offsets.at(o) += 1;
+            o = 2*o + 1 + bit;
+            m >>= 1;
+        }
+    }
+
+    libmaus2::bitbtree::BitBTree<6, 64> *tmp = new libmaus2::bitbtree::BitBTree<6, 64>(n * b, false);  
+
+    uint64_t co;
+    bool bit;
+    std::vector<uint64_t> upto_offsets ((1ull << (b - 1)) - 1, 0);
+    for (size_t i = 0; i < n; ++i) {
+        m = (1ull << (b - 1));
+        v = (uint64_t) W_stat.at(i);
+        o = 0;
+        p = i;
+        co = 0;
+        for (size_t ib = 0; ib < b - 1; ++ib) {
+            bit = m & v;
+            if (bit) {
+                tmp->setBitQuick(ib * n + p + co, true);
+                co += offsets.at(o);
+                p -= upto_offsets.at(o);
+            } else {
+                p -= (p - upto_offsets.at(o)); 
+                upto_offsets.at(o) += 1;
+            }
+            //dtd::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
+            o = 2*o + 1 + bit;
+            m >>= 1;
+        }
+        bit = m & v;
+        if (bit) {
+           // std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
+            tmp->setBitQuick((b - 1) * n + p + co, true); 
+        }
+    }
+    W_stat.clear();
+    delete W;
+    W = new libmaus2::wavelet::DynamicWaveletTree<6, 64> (tmp, b, n);
+
+    libmaus2::bitbtree::BitBTree<6, 64> *last_new = new libmaus2::bitbtree::BitBTree<6, 64>(last_stat.size(), false);
+    for (size_t i = 0; i < last_stat.size(); ++i)
+        if (last_stat.at(i))
+            last_new->setBitQuick(i, true);
+    last_stat.clear();
+    delete last;
+    last = last_new;
+}
+
 
 //
 //
@@ -1162,6 +1522,7 @@ bool DBG_succ::finish_sequence(std::string &sequence, uint64_t seqId, std::ofstr
         return false;
     }
 }
+
 
 size_t DBG_succ::traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream) {
     // store all branch nodes on the way
@@ -1478,6 +1839,134 @@ void DBG_succ::allelesFromSeq(kstring_t &seq, unsigned int f, std::vector<JoinIn
     }
 
 }
+
+void DBG_succ::traversalHash() {
+
+    // store all branch nodes on the way
+    std::stack<BranchInfoMerge> branchnodes;
+    // bool vector that keeps track of visited nodes
+    std::vector<bool> visited(this->get_size());
+    for (std::vector<bool>::iterator it = visited.begin(); it != visited.end(); ++it) {
+        *it = false;
+    }
+
+    // some initializations
+    uint64_t nodeId = 1; // start at source node
+    uint64_t count = 0;
+    size_t out = this->outdegree(nodeId);
+    BranchInfoMerge branch;
+    TAlphabet lastEdge = 0;
+    // keep a running list of the last k-1 characters we have seen
+    std::deque<TAlphabet> last_k;
+
+    // keep traversing until we reach the sink and have worked off all branches from the stack
+    while (out > 0 || branchnodes.size() > 0) {
+
+        if (count > 0 && count % 100000 == 0) {
+            std::cout << "." << std::flush;
+            if (count % 1000000 == 0)
+                std::cout << count << std::endl;
+        }
+
+        // we have reached the sink but there are unvisited nodes left on the stack
+        if (out == 0) {
+            if (branchnodes.size() == 0)
+                break;
+
+            //for (std::deque<TAlphabet>::iterator it = last_k.begin(); it != last_k.end(); it++)
+            //    std::cout << get_alphabet_symbol(*it);
+            //std::cout << "-";
+
+            // get new branch
+            branch = pop_branch(branchnodes, nodeId, lastEdge, last_k);
+            out = this->outdegree(nodeId);
+        }
+
+        // we have not visited that node before
+        if (!visited.at(nodeId)) {
+            visited.at(nodeId) = true;
+            last_k.push_back(this->get_node_end_value(nodeId));
+            if (last_k.size() < k)
+                last_k = get_node_seq(nodeId);
+            if (last_k.size() > k)
+                last_k.pop_front();
+        }
+
+        //for (std::deque<TAlphabet>::iterator it = last_k.begin(); it != last_k.end(); it++)
+        //    std::cout << get_alphabet_symbol(*it);
+
+        // there is only one child
+        if (out == 1) {
+
+            //std::cout << " " << get_alphabet_symbol(this->get_W(nodeId) % alph_size) << " " << nodeId << std::endl;
+            count++;
+            uint64_t next = this->fwd(nodeId);
+            // the next node is new
+            if (!visited.at(next)) {
+                nodeId = next;
+                lastEdge = 0;
+            // we have seen the next node before
+            // --> jump back to previous branch
+            } else {
+                // there are no branches left
+                if (branchnodes.size() == 0)
+                    break;
+                // otherwise go back to last branch
+                branch = pop_branch(branchnodes, nodeId, lastEdge, last_k);
+                out = this->outdegree(nodeId);
+            }
+        // there are several children
+        } else {
+            // account for sentinel symbol as possible outgoing edge
+            size_t cnt = (this->get_W(nodeId) == 0);
+            bool updated = false;
+            // loop over outgoing edges
+            for (TAlphabet c = 1; c < alph_size; ++c) {
+                uint64_t next = this->outgoing(nodeId, c);
+                if (next > 0) {
+                    cnt++;
+                    // we already handled this edge erlier
+                    if (cnt <= lastEdge)
+                        continue;
+                    lastEdge++;
+
+                    //std::cout << " " << get_alphabet_symbol(c) << " " << pred_W(nodeId, c) << std::endl;
+                    count++;
+
+                    if (!visited.at(next)) {
+                        // there are remaining branches - push node to stack
+                        if (cnt < out && next != nodeId) {
+                            // push node information to stack
+                            branchnodes.push(BranchInfoMerge(nodeId, lastEdge, last_k));
+                        }
+                        nodeId = next;
+                        updated = true;
+                        lastEdge = 0;
+                        break;
+                    } //else if (cnt < out) {
+                      //  for (std::deque<TAlphabet>::iterator it = last_k.begin(); it != last_k.end(); it++)
+                      //      std::cout << get_alphabet_symbol(*it);
+                    //}
+                }
+            }
+            // we are done with this branch
+            // we should end up here, when nodes branch to themselves with their last edge
+            if (!updated) {
+                // there are no branches left
+                if (branchnodes.size() == 0)
+                    break;
+                // otherwise go back to last branch
+                branch = pop_branch(branchnodes, nodeId, lastEdge, last_k);
+                out = this->outdegree(nodeId);
+            }
+        }
+        out = this->outdegree(nodeId);
+    }
+    // handle current end
+    std::cout << " " << get_alphabet_symbol(0) << " " << p;
+    std::cout << std::endl;
+}
+
 
 
 //
@@ -1904,6 +2393,85 @@ void DBG_succ::merge(DBG_succ* G) {
     update_F(this->get_node_end_value(p), true);
 }
 
+void DBG_succ::split_range(std::deque<TAlphabet>* str, std::pair<uint64_t, uint64_t> &range) {
+    range = index_range(*str);
+    if (range.first > range.second) {
+        range.first = 0;
+        range.second = 0;
+    } else if (range.first > 0) {
+        range.first = pred_last(range.first - 1) + 1;
+    }
+}
+
+/*
+ * Helper function that will split up a given range in the graph
+ * into bins, one for each character in the alphabet. The split is performed based
+ * on the k - d column of the node label. It is assumed that the all nodes in the
+ * given range share a common suffix of length d.
+ */
+std::vector<uint64_t> DBG_succ::split_range(uint64_t start, uint64_t end, uint64_t d /*depth*/) {
+
+    std::vector<uint64_t> result;
+    uint64_t _end = end;
+
+    // special case d == 0
+    if (d == 0) {
+        for (size_t i = 1; i < F.size(); ++i) {
+            result.push_back((F.at(i) != F.at(i-1))?F.at(i-1)+1:0);  
+        }
+        result.push_back(F.back() + 1);
+    // walk d-1 steps backwards
+    } else{
+        std::stack<uint64_t> backtrace;
+        end--;
+        while (d > 0) {
+            std::cerr << "BT push " << get_node_end_value(start) << " start " << start << " --> " << bwd(succ_last(start)) << " end " << end << " --> " << bwd(succ_last(end)) << std::endl;
+            backtrace.push(get_node_end_value(start));
+            start = bwd(succ_last(start));
+            end = bwd(succ_last(end));
+            d--;
+        }
+        uint64_t c;
+        uint64_t cc = backtrace.top();
+        uint64_t v = start;
+        for (size_t i = 0; i < alph_size; ++i) {
+            c = succ_W(pred_last(v - 1) + 1, cc);
+            //std::cerr << "v: " << v << " cc: " << cc << " c: " << c << std::endl;
+            if (i < (alph_size - 1)) {
+                std::cerr << "v is: " << v << " push back to result: " << (c < F.at(i + 1) ? c : 0) << std::endl;
+                result.push_back((c < F.at(i + 1)) ? c : 0);
+                v = std::max(v, F.at(i + 1) + 1);
+            } else {
+                result.push_back(c < W->n ? c : 0);
+            }
+        }
+        // translate into final coordinates
+        while (backtrace.size() > 0) {
+            for (size_t i = 0; i < result.size(); ++i) {
+                //std::cerr << "res[i] " << result.at(i) << " pred_last(res[i] - 1) " << pred_last(result.at(i) - 1) << " bt " << backtrace.top() << std::endl;
+                if (result.at(i) > 0) {
+                    uint64_t tmp = result.at(i);
+                    uint64_t nextc = succ_W(pred_last(result.at(i) - 1) + 1, backtrace.top());
+                    uint64_t maxc = succ_last(result.at(i));
+                    std::cerr << "nextc " << nextc << " maxc " << maxc << std::endl;
+                    result.at(i) = (nextc <= maxc) ? (pred_last(fwd(nextc) - 1) + 1) : 0;
+                    std::cerr << "tracing back on " << backtrace.top() << " index " << i << " position " << tmp << " resulting in " << result.at(i) << std::endl;
+                }
+            }
+            backtrace.pop();
+        }
+        // shift to beginning of equal node range
+        for (size_t i = 0; i < result.size(); ++i) {
+            if (result.at(i) > 0)
+                result.at(i) = pred_last(result.at(i) - 1) + 1;
+        }
+    }
+    result.push_back(_end);
+
+    return result;
+
+}
+
 /* 
  * Helper function to determine the bin boundaries, given 
  * a number of threads.
@@ -1911,11 +2479,11 @@ void DBG_succ::merge(DBG_succ* G) {
 std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t threads, uint64_t bins_per_thread, DBG_succ* G) {
 
     uint64_t binlen = 0;
-    uint64_t bins = threads * bins_per_thread * 100;
+    uint64_t bins = threads * bins_per_thread * 10;
 
     // depending on the number of threads, we will use a different length prefix
     // to compute the bin boundaries
-    if (bins < alph_size)
+    /*if (bins < alph_size)
         binlen = 1;
     else if (bins < (alph_size * alph_size) || (k <= 2))
         binlen = 2;
@@ -1926,7 +2494,11 @@ std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t threads,
     else if (bins < (alph_size * alph_size * alph_size * alph_size * alph_size) || (k <= 5))
         binlen = 5;
     else
-        binlen = 6;
+        binlen = std::min(6lu, k);
+    */
+    uint64_t exp_binlen = ((uint64_t) std::log((double) bins) / std::log((double) alph_size)) + 1;
+    binlen = std::min(k, exp_binlen);
+    std::cerr << "target binlen is " << binlen << ", generating " << std::pow(binlen, alph_size) << " possible bins" << std::endl;
 
     std::vector<std::pair<uint64_t, uint64_t> > tmp;
     for (uint64_t i = 0; i < std::pow(alph_size, binlen); ++i) {
@@ -1950,6 +2522,59 @@ std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t threads,
     return tmp;
 }
 
+std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins(uint64_t bins) {
+
+    uint64_t nodes = this->rank_last(this->get_size() - 1);
+    uint64_t orig_bins = bins;
+    std::cerr << "working with " << orig_bins << " orig bins; " << nodes << " nodes" <<  std::endl;
+    if (bins > nodes) {
+        std::cerr << "[WARNING] There are max " << nodes << " slots available for binning. Your current choice is " << bins << " which will create " << bins - nodes << " empty slots." << std::endl;
+        bins = nodes;
+    }
+
+    std::vector<std::pair<uint64_t, uint64_t> > result;
+    uint64_t binsize = (nodes + bins - 1) / bins;
+    uint64_t thresh = (nodes - (bins * (nodes / bins))) * binsize;
+    uint64_t pos = 1;
+    for (uint64_t i = 0; i < nodes;) {
+        if (i >= thresh) {
+            binsize = nodes / bins;
+        }
+        //std::cerr << "push " << pos << " - " << this->select_last(std::min(nodes, i + binsize)) << std::endl;
+        result.push_back(std::make_pair(pos, this->select_last(std::min(nodes, i + binsize))));
+        pos = result.back().second + 1;
+        i += binsize;
+    }
+
+    for (uint64_t i = bins; i < orig_bins; i++) {
+        //result.push_back(std::make_pair(pos, pos));
+        result.push_back(std::make_pair(1, 0));
+    }
+    
+    std::cerr << "created " << result.size() << " bins" << std::endl;
+    return result;
+}
+
+std::vector<std::pair<uint64_t, uint64_t> > DBG_succ::get_bins_relative(DBG_succ* G, std::vector<std::pair<uint64_t, uint64_t> > ref_bins, uint64_t first_pos, uint64_t last_pos) {
+    
+    std::vector<std::pair<uint64_t, uint64_t> > result;
+    uint64_t pos = (first_pos == 0) ? 1 : this->index_predecessor(G->get_node_seq(first_pos)) + 1;
+    uint64_t upper;
+    for (size_t i = 0; i < ref_bins.size(); i++) {
+        if (ref_bins.at(i).second == 0) { // this happens if we have more bins than nodes
+            result.push_back(std::make_pair(0, 0));
+        } else {
+            upper = this->index_predecessor(G->get_node_seq(ref_bins.at(i).second));
+            std::cerr << "ref bin " << ref_bins.at(i).second << " rel upper " << upper << std::endl;
+            result.push_back(std::make_pair(pos, upper));
+            pos = upper + 1;
+        }
+    }
+    result.back().second = (last_pos == 0) ? this->get_size() - 1 : result.back().second;
+    return result;
+}
+
+
 std::deque<TAlphabet> DBG_succ::bin_id_to_string(uint64_t bin_id, uint64_t binlen) {
     std::deque<TAlphabet> str;
     while (str.size() < binlen) {
@@ -1960,6 +2585,111 @@ std::deque<TAlphabet> DBG_succ::bin_id_to_string(uint64_t bin_id, uint64_t binle
     return str;
 }
 
+uint64_t DBG_succ::next_non_zero(std::vector<std::pair<uint64_t, std::deque<TAlphabet> > > v, uint64_t pos) {
+
+    uint64_t val = (pos < v.size()) ? v.at(pos).first : 0;
+
+    while ((pos < v.size() - 1) && (v.at(pos).first == 0)) {
+        val = v.at(pos + 1).first;
+        pos++;
+    }
+    return val;
+}
+
+
+uint64_t DBG_succ::next_non_zero(std::vector<uint64_t> v, uint64_t pos) {
+
+    uint64_t val = (pos < v.size()) ? v.at(pos) : 0;
+
+    while ((pos < v.size() - 1) && (v.at(pos) == 0)) {
+        val = v.at(pos + 1);
+        pos++;
+    }
+    return val;
+}
+
+void DBG_succ::merge_bins(DBG_succ* G1, DBG_succ* G2, std::deque<TAlphabet>* curr_range, std::pair<uint64_t, uint64_t>& r1, std::pair<uint64_t, uint64_t>& r2) {
+
+    size_t depth = curr_range->size();
+    //std::cerr << "depth: " << depth << std::endl;
+    /*for (size_t i = 0; i < range1.size(); ++i) {
+        std::cerr << "r1: " << range1.at(i).first << " r2: " << range2.at(i).first << std::endl;
+    }
+    */
+    /*if (depth > 7) {
+        for (std::deque<TAlphabet>::iterator it = curr_range->begin(); it  != curr_range->end(); ++it) {
+            std::cerr << *it << " ";
+        }
+        std::cerr << std::endl;
+    }*/
+    for (size_t i = 0; i < alph_size; ++i) {
+        //for (size_t ii = 0; ii < depth; ii++)
+        //    std::cerr << "|";
+        //std::cerr << i << " - ";
+
+        curr_range->push_front(i);
+        G1->split_range(curr_range, r1);
+        G2->split_range(curr_range, r2);
+        
+        if (r1.first > 0 && r2.first == 0) {
+            //std::cerr << "i: " << i << " A";
+            for (size_t j = r1.first; j <= r1.second; ++j) {
+                W->insert(G1->get_W(j), W->n);
+                last->insertBit(W->n - 1, G1->get_last(j));
+                update_F(G1->get_node_end_value(j), true);
+            }
+        } else if (r1.first == 0 && r2.first > 0) {
+            //std::cerr << "i: " << i << " B";
+            for (size_t j = r2.first; j <= r2.second; ++j) {
+                W->insert(G2->get_W(j), W->n);
+                last->insertBit(W->n - 1, G2->get_last(j));
+                update_F(G2->get_node_end_value(j), true);
+            }
+        } else if (r1.first > 0 && r2.first > 0) {
+            if ((depth == k - 1) || (std::max(r1.second - r1.first + 1, r2.second - r2.first + 1) < alph_size)) {
+                //std::cerr << "i: " << i << " C1";
+                merge(G1, G2, r1.first, r2.first, r1.second + 1, r2.second + 1);
+            } else {
+                //std::cerr << "i: " << i << " C2 --> ";
+                merge_bins(G1, G2, curr_range, r1, r2);
+            }
+            //if (config->verbose && get_size() > 0 && get_size() % 1000 == 0) {
+            //    std::cout << "." << std::flush;
+                if (get_size() % 100 == 0) {
+                    fprintf(stdout, "added %lu - G1: edge %lu/%lu - G2: edge %lu/%lu\n", get_size(), r1.first, G1->get_size(), r2.first, G2->get_size());
+                }
+            //}
+        }
+        //std::cerr << std::endl;
+        curr_range->pop_front();
+    }
+}
+
+
+void DBG_succ::merge_fast(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint64_t n1, uint64_t n2, bool is_parallel) {
+
+    // check whether we can merge the given graphs
+    if (G1->get_k() != G2->get_k()) {
+        fprintf(stderr, "Graphs have different k-mer lengths - cannot be merged!\n");
+        exit(1);
+    }
+    
+    // positions in the graph for respective traversal
+    n1 = (n1 == 0) ? G1->get_size() : n1;
+    n2 = (n2 == 0) ? G2->get_size() : n2;
+
+    // handle special cases where one or both input graphs are empty
+    k1 = (k1 == 0) ? G1->get_size() : k1;
+    k2 = (k2 == 0) ? G2->get_size() : k2;
+
+    std::deque<TAlphabet>* range_set = new std::deque<TAlphabet>();
+    std::pair<uint64_t, uint64_t> r1;
+    std::pair<uint64_t, uint64_t> r2;
+    //std::deque<TAlphabet> range2;
+    merge_bins(G1, G2, range_set, r1, r2);
+
+    delete range_set;
+}
 
 /*
  * Given two pointers to graph structures G1 and G2, this function 
@@ -1990,6 +2720,10 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
     bool k1_smaller, k2_smaller, advance_k1, advance_k2, insert_k1, insert_k2, identical;
 
     std::string k1_str, k2_str;
+
+    if (config->verbose) {
+         std::cout << "Size of bins to merge: " << n1 - k1 << " and " << n2 - k2 << std::endl;
+    }
     
     // Send two pointers running through each of the two graphs, where k1 runs through 
     // G1 and k2 through G2. At each step, compare the two graph nodes at positions 
@@ -2121,6 +2855,7 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
             }
             update_F(G2->get_node_end_value(k2), true);
         }
+
         if ((insert_k1 && !G1->get_last(k1)) || (insert_k2 && !G2->get_last(k2))) {
             //std::cerr << "insert_k1 " << insert_k1 << " last_k1 " << G1->get_last(k1) << "insert_k2 " << insert_k2 << " last_k2 " << G2->get_last(k2) << std::endl;
             last->insertBit(W->n - 1, false);
@@ -2145,6 +2880,294 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
     p = succ_W(1, 0);
 }
 
+void DBG_succ::merge2(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint64_t n1, uint64_t n2, bool is_parallel) {
+
+    // check whether we can merge the given graphs
+    if (G1->get_k() != G2->get_k()) {
+        fprintf(stderr, "Graphs have different k-mer lengths - cannot be merged!\n");
+        exit(1);
+    }
+    
+    // positions in the graph for respective traversal
+    n1 = (n1 == 0) ? G1->get_size() : n1;
+    n2 = (n2 == 0) ? G2->get_size() : n2;
+
+    // handle special cases where one or both input graphs are empty
+    k1 = (k1 == 0) ? G1->get_size() : k1;
+    k2 = (k2 == 0) ? G2->get_size() : k2;
+
+    // keep track of how many nodes we added
+    uint64_t added = 0;
+
+    bool k1_smaller, k2_smaller, advance_k1, advance_k2, insert_k1, insert_k2, identical;
+
+    std::map<uint64_t, std::deque<TAlphabet> > last_added_nodes;
+
+    if (config->verbose) {
+         std::cout << "Size of bins to merge: " << n1 - k1 << " and " << n2 - k2 << std::endl;
+    }
+
+    std::vector<DBG_succ*> Gv;
+    Gv.push_back(G1);
+    Gv.push_back(G2);
+    std::vector<uint64_t> kv (2, 0);
+    
+    // Send two pointers running through each of the two graphs, where k1 runs through 
+    // G1 and k2 through G2. At each step, compare the two graph nodes at positions 
+    // k1 and k2 with each other. Insert the lexicographically smaller one into the 
+    // common merge graph G. 
+    while (k1 < n1 || k2 < n2) {
+
+        if (!is_parallel && config->verbose && added > 0 && added % 1000 == 0) {
+            std::cout << "." << std::flush;
+            if (added % 10000 == 0) {
+                fprintf(stdout, "added %lu - G1: edge %lu/%lu - G2: edge %lu/%lu\n", added, k1, G1->get_size(), k2, G2->get_size());
+            }
+        }
+
+        k1_smaller = false;
+        k2_smaller = false;
+        advance_k1 = false;
+        advance_k2 = false;
+        insert_k1 = false;
+        insert_k2 = false;
+        identical = false;
+
+        
+        //kv.at(0) = k1;
+        //kv.at(1) = k2;
+
+        if (k1 < n1 && k2 < n2) {
+            std::pair<bool, bool> tmp = compare_nodes(G1, k1, G2, k2);
+            k1_smaller = tmp.first;
+            k2_smaller = tmp.second;
+            //std::vector<bool> tmp = compare_nodes(Gv, kv);
+            //k1_smaller = tmp.at(0);
+            //k2_smaller = tmp.at(1);
+        } else {
+            k1_smaller = k1 < n1;
+            k2_smaller = k2 < n2;
+        }
+
+        // the node sequences are identical
+        if (!k1_smaller && !k2_smaller) {
+            // insert G1 and advance both pointers
+            if ((G1->get_W(k1) % alph_size) == (G2->get_W(k2) % alph_size)) {
+                advance_k1 = true;
+                advance_k2 = true;
+                insert_k1 = true;
+                identical = true;
+            // insert G1 and advance k1
+            } else if ((G1->get_W(k1) % alph_size) < (G2->get_W(k2) % alph_size)) {
+                advance_k1 = true;
+                insert_k1 = true;
+            // insert G2 and advance k2
+            } else {
+                advance_k2 = true;
+                insert_k2 = true;
+            }
+        // the node in graph 1 is smaller
+        } else if (k1_smaller) {
+            // insert G1 and advance k1
+            advance_k1 = true;
+            insert_k1 = true;
+        // the node in graph 2 is smaller
+        } else if (k2_smaller) {
+            // insert G2 and advance k2
+            advance_k2 = true;
+            insert_k2 = true;
+        } else {
+            std::cerr << "This should never happen." << std::endl;
+            std::exit(1);
+        }
+
+        // assert XOR of insert; we take a node from either G1 or G2
+        assert(insert_k1 ^ insert_k2);
+
+        // insert node from G1
+        if (insert_k1) {
+            TAlphabet val = G1->get_W(k1);
+            std::deque<TAlphabet> seq1 = G1->get_node_seq(k1);
+
+            if (identical) {
+                W->insert(std::max(val, G2->get_W(k2)), W->n);
+            } else if (val < alph_size) {
+                // check whether we already added a node whose outgoing edge points to the
+                // same node as the current one
+                std::map<uint64_t, std::deque<TAlphabet> >::iterator it = last_added_nodes.find(val % alph_size);
+                if (it != last_added_nodes.end() && compare_seq(seq1, it->second, 1)) {
+                    W->insert(val + alph_size, W->n);
+                } else {
+                    W->insert(val, W->n);
+                }
+            } else {
+                W->insert(val, W->n);
+            }
+            last_added_nodes[val % alph_size] = seq1;
+            update_F(G1->get_node_end_value(k1), true);
+        } 
+
+        // insert node from G2
+        if (insert_k2) {
+            TAlphabet val = G2->get_W(k2);
+            std::deque<TAlphabet> seq1 = G2->get_node_seq(k2);
+
+            if (val < alph_size) {
+                std::map<uint64_t, std::deque<TAlphabet> >::iterator it = last_added_nodes.find(val % alph_size);
+                if (it != last_added_nodes.end() && compare_seq(seq1, it->second, 1)) {
+                    W->insert(val + alph_size, W->n);
+                } else {
+                    W->insert(val, W->n);
+                }
+            } else {
+                W->insert(val, W->n);
+            }
+            last_added_nodes[val % alph_size] = seq1;
+            update_F(G2->get_node_end_value(k2), true);
+        }
+
+        last->insertBit(W->n - 1, true);
+
+        // handle multiple outgoing edges
+        if (added > 0 && W->n > 2 && (*last)[W->n-2]) {
+            // compare the last two added nodes
+            std::map<uint64_t, std::deque<TAlphabet> >::iterator it1 = last_added_nodes.find((*W)[W->n-2] % alph_size);
+            std::map<uint64_t, std::deque<TAlphabet> >::iterator it2 = last_added_nodes.find((*W)[W->n-1] % alph_size);
+            if (it1 != last_added_nodes.end() && it2 != last_added_nodes.end() && it1 != it2 && compare_seq(it1->second, it2->second)) {
+                last->set(W->n - 2, false);
+            }
+        }
+        k1 += advance_k1;
+        k2 += advance_k2;
+
+        ++added;
+    }
+    p = succ_W(1, 0);
+}
+
+
+void DBG_succ::merge3(std::vector<DBG_succ*> Gv, std::vector<uint64_t> kv, std::vector<uint64_t> nv, bool is_parallel) {
+
+    // Preliminarities
+    for (size_t i = 0; i < Gv.size(); i++) {
+        // check whether we can merge the given graphs
+        if (i > 0 && (Gv.at(i)->get_k() != Gv.at(i-1)->get_k())) {
+            fprintf(stderr, "Graphs have different k-mer lengths - cannot be merged!\n");
+            exit(1);
+        }
+        // positions in the graph for respective traversal
+        nv.at(i) = (nv.at(i) == 0) ? Gv.at(i)->get_size() : nv.at(i);
+        // handle special cases where one or both input graphs are empty
+        kv.at(i) = (kv.at(i) == 0) ? Gv.at(i)->get_size() : kv.at(i);
+        //std::cerr << "k(" << i << ") " << kv.at(i) << " n(" << i << ") " << nv.at(i) << std::endl;
+    }
+
+    // keep track of how many nodes we added
+    uint64_t added = 0;
+    size_t cnt = 0;
+    std::map<uint64_t, std::deque<TAlphabet> > last_added_nodes;
+    // init last added nodes, if not starting from the beginning
+    std::deque<TAlphabet> curr_seq;
+    for (size_t i = 0; i < Gv.size(); i++) {
+        if (kv.at(i) < 2)
+            continue;
+        for (size_t a = 0; a < alph_size; a++) {
+            uint64_t sl = std::max(Gv.at(i)->pred_W(kv.at(i) - 1, a), Gv.at(i)->pred_W(kv.at(i) - 1, a + alph_size));
+            if (sl == 0)
+                continue;
+            std::map<uint64_t, std::deque<TAlphabet> >::iterator la = last_added_nodes.find(a);
+            curr_seq = Gv.at(i)->get_node_seq(sl);
+            if (la == last_added_nodes.end() || seq_is_greater(curr_seq, la->second))
+                last_added_nodes[a] = curr_seq;
+        }
+    }
+
+    if (config->verbose) {
+        std::cout << "Size of bins to merge: " << std::endl;
+        for (size_t i = 0; i < Gv.size(); i++)
+            std::cout << nv.at(i) - kv.at(i) << std::endl;
+    }
+
+    // Send parallel pointers running through each of the graphs. At each step, compare all
+    // graph nodes at the respective positions with each other. Insert the lexicographically 
+    // smallest one into the common merge graph G (this). 
+    while (true) {
+
+        //if (!is_parallel && config->verbose && added > 0 && added % 1000 == 0) {
+        if (config->verbose && added > 0 && added % 1000 == 0) {
+            std::cout << "." << std::flush;
+            if (added % 10000 == 0) {
+                std::cout << "added " << added;
+                for (size_t i = 0; i < Gv.size(); i++)
+                    std::cout << " - G" << i << ": edge " << kv.at(i) << "/" << Gv.at(i)->get_size();
+                std::cout << std::endl;
+            }
+        }
+
+        // find set of smallest pointers
+        std::pair<std::vector<bool>, uint64_t> smallest = compare_nodes(Gv, kv, nv, cnt);
+        if (cnt == 0)
+            break;
+        size_t curr_k = std::max_element(smallest.first.begin(), smallest.first.end()) - smallest.first.begin();
+        std::deque<TAlphabet> seq1 = Gv.at(curr_k)->get_node_seq(kv.at(curr_k));
+        uint64_t val = Gv.at(curr_k)->get_W(kv.at(curr_k)) % alph_size;
+
+        /*if (kv.at(62) > 10206700 && kv.at(62) < 10206750) {
+            std::cerr << "curr_k: " << curr_k << " kv: " << kv.at(curr_k) << " val: " << val << " smallest: " << smallest.second % alph_size << std::endl;
+            for (std::deque<TAlphabet>::iterator t = seq1.begin(); t != seq1.end(); t++)
+                std::cerr << *t;
+            std::cerr << std::endl;
+        }*/
+        assert(val == smallest.second % alph_size);
+        
+        //std::cerr << "inserting into W" << std::endl;
+        // check whether we already added a node whose outgoing edge points to the
+        // same node as the current one
+        std::map<uint64_t, std::deque<TAlphabet> >::iterator it = last_added_nodes.find(smallest.second % alph_size);
+        if (it != last_added_nodes.end() && compare_seq(seq1, it->second, 1)) {
+            /*if (kv.at(62) > 10206700 && kv.at(62) < 10206800) {
+                std::cerr << "inserting " << val + alph_size << " from " << curr_k << " at " << kv.at(curr_k) << std::endl;
+                for (std::deque<TAlphabet>::iterator t = it->second.begin(); t != it->second.end(); t++)
+                    std::cerr << *t;
+                std::cerr << std::endl;
+            }*/
+            W->insert(val + alph_size, W->n);
+        } else {
+            /*if (kv.at(62) > 10206700 && kv.at(62) < 10206800) {
+                std::cerr << "inserting " << smallest.second << " from " << curr_k << " at " << kv.at(curr_k) << std::endl;
+            }
+            */
+            W->insert(smallest.second, W->n);
+        }
+        last_added_nodes[val] = seq1;
+        update_F(Gv.at(curr_k)->get_node_end_value(kv.at(curr_k)), true);
+        last->insertBit(W->n - 1, true);
+
+        // handle multiple outgoing edges
+        if (added > 0 && W->n > 2 && (*last)[W->n-2]) {
+            // compare the last two added nodes
+            std::map<uint64_t, std::deque<TAlphabet> >::iterator it1 = last_added_nodes.find((*W)[W->n-2] % alph_size);
+            std::map<uint64_t, std::deque<TAlphabet> >::iterator it2 = last_added_nodes.find((*W)[W->n-1] % alph_size);
+            if (it1 != last_added_nodes.end() && it2 != last_added_nodes.end() && it1 != it2 && compare_seq(it1->second, it2->second)) {
+                last->set(W->n - 2, false);
+            }
+        }
+        uint64_t updated = 0;
+        for (size_t i = 0; i < Gv.size(); i++) {
+            if (smallest.first.at(i)) {
+                updated += (kv.at(i) < nv.at(i));
+                //if (kv.at(i) < nv.at(i))
+                //    std::cerr << "increasing in " << i << " " << kv.at(i) << " to " << kv.at(i) + (kv.at(i) < nv.at(i)) << std::endl;
+                kv.at(i) += (kv.at(i) < nv.at(i));
+            }
+        }
+        ++added;
+        if (updated == 0)
+            break;
+    }
+    p = succ_W(1, 0);
+}
+
 
 /**
 * Given a pointer to a graph structure G, the function compares its elements to the
@@ -2154,27 +3177,50 @@ void DBG_succ::merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint6
 */
 bool DBG_succ::compare(DBG_succ* G) {
 
-    // compare size
-    if (W->n != G->get_size())
-        return false;
-    
-    // compare W
-    for (size_t i = 0; i < W->n; ++i) {
-        if ((*W)[i] != G->get_W(i)) {
-            std::cerr << "W differs at position " << i << std::endl;
-            std::cerr << "1: W[" << i << "] = " << (*W)[i]  << std::endl;
-            std::cerr << "2: W[" << i << "] = " << G->get_W(i) << std::endl;
-            return false;
+    bool is_same = true;
+    uint64_t cnt01 = 0;
+    uint64_t cnt02 = 0;
+
+    /*size_t top = std::min(W->n, G->W->n);
+    for (size_t i = 0; i < top; ++i) {
+        if (i > 0 && i % 10000 == 0) {
+            std::cerr << ".";
+            if (i % 100000 == 0) {
+                std::cerr << i << "/" << top << " - cnt: " << cnt01 << " " << cnt02 << std::endl;
+            }
         }
     }
+    std::cerr << "cnt01: " << cnt01 << std::endl;
+    std::cerr << "cnt02: " << cnt02 << std::endl;
+    */
 
+    // compare size
+    if (W->n != G->get_size()) {
+        std::cerr << "sizes of graphs differ" << std::endl;
+        std::cerr << "1: " << W->n << std::endl;
+        std::cerr << "2: " << G->get_size() << std::endl;
+        is_same = false;
+    }
+    
     // compare last
     for (size_t i = 0; i < W->n; ++i) {
         if ((*last)[i] != G->get_last(i)) {
             std::cerr << "last differs at position " << i << std::endl;
             std::cerr << "1: last[" << i << "] = " << (*last)[i]  << std::endl;
             std::cerr << "2: last[" << i << "] = " << G->get_last(i) << std::endl;
-            return false;
+            is_same = false;
+            break;
+        }
+    }
+
+    // compare W
+    for (size_t i = 0; i < W->n; ++i) {
+        if ((*W)[i] != G->get_W(i)) {
+            std::cerr << "W differs at position " << i << std::endl;
+            std::cerr << "1: W[" << i << "] = " << (*W)[i]  << std::endl;
+            std::cerr << "2: W[" << i << "] = " << G->get_W(i) << std::endl;
+            is_same = false;
+            break;
         }
     }
 
@@ -2184,11 +3230,12 @@ bool DBG_succ::compare(DBG_succ* G) {
             std::cerr << "F differs at position " << i << std::endl;
             std::cerr << "1: F[" << i << "] = " << F.at(i) << std::endl;
             std::cerr << "2: F[" << i << "] = " << G->get_F(i) << std::endl;
-            return false;
+            is_same = false;
+            break;
         }
     }
 
-    return true;
+    return is_same;
 
 }
 

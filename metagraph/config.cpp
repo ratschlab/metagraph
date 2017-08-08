@@ -51,6 +51,8 @@ Config::Config(int argc, const char *argv[]) {
             print_graph = true;
         } else if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--reverse")) {
             reverse = true;
+        } else if (!strcmp(argv[i], "--fast")) {
+            fast = true;
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
             parallel = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--parts-total")) {
@@ -194,6 +196,7 @@ void Config::init() {
     quiet = false;
     print_graph = false;
     reverse = false;
+    fast = false;
     distance = 0;
     parallel = 1;
     bins_per_thread = 1;
