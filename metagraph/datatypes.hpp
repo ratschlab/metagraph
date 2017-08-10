@@ -92,7 +92,7 @@ struct AnnotationHash {
     }*/
 };
 
-struct ParallelMergeContainer2 {
+struct ParallelMergeContainer {
     std::vector<std::pair<uint64_t, uint64_t> > ref_bins;
     std::vector<std::vector<std::pair<uint64_t, uint64_t> > > bins;
     std::vector<DBG_succ*> result;
@@ -111,18 +111,7 @@ struct ParallelMergeContainer2 {
         //std::cerr << "ref bins " << ref_bins.size() << " total " << total << " per part " << bins_per_part << std::endl;
         assert(ref_bins.size() == (total * bins_per_part));
 
-        // augment size of last bin until end of bins
-        //size_t binsize_min = ref_bins.size() / total;
-        //size_t binsize_max = (ref_bins.size() + total - 1) / total;
-        //size_t threshold = ref_bins.size() - (total * binsize_min);
-
-        /*std::vector< std::vector<std::pair<uint64_t, uint64_t> > > new_bins;
-        for (size_t i = 0; i < bins.size(); i++) {
-            std::vector<std::pair<uint64_t, uint64_t> > new_bin;   
-            new_bins.push_back(new_bin);
-        }*/
         std::vector< std::pair<uint64_t, uint64_t> > new_ref_bins;
-
         //std::cerr << "min: " << binsize_min << " max: " << binsize_max << " thresh: " << threshold << " total: " << total << std::endl;
 
         /*size_t start, end;
@@ -142,13 +131,9 @@ struct ParallelMergeContainer2 {
             last = ref_bins.at(end).second;
 
         for (size_t i = start; i < end; i++) {
-            //for (size_t ii = 0; ii < bins.size(); ii++) {
-            //    new_bins.at(ii).push_back(bins.at(ii).at(i));
-            //}
             new_ref_bins.push_back(ref_bins.at(i));
         }
 
-        //bins = new_bins;
         ref_bins = new_ref_bins;
     }
 
@@ -189,7 +174,7 @@ struct ParallelMergeContainer2 {
 };
 
 
-struct ParallelMergeContainer {
+struct ParallelMergeContainer_deprecated {
     std::vector<std::pair<uint64_t, uint64_t> > bins_g1;
     std::vector<std::pair<uint64_t, uint64_t> > bins_g2;
     std::vector<DBG_succ*> result;

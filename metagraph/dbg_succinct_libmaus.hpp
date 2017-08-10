@@ -654,16 +654,11 @@ class DBG_succ {
     uint64_t next_non_zero(std::vector<uint64_t> v, uint64_t pos);
     uint64_t next_non_zero(std::vector<std::pair<uint64_t, std::deque<TAlphabet> > > v, uint64_t pos);
 
-    void merge_bins(DBG_succ* G1, DBG_succ* G2, std::deque<TAlphabet>* curr_range, std::pair<uint64_t, uint64_t>& r1, std::pair<uint64_t, uint64_t>& r2);
-    
-    void merge_fast(DBG_succ* G1, DBG_succ* G2, uint64_t k1 = 1, uint64_t k2 = 1, uint64_t n1 = 0, uint64_t n2 = 0, bool is_parallel = false);
     /*
-     * Given two other graph structures G1 and G2, this function 
-     * integrate both into a new graph G.
+     * Given a list of grapj structures, this functions
+     * integrates all of them into a new graph G.
      */
-    void merge(DBG_succ* G1, DBG_succ* G2, uint64_t k1 = 1, uint64_t k2 = 1, uint64_t n1 = 0, uint64_t n2 = 0, bool is_parallel = false); 
-    void merge2(DBG_succ* G1, DBG_succ* G2, uint64_t k1 = 1, uint64_t k2 = 1, uint64_t n1 = 0, uint64_t n2 = 0, bool is_parallel = false); 
-    void merge3(std::vector<DBG_succ*> Gv, std::vector<uint64_t> kv, std::vector<uint64_t> nv, bool is_parallel = false);
+    void merge(std::vector<DBG_succ*> Gv, std::vector<uint64_t> kv, std::vector<uint64_t> nv, bool is_parallel = false);
 
     /**
     * Given a pointer to a graph structure G, the function compares its elements to the

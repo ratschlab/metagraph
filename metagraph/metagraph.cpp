@@ -21,7 +21,6 @@ KSEQ_INIT(gzFile, gzread)
 
 Config* config;
 ParallelMergeContainer* merge_data;
-ParallelMergeContainer2* merge_data2;
 ParallelAnnotateContainer* anno_data = new ParallelAnnotateContainer();
 
 pthread_mutex_t mutex_merge_result = PTHREAD_MUTEX_INITIALIZER;
@@ -32,7 +31,6 @@ pthread_attr_t attr;
 void parallel_merge_collect(DBG_succ* result) {
 
     for (size_t i = 0; i < merge_data->result.size(); ++i) {
-        //std::cerr << "curr size " << result->get_size() << std::endl;
         if (merge_data->result.at(i)) {
             result->append_graph(merge_data->result.at(i));
             delete merge_data->result.at(i);
@@ -40,19 +38,6 @@ void parallel_merge_collect(DBG_succ* result) {
     }
     merge_data->result.clear();
     merge_data->bins_done = 0;
-    result->p = result->succ_W(1, 0);
-}
-
-void parallel_merge_collect2(DBG_succ* result) {
-
-    for (size_t i = 0; i < merge_data2->result.size(); ++i) {
-        if (merge_data2->result.at(i)) {
-            result->append_graph(merge_data2->result.at(i));
-            delete merge_data2->result.at(i);
-        }
-    }
-    merge_data2->result.clear();
-    merge_data2->bins_done = 0;
     result->p = result->succ_W(1, 0);
 }
 
@@ -89,9 +74,8 @@ void *parallel_annotate_wrapper(void *arg) {
 
 
 /*
- * Distribute the merging of two graph structures G1 and G2 over
- * bins, such that n parallel threads are used. The number of bins
- * is determined dynamically.
+ * Distribute the merging of a set of graph structures over
+ * bins, such that n parallel threads are used. 
  */
 void *parallel_merge_wrapper(void *arg) {
 
@@ -100,7 +84,7 @@ void *parallel_merge_wrapper(void *arg) {
 
     while (true) {
         pthread_mutex_lock (&mutex_bin_idx);
-        if (merge_data->idx == merge_data->bins_g1.size()) {
+        if (merge_data->idx == merge_data->ref_bins.size()) {
             pthread_mutex_unlock (&mutex_bin_idx);
             break;
         } else {
@@ -108,62 +92,20 @@ void *parallel_merge_wrapper(void *arg) {
             merge_data->idx++;
             pthread_mutex_unlock (&mutex_bin_idx);
             
-            // collect bin data for merging and decide how to merge
-            if (merge_data->bins_g1.at(curr_idx).first > 0 || merge_data->bins_g2.at(curr_idx).first > 0) {
-                // creating each graph instance blocks off memory of around 60MB - try to reduce this
-                // we try to improve balancing by merging many smaller bins into larger bins (as many as requested)
-                graph = new DBG_succ(merge_data->k, config, false);
-                graph->merge(merge_data->graph1, 
-                             merge_data->graph2, 
-                             merge_data->bins_g1.at(curr_idx).first,
-                             merge_data->bins_g2.at(curr_idx).first,
-                             merge_data->bins_g1.at(curr_idx).second + 1,
-                             merge_data->bins_g2.at(curr_idx).second + 1,
-                             true);
-            } else {
-                graph = NULL;
+            graph = new DBG_succ(merge_data->k, config, false);
+            std::vector<uint64_t> kv;
+            std::vector<uint64_t> nv;                                                                                                            
+            for (size_t i = 0; i < merge_data->graphs.size(); i++) {
+                kv.push_back(merge_data->bins.at(i).at(curr_idx).first);
+                nv.push_back(merge_data->bins.at(i).at(curr_idx).second + 1);
             }
+            graph->merge(merge_data->graphs, kv, nv, true);
+
             pthread_mutex_lock (&mutex_merge_result);
             merge_data->result.at(curr_idx) = graph;
             merge_data->bins_done++;
             if (config->verbose) 
-                std::cout << "finished bin " << curr_idx + 1 << " (" << merge_data->bins_done << "/" << merge_data->bins_g1.size() << ")" << std::endl;
-            pthread_mutex_unlock (&mutex_merge_result);
-
-        }
-    }
-    pthread_exit((void*) 0);
-}
-
-void *parallel_merge_wrapper2(void *arg) {
-
-    unsigned int curr_idx;
-    DBG_succ* graph;
-
-    while (true) {
-        pthread_mutex_lock (&mutex_bin_idx);
-        if (merge_data2->idx == merge_data2->ref_bins.size()) {
-            pthread_mutex_unlock (&mutex_bin_idx);
-            break;
-        } else {
-            curr_idx = merge_data2->idx;
-            merge_data2->idx++;
-            pthread_mutex_unlock (&mutex_bin_idx);
-            
-            graph = new DBG_succ(merge_data2->k, config, false);
-            std::vector<uint64_t> kv;
-            std::vector<uint64_t> nv;                                                                                                            
-            for (size_t i = 0; i < merge_data2->graphs.size(); i++) {
-                kv.push_back(merge_data2->bins.at(i).at(curr_idx).first);
-                nv.push_back(merge_data2->bins.at(i).at(curr_idx).second + 1);
-            }
-            graph->merge3(merge_data2->graphs, kv, nv, true);
-
-            pthread_mutex_lock (&mutex_merge_result);
-            merge_data2->result.at(curr_idx) = graph;
-            merge_data2->bins_done++;
-            if (config->verbose) 
-                std::cout << "finished bin " << curr_idx + 1 << " (" << merge_data2->bins_done << "/" << merge_data2->ref_bins.size() << ")" << std::endl;
+                std::cout << "finished bin " << curr_idx + 1 << " (" << merge_data->bins_done << "/" << merge_data->ref_bins.size() << ")" << std::endl;
             pthread_mutex_unlock (&mutex_merge_result);
 
         }
@@ -241,193 +183,95 @@ int main(int argc, char const ** argv) {
                // if ((config->parts_total > 1) && (config->parts_total > (config->parallel * config->bins_per_thread)))
                 //    config->bins_per_thread = config->parts_total / config->parallel;
                             
-                if (config->fast) {
-                    std::vector<DBG_succ*> graphs;
-                    std::vector<uint64_t> kv;
-                    std::vector<uint64_t> nv;
-                    for (unsigned int f = 0; f < config->fname.size(); ++f) {
-                            std::cout << "Opening file " << config->fname.at(f) << std::endl;
-                            graph = new DBG_succ(config->fname.at(f), config);
-                            graphs.push_back(graph);
-                            kv.push_back(1);
-                            nv.push_back(graph->get_size());
-                    }
-                    DBG_succ* target_graph = new DBG_succ(graphs.front()->get_k(), config, false);
-
-                    if ((config->parallel > 1) || (config->parts_total > 1)) {
-                        pthread_t* threads = NULL; 
-                        merge_data2 = new ParallelMergeContainer2();
-
-                        // get bins in graphs according to required threads
-                        if (config->verbose)
-                            std::cout << "Collecting reference bins" << std::endl;
-                        std::cerr << "parallel " << config->parallel << " per thread " << config->bins_per_thread << " parts total " << config->parts_total << std::endl;
-                        merge_data2->ref_bins = graphs.front()->get_bins(config->parallel * config->bins_per_thread * config->parts_total);
-
-                        // only work on subset of the bins when requested
-                        if (config->parts_total > 1) {
-                            merge_data2->subset_bins(config->part_idx, config->parts_total, config->parallel * config->bins_per_thread);
-                        }
-                        merge_data2->bins.push_back(merge_data2->ref_bins);
-
-                        if (config->verbose)
-                            std::cout << "Collecting relative bins" << std::endl;
-                        for (size_t i = 1; i < graphs.size(); i++) {
-                            std::cerr << "getting bins for " << i << ": " << config->fname.at(i) << std::endl; 
-                            merge_data2->bins.push_back(graphs.at(i)->get_bins_relative(graphs.front(), merge_data2->ref_bins, merge_data2->first, merge_data2->last));
-                        }
-                        for (size_t i = 0; i < graphs.size(); i++) {
-                            for (size_t ii = 0; ii < merge_data2->bins.at(i).size(); ii++) {
-                                if (merge_data2->bins.at(i).at(ii).first > merge_data2->bins.at(i).at(ii).second) {
-                                   merge_data2->bins.at(i).at(ii) = std::make_pair(graphs.at(i)->get_size(), graphs.at(i)->get_size() - 1); 
-                                }
-                            }
-                        }
-                        /*for (size_t i = 0; i < merge_data2->bins.size(); i++) {
-                            std::cerr << "graph " << i << std::endl;
-                            for (size_t ii = 0; ii < merge_data2->bins.at(i).size(); ii++) {
-                                std::cerr << merge_data2->bins.at(i).at(ii).first << "-" << merge_data2->bins.at(i).at(ii).second << std::endl;
-                            }
-                        }*/
-    
-                        // print bin stats
-                        if (config->verbose) {
-                            merge_data2->get_bin_stats();
-                        }
-
-                        // prepare data shared by threads
-                        merge_data2->idx = 0;
-                        merge_data2->k = graph->get_k();
-                        merge_data2->graphs = graphs;
-                        for (size_t i = 0; i < merge_data2->ref_bins.size(); i++)
-                            merge_data2->result.push_back(NULL);
-                        merge_data2->bins_done = 0;
-
-                        // create threads
-                        threads = new pthread_t[config->parallel]; 
-                        pthread_attr_init(&attr);
-                        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-
-                        // do the work
-                        for (size_t tid = 0; tid < config->parallel; tid++) {
-                           pthread_create(&threads[tid], &attr, parallel_merge_wrapper2, (void *) tid); 
-                           std::cerr << "starting thread " << tid << std::endl;
-                        }
-
-                        // join threads
-                        if (config->verbose)
-                            std::cout << "Waiting for threads to join" << std::endl;
-                        for (size_t tid = 0; tid < config->parallel; tid++) {
-                            pthread_join(threads[tid], NULL);
-                        }
-                        delete[] threads;
-
-                        // collect results
-                        std::cerr << "Collecting results" << std::endl;
-                        parallel_merge_collect2(target_graph);
-
-                        graph = target_graph;
-
-                        delete merge_data2;
-
-                    } else {
-                        target_graph->merge3(graphs, kv, nv);
-                        graph = target_graph;
-                    }
-                    for (size_t f = 0; f < graphs.size(); f++)
-                        delete graphs.at(f);
-                    std::cerr << "... done merging." << std::endl;
-                } else {
-                    for (unsigned int f = 0; f < config->fname.size(); ++f) {
-                        if (f == 0) {
-                            std::cout << "Opening file " << config->fname.at(f) << std::endl;
-                            graph = new DBG_succ(config->fname.at(f), config);
-                        } else {
-                            std::cout << "Opening file for merging: " << config->fname.at(f) << std::endl;
-                            DBG_succ* graph_to_merge = new DBG_succ(config->fname.at(f), config);
-                            
-                            DBG_succ* target_graph = new DBG_succ(graph_to_merge->get_k(), config, false);
-
-                            if ((config->parallel > 1) || (config->parts_total > 1)) {
-
-                                pthread_t* threads = NULL; 
-                                merge_data = new ParallelMergeContainer();
-
-                                // get bins in graphs according to required threads
-                                merge_data->bins_g1 = target_graph->get_bins(config->parallel, config->bins_per_thread, graph);
-                                merge_data->bins_g2 = target_graph->get_bins(config->parallel, config->bins_per_thread, graph_to_merge);
-                                if (config->verbose) {
-                                    merge_data->get_bin_stats();
-                                    std::cout << "Rebalancing bins to a target size of " << config->parallel * config->bins_per_thread << std::endl;
-                                }
-                                merge_data->rebalance_bins(config->parallel * config->bins_per_thread);
-                                if (config->verbose) {
-                                    merge_data->get_bin_stats();
-                                }
-                                assert(merge_data->bins_g1.size() == merge_data->bins_g2.size());
-
-                                // only work on subset of the bins when requested
-                                if (config->parts_total > 1) {
-                                    merge_data->subset_bins(config->part_idx, config->parts_total);
-                                }
-
-                                // prepare data shared by threads
-                                merge_data->idx = 0;
-                                merge_data->k = graph->get_k();
-                                merge_data->graph1 = graph;
-                                merge_data->graph2 = graph_to_merge;
-                                for (size_t i = 0; i < merge_data->bins_g1.size(); i++)
-                                    merge_data->result.push_back(NULL);
-                                merge_data->bins_done = 0;
-
-                                // create threads
-                                threads = new pthread_t[config->parallel]; 
-                                pthread_attr_init(&attr);
-                                pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-
-                                // do the work
-                                for (size_t tid = 0; tid < config->parallel; tid++) {
-                                   pthread_create(&threads[tid], &attr, parallel_merge_wrapper, (void *) tid); 
-                                   std::cerr << "starting thread " << tid << std::endl;
-                                }
-
-                                // join threads
-                                if (config->verbose)
-                                    std::cout << "Waiting for threads to join" << std::endl;
-                                for (size_t tid = 0; tid < config->parallel; tid++) {
-                                    pthread_join(threads[tid], NULL);
-                                }
-                                delete[] threads;
-
-                                // collect results
-                                std::cerr << "Collecting results" << std::endl;
-                                parallel_merge_collect(target_graph);
-
-                                delete merge_data;
-
-                            } else {
-                                if (config->fast) {
-                                    target_graph->merge_fast(graph, graph_to_merge);
-                                } else {
-                                    target_graph->merge(graph, graph_to_merge);
-                                }
-                            }
-
-                            //target_graph->print_seq(); 
-                            /*std::deque<uint64_t> tut;
-                            for (size_t ii = 1; ii < target_graph->last->size(); ++ii) {
-                                std::cerr << ii << "/" << target_graph->last->size() << std::endl;
-                                tut = target_graph->get_node_seq(ii);
-                            }*/
-
-                            delete graph_to_merge;
-                            delete graph;
-                            graph = target_graph;
-
-                            std::cerr << "... done merging." << std::endl;
-                        }
-                    }
+                std::vector<DBG_succ*> graphs;
+                std::vector<uint64_t> kv;
+                std::vector<uint64_t> nv;
+                for (unsigned int f = 0; f < config->fname.size(); ++f) {
+                        std::cout << "Opening file " << config->fname.at(f) << std::endl;
+                        graph = new DBG_succ(config->fname.at(f), config);
+                        graphs.push_back(graph);
+                        kv.push_back(1);
+                        nv.push_back(graph->get_size());
                 }
+                DBG_succ* target_graph = new DBG_succ(graphs.front()->get_k(), config, false);
+
+                if ((config->parallel > 1) || (config->parts_total > 1)) {
+                    pthread_t* threads = NULL; 
+                    merge_data = new ParallelMergeContainer();
+
+                    // get bins in graphs according to required threads
+                    if (config->verbose)
+                        std::cout << "Collecting reference bins" << std::endl;
+                    std::cerr << "parallel " << config->parallel << " per thread " << config->bins_per_thread << " parts total " << config->parts_total << std::endl;
+                    merge_data->ref_bins = graphs.front()->get_bins(config->parallel * config->bins_per_thread * config->parts_total);
+
+                    // only work on subset of the bins when requested
+                    if (config->parts_total > 1) {
+                        merge_data->subset_bins(config->part_idx, config->parts_total, config->parallel * config->bins_per_thread);
+                    }
+                    merge_data->bins.push_back(merge_data->ref_bins);
+
+                    if (config->verbose)
+                        std::cout << "Collecting relative bins" << std::endl;
+                    for (size_t i = 1; i < graphs.size(); i++) {
+                        std::cerr << "getting bins for " << i << ": " << config->fname.at(i) << std::endl; 
+                        merge_data->bins.push_back(graphs.at(i)->get_bins_relative(graphs.front(), merge_data->ref_bins, merge_data->first, merge_data->last));
+                    }
+                    for (size_t i = 0; i < graphs.size(); i++) {
+                        for (size_t ii = 0; ii < merge_data->bins.at(i).size(); ii++) {
+                            if (merge_data->bins.at(i).at(ii).first > merge_data->bins.at(i).at(ii).second) {
+                               merge_data->bins.at(i).at(ii) = std::make_pair(graphs.at(i)->get_size(), graphs.at(i)->get_size() - 1); 
+                            }
+                        }
+                    }
+
+                    // print bin stats
+                    if (config->verbose) {
+                        merge_data->get_bin_stats();
+                    }
+
+                    // prepare data shared by threads
+                    merge_data->idx = 0;
+                    merge_data->k = graph->get_k();
+                    merge_data->graphs = graphs;
+                    for (size_t i = 0; i < merge_data->ref_bins.size(); i++)
+                        merge_data->result.push_back(NULL);
+                    merge_data->bins_done = 0;
+
+                    // create threads
+                    threads = new pthread_t[config->parallel]; 
+                    pthread_attr_init(&attr);
+                    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+
+                    // do the work
+                    for (size_t tid = 0; tid < config->parallel; tid++) {
+                       pthread_create(&threads[tid], &attr, parallel_merge_wrapper, (void *) tid); 
+                       std::cerr << "starting thread " << tid << std::endl;
+                    }
+
+                    // join threads
+                    if (config->verbose)
+                        std::cout << "Waiting for threads to join" << std::endl;
+                    for (size_t tid = 0; tid < config->parallel; tid++) {
+                        pthread_join(threads[tid], NULL);
+                    }
+                    delete[] threads;
+
+                    // collect results
+                    std::cerr << "Collecting results" << std::endl;
+                    parallel_merge_collect(target_graph);
+
+                    graph = target_graph;
+
+                    delete merge_data;
+
+                } else {
+                    target_graph->merge(graphs, kv, nv);
+                    graph = target_graph;
+                }
+                for (size_t f = 0; f < graphs.size(); f++)
+                    delete graphs.at(f);
+                std::cerr << "... done merging." << std::endl;
             }
         } break;
 
