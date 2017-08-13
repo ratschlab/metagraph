@@ -452,7 +452,7 @@ uint64_t DBG_succ::index(std::string &s_) {
     TAlphabet s = get_alphabet_number(s_[0]);
     // init range
     uint64_t rl = succ_last(F[s] + 1);
-    uint64_t ru = F[s + 1]; // upper bound
+    uint64_t ru = s+1 < alph_size ? F[s + 1] : last->size()-1; // upper bound
     // update range iteratively while scanning through s
     for (uint64_t i = 1; i < s_.length(); i++) {
         s = get_alphabet_number(s_[i]);
@@ -908,10 +908,11 @@ std::string DBG_succ::get_node_str(uint64_t k_node) {
     std::pair<TAlphabet, uint64_t> k_val;
     for (uint64_t curr_k = 0; curr_k < this->k; ++curr_k) {
         k_val = get_minus_k_value(k_node, 0);
-        ret << k_val.first;
+        ret << get_alphabet_symbol(k_val.first);
         k_node = k_val.second;
     }
-    return ret.str();
+    std::string ret_str = ret.str();
+    return std::string(ret_str.rbegin(), ret_str.rend());
 }
 
 /**
@@ -1149,6 +1150,7 @@ void DBG_succ::add_seq_alt (kstring_t &seq, bool bridge, unsigned int parallel, 
         std::cout << "======================================" << std::endl;
     }
 
+    /*
     char *nt_lookup = (char*)malloc(128);
     uint8_t def = 5;
     memset(nt_lookup, def, 128);
@@ -1156,6 +1158,19 @@ void DBG_succ::add_seq_alt (kstring_t &seq, bool bridge, unsigned int parallel, 
         nt_lookup[(uint8_t)alphabet[i]]=i;
         nt_lookup[(uint8_t)tolower(alphabet[i])]=i;
     }
+    */
+    const char nt_lookup[128] = {
+                    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5, 
+                    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5, 
+                    5, 5, 5, 5,  0, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+                    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5, 
+                    5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5, 
+                    5, 5, 5, 5,  4, 4, 5, 5,  6, 5, 5, 5,  5, 5, 5, 5, 
+                    5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5, 
+                    5, 5, 5, 5,  4, 4, 5, 5,  6, 5, 5, 5,  5, 5, 5, 5 
+    };   
+
+
 
     //clock_t start = clock();
     //std::cerr << "Loading kmers\n";
@@ -1165,7 +1180,7 @@ void DBG_succ::add_seq_alt (kstring_t &seq, bool bridge, unsigned int parallel, 
     }
     seqtokmer(kmers, seq.s, seq.l, k, nt_lookup, bridge, parallel, suffix);
     //std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
-    free(nt_lookup);
+    //free(nt_lookup);
 }
 
 void DBG_succ::construct_succ(unsigned int parallel) {
@@ -1175,7 +1190,9 @@ void DBG_succ::construct_succ(unsigned int parallel) {
     //__gnu_parallel::sort(kmers.begin(),kmers.end());
     std::sort(kmers.begin(),kmers.end());
     kmers.erase(std::unique(kmers.begin(), kmers.end() ), kmers.end() );
+
     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
+
     start=clock();
     std::cerr << "Constructing succinct representation\t";
     
@@ -1197,35 +1214,58 @@ void DBG_succ::construct_succ(unsigned int parallel) {
             if (i+1 < kmers.size()) {
                 bool dup = compare_kmer_suffix(kmers[i], kmers[i+1]);
                 if (dup) {
+                    //Since this causes the other threads to wait, only update when necessary
                     #pragma omp critical
-                    //last->setBitQuick(i, !compare_kmer_suffix(kmers[i], kmers[i+1]));
                     last->setBitQuick(i, false);
                 }
             }
-            //set F
             //set W
-            uint64_t curW = getW(kmers[i]);
-            Wvec[i] = curW;
+            uint8_t curW = getW(kmers[i]);
+            if (curW == 127) {
+                char* curseq = kmertos(kmers[i], alphabet, alph_size);
+                std::cerr << "Failure decoding kmer " << i << "\n" << kmers[i] << "\n" << curseq << "\n";
+                free(curseq);
+                exit(1);
+            }
             if (!curW && i)
                 p=i;
             if (i) {
                 //uint64_t cF=get_alphabet_number(getPos(kmers[i], k-1, alphabet, alph_size));
                 //#pragma omp critical
                 //F[cF] = std::min(F[cF],i-1);
-                for (int j=i-1;j>=0 && compare_kmer_suffix(kmers[j], kmers[i], 1);--j) {
-                    if ((Wvec[j] % alph_size) == curW) {
-                        Wvec[i] += alph_size;
+                for (size_t j=i-1;compare_kmer_suffix(kmers[j], kmers[i], 1);--j) {
+                    //TODO: recalculating W is probably faster than doing a pragma for ordered
+                    if (getW(kmers[j]) == curW) {
+                        curW += alph_size;
                         break;
                     }
-             
+                    if (!j)
+                        break;
                 }
+                /*
+                size_t j;
+                for (j=i-1;getW(kmers[j])!= curW;--j) {
+                    if (!j)
+                        break;
+                }
+                if (getW(kmers[j]) == curW && compare_kmer_suffix(kmers[j], kmers[i], 1)) {
+                    curW += alph_size;
+                }
+                */
             }
+            Wvec[i] = curW;
         }
     }
+    std::cerr << "Building wavelet tree\t";
+    W = new WaveletTree(Wvec, 4, parallel);
+    assert(W->size() == Wvec.size());
+    assert((*W)[3] == Wvec[3]);
+    Wvec.clear();
+
+    std::cerr << "Building F\t";
     F[0] = 0;
-//    uint64_t cF = get_alphabet_number(getPos(kmers[0], k-1, alphabet, alph_size));
     for (size_t i=0;i<kmers.size();++i) {
-        uint64_t cF=getPos(kmers[i], k-1, alphabet, alph_size);
+        char cF=getPos(kmers[i], k-1, alphabet, alph_size);
         /*
         char *curseq = kmertos(kmers[i], alphabet, alph_size);
         std::cerr << "-" << (*last)[i] << " " << curseq << " " << get_alphabet_symbol(Wvec[i]) << (Wvec[i]>=alph_size ? "-" : "") << "\n"; 
@@ -1244,21 +1284,10 @@ void DBG_succ::construct_succ(unsigned int parallel) {
     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     start=clock();
 
-    std::cerr << "Building wavelet tree\t";
-    W = new WaveletTree(Wvec, 4, parallel);
-    assert(W->size() == Wvec.size());
-    assert((*W)[3] == Wvec[3]);
-    Wvec.clear();
     kmers.clear();
-    /*
-    for (size_t i=0;i<W->size();++i) {
-        char *curseq = kmertos(kmers[i], alphabet, alph_size);
-        std::cout << i << " " << (*last)[i] << " " << curseq+1 << " " << curseq[0] << ((*Wvec)[i] >= alph_size ? "-":"") << " " << get_alphabet_symbol((*W)[i]) << "\n";
-        free(curseq);
-    }
-    */
     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     start=clock();
+    //output total RAM usage
     FILE* sfile = fopen("/proc/self/status","r");
     char line[128];
     while (fgets(line, 128, sfile) != NULL) {
@@ -1268,8 +1297,6 @@ void DBG_succ::construct_succ(unsigned int parallel) {
     }
     fclose(sfile);
     fprintf(stdout, "edges %lu / nodes %lu/ %s\n", get_edge_count(), get_node_count(), line);
-    //std::cerr << kmers.size() << " " << W->n << " " << last->size() << "\n";
-    //assert(W->n == last->size());
 }
 
 
@@ -3332,6 +3359,7 @@ bool DBG_succ::compare(DBG_succ* G) {
     */
 
     // compare size
+    std::cerr << "Comparing size\n";
     if (W->n != G->get_size()) {
         std::cerr << "sizes of graphs differ" << std::endl;
         std::cerr << "1: " << W->n << std::endl;
@@ -3340,6 +3368,7 @@ bool DBG_succ::compare(DBG_succ* G) {
     }
     
     // compare last
+    std::cerr << "Comparing L\n";
     for (size_t i = 0; i < W->n; ++i) {
         if ((*last)[i] != G->get_last(i)) {
             std::cerr << "last differs at position " << i << std::endl;
@@ -3351,6 +3380,7 @@ bool DBG_succ::compare(DBG_succ* G) {
     }
 
     // compare W
+    std::cerr << "Comparing W\n";
     for (size_t i = 0; i < W->n; ++i) {
         if ((*W)[i] != G->get_W(i)) {
             std::cerr << "W differs at position " << i << std::endl;
@@ -3362,6 +3392,7 @@ bool DBG_succ::compare(DBG_succ* G) {
     }
 
     // compare F
+    std::cerr << "Comparing F\n";
     for (size_t i = 0; i < F.size(); ++i) {
         if (F.at(i) != G->get_F(i)) {
             std::cerr << "F differs at position " << i << std::endl;

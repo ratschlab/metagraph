@@ -191,6 +191,7 @@ int main(int argc, char const ** argv) {
                 } else {
                     std::cout << "Opening file for comparison ..." << config->fname.at(f) << std::endl;
                     DBG_succ* graph_ = new DBG_succ(config->fname.at(f), config);
+                    std::cout << "Starting comparison\n";
                     bool identical = graph->compare(graph_);
                     if (identical) {
                         std::cout << "Graphs are identical" << std::endl;
