@@ -250,6 +250,8 @@ class DBG_succ {
 
     public:
 
+    AnnotationHash hasher;
+
     // the bit array indicating the last outgoing edge of a node
     BitBTree *last = new BitBTree();
     //libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();

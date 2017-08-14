@@ -2176,7 +2176,8 @@ void DBG_succ::annotate_kmer(std::string &kmer, uint32_t &label_id, uint64_t &id
     if (!std::binary_search(curr_combo.begin(), curr_combo.end(), label_id)) {
 
         curr_combo = add_to_combination(curr_combo, label_id); 
-        curr_hash = AnnotationHash{}(curr_combo);
+        //curr_hash = AnnotationHash{}(curr_combo);
+        curr_hash = hasher.bithash(curr_combo);
 
        // if (anno_mutex)
        //     pthread_mutex_lock(anno_mutex);
