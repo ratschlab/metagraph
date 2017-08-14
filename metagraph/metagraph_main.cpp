@@ -16,7 +16,7 @@
 #include "kseq.h"
 #include "utils.hpp"
 #include "vcfparse.h"
-
+#include "compare.hpp"
 #include "merge.hpp"
 
 KSEQ_INIT(gzFile, gzread)
@@ -135,7 +135,7 @@ int main(int argc, char const ** argv) {
                 } else {
                     std::cout << "Opening file for comparison ..." << config->fname.at(f) << std::endl;
                     DBG_succ* graph_ = new DBG_succ(config->fname.at(f), config);
-                    bool identical = graph->compare(graph_);
+                    bool identical = compare::compare(graph, graph_);
                     if (identical) {
                         std::cout << "Graphs are identical" << std::endl;
                     } else {
