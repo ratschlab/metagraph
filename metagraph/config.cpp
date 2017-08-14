@@ -170,6 +170,7 @@ void Config::print_usage(std::string prog_name, int identity) {
             fprintf(stderr, "Available options for stats:\n");
             fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t-P --print \tprint graph table to the screen [off]\n");
+            fprintf(stderr, "\t--print-state \tprint node labels and graph arrays to the screen [off]\n");
         } break;
         case annotate: {
             fprintf(stderr, "Usage: %s annotate [options] PATH1 [[PATH2] ...]\n\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
