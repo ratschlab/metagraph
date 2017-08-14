@@ -566,21 +566,6 @@ class DBG_succ {
 
     //
     //
-    // ANNOTATE
-    //
-    //
-
-    void annotate_seq(kstring_t &seq, kstring_t &label, uint64_t start=0, uint64_t end=0, pthread_mutex_t* anno_mutex=NULL);
-
-    void annotate_kmer(std::string &kmer, uint32_t &label, uint64_t &previous, pthread_mutex_t* anno_mutex, bool ignore=false);
-
-    std::vector<uint32_t> classify_path(std::vector<uint64_t> path);
-
-    std::set<uint32_t> classify_read(kstring_t &read, uint64_t max_distance);
-
-
-    //
-    //
     // MERGE
     //
     //
@@ -603,14 +588,6 @@ class DBG_succ {
      * a given bin ID.
      */
     std::deque<TAlphabet> bin_id_to_string(uint64_t bin_id, uint64_t binlen);
-
-    /*
-     * Distribute the merging of two graph structures G1 and G2 over
-     * bins, such that n parallel threads are used. The number of bins
-     * is determined dynamically.
-     */
-    //void merge_parallel(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint64_t n1, uint64_t n2, uint64_t threads);
-
 
     //
     //
@@ -649,7 +626,6 @@ class DBG_succ {
     /**
      * Visualization, Serialization and Deserialization of annotation content.
      */
-    void annotationToScreen();
     void annotationToFile();
     void annotationFromFile();
 

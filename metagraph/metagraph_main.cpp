@@ -19,6 +19,7 @@
 #include "compare.hpp"
 #include "traverse.hpp"
 #include "merge.hpp"
+#include "annotate.hpp"
 
 KSEQ_INIT(gzFile, gzread)
 
@@ -69,7 +70,7 @@ void *parallel_annotate_wrapper(void *arg) {
             start = curr_idx * anno_data->binsize;
             end = std::min(((curr_idx + 1) * anno_data->binsize) + anno_data->graph->k - 1, anno_data->seq->l);
             //std::cerr << "start " << start << " end " << end << std::endl;
-            anno_data->graph->annotate_seq(*(anno_data->seq), *(anno_data->label), start, end, &mutex_annotate);
+            annotate::annotate_seq(anno_data->graph, *(anno_data->seq), *(anno_data->label), start, end, &mutex_annotate);
         }
     }
     pthread_exit((void*) 0);
@@ -597,7 +598,7 @@ int main(int argc, char const ** argv) {
                         //if (config->verbose)
                         //    std::cout << "added labels for " << total_seqs << " sequences, last was " << std::string(read_stream->name.s) << std::endl;
                     } else {
-                        graph->annotate_seq(read_stream->seq, read_stream->name);
+                        annotate::annotate_seq(graph, read_stream->seq, read_stream->name);
                     }
                     if (config->verbose) {
                         std::cout << "entries in annotation map: " << graph->combination_count << std::endl << "length of combination vector: " << graph->combination_vector.size() << std::endl;
@@ -616,7 +617,7 @@ int main(int argc, char const ** argv) {
             }
 
             if (config->print_graph)
-                graph->annotationToScreen();
+                annotate::annotationToScreen(graph);
 
             graph->annotationToFile();
 
@@ -655,13 +656,13 @@ int main(int argc, char const ** argv) {
                 while (kseq_read(read_stream) >= 0) {
 
                     std::cout << std::string(read_stream->name.s) << "\t";
-                    labels_fwd = graph->classify_read(read_stream->seq, config->distance);
+                    labels_fwd = annotate::classify_read(graph, read_stream->seq, config->distance);
                     for (std::set<uint32_t>::iterator it = labels_fwd.begin(); it != labels_fwd.end(); it++)
                         std::cout << graph->id_to_label.at(*it) << ":";
                     std::cout << "\t";
 
                     reverse_complement(read_stream->seq);                    
-                    labels_rev = graph->classify_read(read_stream->seq, config->distance);
+                    labels_rev = annotate::classify_read(graph, read_stream->seq, config->distance);
                     for (std::set<uint32_t>::iterator it = labels_rev.begin(); it != labels_rev.end(); it++)
                         std::cout << graph->id_to_label.at(*it) << ":";
                     std::cout << std::endl;
