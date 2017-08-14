@@ -17,6 +17,7 @@
 #include "utils.hpp"
 #include "vcfparse.h"
 #include "compare.hpp"
+#include "traverse.hpp"
 #include "merge.hpp"
 
 KSEQ_INIT(gzFile, gzread)
@@ -678,7 +679,7 @@ int main(int argc, char const ** argv) {
         if (config->print_graph)
             graph->print_seq();
         if (!config->sqlfbase.empty())
-            graph->toSQL();
+            traverse::toSQL(graph);
         if (!config->outfbase.empty())
             graph->toFile(config->parts_total, config->part_idx);
 
