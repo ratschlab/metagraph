@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <set>
+#include <unordered_map>
 #include <unordered_set>
 #include <pthread.h>
 #include <assert.h>
@@ -56,6 +57,8 @@ struct AnnotationSet {
 };
 
 struct AnnotationHash {
+    std::unordered_map<uint32_t, uint32_t> bitmap;
+    uint32_t last = 1;
     
     uint32_t knuth_hash(const uint32_t i) const {
         return i * UINT32_C(2654435761);
@@ -71,6 +74,22 @@ struct AnnotationHash {
                 h1 = h1 ^ (h2 << 1);
             }
         }
+        return h1;
+    };
+
+    std::uint32_t bithash(const std::vector<uint32_t> &a) {
+        uint32_t h1 = 0;
+        for (std::vector<uint32_t>::const_iterator it = a.begin(); it!=a.end();++it) {
+            std::unordered_map<uint32_t, uint32_t>::iterator c = bitmap.find(*it);
+            if (c != bitmap.end()) {
+                h1 += c->second;
+            } else {
+                bitmap[*it] = last;
+                h1 += last;
+                last <<= 1;
+            }
+        }
+        assert(h1 || !a.size());
         return h1;
     };
 

@@ -249,6 +249,8 @@ class DBG_succ {
 
     public:
 
+    AnnotationHash hasher;
+
     // the bit array indicating the last outgoing edge of a node
     BitBTree *last = new BitBTree();
     //libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();
@@ -638,6 +640,13 @@ class DBG_succ {
      * the screen.
      */
     void print_state();
+    
+    
+    /**
+     * This is a debug function that prints the current representation of the graph to
+     * the screen.
+     */
+    void print_state_str();
 
     /*
      * Returns the sequence stored in W and prints the node

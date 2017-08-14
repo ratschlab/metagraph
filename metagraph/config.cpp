@@ -49,6 +49,8 @@ Config::Config(int argc, const char *argv[]) {
             quiet = true;
         } else if (!strcmp(argv[i], "-P") || !strcmp(argv[i], "--print")) {
             print_graph = true;
+        } else if (!strcmp(argv[i], "--print-state")) {
+            print_graph_succ = true;
         } else if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--reverse")) {
             reverse = true;
         } else if (!strcmp(argv[i], "--fast")) {
@@ -168,6 +170,7 @@ void Config::print_usage(std::string prog_name, int identity) {
             fprintf(stderr, "Available options for stats:\n");
             fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t-P --print \tprint graph table to the screen [off]\n");
+            fprintf(stderr, "\t--print-state \tprint node labels and graph arrays to the screen [off]\n");
         } break;
         case annotate: {
             fprintf(stderr, "Usage: %s annotate [options] PATH1 [[PATH2] ...]\n\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
@@ -199,6 +202,7 @@ void Config::init() {
     verbose = false;
     quiet = false;
     print_graph = false;
+    print_graph_succ = false;
     reverse = false;
     fast = false;
     distance = 0;

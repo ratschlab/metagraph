@@ -39,9 +39,6 @@ $(BUILD_DIR)/%.o : %.cpp
 	### -MMD creates a dependency file (.d) for each object file (.o)
 	$(CXX) $(CXXFLAGS) -MMD -c $< -o $@
 
-bitest: bitest.cpp
-	g++ -g -O3 -D__STDC_LIMIT_MACROS bitest.cpp -lhts -lz
-
 clean:
 	rm -rf $(BINARY) $(BUILD_DIR)
 
