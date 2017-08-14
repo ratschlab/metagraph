@@ -17,6 +17,8 @@
 #include "utils.hpp"
 #include "vcfparse.h"
 
+#include "merge.hpp"
+
 KSEQ_INIT(gzFile, gzread)
 
 Config* config;
@@ -99,7 +101,7 @@ void *parallel_merge_wrapper(void *arg) {
                 kv.push_back(merge_data->bins.at(i).at(curr_idx).first);
                 nv.push_back(merge_data->bins.at(i).at(curr_idx).second + 1);
             }
-            graph->merge(merge_data->graphs, kv, nv, true);
+            merge::merge(graph, merge_data->graphs, kv, nv, true);
 
             pthread_mutex_lock (&mutex_merge_result);
             merge_data->result.at(curr_idx) = graph;
@@ -154,7 +156,7 @@ int main(int argc, char const ** argv) {
                     std::cout << "Opening file " << fname << std::endl;
                     if (config->fast) {
                         if (f == 0) {
-                            graph = new DBG_succ(kFromFile(fname), config, false);
+                            graph = new DBG_succ(utils::kFromFile(fname), config, false);
                             graph->last_stat.push_back(0);
                             graph->W_stat.push_back(0);
                         }
@@ -266,7 +268,7 @@ int main(int argc, char const ** argv) {
                     delete merge_data;
 
                 } else {
-                    target_graph->merge(graphs, kv, nv);
+                    merge::merge(target_graph, graphs, kv, nv);
                     graph = target_graph;
                 }
                 for (size_t f = 0; f < graphs.size(); f++)

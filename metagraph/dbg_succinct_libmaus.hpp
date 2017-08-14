@@ -301,12 +301,6 @@ class DBG_succ {
     struct BranchInfo;
 
     /**
-     * This object collects information about branches during graph traversal for the
-     * purpose of merging, so we know where to jump back to when we reached a dead end.
-     */
-    struct BranchInfoMerge;
-
-    /**
      * This will hold the graph edges that will be written to the SQL graph output.
      */
     struct JoinInfo;
@@ -453,33 +447,11 @@ class DBG_succ {
      */
     std::pair<TAlphabet, uint64_t> get_minus_k_value(uint64_t i, uint64_t k);
 
-    /**
-    * This function takes a pointer to a graph structure G1 and a corresponding node index k1_node
-    * as well as a pointer to a second graph structure G2 and a corresponding node index k2_node. It
-    * returns a pair of bool with the first value set to true if G1(k1_node) < G2(k2_node) and the
-    * second value set to true if G2(k2_node) < G1(k1_node).
-    */
-    std::pair<bool, bool> compare_nodes(DBG_succ *G1, uint64_t k1_node, DBG_succ *G2, uint64_t k2_node); 
-
-    std::pair<std::vector<bool>, uint64_t> compare_nodes(std::vector<DBG_succ*> G, std::vector<uint64_t> k, std::vector<uint64_t> n, size_t &cnt);
-
     /** 
      * This function gets two node indices and returns if the
      * node labels share a k-1 suffix.
      */
     bool compare_node_suffix(uint64_t i1, uint64_t i2);
-
-    /**
-     *  This function checks whether two given strings given as deques are 
-     *  identical.
-     */
-    bool compare_seq(std::deque<TAlphabet> s1, std::deque<TAlphabet> s2, size_t start = 0);
-
-    /**
-     *  This function checks whether string s1 is lexicographically inverse 
-     *  greater than s2.
-     */
-    bool seq_is_greater(std::deque<TAlphabet> s1, std::deque<TAlphabet> s2);
 
     /**
      * This function returns true if node i is a terminal node.
@@ -613,15 +585,11 @@ class DBG_succ {
      */
     BranchInfo pop_branch(std::stack<BranchInfo> &branchnodes, uint64_t &seqId, uint64_t &seqPos, uint64_t &nodeId, uint64_t &lastEdge, bool &isFirst);
 
-    BranchInfoMerge pop_branch(std::stack<BranchInfoMerge> &branchnodes, uint64_t &nodeId, uint64_t &lastEdge, std::deque<TAlphabet> &last_k);
-
     bool finish_sequence(std::string &sequence, uint64_t seqId, std::ofstream &SQLstream); 
 
     size_t traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream); 
 
     void allelesFromSeq(kstring_t &seq, unsigned int f, std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream, bool isRefRun = false, size_t seqNum = 0);
-
-    void traversalHash();
 
     //
     //
@@ -644,21 +612,9 @@ class DBG_succ {
     //
     //
 
-    /**
-    * Heavily borrowing from the graph sequence traversal, this function gets a graph pointer G and merges its
-    * nodes into the current graph object. The edges of the graph G are fully traversed and nodes are added to
-    * the object graph if not existing yet. This function is well suited to merge small graphs into large ones.
-    */
-    void merge(DBG_succ* G); 
-    
+   
     uint64_t next_non_zero(std::vector<uint64_t> v, uint64_t pos);
     uint64_t next_non_zero(std::vector<std::pair<uint64_t, std::deque<TAlphabet> > > v, uint64_t pos);
-
-    /*
-     * Given a list of grapj structures, this functions
-     * integrates all of them into a new graph G.
-     */
-    void merge(std::vector<DBG_succ*> Gv, std::vector<uint64_t> kv, std::vector<uint64_t> nv, bool is_parallel = false);
 
     /**
     * Given a pointer to a graph structure G, the function compares its elements to the
