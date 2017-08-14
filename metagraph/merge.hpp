@@ -36,6 +36,13 @@ namespace merge {
 
     void traversalHash();
 
- 
+    /* 
+     * Helper function to determine the bin boundaries, given 
+     * a number of threads.
+     */
+    std::vector<std::pair<uint64_t, uint64_t> > get_bins(DBG_succ* G, uint64_t bins);
+
+    std::vector<std::pair<uint64_t, uint64_t> > get_bins_relative(DBG_succ* G_from, DBG_succ* G_to, std::vector<std::pair<uint64_t, uint64_t> > ref_bins, uint64_t first_pos, uint64_t last_pos);
+
 }
 #endif

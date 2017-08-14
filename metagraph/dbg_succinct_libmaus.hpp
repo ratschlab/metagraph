@@ -589,14 +589,6 @@ class DBG_succ {
     uint64_t next_non_zero(std::vector<uint64_t> v, uint64_t pos);
     uint64_t next_non_zero(std::vector<std::pair<uint64_t, std::deque<TAlphabet> > > v, uint64_t pos);
 
-    /**
-    * Given a pointer to a graph structure G, the function compares its elements to the
-    * current graph. It will perform an element wise comparison of the arrays W, last and
-    * F and will only check for identity. If any element differs, the function will return 
-    * false and true otherwise.
-    */
-    bool compare(DBG_succ* G); 
-
     /*
      * Helper function that will split up a given range in the graph
      * into bins, one for each character in the alphabet. The split is performed based
@@ -605,15 +597,6 @@ class DBG_succ {
      */
     std::vector<uint64_t> split_range(uint64_t start, uint64_t end, uint64_t d /*depth*/);
     void split_range(std::deque<TAlphabet>* str, std::pair<uint64_t, uint64_t>& range);
-
-    /* 
-     * Helper function to determine the bin boundaries, given 
-     * a number of threads.
-     */
-    std::vector<std::pair<uint64_t, uint64_t> > get_bins(uint64_t threads, uint64_t bins_per_thread, DBG_succ* G);
-    std::vector<std::pair<uint64_t, uint64_t> > get_bins(uint64_t bins);
-
-    std::vector<std::pair<uint64_t, uint64_t> > get_bins_relative(DBG_succ* G, std::vector<std::pair<uint64_t, uint64_t> > ref_bins, uint64_t first_pos, uint64_t last_pos);
 
     /*
      * Helper function to generate the prefix corresponding to 

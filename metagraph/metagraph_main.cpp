@@ -206,7 +206,7 @@ int main(int argc, char const ** argv) {
                     if (config->verbose)
                         std::cout << "Collecting reference bins" << std::endl;
                     std::cerr << "parallel " << config->parallel << " per thread " << config->bins_per_thread << " parts total " << config->parts_total << std::endl;
-                    merge_data->ref_bins = graphs.front()->get_bins(config->parallel * config->bins_per_thread * config->parts_total);
+                    merge_data->ref_bins = merge::get_bins(graphs.front(), config->parallel * config->bins_per_thread * config->parts_total);
 
                     // only work on subset of the bins when requested
                     if (config->parts_total > 1) {
@@ -218,7 +218,7 @@ int main(int argc, char const ** argv) {
                         std::cout << "Collecting relative bins" << std::endl;
                     for (size_t i = 1; i < graphs.size(); i++) {
                         std::cerr << "getting bins for " << i << ": " << config->fname.at(i) << std::endl; 
-                        merge_data->bins.push_back(graphs.at(i)->get_bins_relative(graphs.front(), merge_data->ref_bins, merge_data->first, merge_data->last));
+                        merge_data->bins.push_back(merge::get_bins_relative(graphs.at(i), graphs.front(), merge_data->ref_bins, merge_data->first, merge_data->last));
                     }
                     for (size_t i = 0; i < graphs.size(); i++) {
                         for (size_t ii = 0; ii < merge_data->bins.at(i).size(); ii++) {

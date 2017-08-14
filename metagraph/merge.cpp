@@ -496,4 +496,62 @@ namespace merge {
         std::cout << std::endl;
     }
 
+
+    /* 
+     * Helper function to determine the bin boundaries, given 
+     * a number of bins.
+     */
+    std::vector<std::pair<uint64_t, uint64_t> > get_bins(DBG_succ* G, uint64_t bins) {
+
+        uint64_t nodes = G->rank_last(G->get_size() - 1);
+        uint64_t orig_bins = bins;
+        std::cerr << "working with " << orig_bins << " orig bins; " << nodes << " nodes" <<  std::endl;
+        if (bins > nodes) {
+            std::cerr << "[WARNING] There are max " << nodes << " slots available for binning. Your current choice is " << bins << " which will create " << bins - nodes << " empty slots." << std::endl;
+            bins = nodes;
+        }
+
+        std::vector<std::pair<uint64_t, uint64_t> > result;
+        uint64_t binsize = (nodes + bins - 1) / bins;
+        uint64_t thresh = (nodes - (bins * (nodes / bins))) * binsize;
+        uint64_t pos = 1;
+        for (uint64_t i = 0; i < nodes;) {
+            if (i >= thresh) {
+                binsize = nodes / bins;
+            }
+            //std::cerr << "push " << pos << " - " << this->select_last(std::min(nodes, i + binsize)) << std::endl;
+            result.push_back(std::make_pair(pos, G->select_last(std::min(nodes, i + binsize))));
+            pos = result.back().second + 1;
+            i += binsize;
+        }
+
+        for (uint64_t i = bins; i < orig_bins; i++) {
+            //result.push_back(std::make_pair(pos, pos));
+            result.push_back(std::make_pair(1, 0));
+        }
+        
+        std::cerr << "created " << result.size() << " bins" << std::endl;
+        return result;
+    }
+
+    std::vector<std::pair<uint64_t, uint64_t> > get_bins_relative(DBG_succ* G_from, DBG_succ* G_to, std::vector<std::pair<uint64_t, uint64_t> > ref_bins, uint64_t first_pos, uint64_t last_pos) {
+        
+        std::vector<std::pair<uint64_t, uint64_t> > result;
+        uint64_t pos = (first_pos == 0) ? 1 : G_from->index_predecessor(G_to->get_node_seq(first_pos)) + 1;
+        uint64_t upper;
+        for (size_t i = 0; i < ref_bins.size(); i++) {
+            if (ref_bins.at(i).second == 0) { // this happens if we have more bins than nodes
+                result.push_back(std::make_pair(0, 0));
+            } else {
+                upper = G_from->index_predecessor(G_to->get_node_seq(ref_bins.at(i).second));
+                std::cerr << "ref bin " << ref_bins.at(i).second << " rel upper " << upper << std::endl;
+                result.push_back(std::make_pair(pos, upper));
+                pos = upper + 1;
+            }
+        }
+        result.back().second = (last_pos == 0) ? G_from->get_size() - 1 : result.back().second;
+        return result;
+    }
+
+
 }
