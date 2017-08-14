@@ -19,6 +19,7 @@ class Config {
         bool quiet;
         bool integrate;
         bool print_graph;
+        bool print_graph_succ;
         bool reverse;
         bool fast;
         

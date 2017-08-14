@@ -669,6 +669,13 @@ class DBG_succ {
      * the screen.
      */
     void print_state();
+    
+    
+    /**
+     * This is a debug function that prints the current representation of the graph to
+     * the screen.
+     */
+    void print_state_str();
 
     /*
      * Returns the sequence stored in W and prints the node

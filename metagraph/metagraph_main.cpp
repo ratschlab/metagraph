@@ -317,6 +317,8 @@ int main(int argc, char const ** argv) {
                 }
                 if (config->print_graph)
                     graph_->print_seq();
+                if (config->print_graph_succ)
+                    graph_->print_state_str();
 
                 /*DBG_succ* graph_tut = new DBG_succ(config->k, config);
                 std::cerr << "inserting step by step" << std::endl;

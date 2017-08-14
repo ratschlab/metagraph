@@ -49,6 +49,8 @@ Config::Config(int argc, const char *argv[]) {
             quiet = true;
         } else if (!strcmp(argv[i], "-P") || !strcmp(argv[i], "--print")) {
             print_graph = true;
+        } else if (!strcmp(argv[i], "--print-state")) {
+            print_graph_succ = true;
         } else if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--reverse")) {
             reverse = true;
         } else if (!strcmp(argv[i], "--fast")) {
@@ -199,6 +201,7 @@ void Config::init() {
     verbose = false;
     quiet = false;
     print_graph = false;
+    print_graph_succ = false;
     reverse = false;
     fast = false;
     distance = 0;
