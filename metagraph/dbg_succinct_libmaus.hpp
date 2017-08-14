@@ -244,10 +244,9 @@ class DBG_succ {
     // define an extended alphabet for W --> somehow this does not work properly as expected
     typedef uint64_t TAlphabet;
 
-    private:
-    std::vector<ui256> kmers;
-
     public:
+
+    std::vector<ui256> kmers;
 
     AnnotationHash hasher;
 
@@ -274,6 +273,8 @@ class DBG_succ {
     uint64_t p;
     // alphabet size
     size_t alph_size = 7;
+    // alphabet
+    const std::string alphabet; //("$ACGTNX$ACGTNXn"); 
 
     // infile base when loaded from file
     std::string infbase;
@@ -536,30 +537,6 @@ class DBG_succ {
      * position i in W with val.
      */
     void replaceW(size_t i, TAlphabet val);
-
-    // add a full sequence to the graph
-    void add_seq (kstring_t &seq);
-    void add_seq_alt (kstring_t &seq, bool bridge=true, unsigned int parallel=1, std::string suffix="");
-    void construct_succ(unsigned int parallel=1);
-
-    /** This function takes a character c and appends it to the end of the graph sequence
-     * given that the corresponding note is not part of the graph yet.
-     */
-    void append_pos(TAlphabet c);
-
-    /** This function takes a pointer to a graph structure and concatenates the arrays W, last 
-     * and F to this graph's arrays. In almost all cases this will not produce a valid graph and 
-     * should only be used as a helper in the parallel merge procedure.
-     */
-    void append_graph(DBG_succ *g);
-
-    /** 
-     * This function takes a pointer to a graph structure and concatenates the arrays W, last 
-     * and F to this graph's static containers last_stat and W_stat. In almost all cases 
-     * this will not produce a valid graph and should only be used as a helper in the 
-     * parallel merge procedure.
-     */
-    void append_graph_static(DBG_succ *g);
 
     void toDynamic();
 

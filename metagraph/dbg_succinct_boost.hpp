@@ -59,14 +59,14 @@ uint8_t getW(ui256 kmer) {
 
 //zero-based
 //if i==-1, then it gets W as a char
-char getPos(ui256 &kmer, int64_t i, const char *alphabet, const uint64_t &alph_size) {
+char getPos(ui256 &kmer, int64_t i, const std::string alphabet, const uint64_t &alph_size) {
     uint8_t curw = getW(kmer >> ((BPC)*(i+1)));
     if (curw == 127)
         return 0;
     return (curw < alph_size ? alphabet[curw] : 'N');
 }
 
-char* kmertos(ui256 kmer, const char *alphabet, const uint64_t &alph_size) {
+char* kmertos(ui256 kmer, const std::string alphabet, const uint64_t &alph_size) {
     char *seq = (char*)calloc(256/BPC+1, sizeof(char));
     for (uint8_t curpos=0;kmer;++curpos, kmer >>= BPC) {
         seq[curpos] = getPos(kmer, -1, alphabet, alph_size);

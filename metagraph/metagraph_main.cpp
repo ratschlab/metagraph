@@ -20,6 +20,7 @@
 #include "traverse.hpp"
 #include "merge.hpp"
 #include "annotate.hpp"
+#include "construct.hpp"
 
 KSEQ_INIT(gzFile, gzread)
 
@@ -36,7 +37,7 @@ void parallel_merge_collect(DBG_succ* result) {
 
     for (size_t i = 0; i < merge_data->result.size(); ++i) {
         if (merge_data->result.at(i)) {
-            result->append_graph(merge_data->result.at(i));
+            construct::append_graph(result, merge_data->result.at(i));
             delete merge_data->result.at(i);
         }
     }
@@ -163,14 +164,14 @@ int main(int argc, char const ** argv) {
                             graph->W_stat.push_back(0);
                         }
                         DBG_succ* graph_to_append = new DBG_succ(fname, config);
-                        graph->append_graph_static(graph_to_append);
+                        construct::append_graph_static(graph, graph_to_append);
                         delete graph_to_append;
                     } else {
                         if (f == 0) {
                             graph = new DBG_succ(fname, config);
                         } else {
                             DBG_succ* graph_to_append = new DBG_succ(fname, config);
-                            graph->append_graph(graph_to_append);
+                            construct::append_graph(graph, graph_to_append);
                             delete graph_to_append;
                         }
                     }
@@ -486,7 +487,7 @@ int main(int argc, char const ** argv) {
                             }
                         }
                         nbp += vcf->seq.l;
-                        graph->add_seq_alt(vcf->seq, false, config->parallel, config->suffix);
+                        construct::add_seq_alt(graph, vcf->seq, false, config->parallel, config->suffix);
                     }
                     vcf_destroy(vcf);
                 } else {
@@ -505,9 +506,9 @@ int main(int argc, char const ** argv) {
     
                         // add all k-mers of seq to the graph
                         clock_t start = clock();
-                        //graph->add_seq(read_stream->seq);
+                        //construct::add_seq(graph, read_stream->seq);
                         std::cerr << "Loading next sequence with " << config->parallel << " threads\n";
-                        graph->add_seq_alt(read_stream->seq, true, config->parallel, config->suffix);
+                        construct::add_seq_alt(graph, read_stream->seq, true, config->parallel, config->suffix);
                         std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
                     }
                     kseq_destroy(read_stream);
@@ -519,7 +520,7 @@ int main(int argc, char const ** argv) {
                 
                 //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
             }
-            graph->construct_succ(config->parallel);
+            construct::construct_succ(graph, config->parallel);
             //graph->print_seq();
         } break;
 
