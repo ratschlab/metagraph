@@ -73,8 +73,8 @@ Config::Config(int argc, const char *argv[]) {
             outfbase = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-R") || !strcmp(argv[i], "--reference")) {
             refpath = std::string(argv[++i]);
-        } else if (!strcmp(argv[i], "-s") || !strcmp(argv[i], "--suffix")) {
-            suffix = std::string(argv[++i]);
+        } else if (!strcmp(argv[i], "-s") || !strcmp(argv[i], "--num-splits")) {
+            nsplits = atoi(argv[++i]);
         //} else if (!strcmp(argv[i], "-D") || !strcmp(argv[i], "--db-path")) {
         //    dbpath = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-S") || !strcmp(argv[i], "--sql-base")) {
@@ -143,6 +143,7 @@ void Config::print_usage(std::string prog_name, int identity) {
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
             fprintf(stderr, "\t-r --reverse \tbuild graph from reverse complement of input [off]\n");
             fprintf(stderr, "\t-P --print \tprint graph table to the screen [off]\n");
+            fprintf(stderr, "\t-s --num-splits \tDefine the minimum number of bins to split kmers into [1]\n");
         } break;
         case align: {
             fprintf(stderr, "Usage: %s align [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
@@ -214,5 +215,6 @@ void Config::init() {
     frequency = 1;
     k = 3;
     identity = noidentity;
+    nsplits=1;
 }
 

@@ -245,12 +245,13 @@ class DBG_succ {
     // define an extended alphabet for W --> somehow this does not work properly as expected
     typedef uint64_t TAlphabet;
 
-    private:
-    std::vector<ui256> kmers;
 
     public:
+    std::vector<ui256> kmers;
 
     AnnotationHash hasher;
+
+    size_t lastlet=0;
 
     // the bit array indicating the last outgoing edge of a node
     BitBTree *last = new BitBTree();
@@ -262,6 +263,7 @@ class DBG_succ {
 
     // the bit array indicating the last outgoing edge of a node (static container for full init)
     std::vector<bool> last_stat;
+    std::vector<uint8_t> last_stat_safe;
 
     // the array containing the edge labels
     std::vector<uint8_t> W_stat;
@@ -489,6 +491,8 @@ class DBG_succ {
      */
     uint64_t get_k();
 
+    void get_RAM();
+
     /**
      * Return value of W at position k.
      */
@@ -551,7 +555,7 @@ class DBG_succ {
 
     // add a full sequence to the graph
     void add_seq (kstring_t &seq);
-    void add_seq_alt (kstring_t &seq, bool bridge=true, unsigned int parallel=1, std::string suffix="");
+    size_t add_seq_alt (kstring_t &seq, bool bridge=true, unsigned int parallel=1, std::string suffix="");
     void construct_succ(unsigned int parallel=1);
 
     /** This function takes a character c and appends it to the end of the graph sequence
@@ -574,8 +578,7 @@ class DBG_succ {
     void append_graph_static(DBG_succ *g);
 
     void toDynamic();
-
-
+    
     //
     //
     // TRAVERSAL

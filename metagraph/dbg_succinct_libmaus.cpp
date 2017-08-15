@@ -993,7 +993,7 @@ void DBG_succ::add_seq (kstring_t &seq) {
     //fprintf(stdout, "\nindex of CCT: %i\n", (int) index(test));
 }
 
-void DBG_succ::add_seq_alt (kstring_t &seq, bool bridge, unsigned int parallel, std::string suffix) {
+size_t DBG_succ::add_seq_alt (kstring_t &seq, bool bridge, unsigned int parallel, std::string suffix) {
 
     if (debug) {
         print_seq();
@@ -1025,49 +1025,57 @@ void DBG_succ::add_seq_alt (kstring_t &seq, bool bridge, unsigned int parallel, 
 
     //clock_t start = clock();
     //std::cerr << "Loading kmers\n";
-    if (!kmers.size()) {
-        seqtokmer(kmers, "$", 1, k, nt_lookup);
-        kmers.push_back(stokmer(std::string(k-1,'X')+std::string("$$"), nt_lookup));
-    }
-    seqtokmer(kmers, seq.s, seq.l, k, nt_lookup, bridge, parallel, suffix);
+
+    return seqtokmer(kmers, seq.s, seq.l, k, nt_lookup, bridge, parallel, suffix);
     //std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     //free(nt_lookup);
 }
 
 void DBG_succ::construct_succ(unsigned int parallel) {
-    clock_t start=clock();
-    std::cerr << "Sorting kmers\t";
-    //omp_set_num_threads(std::max((int)parallel-1,1));
-    //__gnu_parallel::sort(kmers.begin(),kmers.end());
-    std::sort(kmers.begin(),kmers.end());
+    //clock_t start=clock();
+    //std::cerr << "Sorting kmers\t";
+    omp_set_num_threads(std::max((int)parallel,1));
+    __gnu_parallel::sort(kmers.begin(),kmers.end());
+    //std::sort(kmers.begin(),kmers.end());
     kmers.erase(std::unique(kmers.begin(), kmers.end() ), kmers.end() );
+    /*
+    for (size_t i=0;i<kmers.size();++i) {
+        char* curseq = kmertos(kmers[i], alphabet, alph_size);
+        std::cerr << curseq+1 << " " << curseq[0] << "\n";
+        free(curseq);
+    }
+    */
 
-    std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
+    //std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
 
-    start=clock();
-    std::cerr << "Constructing succinct representation\t";
+    //start=clock();
+    //std::cerr << "Constructing succinct representation\t";
+
+    size_t curpos = W_stat.size();
+    W_stat.resize(W_stat.size()+kmers.size());
+    last_stat_safe.resize(last_stat_safe.size()+kmers.size(), true);
+    //std::cerr << "\n";
     
-    delete last;
-    delete W;
-    last = new BitBTree(kmers.size(), true);
-    //sdsl::int_vector<> wbv(kmers.size(), 0, strlen(alphabet));
     
-    std::vector<uint8_t> Wvec(kmers.size());
-    size_t lastlet=0;
-    std::cerr << "\n";
+    //delete last;
+    //delete W;
+    //last = new BitBTree(kmers.size(), true);
+    
+    //std::vector<uint8_t> Wvec(kmers.size());
     //std::cerr << getPos(kmers[10],k-1,alphabet,alph_size) << "-" << getPos(kmers[10],k,alphabet,alph_size) << "\n";
     //assert(getPos(kmers[10],k,alphabet,alph_size) == 0);
     #pragma omp parallel num_threads(parallel)
     {
-        #pragma omp for
+        #pragma omp for nowait
         for (size_t i=0;i<kmers.size();++i) {
             //set last
             if (i+1 < kmers.size()) {
                 bool dup = compare_kmer_suffix(kmers[i], kmers[i+1]);
                 if (dup) {
                     //Since this causes the other threads to wait, only update when necessary
-                    #pragma omp critical
-                    last->setBitQuick(i, false);
+                    //#pragma omp critical
+                    //last->setBitQuick(i, false);
+                    last_stat_safe[curpos+i] = false;
                 }
             }
             //set W
@@ -1078,12 +1086,9 @@ void DBG_succ::construct_succ(unsigned int parallel) {
                 free(curseq);
                 exit(1);
             }
-            if (!curW && i)
-                p=i;
+            if (!curW && curpos+i)
+                p=curpos+i;
             if (i) {
-                //uint64_t cF=get_alphabet_number(getPos(kmers[i], k-1, alphabet, alph_size));
-                //#pragma omp critical
-                //F[cF] = std::min(F[cF],i-1);
                 for (size_t j=i-1;compare_kmer_suffix(kmers[j], kmers[i], 1);--j) {
                     //TODO: recalculating W is probably faster than doing a pragma for ordered
                     if (getW(kmers[j]) == curW) {
@@ -1093,51 +1098,43 @@ void DBG_succ::construct_succ(unsigned int parallel) {
                     if (!j)
                         break;
                 }
-                /*
-                size_t j;
-                for (j=i-1;getW(kmers[j])!= curW;--j) {
-                    if (!j)
-                        break;
-                }
-                if (getW(kmers[j]) == curW && compare_kmer_suffix(kmers[j], kmers[i], 1)) {
-                    curW += alph_size;
-                }
-                */
             }
-            Wvec[i] = curW;
+            //Wvec[i] = curW;
+            W_stat[curpos+i] = curW;
         }
     }
+   /* 
     std::cerr << "Building wavelet tree\t";
     W = new WaveletTree(Wvec, 4, parallel);
     assert(W->size() == Wvec.size());
     assert((*W)[3] == Wvec[3]);
     Wvec.clear();
-
-    std::cerr << "Building F\t";
-    F[0] = 0;
+*/
+    //std::cerr << "Building F\t";
     for (size_t i=0;i<kmers.size();++i) {
         char cF=getPos(kmers[i], k-1, alphabet, alph_size);
-        /*
-        char *curseq = kmertos(kmers[i], alphabet, alph_size);
-        std::cerr << "-" << (*last)[i] << " " << curseq << " " << get_alphabet_symbol(Wvec[i]) << (Wvec[i]>=alph_size ? "-" : "") << "\n"; 
-        free(curseq);
-        */
         if (cF != alphabet[lastlet]) {
-            //std::cerr << cF << " " << lastlet << " " << i-1 << "\n";
             for (lastlet++;lastlet<alph_size;lastlet++) {
-                F[lastlet]=i-1;
+                F[lastlet]=curpos+i-1;
                 if (alphabet[lastlet]==cF) {
                     break;
                 }
             }
         }
     }
+    kmers.clear();
+    /*
     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     start=clock();
 
     kmers.clear();
     std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     start=clock();
+    fprintf(stdout, "edges %lu / nodes %lu/ %s\n", get_edge_count(), get_node_count());
+    */
+}
+
+void DBG_succ::get_RAM() {
     //output total RAM usage
     FILE* sfile = fopen("/proc/self/status","r");
     char line[128];
@@ -1146,11 +1143,10 @@ void DBG_succ::construct_succ(unsigned int parallel) {
             break;
         }
     }
+    std::cout << line << "\n";
     fclose(sfile);
-    fprintf(stdout, "edges %lu / nodes %lu/ %s\n", get_edge_count(), get_node_count(), line);
+
 }
-
-
 
 /** This function takes a character c and appends it to the end of the graph sequence
  * given that the corresponding note is not part of the graph yet.
@@ -1461,11 +1457,20 @@ void DBG_succ::toDynamic() {
     //W = new libmaus2::wavelet::DynamicWaveletTree<6, 64> (tmp, b, n);
     W = new WaveletTree(tmp, b, n);
 
-    libmaus2::bitbtree::BitBTree<6, 64> *last_new = new libmaus2::bitbtree::BitBTree<6, 64>(last_stat.size(), false);
-    for (size_t i = 0; i < last_stat.size(); ++i)
-        if (last_stat.at(i))
-            last_new->setBitQuick(i, true);
-    last_stat.clear();
+    libmaus2::bitbtree::BitBTree<6, 64> *last_new;
+    if (last_stat.size()) {
+        last_new = new libmaus2::bitbtree::BitBTree<6, 64>(last_stat.size(), false);
+        for (size_t i = 0; i < last_stat.size(); ++i)
+            if (last_stat.at(i))
+                last_new->setBitQuick(i, true);
+        last_stat.clear();
+    } else {
+        last_new = new libmaus2::bitbtree::BitBTree<6, 64>(last_stat_safe.size(), false);
+        for (size_t i = 0; i < last_stat_safe.size(); ++i)
+            if (last_stat_safe.at(i))
+                last_new->setBitQuick(i, true);
+        last_stat_safe.clear();
+    }
     delete last;
     last = last_new;
 }

@@ -31,6 +31,7 @@ class Config {
         unsigned int part_idx;
         unsigned int collect;
         unsigned int frequency;
+        unsigned int nsplits;
 
         std::vector<std::string> fname;
         std::string outfbase;
