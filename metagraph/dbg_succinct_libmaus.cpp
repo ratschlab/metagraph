@@ -101,7 +101,6 @@ uint64_t p;
 // alphabet size
 size_t alph_size = 7;
 // alphabet
-const char alphabet[] = "$ACGTNX$ACGTNXn";
 
 // infile base when loaded from file
 std::string infbase;
@@ -810,7 +809,7 @@ bool DBG_succ::get_last(uint64_t k) {
 }
 
 char DBG_succ::get_alphabet_symbol(uint64_t s) {
-    return s < strlen(alphabet) ? alphabet[s] : alphabet[14];
+    return s < alphabet.length() ? alphabet[s] : alphabet[14];
 }
 
 std::vector<uint64_t> DBG_succ::align(kstring_t seq) {
@@ -1026,44 +1025,26 @@ size_t DBG_succ::add_seq_alt (kstring_t &seq, bool bridge, unsigned int parallel
     //clock_t start = clock();
     //std::cerr << "Loading kmers\n";
 
-    return seqtokmer(kmers, seq.s, seq.l, k, nt_lookup, bridge, parallel, suffix);
+    return seqtokmer(kmers, seq.s, seq.l, k, nt_lookup, alphabet, bridge, parallel, suffix);
     //std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
     //free(nt_lookup);
 }
 
 void DBG_succ::construct_succ(unsigned int parallel) {
     //clock_t start=clock();
-    //std::cerr << "Sorting kmers\t";
+    std::cerr << "Sorting kmers in current bin\n";
     omp_set_num_threads(std::max((int)parallel,1));
     __gnu_parallel::sort(kmers.begin(),kmers.end());
     //std::sort(kmers.begin(),kmers.end());
     kmers.erase(std::unique(kmers.begin(), kmers.end() ), kmers.end() );
-    /*
-    for (size_t i=0;i<kmers.size();++i) {
-        char* curseq = kmertos(kmers[i], alphabet, alph_size);
-        std::cerr << curseq+1 << " " << curseq[0] << "\n";
-        free(curseq);
-    }
-    */
-
     //std::cerr << (clock()-start)/CLOCKS_PER_SEC << "\n";
 
     //start=clock();
-    //std::cerr << "Constructing succinct representation\t";
 
     size_t curpos = W_stat.size();
     W_stat.resize(W_stat.size()+kmers.size());
     last_stat_safe.resize(last_stat_safe.size()+kmers.size(), true);
-    //std::cerr << "\n";
     
-    
-    //delete last;
-    //delete W;
-    //last = new BitBTree(kmers.size(), true);
-    
-    //std::vector<uint8_t> Wvec(kmers.size());
-    //std::cerr << getPos(kmers[10],k-1,alphabet,alph_size) << "-" << getPos(kmers[10],k,alphabet,alph_size) << "\n";
-    //assert(getPos(kmers[10],k,alphabet,alph_size) == 0);
     #pragma omp parallel num_threads(parallel)
     {
         #pragma omp for nowait
@@ -1073,8 +1054,6 @@ void DBG_succ::construct_succ(unsigned int parallel) {
                 bool dup = compare_kmer_suffix(kmers[i], kmers[i+1]);
                 if (dup) {
                     //Since this causes the other threads to wait, only update when necessary
-                    //#pragma omp critical
-                    //last->setBitQuick(i, false);
                     last_stat_safe[curpos+i] = false;
                 }
             }
@@ -1099,18 +1078,9 @@ void DBG_succ::construct_succ(unsigned int parallel) {
                         break;
                 }
             }
-            //Wvec[i] = curW;
             W_stat[curpos+i] = curW;
         }
-    }
-   /* 
-    std::cerr << "Building wavelet tree\t";
-    W = new WaveletTree(Wvec, 4, parallel);
-    assert(W->size() == Wvec.size());
-    assert((*W)[3] == Wvec[3]);
-    Wvec.clear();
-*/
-    //std::cerr << "Building F\t";
+    } 
     for (size_t i=0;i<kmers.size();++i) {
         char cF=getPos(kmers[i], k-1, alphabet, alph_size);
         if (cF != alphabet[lastlet]) {
@@ -1143,7 +1113,7 @@ void DBG_succ::get_RAM() {
             break;
         }
     }
-    std::cout << line << "\n";
+    std::cout << line;
     fclose(sfile);
 
 }

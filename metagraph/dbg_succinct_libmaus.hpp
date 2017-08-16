@@ -275,8 +275,10 @@ class DBG_succ {
     size_t k;
     // index of position that marks end in graph
     uint64_t p;
+
     // alphabet size
     size_t alph_size = 7;
+    const std::string alphabet = "$ACGTNX$ACGTNXn";
 
     // infile base when loaded from file
     std::string infbase;
