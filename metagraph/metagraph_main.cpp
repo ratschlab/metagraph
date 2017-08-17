@@ -469,67 +469,72 @@ int main(int argc, char const ** argv) {
                 graph->add_seq_alt(start, false, config->parallel, suffices[j]);
                 graph->add_seq_alt(graphsink, true, config->parallel, suffices[j]);
                 // iterate over input files
-                for (unsigned int f = 0; f < config->fname.size(); ++f) {
-                    if (config->verbose) {
-                        std::cout << std::endl << "Parsing " << config->fname[f] << std::endl;
-                    }
-                    // open stream to fasta file
-                    gzFile input_p = gzopen(config->fname[f].c_str(), "r");
-                    int dotind = config->fname.at(f).rfind(".");
-                    std::string ext = "";
-                    if (dotind >= 0) {
-                        if (config->fname.at(f).substr(dotind) == ".gz") {
-                            int nextind = config->fname.at(f).substr(0,dotind-1).rfind(".");
-                            ext = config->fname.at(f).substr(nextind, dotind-nextind);
-                        } else {
-                            ext = config->fname.at(f).substr(dotind);
+                if (suffices[j].find("$") == std::string::npos) {
+                    for (unsigned int f = 0; f < config->fname.size(); ++f) {
+                        if (config->verbose) {
+                            std::cout << std::endl << "Parsing " << config->fname[f] << std::endl;
                         }
-                    }
-                    if (dotind >= 0 && ext == ".vcf") {
-                        //READ FROM VCF
-                        uint64_t nbp = 0;
-                        uint64_t nbplast = 0;
-                        clock_t start = clock();
-                        clock_t timelast = clock();
-                        vcfparse *vcf = vcf_init(config->refpath.c_str(), config->fname.at(f).c_str(), graph->k);
-                        if (!vcf) {
-                            std::cerr << "ERROR reading VCF " << config->fname.at(f) << std::endl;
-                            exit(1);
-                        }
-                        std::cerr << "Loading VCF with " << config->parallel << " threads per line\n";
-                        for (size_t i=1; vcf_get_seq(vcf);++i) {
-                            if (i % 1000 == 0) {
-                                std::cout << "." << std::flush;
-                                if (i % 10000 == 0) {
-                                    fprintf(stdout, "%lu - edges %lu / nodes %lu / bp %lu / runtime %lu / BPph %lu\n", i, graph->get_edge_count(), graph->get_node_count(), nbp, (clock() - start)/CLOCKS_PER_SEC, 60*60*CLOCKS_PER_SEC*(nbp-nbplast)/(clock()-timelast));
-                                    nbplast = nbp;
-                                    timelast = clock();
-                                }
+                        // open stream
+                        gzFile input_p = gzopen(config->fname[f].c_str(), "r");
+
+                        //Get extension of file
+                        int dotind = config->fname.at(f).rfind(".");
+                        std::string ext = "";
+                        if (dotind >= 0) {
+                            if (config->fname.at(f).substr(dotind) == ".gz") {
+                                int nextind = config->fname.at(f).substr(0,dotind-1).rfind(".");
+                                ext = config->fname.at(f).substr(nextind, dotind-nextind);
+                            } else {
+                                ext = config->fname.at(f).substr(dotind);
                             }
-                            nbp += vcf->seq.l;
-                            graph->add_seq_alt(vcf->seq, false, config->parallel, suffices[j]);
                         }
-                        vcf_destroy(vcf);
-                    } else {
-                        //READ FROM FASTA
-                        kseq_t *read_stream = kseq_init(input_p);
-                        if (read_stream == NULL) {
-                            std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
-                            exit(1);
+
+                        if (dotind >= 0 && ext == ".vcf") {
+                            //READ FROM VCF
+                            uint64_t nbp = 0;
+                            uint64_t nbplast = 0;
+                            clock_t start = clock();
+                            clock_t timelast = clock();
+                            vcfparse *vcf = vcf_init(config->refpath.c_str(), config->fname.at(f).c_str(), graph->k);
+                            if (!vcf) {
+                                std::cerr << "ERROR reading VCF " << config->fname.at(f) << std::endl;
+                                exit(1);
+                            }
+                            std::cerr << "Loading VCF with " << config->parallel << " threads per line\n";
+                            for (size_t i=1; vcf_get_seq(vcf);++i) {
+                                if (i % 1000 == 0) {
+                                    std::cout << "." << std::flush;
+                                    if (i % 10000 == 0) {
+                                        fprintf(stdout, "%lu - edges %lu / nodes %lu / bp %lu / runtime %lu / BPph %lu\n", i, graph->get_edge_count(), graph->get_node_count(), nbp, (clock() - start)/CLOCKS_PER_SEC, 60*60*CLOCKS_PER_SEC*(nbp-nbplast)/(clock()-timelast));
+                                        nbplast = nbp;
+                                        timelast = clock();
+                                    }
+                                }
+                                nbp += vcf->seq.l;
+                                graph->add_seq_alt(vcf->seq, false, config->parallel, suffices[j]);
+                            }
+                            vcf_destroy(vcf);
+                        } else {
+                            //READ FROM FASTA
+                            kseq_t *read_stream = kseq_init(input_p);
+                            if (read_stream == NULL) {
+                                std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
+                                exit(1);
+                            }
+                            while (kseq_read(read_stream) >= 0) {
+                                // possibly reverse k-mers
+                                if (config->reverse)
+                                    reverse_complement(read_stream->seq);                    
+                                // add all k-mers of seq to the graph
+                                graph->add_seq_alt(read_stream->seq, true, config->parallel, suffices[j]);
+                            }
+                            kseq_destroy(read_stream);
                         }
-                        while (kseq_read(read_stream) >= 0) {
-                            // possibly reverse k-mers
-                            if (config->reverse)
-                                reverse_complement(read_stream->seq);                    
-                            // add all k-mers of seq to the graph
-                            graph->add_seq_alt(read_stream->seq, true, config->parallel, suffices[j]);
-                        }
-                        kseq_destroy(read_stream);
+                        gzclose(input_p);
+                        //graph->update_counters();
+                        //graph->print_stats();
+                        //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
                     }
-                    gzclose(input_p);
-                    //graph->update_counters();
-                    //graph->print_stats();
-                    //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
                 }
                 graph->get_RAM();
                 graph->construct_succ(config->parallel);
