@@ -103,12 +103,6 @@ size_t seqtokmer(std::vector<ui256> &kmers, const char *seq, const uint64_t &len
             std::vector<ui256> kmer_priv;
             #pragma omp for nowait
             for (i=0; i < len-k; ++i) {
-                //if (!((i+1) % 1000)) {
-                //    std::cout << "." << std::flush;
-                    //if (!((i+1) % 100000)) {
-                    //    std::cout << i+1 << "\n";
-                    //} 
-                //}
                 std::string cursuff = std::string(seq+i+k-suffix.length(), seq+i+k);
                 for (auto it = cursuff.begin(); it!=cursuff.end(); ++it)
                     *it = alphabet[(uint8_t)nt_lookup[(uint8_t)*it]];

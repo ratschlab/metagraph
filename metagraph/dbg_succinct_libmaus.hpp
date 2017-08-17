@@ -158,66 +158,63 @@ class dyn_wavelet2 : public libmaus2::wavelet::DynamicWaveletTree<6, 64> {
         dyn_wavelet2(std::istream &in)
             : libmaus2::wavelet::DynamicWaveletTree<6, 64>(in) {
         }
+        //TODO: this code is copied from toDynamic. This should be refactored
         libmaus2::bitbtree::BitBTree<6, 64>* makeTree(std::vector<uint8_t> &W_stat, size_t b, unsigned int parallel=1) {
             uint64_t n = W_stat.size();
-            //uint64_t n = W_stat->size();
             std::vector<uint64_t> offsets((1ull << (b-1)) - 1, 0);
-            //#pragma omp parallel num_threads(parallel) shared(offsets)
-            //{
-                //#pragma omp for
+            #pragma omp parallel num_threads(parallel)
+            {
+                uint64_t m,v,o;
+                #pragma omp for
                 for (uint64_t i=0;i<n;++i) {
-                    uint64_t m = (1ull << (b - 1));
-                    uint64_t v = (uint64_t) W_stat.at(i);
-                    //v = (uint64_t) W_stat->at(i);
-                    uint64_t o = 0;
+                    m = (1ull << (b - 1));
+                    v = (uint64_t) W_stat.at(i);
+                    o = 0;
                     for (uint64_t ib = 1; ib < b; ++ib) {
                         bool const bit = m & v;
-                        if (!bit)
+                        if (!bit) {
+                            #pragma omp critical
                             offsets.at(o) += 1;
+                        }
                         o = 2*o + 1 + bit;
                         m >>= 1;
                     }
                 }
-            //}
+            }
             libmaus2::bitbtree::BitBTree<6, 64> *tmp = new libmaus2::bitbtree::BitBTree<6, 64>(n*b, false);
-            //libmaus2::bitbtree::BitBTree<6, 64> tmp(n*b, false);
             std::vector<uint64_t> upto_offsets ((1ull << (b - 1)) - 1, 0);
-            //#pragma omp parallel num_threads(parallel)
-            //{
-                //#pragma omp for
+            #pragma omp parallel num_threads(parallel)
+            {
+                uint64_t m,v,o,p,co;
+                bool bit;
+                #pragma omp for
                 for (uint64_t i = 0; i < n; ++i) {
-                    uint64_t m = (1ull << (b - 1));
-                    uint64_t v = (uint64_t) W_stat.at(i);
-                    //v = (uint64_t) W_stat->at(i);
-                    uint64_t o = 0;
-                    uint64_t p = i;
-                    uint64_t co = 0;
-                    bool bit;
+                    m = (1ull << (b - 1));
+                    v = (uint64_t) W_stat.at(i);
+                    o = 0;
+                    p = i;
+                    co = 0;
                     for (uint64_t ib = 0; ib < b - 1; ++ib) {
                         bit = m & v;
                         if (bit) {
-                            //tmp.setBitQuick(ib * n + p + co, true);
+                            #pragma omp critical
                             tmp->setBitQuick(ib * n + p + co, true);
-                            //assert((*tmp)[ib * n + p + co]);
                             co += offsets.at(o);
                             p -= upto_offsets.at(o);
                         } else {
                             p -= (p - upto_offsets.at(o)); 
                             upto_offsets.at(o) += 1;
                         }
-                        //std::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
                         o = 2*o + 1 + bit;
                         m >>= 1;
                     }
                     bit = m & v;
                     if (bit) {
-                       // std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
+                        #pragma omp critical
                         tmp->setBitQuick((b - 1) * n + p + co, true); 
-                        //tmp.setBitQuick((b - 1) * n + p + co, true); 
-                        //assert((*tmp)[(b - 1) * n + p + co]);
                     }
                 }
-            //}
+            }
             return tmp;
         }
 
