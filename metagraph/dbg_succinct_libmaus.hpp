@@ -10,7 +10,6 @@
 #include "config.hpp"
 #include "datatypes.hpp"
 
-#include "kseq.h"
 #include <sdsl/wavelet_trees.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
 
@@ -242,13 +241,15 @@ class DBG_succ {
     // define an extended alphabet for W --> somehow this does not work properly as expected
     typedef uint64_t TAlphabet;
 
-
     public:
+    //Temporary storage for kmers before succinct representation construction
     std::vector<ui256> kmers;
 
+    //Annotation hash generator
     AnnotationHash hasher;
 
-    size_t lastlet=0;
+    //store the position of the last character position modified in F
+    size_t lastlet  =0;
 
     // the bit array indicating the last outgoing edge of a node
     BitBTree *last = new BitBTree();
@@ -275,7 +276,8 @@ class DBG_succ {
 
     // alphabet size
     size_t alph_size = 7;
-    const std::string alphabet = "$ACGTNX$ACGTNXn";
+    // alphabet
+    const std::string alphabet; //("$ACGTNX$ACGTNXn"); 
 
     // infile base when loaded from file
     std::string infbase;
@@ -296,17 +298,6 @@ class DBG_succ {
 #else
     bool debug = false;
 #endif 
-
-    /**
-     * This object collects information about branches during graph traversal, so 
-     * we know where to jump back to when we reached a dead end.
-     */
-    struct BranchInfo;
-
-    /**
-     * This will hold the graph edges that will be written to the SQL graph output.
-     */
-    struct JoinInfo;
 
     // construct empty graph instance
     DBG_succ(size_t k_,
@@ -490,8 +481,6 @@ class DBG_succ {
      */
     uint64_t get_k();
 
-    void get_RAM();
-
     /**
      * Return value of W at position k.
      */
@@ -552,64 +541,8 @@ class DBG_succ {
      */
     void replaceW(size_t i, TAlphabet val);
 
-    // add a full sequence to the graph
-    void add_seq (kstring_t &seq);
-    size_t add_seq_alt (kstring_t &seq, bool bridge=true, unsigned int parallel=1, std::string suffix="");
-    void construct_succ(unsigned int parallel=1);
-
-    /** This function takes a character c and appends it to the end of the graph sequence
-     * given that the corresponding note is not part of the graph yet.
-     */
-    void append_pos(TAlphabet c);
-
-    /** This function takes a pointer to a graph structure and concatenates the arrays W, last 
-     * and F to this graph's arrays. In almost all cases this will not produce a valid graph and 
-     * should only be used as a helper in the parallel merge procedure.
-     */
-    void append_graph(DBG_succ *g);
-
-    /** 
-     * This function takes a pointer to a graph structure and concatenates the arrays W, last 
-     * and F to this graph's static containers last_stat and W_stat. In almost all cases 
-     * this will not produce a valid graph and should only be used as a helper in the 
-     * parallel merge procedure.
-     */
-    void append_graph_static(DBG_succ *g);
-
     void toDynamic();
     
-    //
-    //
-    // TRAVERSAL
-    //
-    //
-    
-    /**
-     * This is a convenience function that pops the last branch and updates the traversal state.
-     */
-    BranchInfo pop_branch(std::stack<BranchInfo> &branchnodes, uint64_t &seqId, uint64_t &seqPos, uint64_t &nodeId, uint64_t &lastEdge, bool &isFirst);
-
-    bool finish_sequence(std::string &sequence, uint64_t seqId, std::ofstream &SQLstream); 
-
-    size_t traverseGraph(std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream); 
-
-    void allelesFromSeq(kstring_t &seq, unsigned int f, std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream, bool isRefRun = false, size_t seqNum = 0);
-
-    //
-    //
-    // ANNOTATE
-    //
-    //
-
-    void annotate_seq(kstring_t &seq, kstring_t &label, uint64_t start=0, uint64_t end=0, pthread_mutex_t* anno_mutex=NULL);
-
-    void annotate_kmer(std::string &kmer, uint32_t &label, uint64_t &previous, pthread_mutex_t* anno_mutex, bool ignore=false);
-
-    std::vector<uint32_t> classify_path(std::vector<uint64_t> path);
-
-    std::set<uint32_t> classify_read(kstring_t &read, uint64_t max_distance);
-
-
     //
     //
     // MERGE
@@ -620,14 +553,6 @@ class DBG_succ {
     uint64_t next_non_zero(std::vector<uint64_t> v, uint64_t pos);
     uint64_t next_non_zero(std::vector<std::pair<uint64_t, std::deque<TAlphabet> > > v, uint64_t pos);
 
-    /**
-    * Given a pointer to a graph structure G, the function compares its elements to the
-    * current graph. It will perform an element wise comparison of the arrays W, last and
-    * F and will only check for identity. If any element differs, the function will return 
-    * false and true otherwise.
-    */
-    bool compare(DBG_succ* G); 
-
     /*
      * Helper function that will split up a given range in the graph
      * into bins, one for each character in the alphabet. The split is performed based
@@ -637,28 +562,11 @@ class DBG_succ {
     std::vector<uint64_t> split_range(uint64_t start, uint64_t end, uint64_t d /*depth*/);
     void split_range(std::deque<TAlphabet>* str, std::pair<uint64_t, uint64_t>& range);
 
-    /* 
-     * Helper function to determine the bin boundaries, given 
-     * a number of threads.
-     */
-    std::vector<std::pair<uint64_t, uint64_t> > get_bins(uint64_t threads, uint64_t bins_per_thread, DBG_succ* G);
-    std::vector<std::pair<uint64_t, uint64_t> > get_bins(uint64_t bins);
-
-    std::vector<std::pair<uint64_t, uint64_t> > get_bins_relative(DBG_succ* G, std::vector<std::pair<uint64_t, uint64_t> > ref_bins, uint64_t first_pos, uint64_t last_pos);
-
     /*
      * Helper function to generate the prefix corresponding to 
      * a given bin ID.
      */
     std::deque<TAlphabet> bin_id_to_string(uint64_t bin_id, uint64_t binlen);
-
-    /*
-     * Distribute the merging of two graph structures G1 and G2 over
-     * bins, such that n parallel threads are used. The number of bins
-     * is determined dynamically.
-     */
-    //void merge_parallel(DBG_succ* G1, DBG_succ* G2, uint64_t k1, uint64_t k2, uint64_t n1, uint64_t n2, uint64_t threads);
-
 
     //
     //
@@ -689,15 +597,6 @@ class DBG_succ {
     void print_adj_list();
 
     /**
-     * Take the current graph content and return it in SQL
-     * format (GA4GH Spec).
-     *
-     * We will perform one depth first search traversal of the graph. While we will record
-     * one long reference string, we will output all sidepaths on the way.
-     */
-    void toSQL(); 
-
-    /**
      * Take the current graph content and store in a file.
      *
      */
@@ -706,7 +605,6 @@ class DBG_succ {
     /**
      * Visualization, Serialization and Deserialization of annotation content.
      */
-    void annotationToScreen();
     void annotationToFile();
     void annotationFromFile();
 

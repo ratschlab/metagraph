@@ -72,17 +72,19 @@ char* kmertos(ui256 kmer, const std::string &alphabet, const uint64_t &alph_size
     char *seq = (char*)calloc(256/BPC+1, sizeof(char));
     for (uint8_t curpos=0;kmer;++curpos, kmer >>= BPC) {
         seq[curpos] = getPos(kmer, -1, alphabet, alph_size);
-    } 
+    }
     return seq;
 }
 
+//TODO: for now, this only returns 0
 size_t seqtokmer(std::vector<ui256> &kmers, const char *seq, const uint64_t &len, const uint64_t &k, const char *nt_lookup, const std::string &alphabet, bool add_bridge=true, unsigned int parallel=1, std::string suffix="") {
     char *bridge = (char*)malloc(k+2);
-    memset(bridge, 'X', k); 
+    memset(bridge, 'X', k);
+    if (!len)
+        return 0;
     bridge[k] = seq[0];
     bridge[k+1] = 0;
     size_t i=0;
-    size_t nkmers=0;
     //std::cout << "Loading next sequence with " << parallel << " threads\n";
     if (add_bridge) {
         for (i=0;i<std::min(k,len); ++i) {
@@ -92,7 +94,6 @@ size_t seqtokmer(std::vector<ui256> &kmers, const char *seq, const uint64_t &len
             if (cursuff == suffix) {
                 kmers.push_back(stokmer(bridge, k+1, nt_lookup));
             }
-            nkmers++;
             memmove(bridge, bridge+1, k); 
             bridge[k]= (i+1 < len) ? seq[i+1] : 'X';
         }
@@ -113,25 +114,23 @@ size_t seqtokmer(std::vector<ui256> &kmers, const char *seq, const uint64_t &len
             #pragma omp critical
             kmers.insert(kmers.end(), std::make_move_iterator(kmer_priv.begin()), std::make_move_iterator(kmer_priv.end()));
         }
-        nkmers += len-k;
         memcpy(bridge, seq+len-k, k); 
         bridge[k]='X';
     }   
     if (add_bridge) {
-        for (i=0;i<k;++i) {
+        for (i=0;i<std::min(k,len);++i) {
             std::string cursuff = std::string(bridge+k-suffix.length(),bridge+k);
             for (auto it = cursuff.begin(); it!=cursuff.end(); ++it)
                 *it = alphabet[(uint8_t)nt_lookup[(uint8_t)*it]];
             if (cursuff == suffix) {
                 kmers.push_back(stokmer(bridge, k+1, nt_lookup));
             }
-            nkmers++;
             memmove(bridge, bridge+1, k); 
             bridge[k]='X';
         }
     }
     free(bridge);
-    return nkmers;
+    return 0;
 }
 
 #endif
