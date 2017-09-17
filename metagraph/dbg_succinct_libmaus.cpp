@@ -31,6 +31,8 @@
 #include <libmaus2/wavelet/DynamicWaveletTree.hpp>
 #include <libmaus2/util/NumberSerialisation.hpp>
 
+#include <sdsl/bit_vectors.hpp>
+
 #include "config.hpp"
 #include "datatypes.hpp"
 #include "serialization.hpp"
@@ -309,12 +311,12 @@ TAlphabet DBG_succ::get_node_begin_value(uint64_t i) {
     return get_node_end_value(i);
 }
 
-
 /**
  * Given a position i in W and an edge label c, this function returns the
- * index of the node the edge is pointing to.
+ * index of the outgoing edge with label c.
  */
-uint64_t DBG_succ::outgoing(uint64_t i, TAlphabet c) {
+uint64_t DBG_succ::outgoing_edge_idx(uint64_t i, TAlphabet c) {
+
     if (i > W->n)
         return 0;
     if (i == 0)
@@ -325,6 +327,25 @@ uint64_t DBG_succ::outgoing(uint64_t i, TAlphabet c) {
     uint64_t j2 = pred_W(R.second, c + alph_size);
     uint64_t j = (j1 < j2) ? j2 : j1;
     if (j < R.first || j >= W->n)
+        return 0;
+
+    return j;
+}
+
+
+
+/**
+ * Given a position i in W and an edge label c, this function returns the
+ * index of the node the edge is pointing to.
+ */
+uint64_t DBG_succ::outgoing(uint64_t i, TAlphabet c) {
+    if (i > W->n)
+        return 0;
+    if (i == 0)
+        return 0;
+
+    uint64_t j = outgoing_edge_idx(i, c);
+    if (j == 0)
         return 0;
     j = fwd(j);
     if (j == 0 || j == W->n)
@@ -384,13 +405,14 @@ uint64_t DBG_succ::indegree(uint64_t i) {
  * Given a node label s, this function returns the index
  * of the corresponding node, if this node exists and 0 otherwise.
  */
-uint64_t DBG_succ::index(std::string &s_) {
+uint64_t DBG_succ::index(std::string &s_, uint64_t length) {
     TAlphabet s = get_alphabet_number(s_[0]);
     // init range
     uint64_t rl = succ_last(F[s] + 1);
     uint64_t ru = s+1 < alph_size ? F[s + 1] : last->size()-1; // upper bound
+    uint64_t up = (length == 0) ? s_.length() : std::min(length, s_.length());
     // update range iteratively while scanning through s
-    for (uint64_t i = 1; i < s_.length(); i++) {
+    for (uint64_t i = 1; i < up; i++) {
         s = get_alphabet_number(s_[i]);
         rl = std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size));
         if (rl >= W->n)
@@ -1261,6 +1283,16 @@ void DBG_succ::toFile(unsigned int total, unsigned int idx) {
 // write annotation to disk
 void DBG_succ::annotationToFile() {
     std::ofstream outstream((config->infbase + ".anno.dbg").c_str());
+    libmaus2::util::NumberSerialisation::serialiseNumber(outstream, annotation_full.size());
+    for (size_t i = 0; i < annotation_full.size(); ++i) {
+        annotation_full.at(i)->serialize(outstream);
+    }
+
+    // id_to_label
+    serialize_annotation_id_vector(outstream, id_to_label);
+    // label_to_id_map
+    serialize_label_to_id_map(outstream, label_to_id_map);
+/*
     //annotation
     libmaus2::util::NumberSerialisation::serialiseNumber32Deque<uint32_t>(outstream, annotation);
     // annotation_map
@@ -1273,15 +1305,32 @@ void DBG_succ::annotationToFile() {
     serialize_label_to_id_map(outstream, label_to_id_map);
     // combination_count
     libmaus2::util::NumberSerialisation::serialiseNumber(outstream, combination_count);
+*/
     outstream.close();
 }
 
 // read annotation from disk
 void DBG_succ::annotationFromFile() {
+    // generate annotation object
+    // populate it with existing annotation if available
     std::ifstream instream((config->infbase + ".anno.dbg").c_str());
     if (instream.good()) {
         if (config->verbose)
-            std::cerr << "get deque from disk" << std::endl;
+            std::cerr << "get annotation from disk" << std::endl;
+        size_t anno_size = libmaus2::util::NumberSerialisation::deserialiseNumber(instream);
+        for (size_t i = 0; i < anno_size; ++i) {
+            annotation_full.push_back(new sdsl::rrr_vector<63>());
+            annotation_full.back()->load(instream);
+        }
+
+        // id_to_label
+        id_to_label = deserialize_annotation_id_vector(instream);
+        // label_to_id_map
+        deserialize_label_to_id_map(instream, label_to_id_map);
+
+        //annotation_full = new sdsl::bit_vector(get_size() * 100, 0);
+
+        /*
         // annotation
         annotation = libmaus2::util::NumberSerialisation::deserialiseNumber32Deque<uint32_t>(instream);
         if (config->verbose)
@@ -1295,8 +1344,9 @@ void DBG_succ::annotationFromFile() {
         // label_to_id_map
         deserialize_label_to_id_map(instream, label_to_id_map);
         combination_count = libmaus2::util::NumberSerialisation::deserialiseNumber(instream);
-    } else {
-        annotation.resize(get_size(), 0);
+        */
+   // } else {
+        //annotation.resize(get_size(), 0);
     }
     instream.close();
 }
