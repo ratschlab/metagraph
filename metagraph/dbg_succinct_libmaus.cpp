@@ -1137,7 +1137,7 @@ void DBG_succ::print_state() {
 
 //TODO: assume that a sentinel was used during construction
 void DBG_succ::print_state_str() {
-    for (uint64_t i=0;i<W->n;i++) {
+    for (uint64_t i=1;i<W->n;i++) {
         std::cout << i << "\t" << get_last(i) << "\t" << get_node_str(i) << "\t" << get_alphabet_symbol((*W)[i]) << ((*W)[i] > alph_size ? "-" : "") << (i==this->p ? "<" : "") << std::endl;
     }    
 }
