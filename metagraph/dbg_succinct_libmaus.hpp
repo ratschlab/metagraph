@@ -83,7 +83,8 @@ class DBG_succ {
     std::vector<uint32_t> combination_vector; // contains all known combinations
     uint64_t combination_count = 0;
 
-    std::vector<sdsl::rrr_vector<63>* > annotation_full;
+    //std::vector<sdsl::rrr_vector<63>* > annotation_full;
+    std::vector<sdsl::sd_vector<>* > annotation_full;
     sdsl::bit_vector* annotation_curr;
     rs_bit_vector annotation_new;
     rs_bit_vector annotation_colors;

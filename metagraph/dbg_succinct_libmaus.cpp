@@ -1150,14 +1150,27 @@ void DBG_succ::print_adj_list() {
     R.second = succ_last(R.first);
     uint64_t n = rank_last(R.second);
     while (R.first < W->n) {
+        std::cout << "R.first: " << R.first << " R.second: " << R.second << std::endl; 
         printf("%lu\t", n);
         for (uint64_t j = R.first; j<=R.second; ++j) {
             if (j > R.first)
                 fprintf(stdout, ",");
             fprintf(stdout, "%lu", rank_last(fwd(j)));
         }
-        if (this->annotation.size() > 0)
-            fprintf(stdout, "\t%u", this->annotation.at(n));
+        if (this->annotation_full.size() > 0)
+            fprintf(stdout, "\t");
+        bool is_first = true;
+        for (uint64_t k = 0; k < this->annotation_full.size(); ++k) {
+            if ((*(this->annotation_full.at(k)))[n] == 1) {
+                if (!is_first)
+                    fprintf(stdout, ",");
+                is_first = false;
+                fprintf(stdout, "%lu", k+1);
+            }
+        }
+        if (is_first)
+            fprintf(stdout, "0");
+        //fprintf(stdout, "\t%u", this->annotation.at(n));
         printf("\n");
         R.first = R.second+1;
         if (R.first >= W->n)
@@ -1319,7 +1332,8 @@ void DBG_succ::annotationFromFile() {
             std::cerr << "get annotation from disk" << std::endl;
         size_t anno_size = libmaus2::util::NumberSerialisation::deserialiseNumber(instream);
         for (size_t i = 0; i < anno_size; ++i) {
-            annotation_full.push_back(new sdsl::rrr_vector<63>());
+            //annotation_full.push_back(new sdsl::rrr_vector<63>());
+            annotation_full.push_back(new sdsl::sd_vector<>());
             annotation_full.back()->load(instream);
         }
 

@@ -94,10 +94,19 @@ namespace annotate {
                 std::cout << "added label ID " << label_id << " for label string " << label_str << std::endl;
         } else { 
             label_id = id_it->second;
+            sdsl::select_support_sd<> slct = sdsl::select_support_sd<>(G->annotation_full.at(label_id - 1));
+            sdsl::rank_support_sd<> rank = sdsl::rank_support_sd<>(G->annotation_full.at(label_id - 1));
+            size_t maxrank = rank(G->annotation_full.at(label_id - 1)->size());
             G->annotation_curr = new sdsl::bit_vector(G->annotation_full.at(label_id - 1)->size(), 0);
-            for (size_t i = 0; i < G->annotation_full.at(label_id - 1)->size(); ++i) {
-                (*(G->annotation_curr))[i] = (*(G->annotation_full.at(label_id - 1)))[i];
+            size_t idx;
+            for (size_t i = 1; i <= maxrank; ++i) {
+                idx = slct(i);
+                if (i < G->annotation_full.at(label_id - 1)->size())
+                    (*(G->annotation_curr))[i] = (*(G->annotation_full.at(label_id - 1)))[i];
             }
+            //for (size_t i = 0; i < G->annotation_full.at(label_id - 1)->size(); ++i) {
+            //    (*(G->annotation_curr))[i] = (*(G->annotation_full.at(label_id - 1)))[i];
+            //}
         }
 
         if (anno_mutex)
@@ -132,10 +141,12 @@ namespace annotate {
         //std::cerr << curr_kmer << ":" << std::string(label.s) << std::endl;
         
         if (label_id - 1 == G->annotation_full.size()) {
-            G->annotation_full.push_back(new sdsl::rrr_vector<63>(*(G->annotation_curr)));
+            //G->annotation_full.push_back(new sdsl::rrr_vector<63>(*(G->annotation_curr)));
+            G->annotation_full.push_back(new sdsl::sd_vector<>(*(G->annotation_curr)));
         } else {
             delete G->annotation_full.at(label_id - 1);
-            (G->annotation_full.at(label_id - 1)) = new sdsl::rrr_vector<63>(*(G->annotation_curr));
+            //(G->annotation_full.at(label_id - 1)) = new sdsl::rrr_vector<63>(*(G->annotation_curr));
+            (G->annotation_full.at(label_id - 1)) = new sdsl::sd_vector<>(*(G->annotation_curr));
         }
         delete G->annotation_curr;
     }   
