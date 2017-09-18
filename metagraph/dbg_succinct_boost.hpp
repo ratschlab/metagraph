@@ -118,7 +118,7 @@ size_t seqtokmer(std::vector<ui256> &kmers, const char *seq, const uint64_t &len
         bridge[k]='X';
     }   
     if (add_bridge) {
-        for (i=0;i<std::min(k,len);++i) {
+        for (i=0;i<k;++i) {
             std::string cursuff = std::string(bridge+k-suffix.length(),bridge+k);
             for (auto it = cursuff.begin(); it!=cursuff.end(); ++it)
                 *it = alphabet[(uint8_t)nt_lookup[(uint8_t)*it]];
