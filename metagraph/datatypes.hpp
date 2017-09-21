@@ -16,6 +16,47 @@
 
 class DBG_succ;
 
+struct ColorNode {
+    
+    ColorNode() {
+        left = NULL;
+        right = NULL;
+        idx = 0;
+    }
+
+    ColorNode* left;
+    ColorNode* right;
+    uint64_t idx;
+    
+};
+
+/*class ColorTree {
+  
+    private:
+    ColorNode* root;
+
+    public:
+    ColorTree() {
+        root = new ColorNode();
+    }
+
+    void add_color(sdsl::vector_rrr<63>* b) {
+        for (size_t i = 0; i < b->size(); ++i) {
+            if (b[i]) {
+                curr = left ? left : (new ColorNode());
+            } else {
+                curr = right ? right : (new ColorNode());
+            }
+        }
+    }
+
+    uint64_t color_index(sdsl::vector_rrr<63>* b) {
+
+    }
+
+};
+*/
+
 struct HitInfo {
     uint64_t rl;
     uint64_t ru;

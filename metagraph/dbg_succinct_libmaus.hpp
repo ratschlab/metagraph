@@ -11,6 +11,7 @@
 #include "datatypes.hpp"
 
 #include <sdsl/wavelet_trees.hpp>
+#include <sdsl/bit_vectors.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
 
 typedef boost::multiprecision::uint256_t ui256;
@@ -64,14 +65,15 @@ class DBG_succ {
 
     // alphabet size
     size_t alph_size = 7;
-    // alphabet
-    const std::string alphabet; //("$ACGTNX$ACGTNXn"); 
 
     // infile base when loaded from file
     std::string infbase;
 
     // config object
     Config* config;
+
+    // alphabet
+    const std::string alphabet; //("$ACGTNX$ACGTNXn"); 
 
     // annotation containers
     std::deque<uint32_t> annotation; // list that associates each node in the graph with an annotation hash
@@ -80,6 +82,15 @@ class DBG_succ {
     std::map<uint32_t, uint32_t> annotation_map; // maps the hash of a combination to the position in the combination vector
     std::vector<uint32_t> combination_vector; // contains all known combinations
     uint64_t combination_count = 0;
+
+    //std::vector<sdsl::rrr_vector<63>* > annotation_full;
+    std::vector<sdsl::sd_vector<>* > annotation_full;
+    sdsl::bit_vector* annotation_curr = NULL;
+    rs_bit_vector annotation_new;
+    rs_bit_vector annotation_colors;
+    std::vector<sdsl::rrr_vector<63> > colors_to_bits;
+    std::vector<std::string> bits_to_labels;
+    size_t anno_labels;
 
 #ifdef DBGDEBUG
     bool debug = true;
@@ -181,6 +192,12 @@ class DBG_succ {
 
     /**
      * Given a position i in W and an edge label c, this function returns the
+     * index of the outgoing edge with label c.
+     */
+    uint64_t outgoing_edge_idx(uint64_t i, TAlphabet c);
+
+    /**
+     * Given a position i in W and an edge label c, this function returns the
      * index of the node the edge is pointing to.
      */
     uint64_t outgoing(uint64_t i, TAlphabet c);
@@ -207,7 +224,7 @@ class DBG_succ {
      * Given a node label s, this function returns the index
      * of the corresponding node, if this node exists and 0 otherwise.
      */
-    uint64_t index(std::string &s_);
+    uint64_t index(std::string &s_, uint64_t length = 0);
 
     uint64_t index(std::deque<TAlphabet> str);
 
