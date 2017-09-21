@@ -149,6 +149,7 @@ namespace annotate {
             (G->annotation_full.at(label_id - 1)) = new sdsl::sd_vector<>(*(G->annotation_curr));
         }
         delete G->annotation_curr;
+        G->annotation_curr = NULL;
     }   
 
     std::vector<uint32_t> classify_path(DBG_succ* G, std::vector<uint64_t> path) {
