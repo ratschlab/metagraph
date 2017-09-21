@@ -587,7 +587,7 @@ int main(int argc, char const ** argv) {
             }
             graph = new DBG_succ(config->infbase, config);
 
-            // load annotatioun (if file does not exist, empty annotation is created)
+            // load annotation (if file does not exist, empty annotation is created)
             graph->annotationFromFile();
 
             // set up rocksdb
@@ -656,16 +656,9 @@ int main(int argc, char const ** argv) {
                         annotate::annotate_seq(graph, read_stream->seq, read_stream->name);
                     }
                     if (config->verbose) {
-                        std::cout << "entries in annotation map: " << graph->combination_count << std::endl << "length of combination vector: " << graph->combination_vector.size() << std::endl;
-                        std::cout << "added labels for " << total_seqs << " sequences, last was " << std::string(read_stream->name.s) << std::endl;
+                        //std::cout << "entries in annotation map: " << graph->combination_count << std::endl << "length of combination vector: " << graph->combination_vector.size() << std::endl;
+                        //std::cout << "added labels for " << total_seqs << " sequences, last was " << std::string(read_stream->name.s) << std::endl;
                     }
-                    /*for (std::unordered_map<uint32_t, std::set<uint32_t> >::iterator ittt = graph->annotation_map.begin(); ittt != graph->annotation_map.end(); ++ittt) {
-                        std::cerr << "map : " << ittt->first << ":";
-                        for (std::set<uint32_t>::iterator it4 = ittt->second.begin(); it4 != ittt->second.end(); ++it4) {
-                            std::cerr << " " << *it4;
-                        }
-                        std::cerr << std::endl;
-                    }*/
                 }
                 kseq_destroy(read_stream);
                 gzclose(input_p);
@@ -710,16 +703,16 @@ int main(int argc, char const ** argv) {
                 std::set<uint32_t> labels_rev;
                 while (kseq_read(read_stream) >= 0) {
 
-                    std::cout << std::string(read_stream->name.s) << "\t";
+                    std::cout << std::string(read_stream->name.s) << ": ";
                     labels_fwd = annotate::classify_read(graph, read_stream->seq, config->distance);
                     for (std::set<uint32_t>::iterator it = labels_fwd.begin(); it != labels_fwd.end(); it++)
-                        std::cout << graph->id_to_label.at(*it) << ":";
+                        std::cout << graph->id_to_label.at(*it + 1) << ":";
                     std::cout << "\t";
 
                     reverse_complement(read_stream->seq);                    
                     labels_rev = annotate::classify_read(graph, read_stream->seq, config->distance);
                     for (std::set<uint32_t>::iterator it = labels_rev.begin(); it != labels_rev.end(); it++)
-                        std::cout << graph->id_to_label.at(*it) << ":";
+                        std::cout << graph->id_to_label.at(*it + 1) << ":";
                     std::cout << std::endl;
                 }
                 kseq_destroy(read_stream);

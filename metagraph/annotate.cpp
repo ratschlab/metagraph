@@ -1,9 +1,11 @@
 #include "annotate.hpp"
 
 #include <string>
+#include <algorithm>
 #include <pthread.h>
 
 #include "dbg_succinct_libmaus.hpp"
+#include "datatypes.hpp"
 
 namespace annotate {
 
@@ -13,7 +15,7 @@ namespace annotate {
 
         // we just need to walk one step in the path
         if (idx > 0) {
-            TAlphabet s = G->get_alphabet_number(kmer[kmer.length() - 1]);
+            TAlphabet s = G->get_alphabet_number(kmer[kmer.length() - 2]);
             uint64_t rl = std::min(G->succ_W(G->pred_last(idx - 1) + 1, s), G->succ_W(G->pred_last(idx - 1) + 1, s + G->alph_size));
             uint64_t ru = std::max(G->pred_W(idx, s), G->pred_W(idx, s + G->alph_size));
             rl = G->outgoing(rl, s);
@@ -21,22 +23,30 @@ namespace annotate {
             idx = (ru > rl) ? ru : rl;
         // we need to look up the full kmer
         } else {
-            idx = G->index(kmer);
+            idx = G->index(kmer, G->k);
         }
         //std::cerr << "kmer: " << kmer << " idx: " << idx << " ignore: " << (ignore?"yes":"no") << " label_id: " << label_id << std::endl;
         //assert(idx > 0);
         if ((idx == 0) || ignore)
             return;
+        idx = G->outgoing_edge_idx(idx, G->get_alphabet_number(kmer[kmer.length() - 1]));
+        if (idx == 0)
+            return;
 
-        std::vector<uint32_t> curr_combo;
+        //std::vector<uint32_t> curr_combo;
+        //sdsl::rrr_vector<64> curr_color;
 
         if (anno_mutex)
             pthread_mutex_lock(anno_mutex);
 
+        (*(G->annotation_curr))[idx] = 1;
+
+/*
         // get annotation of current kmer
-        size_t curr_hash = G->annotation[idx];
+       // size_t curr_hash = G->annotation[idx];
         if (curr_hash > 0)
-            curr_combo = get_curr_combination(G->combination_vector, G->annotation_map[curr_hash]);
+            curr_color = get_curr_color(G, idx);
+            //curr_combo = get_curr_combination(G->combination_vector, G->annotation_map[curr_hash]);
        
         //if (anno_mutex)
         //    pthread_mutex_unlock(anno_mutex);
@@ -46,7 +56,6 @@ namespace annotate {
         if (!std::binary_search(curr_combo.begin(), curr_combo.end(), label_id)) {
 
             curr_combo = add_to_combination(curr_combo, label_id); 
-            //curr_hash = AnnotationHash{}(curr_combo);
             curr_hash = G->hasher.bithash(curr_combo);
 
            // if (anno_mutex)
@@ -59,6 +68,7 @@ namespace annotate {
                 G->combination_count++;
             }
         }
+*/
         if (anno_mutex)
             pthread_mutex_unlock(anno_mutex);
         //}
@@ -73,16 +83,30 @@ namespace annotate {
         if (anno_mutex)
             pthread_mutex_lock(anno_mutex);
 
-         // does the current label already have an ID?
-        std::unordered_map<std::string, uint32_t>::iterator id_it = G->label_to_id_map.find(label_str);
-        if (id_it == G->label_to_id_map.end()) {
-            label_id = (uint32_t) G->id_to_label.size();
-            G->id_to_label.push_back(label_str);
-            G->label_to_id_map[label_str] = label_id;
-            if (G->config->verbose)
-                std::cout << "added label ID " << label_id << " for label string " << label_str << std::endl;
-        } else { 
-            label_id = id_it->second;
+        if (G->annotation_curr == NULL) {
+
+             // does the current label already have an ID?
+            std::unordered_map<std::string, uint32_t>::iterator id_it = G->label_to_id_map.find(label_str);
+            if (id_it == G->label_to_id_map.end()) {
+                label_id = (uint32_t) G->id_to_label.size();
+                G->id_to_label.push_back(label_str);
+                G->label_to_id_map[label_str] = label_id;
+                G->annotation_curr = new sdsl::bit_vector(G->get_size(), 0);
+                if (G->config->verbose)
+                    std::cout << "added label ID " << label_id << " for label string " << label_str << std::endl;
+            } else { 
+                label_id = id_it->second;
+                sdsl::select_support_sd<> slct = sdsl::select_support_sd<>(G->annotation_full.at(label_id - 1));
+                sdsl::rank_support_sd<> rank = sdsl::rank_support_sd<>(G->annotation_full.at(label_id - 1));
+                size_t maxrank = rank(G->annotation_full.at(label_id - 1)->size());
+                G->annotation_curr = new sdsl::bit_vector(G->annotation_full.at(label_id - 1)->size(), 0);
+                size_t idx;
+                for (size_t i = 1; i <= maxrank; ++i) {
+                    idx = slct(i);
+                    if (i < G->annotation_full.at(label_id - 1)->size())
+                        (*(G->annotation_curr))[i] = (*(G->annotation_full.at(label_id - 1)))[i];
+                }
+            }
         }
 
         if (anno_mutex)
@@ -100,35 +124,48 @@ namespace annotate {
                     std::cout << i << " kmers added" << std::endl;
             }
 
-            if (curr_kmer.size() < G->k) {
+            if (curr_kmer.size() <= G->k) {
                 curr_kmer.push_back(seq.s[i]);
                 continue;
             }
-            assert(curr_kmer.size() == G->k);
+            assert(curr_kmer.size() == G->k + 1);
             annotate_kmer(G, curr_kmer, label_id, previous_idx, anno_mutex, (i % G->config->frequency) > 0);
             
             //std::cerr << curr_kmer << ":" << std::string(label.s) << std::endl;
             curr_kmer.push_back(seq.s[i]);
-            curr_kmer = curr_kmer.substr(1, G->k);
+            curr_kmer = curr_kmer.substr(1, G->k + 1);
         }
         // add last kmer and label to database
-        if (curr_kmer.size() == G->k)
+        if (curr_kmer.size() == G->k + 1)
             annotate_kmer(G, curr_kmer, label_id, previous_idx, anno_mutex, (i % G->config->frequency) > 0);
         //std::cerr << curr_kmer << ":" << std::string(label.s) << std::endl;
+        
+        if (label_id - 1 == G->annotation_full.size()) {
+            //G->annotation_full.push_back(new sdsl::rrr_vector<63>(*(G->annotation_curr)));
+            G->annotation_full.push_back(new sdsl::sd_vector<>(*(G->annotation_curr)));
+        } else {
+            delete G->annotation_full.at(label_id - 1);
+            //(G->annotation_full.at(label_id - 1)) = new sdsl::rrr_vector<63>(*(G->annotation_curr));
+            (G->annotation_full.at(label_id - 1)) = new sdsl::sd_vector<>(*(G->annotation_curr));
+        }
+        delete G->annotation_curr;
+        G->annotation_curr = NULL;
     }   
-
 
     std::vector<uint32_t> classify_path(DBG_succ* G, std::vector<uint64_t> path) {
         
-        uint32_t curr_anno;
-        std::vector<uint32_t> labels;
-        std::vector<uint32_t> current_combination;
-        std::map<uint32_t, uint64_t> label_counter;
+        //uint32_t curr_anno;
+        std::vector<uint32_t> labels(G->annotation_full.size(), 0);
+        //std::vector<uint32_t> current_combination;
+        //std::map<uint32_t, uint64_t> label_counter;
 
         // collect all annotated combinations for the path
         // take majority vote as consensus for now
         for (size_t i = 0; i < path.size(); i++) {
-            curr_anno = G->annotation.at(path.at(i));
+            for (size_t j = 0; j < G->annotation_full.size(); ++j) {
+                labels.at(j) = (*(G->annotation_full.at(j)))[path.at(i)] ? 1 : std::max(labels.at(j), 0u);
+            }
+            /*curr_anno = G->annotation.at(path.at(i));
             if (curr_anno > 0) {
                 current_combination = get_curr_combination(G->combination_vector, G->annotation_map[curr_anno]);
                 for (std::vector<uint32_t>::iterator c = current_combination.begin(); c != current_combination.end(); c++) {
@@ -138,9 +175,10 @@ namespace annotate {
                         label_counter[*c] = 1;
                     }
                 }
-            }
+            }*/
         }
 
+        /*
         // take majority vote as consensus for now
         if (label_counter.size() == 1) {
             labels.push_back(label_counter.begin()->first);
@@ -155,7 +193,7 @@ namespace annotate {
                     labels.push_back(c->first);
                 }
             }
-        }
+        }*/
 
         return labels;
     }
@@ -175,7 +213,8 @@ namespace annotate {
         for (size_t i = 0; i < alignment.size(); i++) {
             path_labels = classify_path(G, alignment.at(i).path);
             for (size_t j = 0; j < path_labels.size(); j++) {
-                all_labels.insert(path_labels.at(j));
+                if (path_labels.at(j) > 0)
+                    all_labels.insert(j);
             }
         }
 
@@ -194,6 +233,19 @@ namespace annotate {
         return curr_combo;
     }
 
+/*    sdsl::rrr_vector<63> get_curr_color(DBG_succ* G, uint64_t idx) {
+        uint64_t color_begin = G->annotation_new->select1(idx);
+        uint64_t color_end = G->annotation_new->select1(idx + 1);
+        uint64_t color_idx = 0;
+        uint64_t mask = 1;
+        for (size_t i = color_begin; i < color_end; ++i) {
+            if (G->annotation_colors[i])
+                color_idx |= mask;
+            mask <<= 1;
+        }
+        return G->colors_to_bits.at(color_idx);
+    }
+*/
     /*bool in_combo(std::vector<uint32_t> &combo, uint32_t value) {
         
         std::cerr << "search for " << value << " at idx " << idx << std::endl;
@@ -245,8 +297,15 @@ namespace annotate {
 
     // write annotation to screen
     void annotationToScreen(DBG_succ* G) {
-        std::deque<uint32_t>::iterator ait = G->annotation.begin();
-        //std::set<uint32_t>::iterator sit;
+        for (size_t i = 1; i < G->get_size(); ++i) {
+            std::cout << i;
+            for (size_t j = 0; j < G->annotation_full.size(); ++j) {
+                if ((*(G->annotation_full.at(j)))[i])
+                    std::cout << " : " << G->id_to_label.at(j + 1);
+            }
+            std::cout << std::endl;
+        }
+        /*std::deque<uint32_t>::iterator ait = G->annotation.begin();
         std::vector<uint32_t>::iterator vit;
         std::vector<uint32_t> curr_comb;
         for (; ait != G->annotation.end(); ++ait) {
@@ -259,7 +318,7 @@ namespace annotate {
                 }
             }
             std::cout << std::endl;
-        }
+        }*/
         //std::cerr << "ANNO MAP " << std::endl;
         //for (std::unordered_map<uint32_t, uint32_t>::iterator itt = annotation_map.begin(); itt != annotation_map.end(); itt++)
         //    std::cerr << itt->first << ":" << itt->second << "; ";
