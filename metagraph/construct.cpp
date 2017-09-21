@@ -1,5 +1,7 @@
 #include "construct.hpp"
 
+#include <unordered_set>
+
 #include "kseq.h"
 #include "dbg_succinct_boost.hpp"
 #include "dbg_succinct_libmaus.hpp"
@@ -72,7 +74,7 @@ namespace construct {
     }
 
 
-    void add_seq_alt(DBG_succ* G, kstring_t &seq, bool bridge, unsigned int parallel, std::string suffix) {
+    void add_seq_alt(DBG_succ* G, kstring_t &seq, bool bridge, unsigned int parallel, std::string suffix, size_t cid) {
 
         if (debug) {
             G->print_seq();
@@ -100,22 +102,56 @@ namespace construct {
                         5, 5, 5, 5,  4, 4, 5, 5,  6, 5, 5, 5,  5, 5, 5, 5 
         };   
 
-        seqtokmer(G->kmers, seq.s, seq.l, G->k, nt_lookup, G->alphabet, bridge, parallel, suffix);
+        seqtokmer(G->kmers, seq.s, seq.l, G->k, nt_lookup, G->alphabet, bridge, parallel, suffix, cid);
         //free(nt_lookup);
+    }
+
+    //removes duplicate kmers, and counts coverage
+    std::vector<std::pair<ui256, size_t> >::iterator unique_count(std::vector<std::pair<ui256, size_t> >::iterator first, std::vector<std::pair<ui256, size_t> >::iterator last) {
+        //Adapted from http://en.cppreference.com/w/cpp/algorithm/unique
+        std::unordered_set<size_t> cids;
+        if (first == last)
+            return last;
+        std::vector<std::pair<ui256, size_t> >::iterator result = first, start = first;
+        cids.insert(result->second);
+        while (++first != last) {
+            if (!(result->first == first->first)) {
+                //set a specific code for the coverage
+                if (cids.find(0) != cids.end()) {
+                    //0 if in reference and not a bridge
+                    result->second = 0;
+                } else if (cids.find(1) != cids.end()) {
+                    //1 if in reference and not a bridge
+                    result->second = 1;
+                } else {
+                    //2*coverage + is_bridge
+                    result->second = cids.size()*2 + (*cids.begin() % 2);
+                }
+                result->second = cids.size();
+                if (++result != first) {
+                    *result = std::move(*first);
+                }
+                cids.clear();
+            }
+            cids.insert(first->second);
+        }
+        result->second = cids.size();
+        return ++result;
     }
 
 
     void construct_succ(DBG_succ* G, unsigned int parallel) {
         omp_set_num_threads(std::max((int)parallel,1));
         __gnu_parallel::sort(G->kmers.begin(),G->kmers.end());
-        //std::sort(G->kmers.begin(), G->kmers.end());
-        G->kmers.erase(std::unique(G->kmers.begin(), G->kmers.end() ), G->kmers.end() );
+        std::vector<std::pair<ui256, size_t> >::iterator uniq_count = unique_count(G->kmers.begin(), G->kmers.end());
+        G->kmers.erase(uniq_count, G->kmers.end() );
 
         //DEBUG: output kmers in current bin
         /*
+        std::cerr << "\n";
         for (size_t i=0;i<G->kmers.size();++i) {
-            char* curseq = kmertos(G->kmers[i], G->alphabet, G->alph_size);
-            std::cerr << G->kmers[i] << "\t" << curseq+1 << " " << curseq[0] << "\n";
+            char* curseq = kmertos(G->kmers[i].first, G->alphabet, G->alph_size);
+            std::cerr << G->kmers[i].first << "\t" << curseq+1 << " " << curseq[0] << " " << G->kmers[i].second << "\n";
             free(curseq);
         }
         */
@@ -123,6 +159,8 @@ namespace construct {
         size_t curpos = G->W_stat.size();
         G->W_stat.resize(G->W_stat.size()+G->kmers.size());
         G->last_stat_safe.resize(G->last_stat_safe.size()+G->kmers.size(), true);
+        G->coverage.resize(G->coverage.size()+G->kmers.size(),0);
+        G->bridge_stat.resize(G->bridge_stat.size()+G->kmers.size(),false);
         
         #pragma omp parallel num_threads(parallel)
         {    
@@ -130,25 +168,32 @@ namespace construct {
             for (size_t i=0;i<G->kmers.size();++i) {
                 //set last
                 if (i+1 < G->kmers.size()) {
-                    bool dup = compare_kmer_suffix(G->kmers[i], G->kmers[i+1]);
+                    bool dup = compare_kmer_suffix(G->kmers[i].first, G->kmers[i+1].first);
                     if (dup) {
                         G->last_stat_safe[curpos+i] = false;
                     }    
-                }    
+                }
+                //set bridge and coverage if from a read
+                if (G->kmers[i].second > 1) {
+                    G->coverage[curpos+i] = G->kmers[i].second / 2;
+                    if (G->kmers[i].second % 2) {
+                        G->bridge_stat[curpos+i] = true;
+                    }
+                }
                 //set W
-                uint8_t curW = getW(G->kmers[i]);
+                uint8_t curW = getW(G->kmers[i].first);
                 if (curW == 127) {
-                    char* curseq = kmertos(G->kmers[i], G->alphabet, G->alph_size);
-                    std::cerr << "Failure decoding kmer " << i << "\n" << G->kmers[i] << "\n" << curseq << "\n";
+                    char* curseq = kmertos(G->kmers[i].first, G->alphabet, G->alph_size);
+                    std::cerr << "Failure decoding kmer " << i << "\n" << G->kmers[i].first << "\n" << curseq << "\n";
                     free(curseq);
                     exit(1);
                 }    
                 if (!curW && curpos+i)
                     G->p=curpos+i;
                 if (i) {
-                    for (size_t j=i-1;compare_kmer_suffix(G->kmers[j], G->kmers[i], 1);--j) {
+                    for (size_t j=i-1;compare_kmer_suffix(G->kmers[j].first, G->kmers[i].first, 1);--j) {
                         //TODO: recalculating W is probably faster than doing a pragma for ordered
-                        if (getW(G->kmers[j]) == curW) {
+                        if (getW(G->kmers[j].first) == curW) {
                             curW += G->alph_size;
                             break;
                         }    
@@ -160,7 +205,7 @@ namespace construct {
             }    
         }    
         for (size_t i=0;i<G->kmers.size();++i) {
-            char cF=getPos(G->kmers[i], G->k-1, G->alphabet, G->alph_size);
+            char cF=getPos(G->kmers[i].first, G->k-1, G->alphabet, G->alph_size);
             if (cF != G->alphabet[G->lastlet]) {
                 for ((G->lastlet)++; G->lastlet<G->alph_size; (G->lastlet)++) {
                     G->F[G->lastlet]=curpos+i-1;
@@ -171,6 +216,9 @@ namespace construct {
             }    
         }    
         G->kmers.clear();
+    }
+
+    void clean_bridges(DBG_succ* G) {
     }
 
 

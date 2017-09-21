@@ -243,7 +243,9 @@ class DBG_succ {
 
     public:
     //Temporary storage for kmers before succinct representation construction
-    std::vector<ui256> kmers;
+    //the second element stores an ID for each kmer indicating which sequence it came from
+    //an even ID indicates that it's a normal kmer, an odd ID indicates that it's a bridge
+    std::vector<std::pair<ui256, size_t> > kmers;
 
     //Annotation hash generator
     AnnotationHash hasher;
@@ -265,6 +267,13 @@ class DBG_succ {
 
     // the array containing the edge labels
     std::vector<uint8_t> W_stat;
+
+    //read coverage
+    std::vector<size_t> coverage;
+
+    //read bridge indicator
+    std::vector<uint8_t> bridge_stat;
+    BitBTree *bridge = new BitBTree();
 
     // the offset array to mark the offsets for the last column in the implicit node list
     std::vector<TAlphabet> F; 

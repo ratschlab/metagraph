@@ -535,17 +535,24 @@ int main(int argc, char const ** argv) {
                             vcf_destroy(vcf);
                         } else {
                             //READ FROM FASTA
+                            //TODO: handle read_stream->qual
                             kseq_t *read_stream = kseq_init(input_p);
                             if (read_stream == NULL) {
                                 std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
                                 exit(1);
                             }
-                            while (kseq_read(read_stream) >= 0) {
+                            for (size_t i=1;kseq_read(read_stream) >= 0; ++i) {
+                            //while (kseq_read(read_stream) >= 0) {
                                 // possibly reverse k-mers
                                 if (config->reverse)
                                     reverse_complement(read_stream->seq);                    
                                 // add all k-mers of seq to the graph
-                                construct::add_seq_alt(graph, read_stream->seq, true, config->parallel, suffices[j]);
+                                //if CID==
+                                //0: normal
+                                //1: bridge (from reference)
+                                //even>1: normal from read
+                                //odd>1: bridge from read
+                                construct::add_seq_alt(graph, read_stream->seq, true, config->parallel, suffices[j], read_stream->qual.l ? i*2 : 0);
                             }
                             kseq_destroy(read_stream);
                         }
@@ -562,9 +569,11 @@ int main(int argc, char const ** argv) {
                 construct::construct_succ(graph, config->parallel);
                 std::cout << (clock()-tstart)/CLOCKS_PER_SEC << "\n";
             }
+            //TODO: cleanup
             tstart = clock();
             std::cerr << "Converting static graph to dynamic\t";
             graph->toDynamic();
+            construct::clean_bridges(graph);
             std::cout << (clock()-tstart)/CLOCKS_PER_SEC << "\n";
             //graph->print_seq();
         } break;

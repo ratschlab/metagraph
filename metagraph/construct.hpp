@@ -14,7 +14,7 @@ namespace construct {
 
     // add a full sequence to the graph
     void add_seq (DBG_succ* G ,kstring_t &seq);
-    void add_seq_alt (DBG_succ* G, kstring_t &seq, bool bridge=true, unsigned int parallel=1, std::string suffix="");
+    void add_seq_alt (DBG_succ* G, kstring_t &seq, bool bridge=true, unsigned int parallel=1, std::string suffix="", uint64_t cid=0);
     void construct_succ(DBG_succ* G, unsigned int parallel=1);
 
     /** This function takes a character c and appends it to the end of the graph sequence
@@ -35,6 +35,8 @@ namespace construct {
      * parallel merge procedure.
      */
     void append_graph_static(DBG_succ *G_t, DBG_succ* G_s);
+
+    void clean_bridges(DBG_succ* G);
 
 }
 #endif

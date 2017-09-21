@@ -77,7 +77,17 @@ char* kmertos(ui256 kmer, const std::string &alphabet, const uint64_t &alph_size
 }
 
 //TODO: for now, this only returns 0
-size_t seqtokmer(std::vector<ui256> &kmers, const char *seq, const uint64_t &len, const uint64_t &k, const char *nt_lookup, const std::string &alphabet, bool add_bridge=true, unsigned int parallel=1, std::string suffix="") {
+size_t seqtokmer(
+        std::vector<std::pair<ui256, size_t> > &kmers, 
+        const char *seq, 
+        const uint64_t &len, 
+        const uint64_t &k, 
+        const char *nt_lookup, 
+        const std::string &alphabet, 
+        bool add_bridge=true, 
+        unsigned int parallel=1, 
+        std::string suffix="",
+        size_t cid=0) {
     char *bridge = (char*)malloc(k+2);
     memset(bridge, 'X', k);
     if (!len)
@@ -89,10 +99,12 @@ size_t seqtokmer(std::vector<ui256> &kmers, const char *seq, const uint64_t &len
     if (add_bridge) {
         for (i=0;i<std::min(k,len); ++i) {
             std::string cursuff = std::string(bridge+k-suffix.length(),bridge+k);
-            for (auto it = cursuff.begin(); it!=cursuff.end(); ++it)
+            for (std::string::iterator it = cursuff.begin(); it!=cursuff.end(); ++it)
                 *it = alphabet[(uint8_t)nt_lookup[(uint8_t)*it]];
             if (cursuff == suffix) {
-                kmers.push_back(stokmer(bridge, k+1, nt_lookup));
+                //add 1 to the CID if the kmer is a bridge
+                //assumes that CID is an even number
+                kmers.push_back(std::make_pair(stokmer(bridge, k+1, nt_lookup), cid+1));
             }
             memmove(bridge, bridge+1, k); 
             bridge[k]= (i+1 < len) ? seq[i+1] : 'X';
@@ -101,14 +113,14 @@ size_t seqtokmer(std::vector<ui256> &kmers, const char *seq, const uint64_t &len
     if (k<len) {
         #pragma omp parallel num_threads(parallel)
         {
-            std::vector<ui256> kmer_priv;
+            std::vector<std::pair<ui256, size_t> > kmer_priv;
             #pragma omp for nowait
             for (i=0; i < len-k; ++i) {
                 std::string cursuff = std::string(seq+i+k-suffix.length(), seq+i+k);
-                for (auto it = cursuff.begin(); it!=cursuff.end(); ++it)
+                for (std::string::iterator it = cursuff.begin(); it!=cursuff.end(); ++it)
                     *it = alphabet[(uint8_t)nt_lookup[(uint8_t)*it]];
                 if (cursuff == suffix) {
-                    kmer_priv.push_back(stokmer(seq+i, k+1, nt_lookup));
+                    kmer_priv.push_back(std::make_pair(stokmer(seq+i, k+1, nt_lookup), cid));
                 }
             }
             #pragma omp critical
@@ -120,10 +132,11 @@ size_t seqtokmer(std::vector<ui256> &kmers, const char *seq, const uint64_t &len
     if (add_bridge) {
         for (i=0;i<k;++i) {
             std::string cursuff = std::string(bridge+k-suffix.length(),bridge+k);
-            for (auto it = cursuff.begin(); it!=cursuff.end(); ++it)
+            for (std::string::iterator it = cursuff.begin(); it!=cursuff.end(); ++it)
                 *it = alphabet[(uint8_t)nt_lookup[(uint8_t)*it]];
             if (cursuff == suffix) {
-                kmers.push_back(stokmer(bridge, k+1, nt_lookup));
+                //add 1 to the CID if the kmer is a bridge
+                kmers.push_back(std::make_pair(stokmer(bridge, k+1, nt_lookup), cid+1));
             }
             memmove(bridge, bridge+1, k); 
             bridge[k]='X';

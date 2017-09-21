@@ -957,6 +957,18 @@ void DBG_succ::toDynamic() {
     }
     delete last;
     last = last_new;
+
+    BitBTree *bridge_new;
+    if (bridge_stat.size()) {
+        bridge_new = new BitBTree(bridge_stat.size(), false);
+        for (size_t i=0;i<bridge_stat.size();++i) {
+            if (bridge_stat.at(i))
+                bridge_new->setBitQuick(i, true);
+        }
+        bridge_stat.clear();
+    }
+    delete bridge;
+    bridge = bridge_new;
 }
 
 

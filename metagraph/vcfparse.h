@@ -116,7 +116,8 @@ static inline void vcf_print_line(vcfparse* vcfp) {
     }
 }
 
-static inline int vcf_get_seq(vcfparse* vcfp) {
+static inline uint64_t vcf_get_seq(vcfparse* vcfp) {
+    uint64_t annot = 0;
     while (vcfp->rec) {
         (vcfp->curi)++;
         if ((vcfp->curi >= vcfp->rec->n_allele) || (!bcf_has_filter(vcfp->hdr, vcfp->rec, passfilt))) {
@@ -184,13 +185,21 @@ static inline int vcf_get_seq(vcfparse* vcfp) {
                 vcfp->seq.s = (char*)malloc(vcfp->kmer1_l+vcfp->curaltlen+vcfp->kmer3_l+1);
             }
         }
+        //annotation is a bit vector indicating inclusion in the different ethnic groups
+        //the first bit is always 1. if not, then the file is done and no sequence was output
+        annot = 1;
+        const char* annots[] = {"AC_AFR", "AC_EAS", "AC_AMR", "AC_ASJ", "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"};
+        for (size_t i=0;i<sizeof(annots)/sizeof(char *);++i) {
+            bcf_info_t* curinfo = bcf_get_info(vcfp->hdr, vcfp->rec, annots[i]);
+            annot += (bool)(curinfo ? curinfo->v1.i : 0) * (1<<(i+1));
+        }
         strcpy(vcfp->seq.s, vcfp->kmer1);
         //strcat(vcfp->seq.s, vcfp->rec->d.allele[vcfp->curi]);
         strcat(vcfp->seq.s, vcfp->curalt);
         strcat(vcfp->seq.s, vcfp->kmer3);
         vcfp->seq.l = strlen(vcfp->seq.s);
         //fprintf(stderr, "%s\n", vcfp->seq.s);
-        return 1;
+        return annot;
     }
     return 0;
 }
