@@ -83,30 +83,30 @@ namespace annotate {
         if (anno_mutex)
             pthread_mutex_lock(anno_mutex);
 
-         // does the current label already have an ID?
-        std::unordered_map<std::string, uint32_t>::iterator id_it = G->label_to_id_map.find(label_str);
-        if (id_it == G->label_to_id_map.end()) {
-            label_id = (uint32_t) G->id_to_label.size();
-            G->id_to_label.push_back(label_str);
-            G->label_to_id_map[label_str] = label_id;
-            G->annotation_curr = new sdsl::bit_vector(G->get_size(), 0);
-            if (G->config->verbose)
-                std::cout << "added label ID " << label_id << " for label string " << label_str << std::endl;
-        } else { 
-            label_id = id_it->second;
-            sdsl::select_support_sd<> slct = sdsl::select_support_sd<>(G->annotation_full.at(label_id - 1));
-            sdsl::rank_support_sd<> rank = sdsl::rank_support_sd<>(G->annotation_full.at(label_id - 1));
-            size_t maxrank = rank(G->annotation_full.at(label_id - 1)->size());
-            G->annotation_curr = new sdsl::bit_vector(G->annotation_full.at(label_id - 1)->size(), 0);
-            size_t idx;
-            for (size_t i = 1; i <= maxrank; ++i) {
-                idx = slct(i);
-                if (i < G->annotation_full.at(label_id - 1)->size())
-                    (*(G->annotation_curr))[i] = (*(G->annotation_full.at(label_id - 1)))[i];
+        if (G->annotation_curr == NULL) {
+
+             // does the current label already have an ID?
+            std::unordered_map<std::string, uint32_t>::iterator id_it = G->label_to_id_map.find(label_str);
+            if (id_it == G->label_to_id_map.end()) {
+                label_id = (uint32_t) G->id_to_label.size();
+                G->id_to_label.push_back(label_str);
+                G->label_to_id_map[label_str] = label_id;
+                G->annotation_curr = new sdsl::bit_vector(G->get_size(), 0);
+                if (G->config->verbose)
+                    std::cout << "added label ID " << label_id << " for label string " << label_str << std::endl;
+            } else { 
+                label_id = id_it->second;
+                sdsl::select_support_sd<> slct = sdsl::select_support_sd<>(G->annotation_full.at(label_id - 1));
+                sdsl::rank_support_sd<> rank = sdsl::rank_support_sd<>(G->annotation_full.at(label_id - 1));
+                size_t maxrank = rank(G->annotation_full.at(label_id - 1)->size());
+                G->annotation_curr = new sdsl::bit_vector(G->annotation_full.at(label_id - 1)->size(), 0);
+                size_t idx;
+                for (size_t i = 1; i <= maxrank; ++i) {
+                    idx = slct(i);
+                    if (i < G->annotation_full.at(label_id - 1)->size())
+                        (*(G->annotation_curr))[i] = (*(G->annotation_full.at(label_id - 1)))[i];
+                }
             }
-            //for (size_t i = 0; i < G->annotation_full.at(label_id - 1)->size(); ++i) {
-            //    (*(G->annotation_curr))[i] = (*(G->annotation_full.at(label_id - 1)))[i];
-            //}
         }
 
         if (anno_mutex)
