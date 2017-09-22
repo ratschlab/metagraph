@@ -103,8 +103,9 @@ namespace annotate {
                 size_t idx;
                 for (size_t i = 1; i <= maxrank; ++i) {
                     idx = slct(i);
-                    if (i < G->annotation_full.at(label_id - 1)->size())
-                        (*(G->annotation_curr))[i] = (*(G->annotation_full.at(label_id - 1)))[i];
+                    if (idx < G->annotation_full.at(label_id - 1)->size()) {
+                        (*(G->annotation_curr))[idx] = (*(G->annotation_full.at(label_id - 1)))[idx];
+                    }
                 }
             }
         }
