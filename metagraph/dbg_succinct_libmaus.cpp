@@ -160,6 +160,8 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
 DBG_succ::~DBG_succ() {
     delete W;
     delete last;
+    if (bridge != NULL)
+        delete bridge;
 }
 
 //
@@ -982,7 +984,7 @@ void DBG_succ::toDynamic() {
     delete last;
     last = last_new;
 
-    BitBTree *bridge_new;
+    BitBTree *bridge_new=NULL;
     if (bridge_stat.size()) {
         bridge_new = new BitBTree(bridge_stat.size(), false);
         for (size_t i=0;i<bridge_stat.size();++i) {

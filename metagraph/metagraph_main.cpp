@@ -482,6 +482,7 @@ int main(int argc, char const ** argv) {
                 kstring_t graphsink = {1, 1, &sinks[0u]};
                 kstring_t start = {graph->k+1, graph->k+1, &starts[0u]};
                 kstring_t blank = {0, 1, ""};
+                kstring_t annot_s = {0,100,(char*)calloc(100, sizeof(char))};
     
                 clock_t tstart, timelast;
                 
@@ -513,7 +514,6 @@ int main(int argc, char const ** argv) {
                                 }
                                 std::cerr << "Loading VCF with " << config->parallel << " threads per line\n";
                                 uint64_t annot;
-                                std::string annot_s;
                                 for (size_t i=1; annot = vcf_get_seq(vcf);++i) {
                                     if (i % 10000 == 0) {
                                         std::cout << "." << std::flush;
@@ -528,10 +528,8 @@ int main(int argc, char const ** argv) {
                                         }
                                     }
                                     nbp += vcf->seq.l;
-                                    kstring_t annot_s = {0,0};
                                     sprintf(annot_s.s, "%ld", annot);
                                     annot_s.l = strlen(annot_s.s);
-                                    annot_s.m = annot_s.l;
                                     construct::add_seq_fast(graph, vcf->seq, annot_s, false, config->parallel, suffices[j]);
                                 }
                                 vcf_destroy(vcf);

@@ -314,14 +314,22 @@ namespace construct {
                 }    
             }    
         }    
-        sdsl::bit_vector bv(G->kmers.size());
-        G->kmers.clear();
+        sdsl::bit_vector bv(G->W_stat.size());
         for (size_t i=0;i<annots.size();++i) {
-            for (size_t j=0;j<annots[i].size();++j) {
-                bv[j] = annots[i][j];
+            size_t j=0;
+            for (;i < G->annotation_full.size() && G->annotation_full.at(i) != NULL && j<G->annotation_full.at(i)->size();++j) {
+                bv[j] = G->annotation_full.at(i)->operator[](j);
             }
+            for (;j<curpos;++j)
+                bv[j]=0;
+            for (size_t k=0;j<bv.size();++j,++k) {
+                bv[j] = annots.at(i).at(k);
+            }
+            if (G->annotation_full.at(i) != NULL)
+                delete G->annotation_full[i];
             G->annotation_full[i] = new sdsl::sd_vector<>(bv);
         }
+        G->kmers.clear();
     }
 
     void clean_bridges(DBG_succ* G) {
