@@ -457,124 +457,157 @@ int main(int argc, char const ** argv) {
             }
 
             if (config->verbose)
-                std::cerr << "k is " << config->k << std::endl;
+               std::cerr << "k is " << config->k << std::endl;
 
-            //enumerate all suffices
-            unsigned int suffix_len = (unsigned int)ceil(log2(config->nsplits)/log2(graph->alph_size-1));
-            //should be set to at most k-1 so that W calculation is correct
-            suffix_len = std::min(suffix_len, (unsigned int)graph->k-1);
-            std::deque<std::string> suffices = {""};
-            for (size_t i=0;i<suffix_len;++i) {
-                while (suffices[0].length() < suffix_len) {
-                    for (size_t j=0;j<graph->alph_size;++j) {
-                        suffices.push_back(graph->alphabet[j] + suffices[0]);
+            if (config->fast) {
+
+                //enumerate all suffices
+                unsigned int suffix_len = (unsigned int)ceil(log2(config->nsplits)/log2(graph->alph_size-1));
+                //should be set to at most k-1 so that W calculation is correct
+                suffix_len = std::min(suffix_len, (unsigned int)graph->k-1);
+                std::deque<std::string> suffices = {""};
+                for (size_t i=0;i<suffix_len;++i) {
+                    while (suffices[0].length() < suffix_len) {
+                        for (size_t j=0;j<graph->alph_size;++j) {
+                            suffices.push_back(graph->alphabet[j] + suffices[0]);
+                        }
+                        suffices.pop_front();
                     }
-                    suffices.pop_front();
                 }
-            }
-            assert(suffices.size() == pow(graph->alph_size, suffix_len));
-
-            //generate sink node
-            std::string starts = std::string(graph->k-1, graph->alphabet[graph->alph_size-1]) + graph->alphabet[0] + graph->alphabet[0];
-            std::string sinks = graph->alphabet.substr(0,1);
-            kstring_t graphsink = {1, 1, &sinks[0u]};
-            kstring_t start = {graph->k+1, graph->k+1, &starts[0u]};
-
-            clock_t tstart, timelast;
-            
-            //one pass per suffix
-            for (size_t j=0;j<suffices.size();++j) {
-                std::cout << "Suffix: " << suffices[j] << "\n";
-                //add sink nodes
-                construct::add_seq_alt(graph, start, false, config->parallel, suffices[j]);
-                construct::add_seq_alt(graph, graphsink, true, config->parallel, suffices[j]);
-                if (suffices[j].find("$") == std::string::npos) {
-                    // iterate over input files
-                    for (unsigned int f = 0; f < config->fname.size(); ++f) {
-                        if (config->verbose) {
-                            std::cout << std::endl << "Parsing " << config->fname[f] << std::endl;
-                        }
-                        // open stream
-                        gzFile input_p = gzopen(config->fname[f].c_str(), "r");
-
-                        //Get extension of file
-                        int dotind = config->fname.at(f).rfind(".");
-                        std::string ext = "";
-                        if (dotind >= 0) {
-                            if (config->fname.at(f).substr(dotind) == ".gz") {
-                                int nextind = config->fname.at(f).substr(0,dotind-1).rfind(".");
-                                ext = config->fname.at(f).substr(nextind, dotind-nextind);
-                            } else {
-                                ext = config->fname.at(f).substr(dotind);
+                assert(suffices.size() == pow(graph->alph_size, suffix_len));
+    
+                //generate sink node
+                std::string starts = std::string(graph->k-1, graph->alphabet[graph->alph_size-1]) + graph->alphabet[0] + graph->alphabet[0];
+                std::string sinks = graph->alphabet.substr(0,1);
+                kstring_t graphsink = {1, 1, &sinks[0u]};
+                kstring_t start = {graph->k+1, graph->k+1, &starts[0u]};
+                kstring_t blank = {0, 1, ""};
+    
+                clock_t tstart, timelast;
+                
+                //one pass per suffix
+                for (size_t j=0;j<suffices.size();++j) {
+                    std::cout << "Suffix: " << suffices[j] << "\n";
+                    //add sink nodes
+                    construct::add_seq_fast(graph, start, blank, false, config->parallel, suffices[j]);
+                    construct::add_seq_fast(graph, graphsink, blank, true, config->parallel, suffices[j]);
+                    if (suffices[j].find("$") == std::string::npos) {
+                        // iterate over input files
+                        for (unsigned int f = 0; f < config->fname.size(); ++f) {
+                            if (config->verbose) {
+                                std::cout << std::endl << "Parsing " << config->fname[f] << std::endl;
                             }
-                        }
-                        if (dotind >= 0 && ext == ".vcf") {
-                            //READ FROM VCF
-                            uint64_t nbp = 0;
-                            uint64_t nbplast = 0;
-                            tstart = clock();
-                            timelast = clock();
-                            vcfparse *vcf = vcf_init(config->refpath.c_str(), config->fname.at(f).c_str(), graph->k);
-                            if (!vcf) {
-                                std::cerr << "ERROR reading VCF " << config->fname.at(f) << std::endl;
-                                exit(1);
-                            }
-                            std::cerr << "Loading VCF with " << config->parallel << " threads per line\n";
-                            for (size_t i=1; vcf_get_seq(vcf);++i) {
-                                if (i % 10000 == 0) {
-                                    std::cout << "." << std::flush;
-                                    if (i % 100000 == 0) {
-                                        fprintf(stdout, "%lu - bp %lu / runtime %lu / BPph %lu\n", i, nbp, (clock() - tstart)/CLOCKS_PER_SEC, 60*60*CLOCKS_PER_SEC*(nbp-nbplast)/(clock()-timelast));
-                                        nbplast = nbp;
-                                        timelast = clock();
-                                    }
+                            // open stream
+                            gzFile input_p = gzopen(config->fname[f].c_str(), "r");
+    
+                            if (utils::get_filetype(config->fname.at(f)) == "VCF") {
+                                //READ FROM VCF
+                                uint64_t nbp = 0;
+                                uint64_t nbplast = 0;
+                                tstart = clock();
+                                timelast = clock();
+                                vcfparse *vcf = vcf_init(config->refpath.c_str(), config->fname.at(f).c_str(), graph->k);
+                                if (!vcf) {
+                                    std::cerr << "ERROR reading VCF " << config->fname.at(f) << std::endl;
+                                    exit(1);
                                 }
-                                nbp += vcf->seq.l;
-                                construct::add_seq_alt(graph, vcf->seq, false, config->parallel, suffices[j]);
+                                std::cerr << "Loading VCF with " << config->parallel << " threads per line\n";
+                                uint64_t annot;
+                                std::string annot_s;
+                                for (size_t i=1; annot = vcf_get_seq(vcf);++i) {
+                                    if (i % 10000 == 0) {
+                                        std::cout << "." << std::flush;
+                                        if (i % 100000 == 0) {
+                                            fprintf(stdout, "%lu - bp %lu / runtime %lu / BPph %lu\n", 
+                                                    i, 
+                                                    nbp, 
+                                                    (clock() - tstart)/CLOCKS_PER_SEC, 
+                                                    60*60*CLOCKS_PER_SEC*(nbp-nbplast)/(clock()-timelast));
+                                            nbplast = nbp;
+                                            timelast = clock();
+                                        }
+                                    }
+                                    nbp += vcf->seq.l;
+                                    kstring_t annot_s = {0,0};
+                                    sprintf(annot_s.s, "%ld", annot);
+                                    annot_s.l = strlen(annot_s.s);
+                                    annot_s.m = annot_s.l;
+                                    construct::add_seq_fast(graph, vcf->seq, annot_s, false, config->parallel, suffices[j]);
+                                }
+                                vcf_destroy(vcf);
+                            } else {
+                                //READ FROM FASTA
+                                //TODO: handle read_stream->qual
+                                kseq_t *read_stream = kseq_init(input_p);
+                                if (read_stream == NULL) {
+                                    std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
+                                    exit(1);
+                                }
+                                for (size_t i=1;kseq_read(read_stream) >= 0; ++i) {
+                                //while (kseq_read(read_stream) >= 0) {
+                                    // possibly reverse k-mers
+                                    if (config->reverse)
+                                        reverse_complement(read_stream->seq);                    
+                                    // add all k-mers of seq to the graph
+                                    //if CID==
+                                    //0: normal
+                                    //1: bridge (from reference)
+                                    //even>1: normal from read
+                                    //odd>1: bridge from read
+                                    construct::add_seq_fast(graph, read_stream->seq, read_stream->name, true, config->parallel, suffices[j], read_stream->qual.l ? i*2 : 0);
+                                }
+                                kseq_destroy(read_stream);
                             }
-                            vcf_destroy(vcf);
-                        } else {
-                            //READ FROM FASTA
-                            //TODO: handle read_stream->qual
-                            kseq_t *read_stream = kseq_init(input_p);
-                            if (read_stream == NULL) {
-                                std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
-                                exit(1);
-                            }
-                            for (size_t i=1;kseq_read(read_stream) >= 0; ++i) {
-                            //while (kseq_read(read_stream) >= 0) {
-                                // possibly reverse k-mers
-                                if (config->reverse)
-                                    reverse_complement(read_stream->seq);                    
-                                // add all k-mers of seq to the graph
-                                //if CID==
-                                //0: normal
-                                //1: bridge (from reference)
-                                //even>1: normal from read
-                                //odd>1: bridge from read
-                                construct::add_seq_alt(graph, read_stream->seq, true, config->parallel, suffices[j], read_stream->qual.l ? i*2 : 0);
-                            }
-                            kseq_destroy(read_stream);
+                            gzclose(input_p);
+                            //graph->update_counters();
+                            //graph->print_stats();
+                            //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
                         }
-                        gzclose(input_p);
-                        //graph->update_counters();
-                        //graph->print_stats();
-                        //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
                     }
+                    get_RAM();
+                    //append to succinct representation and clear kmer list
+                    tstart = clock();
+                    std::cout << "Sorting kmers and appending succinct representation from current bin\t";
+                    construct::construct_succ(graph, config->parallel);
+                    std::cout << (clock()-tstart)/CLOCKS_PER_SEC << "\n";
                 }
-                get_RAM();
-                //append to succinct representation and clear kmer list
+                //TODO: cleanup
                 tstart = clock();
-                std::cout << "Sorting kmers and appending succinct representation from current bin\t";
-                construct::construct_succ(graph, config->parallel);
+                std::cerr << "Converting static graph to dynamic\t";
+                graph->toDynamic();
+                construct::clean_bridges(graph);
                 std::cout << (clock()-tstart)/CLOCKS_PER_SEC << "\n";
+            } else {
+                //slower method
+                //TODO: merge in optimizations from seqmerge branch
+                //TODO: add VCF parsing (needs previous merge)
+                for (unsigned int f = 0; f < config->fname.size(); ++f) {
+                    if (config->verbose) {
+                        std::cout << std::endl << "Parsing " << config->fname[f] << std::endl;
+                    }
+                    // open stream
+                    gzFile input_p = gzopen(config->fname[f].c_str(), "r");
+                    if (utils::get_filetype(config->fname.at(f)) == "VCF") {
+                        std::cerr << "ERROR: this method of reading VCFs not yet implemented" << std::endl;
+                        exit(1);
+                    } else {
+                        kseq_t *read_stream = kseq_init(input_p);
+                        if (read_stream == NULL) {
+                            std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
+                            exit(1);
+                        }
+                        for (size_t i=1;kseq_read(read_stream) >= 0; ++i) {
+                            if (config->reverse)
+                                reverse_complement(read_stream->seq);
+                            construct::add_seq(graph, read_stream->seq);
+                        }
+                        kseq_destroy(read_stream);
+                    }
+                    gzclose(input_p);
+                }
             }
-            //TODO: cleanup
-            tstart = clock();
-            std::cerr << "Converting static graph to dynamic\t";
-            graph->toDynamic();
-            construct::clean_bridges(graph);
-            std::cout << (clock()-tstart)/CLOCKS_PER_SEC << "\n";
+            config->infbase = config->outfbase;
+            graph->annotationToFile();
             //graph->print_seq();
         } break;
 

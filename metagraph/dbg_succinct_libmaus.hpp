@@ -9,10 +9,12 @@
 
 #include "config.hpp"
 #include "datatypes.hpp"
+#include "dbg_succinct_boost.hpp"
 
 #include <sdsl/wavelet_trees.hpp>
 #include <sdsl/bit_vectors.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
+#include "dbg_succinct_boost.hpp"
 
 typedef boost::multiprecision::uint256_t ui256;
 
@@ -34,7 +36,8 @@ class DBG_succ {
     //Temporary storage for kmers before succinct representation construction
     //the second element stores an ID for each kmer indicating which sequence it came from
     //an even ID indicates that it's a normal kmer, an odd ID indicates that it's a bridge
-    std::vector<std::pair<ui256, size_t> > kmers;
+    std::vector<kmer_boost::KMer> kmers;
+    //std::vector<std::pair<ui256, size_t> > kmers;
 
     //Annotation hash generator
     AnnotationHash hasher;

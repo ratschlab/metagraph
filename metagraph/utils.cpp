@@ -166,5 +166,24 @@ namespace utils {
         return (ss1 > ss2);
     }
 
+    /**
+     *  Returns the input file type, given a filename
+     */
+    std::string get_filetype(std::string& fname) {
+        int dotind = fname.rfind(".");
+        std::string ext = "";
+        if (dotind >= 0) {
+            if (fname.substr(dotind) == ".gz") {
+                int nextind = fname.substr(0,dotind-1).rfind(".");
+                ext = fname.substr(nextind, dotind-nextind);
+            } else {
+                ext = fname.substr(dotind);
+            }
+        }
+        if (dotind >=0 && ext == ".vcf") {
+            return std::string("VCF");
+        }
+        return std::string("FASTA");
+    }
 
 }

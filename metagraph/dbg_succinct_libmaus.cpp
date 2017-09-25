@@ -99,6 +99,7 @@ DBG_succ::DBG_succ(size_t k_, Config* config_, bool sentinel) :
         p = 0;
     }
     id_to_label.push_back("");
+    label_to_id_map[""]=0;
     combination_vector.push_back(0);
 }
 
@@ -152,6 +153,7 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
     }
     instream.close();
     id_to_label.push_back("");
+    label_to_id_map[""]=0;
     combination_vector.push_back(0);
 }
 

@@ -1,9 +1,10 @@
 #include "construct.hpp"
 
 #include <unordered_set>
+#include <unordered_map>
+
 
 #include "kseq.h"
-#include "dbg_succinct_boost.hpp"
 #include "dbg_succinct_libmaus.hpp"
 
 namespace construct {
@@ -73,13 +74,36 @@ namespace construct {
         fprintf(stdout, "edges %lu / nodes %lu\n", G->get_edge_count(), G->get_node_count());
     }
 
+    bool check_suffix(DBG_succ* G, char* target, std::string& suffix, const char* nt_lookup) {
+        std::string cursuff = std::string(target+(G->k)-suffix.length(), target+G->k);
 
-    void add_seq_alt(DBG_succ* G, kstring_t &seq, bool bridge, unsigned int parallel, std::string suffix, size_t cid) {
+        for (std::string::iterator it = cursuff.begin(); it!=cursuff.end(); ++it)
+            *it = G->alphabet[(uint8_t)nt_lookup[(uint8_t)*it]];
+        return cursuff == suffix;
+    }
+
+
+    void add_seq_fast(DBG_succ* G, kstring_t &seq, kstring_t &name, bool add_bridge, unsigned int parallel, std::string suffix, size_t cid) {
 
         if (debug) {
             G->print_seq();
             G->print_state();
             std::cout << "======================================" << std::endl;
+        }
+
+        std::string label_str = std::string(name.s);
+        uint32_t label_id,max_label_id=0;
+        std::unordered_map<std::string, uint32_t>::iterator id_it = G->label_to_id_map.find(label_str);
+        if (id_it == G->label_to_id_map.end()) {
+            label_id = (uint32_t) G->id_to_label.size();
+            G->id_to_label.push_back(label_str);
+            G->label_to_id_map[label_str] = label_id;
+            max_label_id = std::max(max_label_id, label_id);
+        } else {
+            label_id = id_it->second;
+        }
+        if (max_label_id >= G->annotation_full.size()) {
+            G->annotation_full.resize(max_label_id+1);
         }
 
         /*
@@ -101,19 +125,74 @@ namespace construct {
                         5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5, 
                         5, 5, 5, 5,  4, 4, 5, 5,  6, 5, 5, 5,  5, 5, 5, 5 
         };   
-
-        seqtokmer(G->kmers, seq.s, seq.l, G->k, nt_lookup, G->alphabet, bridge, parallel, suffix, cid);
+		char *bridge = (char*)malloc(G->k+2);
+        memset(bridge, 'X', G->k); 
+        if (!seq.l)
+            return;
+        bridge[G->k] = seq.s[0];
+        bridge[G->k+1] = 0;
+        size_t i=0;
+        //std::cout << "Loading next sequence with " << parallel << " threads\n";
+        if (add_bridge) {
+            for (i=0;i<std::min(G->k,seq.l); ++i) {
+                if (check_suffix(G, bridge, suffix, nt_lookup)) {
+                    //add 1 to the CID if the kmer is a bridge
+                    //assumes that CID is an even number
+                    //kmers.push_back(std::make_pair(stokmer(bridge, k+1, nt_lookup), cid+1));
+                    G->kmers.push_back(kmer_boost::KMer{kmer_boost::stokmer(bridge, G->k+1, nt_lookup), cid+1, 0});
+                }   
+                memmove(bridge, bridge+1, G->k); 
+                bridge[G->k]= (i+1 < seq.l) ? seq.s[i+1] : 'X';
+            }   
+        }   
+        if (G->k<seq.l) {
+            #pragma omp parallel num_threads(parallel)
+            {   
+                std::vector<kmer_boost::KMer> kmer_priv;
+                //std::vector<std::pair<ui256, size_t> > kmer_priv;
+                #pragma omp for nowait
+                for (i=0; i < seq.l-G->k; ++i) {
+                    if (check_suffix(G, seq.s+i, suffix, nt_lookup)) {
+                        kmer_priv.push_back(kmer_boost::KMer{kmer_boost::stokmer(seq.s+i, G->k+1, nt_lookup), cid, label_id});
+                        //kmer_priv.push_back(std::make_pair(stokmer(seq+i, k+1, nt_lookup), cid));
+                    }   
+                }   
+                #pragma omp critical
+                G->kmers.insert(G->kmers.end(), std::make_move_iterator(kmer_priv.begin()), std::make_move_iterator(kmer_priv.end()));
+            }   
+            memcpy(bridge, seq.s+seq.l-G->k, G->k); 
+            bridge[G->k]='X';
+        }   
+        if (add_bridge) {
+            for (i=0;i<G->k;++i) {
+                if (check_suffix(G, bridge, suffix, nt_lookup)) {
+                    //add 1 to the CID if the kmer is a bridge
+                    G->kmers.push_back(kmer_boost::KMer{kmer_boost::stokmer(bridge, G->k+1, nt_lookup), cid+1, 0});
+                    //kmers.push_back(std::make_pair(stokmer(bridge, k+1, nt_lookup), cid+1));
+                }   
+                memmove(bridge, bridge+1, G->k); 
+                bridge[G->k]='X';
+            }   
+        }   
+        free(bridge); 
         //free(nt_lookup);
     }
 
-    //removes duplicate kmers, and counts coverage
-    std::vector<std::pair<ui256, size_t> >::iterator unique_count(std::vector<std::pair<ui256, size_t> >::iterator first, std::vector<std::pair<ui256, size_t> >::iterator last) {
+    //removes duplicate kmers, counts coverage, and assigns labels
+    std::vector<kmer_boost::KMer>::iterator unique_count(std::vector<kmer_boost::KMer>::iterator first, std::vector<kmer_boost::KMer>::iterator last) {
+    //std::vector<std::pair<ui256, size_t> >::iterator unique_count(std::vector<std::pair<ui256, size_t> >::iterator first, std::vector<std::pair<ui256, size_t> >::iterator last) {
         //Adapted from http://en.cppreference.com/w/cpp/algorithm/unique
         std::unordered_set<size_t> cids;
         if (first == last)
             return last;
-        std::vector<std::pair<ui256, size_t> >::iterator result = first, start = first;
+        std::vector<kmer_boost::KMer>::iterator result = first, start = first;
         cids.insert(result->second);
+        cpp_int annot;
+        if (result->annot != 0) {
+            annot = (cpp_int(1) << static_cast<size_t>(result->annot-1));
+        } else {
+            annot = 0;
+        }
         while (++first != last) {
             if (!(result->first == first->first)) {
                 //set a specific code for the coverage
@@ -128,14 +207,26 @@ namespace construct {
                     result->second = cids.size()*2 + (*cids.begin() % 2);
                 }
                 result->second = cids.size();
+                result->annot = annot;
                 if (++result != first) {
                     *result = std::move(*first);
                 }
                 cids.clear();
+                if (result->annot != 0) {
+                    annot = (cpp_int(1) << static_cast<size_t>(result->annot-1));
+                } else {
+                    annot = 0;
+                }
+            }
+            if (first->annot) {
+                //num_annots = std::max(num_annots, static_cast<size_t>(first->annot));
+                //TODO: add check for first->annot being too big
+                annot |= (cpp_int(1) << static_cast<size_t>(first->annot-1));
             }
             cids.insert(first->second);
         }
         result->second = cids.size();
+        result->annot = annot;
         return ++result;
     }
 
@@ -143,8 +234,11 @@ namespace construct {
     void construct_succ(DBG_succ* G, unsigned int parallel) {
         omp_set_num_threads(std::max((int)parallel,1));
         __gnu_parallel::sort(G->kmers.begin(),G->kmers.end());
-        std::vector<std::pair<ui256, size_t> >::iterator uniq_count = unique_count(G->kmers.begin(), G->kmers.end());
+        std::vector<kmer_boost::KMer>::iterator uniq_count = unique_count(G->kmers.begin(), G->kmers.end());
         G->kmers.erase(uniq_count, G->kmers.end() );
+        std::vector<std::vector<uint8_t> > annots(G->annotation_full.size(), std::vector<uint8_t>(G->kmers.size()));
+        //TODO: set the bit vector, then store it
+        //TODO: when merging into G, keep track of the fact that this may have a different number of annotations that the rest of hte graph
 
         //DEBUG: output kmers in current bin
         /*
@@ -168,7 +262,7 @@ namespace construct {
             for (size_t i=0;i<G->kmers.size();++i) {
                 //set last
                 if (i+1 < G->kmers.size()) {
-                    bool dup = compare_kmer_suffix(G->kmers[i].first, G->kmers[i+1].first);
+                    bool dup = kmer_boost::compare_kmer_suffix(G->kmers[i].first, G->kmers[i+1].first);
                     if (dup) {
                         G->last_stat_safe[curpos+i] = false;
                     }    
@@ -181,9 +275,9 @@ namespace construct {
                     }
                 }
                 //set W
-                uint8_t curW = getW(G->kmers[i].first);
+                uint8_t curW = kmer_boost::getW(G->kmers[i].first);
                 if (curW == 127) {
-                    char* curseq = kmertos(G->kmers[i].first, G->alphabet, G->alph_size);
+                    char* curseq = kmer_boost::kmertos(G->kmers[i].first, G->alphabet, G->alph_size);
                     std::cerr << "Failure decoding kmer " << i << "\n" << G->kmers[i].first << "\n" << curseq << "\n";
                     free(curseq);
                     exit(1);
@@ -191,9 +285,9 @@ namespace construct {
                 if (!curW && curpos+i)
                     G->p=curpos+i;
                 if (i) {
-                    for (size_t j=i-1;compare_kmer_suffix(G->kmers[j].first, G->kmers[i].first, 1);--j) {
+                    for (size_t j=i-1;kmer_boost::compare_kmer_suffix(G->kmers[j].first, G->kmers[i].first, 1);--j) {
                         //TODO: recalculating W is probably faster than doing a pragma for ordered
-                        if (getW(G->kmers[j].first) == curW) {
+                        if (kmer_boost::getW(G->kmers[j].first) == curW) {
                             curW += G->alph_size;
                             break;
                         }    
@@ -202,10 +296,15 @@ namespace construct {
                     }    
                 }    
                 G->W_stat[curpos+i] = curW;
+                //set  bitvector
+                for (size_t j=0;(G->kmers[i].annot) >> j; ++j) {
+                    assert(j < annots.size());
+                    annots[j][i] = (uint8_t)(((G->kmers[i].annot) >> j) % 2);
+                }
             }    
         }    
         for (size_t i=0;i<G->kmers.size();++i) {
-            char cF=getPos(G->kmers[i].first, G->k-1, G->alphabet, G->alph_size);
+            char cF=kmer_boost::getPos(G->kmers[i].first, G->k-1, G->alphabet, G->alph_size);
             if (cF != G->alphabet[G->lastlet]) {
                 for ((G->lastlet)++; G->lastlet<G->alph_size; (G->lastlet)++) {
                     G->F[G->lastlet]=curpos+i-1;
@@ -215,10 +314,18 @@ namespace construct {
                 }    
             }    
         }    
+        sdsl::bit_vector bv(G->kmers.size());
         G->kmers.clear();
+        for (size_t i=0;i<annots.size();++i) {
+            for (size_t j=0;j<annots[i].size();++j) {
+                bv[j] = annots[i][j];
+            }
+            G->annotation_full[i] = new sdsl::sd_vector<>(bv);
+        }
     }
 
     void clean_bridges(DBG_succ* G) {
+        //TODO: MERGE FROM SEQMERGE
     }
 
 

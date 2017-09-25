@@ -36,6 +36,8 @@ namespace utils {
      */
     bool seq_is_greater(std::deque<TAlphabet> s1, std::deque<TAlphabet> s2);
 
+    std::string get_filetype(std::string& fname);
+
 }
 
 #endif

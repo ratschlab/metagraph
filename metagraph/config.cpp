@@ -142,6 +142,7 @@ void Config::print_usage(std::string prog_name, int identity) {
             fprintf(stderr, "\t-I --infile-base [STR] \tbasename for loading graph input file\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
             fprintf(stderr, "\t-r --reverse \tbuild graph from reverse complement of input [off]\n");
+            fprintf(stderr, "\t   --fast \tuse fast build method [off]\n");
             fprintf(stderr, "\t-P --print \tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t-s --num-splits \tDefine the minimum number of bins to split kmers into [1]\n");
         } break;
