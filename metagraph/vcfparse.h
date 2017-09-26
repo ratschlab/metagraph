@@ -9,6 +9,8 @@
 #include <htslib/vcf_sweep.h>
 #include <htslib/faidx.h>
 #include "kseq.h"
+#include <string>
+#include <iostream>
 
 #ifndef VCFPARSE_T
 #define VCFPARSE_T vcfparse
@@ -116,10 +118,8 @@ static inline void vcf_print_line(vcfparse* vcfp) {
     }
 }
 
-static inline char* vcf_get_seq(vcfparse* vcfp) {
-    char* annot = (char*)malloc(100);
-    annot[0]=0;
-    strcat(annot, "VCF:");
+static inline std::string vcf_get_seq(vcfparse* vcfp) {
+    std::string annot = "VCF:";
     //uint64_t annot;
     while (vcfp->rec) {
         (vcfp->curi)++;
@@ -195,22 +195,24 @@ static inline char* vcf_get_seq(vcfparse* vcfp) {
         for (size_t i=0;i<sizeof(annots)/sizeof(char *);++i) {
             bcf_info_t* curinfo = bcf_get_info(vcfp->hdr, vcfp->rec, annots[i]);
             if (curinfo && curinfo->v1.i) {
-                strcat(annot, annots[i]);
-                strcat(annot, ":");
+                annot += std::string(annots[i]) + ":";
+                //strcat(annot, annots[i]);
+                //strcat(annot, ":");
+                //fprintf(stdout, "%s\n", annot.c_str());
             }
-            annot[strlen(annot)-1]=0;
+            //annot[strlen(annot)-1]=0;
             //annot += (bool)(curinfo ? curinfo->v1.i : 0) * (1<<(i+1));
         }
+        annot.pop_back();
         strcpy(vcfp->seq.s, vcfp->kmer1);
         //strcat(vcfp->seq.s, vcfp->rec->d.allele[vcfp->curi]);
         strcat(vcfp->seq.s, vcfp->curalt);
         strcat(vcfp->seq.s, vcfp->kmer3);
         vcfp->seq.l = strlen(vcfp->seq.s);
         //fprintf(stderr, "%s\n", vcfp->seq.s);
-        return annot;
+        return annot.c_str();
     }
-    free(annot);
-    return NULL;
+    return "";
 }
 
 static inline void vcf_destroy(vcfparse* vcfp) {

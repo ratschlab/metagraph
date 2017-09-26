@@ -99,12 +99,16 @@ namespace construct {
         
         //TODO: hack to get VCFs to work
         size_t vcfind = label_str.find("VCF:");
+        //std::cout << label_str << " " << vcfind << "\n";
         if (vcfind == 0) {
+            //std::cout << "VCF found\n";
             std::istringstream is(label_str);
             std::getline(is, cur_label, ':');
             while (std::getline(is, cur_label, ':')) {
                 labels.push_back(cur_label);
+                //std::cout << cur_label << "\n";
             }
+            //std::cout << "\n";
         } else {
             labels.push_back(label_str);
         }
