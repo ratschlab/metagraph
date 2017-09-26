@@ -513,7 +513,7 @@ int main(int argc, char const ** argv) {
                                     exit(1);
                                 }
                                 std::cerr << "Loading VCF with " << config->parallel << " threads per line\n";
-                                uint64_t annot;
+                                char* annot;
                                 for (size_t i=1; annot = vcf_get_seq(vcf);++i) {
                                     if (i % 10000 == 0) {
                                         std::cout << "." << std::flush;
@@ -528,7 +528,7 @@ int main(int argc, char const ** argv) {
                                         }
                                     }
                                     nbp += vcf->seq.l;
-                                    sprintf(annot_s.s, "%ld", annot);
+                                    annot_s.s = annot;
                                     annot_s.l = strlen(annot_s.s);
                                     construct::add_seq_fast(graph, vcf->seq, annot_s, false, config->parallel, suffices[j]);
                                 }

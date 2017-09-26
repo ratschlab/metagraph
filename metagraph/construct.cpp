@@ -6,6 +6,7 @@
 
 #include "kseq.h"
 #include "dbg_succinct_libmaus.hpp"
+#include <sstream>
 
 namespace construct {
 
@@ -91,16 +92,32 @@ namespace construct {
             std::cout << "======================================" << std::endl;
         }
 
-        std::string label_str = std::string(name.s);
-        uint32_t label_id,max_label_id=0;
-        std::unordered_map<std::string, uint32_t>::iterator id_it = G->label_to_id_map.find(label_str);
-        if (id_it == G->label_to_id_map.end()) {
-            label_id = (uint32_t) G->id_to_label.size();
-            G->id_to_label.push_back(label_str);
-            G->label_to_id_map[label_str] = label_id;
-            max_label_id = std::max(max_label_id, label_id);
+        std::string label_str = std::string(name.s), cur_label;
+        std::vector<std::string> labels;
+        std::vector<uint32_t> label_id;
+        uint32_t max_label_id=0;
+        
+        //TODO: hack to get VCFs to work
+        size_t vcfind = label_str.find("VCF:");
+        if (vcfind == 0) {
+            std::istringstream is(label_str);
+            std::getline(is, cur_label, ':');
+            while (std::getline(is, cur_label, ':')) {
+                labels.push_back(cur_label);
+            }
         } else {
-            label_id = id_it->second;
+            labels.push_back(label_str);
+        }
+        for (auto it = labels.begin(); it!=labels.end();++it) {
+            std::unordered_map<std::string, uint32_t>::iterator id_it = G->label_to_id_map.find(*it);
+            if (id_it == G->label_to_id_map.end()) {
+                label_id.push_back((uint32_t) G->id_to_label.size());
+                G->id_to_label.push_back(*it);
+                G->label_to_id_map[*it] = label_id.back();
+                max_label_id = std::max(max_label_id, label_id.back());
+            } else {
+                label_id.push_back(id_it->second);
+            }
         }
         if (max_label_id >= G->annotation_full.size()) {
             G->annotation_full.resize(max_label_id+1);
@@ -153,7 +170,9 @@ namespace construct {
                 #pragma omp for nowait
                 for (i=0; i < seq.l-G->k; ++i) {
                     if (check_suffix(G, seq.s+i, suffix, nt_lookup)) {
-                        kmer_priv.push_back(kmer_boost::KMer{kmer_boost::stokmer(seq.s+i, G->k+1, nt_lookup), cid, label_id});
+                        for (auto it=label_id.begin(); it!=label_id.end(); ++it) {
+                            kmer_priv.push_back(kmer_boost::KMer{kmer_boost::stokmer(seq.s+i, G->k+1, nt_lookup), cid, *it});
+                        }
                         //kmer_priv.push_back(std::make_pair(stokmer(seq+i, k+1, nt_lookup), cid));
                     }   
                 }   
