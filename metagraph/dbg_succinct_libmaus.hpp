@@ -16,6 +16,8 @@
 #include <boost/multiprecision/cpp_int.hpp>
 #include "dbg_succinct_boost.hpp"
 
+#include <type_traits>
+
 typedef boost::multiprecision::uint256_t ui256;
 
 //libmaus2 structures
@@ -236,7 +238,41 @@ class DBG_succ {
      * Given a node label s, this function returns the index
      * of the corresponding node, if this node exists and 0 otherwise.
      */
-    uint64_t index(std::string &s_, uint64_t length = 0);
+    template <class T> uint64_t index(T &s_, uint64_t length) {
+        TAlphabet s;
+        if (std::is_same<T, std::string>::value) {
+            s = get_alphabet_number(s_[0]);
+        } else {
+            s = s_[0];
+        }    
+        // init range
+        uint64_t rl = succ_last(F[s] + 1);
+        uint64_t ru = s+1 < alph_size ? F[s + 1] : last->size()-1; // upper bound
+        // update range iteratively while scanning through s
+        for (uint64_t i = 1; i < length; i++) {
+            if (std::is_same<T, std::string>::value) {
+                s = get_alphabet_number(s_[i]);
+            } else {
+                s = s_[i];
+            }    
+            rl = std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size));
+            if (rl >= W->n)
+                return 0;
+            ru = std::max(pred_W(ru, s), pred_W(ru, s + alph_size));
+            if (ru >= W->n)
+                return 0;
+            if (rl > ru)
+                return 0;
+            rl = outgoing(rl, s);
+            ru = outgoing(ru, s);
+        }    
+        return (ru > rl) ? ru : rl;
+
+    }
+
+    uint64_t index(std::string &s_, uint64_t length=0) {
+        return index(s_, length == 0 ? s_.length() : std::min(s_.length(), length));
+    }
 
     uint64_t index(std::deque<TAlphabet> str);
 
@@ -263,6 +299,7 @@ class DBG_succ {
      * node labels share a k-1 suffix.
      */
     bool compare_node_suffix(uint64_t i1, uint64_t i2);
+    bool compare_node_suffix(TAlphabet *ref, uint64_t i2);
 
     /**
      * This function returns true if node i is a terminal node.

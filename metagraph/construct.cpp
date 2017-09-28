@@ -17,7 +17,7 @@ namespace construct {
 #endif 
 
     // add a full sequence to the graph
-    void add_seq(DBG_succ* G, kstring_t &seq) {
+    void add_seq(DBG_succ* G, kstring_t &seq, bool append) {
 
         if (debug) {
             G->print_seq();
@@ -40,7 +40,32 @@ namespace construct {
         /** Iterate over input sequence and enumerae all
          * k-mers.
          */
-        for (uint64_t i = 0; i < seq.l; ++i) {
+
+        size_t i;
+        TAlphabet *ckmer = new TAlphabet[G->k+1];
+        for (i=0;i<std::min(seq.l, G->k);++i) {
+            ckmer[i]=6;
+        }
+        ckmer[i]=0;
+        TAlphabet c;
+        uint64_t ind;
+        if (!append) {
+            ind = G->index(ckmer, i);
+            if (!ind) {
+                ind = G->p;
+                i=0;
+            } else {
+                if (G->k >= seq.l) {
+                    delete[] ckmer;
+                    return;
+                }
+                i=G->k;
+            }
+        } else {
+            i=0;
+            ind=0;
+        }
+        for (; i < seq.l; ++i) {
             if (i > 0 && i % 1000 == 0) {
                 std::cout << "." << std::flush;
                 if (i % 10000 == 0) {
@@ -53,7 +78,10 @@ namespace construct {
             //    cerr << "seq[i] ord " << ordValue(seq[i]) + 1 << std::endl;
             // }
 
-            append_pos(G, G->get_alphabet_number(seq.s[i]));
+            c = G->get_alphabet_number(seq.s[i]);
+            ind = append_pos(G, c, ckmer, ind) * !append;
+            memmove(ckmer, &ckmer[1], sizeof(TAlphabet)*(G->k-1));
+            ckmer[G->k-1] = c;
 
             if (debug) {
                 G->print_seq();
@@ -61,18 +89,25 @@ namespace construct {
                 std::cout << "======================================" << std::endl;
             }
         }
-
+        assert(!append || G->W->operator[](ind)==0);
         // Padding after sequence to get back into default state.
-        for (size_t j = 0; j < G->k; j++) {
-            append_pos(G, 6);
-            if (debug) {
-                G->print_seq();
-                G->print_state();
-                std::cout << "======================================" << std::endl;
+        if (G->W->operator[](ind)==0) {
+            for (size_t j = 0; j < G->k; j++) {
+                ind = append_pos(G, 6, ckmer, ind) * !append;
+                memmove(ckmer, &ckmer[1], sizeof(TAlphabet)*(G->k-1));
+                ckmer[G->k-1] = 6;
+                if (debug) {
+                    G->print_seq();
+                    G->print_state();
+                    std::cout << "======================================" << std::endl;
+                }
             }
+            if (!append)
+                ind = append_pos(G, 0, ckmer, ind);
         }
 
         fprintf(stdout, "edges %lu / nodes %lu\n", G->get_edge_count(), G->get_node_count());
+        delete[] ckmer;
     }
 
     bool check_suffix(DBG_succ* G, char* target, std::string& suffix, const char* nt_lookup) {
@@ -92,7 +127,7 @@ namespace construct {
             std::cout << "======================================" << std::endl;
         }
 
-        std::string label_str = std::string(name.s), cur_label;
+        std::string cur_label, label_str = (name.s ? std::string(name.s) : "");
         std::vector<std::string> labels;
         std::vector<uint32_t> label_id;
         uint32_t max_label_id=0;
@@ -355,31 +390,39 @@ namespace construct {
         G->kmers.clear();
     }
 
-    void clean_bridges(DBG_succ* G) {
-        //TODO: MERGE FROM SEQMERGE
-    }
-
-
 
     /** This function takes a character c and appends it to the end of the graph sequence
      * given that the corresponding note is not part of the graph yet.
      */
-    void append_pos(DBG_succ* G, TAlphabet c) {
+    uint64_t append_pos(DBG_succ* G, TAlphabet c, TAlphabet *ckmer, uint64_t i) {
 
         // check that the last position of the graph is indeed a terminal
         assert((*(G->W))[G->p] == 0);
+        uint64_t *p;
+        bool append = false;
         TAlphabet c_p = G->get_node_end_value(G->p);
         // get range of identical nodes (without W) pos current end position
-        std::pair<uint64_t, uint64_t> R = G->get_equal_node_range(G->p);
+        std::pair<uint64_t, uint64_t> R;
+        //std::pair<uint64_t, uint64_t> R = G->get_equal_node_range(G->p);
         //fprintf(stdout, "range [%i %i]\n", (int) R.first, (int) R.second);
 
+        if (!i) {
+            p = &(G->p);
+            append = true;
+            R.second = G->succ_last(*p);
+        } else {
+            append = false;
+            R = G->get_equal_node_range(G->p);
+            p = &(R.first);
+        }
+
         // get position of first occurence of c in W after p
-        uint64_t next_c = G->succ_W(G->p, c);
+        uint64_t next_c = G->succ_W(*p, c);
         // check if c is part of range
         bool exist_c = (next_c <= R.second);
         if (!exist_c) {
             // get position of first occurence of c- in W after p
-            next_c = G->succ_W(G->p, c + G->alph_size);
+            next_c = G->succ_W(*p, c + G->alph_size);
             // check if c- is part of range
             exist_c = (next_c <= R.second);
         }
@@ -389,19 +432,42 @@ namespace construct {
          * at p, insert c at fwd(next_c) and update p.
          */
         if (exist_c) {
+            if (!append) {
+                //if not appending, then this has already been observed and we only need to delete the extra pointer
+                for (i=0;G->W->operator[](*p)==0;++i,++(*p)) {
+                    if (*p==(G->p))
+                        continue;
+                    if (G->debug) {
+                        assert(i<2);
+                        assert(*p < R.second);
+                    }
+                    G->W->remove(*p);
+                    G->last->deleteBit(*p);
+                    G->update_F(c_p, false);
+                    if (*p <= G->p) {
+                        (G->p)--;
+                        if (debug) {
+                            assert(G->W->operator[](*p)==0);
+                        }
+                    }
+                    if (*p <= next_c)
+                        next_c--;
+                }
+                return G->fwd(next_c);
+            }
             uint64_t p_new = G->fwd(next_c);
             // remove old terminal symbol
-            G->last->deleteBit(G->p);
-            G->W->remove(G->p);
+            G->last->deleteBit(*p);
+            G->W->remove(*p);
             // adapt position if altered by previous deletion
-            p_new -= (G->p < p_new);
+            p_new -= (*p < p_new);
             // insert new terminal symbol 
             // we have to insert 0 into last as the node already existed in the range 
             // and the terminal symbol is always first
             G->last->insertBit(p_new, false);
             G->W->insert(0, p_new);
             // update new terminal position
-            G->p = p_new;
+            *p = p_new;
             // take care of updating the offset array F
             G->update_F(c_p, false);
             //assert(get_node_end_value(p) == c);
@@ -414,39 +480,65 @@ namespace construct {
              * whose node shares a k-1 suffix with the current node. If yes, we add c- 
              * instead of c.
              */
+            if (!append) {
+                //we need to insert a new pointer
+                if (*p == G->p)
+                    (*p)++;
+                if (G->W->operator[](*p)) {
+                    //if no placeholder exists
+                    G->W->insert(0, *p);
+                    G->update_F(c_p, true);
+                    G->last->insertBit(*p, false);
+                    R.second++;
+                    if (*p <= G->p) {
+                        (G->p)++;
+                        if (debug) {
+                            assert(G->W->operator[](G->p)==0);
+                        }
+                    }
+                }
+            }
             // get position of last occurence of c before p (including p - 1)
-            uint64_t last_c = G->pred_W(G->p - 1, c);
+            uint64_t last_c = G->pred_W(*p - 1, c);
             // if this position exists
             if (last_c > 0) {
                 uint64_t x = G->fwd(last_c);
                 assert((*(G->last))[x]); // this should always be true - unless x is 0 - I do not get the logic in the reference implementation
 
                 // check, if there are any c or c- symbols following after position p
-                uint64_t next_c = G->succ_W(G->p + 1, c);
-                uint64_t next_cm = G->succ_W(G->p + 1, c + G->alph_size);
+                uint64_t next_c = G->succ_W(*p + 1, c);
+                uint64_t next_cm = G->succ_W(*p + 1, c + G->alph_size);
                 // there is no c between p and next_cm and next_cm is a c- ==> we should add a c- 
                 // all nodes between W[i] = c and W[j] = c- share a common suffix of length k-1
                 bool minus1 = (next_cm < next_c);
                 // check, if we share a k-1 suffix with last_c
                 if (!minus1) {
-                    minus1 = G->compare_node_suffix(G->p, last_c);
+                    if (ckmer) {
+                        minus1 = G->compare_node_suffix(ckmer, last_c);
+                    } else {
+                        minus1 = G->compare_node_suffix(*p, last_c);
+                    }
                 }
 
                 // adding a new node can influence following nodes that share a k-1 suffix with the
                 // new node -> need to adapt the respektive cc to a cc-
                 bool minus2 = false;
                 if (next_c < G->W->n) {
-                    minus2 = G->compare_node_suffix(G->p, next_c);
+                    if (ckmer) {
+                        minus2 = G->compare_node_suffix(ckmer, next_c);
+                    } else {
+                        minus2 = G->compare_node_suffix(*p, next_c);
+                    }
                     if (minus2) {
                         G->replaceW(next_c, (*(G->W))[next_c] + G->alph_size);
                     }
                 }
 
-                G->replaceW(G->p, minus1 ? c + G->alph_size : c);
+                G->replaceW(*p, minus1 ? c + G->alph_size : c);
                 // after we are done, assert that the order within the range we created 
                 // is still valid within W
-                if (G->p - R.second > 0) {
-                    G->sort_W_locally(G->p, R.second);
+                if (*p - R.second > 0) {
+                    G->sort_W_locally(*p, R.second);
                 }
 
                 // if minus1 is true, we share a k-1 suffix with the node at 
@@ -454,32 +546,36 @@ namespace construct {
                 // as we would like to insert before it. Otherwise we insert directly after
                 // it as we are now sorted after it. 
                 if (minus1) {
-                    G->p = x;
+                    *p = x;
                     G->last->insertBit(x, false);
                     G->W->insert(0, x);
                 } else if (minus2) {
-                    G->p = x + 1;
+                    *p = x + 1;
                     G->last->insertBit(x + 1, false);
                     G->W->insert(0, x + 1);
                 // no node shares a k-1 suffix with last_c and thus the new node comes after
                 // the forward of last_c (as the current node came after last_c as well)
                 } else {
-                    G->p = x + 1;
+                    *p = x + 1;
                     G->last->insertBit(x + 1, true);
                     G->W->insert(0, x + 1);
                 }
             } else {
                 uint64_t x = G->F[c] + 1;
-                uint64_t next_c = G->succ_W(G->p + 1, c);
+                uint64_t next_c = G->succ_W(*p + 1, c);
                 bool minus = false;
                 if (next_c < G->W->n) {
-                    minus = G->compare_node_suffix(G->p, next_c);
+                    if (ckmer) {
+                        minus = G->compare_node_suffix(ckmer, next_c);
+                    } else {
+                        minus = G->compare_node_suffix(*p, next_c);
+                    }
                 }
-                G->replaceW(G->p, c);
-                if (G->p - R.second > 0) {
-                    G->sort_W_locally(G->p, R.second);
+                G->replaceW(*p, c);
+                if (*p - R.second > 0) {
+                    G->sort_W_locally(*p, R.second);
                 }
-                G->p = x;
+                *p = x;
                 if (minus) {
                     G->replaceW(next_c, (*(G->W))[next_c] + G->alph_size);
                     G->last->insertBit(x, false);
@@ -488,19 +584,30 @@ namespace construct {
                 }
                 G->W->insert(0, x);
             }
+            if (*p < G->p || (!append && *p == G->p)) {
+                (G->p)++;
+                if (debug)
+                    assert(G->W->operator[](G->p)==0);
+            }
             G->update_F(c, true);
         }
         // update sorting at new location of p
         // with this we assert that $ is always inserted at the first position 
         // of a range of equal nodes --> this will help us to prevent multiple insertions
         // of already existing nodes
-        R = G->get_equal_node_range(G->p);
+        R = G->get_equal_node_range(*p);
         if (R.second - R.first > 0) {
             G->sort_W_locally(R.first, R.second);
-            while ((*(G->W))[G->p] != 0)
-                G->p--;
-            assert((*(G->W))[G->p] == 0);
+            *p = R.first;
+            if (!append && *p == G->p)
+                (*p)++;
+            /*
+            while ((*(G->W))[*p] != 0)
+                (*p)--;
+            */
+            assert(G->W->operator[](*p)==0);
         }
+        return *p;
     }
 
 
@@ -612,5 +719,46 @@ namespace construct {
         for (size_t j = 0; j < G_t->F.size(); ++j) {
             G_t->F.at(j) += G_s->F.at(j);
         }
+    }
+
+    //Given an edge list, remove them from the graph. If a ref_point is given, it's updated index is return, otherwise return 0
+    uint64_t remove_edges(DBG_succ* G, std::set<uint64_t> &edges, uint64_t ref_point) {
+        uint64_t offset = 0; 
+        uint64_t i,j,d;
+        
+        for (std::set<uint64_t>::iterator x = edges.begin();x !=edges.end();++x) {
+            assert(*x >= offset);
+            d = G->W->operator[](*x-offset);
+            if (d < G->alph_size) {
+                //fix W array
+                j = G->succ_W(*x-offset+1,d);
+                for (i=*x-offset+1;i<j;++i) {
+                    if (G->W->operator[](i) == d + G->alph_size) {
+                        G->replaceW(i, d);
+                        break;
+                    }    
+                }    
+            }    
+            G->W->remove(*x-offset);
+            G->update_F(G->get_node_end_value(*x-offset), false);
+            //if the current node has multiple outgoing edges, remove one of the 0s from
+            //last instead of 1
+            if (G->get_last(*x-offset) && (*x >= offset + 1) && !G->get_last(*x-offset-1)) {
+                G->last->deleteBit(*x-offset-1);
+            } else {
+                G->last->deleteBit(*x-offset);
+            }    
+            //fix pointers
+            if (ref_point && *x-offset <= ref_point)
+                ref_point--;
+            if (*x-offset <= G->p) {
+                (G->p)--;
+                if (debug) {
+                    assert(G->W->operator[](G->p)==0);
+                }    
+            }    
+            offset++;
+        }    
+        return ref_point;
     }
 }

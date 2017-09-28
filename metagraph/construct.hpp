@@ -13,14 +13,14 @@ namespace construct {
     typedef uint64_t TAlphabet;
 
     // add a full sequence to the graph
-    void add_seq (DBG_succ* G ,kstring_t &seq);
+    void add_seq (DBG_succ* G ,kstring_t &seq, bool append=true);
     void add_seq_fast (DBG_succ* G, kstring_t &seq, kstring_t& name, bool add_bridge=true, unsigned int parallel=1, std::string suffix="", uint64_t cid=0);
     void construct_succ(DBG_succ* G, unsigned int parallel=1);
 
     /** This function takes a character c and appends it to the end of the graph sequence
      * given that the corresponding note is not part of the graph yet.
      */
-    void append_pos(DBG_succ* G, TAlphabet c);
+    uint64_t append_pos(DBG_succ* G, TAlphabet c, TAlphabet *ckmer=NULL, uint64_t i=0);
 
     /** This function takes a pointer to a graph structure and concatenates the arrays W, last 
      * and F to this graph's arrays. In almost all cases this will not produce a valid graph and 
@@ -36,7 +36,7 @@ namespace construct {
      */
     void append_graph_static(DBG_succ *G_t, DBG_succ* G_s);
 
-    void clean_bridges(DBG_succ* G);
+    uint64_t remove_edges(DBG_succ* G, std::set<uint64_t> &edges, uint64_t ref_point=0);
 
 }
 #endif

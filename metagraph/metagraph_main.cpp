@@ -449,6 +449,7 @@ int main(int argc, char const ** argv) {
             }
         } break;
 
+        //TODO: allow for building by appending/adding to an existing graph
         case Config::build: {
             if (!config->infbase.empty()) {
                 graph = new DBG_succ(config->infbase, config);
@@ -481,7 +482,7 @@ int main(int argc, char const ** argv) {
                 std::string sinks = graph->alphabet.substr(0,1);
                 kstring_t graphsink = {1, 1, &sinks[0u]};
                 kstring_t start = {graph->k+1, graph->k+1, &starts[0u]};
-                kstring_t blank = {0, 1, ""};
+                kstring_t blank = {0, 1, NULL};
     
                 clock_t tstart, timelast;
                 
@@ -574,7 +575,6 @@ int main(int argc, char const ** argv) {
                 tstart = clock();
                 std::cerr << "Converting static graph to dynamic\t";
                 graph->toDynamic();
-                construct::clean_bridges(graph);
                 std::cout << (clock()-tstart)/CLOCKS_PER_SEC << "\n";
             } else {
                 //slower method

@@ -6,6 +6,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 namespace utils {
 
@@ -179,11 +180,20 @@ namespace utils {
             } else {
                 ext = fname.substr(dotind);
             }
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            if (ext == ".vcf") {
+                return "VCF";
+            } else if (ext == ".fq") {
+                return "FASTQ";
+            } else {
+                return "FASTA";
+            }
+
+        } else {
+            std::cerr << "Filetype unknown\n";
+            exit(1);
+            return "";
         }
-        if (dotind >=0 && ext == ".vcf") {
-            return std::string("VCF");
-        }
-        return std::string("FASTA");
     }
 
 }

@@ -409,15 +409,26 @@ uint64_t DBG_succ::indegree(uint64_t i) {
  * Given a node label s, this function returns the index
  * of the corresponding node, if this node exists and 0 otherwise.
  */
-uint64_t DBG_succ::index(std::string &s_, uint64_t length) {
-    TAlphabet s = get_alphabet_number(s_[0]);
+/*
+template <class T>
+uint64_t DBG_succ::index(T &s_, uint64_t length) {
+    TAlphabet s;
+    if (std::is_same<T, std::string>::value) {
+        s = get_alphabet_number(s_[0]);
+    } else {
+        s = s_[0];
+    }
     // init range
     uint64_t rl = succ_last(F[s] + 1);
     uint64_t ru = s+1 < alph_size ? F[s + 1] : last->size()-1; // upper bound
     uint64_t up = (length == 0) ? s_.length() : std::min(length, s_.length());
     // update range iteratively while scanning through s
     for (uint64_t i = 1; i < up; i++) {
-        s = get_alphabet_number(s_[i]);
+        if (std::is_same<T, std::string>::value) {
+            s = get_alphabet_number(s_[i]);
+        } else {
+            s = s_[i];
+        }
         rl = std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size));
         if (rl >= W->n)
             return 0;
@@ -431,6 +442,7 @@ uint64_t DBG_succ::index(std::string &s_, uint64_t length) {
     }
     return (ru > rl) ? ru : rl;
 }
+*/
 
 /** 
  * Given a string str and a maximal number of edit operations
@@ -696,6 +708,18 @@ bool DBG_succ::compare_node_suffix(uint64_t i1, uint64_t i2) {
             return false;
         }
         i1 = bwd(succ_last(i1));
+        i2 = bwd(succ_last(i2));
+    }
+    return true;
+}
+
+bool DBG_succ::compare_node_suffix(TAlphabet *ref, uint64_t i2) {
+    TAlphabet *i1 = &ref[k-1];
+    for (size_t ii=0; ii < k-1;ii++) {
+        if (*i1 != get_node_end_value(i2)) {
+            return false;
+        }
+        i1 = &ref[k-2-ii];
         i2 = bwd(succ_last(i2));
     }
     return true;
