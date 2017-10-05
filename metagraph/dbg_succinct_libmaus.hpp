@@ -270,8 +270,8 @@ class DBG_succ {
 
     }
 
-    uint64_t index(std::string &s_, uint64_t length=0) {
-        return index(s_, length == 0 ? s_.length() : std::min(s_.length(), length));
+    uint64_t index(std::string &s_) {
+        return index(s_, s_.length());
     }
 
     uint64_t index(std::deque<TAlphabet> str);

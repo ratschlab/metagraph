@@ -337,6 +337,13 @@ int main(int argc, char const ** argv) {
                     graph_->print_seq();
                 if (config->print_graph_succ)
                     graph_->print_state_str();
+                
+                std::ifstream instream((config->fname.at(f) + ".anno.dbg").c_str());
+                if (instream.good()) {
+                    size_t anno_size = libmaus2::util::NumberSerialisation::deserialiseNumber(instream);
+                    std::cout << "annot: " << anno_size << std::endl;
+                }
+                instream.close();
 
                 /*DBG_succ* graph_tut = new DBG_succ(config->k, config);
                 std::cerr << "inserting step by step" << std::endl;
