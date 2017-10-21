@@ -373,7 +373,22 @@ struct ParallelAnnotateContainer {
     //pthread_mutex_t* anno_mutex;
 };
 
-class rs_bit_vector: public sdsl::bit_vector {
+class bit_vector {
+
+public:
+    
+    virtual void set(size_t id, bool val) = 0;
+    virtual void operator[](size_t id) = 0;
+    virtual bool operator[](size_t id) = 0;
+    virtual void insertBit(size_t id) = 0;
+    virtual void deleteBit(size_t id) = 0;
+    virtual void serialise(std::ostream &out) = 0;
+    virtual void deserialise(std::istream &in) = 0;
+    virtual void select1(size_t id) = 0;
+    virtual void rank1(size_t id) = 0;
+};
+
+class rs_bit_vector: public bit_vector, public sdsl::bit_vector {
     private:
         sdsl::rank_support_v5<> rk;
         sdsl::select_support_mcl<> slct;
@@ -392,10 +407,10 @@ class rs_bit_vector: public sdsl::bit_vector {
             this->operator[](id) = val;
             update_rs = true;
         }
-        void setBitQuick(size_t id, bool val) {
+        /*void setBitQuick(size_t id, bool val) {
             this->operator[](id) = val;
             update_rs = true;
-        }
+        }*/
         void insertBit(size_t id, bool val) {
             this->resize(this->size()+1);
             if (this->size() > 1)

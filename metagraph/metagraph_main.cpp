@@ -132,6 +132,7 @@ void *parallel_merge_wrapper(void *arg) {
     }
     pthread_exit((void*) 0);
 }
+
 int main(int argc, char const ** argv) {
 
     // parse command line arguments and options
