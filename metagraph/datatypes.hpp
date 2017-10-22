@@ -382,8 +382,8 @@ public:
     virtual uint64_t size() = 0;
     virtual void set(size_t id, bool val) = 0;
     virtual void setBitQuick(size_t id, bool val) = 0;
-    virtual bool const& operator[](size_t id) const = 0;
-    virtual bool& operator[](size_t id) = 0;
+    //virtual bool const& operator[](size_t id) const = 0;
+    virtual bool operator[](size_t id) = 0;
     virtual void insertBit(size_t id, bool val) = 0;
     virtual void deleteBit(size_t id) = 0;
     virtual void serialise(std::ostream &out) = 0;
@@ -404,47 +404,47 @@ public:
     }
 
     uint64_t size() {
-        return this->size();
+        return this->libmaus2::bitbtree::BitBTree<6, 64>::size();
     }
 
     void set(size_t id, bool val) {
-        this->set(id, val);
+        this->libmaus2::bitbtree::BitBTree<6, 64>::set(id, val);
     }
     
     void setBitQuick(size_t id, bool val) {
-        this->setBitQuick(id, val);
+        this->libmaus2::bitbtree::BitBTree<6, 64>::setBitQuick(id, val);
     }
     
-    bool const& operator[](size_t id) const {
-        return this->operator[](id);
-    }
+    //bool const& operator[](size_t id) const {
+    //    return this->libmaus2::bitbtree::BitBTree<6, 64>::operator[](id);
+    //}
 
-    bool& operator[](size_t id) {
-        return this->operator[](id);
+    bool operator[](size_t id) {
+        return this->libmaus2::bitbtree::BitBTree<6, 64>::operator[](id);
     }
 
     void insertBit(size_t id, bool val) {
-        this->insertBit(id, val);
+        this->libmaus2::bitbtree::BitBTree<6, 64>::insertBit(id, val);
     }
 
     void deleteBit(size_t id) {
-        this->deleteBit(id);
+        this->libmaus2::bitbtree::BitBTree<6, 64>::deleteBit(id);
     }
 
     void deserialise(std::istream &in) {
-        this->deserialise(in);
+        this->libmaus2::bitbtree::BitBTree<6, 64>::deserialise(in);
     }
 
     void serialise(std::ostream &out) {
-        this->serialise(out);
+        this->libmaus2::bitbtree::BitBTree<6, 64>::serialise(out);
     }
 
     uint64_t select1(size_t id) {
-        return this->select1(id);
+        return this->libmaus2::bitbtree::BitBTree<6, 64>::select1(id);
     }
 
     uint64_t rank1(size_t id) {
-        return this->rank1(id);
+        return this->libmaus2::bitbtree::BitBTree<6, 64>::rank1(id);
     }
 };
 
@@ -468,20 +468,20 @@ public:
     }
 
     void set(size_t id, bool val) {
-        this->operator[](id) = val;
+        this->sdsl::bit_vector::operator[](id) = val;
         update_rs = true;
     }
 
     void setBitQuick(size_t id, bool val) {
-        this->operator[](id) = val;
+        this->sdsl::bit_vector::operator[](id) = val;
         update_rs = true;
     }
 
-    bool const& operator[](size_t id) const {
-        return this->operator[](id);
-    }
+    //bool const& operator[](size_t id) const {
+    //    return this->operator[](id);
+    //}
 
-    bool& operator[](size_t id) {
+    bool operator[](size_t id) {
         update_rs = true;
         return this->operator[](id);
     }
@@ -536,14 +536,14 @@ public:
     virtual ~wavelet_tree() {};
 
     virtual uint64_t size() = 0;
-    virtual void deserialise(std::istream &in) = 0;
+    //virtual void deserialise(std::istream &in) = 0;
     virtual void serialise(std::ostream &out) = 0;
     virtual void insert(uint64_t val, size_t id) = 0;
     virtual void remove(size_t id) = 0;
     virtual uint64_t rank(uint64_t c, uint64_t i) = 0;
     virtual uint64_t select(uint64_t c, uint64_t i) = 0;
-    virtual uint64_t const& operator[](size_t id) const = 0;
-    virtual uint64_t& operator[](size_t id) = 0;
+    //virtual uint64_t const& operator[](size_t id) const = 0;
+    virtual uint64_t operator[](size_t id) = 0;
     // this only makes sense when implemented in the dynamic part
     virtual bool get_bit_raw(uint64_t id) = 0;
     
@@ -604,7 +604,7 @@ public:
         n++;
         if (this->size() > 1)
             std::copy_backward(this->begin()+id,this->begin()+n-1,this->begin()+n);
-        this->operator[](id) = val;
+        this->sdsl::int_vector<>::operator[](id) = val;
         update_rs = true;
     }
 
@@ -638,11 +638,11 @@ public:
         return sdsl::int_vector<>::operator[](id);
     }*/
 
-    uint64_t const& operator[](size_t id) const {
-        return this->operator[](id);
-    }
+    //uint64_t const& operator[](size_t id) const {
+    //    return this->operator[](id);
+    //}
 
-    uint64_t& operator[](size_t id) {
+    uint64_t operator[](size_t id) {
         update_rs = true;
         return this->operator[](id);
     }
@@ -742,43 +742,43 @@ public:
     }
 
     uint64_t size() {
-        return this->size();
+        return this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::size();
     }
 
-    void deserialise(std::istream &in) {
-        this->deserialise(in);
-    }
+    //void deserialise(std::istream &in) {
+    //    this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::deserialise(in);
+    //}
 
     void serialise(std::ostream &out) {
-        this->serialise(out);
+        this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::serialise(out);
     }
 
     void insert(uint64_t val, size_t id) {
-        this->insert(val, id);
+        this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::insert(val, id);
     }
 
     void remove(size_t id) {
-        this->remove(id);
+        this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::remove(id);
     }
 
     uint64_t rank(uint64_t c, uint64_t i) {
-        return this->rank(c, i);
+        return this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::rank(c, i);
     }
 
     uint64_t select(uint64_t c, uint64_t i) {
-        return this->select(c, i);
+        return this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::select(c, i);
     }
 
-    uint64_t const& operator[](size_t id) const {
-        return this->operator[](id);
-    }
+   // uint64_t const& operator[](size_t id) const {
+   //     return this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::operator[](id);
+   // }
 
-    uint64_t& operator[](size_t id) {
-        return this->operator[](id);
+    uint64_t operator[](size_t id) {
+        return this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::operator[](id);
     }
 
     bool get_bit_raw(uint64_t id) {
-        return this->R->operator[](id);
+        return this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::R->operator[](id);
     }
 
 };
