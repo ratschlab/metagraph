@@ -26,7 +26,7 @@ namespace construct {
         }
 
         // Padding of the input genome / read
-        if (G->W->n == 2) {
+        if (G->W->size() == 2) {
             for (size_t j = 0; j < G->k; j++) {
                 append_pos(G, 6);
                 if (debug) {
@@ -523,7 +523,7 @@ namespace construct {
                 // adding a new node can influence following nodes that share a k-1 suffix with the
                 // new node -> need to adapt the respektive cc to a cc-
                 bool minus2 = false;
-                if (next_c < G->W->n) {
+                if (next_c < G->W->size()) {
                     if (ckmer) {
                         minus2 = G->compare_node_suffix(ckmer, next_c);
                     } else {
@@ -564,7 +564,7 @@ namespace construct {
                 uint64_t x = G->F[c] + 1;
                 uint64_t next_c = G->succ_W(*p + 1, c);
                 bool minus = false;
-                if (next_c < G->W->n) {
+                if (next_c < G->W->size()) {
                     if (ckmer) {
                         minus = G->compare_node_suffix(ckmer, next_c);
                     } else {
@@ -628,7 +628,7 @@ namespace construct {
             ++curr_pos;
         }
         if (G_t->config->verbose)
-            std::cout << "new total edges: " << G_s->W->n << std::endl;
+            std::cout << "new total edges: " << G_s->W->size() << std::endl;
 
         // handle F
         assert(G_t->F.size() == G_s->F.size());
@@ -667,7 +667,7 @@ namespace construct {
                 blocks.pop();
                 uint64_t epos = pos + cnt;
                 for ( ; pos < epos; ++pos) {
-                    offsets.at(o) += !(*(G_s->W->R))[pos];
+                    offsets.at(o) += !G_s->W->get_bit_raw(pos); 
                 }
                 if (ib < b - 1) {
                     new_blocks.push(offsets.at(o));
@@ -692,7 +692,7 @@ namespace construct {
             p = i;
             co = 0;
             for (size_t ib = 0; ib < b - 1; ++ib) {
-                bit = (*(G_s->W->R))[ib * n + p + co];
+                bit = G_s->W->get_bit_raw(ib * n + p + co);
                 if (bit) {
                     v |= m;
                     co += offsets.at(o);
@@ -704,7 +704,7 @@ namespace construct {
                 o = 2*o + 1 + bit;
                 m >>= 1;
             }
-            bit = (*(G_s->W->R))[(b - 1) * n + p + co];
+            bit = G_s->W->get_bit_raw((b - 1) * n + p + co);
             if (bit) {
                 v |= m;
             }

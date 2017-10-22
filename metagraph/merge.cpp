@@ -95,21 +95,21 @@ namespace merge {
             // same node as the current one
             std::map<uint64_t, std::deque<TAlphabet> >::iterator it = last_added_nodes.find(smallest.second % Gt->alph_size);
             if (it != last_added_nodes.end() && utils::compare_seq(seq1, it->second, 1)) {
-                Gt->W->insert(val + Gt->alph_size, Gt->W->n);
+                Gt->W->insert(val + Gt->alph_size, Gt->W->size());
             } else {
-                Gt->W->insert(smallest.second, Gt->W->n);
+                Gt->W->insert(smallest.second, Gt->W->size());
             }
             last_added_nodes[val] = seq1;
             Gt->update_F(Gv.at(curr_k)->get_node_end_value(kv.at(curr_k)), true);
-            Gt->last->insertBit(Gt->W->n - 1, true);
+            Gt->last->insertBit(Gt->W->size() - 1, true);
 
             // handle multiple outgoing edges
-            if (added > 0 && Gt->W->n > 2 && (*(Gt->last))[Gt->W->n-2]) {
+            if (added > 0 && Gt->W->size() > 2 && (*(Gt->last))[Gt->W->size()-2]) {
                 // compare the last two added nodes
-                std::map<uint64_t, std::deque<TAlphabet> >::iterator it1 = last_added_nodes.find((*(Gt->W))[Gt->W->n-2] % Gt->alph_size);
-                std::map<uint64_t, std::deque<TAlphabet> >::iterator it2 = last_added_nodes.find((*(Gt->W))[Gt->W->n-1] % Gt->alph_size);
+                std::map<uint64_t, std::deque<TAlphabet> >::iterator it1 = last_added_nodes.find((*(Gt->W))[Gt->W->size()-2] % Gt->alph_size);
+                std::map<uint64_t, std::deque<TAlphabet> >::iterator it2 = last_added_nodes.find((*(Gt->W))[Gt->W->size()-1] % Gt->alph_size);
                 if (it1 != last_added_nodes.end() && it2 != last_added_nodes.end() && it1 != it2 && utils::compare_seq(it1->second, it2->second)) {
-                    Gt->last->set(Gt->W->n - 2, false);
+                    Gt->last->set(Gt->W->size() - 2, false);
                 }
             }
             uint64_t updated = 0;
@@ -163,7 +163,7 @@ namespace merge {
             if (added > 0 && added % 1000 == 0) {
                 std::cout << "." << std::flush;
                 if (added % 10000 == 0) {
-                    fprintf(stdout, "merged %lu / %lu - edges %lu / nodes %lu\n", added, Gm->get_size(), Gt->W->n - 1, Gt->rank_last((Gt->last->size() - 1)));
+                    fprintf(stdout, "merged %lu / %lu - edges %lu / nodes %lu\n", added, Gm->get_size(), Gt->W->size() - 1, Gt->rank_last((Gt->last->size() - 1)));
                 }
             }
 

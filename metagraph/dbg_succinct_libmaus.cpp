@@ -27,11 +27,7 @@
  * We use libmaus 2 for representing dynamic succint data structures
  * such as the dynamic bit array and the dynamic wavelet tree.
  */
-#include <libmaus2/bitbtree/bitbtree.hpp>
-#include <libmaus2/wavelet/DynamicWaveletTree.hpp>
 #include <libmaus2/util/NumberSerialisation.hpp>
-
-#include <sdsl/bit_vectors.hpp>
 
 #include "config.hpp"
 #include "datatypes.hpp"
@@ -40,12 +36,6 @@
 
 // define an extended alphabet for W --> somehow this does not work properly as expected
 typedef uint64_t TAlphabet;
-
-// the bit array indicating the last outgoing edge of a node
-//libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();
-
-// the array containing the edge labels
-//libmaus2::wavelet::DynamicWaveletTree<6, 64> *W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
 
 // the offset array to mark the offsets for the last column in the implicit node list
 std::vector<TAlphabet> F; 
@@ -59,10 +49,6 @@ size_t alph_size = 7;
 
 // infile base when loaded from file
 std::string infbase;
-
-// config object
-//CFG config;
-
 
 #ifdef DBGDEBUG
     bool debug = true;
@@ -118,8 +104,7 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
     // load W array
     delete W;
     instream.open((infbase + ".W.dbg").c_str());
-    W = new WaveletTree(instream);
-    //W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(instream);
+    W = new wavelet_tree_dyn(instream);
     instream.close();
 
     // load F and k and p
@@ -180,7 +165,7 @@ uint64_t DBG_succ::rank_W(uint64_t i, TAlphabet c) {
     // deal with  border conditions
     if (i <= 0)
         return 0;
-    return W->rank(c, std::min(i, W->n - 1)) - (c == 0);
+    return W->rank(c, std::min(i, W->size() - 1)) - (c == 0);
 }
 
 /**
@@ -196,7 +181,7 @@ uint64_t DBG_succ::select_W(uint64_t i, TAlphabet c) {
 
     // count occurences of c and store them in cnt
     //fprintf(stderr, "query select W -- c: %i i: %lu return: %lu \n", c, i-1+(c==0), W->select(c, i-1+(c==0)));
-    return std::min(W->select(c, i - 1 + (c == 0)), W->n);
+    return std::min(W->select(c, i - 1 + (c == 0)), W->size());
 }
 
 /**
@@ -321,7 +306,7 @@ TAlphabet DBG_succ::get_node_begin_value(uint64_t i) {
  */
 uint64_t DBG_succ::outgoing_edge_idx(uint64_t i, TAlphabet c) {
 
-    if (i > W->n)
+    if (i > W->size())
         return 0;
     if (i == 0)
         return 0;
@@ -330,7 +315,7 @@ uint64_t DBG_succ::outgoing_edge_idx(uint64_t i, TAlphabet c) {
     uint64_t j1 = pred_W(R.second, c);
     uint64_t j2 = pred_W(R.second, c + alph_size);
     uint64_t j = (j1 < j2) ? j2 : j1;
-    if (j < R.first || j >= W->n)
+    if (j < R.first || j >= W->size())
         return 0;
 
     return j;
@@ -343,7 +328,7 @@ uint64_t DBG_succ::outgoing_edge_idx(uint64_t i, TAlphabet c) {
  * index of the node the edge is pointing to.
  */
 uint64_t DBG_succ::outgoing(uint64_t i, TAlphabet c) {
-    if (i > W->n)
+    if (i > W->size())
         return 0;
     if (i == 0)
         return 0;
@@ -352,7 +337,7 @@ uint64_t DBG_succ::outgoing(uint64_t i, TAlphabet c) {
     if (j == 0)
         return 0;
     j = fwd(j);
-    if (j == 0 || j == W->n)
+    if (j == 0 || j == W->size())
         return 0;
     return j;
 }
@@ -388,7 +373,7 @@ uint64_t DBG_succ::incoming(uint64_t i, TAlphabet c) {
  * edges from node i.
  */
 uint64_t DBG_succ::outdegree(uint64_t i) {
-    return (i < W->n) ? succ_last(i) - pred_last(i - 1) : 0;
+    return (i < W->size()) ? succ_last(i) - pred_last(i - 1) : 0;
 }
 
 
@@ -520,7 +505,7 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(std::string &str, uint64_t max_distan
                         ru = std::max(pred_W(curr_hit.ru, b), pred_W(curr_hit.ru, b + alph_size));
 
                         // the current range in W does not contain our next symbol
-                        if ((rl >= W->n) || (ru >= W->n) || (rl > ru))
+                        if ((rl >= W->size()) || (ru >= W->size()) || (rl > ru))
                             continue;
 
                         // update the SA range with the current symbol b
@@ -568,7 +553,7 @@ std::pair<uint64_t, uint64_t> DBG_succ::index_range(std::deque<TAlphabet> str) {
     it++;
     // init range
     uint64_t rl = succ_last(F.at(s) + 1);
-    uint64_t ru = (s < F.size() - 1) ? F.at(s + 1) : (W->n - 1);                // upper bound
+    uint64_t ru = (s < F.size() - 1) ? F.at(s + 1) : (W->size() - 1);                // upper bound
     uint64_t pl;
     //fprintf(stderr, "char: %i rl: %i ru: %i\n", (int) s, (int) rl, (int) ru);
     // update range iteratively while scanning through s
@@ -576,10 +561,10 @@ std::pair<uint64_t, uint64_t> DBG_succ::index_range(std::deque<TAlphabet> str) {
         s = *it % alph_size;
         pl = pred_last(rl - 1) + 1;
         rl = std::min(succ_W(pl, s), succ_W(pl, s + alph_size));
-        if (rl >= W->n)
+        if (rl >= W->size())
             return std::make_pair(0, 0);
         ru = std::max(pred_W(ru, s), pred_W(ru, s + alph_size));
-        if (ru >= W->n)
+        if (ru >= W->size())
             return std::make_pair(0, 0);
         if (rl > ru)
             return std::make_pair(0, 0);
@@ -600,11 +585,11 @@ uint64_t DBG_succ::index_predecessor(std::deque<TAlphabet> str) {
     TAlphabet s1 = *it % alph_size;
     // init range
     uint64_t rl = succ_last(F.at(s1) + 1);                           // lower bound
-    uint64_t ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->n - 1);    // upper bound
+    uint64_t ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->size() - 1);    // upper bound
     while (rl > ru && s1 > 0) {
         s1--;
         rl = succ_last(F.at(s1) + 1);
-        ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->n - 1);
+        ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->size() - 1);
     }
     /*if (s1 == 0) {
         s1 = *it % alph_size + 1;
@@ -637,11 +622,11 @@ uint64_t DBG_succ::index_predecessor(std::deque<TAlphabet> str) {
             rl = std::max(pred_W(pll, s1), pred_W(pll, s1 + alph_size));
             if (rl == 0) {
                 rl = std::min(succ_W(pll, s1), succ_W(pll, s1 + alph_size));
-                if (rl >= W->n) {
+                if (rl >= W->size()) {
                     s1--;
                     while (s1 > 0) {
-                        rl = std::max(pred_W(W->n - 1, s1), pred_W(W->n - 1, s1));
-                        if (rl < W->n)
+                        rl = std::max(pred_W(W->size() - 1, s1), pred_W(W->size() - 1, s1));
+                        if (rl < W->size())
                             break;
                         s1--;
                     }
@@ -650,7 +635,7 @@ uint64_t DBG_succ::index_predecessor(std::deque<TAlphabet> str) {
                         before = true;
                         while (s1 < alph_size) {
                             rl = std::min(succ_W(1, s1), succ_W(1 + alph_size, s1));
-                            if (rl < W->n)
+                            if (rl < W->size())
                                 break;
                             s1++;
                         }
@@ -774,7 +759,7 @@ std::string DBG_succ::get_node_str(uint64_t k_node) {
  * Return number of edges in the current graph.
  */
 uint64_t DBG_succ::get_size() {
-    return W->n;
+    return W->size();
 }
 
 /**
@@ -863,8 +848,9 @@ uint64_t DBG_succ::get_node_count() {
 /*
  * Return the number of edges in the current graph.
  */
+ //TODO: Check this!!!
 uint64_t DBG_succ::get_edge_count() {
-    return W->n - 1;
+    return W->size() - 1;
 }
 
 //
@@ -955,7 +941,8 @@ void DBG_succ::toDynamic() {
         }
     }
 
-    libmaus2::bitbtree::BitBTree<6, 64> *tmp = new libmaus2::bitbtree::BitBTree<6, 64>(n * b, false);  
+    //libmaus2::bitbtree::BitBTree<6, 64> *tmp = new libmaus2::bitbtree::BitBTree<6, 64>(n * b, false);  
+    bit_vector *tmp = new bit_vector_dyn(n * b, false);
 
     uint64_t co;
     bool bit;
@@ -988,18 +975,17 @@ void DBG_succ::toDynamic() {
     }
     W_stat.clear();
     delete W;
-    //W = new libmaus2::wavelet::DynamicWaveletTree<6, 64> (tmp, b, n);
-    W = new WaveletTree(tmp, b, n);
+    W = new wavelet_tree_dyn(tmp, b, n);
 
-    libmaus2::bitbtree::BitBTree<6, 64> *last_new;
+    bit_vector *last_new;
     if (last_stat.size()) {
-        last_new = new libmaus2::bitbtree::BitBTree<6, 64>(last_stat.size(), false);
+        last_new = new bit_vector_dyn(last_stat.size(), false);
         for (size_t i = 0; i < last_stat.size(); ++i)
             if (last_stat.at(i))
                 last_new->setBitQuick(i, true);
         last_stat.clear();
     } else {
-        last_new = new libmaus2::bitbtree::BitBTree<6, 64>(last_stat_safe.size(), false);
+        last_new = new bit_vector_dyn(last_stat_safe.size(), false);
         for (size_t i = 0; i < last_stat_safe.size(); ++i)
             if (last_stat_safe.at(i))
                 last_new->setBitQuick(i, true);
@@ -1008,9 +994,9 @@ void DBG_succ::toDynamic() {
     delete last;
     last = last_new;
 
-    BitBTree *bridge_new=NULL;
+    bit_vector *bridge_new = NULL;
     if (bridge_stat.size()) {
-        bridge_new = new BitBTree(bridge_stat.size(), false);
+        bridge_new = new bit_vector_dyn(bridge_stat.size(), false);
         for (size_t i=0;i<bridge_stat.size();++i) {
             if (bridge_stat.at(i))
                 bridge_new->setBitQuick(i, true);
@@ -1079,7 +1065,7 @@ std::vector<uint64_t> DBG_succ::split_range(uint64_t start, uint64_t end, uint64
                 result.push_back((c < F.at(i + 1)) ? c : 0);
                 v = std::max(v, F.at(i + 1) + 1);
             } else {
-                result.push_back(c < W->n ? c : 0);
+                result.push_back(c < W->size() ? c : 0);
             }
         }
         // translate into final coordinates
@@ -1156,7 +1142,7 @@ uint64_t DBG_succ::next_non_zero(std::vector<uint64_t> v, uint64_t pos) {
 void DBG_succ::print_state() {
 
     fprintf(stderr, "W:\n");
-    for (uint64_t i = 0; i < W->n; i++) {
+    for (uint64_t i = 0; i < W->size(); i++) {
         fprintf(stderr, "\t%lu", (*W)[i]);
         if (i == p)
             fprintf(stderr, "*");
@@ -1177,14 +1163,14 @@ void DBG_succ::print_state() {
 
 //TODO: assume that a sentinel was used during construction
 void DBG_succ::print_state_str() {
-    for (uint64_t i=1;i<W->n;i++) {
+    for (uint64_t i = 1; i < W->size(); i++) {
         std::cout << i << "\t" << get_last(i) << "\t" << get_node_str(i) << "\t" << get_alphabet_symbol((*W)[i]) << ((*W)[i] > alph_size ? "-" : "") << (i==this->p ? "<" : "") << std::endl;
     }    
 }
 
 
 void DBG_succ::print_adj_list() {
-    for (uint64_t edge = 1; edge < W->n; ++edge) {
+    for (uint64_t edge = 1; edge < W->size(); ++edge) {
             fprintf(stdout, "%lu\t%lu\t", rank_last(succ_last(edge)), rank_last(outgoing(edge, (*W)[edge])));
             bool is_first = true;
             for (uint64_t k = 0; k < this->annotation_full.size(); ++k) {
@@ -1211,9 +1197,9 @@ void DBG_succ::print_seq() {
 
     uint64_t linelen = 80;
     uint64_t start = 1;
-    uint64_t end = start + linelen < W->n ? start + linelen : W->n;
+    uint64_t end = start + linelen < W->size() ? start + linelen : W->size();
 
-    while (start < W->n) {
+    while (start < W->size()) {
         for (uint64_t i = start; i < end; i++) {
             if (i % 10 == 0)
                 fprintf(stdout, "%lu", (i / 10) % 10);
@@ -1275,7 +1261,7 @@ void DBG_succ::print_seq() {
         std::cout << std::endl;
 
         start += linelen;
-        end = start + linelen < W->n ? start + linelen : W->n;
+        end = start + linelen < W->size() ? start + linelen : W->size();
     }
 }
 

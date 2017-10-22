@@ -4,30 +4,16 @@
 #include <zlib.h>
 #include <unordered_map>
 
-#include <libmaus2/bitbtree/bitbtree.hpp>
-#include <libmaus2/wavelet/DynamicWaveletTree.hpp>
-
 #include "config.hpp"
 #include "datatypes.hpp"
 #include "dbg_succinct_boost.hpp"
 
-#include <sdsl/wavelet_trees.hpp>
-#include <sdsl/bit_vectors.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
 #include "dbg_succinct_boost.hpp"
 
 #include <type_traits>
 
 typedef boost::multiprecision::uint256_t ui256;
-
-//libmaus2 structures
-typedef libmaus2::bitbtree::BitBTree<6, 64> BitBTree;
-//typedef libmaus2::wavelet::DynamicWaveletTree<6, 64> WaveletTree;
-
-//SDSL-based structures
-//typedef rs_bit_vector BitBTree;
-//typedef dyn_wavelet WaveletTree;
-typedef dyn_wavelet2 WaveletTree;
 
 class DBG_succ {
 
@@ -45,15 +31,13 @@ class DBG_succ {
     AnnotationHash hasher;
 
     //store the position of the last character position modified in F
-    size_t lastlet  =0;
+    size_t lastlet = 0;
 
     // the bit array indicating the last outgoing edge of a node
-    BitBTree *last = new BitBTree();
-    //libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();
+    bit_vector *last = new bit_vector_dyn();
 
     // the array containing the edge labels
-    //libmaus2::wavelet::DynamicWaveletTree<6, 64> *W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
-    WaveletTree *W = new WaveletTree(4);
+    wavelet_tree *W = new wavelet_tree_dyn(4); // 4 is log (sigma)
 
     // the bit array indicating the last outgoing edge of a node (static container for full init)
     std::vector<bool> last_stat;
@@ -67,7 +51,7 @@ class DBG_succ {
 
     //read bridge indicator
     std::vector<uint8_t> bridge_stat;
-    BitBTree *bridge = new BitBTree();
+    bit_vector *bridge = new bit_vector_dyn();
 
     // the offset array to mark the offsets for the last column in the implicit node list
     std::vector<TAlphabet> F; 
@@ -100,8 +84,6 @@ class DBG_succ {
     //std::vector<sdsl::rrr_vector<63>* > annotation_full;
     std::vector<sdsl::sd_vector<>* > annotation_full;
     sdsl::bit_vector* annotation_curr = NULL;
-    rs_bit_vector annotation_new;
-    rs_bit_vector annotation_colors;
     std::vector<sdsl::rrr_vector<63> > colors_to_bits;
     std::vector<std::string> bits_to_labels;
     size_t anno_labels;
@@ -256,10 +238,10 @@ class DBG_succ {
                 s = s_[i];
             }    
             rl = std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size));
-            if (rl >= W->n)
+            if (rl >= W->size())
                 return 0;
             ru = std::max(pred_W(ru, s), pred_W(ru, s + alph_size));
-            if (ru >= W->n)
+            if (ru >= W->size())
                 return 0;
             if (rl > ru)
                 return 0;
