@@ -459,6 +459,7 @@ int main(int argc, char const ** argv) {
 
         //TODO: allow for building by appending/adding to an existing graph
         case Config::build: {
+
             if (!config->infbase.empty()) {
                 graph = new DBG_succ(config->infbase, config);
             } else {

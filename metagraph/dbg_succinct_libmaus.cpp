@@ -75,6 +75,7 @@ DBG_succ::DBG_succ(size_t k_, Config* config_, bool sentinel) :
         W->insert(0, 0);
 
     F.push_back(0);
+
     if (sentinel) {
         for (size_t j = 1; j < alph_size; j++)
             F.push_back(1);
