@@ -88,6 +88,7 @@ DBG_succ::DBG_succ(size_t k_, Config* config_, bool sentinel) :
     id_to_label.push_back("");
     label_to_id_map[""]=0;
     combination_vector.push_back(0);
+    status = dyn;
 }
 
 
@@ -96,6 +97,8 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
     infbase(infbase_),
     config(config_),
     alphabet("$ACGTNX$ACGTNXn") {
+
+    status = dyn;
 
     // load last array
     std::ifstream instream((infbase + ".l.dbg").c_str());
@@ -122,15 +125,18 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
             mode = 2;
         } else if (strcmp(line.c_str(), ">p") == 0) {
             mode = 3;
+        } else if (strcmp(line.c_str(), ">s") == 0) {
+            mode = 4;
         } else {
             if (mode == 1) {
                 F.at(fidx) += std::strtoul(line.c_str(), NULL, 10);
                 fidx++;
-                //F.push_back(std::strtoul(line.c_str(), NULL, 10));
             } else if (mode == 2) {
                 k = strtoul(line.c_str(), NULL, 10);
             } else if (mode == 3) {
                 p = strtoul(line.c_str(), NULL, 10);
+            } else if (mode == 4) {
+                status = (status_types) strtoul(line.c_str(), NULL, 10);
             } else {
                 fprintf(stderr, "ERROR: input file corrupted\n");
                 exit(1);
@@ -1297,6 +1303,8 @@ void DBG_succ::toFile(unsigned int total, unsigned int idx) {
     outstream << k << std::endl;
     outstream << ">p" << std::endl;
     outstream << p << std::endl;
+    outstream << ">s" << std::endl;
+    outstream << status << std::endl;
     outstream.close();
 }
 

@@ -73,6 +73,11 @@ class DBG_succ {
     // alphabet
     const std::string alphabet; //("$ACGTNX$ACGTNXn"); 
 
+    // status of graph
+    enum status_types {stat = 1,
+                       dyn};
+    status_types status = stat;
+
     // annotation containers
     std::deque<uint32_t> annotation; // list that associates each node in the graph with an annotation hash
     std::vector<std::string> id_to_label; // maps the label ID back to the original string

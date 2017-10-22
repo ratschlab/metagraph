@@ -661,7 +661,6 @@ class wavelet_tree_dyn : public wavelet_tree, public libmaus2::wavelet::DynamicW
 private:
 
     //TODO: this code is copied from toDynamic. This should be refactored
-    //libmaus2::bitbtree::BitBTree<6, 64>* makeTree(std::vector<uint8_t> &W_stat, size_t b, unsigned int parallel=1) {
     bit_vector* makeTree(std::vector<uint8_t> &W_stat, size_t b, unsigned int parallel=1) {
         uint64_t n = W_stat.size();
         std::vector<uint64_t> offsets((1ull << (b-1)) - 1, 0);
@@ -684,7 +683,6 @@ private:
                 }
             }
         }
-        //libmaus2::bitbtree::BitBTree<6, 64> *tmp = new libmaus2::bitbtree::BitBTree<6, 64>(n*b, false);
         bit_vector *tmp = new bit_vector_dyn(n * b, false);
         std::vector<uint64_t> upto_offsets ((1ull << (b - 1)) - 1, 0);
         #pragma omp parallel num_threads(parallel)
