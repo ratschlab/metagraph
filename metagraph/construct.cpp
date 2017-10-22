@@ -43,27 +43,27 @@ namespace construct {
 
         size_t i;
         TAlphabet *ckmer = new TAlphabet[G->k+1];
-        for (i=0;i<std::min(seq.l, G->k);++i) {
-            ckmer[i]=6;
+        for (i = 0; i < std::min(seq.l, G->k); ++i) {
+            ckmer[i] = 6;
         }
-        ckmer[i]=0;
+        ckmer[i] = 0;
         TAlphabet c;
         uint64_t ind;
         if (!append) {
             ind = G->index(ckmer, i);
             if (!ind) {
                 ind = G->p;
-                i=0;
+                i = 0;
             } else {
                 if (G->k >= seq.l) {
                     delete[] ckmer;
                     return;
                 }
-                i=G->k;
+                i = G->k;
             }
         } else {
-            i=0;
-            ind=0;
+            i = 0;
+            ind = 0;
         }
         for (; i < seq.l; ++i) {
             if (i > 0 && i % 1000 == 0) {
