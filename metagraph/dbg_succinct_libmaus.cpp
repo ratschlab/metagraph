@@ -930,34 +930,61 @@ TAlphabet DBG_succ::get_alphabet_number(char s) {
 
 void DBG_succ::switch_state(state_type state) {
 
+    std::cerr << "switching state from " << this->state << " to " << state << std::endl;
     if (this->state == state)
         return;
     
     switch (state) {
+        case cstr: {
+            this->state = cstr;
+        } break;
+
         case dyn: {
+            if (this->state == cstr) {
+                delete W;
+                W = new wavelet_tree_dyn(W_stat, 4);
+                W_stat.clear();
+
+                delete last;
+                if (last_stat.size()) {
+                    last = new bit_vector_dyn(last_stat);
+                    last_stat.clear();
+                } else {
+                    last = new bit_vector_dyn(last_stat_safe); 
+                    last_stat_safe.clear();
+                }
+
+                delete bridge;
+                if (bridge_stat.size()) {
+                    bridge = new bit_vector_dyn(bridge_stat);
+                    bridge_stat.clear();
+                } else {
+                    bridge = NULL;
+                }
+            } else {
+                wavelet_tree* W_new = new wavelet_tree_dyn(W, 4);
+                delete W;
+                W = W_new;
+
+                bit_vector* last_new = new bit_vector_dyn(last);
+                delete last;
+                last = last_new;
+            }
+            this->state = dyn;
+        } break;
+
+        case stat: {
+            wavelet_tree* W_new = new wavelet_tree_stat(W, 4);
             delete W;
-            W = new wavelet_tree_dyn(W_stat, 4);
-            W_stat.clear();
+            W = W_new;
 
+            bit_vector* last_new = new bit_vector_stat(last);
             delete last;
-            if (last_stat.size()) {
-                last = new bit_vector_dyn(last_stat);
-                last_stat.clear();
-            } else {
-                last = new bit_vector_dyn(last_stat_safe); 
-                last_stat_safe.clear();
-            }
+            last = last_new;
 
-            delete bridge;
-            if (bridge_stat.size()) {
-                bridge = new bit_vector_dyn(bridge_stat);
-                bridge_stat.clear();
-            } else {
-                bridge = NULL;
-            }
+            this->state = stat;
         } break;
     }
-
 }
 
 

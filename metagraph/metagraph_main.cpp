@@ -472,6 +472,8 @@ int main(int argc, char const ** argv) {
 
             if (config->fast) {
 
+                graph->switch_state(DBG_succ::cstr);
+
                 //enumerate all suffices
                 unsigned int suffix_len = (unsigned int)ceil(log2(config->nsplits)/log2(graph->alph_size-1));
                 //should be set to at most k-1 so that W calculation is correct
@@ -585,7 +587,7 @@ int main(int argc, char const ** argv) {
                 tstart = clock();
                 std::cerr << "Converting static graph to dynamic\t";
                 graph->switch_state(DBG_succ::dyn);
-                //graph->toDynamic();
+                //graph->switch_state(DBG_succ::stat);
                 std::cout << (clock()-tstart)/CLOCKS_PER_SEC << "\n";
             } else {
                 //slower method

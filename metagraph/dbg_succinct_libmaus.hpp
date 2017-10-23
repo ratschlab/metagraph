@@ -75,7 +75,8 @@ class DBG_succ {
 
     // state of graph
     enum state_type {stat = 1,
-                     dyn};
+                     dyn,
+                     cstr};
     state_type state = stat;
 
     // annotation containers
