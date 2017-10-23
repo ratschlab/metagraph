@@ -398,9 +398,33 @@ class bit_vector_dyn: public bit_vector, public libmaus2::bitbtree::BitBTree<6, 
 public:
     bit_vector_dyn() : libmaus2::bitbtree::BitBTree<6, 64>() {
     }
+
     bit_vector_dyn(size_t size, bool def) : libmaus2::bitbtree::BitBTree<6, 64>(size, def) {
     }
+
     ~bit_vector_dyn() {
+    }
+
+    bit_vector_dyn(std::vector<uint8_t> &v) : libmaus2::bitbtree::BitBTree<6, 64>(v.size(), false) {
+        for (size_t i = 0; i < v.size(); ++i) {
+            if (v.at(i))
+                this->set(i, true);
+        }
+    }
+
+    bit_vector_dyn(std::vector<bool> &v) : libmaus2::bitbtree::BitBTree<6, 64>(v.size(), false) {
+        for (size_t i = 0; i < v.size(); ++i) {
+            if (v.at(i))
+                this->set(i, true);
+        }
+    }
+
+
+    bit_vector_dyn(bit_vector &v) : libmaus2::bitbtree::BitBTree<6, 64>(v.size(), false) {
+        for (size_t i = 0; i < v.size(); ++i) {
+            if (v[i])
+                this->set(i, true);
+        }
     }
 
     uint64_t size() {
@@ -660,15 +684,17 @@ class wavelet_tree_dyn : public wavelet_tree, public libmaus2::wavelet::DynamicW
 
 private:
 
-    //TODO: this code is copied from toDynamic. This should be refactored
-    bit_vector* makeTree(std::vector<uint8_t> &W_stat, size_t b, unsigned int parallel=1) {
-        uint64_t n = W_stat.size();
+    libmaus2::bitbtree::BitBTree<6, 64>* makeTree(std::vector<uint8_t> &W_stat, size_t const b, unsigned int parallel=1) {
+
+        size_t const n = W_stat.size();
+
+        // compute total offsets for the individual bins
         std::vector<uint64_t> offsets((1ull << (b-1)) - 1, 0);
         #pragma omp parallel num_threads(parallel)
         {
-            uint64_t m,v,o;
+            uint64_t v, m, o;
             #pragma omp for
-            for (uint64_t i=0;i<n;++i) {
+            for (size_t i = 0; i < n; ++i) {
                 m = (1ull << (b - 1));
                 v = (uint64_t) W_stat.at(i);
                 o = 0;
@@ -683,11 +709,13 @@ private:
                 }
             }
         }
-        bit_vector *tmp = new bit_vector_dyn(n * b, false);
+        //bit_vector *tmp = new bit_vector_dyn(n * b, false);
+        libmaus2::bitbtree::BitBTree<6, 64> *tmp = new libmaus2::bitbtree::BitBTree<6, 64>(n * b, false);
         std::vector<uint64_t> upto_offsets ((1ull << (b - 1)) - 1, 0);
+
         #pragma omp parallel num_threads(parallel)
         {
-            uint64_t m,v,o,p,co;
+            uint64_t m, v, o, p, co;
             bool bit;
             #pragma omp for
             for (uint64_t i = 0; i < n; ++i) {
@@ -707,11 +735,13 @@ private:
                         p -= (p - upto_offsets.at(o)); 
                         upto_offsets.at(o) += 1;
                     }
+                    //std::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
                     o = 2*o + 1 + bit;
                     m >>= 1;
                 }
                 bit = m & v;
                 if (bit) {
+                    //std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
                     #pragma omp critical
                     tmp->setBitQuick((b - 1) * n + p + co, true); 
                 }
@@ -724,20 +754,28 @@ public:
     wavelet_tree_dyn(size_t b)
         : libmaus2::wavelet::DynamicWaveletTree<6, 64>(b) {
     }
+
     wavelet_tree_dyn(std::istream &in)
         : libmaus2::wavelet::DynamicWaveletTree<6, 64>(in) {
     }
+
     wavelet_tree_dyn(std::vector<uint8_t> &W_stat, size_t b, unsigned int parallel=1)
-        : libmaus2::wavelet::DynamicWaveletTree<6, 64>(dynamic_cast<libmaus2::bitbtree::BitBTree<6, 64>*>(makeTree(W_stat, b, parallel)), b, W_stat.size()) {
+        : libmaus2::wavelet::DynamicWaveletTree<6, 64>(makeTree(W_stat, b, parallel), b, W_stat.size()) {
     }
 
-    //wavelet_dyn(libmaus2::bitbtree::BitBTree<6, 64>* bt, size_t b, size_t n)
-    wavelet_tree_dyn(bit_vector* bt, size_t b, size_t n)
-        : libmaus2::wavelet::DynamicWaveletTree<6, 64>(dynamic_cast<libmaus2::bitbtree::BitBTree<6, 64>*>(bt), b, n) {
-    }
+    //wavelet_tree_dyn(std::vector<uint8_t> &W_stat, size_t b, unsigned int parallel=1)
+    //    : libmaus2::wavelet::DynamicWaveletTree<6, 64>(dynamic_cast<libmaus2::bitbtree::BitBTree<6, 64>*>(makeTree(W_stat, b, parallel)), b, W_stat.size()) {
+    //}
 
-    ~wavelet_tree_dyn() {
+
+    wavelet_tree_dyn(libmaus2::bitbtree::BitBTree<6, 64>* bt, size_t b, size_t n)
+        : libmaus2::wavelet::DynamicWaveletTree<6, 64>(bt, b, n) {
     }
+    //wavelet_tree_dyn(bit_vector* bt, size_t b, size_t n)
+    //    : libmaus2::wavelet::DynamicWaveletTree<6, 64>(dynamic_cast<libmaus2::bitbtree::BitBTree<6, 64>*>(bt), b, n) {
+    //}
+
+    ~wavelet_tree_dyn() {}
 
     uint64_t size() {
         return this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::size();

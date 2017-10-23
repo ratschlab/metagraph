@@ -193,7 +193,8 @@ int main(int argc, char const ** argv) {
                     }
                 }
                 if (config->fast) {
-                    graph->toDynamic();
+                    //graph->toDynamic();
+                    graph->switch_state(DBG_succ::dyn);
                 }
                 graph->p = graph->succ_W(1, 0);
 
@@ -583,7 +584,8 @@ int main(int argc, char const ** argv) {
                 //TODO: cleanup
                 tstart = clock();
                 std::cerr << "Converting static graph to dynamic\t";
-                graph->toDynamic();
+                graph->switch_state(DBG_succ::dyn);
+                //graph->toDynamic();
                 std::cout << (clock()-tstart)/CLOCKS_PER_SEC << "\n";
             } else {
                 //slower method

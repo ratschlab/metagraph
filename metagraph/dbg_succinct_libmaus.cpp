@@ -88,7 +88,7 @@ DBG_succ::DBG_succ(size_t k_, Config* config_, bool sentinel) :
     id_to_label.push_back("");
     label_to_id_map[""]=0;
     combination_vector.push_back(0);
-    status = dyn;
+    state = dyn;
 }
 
 
@@ -98,7 +98,7 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
     config(config_),
     alphabet("$ACGTNX$ACGTNXn") {
 
-    status = dyn;
+    state = dyn;
 
     // load last array
     std::ifstream instream((infbase + ".l.dbg").c_str());
@@ -136,7 +136,7 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
             } else if (mode == 3) {
                 p = strtoul(line.c_str(), NULL, 10);
             } else if (mode == 4) {
-                status = (status_types) strtoul(line.c_str(), NULL, 10);
+                state = (state_type) strtoul(line.c_str(), NULL, 10);
             } else {
                 fprintf(stderr, "ERROR: input file corrupted\n");
                 exit(1);
@@ -150,6 +150,7 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
 }
 
 DBG_succ::~DBG_succ() {
+
     delete W;
     delete last;
     if (bridge != NULL)
@@ -927,91 +928,36 @@ TAlphabet DBG_succ::get_alphabet_number(char s) {
 }
 
 
-void DBG_succ::toDynamic() {
+void DBG_succ::switch_state(state_type state) {
 
-    size_t const b = 4;
-    size_t const n = W_stat.size();
+    if (this->state == state)
+        return;
+    
+    switch (state) {
+        case dyn: {
+            delete W;
+            W = new wavelet_tree_dyn(W_stat, 4);
+            W_stat.clear();
 
-    // compute total offsets for the individual bins
-    std::vector<uint64_t> offsets ((1ull << (b - 1)) - 1, 0);
-    uint64_t v, m, o, p;
-    for (size_t i = 0; i < n; ++i) {
-        m = (1ull << (b - 1));
-        v = (uint64_t) W_stat.at(i);
-        o = 0;
-        for (size_t ib = 1; ib < b; ++ib) {
-            bool const bit  = m & v;
-            if (!bit)
-                offsets.at(o) += 1;
-            o = 2*o + 1 + bit;
-            m >>= 1;
-        }
-    }
-
-    //libmaus2::bitbtree::BitBTree<6, 64> *tmp = new libmaus2::bitbtree::BitBTree<6, 64>(n * b, false);  
-    bit_vector *tmp = new bit_vector_dyn(n * b, false);
-
-    uint64_t co;
-    bool bit;
-    std::vector<uint64_t> upto_offsets ((1ull << (b - 1)) - 1, 0);
-    for (size_t i = 0; i < n; ++i) {
-        m = (1ull << (b - 1));
-        v = (uint64_t) W_stat.at(i);
-        o = 0;
-        p = i;
-        co = 0;
-        for (size_t ib = 0; ib < b - 1; ++ib) {
-            bit = m & v;
-            if (bit) {
-                tmp->setBitQuick(ib * n + p + co, true);
-                co += offsets.at(o);
-                p -= upto_offsets.at(o);
+            delete last;
+            if (last_stat.size()) {
+                last = new bit_vector_dyn(last_stat);
+                last_stat.clear();
             } else {
-                p -= (p - upto_offsets.at(o)); 
-                upto_offsets.at(o) += 1;
+                last = new bit_vector_dyn(last_stat_safe); 
+                last_stat_safe.clear();
             }
-            //dtd::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
-            o = 2*o + 1 + bit;
-            m >>= 1;
-        }
-        bit = m & v;
-        if (bit) {
-           // std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
-            tmp->setBitQuick((b - 1) * n + p + co, true); 
-        }
-    }
-    W_stat.clear();
-    delete W;
-    W = new wavelet_tree_dyn(tmp, b, n);
 
-    bit_vector *last_new;
-    if (last_stat.size()) {
-        last_new = new bit_vector_dyn(last_stat.size(), false);
-        for (size_t i = 0; i < last_stat.size(); ++i)
-            if (last_stat.at(i))
-                last_new->setBitQuick(i, true);
-        last_stat.clear();
-    } else {
-        last_new = new bit_vector_dyn(last_stat_safe.size(), false);
-        for (size_t i = 0; i < last_stat_safe.size(); ++i)
-            if (last_stat_safe.at(i))
-                last_new->setBitQuick(i, true);
-        last_stat_safe.clear();
+            delete bridge;
+            if (bridge_stat.size()) {
+                bridge = new bit_vector_dyn(bridge_stat);
+                bridge_stat.clear();
+            } else {
+                bridge = NULL;
+            }
+        } break;
     }
-    delete last;
-    last = last_new;
 
-    bit_vector *bridge_new = NULL;
-    if (bridge_stat.size()) {
-        bridge_new = new bit_vector_dyn(bridge_stat.size(), false);
-        for (size_t i=0;i<bridge_stat.size();++i) {
-            if (bridge_stat.at(i))
-                bridge_new->setBitQuick(i, true);
-        }
-        bridge_stat.clear();
-    }
-    delete bridge;
-    bridge = bridge_new;
 }
 
 
@@ -1304,7 +1250,7 @@ void DBG_succ::toFile(unsigned int total, unsigned int idx) {
     outstream << ">p" << std::endl;
     outstream << p << std::endl;
     outstream << ">s" << std::endl;
-    outstream << status << std::endl;
+    outstream << state << std::endl;
     outstream.close();
 }
 

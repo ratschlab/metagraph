@@ -41,7 +41,7 @@ class DBG_succ {
 
     // the bit array indicating the last outgoing edge of a node (static container for full init)
     std::vector<bool> last_stat;
-    std::vector<uint8_t> last_stat_safe;
+    std::vector<uint8_t> last_stat_safe; // need uint8 here for thread safety
 
     // the array containing the edge labels
     std::vector<uint8_t> W_stat;
@@ -73,10 +73,10 @@ class DBG_succ {
     // alphabet
     const std::string alphabet; //("$ACGTNX$ACGTNXn"); 
 
-    // status of graph
-    enum status_types {stat = 1,
-                       dyn};
-    status_types status = stat;
+    // state of graph
+    enum state_type {stat = 1,
+                     dyn};
+    state_type state = stat;
 
     // annotation containers
     std::deque<uint32_t> annotation; // list that associates each node in the graph with an annotation hash
@@ -382,7 +382,7 @@ class DBG_succ {
      */
     void replaceW(size_t i, TAlphabet val);
 
-    void toDynamic();
+    void switch_state(state_type state);
     
     //
     //
