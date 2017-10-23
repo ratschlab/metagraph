@@ -38,7 +38,7 @@ void parallel_merge_collect(DBG_succ* result) {
 
     for (size_t i = 0; i < merge_data->result.size(); ++i) {
         if (merge_data->result.at(i)) {
-            construct::append_graph(result, merge_data->result.at(i));
+            construct::append_graph(merge_data->result.at(i), result);
             delete merge_data->result.at(i);
         }
     }
@@ -774,7 +774,7 @@ int main(int argc, char const ** argv) {
             traverse::toSQL(graph);
         if (!config->outfbase.empty())
             graph->toFile(config->parts_total, config->part_idx);
-
+        
         delete graph;
     }
     delete config;
