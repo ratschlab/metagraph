@@ -88,7 +88,7 @@ DBG_succ::DBG_succ(size_t k_, Config* config_, bool sentinel) :
     id_to_label.push_back("");
     label_to_id_map[""]=0;
     combination_vector.push_back(0);
-    state = dyn;
+    state = Config::dyn;
 }
 
 
@@ -98,18 +98,7 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
     config(config_),
     alphabet("$ACGTNX$ACGTNXn") {
 
-    state = dyn;
-
-    // load last array
-    std::ifstream instream((infbase + ".l.dbg").c_str());
-    last->deserialise(instream);
-    instream.close();
-
-    // load W array
-    delete W;
-    instream.open((infbase + ".W.dbg").c_str());
-    W = new wavelet_tree_dyn(instream);
-    instream.close();
+    std::ifstream instream;
 
     // load F and k and p
     for (size_t j = 0; j < alph_size; j++)
@@ -136,7 +125,7 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
             } else if (mode == 3) {
                 p = strtoul(line.c_str(), NULL, 10);
             } else if (mode == 4) {
-                state = (state_type) strtoul(line.c_str(), NULL, 10);
+                state = (Config::state_type) strtoul(line.c_str(), NULL, 10);
             } else {
                 fprintf(stderr, "ERROR: input file corrupted\n");
                 exit(1);
@@ -147,6 +136,29 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
     id_to_label.push_back("");
     label_to_id_map[""]=0;
     combination_vector.push_back(0);
+
+    // load last array
+    //std::ifstream instream((infbase + ".l.dbg").c_str());
+    //last->deserialise(instream);
+    //instream.close();
+
+    // load W and last arrays
+    delete W;
+    delete last;
+    std::ifstream instream_W((infbase + ".W.dbg").c_str());
+    std::ifstream instream_l((infbase + ".l.dbg").c_str());
+    switch (state) {
+        case Config::dyn: {
+            W = new wavelet_tree_dyn(instream_W);
+            last = new bit_vector_dyn(instream_l);
+        } break;
+        case Config::stat: {
+            W = new wavelet_tree_stat(instream_W);
+            last = new bit_vector_stat(instream_l);
+        } break;
+    }
+    instream_W.close();
+    instream_l.close();
 }
 
 DBG_succ::~DBG_succ() {
@@ -928,19 +940,19 @@ TAlphabet DBG_succ::get_alphabet_number(char s) {
 }
 
 
-void DBG_succ::switch_state(state_type state) {
+void DBG_succ::switch_state(Config::state_type state) {
 
     std::cerr << "switching state from " << this->state << " to " << state << std::endl;
     if (this->state == state)
         return;
     
     switch (state) {
-        case cstr: {
-            this->state = cstr;
+        case Config::cstr: {
+            this->state = Config::cstr;
         } break;
 
-        case dyn: {
-            if (this->state == cstr) {
+        case Config::dyn: {
+            if (this->state == Config::cstr) {
                 delete W;
                 W = new wavelet_tree_dyn(W_stat, 4);
                 W_stat.clear();
@@ -970,10 +982,10 @@ void DBG_succ::switch_state(state_type state) {
                 delete last;
                 last = last_new;
             }
-            this->state = dyn;
+            this->state = Config::dyn;
         } break;
 
-        case stat: {
+        case Config::stat: {
             wavelet_tree* W_new = new wavelet_tree_stat(W, 4);
             delete W;
             W = W_new;
@@ -982,7 +994,7 @@ void DBG_succ::switch_state(state_type state) {
             delete last;
             last = last_new;
 
-            this->state = stat;
+            this->state = Config::stat;
         } break;
     }
 }

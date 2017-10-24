@@ -74,10 +74,7 @@ class DBG_succ {
     const std::string alphabet; //("$ACGTNX$ACGTNXn"); 
 
     // state of graph
-    enum state_type {stat = 1,
-                     dyn,
-                     cstr};
-    state_type state = stat;
+    Config::state_type state = Config::stat;
 
     // annotation containers
     std::deque<uint32_t> annotation; // list that associates each node in the graph with an annotation hash
@@ -383,7 +380,7 @@ class DBG_succ {
      */
     void replaceW(size_t i, TAlphabet val);
 
-    void switch_state(state_type state);
+    void switch_state(Config::state_type state);
     
     //
     //

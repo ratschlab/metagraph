@@ -194,7 +194,7 @@ int main(int argc, char const ** argv) {
                 }
                 if (config->fast) {
                     //graph->toDynamic();
-                    graph->switch_state(DBG_succ::dyn);
+                    graph->switch_state(Config::dyn);
                 }
                 graph->p = graph->succ_W(1, 0);
 
@@ -468,11 +468,11 @@ int main(int argc, char const ** argv) {
             }
 
             if (config->verbose)
-               std::cerr << "k is " << config->k << std::endl;
+               std::cerr << "k is " << graph->k << std::endl;
 
             if (config->fast) {
 
-                graph->switch_state(DBG_succ::cstr);
+                graph->switch_state(Config::cstr);
 
                 //enumerate all suffices
                 unsigned int suffix_len = (unsigned int)ceil(log2(config->nsplits)/log2(graph->alph_size-1));
@@ -586,8 +586,7 @@ int main(int argc, char const ** argv) {
                 //TODO: cleanup
                 tstart = clock();
                 std::cerr << "Converting static graph to dynamic\t";
-                graph->switch_state(DBG_succ::dyn);
-                //graph->switch_state(DBG_succ::stat);
+                graph->switch_state(Config::dyn);
                 std::cout << (clock()-tstart)/CLOCKS_PER_SEC << "\n";
             } else {
                 //slower method
@@ -618,6 +617,7 @@ int main(int argc, char const ** argv) {
                     gzclose(input_p);
                 }
             }
+            graph->switch_state(config->state);
             config->infbase = config->outfbase;
             graph->annotationToFile();
             //graph->print_seq();

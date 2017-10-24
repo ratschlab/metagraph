@@ -427,6 +427,10 @@ public:
         }
     }
 
+    bit_vector_dyn(std::istream &in) {
+        this->deserialise(in);
+    }
+
     uint64_t size() {
         return this->libmaus2::bitbtree::BitBTree<6, 64>::size();
     }
@@ -494,6 +498,10 @@ public:
         }
     }
 
+    bit_vector_stat(std::istream &in) {
+        this->deserialise(in);
+    }
+
     bit_vector_stat() : sdsl::bit_vector() {
     }
 
@@ -516,7 +524,7 @@ public:
 
     bool operator[](size_t id) {
         update_rs = true;
-        return this->operator[](id);
+        return this->sdsl::bit_vector::operator[](id);
     }
 
     void insertBit(size_t id, bool val) {
@@ -557,7 +565,7 @@ public:
         return rk(id >= this->size() ? this->size() : id+1);
     }
     uint64_t size() {
-        return this->size();
+        return this->sdsl::bit_vector::size();
     }
 };
 
