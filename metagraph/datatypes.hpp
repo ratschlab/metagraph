@@ -581,10 +581,12 @@ public:
     virtual void serialise(std::ostream &out) = 0;
     virtual void insert(uint64_t val, size_t id) = 0;
     virtual void remove(size_t id) = 0;
+    //virtual void set(size_t id, uint64_t val) = 0;
     virtual uint64_t rank(uint64_t c, uint64_t i) = 0;
     virtual uint64_t select(uint64_t c, uint64_t i) = 0;
     //virtual uint64_t const& operator[](size_t id) const = 0;
     virtual uint64_t operator[](size_t id) = 0;
+    //virtual uint64_t get(size_t id) = 0;
     // this only makes sense when implemented in the dynamic part
     virtual bool get_bit_raw(uint64_t id) = 0;
     
@@ -598,6 +600,7 @@ private:
     size_t logsigma;
     bool update_rs;
     void init_wt() {
+        std::cout << "Initializing WT index" << std::endl;
         this->resize(n);
         sdsl::construct_im(wwt, *this);
         update_rs=false;
@@ -625,6 +628,8 @@ public:
 
     wavelet_tree_stat(std::istream &in) {
         this->deserialise(in);
+        // we assume the wwt has been build before serialization
+        update_rs = false;
     }
 
     ~wavelet_tree_stat() {
@@ -642,6 +647,8 @@ public:
 
     void serialise(std::ostream &out) {
         this->resize(n);
+        if (update_rs)
+            init_wt();
         wwt.serialize(out);
         this->serialize(out);
     }
@@ -671,6 +678,7 @@ public:
     }
 
     uint64_t select(uint64_t c, uint64_t i) {
+
         if (update_rs)
             init_wt();
         i++;
@@ -692,9 +700,19 @@ public:
     //}
 
     uint64_t operator[](size_t id) {
-        update_rs = true;
+//        update_rs = true;
         return this->sdsl::int_vector<>::operator[](id);
     }
+
+/*    void set(size_t id, uint64_t val) {
+        update_rs = true;
+        this->sdsl::int_vector<>::operator[](id) = val;
+    }
+
+    uint64_t get(size_t id) {
+        return this->sdsl::int_vector<>::operator[](id);
+    }
+    */
 
     bool get_bit_raw(uint64_t id) {
        throw std::logic_error("Not Implemented"); 
@@ -907,6 +925,14 @@ public:
     uint64_t operator[](size_t id) {
         return this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::operator[](id);
     }
+
+//    uint64_t get(size_t id) {
+//        return this->operator[](id);
+//    }
+
+//    void set(size_t id, uint64_t val) {
+//        this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::operator[](id) = val;
+//    }
 
     bool get_bit_raw(uint64_t id) {
         return this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::R->operator[](id);

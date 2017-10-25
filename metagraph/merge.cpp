@@ -1,6 +1,7 @@
 #include "merge.hpp"
 #include "utils.hpp"
 #include "construct.hpp"
+#include <unistd.h>
 
 namespace merge {
 
@@ -87,6 +88,8 @@ namespace merge {
             size_t curr_k = std::max_element(smallest.first.begin(), smallest.first.end()) - smallest.first.begin();
             std::deque<TAlphabet> seq1 = Gv.at(curr_k)->get_node_seq(kv.at(curr_k));
             uint64_t val = Gv.at(curr_k)->get_W(kv.at(curr_k)) % Gt->alph_size;
+            //std::cerr << "val: " << val << std::endl;
+            //usleep(1000000);
 
             assert(val == smallest.second % Gt->alph_size);
             

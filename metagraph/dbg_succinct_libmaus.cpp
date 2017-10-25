@@ -99,6 +99,8 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
     alphabet("$ACGTNX$ACGTNXn") {
 
     std::ifstream instream;
+    // if not specified in the file, the default for loading is dynamic
+    state = Config::dyn;
 
     // load F and k and p
     for (size_t j = 0; j < alph_size; j++)
@@ -270,6 +272,7 @@ uint64_t DBG_succ::bwd(uint64_t i) {
     uint64_t o = F[c];
     //fprintf(stdout, "i %lu c %i o %lu rank(i) %lu rank(o) %lu difference %lu\n", i, (int) c, o, rank_last(i), rank_last(o), rank_last(i) - rank_last(o));
     // compute the offset for this position in W and select it
+    //usleep(500000);
     return select_W(rank_last(i) - rank_last(o), c);
 }
 
@@ -696,6 +699,7 @@ std::pair<uint64_t, uint64_t> DBG_succ::get_equal_node_range(uint64_t i) {
  * will return the k-th last character of node i.
  */
 std::pair<TAlphabet, uint64_t> DBG_succ::get_minus_k_value(uint64_t i, uint64_t k) {
+
     for (; k > 0; --k)
         i = bwd(succ_last(i));
     return std::make_pair(get_node_end_value(i), bwd(succ_last(i)));
@@ -942,7 +946,7 @@ TAlphabet DBG_succ::get_alphabet_number(char s) {
 
 void DBG_succ::switch_state(Config::state_type state) {
 
-    std::cerr << "switching state from " << this->state << " to " << state << std::endl;
+    //std::cerr << "switching state from " << this->state << " to " << state << std::endl;
     if (this->state == state)
         return;
     
