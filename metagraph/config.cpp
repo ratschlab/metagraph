@@ -216,6 +216,6 @@ void Config::init() {
     k = 3;
     identity = noidentity;
     nsplits = 1;
-    state = dyn;
+    state = stat;
 }
 
