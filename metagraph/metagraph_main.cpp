@@ -540,6 +540,7 @@ int main(int argc, char const ** argv) {
                                     strcat(annot_s.s, annot.c_str());
                                     annot_s.l = strlen(annot_s.s);
                                     construct::add_seq_fast(graph, vcf->seq, annot_s, false, config->parallel, suffices[j]);
+                                    free(annot_s.s);
                                 }
                                 vcf_destroy(vcf);
                             } else {

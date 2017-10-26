@@ -162,6 +162,11 @@ DBG_succ::~DBG_succ() {
     delete last;
     if (bridge != NULL)
         delete bridge;
+    for (auto it = annotation_full.begin(); it != annotation_full.end(); ++it) {
+        if (*it != NULL) {
+            delete *it;
+        }
+    }
 }
 
 //
