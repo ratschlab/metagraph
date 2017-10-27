@@ -121,6 +121,7 @@ static inline void vcf_print_line(vcfparse* vcfp) {
     }
 }
 
+//TODO: make a parallel version of this that outputs n lines at a time?
 static inline std::string vcf_get_seq(vcfparse* vcfp, char** annots, size_t num_annots) {
     std::string annot = "";
     //std::string annot = "VCF:";
@@ -142,8 +143,11 @@ static inline std::string vcf_get_seq(vcfparse* vcfp, char** annots, size_t num_
             //if this is of the form <CN#>, then it's a copy number variation
             //otherwise, crash
             if (vcfp->rec->d.allele[vcfp->curi][1] != 'C' || vcfp->rec->d.allele[vcfp->curi][2] != 'N') {
-                fprintf(stderr, "Can't handle this type of variant: %s\n",vcfp->rec->d.allele[vcfp->curi]);
-                exit(1);
+                //TODO: HANDLE RETROTRANSPOSONS PROPERLY
+                fprintf(stderr, "Can't handle this type of variant, skipping: %s\n",vcfp->rec->d.allele[vcfp->curi]);
+                vcf_next_line(vcfp);
+                continue;
+                //exit(1);
             }
             //replace <CN#> with # copies of the ref allele
             //fprintf(stderr, "%s\n", vcfp->rec->d.allele[vcfp->curi]);
