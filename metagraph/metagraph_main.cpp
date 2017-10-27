@@ -33,6 +33,7 @@ pthread_mutex_t mutex_merge_result = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_bin_idx = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_annotate = PTHREAD_MUTEX_INITIALIZER;
 pthread_attr_t attr;  
+char* annots[] = {"AC_AFR", "AC_EAS", "AC_AMR", "AC_ASJ", "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"};
 
 void parallel_merge_collect(DBG_succ* result) {
 
@@ -521,7 +522,7 @@ int main(int argc, char const ** argv) {
                                 }
                                 std::cerr << "Loading VCF with " << config->parallel << " threads per line\n";
                                 std::string annot;
-                                for (size_t i=1; (annot = vcf_get_seq(vcf)).length();++i) {
+                                for (size_t i=1; (annot = vcf_get_seq(vcf, annots, sizeof(annots)/sizeof(char *))).length();++i) {
                                     if (i % 10000 == 0) {
                                         std::cout << "." << std::flush;
                                         if (i % 100000 == 0) {
@@ -534,6 +535,7 @@ int main(int argc, char const ** argv) {
                                             timelast = clock();
                                         }
                                     }
+                                    annot = "VCF:" + annot;
                                     nbp += vcf->seq.l;
                                     //annot_s.s = annot;
                                     kstring_t annot_s = {0,100,(char*)calloc(100, sizeof(char))};

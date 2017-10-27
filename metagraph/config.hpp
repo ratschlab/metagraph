@@ -55,4 +55,5 @@ class Config {
     private:
         void init();
 };
+
 #endif

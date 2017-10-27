@@ -31,6 +31,8 @@ typedef struct __vcfparse {
     uint32_t kmer1_l;
     uint32_t kmer3_l;
     uint32_t ref_callele_l;
+    const char **seqnames = NULL;
+    int nseq=0;
 } vcfparse;
 static char passfilt[] = "PASS";
 
@@ -103,6 +105,7 @@ static inline vcfparse* vcf_init(const char* ref, const char* vcf, int k) {
         fprintf(stderr, "Empty VCF file\n");
         exit(1);
     }
+    vcfp->seqnames = bcf_hdr_seqnames(vcfp->hdr, &(vcfp->nseq));
     return vcfp;
 }
 
@@ -118,8 +121,9 @@ static inline void vcf_print_line(vcfparse* vcfp) {
     }
 }
 
-static inline std::string vcf_get_seq(vcfparse* vcfp) {
-    std::string annot = "VCF:";
+static inline std::string vcf_get_seq(vcfparse* vcfp, char** annots, size_t num_annots) {
+    std::string annot = "";
+    //std::string annot = "VCF:";
     //uint64_t annot;
     while (vcfp->rec) {
         (vcfp->curi)++;
@@ -190,9 +194,11 @@ static inline std::string vcf_get_seq(vcfparse* vcfp) {
         }
         //annotation is a bit vector indicating inclusion in the different ethnic groups
         //the first bit is always 1. if not, then the file is done and no sequence was output
-        const char* annots[] = {"AC_AFR", "AC_EAS", "AC_AMR", "AC_ASJ", "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"};
+        //TODO: check if these annots are part of the INFO, if not, check genotypes
+        //ngt = bcf_get_genotypes(sr->readers[0].header, line0, &gt_arr, &ngt_arr); //get genotypes
         //annot=1;
-        for (size_t i=0;i<sizeof(annots)/sizeof(char *);++i) {
+        annot = std::string(vcfp->seqnames[vcfp->rec->rid]) + ":";
+        for (size_t i=0;i<num_annots;++i) {
             bcf_info_t* curinfo = bcf_get_info(vcfp->hdr, vcfp->rec, annots[i]);
             if (curinfo && curinfo->v1.i) {
                 annot += std::string(annots[i]) + ":";
@@ -203,7 +209,34 @@ static inline std::string vcf_get_seq(vcfparse* vcfp) {
             //annot[strlen(annot)-1]=0;
             //annot += (bool)(curinfo ? curinfo->v1.i : 0) * (1<<(i+1));
         }
-        annot.pop_back();
+
+        int32_t *gt_arr=NULL, ngt_arr = 0;
+        int nsmpl = bcf_hdr_nsamples(vcfp->hdr);
+        bcf_fmt_t *curfmt;
+        if (curfmt = bcf_get_fmt(vcfp->hdr, vcfp->rec, "GT")) {
+            int ngt = bcf_get_genotypes(vcfp->hdr, vcfp->rec, &gt_arr, &ngt_arr);
+            int ploidy = ngt/nsmpl;
+            int cur;
+            if (ngt > 0) {
+                for (size_t i=0;i<ngt;i+=ploidy) {
+                    cur = 0;
+                    for (size_t j=0;j<ploidy;++j) {
+                        cur |= *(gt_arr + i+j);
+                    }
+                    if ((cur & 5) == 5) {
+                        //at least one parent has this allele
+                        annot += std::string(vcfp->hdr->samples[i/ploidy]) + ":";
+                    }
+                }
+            }
+        if (annot.length())
+            free(gt_arr);
+        }
+        //if (annot[annot.length()-1] == ':')
+        //if annot is of any length, assume that the last character is ':'
+        if (annot.length())
+            annot.pop_back();
+        //std::cout << annot << "\n";
         strcpy(vcfp->seq.s, vcfp->kmer1);
         //strcat(vcfp->seq.s, vcfp->rec->d.allele[vcfp->curi]);
         strcat(vcfp->seq.s, vcfp->curalt);
@@ -224,6 +257,7 @@ static inline void vcf_destroy(vcfparse* vcfp) {
         free(vcfp->curalt);
     bcf_sweep_destroy(vcfp->sw);
     fai_destroy(vcfp->ref);
+    free(vcfp->seqnames);
     free(vcfp);
 }
 #endif
