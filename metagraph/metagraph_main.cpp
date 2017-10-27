@@ -537,10 +537,10 @@ int main(int argc, char const ** argv) {
                                     }
                                     annot = "VCF:" + annot;
                                     nbp += vcf->seq.l;
-                                    //annot_s.s = annot;
-                                    kstring_t annot_s = {0,100,(char*)calloc(100, sizeof(char))};
-                                    strcat(annot_s.s, annot.c_str());
-                                    annot_s.l = strlen(annot_s.s);
+                                    char* newannot = (char*)malloc(annot.length()+2);
+                                    newannot[0]=0;
+                                    strcat(newannot, annot.c_str());
+                                    kstring_t annot_s = {annot.length(), annot.length()+2, newannot};
                                     construct::add_seq_fast(graph, vcf->seq, annot_s, false, config->parallel, suffices[j]);
                                     free(annot_s.s);
                                 }
