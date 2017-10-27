@@ -290,10 +290,13 @@ namespace construct {
 
 
     void construct_succ(DBG_succ* G, unsigned int parallel) {
+
+        // parallel sort of all kmers
         omp_set_num_threads(std::max((int)parallel,1));
         __gnu_parallel::sort(G->kmers.begin(),G->kmers.end());
         std::vector<kmer_boost::KMer>::iterator uniq_count = unique_count(G->kmers.begin(), G->kmers.end());
         G->kmers.erase(uniq_count, G->kmers.end() );
+        // annotation vectors
         std::vector<std::vector<uint8_t> > annots(G->annotation_full.size(), std::vector<uint8_t>(G->kmers.size()));
         //TODO: set the bit vector, then store it
         //TODO: when merging into G, keep track of the fact that this may have a different number of annotations that the rest of hte graph
@@ -309,27 +312,27 @@ namespace construct {
         */
 
         size_t curpos = G->W_stat.size();
-        G->W_stat.resize(G->W_stat.size()+G->kmers.size());
-        G->last_stat_safe.resize(G->last_stat_safe.size()+G->kmers.size(), true);
-        G->coverage.resize(G->coverage.size()+G->kmers.size(),0);
-        G->bridge_stat.resize(G->bridge_stat.size()+G->kmers.size(),false);
+        G->W_stat.resize(G->W_stat.size() + G->kmers.size());
+        G->last_stat_safe.resize(G->last_stat_safe.size() + G->kmers.size(), true);
+        G->coverage.resize(G->coverage.size() + G->kmers.size(),0);
+        G->bridge_stat.resize(G->bridge_stat.size() + G->kmers.size(),false);
         
         #pragma omp parallel num_threads(parallel)
         {    
             #pragma omp for nowait
-            for (size_t i=0;i<G->kmers.size();++i) {
+            for (size_t i = 0; i < G->kmers.size(); ++i) {
                 //set last
-                if (i+1 < G->kmers.size()) {
+                if (i + 1 < G->kmers.size()) {
                     bool dup = kmer_boost::compare_kmer_suffix(G->kmers[i].first, G->kmers[i+1].first);
                     if (dup) {
-                        G->last_stat_safe[curpos+i] = false;
+                        G->last_stat_safe[curpos + i] = false;
                     }    
                 }
                 //set bridge and coverage if from a read
                 if (G->kmers[i].second > 1) {
-                    G->coverage[curpos+i] = G->kmers[i].second / 2;
+                    G->coverage[curpos + i] = G->kmers[i].second / 2;
                     if (G->kmers[i].second % 2) {
-                        G->bridge_stat[curpos+i] = true;
+                        G->bridge_stat[curpos + i] = true;
                     }
                 }
                 //set W
@@ -355,37 +358,39 @@ namespace construct {
                 }    
                 G->W_stat[curpos+i] = curW;
                 //set  bitvector
-                for (size_t j=0;(G->kmers[i].annot) >> j; ++j) {
+                for (size_t j = 0; (G->kmers[i].annot) >> j; ++j) {
                     assert(j < annots.size());
                     annots[j][i] = (uint8_t)(((G->kmers[i].annot) >> j) % 2);
                 }
             }    
         }    
-        for (size_t i=0;i<G->kmers.size();++i) {
-            char cF=kmer_boost::getPos(G->kmers[i].first, G->k-1, G->alphabet, G->alph_size);
+        for (size_t i = 0; i < G->kmers.size(); ++i) {
+            char cF = kmer_boost::getPos(G->kmers[i].first, G->k-1, G->alphabet, G->alph_size);
             if (cF != G->alphabet[G->lastlet]) {
                 for ((G->lastlet)++; G->lastlet<G->alph_size; (G->lastlet)++) {
-                    G->F[G->lastlet]=curpos+i-1;
-                    if (G->alphabet[G->lastlet]==cF) {
+                    G->F[G->lastlet] = curpos + i - 1;
+                    if (G->alphabet[G->lastlet] == cF) {
                         break;
                     }    
                 }    
             }    
         }    
         sdsl::bit_vector bv(G->W_stat.size());
-        for (size_t i=0;i<annots.size();++i) {
-            size_t j=0;
-            for (;i < G->annotation_full.size() && G->annotation_full.at(i) != NULL && j<G->annotation_full.at(i)->size();++j) {
+        // loop over annotation columns
+        for (size_t i = 0; i < annots.size();++i) {
+            size_t j = 0;
+            for (; i < G->annotation_full.size() && G->annotation_full.at(i) != NULL && j < G->annotation_full.at(i)->size(); ++j) {
                 bv[j] = G->annotation_full.at(i)->operator[](j);
             }
-            for (;j<curpos;++j)
-                bv[j]=0;
-            for (size_t k=0;j<bv.size();++j,++k) {
+            for (; j < curpos; ++j)
+                bv[j] = 0;
+
+            for (size_t k = 0; j < bv.size(); ++j, ++k) {
                 bv[j] = annots.at(i).at(k);
             }
             if (G->annotation_full.at(i) != NULL)
-                delete G->annotation_full[i];
-            G->annotation_full[i] = new sdsl::sd_vector<>(bv);
+                delete G->annotation_full.at(i);
+            G->annotation_full.at(i) = new sdsl::sd_vector<>(bv);
         }
         G->kmers.clear();
     }
