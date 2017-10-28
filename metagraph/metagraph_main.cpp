@@ -750,6 +750,12 @@ int main(int argc, char const ** argv) {
 
             // load annotatioun (if file does not exist, empty annotation is created)
             graph->annotationFromFile();
+            std::cerr <<"building ranks" << std::endl;
+            for (size_t ii = 0; ii < graph->annotation_full.size(); ++ii) {
+                //graph->annotation_full_ranks.push_back(new sdsl::rank_support_sd<>(graph->annotation_full.at(ii))); 
+                graph->annotation_full_ranks.push_back(new sdsl::sd_vector<>::rank_1_type(graph->annotation_full.at(ii))); 
+            }
+            std::cerr <<"building ranks done" << std::endl;
 
             // iterate over input files
             for (unsigned int f = 0; f < config->fname.size(); ++f) {

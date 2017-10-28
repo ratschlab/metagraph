@@ -162,9 +162,12 @@ namespace annotate {
 
         // collect all annotated combinations for the path
         // take majority vote as consensus for now
-        for (size_t i = 0; i < path.size(); i++) {
+        bool tmp;
+        for (size_t i = 0; i < path.size(); i += 1) {
             for (size_t j = 0; j < G->annotation_full.size(); ++j) {
-                labels.at(j) = (*(G->annotation_full.at(j)))[path.at(i)] ? 1 : std::max(labels.at(j), 0u);
+                //labels.at(j) = (*(G->annotation_full.at(j)))[path.at(i)] ? 1 : std::max(labels.at(j), 0u);
+                tmp = (*(G->annotation_full_ranks.at(j)))(path.at(i)) > (*(G->annotation_full_ranks.at(j)))(path.at(i) - 1);
+                labels.at(j) = tmp ? 1 : std::max(labels.at(j), 0u);
             }
             /*curr_anno = G->annotation.at(path.at(i));
             if (curr_anno > 0) {
