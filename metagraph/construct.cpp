@@ -72,11 +72,6 @@ namespace construct {
                     fprintf(stdout, "%lu - edges %lu / nodes %lu\n", i, G->get_edge_count(), G->get_node_count());
                 }
             }
-            // if (debug) {
-            //    fprintf(stdout, "appending %i\n", (int) ordValue(seq[i]));
-            //    cerr << "seq[i] " << seq[i] << std::endl;
-            //    cerr << "seq[i] ord " << ordValue(seq[i]) + 1 << std::endl;
-            // }
 
             c = G->get_alphabet_number(seq.s[i]);
             ind = append_pos(G, c, ckmer, ind) * !append;
