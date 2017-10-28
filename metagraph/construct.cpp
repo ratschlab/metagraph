@@ -26,7 +26,7 @@ namespace construct {
         }
 
         // Padding of the input genome / read
-        if (G->W->n == 2) {
+        if (G->W->size() == 2) {
             for (size_t j = 0; j < G->k; j++) {
                 append_pos(G, 6);
                 if (debug) {
@@ -43,27 +43,27 @@ namespace construct {
 
         size_t i;
         TAlphabet *ckmer = new TAlphabet[G->k+1];
-        for (i=0;i<std::min(seq.l, G->k);++i) {
-            ckmer[i]=6;
+        for (i = 0; i < std::min(seq.l, G->k); ++i) {
+            ckmer[i] = 6;
         }
-        ckmer[i]=0;
+        ckmer[i] = 0;
         TAlphabet c;
         uint64_t ind;
         if (!append) {
             ind = G->index(ckmer, i);
             if (!ind) {
                 ind = G->p;
-                i=0;
+                i = 0;
             } else {
                 if (G->k >= seq.l) {
                     delete[] ckmer;
                     return;
                 }
-                i=G->k;
+                i = G->k;
             }
         } else {
-            i=0;
-            ind=0;
+            i = 0;
+            ind = 0;
         }
         for (; i < seq.l; ++i) {
             if (i > 0 && i % 1000 == 0) {
@@ -72,11 +72,6 @@ namespace construct {
                     fprintf(stdout, "%lu - edges %lu / nodes %lu\n", i, G->get_edge_count(), G->get_node_count());
                 }
             }
-            // if (debug) {
-            //    fprintf(stdout, "appending %i\n", (int) ordValue(seq[i]));
-            //    cerr << "seq[i] " << seq[i] << std::endl;
-            //    cerr << "seq[i] ord " << ordValue(seq[i]) + 1 << std::endl;
-            // }
 
             c = G->get_alphabet_number(seq.s[i]);
             ind = append_pos(G, c, ckmer, ind) * !append;
@@ -290,10 +285,13 @@ namespace construct {
 
 
     void construct_succ(DBG_succ* G, unsigned int parallel) {
+
+        // parallel sort of all kmers
         omp_set_num_threads(std::max((int)parallel,1));
         __gnu_parallel::sort(G->kmers.begin(),G->kmers.end());
         std::vector<kmer_boost::KMer>::iterator uniq_count = unique_count(G->kmers.begin(), G->kmers.end());
         G->kmers.erase(uniq_count, G->kmers.end() );
+        // annotation vectors
         std::vector<std::vector<uint8_t> > annots(G->annotation_full.size(), std::vector<uint8_t>(G->kmers.size()));
         //TODO: set the bit vector, then store it
         //TODO: when merging into G, keep track of the fact that this may have a different number of annotations that the rest of hte graph
@@ -309,27 +307,27 @@ namespace construct {
         */
 
         size_t curpos = G->W_stat.size();
-        G->W_stat.resize(G->W_stat.size()+G->kmers.size());
-        G->last_stat_safe.resize(G->last_stat_safe.size()+G->kmers.size(), true);
-        G->coverage.resize(G->coverage.size()+G->kmers.size(),0);
-        G->bridge_stat.resize(G->bridge_stat.size()+G->kmers.size(),false);
+        G->W_stat.resize(G->W_stat.size() + G->kmers.size());
+        G->last_stat_safe.resize(G->last_stat_safe.size() + G->kmers.size(), true);
+        G->coverage.resize(G->coverage.size() + G->kmers.size(),0);
+        G->bridge_stat.resize(G->bridge_stat.size() + G->kmers.size(),false);
         
         #pragma omp parallel num_threads(parallel)
         {    
             #pragma omp for nowait
-            for (size_t i=0;i<G->kmers.size();++i) {
+            for (size_t i = 0; i < G->kmers.size(); ++i) {
                 //set last
-                if (i+1 < G->kmers.size()) {
+                if (i + 1 < G->kmers.size()) {
                     bool dup = kmer_boost::compare_kmer_suffix(G->kmers[i].first, G->kmers[i+1].first);
                     if (dup) {
-                        G->last_stat_safe[curpos+i] = false;
+                        G->last_stat_safe[curpos + i] = false;
                     }    
                 }
                 //set bridge and coverage if from a read
                 if (G->kmers[i].second > 1) {
-                    G->coverage[curpos+i] = G->kmers[i].second / 2;
+                    G->coverage[curpos + i] = G->kmers[i].second / 2;
                     if (G->kmers[i].second % 2) {
-                        G->bridge_stat[curpos+i] = true;
+                        G->bridge_stat[curpos + i] = true;
                     }
                 }
                 //set W
@@ -355,37 +353,39 @@ namespace construct {
                 }    
                 G->W_stat[curpos+i] = curW;
                 //set  bitvector
-                for (size_t j=0;(G->kmers[i].annot) >> j; ++j) {
+                for (size_t j = 0; (G->kmers[i].annot) >> j; ++j) {
                     assert(j < annots.size());
                     annots[j][i] = (uint8_t)(((G->kmers[i].annot) >> j) % 2);
                 }
             }    
         }    
-        for (size_t i=0;i<G->kmers.size();++i) {
-            char cF=kmer_boost::getPos(G->kmers[i].first, G->k-1, G->alphabet, G->alph_size);
+        for (size_t i = 0; i < G->kmers.size(); ++i) {
+            char cF = kmer_boost::getPos(G->kmers[i].first, G->k-1, G->alphabet, G->alph_size);
             if (cF != G->alphabet[G->lastlet]) {
                 for ((G->lastlet)++; G->lastlet<G->alph_size; (G->lastlet)++) {
-                    G->F[G->lastlet]=curpos+i-1;
-                    if (G->alphabet[G->lastlet]==cF) {
+                    G->F[G->lastlet] = curpos + i - 1;
+                    if (G->alphabet[G->lastlet] == cF) {
                         break;
                     }    
                 }    
             }    
         }    
         sdsl::bit_vector bv(G->W_stat.size());
-        for (size_t i=0;i<annots.size();++i) {
-            size_t j=0;
-            for (;i < G->annotation_full.size() && G->annotation_full.at(i) != NULL && j<G->annotation_full.at(i)->size();++j) {
+        // loop over annotation columns
+        for (size_t i = 0; i < annots.size();++i) {
+            size_t j = 0;
+            for (; i < G->annotation_full.size() && G->annotation_full.at(i) != NULL && j < G->annotation_full.at(i)->size(); ++j) {
                 bv[j] = G->annotation_full.at(i)->operator[](j);
             }
-            for (;j<curpos;++j)
-                bv[j]=0;
-            for (size_t k=0;j<bv.size();++j,++k) {
+            for (; j < curpos; ++j)
+                bv[j] = 0;
+
+            for (size_t k = 0; j < bv.size(); ++j, ++k) {
                 bv[j] = annots.at(i).at(k);
             }
             if (G->annotation_full.at(i) != NULL)
-                delete G->annotation_full[i];
-            G->annotation_full[i] = new sdsl::sd_vector<>(bv);
+                delete G->annotation_full.at(i);
+            G->annotation_full.at(i) = new sdsl::sd_vector<>(bv);
         }
         G->kmers.clear();
     }
@@ -523,7 +523,7 @@ namespace construct {
                 // adding a new node can influence following nodes that share a k-1 suffix with the
                 // new node -> need to adapt the respektive cc to a cc-
                 bool minus2 = false;
-                if (next_c < G->W->n) {
+                if (next_c < G->W->size()) {
                     if (ckmer) {
                         minus2 = G->compare_node_suffix(ckmer, next_c);
                     } else {
@@ -564,7 +564,7 @@ namespace construct {
                 uint64_t x = G->F[c] + 1;
                 uint64_t next_c = G->succ_W(*p + 1, c);
                 bool minus = false;
-                if (next_c < G->W->n) {
+                if (next_c < G->W->size()) {
                     if (ckmer) {
                         minus = G->compare_node_suffix(ckmer, next_c);
                     } else {
@@ -628,7 +628,7 @@ namespace construct {
             ++curr_pos;
         }
         if (G_t->config->verbose)
-            std::cout << "new total edges: " << G_s->W->n << std::endl;
+            std::cout << "new total edges: " << G_s->W->size() << std::endl;
 
         // handle F
         assert(G_t->F.size() == G_s->F.size());
@@ -667,7 +667,7 @@ namespace construct {
                 blocks.pop();
                 uint64_t epos = pos + cnt;
                 for ( ; pos < epos; ++pos) {
-                    offsets.at(o) += !(*(G_s->W->R))[pos];
+                    offsets.at(o) += !G_s->W->get_bit_raw(pos); 
                 }
                 if (ib < b - 1) {
                     new_blocks.push(offsets.at(o));
@@ -692,7 +692,7 @@ namespace construct {
             p = i;
             co = 0;
             for (size_t ib = 0; ib < b - 1; ++ib) {
-                bit = (*(G_s->W->R))[ib * n + p + co];
+                bit = G_s->W->get_bit_raw(ib * n + p + co);
                 if (bit) {
                     v |= m;
                     co += offsets.at(o);
@@ -704,7 +704,7 @@ namespace construct {
                 o = 2*o + 1 + bit;
                 m >>= 1;
             }
-            bit = (*(G_s->W->R))[(b - 1) * n + p + co];
+            bit = G_s->W->get_bit_raw((b - 1) * n + p + co);
             if (bit) {
                 v |= m;
             }

@@ -29,15 +29,15 @@ namespace compare {
         */
 
         // compare size
-        if (G1->W->n != G2->get_size()) {
+        if (G1->W->size() != G2->get_size()) {
             std::cerr << "sizes of graphs differ" << std::endl;
-            std::cerr << "1: " << G1->W->n << std::endl;
+            std::cerr << "1: " << G1->W->size() << std::endl;
             std::cerr << "2: " << G2->get_size() << std::endl;
             is_same = false;
         }
         
         // compare last
-        for (size_t i = 0; i < G1->W->n; ++i) {
+        for (size_t i = 0; i < G1->W->size(); ++i) {
             if (G1->get_last(i) != G2->get_last(i)) {
                 std::cerr << "last differs at position " << i << std::endl;
                 std::cerr << "1: last[" << i << "] = " << G1->get_last(i)  << std::endl;
@@ -48,7 +48,7 @@ namespace compare {
         }
 
         // compare W
-        for (size_t i = 0; i < G1->W->n; ++i) {
+        for (size_t i = 0; i < G1->W->size(); ++i) {
             if (G1->get_W(i) != G2->get_W(i)) {
                 std::cerr << "W differs at position " << i << std::endl;
                 std::cerr << "1: W[" << i << "] = " << G1->get_W(i)  << std::endl;

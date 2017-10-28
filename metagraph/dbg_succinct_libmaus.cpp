@@ -27,11 +27,7 @@
  * We use libmaus 2 for representing dynamic succint data structures
  * such as the dynamic bit array and the dynamic wavelet tree.
  */
-#include <libmaus2/bitbtree/bitbtree.hpp>
-#include <libmaus2/wavelet/DynamicWaveletTree.hpp>
 #include <libmaus2/util/NumberSerialisation.hpp>
-
-#include <sdsl/bit_vectors.hpp>
 
 #include "config.hpp"
 #include "datatypes.hpp"
@@ -40,12 +36,6 @@
 
 // define an extended alphabet for W --> somehow this does not work properly as expected
 typedef uint64_t TAlphabet;
-
-// the bit array indicating the last outgoing edge of a node
-//libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();
-
-// the array containing the edge labels
-//libmaus2::wavelet::DynamicWaveletTree<6, 64> *W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
 
 // the offset array to mark the offsets for the last column in the implicit node list
 std::vector<TAlphabet> F; 
@@ -59,10 +49,6 @@ size_t alph_size = 7;
 
 // infile base when loaded from file
 std::string infbase;
-
-// config object
-//CFG config;
-
 
 #ifdef DBGDEBUG
     bool debug = true;
@@ -89,6 +75,7 @@ DBG_succ::DBG_succ(size_t k_, Config* config_, bool sentinel) :
         W->insert(0, 0);
 
     F.push_back(0);
+
     if (sentinel) {
         for (size_t j = 1; j < alph_size; j++)
             F.push_back(1);
@@ -101,6 +88,7 @@ DBG_succ::DBG_succ(size_t k_, Config* config_, bool sentinel) :
     id_to_label.push_back("");
     label_to_id_map[""]=0;
     combination_vector.push_back(0);
+    state = Config::dyn;
 }
 
 
@@ -110,17 +98,9 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
     config(config_),
     alphabet("$ACGTNX$ACGTNXn") {
 
-    // load last array
-    std::ifstream instream((infbase + ".l.dbg").c_str());
-    last->deserialise(instream);
-    instream.close();
-
-    // load W array
-    delete W;
-    instream.open((infbase + ".W.dbg").c_str());
-    W = new WaveletTree(instream);
-    //W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(instream);
-    instream.close();
+    std::ifstream instream;
+    // if not specified in the file, the default for loading is dynamic
+    state = Config::dyn;
 
     // load F and k and p
     for (size_t j = 0; j < alph_size; j++)
@@ -136,15 +116,18 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
             mode = 2;
         } else if (strcmp(line.c_str(), ">p") == 0) {
             mode = 3;
+        } else if (strcmp(line.c_str(), ">s") == 0) {
+            mode = 4;
         } else {
             if (mode == 1) {
                 F.at(fidx) += std::strtoul(line.c_str(), NULL, 10);
                 fidx++;
-                //F.push_back(std::strtoul(line.c_str(), NULL, 10));
             } else if (mode == 2) {
                 k = strtoul(line.c_str(), NULL, 10);
             } else if (mode == 3) {
                 p = strtoul(line.c_str(), NULL, 10);
+            } else if (mode == 4) {
+                state = (Config::state_type) strtoul(line.c_str(), NULL, 10);
             } else {
                 fprintf(stderr, "ERROR: input file corrupted\n");
                 exit(1);
@@ -155,9 +138,33 @@ DBG_succ::DBG_succ(std::string infbase_, Config* config_) :
     id_to_label.push_back("");
     label_to_id_map[""]=0;
     combination_vector.push_back(0);
+
+    // load last array
+    //std::ifstream instream((infbase + ".l.dbg").c_str());
+    //last->deserialise(instream);
+    //instream.close();
+
+    // load W and last arrays
+    delete W;
+    delete last;
+    std::ifstream instream_W((infbase + ".W.dbg").c_str());
+    std::ifstream instream_l((infbase + ".l.dbg").c_str());
+    switch (state) {
+        case Config::dyn: {
+            W = new wavelet_tree_dyn(instream_W);
+            last = new bit_vector_dyn(instream_l);
+        } break;
+        case Config::stat: {
+            W = new wavelet_tree_stat(instream_W);
+            last = new bit_vector_stat(instream_l);
+        } break;
+    }
+    instream_W.close();
+    instream_l.close();
 }
 
 DBG_succ::~DBG_succ() {
+
     delete W;
     delete last;
     if (bridge != NULL)
@@ -185,7 +192,7 @@ uint64_t DBG_succ::rank_W(uint64_t i, TAlphabet c) {
     // deal with  border conditions
     if (i <= 0)
         return 0;
-    return W->rank(c, std::min(i, W->n - 1)) - (c == 0);
+    return W->rank(c, std::min(i, W->size() - 1)) - (c == 0);
 }
 
 /**
@@ -201,7 +208,7 @@ uint64_t DBG_succ::select_W(uint64_t i, TAlphabet c) {
 
     // count occurences of c and store them in cnt
     //fprintf(stderr, "query select W -- c: %i i: %lu return: %lu \n", c, i-1+(c==0), W->select(c, i-1+(c==0)));
-    return std::min(W->select(c, i - 1 + (c == 0)), W->n);
+    return std::min(W->select(c, i - 1 + (c == 0)), W->size());
 }
 
 /**
@@ -270,6 +277,7 @@ uint64_t DBG_succ::bwd(uint64_t i) {
     uint64_t o = F[c];
     //fprintf(stdout, "i %lu c %i o %lu rank(i) %lu rank(o) %lu difference %lu\n", i, (int) c, o, rank_last(i), rank_last(o), rank_last(i) - rank_last(o));
     // compute the offset for this position in W and select it
+    //usleep(500000);
     return select_W(rank_last(i) - rank_last(o), c);
 }
 
@@ -326,7 +334,7 @@ TAlphabet DBG_succ::get_node_begin_value(uint64_t i) {
  */
 uint64_t DBG_succ::outgoing_edge_idx(uint64_t i, TAlphabet c) {
 
-    if (i > W->n)
+    if (i > W->size())
         return 0;
     if (i == 0)
         return 0;
@@ -335,7 +343,7 @@ uint64_t DBG_succ::outgoing_edge_idx(uint64_t i, TAlphabet c) {
     uint64_t j1 = pred_W(R.second, c);
     uint64_t j2 = pred_W(R.second, c + alph_size);
     uint64_t j = (j1 < j2) ? j2 : j1;
-    if (j < R.first || j >= W->n)
+    if (j < R.first || j >= W->size())
         return 0;
 
     return j;
@@ -348,7 +356,7 @@ uint64_t DBG_succ::outgoing_edge_idx(uint64_t i, TAlphabet c) {
  * index of the node the edge is pointing to.
  */
 uint64_t DBG_succ::outgoing(uint64_t i, TAlphabet c) {
-    if (i > W->n)
+    if (i > W->size())
         return 0;
     if (i == 0)
         return 0;
@@ -357,7 +365,7 @@ uint64_t DBG_succ::outgoing(uint64_t i, TAlphabet c) {
     if (j == 0)
         return 0;
     j = fwd(j);
-    if (j == 0 || j == W->n)
+    if (j == 0 || j == W->size())
         return 0;
     return j;
 }
@@ -393,7 +401,7 @@ uint64_t DBG_succ::incoming(uint64_t i, TAlphabet c) {
  * edges from node i.
  */
 uint64_t DBG_succ::outdegree(uint64_t i) {
-    return (i < W->n) ? succ_last(i) - pred_last(i - 1) : 0;
+    return (i < W->size()) ? succ_last(i) - pred_last(i - 1) : 0;
 }
 
 
@@ -410,44 +418,7 @@ uint64_t DBG_succ::indegree(uint64_t i) {
     return 1 + rank_W(y, d + alph_size) - rank_W(x, d + alph_size);
 }
 
-/**
- * Given a node label s, this function returns the index
- * of the corresponding node, if this node exists and 0 otherwise.
- */
-/*
-template <class T>
-uint64_t DBG_succ::index(T &s_, uint64_t length) {
-    TAlphabet s;
-    if (std::is_same<T, std::string>::value) {
-        s = get_alphabet_number(s_[0]);
-    } else {
-        s = s_[0];
-    }
-    // init range
-    uint64_t rl = succ_last(F[s] + 1);
-    uint64_t ru = s+1 < alph_size ? F[s + 1] : last->size()-1; // upper bound
-    uint64_t up = (length == 0) ? s_.length() : std::min(length, s_.length());
-    // update range iteratively while scanning through s
-    for (uint64_t i = 1; i < up; i++) {
-        if (std::is_same<T, std::string>::value) {
-            s = get_alphabet_number(s_[i]);
-        } else {
-            s = s_[i];
-        }
-        rl = std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size));
-        if (rl >= W->n)
-            return 0;
-        ru = std::max(pred_W(ru, s), pred_W(ru, s + alph_size));
-        if (ru >= W->n)
-            return 0;
-        if (rl > ru)
-            return 0;
-        rl = outgoing(rl, s);
-        ru = outgoing(ru, s);
-    }
-    return (ru > rl) ? ru : rl;
-}
-*/
+
 
 /** 
  * Given a string str and a maximal number of edit operations
@@ -476,12 +447,14 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(std::string &str, uint64_t max_distan
         hits.push(HitInfo(rl, ru, 1, 1, (uint64_t) (b != s), std::string(1, get_alphabet_symbol(b)), tmp));
 
         // opening/extending a gap in the pattern starting with the first position
-        for (size_t p = 1; p < str.length() - 1; ++p) {
-            TAlphabet ss = get_alphabet_number(str[p]);
-            if ((p + (b != ss)) > max_distance)
-                break;
-            hits.push(HitInfo(rl, ru, p + 1, 1, p + (b != ss), std::string(p, 'd') + std::string(1, get_alphabet_symbol(b)), tmp));
-            //std::cout << "a) adding '-'" << std::endl;
+        if (max_distance > 0) {
+            for (size_t p = 1; p < str.length() - 1; ++p) {
+                TAlphabet ss = get_alphabet_number(str[p]);
+                if ((p + (b != ss)) > max_distance)
+                    break;
+                hits.push(HitInfo(rl, ru, p + 1, 1, p + (b != ss), std::string(p, 'd') + std::string(1, get_alphabet_symbol(b)), tmp));
+                //std::cout << "a) adding '-'" << std::endl;
+            }
         }
     }
 
@@ -525,7 +498,7 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(std::string &str, uint64_t max_distan
                         ru = std::max(pred_W(curr_hit.ru, b), pred_W(curr_hit.ru, b + alph_size));
 
                         // the current range in W does not contain our next symbol
-                        if ((rl >= W->n) || (ru >= W->n) || (rl > ru))
+                        if ((rl >= W->size()) || (ru >= W->size()) || (rl > ru))
                             continue;
 
                         // update the SA range with the current symbol b
@@ -561,39 +534,6 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(std::string &str, uint64_t max_distan
 }
 
 
-uint64_t DBG_succ::index(std::deque<TAlphabet> str) {
-    std::pair<uint64_t, uint64_t> tmp = index_range(str);
-    return (tmp.second > tmp.first) ? tmp.second : tmp.first;
-}
-
-std::pair<uint64_t, uint64_t> DBG_succ::index_range(std::deque<TAlphabet> str) {
-    // get first 
-    std::deque<TAlphabet>::iterator it = str.begin();
-    TAlphabet s = *it % alph_size;
-    it++;
-    // init range
-    uint64_t rl = succ_last(F.at(s) + 1);
-    uint64_t ru = (s < F.size() - 1) ? F.at(s + 1) : (W->n - 1);                // upper bound
-    uint64_t pl;
-    //fprintf(stderr, "char: %i rl: %i ru: %i\n", (int) s, (int) rl, (int) ru);
-    // update range iteratively while scanning through s
-    for (; it != str.end(); it++) {
-        s = *it % alph_size;
-        pl = pred_last(rl - 1) + 1;
-        rl = std::min(succ_W(pl, s), succ_W(pl, s + alph_size));
-        if (rl >= W->n)
-            return std::make_pair(0, 0);
-        ru = std::max(pred_W(ru, s), pred_W(ru, s + alph_size));
-        if (ru >= W->n)
-            return std::make_pair(0, 0);
-        if (rl > ru)
-            return std::make_pair(0, 0);
-        rl = outgoing(rl, s);
-        ru = outgoing(ru, s);
-    }
-    return std::make_pair(rl, ru);
-}
-
 /**
  * Given a node label s, this function returns the index
  * of the corresponding node or the closest predecessor, if no node 
@@ -605,11 +545,11 @@ uint64_t DBG_succ::index_predecessor(std::deque<TAlphabet> str) {
     TAlphabet s1 = *it % alph_size;
     // init range
     uint64_t rl = succ_last(F.at(s1) + 1);                           // lower bound
-    uint64_t ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->n - 1);    // upper bound
+    uint64_t ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->size() - 1);    // upper bound
     while (rl > ru && s1 > 0) {
         s1--;
         rl = succ_last(F.at(s1) + 1);
-        ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->n - 1);
+        ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->size() - 1);
     }
     /*if (s1 == 0) {
         s1 = *it % alph_size + 1;
@@ -642,11 +582,11 @@ uint64_t DBG_succ::index_predecessor(std::deque<TAlphabet> str) {
             rl = std::max(pred_W(pll, s1), pred_W(pll, s1 + alph_size));
             if (rl == 0) {
                 rl = std::min(succ_W(pll, s1), succ_W(pll, s1 + alph_size));
-                if (rl >= W->n) {
+                if (rl >= W->size()) {
                     s1--;
                     while (s1 > 0) {
-                        rl = std::max(pred_W(W->n - 1, s1), pred_W(W->n - 1, s1));
-                        if (rl < W->n)
+                        rl = std::max(pred_W(W->size() - 1, s1), pred_W(W->size() - 1, s1));
+                        if (rl < W->size())
                             break;
                         s1--;
                     }
@@ -655,7 +595,7 @@ uint64_t DBG_succ::index_predecessor(std::deque<TAlphabet> str) {
                         before = true;
                         while (s1 < alph_size) {
                             rl = std::min(succ_W(1, s1), succ_W(1 + alph_size, s1));
-                            if (rl < W->n)
+                            if (rl < W->size())
                                 break;
                             s1++;
                         }
@@ -696,6 +636,7 @@ std::pair<uint64_t, uint64_t> DBG_succ::get_equal_node_range(uint64_t i) {
  * will return the k-th last character of node i.
  */
 std::pair<TAlphabet, uint64_t> DBG_succ::get_minus_k_value(uint64_t i, uint64_t k) {
+
     for (; k > 0; --k)
         i = bwd(succ_last(i));
     return std::make_pair(get_node_end_value(i), bwd(succ_last(i)));
@@ -779,7 +720,7 @@ std::string DBG_succ::get_node_str(uint64_t k_node) {
  * Return number of edges in the current graph.
  */
 uint64_t DBG_succ::get_size() {
-    return W->n;
+    return W->size();
 }
 
 /**
@@ -822,17 +763,19 @@ char DBG_succ::get_alphabet_symbol(uint64_t s) {
     return s < alphabet.size() ? alphabet[s] : alphabet[14];
 }
 
-std::vector<uint64_t> DBG_succ::align(kstring_t seq) {
+std::vector<uint64_t> DBG_succ::align(kstring_t seq, uint64_t alignment_length) {
 
-  uint64_t kmer_length = this->get_k();
-  uint64_t no_kmers_in_seq = seq.l - kmer_length + 1;
+    size_t seq_length = seq.l;
+    //std::vector<std::vector<HitInfo> > hit_list;
+    std::vector<uint64_t> indices;
 
-  std::vector<uint64_t> indices (no_kmers_in_seq, 0);
+    if (alignment_length == 0)
+        alignment_length = this->get_k();
 
-  for (uint64_t i = 0; i < no_kmers_in_seq; ++i) {
-  // TODO make sure that kmer is shorter than seq.l
-    std::string kmer(seq.s + i, seq.s + i + kmer_length);
-    indices[i] = this->index(kmer);
+  std::vector<HitInfo> curr_result;
+  for (uint64_t i = 0; i < seq_length - alignment_length + 1; ++i) {
+    std::string kmer(seq.s + i, seq.s + i + alignment_length);
+    indices.push_back(this->index(kmer, kmer.size()));
   }
   
   return indices;
@@ -852,7 +795,6 @@ std::vector<std::vector<HitInfo> > DBG_succ::align_fuzzy(kstring_t seq, uint64_t
         for (uint64_t i = 0; i < seq_length - alignment_length + 1; ++i) {
             std::string kmer(seq.s + i, seq.s + i + alignment_length);
             hit_list.push_back(this->index_fuzzy(kmer, max_distance));
-
         }
     }
     return hit_list;
@@ -868,8 +810,9 @@ uint64_t DBG_succ::get_node_count() {
 /*
  * Return the number of edges in the current graph.
  */
+ //TODO: Check this!!!
 uint64_t DBG_succ::get_edge_count() {
-    return W->n - 1;
+    return W->size() - 1;
 }
 
 //
@@ -939,91 +882,63 @@ TAlphabet DBG_succ::get_alphabet_number(char s) {
 }
 
 
-void DBG_succ::toDynamic() {
+void DBG_succ::switch_state(Config::state_type state) {
 
-    size_t const b = 4;
-    size_t const n = W_stat.size();
+    //std::cerr << "switching state from " << this->state << " to " << state << std::endl;
+    if (this->state == state)
+        return;
+    
+    switch (state) {
+        case Config::cstr: {
+            this->state = Config::cstr;
+        } break;
 
-    // compute total offsets for the individual bins
-    std::vector<uint64_t> offsets ((1ull << (b - 1)) - 1, 0);
-    uint64_t v, m, o, p;
-    for (size_t i = 0; i < n; ++i) {
-        m = (1ull << (b - 1));
-        v = (uint64_t) W_stat.at(i);
-        o = 0;
-        for (size_t ib = 1; ib < b; ++ib) {
-            bool const bit  = m & v;
-            if (!bit)
-                offsets.at(o) += 1;
-            o = 2*o + 1 + bit;
-            m >>= 1;
-        }
-    }
+        case Config::dyn: {
+            if (this->state == Config::cstr) {
+                delete W;
+                W = new wavelet_tree_dyn(W_stat, 4);
+                W_stat.clear();
 
-    libmaus2::bitbtree::BitBTree<6, 64> *tmp = new libmaus2::bitbtree::BitBTree<6, 64>(n * b, false);  
+                delete last;
+                if (last_stat.size()) {
+                    last = new bit_vector_dyn(last_stat);
+                    last_stat.clear();
+                } else {
+                    last = new bit_vector_dyn(last_stat_safe); 
+                    last_stat_safe.clear();
+                }
 
-    uint64_t co;
-    bool bit;
-    std::vector<uint64_t> upto_offsets ((1ull << (b - 1)) - 1, 0);
-    for (size_t i = 0; i < n; ++i) {
-        m = (1ull << (b - 1));
-        v = (uint64_t) W_stat.at(i);
-        o = 0;
-        p = i;
-        co = 0;
-        for (size_t ib = 0; ib < b - 1; ++ib) {
-            bit = m & v;
-            if (bit) {
-                tmp->setBitQuick(ib * n + p + co, true);
-                co += offsets.at(o);
-                p -= upto_offsets.at(o);
+                delete bridge;
+                if (bridge_stat.size()) {
+                    bridge = new bit_vector_dyn(bridge_stat);
+                    bridge_stat.clear();
+                } else {
+                    bridge = NULL;
+                }
             } else {
-                p -= (p - upto_offsets.at(o)); 
-                upto_offsets.at(o) += 1;
+                wavelet_tree* W_new = new wavelet_tree_dyn(W, 4);
+                delete W;
+                W = W_new;
+
+                bit_vector* last_new = new bit_vector_dyn(last);
+                delete last;
+                last = last_new;
             }
-            //dtd::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
-            o = 2*o + 1 + bit;
-            m >>= 1;
-        }
-        bit = m & v;
-        if (bit) {
-           // std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
-            tmp->setBitQuick((b - 1) * n + p + co, true); 
-        }
-    }
-    W_stat.clear();
-    delete W;
-    //W = new libmaus2::wavelet::DynamicWaveletTree<6, 64> (tmp, b, n);
-    W = new WaveletTree(tmp, b, n);
+            this->state = Config::dyn;
+        } break;
 
-    libmaus2::bitbtree::BitBTree<6, 64> *last_new;
-    if (last_stat.size()) {
-        last_new = new libmaus2::bitbtree::BitBTree<6, 64>(last_stat.size(), false);
-        for (size_t i = 0; i < last_stat.size(); ++i)
-            if (last_stat.at(i))
-                last_new->setBitQuick(i, true);
-        last_stat.clear();
-    } else {
-        last_new = new libmaus2::bitbtree::BitBTree<6, 64>(last_stat_safe.size(), false);
-        for (size_t i = 0; i < last_stat_safe.size(); ++i)
-            if (last_stat_safe.at(i))
-                last_new->setBitQuick(i, true);
-        last_stat_safe.clear();
-    }
-    delete last;
-    last = last_new;
+        case Config::stat: {
+            wavelet_tree* W_new = new wavelet_tree_stat(W, 4);
+            delete W;
+            W = W_new;
 
-    BitBTree *bridge_new=NULL;
-    if (bridge_stat.size()) {
-        bridge_new = new BitBTree(bridge_stat.size(), false);
-        for (size_t i=0;i<bridge_stat.size();++i) {
-            if (bridge_stat.at(i))
-                bridge_new->setBitQuick(i, true);
-        }
-        bridge_stat.clear();
+            bit_vector* last_new = new bit_vector_stat(last);
+            delete last;
+            last = last_new;
+
+            this->state = Config::stat;
+        } break;
     }
-    delete bridge;
-    bridge = bridge_new;
 }
 
 
@@ -1036,7 +951,7 @@ void DBG_succ::toDynamic() {
 
 
 void DBG_succ::split_range(std::deque<TAlphabet>* str, std::pair<uint64_t, uint64_t> &range) {
-    range = index_range(*str);
+    range = index_range(*str, str->size());
     if (range.first > range.second) {
         range.first = 0;
         range.second = 0;
@@ -1084,7 +999,7 @@ std::vector<uint64_t> DBG_succ::split_range(uint64_t start, uint64_t end, uint64
                 result.push_back((c < F.at(i + 1)) ? c : 0);
                 v = std::max(v, F.at(i + 1) + 1);
             } else {
-                result.push_back(c < W->n ? c : 0);
+                result.push_back(c < W->size() ? c : 0);
             }
         }
         // translate into final coordinates
@@ -1161,7 +1076,7 @@ uint64_t DBG_succ::next_non_zero(std::vector<uint64_t> v, uint64_t pos) {
 void DBG_succ::print_state() {
 
     fprintf(stderr, "W:\n");
-    for (uint64_t i = 0; i < W->n; i++) {
+    for (uint64_t i = 0; i < W->size(); i++) {
         fprintf(stderr, "\t%lu", (*W)[i]);
         if (i == p)
             fprintf(stderr, "*");
@@ -1182,14 +1097,14 @@ void DBG_succ::print_state() {
 
 //TODO: assume that a sentinel was used during construction
 void DBG_succ::print_state_str() {
-    for (uint64_t i=1;i<W->n;i++) {
+    for (uint64_t i = 1; i < W->size(); i++) {
         std::cout << i << "\t" << get_last(i) << "\t" << get_node_str(i) << "\t" << get_alphabet_symbol((*W)[i]) << ((*W)[i] > alph_size ? "-" : "") << (i==this->p ? "<" : "") << std::endl;
     }    
 }
 
 
 void DBG_succ::print_adj_list() {
-    for (uint64_t edge = 1; edge < W->n; ++edge) {
+    for (uint64_t edge = 1; edge < W->size(); ++edge) {
             fprintf(stdout, "%lu\t%lu\t", rank_last(succ_last(edge)), rank_last(outgoing(edge, (*W)[edge])));
             bool is_first = true;
             for (uint64_t k = 0; k < this->annotation_full.size(); ++k) {
@@ -1216,9 +1131,9 @@ void DBG_succ::print_seq() {
 
     uint64_t linelen = 80;
     uint64_t start = 1;
-    uint64_t end = start + linelen < W->n ? start + linelen : W->n;
+    uint64_t end = start + linelen < W->size() ? start + linelen : W->size();
 
-    while (start < W->n) {
+    while (start < W->size()) {
         for (uint64_t i = start; i < end; i++) {
             if (i % 10 == 0)
                 fprintf(stdout, "%lu", (i / 10) % 10);
@@ -1280,7 +1195,7 @@ void DBG_succ::print_seq() {
         std::cout << std::endl;
 
         start += linelen;
-        end = start + linelen < W->n ? start + linelen : W->n;
+        end = start + linelen < W->size() ? start + linelen : W->size();
     }
 }
 
@@ -1315,6 +1230,8 @@ void DBG_succ::toFile(unsigned int total, unsigned int idx) {
     outstream << k << std::endl;
     outstream << ">p" << std::endl;
     outstream << p << std::endl;
+    outstream << ">s" << std::endl;
+    outstream << state << std::endl;
     outstream.close();
 }
 

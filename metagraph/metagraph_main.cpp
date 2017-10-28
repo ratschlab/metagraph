@@ -39,7 +39,7 @@ void parallel_merge_collect(DBG_succ* result) {
 
     for (size_t i = 0; i < merge_data->result.size(); ++i) {
         if (merge_data->result.at(i)) {
-            construct::append_graph(result, merge_data->result.at(i));
+            construct::append_graph(merge_data->result.at(i), result);
             delete merge_data->result.at(i);
         }
     }
@@ -133,6 +133,7 @@ void *parallel_merge_wrapper(void *arg) {
     }
     pthread_exit((void*) 0);
 }
+
 int main(int argc, char const ** argv) {
 
     // parse command line arguments and options
@@ -193,7 +194,8 @@ int main(int argc, char const ** argv) {
                     }
                 }
                 if (config->fast) {
-                    graph->toDynamic();
+                    //graph->toDynamic();
+                    graph->switch_state(Config::dyn);
                 }
                 graph->p = graph->succ_W(1, 0);
 
@@ -419,14 +421,33 @@ int main(int argc, char const ** argv) {
 
                     //graph->print_seq();
                     uint64_t aln_len = read_stream->seq.l;
+                    bool reverse = false;
 
                     if (config->distance > 0) {
+                        // since we set aln_len = read_stream->seq.l, we only get a single hit vector
                         std::vector<std::vector<HitInfo> > graphindices = graph->align_fuzzy(read_stream->seq, aln_len, config->distance);
 
-                        for (size_t i = 0; i < graphindices.size(); ++i) {
-                            int print_len = (i + aln_len < read_stream->seq.l) ? aln_len : (read_stream->seq.l - i);
-                            printf("%.*s: ", print_len, read_stream->seq.s + i);
+                        //for (size_t i = 0; i < graphindices.size(); ++i) {
+                        size_t i = 0;
+                        int print_len = (i + aln_len < read_stream->seq.l) ? aln_len : (read_stream->seq.l - i);
+                        printf("%.*s: ", print_len, read_stream->seq.s + i);
 
+                        for (size_t l = 0;  l < graphindices.at(i).size(); ++l) {
+                            HitInfo curr_hit(graphindices.at(i).at(l));
+                            for (size_t m = 0; m < curr_hit.path.size(); ++m) {
+                                std::cout << curr_hit.path.at(m) << ':';
+                            }
+                            for (size_t m = curr_hit.rl; m <= curr_hit.ru; ++m) {
+                                std::cout << m << " ";
+                            }
+                            std::cout << "[" << curr_hit.cigar << "] ";
+                        }
+                        //}
+
+                        // try reverse
+                        if (graphindices.at(i).size() == 0) {
+                            reverse_complement(read_stream->seq);
+                            graphindices = graph->align_fuzzy(read_stream->seq, aln_len, config->distance);
                             for (size_t l = 0; l < graphindices.at(i).size(); ++l) {
                                 HitInfo curr_hit(graphindices.at(i).at(l));
                                 for (size_t m = 0; m < curr_hit.path.size(); ++m) {
@@ -437,8 +458,8 @@ int main(int argc, char const ** argv) {
                                 }
                                 std::cout << "[" << curr_hit.cigar << "] ";
                             }
-                            std::cout << std::endl;
                         }
+                        std::cout << std::endl;
                     } else {
                         std::vector<uint64_t> graphindices = graph->align(read_stream->seq);
 
@@ -459,16 +480,20 @@ int main(int argc, char const ** argv) {
 
         //TODO: allow for building by appending/adding to an existing graph
         case Config::build: {
+
             if (!config->infbase.empty()) {
                 graph = new DBG_succ(config->infbase, config);
+                graph->annotationFromFile();
             } else {
                 graph = new DBG_succ(config->k, config);
             }
 
             if (config->verbose)
-               std::cerr << "k is " << config->k << std::endl;
+               std::cerr << "k is " << graph->k << std::endl;
 
             if (config->fast) {
+
+                graph->switch_state(Config::cstr);
 
                 //enumerate all suffices
                 unsigned int suffix_len = (unsigned int)ceil(log2(config->nsplits)/log2(graph->alph_size-1));
@@ -584,7 +609,7 @@ int main(int argc, char const ** argv) {
                 //TODO: cleanup
                 tstart = clock();
                 std::cerr << "Converting static graph to dynamic\t";
-                graph->toDynamic();
+                graph->switch_state(Config::dyn);
                 std::cout << (clock()-tstart)/CLOCKS_PER_SEC << "\n";
             } else {
                 //slower method
@@ -615,6 +640,7 @@ int main(int argc, char const ** argv) {
                     gzclose(input_p);
                 }
             }
+            graph->switch_state(config->state);
             config->infbase = config->outfbase;
             graph->annotationToFile();
             //graph->print_seq();
@@ -775,7 +801,7 @@ int main(int argc, char const ** argv) {
             traverse::toSQL(graph);
         if (!config->outfbase.empty())
             graph->toFile(config->parts_total, config->part_idx);
-
+        
         delete graph;
     }
     delete config;

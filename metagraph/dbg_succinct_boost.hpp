@@ -17,9 +17,9 @@ typedef boost::multiprecision::cpp_int cpp_int;
 namespace kmer_boost {
 
     typedef struct __KMer {
-        ui256 first;
-        size_t second;
-        cpp_int annot;
+        ui256 first;    // kmer sequences
+        size_t second;  // coverage count
+        cpp_int annot;  // annotation vector
     } KMer;
     bool operator<(const KMer& a, const KMer& b);
     
