@@ -2,14 +2,10 @@
 
 
 bool kmer_boost::operator<(const kmer_boost::KMer& a, const kmer_boost::KMer& b) {
-    if (a.first == b.first) {
-        if (a.second == b.second) {
-            return a.annot < b.annot;
-        } else {
-            return a.second < b.second;
-        }
+    if (a.seq == b.seq) {
+        return a.annot < b.annot;
     } else {
-        return a.first < b.first;
+        return a.seq < b.seq;
     }
 }
 

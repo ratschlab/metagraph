@@ -496,13 +496,14 @@ int main(int argc, char const ** argv) {
                 graph->switch_state(Config::cstr);
 
                 //enumerate all suffices
-                unsigned int suffix_len = (unsigned int)ceil(log2(config->nsplits)/log2(graph->alph_size-1));
+                unsigned int suffix_len = (unsigned int) ceil(log2(config->nsplits) / log2(graph->alph_size - 1));
+
                 //should be set to at most k-1 so that W calculation is correct
-                suffix_len = std::min(suffix_len, (unsigned int)graph->k-1);
+                suffix_len = std::min(suffix_len, (unsigned int) graph->k - 1);
                 std::deque<std::string> suffices = {""};
-                for (size_t i=0;i<suffix_len;++i) {
+                for (size_t i = 0; i < suffix_len; ++i) {
                     while (suffices[0].length() < suffix_len) {
-                        for (size_t j=0;j<graph->alph_size;++j) {
+                        for (size_t j = 0; j < graph->alph_size; ++j) {
                             suffices.push_back(graph->alphabet[j] + suffices[0]);
                         }
                         suffices.pop_front();
@@ -520,11 +521,12 @@ int main(int argc, char const ** argv) {
                 clock_t tstart, timelast;
                 
                 //one pass per suffix
-                for (size_t j=0;j<suffices.size();++j) {
+                for (size_t j = 0; j < suffices.size(); ++j) {
                     std::cout << "Suffix: " << suffices[j] << "\n";
                     //add sink nodes
                     construct::add_seq_fast(graph, start, blank, false, config->parallel, suffices[j]);
                     construct::add_seq_fast(graph, graphsink, blank, true, config->parallel, suffices[j]);
+
                     if (suffices[j].find("$") == std::string::npos) {
                         // iterate over input files
                         for (unsigned int f = 0; f < config->fname.size(); ++f) {
@@ -578,18 +580,13 @@ int main(int argc, char const ** argv) {
                                     std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
                                     exit(1);
                                 }
-                                for (size_t i=1;kseq_read(read_stream) >= 0; ++i) {
+                                for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
                                 //while (kseq_read(read_stream) >= 0) {
                                     // possibly reverse k-mers
                                     if (config->reverse)
                                         reverse_complement(read_stream->seq);                    
                                     // add all k-mers of seq to the graph
-                                    //if CID==
-                                    //0: normal
-                                    //1: bridge (from reference)
-                                    //even>1: normal from read
-                                    //odd>1: bridge from read
-                                    construct::add_seq_fast(graph, read_stream->seq, read_stream->name, true, config->parallel, suffices[j], read_stream->qual.l ? i*2 : 0);
+                                    construct::add_seq_fast(graph, read_stream->seq, read_stream->name, true, config->parallel, suffices[j]);
                                 }
                                 kseq_destroy(read_stream);
                             }

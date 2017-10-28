@@ -167,8 +167,8 @@ DBG_succ::~DBG_succ() {
 
     delete W;
     delete last;
-    if (bridge != NULL)
-        delete bridge;
+    //if (bridge != NULL)
+    //    delete bridge;
     for (auto it = annotation_full.begin(); it != annotation_full.end(); ++it) {
         if (*it != NULL) {
             delete *it;
@@ -908,13 +908,13 @@ void DBG_succ::switch_state(Config::state_type state) {
                     last_stat_safe.clear();
                 }
 
-                delete bridge;
-                if (bridge_stat.size()) {
-                    bridge = new bit_vector_dyn(bridge_stat);
-                    bridge_stat.clear();
-                } else {
-                    bridge = NULL;
-                }
+                //delete bridge;
+                //if (bridge_stat.size()) {
+                //    bridge = new bit_vector_dyn(bridge_stat);
+                //    bridge_stat.clear();
+                //} else {
+                //    bridge = NULL;
+                //}
             } else {
                 wavelet_tree* W_new = new wavelet_tree_dyn(W, 4);
                 delete W;

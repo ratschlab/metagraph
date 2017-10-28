@@ -50,8 +50,8 @@ class DBG_succ {
     std::vector<size_t> coverage;
 
     //read bridge indicator
-    std::vector<uint8_t> bridge_stat;
-    bit_vector *bridge = new bit_vector_dyn();
+    //std::vector<uint8_t> bridge_stat;
+    //bit_vector *bridge = new bit_vector_dyn();
 
     // the offset array to mark the offsets for the last column in the implicit node list
     std::vector<TAlphabet> F; 
