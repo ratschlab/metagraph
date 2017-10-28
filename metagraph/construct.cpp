@@ -355,34 +355,37 @@ namespace construct {
             }    
         }    
         if (add_anno) {
-            sdsl::bit_vector* bv;
-            // loop over annotation columns
-            for (size_t i = 0; i <= max_anno_id; ++i) {
-                bv = new sdsl::bit_vector(G->W_stat.size(), 0);
-                if (i < G->annotation_full.size() && G->annotation_full.at(i) != NULL) {
-                    sdsl::select_support_sd<> slct = sdsl::select_support_sd<>(G->annotation_full.at(i));
-                    sdsl::rank_support_sd<> rank = sdsl::rank_support_sd<>(G->annotation_full.at(i));
-                    size_t maxrank = rank(G->annotation_full.at(i)->size());
-                    size_t idx;
-                    for (size_t j = 1; j <= maxrank; ++j) {
-                        idx = slct(j);
-                        if (idx < G->annotation_full.at(i)->size()) {
-                            bv->operator[](idx) = G->annotation_full.at(i)->operator[](idx);
+            for (size_t i = G->annotation_full.size(); i <= max_anno_id; ++i)
+                G->annotation_full.push_back(NULL);
+
+            #pragma omp parallel num_threads(parallel)
+            {    
+                #pragma omp for nowait
+                // loop over annotation columns
+                for (size_t i = 0; i <= max_anno_id; ++i) {
+                    //std::cerr << i << std::endl; 
+                    sdsl::bit_vector* bv = new sdsl::bit_vector(G->W_stat.size(), 0);
+                    if (G->annotation_full.at(i) != NULL) {
+                        sdsl::select_support_sd<> slct = sdsl::select_support_sd<>(G->annotation_full.at(i));
+                        sdsl::rank_support_sd<> rank = sdsl::rank_support_sd<>(G->annotation_full.at(i));
+                        size_t maxrank = rank(G->annotation_full.at(i)->size());
+                        size_t idx;
+                        for (size_t j = 1; j <= maxrank; ++j) {
+                            idx = slct(j);
+                            if (idx < G->annotation_full.at(i)->size()) {
+                                bv->operator[](idx) = G->annotation_full.at(i)->operator[](idx);
+                            }
                         }
                     }
-                }
-                for (size_t k = 0; k < G->kmers.size(); ++k) {
-                    if ((G->kmers.at(k).annot > 0) && (msb(G->kmers.at(k).annot) >= i) && ((cpp_int(1)<<i) & G->kmers.at(k).annot))
-                        bv->operator[](k + curpos) = true;
-                }
-                if (i < G->annotation_full.size()) {
+                    for (size_t k = 0; k < G->kmers.size(); ++k) {
+                        if ((G->kmers.at(k).annot > 0) && (msb(G->kmers.at(k).annot) >= i) && ((cpp_int(1)<<i) & G->kmers.at(k).annot))
+                            bv->operator[](k + curpos) = true;
+                    }
                     if (G->annotation_full.at(i) != NULL)
                         delete G->annotation_full.at(i);
                     G->annotation_full.at(i) = new sdsl::sd_vector<>(*bv);
-                } else {
-                    G->annotation_full.push_back(new sdsl::sd_vector<>(*bv));
+                    delete bv;
                 }
-                delete bv;
             }
         }
         G->kmers.clear();
