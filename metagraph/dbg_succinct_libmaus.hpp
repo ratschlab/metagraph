@@ -223,47 +223,60 @@ class DBG_succ {
      * Given a node label s, this function returns the index
      * of the corresponding node, if this node exists and 0 otherwise.
      */
-    template <class T> uint64_t index(T &s_, uint64_t length) {
+    template <class T> 
+    uint64_t index(T &s_, uint64_t length) {
+        std::pair<uint64_t, uint64_t> range = index_range<T>(s_, length);
+        if (range.first == 0 && range.second == 0) {
+            return 0;
+        } else {
+            return (range.second > range.first) ? range.second : range.first;
+        }
+    }
+
+    /**
+     * Given a node label str, this function returns the index range
+     * of nodes sharing the suffix str, if no such range exists, the pair
+     (0, 0) is returnd.
+     */
+    template <class T>
+    std::pair<uint64_t, uint64_t> index_range(T &str, uint64_t length) {
+        
+        // get first 
         TAlphabet s;
         if (std::is_same<T, std::string>::value) {
-            s = get_alphabet_number(s_[0]);
+            s = get_alphabet_number(str[0]);
         } else {
-            s = s_[0];
-        }    
+            s = str[0];
+        }
         // init range
-        uint64_t rl = succ_last(F[s] + 1);
-        uint64_t ru = s+1 < alph_size ? F[s + 1] : last->size()-1; // upper bound
+        uint64_t rl = succ_last(F.at(s) + 1);
+        uint64_t ru = (s < F.size() - 1) ? F.at(s + 1) : (W->size() - 1);                // upper bound
+        uint64_t pl;
+        //fprintf(stderr, "char: %i rl: %i ru: %i\n", (int) s, (int) rl, (int) ru);
         // update range iteratively while scanning through s
-        for (uint64_t i = 1; i < length; i++) {
+        for (uint64_t i = 1; i < length; ++i) {
             if (std::is_same<T, std::string>::value) {
-                s = get_alphabet_number(s_[i]);
+                s = get_alphabet_number(str[i]);
             } else {
-                s = s_[i];
-            }    
-            rl = std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size));
+                s = str[i];
+            }
+            pl = pred_last(rl - 1) + 1;
+            rl = std::min(succ_W(pl, s), succ_W(pl, s + alph_size));
             if (rl >= W->size())
-                return 0;
+                return std::make_pair(0, 0);
             ru = std::max(pred_W(ru, s), pred_W(ru, s + alph_size));
             if (ru >= W->size())
-                return 0;
+                return std::make_pair(0, 0);
             if (rl > ru)
-                return 0;
+                return std::make_pair(0, 0);
+
             rl = outgoing(rl, s);
             ru = outgoing(ru, s);
-        }    
-        return (ru > rl) ? ru : rl;
-
+        }
+        return std::make_pair(rl, ru);
     }
-
-    uint64_t index(std::string &s_) {
-        return index(s_, s_.length());
-    }
-
-    uint64_t index(std::deque<TAlphabet> str);
 
     std::vector<HitInfo> index_fuzzy(std::string &str, uint64_t eops);
-
-    std::pair<uint64_t, uint64_t> index_range(std::deque<TAlphabet> str);
 
     uint64_t index_predecessor(std::deque<TAlphabet> str);
 
@@ -346,7 +359,7 @@ class DBG_succ {
      * Breaks the seq into k-mers and searches for the index of each
      * k-mer in the graph. Returns these indices.
      */
-    std::vector<uint64_t> align(kstring_t seq);
+    std::vector<uint64_t> align(kstring_t seq, uint64_t alignment_length = 0);
 
     std::vector<std::vector<HitInfo> > align_fuzzy(kstring_t seq, uint64_t max_distance = 0, uint64_t alignment_length = 0);
 

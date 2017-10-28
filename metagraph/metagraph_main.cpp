@@ -420,14 +420,33 @@ int main(int argc, char const ** argv) {
 
                     //graph->print_seq();
                     uint64_t aln_len = read_stream->seq.l;
+                    bool reverse = false;
 
                     if (config->distance > 0) {
+                        // since we set aln_len = read_stream->seq.l, we only get a single hit vector
                         std::vector<std::vector<HitInfo> > graphindices = graph->align_fuzzy(read_stream->seq, aln_len, config->distance);
 
-                        for (size_t i = 0; i < graphindices.size(); ++i) {
-                            int print_len = (i + aln_len < read_stream->seq.l) ? aln_len : (read_stream->seq.l - i);
-                            printf("%.*s: ", print_len, read_stream->seq.s + i);
+                        //for (size_t i = 0; i < graphindices.size(); ++i) {
+                        size_t i = 0;
+                        int print_len = (i + aln_len < read_stream->seq.l) ? aln_len : (read_stream->seq.l - i);
+                        printf("%.*s: ", print_len, read_stream->seq.s + i);
 
+                        for (size_t l = 0;  l < graphindices.at(i).size(); ++l) {
+                            HitInfo curr_hit(graphindices.at(i).at(l));
+                            for (size_t m = 0; m < curr_hit.path.size(); ++m) {
+                                std::cout << curr_hit.path.at(m) << ':';
+                            }
+                            for (size_t m = curr_hit.rl; m <= curr_hit.ru; ++m) {
+                                std::cout << m << " ";
+                            }
+                            std::cout << "[" << curr_hit.cigar << "] ";
+                        }
+                        //}
+
+                        // try reverse
+                        if (graphindices.at(i).size() == 0) {
+                            reverse_complement(read_stream->seq);
+                            graphindices = graph->align_fuzzy(read_stream->seq, aln_len, config->distance);
                             for (size_t l = 0; l < graphindices.at(i).size(); ++l) {
                                 HitInfo curr_hit(graphindices.at(i).at(l));
                                 for (size_t m = 0; m < curr_hit.path.size(); ++m) {
@@ -438,8 +457,8 @@ int main(int argc, char const ** argv) {
                                 }
                                 std::cout << "[" << curr_hit.cigar << "] ";
                             }
-                            std::cout << std::endl;
                         }
+                        std::cout << std::endl;
                     } else {
                         std::vector<uint64_t> graphindices = graph->align(read_stream->seq);
 
@@ -463,6 +482,7 @@ int main(int argc, char const ** argv) {
 
             if (!config->infbase.empty()) {
                 graph = new DBG_succ(config->infbase, config);
+                graph->annotationFromFile();
             } else {
                 graph = new DBG_succ(config->k, config);
             }

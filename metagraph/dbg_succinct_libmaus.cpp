@@ -413,44 +413,7 @@ uint64_t DBG_succ::indegree(uint64_t i) {
     return 1 + rank_W(y, d + alph_size) - rank_W(x, d + alph_size);
 }
 
-/**
- * Given a node label s, this function returns the index
- * of the corresponding node, if this node exists and 0 otherwise.
- */
-/*
-template <class T>
-uint64_t DBG_succ::index(T &s_, uint64_t length) {
-    TAlphabet s;
-    if (std::is_same<T, std::string>::value) {
-        s = get_alphabet_number(s_[0]);
-    } else {
-        s = s_[0];
-    }
-    // init range
-    uint64_t rl = succ_last(F[s] + 1);
-    uint64_t ru = s+1 < alph_size ? F[s + 1] : last->size()-1; // upper bound
-    uint64_t up = (length == 0) ? s_.length() : std::min(length, s_.length());
-    // update range iteratively while scanning through s
-    for (uint64_t i = 1; i < up; i++) {
-        if (std::is_same<T, std::string>::value) {
-            s = get_alphabet_number(s_[i]);
-        } else {
-            s = s_[i];
-        }
-        rl = std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size));
-        if (rl >= W->n)
-            return 0;
-        ru = std::max(pred_W(ru, s), pred_W(ru, s + alph_size));
-        if (ru >= W->n)
-            return 0;
-        if (rl > ru)
-            return 0;
-        rl = outgoing(rl, s);
-        ru = outgoing(ru, s);
-    }
-    return (ru > rl) ? ru : rl;
-}
-*/
+
 
 /** 
  * Given a string str and a maximal number of edit operations
@@ -479,12 +442,14 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(std::string &str, uint64_t max_distan
         hits.push(HitInfo(rl, ru, 1, 1, (uint64_t) (b != s), std::string(1, get_alphabet_symbol(b)), tmp));
 
         // opening/extending a gap in the pattern starting with the first position
-        for (size_t p = 1; p < str.length() - 1; ++p) {
-            TAlphabet ss = get_alphabet_number(str[p]);
-            if ((p + (b != ss)) > max_distance)
-                break;
-            hits.push(HitInfo(rl, ru, p + 1, 1, p + (b != ss), std::string(p, 'd') + std::string(1, get_alphabet_symbol(b)), tmp));
-            //std::cout << "a) adding '-'" << std::endl;
+        if (max_distance > 0) {
+            for (size_t p = 1; p < str.length() - 1; ++p) {
+                TAlphabet ss = get_alphabet_number(str[p]);
+                if ((p + (b != ss)) > max_distance)
+                    break;
+                hits.push(HitInfo(rl, ru, p + 1, 1, p + (b != ss), std::string(p, 'd') + std::string(1, get_alphabet_symbol(b)), tmp));
+                //std::cout << "a) adding '-'" << std::endl;
+            }
         }
     }
 
@@ -563,39 +528,6 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(std::string &str, uint64_t max_distan
     return result;
 }
 
-
-uint64_t DBG_succ::index(std::deque<TAlphabet> str) {
-    std::pair<uint64_t, uint64_t> tmp = index_range(str);
-    return (tmp.second > tmp.first) ? tmp.second : tmp.first;
-}
-
-std::pair<uint64_t, uint64_t> DBG_succ::index_range(std::deque<TAlphabet> str) {
-    // get first 
-    std::deque<TAlphabet>::iterator it = str.begin();
-    TAlphabet s = *it % alph_size;
-    it++;
-    // init range
-    uint64_t rl = succ_last(F.at(s) + 1);
-    uint64_t ru = (s < F.size() - 1) ? F.at(s + 1) : (W->size() - 1);                // upper bound
-    uint64_t pl;
-    //fprintf(stderr, "char: %i rl: %i ru: %i\n", (int) s, (int) rl, (int) ru);
-    // update range iteratively while scanning through s
-    for (; it != str.end(); it++) {
-        s = *it % alph_size;
-        pl = pred_last(rl - 1) + 1;
-        rl = std::min(succ_W(pl, s), succ_W(pl, s + alph_size));
-        if (rl >= W->size())
-            return std::make_pair(0, 0);
-        ru = std::max(pred_W(ru, s), pred_W(ru, s + alph_size));
-        if (ru >= W->size())
-            return std::make_pair(0, 0);
-        if (rl > ru)
-            return std::make_pair(0, 0);
-        rl = outgoing(rl, s);
-        ru = outgoing(ru, s);
-    }
-    return std::make_pair(rl, ru);
-}
 
 /**
  * Given a node label s, this function returns the index
@@ -826,17 +758,19 @@ char DBG_succ::get_alphabet_symbol(uint64_t s) {
     return s < alphabet.size() ? alphabet[s] : alphabet[14];
 }
 
-std::vector<uint64_t> DBG_succ::align(kstring_t seq) {
+std::vector<uint64_t> DBG_succ::align(kstring_t seq, uint64_t alignment_length) {
 
-  uint64_t kmer_length = this->get_k();
-  uint64_t no_kmers_in_seq = seq.l - kmer_length + 1;
+    size_t seq_length = seq.l;
+    //std::vector<std::vector<HitInfo> > hit_list;
+    std::vector<uint64_t> indices;
 
-  std::vector<uint64_t> indices (no_kmers_in_seq, 0);
+    if (alignment_length == 0)
+        alignment_length = this->get_k();
 
-  for (uint64_t i = 0; i < no_kmers_in_seq; ++i) {
-  // TODO make sure that kmer is shorter than seq.l
-    std::string kmer(seq.s + i, seq.s + i + kmer_length);
-    indices[i] = this->index(kmer);
+  std::vector<HitInfo> curr_result;
+  for (uint64_t i = 0; i < seq_length - alignment_length + 1; ++i) {
+    std::string kmer(seq.s + i, seq.s + i + alignment_length);
+    indices.push_back(this->index(kmer, kmer.size()));
   }
   
   return indices;
@@ -856,7 +790,6 @@ std::vector<std::vector<HitInfo> > DBG_succ::align_fuzzy(kstring_t seq, uint64_t
         for (uint64_t i = 0; i < seq_length - alignment_length + 1; ++i) {
             std::string kmer(seq.s + i, seq.s + i + alignment_length);
             hit_list.push_back(this->index_fuzzy(kmer, max_distance));
-
         }
     }
     return hit_list;
@@ -1013,7 +946,7 @@ void DBG_succ::switch_state(Config::state_type state) {
 
 
 void DBG_succ::split_range(std::deque<TAlphabet>* str, std::pair<uint64_t, uint64_t> &range) {
-    range = index_range(*str);
+    range = index_range(*str, str->size());
     if (range.first > range.second) {
         range.first = 0;
         range.second = 0;

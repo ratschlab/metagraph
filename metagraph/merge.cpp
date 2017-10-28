@@ -183,7 +183,7 @@ namespace merge {
 
             if (new_branch) {
                 // find node where to restart insertion
-                uint64_t ridx = Gt->index(last_k);
+                uint64_t ridx = Gt->index(last_k, last_k.size());
                 // put at the beginning of equal node range
                 ridx = Gt->pred_last(ridx - 1) + 1;
                 ridx -= (Gt->p < ridx);
@@ -349,7 +349,7 @@ namespace merge {
         std::deque<TAlphabet> tmp_p;
         for (size_t t = 0; t < Gt->k; t++)
             tmp_p.push_back(6);
-        uint64_t old_p = Gt->pred_last(Gt->index(tmp_p) - 1) + 1;
+        uint64_t old_p = Gt->pred_last(Gt->index(tmp_p, tmp_p.size()) - 1) + 1;
 
         old_p -= (Gt->p < old_p);
         Gt->W->remove(Gt->p);
