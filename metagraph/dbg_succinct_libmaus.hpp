@@ -4,30 +4,16 @@
 #include <zlib.h>
 #include <unordered_map>
 
-#include <libmaus2/bitbtree/bitbtree.hpp>
-#include <libmaus2/wavelet/DynamicWaveletTree.hpp>
-
 #include "config.hpp"
 #include "datatypes.hpp"
 #include "dbg_succinct_boost.hpp"
 
-#include <sdsl/wavelet_trees.hpp>
-#include <sdsl/bit_vectors.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
 #include "dbg_succinct_boost.hpp"
 
 #include <type_traits>
 
 typedef boost::multiprecision::uint256_t ui256;
-
-//libmaus2 structures
-typedef libmaus2::bitbtree::BitBTree<6, 64> BitBTree;
-//typedef libmaus2::wavelet::DynamicWaveletTree<6, 64> WaveletTree;
-
-//SDSL-based structures
-//typedef rs_bit_vector BitBTree;
-//typedef dyn_wavelet WaveletTree;
-typedef dyn_wavelet2 WaveletTree;
 
 class DBG_succ {
 
@@ -45,19 +31,17 @@ class DBG_succ {
     AnnotationHash hasher;
 
     //store the position of the last character position modified in F
-    size_t lastlet  =0;
+    size_t lastlet = 0;
 
     // the bit array indicating the last outgoing edge of a node
-    BitBTree *last = new BitBTree();
-    //libmaus2::bitbtree::BitBTree<6, 64> *last = new libmaus2::bitbtree::BitBTree<6, 64>();
+    bit_vector *last = new bit_vector_dyn();
 
     // the array containing the edge labels
-    //libmaus2::wavelet::DynamicWaveletTree<6, 64> *W = new libmaus2::wavelet::DynamicWaveletTree<6, 64>(4); // 4 is log (sigma)
-    WaveletTree *W = new WaveletTree(4);
+    wavelet_tree *W = new wavelet_tree_dyn(4); // 4 is log (sigma)
 
     // the bit array indicating the last outgoing edge of a node (static container for full init)
     std::vector<bool> last_stat;
-    std::vector<uint8_t> last_stat_safe;
+    std::vector<uint8_t> last_stat_safe; // need uint8 here for thread safety
 
     // the array containing the edge labels
     std::vector<uint8_t> W_stat;
@@ -67,7 +51,7 @@ class DBG_succ {
 
     //read bridge indicator
     std::vector<uint8_t> bridge_stat;
-    BitBTree *bridge = new BitBTree();
+    bit_vector *bridge = new bit_vector_dyn();
 
     // the offset array to mark the offsets for the last column in the implicit node list
     std::vector<TAlphabet> F; 
@@ -89,6 +73,9 @@ class DBG_succ {
     // alphabet
     const std::string alphabet; //("$ACGTNX$ACGTNXn"); 
 
+    // state of graph
+    Config::state_type state = Config::stat;
+
     // annotation containers
     std::deque<uint32_t> annotation; // list that associates each node in the graph with an annotation hash
     std::vector<std::string> id_to_label; // maps the label ID back to the original string
@@ -100,8 +87,6 @@ class DBG_succ {
     //std::vector<sdsl::rrr_vector<63>* > annotation_full;
     std::vector<sdsl::sd_vector<>* > annotation_full;
     sdsl::bit_vector* annotation_curr = NULL;
-    rs_bit_vector annotation_new;
-    rs_bit_vector annotation_colors;
     std::vector<sdsl::rrr_vector<63> > colors_to_bits;
     std::vector<std::string> bits_to_labels;
     size_t anno_labels;
@@ -238,47 +223,60 @@ class DBG_succ {
      * Given a node label s, this function returns the index
      * of the corresponding node, if this node exists and 0 otherwise.
      */
-    template <class T> uint64_t index(T &s_, uint64_t length) {
+    template <class T> 
+    uint64_t index(T &s_, uint64_t length) {
+        std::pair<uint64_t, uint64_t> range = index_range<T>(s_, length);
+        if (range.first == 0 && range.second == 0) {
+            return 0;
+        } else {
+            return (range.second > range.first) ? range.second : range.first;
+        }
+    }
+
+    /**
+     * Given a node label str, this function returns the index range
+     * of nodes sharing the suffix str, if no such range exists, the pair
+     (0, 0) is returnd.
+     */
+    template <class T>
+    std::pair<uint64_t, uint64_t> index_range(T &str, uint64_t length) {
+        
+        // get first 
         TAlphabet s;
         if (std::is_same<T, std::string>::value) {
-            s = get_alphabet_number(s_[0]);
+            s = get_alphabet_number(str[0]);
         } else {
-            s = s_[0];
-        }    
+            s = str[0];
+        }
         // init range
-        uint64_t rl = succ_last(F[s] + 1);
-        uint64_t ru = s+1 < alph_size ? F[s + 1] : last->size()-1; // upper bound
+        uint64_t rl = succ_last(F.at(s) + 1);
+        uint64_t ru = (s < F.size() - 1) ? F.at(s + 1) : (W->size() - 1);                // upper bound
+        uint64_t pl;
+        //fprintf(stderr, "char: %i rl: %i ru: %i\n", (int) s, (int) rl, (int) ru);
         // update range iteratively while scanning through s
-        for (uint64_t i = 1; i < length; i++) {
+        for (uint64_t i = 1; i < length; ++i) {
             if (std::is_same<T, std::string>::value) {
-                s = get_alphabet_number(s_[i]);
+                s = get_alphabet_number(str[i]);
             } else {
-                s = s_[i];
-            }    
-            rl = std::min(succ_W(pred_last(rl - 1) + 1, s), succ_W(pred_last(rl - 1) + 1, s + alph_size));
-            if (rl >= W->n)
-                return 0;
+                s = str[i];
+            }
+            pl = pred_last(rl - 1) + 1;
+            rl = std::min(succ_W(pl, s), succ_W(pl, s + alph_size));
+            if (rl >= W->size())
+                return std::make_pair(0, 0);
             ru = std::max(pred_W(ru, s), pred_W(ru, s + alph_size));
-            if (ru >= W->n)
-                return 0;
+            if (ru >= W->size())
+                return std::make_pair(0, 0);
             if (rl > ru)
-                return 0;
+                return std::make_pair(0, 0);
+
             rl = outgoing(rl, s);
             ru = outgoing(ru, s);
-        }    
-        return (ru > rl) ? ru : rl;
-
+        }
+        return std::make_pair(rl, ru);
     }
-
-    uint64_t index(std::string &s_) {
-        return index(s_, s_.length());
-    }
-
-    uint64_t index(std::deque<TAlphabet> str);
 
     std::vector<HitInfo> index_fuzzy(std::string &str, uint64_t eops);
-
-    std::pair<uint64_t, uint64_t> index_range(std::deque<TAlphabet> str);
 
     uint64_t index_predecessor(std::deque<TAlphabet> str);
 
@@ -361,7 +359,7 @@ class DBG_succ {
      * Breaks the seq into k-mers and searches for the index of each
      * k-mer in the graph. Returns these indices.
      */
-    std::vector<uint64_t> align(kstring_t seq);
+    std::vector<uint64_t> align(kstring_t seq, uint64_t alignment_length = 0);
 
     std::vector<std::vector<HitInfo> > align_fuzzy(kstring_t seq, uint64_t max_distance = 0, uint64_t alignment_length = 0);
 
@@ -395,7 +393,7 @@ class DBG_succ {
      */
     void replaceW(size_t i, TAlphabet val);
 
-    void toDynamic();
+    void switch_state(Config::state_type state);
     
     //
     //

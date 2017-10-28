@@ -1,6 +1,3 @@
-//#include <cstdlib>
-//#include <cstdio>
-//#include <cstring>
 #include "config.hpp"
 
 // default constructor
@@ -75,6 +72,8 @@ Config::Config(int argc, const char *argv[]) {
             refpath = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-s") || !strcmp(argv[i], "--num-splits")) {
             nsplits = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "-t") || !strcmp(argv[i], "--state")) {
+            state = (state_type) atoi(argv[++i]);
         //} else if (!strcmp(argv[i], "-D") || !strcmp(argv[i], "--db-path")) {
         //    dbpath = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-S") || !strcmp(argv[i], "--sql-base")) {
@@ -216,6 +215,7 @@ void Config::init() {
     frequency = 1;
     k = 3;
     identity = noidentity;
-    nsplits=1;
+    nsplits = 1;
+    state = stat;
 }
 

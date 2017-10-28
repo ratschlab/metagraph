@@ -373,215 +373,570 @@ struct ParallelAnnotateContainer {
     //pthread_mutex_t* anno_mutex;
 };
 
-class rs_bit_vector: public sdsl::bit_vector {
-    private:
-        sdsl::rank_support_v5<> rk;
-        sdsl::select_support_mcl<> slct;
-        bool update_rs = true;
-        void init_rs() {
-            rk = sdsl::rank_support_v5<>(this);
-            slct = sdsl::select_support_mcl<>(this);
-            update_rs = false;
-        }
-    public:
-        rs_bit_vector(size_t size, bool def) : sdsl::bit_vector(size, def) {
-        }
-        rs_bit_vector() : sdsl::bit_vector() {
-        }
-        void set(size_t id, bool val) {
-            this->operator[](id) = val;
-            update_rs = true;
-        }
-        void setBitQuick(size_t id, bool val) {
-            this->operator[](id) = val;
-            update_rs = true;
-        }
-        void insertBit(size_t id, bool val) {
-            this->resize(this->size()+1);
-            if (this->size() > 1)
-                std::copy_backward(this->begin()+id,(this->end())-1,this->end());
-            set(id, val);
-            update_rs = true;
-        }
-        void deleteBit(size_t id) {
-            if (this->size() > 1)
-                std::copy(this->begin()+id+1,this->end(),this->begin()+id);
-            this->resize(this->size()-1);
-            update_rs = true;
-        }
-        void deserialise(std::istream &in) {
-            this->load(in);
-        }
-        void serialise(std::ostream &out) {
-            this->serialize(out);
-        }
-        uint64_t select1(size_t id) {
-            if (update_rs)
-                init_rs();
-            //compensating for libmaus weirdness
-            id++;
-            size_t maxrank = rk(this->size());
-            if (id > maxrank) {
-                //TODO: should this line ever be reached?
-                return this->size();
-            }
-            return slct(id);
-        }
-        uint64_t rank1(size_t id) {
-            if (update_rs)
-                init_rs();
-            //the rank method in SDSL does not include id in the count
-            return rk(id >= this->size() ? this->size() : id+1);
-        }
+class bit_vector {
+
+public:
+
+    virtual ~bit_vector() {};
+
+    virtual uint64_t size() = 0;
+    virtual void set(size_t id, bool val) = 0;
+    virtual void setBitQuick(size_t id, bool val) = 0;
+    //virtual bool const& operator[](size_t id) const = 0;
+    virtual bool operator[](size_t id) = 0;
+    virtual void insertBit(size_t id, bool val) = 0;
+    virtual void deleteBit(size_t id) = 0;
+    virtual void serialise(std::ostream &out) = 0;
+    virtual void deserialise(std::istream &in) = 0;
+    virtual uint64_t select1(size_t id) = 0;
+    virtual uint64_t rank1(size_t id) = 0;
 };
 
-class dyn_wavelet: public sdsl::int_vector<> {
-    private:
-        sdsl::wt_int<> wwt;
-        size_t logsigma;
-        bool update_rs;
-        void init_wt() {
-            this->resize(n);
-            sdsl::construct_im(wwt, *this);
-            update_rs=false;
+
+class bit_vector_dyn: public bit_vector, public libmaus2::bitbtree::BitBTree<6, 64> {
+
+public:
+    bit_vector_dyn() : libmaus2::bitbtree::BitBTree<6, 64>() {
+    }
+
+    bit_vector_dyn(size_t size, bool def) : libmaus2::bitbtree::BitBTree<6, 64>(size, def) {
+    }
+
+    ~bit_vector_dyn() {
+    }
+
+    bit_vector_dyn(std::vector<uint8_t> &v) : libmaus2::bitbtree::BitBTree<6, 64>(v.size(), false) {
+        for (size_t i = 0; i < v.size(); ++i) {
+            if (v.at(i))
+                this->set(i, true);
         }
-    public:
-        size_t n;
-        dyn_wavelet(size_t logsigma, size_t size, uint64_t def) 
-            : sdsl::int_vector<>(2 * size + 1, def, 1<< logsigma) {
-            n = size;
-            update_rs = true;
+    }
+
+    bit_vector_dyn(std::vector<bool> &v) : libmaus2::bitbtree::BitBTree<6, 64>(v.size(), false) {
+        for (size_t i = 0; i < v.size(); ++i) {
+            if (v.at(i))
+                this->set(i, true);
         }
-        dyn_wavelet(size_t logsigma)
-            : dyn_wavelet(logsigma, 0, 0) {
+    }
+
+
+    bit_vector_dyn(bit_vector* v) : libmaus2::bitbtree::BitBTree<6, 64>(v->size(), false) {
+        for (size_t i = 0; i < v->size(); ++i) {
+            if (v->operator[](i))
+                this->set(i, true);
         }
-        void deserialise(std::istream &in) {
-            wwt.load(in);
-            this->load(in);
-            n = this->size();
-        }
-        dyn_wavelet(std::istream &in) {
-            this->deserialise(in);
-        }
-        void insert(uint64_t val, size_t id) {
-            if (n == this->size()) {
-                this->resize(2*n+1);
-            }
-            n++;
-            if (this->size() > 1)
-                std::copy_backward(this->begin()+id,this->begin()+n-1,this->begin()+n);
-            this->operator[](id) = val;
-            update_rs = true;
-        }
-        void remove(size_t id) {
-            if (this->size() > 1)
-                std::copy(this->begin()+id+1,this->begin()+n,this->begin()+id);
-            n--;
-            update_rs = true;
-        }
-        uint64_t rank(uint64_t c, uint64_t i) {
-            if (update_rs)
-                init_wt();
-            return wwt.rank(i >= wwt.size() ? wwt.size() : i+1, c);
-        }
-        uint64_t select(uint64_t c, uint64_t i) {
-            if (update_rs)
-                init_wt();
-            i++;
-            uint64_t maxrank = wwt.rank(wwt.size(), c);
-            if (i > maxrank) {
-                //TODO: should this line ever be reached?
-                return wwt.size();
-            }
-            return wwt.select(i, c);
-        }
-        void serialise(std::ostream &out) {
-            this->resize(n);
-            wwt.serialize(out);
-            this->serialize(out);
-        }
-        sdsl::int_vector<>::reference operator[](const size_t id) {
-            update_rs = true;
-            return sdsl::int_vector<>::operator[](id);
-        }
+    }
+
+    bit_vector_dyn(std::istream &in) {
+        this->deserialise(in);
+    }
+
+    uint64_t size() {
+        return this->libmaus2::bitbtree::BitBTree<6, 64>::size();
+    }
+
+    void set(size_t id, bool val) {
+        this->libmaus2::bitbtree::BitBTree<6, 64>::set(id, val);
+    }
+    
+    void setBitQuick(size_t id, bool val) {
+        this->libmaus2::bitbtree::BitBTree<6, 64>::setBitQuick(id, val);
+    }
+    
+    //bool const& operator[](size_t id) const {
+    //    return this->libmaus2::bitbtree::BitBTree<6, 64>::operator[](id);
+    //}
+
+    bool operator[](size_t id) {
+        return this->libmaus2::bitbtree::BitBTree<6, 64>::operator[](id);
+    }
+
+    void insertBit(size_t id, bool val) {
+        this->libmaus2::bitbtree::BitBTree<6, 64>::insertBit(id, val);
+    }
+
+    void deleteBit(size_t id) {
+        this->libmaus2::bitbtree::BitBTree<6, 64>::deleteBit(id);
+    }
+
+    void deserialise(std::istream &in) {
+        this->libmaus2::bitbtree::BitBTree<6, 64>::deserialise(in);
+    }
+
+    void serialise(std::ostream &out) {
+        this->libmaus2::bitbtree::BitBTree<6, 64>::serialise(out);
+    }
+
+    uint64_t select1(size_t id) {
+        return this->libmaus2::bitbtree::BitBTree<6, 64>::select1(id);
+    }
+
+    uint64_t rank1(size_t id) {
+        return this->libmaus2::bitbtree::BitBTree<6, 64>::rank1(id);
+    }
 };
+
+class bit_vector_stat: public bit_vector, public sdsl::bit_vector {
+
+private:
+    sdsl::rank_support_v5<> rk;
+    sdsl::select_support_mcl<> slct;
+    bool update_rs = true;
+    void init_rs() {
+        rk = sdsl::rank_support_v5<>(this);
+        slct = sdsl::select_support_mcl<>(this);
+        update_rs = false;
+    }
+public:
+    bit_vector_stat(size_t size, bool def) : sdsl::bit_vector(size, def) {
+    }
+
+    bit_vector_stat(bit_vector* V) : sdsl::bit_vector(V->size(), 0) {
+        for (size_t i = 0; i < V->size(); ++i) {
+            if (V->operator[](i))
+                this->sdsl::bit_vector::operator[](i) = true;
+        }
+    }
+
+    bit_vector_stat(std::istream &in) {
+        this->deserialise(in);
+    }
+
+    bit_vector_stat() : sdsl::bit_vector() {
+    }
+
+    ~bit_vector_stat() {
+    }
+
+    void set(size_t id, bool val) {
+        this->sdsl::bit_vector::operator[](id) = val;
+        update_rs = true;
+    }
+
+    void setBitQuick(size_t id, bool val) {
+        this->sdsl::bit_vector::operator[](id) = val;
+        update_rs = true;
+    }
+
+    //bool const& operator[](size_t id) const {
+    //    return this->operator[](id);
+    //}
+
+    bool operator[](size_t id) {
+        update_rs = true;
+        return this->sdsl::bit_vector::operator[](id);
+    }
+
+    void insertBit(size_t id, bool val) {
+        this->resize(this->size()+1);
+        if (this->size() > 1)
+            std::copy_backward(this->begin()+id,(this->end())-1,this->end());
+        set(id, val);
+        update_rs = true;
+    }
+    void deleteBit(size_t id) {
+        if (this->size() > 1)
+            std::copy(this->begin()+id+1,this->end(),this->begin()+id);
+        this->resize(this->size()-1);
+        update_rs = true;
+    }
+    void deserialise(std::istream &in) {
+        this->load(in);
+    }
+    void serialise(std::ostream &out) {
+        this->serialize(out);
+    }
+    uint64_t select1(size_t id) {
+        if (update_rs)
+            init_rs();
+        //compensating for libmaus weirdness
+        id++;
+        size_t maxrank = rk(this->size());
+        if (id > maxrank) {
+            //TODO: should this line ever be reached?
+            return this->size();
+        }
+        return slct(id);
+    }
+    uint64_t rank1(size_t id) {
+        if (update_rs)
+            init_rs();
+        //the rank method in SDSL does not include id in the count
+        return rk(id >= this->size() ? this->size() : id+1);
+    }
+    uint64_t size() {
+        return this->sdsl::bit_vector::size();
+    }
+};
+
+
+class wavelet_tree {
+    
+public:
+
+    virtual ~wavelet_tree() {};
+
+    virtual uint64_t size() = 0;
+    //virtual void deserialise(std::istream &in) = 0;
+    virtual void serialise(std::ostream &out) = 0;
+    virtual void insert(uint64_t val, size_t id) = 0;
+    virtual void remove(size_t id) = 0;
+    //virtual void set(size_t id, uint64_t val) = 0;
+    virtual uint64_t rank(uint64_t c, uint64_t i) = 0;
+    virtual uint64_t select(uint64_t c, uint64_t i) = 0;
+    //virtual uint64_t const& operator[](size_t id) const = 0;
+    virtual uint64_t operator[](size_t id) = 0;
+    //virtual uint64_t get(size_t id) = 0;
+    // this only makes sense when implemented in the dynamic part
+    virtual bool get_bit_raw(uint64_t id) = 0;
+    
+};
+
+
+class wavelet_tree_stat: public wavelet_tree, public sdsl::int_vector<> {
+
+private:
+    sdsl::wt_int<> wwt;
+    size_t logsigma;
+    bool update_rs;
+    void init_wt() {
+        std::cout << "Initializing WT index" << std::endl;
+        this->resize(n);
+        sdsl::construct_im(wwt, *this);
+        update_rs=false;
+    }
+    size_t n;
+
+public:
+    wavelet_tree_stat(size_t logsigma, size_t size, uint64_t def) 
+        : sdsl::int_vector<>(2 * size + 1, def, 1<< logsigma) {
+        n = size;
+        update_rs = true;
+    }
+
+    wavelet_tree_stat(wavelet_tree* T, size_t logsigma)
+        : sdsl::int_vector<>(T->size(), 0, logsigma) {
+        n = T->size();
+        for (size_t i = 0; i < n; ++i)
+            this->sdsl::int_vector<>::operator[](i) = T->operator[](i);
+        update_rs = true;
+    }
+
+    wavelet_tree_stat(size_t logsigma)
+        : wavelet_tree_stat(logsigma, 0, 0) {
+    }
+
+    wavelet_tree_stat(std::istream &in) {
+        this->deserialise(in);
+        // we assume the wwt has been build before serialization
+        update_rs = false;
+    }
+
+    ~wavelet_tree_stat() {
+    }
+
+    uint64_t size() {
+        return n;
+    }
+
+    void deserialise(std::istream &in) {
+        wwt.load(in);
+        this->load(in);
+        n = this->sdsl::int_vector<>::size();
+    }
+
+    void serialise(std::ostream &out) {
+        this->resize(n);
+        if (update_rs)
+            init_wt();
+        wwt.serialize(out);
+        this->serialize(out);
+    }
+
+    void insert(uint64_t val, size_t id) {
+        if (n == this->size()) {
+            this->resize(2*n+1);
+        }
+        n++;
+        if (this->size() > 1)
+            std::copy_backward(this->begin()+id,this->begin()+n-1,this->begin()+n);
+        this->sdsl::int_vector<>::operator[](id) = val;
+        update_rs = true;
+    }
+
+    void remove(size_t id) {
+        if (this->size() > 1)
+            std::copy(this->begin()+id+1,this->begin()+n,this->begin()+id);
+        n--;
+        update_rs = true;
+    }
+
+    uint64_t rank(uint64_t c, uint64_t i) {
+        if (update_rs)
+            init_wt();
+        return wwt.rank(i >= wwt.size() ? wwt.size() : i+1, c);
+    }
+
+    uint64_t select(uint64_t c, uint64_t i) {
+
+        if (update_rs)
+            init_wt();
+        i++;
+        uint64_t maxrank = wwt.rank(wwt.size(), c);
+        if (i > maxrank) {
+            //TODO: should this line ever be reached?
+            return wwt.size();
+        }
+        return wwt.select(i, c);
+    }
+
+    /*sdsl::int_vector<>::reference operator[](const size_t id) {
+        update_rs = true;
+        return sdsl::int_vector<>::operator[](id);
+    }*/
+
+    //uint64_t const& operator[](size_t id) const {
+    //    return this->operator[](id);
+    //}
+
+    uint64_t operator[](size_t id) {
+//        update_rs = true;
+        return this->sdsl::int_vector<>::operator[](id);
+    }
+
+/*    void set(size_t id, uint64_t val) {
+        update_rs = true;
+        this->sdsl::int_vector<>::operator[](id) = val;
+    }
+
+    uint64_t get(size_t id) {
+        return this->sdsl::int_vector<>::operator[](id);
+    }
+    */
+
+    bool get_bit_raw(uint64_t id) {
+       throw std::logic_error("Not Implemented"); 
+       return id;
+    }
+
+};
+
 
 //Child of DynamicWaveletTree allowing for construction from an int vector
-class dyn_wavelet2 : public libmaus2::wavelet::DynamicWaveletTree<6, 64> {
-    public:
-        dyn_wavelet2(size_t b)
-            : libmaus2::wavelet::DynamicWaveletTree<6, 64>(b) {
-        }
-        dyn_wavelet2(std::istream &in)
-            : libmaus2::wavelet::DynamicWaveletTree<6, 64>(in) {
-        }
-        //TODO: this code is copied from toDynamic. This should be refactored
-        libmaus2::bitbtree::BitBTree<6, 64>* makeTree(std::vector<uint8_t> &W_stat, size_t b, unsigned int parallel=1) {
-            uint64_t n = W_stat.size();
-            std::vector<uint64_t> offsets((1ull << (b-1)) - 1, 0);
-            #pragma omp parallel num_threads(parallel)
-            {
-                uint64_t m,v,o;
-                #pragma omp for
-                for (uint64_t i=0;i<n;++i) {
-                    m = (1ull << (b - 1));
-                    v = (uint64_t) W_stat.at(i);
-                    o = 0;
-                    for (uint64_t ib = 1; ib < b; ++ib) {
-                        bool const bit = m & v;
-                        if (!bit) {
-                            #pragma omp critical
-                            offsets.at(o) += 1;
-                        }
-                        o = 2*o + 1 + bit;
-                        m >>= 1;
+class wavelet_tree_dyn : public wavelet_tree, public libmaus2::wavelet::DynamicWaveletTree<6, 64> {
+
+private:
+
+    libmaus2::bitbtree::BitBTree<6, 64>* makeTree(std::vector<uint8_t> &W_stat, size_t const b, unsigned int parallel=1) {
+
+        size_t const n = W_stat.size();
+
+        // compute total offsets for the individual bins
+        std::vector<uint64_t> offsets((1ull << (b-1)) - 1, 0);
+        #pragma omp parallel num_threads(parallel)
+        {
+            uint64_t v, m, o;
+            #pragma omp for
+            for (size_t i = 0; i < n; ++i) {
+                m = (1ull << (b - 1));
+                v = (uint64_t) W_stat.at(i);
+                o = 0;
+                for (uint64_t ib = 1; ib < b; ++ib) {
+                    bool const bit = m & v;
+                    if (!bit) {
+                        #pragma omp critical
+                        offsets.at(o) += 1;
                     }
+                    o = 2*o + 1 + bit;
+                    m >>= 1;
                 }
             }
-            libmaus2::bitbtree::BitBTree<6, 64> *tmp = new libmaus2::bitbtree::BitBTree<6, 64>(n*b, false);
-            std::vector<uint64_t> upto_offsets ((1ull << (b - 1)) - 1, 0);
-            #pragma omp parallel num_threads(parallel)
-            {
-                uint64_t m,v,o,p,co;
-                bool bit;
-                #pragma omp for
-                for (uint64_t i = 0; i < n; ++i) {
-                    m = (1ull << (b - 1));
-                    v = (uint64_t) W_stat.at(i);
-                    o = 0;
-                    p = i;
-                    co = 0;
-                    for (uint64_t ib = 0; ib < b - 1; ++ib) {
-                        bit = m & v;
-                        if (bit) {
-                            #pragma omp critical
-                            tmp->setBitQuick(ib * n + p + co, true);
-                            co += offsets.at(o);
-                            p -= upto_offsets.at(o);
-                        } else {
-                            p -= (p - upto_offsets.at(o)); 
-                            upto_offsets.at(o) += 1;
-                        }
-                        o = 2*o + 1 + bit;
-                        m >>= 1;
-                    }
+        }
+        //bit_vector *tmp = new bit_vector_dyn(n * b, false);
+        libmaus2::bitbtree::BitBTree<6, 64> *tmp = new libmaus2::bitbtree::BitBTree<6, 64>(n * b, false);
+        std::vector<uint64_t> upto_offsets ((1ull << (b - 1)) - 1, 0);
+
+        #pragma omp parallel num_threads(parallel)
+        {
+            uint64_t m, v, o, p, co;
+            bool bit;
+            #pragma omp for
+            for (uint64_t i = 0; i < n; ++i) {
+                m = (1ull << (b - 1));
+                v = (uint64_t) W_stat.at(i);
+                o = 0;
+                p = i;
+                co = 0;
+                for (uint64_t ib = 0; ib < b - 1; ++ib) {
                     bit = m & v;
                     if (bit) {
                         #pragma omp critical
-                        tmp->setBitQuick((b - 1) * n + p + co, true); 
+                        tmp->setBitQuick(ib * n + p + co, true);
+                        co += offsets.at(o);
+                        p -= upto_offsets.at(o);
+                    } else {
+                        p -= (p - upto_offsets.at(o)); 
+                        upto_offsets.at(o) += 1;
                     }
+                    //std::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
+                    o = 2*o + 1 + bit;
+                    m >>= 1;
+                }
+                bit = m & v;
+                if (bit) {
+                    //std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
+                    #pragma omp critical
+                    tmp->setBitQuick((b - 1) * n + p + co, true); 
                 }
             }
-            return tmp;
         }
+        return tmp;
+    }
 
-        dyn_wavelet2(std::vector<uint8_t> &W_stat, size_t b, unsigned int parallel=1)
-            : libmaus2::wavelet::DynamicWaveletTree<6, 64>(makeTree(W_stat, b, parallel), b, W_stat.size()) {
-        }
+    libmaus2::bitbtree::BitBTree<6, 64>* makeTree(wavelet_tree* W_stat, size_t const b, unsigned int parallel=1) {
 
-        dyn_wavelet2(libmaus2::bitbtree::BitBTree<6, 64>* bt, size_t b, size_t n)
-            : libmaus2::wavelet::DynamicWaveletTree<6, 64>(bt, b, n) {
+        size_t const n = W_stat->size();
+
+        // compute total offsets for the individual bins
+        std::vector<uint64_t> offsets((1ull << (b-1)) - 1, 0);
+        #pragma omp parallel num_threads(parallel)
+        {
+            uint64_t v, m, o;
+            #pragma omp for
+            for (size_t i = 0; i < n; ++i) {
+                m = (1ull << (b - 1));
+                v = (uint64_t) W_stat->operator[](i);
+                o = 0;
+                for (uint64_t ib = 1; ib < b; ++ib) {
+                    bool const bit = m & v;
+                    if (!bit) {
+                        #pragma omp critical
+                        offsets.at(o) += 1;
+                    }
+                    o = 2*o + 1 + bit;
+                    m >>= 1;
+                }
+            }
         }
+        //bit_vector *tmp = new bit_vector_dyn(n * b, false);
+        libmaus2::bitbtree::BitBTree<6, 64> *tmp = new libmaus2::bitbtree::BitBTree<6, 64>(n * b, false);
+        std::vector<uint64_t> upto_offsets ((1ull << (b - 1)) - 1, 0);
+
+        #pragma omp parallel num_threads(parallel)
+        {
+            uint64_t m, v, o, p, co;
+            bool bit;
+            #pragma omp for
+            for (uint64_t i = 0; i < n; ++i) {
+                m = (1ull << (b - 1));
+                v = (uint64_t) W_stat->operator[](i);
+                o = 0;
+                p = i;
+                co = 0;
+                for (uint64_t ib = 0; ib < b - 1; ++ib) {
+                    bit = m & v;
+                    if (bit) {
+                        #pragma omp critical
+                        tmp->setBitQuick(ib * n + p + co, true);
+                        co += offsets.at(o);
+                        p -= upto_offsets.at(o);
+                    } else {
+                        p -= (p - upto_offsets.at(o)); 
+                        upto_offsets.at(o) += 1;
+                    }
+                    //std::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
+                    o = 2*o + 1 + bit;
+                    m >>= 1;
+                }
+                bit = m & v;
+                if (bit) {
+                    //std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
+                    #pragma omp critical
+                    tmp->setBitQuick((b - 1) * n + p + co, true); 
+                }
+            }
+        }
+        return tmp;
+    }
+
+public:
+    wavelet_tree_dyn(size_t b)
+        : libmaus2::wavelet::DynamicWaveletTree<6, 64>(b) {
+    }
+
+    wavelet_tree_dyn(std::istream &in)
+        : libmaus2::wavelet::DynamicWaveletTree<6, 64>(in) {
+    }
+
+    wavelet_tree_dyn(std::vector<uint8_t> &W_stat, size_t b, unsigned int parallel=1)
+        : libmaus2::wavelet::DynamicWaveletTree<6, 64>(makeTree(W_stat, b, parallel), b, W_stat.size()) {
+    }
+
+    wavelet_tree_dyn(wavelet_tree* W_stat, size_t b, unsigned int parallel=1)
+        : libmaus2::wavelet::DynamicWaveletTree<6, 64>(makeTree(W_stat, b, parallel), b, W_stat->size()) {
+    }
+
+    //wavelet_tree_dyn(std::vector<uint8_t> &W_stat, size_t b, unsigned int parallel=1)
+    //    : libmaus2::wavelet::DynamicWaveletTree<6, 64>(dynamic_cast<libmaus2::bitbtree::BitBTree<6, 64>*>(makeTree(W_stat, b, parallel)), b, W_stat.size()) {
+    //}
+
+
+    wavelet_tree_dyn(libmaus2::bitbtree::BitBTree<6, 64>* bt, size_t b, size_t n)
+        : libmaus2::wavelet::DynamicWaveletTree<6, 64>(bt, b, n) {
+    }
+    //wavelet_tree_dyn(bit_vector* bt, size_t b, size_t n)
+    //    : libmaus2::wavelet::DynamicWaveletTree<6, 64>(dynamic_cast<libmaus2::bitbtree::BitBTree<6, 64>*>(bt), b, n) {
+    //}
+
+    ~wavelet_tree_dyn() {}
+
+    uint64_t size() {
+        return this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::size();
+    }
+
+    //void deserialise(std::istream &in) {
+    //    this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::deserialise(in);
+    //}
+
+    void serialise(std::ostream &out) {
+        this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::serialise(out);
+    }
+
+    void insert(uint64_t val, size_t id) {
+        this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::insert(val, id);
+    }
+
+    void remove(size_t id) {
+        this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::remove(id);
+    }
+
+    uint64_t rank(uint64_t c, uint64_t i) {
+        return this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::rank(c, i);
+    }
+
+    uint64_t select(uint64_t c, uint64_t i) {
+        return this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::select(c, i);
+    }
+
+   // uint64_t const& operator[](size_t id) const {
+   //     return this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::operator[](id);
+   // }
+
+    uint64_t operator[](size_t id) {
+        return this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::operator[](id);
+    }
+
+//    uint64_t get(size_t id) {
+//        return this->operator[](id);
+//    }
+
+//    void set(size_t id, uint64_t val) {
+//        this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::operator[](id) = val;
+//    }
+
+    bool get_bit_raw(uint64_t id) {
+        return this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::R->operator[](id);
+    }
 
 };
 

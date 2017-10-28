@@ -234,30 +234,6 @@ namespace annotate {
         return curr_combo;
     }
 
-/*    sdsl::rrr_vector<63> get_curr_color(DBG_succ* G, uint64_t idx) {
-        uint64_t color_begin = G->annotation_new->select1(idx);
-        uint64_t color_end = G->annotation_new->select1(idx + 1);
-        uint64_t color_idx = 0;
-        uint64_t mask = 1;
-        for (size_t i = color_begin; i < color_end; ++i) {
-            if (G->annotation_colors[i])
-                color_idx |= mask;
-            mask <<= 1;
-        }
-        return G->colors_to_bits.at(color_idx);
-    }
-*/
-    /*bool in_combo(std::vector<uint32_t> &combo, uint32_t value) {
-        
-        std::cerr << "search for " << value << " at idx " << idx << std::endl;
-        std::vector<uint32_t>::iterator start = anno.begin() + idx;
-        std::cerr << "start val " << *start << std::endl;
-        std::vector<uint32_t>::iterator end = anno.begin() + idx + *start;
-        start++;
-
-        return std::binary_search(start, end, value);
-    };*/
-
     std::vector<uint32_t> add_to_combination(std::vector<uint32_t> &old_combination, uint32_t value) {
 
         std::vector<uint32_t> new_combination;

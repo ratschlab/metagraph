@@ -52,6 +52,11 @@ class Config {
                          classify};
         int identity;
 
+        enum state_type {stat = 1,
+                         dyn,
+                         cstr};
+        state_type state;
+
     private:
         void init();
 };
