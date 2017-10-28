@@ -117,7 +117,7 @@ namespace construct {
     }
 
 
-    void add_seq_fast(DBG_succ* G, kstring_t &seq, kstring_t &name, bool add_bridge, unsigned int parallel, std::string suffix) {
+    void add_seq_fast(DBG_succ* G, kstring_t &seq, kstring_t &name, bool add_bridge, unsigned int parallel, std::string suffix, bool add_anno) {
 
         if (debug) {
             G->print_seq();
@@ -125,43 +125,45 @@ namespace construct {
             std::cout << "======================================" << std::endl;
         }
 
-        // annotation data
-        std::string cur_label, label_str = (name.s ? std::string(name.s) : "");
-        std::vector<std::string> labels;
         std::vector<uint32_t> label_id;
-        uint32_t max_label_id = 0;
-        
-        //TODO: hack to get VCFs to work
-        size_t vcfind = label_str.find("VCF:");
-        //std::cout << label_str << " " << vcfind << "\n";
-        if (vcfind == 0) {
-            //std::cout << "VCF found\n";
-            std::istringstream is(label_str);
-            std::getline(is, cur_label, ':');
-            while (std::getline(is, cur_label, ':')) {
-                labels.push_back(cur_label);
-                //std::cout << cur_label << "\n";
-            }
-            //std::cout << "\n";
-        } else {
-            labels.push_back(label_str);
-        }
-
-        // translate label strings into label IDs
-        for (auto it = labels.begin(); it!= labels.end(); ++it) {
-            std::unordered_map<std::string, uint32_t>::iterator id_it = G->label_to_id_map.find(*it);
-            if (id_it == G->label_to_id_map.end()) {
-                label_id.push_back((uint32_t) G->id_to_label.size());
-                G->id_to_label.push_back(*it);
-                G->label_to_id_map[*it] = label_id.back();
-                max_label_id = std::max(max_label_id, label_id.back());
+        if (add_anno) {
+            // annotation data
+            std::string cur_label, label_str = (name.s ? std::string(name.s) : "");
+            std::vector<std::string> labels;
+            uint32_t max_label_id = 0;
+            
+            //TODO: hack to get VCFs to work
+            size_t vcfind = label_str.find("VCF:");
+            //std::cout << label_str << " " << vcfind << "\n";
+            if (vcfind == 0) {
+                //std::cout << "VCF found\n";
+                std::istringstream is(label_str);
+                std::getline(is, cur_label, ':');
+                while (std::getline(is, cur_label, ':')) {
+                    labels.push_back(cur_label);
+                    //std::cout << cur_label << "\n";
+                }
+                //std::cout << "\n";
             } else {
-                label_id.push_back(id_it->second);
+                labels.push_back(label_str);
             }
-        }
 
-        if (max_label_id >= G->annotation_full.size()) {
-            G->annotation_full.resize(max_label_id + 1);
+            // translate label strings into label IDs
+            for (auto it = labels.begin(); it!= labels.end(); ++it) {
+                std::unordered_map<std::string, uint32_t>::iterator id_it = G->label_to_id_map.find(*it);
+                if (id_it == G->label_to_id_map.end()) {
+                    label_id.push_back((uint32_t) G->id_to_label.size());
+                    G->id_to_label.push_back(*it);
+                    G->label_to_id_map[*it] = label_id.back();
+                    max_label_id = std::max(max_label_id, label_id.back());
+                } else {
+                    label_id.push_back(id_it->second);
+                }
+            }
+
+            if (max_label_id >= G->annotation_full.size()) {
+                G->annotation_full.resize(max_label_id + 1);
+            }
         }
 
         // translate from ascii into talphabet
@@ -200,14 +202,16 @@ namespace construct {
             #pragma omp parallel num_threads(parallel)
             {   
                 std::vector<kmer_boost::KMer> kmer_priv;
-                //std::vector<std::pair<ui256, size_t> > kmer_priv;
                 #pragma omp for nowait
                 for (i = 0; i < seq.l - G->k; ++i) {
                     if (check_suffix(G, seq.s + i, suffix, nt_lookup)) {
-                        for (auto it = label_id.begin(); it != label_id.end(); ++it) {
-                            kmer_priv.push_back(kmer_boost::KMer{kmer_boost::stokmer(seq.s+i, G->k+1, nt_lookup), *it});
+                        if (add_anno) {
+                            for (auto it = label_id.begin(); it != label_id.end(); ++it) {
+                                kmer_priv.push_back(kmer_boost::KMer{kmer_boost::stokmer(seq.s+i, G->k+1, nt_lookup), *it});
+                            }
+                        } else {
+                            kmer_priv.push_back(kmer_boost::KMer{kmer_boost::stokmer(seq.s+i, G->k+1, nt_lookup), 0});
                         }
-                        //kmer_priv.push_back(std::make_pair(stokmer(seq+i, k+1, nt_lookup), cid));
                     }   
                 }   
                 #pragma omp critical
@@ -220,65 +224,71 @@ namespace construct {
             for (i = 0; i < G->k; ++i) {
                 if (check_suffix(G, bridge, suffix, nt_lookup)) {
                     G->kmers.push_back(kmer_boost::KMer{kmer_boost::stokmer(bridge, G->k+1, nt_lookup), 0});
-                    //kmers.push_back(std::make_pair(stokmer(bridge, k+1, nt_lookup), cid+1));
                 }   
                 memmove(bridge, bridge+1, G->k); 
                 bridge[G->k] = 'X';
             }   
         }   
         free(bridge); 
-        //free(nt_lookup);
     }
 
     //removes duplicate kmers, counts coverage, and assigns labels
-    std::vector<kmer_boost::KMer>::iterator unique_count(std::vector<kmer_boost::KMer>::iterator first, std::vector<kmer_boost::KMer>::iterator last) {
+    std::vector<kmer_boost::KMer>::iterator unique_count(std::vector<kmer_boost::KMer>::iterator first, std::vector<kmer_boost::KMer>::iterator last, bool add_anno) {
 
         //Adapted from http://en.cppreference.com/w/cpp/algorithm/unique
         if (first == last)
             return last;
 
-        std::vector<kmer_boost::KMer>::iterator result = first, start = first;
-        cpp_int annot;
-        if (result->annot != 0) {
-            annot = (cpp_int(1) << static_cast<size_t>(result->annot-1));
+        std::vector<kmer_boost::KMer>::iterator result = first;
+        if (add_anno) {
+            cpp_int annot;
+            if (result->annot != 0) {
+                annot = (cpp_int(1) << static_cast<size_t>(result->annot-1));
+            } else {
+                annot = 0;
+            }
+            while (++first != last) {
+                if (!(result->seq == first->seq)) {
+                    result->annot = annot;
+                    if (++result != first) {
+                        *result = std::move(*first);
+                    }
+                    if (result->annot != 0) {
+                        annot = (cpp_int(1) << static_cast<size_t>(result->annot-1));
+                    } else {
+                        annot = 0;
+                    }
+                }
+                if (first->annot) {
+                    //num_annots = std::max(num_annots, static_cast<size_t>(first->annot));
+                    //TODO: add check for first->annot being too big
+                    annot |= (cpp_int(1) << static_cast<size_t>(first->annot-1));
+                }
+            }
+            result->annot = annot;
         } else {
-            annot = 0;
-        }
-        while (++first != last) {
-            if (!(result->seq == first->seq)) {
-                result->annot = annot;
-                if (++result != first) {
+            while (++first != last) {
+                if (!(result->seq == first->seq) && (++result != first)) {
                     *result = std::move(*first);
                 }
-                if (result->annot != 0) {
-                    annot = (cpp_int(1) << static_cast<size_t>(result->annot-1));
-                } else {
-                    annot = 0;
-                }
-            }
-            if (first->annot) {
-                //num_annots = std::max(num_annots, static_cast<size_t>(first->annot));
-                //TODO: add check for first->annot being too big
-                annot |= (cpp_int(1) << static_cast<size_t>(first->annot-1));
             }
         }
-        result->annot = annot;
         return ++result;
     }
 
 
-    void construct_succ(DBG_succ* G, unsigned int parallel) {
+    void construct_succ(DBG_succ* G, unsigned int parallel, bool add_anno) {
 
         // parallel sort of all kmers
         omp_set_num_threads(std::max((int)parallel,1));
         __gnu_parallel::sort(G->kmers.begin(),G->kmers.end());
-        std::vector<kmer_boost::KMer>::iterator uniq_count = unique_count(G->kmers.begin(), G->kmers.end());
+        std::vector<kmer_boost::KMer>::iterator uniq_count = unique_count(G->kmers.begin(), G->kmers.end(), add_anno);
         G->kmers.erase(uniq_count, G->kmers.end() );
 
-        // annotation vectors
-        std::vector<std::vector<uint8_t> > annots(G->annotation_full.size(), std::vector<uint8_t>(G->kmers.size()));
+        // Annotation:
         //TODO: set the bit vector, then store it
         //TODO: when merging into G, keep track of the fact that this may have a different number of annotations that the rest of hte graph
+        size_t max_anno_id = G->annotation_full.size();
 
         //DEBUG: output kmers in current bin
         /*
@@ -329,11 +339,8 @@ namespace construct {
                     }    
                 }    
                 G->W_stat[curpos+i] = curW;
-                //set  bitvector
-                for (size_t j = 0; (G->kmers[i].annot) >> j; ++j) {
-                    assert(j < annots.size());
-                    annots[j][i] = (uint8_t)(((G->kmers[i].annot) >> j) % 2);
-                }
+                if (add_anno && G->kmers[i].annot > 0)
+                    max_anno_id = std::max(max_anno_id, (size_t) msb(G->kmers[i].annot));
             }    
         }    
         for (size_t i = 0; i < G->kmers.size(); ++i) {
@@ -347,23 +354,36 @@ namespace construct {
                 }    
             }    
         }    
-        sdsl::bit_vector bv(G->W_stat.size());
-        // loop over annotation columns
-        for (size_t i = 0; i < annots.size();++i) {
-            size_t j = 0;
-            for (; i < G->annotation_full.size() && G->annotation_full.at(i) != NULL && j < G->annotation_full.at(i)->size(); ++j) {
-                bv[j] = G->annotation_full.at(i)->operator[](j);
+        if (add_anno) {
+            sdsl::bit_vector* bv;
+            // loop over annotation columns
+            for (size_t i = 0; i <= max_anno_id; ++i) {
+                bv = new sdsl::bit_vector(G->W_stat.size(), 0);
+                if (i < G->annotation_full.size() && G->annotation_full.at(i) != NULL) {
+                    sdsl::select_support_sd<> slct = sdsl::select_support_sd<>(G->annotation_full.at(i));
+                    sdsl::rank_support_sd<> rank = sdsl::rank_support_sd<>(G->annotation_full.at(i));
+                    size_t maxrank = rank(G->annotation_full.at(i)->size());
+                    size_t idx;
+                    for (size_t j = 1; j <= maxrank; ++j) {
+                        idx = slct(j);
+                        if (idx < G->annotation_full.at(i)->size()) {
+                            bv->operator[](idx) = G->annotation_full.at(i)->operator[](idx);
+                        }
+                    }
+                }
+                for (size_t k = 0; k < G->kmers.size(); ++k) {
+                    if ((G->kmers.at(k).annot > 0) && (msb(G->kmers.at(k).annot) >= i) && ((cpp_int(1)<<i) & G->kmers.at(k).annot))
+                        bv->operator[](k + curpos) = true;
+                }
+                if (i < G->annotation_full.size()) {
+                    if (G->annotation_full.at(i) != NULL)
+                        delete G->annotation_full.at(i);
+                    G->annotation_full.at(i) = new sdsl::sd_vector<>(*bv);
+                } else {
+                    G->annotation_full.push_back(new sdsl::sd_vector<>(*bv));
+                }
+                delete bv;
             }
-            for (; j < curpos; ++j)
-                bv[j] = 0;
-
-            for (size_t k = 0; j < bv.size(); ++j, ++k) {
-                bv[j] = annots.at(i).at(k);
-                //G->bridge_stat.at(k) |= bv[j];
-            }
-            if (G->annotation_full.at(i) != NULL)
-                delete G->annotation_full.at(i);
-            G->annotation_full.at(i) = new sdsl::sd_vector<>(bv);
         }
         G->kmers.clear();
     }

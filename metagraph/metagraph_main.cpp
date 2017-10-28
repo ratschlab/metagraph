@@ -524,8 +524,8 @@ int main(int argc, char const ** argv) {
                 for (size_t j = 0; j < suffices.size(); ++j) {
                     std::cout << "Suffix: " << suffices[j] << "\n";
                     //add sink nodes
-                    construct::add_seq_fast(graph, start, blank, false, config->parallel, suffices[j]);
-                    construct::add_seq_fast(graph, graphsink, blank, true, config->parallel, suffices[j]);
+                    construct::add_seq_fast(graph, start, blank, false, config->parallel, suffices[j], config->add_anno);
+                    construct::add_seq_fast(graph, graphsink, blank, true, config->parallel, suffices[j], config->add_anno);
 
                     if (suffices[j].find("$") == std::string::npos) {
                         // iterate over input files
@@ -568,7 +568,7 @@ int main(int argc, char const ** argv) {
                                     newannot[0]=0;
                                     strcat(newannot, annot.c_str());
                                     kstring_t annot_s = {annot.length(), annot.length()+2, newannot};
-                                    construct::add_seq_fast(graph, vcf->seq, annot_s, false, config->parallel, suffices[j]);
+                                    construct::add_seq_fast(graph, vcf->seq, annot_s, false, config->parallel, suffices[j], config->add_anno);
                                     free(annot_s.s);
                                 }
                                 vcf_destroy(vcf);
@@ -586,7 +586,7 @@ int main(int argc, char const ** argv) {
                                     if (config->reverse)
                                         reverse_complement(read_stream->seq);                    
                                     // add all k-mers of seq to the graph
-                                    construct::add_seq_fast(graph, read_stream->seq, read_stream->name, true, config->parallel, suffices[j]);
+                                    construct::add_seq_fast(graph, read_stream->seq, read_stream->name, true, config->parallel, suffices[j], config->add_anno);
                                 }
                                 kseq_destroy(read_stream);
                             }
@@ -600,8 +600,8 @@ int main(int argc, char const ** argv) {
                     //append to succinct representation and clear kmer list
                     tstart = clock();
                     std::cout << "Sorting kmers and appending succinct representation from current bin\t";
-                    construct::construct_succ(graph, config->parallel);
-                    std::cout << (clock()-tstart)/CLOCKS_PER_SEC << "\n";
+                    construct::construct_succ(graph, config->parallel, config->add_anno);
+                    std::cout << (clock()-tstart)/CLOCKS_PER_SEC << "\n\n";
                 }
                 //TODO: cleanup
                 tstart = clock();

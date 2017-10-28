@@ -52,6 +52,8 @@ Config::Config(int argc, const char *argv[]) {
             reverse = true;
         } else if (!strcmp(argv[i], "--fast")) {
             fast = true;
+        } else if (!strcmp(argv[i], "--anno")) {
+            add_anno = true;
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
             parallel = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--parts-total")) {
@@ -206,6 +208,7 @@ void Config::init() {
     print_graph_succ = false;
     reverse = false;
     fast = false;
+    add_anno = false;
     distance = 0;
     parallel = 1;
     bins_per_thread = 1;

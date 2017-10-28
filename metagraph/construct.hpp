@@ -14,8 +14,8 @@ namespace construct {
 
     // add a full sequence to the graph
     void add_seq (DBG_succ* G ,kstring_t &seq, bool append=true);
-    void add_seq_fast (DBG_succ* G, kstring_t &seq, kstring_t& name, bool add_bridge=true, unsigned int parallel=1, std::string suffix="");
-    void construct_succ(DBG_succ* G, unsigned int parallel=1);
+    void add_seq_fast (DBG_succ* G, kstring_t &seq, kstring_t& name, bool add_bridge=true, unsigned int parallel=1, std::string suffix="", bool add_anno=false);
+    void construct_succ(DBG_succ* G, unsigned int parallel=1, bool add_anno=false);
 
     /** This function takes a character c and appends it to the end of the graph sequence
      * given that the corresponding note is not part of the graph yet.

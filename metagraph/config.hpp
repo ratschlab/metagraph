@@ -22,6 +22,7 @@ class Config {
         bool print_graph_succ;
         bool reverse;
         bool fast;
+        bool add_anno;
         
         unsigned int k;
         unsigned int distance;
