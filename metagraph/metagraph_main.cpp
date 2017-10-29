@@ -85,7 +85,8 @@ void *parallel_annotate_wrapper(void *arg) {
             pthread_mutex_unlock (&mutex_bin_idx);
             
             start = curr_idx * anno_data->binsize;
-            end = std::min(((curr_idx + 1) * anno_data->binsize) + anno_data->graph->k - 1, anno_data->seq->l);
+            //end = std::min(((curr_idx + 1) * anno_data->binsize) + anno_data->graph->k - 1, anno_data->seq->l);
+            end = std::min(((curr_idx + 1) * anno_data->binsize), anno_data->seq->l);
             //std::cerr << "start " << start << " end " << end << std::endl;
             annotate::annotate_seq(anno_data->graph, *(anno_data->seq), *(anno_data->label), start, end, &mutex_annotate);
         }
@@ -691,7 +692,7 @@ int main(int argc, char const ** argv) {
                         anno_data->label = &(read_stream->name);
                         anno_data->graph = graph;
                         anno_data->idx = 0;
-                        anno_data->binsize = (read_stream->seq.l + 1) / config->parallel * config->bins_per_thread;
+                        anno_data->binsize = (read_stream->seq.l + 1) / (config->parallel * config->bins_per_thread);
                         anno_data->total_bins = ((read_stream->seq.l + anno_data->binsize - 1) / anno_data->binsize); 
 
                         // create threads

@@ -481,7 +481,7 @@ class bit_vector_stat: public bit_vector, public sdsl::bit_vector {
 private:
     sdsl::rank_support_v5<> rk;
     sdsl::select_support_mcl<> slct;
-    bool update_rs = true;
+    bool update_rs;
     void init_rs() {
         rk = sdsl::rank_support_v5<>(this);
         slct = sdsl::select_support_mcl<>(this);
@@ -489,6 +489,7 @@ private:
     }
 public:
     bit_vector_stat(size_t size, bool def) : sdsl::bit_vector(size, def) {
+        init_rs();
     }
 
     bit_vector_stat(bit_vector* V) : sdsl::bit_vector(V->size(), 0) {
@@ -496,13 +497,16 @@ public:
             if (V->operator[](i))
                 this->sdsl::bit_vector::operator[](i) = true;
         }
+        init_rs();
     }
 
     bit_vector_stat(std::istream &in) {
         this->deserialise(in);
+        init_rs();
     }
 
     bit_vector_stat() : sdsl::bit_vector() {
+        init_rs();
     }
 
     ~bit_vector_stat() {
@@ -550,19 +554,19 @@ public:
         if (update_rs)
             init_rs();
         //compensating for libmaus weirdness
-        id++;
-        size_t maxrank = rk(this->size());
-        if (id > maxrank) {
+        //id++;
+        //size_t maxrank = rk(this->size());
+        //if (id > maxrank) {
             //TODO: should this line ever be reached?
-            return this->size();
-        }
-        return slct(id);
+        //    return this->size();
+        //}
+        return slct(id + 1);
     }
     uint64_t rank1(size_t id) {
         if (update_rs)
             init_rs();
         //the rank method in SDSL does not include id in the count
-        return rk(id >= this->size() ? this->size() : id+1);
+        return rk(id >= this->size() ? this->size() : id + 1);
     }
     uint64_t size() {
         return this->sdsl::bit_vector::size();

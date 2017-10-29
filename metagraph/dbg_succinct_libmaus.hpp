@@ -86,7 +86,6 @@ class DBG_succ {
 
     //std::vector<sdsl::rrr_vector<63>* > annotation_full;
     std::vector<sdsl::sd_vector<>* > annotation_full;
-    sdsl::bit_vector* annotation_curr = NULL;
     std::vector<sdsl::rrr_vector<63> > colors_to_bits;
     std::vector<std::string> bits_to_labels;
     size_t anno_labels;
