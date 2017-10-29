@@ -18,10 +18,35 @@ namespace kmer_boost {
 
     typedef struct __KMer {
         ui256 seq;    // kmer sequences
-        cpp_int annot;  // annotation vector
+       // cpp_int annot;  // annotation vector
+
+        
+        std::vector<uint32_t> annot;
+        __KMer() {}
+        __KMer(ui256 seq_) : seq(seq_) {}
+        __KMer(ui256 seq_, size_t annot_):
+            seq(seq_) {
+                if (annot_ > 0)
+                    annot.push_back(annot_ - 1);
+            }
+       
     } KMer;
     bool operator<(const KMer& a, const KMer& b);
     
+    typedef struct __KMer_anno : public __KMer {
+        ui256 seq;    // kmer sequences
+        //cpp_int annot;  // annotation vector
+        
+        std::vector<uint32_t> annot;
+        __KMer_anno(ui256 seq_) : seq(seq_) {}
+        __KMer_anno(ui256 seq_, size_t annot_):
+            seq(seq_) {
+                if (annot_ > 0)
+                    annot.push_back(annot_ - 1);
+            }
+        
+    } KMer_anno;
+    bool operator<(const KMer_anno& a, const KMer_anno& b);
     
     bool compare_kmer_suffix(const ui256 &k1, const ui256 &k2, const uint64_t &minus=0);
     

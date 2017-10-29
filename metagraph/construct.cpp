@@ -241,28 +241,45 @@ namespace construct {
 
         std::vector<kmer_boost::KMer>::iterator result = first;
         if (add_anno) {
+            /*
             cpp_int annot;
             if (result->annot != 0) {
                 annot = (cpp_int(1) << static_cast<size_t>(result->annot-1));
             } else {
                 annot = 0;
             }
+            */ 
+            std::vector<uint32_t> annot;
+            if (result->annot.size() > 0) {
+                annot = result->annot;
+            }
+            
             while (++first != last) {
                 if (!(result->seq == first->seq)) {
                     result->annot = annot;
                     if (++result != first) {
                         *result = std::move(*first);
                     }
+                    /*
                     if (result->annot != 0) {
                         annot = (cpp_int(1) << static_cast<size_t>(result->annot-1));
                     } else {
                         annot = 0;
                     }
+                    */
+                    if (result->annot.size() > 0) {
+                        annot = result->annot;
+                    } else {
+                        annot.clear();
+                    }
+                    
                 }
-                if (first->annot) {
+                //if (first->annot != 0) {
+                if (first->annot.size() > 0) {
                     //num_annots = std::max(num_annots, static_cast<size_t>(first->annot));
                     //TODO: add check for first->annot being too big
-                    annot |= (cpp_int(1) << static_cast<size_t>(first->annot-1));
+                    //annot |= (cpp_int(1) << static_cast<size_t>(first->annot-1));
+                    annot.push_back(first->annot.back());
                 }
             }
             result->annot = annot;
@@ -339,8 +356,12 @@ namespace construct {
                     }    
                 }    
                 G->W_stat[curpos+i] = curW;
+                /*
                 if (add_anno && G->kmers[i].annot > 0)
                     max_anno_id = std::max(max_anno_id, (size_t) msb(G->kmers[i].annot));
+                */
+                if (add_anno && G->kmers[i].annot.size() > 0)
+                    max_anno_id = std::max(max_anno_id, (size_t) *std::max_element(G->kmers[i].annot.begin(), G->kmers[i].annot.end()));
             }    
         }    
         for (size_t i = 0; i < G->kmers.size(); ++i) {
@@ -378,8 +399,13 @@ namespace construct {
                         }
                     }
                     for (size_t k = 0; k < G->kmers.size(); ++k) {
+                        std::vector<uint32_t>::iterator it = std::find(G->kmers.at(k).annot.begin(), G->kmers.at(k).annot.end(), i);
+                        if ((G->kmers.at(k).annot.size() > 0) && (it != G->kmers.at(k).annot.end()))
+                            bv->operator[](k + curpos) = true;
+                        /*
                         if ((G->kmers.at(k).annot > 0) && (msb(G->kmers.at(k).annot) >= i) && ((cpp_int(1)<<i) & G->kmers.at(k).annot))
                             bv->operator[](k + curpos) = true;
+                        */
                     }
                     if (G->annotation_full.at(i) != NULL)
                         delete G->annotation_full.at(i);

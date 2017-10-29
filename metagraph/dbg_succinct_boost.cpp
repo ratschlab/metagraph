@@ -2,8 +2,13 @@
 
 
 bool kmer_boost::operator<(const kmer_boost::KMer& a, const kmer_boost::KMer& b) {
+    return a.seq < b.seq;
+}
+
+bool kmer_boost::operator<(const kmer_boost::KMer_anno& a, const kmer_boost::KMer_anno& b) {
     if (a.seq == b.seq) {
-        return a.annot < b.annot;
+        //return a.annot < b.annot;
+        return a.annot.size() < b.annot.size();
     } else {
         return a.seq < b.seq;
     }
