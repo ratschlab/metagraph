@@ -445,7 +445,7 @@ class DBG_succ {
      */
     void print_seq();
 
-    void print_adj_list();
+    void print_adj_list(std::string outf="");
 
     /**
      * Take the current graph content and store in a file.

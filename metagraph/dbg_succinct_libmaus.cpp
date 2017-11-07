@@ -1103,21 +1103,53 @@ void DBG_succ::print_state_str() {
 }
 
 
-void DBG_succ::print_adj_list() {
+void DBG_succ::print_adj_list(std::string outf) {
+    if (outf != "") {
+        freopen(outf.c_str(), "w", stdout);
+    }
+    std::vector<size_t> next_ind(this->annotation_full.size());
+    std::vector<size_t> cur_rank(this->annotation_full.size());
+    std::vector<size_t> max_rank(this->annotation_full.size());
+    std::vector<sdsl::sd_vector<>::select_1_type> selects(this->annotation_full.size());
+    std::vector<sdsl::sd_vector<>::rank_1_type> ranks(this->annotation_full.size());
+    for (uint64_t k = 0;k < this->annotation_full.size(); ++k) {
+        sdsl::util::init_support(selects[k], this->annotation_full.at(k));
+        sdsl::util::init_support(ranks[k], this->annotation_full[k]);
+        max_rank[k] = ranks[k](this->annotation_full[k]->size());
+        if (max_rank[k]) {
+            cur_rank[k] = 1;
+            next_ind[k] = selects[k](1);
+        } else {
+            cur_rank[k] = 0;
+            next_ind[k] = 0;
+        }
+    }
     for (uint64_t edge = 1; edge < W->size(); ++edge) {
-            fprintf(stdout, "%lu\t%lu\t", rank_last(succ_last(edge)), rank_last(outgoing(edge, (*W)[edge])));
-            bool is_first = true;
-            for (uint64_t k = 0; k < this->annotation_full.size(); ++k) {
-                if ((*(this->annotation_full.at(k)))[edge] == 1) {
-                    if (!is_first)
-                        fprintf(stdout, ",");
-                    is_first = false;
-                    fprintf(stdout, "%lu", k+1);
+        fprintf(stdout, "%lu\t%lu\t", rank_last(succ_last(edge)), rank_last(outgoing(edge, (*W)[edge])));
+        bool is_first = true;
+        for (uint64_t k = 0; k < this->annotation_full.size(); ++k) {
+            //if ((*(this->annotation_full.at(k)))[edge] == 1) {
+            if (edge == next_ind[k]) {
+                if (!is_first) {
+                    fprintf(stdout, ",");
+                }
+                is_first = false;
+                fprintf(stdout, "%lu", k+1);
+                cur_rank[k]++;
+                if (cur_rank[k] <= max_rank[k]) {
+                    next_ind[k] = selects[k](cur_rank[k]);
+                } else {
+                    next_ind[k] = 0;
                 }
             }
-            if (is_first)
-                fprintf(stdout, "0");
-            printf("\n");
+        }
+        if (is_first) {
+            fprintf(stdout, "0");
+        }
+        fprintf(stdout, "\n");
+    }
+    if (outf != "") {
+        fclose(stdout);
     }
 }
 

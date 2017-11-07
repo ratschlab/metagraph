@@ -393,6 +393,7 @@ int main(int argc, char const ** argv) {
                 // checks whether annotation exists and creates an empty one if not
                 graph_->annotationFromFile();
                 graph_->print_adj_list();
+                //graph_->print_adj_list(config->outfbase);
                 delete graph_;
             //}
         } break;
