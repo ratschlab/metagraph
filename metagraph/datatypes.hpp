@@ -16,22 +16,15 @@
 
 class DBG_succ;
 
+/*
 struct ColorNode {
-    
-    ColorNode() {
-        left = NULL;
-        right = NULL;
-        idx = 0;
-    }
-
-    ColorNode* left;
-    ColorNode* right;
-    uint64_t idx;
-    
+    ColorNode *left = NULL;
+    ColorNode *right = NULL;
+    uint64_t idx = 0;
 };
 
-/*class ColorTree {
-  
+class ColorTree {
+
     private:
     ColorNode* root;
 
@@ -43,9 +36,9 @@ struct ColorNode {
     void add_color(sdsl::vector_rrr<63>* b) {
         for (size_t i = 0; i < b->size(); ++i) {
             if (b[i]) {
-                curr = left ? left : (new ColorNode());
+                curr = left ? left : (new ColorNode);
             } else {
-                curr = right ? right : (new ColorNode());
+                curr = right ? right : (new ColorNode);
             }
         }
     }
@@ -75,7 +68,7 @@ struct HitInfo {
         cigar(cigar_),
         path(path_) {}
 
-    HitInfo(const HitInfo& other):
+    HitInfo(const HitInfo &other):
         rl(other.rl),
         ru(other.ru),
         str_pos(other.str_pos),
@@ -105,7 +98,7 @@ struct AnnotationSet {
 struct AnnotationHash {
     std::unordered_map<uint32_t, uint32_t> bitmap;
     uint32_t last = 1;
-    
+
     uint32_t knuth_hash(const uint32_t i) const {
         return i * UINT32_C(2654435761);
     };
@@ -205,12 +198,12 @@ struct ParallelMergeContainer {
     void print_bins() {
         for (size_t ii = 0; ii < bins.size(); ii++) {
             std::cerr << "graph " << ii + 1 << std::endl;
-            for (size_t i = 0; i < bins.at(ii).size(); i++) 
+            for (size_t i = 0; i < bins.at(ii).size(); i++)
                 std::cerr << bins.at(ii).at(i).first << " - " << bins.at(ii).at(i).second << std::endl;
         }
     }
 
-    /* Show an overview of the distribution of merging bin 
+    /* Show an overview of the distribution of merging bin
      * sizes.
      */
     void get_bin_stats() {
@@ -262,7 +255,7 @@ struct ParallelMergeContainer_deprecated {
             size2 = (bins_g2.at(i).first == 0) ? 0 : bins_g2.at(i).second - bins_g2.at(i).first + 1;
             combined_bins.push_back(size1 + size2);
             total_sum += combined_bins.back();
-            //std::cerr << "bin 1: " << bins_g1.at(i).first << " - " << bins_g1.at(i).second << " size: " << size1 << " --- " << "bin 2: " << bins_g2.at(i).first << " - " << bins_g2.at(i).second << " size: " << size2 << " total: " << size1 + size2 << std::endl; 
+            //std::cerr << "bin 1: " << bins_g1.at(i).first << " - " << bins_g1.at(i).second << " size: " << size1 << " --- " << "bin 2: " << bins_g2.at(i).first << " - " << bins_g2.at(i).second << " size: " << size2 << " total: " << size1 + size2 << std::endl;
         }
         uint64_t target_bin_size = (total_sum / target_bins) + 1;
 
@@ -301,7 +294,7 @@ struct ParallelMergeContainer_deprecated {
     }
 
 
-    /* Show an overview of the distribution of merging bin 
+    /* Show an overview of the distribution of merging bin
      * sizes.
      */
     void get_bin_stats() {
@@ -369,7 +362,7 @@ struct ParallelAnnotateContainer {
     DBG_succ* graph;
     uint64_t idx;
     uint64_t binsize;
-    uint64_t total_bins; 
+    uint64_t total_bins;
     //pthread_mutex_t* anno_mutex;
 };
 
@@ -438,11 +431,11 @@ public:
     void set(size_t id, bool val) {
         this->libmaus2::bitbtree::BitBTree<6, 64>::set(id, val);
     }
-    
+
     void setBitQuick(size_t id, bool val) {
         this->libmaus2::bitbtree::BitBTree<6, 64>::setBitQuick(id, val);
     }
-    
+
     //bool const& operator[](size_t id) const {
     //    return this->libmaus2::bitbtree::BitBTree<6, 64>::operator[](id);
     //}
@@ -575,7 +568,7 @@ public:
 
 
 class wavelet_tree {
-    
+
 public:
 
     virtual ~wavelet_tree() {};
@@ -593,7 +586,7 @@ public:
     //virtual uint64_t get(size_t id) = 0;
     // this only makes sense when implemented in the dynamic part
     virtual bool get_bit_raw(uint64_t id) = 0;
-    
+
 };
 
 
@@ -612,7 +605,7 @@ private:
     size_t n;
 
 public:
-    wavelet_tree_stat(size_t logsigma, size_t size, uint64_t def) 
+    wavelet_tree_stat(size_t logsigma, size_t size, uint64_t def)
         : sdsl::int_vector<>(2 * size + 1, def, 1<< logsigma) {
         n = size;
         update_rs = true;
@@ -719,7 +712,7 @@ public:
     */
 
     bool get_bit_raw(uint64_t id) {
-       throw std::logic_error("Not Implemented"); 
+       throw std::logic_error("Not Implemented");
        return id;
     }
 
@@ -779,7 +772,7 @@ private:
                         co += offsets.at(o);
                         p -= upto_offsets.at(o);
                     } else {
-                        p -= (p - upto_offsets.at(o)); 
+                        p -= (p - upto_offsets.at(o));
                         upto_offsets.at(o) += 1;
                     }
                     //std::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
@@ -790,7 +783,7 @@ private:
                 if (bit) {
                     //std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
                     #pragma omp critical
-                    tmp->setBitQuick((b - 1) * n + p + co, true); 
+                    tmp->setBitQuick((b - 1) * n + p + co, true);
                 }
             }
         }
@@ -845,7 +838,7 @@ private:
                         co += offsets.at(o);
                         p -= upto_offsets.at(o);
                     } else {
-                        p -= (p - upto_offsets.at(o)); 
+                        p -= (p - upto_offsets.at(o));
                         upto_offsets.at(o) += 1;
                     }
                     //std::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
@@ -856,7 +849,7 @@ private:
                 if (bit) {
                     //std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
                     #pragma omp critical
-                    tmp->setBitQuick((b - 1) * n + p + co, true); 
+                    tmp->setBitQuick((b - 1) * n + p + co, true);
                 }
             }
         }

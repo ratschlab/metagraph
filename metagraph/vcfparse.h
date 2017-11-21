@@ -2,9 +2,11 @@
 #define METAGRAPH_VCFPARSE
 
 #include <stdio.h>
+
 #ifndef __STDC_LIMIT_MACROS
 #define __STDC_LIMIT_MACROS
 #endif
+
 #include <stdint.h>
 #include <htslib/vcf_sweep.h>
 #include <htslib/faidx.h>
@@ -14,7 +16,8 @@
 
 #ifndef VCFPARSE_T
 #define VCFPARSE_T vcfparse
-typedef struct __vcfparse {
+
+struct vcfparse {
     faidx_t *ref;
     bcf_sweep_t *sw;
     bcf_hdr_t *hdr;
@@ -32,8 +35,9 @@ typedef struct __vcfparse {
     uint32_t kmer3_l;
     uint32_t ref_callele_l;
     const char **seqnames = NULL;
-    int nseq=0;
-} vcfparse;
+    int nseq = 0;
+};
+
 static char passfilt[] = "PASS";
 
 static inline void _vcf_clean_kmers(vcfparse* vcfp) {
@@ -111,13 +115,13 @@ static inline vcfparse* vcf_init(const char* ref, const char* vcf, int k) {
 
 static inline void vcf_print_line(vcfparse* vcfp) {
     if (vcfp->rec) {
-        fprintf(stdout, "%s\t%d\t%d\t%d\t%d", 
+        fprintf(stdout, "%s\t%d\t%d\t%d\t%d",
                 vcfp->hdr->id[BCF_DT_CTG][vcfp->rec->rid].key, //contig name
                 vcfp->hdr->id[BCF_DT_CTG][vcfp->rec->rid].val->info[0], //contig length
                 vcfp->rec->rid, //contig id
                 vcfp->rec->pos+1, //1-based coordinate
                 vcfp->rec->n_allele //number of alleles
-                ); 
+                );
     }
 }
 
@@ -222,10 +226,10 @@ static inline std::string vcf_get_seq(vcfparse* vcfp, char** annots, size_t num_
             int ploidy = ngt/nsmpl;
             int cur;
             if (ngt > 0) {
-                for (size_t i=0;i<ngt;i+=ploidy) {
+                for (size_t i = 0; i < ngt; i += ploidy) {
                     cur = 0;
-                    for (size_t j=0;j<ploidy;++j) {
-                        cur |= *(gt_arr + i+j);
+                    for (size_t j = 0; j < ploidy; ++j) {
+                        cur |= *(gt_arr + i + j);
                     }
                     if ((cur & 5) == 5) {
                         //at least one parent has this allele
@@ -264,5 +268,6 @@ static inline void vcf_destroy(vcfparse* vcfp) {
     free(vcfp->seqnames);
     free(vcfp);
 }
+
 #endif
 #endif

@@ -67,8 +67,8 @@ namespace merge {
         }
 
         // Send parallel pointers running through each of the graphs. At each step, compare all
-        // graph nodes at the respective positions with each other. Insert the lexicographically 
-        // smallest one into the common merge graph G (this). 
+        // graph nodes at the respective positions with each other. Insert the lexicographically
+        // smallest one into the common merge graph G (this).
         while (true) {
 
             if (Gt->config->verbose && added > 0 && added % 1000 == 0) {
@@ -92,7 +92,7 @@ namespace merge {
             //usleep(1000000);
 
             assert(val == smallest.second % Gt->alph_size);
-            
+
             //std::cerr << "inserting into W" << std::endl;
             // check whether we already added a node whose outgoing edge points to the
             // same node as the current one
@@ -382,7 +382,6 @@ namespace merge {
     }
 
 
-
     void traversalHash(DBG_succ* G) {
 
         // store all branch nodes on the way
@@ -501,8 +500,8 @@ namespace merge {
     }
 
 
-    /* 
-     * Helper function to determine the bin boundaries, given 
+    /*
+     * Helper function to determine the bin boundaries, given
      * a number of bins.
      */
     std::vector<std::pair<uint64_t, uint64_t> > get_bins(DBG_succ* G, uint64_t bins) {
@@ -533,13 +532,13 @@ namespace merge {
             //result.push_back(std::make_pair(pos, pos));
             result.push_back(std::make_pair(1, 0));
         }
-        
+
         std::cerr << "created " << result.size() << " bins" << std::endl;
         return result;
     }
 
     std::vector<std::pair<uint64_t, uint64_t> > get_bins_relative(DBG_succ* G_from, DBG_succ* G_to, std::vector<std::pair<uint64_t, uint64_t> > ref_bins, uint64_t first_pos, uint64_t last_pos) {
-        
+
         std::vector<std::pair<uint64_t, uint64_t> > result;
         uint64_t pos = (first_pos == 0) ? 1 : G_from->index_predecessor(G_to->get_node_seq(first_pos)) + 1;
         uint64_t upper;
@@ -556,6 +555,4 @@ namespace merge {
         result.back().second = (last_pos == 0) ? G_from->get_size() - 1 : result.back().second;
         return result;
     }
-
-
 }

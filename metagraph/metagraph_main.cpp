@@ -32,8 +32,9 @@ ParallelAnnotateContainer* anno_data = new ParallelAnnotateContainer();
 pthread_mutex_t mutex_merge_result = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_bin_idx = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_annotate = PTHREAD_MUTEX_INITIALIZER;
-pthread_attr_t attr;  
-char* annots[] = {"AC_AFR", "AC_EAS", "AC_AMR", "AC_ASJ", "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"};
+pthread_attr_t attr;
+char* annots[] = {"AC_AFR", "AC_EAS", "AC_AMR", "AC_ASJ",
+                  "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"};
 
 void parallel_merge_collect(DBG_succ* result) {
 
@@ -49,12 +50,12 @@ void parallel_merge_collect(DBG_succ* result) {
 }
 
 bool operator==(const AnnotationSet& lhs, const AnnotationSet& rhs) {
-    return (lhs.annotation == rhs.annotation); 
+    return (lhs.annotation == rhs.annotation);
 }
 
 void get_RAM() {
     //output total RAM usage
-    FILE* sfile = fopen("/proc/self/status","r");
+    FILE* sfile = fopen("/proc/self/status", "r");
     char line[128];
     while (fgets(line, 128, sfile) != NULL) {
         if (strncmp(line, "VmRSS:", 6) == 0) {
@@ -67,10 +68,10 @@ void get_RAM() {
 
 
 /*
- * Distribute the annotation of all k-mers in a sequence over 
+ * Distribute the annotation of all k-mers in a sequence over
  * a number of parallel bins.
  */
-void *parallel_annotate_wrapper(void *arg) {
+void* parallel_annotate_wrapper(void *arg) {
 
     uint64_t curr_idx, start, end;
 
@@ -83,7 +84,7 @@ void *parallel_annotate_wrapper(void *arg) {
             curr_idx = anno_data->idx;
             anno_data->idx++;
             pthread_mutex_unlock (&mutex_bin_idx);
-            
+
             start = curr_idx * anno_data->binsize;
             //end = std::min(((curr_idx + 1) * anno_data->binsize) + anno_data->graph->k - 1, anno_data->seq->l);
             end = std::min(((curr_idx + 1) * anno_data->binsize), anno_data->seq->l);
@@ -97,9 +98,9 @@ void *parallel_annotate_wrapper(void *arg) {
 
 /*
  * Distribute the merging of a set of graph structures over
- * bins, such that n parallel threads are used. 
+ * bins, such that n parallel threads are used.
  */
-void *parallel_merge_wrapper(void *arg) {
+void* parallel_merge_wrapper(void *arg) {
 
     unsigned int curr_idx;
     DBG_succ* graph;
@@ -113,10 +114,10 @@ void *parallel_merge_wrapper(void *arg) {
             curr_idx = merge_data->idx;
             merge_data->idx++;
             pthread_mutex_unlock (&mutex_bin_idx);
-            
+
             graph = new DBG_succ(merge_data->k, config, false);
             std::vector<uint64_t> kv;
-            std::vector<uint64_t> nv;                                                                                                            
+            std::vector<uint64_t> nv;
             for (size_t i = 0; i < merge_data->graphs.size(); i++) {
                 kv.push_back(merge_data->bins.at(i).at(curr_idx).first);
                 nv.push_back(merge_data->bins.at(i).at(curr_idx).second + 1);
@@ -126,16 +127,16 @@ void *parallel_merge_wrapper(void *arg) {
             pthread_mutex_lock (&mutex_merge_result);
             merge_data->result.at(curr_idx) = graph;
             merge_data->bins_done++;
-            if (config->verbose) 
+            if (config->verbose)
                 std::cout << "finished bin " << curr_idx + 1 << " (" << merge_data->bins_done << "/" << merge_data->ref_bins.size() << ")" << std::endl;
             pthread_mutex_unlock (&mutex_merge_result);
-
         }
     }
     pthread_exit((void*) 0);
 }
 
-int main(int argc, char const ** argv) {
+
+int main(int argc, char const *argv[]) {
 
     // parse command line arguments and options
     config = new Config(argc, argv);
@@ -165,10 +166,9 @@ int main(int argc, char const ** argv) {
                     delete graph_;
                 }
             }
-        } break;
-
+            break;
+        }
         case Config::merge: {
-
             // collect results on an external merge
             if (config->collect > 1) {
                 std::string fname;
@@ -204,9 +204,9 @@ int main(int argc, char const ** argv) {
             } else {
 
                 // some preliminaries to make command line options consistent
-               // if ((config->parts_total > 1) && (config->parts_total > (config->parallel * config->bins_per_thread)))
+                // if ((config->parts_total > 1) && (config->parts_total > (config->parallel * config->bins_per_thread)))
                 //    config->bins_per_thread = config->parts_total / config->parallel;
-                            
+
                 std::vector<DBG_succ*> graphs;
                 std::vector<uint64_t> kv;
                 std::vector<uint64_t> nv;
@@ -220,7 +220,7 @@ int main(int argc, char const ** argv) {
                 DBG_succ* target_graph = new DBG_succ(graphs.front()->get_k(), config, false);
 
                 if ((config->parallel > 1) || (config->parts_total > 1)) {
-                    pthread_t* threads = NULL; 
+                    pthread_t* threads = NULL;
                     merge_data = new ParallelMergeContainer();
 
                     // get bins in graphs according to required threads
@@ -238,13 +238,13 @@ int main(int argc, char const ** argv) {
                     if (config->verbose)
                         std::cout << "Collecting relative bins" << std::endl;
                     for (size_t i = 1; i < graphs.size(); i++) {
-                        std::cerr << "getting bins for " << i << ": " << config->fname.at(i) << std::endl; 
+                        std::cerr << "getting bins for " << i << ": " << config->fname.at(i) << std::endl;
                         merge_data->bins.push_back(merge::get_bins_relative(graphs.at(i), graphs.front(), merge_data->ref_bins, merge_data->first, merge_data->last));
                     }
                     for (size_t i = 0; i < graphs.size(); i++) {
                         for (size_t ii = 0; ii < merge_data->bins.at(i).size(); ii++) {
                             if (merge_data->bins.at(i).at(ii).first > merge_data->bins.at(i).at(ii).second) {
-                               merge_data->bins.at(i).at(ii) = std::make_pair(graphs.at(i)->get_size(), graphs.at(i)->get_size() - 1); 
+                               merge_data->bins.at(i).at(ii) = std::make_pair(graphs.at(i)->get_size(), graphs.at(i)->get_size() - 1);
                             }
                         }
                     }
@@ -263,13 +263,13 @@ int main(int argc, char const ** argv) {
                     merge_data->bins_done = 0;
 
                     // create threads
-                    threads = new pthread_t[config->parallel]; 
+                    threads = new pthread_t[config->parallel];
                     pthread_attr_init(&attr);
                     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
                     // do the work
                     for (size_t tid = 0; tid < config->parallel; tid++) {
-                       pthread_create(&threads[tid], &attr, parallel_merge_wrapper, (void *) tid); 
+                       pthread_create(&threads[tid], &attr, parallel_merge_wrapper, (void *) tid);
                        std::cerr << "starting thread " << tid << std::endl;
                     }
 
@@ -297,8 +297,8 @@ int main(int argc, char const ** argv) {
                     delete graphs.at(f);
                 std::cerr << "... done merging." << std::endl;
             }
-        } break;
-
+            break;
+        }
         case Config::stats: {
             std::ofstream outstream;
             if (!config->outfbase.empty()) {
@@ -321,7 +321,7 @@ int main(int argc, char const ** argv) {
                     std::cout << "Statistics for file " << config->fname.at(f) << std::endl;
                     std::cout << "nodes: " << graph_->get_node_count() << std::endl;
                     std::cout << "edges: " << graph_->get_edge_count() << std::endl;
-                    std::cout << "k: " << graph_->get_k() << std::endl; 
+                    std::cout << "k: " << graph_->get_k() << std::endl;
                     //graph_->traversalHash();
                     /*std::deque<uint64_t> tmp;
                     tmp.push_back(4);
@@ -332,8 +332,8 @@ int main(int argc, char const ** argv) {
                     std::cout << graph_->index_predecessor(tmp) << std::endl; */
                 }
                 if (!config->outfbase.empty()) {
-                    outstream << config->fname.at(f) << "\t" 
-                              << graph_->get_node_count() << "\t" 
+                    outstream << config->fname.at(f) << "\t"
+                              << graph_->get_node_count() << "\t"
                               << graph_->get_edge_count() << "\t"
                               << graph_->get_k() << std::endl;
                 }
@@ -341,7 +341,7 @@ int main(int argc, char const ** argv) {
                     graph_->print_seq();
                 if (config->print_graph_succ)
                     graph_->print_state_str();
-                
+
                 std::ifstream instream((config->fname.at(f) + ".anno.dbg").c_str());
                 if (instream.good()) {
                     size_t anno_size = libmaus2::util::NumberSerialisation::deserialiseNumber(instream);
@@ -356,7 +356,7 @@ int main(int argc, char const ** argv) {
                 std::cerr << "done" << std::endl;
 
                 std::cerr << "construct anew" << std::endl;
-                graph_tut->last = new libmaus2::bitbtree::BitBTree<6, 64>(10000000ull, false); 
+                graph_tut->last = new libmaus2::bitbtree::BitBTree<6, 64>(10000000ull, false);
                 for (size_t i = 0; i < 10000000; ++i)
                     graph_tut->last->setBitQuick(i, i % 2);
                 std::cerr << "done" << std::endl;
@@ -383,9 +383,8 @@ int main(int argc, char const ** argv) {
             }
             if (!config->outfbase.empty())
                 outstream.close();
-
-        } break;
-
+            break;
+        }
         case Config::dump: {
             //for (unsigned int f = 0; f < config->fname.size(); ++f) {
                 //DBG_succ* graph_ = new DBG_succ(config->fname.at(f), config);
@@ -396,12 +395,10 @@ int main(int argc, char const ** argv) {
                 //graph_->print_adj_list(config->outfbase);
                 delete graph_;
             //}
-        } break;
-
-
+            break;
+        }
         case Config::align: {
-
-            // load graph 
+            // load graph
             if (config->infbase.empty()) {
               std::cerr << "Requires input <de bruijn graph> to align reads." << config->align << std::endl;
               exit(1);
@@ -478,11 +475,12 @@ int main(int argc, char const ** argv) {
                 kseq_destroy(read_stream);
                 gzclose(input_p);
             }
-        } break;
+            break;
+        }
 
         //TODO: allow for building by appending/adding to an existing graph
-        case Config::build: {
 
+        case Config::build: {
             if (!config->infbase.empty()) {
                 graph = new DBG_succ(config->infbase, config);
                 graph->annotationFromFile();
@@ -512,16 +510,16 @@ int main(int argc, char const ** argv) {
                     }
                 }
                 assert(suffices.size() == pow(graph->alph_size, suffix_len));
-    
+
                 //generate sink node
                 std::string starts = std::string(graph->k-1, graph->alphabet[graph->alph_size-1]) + graph->alphabet[0] + graph->alphabet[0];
                 std::string sinks = graph->alphabet.substr(0,1);
                 kstring_t graphsink = {1, 1, &sinks[0u]};
                 kstring_t start = {graph->k+1, graph->k+1, &starts[0u]};
                 kstring_t blank = {0, 1, NULL};
-    
+
                 clock_t tstart, timelast;
-                
+
                 //one pass per suffix
                 for (size_t j = 0; j < suffices.size(); ++j) {
                     std::cout << "Suffix: " << suffices[j] << "\n";
@@ -537,7 +535,7 @@ int main(int argc, char const ** argv) {
                             }
                             // open stream
                             gzFile input_p = gzopen(config->fname[f].c_str(), "r");
-    
+
                             if (utils::get_filetype(config->fname.at(f)) == "VCF") {
                                 //READ FROM VCF
                                 uint64_t nbp = 0;
@@ -555,10 +553,10 @@ int main(int argc, char const ** argv) {
                                     if (i % 10000 == 0) {
                                         std::cout << "." << std::flush;
                                         if (i % 100000 == 0) {
-                                            fprintf(stdout, "%lu - bp %lu / runtime %lu / BPph %lu\n", 
-                                                    i, 
-                                                    nbp, 
-                                                    (clock() - tstart)/CLOCKS_PER_SEC, 
+                                            fprintf(stdout, "%lu - bp %lu / runtime %lu / BPph %lu\n",
+                                                    i,
+                                                    nbp,
+                                                    (clock() - tstart)/CLOCKS_PER_SEC,
                                                     60*60*CLOCKS_PER_SEC*(nbp-nbplast)/(clock()-timelast));
                                             nbplast = nbp;
                                             timelast = clock();
@@ -586,7 +584,7 @@ int main(int argc, char const ** argv) {
                                 //while (kseq_read(read_stream) >= 0) {
                                     // possibly reverse k-mers
                                     if (config->reverse)
-                                        reverse_complement(read_stream->seq);                    
+                                        reverse_complement(read_stream->seq);
                                     // add all k-mers of seq to the graph
                                     construct::add_seq_fast(graph, read_stream->seq, read_stream->name, true, config->parallel, suffices[j], config->add_anno);
                                 }
@@ -643,11 +641,11 @@ int main(int argc, char const ** argv) {
             config->infbase = config->outfbase;
             graph->annotationToFile();
             //graph->print_seq();
-        } break;
-
+            break;
+        }
         case Config::annotate: {
 
-            // load graph 
+            // load graph
             if (config->infbase.empty()) {
               std::cerr << "Requires input <de bruijn graph> for annotation. Use option -I. " << std::endl;
               exit(1);
@@ -662,9 +660,9 @@ int main(int argc, char const ** argv) {
            // options.create_if_missing = true;
            // rocksdb::DB* db;
            // rocksdb::Status status = rocksdb::DB::Open(options, config->dbpath, &db);
-            
+
             uint64_t total_seqs = 0;
-            
+
             // iterate over input files
             for (unsigned int f = 0; f < config->fname.size(); ++f) {
 
@@ -684,26 +682,26 @@ int main(int argc, char const ** argv) {
                 while (kseq_read(read_stream) >= 0) {
 
                     if (config->reverse)
-                        reverse_complement(read_stream->seq);                    
+                        reverse_complement(read_stream->seq);
 
                     if (config->parallel > 1) {
-                        pthread_t* threads = NULL; 
+                        pthread_t* threads = NULL;
 
                         anno_data->seq = &(read_stream->seq);
                         anno_data->label = &(read_stream->name);
                         anno_data->graph = graph;
                         anno_data->idx = 0;
                         anno_data->binsize = (read_stream->seq.l + 1) / (config->parallel * config->bins_per_thread);
-                        anno_data->total_bins = ((read_stream->seq.l + anno_data->binsize - 1) / anno_data->binsize); 
+                        anno_data->total_bins = ((read_stream->seq.l + anno_data->binsize - 1) / anno_data->binsize);
 
                         // create threads
-                        threads = new pthread_t[config->parallel]; 
+                        threads = new pthread_t[config->parallel];
                         pthread_attr_init(&attr);
                         pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
                         // do the work
                         for (size_t tid = 0; tid < config->parallel; tid++) {
-                           pthread_create(&threads[tid], &attr, parallel_annotate_wrapper, (void *) tid); 
+                           pthread_create(&threads[tid], &attr, parallel_annotate_wrapper, (void *) tid);
                            //std::cerr << "starting thread " << tid << std::endl;
                         }
 
@@ -735,12 +733,11 @@ int main(int argc, char const ** argv) {
                 annotate::annotationToScreen(graph);
 
             graph->annotationToFile();
-
-        } break;
-
+            break;
+        }
         case Config::classify: {
 
-            // load graph 
+            // load graph
             if (config->infbase.empty()) {
               std::cerr << "Requires input <de bruijn graph> for annotation. Use option -I. " << std::endl;
               exit(1);
@@ -765,7 +762,7 @@ int main(int argc, char const ** argv) {
                     std::cerr << "ERROR while opening input file " << config->fname.at(f) << std::endl;
                     exit(1);
                 }
-                
+
                 std::set<uint32_t> labels_fwd;
                 std::set<uint32_t> labels_rev;
                 while (kseq_read(read_stream) >= 0) {
@@ -776,7 +773,7 @@ int main(int argc, char const ** argv) {
                         std::cout << graph->id_to_label.at(*it + 1) << ":";
                     std::cout << "\t";
 
-                    reverse_complement(read_stream->seq);                    
+                    reverse_complement(read_stream->seq);
                     labels_rev = annotate::classify_read(graph, read_stream->seq, config->distance);
                     for (std::set<uint32_t>::iterator it = labels_rev.begin(); it != labels_rev.end(); it++)
                         std::cout << graph->id_to_label.at(*it + 1) << ":";
@@ -785,10 +782,8 @@ int main(int argc, char const ** argv) {
                 kseq_destroy(read_stream);
                 gzclose(input_p);
             }
- 
-
-
-        } break;
+            break;
+        }
     }
 
     // output and cleanup
@@ -800,13 +795,9 @@ int main(int argc, char const ** argv) {
             traverse::toSQL(graph);
         if (!config->outfbase.empty())
             graph->toFile(config->parts_total, config->part_idx);
-        
         delete graph;
     }
     delete config;
 
     return 0;
 }
-
-
-

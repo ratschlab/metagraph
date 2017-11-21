@@ -11,7 +11,7 @@ class Config {
         Config(int argc, const char *argv[]);
 
         ~Config();
-       
+
         void print_usage(std::string prog_name, int identity = -1);
         //void print_call(string prog_name);
 
@@ -23,7 +23,7 @@ class Config {
         bool reverse;
         bool fast;
         bool add_anno;
-        
+
         unsigned int k;
         unsigned int distance;
         unsigned int parallel;
@@ -42,10 +42,10 @@ class Config {
         std::string refpath;
         std::string suffix;
 
-        enum identities {noidentity = -1, 
-                         build = 1, 
-                         merge, 
-                         compare, 
+        enum identities {noidentity = -1,
+                         build = 1,
+                         merge,
+                         compare,
                          align,
                          stats,
                          annotate,

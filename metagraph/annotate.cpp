@@ -11,7 +11,9 @@ namespace annotate {
 
     typedef uint64_t TAlphabet;
 
-    void annotate_kmer(DBG_succ* G, sdsl::bit_vector* annotation_curr, std::string &kmer, uint32_t &label_id, uint64_t &idx, pthread_mutex_t* anno_mutex, bool ignore) {
+    void annotate_kmer(DBG_succ* G, sdsl::bit_vector* annotation_curr,
+                       std::string &kmer, uint32_t &label_id, uint64_t &idx,
+                       pthread_mutex_t* anno_mutex, bool ignore) {
 
         // we just need to walk one step in the path
         if (idx > 0) {
@@ -71,7 +73,7 @@ namespace annotate {
             annotation_curr = new sdsl::bit_vector(G->get_size(), 0);
             if (G->config->verbose)
                 std::cout << "added label ID " << label_id << " for label string " << label_str << std::endl;
-        } else { 
+        } else {
             label_id = id_it->second;
             if (G->annotation_full.at(label_id - 1) != NULL) {
                 annotation_curr = inflate_annotation(G, label_id - 1);
@@ -101,7 +103,7 @@ namespace annotate {
             }
             assert(curr_kmer.size() == G->k + 1);
             annotate_kmer(G, annotation_curr, curr_kmer, label_id, previous_idx, anno_mutex, (i % G->config->frequency) > 0);
-            
+
             //std::cerr << curr_kmer << ":" << std::string(label.s) << std::endl;
             curr_kmer.push_back(seq.s[i]);
             curr_kmer = curr_kmer.substr(1, G->k + 1);
@@ -109,7 +111,7 @@ namespace annotate {
         // add last kmer and label to database
         if (curr_kmer.size() == G->k + 1)
             annotate_kmer(G, annotation_curr, curr_kmer, label_id, previous_idx, anno_mutex, (i % G->config->frequency) > 0);
-        
+
         if (anno_mutex)
             pthread_mutex_lock(anno_mutex);
 
@@ -130,10 +132,10 @@ namespace annotate {
 
         delete annotation_curr;
         annotation_curr = NULL;
-    }   
+    }
 
     std::vector<uint32_t> classify_path(DBG_succ* G, std::vector<uint64_t> path) {
-        
+
         //uint32_t curr_anno;
         std::vector<uint32_t> labels(G->annotation_full.size(), 0);
         //std::vector<uint32_t> current_combination;
@@ -168,7 +170,7 @@ namespace annotate {
                 if (c->second > curr_max) {
                     labels.clear();
                     curr_max = c->second;
-                } 
+                }
                 if (c->second == curr_max) {
                     labels.push_back(c->first);
                 }
@@ -281,5 +283,5 @@ namespace annotate {
         //std::cerr << std::endl;
     }
 
-                
+
 }

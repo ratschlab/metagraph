@@ -4,10 +4,10 @@
 testrun*
 *.dbg
 *.fna
-metagraph/external-libraries/
-metagraph/external-libraries/libmaus2-lib
 metagraph/external-libraries/seqan-include
-!metagraph/external-libraries/README
-a.out
+metagraph/external-libraries/README
 *.gch
 database-cli
+*.DS_Store
+*._*
+build
