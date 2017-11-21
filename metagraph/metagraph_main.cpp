@@ -33,8 +33,10 @@ pthread_mutex_t mutex_merge_result = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_bin_idx = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_annotate = PTHREAD_MUTEX_INITIALIZER;
 pthread_attr_t attr;
-char* annots[] = {"AC_AFR", "AC_EAS", "AC_AMR", "AC_ASJ",
-                  "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"};
+const char *annots[] = {
+  "AC_AFR", "AC_EAS", "AC_AMR", "AC_ASJ",
+  "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"
+};
 
 void parallel_merge_collect(DBG_succ* result) {
 
@@ -71,7 +73,7 @@ void get_RAM() {
  * Distribute the annotation of all k-mers in a sequence over
  * a number of parallel bins.
  */
-void* parallel_annotate_wrapper(void *arg) {
+void* parallel_annotate_wrapper(void *) {
 
     uint64_t curr_idx, start, end;
 
@@ -100,7 +102,7 @@ void* parallel_annotate_wrapper(void *arg) {
  * Distribute the merging of a set of graph structures over
  * bins, such that n parallel threads are used.
  */
-void* parallel_merge_wrapper(void *arg) {
+void* parallel_merge_wrapper(void *) {
 
     unsigned int curr_idx;
     DBG_succ* graph;
@@ -122,7 +124,7 @@ void* parallel_merge_wrapper(void *arg) {
                 kv.push_back(merge_data->bins.at(i).at(curr_idx).first);
                 nv.push_back(merge_data->bins.at(i).at(curr_idx).second + 1);
             }
-            merge::merge(graph, merge_data->graphs, kv, nv, true);
+            merge::merge(graph, merge_data->graphs, kv, nv);
 
             pthread_mutex_lock (&mutex_merge_result);
             merge_data->result.at(curr_idx) = graph;
@@ -549,7 +551,7 @@ int main(int argc, char const *argv[]) {
                                 }
                                 std::cerr << "Loading VCF with " << config->parallel << " threads per line\n";
                                 std::string annot;
-                                for (size_t i=1; (annot = vcf_get_seq(vcf, annots, sizeof(annots)/sizeof(char *))).length();++i) {
+                                for (size_t i = 1; (annot = vcf_get_seq(vcf, annots, sizeof(annots) / sizeof(char *))).length(); ++i) {
                                     if (i % 10000 == 0) {
                                         std::cout << "." << std::flush;
                                         if (i % 100000 == 0) {

@@ -126,7 +126,7 @@ static inline void vcf_print_line(vcfparse* vcfp) {
 }
 
 //TODO: make a parallel version of this that outputs n lines at a time?
-static inline std::string vcf_get_seq(vcfparse* vcfp, char** annots, size_t num_annots) {
+static inline std::string vcf_get_seq(vcfparse* vcfp, const char *annots[], size_t num_annots) {
     std::string annot = "";
     //std::string annot = "VCF:";
     //uint64_t annot;
@@ -221,14 +221,14 @@ static inline std::string vcf_get_seq(vcfparse* vcfp, char** annots, size_t num_
         int32_t *gt_arr=NULL, ngt_arr = 0;
         int nsmpl = bcf_hdr_nsamples(vcfp->hdr);
         bcf_fmt_t *curfmt;
-        if (curfmt = bcf_get_fmt(vcfp->hdr, vcfp->rec, "GT")) {
+        if ((curfmt = bcf_get_fmt(vcfp->hdr, vcfp->rec, "GT"))) {
             int ngt = bcf_get_genotypes(vcfp->hdr, vcfp->rec, &gt_arr, &ngt_arr);
             int ploidy = ngt/nsmpl;
             int cur;
             if (ngt > 0) {
-                for (size_t i = 0; i < ngt; i += ploidy) {
+                for (int i = 0; i < ngt; i += ploidy) {
                     cur = 0;
-                    for (size_t j = 0; j < ploidy; ++j) {
+                    for (int j = 0; j < ploidy; ++j) {
                         cur |= *(gt_arr + i + j);
                     }
                     if ((cur & 5) == 5) {

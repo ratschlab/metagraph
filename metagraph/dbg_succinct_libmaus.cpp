@@ -157,6 +157,9 @@ DBG_succ::DBG_succ(std::string infbase_, Config *config_) :
             W = new wavelet_tree_stat(instream_W);
             last = new bit_vector_stat(instream_l);
         } break;
+        case Config::cstr:
+            assert("Never happens");
+            break;
     }
     instream_W.close();
     instream_l.close();

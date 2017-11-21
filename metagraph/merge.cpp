@@ -24,7 +24,7 @@ namespace merge {
             last_k(last_k_) {}
     };
 
-    void merge(DBG_succ* Gt, std::vector<DBG_succ*> Gv, std::vector<uint64_t> kv, std::vector<uint64_t> nv, bool is_parallel) {
+    void merge(DBG_succ *Gt, std::vector<DBG_succ*> Gv, std::vector<uint64_t> kv, std::vector<uint64_t> nv) {
 
         // Preliminarities
         for (size_t i = 0; i < Gv.size(); i++) {
