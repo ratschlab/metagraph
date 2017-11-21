@@ -422,7 +422,7 @@ int main(int argc, char const *argv[]) {
 
                     //graph->print_seq();
                     uint64_t aln_len = read_stream->seq.l;
-                    bool reverse = false;
+                    //bool reverse = false;
 
                     if (config->distance > 0) {
                         // since we set aln_len = read_stream->seq.l, we only get a single hit vector
