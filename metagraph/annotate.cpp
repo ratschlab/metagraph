@@ -11,9 +11,8 @@ namespace annotate {
 
     typedef uint64_t TAlphabet;
 
-    void annotate_kmer(DBG_succ* G, sdsl::bit_vector* annotation_curr,
-                       std::string &kmer, uint32_t &label_id, uint64_t &idx,
-                       pthread_mutex_t* anno_mutex, bool ignore) {
+    void annotate_kmer(DBG_succ *G, sdsl::bit_vector *annotation_curr,
+                       std::string &kmer, uint64_t &idx, bool ignore) {
 
         // we just need to walk one step in the path
         if (idx > 0) {
@@ -102,7 +101,7 @@ namespace annotate {
                 continue;
             }
             assert(curr_kmer.size() == G->k + 1);
-            annotate_kmer(G, annotation_curr, curr_kmer, label_id, previous_idx, anno_mutex, (i % G->config->frequency) > 0);
+            annotate_kmer(G, annotation_curr, curr_kmer, previous_idx, (i % G->config->frequency) > 0);
 
             //std::cerr << curr_kmer << ":" << std::string(label.s) << std::endl;
             curr_kmer.push_back(seq.s[i]);
@@ -110,7 +109,7 @@ namespace annotate {
         }
         // add last kmer and label to database
         if (curr_kmer.size() == G->k + 1)
-            annotate_kmer(G, annotation_curr, curr_kmer, label_id, previous_idx, anno_mutex, (i % G->config->frequency) > 0);
+            annotate_kmer(G, annotation_curr, curr_kmer, previous_idx, (i % G->config->frequency) > 0);
 
         if (anno_mutex)
             pthread_mutex_lock(anno_mutex);

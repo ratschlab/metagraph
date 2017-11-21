@@ -4,8 +4,6 @@
 testrun*
 *.dbg
 *.fna
-metagraph/external-libraries/seqan-include
-metagraph/external-libraries/README
 *.gch
 database-cli
 *.DS_Store
