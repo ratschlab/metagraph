@@ -1,1 +1,3 @@
 Put external dependencies in this directory.
+
+git submodule update --init --recursive

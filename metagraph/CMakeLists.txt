@@ -38,8 +38,9 @@ target_link_libraries(
   -lcurl -lssl -lcrypto -llzma
 )
 
+
 #-------------------
-# Test
+# Unit Tests
 #-------------------
 # Download and unpack googletest at configure time
 configure_file(CMakeLists.txt.in googletest-download/CMakeLists.txt)
