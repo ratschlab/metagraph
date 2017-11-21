@@ -158,7 +158,7 @@ DBG_succ::DBG_succ(std::string infbase_, Config *config_) :
             last = new bit_vector_stat(instream_l);
         } break;
         case Config::cstr:
-            assert("Never happens");
+            assert(false && "Never happens");
             break;
     }
     instream_W.close();
