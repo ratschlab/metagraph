@@ -69,6 +69,10 @@ add_subdirectory(
 file(GLOB unit_tests_files "unit_tests/*.cpp")
 list(FILTER unit_tests_files EXCLUDE REGEX ".*\\._.*")
 
+if (CMAKE_VERSION VERSION_LESS 2.8.11)
+  include_directories("${gtest_SOURCE_DIR}/include")
+endif()
+
 add_executable(unit_tests ${unit_tests_files})
 
 target_link_libraries(unit_tests -lgtest_main -lgtest)
