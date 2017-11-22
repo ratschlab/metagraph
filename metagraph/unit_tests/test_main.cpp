@@ -1,6 +1,8 @@
 #include <stdio.h>
 
 #include "gtest/gtest.h"
+#include "dbg_succinct_libmaus.hpp"
+#include "construct.hpp"
 
 int Sum(int a, int b) {
   return a + b;
@@ -19,3 +21,4 @@ TEST(SumTest, HandlesZeroInput) {
 TEST(SumTest, HandlesNegativeInput) {
   ASSERT_EQ(-3, Sum(-1, -2));
 }
+

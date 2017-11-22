@@ -73,8 +73,10 @@ if (CMAKE_VERSION VERSION_LESS 2.8.11)
   include_directories("${gtest_SOURCE_DIR}/include")
 endif()
 
+include_directories(.)
+
 add_executable(unit_tests ${unit_tests_files})
 
-target_link_libraries(unit_tests -lgtest_main -lgtest)
+target_link_libraries(unit_tests -lgtest_main -lgtest -lsdsl)
 
 add_test(NAME unit_tests COMMAND unit_tests)

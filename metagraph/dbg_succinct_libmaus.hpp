@@ -87,6 +87,13 @@ class DBG_succ {
     std::vector<std::string> bits_to_labels;
     size_t anno_labels;
 
+    //default values for the sink node
+    std::string starts;
+    std::string sinks;
+    kstring_t graphsink;
+    kstring_t start;
+    kstring_t blank;
+
 #ifdef DBGDEBUG
     bool debug = true;
 #else

@@ -37,6 +37,10 @@ namespace construct {
 
     uint64_t remove_edges(DBG_succ *G, std::set<uint64_t> &edges, uint64_t ref_point = 0);
 
+    std::deque<std::string> generate_suffices(DBG_succ *G, unsigned int nsplits);
+
+    void add_sink(DBG_succ* G, unsigned int parallel = 1, std::string suffix = "", bool add_anno = false);
+
 } // namespace construct
 
 #endif // __CONSTRUCT_HPP__
