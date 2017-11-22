@@ -4,7 +4,7 @@ project(MetaGenGraph)
 enable_testing()
 
 list(APPEND CMAKE_CXX_FLAGS "\
-  -std=c++11 -Wall -Werror -O3 \
+  -std=c++14 -Wall -Werror -O3 \
   -msse4.2 -fopenmp -D_THREAD_SAFE -pthread \
   -W -Wno-long-long -Wno-variadic-macros")
 

@@ -1,54 +1,21 @@
 #ifndef __DATATYPES_HPP__
 #define __DATATYPES_HPP__
 
+#include <pthread.h>
+#include <assert.h>
 #include <functional>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
-#include <pthread.h>
-#include <assert.h>
-#include "kseq.h"
 
 #include <sdsl/wavelet_trees.hpp>
-
 #include <libmaus2/bitbtree/bitbtree.hpp>
 #include <libmaus2/wavelet/DynamicWaveletTree.hpp>
 
+#include "kseq.h"
+
 class DBG_succ;
 
-/*
-struct ColorNode {
-    ColorNode *left = NULL;
-    ColorNode *right = NULL;
-    uint64_t idx = 0;
-};
-
-class ColorTree {
-
-    private:
-    ColorNode* root;
-
-    public:
-    ColorTree() {
-        root = new ColorNode();
-    }
-
-    void add_color(sdsl::vector_rrr<63>* b) {
-        for (size_t i = 0; i < b->size(); ++i) {
-            if (b[i]) {
-                curr = left ? left : (new ColorNode);
-            } else {
-                curr = right ? right : (new ColorNode);
-            }
-        }
-    }
-
-    uint64_t color_index(sdsl::vector_rrr<63>* b) {
-
-    }
-
-};
-*/
 
 struct HitInfo {
     uint64_t rl;
@@ -58,96 +25,19 @@ struct HitInfo {
     uint64_t distance;
     std::string cigar;
     std::vector<uint64_t> path;
-
-    HitInfo(uint64_t rl_, uint64_t ru_, uint64_t str_pos_, uint64_t graph_pos_, uint64_t distance_, std::string cigar_, std::vector<uint64_t> path_):
-        rl(rl_),
-        ru(ru_),
-        str_pos(str_pos_),
-        graph_pos(graph_pos_),
-        distance(distance_),
-        cigar(cigar_),
-        path(path_) {}
-
-    HitInfo(const HitInfo &other):
-        rl(other.rl),
-        ru(other.ru),
-        str_pos(other.str_pos),
-        graph_pos(other.graph_pos),
-        distance(other.distance),
-        cigar(other.cigar),
-        path(other.path) {}
 };
 
 class HitInfoCompare {
-    bool is_reverse;
-public:
-    HitInfoCompare(const bool& is_reverse_ = false) {
-        is_reverse = is_reverse_;
+  public:
+    explicit HitInfoCompare(bool is_reverse) : is_reverse_(is_reverse) {}
+    HitInfoCompare() : HitInfoCompare::HitInfoCompare(false) {}
+
+    bool operator()(const HitInfo &lhs, const HitInfo &rhs) const {
+        return is_reverse_ ? lhs.distance < rhs.distance
+                           : lhs.distance > rhs.distance;
     }
-
-    bool operator() (const HitInfo& lhs, const HitInfo& rhs) const {
-        if (is_reverse) return (lhs.distance < rhs.distance);
-        else return (lhs.distance > rhs.distance);
-    }
-};
-
-struct AnnotationSet {
-    std::set<uint32_t> annotation;
-};
-
-struct AnnotationHash {
-    std::unordered_map<uint32_t, uint32_t> bitmap;
-    uint32_t last = 1;
-
-    uint32_t knuth_hash(const uint32_t i) const {
-        return i * UINT32_C(2654435761);
-    };
-
-    std::uint32_t operator()(const std::vector<uint32_t> &a) const {
-        std::vector<uint32_t>::const_iterator it = a.begin();
-        uint32_t h1 = knuth_hash(*it);
-        it++;
-        if (a.size() > 1) {
-            for (; it != a.end(); ++it) {
-                uint32_t h2 = knuth_hash(*it);
-                h1 = h1 ^ (h2 << 1);
-            }
-        }
-        return h1;
-    };
-
-    std::uint32_t bithash(const std::vector<uint32_t> &a) {
-        uint32_t h1 = 0;
-        for (std::vector<uint32_t>::const_iterator it = a.begin(); it!=a.end();++it) {
-            std::unordered_map<uint32_t, uint32_t>::iterator c = bitmap.find(*it);
-            if (c != bitmap.end()) {
-                h1 += c->second;
-            } else {
-                bitmap[*it] = last;
-                h1 += last;
-                last <<= 1;
-            }
-        }
-        assert(h1 || !a.size());
-        return h1;
-    };
-
-
-    /*std::uint32_t operator()(const std::set<uint32_t> &a) const {
-        std::set<uint32_t>::iterator it = a.begin();
-        //std::uint32_t h1 = (uint32_t) std::hash<uint32_t>{}(*it);
-        uint32_t h1 = knuth_hash(*it);
-        it++;
-        if (a.size() > 1) {
-            for (; it != a.end(); ++it) {
-                //std::uint32_t h2 = (uint32_t) std::hash<uint32_t>{}(*it);
-                uint32_t h2 = knuth_hash(*it);
-                h1 = h1 ^ (h2 << 1);
-                //h1 = (h1 * h2);
-            }
-        }
-        return h1;
-    }*/
+  private:
+    bool is_reverse_;
 };
 
 struct ParallelMergeContainer {
@@ -367,12 +257,10 @@ struct ParallelAnnotateContainer {
 };
 
 class bit_vector {
-
-public:
-
+  public:
     virtual ~bit_vector() {};
 
-    virtual uint64_t size() = 0;
+    virtual uint64_t size() const = 0;
     virtual void set(size_t id, bool val) = 0;
     virtual void setBitQuick(size_t id, bool val) = 0;
     //virtual bool const& operator[](size_t id) const = 0;
@@ -387,8 +275,7 @@ public:
 
 
 class bit_vector_dyn: public bit_vector, public libmaus2::bitbtree::BitBTree<6, 64> {
-
-public:
+  public:
     bit_vector_dyn() : libmaus2::bitbtree::BitBTree<6, 64>() {
     }
 
@@ -424,7 +311,7 @@ public:
         this->deserialise(in);
     }
 
-    uint64_t size() {
+    uint64_t size() const {
         return this->libmaus2::bitbtree::BitBTree<6, 64>::size();
     }
 
@@ -470,8 +357,7 @@ public:
 };
 
 class bit_vector_stat: public bit_vector, public sdsl::bit_vector {
-
-private:
+  private:
     sdsl::rank_support_v5<> rk;
     sdsl::select_support_mcl<> slct;
     bool update_rs;
@@ -480,7 +366,8 @@ private:
         slct = sdsl::select_support_mcl<>(this);
         update_rs = false;
     }
-public:
+
+  public:
     bit_vector_stat(size_t size, bool def) : sdsl::bit_vector(size, def) {
         init_rs();
     }
@@ -561,16 +448,14 @@ public:
         //the rank method in SDSL does not include id in the count
         return rk(id >= this->size() ? this->size() : id + 1);
     }
-    uint64_t size() {
+    uint64_t size() const {
         return this->sdsl::bit_vector::size();
     }
 };
 
 
 class wavelet_tree {
-
-public:
-
+  public:
     virtual ~wavelet_tree() {};
 
     virtual uint64_t size() = 0;
@@ -586,13 +471,11 @@ public:
     //virtual uint64_t get(size_t id) = 0;
     // this only makes sense when implemented in the dynamic part
     virtual bool get_bit_raw(uint64_t id) = 0;
-
 };
 
 
 class wavelet_tree_stat: public wavelet_tree, public sdsl::int_vector<> {
-
-private:
+  private:
     sdsl::wt_int<> wwt;
     size_t logsigma;
     bool update_rs;
@@ -604,15 +487,15 @@ private:
     }
     size_t n;
 
-public:
+  public:
     wavelet_tree_stat(size_t logsigma, size_t size, uint64_t def)
-        : sdsl::int_vector<>(2 * size + 1, def, 1<< logsigma) {
+            : sdsl::int_vector<>(2 * size + 1, def, 1<< logsigma) {
         n = size;
         update_rs = true;
     }
 
     wavelet_tree_stat(wavelet_tree* T, size_t logsigma)
-        : sdsl::int_vector<>(T->size(), 0, logsigma) {
+            : sdsl::int_vector<>(T->size(), 0, logsigma) {
         n = T->size();
         for (size_t i = 0; i < n; ++i)
             this->sdsl::int_vector<>::operator[](i) = T->operator[](i);
@@ -721,9 +604,7 @@ public:
 
 //Child of DynamicWaveletTree allowing for construction from an int vector
 class wavelet_tree_dyn : public wavelet_tree, public libmaus2::wavelet::DynamicWaveletTree<6, 64> {
-
-private:
-
+  private:
     libmaus2::bitbtree::BitBTree<6, 64>* makeTree(std::vector<uint8_t> &W_stat, size_t const b, unsigned int parallel=1) {
 
         size_t const n = W_stat.size();
@@ -856,7 +737,7 @@ private:
         return tmp;
     }
 
-public:
+  public:
     wavelet_tree_dyn(size_t b)
         : libmaus2::wavelet::DynamicWaveletTree<6, 64>(b) {
     }
@@ -884,8 +765,6 @@ public:
     //wavelet_tree_dyn(bit_vector* bt, size_t b, size_t n)
     //    : libmaus2::wavelet::DynamicWaveletTree<6, 64>(dynamic_cast<libmaus2::bitbtree::BitBTree<6, 64>*>(bt), b, n) {
     //}
-
-    ~wavelet_tree_dyn() {}
 
     uint64_t size() {
         return this->libmaus2::wavelet::DynamicWaveletTree<6, 64>::size();
@@ -938,4 +817,4 @@ public:
 };
 
 
-#endif
+#endif // __DATATYPES_HPP__

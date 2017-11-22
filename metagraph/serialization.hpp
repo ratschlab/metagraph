@@ -11,6 +11,7 @@
 #include <libmaus2/util/NumberSerialisation.hpp>
 #include <libmaus2/util/StringSerialisation.hpp>
 
+
 void serialize_annotation_map(std::ostream &out, std::map<uint32_t, uint32_t> const &M) {
     libmaus2::util::NumberSerialisation::serialiseNumber(out, M.size());
     for (std::map<uint32_t, uint32_t>::const_iterator it = M.begin(); it != M.end(); ++it) {
@@ -19,8 +20,7 @@ void serialize_annotation_map(std::ostream &out, std::map<uint32_t, uint32_t> co
     }
 }
 
-
-void serialise_annotation(std::ostream & out, std::deque<uint32_t> & D) {
+void serialise_annotation(std::ostream &out, std::deque<uint32_t> &D) {
     libmaus2::util::NumberSerialisation::serialiseNumber(out, D.size());
     std::map<uint32_t, uint32_t> MD;
     std::map<uint32_t, uint32_t> DM;

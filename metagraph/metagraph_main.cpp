@@ -1,13 +1,10 @@
 #include <iostream>
 #include <fstream>
 #include <ctime>
-
 #include <vector>
 #include <set>
 #include <deque>
 #include <string>
-#include <zlib.h>
-#include <pthread.h>
 #include <map>
 
 #include "datatypes.hpp"
@@ -17,11 +14,11 @@
 #include "kseq.h"
 #include "utils.hpp"
 #include "vcfparse.h"
-#include "compare.hpp"
 #include "traverse.hpp"
 #include "merge.hpp"
 #include "annotate.hpp"
 #include "construct.hpp"
+
 
 KSEQ_INIT(gzFile, gzread)
 
@@ -49,10 +46,6 @@ void parallel_merge_collect(DBG_succ* result) {
     merge_data->result.clear();
     merge_data->bins_done = 0;
     result->p = result->succ_W(1, 0);
-}
-
-bool operator==(const AnnotationSet& lhs, const AnnotationSet& rhs) {
-    return (lhs.annotation == rhs.annotation);
 }
 
 void get_RAM() {
@@ -147,20 +140,18 @@ int main(int argc, char const *argv[]) {
         std::cout << "Welcome to MetaGraph" << std::endl;
 
     // create graph pointer
-    DBG_succ* graph = NULL;
+    DBG_succ *graph = NULL;
 
     switch (config->identity) {
-
-        case Config::compare: {
+        case Config::COMPARE: {
             for (unsigned int f = 0; f < config->fname.size(); ++f) {
                 if (f == 0) {
                     std::cout << "Opening file " << config->fname.at(f) << std::endl;
                     graph = new DBG_succ(config->fname.at(f), config);
                 } else {
                     std::cout << "Opening file for comparison ..." << config->fname.at(f) << std::endl;
-                    DBG_succ* graph_ = new DBG_succ(config->fname.at(f), config);
-                    bool identical = compare::compare(graph, graph_);
-                    if (identical) {
+                    DBG_succ *graph_ = new DBG_succ(config->fname.at(f), config);
+                    if (*graph == *graph_) {
                         std::cout << "Graphs are identical" << std::endl;
                     } else {
                         std::cout << "Graphs are not identical" << std::endl;
@@ -170,7 +161,7 @@ int main(int argc, char const *argv[]) {
             }
             break;
         }
-        case Config::merge: {
+        case Config::MERGE: {
             // collect results on an external merge
             if (config->collect > 1) {
                 std::string fname;
@@ -198,7 +189,7 @@ int main(int argc, char const *argv[]) {
                 }
                 if (config->fast) {
                     //graph->toDynamic();
-                    graph->switch_state(Config::dyn);
+                    graph->switch_state(Config::DYN);
                 }
                 graph->p = graph->succ_W(1, 0);
 
@@ -301,7 +292,7 @@ int main(int argc, char const *argv[]) {
             }
             break;
         }
-        case Config::stats: {
+        case Config::STATS: {
             std::ofstream outstream;
             if (!config->outfbase.empty()) {
                 outstream.open((config->outfbase + ".stats.dbg").c_str());
@@ -387,7 +378,7 @@ int main(int argc, char const *argv[]) {
                 outstream.close();
             break;
         }
-        case Config::dump: {
+        case Config::DUMP: {
             //for (unsigned int f = 0; f < config->fname.size(); ++f) {
                 //DBG_succ* graph_ = new DBG_succ(config->fname.at(f), config);
                 DBG_succ* graph_ = new DBG_succ(config->infbase, config);
@@ -399,10 +390,10 @@ int main(int argc, char const *argv[]) {
             //}
             break;
         }
-        case Config::align: {
+        case Config::ALIGN: {
             // load graph
             if (config->infbase.empty()) {
-              std::cerr << "Requires input <de bruijn graph> to align reads." << config->align << std::endl;
+              std::cerr << "Requires input <de bruijn graph> to align reads." << config->ALIGN << std::endl;
               exit(1);
             }
             graph = new DBG_succ(config->infbase, config);
@@ -414,7 +405,7 @@ int main(int argc, char const *argv[]) {
                 gzFile input_p = gzopen(config->fname.at(f).c_str(), "r");
                 kseq_t *read_stream = kseq_init(input_p);
                 if (read_stream == NULL) {
-                  std::cerr << "ERROR while opening input file " << config->align << std::endl;
+                  std::cerr << "ERROR while opening input file " << config->ALIGN << std::endl;
                   exit(1);
                 }
 
@@ -479,10 +470,12 @@ int main(int argc, char const *argv[]) {
             }
             break;
         }
-
+        case Config::NO_IDENTITY: {
+            assert(false);
+            break;
+        }
         //TODO: allow for building by appending/adding to an existing graph
-
-        case Config::build: {
+        case Config::BUILD: {
             if (!config->infbase.empty()) {
                 graph = new DBG_succ(config->infbase, config);
                 graph->annotationFromFile();
@@ -495,7 +488,7 @@ int main(int argc, char const *argv[]) {
 
             if (config->fast) {
 
-                graph->switch_state(Config::cstr);
+                graph->switch_state(Config::CSTR);
 
                 //enumerate all suffices
                 unsigned int suffix_len = (unsigned int) ceil(log2(config->nsplits) / log2(graph->alph_size - 1));
@@ -608,7 +601,7 @@ int main(int argc, char const *argv[]) {
                 //TODO: cleanup
                 tstart = clock();
                 std::cerr << "Converting static graph to dynamic\t";
-                graph->switch_state(Config::dyn);
+                graph->switch_state(Config::DYN);
                 std::cout << (clock()-tstart)/CLOCKS_PER_SEC << "\n";
             } else {
                 //slower method
@@ -645,8 +638,7 @@ int main(int argc, char const *argv[]) {
             //graph->print_seq();
             break;
         }
-        case Config::annotate: {
-
+        case Config::ANNOTATE: {
             // load graph
             if (config->infbase.empty()) {
               std::cerr << "Requires input <de bruijn graph> for annotation. Use option -I. " << std::endl;
@@ -737,8 +729,7 @@ int main(int argc, char const *argv[]) {
             graph->annotationToFile();
             break;
         }
-        case Config::classify: {
-
+        case Config::CLASSIFY: {
             // load graph
             if (config->infbase.empty()) {
               std::cerr << "Requires input <de bruijn graph> for annotation. Use option -I. " << std::endl;

@@ -86,7 +86,7 @@ DBG_succ::DBG_succ(size_t k_, Config *config_, bool sentinel)
     id_to_label.push_back("");
     label_to_id_map[""]=0;
     combination_vector.push_back(0);
-    state = Config::dyn;
+    state = Config::DYN;
 }
 
 
@@ -98,7 +98,7 @@ DBG_succ::DBG_succ(std::string infbase_, Config *config_) :
 
     std::ifstream instream;
     // if not specified in the file, the default for loading is dynamic
-    state = Config::dyn;
+    state = Config::DYN;
 
     // load F and k and p
     for (size_t j = 0; j < alph_size; j++) {
@@ -126,7 +126,7 @@ DBG_succ::DBG_succ(std::string infbase_, Config *config_) :
             } else if (mode == 3) {
                 p = strtoul(line.c_str(), NULL, 10);
             } else if (mode == 4) {
-                state = static_cast<Config::state_type>(strtoul(line.c_str(), NULL, 10));
+                state = static_cast<Config::StateType>(strtoul(line.c_str(), NULL, 10));
             } else {
                 fprintf(stderr, "ERROR: input file corrupted\n");
                 exit(1);
@@ -149,15 +149,15 @@ DBG_succ::DBG_succ(std::string infbase_, Config *config_) :
     std::ifstream instream_W((infbase + ".W.dbg").c_str());
     std::ifstream instream_l((infbase + ".l.dbg").c_str());
     switch (state) {
-        case Config::dyn: {
+        case Config::DYN: {
             W = new wavelet_tree_dyn(instream_W);
             last = new bit_vector_dyn(instream_l);
         } break;
-        case Config::stat: {
+        case Config::STAT: {
             W = new wavelet_tree_stat(instream_W);
             last = new bit_vector_stat(instream_l);
         } break;
-        case Config::cstr:
+        case Config::CSTR:
             assert(false && "Never happens");
             break;
     }
@@ -446,7 +446,8 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(std::string &str, uint64_t max_distan
         //std::cout << "pushing: rl " << rl << " ru " << ru << " str_pos 1 max_distance " << (uint64_t) (b != s) << std::endl;
         //std::cout << "s " << s << " b " << b << std::endl;
         std::vector<uint64_t> tmp;
-        hits.push(HitInfo(rl, ru, 1, 1, (uint64_t) (b != s), std::string(1, get_alphabet_symbol(b)), tmp));
+        hits.push({ rl, ru, 1, 1, static_cast<uint64_t>(b != s),
+                    std::string(1, get_alphabet_symbol(b)), tmp });
 
         // opening/extending a gap in the pattern starting with the first position
         if (max_distance > 0) {
@@ -454,7 +455,8 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(std::string &str, uint64_t max_distan
                 TAlphabet ss = get_alphabet_number(str[p]);
                 if ((p + (b != ss)) > max_distance)
                     break;
-                hits.push(HitInfo(rl, ru, p + 1, 1, p + (b != ss), std::string(p, 'd') + std::string(1, get_alphabet_symbol(b)), tmp));
+                hits.push({ rl, ru, p + 1, 1, p + (b != ss),
+                            std::string(p, 'd') + std::string(1, get_alphabet_symbol(b)), tmp });
                 //std::cout << "a) adding '-'" << std::endl;
             }
         }
@@ -463,7 +465,7 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(std::string &str, uint64_t max_distan
     // walk through pattern thereby extending all partial hits
     while (hits.size() > 0) {
         while (hits.size() > 0) {
-            HitInfo curr_hit = hits.top();
+            HitInfo curr_hit(hits.top());
             hits.pop();
             //std::cout << "loaded: rl " << curr_hit.rl << " ru " << curr_hit.ru << " dist " << curr_hit.distance << std::endl;
 
@@ -471,7 +473,9 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(std::string &str, uint64_t max_distan
 
                 // opening/extending a gap in the graph, leaving current pattern position unmatched
                 if (curr_hit.distance < max_distance) {
-                    hits2.push(HitInfo(curr_hit.rl, curr_hit.ru, curr_hit.str_pos + 1, curr_hit.graph_pos, curr_hit.distance + 1, curr_hit.cigar + 'd', curr_hit.path));
+                    hits2.push({ curr_hit.rl, curr_hit.ru, curr_hit.str_pos + 1,
+                                 curr_hit.graph_pos, curr_hit.distance + 1,
+                                 curr_hit.cigar + 'd', curr_hit.path });
                     //std::cout << "b) " << curr_hit.cigar << " adding '-'" << std::endl;
                 }
 
@@ -512,14 +516,18 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(std::string &str, uint64_t max_distan
                             continue;
 
                         // add hit for extension in next step
-                        hits2.push(HitInfo(rl, ru, curr_hit.str_pos + 1, curr_hit.graph_pos + 1, curr_hit.distance + (b != s), curr_hit.cigar + get_alphabet_symbol(b), curr_hit.path));
+                        hits2.push({ rl, ru, curr_hit.str_pos + 1,
+                                     curr_hit.graph_pos + 1, curr_hit.distance + (b != s),
+                                     curr_hit.cigar + get_alphabet_symbol(b), curr_hit.path });
                         //std::cout << "curr rl " << curr_hit.rl << " ru " << curr_hit.ru << std::endl;
                         //std::cout << "c) " << curr_hit.cigar << " adding '" << get_alphabet_symbol(b) << "' - graph pos " << curr_hit.graph_pos + 1 << " rl " << rl << " ru " << ru << std::endl;
 
                         // opening/extending a gap in the pattern, leaving current graph position unmatched
                         // --> choose any available mismatching next edge
                         if (b != s) {
-                            hits2.push(HitInfo(rl, ru, curr_hit.str_pos, curr_hit.graph_pos + 1, curr_hit.distance + 1, curr_hit.cigar + 'i', curr_hit.path));
+                            hits2.push({ rl, ru, curr_hit.str_pos,
+                                         curr_hit.graph_pos + 1, curr_hit.distance + 1,
+                                         curr_hit.cigar + 'i', curr_hit.path });
                         }
                     }
                 }
@@ -721,7 +729,7 @@ std::string DBG_succ::get_node_str(uint64_t k_node) {
 /**
  * Return number of edges in the current graph.
  */
-uint64_t DBG_succ::get_size() {
+uint64_t DBG_succ::get_size() const {
     return W->size();
 }
 
@@ -742,7 +750,7 @@ uint64_t DBG_succ::get_k() {
 /**
  * Return value of W at position k.
  */
-TAlphabet DBG_succ::get_W(uint64_t k) {
+TAlphabet DBG_succ::get_W(uint64_t k) const {
     return (*W)[k];
 }
 
@@ -750,14 +758,14 @@ TAlphabet DBG_succ::get_W(uint64_t k) {
  * Return value of F vector at index k.
  * The index is over the alphabet!
  */
-TAlphabet DBG_succ::get_F(uint64_t k) {
+TAlphabet DBG_succ::get_F(uint64_t k) const {
     return F.at(k);
 }
 
 /**
  * Return value of last at position k.
  */
-bool DBG_succ::get_last(uint64_t k) {
+bool DBG_succ::get_last(uint64_t k) const {
     return (*last)[k];
 }
 
@@ -884,19 +892,19 @@ TAlphabet DBG_succ::get_alphabet_number(char s) {
 }
 
 
-void DBG_succ::switch_state(Config::state_type state) {
+void DBG_succ::switch_state(Config::StateType state) {
 
     //std::cerr << "switching state from " << this->state << " to " << state << std::endl;
     if (this->state == state)
         return;
 
     switch (state) {
-        case Config::cstr: {
-            this->state = Config::cstr;
+        case Config::CSTR: {
+            this->state = Config::CSTR;
         } break;
 
-        case Config::dyn: {
-            if (this->state == Config::cstr) {
+        case Config::DYN: {
+            if (this->state == Config::CSTR) {
                 delete W;
                 W = new wavelet_tree_dyn(W_stat, 4);
                 W_stat.clear();
@@ -926,10 +934,10 @@ void DBG_succ::switch_state(Config::state_type state) {
                 delete last;
                 last = last_new;
             }
-            this->state = Config::dyn;
+            this->state = Config::DYN;
         } break;
 
-        case Config::stat: {
+        case Config::STAT: {
             wavelet_tree* W_new = new wavelet_tree_stat(W, 4);
             delete W;
             W = W_new;
@@ -938,7 +946,7 @@ void DBG_succ::switch_state(Config::state_type state) {
             delete last;
             last = last_new;
 
-            this->state = Config::stat;
+            this->state = Config::STAT;
         } break;
     }
 }
@@ -1340,4 +1348,69 @@ void DBG_succ::annotationFromFile() {
         //annotation.resize(get_size(), 0);
     }
     instream.close();
+}
+
+
+/**
+* Given a pointer to a graph structures G1 and G2, the function compares their elements to the
+* each other. It will perform an element wise comparison of the arrays W, last and
+* F and will only check for identity. If any element differs, the function will return
+* false and true otherwise.
+*/
+bool DBG_succ::operator==(const DBG_succ &other) const {
+    /*uint64_t cnt01 = 0;
+    uint64_t cnt02 = 0;
+
+    size_t top = std::min(W->n, G->W->n);
+    for (size_t i = 0; i < top; ++i) {
+        if (i > 0 && i % 10000 == 0) {
+            std::cerr << ".";
+            if (i % 100000 == 0) {
+                std::cerr << i << "/" << top << " - cnt: " << cnt01 << " " << cnt02 << std::endl;
+            }
+        }
+    }
+    std::cerr << "cnt01: " << cnt01 << std::endl;
+    std::cerr << "cnt02: " << cnt02 << std::endl;
+    */
+
+    // compare size
+    if (W->size() != other.get_size()) {
+        std::cerr << "sizes of graphs differ" << std::endl;
+        std::cerr << "1: " << W->size() << std::endl;
+        std::cerr << "2: " << other.get_size() << std::endl;
+        return false;
+    }
+
+    // compare last
+    for (size_t i = 0; i < W->size(); ++i) {
+        if (get_last(i) != other.get_last(i)) {
+            std::cerr << "last differs at position " << i << std::endl;
+            std::cerr << "1: last[" << i << "] = " << get_last(i)  << std::endl;
+            std::cerr << "2: last[" << i << "] = " << other.get_last(i) << std::endl;
+            return false;
+        }
+    }
+
+    // compare W
+    for (size_t i = 0; i < W->size(); ++i) {
+        if (get_W(i) != other.get_W(i)) {
+            std::cerr << "W differs at position " << i << std::endl;
+            std::cerr << "1: W[" << i << "] = " << get_W(i)  << std::endl;
+            std::cerr << "2: W[" << i << "] = " << other.get_W(i) << std::endl;
+            return false;
+        }
+    }
+
+    // compare F
+    for (size_t i = 0; i < F.size(); ++i) {
+        if (get_F(i) != other.get_F(i)) {
+            std::cerr << "F differs at position " << i << std::endl;
+            std::cerr << "1: F[" << i << "] = " << get_F(i) << std::endl;
+            std::cerr << "2: F[" << i << "] = " << other.get_F(i) << std::endl;
+            return false;
+        }
+    }
+
+    return true;
 }

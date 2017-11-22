@@ -1,45 +1,42 @@
 #include "config.hpp"
 
-// default constructor
-Config::Config() {
-    init();
-}
+#include <cstring>
+
 
 Config::Config(int argc, const char *argv[]) {
-
-    init();
     // provide help overview if no identity was given
     if (argc == 1) {
-        print_usage(std::string(argv[0]));
+        print_usage(argv[0]);
         exit(-1);
     }
 
     // parse identity from first command line argument
     if (!strcmp(argv[1], "merge")) {
-        identity = merge;
+        identity = MERGE;
     } else if (!strcmp(argv[1], "compare")) {
-        identity = compare;
+        identity = COMPARE;
     } else if (!strcmp(argv[1], "align")) {
-        identity = align;
+        identity = ALIGN;
     } else if (!strcmp(argv[1], "build")) {
-        identity = build;
+        identity = BUILD;
     } else if (!strcmp(argv[1], "stats")) {
-        identity = stats;
+        identity = STATS;
     } else if (!strcmp(argv[1], "annotate")) {
-        identity = annotate;
+        identity = ANNOTATE;
     } else if (!strcmp(argv[1], "classify")) {
-        identity = classify;
+        identity = CLASSIFY;
     } else if (!strcmp(argv[1], "dump")) {
-        identity = dump;
+        identity = DUMP;
     }
+
     // provide help screen for chosen identity
     if (argc == 2) {
-        print_usage(std::string(argv[0]), identity);
+        print_usage(argv[0], identity);
         exit(-1);
     }
+
     // parse remaining command line items
-    int i = 2;
-    while (i < argc) {
+    for (int i = 2; i < argc; ++i) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
             verbose = true;
         } else if (!strcmp(argv[i], "-q") || !strcmp(argv[i], "--quiet")) {
@@ -75,7 +72,7 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "-s") || !strcmp(argv[i], "--num-splits")) {
             nsplits = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-t") || !strcmp(argv[i], "--state")) {
-            state = (state_type) atoi(argv[++i]);
+            state = static_cast<StateType>(atoi(argv[++i]));
         //} else if (!strcmp(argv[i], "-D") || !strcmp(argv[i], "--db-path")) {
         //    dbpath = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-S") || !strcmp(argv[i], "--sql-base")) {
@@ -89,33 +86,26 @@ Config::Config(int argc, const char *argv[]) {
         //} else if (!strcmp(argv[i], "--debug")) {
         //    debug = true;
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
-            print_usage(std::string(argv[0]), identity);
+            print_usage(argv[0], identity);
             exit(0);
+        } else if (argv[i][0] == '-') {
+            fprintf(stderr, "\nERROR: Unknown option %s\n", argv[i]);
+            print_usage(argv[0], identity);
+            exit(-1);
         } else {
-            if (argv[i][0] == '-') {
-                fprintf(stderr, "\nERROR: Unknown option %s\n", argv[i]);
-                print_usage(std::string(argv[0], identity));
-                exit(-1);
-            }
-            else {
-                fname.push_back(std::string(argv[i]));
-            }
+            fname.push_back(argv[i]);
         }
-        i++;
     }
 }
 
-// nothing to destro
-Config::~Config() {}
-
-void Config::print_usage(std::string prog_name, int identity) {
+void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     fprintf(stderr, "Comprehensive metagenome graph representation -- Version 0.1\n\n");
     //fprintf(stderr, "This program is the first implementation of a\n");
     //fprintf(stderr, "meta-metagenome graph for identification and annotation\n");
     //fprintf(stderr, "purposes.\n\n");
 
     switch (identity) {
-        case noidentity: {
+        case NO_IDENTITY: {
             fprintf(stderr, "Usage: %s <command> [command specific options]\n\n", prog_name.c_str());
             fprintf(stderr, "Available commands:\n");
             fprintf(stderr, "\tbuild\t\tconstruct a graph object from input sequence\n");
@@ -135,7 +125,7 @@ void Config::print_usage(std::string prog_name, int identity) {
             fprintf(stderr, "\tannotate\tgiven a graph and a fast[a|q] file, annotate\n");
             fprintf(stderr, "\t\t\tthe respective kmers\n\n");
         } break;
-        case build: {
+        case BUILD: {
             fprintf(stderr, "Usage: %s build [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for build:\n");
             fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file []\n");
@@ -147,17 +137,17 @@ void Config::print_usage(std::string prog_name, int identity) {
             fprintf(stderr, "\t-P --print \tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t-s --num-splits \tDefine the minimum number of bins to split kmers into [1]\n");
         } break;
-        case align: {
+        case ALIGN: {
             fprintf(stderr, "Usage: %s align [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for align:\n");
             fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
         } break;
-        case compare: {
+        case COMPARE: {
             fprintf(stderr, "Usage: %s compare [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for compare:\n");
             fprintf(stderr, "\t-I --infile-base [STR] \tbasename for loading graph input file\n");
         } break;
-        case merge: {
+        case MERGE: {
             fprintf(stderr, "Usage: %s merge [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for merge:\n");
             fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file []\n");
@@ -168,14 +158,14 @@ void Config::print_usage(std::string prog_name, int identity) {
             fprintf(stderr, "\t   --parts-total [INT] \t\ttotal number of parts in external merge[]\n");
             fprintf(stderr, "\t-C --collect [INT] \t\tinitiate collection of external merge, provide total number of splits [1]\n");
         } break;
-        case stats: {
+        case STATS: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for stats:\n");
             fprintf(stderr, "\t-O --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t-P --print \tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t--print-state \tprint node labels and graph arrays to the screen [off]\n");
         } break;
-        case annotate: {
+        case ANNOTATE: {
             fprintf(stderr, "Usage: %s annotate [options] PATH1 [[PATH2] ...]\n\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for annotate:\n");
             //fprintf(stderr, "\t-D --db-path \tpath that is used to store the annotations database []\n");
@@ -184,14 +174,18 @@ void Config::print_usage(std::string prog_name, int identity) {
             fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [1]\n");
             fprintf(stderr, "\t-f --frequency [INT] \t\twhen a, annotate only every a-th kmer [1]\n");
         } break;
-        case classify: {
+        case CLASSIFY: {
             fprintf(stderr, "Usage: %s classify [options] FILE1 [[FILE2] ...]\n\tEach read file is given in fasta or fastq format.\n\n", prog_name.c_str());
             fprintf(stderr, "\t-I --infile-base [STR] \tbasename for graph with annotation used for classifying\n");
             fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
         } break;
-
+        case DUMP: {
+            //TODO: add help message
+            fprintf(stderr, "Usage: %s dump TODO", prog_name.c_str());
+        } break;
     }
-    if (identity != noidentity) {
+
+    if (identity != NO_IDENTITY) {
         fprintf(stderr, "\n\tGeneral options:\n");
         fprintf(stderr, "\t-v --verbose \t\tswitch on verbose output [off]\n");
         fprintf(stderr, "\t-q --quiet \t\tproduce as little log output as posible [off]\n");
@@ -199,26 +193,3 @@ void Config::print_usage(std::string prog_name, int identity) {
         fprintf(stderr, "\n");
     }
 }
-
-// PRIVATE
-void Config::init() {
-    verbose = false;
-    quiet = false;
-    print_graph = false;
-    print_graph_succ = false;
-    reverse = false;
-    fast = false;
-    add_anno = false;
-    distance = 0;
-    parallel = 1;
-    bins_per_thread = 1;
-    parts_total = 1;
-    part_idx = 0;
-    collect = 1;
-    frequency = 1;
-    k = 3;
-    identity = noidentity;
-    nsplits = 1;
-    state = stat;
-}
-

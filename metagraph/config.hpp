@@ -1,65 +1,57 @@
 #ifndef __CONFIG_HPP__
 #define __CONFIG_HPP__
 
-#include <cstring>
 #include <string>
 #include <vector>
 
+
 class Config {
-    public:
-        Config();
-        Config(int argc, const char *argv[]);
+  public:
+    Config(int argc, const char *argv[]);
 
-        ~Config();
+    bool verbose = false;
+    bool quiet = false;
+    bool print_graph = false;
+    bool print_graph_succ = false;
+    bool reverse = false;
+    bool fast = false;
+    bool add_anno = false;
 
-        void print_usage(std::string prog_name, int identity = -1);
-        //void print_call(string prog_name);
+    unsigned int k = 3;
+    unsigned int distance = 0;
+    unsigned int parallel = 1;
+    unsigned int bins_per_thread = 1;
+    unsigned int parts_total = 1;
+    unsigned int part_idx = 0;
+    unsigned int collect = 1;
+    unsigned int frequency = 1;
+    unsigned int nsplits = 1;
 
-        bool verbose;
-        bool quiet;
-        bool integrate;
-        bool print_graph;
-        bool print_graph_succ;
-        bool reverse;
-        bool fast;
-        bool add_anno;
+    std::vector<std::string> fname;
+    std::string outfbase;
+    std::string infbase;
+    std::string sqlfbase;
+    std::string dbpath;
+    std::string refpath;
+    std::string suffix;
 
-        unsigned int k;
-        unsigned int distance;
-        unsigned int parallel;
-        unsigned int bins_per_thread;
-        unsigned int parts_total;
-        unsigned int part_idx;
-        unsigned int collect;
-        unsigned int frequency;
-        unsigned int nsplits;
+    enum IdentityType {
+        NO_IDENTITY = -1,
+        BUILD = 1,
+        MERGE,
+        COMPARE,
+        ALIGN,
+        STATS,
+        ANNOTATE,
+        DUMP,
+        CLASSIFY
+    };
+    IdentityType identity = NO_IDENTITY;
 
-        std::vector<std::string> fname;
-        std::string outfbase;
-        std::string infbase;
-        std::string sqlfbase;
-        std::string dbpath;
-        std::string refpath;
-        std::string suffix;
+    enum StateType { STAT = 1, DYN, CSTR };
+    StateType state = STAT;
 
-        enum identities {noidentity = -1,
-                         build = 1,
-                         merge,
-                         compare,
-                         align,
-                         stats,
-                         annotate,
-                         dump,
-                         classify};
-        int identity;
-
-        enum state_type {stat = 1,
-                         dyn,
-                         cstr};
-        state_type state;
-
-    private:
-        void init();
+    void print_usage(const std::string &prog_name, IdentityType identity = NO_IDENTITY);
 };
 
-#endif
+#endif // __CONFIG_HPP__

@@ -28,8 +28,8 @@
 
 #include "kseq.h"
 
-void reverse_complement(kstring_t &seq) {
-    char comp_tab[] = {
+void reverse_complement(const kstring_t &seq) {
+    const char comp_tab[] = {
        0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,
       16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,
       32,  33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,
@@ -42,8 +42,8 @@ void reverse_complement(kstring_t &seq) {
 
     int c0, c1;
     for (size_t i = 0; i < seq.l>>1; ++i) {
-        c0 = comp_tab[(int)seq.s[i]];
-        c1 = comp_tab[(int)seq.s[seq.l - 1 - i]];
+        c0 = comp_tab[static_cast<int>(seq.s[i])];
+        c1 = comp_tab[static_cast<int>(seq.s[seq.l - 1 - i])];
         seq.s[i] = c1;
         seq.s[seq.l - 1 - i] = c0;
     }

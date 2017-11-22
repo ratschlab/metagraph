@@ -27,9 +27,6 @@ class DBG_succ {
     std::vector<kmer_boost::KMer> kmers;
     //std::vector<std::pair<ui256, size_t> > kmers;
 
-    //Annotation hash generator
-    AnnotationHash hasher;
-
     //store the position of the last character position modified in F
     size_t lastlet = 0;
 
@@ -54,7 +51,7 @@ class DBG_succ {
     //bit_vector *bridge = new bit_vector_dyn();
 
     // the offset array to mark the offsets for the last column in the implicit node list
-    std::vector<TAlphabet> F; 
+    std::vector<TAlphabet> F;
 
     // k-mer size
     size_t k;
@@ -71,10 +68,10 @@ class DBG_succ {
     Config* config;
 
     // alphabet
-    const std::string alphabet; //("$ACGTNX$ACGTNXn"); 
+    const std::string alphabet; //("$ACGTNX$ACGTNXn");
 
     // state of graph
-    Config::state_type state = Config::stat;
+    Config::StateType state = Config::STAT;
 
     // annotation containers
     std::deque<uint32_t> annotation; // list that associates each node in the graph with an annotation hash
@@ -94,27 +91,27 @@ class DBG_succ {
     bool debug = true;
 #else
     bool debug = false;
-#endif 
+#endif
 
     // construct empty graph instance
     DBG_succ(size_t k_,
-             Config* config_, 
+             Config* config_,
              bool sentinel = true);
 
     // load graph instance from a provided file name base
-    DBG_succ(std::string infbase_, 
+    DBG_succ(std::string infbase_,
              Config* config_);
 
     // destructor
     ~DBG_succ();
-    
+
     //
     //
     // QUERY FUNCTIONS
     //
     //
-    
-    /** 
+
+    /**
      * Uses the object's array W, a given position i in W and a character c
      * from the alphabet and returns the number of occurences of c in W up to
      * position i.
@@ -122,25 +119,25 @@ class DBG_succ {
     uint64_t rank_W(uint64_t i, TAlphabet c);
 
     /**
-     * Uses the array W and gets a count i and a character c from 
-     * the alphabet and returns the positions of the i-th occurence of c 
+     * Uses the array W and gets a count i and a character c from
+     * the alphabet and returns the positions of the i-th occurence of c
      * in W.
      */
     uint64_t select_W(uint64_t i, TAlphabet c);
 
     /**
-     * This is a convenience function that returns for array W, a position i and 
+     * This is a convenience function that returns for array W, a position i and
      * a character c the last index of a character c preceding in W[1..i].
      */
     uint64_t pred_W(uint64_t i, TAlphabet c);
 
     /**
-     * This is a convenience function that returns for array W, a position i and 
+     * This is a convenience function that returns for array W, a position i and
      * a character c the first index of a character c in W[i..N].
      */
     uint64_t succ_W(uint64_t i, TAlphabet c);
 
-    /** 
+    /**
      * Uses the object's array last and a position and
      * returns the number of set bits up to that postion.
      */
@@ -166,7 +163,7 @@ class DBG_succ {
 
     /**
      * This function gets a position i that reflects the i-th node and returns the
-     * position in W that corresponds to the i-th node's last character. 
+     * position in W that corresponds to the i-th node's last character.
      */
     uint64_t bwd(uint64_t i);
 
@@ -177,13 +174,13 @@ class DBG_succ {
     uint64_t fwd(uint64_t i);
 
     /**
-     * Using the offset structure F this function returns the value of the last 
+     * Using the offset structure F this function returns the value of the last
      * position of node i.
      */
     TAlphabet get_node_end_value(uint64_t i);
-    
+
     /**
-     * Given index of node i, the function returns the 
+     * Given index of node i, the function returns the
      * first character of the node.
      */
     TAlphabet get_node_begin_value(uint64_t i);
@@ -222,7 +219,7 @@ class DBG_succ {
      * Given a node label s, this function returns the index
      * of the corresponding node, if this node exists and 0 otherwise.
      */
-    template <class T> 
+    template <class T>
     uint64_t index(T &s_, uint64_t length) {
         std::pair<uint64_t, uint64_t> range = index_range<T>(s_, length);
         if (range.first == 0 && range.second == 0) {
@@ -239,8 +236,8 @@ class DBG_succ {
      */
     template <class T>
     std::pair<uint64_t, uint64_t> index_range(T &str, uint64_t length) {
-        
-        // get first 
+
+        // get first
         TAlphabet s;
         if (std::is_same<T, std::string>::value) {
             s = get_alphabet_number(str[0]);
@@ -286,12 +283,12 @@ class DBG_succ {
     std::pair<uint64_t, uint64_t> get_equal_node_range(uint64_t i);
 
     /**
-     * Given index i of a node and a value k, this function 
+     * Given index i of a node and a value k, this function
      * will return the k-th last character of node i.
      */
     std::pair<TAlphabet, uint64_t> get_minus_k_value(uint64_t i, uint64_t k);
 
-    /** 
+    /**
      * This function gets two node indices and returns if the
      * node labels share a k-1 suffix.
      */
@@ -307,19 +304,19 @@ class DBG_succ {
     * Given a node index k_node, this function returns the k-mer sequence of the
     * node in a deque data structure.
     */
-    std::deque<TAlphabet> get_node_seq(uint64_t k_node); 
+    std::deque<TAlphabet> get_node_seq(uint64_t k_node);
 
     /**
-    * Given a node index k_node, this function returns the k-mer sequence of the 
+    * Given a node index k_node, this function returns the k-mer sequence of the
     * node as a string.
     */
-    std::string get_node_str(uint64_t k_node); 
+    std::string get_node_str(uint64_t k_node);
 
     /**
      * Return number of edges in the current graph.
      * TODO: delete
      */
-    uint64_t get_size();
+    uint64_t get_size() const;
 
     /**
      * Return number of nodes in the current graph.
@@ -335,18 +332,18 @@ class DBG_succ {
     /**
      * Return value of W at position k.
      */
-    TAlphabet get_W(uint64_t k);
+    TAlphabet get_W(uint64_t k) const;
 
-    /** 
+    /**
      * Return value of F vector at index k.
      * The index is over the alphabet!
      */
-    TAlphabet get_F(uint64_t k);
+    TAlphabet get_F(uint64_t k) const;
 
     /**
      * Return value of last at position k.
      */
-    bool get_last(uint64_t k);
+    bool get_last(uint64_t k) const;
 
     // Given the alphabet index return the corresponding symbol
     char get_alphabet_symbol(uint64_t s);
@@ -370,11 +367,11 @@ class DBG_succ {
     //
     //
     // APPEND
-    // 
     //
-    
+    //
+
     /**
-     * This function gets a value of the alphabet c and updates the offset of 
+     * This function gets a value of the alphabet c and updates the offset of
      * all following values by +1 is positive is true and by -1 otherwise.
      */
     void update_F(TAlphabet c, bool positive);
@@ -386,21 +383,21 @@ class DBG_succ {
      */
     void sort_W_locally(uint64_t l, uint64_t u);
 
-    /** 
+    /**
      * This is a convenience function to replace the value at
      * position i in W with val.
      */
     void replaceW(size_t i, TAlphabet val);
 
-    void switch_state(Config::state_type state);
-    
+    void switch_state(Config::StateType state);
+
     //
     //
     // MERGE
     //
     //
 
-   
+
     uint64_t next_non_zero(std::vector<uint64_t> v, uint64_t pos);
     uint64_t next_non_zero(std::vector<std::pair<uint64_t, std::deque<TAlphabet> > > v, uint64_t pos);
 
@@ -414,7 +411,7 @@ class DBG_succ {
     void split_range(std::deque<TAlphabet>* str, std::pair<uint64_t, uint64_t>& range);
 
     /*
-     * Helper function to generate the prefix corresponding to 
+     * Helper function to generate the prefix corresponding to
      * a given bin ID.
      */
     std::deque<TAlphabet> bin_id_to_string(uint64_t bin_id, uint64_t binlen);
@@ -424,14 +421,14 @@ class DBG_succ {
     // SERIALIZE
     //
     //
-    
+
     /**
      * This is a debug function that prints the current state of the graph arrays to
      * the screen.
      */
     void print_state();
-    
-    
+
+
     /**
      * This is a debug function that prints the current representation of the graph to
      * the screen.
@@ -440,7 +437,7 @@ class DBG_succ {
 
     /*
      * Returns the sequence stored in W and prints the node
-     * information in an overview. 
+     * information in an overview.
      * Useful for debugging purposes.
      */
     void print_seq();
@@ -451,7 +448,7 @@ class DBG_succ {
      * Take the current graph content and store in a file.
      *
      */
-    void toFile(unsigned int total = 1, unsigned int idx = 0); 
+    void toFile(unsigned int total = 1, unsigned int idx = 0);
 
     /**
      * Visualization, Serialization and Deserialization of annotation content.
@@ -459,5 +456,13 @@ class DBG_succ {
     void annotationToFile();
     void annotationFromFile();
 
+    /**
+    * Given a pointer to a graph structures G1 and G2, the function compares their elements to the
+    * each other. It will perform an element wise comparison of the arrays W, last and
+    * F and will only check for identity. If any element differs, the function will return
+    * false and true otherwise.
+    */
+    bool operator==(const DBG_succ &other) const;
 };
+
 #endif
