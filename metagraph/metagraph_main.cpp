@@ -506,8 +506,7 @@ int main(int argc, char const *argv[]) {
                 for (size_t j = 0; j < suffices.size(); ++j) {
                     std::cout << "Suffix: " << suffices[j] << "\n";
                     //add sink nodes
-                    construct::add_seq_fast(graph, graph->start, graph->blank, false, config->parallel, suffices[j], config->add_anno);
-                    construct::add_seq_fast(graph, graph->graphsink, graph->blank, true, config->parallel, suffices[j], config->add_anno);
+                    construct::add_sink(graph, config->parallel, suffices[j], config->add_anno);
 
                     if (suffices[j].find("$") == std::string::npos) {
                         // iterate over input files
