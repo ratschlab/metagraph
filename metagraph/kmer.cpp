@@ -1,4 +1,4 @@
-#include "dbg_succinct_boost.hpp"
+#include "kmer.hpp"
 
 
 bool kmer_boost::operator<(const kmer_boost::KMer& a, const kmer_boost::KMer& b) {

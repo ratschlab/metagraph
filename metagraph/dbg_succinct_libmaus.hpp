@@ -6,10 +6,7 @@
 
 #include "config.hpp"
 #include "datatypes.hpp"
-#include "dbg_succinct_boost.hpp"
-
-#include <boost/multiprecision/cpp_int.hpp>
-#include "dbg_succinct_boost.hpp"
+#include "kmer.hpp"
 
 #include <type_traits>
 
