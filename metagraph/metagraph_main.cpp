@@ -498,27 +498,7 @@ int main(int argc, char const *argv[]) {
                 graph->switch_state(Config::cstr);
 
                 //enumerate all suffices
-                unsigned int suffix_len = (unsigned int) ceil(log2(config->nsplits) / log2(graph->alph_size - 1));
-
-                //should be set to at most k-1 so that W calculation is correct
-                suffix_len = std::min(suffix_len, (unsigned int) graph->k - 1);
-                std::deque<std::string> suffices = {""};
-                for (size_t i = 0; i < suffix_len; ++i) {
-                    while (suffices[0].length() < suffix_len) {
-                        for (size_t j = 0; j < graph->alph_size; ++j) {
-                            suffices.push_back(graph->alphabet[j] + suffices[0]);
-                        }
-                        suffices.pop_front();
-                    }
-                }
-                assert(suffices.size() == pow(graph->alph_size, suffix_len));
-
-                //generate sink node
-                std::string starts = std::string(graph->k-1, graph->alphabet[graph->alph_size-1]) + graph->alphabet[0] + graph->alphabet[0];
-                std::string sinks = graph->alphabet.substr(0,1);
-                kstring_t graphsink = {1, 1, &sinks[0u]};
-                kstring_t start = {graph->k+1, graph->k+1, &starts[0u]};
-                kstring_t blank = {0, 1, NULL};
+                std::deque<std::string> suffices = construct::generate_suffices(graph, config->nsplits);
 
                 clock_t tstart, timelast;
 
@@ -526,8 +506,8 @@ int main(int argc, char const *argv[]) {
                 for (size_t j = 0; j < suffices.size(); ++j) {
                     std::cout << "Suffix: " << suffices[j] << "\n";
                     //add sink nodes
-                    construct::add_seq_fast(graph, start, blank, false, config->parallel, suffices[j], config->add_anno);
-                    construct::add_seq_fast(graph, graphsink, blank, true, config->parallel, suffices[j], config->add_anno);
+                    construct::add_seq_fast(graph, graph->start, graph->blank, false, config->parallel, suffices[j], config->add_anno);
+                    construct::add_seq_fast(graph, graph->graphsink, graph->blank, true, config->parallel, suffices[j], config->add_anno);
 
                     if (suffices[j].find("$") == std::string::npos) {
                         // iterate over input files

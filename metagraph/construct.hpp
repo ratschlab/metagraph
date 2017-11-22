@@ -38,6 +38,10 @@ namespace construct {
     void append_graph_static(DBG_succ *G_t, DBG_succ *G_s);
 
     uint64_t remove_edges(DBG_succ *G, std::set<uint64_t> &edges, uint64_t ref_point = 0);
+
+    std::deque<std::string> generate_suffices(DBG_succ *G, unsigned int nsplits);
+
+    void add_sink(DBG_succ* G, unsigned int parallel = 1, std::string suffix = "", bool add_anno = false);
 }
 
 #endif
