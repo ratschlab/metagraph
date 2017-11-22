@@ -158,6 +158,7 @@ void add_seq_fast(DBG_succ* G, kstring_t &seq, kstring_t &name, bool add_bridge,
     }
 
     // translate from ascii into talphabet
+    /*
     const char nt_lookup[128] = {
         5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
         5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
@@ -168,6 +169,7 @@ void add_seq_fast(DBG_succ* G, kstring_t &seq, kstring_t &name, bool add_bridge,
         5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
         5, 5, 5, 5,  4, 4, 5, 5,  6, 5, 5, 5,  5, 5, 5, 5
     };
+    */
 
     // ther is nothing to parse
     if (!seq.l) {

@@ -29,13 +29,19 @@ list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
 
 add_executable(metagengraph ${src_files})
 
+add_library(metagraph STATIC ${src_files})
+
 #set(CMAKE_EXE_LINKER_FLAGS "-static")
-target_link_libraries(
-  metagengraph
+
+set(METALIBS 
   -lhts -lz -lbz2
   -lmaus2 -lmaus2_simd_align_128 -lmaus2_simd_align_256
   -lsdsl -ldivsufsort -ldivsufsort64
   -lssl -lcrypto -llzma
+)
+
+target_link_libraries(
+  metagengraph ${METALIBS}
 )
 
 
@@ -73,10 +79,16 @@ if (CMAKE_VERSION VERSION_LESS 2.8.11)
   include_directories("${gtest_SOURCE_DIR}/include")
 endif()
 
-include_directories(.)
+include_directories(
+  .
+)
+
+link_directories(
+  ${CMAKE_BINARY_DIR}
+)
 
 add_executable(unit_tests ${unit_tests_files})
 
-target_link_libraries(unit_tests -lgtest_main -lgtest -lsdsl)
+target_link_libraries(unit_tests -lgtest_main -lgtest -lmetagraph ${METALIBS})
 
 add_test(NAME unit_tests COMMAND unit_tests)
