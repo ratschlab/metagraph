@@ -170,8 +170,9 @@ void add_seq_fast(DBG_succ* G, kstring_t &seq, kstring_t &name, bool add_bridge,
     };
 
     // ther is nothing to parse
-    if (!seq.l)
+    if (!seq.l) {
         return;
+    }
 
 	char *bridge = (char*) malloc(G->k+2);
     memset(bridge, 'X', G->k);
