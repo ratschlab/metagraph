@@ -919,7 +919,9 @@ void DBG_succ::switch_state(Config::StateType state) {
                     last = new bit_vector_dyn(last_stat);
                     last_stat.clear();
                 } else {
-                    last = new bit_vector_dyn(last_stat_safe);
+                    std::vector<bool> last_stat_safe_bool(last_stat_safe.size());
+                    std::copy(last_stat_safe.begin(), last_stat_safe.end(), last_stat_safe_bool.begin());
+                    last = new bit_vector_dyn(last_stat_safe_bool);
                     last_stat_safe.clear();
                 }
 
@@ -931,11 +933,11 @@ void DBG_succ::switch_state(Config::StateType state) {
                 //    bridge = NULL;
                 //}
             } else {
-                wavelet_tree* W_new = new wavelet_tree_dyn(W, 4);
+                wavelet_tree *W_new = new wavelet_tree_dyn(*W, 4);
                 delete W;
                 W = W_new;
 
-                bit_vector* last_new = new bit_vector_dyn(last);
+                bit_vector *last_new = new bit_vector_dyn(*last);
                 delete last;
                 last = last_new;
             }
@@ -943,11 +945,11 @@ void DBG_succ::switch_state(Config::StateType state) {
         } break;
 
         case Config::STAT: {
-            wavelet_tree* W_new = new wavelet_tree_stat(W, 4);
+            wavelet_tree *W_new = new wavelet_tree_stat(W, 4);
             delete W;
             W = W_new;
 
-            bit_vector* last_new = new bit_vector_stat(last);
+            bit_vector *last_new = new bit_vector_stat(*last);
             delete last;
             last = last_new;
 

@@ -3,14 +3,12 @@
 
 #include <zlib.h>
 #include <unordered_map>
+#include <type_traits>
 
 #include "config.hpp"
 #include "datatypes.hpp"
 #include "kmer.hpp"
 
-#include <type_traits>
-
-typedef boost::multiprecision::uint256_t ui256;
 
 class DBG_succ {
 

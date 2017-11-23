@@ -22,9 +22,103 @@
 
 KSEQ_INIT(gzFile, gzread)
 
-Config* config;
-ParallelMergeContainer* merge_data;
-ParallelAnnotateContainer* anno_data = new ParallelAnnotateContainer();
+
+struct ParallelMergeContainer {
+    std::vector<std::pair<uint64_t, uint64_t> > ref_bins;
+    std::vector<std::vector<std::pair<uint64_t, uint64_t> > > bins;
+    std::vector<DBG_succ*> result;
+    std::vector<DBG_succ*> graphs;
+    unsigned int idx;
+    unsigned int k;
+    unsigned int bins_done;
+    unsigned int first = 0;
+    unsigned int last = 0;
+
+    /* Helper function to subset the bins to the chunk
+     * computed in the current distributed compute.
+     */
+    void subset_bins(unsigned int idx, unsigned int total, unsigned int bins_per_part){
+
+        //std::cerr << "ref bins " << ref_bins.size() << " total " << total << " per part " << bins_per_part << std::endl;
+        assert(ref_bins.size() == (total * bins_per_part));
+
+        std::vector< std::pair<uint64_t, uint64_t> > new_ref_bins;
+        //std::cerr << "min: " << binsize_min << " max: " << binsize_max << " thresh: " << threshold << " total: " << total << std::endl;
+
+        /*size_t start, end;
+        if (idx < threshold) {
+            start = binsize_max * idx;
+            end = (idx == (total - 1)) ? ref_bins.size() : binsize_max * (idx + 1);
+        } else {
+            start = (threshold * binsize_max) + ((idx - threshold) * binsize_min);
+            end = (idx == (total - 1)) ? ref_bins.size() : (threshold * binsize_max) + ((idx - threshold + 1) * binsize_min);
+        }*/
+        size_t start = idx * bins_per_part;
+        size_t end = (idx + 1) * bins_per_part;
+
+        if (start > 0)
+            first = ref_bins.at(start - 1).second;
+        if (end < ref_bins.size())
+            last = ref_bins.at(end).second;
+
+        for (size_t i = start; i < end; i++) {
+            new_ref_bins.push_back(ref_bins.at(i));
+        }
+
+        ref_bins = new_ref_bins;
+    }
+
+    void print_bins() {
+        for (size_t ii = 0; ii < bins.size(); ii++) {
+            std::cerr << "graph " << ii + 1 << std::endl;
+            for (size_t i = 0; i < bins.at(ii).size(); i++)
+                std::cerr << bins.at(ii).at(i).first << " - " << bins.at(ii).at(i).second << std::endl;
+        }
+    }
+
+    /* Show an overview of the distribution of merging bin
+     * sizes.
+     */
+    void get_bin_stats() {
+        size_t min_bin = 0, max_bin = 0, total_bin = 0;
+
+        size_t cum_size;
+        for (size_t i = 0; i < ref_bins.size(); ++i) {
+            cum_size = 0;
+            for (size_t ii = 0; ii < bins.size(); ii++) {
+                cum_size += (bins.at(ii).at(i).first == 0) ? 0 : bins.at(ii).at(i).second - bins.at(ii).at(i).first + 1;
+            }
+            if (cum_size > 0) {
+                min_bin = (min_bin == 0) ? cum_size : std::min(min_bin, cum_size);
+                max_bin = (max_bin == 0) ? cum_size : std::max(max_bin, cum_size);
+            }
+            total_bin += cum_size;
+        }
+
+        std::cout << std::endl;
+        std::cout << "Total number of bins: " << ref_bins.size() << std::endl;
+        std::cout << "Total size: " << total_bin << std::endl;
+        std::cout << "Smallest bin: " << min_bin << std::endl;
+        std::cout << "Largest bin: " << max_bin << std::endl;
+        std::cout << "Average bin size: " << total_bin / ref_bins.size() << std::endl << std::endl;
+    }
+};
+
+
+struct ParallelAnnotateContainer {
+    kstring_t* seq;
+    kstring_t* label;
+    DBG_succ* graph;
+    uint64_t idx;
+    uint64_t binsize;
+    uint64_t total_bins;
+    //pthread_mutex_t* anno_mutex;
+};
+
+
+Config *config;
+ParallelMergeContainer *merge_data;
+ParallelAnnotateContainer *anno_data = new ParallelAnnotateContainer();
 
 pthread_mutex_t mutex_merge_result = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_bin_idx = PTHREAD_MUTEX_INITIALIZER;

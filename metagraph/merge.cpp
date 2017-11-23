@@ -55,7 +55,8 @@ namespace merge {
                     continue;
                 std::map<uint64_t, std::deque<TAlphabet> >::iterator la = last_added_nodes.find(a);
                 curr_seq = Gv.at(i)->get_node_seq(sl);
-                if (la == last_added_nodes.end() || utils::seq_is_greater(curr_seq, la->second))
+                if (la == last_added_nodes.end()
+                     || utils::colexicographically_greater(curr_seq, la->second))
                     last_added_nodes[a] = curr_seq;
             }
         }
