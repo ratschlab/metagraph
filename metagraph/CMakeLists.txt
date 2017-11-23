@@ -72,7 +72,9 @@ add_subdirectory(
   EXCLUDE_FROM_ALL
 )
 
-file(GLOB unit_tests_files "unit_tests/*.cpp")
+set(UNIT_TEST_DIR "unit_tests")
+
+file(GLOB unit_tests_files "${UNIT_TEST_DIR}/*.cpp")
 list(FILTER unit_tests_files EXCLUDE REGEX ".*\\._.*")
 
 if (CMAKE_VERSION VERSION_LESS 2.8.11)
