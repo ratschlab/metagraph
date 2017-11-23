@@ -15,7 +15,7 @@ class DBG_succ {
     // define an extended alphabet for W --> somehow this does not work properly as expected
     typedef uint64_t TAlphabet;
 
-    public:
+  public:
     //Temporary storage for kmers before succinct representation construction
     //the second element stores an ID for each kmer indicating which sequence it came from
     //an even ID indicates that it's a normal kmer, an odd ID indicates that it's a bridge
@@ -60,7 +60,7 @@ class DBG_succ {
     std::string infbase;
 
     // config object
-    Config* config;
+    Config *config;
 
     // alphabet
     const std::string alphabet; //("$ACGTNX$ACGTNXn");

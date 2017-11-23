@@ -16,6 +16,18 @@ static char passfilt[] = "PASS";
 
 class vcf_parser {
   public:
+    ~vcf_parser() {
+        if (kmer1)
+            vcf_clean_kmers();
+        if (seq.s)
+            free(seq.s);
+        if (curalt)
+            free(curalt);
+        bcf_sweep_destroy(sw);
+        fai_destroy(ref);
+        free(seqnames);
+    }
+
     bool init(const char *ref_, const char *vcf, int k_) {
         //load ref
         ref = fai_load(ref_);
@@ -44,6 +56,18 @@ class vcf_parser {
         }
         seqnames = bcf_hdr_seqnames(hdr, &(nseq));
         return true;
+    }
+
+    void vcf_print_line() {
+        if (rec) {
+            fprintf(stdout, "%s\t%d\t%d\t%d\t%d",
+                    hdr->id[BCF_DT_CTG][rec->rid].key, //contig name
+                    hdr->id[BCF_DT_CTG][rec->rid].val->info[0], //contig length
+                    rec->rid, //contig id
+                    rec->pos + 1, //1-based coordinate
+                    rec->n_allele //number of alleles
+                    );
+        }
     }
 
     //TODO: make a parallel version of this that outputs n lines at a time?
@@ -112,13 +136,13 @@ class vcf_parser {
             }
             //curaltlen = strlen(rec->d.allele[curi]);
             curaltlen = strlen(curalt);
-            if (kmer1_l+curaltlen+kmer3_l > seq.l) {
-                temp = (char*)realloc(seq.s, kmer1_l+curaltlen+kmer3_l+1);
+            if (kmer1_l + curaltlen + kmer3_l > seq.l) {
+                temp = (char*)realloc(seq.s, kmer1_l + curaltlen + kmer3_l + 1);
                 if (temp) {
                     seq.s = temp;
                 } else {
                     free(seq.s);
-                    seq.s = (char*)malloc(kmer1_l+curaltlen+kmer3_l+1);
+                    seq.s = (char*)malloc(kmer1_l + curaltlen + kmer3_l + 1);
                 }
             }
             //annotation is a bit vector indicating inclusion in the different ethnic groups
@@ -127,8 +151,8 @@ class vcf_parser {
             //ngt = bcf_get_genotypes(sr->readers[0].header, line0, &gt_arr, &ngt_arr); //get genotypes
             //annot=1;
             annot = std::string(seqnames[rec->rid]) + ":";
-            for (size_t i=0;i<num_annots;++i) {
-                bcf_info_t* curinfo = bcf_get_info(hdr, rec, annots[i]);
+            for (size_t i=0; i < num_annots; ++i) {
+                bcf_info_t *curinfo = bcf_get_info(hdr, rec, annots[i]);
                 if (curinfo && curinfo->v1.i) {
                     annot += std::string(annots[i]) + ":";
                     //strcat(annot, annots[i]);
@@ -154,7 +178,7 @@ class vcf_parser {
                         }
                         if ((cur & 5) == 5) {
                             //at least one parent has this allele
-                            annot += std::string(hdr->samples[i/ploidy]) + ":";
+                            annot += std::string(hdr->samples[i / ploidy]) + ":";
                         }
                     }
                 }
@@ -197,7 +221,7 @@ class vcf_parser {
     int nseq = 0;
 
   private:
-    void _vcf_clean_kmers() {
+    void vcf_clean_kmers() {
         if (kmer1) {
             free(kmer1);
             kmer1 = NULL;
@@ -225,42 +249,22 @@ class vcf_parser {
         if ( (rec = bcf_sweep_fwd(sw)) ) {
             bcf_unpack(rec, BCF_UN_FLT);
             if (kmer1)
-                _vcf_clean_kmers();
+                vcf_clean_kmers();
             curi = 0;
             ref_callele_l = strlen(rec->d.allele[0]);
             curkey = hdr->id[BCF_DT_CTG][rec->rid].key;
             curpos = &(rec->pos);
-            kmer1 = faidx_fetch_seq(ref, hdr->id[BCF_DT_CTG][rec->rid].key, rec->pos-k, rec->pos-1, &len);
-            kmer3 = faidx_fetch_seq(ref, hdr->id[BCF_DT_CTG][rec->rid].key, rec->pos+ref_callele_l, rec->pos+ref_callele_l-1+k, &len);
+            kmer1 = faidx_fetch_seq(ref, hdr->id[BCF_DT_CTG][rec->rid].key,
+                                         rec->pos - k,
+                                         rec->pos - 1, &len);
+            kmer3 = faidx_fetch_seq(ref, hdr->id[BCF_DT_CTG][rec->rid].key,
+                                         rec->pos + ref_callele_l,
+                                         rec->pos + ref_callele_l - 1 + k, &len);
             kmer1_l = strlen(kmer1);
             kmer3_l = strlen(kmer3);
             return 1;
         }
         return 0;
-    }
-
-    void vcf_print_line() {
-        if (rec) {
-            fprintf(stdout, "%s\t%d\t%d\t%d\t%d",
-                    hdr->id[BCF_DT_CTG][rec->rid].key, //contig name
-                    hdr->id[BCF_DT_CTG][rec->rid].val->info[0], //contig length
-                    rec->rid, //contig id
-                    rec->pos+1, //1-based coordinate
-                    rec->n_allele //number of alleles
-                    );
-        }
-    }
-
-    void destroy() {
-        if (kmer1)
-            _vcf_clean_kmers();
-        if (seq.s)
-            free(seq.s);
-        if (curalt)
-            free(curalt);
-        bcf_sweep_destroy(sw);
-        fai_destroy(ref);
-        free(seqnames);
     }
 };
 
