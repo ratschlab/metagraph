@@ -25,3 +25,42 @@ TEST(get_filetype, FASTQ) {
     EXPECT_EQ("FASTQ", utils::get_filetype("file.fq.gz"));
     EXPECT_EQ("FASTQ", utils::get_filetype("file.FQ.gz"));
 }
+
+
+bool colexicographically_greater(const std::string &s1, const std::string &s2) {
+    return utils::colexicographically_greater(s1, s2);
+}
+
+
+TEST(colexicographically_greater, basics) {
+    EXPECT_FALSE(colexicographically_greater("AAAA", "AAAA"));
+
+    EXPECT_TRUE(colexicographically_greater("BAAA", "AAAA"));
+    EXPECT_TRUE(colexicographically_greater("AAAB", "AAAA"));
+
+    EXPECT_FALSE(colexicographically_greater("AAAA", "BAAA"));
+    EXPECT_FALSE(colexicographically_greater("AAAA", "AAAB"));
+}
+
+TEST(colexicographically_greater, different_lengths) {
+    EXPECT_TRUE(colexicographically_greater("AAAAA", "AAAA"));
+    EXPECT_FALSE(colexicographically_greater("AAAAA", "BBBB"));
+
+    EXPECT_TRUE(colexicographically_greater("AAAAB", "AAAA"));
+    EXPECT_TRUE(colexicographically_greater("ABAAA", "AAAA"));
+    EXPECT_TRUE(colexicographically_greater("BAAAA", "AAAA"));
+}
+
+
+TEST(seq_equal, basics) {
+    EXPECT_TRUE(utils::seq_equal(std::string("ABAAACD"), std::string("ABAAACD"), 0));
+    EXPECT_FALSE(utils::seq_equal(std::string("ABAAACD"), std::string("BAAAACD"), 0));
+    EXPECT_FALSE(utils::seq_equal(std::string("ABAAACD"), std::string("BAAAACD"), 1));
+    EXPECT_TRUE(utils::seq_equal(std::string("ABAAACD"), std::string("BAAAACD"), 2));
+    EXPECT_TRUE(utils::seq_equal(std::string("ABAAACD"), std::string("BAAAACD"), 3));
+    EXPECT_TRUE(utils::seq_equal(std::string("ABAAACD"), std::string("BAAAACD"), 4));
+    EXPECT_TRUE(utils::seq_equal(std::string("ABAAACD"), std::string("BAAAACD"), 5));
+    EXPECT_TRUE(utils::seq_equal(std::string("ABAAACD"), std::string("BAAAACD"), 6));
+    EXPECT_TRUE(utils::seq_equal(std::string("ABAAACD"), std::string("BAAAACD"), 7));
+    EXPECT_TRUE(utils::seq_equal(std::string("ABAAACD"), std::string("BAAAACD"), 100));
+}

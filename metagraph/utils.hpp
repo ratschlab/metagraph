@@ -31,7 +31,7 @@ namespace utils {
      *  This function checks whether two given strings are identical.
      */
     template <class String>
-    bool compare_seq(const String &s1, const String &s2, size_t start = 0) {
+    bool seq_equal(const String &s1, const String &s2, size_t start = 0) {
         if (s1.size() != s2.size())
             return false;
 
