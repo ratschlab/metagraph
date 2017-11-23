@@ -4,18 +4,11 @@
 
 #include "vcfparse.h"
 
-std::string ref_file, vcf_file1, vcf_file2;
+const std::string working_dir = "../unit_tests";
+const std::string ref_file = working_dir + "/test_vcfparse.fa";
+const std::string vcf_file1 = working_dir + "/test_vcfparse_1.vcf";
+const std::string vcf_file2 = working_dir + "/test_vcfparse_2.vcf";
 const char *annots[] = {};
-
-int main(int argc, char** argv) {
-    ::testing::InitGoogleTest(&argc, argv);
-    //assert(argc >= 2);
-    std::string working_dir = "../unit_tests";
-    ref_file = working_dir + "/test_vcfparse.fa";
-    vcf_file1 = working_dir + "/test_vcfparse_1.vcf";
-    vcf_file2 = working_dir + "/test_vcfparse_2.vcf";
-    return RUN_ALL_TESTS();
-}
 
 TEST(VcfParse, LoadVCF) {
     vcfparse *vcf = vcf_init(ref_file.c_str(), vcf_file1.c_str(), 3);

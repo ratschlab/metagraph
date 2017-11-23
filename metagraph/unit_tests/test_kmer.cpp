@@ -7,7 +7,6 @@
 #include "config.hpp"
 #include "kmer.hpp"
 
-
 DBG_succ* init_graph() {
     int argc = 3;
     char const *argv[argc] = {"metagengraph","build","test.fa"};
@@ -17,22 +16,25 @@ DBG_succ* init_graph() {
     return graph;
 }
 
+
+DBG_succ *graph;
+
 std::string kmer_codec(std::string &test_kmer) {
-    DBG_succ *graph = init_graph();
     const char *kmer_s = kmer_boost::kmertos(kmer_boost::stokmer(test_kmer.c_str(), test_kmer.length(), construct::nt_lookup), graph->alphabet, graph->alph_size);
-    delete graph;
     std::string kmer = std::string(kmer_s+1) + kmer_s[0];
     free((char*)kmer_s);
     return kmer;
 }
 
 void test_kmer_codec(std::string test_kmer, std::string test_compare_kmer = "") {
+    graph = init_graph();
     if (test_compare_kmer == "")
         test_compare_kmer = test_kmer;
     ASSERT_EQ(test_kmer.length(), test_compare_kmer.length());
     std::string kmer = kmer_codec(test_kmer);
     ASSERT_EQ(test_compare_kmer.length(), kmer.length());
     EXPECT_EQ(test_compare_kmer, kmer);
+    delete graph;
 }
 
 TEST(KmerEncodeTest, Invertible) {
@@ -56,12 +58,10 @@ TEST(KmerEncodeTest, InvalidChars) {
 }
 
 void test_kmer_less(std::string k1, std::string k2, bool truth) {
-    DBG_succ *graph = init_graph();
     ui256 kmer[2] = {\
         kmer_boost::stokmer(k1.c_str(), k1.length(), construct::nt_lookup),
         kmer_boost::stokmer(k2.c_str(), k2.length(), construct::nt_lookup)
     };
-    delete graph;
     ASSERT_EQ(kmer[0] < kmer[1], truth);
 }
 
@@ -74,12 +74,10 @@ TEST(KmerEncodeTest, Less) {
 }
 
 void test_kmer_suffix(std::string k1, std::string k2, bool truth) {
-    DBG_succ *graph = init_graph();
     ui256 kmer[2] = {\
         kmer_boost::stokmer(k1.c_str(), k1.length(), construct::nt_lookup),
         kmer_boost::stokmer(k2.c_str(), k2.length(), construct::nt_lookup)
     };
-    delete graph;
     ASSERT_EQ(kmer_boost::compare_kmer_suffix(kmer[0], kmer[1]), truth);
 }
 
@@ -90,3 +88,4 @@ TEST(KmerEncodeTest, CompareSuffixTrue) {
 TEST(KmerEncodeTest, CompareSuffixFalse) {
     test_kmer_less("ATTG", "ACTG", false);
 }
+
