@@ -1,4 +1,4 @@
-#include "vcfparse.h"
+#include "vcf_parser.hpp"
 
 
 static char passfilt[] = "PASS";
@@ -12,24 +12,24 @@ vcf_parser::~vcf_parser() {
     if (curalt)
         free(curalt);
     bcf_sweep_destroy(sw);
-    fai_destroy(ref);
-    free(seqnames);
+    fai_destroy(reference_);
 }
 
-bool vcf_parser::init(const char *ref_, const char *vcf, int k_) {
+bool vcf_parser::init(const std::string &reference_file,
+                      const std::string &vcf_file, int k) {
     //load ref
-    ref = fai_load(ref_);
-    if (!ref) {
+    reference_ = fai_load(reference_file.c_str());
+    if (!reference_) {
         fprintf(stderr, "Failed to read reference\n");
         exit(1);
     }
     //load vcf
-    sw = bcf_sweep_init(vcf);
+    sw = bcf_sweep_init(vcf_file.c_str());
     if (!sw) {
         fprintf(stderr, "Failed to read VCF\n");
         exit(1);
     }
-    k = k_;
+    k_ = k;
     seq.s = (char*)calloc(1, sizeof(char));
     seq.l = 0;
     hdr = bcf_sweep_hdr(sw);
@@ -42,7 +42,12 @@ bool vcf_parser::init(const char *ref_, const char *vcf, int k_) {
         fprintf(stderr, "Empty VCF file\n");
         exit(1);
     }
-    seqnames = bcf_hdr_seqnames(hdr, &(nseq));
+
+    int nseq = 0;
+    auto **seq_names = bcf_hdr_seqnames(hdr, &nseq);
+    seq_names_.assign(seq_names, seq_names + nseq);
+    free(seq_names);
+
     return true;
 }
 
@@ -81,7 +86,8 @@ std::string vcf_parser::vcf_get_seq(const char *annots[], size_t num_annots) {
             //otherwise, crash
             if (rec->d.allele[curi][1] != 'C' || rec->d.allele[curi][2] != 'N') {
                 //TODO: HANDLE RETROTRANSPOSONS PROPERLY
-                fprintf(stderr, "Can't handle this type of variant, skipping: %s\n",rec->d.allele[curi]);
+                fprintf(stderr, "Can't handle this type of variant, skipping: %s\n",
+                                rec->d.allele[curi]);
                 vcf_next_line();
                 continue;
                 //exit(1);
@@ -97,12 +103,12 @@ std::string vcf_parser::vcf_get_seq(const char *annots[], size_t num_annots) {
             }
             */
             if (ref_callele_l * cn > curaltlen) {
-                temp = (char*)realloc(curalt, ref_callele_l * cn+1);
+                temp = (char*)realloc(curalt, ref_callele_l * cn + 1);
                 if (temp) {
                     curalt = temp;
                 } else {
                     free(curalt);
-                    curalt = (char*)malloc(ref_callele_l * cn+1);
+                    curalt = (char*)malloc(ref_callele_l * cn + 1);
                 }
             }
             curalt[0] = 0;
@@ -112,12 +118,12 @@ std::string vcf_parser::vcf_get_seq(const char *annots[], size_t num_annots) {
             //fprintf(stderr,"\n%u\n%s\n%s\n",cn,rec->d.allele[0], curalt);
         } else {
             if (strlen(rec->d.allele[curi]) > curaltlen) {
-                temp = curalt = (char*)realloc(curalt, strlen(rec->d.allele[curi])+1);
+                temp = curalt = (char*)realloc(curalt, strlen(rec->d.allele[curi]) + 1);
                 if (temp) {
                     curalt = temp;
                 } else {
                     free(curalt);
-                    curalt = (char*)malloc(strlen(rec->d.allele[curi])+1);
+                    curalt = (char*)malloc(strlen(rec->d.allele[curi]) + 1);
                 }
             }
             strcpy(curalt, rec->d.allele[curi]);
@@ -138,7 +144,7 @@ std::string vcf_parser::vcf_get_seq(const char *annots[], size_t num_annots) {
         //TODO: check if these annots are part of the INFO, if not, check genotypes
         //ngt = bcf_get_genotypes(sr->readers[0].header, line0, &gt_arr, &ngt_arr); //get genotypes
         //annot=1;
-        annot = std::string(seqnames[rec->rid]) + ":";
+        annot = std::string(seq_names_[rec->rid]) + ":";
         for (size_t i=0; i < num_annots; ++i) {
             bcf_info_t *curinfo = bcf_get_info(hdr, rec, annots[i]);
             if (curinfo && curinfo->v1.i) {
@@ -220,14 +226,12 @@ int vcf_parser::vcf_next_line() {
             vcf_clean_kmers();
         curi = 0;
         ref_callele_l = strlen(rec->d.allele[0]);
-        curkey = hdr->id[BCF_DT_CTG][rec->rid].key;
-        curpos = &(rec->pos);
-        kmer1 = faidx_fetch_seq(ref, hdr->id[BCF_DT_CTG][rec->rid].key,
-                                     rec->pos - k,
+        kmer1 = faidx_fetch_seq(reference_, hdr->id[BCF_DT_CTG][rec->rid].key,
+                                     rec->pos - k_,
                                      rec->pos - 1, &len);
-        kmer3 = faidx_fetch_seq(ref, hdr->id[BCF_DT_CTG][rec->rid].key,
+        kmer3 = faidx_fetch_seq(reference_, hdr->id[BCF_DT_CTG][rec->rid].key,
                                      rec->pos + ref_callele_l,
-                                     rec->pos + ref_callele_l - 1 + k, &len);
+                                     rec->pos + ref_callele_l - 1 + k_, &len);
         kmer1_l = strlen(kmer1);
         kmer3_l = strlen(kmer3);
         return 1;

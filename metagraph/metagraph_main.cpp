@@ -5,7 +5,7 @@
 #include "config.hpp"
 #include "helpers.hpp"
 #include "utils.hpp"
-#include "vcfparse.h"
+#include "vcf_parser.hpp"
 #include "traverse.hpp"
 #include "merge.hpp"
 #include "annotate.hpp"
@@ -262,7 +262,7 @@ int main(int argc, const char *argv[]) {
                                 tstart = clock();
                                 timelast = clock();
                                 vcf_parser vcf;
-                                if (!vcf.init(config->refpath.c_str(), files[f].c_str(), graph->k)) {
+                                if (!vcf.init(config->refpath, files[f], graph->k)) {
                                     std::cerr << "ERROR reading VCF " << files[f] << std::endl;
                                     exit(1);
                                 }

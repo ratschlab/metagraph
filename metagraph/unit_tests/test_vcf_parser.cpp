@@ -2,7 +2,7 @@
 
 #include "gtest/gtest.h"
 
-#include "vcfparse.h"
+#include "vcf_parser.hpp"
 
 const std::string test_data_dir = "../unit_tests/data/";
 const std::string ref_file = test_data_dir + "test_vcfparse.fa";
