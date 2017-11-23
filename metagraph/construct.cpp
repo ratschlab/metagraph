@@ -108,7 +108,8 @@ bool check_suffix(DBG_succ* G, char* target, std::string& suffix, const char* nt
 }
 
 
-void add_seq_fast(DBG_succ* G, kstring_t &seq, kstring_t &name, bool add_bridge, unsigned int parallel, std::string suffix, bool add_anno) {
+void add_seq_fast(DBG_succ *G, kstring_t &seq, const std::string &annotation,
+                  bool add_bridge, unsigned int parallel, std::string suffix, bool add_anno) {
 
 #ifdef DBGDEBUG
         G->print_seq();
@@ -119,7 +120,8 @@ void add_seq_fast(DBG_succ* G, kstring_t &seq, kstring_t &name, bool add_bridge,
     std::vector<uint32_t> label_id;
     if (add_anno) {
         // annotation data
-        std::string cur_label, label_str = (name.s ? std::string(name.s) : "");
+        std::string cur_label;
+        std::string label_str = annotation;
         std::vector<std::string> labels;
         uint32_t max_label_id = 0;
 
@@ -795,8 +797,8 @@ std::deque<std::string> generate_suffices(DBG_succ *G, unsigned int nsplits) {
 }
 
 void add_sink(DBG_succ* G, unsigned int parallel, std::string suffix, bool add_anno) {
-    add_seq_fast(G, G->start, G->blank, false, parallel, suffix, add_anno);
-    add_seq_fast(G, G->graphsink, G->blank, true, parallel, suffix, add_anno);
+    add_seq_fast(G, G->start, "", false, parallel, suffix, add_anno);
+    add_seq_fast(G, G->graphsink, "", true, parallel, suffix, add_anno);
 }
 
 } // construct

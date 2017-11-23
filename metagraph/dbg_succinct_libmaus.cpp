@@ -66,8 +66,7 @@ DBG_succ::DBG_succ(size_t k_, Config *config_, bool sentinel)
         starts(std::string(k-1, alphabet[alph_size-1]) + alphabet[0] + alphabet[0]),
         sinks(alphabet.substr(0,1)),
         graphsink(kstring_t{1, 1, &sinks[0u]}),
-        start(kstring_t{k+1, k+1, &starts[0u]}),
-        blank(kstring_t{0, 1, NULL}) {
+        start(kstring_t{k+1, k+1, &starts[0u]}) {
 
     last->insertBit(0, false);
     if (sentinel)

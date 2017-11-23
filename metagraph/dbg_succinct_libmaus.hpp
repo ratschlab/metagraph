@@ -87,7 +87,6 @@ class DBG_succ {
     std::string sinks;
     kstring_t graphsink;
     kstring_t start;
-    kstring_t blank;
 
 #ifdef DBGDEBUG
     bool debug = true;

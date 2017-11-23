@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 
+
 /** This returns the currently used memory by the process.
  *
  * The code was copied and has been modified from:
@@ -27,5 +28,20 @@ size_t get_curr_mem2() {
     fclose(fp);
     return static_cast<size_t>(rss) * static_cast<size_t>(sysconf(_SC_PAGESIZE));
 }
+
+
+void get_RAM() {
+    //output total RAM usage
+    FILE* sfile = fopen("/proc/self/status", "r");
+    char line[128];
+    while (fgets(line, 128, sfile) != NULL) {
+        if (strncmp(line, "VmRSS:", 6) == 0) {
+            break;
+        }
+    }
+    std::cout << line;
+    fclose(sfile);
+}
+
 
 #endif // __UNIX_TOOLS_HPP__

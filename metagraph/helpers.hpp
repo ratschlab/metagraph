@@ -41,14 +41,14 @@ void reverse_complement(const kstring_t &seq) {
     };
 
     int c0, c1;
-    for (size_t i = 0; i < seq.l>>1; ++i) {
+    for (size_t i = 0; i < seq.l >> 1; ++i) {
         c0 = comp_tab[static_cast<int>(seq.s[i])];
         c1 = comp_tab[static_cast<int>(seq.s[seq.l - 1 - i])];
         seq.s[i] = c1;
         seq.s[seq.l - 1 - i] = c0;
     }
     if (seq.l & 1)
-        seq.s[seq.l>>1] = comp_tab[(int)seq.s[seq.l>>1]];
+        seq.s[seq.l >> 1] = comp_tab[static_cast<int>(seq.s[seq.l >> 1])];
 };
 
 #endif
