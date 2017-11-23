@@ -98,7 +98,7 @@ namespace merge {
             // check whether we already added a node whose outgoing edge points to the
             // same node as the current one
             std::map<uint64_t, std::deque<TAlphabet> >::iterator it = last_added_nodes.find(smallest.second % Gt->alph_size);
-            if (it != last_added_nodes.end() && utils::compare_seq(seq1, it->second, 1)) {
+            if (it != last_added_nodes.end() && utils::seq_equal(seq1, it->second, 1)) {
                 Gt->W->insert(val + Gt->alph_size, Gt->W->size());
             } else {
                 Gt->W->insert(smallest.second, Gt->W->size());
@@ -112,7 +112,7 @@ namespace merge {
                 // compare the last two added nodes
                 std::map<uint64_t, std::deque<TAlphabet> >::iterator it1 = last_added_nodes.find((*(Gt->W))[Gt->W->size()-2] % Gt->alph_size);
                 std::map<uint64_t, std::deque<TAlphabet> >::iterator it2 = last_added_nodes.find((*(Gt->W))[Gt->W->size()-1] % Gt->alph_size);
-                if (it1 != last_added_nodes.end() && it2 != last_added_nodes.end() && it1 != it2 && utils::compare_seq(it1->second, it2->second)) {
+                if (it1 != last_added_nodes.end() && it2 != last_added_nodes.end() && it1 != it2 && utils::seq_equal(it1->second, it2->second)) {
                     Gt->last->set(Gt->W->size() - 2, false);
                 }
             }
