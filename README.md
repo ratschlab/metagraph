@@ -2,9 +2,10 @@
 
 
 Prerequisites
-- C++ 14
-- boost
 - cmake 3.6.1
+- C++14
+- boost
+- HTSlib
 
 Install
 1. `git clone --recursive https://github.com/ratschlab/projects2014-metagenome.git`
