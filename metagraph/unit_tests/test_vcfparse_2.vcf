@@ -1,0 +1,12 @@
+##fileformat=VCFv4.2
+##INFO=<ID=AC_AFR,Number=A,Type=Integer,Description="Allele count in African/African American genotypes, for each ALT allele, in the same order as listed">
+##INFO=<ID=AC_AMR,Number=A,Type=Integer,Description="Allele count in Admixed American genotypes, for each ALT allele, in the same order as listed">
+##INFO=<ID=AC_ASJ,Number=A,Type=Integer,Description="Allele count in Ashkenazi Jewish genotypes, for each ALT allele, in the same order as listed">
+##INFO=<ID=AC_EAS,Number=A,Type=Integer,Description="Allele count in East Asian genotypes, for each ALT allele, in the same order as listed">
+##INFO=<ID=AC_FIN,Number=A,Type=Integer,Description="Allele count in Finnish genotypes, for each ALT allele, in the same order as listed">
+##INFO=<ID=AC_NFE,Number=A,Type=Integer,Description="Allele count in Non-Finnish European genotypes, for each ALT allele, in the same order as listed">
+##INFO=<ID=AC_OTH,Number=A,Type=Integer,Description="Allele count in Other (population not assigned) genotypes, for each ALT allele, in the same order as listed">
+##INFO=<ID=AC_SAS,Number=A,Type=Integer,Description="Allele count in South Asian genotypes, for each ALT allele, in the same order as listed">
+##contig=<ID=test,length=21>
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+test	5	.	T	C	366.59	PASS	AC_AFR=0;AC_AMR=2;AC_ASJ=0;AC_EAS=0;AC_FIN=0;AC_NFE=0;AC_OTH=0;AC_SAS=0

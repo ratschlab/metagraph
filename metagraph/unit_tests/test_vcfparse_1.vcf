@@ -1,0 +1,8 @@
+##fileformat=VCFv4.1
+##FILTER=<ID=PASS,Description="All filters passed">
+##source=1000GenomesPhase3Pipeline
+##contig=<ID=test,assembly=test,length=21>
+##INFO=<ID=VT,Number=.,Type=String,Description="indicates what type of variant the line represents">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	A	B	C	D
+test	5	test	T	G	100	PASS	VT=SNP	GT	1|0	0|1	1|1	0|0
