@@ -42,6 +42,7 @@ namespace construct {
     void add_sink(DBG_succ* G, unsigned int parallel = 1, std::string suffix = "", bool add_anno = false);
 
     // translate from ascii into talphabet
+    //TODO: move this to dbg_succinct_libmaus.hpp
     const char nt_lookup[128] = {
         5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
         5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
