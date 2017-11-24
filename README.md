@@ -11,4 +11,4 @@ Install
 1. `git clone --recursive https://github.com/ratschlab/projects2014-metagenome.git`
 2. install **libmaus2** and **sdsl-lite** in `metagraph/external-libraries/` following the corresponding istructions
 3. go to the **build** directory `mkdir -p metagraph/build && cd metagraph/build`
-4. compile by `cmake .. && make -j30 && ./unit_tests`
+4. compile by `cmake .. && make metagengraph && make && ./unit_tests`
