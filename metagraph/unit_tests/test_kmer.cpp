@@ -4,37 +4,22 @@
 
 #include "dbg_succinct_libmaus.hpp"
 #include "construct.hpp"
-#include "config.hpp"
 #include "kmer.hpp"
 
-DBG_succ* init_graph() {
-    int argc = 3;
-    char const *argv[argc] = {"metagengraph","build","test.fa"};
-    Config *config = new Config(argc, argv);
-    DBG_succ *graph = new DBG_succ(config->k, config);
-    delete config;
-    return graph;
-}
-
-
-DBG_succ *graph;
-
 std::string kmer_codec(std::string &test_kmer) {
-    const char *kmer_s = kmer_boost::kmertos(kmer_boost::stokmer(test_kmer.c_str(), test_kmer.length(), construct::nt_lookup), graph->alphabet, graph->alph_size);
+    const char *kmer_s = kmer_boost::kmertos(kmer_boost::stokmer(test_kmer.c_str(), test_kmer.length(), construct::nt_lookup), DBG_succ::default_alphabet, DBG_succ::default_alph_size);
     std::string kmer = std::string(kmer_s+1) + kmer_s[0];
     free((char*)kmer_s);
     return kmer;
 }
 
 void test_kmer_codec(std::string test_kmer, std::string test_compare_kmer = "") {
-    graph = init_graph();
     if (test_compare_kmer == "")
         test_compare_kmer = test_kmer;
     ASSERT_EQ(test_kmer.length(), test_compare_kmer.length());
     std::string kmer = kmer_codec(test_kmer);
     ASSERT_EQ(test_compare_kmer.length(), kmer.length());
     EXPECT_EQ(test_compare_kmer, kmer);
-    delete graph;
 }
 
 TEST(KmerEncodeTest, Invertible) {
