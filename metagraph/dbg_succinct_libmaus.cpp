@@ -1096,7 +1096,7 @@ void DBG_succ::print_state() {
 
     fprintf(stderr, "W:\n");
     for (uint64_t i = 0; i < W->size(); i++) {
-        fprintf(stderr, "\t%lu", (*W)[i]);
+        fprintf(stderr, "\t%llu", (*W)[i]);
         if (i == p)
             fprintf(stderr, "*");
     }
@@ -1144,7 +1144,9 @@ void DBG_succ::print_adj_list(std::string outf) {
         }
     }
     for (uint64_t edge = 1; edge < W->size(); ++edge) {
-        fprintf(stdout, "%lu\t%lu\t", rank_last(succ_last(edge)), rank_last(outgoing(edge, (*W)[edge])));
+        fprintf(stdout, "%llu\t%llu\t",
+                        rank_last(succ_last(edge)),
+                        rank_last(outgoing(edge, (*W)[edge])));
         bool is_first = true;
         for (uint64_t k = 0; k < this->annotation_full.size(); ++k) {
             //if ((*(this->annotation_full.at(k)))[edge] == 1) {
@@ -1153,7 +1155,7 @@ void DBG_succ::print_adj_list(std::string outf) {
                     fprintf(stdout, ",");
                 }
                 is_first = false;
-                fprintf(stdout, "%lu", k+1);
+                fprintf(stdout, "%llu", k + 1);
                 cur_rank[k]++;
                 if (cur_rank[k] <= max_rank[k]) {
                     next_ind[k] = selects[k](cur_rank[k]);
@@ -1187,7 +1189,7 @@ void DBG_succ::print_seq() {
     while (start < W->size()) {
         for (uint64_t i = start; i < end; i++) {
             if (i % 10 == 0)
-                fprintf(stdout, "%lu", (i / 10) % 10);
+                fprintf(stdout, "%llu", (i / 10) % 10);
             else
                 fprintf(stdout, " ");
         }

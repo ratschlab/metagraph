@@ -149,7 +149,7 @@ namespace traverse {
                 branch = pop_branch(branchnodes, seqId, seqPos, nodeId, lastEdge, isFirst);
                 out = G->outdegree(nodeId);
                 if (debug)
-                    fprintf(stderr, " -- popped %lu -- ", nodeId); 
+                    fprintf(stderr, " -- popped %llu -- ", nodeId); 
                 joinOpen = true;
                 joinEdge = lastEdge + 1;
             }
@@ -197,12 +197,12 @@ namespace traverse {
                     branch = pop_branch(branchnodes, seqId, seqPos, nodeId, lastEdge, isFirst);
                     out = G->outdegree(nodeId);
                     if (debug)
-                        fprintf(stderr, " -- popped %lu -- ", nodeId); 
+                        fprintf(stderr, " -- popped %llu -- ", nodeId); 
                     joinOpen = true;
                     joinEdge = lastEdge + 1;
                 }
                 if (debug)
-                    fprintf(stderr, " new nodeId: %lu\n", nodeId);
+                    fprintf(stderr, " new nodeId: %llu\n", nodeId);
             // there are several children
             } else {
                 size_t cnt = 0;
@@ -225,7 +225,7 @@ namespace traverse {
                                 // push node information to stack
                                 branchnodes.push(BranchInfo(nodeId, seqId, seqPos, lastEdge));
                                 if (debug)
-                                    fprintf(stderr, " -- pushed %lu : seqId %lu seqPos %lu lastEdge %lu -- ", nodeId, seqId, seqPos, lastEdge); 
+                                    fprintf(stderr, " -- pushed %llu : seqId %llu seqPos %llu lastEdge %llu -- ", nodeId, seqId, seqPos, lastEdge); 
                             }
                             if (joinOpen) {
                                 if (sequence.length() > 0) {
@@ -264,7 +264,7 @@ namespace traverse {
                     branch = pop_branch(branchnodes, seqId, seqPos, nodeId, lastEdge, isFirst);
                     out = G->outdegree(nodeId);
                     if (debug)
-                        fprintf(stderr, " -- popped %lu -- ", nodeId); 
+                        fprintf(stderr, " -- popped %llu -- ", nodeId); 
                     joinOpen = true;
                     joinEdge = lastEdge + 1;
                 }

@@ -155,7 +155,8 @@ void* parallel_annotate_wrapper(void *) {
 
             start = curr_idx * anno_data->binsize;
             //end = std::min(((curr_idx + 1) * anno_data->binsize) + anno_data->graph->k - 1, anno_data->seq->l);
-            end = std::min(((curr_idx + 1) * anno_data->binsize), anno_data->seq->l);
+            end = std::min((curr_idx + 1) * anno_data->binsize,
+                           static_cast<uint64_t>(anno_data->seq->l));
             //std::cerr << "start " << start << " end " << end << std::endl;
             annotate::annotate_seq(anno_data->graph, *(anno_data->seq), *(anno_data->label), start, end, &mutex_annotate);
         }
@@ -272,11 +273,12 @@ int main(int argc, const char *argv[]) {
                                     if (i % 10'000 == 0) {
                                         std::cout << "." << std::flush;
                                         if (i % 100'000 == 0) {
-                                            fprintf(stdout, "%lu - bp %lu / runtime %lu / BPph %lu\n",
-                                                    i,
-                                                    nbp,
-                                                    (clock() - tstart) / CLOCKS_PER_SEC,
-                                                    60 * 60 * CLOCKS_PER_SEC * (nbp - nbplast) / (clock() - timelast));
+                                            fprintf(stdout, "%lu - bp %llu / runtime %lu / BPph %llu\n",
+                                                            i,
+                                                            nbp,
+                                                            (clock() - tstart) / CLOCKS_PER_SEC,
+                                                            60llu * 60llu * CLOCKS_PER_SEC * (nbp - nbplast)
+                                                                                    / (clock() - timelast));
                                             nbplast = nbp;
                                             timelast = clock();
                                         }

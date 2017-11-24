@@ -167,7 +167,11 @@ namespace merge {
             if (added > 0 && added % 1000 == 0) {
                 std::cout << "." << std::flush;
                 if (added % 10000 == 0) {
-                    fprintf(stdout, "merged %lu / %lu - edges %lu / nodes %lu\n", added, Gm->get_size(), Gt->W->size() - 1, Gt->rank_last((Gt->last->size() - 1)));
+                    fprintf(stdout, "merged %llu / %llu - edges %llu / nodes %llu\n",
+                                    added,
+                                    Gm->get_size(),
+                                    Gt->W->size() - 1,
+                                    Gt->rank_last((Gt->last->size() - 1)));
                 }
             }
 
