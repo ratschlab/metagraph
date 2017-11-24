@@ -167,7 +167,7 @@ namespace merge {
             if (added > 0 && added % 1000 == 0) {
                 std::cout << "." << std::flush;
                 if (added % 10000 == 0) {
-                    fprintf(stdout, "merged %llu / %llu - edges %llu / nodes %llu\n",
+                    fprintf(stdout, "merged %" PRIu64 " / %" PRIu64 " - edges %" PRIu64 " / nodes %" PRIu64 "\n",
                                     added,
                                     Gm->get_size(),
                                     Gt->W->size() - 1,

@@ -1096,7 +1096,7 @@ void DBG_succ::print_state() {
 
     fprintf(stderr, "W:\n");
     for (uint64_t i = 0; i < W->size(); i++) {
-        fprintf(stderr, "\t%llu", (*W)[i]);
+        fprintf(stderr, "\t%" PRIu64, (*W)[i]);
         if (i == p)
             fprintf(stderr, "*");
     }
@@ -1144,7 +1144,7 @@ void DBG_succ::print_adj_list(std::string outf) {
         }
     }
     for (uint64_t edge = 1; edge < W->size(); ++edge) {
-        fprintf(stdout, "%llu\t%llu\t",
+        fprintf(stdout, "%" PRIu64 "\t%" PRIu64 "\t",
                         rank_last(succ_last(edge)),
                         rank_last(outgoing(edge, (*W)[edge])));
         bool is_first = true;
@@ -1155,7 +1155,7 @@ void DBG_succ::print_adj_list(std::string outf) {
                     fprintf(stdout, ",");
                 }
                 is_first = false;
-                fprintf(stdout, "%llu", k + 1);
+                fprintf(stdout, "%" PRIu64, k + 1);
                 cur_rank[k]++;
                 if (cur_rank[k] <= max_rank[k]) {
                     next_ind[k] = selects[k](cur_rank[k]);
@@ -1189,7 +1189,7 @@ void DBG_succ::print_seq() {
     while (start < W->size()) {
         for (uint64_t i = start; i < end; i++) {
             if (i % 10 == 0)
-                fprintf(stdout, "%llu", (i / 10) % 10);
+                fprintf(stdout, "%" PRIu64, (i / 10) % 10);
             else
                 fprintf(stdout, " ");
         }

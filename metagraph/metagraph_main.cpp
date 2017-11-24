@@ -273,12 +273,13 @@ int main(int argc, const char *argv[]) {
                                     if (i % 10'000 == 0) {
                                         std::cout << "." << std::flush;
                                         if (i % 100'000 == 0) {
-                                            fprintf(stdout, "%lu - bp %llu / runtime %lu / BPph %llu\n",
+                                            fprintf(stdout, "%zu - bp %" PRIu64 " / runtime %lu / BPph %" PRIu64 "\n",
                                                             i,
                                                             nbp,
                                                             (clock() - tstart) / CLOCKS_PER_SEC,
-                                                            60llu * 60llu * CLOCKS_PER_SEC * (nbp - nbplast)
-                                                                                    / (clock() - timelast));
+                                                            uint64_t(60) * uint64_t(60)
+                                                                * CLOCKS_PER_SEC * (nbp - nbplast)
+                                                                / (clock() - timelast));
                                             nbplast = nbp;
                                             timelast = clock();
                                         }
