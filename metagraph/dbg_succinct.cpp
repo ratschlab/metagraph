@@ -32,7 +32,7 @@
 #include "config.hpp"
 #include "datatypes.hpp"
 #include "serialization.hpp"
-#include "dbg_succinct_libmaus.hpp"
+#include "dbg_succinct.hpp"
 
 // define an extended alphabet for W --> somehow this does not work properly as expected
 typedef uint64_t TAlphabet;

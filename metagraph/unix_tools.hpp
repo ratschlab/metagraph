@@ -32,16 +32,15 @@ size_t get_curr_mem2() {
 
 void get_RAM() {
     //output total RAM usage
-    FILE* sfile = fopen("/proc/self/status", "r");
+    FILE *sfile = fopen("/proc/self/status", "r");
     char line[128];
     while (fgets(line, 128, sfile) != NULL) {
         if (strncmp(line, "VmRSS:", 6) == 0) {
+            printf("%s", line);
             break;
         }
     }
-    std::cout << line;
     fclose(sfile);
 }
-
 
 #endif // __UNIX_TOOLS_HPP__

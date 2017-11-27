@@ -7,7 +7,7 @@
 #include <deque>
 #include <iostream>
 
-#include "dbg_succinct_libmaus.hpp"
+#include "dbg_succinct.hpp"
 
 namespace merge {
 

@@ -10,7 +10,29 @@
 #include "kmer.hpp"
 
 
-class DBG_succ {
+/*
+GenomeGraph {
+  public:
+    template <class T>
+    get_index(const T &k_mer)
+    get_indices(const std::string &sequence)
+
+    get_incoming_edges(node_it node, char edge_label)
+    get_outgoing_edges(node_it node, char edge_label)
+
+    void add_sequence(const std::string &sequence)
+
+    
+};
+
+
+class DBGCondensed : public GenomeGraph {
+
+};
+*/
+
+
+class DBG_succ { //: public GenomeGraph{
 
     // define an extended alphabet for W --> somehow this does not work properly as expected
     typedef uint64_t TAlphabet;
@@ -49,6 +71,7 @@ class DBG_succ {
     std::vector<TAlphabet> F;
 
     // k-mer size
+    // k -> k_
     size_t k;
     // infile base when loaded from file
     std::string infbase;
@@ -100,12 +123,12 @@ class DBG_succ {
 
     // construct empty graph instance
     DBG_succ(size_t k_,
-             Config* config_,
+             Config *config_,
              bool sentinel = true);
 
     // load graph instance from a provided file name base
     DBG_succ(std::string infbase_,
-             Config* config_);
+             Config *config_);
 
     // destructor
     ~DBG_succ();
@@ -277,8 +300,10 @@ class DBG_succ {
         return std::make_pair(rl, ru);
     }
 
+    //TODO: public method
     std::vector<HitInfo> index_fuzzy(std::string &str, uint64_t eops);
 
+    // colex_upper_bound
     uint64_t index_predecessor(std::deque<TAlphabet> str);
 
     /**
@@ -325,12 +350,12 @@ class DBG_succ {
 
     /**
      * Return number of nodes in the current graph.
+     * TODO: delete
      */
     uint64_t get_nodes();
 
     /**
      * Return k-mer length of current graph.
-     * TODO: delete
      */
     uint64_t get_k();
 
@@ -364,10 +389,11 @@ class DBG_succ {
 
     std::vector<std::vector<HitInfo> > align_fuzzy(kstring_t seq, uint64_t max_distance = 0, uint64_t alignment_length = 0);
 
+    // num_nodes
     uint64_t get_node_count();
 
+    // num_edges
     uint64_t get_edge_count();
-
 
     //
     //
@@ -402,7 +428,6 @@ class DBG_succ {
     //
     //
 
-
     uint64_t next_non_zero(std::vector<uint64_t> v, uint64_t pos);
     uint64_t next_non_zero(std::vector<std::pair<uint64_t, std::deque<TAlphabet> > > v, uint64_t pos);
 
@@ -433,13 +458,11 @@ class DBG_succ {
      */
     void print_state();
 
-
     /**
      * This is a debug function that prints the current representation of the graph to
      * the screen.
      */
     void print_state_str();
-
     /*
      * Returns the sequence stored in W and prints the node
      * information in an overview.

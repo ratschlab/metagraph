@@ -6,7 +6,7 @@
 
 #include "kseq.h"
 #include "construct.hpp"
-#include "dbg_succinct_libmaus.hpp"
+#include "dbg_succinct.hpp"
 KSEQ_INIT(gzFile, gzread)
 
 const std::string test_data_dir = "../unit_tests/data";

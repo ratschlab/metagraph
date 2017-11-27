@@ -5,7 +5,7 @@
 #include <string>
 #include <parallel/algorithm>
 
-#include "dbg_succinct_libmaus.hpp"
+#include "dbg_succinct.hpp"
 
 
 namespace construct {
@@ -42,7 +42,7 @@ namespace construct {
     void add_sink(DBG_succ* G, unsigned int parallel = 1, std::string suffix = "", bool add_anno = false);
 
     // translate from ascii into talphabet
-    //TODO: move this to dbg_succinct_libmaus.hpp
+    //TODO: move this to dbg_succinct.hpp
     const char nt_lookup[128] = {
         5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
         5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,

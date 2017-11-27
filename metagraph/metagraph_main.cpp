@@ -1,7 +1,7 @@
 #include <fstream>
 #include <ctime>
 
-#include "dbg_succinct_libmaus.hpp"
+#include "dbg_succinct.hpp"
 #include "config.hpp"
 #include "helpers.hpp"
 #include "utils.hpp"

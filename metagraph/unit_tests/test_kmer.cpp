@@ -2,7 +2,7 @@
 
 #include "gtest/gtest.h"
 
-#include "dbg_succinct_libmaus.hpp"
+#include "dbg_succinct.hpp"
 #include "construct.hpp"
 #include "kmer.hpp"
 

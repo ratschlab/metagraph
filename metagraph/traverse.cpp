@@ -14,7 +14,7 @@
 #include "kseq.h"
 KSEQ_INIT(gzFile, gzread)
 
-#include "dbg_succinct_libmaus.hpp"
+#include "dbg_succinct.hpp"
 
 namespace traverse {
 
