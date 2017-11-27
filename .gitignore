@@ -12,3 +12,4 @@ database-cli
 *.DS_Store
 *._*
 build
+.*.swp
