@@ -3,11 +3,11 @@
 #include "gtest/gtest.h"
 
 #include "dbg_succinct.hpp"
-#include "construct.hpp"
 #include "kmer.hpp"
 
+
 std::string kmer_codec(std::string &test_kmer) {
-    const char *kmer_s = kmer_boost::kmertos(kmer_boost::stokmer(test_kmer.c_str(), test_kmer.length(), construct::nt_lookup), DBG_succ::default_alphabet, DBG_succ::default_alph_size);
+    const char *kmer_s = kmer_boost::kmertos(kmer_boost::stokmer(test_kmer.c_str(), test_kmer.length(), DBG_succ::nt_lookup), DBG_succ::default_alphabet, DBG_succ::default_alph_size);
     std::string kmer = std::string(kmer_s+1) + kmer_s[0];
     free((char*)kmer_s);
     return kmer;
@@ -44,8 +44,8 @@ TEST(KmerEncodeTest, InvalidChars) {
 
 void test_kmer_less(std::string k1, std::string k2, bool truth) {
     ui256 kmer[2] = {\
-        kmer_boost::stokmer(k1.c_str(), k1.length(), construct::nt_lookup),
-        kmer_boost::stokmer(k2.c_str(), k2.length(), construct::nt_lookup)
+        kmer_boost::stokmer(k1.c_str(), k1.length(), DBG_succ::nt_lookup),
+        kmer_boost::stokmer(k2.c_str(), k2.length(), DBG_succ::nt_lookup)
     };
     ASSERT_EQ(kmer[0] < kmer[1], truth);
 }
@@ -60,8 +60,8 @@ TEST(KmerEncodeTest, Less) {
 
 void test_kmer_suffix(std::string k1, std::string k2, bool truth) {
     ui256 kmer[2] = {\
-        kmer_boost::stokmer(k1.c_str(), k1.length(), construct::nt_lookup),
-        kmer_boost::stokmer(k2.c_str(), k2.length(), construct::nt_lookup)
+        kmer_boost::stokmer(k1.c_str(), k1.length(), DBG_succ::nt_lookup),
+        kmer_boost::stokmer(k2.c_str(), k2.length(), DBG_succ::nt_lookup)
     };
     ASSERT_EQ(kmer_boost::compare_kmer_suffix(kmer[0], kmer[1]), truth);
 }

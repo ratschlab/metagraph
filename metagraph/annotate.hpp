@@ -10,7 +10,7 @@
 
 
 /*
-class Annotation {
+class GenomeAnnotation {
   public:
       get_annotation = 0;
       get_annotation
@@ -24,27 +24,27 @@ class Annotation {
 };
 
 
-class WaveletTrie : parent Annotation {
+class WaveletTrie : parent GenomeAnnotation {
   public:
 };
 
 
-class ColorCompressed : parent Annotation {
+class ColorCompressed : parent GenomeAnnotation {
   public:
 };
 
 
-class EdgeCompressed : parent Annotation {
+class EdgeCompressed : parent GenomeAnnotation {
   public:
 };
 
 
-class ColorBloomFilter : parent Annotation {
+class ColorBloomFilter : parent GenomeAnnotation {
   public:
 };
 
 
-class UncompressedMatrix : parent Annotation {
+class UncompressedMatrix : parent GenomeAnnotation {
   public:
 };
 

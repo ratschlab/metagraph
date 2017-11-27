@@ -57,6 +57,16 @@ std::string infbase;
 
 const std::string DBG_succ::default_alphabet = "$ACGTNX$ACGTNXn";
 const size_t DBG_succ::default_alph_size = 7;
+const char DBG_succ::nt_lookup[128] = {
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  0, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  4, 4, 5, 5,  6, 5, 5, 5,  5, 5, 5, 5,
+    5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  4, 4, 5, 5,  6, 5, 5, 5,  5, 5, 5, 5
+};
 
 // alphabet size
 //
@@ -886,7 +896,7 @@ void DBG_succ::replaceW(size_t i, TAlphabet val) {
 
 TAlphabet DBG_succ::get_alphabet_number(char s) {
 
-     TAlphabet nt_lookup[128] = {
+     TAlphabet nt_lookup_[128] = {
         5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
         5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
         5, 5, 5, 5,  0, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
@@ -897,7 +907,7 @@ TAlphabet DBG_succ::get_alphabet_number(char s) {
         5, 5, 5, 5,  4, 4, 5, 5,  6, 5, 5, 5,  5, 5, 5, 5
     };
 
-    return nt_lookup[(int) s];
+    return nt_lookup_[(int) s];
 }
 
 

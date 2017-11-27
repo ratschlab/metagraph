@@ -1,6 +1,5 @@
 #include "merge.hpp"
 #include "utils.hpp"
-#include "construct.hpp"
 #include <unistd.h>
 
 namespace merge {
@@ -228,7 +227,7 @@ namespace merge {
                 val = Gm->get_W(nodeId) % Gt->alph_size;
                 if ((val != 6 || !initial_k) && val != 0) {
                     initial_k = false;
-                    construct::append_pos(Gt, val % Gt->alph_size);
+                    Gt->append_pos(val % Gt->alph_size);
                     added++;
                     //std::cerr << "append " << val % alph_size << " nodeID: " << nodeId << std::endl;
                     //std::cerr << "p: " << p << " W size: " << W->n << std::endl;
@@ -249,7 +248,7 @@ namespace merge {
                         val = Gm->get_W(next) % Gt->alph_size;
                         if ((val != 6 || !initial_k) && val != 0) {
                             initial_k = false;
-                            construct::append_pos(Gt, val % Gt->alph_size);
+                            Gt->append_pos(val % Gt->alph_size);
                             added++;
                             //std::cerr << "..append " << val % alph_size << " nodeID: " << nodeId << std::endl;
                             //std::cerr << "p: " << p << " W size: " << W->n << std::endl;
@@ -285,7 +284,7 @@ namespace merge {
                             initial_k = false;
                             //std::cerr << "p (before): " << p << " W size: " << W->n << std::endl;
                             //this->print_seq();
-                            construct::append_pos(Gt, c);
+                            Gt->append_pos(c);
                             added++;
                             curr_p += (Gt->p <= curr_p);
                             //std::cerr << "append " << c % alph_size << " nodeID: " << nodeId << std::endl;
@@ -311,7 +310,7 @@ namespace merge {
                                 c = Gm->get_W(next) % Gt->alph_size;
                                 if ((c != 6 || !initial_k) && c != 0) {
                                     initial_k = false;
-                                    construct::append_pos(Gt, c);
+                                    Gt->append_pos(c);
                                     added++;
                                     //std::cerr << "...append " << c % alph_size << " nodeID: " << nodeId << std::endl;
                                     //std::cerr << "p: " << p << " W size: " << W->n << std::endl;

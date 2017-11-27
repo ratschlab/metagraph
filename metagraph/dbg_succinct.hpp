@@ -38,6 +38,38 @@ class DBG_succ { //: public GenomeGraph{
     typedef uint64_t TAlphabet;
 
   public:
+    // add a full sequence to the graph
+    void add_seq(kstring_t &seq, bool append = true);
+    void add_seq_fast(const std::string &seq, const std::string &name = "",
+                      bool add_bridge = true, unsigned int parallel = 1,
+                      std::string suffix = "", bool add_anno = false);
+    void construct_succ(unsigned int parallel = 1, bool add_anno = false);
+
+    /** This function takes a character c and appends it to the end of the graph sequence
+     * given that the corresponding note is not part of the graph yet.
+     */
+    uint64_t append_pos(uint64_t c, uint64_t *ckmer = NULL, uint64_t i = 0);
+
+    /** This function takes a pointer to a graph structure and concatenates the arrays W, last
+     * and F to this graph's arrays. In almost all cases this will not produce a valid graph and
+     * should only be used as a helper in the parallel merge procedure.
+     */
+    void append_graph(DBG_succ *other);
+
+    /**
+     * This function takes a pointer to a graph structure and concatenates the arrays W, last
+     * and F to this graph's static containers last_stat and W_stat. In almost all cases
+     * this will not produce a valid graph and should only be used as a helper in the
+     * parallel merge procedure.
+     */
+    void append_graph_static(DBG_succ *other);
+
+    uint64_t remove_edges(std::set<uint64_t> &edges, uint64_t ref_point = 0);
+
+    std::deque<std::string> generate_suffices(unsigned int nsplits);
+
+    void add_sink(unsigned int parallel = 1, std::string suffix = "", bool add_anno = false);
+
     //Temporary storage for kmers before succinct representation construction
     //the second element stores an ID for each kmer indicating which sequence it came from
     //an even ID indicates that it's a normal kmer, an odd ID indicates that it's a bridge
@@ -85,6 +117,8 @@ class DBG_succ { //: public GenomeGraph{
     // default alphabet
     static const std::string default_alphabet;
     static const size_t default_alph_size;
+    // translate from ascii into talphabet
+    static const char nt_lookup[128];
 
     // alphabet
     const std::string alphabet; //("$ACGTNX$ACGTNXn");

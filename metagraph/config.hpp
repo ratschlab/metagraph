@@ -8,7 +8,6 @@
 class Config {
   public:
     Config(int argc, const char *argv[]);
-    Config();
 
     bool verbose = false;
     bool quiet = false;

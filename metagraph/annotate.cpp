@@ -6,6 +6,7 @@
 
 #include "datatypes.hpp"
 
+
 namespace annotate {
 
 void annotate_kmer(DBG_succ *G, sdsl::bit_vector *annotation_curr,

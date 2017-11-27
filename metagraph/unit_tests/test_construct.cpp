@@ -5,7 +5,6 @@
 #include <htslib/kseq.h>
 #include "gtest/gtest.h"
 
-#include "construct.hpp"
 #include "dbg_succinct.hpp"
 
 KSEQ_INIT(gzFile, gzread)
@@ -15,17 +14,15 @@ const std::string test_fasta = test_data_dir + "/test_construct.fa";
 
 
 DBG_succ* init_graph() {
-    Config *config = new Config();
-    DBG_succ *graph = new DBG_succ(config->k, config);
-    delete config;
+    DBG_succ *graph = new DBG_succ(3, NULL);
     assert(graph);
-    construct::add_sink(graph);
+    graph->add_sink();
     graph->switch_state(Config::CSTR);
     return graph;
 }
 
 void construct_succ(DBG_succ *graph) {
-    construct::construct_succ(graph);
+    graph->construct_succ();
     graph->switch_state(Config::DYN);
 }
 
@@ -47,11 +44,11 @@ TEST(Construct, ShortGraphWithLoop) {
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
     DBG_succ *graph = init_graph();
-    construct::add_sink(graph);
+    graph->add_sink();
     for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
-        construct::add_seq_fast(graph, read_stream->seq.s, std::string(read_stream->name.s, read_stream->name.l), true);
+        graph->add_seq_fast(read_stream->seq.s, std::string(read_stream->name.s, read_stream->name.l), true);
     }
-    construct::construct_succ(graph);
+    graph->construct_succ();
     graph->switch_state(Config::DYN);
     std::ostringstream ostr;
     ostr << *(graph->last);

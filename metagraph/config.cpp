@@ -2,9 +2,6 @@
 
 #include <cstring>
 
-//default values
-Config::Config() {
-}
 
 Config::Config(int argc, const char *argv[]) {
     // provide help overview if no identity was given

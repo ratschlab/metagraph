@@ -9,7 +9,6 @@
 #include "traverse.hpp"
 #include "merge.hpp"
 #include "annotate.hpp"
-#include "construct.hpp"
 #include "unix_tools.hpp"
 
 
@@ -126,7 +125,7 @@ void parallel_merge_collect(DBG_succ *result) {
 
     for (size_t i = 0; i < merge_data->result.size(); ++i) {
         if (merge_data->result.at(i)) {
-            construct::append_graph(merge_data->result.at(i), result);
+            result->append_graph(merge_data->result.at(i));
             delete merge_data->result.at(i);
         }
     }
@@ -236,7 +235,7 @@ int main(int argc, const char *argv[]) {
                 graph->switch_state(Config::CSTR);
 
                 //enumerate all suffices
-                std::deque<std::string> suffices = construct::generate_suffices(graph, config->nsplits);
+                std::deque<std::string> suffices = graph->generate_suffices(config->nsplits);
 
                 clock_t tstart, timelast;
 
@@ -244,7 +243,7 @@ int main(int argc, const char *argv[]) {
                 for (size_t j = 0; j < suffices.size(); ++j) {
                     std::cout << "Suffix: " << suffices[j] << "\n";
                     //add sink nodes
-                    construct::add_sink(graph, config->parallel, suffices[j], config->add_anno);
+                    graph->add_sink(config->parallel, suffices[j], config->add_anno);
 
                     if (suffices[j].find("$") == std::string::npos) {
                         // iterate over input files
@@ -286,9 +285,9 @@ int main(int argc, const char *argv[]) {
                                     }
                                     annotation = "VCF:" + annotation;
                                     nbp += sequence.length();
-                                    construct::add_seq_fast(graph, sequence, annotation,
-                                                            false, config->parallel,
-                                                            suffices[j], config->add_anno);
+                                    graph->add_seq_fast(sequence, annotation,
+                                                        false, config->parallel,
+                                                        suffices[j], config->add_anno);
                                 }
                             } else {
                                 //READ FROM FASTA
@@ -304,9 +303,9 @@ int main(int argc, const char *argv[]) {
                                     if (config->reverse)
                                         reverse_complement(read_stream->seq);
                                     // add all k-mers of seq to the graph
-                                    construct::add_seq_fast(graph, std::string(read_stream->seq.s, read_stream->seq.l),
-                                                            std::string(read_stream->name.s, read_stream->name.l),
-                                                            true, config->parallel, suffices[j], config->add_anno);
+                                    graph->add_seq_fast(std::string(read_stream->seq.s, read_stream->seq.l),
+                                                        std::string(read_stream->name.s, read_stream->name.l),
+                                                        true, config->parallel, suffices[j], config->add_anno);
                                 }
                                 kseq_destroy(read_stream);
                             }
@@ -320,7 +319,7 @@ int main(int argc, const char *argv[]) {
                     //append to succinct representation and clear kmer list
                     tstart = clock();
                     std::cout << "Sorting kmers and appending succinct representation from current bin\t";
-                    construct::construct_succ(graph, config->parallel, config->add_anno);
+                    graph->construct_succ(config->parallel, config->add_anno);
                     std::cout << (clock()-tstart)/CLOCKS_PER_SEC << "\n\n";
                 }
                 //TODO: cleanup
@@ -350,7 +349,7 @@ int main(int argc, const char *argv[]) {
                         for (size_t i=1;kseq_read(read_stream) >= 0; ++i) {
                             if (config->reverse)
                                 reverse_complement(read_stream->seq);
-                            construct::add_seq(graph, read_stream->seq);
+                            graph->add_seq(read_stream->seq);
                         }
                         kseq_destroy(read_stream);
                     }
@@ -536,14 +535,14 @@ int main(int argc, const char *argv[]) {
                             graph->W_stat.push_back(0);
                         }
                         DBG_succ* graph_to_append = new DBG_succ(fname, config);
-                        construct::append_graph_static(graph, graph_to_append);
+                        graph->append_graph_static(graph_to_append);
                         delete graph_to_append;
                     } else {
                         if (f == 0) {
                             graph = new DBG_succ(fname, config);
                         } else {
                             DBG_succ* graph_to_append = new DBG_succ(fname, config);
-                            construct::append_graph(graph, graph_to_append);
+                            graph->append_graph(graph_to_append);
                             delete graph_to_append;
                         }
                     }
