@@ -9,13 +9,11 @@
 #include <unordered_set>
 
 #define __STDC_FORMAT_MACROS 1
-#include <inttypes.h>
+#include <cinttypes>
 
 #include <sdsl/wavelet_trees.hpp>
 #include <libmaus2/bitbtree/bitbtree.hpp>
 #include <libmaus2/wavelet/DynamicWaveletTree.hpp>
-
-#include "kseq.h"
 
 
 struct HitInfo {
@@ -58,15 +56,19 @@ class bit_vector {
     virtual void deserialise(std::istream &in) = 0;
     virtual uint64_t select1(size_t id) const = 0;
     virtual uint64_t rank1(size_t id) const = 0;
-    friend inline std::ostream& operator<<(std::ostream &os, const bit_vector& bv);
+
+    friend inline std::ostream& operator<<(std::ostream &os, const bit_vector &bv);
+
   protected:
-    virtual void print(std::ostream& os) const = 0;
+    virtual void print(std::ostream &os) const = 0;
 };
 
-inline std::ostream& operator<<(std::ostream& os, const bit_vector& bv) {
+
+inline std::ostream& operator<<(std::ostream& os, const bit_vector &bv) {
     bv.print(os);
     return os;
 }
+
 
 class bit_vector_dyn : public bit_vector {
   public:

@@ -26,7 +26,8 @@
 // available at https://github.com/lh3/seqtk/
 
 
-#include "kseq.h"
+#include <htslib/kseq.h>
+
 
 void reverse_complement(const kstring_t &seq) {
     const char comp_tab[] = {

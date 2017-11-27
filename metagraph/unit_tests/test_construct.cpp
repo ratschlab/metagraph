@@ -2,11 +2,12 @@
 #include <string>
 #include <sstream>
 
+#include <htslib/kseq.h>
 #include "gtest/gtest.h"
 
-#include "kseq.h"
 #include "construct.hpp"
 #include "dbg_succinct.hpp"
+
 KSEQ_INIT(gzFile, gzread)
 
 const std::string test_data_dir = "../unit_tests/data";

@@ -7,11 +7,13 @@
 #include <vector>
 #include <iterator>
 #include <algorithm>
-#include "kseq.h"
+
+#include <htslib/kseq.h>
 
 #define BPC 3
 typedef boost::multiprecision::uint256_t ui256;
 typedef boost::multiprecision::cpp_int cpp_int;
+
 
 namespace kmer_boost {
 
