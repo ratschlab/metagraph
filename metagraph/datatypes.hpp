@@ -55,8 +55,15 @@ class bit_vector {
     virtual void deserialise(std::istream &in) = 0;
     virtual uint64_t select1(size_t id) const = 0;
     virtual uint64_t rank1(size_t id) const = 0;
+    friend inline std::ostream& operator<<(std::ostream &os, const bit_vector& bv);
+  protected:
+    virtual void print(std::ostream& os) const = 0;
 };
 
+inline std::ostream& operator<<(std::ostream& os, const bit_vector& bv) {
+    bv.print(os);
+    return os;
+}
 
 class bit_vector_dyn : public bit_vector {
   public:
@@ -122,6 +129,11 @@ class bit_vector_dyn : public bit_vector {
 
     uint64_t rank1(size_t id) const {
         return vector_.rank1(id);
+    }
+
+  protected:
+    void print(std::ostream& os) const {
+        os << static_cast<libmaus2::bitbtree::BitBTree<6, 64> >(vector_);
     }
 
   private:
@@ -191,6 +203,12 @@ class bit_vector_stat : public bit_vector {
     uint64_t size() const {
         return vector_.size();
     }
+    
+  protected:
+    void print(std::ostream& os) const {
+        os << static_cast<sdsl::bit_vector>(vector_);
+    }
+
 
   private:
     sdsl::bit_vector vector_;
@@ -225,7 +243,15 @@ class wavelet_tree {
     //virtual uint64_t get(size_t id) = 0;
     // this only makes sense when implemented in the dynamic part
     virtual bool get_bit_raw(uint64_t id) const = 0;
+    friend inline std::ostream& operator<<(std::ostream &os, const wavelet_tree& wt);
+  protected:
+    virtual void print(std::ostream& os) const = 0;
 };
+
+inline std::ostream& operator<<(std::ostream &os, const wavelet_tree& wt) {
+    wt.print(os);
+    return os;
+}
 
 
 class wavelet_tree_stat : public wavelet_tree {
@@ -332,6 +358,11 @@ class wavelet_tree_stat : public wavelet_tree {
        return id;
     }
 
+  protected:
+    void print(std::ostream& os) const {
+        os << wwt_;
+    }
+
   private:
     sdsl::int_vector<> int_vector_;
     sdsl::wt_int<> wwt_;
@@ -427,6 +458,12 @@ class wavelet_tree_dyn : public wavelet_tree {
     bool get_bit_raw(uint64_t id) const {
         return wavelet_tree_.R->operator[](id);
     }
+  
+  protected:
+    void print(std::ostream& os) const {
+        os << wavelet_tree_;
+    }
+
 
   private:
     libmaus2::wavelet::DynamicWaveletTree<6, 64> wavelet_tree_;
