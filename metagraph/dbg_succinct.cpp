@@ -8,21 +8,21 @@
  * that has been used as a reference for this implementation.
  */
 
+#include <assert.h>
+#include <pthread.h>
 #include <vector>
 #include <map>
 #include <stack>
 #include <queue>
 #include <deque>
 #include <algorithm>
-#include <assert.h>
 #include <iostream>
 #include <sstream>
 #include <fstream>
 #include <string>
-#include <zlib.h>
 #include <cmath>
-#include <pthread.h>
 
+#include <zlib.h>
 /**
  * We use libmaus 2 for representing dynamic succint data structures
  * such as the dynamic bit array and the dynamic wavelet tree.
@@ -33,6 +33,7 @@
 #include "datatypes.hpp"
 #include "serialization.hpp"
 #include "dbg_succinct.hpp"
+
 
 // define an extended alphabet for W --> somehow this does not work properly as expected
 typedef uint64_t TAlphabet;

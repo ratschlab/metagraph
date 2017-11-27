@@ -7,14 +7,12 @@
 #include <vector>
 
 #include <zlib.h>
-
 #include <libmaus2/digest/md5.hpp>
-
-// use Heng Li's kseq structure for string IO
-#include "kseq.h"
+#include <htslib/kseq.h>
 KSEQ_INIT(gzFile, gzread)
 
 #include "dbg_succinct.hpp"
+
 
 namespace traverse {
 

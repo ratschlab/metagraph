@@ -6,7 +6,6 @@
 #include <set>
 #include <string>
 
-#include "kseq.h"
 #include "dbg_succinct.hpp"
 
 
