@@ -142,10 +142,12 @@ bool vcf_parser::read_next_line() {
                                rec_->pos - k_,
                                rec_->pos - 1, &len);
     kmer1_.assign(first, len);
+    free(first);
     auto second = faidx_fetch_seq(reference_,
                                hdr_->id[BCF_DT_CTG][rec_->rid].key,
                                rec_->pos + ref_callele_l,
                                rec_->pos + ref_callele_l - 1 + k_, &len);
     kmer3_.assign(second, len);
+    free(second);
     return true;
 }
