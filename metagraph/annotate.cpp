@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <pthread.h>
 
-#include "dbg_succinct_libmaus.hpp"
 #include "datatypes.hpp"
 
 namespace annotate {
@@ -50,7 +49,7 @@ sdsl::bit_vector* inflate_annotation(DBG_succ* G, uint64_t id) {
     return result;
 }
 
-void annotate_seq(DBG_succ* G, kstring_t &seq, kstring_t &label, uint64_t start, uint64_t end, pthread_mutex_t* anno_mutex) {
+void annotate_seq(DBG_succ *G, kstring_t &seq, kstring_t &label, uint64_t start, uint64_t end, pthread_mutex_t* anno_mutex) {
 
     std::string curr_kmer;
     std::string label_str = std::string(label.s);
@@ -178,10 +177,11 @@ std::vector<uint32_t> classify_path(DBG_succ* G, std::vector<uint64_t> path) {
 }
 
 
-std::set<uint32_t> classify_read(DBG_succ* G, kstring_t &read, uint64_t max_distance) {
+std::set<uint32_t> classify_read(DBG_succ *G, kstring_t &read, uint64_t max_distance) {
 
     // containers for label information
     std::vector<uint32_t> path_labels;
+    // TODO: unordered_set
     std::set<uint32_t> all_labels;
 
     // get alignment of the read to the graph
@@ -200,56 +200,6 @@ std::set<uint32_t> classify_read(DBG_succ* G, kstring_t &read, uint64_t max_dist
     return all_labels;
 }
 
-std::vector<uint32_t> get_curr_combination(std::vector<uint32_t> &combinations, uint32_t idx) {
-    std::vector<uint32_t>::iterator start = combinations.begin() + idx;
-    uint32_t length = *start;
-    std::vector<uint32_t>::iterator end = combinations.begin() + idx + length + 1;
-    start++;
-
-    std::vector<uint32_t> curr_combo(length);
-    std::copy(start, end, curr_combo.begin());
-
-    return curr_combo;
-}
-
-std::vector<uint32_t> add_to_combination(std::vector<uint32_t> &old_combination, uint32_t value) {
-
-    std::vector<uint32_t> new_combination;
-
-    if (old_combination.size() > 0) {
-        std::vector<uint32_t>::iterator insert_idx = std::upper_bound(old_combination.begin(), old_combination.end(), value);
-        std::vector<uint32_t>::iterator it;
-        for (it = old_combination.begin(); it != insert_idx; ++it)
-            new_combination.push_back(*it);
-        new_combination.push_back(value);
-        for (it = insert_idx; it != old_combination.end(); ++it)
-            new_combination.push_back(*it);
-    } else {
-        new_combination.push_back(value);
-    }
-
-    return new_combination;
-}
-
-uint32_t insert_new_combination(std::vector<uint32_t> &combination_vector, std::vector<uint32_t> &new_combination) {
-
-    uint32_t insert_pos = combination_vector.size();
-    //std::cerr << "ins pos " << insert_pos << std::endl;
-
-    // are we close to the next billion? -> pre-allocate another billion entries
-    // this prevents the vector size from doubling with each re-allocation
-    // we give up on the constant amortized cost, but this is ok for here
-
-    if ((insert_pos + 1'000) % 1'000'000'000 == 0)
-        combination_vector.reserve(insert_pos + 1'000 + 1'000'000'000);
-
-    combination_vector.push_back(new_combination.size());
-    for (const auto &value : new_combination) {
-        combination_vector.push_back(value);
-    }
-    return insert_pos;
-}
-
 // write annotation to screen
 void annotationToScreen(DBG_succ *G) {
     for (size_t i = 1; i < G->get_size(); ++i) {
@@ -260,24 +210,6 @@ void annotationToScreen(DBG_succ *G) {
         }
         std::cout << std::endl;
     }
-    /*std::deque<uint32_t>::iterator ait = G->annotation.begin();
-    std::vector<uint32_t>::iterator vit;
-    std::vector<uint32_t> curr_comb;
-    for (; ait != G->annotation.end(); ++ait) {
-        std::cout << *ait << " : " << G->annotation_map[*ait] << " : ";
-        if (*ait > 0) {
-            curr_comb = get_curr_combination(G->combination_vector, G->annotation_map[*ait]);
-            //sit = annotation_map[*ait].begin();
-            for (vit = curr_comb.begin(); vit != curr_comb.end(); ++vit) {
-                std::cout << G->id_to_label.at(*vit) << " ";
-            }
-        }
-        std::cout << std::endl;
-    }*/
-    //std::cerr << "ANNO MAP " << std::endl;
-    //for (std::unordered_map<uint32_t, uint32_t>::iterator itt = annotation_map.begin(); itt != annotation_map.end(); itt++)
-    //    std::cerr << itt->first << ":" << itt->second << "; ";
-    //std::cerr << std::endl;
 }
 
 } // namespace annotate

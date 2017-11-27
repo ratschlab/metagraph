@@ -7,7 +7,7 @@
 #include <map>
 #include <vector>
 
-#include "dbg_succinct_libmaus.hpp"
+#include "dbg_succinct.hpp"
 
 namespace traverse {
 
@@ -24,7 +24,6 @@ namespace traverse {
      */
     struct JoinInfo;
 
-
     /**
      * This is a convenience function that pops the last branch and updates the traversal state.
      */
@@ -34,9 +33,15 @@ namespace traverse {
 
     bool finish_sequence(DBG_succ* G, std::string &sequence, uint64_t seqId, std::ofstream &SQLstream);
 
-    size_t traverseGraph(DBG_succ* G, std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream);
+    size_t traverseGraph(DBG_succ* G, std::vector<JoinInfo> &joins,
+                         std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream);
 
-    void allelesFromSeq(DBG_succ* G, kstring_t &seq, unsigned int f, std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream, bool isRefRun = false, size_t seqNum = 0);
+    void allelesFromSeq(DBG_succ* G,
+                        kstring_t &seq, unsigned int f,
+                        std::vector<JoinInfo> &joins,
+                        std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap,
+                        std::ofstream &SQLstream,
+                        bool isRefRun = false, size_t seqNum = 0);
 
     /**
      * Take the current graph content and return it in SQL

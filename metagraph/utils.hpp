@@ -6,7 +6,7 @@
 #include <vector>
 #include <deque>
 
-#include "dbg_succinct_libmaus.hpp"
+#include "dbg_succinct.hpp"
 
 
 namespace utils {
