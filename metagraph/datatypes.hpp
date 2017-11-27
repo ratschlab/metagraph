@@ -8,6 +8,9 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#define __STDC_FORMAT_MACROS 1
+#include <inttypes.h>
+
 #include <sdsl/wavelet_trees.hpp>
 #include <libmaus2/bitbtree/bitbtree.hpp>
 #include <libmaus2/wavelet/DynamicWaveletTree.hpp>
