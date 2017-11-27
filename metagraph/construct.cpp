@@ -3,6 +3,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <sstream>
+#include <cstdio>
 
 
 namespace construct {
@@ -60,7 +61,8 @@ void add_seq(DBG_succ *G, kstring_t &seq, bool append) {
         if (i > 0 && i % 1'000 == 0) {
             std::cout << "." << std::flush;
             if (i % 10'000 == 0) {
-                fprintf(stdout, "%lu - edges %lu / nodes %lu\n", i, G->get_edge_count(), G->get_node_count());
+                fprintf(stdout, "%lu - edges %" PRIu64 " / nodes %" PRIu64 "\n",
+                                i, G->get_edge_count(), G->get_node_count());
             }
         }
 
@@ -92,7 +94,8 @@ void add_seq(DBG_succ *G, kstring_t &seq, bool append) {
             ind = append_pos(G, 0, ckmer, ind);
     }
 
-    fprintf(stdout, "edges %lu / nodes %lu\n", G->get_edge_count(), G->get_node_count());
+    fprintf(stdout, "edges %" PRIu64 " / nodes %" PRIu64 "\n",
+                    G->get_edge_count(), G->get_node_count());
     delete[] ckmer;
 }
 

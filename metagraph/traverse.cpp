@@ -62,7 +62,8 @@ namespace traverse {
     /**
      * This is a convenience function that pops the last branch and updates the traversal state.
      */
-    BranchInfo pop_branch(std::stack<BranchInfo> &branchnodes, uint64_t &seqId, uint64_t &seqPos, uint64_t &nodeId, uint64_t &lastEdge, bool &isFirst) {
+    BranchInfo pop_branch(std::stack<BranchInfo> &branchnodes,
+                          uint64_t &seqId, uint64_t &seqPos, uint64_t &nodeId, uint64_t &lastEdge, bool &isFirst) {
         BranchInfo branch = branchnodes.top();
         branchnodes.pop();
         isFirst = true;
@@ -110,7 +111,9 @@ namespace traverse {
     }
 
 
-    size_t traverseGraph(DBG_succ* G, std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream) {
+    size_t traverseGraph(DBG_succ* G, std::vector<JoinInfo> &joins,
+                         std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap,
+                         std::ofstream &SQLstream) {
         // store all branch nodes on the way
         std::stack<BranchInfo> branchnodes;
         std::map<uint64_t, std::pair<uint64_t, uint64_t> > nodeId2seqId;
@@ -149,7 +152,7 @@ namespace traverse {
                 branch = pop_branch(branchnodes, seqId, seqPos, nodeId, lastEdge, isFirst);
                 out = G->outdegree(nodeId);
                 if (debug)
-                    fprintf(stderr, " -- popped %lu -- ", nodeId); 
+                    fprintf(stderr, " -- popped %" PRIu64 " -- ", nodeId); 
                 joinOpen = true;
                 joinEdge = lastEdge + 1;
             }
@@ -188,7 +191,8 @@ namespace traverse {
                 // we have seen the next node before
                 } else {
                     // look up the sequence info of that node
-                    joins.push_back(JoinInfo(seqId, seqPos, nodeId2seqPos[next].first, nodeId2seqPos[next].second));
+                    joins.push_back(JoinInfo(seqId, seqPos, nodeId2seqPos[next].first,
+                                                            nodeId2seqPos[next].second));
                     branchMap.insert(std::make_pair(std::make_pair(nodeId, 1ul), joins.size() - 1));
                     // there are no branches left
                     if (branchnodes.size() == 0)
@@ -197,12 +201,12 @@ namespace traverse {
                     branch = pop_branch(branchnodes, seqId, seqPos, nodeId, lastEdge, isFirst);
                     out = G->outdegree(nodeId);
                     if (debug)
-                        fprintf(stderr, " -- popped %lu -- ", nodeId); 
+                        fprintf(stderr, " -- popped %" PRIu64 " -- ", nodeId); 
                     joinOpen = true;
                     joinEdge = lastEdge + 1;
                 }
                 if (debug)
-                    fprintf(stderr, " new nodeId: %lu\n", nodeId);
+                    fprintf(stderr, " new nodeId: %" PRIu64 "\n", nodeId);
             // there are several children
             } else {
                 size_t cnt = 0;
@@ -225,7 +229,8 @@ namespace traverse {
                                 // push node information to stack
                                 branchnodes.push(BranchInfo(nodeId, seqId, seqPos, lastEdge));
                                 if (debug)
-                                    fprintf(stderr, " -- pushed %lu : seqId %lu seqPos %lu lastEdge %lu -- ", nodeId, seqId, seqPos, lastEdge); 
+                                    fprintf(stderr, " -- pushed %" PRIu64 " : seqId %" PRIu64 " seqPos %" PRIu64 " lastEdge %" PRIu64 " -- ",
+                                                    nodeId, seqId, seqPos, lastEdge); 
                             }
                             if (joinOpen) {
                                 if (sequence.length() > 0) {
@@ -246,9 +251,11 @@ namespace traverse {
                         } else {
                             // look up the sequence info of that node
                             if (nodeId == next) { 
-                                joins.push_back(JoinInfo(nodeId2seqPos[next].first, nodeId2seqPos[next].second, nodeId2seqPos[next].first, nodeId2seqPos[next].second));
+                                joins.push_back(JoinInfo(nodeId2seqPos[next].first, nodeId2seqPos[next].second,
+                                                         nodeId2seqPos[next].first, nodeId2seqPos[next].second));
                             } else {
-                                joins.push_back(JoinInfo(seqId, seqPos, nodeId2seqPos[next].first, nodeId2seqPos[next].second));
+                                joins.push_back(JoinInfo(seqId, seqPos, nodeId2seqPos[next].first,
+                                                                        nodeId2seqPos[next].second));
                             }
                             branchMap.insert(std::make_pair(std::make_pair(nodeId, lastEdge), joins.size() - 1));
                         }
@@ -264,7 +271,7 @@ namespace traverse {
                     branch = pop_branch(branchnodes, seqId, seqPos, nodeId, lastEdge, isFirst);
                     out = G->outdegree(nodeId);
                     if (debug)
-                        fprintf(stderr, " -- popped %lu -- ", nodeId); 
+                        fprintf(stderr, " -- popped %" PRIu64 " -- ", nodeId); 
                     joinOpen = true;
                     joinEdge = lastEdge + 1;
                 }
@@ -293,7 +300,11 @@ namespace traverse {
         return seqCnt;
     }
 
-    void allelesFromSeq(DBG_succ* G, kstring_t &seq, unsigned int f, std::vector<JoinInfo> &joins, std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap, std::ofstream &SQLstream, bool isRefRun, size_t seqNum) {
+    void allelesFromSeq(DBG_succ* G, kstring_t &seq, unsigned int f,
+                        std::vector<JoinInfo> &joins,
+                        std::map< std::pair<uint64_t, TAlphabet>, uint64_t > &branchMap,
+                        std::ofstream &SQLstream,
+                        bool isRefRun, size_t seqNum) {
         
         uint64_t nodeId = 1;
         uint64_t seqId = 1;

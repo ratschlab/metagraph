@@ -88,6 +88,7 @@ link_directories(
 )
 
 add_executable(unit_tests ${unit_tests_files})
+add_dependencies(unit_tests metagraph)
 
 target_link_libraries(unit_tests -lgtest_main -lgtest -lmetagraph ${METALIBS})
 
