@@ -50,6 +50,12 @@ class DBG_succ {
 
     // k-mer size
     size_t k;
+    // infile base when loaded from file
+    std::string infbase;
+
+    // config object
+    Config *config;
+
     // index of position that marks end in graph
     uint64_t p;
     
@@ -57,17 +63,11 @@ class DBG_succ {
     static const std::string default_alphabet;
     static const size_t default_alph_size;
 
+    // alphabet
+    const std::string alphabet; //("$ACGTNX$ACGTNXn");
     // alphabet size
     size_t alph_size;
 
-    // infile base when loaded from file
-    std::string infbase;
-
-    // config object
-    Config *config;
-
-    // alphabet
-    const std::string alphabet; //("$ACGTNX$ACGTNXn");
 
     // state of graph
     Config::StateType state = Config::STAT;

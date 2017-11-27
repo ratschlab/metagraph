@@ -117,7 +117,7 @@ pthread_mutex_t mutex_bin_idx = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex_annotate = PTHREAD_MUTEX_INITIALIZER;
 pthread_attr_t attr;
 
-const char *annots[] = {
+const std::vector<std::string> annots = {
   "AC_AFR", "AC_EAS", "AC_AMR", "AC_ASJ",
   "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"
 };
@@ -222,7 +222,7 @@ int main(int argc, const char *argv[]) {
     switch (config->identity) {
         //TODO: allow for building by appending/adding to an existing graph
         case Config::BUILD: {
-            if (!config->infbase.empty()) {
+            if (config->infbase.size()) {
                 graph = new DBG_succ(config->infbase, config);
                 graph->annotationFromFile();
             } else {
@@ -230,10 +230,9 @@ int main(int argc, const char *argv[]) {
             }
 
             if (config->verbose)
-               std::cerr << "k is " << graph->k << std::endl;
+                std::cerr << "k is " << graph->k << std::endl;
 
             if (config->fast) {
-
                 graph->switch_state(Config::CSTR);
 
                 //enumerate all suffices
@@ -268,8 +267,9 @@ int main(int argc, const char *argv[]) {
                                     exit(1);
                                 }
                                 std::cerr << "Loading VCF with " << config->parallel << " threads per line\n";
-                                std::string annot;
-                                for (size_t i = 1; (annot = vcf.vcf_get_seq(annots, sizeof(annots) / sizeof(char *))).length(); ++i) {
+                                std::string sequence;
+                                std::string annotation;
+                                for (size_t i = 1; vcf.get_seq(annots, &sequence, &annotation); ++i) {
                                     if (i % 10'000 == 0) {
                                         std::cout << "." << std::flush;
                                         if (i % 100'000 == 0) {
@@ -284,10 +284,11 @@ int main(int argc, const char *argv[]) {
                                             timelast = clock();
                                         }
                                     }
-                                    annot = "VCF:" + annot;
-                                    nbp += vcf.seq.l;
-                                    construct::add_seq_fast(graph, vcf.seq, annot,
-                                                            false, config->parallel, suffices[j], config->add_anno);
+                                    annotation = "VCF:" + annotation;
+                                    nbp += sequence.length();
+                                    construct::add_seq_fast(graph, sequence, annotation,
+                                                            false, config->parallel,
+                                                            suffices[j], config->add_anno);
                                 }
                             } else {
                                 //READ FROM FASTA
@@ -303,7 +304,7 @@ int main(int argc, const char *argv[]) {
                                     if (config->reverse)
                                         reverse_complement(read_stream->seq);
                                     // add all k-mers of seq to the graph
-                                    construct::add_seq_fast(graph, read_stream->seq,
+                                    construct::add_seq_fast(graph, std::string(read_stream->seq.s, read_stream->seq.l),
                                                             std::string(read_stream->name.s, read_stream->name.l),
                                                             true, config->parallel, suffices[j], config->add_anno);
                                 }

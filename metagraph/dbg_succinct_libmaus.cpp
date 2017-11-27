@@ -58,7 +58,6 @@ const std::string DBG_succ::default_alphabet = "$ACGTNX$ACGTNXn";
 const size_t DBG_succ::default_alph_size = 7;
 
 // alphabet size
-size_t alph_size = DBG_succ::default_alph_size;
 //
 //
 // CONSTRUCTORS
@@ -66,7 +65,8 @@ size_t alph_size = DBG_succ::default_alph_size;
 //
 DBG_succ::DBG_succ(size_t k_, Config *config_, bool sentinel)
       : k(k_), config(config_), alphabet(DBG_succ::default_alphabet),
-        starts(std::string(k-1, alphabet[DBG_succ::default_alph_size-1]) + alphabet[0] + alphabet[0]),
+        alph_size(DBG_succ::default_alph_size),
+        starts(std::string(k-1, alphabet[alph_size-1]) + alphabet[0] + alphabet[0]),
         sinks(alphabet.substr(0,1)),
         graphsink(kstring_t{1, 1, &sinks[0u]}),
         start(kstring_t{k+1, k+1, &starts[0u]}) {
@@ -101,7 +101,8 @@ DBG_succ::DBG_succ(size_t k_, Config *config_, bool sentinel)
 DBG_succ::DBG_succ(std::string infbase_, Config *config_) :
     infbase(infbase_),
     config(config_),
-    alphabet("$ACGTNX$ACGTNXn") {
+    alphabet(DBG_succ::default_alphabet),
+    alph_size(DBG_succ::default_alph_size) {
 
     std::ifstream instream;
     // if not specified in the file, the default for loading is dynamic

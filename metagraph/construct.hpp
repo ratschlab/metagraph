@@ -12,7 +12,7 @@ namespace construct {
 
     // add a full sequence to the graph
     void add_seq(DBG_succ *G, kstring_t &seq, bool append = true);
-    void add_seq_fast(DBG_succ *G, kstring_t &seq, const std::string &name, bool add_bridge = true,
+    void add_seq_fast(DBG_succ *G, const std::string &seq, const std::string &name = "", bool add_bridge = true,
                       unsigned int parallel = 1, std::string suffix = "", bool add_anno = false);
     void construct_succ(DBG_succ *G, unsigned int parallel = 1, bool add_anno = false);
 
