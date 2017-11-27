@@ -55,7 +55,7 @@ TEST(Construct, EmptyGraph) {
     delete graph;
 }
 
-TEST(Construct, SmallGraph) {
+TEST(Construct, SmallGraphTraversal) {
     gzFile input_p = gzopen(test_fasta.c_str(), "r");
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
@@ -66,8 +66,33 @@ TEST(Construct, SmallGraph) {
     }
     construct::construct_succ(graph);
     graph->switch_state(Config::DYN);
+
+    //test graph construction
     test_graph(graph, "01011110111111111111111111111001", "06241463411641812643366666131313013", "0 1 9 11 15 20 20 ", 29u);
+
+    //traversal
+    std::vector<size_t> outgoing_edges = {21, 10, 16, 3, 17, 22, 12, 18, 4, 5, 23, 19, 6, 6, 8, 11, 24, 20, 13, 14, 25, 26, 27, 28, 31, 31, 31, 31, 1, 9, 15};
+    assert(outgoing_edges.size() == graph->get_edge_count());
+    std::vector<size_t> incoming_edges = {};
+    for (size_t i = 0; i < outgoing_edges.size(); ++i) {
+        //test forward traversal given an output edge label
+        EXPECT_EQ(graph->outgoing(i + 1, graph->get_W(i + 1)), outgoing_edges[i]);
+        //test that there is only one terminus
+        auto sink_rank = graph->get_equal_node_range(graph->p);
+        if (i + 1 < sink_rank.first || i + 1 > sink_rank.second) {
+            EXPECT_EQ(graph->outgoing(i + 1, 0), 0u);
+        } else {
+            EXPECT_EQ(graph->outgoing(i + 1, 0), 1u);
+        }
+        //test FM index property
+        if (graph->get_W(i + 1) < graph->alph_size) {
+            EXPECT_TRUE(graph->get_last(graph->fwd(i + 1)));
+            EXPECT_EQ(graph->get_W(i + 1), graph->get_node_end_value(graph->fwd(i + 1)));
+        }
+    }
+
     delete graph;
     kseq_destroy(read_stream);
     gzclose(input_p);
 }
+
