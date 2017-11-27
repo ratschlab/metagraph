@@ -61,7 +61,7 @@ TEST(Construct, SmallGraph) {
     DBG_succ *graph = init_graph();
     construct::add_sink(graph);
     for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
-        construct::add_seq_fast(graph, read_stream->seq, std::string(read_stream->name.s, read_stream->name.l), true);
+        construct::add_seq_fast(graph, read_stream->seq.s, std::string(read_stream->name.s, read_stream->name.l), true);
     }
     construct::construct_succ(graph);
     graph->switch_state(Config::DYN);

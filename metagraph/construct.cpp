@@ -100,7 +100,7 @@ void add_seq(DBG_succ *G, kstring_t &seq, bool append) {
 }
 
 
-bool check_suffix(DBG_succ* G, char* target, std::string& suffix, const char* nt_lookup) {
+bool check_suffix(DBG_succ *G, const char *target, std::string& suffix, const char* nt_lookup) {
 
     std::string cursuff = std::string(target + G->k - suffix.length(), target + G->k);
 
@@ -111,7 +111,7 @@ bool check_suffix(DBG_succ* G, char* target, std::string& suffix, const char* nt
 }
 
 
-void add_seq_fast(DBG_succ *G, kstring_t &seq, const std::string &annotation,
+void add_seq_fast(DBG_succ *G, const std::string &seq, const std::string &annotation,
                   bool add_bridge, unsigned int parallel, std::string suffix, bool add_anno) {
 
 #ifdef DBGDEBUG
@@ -175,46 +175,46 @@ void add_seq_fast(DBG_succ *G, kstring_t &seq, const std::string &annotation,
     };
 
     // ther is nothing to parse
-    if (!seq.l) {
+    if (!seq.size()) {
         return;
     }
 
 	char *bridge = (char*) malloc(G->k+2);
     memset(bridge, 'X', G->k);
-    bridge[G->k] = seq.s[0];
+    bridge[G->k] = seq[0];
     bridge[G->k+1] = 0;
 
     size_t i = 0;
     //std::cout << "Loading next sequence with " << parallel << " threads\n";
     if (add_bridge) {
-        for (i = 0; i < std::min(G->k, seq.l); ++i) {
+        for (i = 0; i < std::min(G->k, seq.length()); ++i) {
             if (check_suffix(G, bridge, suffix, nt_lookup)) {
                 G->kmers.push_back(kmer_boost::KMer{kmer_boost::stokmer(bridge, G->k+1, nt_lookup), 0});
             }
             memmove(bridge, bridge+1, G->k);
-            bridge[G->k] = (i+1 < seq.l) ? seq.s[i+1] : 'X';
+            bridge[G->k] = (i+1 < seq.length()) ? seq[i+1] : 'X';
         }
     }
-    if (G->k < seq.l) {
+    if (G->k < seq.length()) {
         #pragma omp parallel num_threads(parallel)
         {
             std::vector<kmer_boost::KMer> kmer_priv;
             #pragma omp for nowait
-            for (i = 0; i < seq.l - G->k; ++i) {
-                if (check_suffix(G, seq.s + i, suffix, nt_lookup)) {
+            for (i = 0; i < seq.length() - G->k; ++i) {
+                if (check_suffix(G, seq.c_str() + i, suffix, nt_lookup)) {
                     if (add_anno) {
                         for (auto it = label_id.begin(); it != label_id.end(); ++it) {
-                            kmer_priv.push_back(kmer_boost::KMer{kmer_boost::stokmer(seq.s+i, G->k+1, nt_lookup), *it});
+                            kmer_priv.push_back(kmer_boost::KMer{kmer_boost::stokmer(seq.c_str()+i, G->k+1, nt_lookup), *it});
                         }
                     } else {
-                        kmer_priv.push_back(kmer_boost::KMer{kmer_boost::stokmer(seq.s+i, G->k+1, nt_lookup), 0});
+                        kmer_priv.push_back(kmer_boost::KMer{kmer_boost::stokmer(seq.c_str()+i, G->k+1, nt_lookup), 0});
                     }
                 }
             }
             #pragma omp critical
             G->kmers.insert(G->kmers.end(), std::make_move_iterator(kmer_priv.begin()), std::make_move_iterator(kmer_priv.end()));
         }
-        memcpy(bridge, seq.s + seq.l - G->k, G->k);
+        memcpy(bridge, seq.c_str() + seq.length() - G->k, G->k);
         bridge[G->k]='X';
     }
     if (add_bridge) {
@@ -800,8 +800,8 @@ std::deque<std::string> generate_suffices(DBG_succ *G, unsigned int nsplits) {
 }
 
 void add_sink(DBG_succ* G, unsigned int parallel, std::string suffix, bool add_anno) {
-    add_seq_fast(G, G->start, "", false, parallel, suffix, add_anno);
-    add_seq_fast(G, G->graphsink, "", true, parallel, suffix, add_anno);
+    add_seq_fast(G, std::string(G->start.s, G->start.l), "", false, parallel, suffix, add_anno);
+    add_seq_fast(G, std::string(G->graphsink.s, G->graphsink.l), "", true, parallel, suffix, add_anno);
 }
 
 } // construct
