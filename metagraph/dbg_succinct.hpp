@@ -37,9 +37,9 @@ class DBG_succ { //: public GenomeGraph{
 
     // add a full sequence to the graph
     void add_seq(kstring_t &seq, bool append = true);
-    void add_seq_fast(const std::string &seq, const std::string &name = "",
+    void add_seq_fast(const std::string &seq,
                       bool add_bridge = true, unsigned int parallel = 1,
-                      std::string suffix = "", bool add_anno = false);
+                      std::string suffix = "");
     void construct_succ(unsigned int parallel = 1);
 
     /** This function takes a character c and appends it to the end of the graph sequence
@@ -65,7 +65,7 @@ class DBG_succ { //: public GenomeGraph{
 
     std::deque<std::string> generate_suffices(unsigned int nsplits);
 
-    void add_sink(unsigned int parallel = 1, std::string suffix = "", bool add_anno = false);
+    void add_sink(unsigned int parallel = 1, std::string suffix = "");
 
     //Temporary storage for kmers before succinct representation construction
     //the second element stores an ID for each kmer indicating which sequence it came from
@@ -120,27 +120,6 @@ class DBG_succ { //: public GenomeGraph{
     // state of graph
     Config::StateType state = Config::STAT;
 
-    // annotation containers
-    std::deque<uint32_t> annotation; // list that associates each node in the graph with an annotation hash
-    std::vector<std::string> id_to_label; // maps the label ID back to the original string
-    std::unordered_map<std::string, uint32_t> label_to_id_map; // maps each label string to an integer ID
-    std::map<uint32_t, uint32_t> annotation_map; // maps the hash of a combination to the position in the combination vector
-    std::vector<uint32_t> combination_vector; // contains all known combinations
-    uint64_t combination_count = 0;
-
-    //std::vector<sdsl::rrr_vector<63>* > annotation_full;
-    std::vector<sdsl::sd_vector<>* > annotation_full;
-
-    /**
-     * Visualization, Serialization and Deserialization of annotation content.
-     */
-    void annotationToFile(const std::string &filename);
-    void annotationFromFile(const std::string &filename);
-
-    std::vector<sdsl::rrr_vector<63> > colors_to_bits;
-    std::vector<std::string> bits_to_labels;
-    size_t anno_labels;
-
     //default values for the sink node
     std::string starts;
     std::string sinks;
@@ -154,8 +133,7 @@ class DBG_succ { //: public GenomeGraph{
 #endif
 
     // construct empty graph instance
-    DBG_succ(size_t k_,
-             bool sentinel = true);
+    DBG_succ(size_t k_, bool sentinel = true);
 
     // load graph instance from a provided file name base
     DBG_succ(std::string infbase_);
@@ -500,7 +478,7 @@ class DBG_succ { //: public GenomeGraph{
      */
     void print_seq();
 
-    void print_adj_list(std::string outf="");
+    void print_adj_list(const std::string &filename = "");
 
     /**
      * Take the current graph content and store in a file.

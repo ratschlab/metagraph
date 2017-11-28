@@ -59,7 +59,7 @@ TEST(Construct, SmallGraphTraversal) {
     DBG_succ *graph = init_graph();
     graph->add_sink();
     for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
-        graph->add_seq_fast(read_stream->seq.s, std::string(read_stream->name.s, read_stream->name.l), true);
+        graph->add_seq_fast(read_stream->seq.s);
     }
     graph->construct_succ();
     graph->switch_state(Config::DYN);

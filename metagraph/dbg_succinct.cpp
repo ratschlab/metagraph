@@ -22,12 +22,12 @@
 #include <string>
 #include <cmath>
 
-#include <zlib.h>
 /**
  * We use libmaus 2 for representing dynamic succint data structures
  * such as the dynamic bit array and the dynamic wavelet tree.
  */
 #include <libmaus2/util/NumberSerialisation.hpp>
+#include <zlib.h>
 
 #include "datatypes.hpp"
 #include "serialization.hpp"
@@ -100,9 +100,6 @@ DBG_succ::DBG_succ(size_t k_, bool sentinel)
             F.push_back(0);
         p = 0;
     }
-    id_to_label.push_back("");
-    label_to_id_map[""]=0;
-    combination_vector.push_back(0);
     state = Config::DYN;
 }
 
@@ -151,9 +148,6 @@ DBG_succ::DBG_succ(std::string infbase_) :
         }
     }
     instream.close();
-    id_to_label.push_back("");
-    label_to_id_map[""]=0;
-    combination_vector.push_back(0);
 
     // load last array
     //std::ifstream instream((infbase + ".l.dbg").c_str());
@@ -183,16 +177,8 @@ DBG_succ::DBG_succ(std::string infbase_) :
 }
 
 DBG_succ::~DBG_succ() {
-
     delete W;
     delete last;
-    //if (bridge != NULL)
-    //    delete bridge;
-    for (auto it = annotation_full.begin(); it != annotation_full.end(); ++it) {
-        if (*it != NULL) {
-            delete *it;
-        }
-    }
 }
 
 //
@@ -1129,54 +1115,17 @@ void DBG_succ::print_state_str() {
 }
 
 
-void DBG_succ::print_adj_list(std::string outf) {
-    if (outf != "") {
-        freopen(outf.c_str(), "w", stdout);
-    }
-    std::vector<size_t> next_ind(this->annotation_full.size());
-    std::vector<size_t> cur_rank(this->annotation_full.size());
-    std::vector<size_t> max_rank(this->annotation_full.size());
-    std::vector<sdsl::sd_vector<>::select_1_type> selects(this->annotation_full.size());
-    std::vector<sdsl::sd_vector<>::rank_1_type> ranks(this->annotation_full.size());
-    for (uint64_t k = 0;k < this->annotation_full.size(); ++k) {
-        sdsl::util::init_support(selects[k], this->annotation_full.at(k));
-        sdsl::util::init_support(ranks[k], this->annotation_full[k]);
-        max_rank[k] = ranks[k](this->annotation_full[k]->size());
-        if (max_rank[k]) {
-            cur_rank[k] = 1;
-            next_ind[k] = selects[k](1);
-        } else {
-            cur_rank[k] = 0;
-            next_ind[k] = 0;
-        }
+void DBG_succ::print_adj_list(const std::string &filename) {
+    if (filename != "") {
+        freopen(filename.c_str(), "w", stdout);
     }
     for (uint64_t edge = 1; edge < W->size(); ++edge) {
         fprintf(stdout, "%" PRIu64 "\t%" PRIu64 "\t",
                         rank_last(succ_last(edge)),
                         rank_last(outgoing(edge, (*W)[edge])));
-        bool is_first = true;
-        for (uint64_t k = 0; k < this->annotation_full.size(); ++k) {
-            //if ((*(this->annotation_full.at(k)))[edge] == 1) {
-            if (edge == next_ind[k]) {
-                if (!is_first) {
-                    fprintf(stdout, ",");
-                }
-                is_first = false;
-                fprintf(stdout, "%" PRIu64, k + 1);
-                cur_rank[k]++;
-                if (cur_rank[k] <= max_rank[k]) {
-                    next_ind[k] = selects[k](cur_rank[k]);
-                } else {
-                    next_ind[k] = 0;
-                }
-            }
-        }
-        if (is_first) {
-            fprintf(stdout, "0");
-        }
         fprintf(stdout, "\n");
     }
-    if (outf != "") {
+    if (filename != "") {
         fclose(stdout);
     }
 }
@@ -1295,79 +1244,6 @@ void DBG_succ::toFile(const std::string &outbase_,
     outstream << state << std::endl;
     outstream.close();
 }
-
-
-// write annotation to disk
-void DBG_succ::annotationToFile(const std::string &filename) {
-    std::ofstream outstream(filename);
-    libmaus2::util::NumberSerialisation::serialiseNumber(outstream, annotation_full.size());
-    for (size_t i = 0; i < annotation_full.size(); ++i) {
-        annotation_full.at(i)->serialize(outstream);
-    }
-
-    // id_to_label
-    serialize_strings_vector(outstream, id_to_label);
-    // label_to_id_map
-    serialize_string_number_map(outstream, label_to_id_map);
-/*
-    //annotation
-    libmaus2::util::NumberSerialisation::serialiseNumber32Deque<uint32_t>(outstream, annotation);
-    // annotation_map
-    serialize_annotation_map(outstream, annotation_map);
-    //combination vector
-    serialize_combination_vector(outstream, combination_vector);
-    // id_to_label
-    serialize_annotation_id_vector(outstream, id_to_label);
-    // label_to_id_map
-    serialize_label_to_id_map(outstream, label_to_id_map);
-    // combination_count
-    libmaus2::util::NumberSerialisation::serialiseNumber(outstream, combination_count);
-*/
-    outstream.close();
-}
-
-// read annotation from disk
-void DBG_succ::annotationFromFile(const std::string &filename) {
-    // generate annotation object
-    // populate it with existing annotation if available
-    std::ifstream instream(filename);
-    if (instream.good()) {
-        //if (config->verbose)
-        //    std::cerr << "get annotation from disk" << std::endl;
-        size_t anno_size = libmaus2::util::NumberSerialisation::deserialiseNumber(instream);
-        for (size_t i = 0; i < anno_size; ++i) {
-            //annotation_full.push_back(new sdsl::rrr_vector<63>());
-            annotation_full.push_back(new sdsl::sd_vector<>());
-            annotation_full.back()->load(instream);
-        }
-
-        // id_to_label
-        id_to_label = load_strings_vector(instream);
-        // label_to_id_map
-        label_to_id_map = load_string_number_map(instream);
-
-        //annotation_full = new sdsl::bit_vector(get_size() * 100, 0);
-
-        /*
-        // annotation
-        annotation = libmaus2::util::NumberSerialisation::deserialiseNumber32Deque<uint32_t>(instream);
-        if (config->verbose)
-            std::cerr << "get map from disk" << std::endl;
-        // annotation_map
-        deserialize_annotation_map(instream, annotation_map);
-        // combination_vector
-        combination_vector = deserialize_combination_vector(instream);
-        // id_to_label
-        id_to_label = deserialize_annotation_id_vector(instream);
-        // label_to_id_map
-        deserialize_label_to_id_map(instream, label_to_id_map);
-        combination_count = libmaus2::util::NumberSerialisation::deserialiseNumber(instream);
-        */
-   // } else {
-        //annotation.resize(get_size(), 0);
-    }
-}
-
 
 /**
 * Given a pointer to a graph structures G1 and G2, the function compares their elements to the

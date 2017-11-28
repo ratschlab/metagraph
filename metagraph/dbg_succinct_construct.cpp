@@ -110,9 +110,9 @@ bool check_suffix(DBG_succ *G, const char *target, std::string& suffix) {
 }
 
 
-void DBG_succ::add_seq_fast(const std::string &seq, const std::string &annotation,
+void DBG_succ::add_seq_fast(const std::string &seq,
                             bool add_bridge, unsigned int parallel,
-                            std::string suffix, bool add_anno) {
+                            std::string suffix) {
 
 #ifdef DBGDEBUG
         print_seq();
@@ -121,46 +121,6 @@ void DBG_succ::add_seq_fast(const std::string &seq, const std::string &annotatio
 #endif
 
     std::vector<uint32_t> label_id;
-    if (add_anno) {
-        // annotation data
-        std::string cur_label;
-        std::string label_str = annotation;
-        std::vector<std::string> labels;
-        uint32_t max_label_id = 0;
-
-        //TODO: hack to get VCFs to work
-        size_t vcfind = label_str.find("VCF:");
-        //std::cout << label_str << " " << vcfind << "\n";
-        if (vcfind == 0) {
-            //std::cout << "VCF found\n";
-            std::istringstream is(label_str);
-            std::getline(is, cur_label, ':');
-            while (std::getline(is, cur_label, ':')) {
-                labels.push_back(cur_label);
-                //std::cout << cur_label << "\n";
-            }
-            //std::cout << "\n";
-        } else {
-            labels.push_back(label_str);
-        }
-
-        // translate label strings into label IDs
-        for (auto it = labels.begin(); it!= labels.end(); ++it) {
-            std::unordered_map<std::string, uint32_t>::iterator id_it = label_to_id_map.find(*it);
-            if (id_it == label_to_id_map.end()) {
-                label_id.push_back((uint32_t) id_to_label.size());
-                id_to_label.push_back(*it);
-                label_to_id_map[*it] = label_id.back();
-                max_label_id = std::max(max_label_id, label_id.back());
-            } else {
-                label_id.push_back(id_it->second);
-            }
-        }
-
-        if (max_label_id >= annotation_full.size()) {
-            annotation_full.resize(max_label_id + 1);
-        }
-    }
 
     // ther is nothing to parse
     if (!seq.size()) {
@@ -190,13 +150,10 @@ void DBG_succ::add_seq_fast(const std::string &seq, const std::string &annotatio
             #pragma omp for nowait
             for (i = 0; i < seq.length() - k; ++i) {
                 if (check_suffix(this, seq.c_str() + i, suffix)) {
-                    if (add_anno) {
-                        for (auto it = label_id.begin(); it != label_id.end(); ++it) {
-                            kmer_priv.push_back(KMer::from_string(std::string(seq.c_str() + i, k + 1), DBG_succ::get_alphabet_number));
-                        }
-                    } else {
-                        kmer_priv.push_back(KMer::from_string(std::string(seq.c_str() + i, k + 1), DBG_succ::get_alphabet_number));
-                    }
+                    kmer_priv.push_back(KMer::from_string(
+                        std::string(seq.c_str() + i, k + 1),
+                        DBG_succ::get_alphabet_number
+                    ));
                 }
             }
             #pragma omp critical
@@ -672,7 +629,7 @@ std::deque<std::string> DBG_succ::generate_suffices(unsigned int nsplits) {
     return suffices;
 }
 
-void DBG_succ::add_sink(unsigned int parallel, std::string suffix, bool add_anno) {
-    add_seq_fast(std::string(start.s, start.l), "", false, parallel, suffix, add_anno);
-    add_seq_fast(std::string(graphsink.s, graphsink.l), "", true, parallel, suffix, add_anno);
+void DBG_succ::add_sink(unsigned int parallel, std::string suffix) {
+    add_seq_fast(std::string(start.s, start.l), false, parallel, suffix);
+    add_seq_fast(std::string(graphsink.s, graphsink.l), true, parallel, suffix);
 }

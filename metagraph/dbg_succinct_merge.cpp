@@ -1,4 +1,4 @@
-#include "merge.hpp"
+#include "dbg_succinct_merge.hpp"
 
 #include <unistd.h>
 
