@@ -843,7 +843,7 @@ int main(int argc, const char *argv[]) {
         if (config->print_graph)
             graph->print_seq();
         if (!config->sqlfbase.empty())
-            traverse::toSQL(graph);
+            traverse::toSQL(graph, config->sqlfbase + ".sql");
         if (!config->outfbase.empty())
             graph->toFile(config->parts_total, config->part_idx);
         delete graph;

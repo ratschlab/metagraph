@@ -15,18 +15,23 @@
  * http://nadeausoftware.com/articles/2012/07/c_c_tip_how_get_process_resident_set_size_physical_memory_use
  */
 size_t get_curr_mem2() {
-    long rss = 0L;
     FILE *fp = NULL;
 
     if ( (fp = fopen( "/proc/self/statm", "r")) == NULL ) {
-        return static_cast<size_t>(0L);      /* Can't open? */
+        return 0;      /* Can't open? */
     }
+    long rss = 0L;
     if ( fscanf(fp, "%*s%ld", &rss) != 1 ) {
         fclose(fp);
-        return static_cast<size_t>(0L);      /* Can't read? */
+        return 0;      /* Can't read? */
     }
     fclose(fp);
-    return static_cast<size_t>(rss) * static_cast<size_t>(sysconf(_SC_PAGESIZE));
+
+    long page_size = sysconf(_SC_PAGESIZE);
+    if (page_size < 0 || rss < 0)
+        return 0;
+
+    return rss * page_size;
 }
 
 

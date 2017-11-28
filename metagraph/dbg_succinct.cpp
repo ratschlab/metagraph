@@ -1310,9 +1310,9 @@ void DBG_succ::annotationToFile() {
     }
 
     // id_to_label
-    serialize_annotation_id_vector(outstream, id_to_label);
+    serialize_strings_vector(outstream, id_to_label);
     // label_to_id_map
-    serialize_label_to_id_map(outstream, label_to_id_map);
+    serialize_string_number_map(outstream, label_to_id_map);
 /*
     //annotation
     libmaus2::util::NumberSerialisation::serialiseNumber32Deque<uint32_t>(outstream, annotation);
@@ -1346,9 +1346,9 @@ void DBG_succ::annotationFromFile() {
         }
 
         // id_to_label
-        id_to_label = deserialize_annotation_id_vector(instream);
+        id_to_label = load_strings_vector(instream);
         // label_to_id_map
-        deserialize_label_to_id_map(instream, label_to_id_map);
+        label_to_id_map = load_string_number_map(instream);
 
         //annotation_full = new sdsl::bit_vector(get_size() * 100, 0);
 

@@ -21,8 +21,6 @@ GenomeGraph {
     get_outgoing_edges(node_it node, char edge_label)
 
     void add_sequence(const std::string &sequence)
-
-    
 };
 
 
@@ -33,11 +31,10 @@ class DBGCondensed : public GenomeGraph {
 
 
 class DBG_succ { //: public GenomeGraph{
-
+  public:
     // define an extended alphabet for W --> somehow this does not work properly as expected
     typedef uint64_t TAlphabet;
 
-  public:
     // add a full sequence to the graph
     void add_seq(kstring_t &seq, bool append = true);
     void add_seq_fast(const std::string &seq, const std::string &name = "",
