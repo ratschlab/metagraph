@@ -56,7 +56,7 @@ std::string infbase;
 
 const std::string DBG_succ::default_alphabet = "$ACGTNX$ACGTNXn";
 const size_t DBG_succ::default_alph_size = 7;
-const char DBG_succ::nt_lookup[128] = {
+const TAlphabet nt_lookup[128] = {
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 5, 5, 5,  0, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,

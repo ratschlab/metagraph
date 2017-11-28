@@ -7,7 +7,10 @@
 
 
 std::string kmer_codec(std::string &test_kmer) {
-    const char *kmer_s = kmer_boost::kmertos(kmer_boost::stokmer(test_kmer.c_str(), test_kmer.length(), DBG_succ::nt_lookup), DBG_succ::default_alphabet, DBG_succ::default_alph_size);
+    const char *kmer_s = KMer::kmertos(
+        KMer::stokmer(test_kmer, DBG_succ::get_alphabet_number),
+        DBG_succ::default_alphabet, DBG_succ::default_alph_size
+    );
     std::string kmer = std::string(kmer_s+1) + kmer_s[0];
     free((char*)kmer_s);
     return kmer;
@@ -43,9 +46,9 @@ TEST(KmerEncodeTest, InvalidChars) {
 }
 
 void test_kmer_less(std::string k1, std::string k2, bool truth) {
-    ui256 kmer[2] = {\
-        kmer_boost::stokmer(k1.c_str(), k1.length(), DBG_succ::nt_lookup),
-        kmer_boost::stokmer(k2.c_str(), k2.length(), DBG_succ::nt_lookup)
+    KMer kmer[2] = {
+        KMer::stokmer(k1.c_str(), k1.length(), DBG_succ::get_alphabet_number),
+        KMer::stokmer(k2.c_str(), k2.length(), DBG_succ::get_alphabet_number)
     };
     ASSERT_EQ(kmer[0] < kmer[1], truth);
 }
@@ -59,11 +62,11 @@ TEST(KmerEncodeTest, Less) {
 }
 
 void test_kmer_suffix(std::string k1, std::string k2, bool truth) {
-    ui256 kmer[2] = {\
-        kmer_boost::stokmer(k1.c_str(), k1.length(), DBG_succ::nt_lookup),
-        kmer_boost::stokmer(k2.c_str(), k2.length(), DBG_succ::nt_lookup)
+    KMer kmer[2] = {
+        KMer::stokmer(k1.c_str(), k1.length(), DBG_succ::get_alphabet_number),
+        KMer::stokmer(k2.c_str(), k2.length(), DBG_succ::get_alphabet_number)
     };
-    ASSERT_EQ(kmer_boost::compare_kmer_suffix(kmer[0], kmer[1]), truth);
+    ASSERT_EQ(KMer::compare_kmer_suffix(kmer[0], kmer[1]), truth);
 }
 
 TEST(KmerEncodeTest, CompareSuffixTrue) {

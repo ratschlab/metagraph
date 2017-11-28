@@ -70,7 +70,7 @@ class DBG_succ { //: public GenomeGraph{
     //Temporary storage for kmers before succinct representation construction
     //the second element stores an ID for each kmer indicating which sequence it came from
     //an even ID indicates that it's a normal kmer, an odd ID indicates that it's a bridge
-    std::vector<kmer_boost::KMer> kmers;
+    std::vector<KMer> kmers;
     //std::vector<std::pair<ui256, size_t> > kmers;
 
     //store the position of the last character position modified in F
@@ -111,8 +111,6 @@ class DBG_succ { //: public GenomeGraph{
     // default alphabet
     static const std::string default_alphabet;
     static const size_t default_alph_size;
-    // translate from ascii into talphabet
-    static const char nt_lookup[128];
 
     // alphabet
     const std::string alphabet; //("$ACGTNX$ACGTNXn");
@@ -411,7 +409,7 @@ class DBG_succ { //: public GenomeGraph{
     char get_alphabet_symbol(uint64_t s);
 
     // Given the alphabet character return its corresponding number
-    TAlphabet get_alphabet_number(char s);
+    static TAlphabet get_alphabet_number(char s);
 
     /**
      * Breaks the seq into k-mers and searches for the index of each

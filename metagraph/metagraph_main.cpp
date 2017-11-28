@@ -409,6 +409,7 @@ int main(int argc, const char *argv[]) {
                         anno_data->seq = &(read_stream->seq);
                         anno_data->label = &(read_stream->name);
                         anno_data->graph = graph;
+                        anno_data->config = config;
                         anno_data->idx = 0;
                         anno_data->binsize = (read_stream->seq.l + 1) / (config->parallel * config->bins_per_thread);
                         anno_data->total_bins = ((read_stream->seq.l + anno_data->binsize - 1) / anno_data->binsize);

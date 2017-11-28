@@ -104,7 +104,7 @@ bool check_suffix(DBG_succ *G, const char *target, std::string& suffix) {
     std::string cursuff = std::string(target + G->k - suffix.length(), target + G->k);
 
     for (auto it = cursuff.begin(); it != cursuff.end(); ++it) {
-        *it = G->alphabet[static_cast<uint8_t>(DBG_succ::nt_lookup[(uint8_t) *it])];
+        *it = G->alphabet[static_cast<uint8_t>(DBG_succ::get_alphabet_number(*it))];
     }
     return cursuff == suffix;
 }
@@ -177,7 +177,7 @@ void DBG_succ::add_seq_fast(const std::string &seq, const std::string &annotatio
     if (add_bridge) {
         for (i = 0; i < std::min(k, seq.length()); ++i) {
             if (check_suffix(this, bridge, suffix)) {
-                kmers.push_back(kmer_boost::KMer{kmer_boost::stokmer(bridge, k+1, DBG_succ::nt_lookup), 0});
+                kmers.push_back(KMer{ KMer::stokmer(bridge, k + 1, DBG_succ::get_alphabet_number), 0 });
             }
             memmove(bridge, bridge+1, k);
             bridge[k] = (i+1 < seq.length()) ? seq[i+1] : 'X';
@@ -186,16 +186,16 @@ void DBG_succ::add_seq_fast(const std::string &seq, const std::string &annotatio
     if (k < seq.length()) {
         #pragma omp parallel num_threads(parallel)
         {
-            std::vector<kmer_boost::KMer> kmer_priv;
+            std::vector<KMer> kmer_priv;
             #pragma omp for nowait
             for (i = 0; i < seq.length() - k; ++i) {
                 if (check_suffix(this, seq.c_str() + i, suffix)) {
                     if (add_anno) {
                         for (auto it = label_id.begin(); it != label_id.end(); ++it) {
-                            kmer_priv.push_back(kmer_boost::KMer{kmer_boost::stokmer(seq.c_str()+i, k+1, DBG_succ::nt_lookup), *it});
+                            kmer_priv.push_back(KMer{ KMer::stokmer(seq.c_str()+i, k + 1, DBG_succ::get_alphabet_number), *it });
                         }
                     } else {
-                        kmer_priv.push_back(kmer_boost::KMer{kmer_boost::stokmer(seq.c_str()+i, k+1, DBG_succ::nt_lookup), 0});
+                        kmer_priv.push_back(KMer{ KMer::stokmer(seq.c_str()+i, k + 1, DBG_succ::get_alphabet_number), 0 });
                     }
                 }
             }
@@ -208,7 +208,7 @@ void DBG_succ::add_seq_fast(const std::string &seq, const std::string &annotatio
     if (add_bridge) {
         for (i = 0; i < k; ++i) {
             if (check_suffix(this, bridge, suffix)) {
-                kmers.push_back(kmer_boost::KMer{kmer_boost::stokmer(bridge, k+1, DBG_succ::nt_lookup), 0});
+                kmers.push_back(KMer{ KMer::stokmer(bridge, k + 1, DBG_succ::get_alphabet_number), 0 });
             }
             memmove(bridge, bridge+1, k);
             bridge[k] = 'X';
@@ -218,15 +218,15 @@ void DBG_succ::add_seq_fast(const std::string &seq, const std::string &annotatio
 }
 
 //removes duplicate kmers, counts coverage, and assigns labels
-std::vector<kmer_boost::KMer>::iterator unique_count(std::vector<kmer_boost::KMer>::iterator first,
-                                                     std::vector<kmer_boost::KMer>::iterator last,
-                                                     bool add_anno) {
+std::vector<KMer>::iterator unique_count(std::vector<KMer>::iterator first,
+                                         std::vector<KMer>::iterator last,
+                                         bool add_anno) {
 
     //Adapted from http://en.cppreference.com/w/cpp/algorithm/unique
     if (first == last)
         return last;
 
-    std::vector<kmer_boost::KMer>::iterator result = first;
+    std::vector<KMer>::iterator result = first;
     if (add_anno) {
         /*
         cpp_int annot;
@@ -242,7 +242,7 @@ std::vector<kmer_boost::KMer>::iterator unique_count(std::vector<kmer_boost::KMe
         }
 
         while (++first != last) {
-            if (!(result->seq == first->seq)) {
+            if (!(*result == *first)) {
                 result->annot = annot;
                 if (++result != first) {
                     *result = std::move(*first);
@@ -272,7 +272,7 @@ std::vector<kmer_boost::KMer>::iterator unique_count(std::vector<kmer_boost::KMe
         result->annot = annot;
     } else {
         while (++first != last) {
-            if (!(result->seq == first->seq) && (++result != first)) {
+            if (!(*result == *first) && (++result != first)) {
                 *result = std::move(*first);
             }
         }
@@ -286,7 +286,7 @@ void DBG_succ::construct_succ(unsigned int parallel, bool add_anno) {
     // parallel sort of all kmers
     omp_set_num_threads(std::max((int)parallel,1));
     __gnu_parallel::sort(this->kmers.begin(),this->kmers.end());
-    std::vector<kmer_boost::KMer>::iterator uniq_count = unique_count(this->kmers.begin(), this->kmers.end(), add_anno);
+    std::vector<KMer>::iterator uniq_count = unique_count(this->kmers.begin(), this->kmers.end(), add_anno);
     this->kmers.erase(uniq_count, this->kmers.end() );
 
     // Annotation:
@@ -316,25 +316,25 @@ void DBG_succ::construct_succ(unsigned int parallel, bool add_anno) {
         for (size_t i = 0; i < this->kmers.size(); ++i) {
             //set last
             if (i + 1 < this->kmers.size()) {
-                bool dup = kmer_boost::compare_kmer_suffix(this->kmers[i].seq, this->kmers[i+1].seq);
+                bool dup = KMer::compare_kmer_suffix(this->kmers[i], this->kmers[i + 1]);
                 if (dup) {
                     this->last_stat_safe[curpos + i] = false;
                 }
             }
             //set W
-            uint8_t curW = kmer_boost::getW(this->kmers[i].seq);
+            uint8_t curW = this->kmers[i].getW();
             if (curW == 127) {
-                char* curseq = kmer_boost::kmertos(this->kmers[i].seq, this->alphabet, this->alph_size);
-                std::cerr << "Failure decoding kmer " << i << "\n" << this->kmers[i].seq << "\n" << curseq << "\n";
+                char* curseq = KMer::kmertos(this->kmers[i], this->alphabet, this->alph_size);
+                std::cerr << "Failure decoding kmer " << i << "\n" << this->kmers[i] << "\n" << curseq << "\n";
                 free(curseq);
                 exit(1);
             }
             if (!curW && curpos+i)
                 this->p = curpos + i;
             if (i) {
-                for (size_t j = i - 1; kmer_boost::compare_kmer_suffix(this->kmers[j].seq, this->kmers[i].seq, 1); --j) {
+                for (size_t j = i - 1; KMer::compare_kmer_suffix(this->kmers[j], this->kmers[i], 1); --j) {
                     //TODO: recalculating W is probably faster than doing a pragma for ordered
-                    if (kmer_boost::getW(this->kmers[j].seq) == curW) {
+                    if (this->kmers[j].getW() == curW) {
                         curW += this->alph_size;
                         break;
                     }
@@ -352,7 +352,7 @@ void DBG_succ::construct_succ(unsigned int parallel, bool add_anno) {
         }
     }
     for (size_t i = 0; i < this->kmers.size(); ++i) {
-        char cF = kmer_boost::getPos(this->kmers[i].seq, this->k-1, this->alphabet, this->alph_size);
+        char cF = KMer::getPos(this->kmers[i], this->k - 1, this->alphabet, this->alph_size);
         if (cF != this->alphabet[this->lastlet]) {
             for ((this->lastlet)++; this->lastlet<this->alph_size; (this->lastlet)++) {
                 this->F[this->lastlet] = curpos + i - 1;
