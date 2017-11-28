@@ -66,7 +66,7 @@ namespace annotate {
 
     sdsl::bit_vector* inflate_annotation(DBG_succ *G, uint64_t id);
 
-    void annotate_seq(DBG_succ *G, kstring_t &seq, kstring_t &label,
+    void annotate_seq(DBG_succ *G, Config *config, kstring_t &seq, kstring_t &label,
                       uint64_t start = 0, uint64_t end = 0,
                       pthread_mutex_t *anno_mutex = NULL);
 

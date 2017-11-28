@@ -101,6 +101,7 @@ struct ParallelAnnotateContainer {
     kstring_t *seq;
     kstring_t *label;
     DBG_succ *graph;
+    Config *config;
     uint64_t idx;
     uint64_t binsize;
     uint64_t total_bins;
@@ -121,11 +122,11 @@ const std::vector<std::string> annots = {
   "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"
 };
 
-void parallel_merge_collect(DBG_succ *result) {
+void parallel_merge_collect(DBG_succ *result, bool verbose) {
 
     for (size_t i = 0; i < merge_data->result.size(); ++i) {
         if (merge_data->result.at(i)) {
-            result->append_graph(merge_data->result.at(i));
+            result->append_graph(merge_data->result.at(i), verbose);
             delete merge_data->result.at(i);
         }
     }
@@ -157,7 +158,7 @@ void* parallel_annotate_wrapper(void *) {
             end = std::min((curr_idx + 1) * anno_data->binsize,
                            static_cast<uint64_t>(anno_data->seq->l));
             //std::cerr << "start " << start << " end " << end << std::endl;
-            annotate::annotate_seq(anno_data->graph, *(anno_data->seq), *(anno_data->label), start, end, &mutex_annotate);
+            annotate::annotate_seq(anno_data->graph, anno_data->config, *(anno_data->seq), *(anno_data->label), start, end, &mutex_annotate);
         }
     }
     pthread_exit((void*) 0);
@@ -184,14 +185,14 @@ void* parallel_merge_wrapper(void *config_) {
             merge_data->idx++;
             pthread_mutex_unlock (&mutex_bin_idx);
 
-            graph = new DBG_succ(merge_data->k, config, false);
+            graph = new DBG_succ(merge_data->k, false);
             std::vector<uint64_t> kv;
             std::vector<uint64_t> nv;
             for (size_t i = 0; i < merge_data->graphs.size(); i++) {
                 kv.push_back(merge_data->bins.at(i).at(curr_idx).first);
                 nv.push_back(merge_data->bins.at(i).at(curr_idx).second + 1);
             }
-            merge::merge(graph, merge_data->graphs, kv, nv);
+            merge::merge(graph, merge_data->graphs, kv, nv, config->verbose);
 
             pthread_mutex_lock (&mutex_merge_result);
             merge_data->result.at(curr_idx) = graph;
@@ -222,10 +223,10 @@ int main(int argc, const char *argv[]) {
         //TODO: allow for building by appending/adding to an existing graph
         case Config::BUILD: {
             if (config->infbase.size()) {
-                graph = new DBG_succ(config->infbase, config);
-                graph->annotationFromFile();
+                graph = new DBG_succ(config->infbase);
+                graph->annotationFromFile(config->infbase + ".anno.dbg");
             } else {
-                graph = new DBG_succ(config->k, config);
+                graph = new DBG_succ(config->k);
             }
 
             if (config->verbose)
@@ -358,7 +359,7 @@ int main(int argc, const char *argv[]) {
             }
             graph->switch_state(config->state);
             config->infbase = config->outfbase;
-            graph->annotationToFile();
+            graph->annotationToFile(config->infbase + ".anno.dbg");
             //graph->print_seq();
             break;
         }
@@ -368,10 +369,10 @@ int main(int argc, const char *argv[]) {
               std::cerr << "Requires input <de bruijn graph> for annotation. Use option -I. " << std::endl;
               exit(1);
             }
-            graph = new DBG_succ(config->infbase, config);
+            graph = new DBG_succ(config->infbase);
 
             // load annotation (if file does not exist, empty annotation is created)
-            graph->annotationFromFile();
+            graph->annotationFromFile(config->infbase + ".anno.dbg");
 
             // set up rocksdb
            // rocksdb::Options options;
@@ -437,7 +438,7 @@ int main(int argc, const char *argv[]) {
                         //    std::cout << "added labels for " << total_seqs
                         //              << " sequences, last was " << std::string(read_stream->name.s) << std::endl;
                     } else {
-                        annotate::annotate_seq(graph, read_stream->seq, read_stream->name);
+                        annotate::annotate_seq(graph, config, read_stream->seq, read_stream->name);
                     }
                     if (config->verbose) {
                         //std::cout << "entries in annotation map: " << graph->combination_count << std::endl
@@ -452,7 +453,7 @@ int main(int argc, const char *argv[]) {
             if (config->print_graph)
                 annotate::annotationToScreen(graph);
 
-            graph->annotationToFile();
+            graph->annotationToFile(config->infbase + ".anno.dbg");
             break;
         }
         case Config::CLASSIFY: {
@@ -461,10 +462,10 @@ int main(int argc, const char *argv[]) {
               std::cerr << "Requires input <de bruijn graph> for annotation. Use option -I. " << std::endl;
               exit(1);
             }
-            graph = new DBG_succ(config->infbase, config);
+            graph = new DBG_succ(config->infbase);
 
             // load annotatioun (if file does not exist, empty annotation is created)
-            graph->annotationFromFile();
+            graph->annotationFromFile(config->infbase + ".anno.dbg");
 
             // iterate over input files
             for (unsigned int f = 0; f < files.size(); ++f) {
@@ -507,10 +508,10 @@ int main(int argc, const char *argv[]) {
             for (size_t f = 0; f < files.size(); ++f) {
                 if (f == 0) {
                     std::cout << "Opening file " << files[f] << std::endl;
-                    graph = new DBG_succ(files[f], config);
+                    graph = new DBG_succ(files[f]);
                 } else {
                     std::cout << "Opening file for comparison ..." << files[f] << std::endl;
-                    DBG_succ *graph_ = new DBG_succ(files[f], config);
+                    DBG_succ *graph_ = new DBG_succ(files[f]);
                     if (*graph == *graph_) {
                         std::cout << "Graphs are identical" << std::endl;
                     } else {
@@ -530,19 +531,19 @@ int main(int argc, const char *argv[]) {
                     std::cout << "Opening file " << fname << std::endl;
                     if (config->fast) {
                         if (f == 0) {
-                            graph = new DBG_succ(utils::kFromFile(fname), config, false);
+                            graph = new DBG_succ(utils::kFromFile(fname), false);
                             graph->last_stat.push_back(0);
                             graph->W_stat.push_back(0);
                         }
-                        DBG_succ* graph_to_append = new DBG_succ(fname, config);
-                        graph->append_graph_static(graph_to_append);
+                        DBG_succ* graph_to_append = new DBG_succ(fname);
+                        graph->append_graph_static(graph_to_append, config->verbose);
                         delete graph_to_append;
                     } else {
                         if (f == 0) {
-                            graph = new DBG_succ(fname, config);
+                            graph = new DBG_succ(fname);
                         } else {
-                            DBG_succ* graph_to_append = new DBG_succ(fname, config);
-                            graph->append_graph(graph_to_append);
+                            DBG_succ* graph_to_append = new DBG_succ(fname);
+                            graph->append_graph(graph_to_append, config->verbose);
                             delete graph_to_append;
                         }
                     }
@@ -565,12 +566,12 @@ int main(int argc, const char *argv[]) {
                 std::vector<uint64_t> nv;
                 for (unsigned int f = 0; f < files.size(); ++f) {
                         std::cout << "Opening file " << files[f] << std::endl;
-                        graph = new DBG_succ(files[f], config);
+                        graph = new DBG_succ(files[f]);
                         graphs.push_back(graph);
                         kv.push_back(1);
                         nv.push_back(graph->get_size());
                 }
-                DBG_succ* target_graph = new DBG_succ(graphs.front()->get_k(), config, false);
+                DBG_succ* target_graph = new DBG_succ(graphs.front()->get_k(), false);
 
                 if ((config->parallel > 1) || (config->parts_total > 1)) {
                     pthread_t* threads = NULL;
@@ -637,14 +638,14 @@ int main(int argc, const char *argv[]) {
 
                     // collect results
                     std::cerr << "Collecting results" << std::endl;
-                    parallel_merge_collect(target_graph);
+                    parallel_merge_collect(target_graph, config->verbose);
 
                     graph = target_graph;
 
                     delete merge_data;
 
                 } else {
-                    merge::merge(target_graph, graphs, kv, nv);
+                    merge::merge(target_graph, graphs, kv, nv, config->verbose);
                     graph = target_graph;
                 }
                 for (size_t f = 0; f < graphs.size(); f++)
@@ -660,7 +661,7 @@ int main(int argc, const char *argv[]) {
                 outstream << "file\tnodes\tedges\tk" << std::endl;
             }
             for (unsigned int f = 0; f < files.size(); ++f) {
-                DBG_succ* graph_ = new DBG_succ(files[f], config);
+                DBG_succ* graph_ = new DBG_succ(files[f]);
                 /*graph_->W = new libmaus2::wavelet::DynamicWaveletTree<6, 64> (3);
                 graph_->W->insert(1ull, 0);
                 graph_->W->insert(7ull, 1);
@@ -703,7 +704,7 @@ int main(int argc, const char *argv[]) {
                 }
                 instream.close();
 
-                /*DBG_succ* graph_tut = new DBG_succ(config->k, config);
+                /*DBG_succ* graph_tut = new DBG_succ(config->k);
                 std::cerr << "inserting step by step" << std::endl;
                 for (size_t i = 0; i < 10000000; ++i)
                     graph_tut->last->insertBit(i % 2, i);
@@ -741,10 +742,10 @@ int main(int argc, const char *argv[]) {
         }
         case Config::DUMP: {
             //for (unsigned int f = 0; f < files.size(); ++f) {
-                //DBG_succ* graph_ = new DBG_succ(files[f], config);
-                DBG_succ* graph_ = new DBG_succ(config->infbase, config);
+                //DBG_succ* graph_ = new DBG_succ(files[f]);
+                DBG_succ* graph_ = new DBG_succ(config->infbase);
                 // checks whether annotation exists and creates an empty one if not
-                graph_->annotationFromFile();
+                graph_->annotationFromFile(config->infbase + ".anno.dbg");
                 graph_->print_adj_list();
                 //graph_->print_adj_list(config->outfbase);
                 delete graph_;
@@ -757,7 +758,7 @@ int main(int argc, const char *argv[]) {
               std::cerr << "Requires input <de bruijn graph> to align reads." << config->ALIGN << std::endl;
               exit(1);
             }
-            graph = new DBG_succ(config->infbase, config);
+            graph = new DBG_succ(config->infbase);
 
             for (unsigned int f = 0; f < files.size(); ++f) {
                 std::cout << "Opening file for alignment ..." << files[f] << std::endl;
@@ -843,9 +844,9 @@ int main(int argc, const char *argv[]) {
         if (config->print_graph)
             graph->print_seq();
         if (!config->sqlfbase.empty())
-            traverse::toSQL(graph, config->sqlfbase + ".sql");
+            traverse::toSQL(graph, config->fname, config->sqlfbase);
         if (!config->outfbase.empty())
-            graph->toFile(config->parts_total, config->part_idx);
+            graph->toFile(config->outfbase, config->parts_total, config->part_idx);
         delete graph;
     }
     delete config;

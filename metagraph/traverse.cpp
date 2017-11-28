@@ -56,14 +56,11 @@ struct BranchInfo;
  */
 struct JoinInfo;
 
-bool finish_sequence(DBG_succ *G,
-                     std::string &sequence,
-                     uint64_t seqId,
-                     std::ofstream &SQLstream);
 
 size_t traverseGraph(DBG_succ *G,
                      std::vector<JoinInfo> &joins,
                      std::map<std::pair<uint64_t, DBG_succ::TAlphabet>, uint64_t> &branchMap,
+                     const std::string &sqlfbase,
                      std::ofstream &SQLstream);
 
 void allelesFromSeq(DBG_succ *G,
@@ -94,18 +91,19 @@ BranchInfo pop_branch(std::stack<BranchInfo> &branchnodes,
 }
 
 
-bool finish_sequence(DBG_succ *G,
-                     std::string &sequence,
-                     uint64_t seqId, std::ofstream &SQLstream) {
+bool finish_sequence(std::string &sequence,
+                     uint64_t seqId,
+                     const std::string &sqlfbase,
+                     std::ofstream &SQLstream) {
     if (sequence.length() > 0) {
         if (seqId == 1)
             SQLstream << "INSERT INTO FASTA VALUES (1, '"
-                                    << G->config->sqlfbase << ".fa');" << std::endl;
+                                    << sqlfbase << ".fa');" << std::endl;
         std::ofstream stream;
         if (seqId == 1)
-            stream.open((G->config->sqlfbase + ".fa").c_str());
+            stream.open((sqlfbase + ".fa").c_str());
         else
-            stream.open((G->config->sqlfbase + ".fa").c_str(), std::ofstream::app);
+            stream.open((sqlfbase + ".fa").c_str(), std::ofstream::app);
         stream << ">seq" << seqId << std::endl;
         uint64_t i = 0;
         while ((i + 80) < sequence.length()) {
@@ -139,6 +137,7 @@ bool finish_sequence(DBG_succ *G,
 size_t traverseGraph(DBG_succ* G,
                      std::vector<JoinInfo> &joins,
                      std::map<std::pair<uint64_t, DBG_succ::TAlphabet>, uint64_t> &branchMap,
+                     const std::string &sqlfbase,
                      std::ofstream &SQLstream) {
     // store all branch nodes on the way
     std::stack<BranchInfo> branchnodes;
@@ -205,7 +204,7 @@ size_t traverseGraph(DBG_succ* G,
             if (!visited.at(next)) {
                 if (joinOpen) {
                     if (sequence.length() > 0) {
-                        finish_sequence(G, sequence, seqCnt++, SQLstream);
+                        finish_sequence(sequence, seqCnt++, sqlfbase, SQLstream);
                     }
                     seqId = seqCnt;
                     seqPos = 0;
@@ -280,7 +279,7 @@ size_t traverseGraph(DBG_succ* G,
                         }
                         if (joinOpen) {
                             if (sequence.length() > 0) {
-                                finish_sequence(G, sequence, seqCnt++, SQLstream);
+                                finish_sequence(sequence, seqCnt++, sqlfbase, SQLstream);
                             }
                             seqId = seqCnt;
                             seqPos = 0;
@@ -339,7 +338,7 @@ size_t traverseGraph(DBG_succ* G,
     }
     // for completeness
     if (sequence.length() > 0)
-        finish_sequence(G, sequence, seqCnt++, SQLstream);
+        finish_sequence(sequence, seqCnt++, sqlfbase, SQLstream);
     else
         seqCnt--;
 
@@ -391,8 +390,8 @@ void allelesFromSeq(DBG_succ* G, kstring_t &seq, unsigned int f,
         for (size_t i = 0; i < seqNum; ++i)
             isRef.push_back(false);
     }
-    if (G->config->verbose)
-        fprintf(stderr, "processing alleles for file %u\n", f);
+    // if (G->config->verbose)
+    //     fprintf(stderr, "processing alleles for file %u\n", f);
 
     while (true) {
         nodeVal = G->get_node_end_value(nodeId);
@@ -522,7 +521,8 @@ void allelesFromSeq(DBG_succ* G, kstring_t &seq, unsigned int f,
 }
 
 
-void toSQL(DBG_succ *G, const std::string &sql_script) {
+void toSQL(DBG_succ *G, const std::vector<std::string> &fname,
+                        const std::string &sqlfbase) {
     // this vector stores the joins between the sequence objects we wrote
     std::vector<JoinInfo> joins;
     // we also store for each branching edge the join it creates
@@ -530,11 +530,11 @@ void toSQL(DBG_succ *G, const std::string &sql_script) {
     std::map<std::pair<uint64_t, DBG_succ::TAlphabet>, uint64_t> branchMap;
 
     // open sql filestream
-    std::ofstream SQLstream(sql_script);
+    std::ofstream SQLstream(sqlfbase + ".sql");
 
     // traverse the graph, thereby filling joins vector, branchMap and 
     // writing the sequences to individual fasta files
-    size_t seqNum = traverseGraph(G, joins, branchMap, SQLstream); 
+    size_t seqNum = traverseGraph(G, joins, branchMap, sqlfbase, SQLstream); 
     
     // write graph joins to SQL file
     for (size_t i = 0; i < joins.size(); ++i) {
@@ -559,17 +559,17 @@ void toSQL(DBG_succ *G, const std::string &sql_script) {
 
     // for each input sequence traverse the graph once more and
     // collect allele path information 
-    for (unsigned int f = 0; f < G->config->fname.size(); ++f) {
+    for (unsigned int f = 0; f < fname.size(); ++f) {
 
         // first traversal is for reference info
         if (f == 0) {
             // open stream to fasta file
-            gzFile input_p = gzopen(G->config->fname.at(f).c_str(), "r");
+            gzFile input_p = gzopen(fname.at(f).c_str(), "r");
             kseq_t *stream = kseq_init(input_p);
 
             if (stream)
                 std::cerr << "ERROR while opening input file "
-                          << G->config->fname.at(f) << std::endl;
+                          << fname.at(f) << std::endl;
 
             while (kseq_read(stream) >= 0) {
                 allelesFromSeq(G, stream->seq, f, joins, branchMap, SQLstream, true, seqNum);
@@ -582,11 +582,11 @@ void toSQL(DBG_succ *G, const std::string &sql_script) {
                       << std::endl;
         }
         // open stream to fasta file
-        gzFile input_p = gzopen(G->config->fname.at(f).c_str(), "r");
+        gzFile input_p = gzopen(fname.at(f).c_str(), "r");
         kseq_t *stream = kseq_init(input_p);
         if (stream)
             std::cerr << "ERROR while opening input file "
-                      << G->config->fname.at(f) << std::endl;
+                      << fname.at(f) << std::endl;
 
         while (kseq_read(stream) >= 0) 
             allelesFromSeq(G, stream->seq, f, joins, branchMap, SQLstream);
@@ -596,16 +596,16 @@ void toSQL(DBG_succ *G, const std::string &sql_script) {
     }
 
     // write call set (one per input file)
-    for (unsigned int f = 0; f < G->config->fname.size(); ++f)
+    for (unsigned int f = 0; f < fname.size(); ++f)
         SQLstream << "INSERT INTO CallSet VALUES ("
-                  << f + 1 << ", '" << G->config->fname.at(f)
+                  << f + 1 << ", '" << fname.at(f)
                            << "', 'DBG"
                   << f + 1 << "');" << std::endl;
-    for (unsigned int f = 0; f < G->config->fname.size(); ++f)
+    for (unsigned int f = 0; f < fname.size(); ++f)
         SQLstream << "INSERT INTO VariantSet_CallSet_Join VALUES (1, "
                   << f + 1 << ");" << std::endl;
-    for (unsigned int f = 0; f < G->config->fname.size(); ++f) {
-        for (unsigned int ff = 0; ff < G->config->fname.size(); ++ff) {
+    for (unsigned int f = 0; f < fname.size(); ++f) {
+        for (unsigned int ff = 0; ff < fname.size(); ++ff) {
             if (f == ff) {
                 SQLstream << "INSERT INTO AlleleCall VALUES ("
                           << ff + 1 << ", " << f + 1 << ", 1);" << std::endl;

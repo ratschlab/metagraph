@@ -622,11 +622,11 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
  * and F to this graph's arrays. In almost all cases this will not produce a valid graph and
  * should only be used as a helper in the parallel merge procedure.
  */
-void DBG_succ::append_graph(DBG_succ* G) {
+void DBG_succ::append_graph(DBG_succ *G, bool verbose) {
 
     size_t curr_pos = this->get_size();
 
-    if (this->config->verbose)
+    if (verbose)
         std::cout << "    adding " << G->get_size() << " edges" << std::endl;
     // handle last and W
     for (size_t j = 1; j < G->get_size(); ++j) {
@@ -634,7 +634,7 @@ void DBG_succ::append_graph(DBG_succ* G) {
         this->W->insert(G->get_W(j), curr_pos);
         ++curr_pos;
     }
-    if (this->config->verbose)
+    if (verbose)
         std::cout << "new total edges: " << G->W->size() << std::endl;
 
     // handle F
@@ -650,10 +650,10 @@ void DBG_succ::append_graph(DBG_succ* G) {
  * this will not produce a valid graph and should only be used as a helper in the
  * parallel merge procedure.
  */
-void DBG_succ::append_graph_static(DBG_succ *G) {
+void DBG_succ::append_graph_static(DBG_succ *G, bool verbose) {
 
     size_t n = G->get_size();
-    if (this->config->verbose)
+    if (verbose)
         std::cout << "    adding " << n << " edges" << std::endl;
 
     //size_t n_old = this->last_stat.size();

@@ -5,9 +5,9 @@
 #include <unordered_map>
 #include <type_traits>
 
-#include "config.hpp"
 #include "datatypes.hpp"
 #include "kmer.hpp"
+#include "config.hpp"
 
 
 /*
@@ -51,7 +51,7 @@ class DBG_succ { //: public GenomeGraph{
      * and F to this graph's arrays. In almost all cases this will not produce a valid graph and
      * should only be used as a helper in the parallel merge procedure.
      */
-    void append_graph(DBG_succ *other);
+    void append_graph(DBG_succ *other, bool verbose);
 
     /**
      * This function takes a pointer to a graph structure and concatenates the arrays W, last
@@ -59,7 +59,7 @@ class DBG_succ { //: public GenomeGraph{
      * this will not produce a valid graph and should only be used as a helper in the
      * parallel merge procedure.
      */
-    void append_graph_static(DBG_succ *other);
+    void append_graph_static(DBG_succ *other, bool verbose);
 
     uint64_t remove_edges(std::set<uint64_t> &edges, uint64_t ref_point = 0);
 
@@ -105,9 +105,6 @@ class DBG_succ { //: public GenomeGraph{
     // infile base when loaded from file
     std::string infbase;
 
-    // config object
-    Config *config;
-
     // index of position that marks end in graph
     uint64_t p;
     
@@ -122,7 +119,6 @@ class DBG_succ { //: public GenomeGraph{
     // alphabet size
     size_t alph_size;
 
-
     // state of graph
     Config::StateType state = Config::STAT;
 
@@ -136,6 +132,13 @@ class DBG_succ { //: public GenomeGraph{
 
     //std::vector<sdsl::rrr_vector<63>* > annotation_full;
     std::vector<sdsl::sd_vector<>* > annotation_full;
+
+    /**
+     * Visualization, Serialization and Deserialization of annotation content.
+     */
+    void annotationToFile(const std::string &filename);
+    void annotationFromFile(const std::string &filename);
+
     std::vector<sdsl::rrr_vector<63> > colors_to_bits;
     std::vector<std::string> bits_to_labels;
     size_t anno_labels;
@@ -154,12 +157,10 @@ class DBG_succ { //: public GenomeGraph{
 
     // construct empty graph instance
     DBG_succ(size_t k_,
-             Config *config_,
              bool sentinel = true);
 
     // load graph instance from a provided file name base
-    DBG_succ(std::string infbase_,
-             Config *config_);
+    DBG_succ(std::string infbase_);
 
     // destructor
     ~DBG_succ();
@@ -507,13 +508,8 @@ class DBG_succ { //: public GenomeGraph{
      * Take the current graph content and store in a file.
      *
      */
-    void toFile(unsigned int total = 1, unsigned int idx = 0);
-
-    /**
-     * Visualization, Serialization and Deserialization of annotation content.
-     */
-    void annotationToFile();
-    void annotationFromFile();
+    void toFile(const std::string &outbase,
+                unsigned int total = 1, unsigned int idx = 0);
 
     /**
     * Given a pointer to a graph structures G1 and G2, the function compares their elements to the

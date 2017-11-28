@@ -29,7 +29,6 @@
  */
 #include <libmaus2/util/NumberSerialisation.hpp>
 
-#include "config.hpp"
 #include "datatypes.hpp"
 #include "serialization.hpp"
 #include "dbg_succinct.hpp"
@@ -74,8 +73,8 @@ const char DBG_succ::nt_lookup[128] = {
 // CONSTRUCTORS
 //
 //
-DBG_succ::DBG_succ(size_t k_, Config *config_, bool sentinel)
-      : k(k_), config(config_), alphabet(DBG_succ::default_alphabet),
+DBG_succ::DBG_succ(size_t k_, bool sentinel)
+      : k(k_), alphabet(DBG_succ::default_alphabet),
         alph_size(DBG_succ::default_alph_size),
         starts(std::string(k-1, alphabet[alph_size-1]) + alphabet[0] + alphabet[0]),
         sinks(alphabet.substr(0,1)),
@@ -109,9 +108,8 @@ DBG_succ::DBG_succ(size_t k_, Config *config_, bool sentinel)
 
 
 
-DBG_succ::DBG_succ(std::string infbase_, Config *config_) :
+DBG_succ::DBG_succ(std::string infbase_) :
     infbase(infbase_),
-    config(config_),
     alphabet(DBG_succ::default_alphabet),
     alph_size(DBG_succ::default_alph_size) {
 
@@ -296,7 +294,6 @@ uint64_t DBG_succ::bwd(uint64_t i) {
     TAlphabet c = get_node_end_value(i);
     // get the offset for the last position in node i
     uint64_t o = F[c];
-    //fprintf(stdout, "i %lu c %i o %lu rank(i) %lu rank(o) %lu difference %lu\n", i, (int) c, o, rank_last(i), rank_last(o), rank_last(i) - rank_last(o));
     // compute the offset for this position in W and select it
     //usleep(500000);
     return select_W(rank_last(i) - rank_last(o), c);
@@ -519,8 +516,10 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(std::string &str, uint64_t max_distan
                             continue;
 
                         // re-define range of nodes to check for outgoing nodes
-                        rl = std::min(succ_W(pred_last(curr_hit.rl - 1) + 1, b), succ_W(pred_last(curr_hit.rl - 1) + 1, b + alph_size));
-                        ru = std::max(pred_W(curr_hit.ru, b), pred_W(curr_hit.ru, b + alph_size));
+                        rl = std::min(succ_W(pred_last(curr_hit.rl - 1) + 1, b),
+                                      succ_W(pred_last(curr_hit.rl - 1) + 1, b + alph_size));
+                        ru = std::max(pred_W(curr_hit.ru, b),
+                                      pred_W(curr_hit.ru, b + alph_size));
 
                         // the current range in W does not contain our next symbol
                         if ((rl >= W->size()) || (ru >= W->size()) || (rl > ru))
@@ -538,8 +537,6 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(std::string &str, uint64_t max_distan
                         hits2.push({ rl, ru, curr_hit.str_pos + 1,
                                      curr_hit.graph_pos + 1, curr_hit.distance + (b != s),
                                      curr_hit.cigar + get_alphabet_symbol(b), curr_hit.path });
-                        //std::cout << "curr rl " << curr_hit.rl << " ru " << curr_hit.ru << std::endl;
-                        //std::cout << "c) " << curr_hit.cigar << " adding '" << get_alphabet_symbol(b) << "' - graph pos " << curr_hit.graph_pos + 1 << " rl " << rl << " ru " << ru << std::endl;
 
                         // opening/extending a gap in the pattern, leaving current graph position unmatched
                         // --> choose any available mismatching next edge
@@ -552,8 +549,8 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(std::string &str, uint64_t max_distan
                 }
             } else {
                 // collect results
-                //std::cout << "pushing " << curr_hit.cigar << "  " << curr_hit.distance << " rl " << curr_hit.rl << " ru " << curr_hit.ru << std::endl;
-                result.push_back(curr_hit); //std::make_pair(curr_hit.rl < curr_hit.ru ? curr_hit.ru : curr_hit.rl, curr_hit.cigar));
+                //std::make_pair(curr_hit.rl < curr_hit.ru ? curr_hit.ru : curr_hit.rl, curr_hit.cigar));
+                result.push_back(curr_hit);
             }
         }
         hits.swap(hits2);
@@ -895,19 +892,7 @@ void DBG_succ::replaceW(size_t i, TAlphabet val) {
 
 
 TAlphabet DBG_succ::get_alphabet_number(char s) {
-
-     TAlphabet nt_lookup_[128] = {
-        5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-        5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-        5, 5, 5, 5,  0, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-        5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-        5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
-        5, 5, 5, 5,  4, 4, 5, 5,  6, 5, 5, 5,  5, 5, 5, 5,
-        5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
-        5, 5, 5, 5,  4, 4, 5, 5,  6, 5, 5, 5,  5, 5, 5, 5
-    };
-
-    return nt_lookup_[(int) s];
+    return nt_lookup[static_cast<int>(s)];
 }
 
 
@@ -920,8 +905,8 @@ void DBG_succ::switch_state(Config::StateType state) {
     switch (state) {
         case Config::CSTR: {
             this->state = Config::CSTR;
-        } break;
-
+            break;
+        }
         case Config::DYN: {
             if (this->state == Config::CSTR) {
                 delete W;
@@ -956,8 +941,8 @@ void DBG_succ::switch_state(Config::StateType state) {
                 last = last_new;
             }
             this->state = Config::DYN;
-        } break;
-
+            break;
+        }
         case Config::STAT: {
             wavelet_tree *W_new = new wavelet_tree_stat(W, 4);
             delete W;
@@ -968,10 +953,10 @@ void DBG_succ::switch_state(Config::StateType state) {
             last = last_new;
 
             this->state = Config::STAT;
-        } break;
+            break;
+        }
     }
 }
-
 
 
 //
@@ -1013,7 +998,11 @@ std::vector<uint64_t> DBG_succ::split_range(uint64_t start, uint64_t end, uint64
         std::stack<uint64_t> backtrace;
         end--;
         while (d > 0) {
-            std::cerr << "BT push " << get_node_end_value(start) << " start " << start << " --> " << bwd(succ_last(start)) << " end " << end << " --> " << bwd(succ_last(end)) << std::endl;
+            std::cerr << "BT push " << get_node_end_value(start)
+                      << " start " << start
+                      << " --> " << bwd(succ_last(start))
+                      << " end " << end
+                      << " --> " << bwd(succ_last(end)) << std::endl;
             backtrace.push(get_node_end_value(start));
             start = bwd(succ_last(start));
             end = bwd(succ_last(end));
@@ -1036,14 +1025,16 @@ std::vector<uint64_t> DBG_succ::split_range(uint64_t start, uint64_t end, uint64
         // translate into final coordinates
         while (backtrace.size() > 0) {
             for (size_t i = 0; i < result.size(); ++i) {
-                //std::cerr << "res[i] " << result.at(i) << " pred_last(res[i] - 1) " << pred_last(result.at(i) - 1) << " bt " << backtrace.top() << std::endl;
                 if (result.at(i) > 0) {
                     uint64_t tmp = result.at(i);
                     uint64_t nextc = succ_W(pred_last(result.at(i) - 1) + 1, backtrace.top());
                     uint64_t maxc = succ_last(result.at(i));
                     std::cerr << "nextc " << nextc << " maxc " << maxc << std::endl;
                     result.at(i) = (nextc <= maxc) ? (pred_last(fwd(nextc) - 1) + 1) : 0;
-                    std::cerr << "tracing back on " << backtrace.top() << " index " << i << " position " << tmp << " resulting in " << result.at(i) << std::endl;
+                    std::cerr << "tracing back on " << backtrace.top()
+                              << " index " << i
+                              << " position " << tmp
+                              << " resulting in " << result.at(i) << std::endl;
                 }
             }
             backtrace.pop();
@@ -1129,7 +1120,11 @@ void DBG_succ::print_state() {
 //TODO: assume that a sentinel was used during construction
 void DBG_succ::print_state_str() {
     for (uint64_t i = 1; i < W->size(); i++) {
-        std::cout << i << "\t" << get_last(i) << "\t" << get_node_str(i) << "\t" << get_alphabet_symbol((*W)[i]) << ((*W)[i] > alph_size ? "-" : "") << (i==this->p ? "<" : "") << std::endl;
+        std::cout << i << "\t" << get_last(i)
+                       << "\t" << get_node_str(i)
+                       << "\t" << get_alphabet_symbol((*W)[i])
+                       << ((*W)[i] > alph_size ? "-" : "")
+                       << (i==this->p ? "<" : "") << std::endl;
     }
 }
 
@@ -1269,10 +1264,11 @@ void DBG_succ::print_seq() {
  * Take the current graph content and store in a file.
  *
  */
-void DBG_succ::toFile(unsigned int total, unsigned int idx) {
+void DBG_succ::toFile(const std::string &outbase_,
+                      unsigned int total, unsigned int idx) {
 
     // adapt outbase depending on merging strategy
-    std::string outbase = config->outfbase;
+    std::string outbase = outbase_;
     if (total > 1)
         outbase += "." + std::to_string(idx) + "_" + std::to_string(total);
 
@@ -1302,8 +1298,8 @@ void DBG_succ::toFile(unsigned int total, unsigned int idx) {
 
 
 // write annotation to disk
-void DBG_succ::annotationToFile() {
-    std::ofstream outstream((config->infbase + ".anno.dbg").c_str());
+void DBG_succ::annotationToFile(const std::string &filename) {
+    std::ofstream outstream(filename);
     libmaus2::util::NumberSerialisation::serialiseNumber(outstream, annotation_full.size());
     for (size_t i = 0; i < annotation_full.size(); ++i) {
         annotation_full.at(i)->serialize(outstream);
@@ -1331,13 +1327,13 @@ void DBG_succ::annotationToFile() {
 }
 
 // read annotation from disk
-void DBG_succ::annotationFromFile() {
+void DBG_succ::annotationFromFile(const std::string &filename) {
     // generate annotation object
     // populate it with existing annotation if available
-    std::ifstream instream((config->infbase + ".anno.dbg").c_str());
+    std::ifstream instream(filename);
     if (instream.good()) {
-        if (config->verbose)
-            std::cerr << "get annotation from disk" << std::endl;
+        //if (config->verbose)
+        //    std::cerr << "get annotation from disk" << std::endl;
         size_t anno_size = libmaus2::util::NumberSerialisation::deserialiseNumber(instream);
         for (size_t i = 0; i < anno_size; ++i) {
             //annotation_full.push_back(new sdsl::rrr_vector<63>());
@@ -1370,7 +1366,6 @@ void DBG_succ::annotationFromFile() {
    // } else {
         //annotation.resize(get_size(), 0);
     }
-    instream.close();
 }
 
 

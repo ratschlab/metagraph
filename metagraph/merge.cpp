@@ -25,7 +25,8 @@ BranchInfoMerge pop_branch(std::stack<BranchInfoMerge> &branchnodes,
 void merge(DBG_succ *Gt,
            std::vector<DBG_succ*> Gv,
            std::vector<uint64_t> kv,
-           std::vector<uint64_t> nv) {
+           std::vector<uint64_t> nv,
+           bool verbose) {
 
     // Preliminarities
     for (size_t i = 0; i < Gv.size(); i++) {
@@ -65,7 +66,7 @@ void merge(DBG_succ *Gt,
         }
     }
 
-    if (Gt->config->verbose) {
+    if (verbose) {
         std::cout << "Size of bins to merge: " << std::endl;
         for (size_t i = 0; i < Gv.size(); i++)
             std::cout << nv.at(i) - kv.at(i) << std::endl;
@@ -76,7 +77,7 @@ void merge(DBG_succ *Gt,
     // smallest one into the common merge graph G (this).
     while (true) {
 
-        if (Gt->config->verbose && added > 0 && added % 1000 == 0) {
+        if (verbose && added > 0 && added % 1000 == 0) {
             std::cout << "." << std::flush;
             if (added % 10000 == 0) {
                 std::cout << "added " << added;

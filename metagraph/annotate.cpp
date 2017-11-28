@@ -50,7 +50,9 @@ sdsl::bit_vector* inflate_annotation(DBG_succ* G, uint64_t id) {
     return result;
 }
 
-void annotate_seq(DBG_succ *G, kstring_t &seq, kstring_t &label, uint64_t start, uint64_t end, pthread_mutex_t* anno_mutex) {
+void annotate_seq(DBG_succ *G, Config *config, kstring_t &seq, kstring_t &label,
+                  uint64_t start, uint64_t end,
+                  pthread_mutex_t *anno_mutex) {
 
     std::string curr_kmer;
     std::string label_str = std::string(label.s);
@@ -68,8 +70,9 @@ void annotate_seq(DBG_succ *G, kstring_t &seq, kstring_t &label, uint64_t start,
         G->label_to_id_map[label_str] = label_id;
         G->annotation_full.push_back(NULL);
         annotation_curr = new sdsl::bit_vector(G->get_size(), 0);
-        if (G->config->verbose)
-            std::cout << "added label ID " << label_id << " for label string " << label_str << std::endl;
+        if (config->verbose)
+            std::cout << "added label ID " << label_id
+                      << " for label string " << label_str << std::endl;
     } else {
         label_id = id_it->second;
         if (G->annotation_full.at(label_id - 1) != NULL) {
@@ -88,7 +91,7 @@ void annotate_seq(DBG_succ *G, kstring_t &seq, kstring_t &label, uint64_t start,
     size_t i;
     for (i = start; i < end; ++i) {
 
-        if (G->config->verbose && i > 0 && i % 1'000 == 0) {
+        if (config->verbose && i > 0 && i % 1'000 == 0) {
             std::cout << "." << std::flush;
             if (!anno_mutex && (i % 10'000 == 0))
                 std::cout << i << " kmers added" << std::endl;
@@ -99,7 +102,7 @@ void annotate_seq(DBG_succ *G, kstring_t &seq, kstring_t &label, uint64_t start,
             continue;
         }
         assert(curr_kmer.size() == G->k + 1);
-        annotate_kmer(G, annotation_curr, curr_kmer, previous_idx, (i % G->config->frequency) > 0);
+        annotate_kmer(G, annotation_curr, curr_kmer, previous_idx, (i % config->frequency) > 0);
 
         //std::cerr << curr_kmer << ":" << std::string(label.s) << std::endl;
         curr_kmer.push_back(seq.s[i]);
@@ -107,7 +110,7 @@ void annotate_seq(DBG_succ *G, kstring_t &seq, kstring_t &label, uint64_t start,
     }
     // add last kmer and label to database
     if (curr_kmer.size() == G->k + 1)
-        annotate_kmer(G, annotation_curr, curr_kmer, previous_idx, (i % G->config->frequency) > 0);
+        annotate_kmer(G, annotation_curr, curr_kmer, previous_idx, (i % config->frequency) > 0);
 
     if (anno_mutex)
         pthread_mutex_lock(anno_mutex);

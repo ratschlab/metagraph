@@ -19,7 +19,8 @@ namespace traverse {
      * We will perform one depth first search traversal of the graph. While we will record
      * one long reference string, we will output all sidepaths on the way.
      */
-    void toSQL(DBG_succ *G, const std::string &sql_script);
+    void toSQL(DBG_succ *G, const std::vector<std::string> &fname,
+                            const std::string &sqlfbase);
 
 }
 
