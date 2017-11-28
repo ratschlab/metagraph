@@ -1,5 +1,5 @@
-#ifndef __DBG_SUCCINCT_LIBM_HPP__
-#define __DBG_SUCCINCT_LIBM_HPP__
+#ifndef __DBG_SUCCINCT_HPP__
+#define __DBG_SUCCINCT_HPP__
 
 #include <zlib.h>
 #include <unordered_map>
@@ -518,4 +518,4 @@ class DBG_succ { //: public GenomeGraph{
     bool operator==(const DBG_succ &other) const;
 };
 
-#endif
+#endif // __DBG_SUCCINCT_HPP__

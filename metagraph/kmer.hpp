@@ -1,19 +1,19 @@
-#ifndef __DBG_SUCC_BOOST__
-#define __DBG_SUCC_BOOST__
+#ifndef __KMER_HPP__
+#define __KMER_HPP__
 
 #include <iostream>
 #include <boost/multiprecision/cpp_int.hpp>
 #include <string>
-#include <vector>
-#include <iterator>
 #include <algorithm>
 
 #include <htslib/kseq.h>
 
 typedef boost::multiprecision::uint256_t ui256;
 typedef boost::multiprecision::cpp_int cpp_int;
+typedef uint64_t TAlphabet;
 
-const int kBPC = 3;
+const int kBitsPerChar = 3;
+const int kMax = 1llu << kBitsPerChar;
 
 
 class KMer {
@@ -21,67 +21,53 @@ class KMer {
 
   public:
     std::vector<uint32_t> annot;
-    KMer() {}
-    explicit KMer(const ui256 &seq_) : seq(seq_) {}
-    KMer(const KMer &k, size_t annot_) : KMer(k.seq, annot_) {}
-    KMer(ui256 seq_, size_t annot_) : seq(seq_) {
-            if (annot_ > 0)
-                annot.push_back(annot_ - 1);
-        }
 
-    friend std::ostream& operator<<(std::ostream &os, const KMer &kmer) {
-        os << kmer.seq;
-        return os;
+    KMer() {}
+
+    explicit KMer(const ui256 &seq_) : seq(seq_) {}
+
+    KMer(const KMer &k, size_t annot_) : KMer(k.seq, annot_) {}
+
+    KMer(ui256 seq_, size_t annot_) : seq(seq_) {
+        if (annot_ > 0)
+            annot.push_back(annot_ - 1);
     }
 
-    uint8_t getW() const;
+    TAlphabet operator[](size_t i) const { return get(i) - 1; }
 
     bool operator<(const KMer &other) const { return seq < other.seq; }
+
     bool operator==(const KMer &other) const { return seq == other.seq; }
 
-    static bool compare_kmer_suffix(const KMer &k1, const KMer &k2, uint64_t minus = 0);
+    static bool compare_kmer_suffix(const KMer &k1,
+                                    const KMer &k2, size_t minus = 0);
 
     template <class Map>
-    static KMer stokmer(const char *seq, const uint64_t len, Map to_alphabet) {
-        if (len * kBPC >= 256 || len < 2) {
-            std::cerr << "String must be between lengths 2 and " << 256 / kBPC << ".\n";
+    static KMer from_string(const std::string &seq, Map &&to_alphabet) {
+        if (seq.length() * kBitsPerChar >= 256 || seq.length() < 2) {
+            std::cerr << "String must be between lengths 2 and " << 256 / kBitsPerChar << ".\n";
             exit(1);
         }
-
         ui256 kmer = 0;
-        uint8_t cur;
-        uint8_t maxn = 1 << kBPC;
+        for (int i = seq.length() - 2; i >= 0; --i) {
+            uint8_t cur = to_alphabet(seq[i]) + 1;
 
-        for (int i = len - 2; i >= 0; --i) {
-            kmer <<= kBPC;
-            //this makes sure the range is 1-7 instead of 0-6
-            cur = to_alphabet(seq[i]) + 1;
-            if (cur < maxn) {
-                kmer += cur;
-            } else {
-                std::cerr << "Alphabet size too big for the given number of bits. Alphabet size must be < " << maxn << "\n";
-                exit(1);
-            }
+            assert(cur < kMax && "Alphabet size too big for the given number of bits");
+
+            kmer = (kmer << kBitsPerChar) + cur;
         }
-        kmer <<= kBPC;
-        kmer += to_alphabet(seq[len - 1]) + 1;
-        return KMer {kmer};
+        kmer <<= kBitsPerChar;
+        kmer += to_alphabet(seq[seq.length() - 1]) + 1;
+        return KMer(kmer);
     }
 
-    template <class Map>
-    static KMer stokmer(const std::string &seq, Map to_alphabet) {
-        return stokmer(seq.c_str(), seq.length(), to_alphabet);
-    }
+    std::string to_string(const std::string &alphabet) const;
 
-    //zero-based
-    //if i==-1, then it gets W as a char
-    static char getPos(const ui256 &kmer, int64_t i, const std::string &alphabet, const uint64_t &alph_size);
+    friend std::ostream& operator<<(std::ostream &os, const KMer &kmer);
 
-    static char getPos(const KMer &kmer, int64_t i, const std::string &alphabet, const uint64_t &alph_size) {
-        return getPos(kmer.seq, i, alphabet, alph_size);
-    }
+  private:
+    TAlphabet get(size_t i) const;
 
-    static char* kmertos(const KMer &k, const std::string &alphabet, const uint64_t &alph_size);
 };
 
-#endif // __DBG_SUCC_BOOST__
+#endif // __KMER_HPP__

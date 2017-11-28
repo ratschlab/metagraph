@@ -177,7 +177,7 @@ void DBG_succ::add_seq_fast(const std::string &seq, const std::string &annotatio
     if (add_bridge) {
         for (i = 0; i < std::min(k, seq.length()); ++i) {
             if (check_suffix(this, bridge, suffix)) {
-                kmers.push_back(KMer{ KMer::stokmer(bridge, k + 1, DBG_succ::get_alphabet_number), 0 });
+                kmers.push_back(KMer{ KMer::from_string(std::string(bridge, k + 1), DBG_succ::get_alphabet_number), 0 });
             }
             memmove(bridge, bridge+1, k);
             bridge[k] = (i+1 < seq.length()) ? seq[i+1] : 'X';
@@ -192,10 +192,10 @@ void DBG_succ::add_seq_fast(const std::string &seq, const std::string &annotatio
                 if (check_suffix(this, seq.c_str() + i, suffix)) {
                     if (add_anno) {
                         for (auto it = label_id.begin(); it != label_id.end(); ++it) {
-                            kmer_priv.push_back(KMer{ KMer::stokmer(seq.c_str()+i, k + 1, DBG_succ::get_alphabet_number), *it });
+                            kmer_priv.push_back(KMer{ KMer::from_string(std::string(seq.c_str() + i, k + 1), DBG_succ::get_alphabet_number), *it });
                         }
                     } else {
-                        kmer_priv.push_back(KMer{ KMer::stokmer(seq.c_str()+i, k + 1, DBG_succ::get_alphabet_number), 0 });
+                        kmer_priv.push_back(KMer{ KMer::from_string(std::string(seq.c_str() + i, k + 1), DBG_succ::get_alphabet_number), 0 });
                     }
                 }
             }
@@ -208,7 +208,7 @@ void DBG_succ::add_seq_fast(const std::string &seq, const std::string &annotatio
     if (add_bridge) {
         for (i = 0; i < k; ++i) {
             if (check_suffix(this, bridge, suffix)) {
-                kmers.push_back(KMer{ KMer::stokmer(bridge, k + 1, DBG_succ::get_alphabet_number), 0 });
+                kmers.push_back(KMer{ KMer::from_string(std::string(bridge, k + 1), DBG_succ::get_alphabet_number), 0 });
             }
             memmove(bridge, bridge+1, k);
             bridge[k] = 'X';
@@ -298,7 +298,7 @@ void DBG_succ::construct_succ(unsigned int parallel, bool add_anno) {
     /*
     std::cerr << "\n";
     for (size_t i=0;i<this->kmers.size();++i) {
-        char* curseq = kmertos(this->kmers[i].first, this->alphabet, this->alph_size);
+        char* curseq = kmer_to_s(this->kmers[i].first, this->alphabet, this->alph_size);
         std::cerr << this->kmers[i].first << "\t" << curseq+1 << " " << curseq[0] << " " << this->kmers[i].second << "\n";
         free(curseq);
     }
@@ -322,11 +322,10 @@ void DBG_succ::construct_succ(unsigned int parallel, bool add_anno) {
                 }
             }
             //set W
-            uint8_t curW = this->kmers[i].getW();
+            uint8_t curW = this->kmers[i][0];
             if (curW == 127) {
-                char* curseq = KMer::kmertos(this->kmers[i], this->alphabet, this->alph_size);
+                std::string curseq = this->kmers[i].to_string(this->alphabet);
                 std::cerr << "Failure decoding kmer " << i << "\n" << this->kmers[i] << "\n" << curseq << "\n";
-                free(curseq);
                 exit(1);
             }
             if (!curW && curpos+i)
@@ -334,7 +333,7 @@ void DBG_succ::construct_succ(unsigned int parallel, bool add_anno) {
             if (i) {
                 for (size_t j = i - 1; KMer::compare_kmer_suffix(this->kmers[j], this->kmers[i], 1); --j) {
                     //TODO: recalculating W is probably faster than doing a pragma for ordered
-                    if (this->kmers[j].getW() == curW) {
+                    if (this->kmers[j][0] == curW) {
                         curW += this->alph_size;
                         break;
                     }
@@ -352,7 +351,7 @@ void DBG_succ::construct_succ(unsigned int parallel, bool add_anno) {
         }
     }
     for (size_t i = 0; i < this->kmers.size(); ++i) {
-        char cF = KMer::getPos(this->kmers[i], this->k - 1, this->alphabet, this->alph_size);
+        char cF = this->alphabet[this->kmers[i][this->k]];
         if (cF != this->alphabet[this->lastlet]) {
             for ((this->lastlet)++; this->lastlet<this->alph_size; (this->lastlet)++) {
                 this->F[this->lastlet] = curpos + i - 1;
