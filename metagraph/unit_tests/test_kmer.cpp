@@ -76,3 +76,7 @@ TEST(KmerEncodeTest, CompareSuffixFalse) {
     test_kmer_less("ATTG", "ACTG", false);
 }
 
+TEST(KmerTest, SizeOfClass) {
+    EXPECT_TRUE(static_cast<int>(sizeof(KMer))
+                 - static_cast<int>(sizeof(std::vector<uint32_t>)) <= 56);
+}

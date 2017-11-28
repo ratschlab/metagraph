@@ -17,7 +17,7 @@ const int kMax = 1llu << kBitsPerChar;
 
 
 class KMer {
-    ui256 seq;    // kmer sequences
+    friend std::ostream& operator<<(std::ostream &os, const KMer &kmer);
 
   public:
     std::vector<uint32_t> annot;
@@ -44,10 +44,9 @@ class KMer {
 
     template <class Map>
     static KMer from_string(const std::string &seq, Map &&to_alphabet) {
-        if (seq.length() * kBitsPerChar >= 256 || seq.length() < 2) {
-            std::cerr << "String must be between lengths 2 and " << 256 / kBitsPerChar << ".\n";
-            exit(1);
-        }
+        assert(seq.length() * kBitsPerChar < 256 && seq.length() >= 2
+                && "String must be between lengths 2 and 256 / kBitsPerChar");
+
         ui256 kmer = 0;
         for (int i = seq.length() - 2; i >= 0; --i) {
             uint8_t cur = to_alphabet(seq[i]) + 1;
@@ -63,11 +62,10 @@ class KMer {
 
     std::string to_string(const std::string &alphabet) const;
 
-    friend std::ostream& operator<<(std::ostream &os, const KMer &kmer);
-
   private:
-    TAlphabet get(size_t i) const;
+    ui256 seq; // kmer sequence
 
+    TAlphabet get(size_t i) const;
 };
 
 #endif // __KMER_HPP__
