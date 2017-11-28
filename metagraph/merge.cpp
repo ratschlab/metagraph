@@ -51,10 +51,13 @@ void merge(DBG_succ *Gt,
         if (kv.at(i) < 2)
             continue;
         for (size_t a = 0; a < Gt->alph_size; a++) {
-            uint64_t sl = std::max(Gv.at(i)->pred_W(kv.at(i) - 1, a), Gv.at(i)->pred_W(kv.at(i) - 1, a + Gt->alph_size));
+            uint64_t sl = std::max(
+                Gv.at(i)->pred_W(kv.at(i) - 1, a),
+                Gv.at(i)->pred_W(kv.at(i) - 1, a + Gt->alph_size)
+            );
             if (sl == 0)
                 continue;
-            std::map<uint64_t, std::deque<TAlphabet> >::iterator la = last_added_nodes.find(a);
+            auto la = last_added_nodes.find(a);
             curr_seq = Gv.at(i)->get_node_seq(sl);
             if (la == last_added_nodes.end()
                  || utils::colexicographically_greater(curr_seq, la->second))
@@ -87,7 +90,8 @@ void merge(DBG_succ *Gt,
         std::pair<std::vector<bool>, uint64_t> smallest = utils::compare_nodes(Gv, kv, nv, cnt);
         if (cnt == 0)
             break;
-        size_t curr_k = std::max_element(smallest.first.begin(), smallest.first.end()) - smallest.first.begin();
+        size_t curr_k = std::max_element(smallest.first.begin(), smallest.first.end())
+                                 - smallest.first.begin();
         std::deque<TAlphabet> seq1 = Gv.at(curr_k)->get_node_seq(kv.at(curr_k));
         uint64_t val = Gv.at(curr_k)->get_W(kv.at(curr_k)) % Gt->alph_size;
         //std::cerr << "val: " << val << std::endl;
@@ -98,7 +102,7 @@ void merge(DBG_succ *Gt,
         //std::cerr << "inserting into W" << std::endl;
         // check whether we already added a node whose outgoing edge points to the
         // same node as the current one
-        std::map<uint64_t, std::deque<TAlphabet> >::iterator it = last_added_nodes.find(smallest.second % Gt->alph_size);
+        auto it = last_added_nodes.find(smallest.second % Gt->alph_size);
         if (it != last_added_nodes.end() && utils::seq_equal(seq1, it->second, 1)) {
             Gt->W->insert(val + Gt->alph_size, Gt->W->size());
         } else {
@@ -139,7 +143,7 @@ void merge(DBG_succ *Gt,
 * nodes into the target graph object Gt. The edges of Gm are fully traversed and nodes are added to
 * Gt if not existing yet. This function is well suited to merge small graphs into large ones.
 */
-void merge(DBG_succ* Gt, DBG_succ* Gm) {
+void merge(DBG_succ *Gt, DBG_succ *Gm) {
 
     // store all branch nodes on the way
     std::stack<BranchInfoMerge> branchnodes;
@@ -169,7 +173,10 @@ void merge(DBG_succ* Gt, DBG_succ* Gm) {
         if (added > 0 && added % 1000 == 0) {
             std::cout << "." << std::flush;
             if (added % 10000 == 0) {
-                fprintf(stdout, "merged %" PRIu64 " / %" PRIu64 " - edges %" PRIu64 " / nodes %" PRIu64 "\n",
+                fprintf(stdout, "merged %" PRIu64
+                                    " / %" PRIu64
+                              " - edges %" PRIu64
+                              " / nodes %" PRIu64 "\n",
                                 added,
                                 Gm->get_size(),
                                 Gt->W->size() - 1,
@@ -513,11 +520,12 @@ void traversalHash(DBG_succ* G) {
  * Helper function to determine the bin boundaries, given
  * a number of bins.
  */
-std::vector<std::pair<uint64_t, uint64_t> > get_bins(DBG_succ* G, uint64_t bins) {
+std::vector<std::pair<uint64_t, uint64_t>> get_bins(DBG_succ *G, uint64_t bins) {
 
     uint64_t nodes = G->rank_last(G->get_size() - 1);
     uint64_t orig_bins = bins;
-    std::cerr << "working with " << orig_bins << " orig bins; " << nodes << " nodes" <<  std::endl;
+    std::cerr << "working with " << orig_bins << " orig bins; "
+                                     << nodes << " nodes" <<  std::endl;
     if (bins > nodes) {
         std::cerr << "[WARNING] There are max "
                   << nodes << " slots available for binning. Your current choice is "
@@ -526,7 +534,7 @@ std::vector<std::pair<uint64_t, uint64_t> > get_bins(DBG_succ* G, uint64_t bins)
         bins = nodes;
     }
 
-    std::vector<std::pair<uint64_t, uint64_t> > result;
+    std::vector<std::pair<uint64_t, uint64_t>> result;
     uint64_t binsize = (nodes + bins - 1) / bins;
     uint64_t thresh = (nodes - (bins * (nodes / bins))) * binsize;
     uint64_t pos = 1;
@@ -534,8 +542,9 @@ std::vector<std::pair<uint64_t, uint64_t> > get_bins(DBG_succ* G, uint64_t bins)
         if (i >= thresh) {
             binsize = nodes / bins;
         }
-        //std::cerr << "push " << pos << " - " << this->select_last(std::min(nodes, i + binsize)) << std::endl;
-        result.push_back(std::make_pair(pos, G->select_last(std::min(nodes, i + binsize))));
+        result.push_back(
+            std::make_pair(pos, G->select_last(std::min(nodes, i + binsize)))
+        );
         pos = result.back().second + 1;
         i += binsize;
     }
@@ -557,7 +566,7 @@ std::vector<std::pair<uint64_t, uint64_t>> get_bins_relative(
                                                 uint64_t last_pos
                                             ) {
 
-    std::vector<std::pair<uint64_t, uint64_t> > result;
+    std::vector<std::pair<uint64_t, uint64_t>> result;
     uint64_t pos = (first_pos == 0) ? 1 : G_from->index_predecessor(G_to->get_node_seq(first_pos)) + 1;
     uint64_t upper;
     for (size_t i = 0; i < ref_bins.size(); i++) {
