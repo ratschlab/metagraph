@@ -177,7 +177,7 @@ void DBG_succ::add_seq_fast(const std::string &seq, const std::string &annotatio
     if (add_bridge) {
         for (i = 0; i < std::min(k, seq.length()); ++i) {
             if (check_suffix(this, bridge, suffix)) {
-                kmers.push_back(KMer{ KMer::from_string(std::string(bridge, k + 1), DBG_succ::get_alphabet_number), 0 });
+                kmers.push_back(KMer::from_string(std::string(bridge, k + 1), DBG_succ::get_alphabet_number));
             }
             memmove(bridge, bridge+1, k);
             bridge[k] = (i+1 < seq.length()) ? seq[i+1] : 'X';
@@ -192,10 +192,10 @@ void DBG_succ::add_seq_fast(const std::string &seq, const std::string &annotatio
                 if (check_suffix(this, seq.c_str() + i, suffix)) {
                     if (add_anno) {
                         for (auto it = label_id.begin(); it != label_id.end(); ++it) {
-                            kmer_priv.push_back(KMer{ KMer::from_string(std::string(seq.c_str() + i, k + 1), DBG_succ::get_alphabet_number), *it });
+                            kmer_priv.push_back(KMer::from_string(std::string(seq.c_str() + i, k + 1), DBG_succ::get_alphabet_number));
                         }
                     } else {
-                        kmer_priv.push_back(KMer{ KMer::from_string(std::string(seq.c_str() + i, k + 1), DBG_succ::get_alphabet_number), 0 });
+                        kmer_priv.push_back(KMer::from_string(std::string(seq.c_str() + i, k + 1), DBG_succ::get_alphabet_number));
                     }
                 }
             }
@@ -208,7 +208,7 @@ void DBG_succ::add_seq_fast(const std::string &seq, const std::string &annotatio
     if (add_bridge) {
         for (i = 0; i < k; ++i) {
             if (check_suffix(this, bridge, suffix)) {
-                kmers.push_back(KMer{ KMer::from_string(std::string(bridge, k + 1), DBG_succ::get_alphabet_number), 0 });
+                kmers.push_back(KMer::from_string(std::string(bridge, k + 1), DBG_succ::get_alphabet_number));
             }
             memmove(bridge, bridge+1, k);
             bridge[k] = 'X';
@@ -217,82 +217,14 @@ void DBG_succ::add_seq_fast(const std::string &seq, const std::string &annotatio
     free(bridge);
 }
 
-//removes duplicate kmers, counts coverage, and assigns labels
-std::vector<KMer>::iterator unique_count(std::vector<KMer>::iterator first,
-                                         std::vector<KMer>::iterator last,
-                                         bool add_anno) {
-
-    //Adapted from http://en.cppreference.com/w/cpp/algorithm/unique
-    if (first == last)
-        return last;
-
-    std::vector<KMer>::iterator result = first;
-    if (add_anno) {
-        /*
-        cpp_int annot;
-        if (result->annot != 0) {
-            annot = (cpp_int(1) << static_cast<size_t>(result->annot-1));
-        } else {
-            annot = 0;
-        }
-        */
-        std::vector<uint32_t> annot;
-        if (result->annot.size() > 0) {
-            annot = result->annot;
-        }
-
-        while (++first != last) {
-            if (!(*result == *first)) {
-                result->annot = annot;
-                if (++result != first) {
-                    *result = std::move(*first);
-                }
-                /*
-                if (result->annot != 0) {
-                    annot = (cpp_int(1) << static_cast<size_t>(result->annot-1));
-                } else {
-                    annot = 0;
-                }
-                */
-                if (result->annot.size() > 0) {
-                    annot = result->annot;
-                } else {
-                    annot.clear();
-                }
-
-            }
-            //if (first->annot != 0) {
-            if (first->annot.size() > 0) {
-                //num_annots = std::max(num_annots, static_cast<size_t>(first->annot));
-                //TODO: add check for first->annot being too big
-                //annot |= (cpp_int(1) << static_cast<size_t>(first->annot-1));
-                annot.push_back(first->annot.back());
-            }
-        }
-        result->annot = annot;
-    } else {
-        while (++first != last) {
-            if (!(*result == *first) && (++result != first)) {
-                *result = std::move(*first);
-            }
-        }
-    }
-    return ++result;
-}
-
-
-void DBG_succ::construct_succ(unsigned int parallel, bool add_anno) {
+void DBG_succ::construct_succ(unsigned int parallel) {
 
     // parallel sort of all kmers
     omp_set_num_threads(std::max((int)parallel,1));
     __gnu_parallel::sort(this->kmers.begin(),this->kmers.end());
-    std::vector<KMer>::iterator uniq_count = unique_count(this->kmers.begin(), this->kmers.end(), add_anno);
-    this->kmers.erase(uniq_count, this->kmers.end() );
 
-    // Annotation:
-    //TODO: set the bit vector, then store it
-    //TODO: when merging into G, keep track of the fact that this may have a different number of annotations that the rest of hte graph
-    size_t max_anno_id = this->annotation_full.size();
+    auto last = std::unique(this->kmers.begin(), this->kmers.end());
+    this->kmers.erase(last, this->kmers.end()); 
 
     //DEBUG: output kmers in current bin
     /*
@@ -342,12 +274,6 @@ void DBG_succ::construct_succ(unsigned int parallel, bool add_anno) {
                 }
             }
             this->W_stat[curpos+i] = curW;
-            /*
-            if (add_anno && this->kmers[i].annot > 0)
-                max_anno_id = std::max(max_anno_id, (size_t) msb(this->kmers[i].annot));
-            */
-            if (add_anno && this->kmers[i].annot.size() > 0)
-                max_anno_id = std::max(max_anno_id, (size_t) *std::max_element(this->kmers[i].annot.begin(), this->kmers[i].annot.end()));
         }
     }
     for (size_t i = 0; i < this->kmers.size(); ++i) {
@@ -358,45 +284,6 @@ void DBG_succ::construct_succ(unsigned int parallel, bool add_anno) {
                 if (this->alphabet[this->lastlet] == cF) {
                     break;
                 }
-            }
-        }
-    }
-    if (add_anno) {
-        for (size_t i = this->annotation_full.size(); i <= max_anno_id; ++i)
-            this->annotation_full.push_back(NULL);
-
-        #pragma omp parallel num_threads(parallel)
-        {
-            #pragma omp for nowait
-            // loop over annotation columns
-            for (size_t i = 0; i <= max_anno_id; ++i) {
-                //std::cerr << i << std::endl;
-                sdsl::bit_vector* bv = new sdsl::bit_vector(this->W_stat.size(), 0);
-                if (this->annotation_full.at(i) != NULL) {
-                    sdsl::select_support_sd<> slct = sdsl::select_support_sd<>(this->annotation_full.at(i));
-                    sdsl::rank_support_sd<> rank = sdsl::rank_support_sd<>(this->annotation_full.at(i));
-                    size_t maxrank = rank(this->annotation_full.at(i)->size());
-                    size_t idx;
-                    for (size_t j = 1; j <= maxrank; ++j) {
-                        idx = slct(j);
-                        if (idx < this->annotation_full.at(i)->size()) {
-                            bv->operator[](idx) = this->annotation_full.at(i)->operator[](idx);
-                        }
-                    }
-                }
-                for (size_t k = 0; k < this->kmers.size(); ++k) {
-                    std::vector<uint32_t>::iterator it = std::find(this->kmers.at(k).annot.begin(), this->kmers.at(k).annot.end(), i);
-                    if ((this->kmers.at(k).annot.size() > 0) && (it != this->kmers.at(k).annot.end()))
-                        bv->operator[](k + curpos) = true;
-                    /*
-                    if ((this->kmers.at(k).annot > 0) && (msb(this->kmers.at(k).annot) >= i) && ((cpp_int(1)<<i) & this->kmers.at(k).annot))
-                        bv->operator[](k + curpos) = true;
-                    */
-                }
-                if (this->annotation_full.at(i) != NULL)
-                    delete this->annotation_full.at(i);
-                this->annotation_full.at(i) = new sdsl::sd_vector<>(*bv);
-                delete bv;
             }
         }
     }

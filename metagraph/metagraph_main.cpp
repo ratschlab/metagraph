@@ -320,7 +320,7 @@ int main(int argc, const char *argv[]) {
                     //append to succinct representation and clear kmer list
                     tstart = clock();
                     std::cout << "Sorting kmers and appending succinct representation from current bin\t";
-                    graph->construct_succ(config->parallel, config->add_anno);
+                    graph->construct_succ(config->parallel);
                     std::cout << (clock()-tstart)/CLOCKS_PER_SEC << "\n\n";
                 }
                 //TODO: cleanup

@@ -20,24 +20,17 @@ class KMer {
     friend std::ostream& operator<<(std::ostream &os, const KMer &kmer);
 
   public:
-    std::vector<uint32_t> annot;
-
     KMer() {}
 
     explicit KMer(const ui256 &seq_) : seq(seq_) {}
-
-    KMer(const KMer &k, size_t annot_) : KMer(k.seq, annot_) {}
-
-    KMer(ui256 seq_, size_t annot_) : seq(seq_) {
-        if (annot_ > 0)
-            annot.push_back(annot_ - 1);
-    }
 
     TAlphabet operator[](size_t i) const { return get(i) - 1; }
 
     bool operator<(const KMer &other) const { return seq < other.seq; }
 
     bool operator==(const KMer &other) const { return seq == other.seq; }
+
+    bool operator!=(const KMer &other) const { return seq != other.seq; }
 
     static bool compare_kmer_suffix(const KMer &k1,
                                     const KMer &k2, size_t minus = 0);

@@ -77,6 +77,5 @@ TEST(KmerEncodeTest, CompareSuffixFalse) {
 }
 
 TEST(KmerTest, SizeOfClass) {
-    EXPECT_TRUE(static_cast<int>(sizeof(KMer))
-                 - static_cast<int>(sizeof(std::vector<uint32_t>)) <= 56);
+    EXPECT_EQ(sizeof(ui256), sizeof(KMer));
 }
