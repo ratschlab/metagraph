@@ -2,8 +2,8 @@
 
 
 bool KMer::compare_kmer_suffix(const KMer &k1, const KMer &k2, size_t minus) {
-    return k1.seq >> ((minus + 1) * kBitsPerChar)
-             == k2.seq >> ((minus + 1) * kBitsPerChar);
+    return k1.seq_ >> ((minus + 1) * kBitsPerChar)
+             == k2.seq_ >> ((minus + 1) * kBitsPerChar);
 }
 
 std::string KMer::to_string(const std::string &alphabet) const {
@@ -18,9 +18,9 @@ std::string KMer::to_string(const std::string &alphabet) const {
 }
 
 TAlphabet KMer::get(size_t i) const {
-    return ((seq >> (kBitsPerChar * i)) % kMax).convert_to<TAlphabet>();
+    return ((seq_ >> (kBitsPerChar * i)) % kMax).convert_to<TAlphabet>();
 }
 
 std::ostream& operator<<(std::ostream &os, const KMer &kmer) {
-    return os << kmer.seq;
+    return os << kmer.seq_;
 }

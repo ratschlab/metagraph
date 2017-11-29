@@ -20,17 +20,19 @@ class KMer {
     friend std::ostream& operator<<(std::ostream &os, const KMer &kmer);
 
   public:
-    KMer() {}
+    KMer(KMer &&other) : seq_(other.seq_) {}
+    KMer(const KMer &other) : seq_(other.seq_) {}
+    explicit KMer(ui256 &&seq) : seq_(seq) {}
+    explicit KMer(const ui256 &seq) : seq_(seq) {}
 
-    explicit KMer(const ui256 &seq_) : seq(seq_) {}
+    KMer& operator=(KMer &&other) { seq_ = other.seq_; return *this; }
+    KMer& operator=(const KMer &other) { seq_ = other.seq_; return *this; }
+
+    bool operator<(const KMer &other) const { return seq_ < other.seq_; }
+    bool operator==(const KMer &other) const { return seq_ == other.seq_; }
+    bool operator!=(const KMer &other) const { return seq_ != other.seq_; }
 
     TAlphabet operator[](size_t i) const { return get(i) - 1; }
-
-    bool operator<(const KMer &other) const { return seq < other.seq; }
-
-    bool operator==(const KMer &other) const { return seq == other.seq; }
-
-    bool operator!=(const KMer &other) const { return seq != other.seq; }
 
     static bool compare_kmer_suffix(const KMer &k1,
                                     const KMer &k2, size_t minus = 0);
@@ -56,7 +58,7 @@ class KMer {
     std::string to_string(const std::string &alphabet) const;
 
   private:
-    ui256 seq; // kmer sequence
+    ui256 seq_; // kmer sequence
 
     TAlphabet get(size_t i) const;
 };
