@@ -4,9 +4,8 @@ project(MetaGenGraph)
 enable_testing()
 
 list(APPEND CMAKE_CXX_FLAGS "\
-  -std=c++14 -Wall -Werror -O3 \
-  -msse4.2 -fopenmp -D_THREAD_SAFE -pthread \
-  -W -Wno-long-long -Wno-variadic-macros")
+  -std=c++14 -Wall -Wextra -Werror -O3 \
+  -msse4.2 -fopenmp -D_THREAD_SAFE -pthread")
 
 set(CMAKE_VERBOSE_MAKEFILE 1)
 cmake_policy(SET CMP0015 NEW)
