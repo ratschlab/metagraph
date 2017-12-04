@@ -783,7 +783,7 @@ int main(int argc, const char *argv[]) {
                 if (config->print_graph)
                     graph_->print_seq();
                 if (config->print_graph_succ)
-                    graph_->print_state_str();
+                    graph_->print_state();
 
                 std::ifstream instream((files[f] + ".anno.dbg").c_str());
                 if (instream.good()) {
@@ -944,9 +944,9 @@ int main(int argc, const char *argv[]) {
         if (!config->sqlfbase.empty())
             traverse::toSQL(graph, config->fname, config->sqlfbase);
         if (!config->outfbase.empty())
-            graph->toFile(config->outfbase
-                            + "." + std::to_string(config->part_idx)
-                            + "_" + std::to_string(config->parts_total));
+            graph->serialize(config->outfbase
+                                + "." + std::to_string(config->part_idx)
+                                + "_" + std::to_string(config->parts_total));
         delete graph;
     }
     delete config;

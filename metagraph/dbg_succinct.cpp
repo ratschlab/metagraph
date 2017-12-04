@@ -82,6 +82,35 @@ DBG_succ::~DBG_succ() {
     delete last;
 }
 
+/**
+ * Take the current graph content and store in a file.
+ */
+void DBG_succ::serialize(const std::string &outbase) const {
+    // write Wavelet Tree
+    std::ofstream outstream(outbase + ".W.dbg");
+    W->serialise(outstream);
+    outstream.close();
+
+    // write last array
+    outstream.open(outbase + ".l.dbg");
+    last->serialise(outstream);
+    outstream.close();
+
+    // write F values and k
+    outstream.open(outbase + ".F.dbg");
+    outstream << ">F" << std::endl;
+    for (size_t i = 0; i < F.size(); ++i) {
+        outstream << F.at(i) << std::endl;
+    }
+    outstream << ">k" << std::endl;
+    outstream << k_ << std::endl;
+    outstream << ">p" << std::endl;
+    outstream << p_ << std::endl;
+    outstream << ">s" << std::endl;
+    outstream << state << std::endl;
+    outstream.close();
+}
+
 bool DBG_succ::load(const std::string &infbase) {
 
     std::ifstream instream;
@@ -92,7 +121,7 @@ bool DBG_succ::load(const std::string &infbase) {
     for (size_t j = 0; j < alph_size; j++) {
         F.push_back(0);
     }
-    instream.open((infbase + ".F.dbg").c_str());
+    instream.open(infbase + ".F.dbg");
     std::string line;
     size_t mode = 0;
     size_t fidx = 0;
@@ -124,15 +153,15 @@ bool DBG_succ::load(const std::string &infbase) {
     instream.close();
 
     // load last array
-    //std::ifstream instream((infbase + ".l.dbg").c_str());
+    //std::ifstream instream(infbase + ".l.dbg");
     //last->deserialise(instream);
     //instream.close();
 
     // load W and last arrays
     delete W;
     delete last;
-    std::ifstream instream_W((infbase + ".W.dbg").c_str());
-    std::ifstream instream_l((infbase + ".l.dbg").c_str());
+    std::ifstream instream_W(infbase + ".W.dbg");
+    std::ifstream instream_l(infbase + ".l.dbg");
     switch (state) {
         case Config::DYN: {
             W = new wavelet_tree_dyn(instream_W);
@@ -862,63 +891,34 @@ void DBG_succ::switch_state(Config::StateType state) {
     }
 }
 
-//
-//
-// SERIALIZE
-//
-//
-
-/**
- * This is a debug function that prints the current state of the graph arrays to
- * the screen.
- */
-void DBG_succ::print_state() const {
-
-    fprintf(stderr, "W:\n");
-    for (uint64_t i = 0; i < W->size(); i++) {
-        fprintf(stderr, "\t%" PRIu64, (*W)[i]);
-        if (i == p_)
-            fprintf(stderr, "*");
-    }
-    fprintf(stderr, "\n");
-
-    fprintf(stderr, "last:\n");
-    for (uint64_t i = 0; i < last->size(); i++)
-        fprintf(stderr, "\t%i", (int) (*last)[i]);
-    fprintf(stderr, "\n");
-
-    fprintf(stderr, "F:\n");
-    for (uint64_t i = 0; i < F.size(); i++)
-        fprintf(stderr, "\t%i", (int) F[i]);
-    fprintf(stderr, "\n");
-
-}
-
-
 //TODO: assume that a sentinel was used during construction
-void DBG_succ::print_state_str() const {
+void DBG_succ::print_state() const {
     for (uint64_t i = 1; i < W->size(); i++) {
         std::cout << i << "\t" << get_last(i)
                        << "\t" << get_node_str(i)
                        << "\t" << decode((*W)[i])
-                       << ((*W)[i] > alph_size ? "-" : "")
-                       << (i == this->p_ ? "<" : "") << std::endl;
+                       << ((*W)[i] > alph_size
+                                   ? "-"
+                                   : "")
+                       << (i == this->p_
+                              ? "<"
+                              : "")
+                       << std::endl;
     }
 }
 
 
 void DBG_succ::print_adj_list(const std::string &filename) const {
-    if (filename != "") {
-        freopen(filename.c_str(), "w", stdout);
-    }
+    std::ofstream of;
+    std::ostream &outstream = filename != ""
+                                       ? (of = std::ofstream(filename))
+                                       : std::cout;
+
     for (uint64_t edge = 1; edge < W->size(); ++edge) {
-        fprintf(stdout, "%" PRIu64 "\t%" PRIu64 "\t",
-                        rank_last(succ_last(edge)),
-                        rank_last(outgoing(edge, (*W)[edge])));
-        fprintf(stdout, "\n");
-    }
-    if (filename != "") {
-        fclose(stdout);
+        outstream << rank_last(succ_last(edge))
+                  << "\t"
+                  << rank_last(outgoing(edge, (*W)[edge]))
+                  << "\n";
     }
 }
 
@@ -932,8 +932,9 @@ void DBG_succ::print_seq() const {
 
     uint64_t linelen = 80;
     uint64_t start = 1;
-    uint64_t end = start + linelen < W->size() ? start + linelen : W->size();
-
+    uint64_t end = start + linelen < W->size()
+                                   ? start + linelen
+                                   : W->size();
     while (start < W->size()) {
         for (uint64_t i = start; i < end; i++) {
             if (i % 10 == 0)
@@ -998,36 +999,6 @@ void DBG_succ::print_seq() const {
         start += linelen;
         end = start + linelen < W->size() ? start + linelen : W->size();
     }
-}
-
-
-/**
- * Take the current graph content and store in a file.
- */
-void DBG_succ::toFile(const std::string &outbase) const {
-    // write Wavelet Tree
-    std::ofstream outstream(outbase + ".W.dbg");
-    W->serialise(outstream);
-    outstream.close();
-
-    // write last array
-    outstream.open(outbase + ".l.dbg");
-    last->serialise(outstream);
-    outstream.close();
-
-    // write F values and k
-    outstream.open(outbase + ".F.dbg");
-    outstream << ">F" << std::endl;
-    for (size_t i = 0; i < F.size(); ++i) {
-        outstream << F.at(i) << std::endl;
-    }
-    outstream << ">k" << std::endl;
-    outstream << k_ << std::endl;
-    outstream << ">p" << std::endl;
-    outstream << p_ << std::endl;
-    outstream << ">s" << std::endl;
-    outstream << state << std::endl;
-    outstream.close();
 }
 
 

@@ -42,12 +42,11 @@ class DBG_succ { //: public GenomeGraph{
     // define an extended alphabet for W --> somehow this does not work properly as expected
     typedef uint64_t TAlphabet;
 
-    // construct empty graph instance
     DBG_succ(size_t k = 0, bool sentinel = true);
     ~DBG_succ();
 
-    // load graph instance from a provided file name base
-    bool load(const std::string &infbase);
+    bool load(const std::string &filename_base);
+    void serialize(const std::string &filename_base) const;
 
     // add a full sequence to the graph
     void add_sequence(const std::string &seq, bool append = true);
@@ -59,8 +58,9 @@ class DBG_succ { //: public GenomeGraph{
 
     void construct_succ(unsigned int parallel = 1);
 
-    /** This function takes a character c and appends it to the end of the graph sequence
-     * given that the corresponding note is not part of the graph yet.
+    /**
+     * This function takes a character c and appends it to the end of the graph
+     * sequence given that the corresponding note is not part of the graph yet.
      */
     uint64_t append_pos(uint64_t c, uint64_t *ckmer = NULL, uint64_t i = 0);
 
@@ -84,31 +84,24 @@ class DBG_succ { //: public GenomeGraph{
 
     void add_sink(unsigned int parallel = 1, std::string suffix = "");
 
-
     /**
-     * This is a debug function that prints the current state of the graph arrays to
+     * This is a debug function that prints the current representation of the graph to
      * the screen.
      */
     void print_state() const;
 
     /**
-     * This is a debug function that prints the current representation of the graph to
-     * the screen.
-     */
-    void print_state_str() const;
-    /*
      * Returns the sequence stored in W and prints the node
      * information in an overview.
      * Useful for debugging purposes.
      */
     void print_seq() const;
 
-    void print_adj_list(const std::string &filename = "") const;
-
     /**
-     * Take the current graph content and store in a file.
+     * Write the adjacency list to file |filename| or
+     * print it to stdout of the filename is not provided.
      */
-    void toFile(const std::string &outbase) const;
+    void print_adj_list(const std::string &filename = "") const;
 
     /**
     * Given a pointer to a graph structures G1 and G2, the function compares their elements to the
