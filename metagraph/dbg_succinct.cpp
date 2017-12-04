@@ -221,8 +221,8 @@ bool DBG_succ::load(const std::string &infbase) {
                 last = new bit_vector_stat(instream_l);
                 break;
             case Config::CSTR:
-                assert(false && "Never happens");
-                break;
+                assert(false && "Must not happen");
+                return false;
         }
         return true;
     } catch (...) {
