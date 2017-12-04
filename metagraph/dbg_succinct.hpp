@@ -42,13 +42,22 @@ class DBG_succ { //: public GenomeGraph{
     // define an extended alphabet for W --> somehow this does not work properly as expected
     typedef uint64_t TAlphabet;
 
-    DBG_succ(size_t k = 0, bool sentinel = true);
+    DBG_succ(size_t k = 1, bool sentinel = true);
     ~DBG_succ();
+
+    /**
+    * Perform an element wise comparison of the arrays W, last and
+    * F and will only check for identity. If any element differs, return
+    * false and true otherwise.
+    */
+    bool operator==(const DBG_succ &other) const;
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
 
-    // add a full sequence to the graph
+    /**
+     * Add a full sequence to the graph.
+     */
     void add_sequence(const std::string &seq, bool append = true);
 
     void add_sequence_fast(const std::string &seq,
@@ -57,12 +66,6 @@ class DBG_succ { //: public GenomeGraph{
                            std::string suffix = "");
 
     void construct_succ(unsigned int parallel = 1);
-
-    /**
-     * This function takes a character c and appends it to the end of the graph
-     * sequence given that the corresponding note is not part of the graph yet.
-     */
-    uint64_t append_pos(uint64_t c, uint64_t *ckmer = NULL, uint64_t i = 0);
 
     /** This function takes a pointer to a graph structure and concatenates the arrays W, last
      * and F to this graph's arrays. In almost all cases this will not produce a valid graph and
@@ -79,8 +82,6 @@ class DBG_succ { //: public GenomeGraph{
     void append_graph_static(DBG_succ *other);
 
     uint64_t remove_edges(std::set<uint64_t> &edges, uint64_t ref_point = 0);
-
-    std::deque<std::string> generate_suffices(unsigned int nsplits);
 
     void add_sink(unsigned int parallel = 1, std::string suffix = "");
 
@@ -102,14 +103,6 @@ class DBG_succ { //: public GenomeGraph{
      * print it to stdout of the filename is not provided.
      */
     void print_adj_list(const std::string &filename = "") const;
-
-    /**
-    * Given a pointer to a graph structures G1 and G2, the function compares their elements to the
-    * each other. It will perform an element wise comparison of the arrays W, last and
-    * F and will only check for identity. If any element differs, the function will return
-    * false and true otherwise.
-    */
-    bool operator==(const DBG_succ &other) const;
 
     /**
      * Given index i of a node and a value k, this function
@@ -292,6 +285,11 @@ class DBG_succ { //: public GenomeGraph{
     void switch_state(Config::StateType state);
 
   private:
+    /**
+     * This function takes a character c and appends it to the end of the graph
+     * sequence given that the corresponding note is not part of the graph yet.
+     */
+    uint64_t append_pos(uint64_t c, uint64_t *ckmer = NULL, uint64_t i = 0);
 
     /**
      * Uses the object's array W, a given position i in W and a character c

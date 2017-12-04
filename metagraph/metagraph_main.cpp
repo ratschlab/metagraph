@@ -300,7 +300,10 @@ int main(int argc, const char *argv[]) {
         case Config::BUILD: {
             if (config->infbase.size()) {
                 graph = new DBG_succ();
-                graph->load(config->infbase);
+                if (!graph->load(config->infbase)) {
+                    fprintf(stderr, "ERROR: input file corrupted\n");
+                    exit(1);
+                }
                 // graph->annotationFromFile(config->infbase + ".anno.dbg");
             } else {
                 graph = new DBG_succ(config->k);
@@ -313,7 +316,16 @@ int main(int argc, const char *argv[]) {
                 graph->switch_state(Config::CSTR);
 
                 //enumerate all suffices
-                std::deque<std::string> suffices = graph->generate_suffices(config->nsplits);
+                assert(DBG_succ::alph_size > 1);
+                size_t suffix_len = std::min(
+                    static_cast<uint64_t>(std::ceil(std::log2(config->nsplits)
+                                                    / std::log2(DBG_succ::alph_size - 1))),
+                    graph->get_k() - 1
+                );
+                auto suffices = utils::generate_strings(
+                    DBG_succ::alphabet.substr(0, DBG_succ::alph_size),
+                    suffix_len
+                );
 
                 clock_t tstart, timelast;
 
@@ -540,7 +552,10 @@ int main(int argc, const char *argv[]) {
               exit(1);
             }
             graph = new DBG_succ();
-            graph->load(config->infbase);
+            if (!graph->load(config->infbase)) {
+                fprintf(stderr, "ERROR: input file corrupted\n");
+                exit(1);
+            }
 
             // load annotatioun (if file does not exist, empty annotation is created)
             // graph->annotationFromFile(config->infbase + ".anno.dbg");
@@ -587,11 +602,17 @@ int main(int argc, const char *argv[]) {
                 if (f == 0) {
                     std::cout << "Opening file " << files[f] << std::endl;
                     graph = new DBG_succ();
-                    graph->load(files[f]);
+                    if (!graph->load(files[f])) {
+                        fprintf(stderr, "ERROR: input file corrupted\n");
+                        exit(1);
+                    }
                 } else {
                     std::cout << "Opening file for comparison ..." << files[f] << std::endl;
                     DBG_succ *graph_ = new DBG_succ();
-                    graph_->load(files[f]);
+                    if (!graph_->load(files[f])) {
+                        fprintf(stderr, "ERROR: input file corrupted\n");
+                        exit(1);
+                    }
                     if (*graph == *graph_) {
                         std::cout << "Graphs are identical" << std::endl;
                     } else {
@@ -616,16 +637,25 @@ int main(int argc, const char *argv[]) {
                             graph->W_stat.push_back(0);
                         }
                         DBG_succ* graph_to_append = new DBG_succ();
-                        graph_to_append->load(fname);
+                        if (!graph_to_append->load(fname)) {
+                            fprintf(stderr, "ERROR: input file corrupted\n");
+                            exit(1);
+                        }
                         graph->append_graph_static(graph_to_append);
                         delete graph_to_append;
                     } else {
                         if (f == 0) {
                             graph = new DBG_succ();
-                            graph->load(fname);
+                            if (!graph->load(fname)) {
+                                fprintf(stderr, "ERROR: input file corrupted\n");
+                                exit(1);
+                            }
                         } else {
                             DBG_succ* graph_to_append = new DBG_succ();
-                            graph_to_append->load(fname);
+                            if (!graph_to_append->load(fname)) {
+                                fprintf(stderr, "ERROR: input file corrupted\n");
+                                exit(1);
+                            }
                             graph->append_graph(graph_to_append);
                             delete graph_to_append;
                         }
@@ -650,7 +680,10 @@ int main(int argc, const char *argv[]) {
                 for (unsigned int f = 0; f < files.size(); ++f) {
                         std::cout << "Opening file " << files[f] << std::endl;
                         graph = new DBG_succ();
-                        graph->load(files[f]);
+                        if (!graph->load(files[f])) {
+                            fprintf(stderr, "ERROR: input file corrupted\n");
+                            exit(1);
+                        }
                         graphs.push_back(graph);
                         kv.push_back(1);
                         nv.push_back(graph->get_W().size());
@@ -749,7 +782,10 @@ int main(int argc, const char *argv[]) {
             }
             for (unsigned int f = 0; f < files.size(); ++f) {
                 DBG_succ* graph_ = new DBG_succ();
-                graph_->load(files[f]);
+                if (!graph_->load(files[f])) {
+                    fprintf(stderr, "ERROR: input file corrupted\n");
+                    exit(1);
+                }
                 /*graph_->W = new libmaus2::wavelet::DynamicWaveletTree<6, 64> (3);
                 graph_->W->insert(1ull, 0);
                 graph_->W->insert(7ull, 1);
@@ -832,7 +868,10 @@ int main(int argc, const char *argv[]) {
             //for (unsigned int f = 0; f < files.size(); ++f) {
                 //DBG_succ* graph_ = new DBG_succ(files[f]);
                 DBG_succ *graph_ = new DBG_succ();
-                graph_->load(config->infbase);
+                if (!graph_->load(config->infbase)) {
+                    fprintf(stderr, "ERROR: input file corrupted\n");
+                    exit(1);
+                }
                 // checks whether annotation exists and creates an empty one if not
                 // graph_->annotationFromFile(config->infbase + ".anno.dbg");
                 graph_->print_adj_list();
@@ -848,7 +887,10 @@ int main(int argc, const char *argv[]) {
               exit(1);
             }
             graph = new DBG_succ();
-            graph->load(config->infbase);
+            if (!graph->load(config->infbase)) {
+                fprintf(stderr, "ERROR: input file corrupted\n");
+                exit(1);
+            }
 
             for (unsigned int f = 0; f < files.size(); ++f) {
                 std::cout << "Opening file for alignment ..." << files[f] << std::endl;

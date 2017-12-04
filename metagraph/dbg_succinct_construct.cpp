@@ -612,25 +612,6 @@ uint64_t DBG_succ::remove_edges(std::set<uint64_t> &edges, uint64_t ref_point) {
     return ref_point;
 }
 
-//Given a graph and a minimum number of splits, generate a list of suffices from the alphabet
-std::deque<std::string> DBG_succ::generate_suffices(unsigned int nsplits) {
-    unsigned int suffix_len = (unsigned int) ceil(log2(nsplits) / log2(alph_size - 1));
-
-    //should be set to at most k-1 so that W calculation is correct
-    suffix_len = std::min(suffix_len, static_cast<unsigned int>(k_ - 1));
-    std::deque<std::string> suffices = { "" };
-    for (size_t i = 0; i < suffix_len; ++i) {
-         while (suffices[0].length() < suffix_len) {
-             for (size_t j = 0; j < alph_size; ++j) {
-                  suffices.push_back(alphabet[j] + suffices[0]);
-             }
-             suffices.pop_front();
-         }
-    }
-    assert(suffices.size() == pow(alph_size, suffix_len));
-    return suffices;
-}
-
 void DBG_succ::add_sink(unsigned int parallel, std::string suffix) {
     add_sequence_fast(start, false, parallel, suffix);
     add_sequence_fast(sink, true, parallel, suffix);

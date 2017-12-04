@@ -40,7 +40,7 @@ set(METALIBS
 )
 
 target_link_libraries(
-  metagengraph -lmetagraph ${METALIBS}
+  metagengraph metagraph ${METALIBS}
 )
 
 
@@ -89,6 +89,6 @@ link_directories(
 add_executable(unit_tests ${unit_tests_files})
 add_dependencies(unit_tests metagraph)
 
-target_link_libraries(unit_tests -lgtest_main -lgtest -lmetagraph ${METALIBS})
+target_link_libraries(unit_tests -lgtest_main -lgtest metagraph ${METALIBS})
 
 add_test(NAME unit_tests COMMAND unit_tests)

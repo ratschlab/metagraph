@@ -59,6 +59,9 @@ namespace utils {
 
     std::string get_filetype(const std::string &fname);
 
+    std::deque<std::string> generate_strings(const std::string &alphabet,
+                                             size_t length);
+
 } // namespace utils
 
 #endif // __UTILS_HPP__

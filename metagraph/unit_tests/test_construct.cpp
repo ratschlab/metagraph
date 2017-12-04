@@ -13,6 +13,8 @@ KSEQ_INIT(gzFile, gzread)
 
 const std::string test_data_dir = "../unit_tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
+const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
+
 
 
 DBG_succ* init_graph(size_t k = 3) {
@@ -46,6 +48,30 @@ void test_graph(DBG_succ *graph, const std::string &last,
     }
     EXPECT_EQ(ostr.str(), F);
 
+}
+
+TEST(Construct, GraphDefaultConstructor) {
+    DBG_succ *graph_ = NULL;
+
+    ASSERT_NO_THROW({
+        graph_ = new DBG_succ;
+    });
+    ASSERT_TRUE(graph_ != NULL);
+    delete graph_;
+
+    ASSERT_NO_THROW({
+        graph_ = new DBG_succ();
+    });
+    ASSERT_TRUE(graph_ != NULL);
+    delete graph_;
+
+    ASSERT_NO_THROW({
+        DBG_succ graph;
+    });
+
+    ASSERT_NO_THROW({
+        DBG_succ graph();
+    });
 }
 
 TEST(Construct, EmptyGraph) {
@@ -103,3 +129,32 @@ TEST(Construct, SmallGraphTraversal) {
     gzclose(input_p);
 }
 
+TEST(Construct, Serialization) {
+    gzFile input_p = gzopen(test_fasta.c_str(), "r");
+    kseq_t *read_stream = kseq_init(input_p);
+    ASSERT_TRUE(read_stream);
+    DBG_succ *graph = init_graph();
+    graph->add_sink();
+    for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
+        graph->add_sequence_fast(read_stream->seq.s);
+    }
+    kseq_destroy(read_stream);
+    gzclose(input_p);
+
+    graph->construct_succ();
+    graph->switch_state(Config::DYN);
+
+    //test graph construction
+    test_graph(graph, "01011110111111111111111111111001",
+                      "06241463411641812643366666131313013",
+                      "0 1 9 11 15 20 20 ",
+                      29u);
+
+    graph->serialize(test_dump_basename);
+
+    DBG_succ loaded_graph;
+    ASSERT_TRUE(loaded_graph.load(test_dump_basename)) << "Can't load the graph";
+    EXPECT_EQ(*graph, loaded_graph) << "Loaded graph differs";
+
+    delete graph;
+}

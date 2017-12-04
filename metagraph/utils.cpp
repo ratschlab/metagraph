@@ -159,4 +159,23 @@ std::string get_filetype(const std::string &fname) {
     }
 }
 
+/**
+ * Given a minimum number of splits,
+ * generate a list of suffices from the alphabet.
+ */
+std::deque<std::string> generate_strings(const std::string &alphabet,
+                                         size_t length) {
+
+    std::deque<std::string> suffices = { "" };
+    while (suffices[0].length() < length) {
+        for (const char c : alphabet) {
+            suffices.push_back(c + suffices[0]);
+        }
+        suffices.pop_front();
+    }
+    assert(suffices.size() == std::pow(alphabet.size(), length));
+    return suffices;
+}
+
+
 } // namespace utils

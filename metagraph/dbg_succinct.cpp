@@ -83,6 +83,60 @@ DBG_succ::~DBG_succ() {
 }
 
 /**
+* Given a pointer to a graph structures G1 and G2, the function compares their elements to the
+* each other. It will perform an element wise comparison of the arrays W, last and
+* F and will only check for identity. If any element differs, the function will return
+* false and true otherwise.
+*/
+bool DBG_succ::operator==(const DBG_succ &other) const {
+    // compare size
+    if (W->size() != other.W->size()) {
+        std::cerr << "sizes of graphs differ" << std::endl;
+        std::cerr << "1: " << W->size() << std::endl;
+        std::cerr << "2: " << other.W->size() << std::endl;
+        return false;
+    }
+    if (F.size() != other.F.size()) {
+        std::cerr << "sizes of F arrays differ" << std::endl;
+        std::cerr << "1: " << F.size() << std::endl;
+        std::cerr << "2: " << other.F.size() << std::endl;
+        return false;
+    }
+
+    // compare last
+    for (size_t i = 0; i < W->size(); ++i) {
+        if (get_last(i) != other.get_last(i)) {
+            std::cerr << "last differs at position " << i << std::endl;
+            std::cerr << "1: last[" << i << "] = " << get_last(i)  << std::endl;
+            std::cerr << "2: last[" << i << "] = " << other.get_last(i) << std::endl;
+            return false;
+        }
+    }
+
+    // compare W
+    for (size_t i = 0; i < W->size(); ++i) {
+        if (get_W(i) != other.get_W(i)) {
+            std::cerr << "W differs at position " << i << std::endl;
+            std::cerr << "1: W[" << i << "] = " << get_W(i)  << std::endl;
+            std::cerr << "2: W[" << i << "] = " << other.get_W(i) << std::endl;
+            return false;
+        }
+    }
+
+    // compare F
+    for (size_t i = 0; i < F.size(); ++i) {
+        if (get_F(i) != other.get_F(i)) {
+            std::cerr << "F differs at position " << i << std::endl;
+            std::cerr << "1: F[" << i << "] = " << get_F(i) << std::endl;
+            std::cerr << "2: F[" << i << "] = " << other.get_F(i) << std::endl;
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
  * Take the current graph content and store in a file.
  */
 void DBG_succ::serialize(const std::string &outbase) const {
@@ -100,84 +154,80 @@ void DBG_succ::serialize(const std::string &outbase) const {
     outstream.open(outbase + ".F.dbg");
     outstream << ">F" << std::endl;
     for (size_t i = 0; i < F.size(); ++i) {
-        outstream << F.at(i) << std::endl;
+        outstream << F.at(i) << "\n";
     }
-    outstream << ">k" << std::endl;
-    outstream << k_ << std::endl;
-    outstream << ">p" << std::endl;
-    outstream << p_ << std::endl;
-    outstream << ">s" << std::endl;
-    outstream << state << std::endl;
-    outstream.close();
+    outstream << ">k\n"
+              << k_ << "\n"
+              << ">p\n"
+              << p_ << "\n"
+              << ">s\n"
+              << state << "\n";
 }
 
 bool DBG_succ::load(const std::string &infbase) {
-
-    std::ifstream instream;
     // if not specified in the file, the default for loading is dynamic
     state = Config::DYN;
 
     // load F and k and p
-    for (size_t j = 0; j < alph_size; j++) {
-        F.push_back(0);
-    }
-    instream.open(infbase + ".F.dbg");
-    std::string line;
-    size_t mode = 0;
-    size_t fidx = 0;
-    while (std::getline(instream, line)) {
-        if (strcmp(line.c_str(), ">F") == 0) {
-            mode = 1;
-        } else if (strcmp(line.c_str(), ">k") == 0) {
-            mode = 2;
-        } else if (strcmp(line.c_str(), ">p") == 0) {
-            mode = 3;
-        } else if (strcmp(line.c_str(), ">s") == 0) {
-            mode = 4;
-        } else {
-            if (mode == 1) {
-                F.at(fidx) += std::strtoul(line.c_str(), NULL, 10);
-                fidx++;
-            } else if (mode == 2) {
-                k_ = strtoul(line.c_str(), NULL, 10);
-            } else if (mode == 3) {
-                p_ = strtoul(line.c_str(), NULL, 10);
-            } else if (mode == 4) {
-                state = static_cast<Config::StateType>(strtoul(line.c_str(), NULL, 10));
-            } else {
-                fprintf(stderr, "ERROR: input file corrupted\n");
-                exit(1);
+    F.resize(0);
+    F.reserve(alph_size);
+
+    try {
+        std::ifstream instream(infbase + ".F.dbg");
+        char mode = 0;
+        std::string cur_line;
+
+        while (std::getline(instream, cur_line)) {
+            if (cur_line[0] == '>') {
+                if (cur_line.length() < 2)
+                    return false;
+                mode = cur_line[1];
+                continue;
+            }
+            switch (mode) {
+                case 'F':
+                    F.push_back(std::stoul(cur_line));
+                    break;
+                case 'k':
+                    k_ = std::stoul(cur_line);
+                    break;
+                case 'p':
+                    p_ = std::stoul(cur_line);
+                    break;
+                case 's':
+                    state = static_cast<Config::StateType>(std::stoul(cur_line));
+                    break;
+                default:
+                    return false;
             }
         }
-    }
-    instream.close();
+        instream.close();
 
-    // load last array
-    //std::ifstream instream(infbase + ".l.dbg");
-    //last->deserialise(instream);
-    //instream.close();
+        if (F.size() != alph_size)
+            return false;
 
-    // load W and last arrays
-    delete W;
-    delete last;
-    std::ifstream instream_W(infbase + ".W.dbg");
-    std::ifstream instream_l(infbase + ".l.dbg");
-    switch (state) {
-        case Config::DYN: {
-            W = new wavelet_tree_dyn(instream_W);
-            last = new bit_vector_dyn(instream_l);
-        } break;
-        case Config::STAT: {
-            W = new wavelet_tree_stat(instream_W);
-            last = new bit_vector_stat(instream_l);
-        } break;
-        case Config::CSTR:
-            assert(false && "Never happens");
-            break;
+        // load W and last arrays
+        delete W;
+        delete last;
+        std::ifstream instream_W(infbase + ".W.dbg");
+        std::ifstream instream_l(infbase + ".l.dbg");
+        switch (state) {
+            case Config::DYN:
+                W = new wavelet_tree_dyn(instream_W);
+                last = new bit_vector_dyn(instream_l);
+                break;
+            case Config::STAT:
+                W = new wavelet_tree_stat(instream_W);
+                last = new bit_vector_stat(instream_l);
+                break;
+            case Config::CSTR:
+                assert(false && "Never happens");
+                break;
+        }
+        return true;
+    } catch (...) {
+        return false;
     }
-    instream_W.close();
-    instream_l.close();
-    return true;
 }
 
 //
@@ -999,53 +1049,4 @@ void DBG_succ::print_seq() const {
         start += linelen;
         end = start + linelen < W->size() ? start + linelen : W->size();
     }
-}
-
-
-/**
-* Given a pointer to a graph structures G1 and G2, the function compares their elements to the
-* each other. It will perform an element wise comparison of the arrays W, last and
-* F and will only check for identity. If any element differs, the function will return
-* false and true otherwise.
-*/
-bool DBG_succ::operator==(const DBG_succ &other) const {
-    // compare size
-    if (W->size() != other.W->size()) {
-        std::cerr << "sizes of graphs differ" << std::endl;
-        std::cerr << "1: " << W->size() << std::endl;
-        std::cerr << "2: " << other.W->size() << std::endl;
-        return false;
-    }
-
-    // compare last
-    for (size_t i = 0; i < W->size(); ++i) {
-        if (get_last(i) != other.get_last(i)) {
-            std::cerr << "last differs at position " << i << std::endl;
-            std::cerr << "1: last[" << i << "] = " << get_last(i)  << std::endl;
-            std::cerr << "2: last[" << i << "] = " << other.get_last(i) << std::endl;
-            return false;
-        }
-    }
-
-    // compare W
-    for (size_t i = 0; i < W->size(); ++i) {
-        if (get_W(i) != other.get_W(i)) {
-            std::cerr << "W differs at position " << i << std::endl;
-            std::cerr << "1: W[" << i << "] = " << get_W(i)  << std::endl;
-            std::cerr << "2: W[" << i << "] = " << other.get_W(i) << std::endl;
-            return false;
-        }
-    }
-
-    // compare F
-    for (size_t i = 0; i < F.size(); ++i) {
-        if (get_F(i) != other.get_F(i)) {
-            std::cerr << "F differs at position " << i << std::endl;
-            std::cerr << "1: F[" << i << "] = " << get_F(i) << std::endl;
-            std::cerr << "2: F[" << i << "] = " << other.get_F(i) << std::endl;
-            return false;
-        }
-    }
-
-    return true;
 }
