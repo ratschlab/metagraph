@@ -43,7 +43,7 @@ void DBG_succ::add_sequence(const std::string &seq, bool append) {
     if (!append) {
         ind = index(ckmer, i);
         if (!ind) {
-            ind = p;
+            ind = p_;
             i = 0;
         } else {
             if (k_ >= seq.length()) {
@@ -177,7 +177,7 @@ void DBG_succ::add_sequence_fast(const std::string &seq,
 void DBG_succ::construct_succ(unsigned int parallel) {
 
     // parallel sort of all kmers
-    omp_set_num_threads(std::max((int)parallel,1));
+    omp_set_num_threads(std::max(static_cast<int>(parallel), 1));
     __gnu_parallel::sort(this->kmers.begin(),this->kmers.end());
 
     auto last = std::unique(this->kmers.begin(), this->kmers.end());
@@ -218,7 +218,7 @@ void DBG_succ::construct_succ(unsigned int parallel) {
                 exit(1);
             }
             if (!curW && curpos+i)
-                this->p = curpos + i;
+                this->p_ = curpos + i;
             if (i) {
                 for (size_t j = i - 1; KMer::compare_kmer_suffix(this->kmers[j], this->kmers[i], 1); --j) {
                     //TODO: recalculating W is probably faster than doing a pragma for ordered
@@ -233,12 +233,14 @@ void DBG_succ::construct_succ(unsigned int parallel) {
             this->W_stat[curpos+i] = curW;
         }
     }
+    size_t lastlet = 0;
+
     for (size_t i = 0; i < this->kmers.size(); ++i) {
         char cF = this->alphabet[this->kmers[i][this->k_]];
-        if (cF != this->alphabet[this->lastlet]) {
-            for ((this->lastlet)++; this->lastlet<this->alph_size; (this->lastlet)++) {
-                this->F[this->lastlet] = curpos + i - 1;
-                if (this->alphabet[this->lastlet] == cF) {
+        if (cF != this->alphabet[lastlet]) {
+            for (lastlet++; lastlet < this->alph_size; lastlet++) {
+                this->F[lastlet] = curpos + i - 1;
+                if (this->alphabet[lastlet] == cF) {
                     break;
                 }
             }
@@ -253,22 +255,22 @@ void DBG_succ::construct_succ(unsigned int parallel) {
 uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
 
     // check that the last position of the graph is indeed a terminal
-    assert((*(this->W))[this->p] == 0);
+    assert((*(this->W))[this->p_] == 0);
     uint64_t *p;
     bool append = false;
-    uint64_t c_p = this->get_node_end_value(this->p);
+    uint64_t c_p = this->get_node_end_value(this->p_);
     // get range of identical nodes (without W) pos current end position
     std::pair<uint64_t, uint64_t> R;
-    //std::pair<uint64_t, uint64_t> R = this->get_equal_node_range(this->p);
+    //std::pair<uint64_t, uint64_t> R = this->get_equal_node_range(this->p_);
     //fprintf(stdout, "range [%i %i]\n", (int) R.first, (int) R.second);
 
     if (!i) {
-        p = &(this->p);
+        p = &(this->p_);
         append = true;
         R.second = this->succ_last(*p);
     } else {
         append = false;
-        R = this->get_equal_node_range(this->p);
+        R = this->get_equal_node_range(this->p_);
         p = &(R.first);
     }
 
@@ -291,17 +293,17 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
         if (!append) {
             //if not appending, then this has already been observed and we only need to delete the extra pointer
             for (i=0;this->W->operator[](*p)==0;++i,++(*p)) {
-                if (*p==(this->p))
+                if (*p==(this->p_))
                     continue;
-                if (this->debug) {
+                if (this->verbose) {
                     assert(i<2);
                     assert(*p < R.second);
                 }
                 this->W->remove(*p);
                 this->last->deleteBit(*p);
                 this->update_F(c_p, false);
-                if (*p <= this->p) {
-                    (this->p)--;
+                if (*p <= this->p_) {
+                    (this->p_)--;
                     assert(this->W->operator[](*p) == 0);
                 }
                 if (*p <= next_c)
@@ -336,7 +338,7 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
          */
         if (!append) {
             //we need to insert a new pointer
-            if (*p == this->p)
+            if (*p == this->p_)
                 (*p)++;
             if (this->W->operator[](*p)) {
                 //if no placeholder exists
@@ -344,9 +346,9 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
                 this->update_F(c_p, true);
                 this->last->insertBit(*p, false);
                 R.second++;
-                if (*p <= this->p) {
-                    (this->p)++;
-                    assert(this->W->operator[](this->p) == 0);
+                if (*p <= this->p_) {
+                    (this->p_)++;
+                    assert(this->W->operator[](this->p_) == 0);
                 }
             }
         }
@@ -436,9 +438,9 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
             }
             this->W->insert(0, x);
         }
-        if (*p < this->p || (!append && *p == this->p)) {
-            (this->p)++;
-            assert(this->W->operator[](this->p) == 0);
+        if (*p < this->p_ || (!append && *p == this->p_)) {
+            (this->p_)++;
+            assert(this->W->operator[](this->p_) == 0);
         }
         this->update_F(c, true);
     }
@@ -450,7 +452,7 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
     if (R.second - R.first > 0) {
         this->sort_W_locally(R.first, R.second);
         *p = R.first;
-        if (!append && *p == this->p)
+        if (!append && *p == this->p_)
             (*p)++;
         /*
         while ((*(this->W))[*p] != 0)
@@ -465,7 +467,7 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
  * and F to this graph's arrays. In almost all cases this will not produce a valid graph and
  * should only be used as a helper in the parallel merge procedure.
  */
-void DBG_succ::append_graph(DBG_succ *G, bool verbose) {
+void DBG_succ::append_graph(DBG_succ *G) {
 
     size_t curr_pos = this->W->size();
 
@@ -493,7 +495,7 @@ void DBG_succ::append_graph(DBG_succ *G, bool verbose) {
  * this will not produce a valid graph and should only be used as a helper in the
  * parallel merge procedure.
  */
-void DBG_succ::append_graph_static(DBG_succ *G, bool verbose) {
+void DBG_succ::append_graph_static(DBG_succ *G) {
 
     size_t n = G->W->size();
     if (verbose)
@@ -601,9 +603,9 @@ uint64_t DBG_succ::remove_edges(std::set<uint64_t> &edges, uint64_t ref_point) {
         //fix pointers
         if (ref_point && *x-offset <= ref_point)
             ref_point--;
-        if (*x-offset <= this->p) {
-            (this->p)--;
-            assert(this->W->operator[](this->p) == 0);
+        if (*x - offset <= this->p_) {
+            (this->p_)--;
+            assert(this->W->operator[](this->p_) == 0);
         }
         offset++;
     }

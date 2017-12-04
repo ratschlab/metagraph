@@ -191,17 +191,17 @@ const std::vector<std::string> annots = {
   "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"
 };
 
-void parallel_merge_collect(DBG_succ *result, bool verbose) {
+void parallel_merge_collect(DBG_succ *result) {
 
     for (size_t i = 0; i < merge_data->result.size(); ++i) {
         if (merge_data->result.at(i)) {
-            result->append_graph(merge_data->result.at(i), verbose);
+            result->append_graph(merge_data->result.at(i));
             delete merge_data->result.at(i);
         }
     }
     merge_data->result.clear();
     merge_data->bins_done = 0;
-    result->p = result->succ_W(1, 0);
+    result->p_ = result->succ_W(1, 0);
 }
 
 /*
@@ -265,7 +265,7 @@ void* parallel_merge_wrapper(void *config_) {
                 kv.push_back(merge_data->bins.at(i).at(curr_idx).first);
                 nv.push_back(merge_data->bins.at(i).at(curr_idx).second + 1);
             }
-            merge::merge(graph, merge_data->graphs, kv, nv, config->verbose);
+            merge::merge(graph, merge_data->graphs, kv, nv);
 
             pthread_mutex_lock (&mutex_merge_result);
             merge_data->result.at(curr_idx) = graph;
@@ -617,7 +617,7 @@ int main(int argc, const char *argv[]) {
                         }
                         DBG_succ* graph_to_append = new DBG_succ();
                         graph_to_append->load(fname);
-                        graph->append_graph_static(graph_to_append, config->verbose);
+                        graph->append_graph_static(graph_to_append);
                         delete graph_to_append;
                     } else {
                         if (f == 0) {
@@ -626,7 +626,7 @@ int main(int argc, const char *argv[]) {
                         } else {
                             DBG_succ* graph_to_append = new DBG_succ();
                             graph_to_append->load(fname);
-                            graph->append_graph(graph_to_append, config->verbose);
+                            graph->append_graph(graph_to_append);
                             delete graph_to_append;
                         }
                     }
@@ -635,7 +635,7 @@ int main(int argc, const char *argv[]) {
                     //graph->toDynamic();
                     graph->switch_state(Config::DYN);
                 }
-                graph->p = graph->succ_W(1, 0);
+                graph->p_ = graph->succ_W(1, 0);
 
             // run normal merge procedure
             } else {
@@ -725,14 +725,14 @@ int main(int argc, const char *argv[]) {
 
                     // collect results
                     std::cerr << "Collecting results" << std::endl;
-                    parallel_merge_collect(target_graph, config->verbose);
+                    parallel_merge_collect(target_graph);
 
                     graph = target_graph;
 
                     delete merge_data;
 
                 } else {
-                    merge::merge(target_graph, graphs, kv, nv, config->verbose);
+                    merge::merge(target_graph, graphs, kv, nv);
                     graph = target_graph;
                 }
                 for (size_t f = 0; f < graphs.size(); f++)

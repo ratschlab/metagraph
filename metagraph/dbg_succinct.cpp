@@ -68,11 +68,11 @@ DBG_succ::DBG_succ(size_t k, bool sentinel)
     if (sentinel) {
         for (size_t j = 1; j < alph_size; j++)
             F.push_back(1);
-        p = 1;
+        p_ = 1;
     } else {
         for (size_t j = 1; j < alph_size; j++)
             F.push_back(0);
-        p = 0;
+        p_ = 0;
     }
     state = Config::DYN;
 }
@@ -112,7 +112,7 @@ bool DBG_succ::load(const std::string &infbase) {
             } else if (mode == 2) {
                 k_ = strtoul(line.c_str(), NULL, 10);
             } else if (mode == 3) {
-                p = strtoul(line.c_str(), NULL, 10);
+                p_ = strtoul(line.c_str(), NULL, 10);
             } else if (mode == 4) {
                 state = static_cast<Config::StateType>(strtoul(line.c_str(), NULL, 10));
             } else {
@@ -877,7 +877,7 @@ void DBG_succ::print_state() const {
     fprintf(stderr, "W:\n");
     for (uint64_t i = 0; i < W->size(); i++) {
         fprintf(stderr, "\t%" PRIu64, (*W)[i]);
-        if (i == p)
+        if (i == p_)
             fprintf(stderr, "*");
     }
     fprintf(stderr, "\n");
@@ -902,7 +902,7 @@ void DBG_succ::print_state_str() const {
                        << "\t" << get_node_str(i)
                        << "\t" << decode((*W)[i])
                        << ((*W)[i] > alph_size ? "-" : "")
-                       << (i==this->p ? "<" : "") << std::endl;
+                       << (i == this->p_ ? "<" : "") << std::endl;
     }
 }
 
@@ -960,7 +960,7 @@ void DBG_succ::print_seq() const {
         std::cout << std::endl;
 
         for (uint64_t i = start; i < end; i++) {
-            if (p == i)
+            if (p_ == i)
                 fprintf(stdout, "*");
             else
                 fprintf(stdout, " ");
@@ -1024,7 +1024,7 @@ void DBG_succ::toFile(const std::string &outbase) const {
     outstream << ">k" << std::endl;
     outstream << k_ << std::endl;
     outstream << ">p" << std::endl;
-    outstream << p << std::endl;
+    outstream << p_ << std::endl;
     outstream << ">s" << std::endl;
     outstream << state << std::endl;
     outstream.close();

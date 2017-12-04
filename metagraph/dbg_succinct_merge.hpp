@@ -16,8 +16,7 @@ namespace merge {
     void merge(DBG_succ *Gt,
                std::vector<DBG_succ*> Gv,
                std::vector<uint64_t> kv,
-               std::vector<uint64_t> nv,
-               bool verbose);
+               std::vector<uint64_t> nv);
 
     /**
     * Heavily borrowing from the graph sequence traversal, this function gets a graph pointer |mergeable| and merges its

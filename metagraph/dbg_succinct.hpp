@@ -37,8 +37,7 @@ class DBG_succ { //: public GenomeGraph{
     friend void merge::merge(DBG_succ *Gt,
                              std::vector<DBG_succ*> Gv,
                              std::vector<uint64_t> kv,
-                             std::vector<uint64_t> nv,
-                             bool verbose);
+                             std::vector<uint64_t> nv);
   public:
     // define an extended alphabet for W --> somehow this does not work properly as expected
     typedef uint64_t TAlphabet;
@@ -69,7 +68,7 @@ class DBG_succ { //: public GenomeGraph{
      * and F to this graph's arrays. In almost all cases this will not produce a valid graph and
      * should only be used as a helper in the parallel merge procedure.
      */
-    void append_graph(DBG_succ *other, bool verbose);
+    void append_graph(DBG_succ *other);
 
     /**
      * This function takes a pointer to a graph structure and concatenates the arrays W, last
@@ -77,7 +76,7 @@ class DBG_succ { //: public GenomeGraph{
      * this will not produce a valid graph and should only be used as a helper in the
      * parallel merge procedure.
      */
-    void append_graph_static(DBG_succ *other, bool verbose);
+    void append_graph_static(DBG_succ *other);
 
     uint64_t remove_edges(std::set<uint64_t> &edges, uint64_t ref_point = 0);
 
@@ -130,9 +129,6 @@ class DBG_succ { //: public GenomeGraph{
     //an even ID indicates that it's a normal kmer, an odd ID indicates that it's a bridge
     std::vector<KMer> kmers;
 
-    //store the position of the last character position modified in F
-    size_t lastlet = 0;
-
     // the bit array indicating the last outgoing edge of a node
     bit_vector *last = new bit_vector_dyn();
 
@@ -160,7 +156,7 @@ class DBG_succ { //: public GenomeGraph{
     size_t k_;
 
     // index of position that marks end in graph
-    uint64_t p;
+    uint64_t p_;
 
     static const std::string alphabet;
     static const size_t alph_size;
@@ -173,9 +169,9 @@ class DBG_succ { //: public GenomeGraph{
     std::string sink;
 
 #ifdef DBGDEBUG
-    bool debug = true;
+    bool verbose = true;
 #else
-    bool debug = false;
+    bool verbose = false;
 #endif
 
     /**
@@ -365,11 +361,13 @@ class DBG_succ { //: public GenomeGraph{
      */
     template <class T>
     uint64_t index(const T &str, uint64_t length) const {
-        std::pair<uint64_t, uint64_t> range = index_range<T>(str, length);
+        auto range = index_range(str, length);
         if (range.first == 0 && range.second == 0) {
             return 0;
         } else {
-            return (range.second > range.first) ? range.second : range.first;
+            return range.second > range.first
+                                    ? range.second
+                                    : range.first;
         }
     }
 

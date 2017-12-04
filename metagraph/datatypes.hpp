@@ -64,7 +64,7 @@ class bit_vector {
 };
 
 
-inline std::ostream& operator<<(std::ostream& os, const bit_vector &bv) {
+inline std::ostream& operator<<(std::ostream &os, const bit_vector &bv) {
     bv.print(os);
     return os;
 }

@@ -15,8 +15,8 @@ const std::string test_data_dir = "../unit_tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
 
 
-DBG_succ* init_graph() {
-    DBG_succ *graph = new DBG_succ(3, NULL);
+DBG_succ* init_graph(size_t k = 3) {
+    DBG_succ *graph = new DBG_succ(k, NULL);
     assert(graph);
     graph->add_sink();
     graph->switch_state(Config::CSTR);
@@ -28,8 +28,9 @@ void construct_succ(DBG_succ *graph) {
     graph->switch_state(Config::DYN);
 }
 
-void test_graph(DBG_succ *graph, const std::string& last, const std::string& W,
-                                 const std::string& F, const size_t& p) {
+void test_graph(DBG_succ *graph, const std::string &last,
+                                 const std::string &W,
+                                 const std::string &F, const size_t &p) {
     std::ostringstream ostr;
     ostr << *(graph->last);
     EXPECT_EQ(ostr.str(), last);
@@ -39,7 +40,7 @@ void test_graph(DBG_succ *graph, const std::string& last, const std::string& W,
     EXPECT_EQ(ostr.str(), W);
     ostr.clear();
     ostr.str("");
-    EXPECT_EQ(graph->p, p);
+    EXPECT_EQ(graph->p_, p);
     for (size_t i = 0; i < graph->F.size(); ++i) {
         ostr << graph->F[i] << " ";
     }
@@ -83,7 +84,7 @@ TEST(Construct, SmallGraphTraversal) {
         //test forward traversal given an output edge label
         EXPECT_EQ(graph->outgoing(i + 1, graph->get_W(i + 1)), outgoing_edges[i]);
         //test that there is only one terminus
-        auto sink_rank = graph->get_equal_node_range(graph->p);
+        auto sink_rank = graph->get_equal_node_range(graph->p_);
         if (i + 1 < sink_rank.first || i + 1 > sink_rank.second) {
             EXPECT_EQ(graph->outgoing(i + 1, 0), 0u);
         } else {
