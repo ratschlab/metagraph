@@ -5,6 +5,8 @@
 #include <htslib/kseq.h>
 #include "gtest/gtest.h"
 
+#define private public
+
 #include "dbg_succinct.hpp"
 
 KSEQ_INIT(gzFile, gzread)
@@ -26,7 +28,8 @@ void construct_succ(DBG_succ *graph) {
     graph->switch_state(Config::DYN);
 }
 
-void test_graph(DBG_succ *graph, const std::string& last, const std::string& W, const std::string& F, const size_t& p) {
+void test_graph(DBG_succ *graph, const std::string& last, const std::string& W,
+                                 const std::string& F, const size_t& p) {
     std::ostringstream ostr;
     ostr << *(graph->last);
     EXPECT_EQ(ostr.str(), last);
@@ -59,17 +62,22 @@ TEST(Construct, SmallGraphTraversal) {
     DBG_succ *graph = init_graph();
     graph->add_sink();
     for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
-        graph->add_seq_fast(read_stream->seq.s);
+        graph->add_sequence_fast(read_stream->seq.s);
     }
     graph->construct_succ();
     graph->switch_state(Config::DYN);
 
     //test graph construction
-    test_graph(graph, "01011110111111111111111111111001", "06241463411641812643366666131313013", "0 1 9 11 15 20 20 ", 29u);
+    test_graph(graph, "01011110111111111111111111111001",
+                      "06241463411641812643366666131313013",
+                      "0 1 9 11 15 20 20 ",
+                      29u);
 
     //traversal
-    std::vector<size_t> outgoing_edges = {21, 10, 16, 3, 17, 22, 12, 18, 4, 5, 23, 19, 6, 6, 8, 11, 24, 20, 13, 14, 25, 26, 27, 28, 31, 31, 31, 31, 1, 9, 15};
-    assert(outgoing_edges.size() == graph->get_edge_count());
+    std::vector<size_t> outgoing_edges = { 21, 10, 16, 3, 17, 22, 12, 18, 4, 5,
+                                           23, 19, 6, 6, 8, 11, 24, 20, 13, 14,
+                                           25, 26, 27, 28, 31, 31, 31, 31, 1, 9, 15 };
+    assert(outgoing_edges.size() == graph->num_edges());
     std::vector<size_t> incoming_edges = {};
     for (size_t i = 0; i < outgoing_edges.size(); ++i) {
         //test forward traversal given an output edge label
@@ -84,7 +92,8 @@ TEST(Construct, SmallGraphTraversal) {
         //test FM index property
         if (graph->get_W(i + 1) < graph->alph_size) {
             EXPECT_TRUE(graph->get_last(graph->fwd(i + 1)));
-            EXPECT_EQ(graph->get_W(i + 1), graph->get_node_end_value(graph->fwd(i + 1)));
+            EXPECT_EQ(graph->get_W(i + 1),
+                      graph->get_node_end_value(graph->fwd(i + 1)));
         }
     }
 

@@ -8,7 +8,7 @@
 
 
 // add a full sequence to the graph
-void DBG_succ::add_seq(kstring_t &seq, bool append) {
+void DBG_succ::add_sequence(const std::string &seq, bool append) {
 
 #ifdef DBGDEBUG
     print_seq();
@@ -18,7 +18,7 @@ void DBG_succ::add_seq(kstring_t &seq, bool append) {
 
     // Padding of the input genome / read
     if (W->size() == 2) {
-        for (size_t j = 0; j < k; j++) {
+        for (size_t j = 0; j < k_; j++) {
             append_pos(6);
 #ifdef DBGDEBUG
             print_seq();
@@ -33,8 +33,8 @@ void DBG_succ::add_seq(kstring_t &seq, bool append) {
      */
 
     size_t i;
-    uint64_t *ckmer = new uint64_t[k+1];
-    for (i = 0; i < std::min(seq.l, k); ++i) {
+    uint64_t *ckmer = new uint64_t[k_ + 1];
+    for (i = 0; i < std::min(seq.length(), k_); ++i) {
         ckmer[i] = 6;
     }
     ckmer[i] = 0;
@@ -46,29 +46,29 @@ void DBG_succ::add_seq(kstring_t &seq, bool append) {
             ind = p;
             i = 0;
         } else {
-            if (k >= seq.l) {
+            if (k_ >= seq.length()) {
                 delete[] ckmer;
                 return;
             }
-            i = k;
+            i = k_;
         }
     } else {
         i = 0;
         ind = 0;
     }
-    for (; i < seq.l; ++i) {
+    for (; i < seq.length(); ++i) {
         if (i > 0 && i % 1'000 == 0) {
             std::cout << "." << std::flush;
             if (i % 10'000 == 0) {
                 fprintf(stdout, "%lu - edges %" PRIu64 " / nodes %" PRIu64 "\n",
-                                i, get_edge_count(), get_node_count());
+                                i, num_edges(), num_nodes());
             }
         }
 
-        c = get_alphabet_number(seq.s[i]);
+        c = encode(seq[i]);
         ind = append_pos(c, ckmer, ind) * !append;
-        memmove(ckmer, &ckmer[1], sizeof(uint64_t)*(k-1));
-        ckmer[k-1] = c;
+        memmove(ckmer, &ckmer[1], sizeof(uint64_t)*(k_ - 1));
+        ckmer[k_ - 1] = c;
 
 #ifdef DBGDEBUG
         print_seq();
@@ -79,10 +79,10 @@ void DBG_succ::add_seq(kstring_t &seq, bool append) {
     assert(!append || W->operator[](ind)==0);
     // Padding after sequence to get back into default state.
     if (W->operator[](ind)==0) {
-        for (size_t j = 0; j < k; j++) {
+        for (size_t j = 0; j < k_; j++) {
             ind = append_pos(6, ckmer, ind) * !append;
-            memmove(ckmer, &ckmer[1], sizeof(uint64_t)*(k-1));
-            ckmer[k-1] = 6;
+            memmove(ckmer, &ckmer[1], sizeof(uint64_t)*(k_ - 1));
+            ckmer[k_ - 1] = 6;
 #ifdef DBGDEBUG
             print_seq();
             print_state();
@@ -94,24 +94,24 @@ void DBG_succ::add_seq(kstring_t &seq, bool append) {
     }
 
     fprintf(stdout, "edges %" PRIu64 " / nodes %" PRIu64 "\n",
-                    get_edge_count(), get_node_count());
+                    num_edges(), num_nodes());
     delete[] ckmer;
 }
 
 
 bool check_suffix(DBG_succ *G, const char *target, std::string& suffix) {
 
-    std::string cursuff = std::string(target + G->k - suffix.length(), target + G->k);
+    std::string cursuff = std::string(target + G->k_ - suffix.length(), target + G->k_);
 
     for (auto it = cursuff.begin(); it != cursuff.end(); ++it) {
-        *it = G->alphabet[static_cast<uint8_t>(DBG_succ::get_alphabet_number(*it))];
+        *it = G->alphabet[static_cast<uint8_t>(DBG_succ::encode(*it))];
     }
     return cursuff == suffix;
 }
 
 
-void DBG_succ::add_seq_fast(const std::string &seq,
-                            bool add_bridge, unsigned int parallel,
+void DBG_succ::add_sequence_fast(const std::string &seq,
+                                 bool add_bridge, unsigned int parallel,
                             std::string suffix) {
 
 #ifdef DBGDEBUG
@@ -127,48 +127,48 @@ void DBG_succ::add_seq_fast(const std::string &seq,
         return;
     }
 
-	char *bridge = (char*) malloc(k+2);
-    memset(bridge, 'X', k);
-    bridge[k] = seq[0];
-    bridge[k+1] = 0;
+	char *bridge = (char*) malloc(k_ + 2);
+    memset(bridge, 'X', k_);
+    bridge[k_] = seq[0];
+    bridge[k_ + 1] = 0;
 
     size_t i = 0;
     //std::cout << "Loading next sequence with " << parallel << " threads\n";
     if (add_bridge) {
-        for (i = 0; i < std::min(k, seq.length()); ++i) {
+        for (i = 0; i < std::min(k_, seq.length()); ++i) {
             if (check_suffix(this, bridge, suffix)) {
-                kmers.push_back(KMer::from_string(std::string(bridge, k + 1), DBG_succ::get_alphabet_number));
+                kmers.push_back(KMer::from_string(std::string(bridge, k_ + 1), DBG_succ::encode));
             }
-            memmove(bridge, bridge+1, k);
-            bridge[k] = (i+1 < seq.length()) ? seq[i+1] : 'X';
+            memmove(bridge, bridge+1, k_);
+            bridge[k_] = (i+1 < seq.length()) ? seq[i+1] : 'X';
         }
     }
-    if (k < seq.length()) {
+    if (k_ < seq.length()) {
         #pragma omp parallel num_threads(parallel)
         {
             std::vector<KMer> kmer_priv;
             #pragma omp for nowait
-            for (i = 0; i < seq.length() - k; ++i) {
+            for (i = 0; i < seq.length() - k_; ++i) {
                 if (check_suffix(this, seq.c_str() + i, suffix)) {
                     kmer_priv.push_back(KMer::from_string(
-                        std::string(seq.c_str() + i, k + 1),
-                        DBG_succ::get_alphabet_number
+                        std::string(seq.c_str() + i, k_ + 1),
+                        DBG_succ::encode
                     ));
                 }
             }
             #pragma omp critical
             kmers.insert(kmers.end(), std::make_move_iterator(kmer_priv.begin()), std::make_move_iterator(kmer_priv.end()));
         }
-        memcpy(bridge, seq.c_str() + seq.length() - k, k);
-        bridge[k]='X';
+        memcpy(bridge, seq.c_str() + seq.length() - k_, k_);
+        bridge[k_]='X';
     }
     if (add_bridge) {
-        for (i = 0; i < k; ++i) {
+        for (i = 0; i < k_; ++i) {
             if (check_suffix(this, bridge, suffix)) {
-                kmers.push_back(KMer::from_string(std::string(bridge, k + 1), DBG_succ::get_alphabet_number));
+                kmers.push_back(KMer::from_string(std::string(bridge, k_ + 1), DBG_succ::encode));
             }
-            memmove(bridge, bridge+1, k);
-            bridge[k] = 'X';
+            memmove(bridge, bridge+1, k_);
+            bridge[k_] = 'X';
         }
     }
     free(bridge);
@@ -234,7 +234,7 @@ void DBG_succ::construct_succ(unsigned int parallel) {
         }
     }
     for (size_t i = 0; i < this->kmers.size(); ++i) {
-        char cF = this->alphabet[this->kmers[i][this->k]];
+        char cF = this->alphabet[this->kmers[i][this->k_]];
         if (cF != this->alphabet[this->lastlet]) {
             for ((this->lastlet)++; this->lastlet<this->alph_size; (this->lastlet)++) {
                 this->F[this->lastlet] = curpos + i - 1;
@@ -382,11 +382,11 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
                     minus2 = this->compare_node_suffix(*p, next_c);
                 }
                 if (minus2) {
-                    this->replaceW(next_c, (*(this->W))[next_c] + this->alph_size);
+                    this->W_set_value(next_c, (*(this->W))[next_c] + this->alph_size);
                 }
             }
 
-            this->replaceW(*p, minus1 ? c + this->alph_size : c);
+            this->W_set_value(*p, minus1 ? c + this->alph_size : c);
             // after we are done, assert that the order within the range we created
             // is still valid within W
             if (*p - R.second > 0) {
@@ -423,13 +423,13 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
                     minus = this->compare_node_suffix(*p, next_c);
                 }
             }
-            this->replaceW(*p, c);
+            this->W_set_value(*p, c);
             if (*p - R.second > 0) {
                 this->sort_W_locally(*p, R.second);
             }
             *p = x;
             if (minus) {
-                this->replaceW(next_c, (*(this->W))[next_c] + this->alph_size);
+                this->W_set_value(next_c, (*(this->W))[next_c] + this->alph_size);
                 this->last->insertBit(x, false);
             } else {
                 this->last->insertBit(x, true);
@@ -467,12 +467,12 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
  */
 void DBG_succ::append_graph(DBG_succ *G, bool verbose) {
 
-    size_t curr_pos = this->get_size();
+    size_t curr_pos = this->W->size();
 
     if (verbose)
-        std::cout << "    adding " << G->get_size() << " edges" << std::endl;
+        std::cout << "    adding " << G->W->size() << " edges" << std::endl;
     // handle last and W
-    for (size_t j = 1; j < G->get_size(); ++j) {
+    for (size_t j = 1; j < G->W->size(); ++j) {
         this->last->insertBit(curr_pos, G->get_last(j));
         this->W->insert(G->get_W(j), curr_pos);
         ++curr_pos;
@@ -495,7 +495,7 @@ void DBG_succ::append_graph(DBG_succ *G, bool verbose) {
  */
 void DBG_succ::append_graph_static(DBG_succ *G, bool verbose) {
 
-    size_t n = G->get_size();
+    size_t n = G->W->size();
     if (verbose)
         std::cout << "    adding " << n << " edges" << std::endl;
 
@@ -584,7 +584,7 @@ uint64_t DBG_succ::remove_edges(std::set<uint64_t> &edges, uint64_t ref_point) {
             j = this->succ_W(*x-offset + 1, d);
             for (i = *x - offset + 1; i < j; ++i) {
                 if (this->W->operator[](i) == d + this->alph_size) {
-                    this->replaceW(i, d);
+                    this->W_set_value(i, d);
                     break;
                 }
             }
@@ -615,8 +615,8 @@ std::deque<std::string> DBG_succ::generate_suffices(unsigned int nsplits) {
     unsigned int suffix_len = (unsigned int) ceil(log2(nsplits) / log2(alph_size - 1));
 
     //should be set to at most k-1 so that W calculation is correct
-    suffix_len = std::min(suffix_len, (unsigned int) k - 1);
-    std::deque<std::string> suffices = {""};
+    suffix_len = std::min(suffix_len, static_cast<unsigned int>(k_ - 1));
+    std::deque<std::string> suffices = { "" };
     for (size_t i = 0; i < suffix_len; ++i) {
          while (suffices[0].length() < suffix_len) {
              for (size_t j = 0; j < alph_size; ++j) {
@@ -630,6 +630,6 @@ std::deque<std::string> DBG_succ::generate_suffices(unsigned int nsplits) {
 }
 
 void DBG_succ::add_sink(unsigned int parallel, std::string suffix) {
-    add_seq_fast(std::string(start.s, start.l), false, parallel, suffix);
-    add_seq_fast(std::string(graphsink.s, graphsink.l), true, parallel, suffix);
+    add_sequence_fast(start, false, parallel, suffix);
+    add_sequence_fast(sink, true, parallel, suffix);
 }

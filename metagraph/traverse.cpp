@@ -134,7 +134,7 @@ bool finish_sequence(std::string &sequence,
 }
 
 
-size_t traverseGraph(DBG_succ* G,
+size_t traverseGraph(DBG_succ *G,
                      std::vector<JoinInfo> &joins,
                      std::map<std::pair<uint64_t, DBG_succ::TAlphabet>, uint64_t> &branchMap,
                      const std::string &sqlfbase,
@@ -190,7 +190,7 @@ size_t traverseGraph(DBG_succ* G,
             seqPos += isFirst ? 0 : 1;
             isFirst = false;
             val = G->get_node_end_value(nodeId);
-            sequence.append(1, G->get_alphabet_symbol(val % G->alph_size));
+            sequence.append(1, G->decode(val % G->alph_size));
             // store seq position of this node (we will join to it later)
             if (G->indegree(nodeId) > 1) {
                 nodeId2seqPos.insert(std::make_pair(nodeId, std::make_pair(seqId, seqPos)));
@@ -401,7 +401,7 @@ void allelesFromSeq(DBG_succ* G, kstring_t &seq, unsigned int f,
             currStart++;
             continue;
         }
-        seqVal = G->get_alphabet_number(seq.s[seqPos]);
+        seqVal = G->encode(seq.s[seqPos]);
 
         assert(nodeVal % G->alph_size == 6 || nodeVal % G->alph_size == seqVal);
         if (seqPos + 1 == seq.l)
@@ -411,7 +411,7 @@ void allelesFromSeq(DBG_succ* G, kstring_t &seq, unsigned int f,
         } else {
             currStart++;
         }
-        seqValNext = G->get_alphabet_number(seq.s[seqPos]) + 1;
+        seqValNext = G->encode(seq.s[seqPos]) + 1;
 
         // find edge to next node
         out = G->outdegree(nodeId);

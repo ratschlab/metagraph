@@ -3,6 +3,7 @@
 #include <unistd.h>
 
 #include "utils.hpp"
+#include "dbg_succinct.hpp"
 
 
 namespace merge {
@@ -36,9 +37,9 @@ void merge(DBG_succ *Gt,
             exit(1);
         }
         // positions in the graph for respective traversal
-        nv.at(i) = (nv.at(i) == 0) ? Gv.at(i)->get_size() : nv.at(i);
+        nv.at(i) = (nv.at(i) == 0) ? Gv.at(i)->get_W().size() : nv.at(i);
         // handle special cases where one or both input graphs are empty
-        kv.at(i) = (kv.at(i) == 0) ? Gv.at(i)->get_size() : kv.at(i);
+        kv.at(i) = (kv.at(i) == 0) ? Gv.at(i)->get_W().size() : kv.at(i);
         //std::cerr << "k(" << i << ") " << kv.at(i) << " n(" << i << ") " << nv.at(i) << std::endl;
     }
 
@@ -82,7 +83,7 @@ void merge(DBG_succ *Gt,
             if (added % 10000 == 0) {
                 std::cout << "added " << added;
                 for (size_t i = 0; i < Gv.size(); i++)
-                    std::cout << " - G" << i << ": edge " << kv.at(i) << "/" << Gv.at(i)->get_size();
+                    std::cout << " - G" << i << ": edge " << kv.at(i) << "/" << Gv.at(i)->get_W().size();
                 std::cout << std::endl;
             }
         }
@@ -149,7 +150,7 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
     // store all branch nodes on the way
     std::stack<BranchInfoMerge> branchnodes;
     // bool vector that keeps track of visited nodes
-    std::vector<bool> visited(Gm->get_size());
+    std::vector<bool> visited(Gm->get_W().size());
     for (std::vector<bool>::iterator it = visited.begin(); it != visited.end(); ++it) {
         *it = false;
     }
@@ -179,7 +180,7 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
                               " - edges %" PRIu64
                               " / nodes %" PRIu64 "\n",
                                 added,
-                                Gm->get_size(),
+                                Gm->get_W().size(),
                                 Gt->W->size() - 1,
                                 Gt->rank_last((Gt->last->size() - 1)));
             }
@@ -228,7 +229,7 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
             //std::cerr << "current val " << val % alph_size << " nodeID: " << nodeId << std::endl;
             //G->print_seq();
             last_k.push_back(Gm->get_node_end_value(nodeId));
-            if (last_k.size() > Gt->k)
+            if (last_k.size() > Gt->k_)
                 last_k.pop_front();
         }
 
@@ -362,7 +363,7 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
     }
     // bring graph into default state
     std::deque<TAlphabet> tmp_p;
-    for (size_t t = 0; t < Gt->k; t++)
+    for (size_t t = 0; t < Gt->k_; t++)
         tmp_p.push_back(6);
     uint64_t old_p = Gt->pred_last(Gt->index(tmp_p, tmp_p.size()) - 1) + 1;
 
@@ -404,7 +405,7 @@ void traversalHash(DBG_succ* G) {
     // store all branch nodes on the way
     std::stack<BranchInfoMerge> branchnodes;
     // bool vector that keeps track of visited nodes
-    std::vector<bool> visited(G->get_size());
+    std::vector<bool> visited(G->get_W().size());
     for (std::vector<bool>::iterator it = visited.begin(); it != visited.end(); ++it) {
         *it = false;
     }
@@ -441,9 +442,9 @@ void traversalHash(DBG_succ* G) {
         if (!visited.at(nodeId)) {
             visited.at(nodeId) = true;
             last_k.push_back(G->get_node_end_value(nodeId));
-            if (last_k.size() < G->k)
+            if (last_k.size() < G->k_)
                 last_k = G->get_node_seq(nodeId);
-            if (last_k.size() > G->k)
+            if (last_k.size() > G->k_)
                 last_k.pop_front();
         }
 
@@ -512,75 +513,8 @@ void traversalHash(DBG_succ* G) {
         out = G->outdegree(nodeId);
     }
     // handle current end
-    std::cout << " " << G->get_alphabet_symbol(0) << " " << G->p;
+    std::cout << " " << G->decode(0) << " " << G->p;
     std::cout << std::endl;
 }
 
-
-/*
- * Helper function to determine the bin boundaries, given
- * a number of bins.
- */
-std::vector<std::pair<uint64_t, uint64_t>> get_bins(DBG_succ *G, uint64_t bins) {
-
-    uint64_t nodes = G->rank_last(G->get_size() - 1);
-    uint64_t orig_bins = bins;
-    std::cerr << "working with " << orig_bins << " orig bins; "
-                                     << nodes << " nodes" <<  std::endl;
-    if (bins > nodes) {
-        std::cerr << "[WARNING] There are max "
-                  << nodes << " slots available for binning. Your current choice is "
-                  << bins << " which will create "
-                  << bins - nodes << " empty slots." << std::endl;
-        bins = nodes;
-    }
-
-    std::vector<std::pair<uint64_t, uint64_t>> result;
-    uint64_t binsize = (nodes + bins - 1) / bins;
-    uint64_t thresh = (nodes - (bins * (nodes / bins))) * binsize;
-    uint64_t pos = 1;
-    for (uint64_t i = 0; i < nodes;) {
-        if (i >= thresh) {
-            binsize = nodes / bins;
-        }
-        result.push_back(
-            std::make_pair(pos, G->select_last(std::min(nodes, i + binsize)))
-        );
-        pos = result.back().second + 1;
-        i += binsize;
-    }
-
-    for (uint64_t i = bins; i < orig_bins; i++) {
-        //result.push_back(std::make_pair(pos, pos));
-        result.push_back(std::make_pair(1, 0));
-    }
-
-    std::cerr << "created " << result.size() << " bins" << std::endl;
-    return result;
-}
-
-std::vector<std::pair<uint64_t, uint64_t>> get_bins_relative(
-                                                DBG_succ* G_from,
-                                                DBG_succ* G_to,
-                                                std::vector<std::pair<uint64_t, uint64_t>> ref_bins,
-                                                uint64_t first_pos,
-                                                uint64_t last_pos
-                                            ) {
-
-    std::vector<std::pair<uint64_t, uint64_t>> result;
-    uint64_t pos = (first_pos == 0) ? 1 : G_from->index_predecessor(G_to->get_node_seq(first_pos)) + 1;
-    uint64_t upper;
-    for (size_t i = 0; i < ref_bins.size(); i++) {
-        if (ref_bins.at(i).second == 0) { // this happens if we have more bins than nodes
-            result.push_back(std::make_pair(0, 0));
-        } else {
-            upper = G_from->index_predecessor(G_to->get_node_seq(ref_bins.at(i).second));
-            std::cerr << "ref bin " << ref_bins.at(i).second << " rel upper " << upper << std::endl;
-            result.push_back(std::make_pair(pos, upper));
-            pos = upper + 1;
-        }
-    }
-    result.back().second = (last_pos == 0) ? G_from->get_size() - 1 : result.back().second;
-    return result;
-}
-}
+} // namespace merge

@@ -15,6 +15,75 @@
 KSEQ_INIT(gzFile, gzread)
 
 
+/*
+ * Helper function to determine the bin boundaries, given
+ * a number of bins.
+ */
+std::vector<std::pair<uint64_t, uint64_t>> get_bins(DBG_succ *G, uint64_t bins) {
+
+    uint64_t nodes = G->rank_last(G->get_W().size() - 1);
+    uint64_t orig_bins = bins;
+    std::cerr << "working with " << orig_bins << " orig bins; "
+                                     << nodes << " nodes" <<  std::endl;
+    if (bins > nodes) {
+        std::cerr << "[WARNING] There are max "
+                  << nodes << " slots available for binning. Your current choice is "
+                  << bins << " which will create "
+                  << bins - nodes << " empty slots." << std::endl;
+        bins = nodes;
+    }
+
+    std::vector<std::pair<uint64_t, uint64_t>> result;
+    uint64_t binsize = (nodes + bins - 1) / bins;
+    uint64_t thresh = (nodes - (bins * (nodes / bins))) * binsize;
+    uint64_t pos = 1;
+    for (uint64_t i = 0; i < nodes;) {
+        if (i >= thresh) {
+            binsize = nodes / bins;
+        }
+        result.push_back(
+            std::make_pair(pos, G->select_last(std::min(nodes, i + binsize)))
+        );
+        pos = result.back().second + 1;
+        i += binsize;
+    }
+
+    for (uint64_t i = bins; i < orig_bins; i++) {
+        //result.push_back(std::make_pair(pos, pos));
+        result.push_back(std::make_pair(1, 0));
+    }
+
+    std::cerr << "created " << result.size() << " bins" << std::endl;
+    return result;
+}
+
+
+std::vector<std::pair<uint64_t, uint64_t>> get_bins_relative(
+                                                DBG_succ* G_from,
+                                                DBG_succ* G_to,
+                                                std::vector<std::pair<uint64_t, uint64_t>> ref_bins,
+                                                uint64_t first_pos,
+                                                uint64_t last_pos
+                                            ) {
+
+    std::vector<std::pair<uint64_t, uint64_t>> result;
+    uint64_t pos = (first_pos == 0) ? 1 : G_from->colex_upper_bound(G_to->get_node_seq(first_pos)) + 1;
+    uint64_t upper;
+    for (size_t i = 0; i < ref_bins.size(); i++) {
+        if (ref_bins.at(i).second == 0) { // this happens if we have more bins than nodes
+            result.push_back(std::make_pair(0, 0));
+        } else {
+            upper = G_from->colex_upper_bound(G_to->get_node_seq(ref_bins.at(i).second));
+            std::cerr << "ref bin " << ref_bins.at(i).second << " rel upper " << upper << std::endl;
+            result.push_back(std::make_pair(pos, upper));
+            pos = upper + 1;
+        }
+    }
+    result.back().second = (last_pos == 0) ? G_from->get_W().size() - 1 : result.back().second;
+    return result;
+}
+
+
 struct ParallelMergeContainer {
     std::vector<std::pair<uint64_t, uint64_t> > ref_bins;
     std::vector<std::vector<std::pair<uint64_t, uint64_t> > > bins;
@@ -202,7 +271,10 @@ void* parallel_merge_wrapper(void *config_) {
             merge_data->result.at(curr_idx) = graph;
             merge_data->bins_done++;
             if (config->verbose)
-                std::cout << "finished bin " << curr_idx + 1 << " (" << merge_data->bins_done << "/" << merge_data->ref_bins.size() << ")" << std::endl;
+                std::cout << "finished bin " << curr_idx + 1
+                          << " (" << merge_data->bins_done
+                                  << "/" << merge_data->ref_bins.size()
+                          << ")" << std::endl;
             pthread_mutex_unlock (&mutex_merge_result);
         }
     }
@@ -227,14 +299,15 @@ int main(int argc, const char *argv[]) {
         //TODO: allow for building by appending/adding to an existing graph
         case Config::BUILD: {
             if (config->infbase.size()) {
-                graph = new DBG_succ(config->infbase);
+                graph = new DBG_succ();
+                graph->load(config->infbase);
                 // graph->annotationFromFile(config->infbase + ".anno.dbg");
             } else {
                 graph = new DBG_succ(config->k);
             }
 
             if (config->verbose)
-                std::cerr << "k is " << graph->k << std::endl;
+                std::cerr << "k is " << graph->k_ << std::endl;
 
             if (config->fast) {
                 graph->switch_state(Config::CSTR);
@@ -266,7 +339,7 @@ int main(int argc, const char *argv[]) {
                                 tstart = clock();
                                 timelast = clock();
                                 vcf_parser vcf;
-                                if (!vcf.init(config->refpath, files[f], graph->k)) {
+                                if (!vcf.init(config->refpath, files[f], graph->k_)) {
                                     std::cerr << "ERROR reading VCF " << files[f] << std::endl;
                                     exit(1);
                                 }
@@ -290,9 +363,9 @@ int main(int argc, const char *argv[]) {
                                     }
                                     annotation = "VCF:" + annotation;
                                     nbp += sequence.length();
-                                    graph->add_seq_fast(sequence,
-                                                        false, config->parallel,
-                                                        suffices[j]);
+                                    graph->add_sequence_fast(sequence,
+                                                             false, config->parallel,
+                                                             suffices[j]);
                                 }
                             } else {
                                 //READ FROM FASTA
@@ -308,8 +381,8 @@ int main(int argc, const char *argv[]) {
                                     if (config->reverse)
                                         reverse_complement(read_stream->seq);
                                     // add all k-mers of seq to the graph
-                                    graph->add_seq_fast(std::string(read_stream->seq.s, read_stream->seq.l),
-                                                        true, config->parallel, suffices[j]);
+                                    graph->add_sequence_fast(std::string(read_stream->seq.s, read_stream->seq.l),
+                                                             true, config->parallel, suffices[j]);
                                 }
                                 kseq_destroy(read_stream);
                             }
@@ -350,10 +423,10 @@ int main(int argc, const char *argv[]) {
                             std::cerr << "ERROR while opening input file " << files[f] << std::endl;
                             exit(1);
                         }
-                        for (size_t i=1;kseq_read(read_stream) >= 0; ++i) {
+                        for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
                             if (config->reverse)
                                 reverse_complement(read_stream->seq);
-                            graph->add_seq(read_stream->seq);
+                            graph->add_sequence(std::string(read_stream->seq.s, read_stream->seq.l));
                         }
                         kseq_destroy(read_stream);
                     }
@@ -466,7 +539,8 @@ int main(int argc, const char *argv[]) {
               std::cerr << "Requires input <de bruijn graph> for annotation. Use option -I. " << std::endl;
               exit(1);
             }
-            graph = new DBG_succ(config->infbase);
+            graph = new DBG_succ();
+            graph->load(config->infbase);
 
             // load annotatioun (if file does not exist, empty annotation is created)
             // graph->annotationFromFile(config->infbase + ".anno.dbg");
@@ -512,10 +586,12 @@ int main(int argc, const char *argv[]) {
             for (size_t f = 0; f < files.size(); ++f) {
                 if (f == 0) {
                     std::cout << "Opening file " << files[f] << std::endl;
-                    graph = new DBG_succ(files[f]);
+                    graph = new DBG_succ();
+                    graph->load(files[f]);
                 } else {
                     std::cout << "Opening file for comparison ..." << files[f] << std::endl;
-                    DBG_succ *graph_ = new DBG_succ(files[f]);
+                    DBG_succ *graph_ = new DBG_succ();
+                    graph_->load(files[f]);
                     if (*graph == *graph_) {
                         std::cout << "Graphs are identical" << std::endl;
                     } else {
@@ -539,14 +615,17 @@ int main(int argc, const char *argv[]) {
                             graph->last_stat.push_back(0);
                             graph->W_stat.push_back(0);
                         }
-                        DBG_succ* graph_to_append = new DBG_succ(fname);
+                        DBG_succ* graph_to_append = new DBG_succ();
+                        graph_to_append->load(fname);
                         graph->append_graph_static(graph_to_append, config->verbose);
                         delete graph_to_append;
                     } else {
                         if (f == 0) {
-                            graph = new DBG_succ(fname);
+                            graph = new DBG_succ();
+                            graph->load(fname);
                         } else {
-                            DBG_succ* graph_to_append = new DBG_succ(fname);
+                            DBG_succ* graph_to_append = new DBG_succ();
+                            graph_to_append->load(fname);
                             graph->append_graph(graph_to_append, config->verbose);
                             delete graph_to_append;
                         }
@@ -570,22 +649,25 @@ int main(int argc, const char *argv[]) {
                 std::vector<uint64_t> nv;
                 for (unsigned int f = 0; f < files.size(); ++f) {
                         std::cout << "Opening file " << files[f] << std::endl;
-                        graph = new DBG_succ(files[f]);
+                        graph = new DBG_succ();
+                        graph->load(files[f]);
                         graphs.push_back(graph);
                         kv.push_back(1);
-                        nv.push_back(graph->get_size());
+                        nv.push_back(graph->get_W().size());
                 }
                 DBG_succ* target_graph = new DBG_succ(graphs.front()->get_k(), false);
 
                 if ((config->parallel > 1) || (config->parts_total > 1)) {
-                    pthread_t* threads = NULL;
+                    pthread_t *threads = NULL;
                     merge_data = new ParallelMergeContainer();
 
                     // get bins in graphs according to required threads
                     if (config->verbose)
                         std::cout << "Collecting reference bins" << std::endl;
-                    std::cerr << "parallel " << config->parallel << " per thread " << config->bins_per_thread << " parts total " << config->parts_total << std::endl;
-                    merge_data->ref_bins = merge::get_bins(graphs.front(), config->parallel * config->bins_per_thread * config->parts_total);
+                    std::cerr << "parallel " << config->parallel
+                              << " per thread " << config->bins_per_thread
+                              << " parts total " << config->parts_total << std::endl;
+                    merge_data->ref_bins = get_bins(graphs.front(), config->parallel * config->bins_per_thread * config->parts_total);
 
                     // only work on subset of the bins when requested
                     if (config->parts_total > 1) {
@@ -597,13 +679,14 @@ int main(int argc, const char *argv[]) {
                         std::cout << "Collecting relative bins" << std::endl;
                     for (size_t i = 1; i < graphs.size(); i++) {
                         std::cerr << "getting bins for " << i << ": " << files[i] << std::endl;
-                        merge_data->bins.push_back(merge::get_bins_relative(graphs.at(i), graphs.front(), merge_data->ref_bins,
-                                                                            merge_data->first, merge_data->last));
+                        merge_data->bins.push_back(get_bins_relative(graphs.at(i), graphs.front(), merge_data->ref_bins,
+                                                                     merge_data->first, merge_data->last));
                     }
                     for (size_t i = 0; i < graphs.size(); i++) {
                         for (size_t ii = 0; ii < merge_data->bins.at(i).size(); ii++) {
                             if (merge_data->bins.at(i).at(ii).first > merge_data->bins.at(i).at(ii).second) {
-                               merge_data->bins.at(i).at(ii) = std::make_pair(graphs.at(i)->get_size(), graphs.at(i)->get_size() - 1);
+                               merge_data->bins.at(i).at(ii) = std::make_pair(graphs.at(i)->get_W().size(),
+                                                                              graphs.at(i)->get_W().size() - 1);
                             }
                         }
                     }
@@ -665,7 +748,8 @@ int main(int argc, const char *argv[]) {
                 outstream << "file\tnodes\tedges\tk" << std::endl;
             }
             for (unsigned int f = 0; f < files.size(); ++f) {
-                DBG_succ* graph_ = new DBG_succ(files[f]);
+                DBG_succ* graph_ = new DBG_succ();
+                graph_->load(files[f]);
                 /*graph_->W = new libmaus2::wavelet::DynamicWaveletTree<6, 64> (3);
                 graph_->W->insert(1ull, 0);
                 graph_->W->insert(7ull, 1);
@@ -678,8 +762,8 @@ int main(int argc, const char *argv[]) {
                 */
                 if (!config->quiet) {
                     std::cout << "Statistics for file " << files[f] << std::endl;
-                    std::cout << "nodes: " << graph_->get_node_count() << std::endl;
-                    std::cout << "edges: " << graph_->get_edge_count() << std::endl;
+                    std::cout << "nodes: " << graph_->num_nodes() << std::endl;
+                    std::cout << "edges: " << graph_->num_edges() << std::endl;
                     std::cout << "k: " << graph_->get_k() << std::endl;
                     //graph_->traversalHash();
                     /*std::deque<uint64_t> tmp;
@@ -692,8 +776,8 @@ int main(int argc, const char *argv[]) {
                 }
                 if (!config->outfbase.empty()) {
                     outstream << files[f] << "\t"
-                              << graph_->get_node_count() << "\t"
-                              << graph_->get_edge_count() << "\t"
+                              << graph_->num_nodes() << "\t"
+                              << graph_->num_edges() << "\t"
                               << graph_->get_k() << std::endl;
                 }
                 if (config->print_graph)
@@ -721,8 +805,8 @@ int main(int argc, const char *argv[]) {
                 std::cerr << "done" << std::endl;
                 */
 
-                /*std::cerr << graph_->get_edge_count() << std::endl;
-                std::vector<uint64_t> result = graph_->split_range(1, graph_->get_edge_count(), 0);
+                /*std::cerr << graph_->num_edges() << std::endl;
+                std::vector<uint64_t> result = graph_->split_range(1, graph_->num_edges(), 0);
                 std::cout << "Results for d = 0" << std::endl;
                 for (size_t i = 0; i < result.size(); ++i) {
                     std::cout << "  " << result.at(i) << std::endl;
@@ -747,7 +831,8 @@ int main(int argc, const char *argv[]) {
         case Config::DUMP: {
             //for (unsigned int f = 0; f < files.size(); ++f) {
                 //DBG_succ* graph_ = new DBG_succ(files[f]);
-                DBG_succ* graph_ = new DBG_succ(config->infbase);
+                DBG_succ *graph_ = new DBG_succ();
+                graph_->load(config->infbase);
                 // checks whether annotation exists and creates an empty one if not
                 // graph_->annotationFromFile(config->infbase + ".anno.dbg");
                 graph_->print_adj_list();
@@ -762,7 +847,8 @@ int main(int argc, const char *argv[]) {
               std::cerr << "Requires input <de bruijn graph> to align reads." << config->ALIGN << std::endl;
               exit(1);
             }
-            graph = new DBG_succ(config->infbase);
+            graph = new DBG_succ();
+            graph->load(config->infbase);
 
             for (unsigned int f = 0; f < files.size(); ++f) {
                 std::cout << "Opening file for alignment ..." << files[f] << std::endl;
@@ -783,8 +869,11 @@ int main(int argc, const char *argv[]) {
 
                     if (config->distance > 0) {
                         // since we set aln_len = read_stream->seq.l, we only get a single hit vector
-                        std::vector<std::vector<HitInfo> > graphindices = graph->align_fuzzy(read_stream->seq, aln_len, config->distance);
-
+                        auto graphindices = graph->align_fuzzy(
+                            std::string(read_stream->seq.s, read_stream->seq.l),
+                            aln_len,
+                            config->distance
+                        );
                         //for (size_t i = 0; i < graphindices.size(); ++i) {
                         size_t i = 0;
                         int print_len = (i + aln_len < read_stream->seq.l) ? aln_len : (read_stream->seq.l - i);
@@ -805,7 +894,10 @@ int main(int argc, const char *argv[]) {
                         // try reverse
                         if (graphindices.at(i).size() == 0) {
                             reverse_complement(read_stream->seq);
-                            graphindices = graph->align_fuzzy(read_stream->seq, aln_len, config->distance);
+                            graphindices = graph->align_fuzzy(
+                                std::string(read_stream->seq.s, read_stream->seq.l),
+                                aln_len, config->distance
+                            );
                             for (size_t l = 0; l < graphindices.at(i).size(); ++l) {
                                 HitInfo curr_hit(graphindices.at(i).at(l));
                                 for (size_t m = 0; m < curr_hit.path.size(); ++m) {
@@ -819,7 +911,9 @@ int main(int argc, const char *argv[]) {
                         }
                         std::cout << std::endl;
                     } else {
-                        std::vector<uint64_t> graphindices = graph->align(read_stream->seq);
+                        std::vector<uint64_t> graphindices = graph->align(
+                            std::string(read_stream->seq.s, read_stream->seq.l)
+                        );
 
                         for (size_t i = 0; i < graphindices.size(); ++i) {
                             for (uint64_t j = 0; j < graph->get_k(); ++j) {
@@ -850,7 +944,9 @@ int main(int argc, const char *argv[]) {
         if (!config->sqlfbase.empty())
             traverse::toSQL(graph, config->fname, config->sqlfbase);
         if (!config->outfbase.empty())
-            graph->toFile(config->outfbase, config->parts_total, config->part_idx);
+            graph->toFile(config->outfbase
+                            + "." + std::to_string(config->part_idx)
+                            + "_" + std::to_string(config->parts_total));
         delete graph;
     }
     delete config;
