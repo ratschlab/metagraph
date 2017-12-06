@@ -200,22 +200,22 @@ bool DBG_succ::load(const std::string &infbase) {
         // load W and last arrays
         delete W;
         delete last;
-        std::ifstream instream_W(infbase + ".W.dbg");
-        std::ifstream instream_l(infbase + ".l.dbg");
         switch (state) {
             case Config::DYN:
-                W = new wavelet_tree_dyn(instream_W);
-                last = new bit_vector_dyn(instream_l);
+                W = new wavelet_tree_dyn(4);
+                last = new bit_vector_dyn();
                 break;
             case Config::STAT:
-                W = new wavelet_tree_stat(instream_W);
-                last = new bit_vector_stat(instream_l);
+                W = new wavelet_tree_stat(4);
+                last = new bit_vector_stat();
                 break;
             case Config::CSTR:
                 assert(false && "Must not happen");
                 return false;
         }
-        return true;
+        std::ifstream instream_W(infbase + ".W.dbg");
+        std::ifstream instream_l(infbase + ".l.dbg");
+        return W->deserialise(instream_W) && last->deserialise(instream_l);
     } catch (...) {
         return false;
     }
@@ -250,7 +250,9 @@ uint64_t DBG_succ::select_W(uint64_t i, TAlphabet c) const {
     if (i <= 0)
         return 0;
 
-    return std::min(W->select(c, i - 1 + (c == 0)), W->size());
+    return i + (c == 0) <= W->rank(c, W->size() - 1)
+                ? W->select(c, i + (c == 0))
+                : W->size();
 }
 
 /**
@@ -289,7 +291,7 @@ uint64_t DBG_succ::select_last(uint64_t i) const {
     if (i <= 0)
         return 0;
     // for some reason the libmaus2 select is 0 based ...
-    return std::min(last->select1(i - 1), last->size());
+    return std::min(last->select1(i), last->size());
 }
 
 /**
@@ -884,7 +886,7 @@ void DBG_succ::switch_state(Config::StateType state) {
         case Config::DYN: {
             if (this->state == Config::CSTR) {
                 delete W;
-                W = new wavelet_tree_dyn(W_stat, 4);
+                W = new wavelet_tree_dyn(4, W_stat);
                 W_stat.clear();
 
                 delete last;
@@ -906,7 +908,7 @@ void DBG_succ::switch_state(Config::StateType state) {
                 //    bridge = NULL;
                 //}
             } else {
-                wavelet_tree *W_new = new wavelet_tree_dyn(*W, 4);
+                wavelet_tree *W_new = new wavelet_tree_dyn(4, *W);
                 delete W;
                 W = W_new;
 
@@ -918,7 +920,7 @@ void DBG_succ::switch_state(Config::StateType state) {
             break;
         }
         case Config::STAT: {
-            wavelet_tree *W_new = new wavelet_tree_stat(W, 4);
+            wavelet_tree *W_new = new wavelet_tree_stat(4, *W);
             delete W;
             W = W_new;
 

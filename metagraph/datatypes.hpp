@@ -45,24 +45,24 @@ class bit_vector {
   public:
     virtual ~bit_vector() {};
 
+    virtual uint64_t rank1(uint64_t id) const = 0;
+    virtual uint64_t select1(uint64_t id) const = 0;
     virtual uint64_t size() const = 0;
-    virtual void set(size_t id, bool val) = 0;
+    virtual void set(uint64_t id, bool val) = 0;
     // Can be redefined, e.g. without rebalancing
-    virtual void setBitQuick(size_t id, bool val) { set(id, val); };
-    virtual bool operator[](size_t id) const = 0;
-    virtual void insertBit(size_t id, bool val) = 0;
-    virtual void deleteBit(size_t id) = 0;
+    virtual void setBitQuick(uint64_t id, bool val) { set(id, val); };
+    virtual bool operator[](uint64_t id) const = 0;
+    virtual void insertBit(uint64_t id, bool val) = 0;
+    virtual void deleteBit(uint64_t id) = 0;
     virtual void serialise(std::ostream &out) const = 0;
-    virtual void deserialise(std::istream &in) = 0;
-    virtual uint64_t select1(size_t id) const = 0;
-    virtual uint64_t rank1(size_t id) const = 0;
+    virtual bool deserialise(std::istream &in) = 0;
 
-    friend inline std::ostream& operator<<(std::ostream &os, const bit_vector &bv);
+    friend inline std::ostream& operator<<(std::ostream &os,
+                                           const bit_vector &bv);
 
   protected:
     virtual void print(std::ostream &os) const = 0;
 };
-
 
 inline std::ostream& operator<<(std::ostream &os, const bit_vector &bv) {
     bv.print(os);
@@ -74,11 +74,10 @@ class bit_vector_dyn : public bit_vector {
   public:
     bit_vector_dyn() : vector_() {}
 
-    bit_vector_dyn(size_t size, bool value) : vector_(size, value) {}
+    bit_vector_dyn(uint64_t size, bool value) : vector_(size, value) {}
 
-    explicit bit_vector_dyn(const std::vector<bool> &v)
-            : vector_(v.size(), false) {
-        for (size_t i = 0; i < v.size(); ++i) {
+    explicit bit_vector_dyn(const std::vector<bool> &v) : vector_(v.size(), false) {
+        for (uint64_t i = 0; i < v.size(); ++i) {
             if (v.at(i))
                 this->set(i, true);
         }
@@ -86,9 +85,8 @@ class bit_vector_dyn : public bit_vector {
 
     explicit bit_vector_dyn(const bit_vector_dyn &v) : vector_(v.vector_) {}
 
-    explicit bit_vector_dyn(const bit_vector &v)
-            : vector_(v.size(), false) {
-        for (size_t i = 0; i < v.size(); ++i) {
+    explicit bit_vector_dyn(const bit_vector &v) : vector_(v.size(), false) {
+        for (uint64_t i = 0; i < v.size(); ++i) {
             if (v[i])
                 this->set(i, true);
         }
@@ -98,50 +96,52 @@ class bit_vector_dyn : public bit_vector {
         this->deserialise(in);
     }
 
+    uint64_t rank1(uint64_t id) const {
+        return vector_.rank1(id);
+    }
+
+    uint64_t select1(uint64_t id) const {
+        assert(id > 0 && size() > 0 && id <= rank1(size() - 1));
+        return vector_.select1(id - 1);
+    }
+
     uint64_t size() const {
         return vector_.size();
     }
 
-    void set(size_t id, bool val) {
+    void set(uint64_t id, bool val) {
         vector_.set(id, val);
     }
 
-    void setBitQuick(size_t id, bool val) {
+    void setBitQuick(uint64_t id, bool val) {
         vector_.setBitQuick(id, val);
     }
 
-    bool operator[](size_t id) const {
+    bool operator[](uint64_t id) const {
+        assert(id < size());
         return vector_[id];
     }
 
-    void insertBit(size_t id, bool val) {
+    void insertBit(uint64_t id, bool val) {
         vector_.insertBit(id, val);
     }
 
-    void deleteBit(size_t id) {
+    void deleteBit(uint64_t id) {
+        assert(size() > 0);
         vector_.deleteBit(id);
     }
 
-    void deserialise(std::istream &in) {
+    bool deserialise(std::istream &in) {
         vector_.deserialise(in);
+        return true;
     }
 
     void serialise(std::ostream &out) const {
         vector_.serialise(out);
     }
 
-    uint64_t select1(size_t id) const {
-        return vector_.select1(id);
-    }
-
-    uint64_t rank1(size_t id) const {
-        return vector_.rank1(id);
-    }
-
   protected:
-    void print(std::ostream& os) const {
-        os << static_cast<libmaus2::bitbtree::BitBTree<6, 64> >(vector_);
-    }
+    void print(std::ostream& os) const { os << vector_; }
 
   private:
     libmaus2::bitbtree::BitBTree<6, 64> vector_;
@@ -152,14 +152,14 @@ class bit_vector_stat : public bit_vector {
   public:
     bit_vector_stat() : vector_() {}
 
-    bit_vector_stat(size_t size, bool value) : vector_(size, value) {}
+    bit_vector_stat(uint64_t size, bool value) : vector_(size, value) {}
 
     bit_vector_stat(const bit_vector_stat &other) : vector_(other.vector_) {}
 
-    bit_vector_stat(const bit_vector &V)
-            : vector_(V.size(), 0) {
-        for (size_t i = 0; i < V.size(); ++i) {
-            if (V[i])
+    bit_vector_stat(const bit_vector &other)
+            : vector_(other.size(), 0) {
+        for (uint64_t i = 0; i < other.size(); ++i) {
+            if (other[i])
                 vector_[i] = 1;
         }
     }
@@ -170,54 +170,62 @@ class bit_vector_stat : public bit_vector {
         deserialise(in);
     }
 
-    void set(size_t id, bool val) {
+    uint64_t rank1(uint64_t id) const {
+        if (requires_update_)
+            const_cast<bit_vector_stat*>(this)->init_rs();
+        //the rank method in SDSL does not include id in the count
+        return rk_(id >= this->size() ? this->size() : id + 1);
+    }
+
+    uint64_t select1(uint64_t id) const {
+        assert(id > 0 && size() > 0 && id <= rank1(size() - 1));
+        if (requires_update_)
+            const_cast<bit_vector_stat*>(this)->init_rs();
+        return slct_(id);
+    }
+
+    void set(uint64_t id, bool val) {
         vector_[id] = val;
         requires_update_ = true;
     }
 
-    bool operator[](size_t id) const {
+    bool operator[](uint64_t id) const {
+        assert(id < size());
         return vector_[id];
     }
 
-    void insertBit(size_t id, bool val) {
+    void insertBit(uint64_t id, bool val) {
         vector_.resize(size() + 1);
         if (vector_.size() > 1)
             std::copy_backward(vector_.begin() + id, vector_.end() - 1, vector_.end());
         set(id, val);
         requires_update_ = true;
     }
-    void deleteBit(size_t id) {
+
+    void deleteBit(uint64_t id) {
+        assert(size() > 0);
         if (vector_.size() > 1)
             std::copy(vector_.begin() + id + 1, vector_.end(), vector_.begin() + id);
         vector_.resize(vector_.size() - 1);
         requires_update_ = true;
     }
-    void deserialise(std::istream &in) {
+
+    bool deserialise(std::istream &in) {
         vector_.load(in);
         requires_update_ = true;
+        return true;
     }
+
     void serialise(std::ostream &out) const {
         vector_.serialize(out);
     }
-    uint64_t select1(size_t id) const {
-        if (requires_update_)
-            const_cast<bit_vector_stat*>(this)->init_rs();
-        return slct_(id + 1);
-    }
-    uint64_t rank1(size_t id) const {
-        if (requires_update_)
-            const_cast<bit_vector_stat*>(this)->init_rs();
-        //the rank method in SDSL does not include id in the count
-        return rk_(id >= this->size() ? this->size() : id + 1);
-    }
+
     uint64_t size() const {
         return vector_.size();
     }
-    
+
   protected:
-    void print(std::ostream &os) const {
-        os << static_cast<sdsl::bit_vector>(vector_);
-    }
+    void print(std::ostream &os) const { os << vector_; }
 
   private:
     sdsl::bit_vector vector_;
@@ -239,20 +247,18 @@ class wavelet_tree {
   public:
     virtual ~wavelet_tree() {};
 
-    virtual uint64_t size() const = 0;
-    //virtual void deserialise(std::istream &in) = 0;
-    virtual void serialise(std::ostream &out) const = 0;
-    virtual void insert(uint64_t val, size_t id) = 0;
-    virtual void remove(size_t id) = 0;
-    //virtual void set(size_t id, uint64_t val) = 0;
     virtual uint64_t rank(uint64_t c, uint64_t i) const = 0;
     virtual uint64_t select(uint64_t c, uint64_t i) const = 0;
-    //virtual uint64_t const& operator[](size_t id) const = 0;
-    virtual uint64_t operator[](size_t id) const = 0;
-    //virtual uint64_t get(size_t id) = 0;
-    // this only makes sense when implemented in the dynamic part
-    virtual bool get_bit_raw(uint64_t id) const = 0;
-    friend inline std::ostream& operator<<(std::ostream &os, const wavelet_tree& wt);
+    virtual uint64_t size() const = 0;
+    //virtual void set(uint64_t id, uint64_t val) = 0;
+    virtual uint64_t operator[](uint64_t id) const = 0;
+    virtual void insert(uint64_t val, uint64_t id) = 0;
+    virtual void remove(uint64_t id) = 0;
+    virtual bool deserialise(std::istream &in) = 0;
+    virtual void serialise(std::ostream &out) const = 0;
+
+    friend inline std::ostream& operator<<(std::ostream &os,
+                                           const wavelet_tree &wt);
 
   protected:
     virtual void print(std::ostream &os) const = 0;
@@ -266,29 +272,26 @@ inline std::ostream& operator<<(std::ostream &os, const wavelet_tree& wt) {
 
 class wavelet_tree_stat : public wavelet_tree {
   public:
-    wavelet_tree_stat(size_t logsigma_, size_t size, uint64_t def)
-            : int_vector_(2 * size + 1, def, 1 << logsigma_), n_(size) {}
+    explicit wavelet_tree_stat(uint64_t logsigma, uint64_t size = 0, uint64_t value = 0)
+            : int_vector_(2 * size + 1, value, 1 << logsigma), n_(size) {}
 
-    wavelet_tree_stat(wavelet_tree *T, size_t logsigma_)
-            : int_vector_(T->size(), 0, logsigma_), n_(T->size()) {
-        for (size_t i = 0; i < n_; ++i) {
-            int_vector_[i] = T->operator[](i);
+    template <class Vector>
+    wavelet_tree_stat(uint64_t logsigma, const Vector &vector)
+            : int_vector_(vector.size(), 0, logsigma), n_(vector.size()) {
+        for (uint64_t i = 0; i < n_; ++i) {
+            int_vector_[i] = vector[i];
         }
     }
 
-    wavelet_tree_stat(size_t logsigma_)
-            : wavelet_tree_stat(logsigma_, 0, 0) {}
-
-    wavelet_tree_stat(std::istream &in) { deserialise(in); }
-
     uint64_t size() const { return n_; }
 
-    void deserialise(std::istream &in) {
+    bool deserialise(std::istream &in) {
         wwt_.load(in);
         int_vector_.load(in);
         n_ = int_vector_.size();
         // we assume the wwt_ has been build before serialization
         requires_update_ = false;
+        return true;
     }
 
     void serialise(std::ostream &out) const {
@@ -298,7 +301,7 @@ class wavelet_tree_stat : public wavelet_tree {
         wwt_.serialize(out);
     }
 
-    void insert(uint64_t val, size_t id) {
+    void insert(uint64_t val, uint64_t id) {
         if (n_ == size()) {
             int_vector_.resize(2 * n_ + 1);
         }
@@ -311,7 +314,7 @@ class wavelet_tree_stat : public wavelet_tree {
         requires_update_ = true;
     }
 
-    void remove(size_t id) {
+    void remove(uint64_t id) {
         if (this->size() > 1)
             std::copy(int_vector_.begin() + id + 1,
                       int_vector_.begin() + n_,
@@ -323,50 +326,30 @@ class wavelet_tree_stat : public wavelet_tree {
     uint64_t rank(uint64_t c, uint64_t i) const {
         if (requires_update_)
             const_cast<wavelet_tree_stat*>(this)->init_wt();
-        return wwt_.rank(i >= wwt_.size() ? wwt_.size() : i+1, c);
+
+        return wwt_.rank(std::min(i + 1, size()), c);
     }
 
     uint64_t select(uint64_t c, uint64_t i) const {
+        assert(i > 0 && size() > 0);
 
         if (requires_update_)
             const_cast<wavelet_tree_stat*>(this)->init_wt();
-        i++;
-        uint64_t maxrank = wwt_.rank(wwt_.size(), c);
-        if (i > maxrank) {
-            //TODO: should this line ever be reached?
-            return wwt_.size();
-        }
+
+        assert(i <= rank(c, size() - 1));
         return wwt_.select(i, c);
     }
 
-    /*sdsl::int_vector<>::reference operator[](const size_t id) {
-        requires_update_ = true;
-        return sdsl::int_vector<>::operator[](id);
-    }*/
-
-    //uint64_t const& operator[](size_t id) const {
-    //    return this->operator[](id);
-    //}
-
-    uint64_t operator[](size_t id) const {
-//        requires_update_ = true;
+    uint64_t operator[](uint64_t id) const {
+        assert(id < size());
         return int_vector_[id];
     }
 
-/*    void set(size_t id, uint64_t val) {
+/*    void set(uint64_t id, uint64_t val) {
         requires_update_ = true;
         int_vector_.operator[](id) = val;
     }
-
-    uint64_t get(size_t id) {
-        return int_vector_.operator[](id);
-    }
     */
-
-    bool get_bit_raw(uint64_t id) const {
-       throw std::logic_error("Not Implemented");
-       return id;
-    }
 
   protected:
     void print(std::ostream& os) const {
@@ -376,121 +359,173 @@ class wavelet_tree_stat : public wavelet_tree {
   private:
     sdsl::int_vector<> int_vector_;
     sdsl::wt_int<> wwt_;
-    size_t logsigma_;
     bool requires_update_ = true;
-    size_t n_;
+    uint64_t n_;
 
     void init_wt() {
-        std::cout << "Initializing WT index" << std::endl;
+        // std::cout << "Initializing WT index" << std::endl;
         int_vector_.resize(n_);
-        sdsl::construct_im(wwt_, &int_vector_);
+        sdsl::construct_im(wwt_, int_vector_);
         requires_update_ = false;
     }
 };
 
 
-//Child of DynamicWaveletTree allowing for construction from an int vector
 class wavelet_tree_dyn : public wavelet_tree {
   public:
-    wavelet_tree_dyn(size_t b)
-        : wavelet_tree_(b) {
-    }
+    explicit wavelet_tree_dyn(uint64_t b) : wavelet_tree_(b) {}
 
-    wavelet_tree_dyn(std::istream &in)
-        : wavelet_tree_(in) {
-    }
+    template <class Vector>
+    wavelet_tree_dyn(uint64_t b, const Vector &W_stat, unsigned int parallel = 1)
+        : wavelet_tree_(initialize_tree(W_stat, b, parallel), b, W_stat.size()) {}
 
-    wavelet_tree_dyn(const std::vector<uint8_t> &W_stat, size_t b, unsigned int parallel=1)
-        : wavelet_tree_(initialize_tree(W_stat, b, parallel), b, W_stat.size()) {
-    }
-
-    wavelet_tree_dyn(const wavelet_tree &W_stat, size_t b, unsigned int parallel=1)
-        : wavelet_tree_(initialize_tree(W_stat, b, parallel), b, W_stat.size()) {
-    }
-
-    //wavelet_tree_dyn(std::vector<uint8_t> &W_stat, size_t b, unsigned int parallel=1)
-    //    : wavelet_tree_(dynamic_cast<libmaus2::bitbtree::BitBTree<6, 64>*>(makeTree(W_stat, b, parallel)), b, W_stat.size()) {
-    //}
-
-
-    wavelet_tree_dyn(libmaus2::bitbtree::BitBTree<6, 64> *bt, size_t b, size_t n)
-        : wavelet_tree_(bt, b, n) {
-    }
-
-    //wavelet_tree_dyn(bit_vector* bt, size_t b, size_t n)
-    //    : wavelet_tree_(dynamic_cast<libmaus2::bitbtree::BitBTree<6, 64>*>(bt), b, n) {
-    //}
+    wavelet_tree_dyn(uint64_t b, libmaus2::bitbtree::BitBTree<6, 64> *bt, uint64_t n)
+        : wavelet_tree_(bt, b, n) {}
 
     uint64_t size() const {
         return wavelet_tree_.size();
     }
 
-    //void deserialise(std::istream &in) {
-    //    wavelet_tree_.deserialise(in);
-    //}
+    bool deserialise(std::istream &in) {
+        wavelet_tree_.R =
+            libmaus2::wavelet::DynamicWaveletTree<6, 64>::loadBitBTree(in);
+        const_cast<uint64_t&>(wavelet_tree_.b) =
+            libmaus2::util::NumberSerialisation::deserialiseNumber(in);
+        wavelet_tree_.n =
+            libmaus2::util::NumberSerialisation::deserialiseNumber(in);
+        return true;
+    }
 
     void serialise(std::ostream &out) const {
         wavelet_tree_.serialise(out);
     }
 
-    void insert(uint64_t val, size_t id) {
+    void insert(uint64_t val, uint64_t id) {
         wavelet_tree_.insert(val, id);
     }
 
-    void remove(size_t id) {
+    void remove(uint64_t id) {
         wavelet_tree_.remove(id);
     }
 
     uint64_t rank(uint64_t c, uint64_t i) const {
-        return wavelet_tree_.rank(c, i);
+        return size() > 0
+                ? wavelet_tree_.rank(c, std::min(i, size() - 1))
+                : 0;
     }
 
     uint64_t select(uint64_t c, uint64_t i) const {
-        return wavelet_tree_.select(c, i);
+        assert(i > 0 && size() > 0 && i <= rank(c, size() - 1));
+        return wavelet_tree_.select(c, i - 1);
     }
 
-   // uint64_t const& operator[](size_t id) const {
-   //     return wavelet_tree_[id];
-   // }
-
-    uint64_t operator[](size_t id) const {
+    uint64_t operator[](uint64_t id) const {
+        assert(id < size());
         return wavelet_tree_[id];
     }
 
-//    uint64_t get(size_t id) {
-//        return this->operator[](id);
-//    }
-
-//    void set(size_t id, uint64_t val) {
+//    void set(uint64_t id, uint64_t val) {
 //        wavelet_tree_[id] = val;
 //    }
 
-    bool get_bit_raw(uint64_t id) const {
-        return wavelet_tree_.R->operator[](id);
+    std::vector<uint64_t> to_vector() const {
+        std::vector<uint64_t> W_stat;
+
+        size_t n = size();
+
+        const size_t b = 4;
+
+        std::vector<uint64_t> offsets(1ull << b, 0);
+        std::queue<uint64_t> blocks;
+        std::queue<uint64_t> new_blocks;
+
+        blocks.push(n);
+
+        size_t pos = 0;
+        uint64_t o = 0;
+
+        for (size_t ib = 0; ib < b; ++ib) {
+            while (!blocks.empty()) {
+                uint64_t cnt = blocks.front();
+                blocks.pop();
+                uint64_t epos = pos + cnt;
+                for ( ; pos < epos; ++pos) {
+                    offsets.at(o) += !get_bit_raw(pos);
+                }
+                if (ib < b - 1) {
+                    new_blocks.push(offsets.at(o));
+                    new_blocks.push(cnt - offsets.at(o));
+                }
+                o++;
+            }
+            if (ib < b - 1)
+                blocks.swap(new_blocks);
+        }
+
+        //std::cerr << "R size: " << R->size() << std::endl;
+
+        bool bit;
+        std::vector<uint64_t> upto_offsets((1ull << (b - 1)) - 1, 0);
+        uint64_t p, co, v, m;
+        for (size_t i = 0; i < n; ++i) {
+            m = 1ull << (b - 1);
+            //v = (uint64_t) W_stat.at(i);
+            v = 0;
+            o = 0;
+            p = i;
+            co = 0;
+            for (size_t ib = 0; ib < b - 1; ++ib) {
+                bit = get_bit_raw(ib * n + p + co);
+                if (bit) {
+                    v |= m;
+                    co += offsets.at(o);
+                    p -= upto_offsets.at(o);
+                } else {
+                    p -= (p - upto_offsets.at(o));
+                    upto_offsets.at(o) += 1;
+                }
+                o = 2 * o + 1 + bit;
+                m >>= 1;
+            }
+            bit = get_bit_raw((b - 1) * n + p + co);
+            if (bit) {
+                v |= m;
+            }
+            W_stat.push_back(v);
+        }
+        return W_stat;
     }
+
   
   protected:
     void print(std::ostream& os) const {
         os << wavelet_tree_;
     }
 
-
   private:
     libmaus2::wavelet::DynamicWaveletTree<6, 64> wavelet_tree_;
 
+    bool get_bit_raw(uint64_t id) const {
+        return wavelet_tree_.R->operator[](id);
+    }
+
     template <class Vector>
     libmaus2::bitbtree::BitBTree<6, 64>* initialize_tree(const Vector &W_stat,
-                                                         size_t const b,
+                                                         const uint64_t b,
                                                          unsigned int parallel = 1) {
-        size_t const n = W_stat.size();
+        // return dynamic_cast<libmaus2::bitbtree::BitBTree<6, 64>*>(
+        //     makeTree(W_stat, b, parallel)), b, W_stat.size()
+        // );
+
+        uint64_t const n = W_stat.size();
 
         // compute total offsets for the individual bins
-        std::vector<uint64_t> offsets((1ull << (b-1)) - 1, 0);
+        std::vector<uint64_t> offsets((1ull << (b - 1)) - 1, 0);
         #pragma omp parallel num_threads(parallel)
         {
             uint64_t v, m, o;
             #pragma omp for
-            for (size_t i = 0; i < n; ++i) {
+            for (uint64_t i = 0; i < n; ++i) {
                 m = (1ull << (b - 1));
                 v = static_cast<uint64_t>(W_stat[i]);
                 o = 0;
@@ -547,5 +582,6 @@ class wavelet_tree_dyn : public wavelet_tree {
         return tmp;
     }
 };
+
 
 #endif // __DATATYPES_HPP__

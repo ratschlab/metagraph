@@ -3,8 +3,40 @@
 #include "datatypes.hpp"
 
 
+const std::string test_data_dir = "../unit_tests/data";
+const std::string test_dump_basename = test_data_dir + "/bit_vector_dump_test";
+
+
+void reference_based_test(const bit_vector &vector,
+                          const std::vector<bool> &reference) {
+    size_t max_rank = std::accumulate(reference.begin(), reference.end(), 0u);
+
+    ASSERT_DEATH(vector.select1(0), "Assertion failed");
+
+    for (size_t i : {1, 2, 10, 100, 1000}) {
+        ASSERT_DEATH(vector.select1(max_rank + i), "Assertion failed");
+        EXPECT_EQ(max_rank, vector.rank1(vector.size() + i - 2));
+    }
+    ASSERT_DEATH(vector.select1(vector.size() + 1), "Assertion failed");
+    ASSERT_DEATH(vector[vector.size()], "Assertion failed");
+    ASSERT_DEATH(vector[vector.size() + 1], "Assertion failed");
+
+    for (size_t i = 1; i <= max_rank; ++i) {
+        EXPECT_EQ(i, vector.rank1(vector.select1(i)));
+    }
+
+    EXPECT_EQ(vector[0], vector.rank1(0));
+    EXPECT_EQ(vector[0], reference[0]);
+
+    for (size_t i = 1; i < vector.size(); ++i) {
+        EXPECT_EQ(vector[i], vector.rank1(i) - vector.rank1(i - 1));
+        EXPECT_EQ(vector[i], reference[i]);
+    }    
+}
+
+
 template <class T>
-void test_bit_vector() {
+void test_bit_vector_queries() {
     bit_vector *vector = new T();
     ASSERT_TRUE(vector);
     delete vector;
@@ -18,9 +50,11 @@ void test_bit_vector() {
     EXPECT_EQ(10u, vector->size());
     for (size_t i = 0; i < vector->size(); ++i) {
         EXPECT_EQ(0, (*vector)[i]);
-        // EXPECT_EQ(0u, vector->select1(i));
-        // EXPECT_EQ(0u, vector->rank1(i));
+        EXPECT_EQ(0u, vector->rank1(i));
+        ASSERT_DEATH(vector->select1(i), "Assertion failed");
     }
+    EXPECT_EQ(0u, vector->rank1(0));
+    EXPECT_EQ(0u, vector->rank1(1'000));
     delete vector;
 
     vector = new T(10, 1);
@@ -28,25 +62,273 @@ void test_bit_vector() {
     EXPECT_EQ(10u, vector->size());
     for (size_t i = 0; i < vector->size(); ++i) {
         EXPECT_EQ(1, (*vector)[i]);
-        EXPECT_EQ(i, vector->select1(i));
+        EXPECT_EQ(i, vector->select1(i + 1));
         EXPECT_EQ(i + 1, vector->rank1(i));
+        EXPECT_EQ(i + 1, vector->rank1(vector->select1(i + 1)));
+        EXPECT_EQ(i, vector->select1(vector->rank1(i)));
     }
+    EXPECT_EQ(10u, vector->rank1(1'000));
+    ASSERT_DEATH(vector->select1(1'000), "Assertion failed");
+    ASSERT_DEATH(vector->select1(0), "Assertion failed");
     delete vector;
 
-    // vector = new T({ 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1 });
-    // ASSERT_TRUE(vector);
-    // for (size_t i = 0; i < vector->size(); ++i) {
-    //     EXPECT_EQ(i + 1, vector->rank1(vector->select1(i)));
-    //     // EXPECT_EQ(i, vector->select1(vector->rank1(i)));
-    // }
-    // delete vector;
+    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+    vector = new T(init_list);
+    std::vector<bool> numbers(init_list);
+    ASSERT_TRUE(vector);
+    reference_based_test(*vector, numbers);
+
+    delete vector;
 }
 
 
-TEST(bit_vector_dyn, methods) {
-    test_bit_vector<bit_vector_dyn>();
+TEST(bit_vector_dyn, queries) {
+    test_bit_vector_queries<bit_vector_dyn>();
 }
 
-TEST(bit_vector_stat, methods) {
-    test_bit_vector<bit_vector_stat>();
+
+TEST(bit_vector_stat, queries) {
+    test_bit_vector_queries<bit_vector_stat>();
+}
+
+
+void test_bit_vector_set(bit_vector *vector, std::vector<bool> *numbers) {
+    reference_based_test(*vector, *numbers);
+
+    for (size_t i = 0; i < numbers->size(); ++i) {
+        bool value = numbers->at(i);
+
+        numbers->at(i) = 1;
+        vector->set(i, 1);
+        reference_based_test(*vector, *numbers);
+
+        numbers->at(i) = 0;
+        vector->set(i, 0);
+        reference_based_test(*vector, *numbers);
+
+        numbers->at(i) = 1;
+        vector->setBitQuick(i, 1);
+        reference_based_test(*vector, *numbers);
+
+        numbers->at(i) = 0;
+        vector->setBitQuick(i, 0);
+        reference_based_test(*vector, *numbers);
+
+        numbers->at(i) = value;
+        vector->set(i, value);
+    }
+}
+
+
+TEST(bit_vector_dyn, set) {
+    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+    bit_vector *vector = new bit_vector_dyn(init_list);
+    std::vector<bool> numbers(init_list);
+    ASSERT_TRUE(vector);
+
+    test_bit_vector_set(vector, &numbers);
+
+    delete vector;
+}
+
+
+TEST(bit_vector_stat, set) {
+    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+    bit_vector *vector = new bit_vector_stat(init_list);
+    std::vector<bool> numbers(init_list);
+    ASSERT_TRUE(vector);
+
+    test_bit_vector_set(vector, &numbers);
+
+    delete vector;
+}
+
+
+void test_bit_vector_ins_del(bit_vector *vector, std::vector<bool> *numbers) {
+    reference_based_test(*vector, *numbers);
+
+    for (size_t i = 0; i < numbers->size(); ++i) {
+        numbers->insert(numbers->begin() + i, 1);
+        vector->insertBit(i, 1);
+        reference_based_test(*vector, *numbers);
+        numbers->erase(numbers->begin() + i, numbers->begin() + i + 1);
+        vector->deleteBit(i);
+
+        numbers->insert(numbers->begin() + i, 0);
+        vector->insertBit(i, 0);
+        reference_based_test(*vector, *numbers);
+        numbers->erase(numbers->begin() + i, numbers->begin() + i + 1);
+        vector->deleteBit(i);
+    }
+}
+
+
+TEST(bit_vector_dyn, InsertDelete) {
+    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+    bit_vector *vector = new bit_vector_dyn(init_list);
+    std::vector<bool> numbers(init_list);
+    ASSERT_TRUE(vector);
+
+    test_bit_vector_ins_del(vector, &numbers);
+
+    delete vector;
+}
+
+
+TEST(bit_vector_stat, InsertDelete) {
+    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+    bit_vector *vector = new bit_vector_stat(init_list);
+    std::vector<bool> numbers(init_list);
+    ASSERT_TRUE(vector);
+
+    test_bit_vector_ins_del(vector, &numbers);
+
+    delete vector;
+}
+
+
+TEST(bit_vector_dyn, Serialization) {
+    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+    bit_vector *vector = new bit_vector_dyn(init_list);
+    std::vector<bool> numbers(init_list);
+    ASSERT_TRUE(vector);
+    std::ofstream outstream(test_dump_basename);
+    vector->serialise(outstream);
+    outstream.close();
+    delete vector;
+
+    vector = new bit_vector_dyn;
+    ASSERT_TRUE(vector);
+    std::ifstream instream(test_dump_basename);
+    ASSERT_TRUE(vector->deserialise(instream));
+
+    test_bit_vector_ins_del(vector, &numbers);
+
+    delete vector;
+}
+
+
+TEST(bit_vector_stat, Serialization) {
+    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+    bit_vector *vector = new bit_vector_stat(init_list);
+    std::vector<bool> numbers(init_list);
+    ASSERT_TRUE(vector);
+    std::ofstream outstream(test_dump_basename);
+    vector->serialise(outstream);
+    outstream.close();
+    delete vector;
+
+    vector = new bit_vector_stat;
+    ASSERT_TRUE(vector);
+    std::ifstream instream(test_dump_basename);
+    ASSERT_TRUE(vector->deserialise(instream));
+
+    test_bit_vector_ins_del(vector, &numbers);
+
+    delete vector;
+}
+
+
+void reference_based_test(const wavelet_tree &vector,
+                          const std::vector<uint64_t> &reference) {
+    for (uint64_t c = 0; c < 16; ++c) {
+        ASSERT_DEATH(vector.select(c, vector.size() + 1), "Assertion failed");
+        ASSERT_DEATH(vector.select(c, 0), "Assertion failed");
+
+        uint64_t max_rank = std::count(reference.begin(), reference.end(), c);
+
+        for (size_t i : {1, 2, 10, 100, 1000}) {
+            ASSERT_DEATH(vector.select(c, max_rank + i), "Assertion failed");
+            EXPECT_EQ(max_rank, vector.rank(c, vector.size() - 1 + i - 1));
+        }
+
+        for (size_t i = 1; i <= max_rank; ++i) {
+            EXPECT_EQ(i, vector.rank(c, vector.select(c, i)));
+        }
+
+        EXPECT_EQ(vector[0] == c, vector.rank(c, 0) == 1);
+        EXPECT_EQ(vector[0], reference[0]);
+
+        for (size_t i = 1; i < vector.size(); ++i) {
+            EXPECT_EQ(vector[i] == c, vector.rank(c, i) != vector.rank(c, i - 1));
+            EXPECT_EQ(vector[i], reference[i]);
+        }
+    }
+}
+
+
+template <class T>
+void test_wavelet_tree_queries() {
+    wavelet_tree *vector = new T(4);
+    ASSERT_TRUE(vector);
+    delete vector;
+
+    vector = new T(4, std::vector<int>(10, 0));
+    ASSERT_TRUE(vector);
+
+    EXPECT_EQ(10u, vector->size());
+    ASSERT_DEATH((*vector)[vector->size()], "Assertion failed");
+    ASSERT_DEATH((*vector)[vector->size() + 1], "Assertion failed");
+
+    for (size_t i = 0; i < 10; ++i) {
+        EXPECT_EQ(0u, (*vector)[i]);
+        EXPECT_EQ(i + 1, vector->rank(0, i));
+        EXPECT_EQ(0u, vector->rank(1, i));
+        EXPECT_EQ(0u, vector->rank(2, i));
+        EXPECT_EQ(i, vector->select(0, i + 1));
+        ASSERT_DEATH(vector->select(1, i + 1), "Assertion failed");
+    }
+    EXPECT_EQ(0u, vector->rank(2, 0));
+    EXPECT_EQ(0u, vector->rank(2, 1'000));
+    EXPECT_EQ(10u, vector->rank(0, 1'000));
+    ASSERT_DEATH(vector->select(1, 1'000), "Assertion failed");
+    ASSERT_DEATH(vector->select(1, 0), "Assertion failed");
+    delete vector;
+
+    vector = new T(4, std::vector<int>(10, 2));
+    ASSERT_TRUE(vector);
+
+    EXPECT_EQ(10u, vector->size());
+    ASSERT_DEATH((*vector)[vector->size()], "Assertion failed");
+    ASSERT_DEATH((*vector)[vector->size() + 1], "Assertion failed");
+
+    for (size_t i = 0; i < 10; ++i) {
+        EXPECT_EQ(2u, (*vector)[i]);
+        EXPECT_EQ(i + 1, vector->rank(2, i));
+        EXPECT_EQ(0u, vector->rank(1, i));
+        EXPECT_EQ(0u, vector->rank(3, i));
+        EXPECT_EQ(i, vector->select(2, i + 1));
+        ASSERT_DEATH(vector->select(1, i + 1), "Assertion failed");
+    }
+    EXPECT_EQ(0u, vector->rank(0, 0));
+    EXPECT_EQ(0u, vector->rank(0, 1'000));
+    EXPECT_EQ(10u, vector->rank(2, 1'000));
+    ASSERT_DEATH(vector->select(3, 1'000), "Assertion failed");
+    ASSERT_DEATH(vector->select(1, 0), "Assertion failed");
+    delete vector;
+
+    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                      0, 1, 2, 0, 3, 2, 1, 1 };
+    vector = new T(4, numbers);
+    ASSERT_TRUE(vector);
+    reference_based_test(*vector, numbers);
+
+    delete vector;
+}
+
+
+TEST(wavelet_tree_stat, queries) {
+    test_wavelet_tree_queries<wavelet_tree_stat>();
+}
+
+
+TEST(wavelet_tree_dyn, queries) {
+    test_wavelet_tree_queries<wavelet_tree_dyn>();
 }

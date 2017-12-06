@@ -440,8 +440,8 @@ void DBG_succ::append_graph(const DBG_succ &G) {
 
     // handle last and W
     for (size_t j = 1, curr_pos = W->size(); j < G.W->size(); ++j, ++curr_pos) {
-        last->insertBit(curr_pos, G.get_last(j));
         W->insert(G.get_W(j), curr_pos);
+        last->insertBit(curr_pos, G.get_last(j));
     }
 
     verbose_cout("new total edges: ", W->size(), "\n");
@@ -462,69 +462,12 @@ void DBG_succ::append_graph(const DBG_succ &G) {
 void DBG_succ::append_graph_static(const DBG_succ &G) {
     verbose_cout("    adding ", G.W->size(), " edges\n");
 
-    size_t n = G.W->size();
+    assert(dynamic_cast<wavelet_tree_dyn*>(G.W));
+    auto G_W_stat = dynamic_cast<wavelet_tree_dyn*>(G.W)->to_vector();
 
-    const size_t b = 4;
+    W_stat.insert(W_stat.end(), G_W_stat.begin() + 1, G_W_stat.end());
 
-    std::vector<uint64_t> offsets(1ull << b, 0);
-    std::queue<uint64_t> blocks;
-    std::queue<uint64_t> new_blocks;
-
-    blocks.push(n);
-
-    size_t pos = 0;
-    uint64_t o = 0;
-
-    for (size_t ib = 0; ib < b; ++ib) {
-        while (!blocks.empty()) {
-            uint64_t cnt = blocks.front();
-            blocks.pop();
-            uint64_t epos = pos + cnt;
-            for ( ; pos < epos; ++pos) {
-                offsets.at(o) += !G.W->get_bit_raw(pos);
-            }
-            if (ib < b - 1) {
-                new_blocks.push(offsets.at(o));
-                new_blocks.push(cnt - offsets.at(o));
-            }
-            o++;
-        }
-        if (ib < b - 1)
-            blocks.swap(new_blocks);
-    }
-
-    //std::cerr << "R size: " << G.W->R->size() << std::endl;
-
-    bool bit;
-    std::vector<uint64_t> upto_offsets((1ull << (b - 1)) - 1, 0);
-    uint64_t p, co, v, m;
-    for (size_t i = 0; i < n; ++i) {
-        m = 1ull << (b - 1);
-        //v = (uint64_t) W_stat.at(i);
-        v = 0;
-        o = 0;
-        p = i;
-        co = 0;
-        for (size_t ib = 0; ib < b - 1; ++ib) {
-            bit = G.W->get_bit_raw(ib * n + p + co);
-            if (bit) {
-                v |= m;
-                co += offsets.at(o);
-                p -= upto_offsets.at(o);
-            } else {
-                p -= (p - upto_offsets.at(o));
-                upto_offsets.at(o) += 1;
-            }
-            o = 2 * o + 1 + bit;
-            m >>= 1;
-        }
-        bit = G.W->get_bit_raw((b - 1) * n + p + co);
-        if (bit) {
-            v |= m;
-        }
-        if (i == 0)
-            continue;
-        W_stat.push_back(v);
+    for (size_t i = 1; i < G.W->size(); ++i) {
         last_stat.push_back(G.get_last(i));
     }
 
