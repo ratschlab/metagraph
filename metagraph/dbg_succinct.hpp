@@ -71,7 +71,7 @@ class DBG_succ { //: public GenomeGraph{
      * and F to this graph's arrays. In almost all cases this will not produce a valid graph and
      * should only be used as a helper in the parallel merge procedure.
      */
-    void append_graph(DBG_succ *other);
+    void append_graph(const DBG_succ &other);
 
     /**
      * This function takes a pointer to a graph structure and concatenates the arrays W, last
@@ -79,9 +79,9 @@ class DBG_succ { //: public GenomeGraph{
      * this will not produce a valid graph and should only be used as a helper in the
      * parallel merge procedure.
      */
-    void append_graph_static(DBG_succ *other);
+    void append_graph_static(const DBG_succ &other);
 
-    uint64_t remove_edges(std::set<uint64_t> &edges, uint64_t ref_point = 0);
+    void remove_edges(const std::set<uint64_t> &edges);
 
     void add_sink(unsigned int parallel = 1, std::string suffix = "");
 
@@ -126,6 +126,7 @@ class DBG_succ { //: public GenomeGraph{
     std::vector<uint8_t> last_stat_safe; // need uint8 here for thread safety
 
     // the array containing the edge labels
+    // TODO TAlphabet
     std::vector<uint8_t> W_stat;
 
     //read coverage
@@ -430,6 +431,16 @@ class DBG_succ { //: public GenomeGraph{
      * a character c the last index of a character c preceding in W[1..i].
      */
     uint64_t pred_W(uint64_t i, TAlphabet c) const;
+
+    void verbose_cout() {}
+
+    template <typename T, typename... Targs>
+    void verbose_cout(const T &arg, Targs ...rest) {
+        if (verbose) {
+            std::cout << arg;
+            verbose_cout(rest...);
+        }
+    }
 
 };
 

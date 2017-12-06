@@ -74,9 +74,10 @@ class bit_vector_dyn : public bit_vector {
   public:
     bit_vector_dyn() : vector_() {}
 
-    bit_vector_dyn(size_t size, bool def) : vector_(size, def) {}
+    bit_vector_dyn(size_t size, bool value) : vector_(size, value) {}
 
-    explicit bit_vector_dyn(std::vector<bool> &v) : vector_(v.size(), false) {
+    explicit bit_vector_dyn(const std::vector<bool> &v)
+            : vector_(v.size(), false) {
         for (size_t i = 0; i < v.size(); ++i) {
             if (v.at(i))
                 this->set(i, true);
@@ -85,7 +86,8 @@ class bit_vector_dyn : public bit_vector {
 
     explicit bit_vector_dyn(const bit_vector_dyn &v) : vector_(v.vector_) {}
 
-    explicit bit_vector_dyn(const bit_vector &v) : vector_(v.size(), false) {
+    explicit bit_vector_dyn(const bit_vector &v)
+            : vector_(v.size(), false) {
         for (size_t i = 0; i < v.size(); ++i) {
             if (v[i])
                 this->set(i, true);
@@ -150,16 +152,19 @@ class bit_vector_stat : public bit_vector {
   public:
     bit_vector_stat() : vector_() {}
 
-    bit_vector_stat(size_t size, bool def) : vector_(size, def) {}
+    bit_vector_stat(size_t size, bool value) : vector_(size, value) {}
 
     bit_vector_stat(const bit_vector_stat &other) : vector_(other.vector_) {}
 
-    bit_vector_stat(const bit_vector &V) : vector_(V.size(), 0) {
+    bit_vector_stat(const bit_vector &V)
+            : vector_(V.size(), 0) {
         for (size_t i = 0; i < V.size(); ++i) {
             if (V[i])
                 vector_[i] = 1;
         }
     }
+
+    bit_vector_stat(std::initializer_list<bool> init) : vector_(init) {}
 
     bit_vector_stat(std::istream &in) {
         deserialise(in);
@@ -196,36 +201,35 @@ class bit_vector_stat : public bit_vector {
     }
     uint64_t select1(size_t id) const {
         if (requires_update_)
-            const_cast<bit_vector_stat *>(this)->init_rs();
-        return slct(id + 1);
+            const_cast<bit_vector_stat*>(this)->init_rs();
+        return slct_(id + 1);
     }
     uint64_t rank1(size_t id) const {
         if (requires_update_)
-            const_cast<bit_vector_stat *>(this)->init_rs();
+            const_cast<bit_vector_stat*>(this)->init_rs();
         //the rank method in SDSL does not include id in the count
-        return rk(id >= this->size() ? this->size() : id + 1);
+        return rk_(id >= this->size() ? this->size() : id + 1);
     }
     uint64_t size() const {
         return vector_.size();
     }
     
   protected:
-    void print(std::ostream& os) const {
+    void print(std::ostream &os) const {
         os << static_cast<sdsl::bit_vector>(vector_);
     }
-
 
   private:
     sdsl::bit_vector vector_;
 
     // maintain rank/select operations
-    sdsl::rank_support_v5<> rk;
-    sdsl::select_support_mcl<> slct;
+    sdsl::rank_support_v5<> rk_;
+    sdsl::select_support_mcl<> slct_;
     bool requires_update_ = true;
 
     void init_rs() {
-        rk = sdsl::rank_support_v5<>(&vector_);
-        slct = sdsl::select_support_mcl<>(&vector_);
+        rk_ = sdsl::rank_support_v5<>(&vector_);
+        slct_ = sdsl::select_support_mcl<>(&vector_);
         requires_update_ = false;
     }
 };
@@ -249,8 +253,9 @@ class wavelet_tree {
     // this only makes sense when implemented in the dynamic part
     virtual bool get_bit_raw(uint64_t id) const = 0;
     friend inline std::ostream& operator<<(std::ostream &os, const wavelet_tree& wt);
+
   protected:
-    virtual void print(std::ostream& os) const = 0;
+    virtual void print(std::ostream &os) const = 0;
 };
 
 inline std::ostream& operator<<(std::ostream &os, const wavelet_tree& wt) {
@@ -474,7 +479,9 @@ class wavelet_tree_dyn : public wavelet_tree {
     libmaus2::wavelet::DynamicWaveletTree<6, 64> wavelet_tree_;
 
     template <class Vector>
-    libmaus2::bitbtree::BitBTree<6, 64>* initialize_tree(const Vector &W_stat, size_t const b, unsigned int parallel=1) {
+    libmaus2::bitbtree::BitBTree<6, 64>* initialize_tree(const Vector &W_stat,
+                                                         size_t const b,
+                                                         unsigned int parallel = 1) {
         size_t const n = W_stat.size();
 
         // compute total offsets for the individual bins
@@ -536,6 +543,7 @@ class wavelet_tree_dyn : public wavelet_tree {
                 }
             }
         }
+
         return tmp;
     }
 };

@@ -50,29 +50,20 @@ const TAlphabet kCharToNucleotide[128] = {
 
 
 DBG_succ::DBG_succ(size_t k, bool sentinel)
-      : k_(k),
-        start(std::string(k - 1, alphabet[alph_size - 1])
-                 + alphabet[0] + alphabet[0]),
-        sink(alphabet.substr(0, 1)) {
+      : F(alph_size, 0), k_(k), p_(0),
+        start(std::string(k - 1, alphabet[alph_size - 1]) + "$$"),
+        sink("$") {
 
     last->insertBit(0, false);
-    if (sentinel)
-        last->insertBit(1, true);
-
     W->insert(0, 0);
-    if (sentinel)
-        W->insert(0, 0);
-
-    F.push_back(0);
 
     if (sentinel) {
-        for (size_t j = 1; j < alph_size; j++)
-            F.push_back(1);
+        last->insertBit(1, true);
+        W->insert(0, 0);
+        for (size_t j = 1; j < alph_size; j++) {
+            F[j] = 1;
+        }
         p_ = 1;
-    } else {
-        for (size_t j = 1; j < alph_size; j++)
-            F.push_back(0);
-        p_ = 0;
     }
     state = Config::DYN;
 }

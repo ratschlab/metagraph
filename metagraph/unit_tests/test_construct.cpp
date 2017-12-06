@@ -74,7 +74,7 @@ TEST(Construct, GraphDefaultConstructor) {
     });
 }
 
-TEST(Construct, EmptyGraph) {
+TEST(DBGSuccinct, EmptyGraph) {
     DBG_succ *graph = init_graph();
     construct_succ(graph);
     graph->switch_state(Config::DYN);
@@ -129,7 +129,7 @@ TEST(Construct, SmallGraphTraversal) {
     gzclose(input_p);
 }
 
-TEST(Construct, Serialization) {
+TEST(DBGSuccinct, Serialization) {
     gzFile input_p = gzopen(test_fasta.c_str(), "r");
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
@@ -157,4 +157,13 @@ TEST(Construct, Serialization) {
     EXPECT_EQ(*graph, loaded_graph) << "Loaded graph differs";
 
     delete graph;
+}
+
+TEST(DBGSuccinct, AddSequence) {
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ graph(k, true);
+        graph.add_sequence(std::string(100, 'A'));
+        EXPECT_EQ(3 * k, graph.num_nodes());
+        EXPECT_EQ(3 * k + 2, graph.num_edges());
+    }
 }

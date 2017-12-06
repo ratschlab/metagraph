@@ -195,7 +195,7 @@ void parallel_merge_collect(DBG_succ *result) {
 
     for (size_t i = 0; i < merge_data->result.size(); ++i) {
         if (merge_data->result.at(i)) {
-            result->append_graph(merge_data->result.at(i));
+            result->append_graph(*merge_data->result.at(i));
             delete merge_data->result.at(i);
         }
     }
@@ -636,13 +636,12 @@ int main(int argc, const char *argv[]) {
                             graph->last_stat.push_back(0);
                             graph->W_stat.push_back(0);
                         }
-                        DBG_succ* graph_to_append = new DBG_succ();
-                        if (!graph_to_append->load(fname)) {
+                        DBG_succ graph_to_append;
+                        if (!graph_to_append.load(fname)) {
                             fprintf(stderr, "ERROR: input file corrupted\n");
                             exit(1);
                         }
                         graph->append_graph_static(graph_to_append);
-                        delete graph_to_append;
                     } else {
                         if (f == 0) {
                             graph = new DBG_succ();
@@ -651,13 +650,12 @@ int main(int argc, const char *argv[]) {
                                 exit(1);
                             }
                         } else {
-                            DBG_succ* graph_to_append = new DBG_succ();
-                            if (!graph_to_append->load(fname)) {
+                            DBG_succ graph_to_append;
+                            if (!graph_to_append.load(fname)) {
                                 fprintf(stderr, "ERROR: input file corrupted\n");
                                 exit(1);
                             }
                             graph->append_graph(graph_to_append);
-                            delete graph_to_append;
                         }
                     }
                 }
