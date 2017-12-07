@@ -23,6 +23,7 @@ BranchInfoMerge pop_branch(std::stack<BranchInfoMerge> &branchnodes,
                            uint64_t &nodeId, uint64_t &lastEdge,
                            std::deque<TAlphabet> &last_k);
 
+
 void merge(DBG_succ *Gt,
            std::vector<DBG_succ*> Gv,
            std::vector<uint64_t> kv,
@@ -79,7 +80,7 @@ void merge(DBG_succ *Gt,
 
         if (Gt->verbose && added > 0 && added % 1000 == 0) {
             std::cout << "." << std::flush;
-            if (added % 10000 == 0) {
+            if (added % 10'000 == 0) {
                 std::cout << "added " << added;
                 for (size_t i = 0; i < Gv.size(); i++)
                     std::cout << " - G" << i << ": edge " << kv.at(i) << "/" << Gv.at(i)->get_W().size();
@@ -399,7 +400,7 @@ BranchInfoMerge pop_branch(std::stack<BranchInfoMerge> &branchnodes,
 }
 
 
-void traversalHash(DBG_succ* G) {
+void traversalHash(DBG_succ *G) {
 
     // store all branch nodes on the way
     std::stack<BranchInfoMerge> branchnodes;

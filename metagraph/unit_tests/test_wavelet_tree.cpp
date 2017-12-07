@@ -10,13 +10,12 @@ const std::string test_dump_basename = test_data_dir + "/bit_vector_dump_test";
 void reference_based_test(const wavelet_tree &vector,
                           const std::vector<uint64_t> &reference) {
     for (uint64_t c = 0; c < 16; ++c) {
-        ASSERT_DEATH(vector.select(c, vector.size() + 1), "");
-        ASSERT_DEATH(vector.select(c, 0), "");
-
         uint64_t max_rank = std::count(reference.begin(), reference.end(), c);
 
+        ASSERT_DEATH(vector.select(c, 0), "");
+        ASSERT_DEATH(vector.select(c, max_rank + 1), "");
+
         for (size_t i : {1, 2, 10, 100, 1000}) {
-            ASSERT_DEATH(vector.select(c, max_rank + i), "");
             EXPECT_EQ(max_rank, vector.rank(c, vector.size() - 1 + i - 1));
         }
 

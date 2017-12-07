@@ -88,25 +88,6 @@ class DBG_succ { //: public GenomeGraph{
     void add_sink(unsigned int parallel = 1, std::string suffix = "");
 
     /**
-     * This is a debug function that prints the current representation of the graph to
-     * the screen.
-     */
-    void print_state() const;
-
-    /**
-     * Returns the sequence stored in W and prints the node
-     * information in an overview.
-     * Useful for debugging purposes.
-     */
-    void print_seq() const;
-
-    /**
-     * Write the adjacency list to file |filename| or
-     * print it to stdout of the filename is not provided.
-     */
-    void print_adj_list(const std::string &filename = "") const;
-
-    /**
      * Given index i of a node and a value k, this function
      * will return the k-th last character of node i.
      */
@@ -125,21 +106,12 @@ class DBG_succ { //: public GenomeGraph{
 
     // the bit array indicating the last outgoing edge of a node (static container for full init)
     std::vector<bool> last_stat;
-    std::vector<uint8_t> last_stat_safe; // need uint8 here for thread safety
 
     // the array containing the edge labels
-    // TODO TAlphabet
-    std::vector<uint8_t> W_stat;
-
-    //read coverage
-    std::vector<size_t> coverage;
-
-    //read bridge indicator
-    //std::vector<uint8_t> bridge_stat;
-    //bit_vector *bridge = new bit_vector_dyn();
+    std::vector<TAlphabet> W_stat;
 
     // the offset array to mark the offsets for the last column in the implicit node list
-    std::vector<TAlphabet> F;
+    std::vector<uint64_t> F;
 
     // k-mer size
     size_t k_;
@@ -279,15 +251,34 @@ class DBG_succ { //: public GenomeGraph{
      */
     void update_F(TAlphabet c, bool positive);
 
+    void switch_state(Config::StateType state);
+
+    /**
+     * This is a debug function that prints the current representation of the graph to
+     * the screen.
+     */
+    void print_state() const;
+
+    /**
+     * Returns the sequence stored in W and prints the node
+     * information in an overview.
+     * Useful for debugging purposes.
+     */
+    void print_seq() const;
+
+    /**
+     * Write the adjacency list to file |filename| or
+     * print it to stdout of the filename is not provided.
+     */
+    void print_adj_list(const std::string &filename = "") const;
+
+  private:
     /**
      * This is a convenience function to replace the value at
      * position i in W with val.
      */
-    void W_set_value(size_t i, TAlphabet val);
+    void W_set_value(uint64_t i, TAlphabet val);
 
-    void switch_state(Config::StateType state);
-
-  private:
     /**
      * This function takes a character c and appends it to the end of the graph
      * sequence given that the corresponding note is not part of the graph yet.
@@ -365,8 +356,6 @@ class DBG_succ { //: public GenomeGraph{
         }
     }
 
-    std::vector<HitInfo> index_fuzzy(const std::string &str, uint64_t eops) const;
-
     /**
      * Given a node label str, this function returns the index range
      * of nodes sharing the suffix str, if no such range exists, the pair
@@ -376,12 +365,9 @@ class DBG_succ { //: public GenomeGraph{
     std::pair<uint64_t, uint64_t> index_range(const T &str, uint64_t length) const {
 
         // get first
-        TAlphabet s;
-        if (std::is_same<T, std::string>::value) {
-            s = encode(str[0]);
-        } else {
-            s = str[0];
-        }
+        TAlphabet s = std::is_same<T, std::string>::value
+                        ? encode(str[0])
+                        : str[0];
         // init range
         uint64_t rl = succ_last(F.at(s) + 1);
         uint64_t ru = (s < F.size() - 1) ? F.at(s + 1) : (W->size() - 1); // upper bound
@@ -409,6 +395,8 @@ class DBG_succ { //: public GenomeGraph{
         }
         return std::make_pair(rl, ru);
     }
+
+    std::vector<HitInfo> index_fuzzy(const std::string &str, uint64_t eops) const;
 
     /**
      * Given a position i in W and an edge label c, this function returns the

@@ -29,7 +29,6 @@
 #include <libmaus2/util/NumberSerialisation.hpp>
 #include <zlib.h>
 
-#include "datatypes.hpp"
 #include "serialization.hpp"
 #include "dbg_succinct.hpp"
 
@@ -87,6 +86,7 @@ bool DBG_succ::operator==(const DBG_succ &other) const {
         std::cerr << "2: " << other.W->size() << std::endl;
         return false;
     }
+
     if (F.size() != other.F.size()) {
         std::cerr << "sizes of F arrays differ" << std::endl;
         std::cerr << "1: " << F.size() << std::endl;
@@ -127,9 +127,6 @@ bool DBG_succ::operator==(const DBG_succ &other) const {
     return true;
 }
 
-/**
- * Take the current graph content and store in a file.
- */
 void DBG_succ::serialize(const std::string &outbase) const {
     // write Wavelet Tree
     std::ofstream outstream(outbase + ".W.dbg");
@@ -153,6 +150,7 @@ void DBG_succ::serialize(const std::string &outbase) const {
               << p_ << "\n"
               << ">s\n"
               << state << "\n";
+    outstream.close();
 }
 
 bool DBG_succ::load(const std::string &infbase) {
@@ -595,9 +593,13 @@ uint64_t DBG_succ::colex_upper_bound(std::deque<TAlphabet> str) const {
     // get first
     std::deque<TAlphabet>::iterator it = str.begin();
     TAlphabet s1 = *it % alph_size;
+
     // init range
-    uint64_t rl = succ_last(F.at(s1) + 1);                           // lower bound
-    uint64_t ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->size() - 1);    // upper bound
+
+    // lower bound
+    uint64_t rl = succ_last(F.at(s1) + 1);
+    // upper bound
+    uint64_t ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->size() - 1);
     while (rl > ru && s1 > 0) {
         s1--;
         rl = succ_last(F.at(s1) + 1);
@@ -688,7 +690,6 @@ std::pair<uint64_t, uint64_t> DBG_succ::get_equal_node_range(uint64_t i) const {
  * will return the k-th last character of node i.
  */
 std::pair<TAlphabet, uint64_t> DBG_succ::get_minus_k_value(uint64_t i, uint64_t k) const {
-
     for (; k > 0; --k)
         i = bwd(succ_last(i));
     return std::make_pair(get_node_end_value(i), bwd(succ_last(i)));
@@ -713,11 +714,11 @@ bool DBG_succ::compare_node_suffix(uint64_t i1, uint64_t i2) const {
 
 bool DBG_succ::compare_node_suffix(TAlphabet *ref, uint64_t i2) const {
     TAlphabet *i1 = &ref[k_ - 1];
-    for (size_t ii=0; ii < k_ - 1;ii++) {
+    for (size_t ii=0; ii < k_ - 1; ii++) {
         if (*i1 != get_node_end_value(i2)) {
             return false;
         }
-        i1 = &ref[k_ - 2-ii];
+        i1 = &ref[k_ - 2 - ii];
         i2 = bwd(succ_last(i2));
     }
     return true;
@@ -742,9 +743,9 @@ bool DBG_succ::is_terminal_node(uint64_t i) const {
 */
 std::deque<TAlphabet> DBG_succ::get_node_seq(uint64_t k_node) const {
     std::deque<TAlphabet> ret;
-    std::pair<TAlphabet, uint64_t> k_val;
+
     for (uint64_t curr_k = 0; curr_k < this->k_; ++curr_k) {
-        k_val = get_minus_k_value(k_node, 0);
+        auto k_val = get_minus_k_value(k_node, 0);
         ret.push_front(k_val.first);
         k_node = k_val.second;
     }
@@ -757,24 +758,19 @@ std::deque<TAlphabet> DBG_succ::get_node_seq(uint64_t k_node) const {
 * node as a string.
 */
 std::string DBG_succ::get_node_str(uint64_t k_node) const {
-    std::stringstream ret;
-    std::pair<TAlphabet, uint64_t> k_val;
-    for (uint64_t curr_k = 0; curr_k < this->k_; ++curr_k) {
-        k_val = get_minus_k_value(k_node, 0);
-        ret << decode(k_val.first);
-        k_node = k_val.second;
-    }
-    std::string ret_str = ret.str();
-    return std::string(ret_str.rbegin(), ret_str.rend());
+    std::string node_string(k_, 0);
+    auto node_encoding = get_node_seq(k_node);
+    std::transform(node_encoding.begin(), node_encoding.end(), node_string.begin(),
+                   [](TAlphabet c) { return decode(c); });
+    return node_string;
 }
 
 std::vector<uint64_t> DBG_succ::align(const std::string &sequence,
                                       uint64_t alignment_length) const {
-
     std::vector<uint64_t> indices;
 
     if (alignment_length == 0)
-        alignment_length = this->get_k();
+        alignment_length = k_;
 
     std::vector<HitInfo> curr_result;
     for (uint64_t i = 0; i < sequence.size() - alignment_length + 1; ++i) {
@@ -825,8 +821,9 @@ uint64_t DBG_succ::num_edges() const {
  * all following values by +1 is positive is true and by -1 otherwise.
  */
 void DBG_succ::update_F(TAlphabet c, bool positive) {
-    for (TAlphabet i = c+1; i < F.size(); i++)
-        F[i] += (2 * (TAlphabet) positive - 1);
+    for (TAlphabet i = c + 1; i < F.size(); i++) {
+        F[i] += 2 * static_cast<int>(positive) - 1;
+    }
 }
 
 /**
@@ -834,41 +831,44 @@ void DBG_succ::update_F(TAlphabet c, bool positive) {
  * to upper bound u and swaps the inserted element to the
  * righ location.
  */
+//TODO: this function can be improved
+//TODO: fix_order_in_W_range
 void DBG_succ::sort_W_locally(uint64_t l, uint64_t u) {
-    for (uint64_t s = u; s > l; s--) {
-        TAlphabet tmp;
-        if (((*W)[s] % alph_size) < ((*W)[s-1] % alph_size)) {
-            tmp = (*W)[s-1];
-            W_set_value(s-1, (*W)[s]);
-            W_set_value(s, tmp);
+    assert(state == Config::DYN);
+
+    for (uint64_t s = u; s > l; --s) {
+        auto first = get_W(s - 1);
+        auto second = get_W(s);
+        if ((second % alph_size) < (first % alph_size)) {
+            W_set_value(s - 1, second);
+            W_set_value(s, first);
         }
     }
     for (uint64_t s = l; s < u; ++s) {
-        TAlphabet tmp;
-        if (((*W)[s] % alph_size) > ((*W)[s+1] % alph_size)) {
-            tmp = (*W)[s+1];
-            W_set_value(s+1, (*W)[s]);
-            W_set_value(s, tmp);
+        auto first = get_W(s);
+        auto second = get_W(s + 1);
+        if ((first % alph_size) > (second % alph_size)) {
+            W_set_value(s + 1, first);
+            W_set_value(s, second);
         }
     }
 }
-
 
 /**
  * This is a convenience function to replace the value at
  * position i in W with val.
  */
-void DBG_succ::W_set_value(size_t i, TAlphabet val) {
+void DBG_succ::W_set_value(uint64_t i, TAlphabet val) {
     W->set(i, val);
 }
-
 
 TAlphabet DBG_succ::encode(char s) {
     return kCharToNucleotide[static_cast<int>(s)];
 }
 
-char DBG_succ::decode(uint64_t s) {
-    return s < alphabet.size() ? alphabet[s] : alphabet[14];
+char DBG_succ::decode(TAlphabet c) {
+    assert(c < alphabet.size());
+    return alphabet[c];
 }
 
 void DBG_succ::switch_state(Config::StateType state) {
@@ -889,15 +889,8 @@ void DBG_succ::switch_state(Config::StateType state) {
                 W_stat.clear();
 
                 delete last;
-                if (last_stat.size()) {
-                    last = new bit_vector_dyn(last_stat);
-                    last_stat.clear();
-                } else {
-                    std::vector<bool> last_stat_safe_bool(last_stat_safe.size());
-                    std::copy(last_stat_safe.begin(), last_stat_safe.end(), last_stat_safe_bool.begin());
-                    last = new bit_vector_dyn(last_stat_safe_bool);
-                    last_stat_safe.clear();
-                }
+                last = new bit_vector_dyn(last_stat);
+                last_stat.clear();
 
                 //delete bridge;
                 //if (bridge_stat.size()) {
@@ -933,22 +926,93 @@ void DBG_succ::switch_state(Config::StateType state) {
     }
 }
 
-//TODO: assume that a sentinel was used during construction
+
 void DBG_succ::print_state() const {
+    std::cout << "Index" << "\t" << "L"
+                         << "\t" << "Vertex"
+                         << "\t" << "W" << std::endl;
+
     for (uint64_t i = 1; i < W->size(); i++) {
         std::cout << i << "\t" << get_last(i)
                        << "\t" << get_node_str(i)
-                       << "\t" << decode((*W)[i])
-                       << ((*W)[i] > alph_size
-                                   ? "-"
-                                   : "")
-                       << (i == this->p_
-                              ? "<"
-                              : "")
-                       << std::endl;
+                       << "\t" << decode(get_W(i))
+                               << (get_W(i) > alph_size
+                                       ? "-"
+                                       : "")
+                               << (i == this->p_
+                                      ? "<"
+                                      : "")
+                               << std::endl;
     }
 }
 
+/*
+ * Returns the sequence stored in W and prints the node
+ * information in an overview.
+ * Useful for debugging purposes.
+ */
+void DBG_succ::print_seq() const {
+
+    const uint64_t linelen = 80;
+
+    for (uint64_t start = 1; start < W->size(); start += linelen) {
+        uint64_t end = start + linelen < W->size() ? start + linelen : W->size();
+
+        for (uint64_t i = start; i < end; i++) {
+            if (i % 10 == 0)
+                fprintf(stdout, "%d", static_cast<int>((i / 10) % 10));
+            else
+                fprintf(stdout, " ");
+        }
+        fprintf(stdout, "\n");
+
+        for (uint64_t i = start; i < end; i++) {
+            if (get_W(i) >= alph_size)
+                fprintf(stdout, "|");
+            else
+                fprintf(stdout, " ");
+        }
+        fprintf(stdout, "\n");
+
+        for (uint64_t i = start; i < end; i++) {
+            fprintf(stdout, "%c", decode(get_W(i)));
+        }
+        fprintf(stdout, "\n");
+
+        std::vector<std::string> nodes;
+        for (uint64_t i = start; i < end; i++) {
+            if (p_ == i)
+                fprintf(stdout, "*");
+            else
+                fprintf(stdout, " ");
+            nodes.push_back(get_node_str(i));
+        }
+        fprintf(stdout, "\n");
+
+        for (size_t l = 0; l < k_; l++) {
+            for (uint64_t i = start; i < end; i++) {
+                fprintf(stdout, "%c", nodes[i - start][k_ - l - 1]);
+            }
+            fprintf(stdout, "\n");
+        }
+        fprintf(stdout, "\n");
+
+        for (uint64_t i = start; i < end; i++) {
+            fprintf(stdout, "%d", get_last(i));
+        }
+        fprintf(stdout, "\n\n");
+
+        for (uint64_t i = start; i < end; ++i) {
+            fprintf(stdout, "%d", static_cast<int>(outdegree(i)));
+        }
+        fprintf(stdout, "\n");
+
+        for (uint64_t i = start; i < end; ++i) {
+            fprintf(stdout, "%d", static_cast<int>(indegree(i)));
+        }
+        fprintf(stdout, "\n\n");
+    }
+}
 
 void DBG_succ::print_adj_list(const std::string &filename) const {
     std::ofstream of;
@@ -959,86 +1023,7 @@ void DBG_succ::print_adj_list(const std::string &filename) const {
     for (uint64_t edge = 1; edge < W->size(); ++edge) {
         outstream << rank_last(succ_last(edge))
                   << "\t"
-                  << rank_last(outgoing(edge, (*W)[edge]))
+                  << rank_last(outgoing(edge, get_W(edge)))
                   << "\n";
-    }
-}
-
-
-/*
- * Returns the sequence stored in W and prints the node
- * information in an overview.
- * Useful for debugging purposes.
- */
-void DBG_succ::print_seq() const {
-
-    uint64_t linelen = 80;
-    uint64_t start = 1;
-    uint64_t end = start + linelen < W->size()
-                                   ? start + linelen
-                                   : W->size();
-    while (start < W->size()) {
-        for (uint64_t i = start; i < end; i++) {
-            if (i % 10 == 0)
-                fprintf(stdout, "%" PRIu64, (i / 10) % 10);
-            else
-                fprintf(stdout, " ");
-        }
-        std::cout << std::endl;
-
-        for (uint64_t i = start; i < end; i++) {
-            if ((*W)[i] >= alph_size)
-                fprintf(stdout, "-");
-            else
-                fprintf(stdout, " ");
-        }
-        std::cout << std::endl;
-
-        for (uint64_t i = start; i < end; i++) {
-            if ((*W)[i] % alph_size == 0)
-                fprintf(stdout, "$");
-            else
-                std::cout << decode((*W)[i] % alph_size);
-        }
-        std::cout << std::endl;
-
-        for (uint64_t i = start; i < end; i++) {
-            if (p_ == i)
-                fprintf(stdout, "*");
-            else
-                fprintf(stdout, " ");
-        }
-        std::cout << std::endl;
-
-        size_t j;
-        for (size_t l = 0; l < k_; l++) {
-            for (uint64_t i = start; i < end; i++) {
-                j = get_minus_k_value(i, l).first;
-                if (j % alph_size == 0)
-                    std::cout << "$";
-                else
-                    std::cout << decode(j % alph_size);
-            }
-            std::cout << std::endl;
-        }
-        std::cout << std::endl;
-        for (uint64_t i = start; i < end; i++) {
-            fprintf(stdout, "%i", (int) (*last)[i]);
-        }
-        std::cout << std::endl;
-        std::cout << std::endl;
-
-        for (uint64_t i = start; i < end; ++i) {
-            std::cout << indegree(i);
-        }
-        std::cout << std::endl;
-        for (uint64_t i = start; i < end; ++i) {
-            std::cout << outdegree(i);
-        }
-        std::cout << std::endl;
-        std::cout << std::endl;
-
-        start += linelen;
-        end = start + linelen < W->size() ? start + linelen : W->size();
     }
 }

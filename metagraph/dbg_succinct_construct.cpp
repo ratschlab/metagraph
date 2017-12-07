@@ -163,9 +163,9 @@ void DBG_succ::construct_succ(unsigned int parallel) {
 
     size_t curpos = W_stat.size();
     W_stat.resize(W_stat.size() + kmers.size());
-    last_stat_safe.resize(last_stat_safe.size() + kmers.size(), true);
-    coverage.resize(coverage.size() + kmers.size(),0);
-    //bridge_stat.resize(bridge_stat.size() + kmers.size(), false);
+
+    std::vector<uint8_t> last_stat_safe(last_stat.size() + kmers.size(), true);
+    std::copy(last_stat.begin(), last_stat.end(), last_stat_safe.begin());
 
     #pragma omp parallel num_threads(parallel)
     {
@@ -201,6 +201,9 @@ void DBG_succ::construct_succ(unsigned int parallel) {
             W_stat[curpos+i] = curW;
         }
     }
+    last_stat.resize(last_stat_safe.size());
+    std::copy(last_stat_safe.begin(), last_stat_safe.end(), last_stat.begin());
+
     size_t lastlet = 0;
 
     for (size_t i = 0; i < kmers.size(); ++i) {
