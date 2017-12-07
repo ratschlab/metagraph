@@ -9,6 +9,8 @@
 #include "kmer.hpp"
 #include "config.hpp"
 #include "dbg_succinct_merge.hpp"
+#include "wavelet_tree.hpp"
+#include "bit_vector.hpp"
 
 
 /*
