@@ -10,13 +10,13 @@ const std::string test_dump_basename = test_data_dir + "/bit_vector_dump_test";
 void reference_based_test(const wavelet_tree &vector,
                           const std::vector<uint64_t> &reference) {
     for (uint64_t c = 0; c < 16; ++c) {
-        ASSERT_DEATH(vector.select(c, vector.size() + 1), "Assertion failed");
-        ASSERT_DEATH(vector.select(c, 0), "Assertion failed");
+        ASSERT_DEATH(vector.select(c, vector.size() + 1), "");
+        ASSERT_DEATH(vector.select(c, 0), "");
 
         uint64_t max_rank = std::count(reference.begin(), reference.end(), c);
 
         for (size_t i : {1, 2, 10, 100, 1000}) {
-            ASSERT_DEATH(vector.select(c, max_rank + i), "Assertion failed");
+            ASSERT_DEATH(vector.select(c, max_rank + i), "");
             EXPECT_EQ(max_rank, vector.rank(c, vector.size() - 1 + i - 1));
         }
 
@@ -45,8 +45,8 @@ void test_wavelet_tree_queries() {
     ASSERT_TRUE(vector);
 
     EXPECT_EQ(10u, vector->size());
-    ASSERT_DEATH((*vector)[vector->size()], "Assertion failed");
-    ASSERT_DEATH((*vector)[vector->size() + 1], "Assertion failed");
+    ASSERT_DEATH((*vector)[vector->size()], "");
+    ASSERT_DEATH((*vector)[vector->size() + 1], "");
 
     for (size_t i = 0; i < 10; ++i) {
         EXPECT_EQ(0u, (*vector)[i]);
@@ -54,21 +54,21 @@ void test_wavelet_tree_queries() {
         EXPECT_EQ(0u, vector->rank(1, i));
         EXPECT_EQ(0u, vector->rank(2, i));
         EXPECT_EQ(i, vector->select(0, i + 1));
-        ASSERT_DEATH(vector->select(1, i + 1), "Assertion failed");
+        ASSERT_DEATH(vector->select(1, i + 1), "");
     }
     EXPECT_EQ(0u, vector->rank(2, 0));
     EXPECT_EQ(0u, vector->rank(2, 1'000));
     EXPECT_EQ(10u, vector->rank(0, 1'000));
-    ASSERT_DEATH(vector->select(1, 1'000), "Assertion failed");
-    ASSERT_DEATH(vector->select(1, 0), "Assertion failed");
+    ASSERT_DEATH(vector->select(1, 1'000), "");
+    ASSERT_DEATH(vector->select(1, 0), "");
     delete vector;
 
     vector = new T(4, std::vector<int>(10, 2));
     ASSERT_TRUE(vector);
 
     EXPECT_EQ(10u, vector->size());
-    ASSERT_DEATH((*vector)[vector->size()], "Assertion failed");
-    ASSERT_DEATH((*vector)[vector->size() + 1], "Assertion failed");
+    ASSERT_DEATH((*vector)[vector->size()], "");
+    ASSERT_DEATH((*vector)[vector->size() + 1], "");
 
     for (size_t i = 0; i < 10; ++i) {
         EXPECT_EQ(2u, (*vector)[i]);
@@ -76,13 +76,13 @@ void test_wavelet_tree_queries() {
         EXPECT_EQ(0u, vector->rank(1, i));
         EXPECT_EQ(0u, vector->rank(3, i));
         EXPECT_EQ(i, vector->select(2, i + 1));
-        ASSERT_DEATH(vector->select(1, i + 1), "Assertion failed");
+        ASSERT_DEATH(vector->select(1, i + 1), "");
     }
     EXPECT_EQ(0u, vector->rank(0, 0));
     EXPECT_EQ(0u, vector->rank(0, 1'000));
     EXPECT_EQ(10u, vector->rank(2, 1'000));
-    ASSERT_DEATH(vector->select(3, 1'000), "Assertion failed");
-    ASSERT_DEATH(vector->select(1, 0), "Assertion failed");
+    ASSERT_DEATH(vector->select(3, 1'000), "");
+    ASSERT_DEATH(vector->select(1, 0), "");
     delete vector;
 
     std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,

@@ -11,15 +11,15 @@ void reference_based_test(const bit_vector &vector,
                           const std::vector<bool> &reference) {
     size_t max_rank = std::accumulate(reference.begin(), reference.end(), 0u);
 
-    ASSERT_DEATH(vector.select1(0), "Assertion failed");
+    ASSERT_DEATH(vector.select1(0), "");
 
     for (size_t i : {1, 2, 10, 100, 1000}) {
-        ASSERT_DEATH(vector.select1(max_rank + i), "Assertion failed");
+        ASSERT_DEATH(vector.select1(max_rank + i), "");
         EXPECT_EQ(max_rank, vector.rank1(vector.size() + i - 2));
     }
-    ASSERT_DEATH(vector.select1(vector.size() + 1), "Assertion failed");
-    ASSERT_DEATH(vector[vector.size()], "Assertion failed");
-    ASSERT_DEATH(vector[vector.size() + 1], "Assertion failed");
+    ASSERT_DEATH(vector.select1(vector.size() + 1), "");
+    ASSERT_DEATH(vector[vector.size()], "");
+    ASSERT_DEATH(vector[vector.size() + 1], "");
 
     for (size_t i = 1; i <= max_rank; ++i) {
         EXPECT_EQ(i, vector.rank1(vector.select1(i)));
@@ -51,7 +51,7 @@ void test_bit_vector_queries() {
     for (size_t i = 0; i < vector->size(); ++i) {
         EXPECT_EQ(0, (*vector)[i]);
         EXPECT_EQ(0u, vector->rank1(i));
-        ASSERT_DEATH(vector->select1(i), "Assertion failed");
+        ASSERT_DEATH(vector->select1(i), "");
     }
     EXPECT_EQ(0u, vector->rank1(0));
     EXPECT_EQ(0u, vector->rank1(1'000));
@@ -68,8 +68,8 @@ void test_bit_vector_queries() {
         EXPECT_EQ(i, vector->select1(vector->rank1(i)));
     }
     EXPECT_EQ(10u, vector->rank1(1'000));
-    ASSERT_DEATH(vector->select1(1'000), "Assertion failed");
-    ASSERT_DEATH(vector->select1(0), "Assertion failed");
+    ASSERT_DEATH(vector->select1(1'000), "");
+    ASSERT_DEATH(vector->select1(0), "");
     delete vector;
 
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
