@@ -289,7 +289,7 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
         // we have to insert 0 into last as the node already existed in the range
         // and the terminal symbol is always first
         last->insertBit(p_new, false);
-        W->insert(0, p_new);
+        W->insert(p_new, 0);
         // update new terminal position
         *p = p_new;
         // take care of updating the offset array F
@@ -310,7 +310,7 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
                 (*p)++;
             if (W->operator[](*p)) {
                 //if no placeholder exists
-                W->insert(0, *p);
+                W->insert(*p, 0);
                 update_F(c_p, true);
                 last->insertBit(*p, false);
                 R.second++;
@@ -370,17 +370,17 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
             if (minus1) {
                 *p = x;
                 last->insertBit(x, false);
-                W->insert(0, x);
+                W->insert(x, 0);
             } else if (minus2) {
                 *p = x + 1;
                 last->insertBit(x + 1, false);
-                W->insert(0, x + 1);
+                W->insert(x + 1, 0);
             // no node shares a k-1 suffix with last_c and thus the new node comes after
             // the forward of last_c (as the current node came after last_c as well)
             } else {
                 *p = x + 1;
                 last->insertBit(x + 1, true);
-                W->insert(0, x + 1);
+                W->insert(x + 1, 0);
             }
         } else {
             uint64_t x = F[c] + 1;
@@ -404,7 +404,7 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
             } else {
                 last->insertBit(x, true);
             }
-            W->insert(0, x);
+            W->insert(x, 0);
         }
         if (*p < p_ || (!append && *p == p_)) {
             (p_)++;
@@ -440,7 +440,7 @@ void DBG_succ::append_graph(const DBG_succ &G) {
 
     // handle last and W
     for (size_t j = 1, curr_pos = W->size(); j < G.W->size(); ++j, ++curr_pos) {
-        W->insert(G.get_W(j), curr_pos);
+        W->insert(curr_pos, G.get_W(j));
         last->insertBit(curr_pos, G.get_last(j));
     }
 

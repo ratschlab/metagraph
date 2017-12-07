@@ -859,8 +859,7 @@ void DBG_succ::sort_W_locally(uint64_t l, uint64_t u) {
  * position i in W with val.
  */
 void DBG_succ::W_set_value(size_t i, TAlphabet val) {
-    W->remove(i);
-    W->insert(val, i);
+    W->set(i, val);
 }
 
 

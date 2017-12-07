@@ -250,12 +250,13 @@ class wavelet_tree {
     virtual uint64_t rank(uint64_t c, uint64_t i) const = 0;
     virtual uint64_t select(uint64_t c, uint64_t i) const = 0;
     virtual uint64_t size() const = 0;
-    //virtual void set(uint64_t id, uint64_t val) = 0;
+    virtual void set(uint64_t id, uint64_t val) = 0;
     virtual uint64_t operator[](uint64_t id) const = 0;
-    virtual void insert(uint64_t val, uint64_t id) = 0;
+    virtual void insert(uint64_t id, uint64_t val) = 0;
     virtual void remove(uint64_t id) = 0;
     virtual bool deserialise(std::istream &in) = 0;
     virtual void serialise(std::ostream &out) const = 0;
+    virtual std::vector<uint64_t> to_vector() const = 0;
 
     friend inline std::ostream& operator<<(std::ostream &os,
                                            const wavelet_tree &wt);
@@ -286,8 +287,8 @@ class wavelet_tree_stat : public wavelet_tree {
     uint64_t size() const { return n_; }
 
     bool deserialise(std::istream &in) {
-        wwt_.load(in);
         int_vector_.load(in);
+        wwt_.load(in);
         n_ = int_vector_.size();
         // we assume the wwt_ has been build before serialization
         requires_update_ = false;
@@ -301,7 +302,7 @@ class wavelet_tree_stat : public wavelet_tree {
         wwt_.serialize(out);
     }
 
-    void insert(uint64_t val, uint64_t id) {
+    void insert(uint64_t id, uint64_t val) {
         if (n_ == size()) {
             int_vector_.resize(2 * n_ + 1);
         }
@@ -345,11 +346,19 @@ class wavelet_tree_stat : public wavelet_tree {
         return int_vector_[id];
     }
 
-/*    void set(uint64_t id, uint64_t val) {
-        requires_update_ = true;
-        int_vector_.operator[](id) = val;
+    std::vector<uint64_t> to_vector() const {
+        std::vector<uint64_t> result(size());
+        for (uint64_t i = 0; i < size(); ++i) {
+            result[i] = int_vector_[i];
+        }
+        return result;
     }
-    */
+
+    void set(uint64_t id, uint64_t val) {
+        requires_update_ = true;
+        int_vector_[id] = val;
+    }
+    
 
   protected:
     void print(std::ostream& os) const {
@@ -400,7 +409,7 @@ class wavelet_tree_dyn : public wavelet_tree {
         wavelet_tree_.serialise(out);
     }
 
-    void insert(uint64_t val, uint64_t id) {
+    void insert(uint64_t id, uint64_t val) {
         wavelet_tree_.insert(val, id);
     }
 
@@ -424,9 +433,10 @@ class wavelet_tree_dyn : public wavelet_tree {
         return wavelet_tree_[id];
     }
 
-//    void set(uint64_t id, uint64_t val) {
-//        wavelet_tree_[id] = val;
-//    }
+    void set(uint64_t id, uint64_t val) {
+        remove(id);
+        insert(id, val);
+    }
 
     std::vector<uint64_t> to_vector() const {
         std::vector<uint64_t> W_stat;

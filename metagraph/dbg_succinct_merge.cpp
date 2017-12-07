@@ -105,9 +105,9 @@ void merge(DBG_succ *Gt,
         // same node as the current one
         auto it = last_added_nodes.find(smallest.second % Gt->alph_size);
         if (it != last_added_nodes.end() && utils::seq_equal(seq1, it->second, 1)) {
-            Gt->W->insert(val + Gt->alph_size, Gt->W->size());
+            Gt->W->insert(Gt->W->size(), val + Gt->alph_size);
         } else {
-            Gt->W->insert(smallest.second, Gt->W->size());
+            Gt->W->insert(Gt->W->size(), smallest.second);
         }
         last_added_nodes[val] = seq1;
         Gt->update_F(Gv.at(curr_k)->get_node_end_value(kv.at(curr_k)), true);
@@ -212,7 +212,7 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
             Gt->update_F(Gt->get_node_end_value(Gt->p_), false);
             //std::cerr << "moving p from " << p << " to " << ridx << std::endl;
             Gt->p_ = ridx;
-            Gt->W->insert(0, Gt->p_);
+            Gt->W->insert(Gt->p_, 0);
             Gt->last->insertBit(Gt->p_, 0); // it's at the beginning of a branch node
             Gt->update_F(Gt->get_node_end_value(Gt->p_), true);
 
@@ -336,7 +336,7 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
                             curr_p -= (Gt->p_ < curr_p);
                             //std::cerr << ".moving p from " << p << " to " << curr_p << std::endl;
                             Gt->p_ = curr_p;
-                            Gt->W->insert(0, Gt->p_);
+                            Gt->W->insert(Gt->p_, 0);
                             Gt->last->insertBit(Gt->p_, 0); // it's at the beginning of a branch node
                             Gt->update_F(Gt->get_node_end_value(Gt->p_), true);
                             //std::cerr << ".aft move " << std::endl;
@@ -371,7 +371,7 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
     Gt->last->deleteBit(Gt->p_);
     Gt->update_F(Gt->get_node_end_value(Gt->p_), false);
     Gt->p_ = old_p;
-    Gt->W->insert(0, Gt->p_);
+    Gt->W->insert(Gt->p_, 0);
     Gt->last->insertBit(Gt->p_, old_last);
 
     // locally update sorting

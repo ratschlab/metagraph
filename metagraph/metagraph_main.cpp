@@ -785,12 +785,12 @@ int main(int argc, const char *argv[]) {
                     exit(1);
                 }
                 /*graph_->W = new libmaus2::wavelet::DynamicWaveletTree<6, 64> (3);
-                graph_->W->insert(1ull, 0);
-                graph_->W->insert(7ull, 1);
-                graph_->W->insert(4ull, 2);
-                graph_->W->insert(3ull, 3);
-                graph_->W->insert(2ull, 4);
-                graph_->W->insert(5ull, 5);
+                graph_->W->insert(0, 1ull);
+                graph_->W->insert(1, 7ull);
+                graph_->W->insert(2, 4ull);
+                graph_->W->insert(3, 3ull);
+                graph_->W->insert(4, 2ull);
+                graph_->W->insert(5, 5ull);
 
                 exit(1);
                 */

@@ -151,8 +151,8 @@ void test_bit_vector_ins_del(bit_vector *vector, std::vector<bool> *numbers) {
     reference_based_test(*vector, *numbers);
 
     for (size_t i = 0; i < numbers->size(); ++i) {
-        numbers->insert(numbers->begin() + i, 1);
-        vector->insertBit(i, 1);
+        numbers->insert(numbers->begin() + i, i % 16);
+        vector->insertBit(i, i % 16);
         reference_based_test(*vector, *numbers);
         numbers->erase(numbers->begin() + i, numbers->begin() + i + 1);
         vector->deleteBit(i);
@@ -208,7 +208,7 @@ TEST(bit_vector_dyn, Serialization) {
     std::ifstream instream(test_dump_basename);
     ASSERT_TRUE(vector->deserialise(instream));
 
-    test_bit_vector_ins_del(vector, &numbers);
+    reference_based_test(*vector, numbers);
 
     delete vector;
 }
@@ -230,7 +230,7 @@ TEST(bit_vector_stat, Serialization) {
     std::ifstream instream(test_dump_basename);
     ASSERT_TRUE(vector->deserialise(instream));
 
-    test_bit_vector_ins_del(vector, &numbers);
+    reference_based_test(*vector, numbers);
 
     delete vector;
 }
@@ -324,11 +324,160 @@ void test_wavelet_tree_queries() {
 }
 
 
-TEST(wavelet_tree_stat, queries) {
+TEST(wavelet_tree_stat, Queries) {
     test_wavelet_tree_queries<wavelet_tree_stat>();
 }
 
 
-TEST(wavelet_tree_dyn, queries) {
+TEST(wavelet_tree_dyn, Queries) {
     test_wavelet_tree_queries<wavelet_tree_dyn>();
+}
+
+
+void test_bit_vector_set(wavelet_tree *vector, std::vector<uint64_t> *numbers) {
+    reference_based_test(*vector, *numbers);
+
+    for (size_t i = 0; i < numbers->size(); ++i) {
+        uint64_t value = numbers->at(i);
+
+        numbers->at(i) = 1;
+        vector->set(i, 1);
+        reference_based_test(*vector, *numbers);
+
+        numbers->at(i) = 0;
+        vector->set(i, 0);
+        reference_based_test(*vector, *numbers);
+
+        numbers->at(i) = value;
+        vector->set(i, value);
+    }
+}
+
+
+TEST(wavelet_tree_stat, Set) {
+    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                      0, 1, 2, 0, 3, 2, 1, 1 };
+    wavelet_tree *vector = new wavelet_tree_stat(4, numbers);
+    ASSERT_TRUE(vector);
+
+    test_bit_vector_set(vector, &numbers);
+
+    delete vector;
+}
+
+
+TEST(wavelet_tree_dyn, Set) {
+    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                      0, 1, 2, 0, 3, 2, 1, 1 };
+    wavelet_tree *vector = new wavelet_tree_dyn(4, numbers);
+    ASSERT_TRUE(vector);
+
+    test_bit_vector_set(vector, &numbers);
+
+    delete vector;
+}
+
+
+void test_wavelet_tree_ins_del(wavelet_tree *vector, std::vector<uint64_t> *numbers) {
+    reference_based_test(*vector, *numbers);
+
+    for (size_t i = 0; i < numbers->size(); ++i) {
+        numbers->insert(numbers->begin() + i, 1);
+        vector->insert(i, 1);
+        reference_based_test(*vector, *numbers);
+        numbers->erase(numbers->begin() + i, numbers->begin() + i + 1);
+        vector->remove(i);
+
+        numbers->insert(numbers->begin() + i, 0);
+        vector->insert(i, 0);
+        reference_based_test(*vector, *numbers);
+        numbers->erase(numbers->begin() + i, numbers->begin() + i + 1);
+        vector->remove(i);
+    }
+}
+
+
+TEST(wavelet_tree_stat, InsertDelete) {
+    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                      0, 1, 2, 0, 3, 2, 1, 1 };
+    wavelet_tree *vector = new wavelet_tree_stat(4, numbers);
+    ASSERT_TRUE(vector);
+
+    test_wavelet_tree_ins_del(vector, &numbers);
+
+    delete vector;
+}
+
+
+TEST(wavelet_tree_dyn, InsertDelete) {
+    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                      0, 1, 2, 0, 3, 2, 1, 1 };
+    wavelet_tree *vector = new wavelet_tree_dyn(4, numbers);
+    ASSERT_TRUE(vector);
+
+    test_wavelet_tree_ins_del(vector, &numbers);
+
+    delete vector;
+}
+
+
+TEST(wavelet_tree_stat, ToStdVector) {
+    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                      0, 1, 2, 0, 3, 2, 1, 1 };
+    wavelet_tree *vector = new wavelet_tree_stat(4, numbers);
+    ASSERT_TRUE(vector);
+    EXPECT_EQ(numbers, vector->to_vector());
+    delete vector;
+}
+
+
+TEST(wavelet_tree_dyn, ToStdVector) {
+    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                      0, 1, 2, 0, 3, 2, 1, 1 };
+    wavelet_tree *vector = new wavelet_tree_dyn(4, numbers);
+    ASSERT_TRUE(vector);
+    EXPECT_EQ(numbers, vector->to_vector());
+    delete vector;
+}
+
+
+TEST(wavelet_tree_stat, Serialization) {
+    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                      0, 1, 2, 0, 3, 2, 1, 1 };
+    wavelet_tree *vector = new wavelet_tree_stat(4, numbers);
+    ASSERT_TRUE(vector);
+    std::ofstream outstream(test_dump_basename);
+    vector->serialise(outstream);
+    outstream.close();
+    delete vector;
+
+    vector = new wavelet_tree_stat(4);
+    ASSERT_TRUE(vector);
+    std::ifstream instream(test_dump_basename);
+    ASSERT_TRUE(vector->deserialise(instream));
+
+    reference_based_test(*vector, numbers);
+
+    delete vector;
+}
+
+
+TEST(wavelet_tree_dyn, Serialization) {
+    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                      0, 1, 2, 0, 3, 2, 1, 1 };
+    wavelet_tree *vector = new wavelet_tree_dyn(4, numbers);
+    ASSERT_TRUE(vector);
+    std::ofstream outstream(test_dump_basename);
+    vector->serialise(outstream);
+    outstream.close();
+    delete vector;
+
+    vector = new wavelet_tree_dyn(4);
+    ASSERT_TRUE(vector);
+    std::ifstream instream(test_dump_basename);
+    ASSERT_TRUE(vector->deserialise(instream));
+
+    reference_based_test(*vector, numbers);
+
+    delete vector;
 }
