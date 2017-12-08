@@ -54,9 +54,7 @@ const TAlphabet kCharToNucleotide[128] = {
 
 
 DBG_succ::DBG_succ(size_t k, bool sentinel)
-      : F(alph_size, 0), k_(k), p_(0),
-        start(std::string(k - 1, alphabet[alph_size - 1]) + "$$"),
-        sink("$") {
+      : F(alph_size, 0), k_(k), p_(0) {
 
     last->insertBit(0, false);
     W->insert(0, 0);
@@ -1552,7 +1550,7 @@ void DBG_succ::remove_edges(const std::set<uint64_t> &edges) {
 }
 
 void DBG_succ::add_sink(unsigned int parallel, std::string suffix) {
-    add_sequence_fast(start, false, parallel, suffix);
-    add_sequence_fast(sink, true, parallel, suffix);
+    add_sequence_fast(std::string(k_ - 1, alphabet[alph_size - 1]) + "$$",
+                      false, parallel, suffix);
+    add_sequence_fast("$", true, parallel, suffix);
 }
-

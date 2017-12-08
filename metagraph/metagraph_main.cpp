@@ -1,5 +1,6 @@
 #include <fstream>
 #include <ctime>
+#include <zlib.h>
 
 #include "dbg_succinct.hpp"
 #include "config.hpp"

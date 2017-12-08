@@ -2,6 +2,7 @@
 #include <string>
 #include <sstream>
 
+#include <zlib.h>
 #include <htslib/kseq.h>
 #include "gtest/gtest.h"
 

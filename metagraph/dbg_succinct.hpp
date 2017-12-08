@@ -1,8 +1,6 @@
 #ifndef __DBG_SUCCINCT_HPP__
 #define __DBG_SUCCINCT_HPP__
 
-#include <zlib.h>
-#include <unordered_map>
 #include <type_traits>
 
 #include "datatypes.hpp"
@@ -93,11 +91,6 @@ class DBG_succ { //: public GenomeGraph{
      */
     std::pair<TAlphabet, uint64_t> get_minus_k_value(uint64_t i, uint64_t k) const;
 
-    //Temporary storage for kmers before succinct representation construction
-    //the second element stores an ID for each kmer indicating which sequence it came from
-    //an even ID indicates that it's a normal kmer, an odd ID indicates that it's a bridge
-    std::vector<KMer> kmers;
-
     // the bit array indicating the last outgoing edge of a node
     bit_vector *last = new bit_vector_dyn();
 
@@ -119,15 +112,16 @@ class DBG_succ { //: public GenomeGraph{
     // index of position that marks end in graph
     uint64_t p_;
 
+    //Temporary storage for kmers before succinct representation construction
+    //the second element stores an ID for each kmer indicating which sequence it came from
+    //an even ID indicates that it's a normal kmer, an odd ID indicates that it's a bridge
+    std::vector<KMer> kmers;
+
     static const std::string alphabet;
     static const size_t alph_size;
 
     // state of graph
     Config::StateType state = Config::STAT;
-
-    //default values for the sink node
-    std::string start;
-    std::string sink;
 
 #ifdef DBGDEBUG
     bool verbose = true;
