@@ -46,7 +46,7 @@ void merge(DBG_succ *Gt,
     // keep track of how many nodes we added
     uint64_t added = 0;
     size_t cnt = 0;
-    std::map<uint64_t, std::deque<TAlphabet> > last_added_nodes;
+    std::map<uint64_t, std::deque<TAlphabet>> last_added_nodes;
     // init last added nodes, if not starting from the beginning
     std::deque<TAlphabet> curr_seq;
     for (size_t i = 0; i < Gv.size(); i++) {
@@ -69,8 +69,9 @@ void merge(DBG_succ *Gt,
 
     if (Gt->verbose) {
         std::cout << "Size of bins to merge: " << std::endl;
-        for (size_t i = 0; i < Gv.size(); i++)
+        for (size_t i = 0; i < Gv.size(); i++) {
             std::cout << nv.at(i) - kv.at(i) << std::endl;
+        }
     }
 
     // Send parallel pointers running through each of the graphs. At each step, compare all
@@ -115,10 +116,10 @@ void merge(DBG_succ *Gt,
         Gt->last->insertBit(Gt->W->size() - 1, true);
 
         // handle multiple outgoing edges
-        if (added > 0 && Gt->W->size() > 2 && (*(Gt->last))[Gt->W->size()-2]) {
+        if (added > 0 && Gt->W->size() > 2 && (*(Gt->last))[Gt->W->size() - 2]) {
             // compare the last two added nodes
-            auto it1 = last_added_nodes.find((*(Gt->W))[Gt->W->size()-2] % Gt->alph_size);
-            auto it2 = last_added_nodes.find((*(Gt->W))[Gt->W->size()-1] % Gt->alph_size);
+            auto it1 = last_added_nodes.find((*(Gt->W))[Gt->W->size() - 2] % Gt->alph_size);
+            auto it2 = last_added_nodes.find((*(Gt->W))[Gt->W->size() - 1] % Gt->alph_size);
             if (it1 != last_added_nodes.end()
                      && it2 != last_added_nodes.end()
                      && it1 != it2
@@ -150,10 +151,7 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
     // store all branch nodes on the way
     std::stack<BranchInfoMerge> branchnodes;
     // bool vector that keeps track of visited nodes
-    std::vector<bool> visited(Gm->get_W().size());
-    for (std::vector<bool>::iterator it = visited.begin(); it != visited.end(); ++it) {
-        *it = false;
-    }
+    std::vector<bool> visited(Gm->get_W().size(), false);
 
     // some initializations
     uint64_t nodeId = 1; // start at source node
@@ -164,7 +162,7 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
     // keep a running list of the last k-1 characters we have seen
     std::deque<TAlphabet> last_k;
     bool new_branch = false;
-    bool old_last = (*(Gt->last))[Gt->p_];
+    bool old_last = (*Gt->last)[Gt->p_];
     bool initial_k = true;
     uint64_t added = 0;
 
@@ -226,7 +224,8 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
         if (!visited.at(nodeId)) {
             visited.at(nodeId) = true;
             val = Gm->get_W(nodeId) % Gt->alph_size;
-            //std::cerr << "current val " << val % alph_size << " nodeID: " << nodeId << std::endl;
+            //std::cerr << "current val " << val % alph_size
+            //          << " nodeID: " << nodeId << std::endl;
             //G->print_seq();
             last_k.push_back(Gm->get_node_end_value(nodeId));
             if (last_k.size() > Gt->k_)
@@ -363,8 +362,9 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
     }
     // bring graph into default state
     std::deque<TAlphabet> tmp_p;
-    for (size_t t = 0; t < Gt->k_; t++)
+    for (size_t t = 0; t < Gt->k_; t++) {
         tmp_p.push_back(6);
+    }
     uint64_t old_p = Gt->pred_last(Gt->index(tmp_p, tmp_p.size()) - 1) + 1;
 
     old_p -= (Gt->p_ < old_p);
@@ -379,8 +379,9 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
     std::pair<uint64_t, uint64_t> R = Gt->get_equal_node_range(Gt->p_);
     if (R.second - R.first > 0) {
         Gt->sort_W_locally(R.first, R.second);
-        while ((*(Gt->W))[Gt->p_] != 0)
+        while ((*(Gt->W))[Gt->p_] != 0) {
             (Gt->p_)--;
+        }
         assert((*(Gt->W))[Gt->p_] == 0);
     }
     Gt->update_F(Gt->get_node_end_value(Gt->p_), true);
@@ -405,10 +406,7 @@ void traversalHash(DBG_succ *G) {
     // store all branch nodes on the way
     std::stack<BranchInfoMerge> branchnodes;
     // bool vector that keeps track of visited nodes
-    std::vector<bool> visited(G->get_W().size());
-    for (std::vector<bool>::iterator it = visited.begin(); it != visited.end(); ++it) {
-        *it = false;
-    }
+    std::vector<bool> visited(G->get_W().size(), false);
 
     // some initializations
     uint64_t nodeId = 1; // start at source node
