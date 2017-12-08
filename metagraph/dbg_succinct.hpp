@@ -168,7 +168,7 @@ class DBG_succ { //: public GenomeGraph{
      * Using the offset structure F this function returns the value of the last
      * position of node i.
      */
-    TAlphabet get_node_end_value(uint64_t i) const;
+    TAlphabet get_node_last_char(uint64_t i) const;
 
     /**
      * Given a node index i, this function returns the number of outgoing
@@ -240,9 +240,9 @@ class DBG_succ { //: public GenomeGraph{
 
     /**
      * This function gets a value of the alphabet c and updates the offset of
-     * all following values by +1 is positive is true and by -1 otherwise.
+     * all following values by adding |value|.
      */
-    void update_F(TAlphabet c, bool positive);
+    void update_F(TAlphabet c, int value);
 
     void switch_state(Config::StateType state);
 
@@ -276,7 +276,7 @@ class DBG_succ { //: public GenomeGraph{
      * This function takes a character c and appends it to the end of the graph
      * sequence given that the corresponding note is not part of the graph yet.
      */
-    uint64_t append_pos(uint64_t c, TAlphabet *ckmer = NULL, uint64_t i = 0);
+    uint64_t append_pos(uint64_t c, TAlphabet *ckmer = NULL);
 
     /**
      * Uses the object's array W, a given position i in W and a character c
@@ -424,7 +424,6 @@ class DBG_succ { //: public GenomeGraph{
             verbose_cout(rest...);
         }
     }
-
 };
 
 #endif // __DBG_SUCCINCT_HPP__

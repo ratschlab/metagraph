@@ -121,7 +121,7 @@ TEST(Construct, SmallGraphTraversal) {
         if (graph->get_W(i + 1) < graph->alph_size) {
             EXPECT_TRUE(graph->get_last(graph->fwd(i + 1)));
             EXPECT_EQ(graph->get_W(i + 1),
-                      graph->get_node_end_value(graph->fwd(i + 1)));
+                      graph->get_node_last_char(graph->fwd(i + 1)));
         }
     }
 

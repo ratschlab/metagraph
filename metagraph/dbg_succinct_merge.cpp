@@ -112,7 +112,7 @@ void merge(DBG_succ *Gt,
             Gt->W->insert(Gt->W->size(), smallest.second);
         }
         last_added_nodes[val] = seq1;
-        Gt->update_F(Gv.at(curr_k)->get_node_end_value(kv.at(curr_k)), true);
+        Gt->update_F(Gv.at(curr_k)->get_node_last_char(kv.at(curr_k)), +1);
         Gt->last->insertBit(Gt->W->size() - 1, true);
 
         // handle multiple outgoing edges
@@ -208,12 +208,12 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
             // move p to last position
             Gt->W->remove(Gt->p_);
             Gt->last->deleteBit(Gt->p_);
-            Gt->update_F(Gt->get_node_end_value(Gt->p_), false);
+            Gt->update_F(Gt->get_node_last_char(Gt->p_), -1);
             //std::cerr << "moving p from " << p << " to " << ridx << std::endl;
             Gt->p_ = ridx;
             Gt->W->insert(Gt->p_, 0);
             Gt->last->insertBit(Gt->p_, 0); // it's at the beginning of a branch node
-            Gt->update_F(Gt->get_node_end_value(Gt->p_), true);
+            Gt->update_F(Gt->get_node_last_char(Gt->p_), +1);
 
             new_branch = false;
             //std::cerr << "aft move " << std::endl;
@@ -227,7 +227,7 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
             //std::cerr << "current val " << val % alph_size
             //          << " nodeID: " << nodeId << std::endl;
             //G->print_seq();
-            last_k.push_back(Gm->get_node_end_value(nodeId));
+            last_k.push_back(Gm->get_node_last_char(nodeId));
             if (last_k.size() > Gt->k_)
                 last_k.pop_front();
         }
@@ -332,13 +332,13 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
                         if (nodeId != next) {
                             Gt->W->remove(Gt->p_);
                             Gt->last->deleteBit(Gt->p_);
-                            Gt->update_F(Gt->get_node_end_value(Gt->p_), false);
+                            Gt->update_F(Gt->get_node_last_char(Gt->p_), -1);
                             curr_p -= (Gt->p_ < curr_p);
                             //std::cerr << ".moving p from " << p << " to " << curr_p << std::endl;
                             Gt->p_ = curr_p;
                             Gt->W->insert(Gt->p_, 0);
                             Gt->last->insertBit(Gt->p_, 0); // it's at the beginning of a branch node
-                            Gt->update_F(Gt->get_node_end_value(Gt->p_), true);
+                            Gt->update_F(Gt->get_node_last_char(Gt->p_), +1);
                             //std::cerr << ".aft move " << std::endl;
                             //this->print_seq();
                         }
@@ -370,7 +370,7 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
     old_p -= (Gt->p_ < old_p);
     Gt->W->remove(Gt->p_);
     Gt->last->deleteBit(Gt->p_);
-    Gt->update_F(Gt->get_node_end_value(Gt->p_), false);
+    Gt->update_F(Gt->get_node_last_char(Gt->p_), -1);
     Gt->p_ = old_p;
     Gt->W->insert(Gt->p_, 0);
     Gt->last->insertBit(Gt->p_, old_last);
@@ -384,7 +384,7 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
         }
         assert((*(Gt->W))[Gt->p_] == 0);
     }
-    Gt->update_F(Gt->get_node_end_value(Gt->p_), true);
+    Gt->update_F(Gt->get_node_last_char(Gt->p_), +1);
 }
 
 
@@ -439,7 +439,7 @@ void traversalHash(DBG_succ *G) {
         // we have not visited that node before
         if (!visited.at(nodeId)) {
             visited.at(nodeId) = true;
-            last_k.push_back(G->get_node_end_value(nodeId));
+            last_k.push_back(G->get_node_last_char(nodeId));
             if (last_k.size() < G->k_)
                 last_k = G->get_node_seq(nodeId);
             if (last_k.size() > G->k_)

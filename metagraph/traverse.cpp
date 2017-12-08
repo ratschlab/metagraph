@@ -189,7 +189,7 @@ size_t traverseGraph(DBG_succ *G,
             visited.at(nodeId) = true;
             seqPos += isFirst ? 0 : 1;
             isFirst = false;
-            val = G->get_node_end_value(nodeId);
+            val = G->get_node_last_char(nodeId);
             sequence.append(1, G->decode(val % G->alph_size));
             // store seq position of this node (we will join to it later)
             if (G->indegree(nodeId) > 1) {
@@ -394,7 +394,7 @@ void allelesFromSeq(DBG_succ* G, kstring_t &seq, unsigned int f,
     //     fprintf(stderr, "processing alleles for file %u\n", f);
 
     while (true) {
-        nodeVal = G->get_node_end_value(nodeId);
+        nodeVal = G->get_node_last_char(nodeId);
         if (nodeVal == 0) {
             nodeId = G->fwd(nodeId);
             alleleSeqPos++;
