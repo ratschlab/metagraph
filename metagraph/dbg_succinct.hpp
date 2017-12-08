@@ -58,7 +58,7 @@ class DBG_succ { //: public GenomeGraph{
     /**
      * Add a full sequence to the graph.
      */
-    void add_sequence(const std::string &seq, bool append = true);
+    void add_sequence(const std::string &seq);
 
     void add_sequence_fast(const std::string &seq,
                            bool add_bridge = true,
@@ -120,8 +120,7 @@ class DBG_succ { //: public GenomeGraph{
     static const std::string alphabet;
     static const size_t alph_size;
 
-    // state of graph
-    Config::StateType state = Config::STAT;
+    Config::StateType state;
 
 #ifdef DBGDEBUG
     bool verbose = true;
@@ -277,7 +276,7 @@ class DBG_succ { //: public GenomeGraph{
      * This function takes a character c and appends it to the end of the graph
      * sequence given that the corresponding note is not part of the graph yet.
      */
-    uint64_t append_pos(uint64_t c, uint64_t *ckmer = NULL, uint64_t i = 0);
+    uint64_t append_pos(uint64_t c, TAlphabet *ckmer = NULL, uint64_t i = 0);
 
     /**
      * Uses the object's array W, a given position i in W and a character c

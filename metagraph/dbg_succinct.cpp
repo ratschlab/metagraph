@@ -1031,69 +1031,64 @@ void DBG_succ::print_adj_list(const std::string &filename) const {
     }
 }
 
-////////////
-// Construct
-////////////
+///////////////
+// Construct //
+///////////////
 
 // add a full sequence to the graph
-void DBG_succ::add_sequence(const std::string &seq, bool append) {
+void DBG_succ::add_sequence(const std::string &seq) {
+    /*
+    std::vector<TAlphabet> ckmer(k_, encode('$'));
+
+    for (size_t i = 0; i < seq.length(); ++i) {
+        // print the process
+        if (i > 0 && i % 1'000 == 0) {
+            std::cout << "." << std::flush;
+            if (i % 10'000 == 0)
+                verbose_cout(i, " - edges ", num_edges(), " / nodes ", num_nodes(), "\n");
+        }
+
+        TAlphabet c = encode(seq[i]);
+        append_pos(c, &ckmer[i], 0);
+        ckmer.push_back(c);
+    }
+
+    verbose_cout("edges ", num_edges(), " / nodes ", num_nodes(), "\n");
+    */
 
     // Padding of the input genome / read
     if (W->size() == 2) {
         for (size_t j = 0; j < k_; j++) {
-            append_pos(6);
-            // append_pos(encode('X'));
+            append_pos(encode('X'));
         }
     }
 
     // Iterate over input sequence and enumerae all k-mers.
-    size_t i;
-    std::vector<uint64_t> ckmer(k_ + 1, encode('X'));
-    for (i = 0; i < std::min(seq.length(), k_); ++i) {
-        ckmer[i] = 6;
-    }
-    ckmer[i] = 0;
+    std::vector<TAlphabet> ckmer(k_ + 1, encode('X'));
+    ckmer[std::min(seq.length(), k_)] = encode('$');
 
-    uint64_t ind;
-    if (!append) {
-        ind = index(ckmer, i);
-        if (!ind) {
-            ind = p_;
-            i = 0;
-        } else {
-            if (k_ >= seq.length())
-                return;
-            i = k_;
-        }
-    } else {
-        i = 0;
-        ind = 0;
-    }
-    for (; i < seq.length(); ++i) {
+    for (size_t i = 0; i < seq.length(); ++i) {
         if (i > 0 && i % 1'000 == 0) {
             std::cout << "." << std::flush;
-            if (i % 10'000 == 0) {
+            if (i % 10'000 == 0)
                 verbose_cout(i, " - edges ", num_edges(), " / nodes ", num_nodes(), "\n");
-            }
         }
 
-        uint64_t c = encode(seq[i]);
-        ind = append_pos(c, ckmer.data(), ind) * !append;
-        memmove(ckmer.data(), &ckmer[1], sizeof(uint64_t) * (k_ - 1));
+        TAlphabet c = encode(seq[i]);
+        append_pos(c, ckmer.data(), 0);
+        memmove(ckmer.data(), &ckmer[1], sizeof(TAlphabet) * (k_ - 1));
         ckmer[k_ - 1] = c;
-
     }
-    assert(!append || W->operator[](ind) == 0);
+    assert(get_W(0) == encode('$'));
 
     // Padding after sequence to get back into default state.
-    if (W->operator[](ind)==0) {
+    if (get_W(0) == 0) {
         for (size_t j = 0; j < k_; j++) {
-            ind = append_pos(6, ckmer.data(), ind) * !append;
-            memmove(ckmer.data(), &ckmer[1], sizeof(uint64_t) * (k_ - 1));
-            ckmer[k_ - 1] = 6;
+            append_pos(encode('X'), ckmer.data(), 0);
+            memmove(ckmer.data(), &ckmer[1], sizeof(TAlphabet) * (k_ - 1));
+            ckmer[k_ - 1] = encode('X');
         }
-        if (!append)
-            ind = append_pos(0, ckmer.data(), ind);
+        append_pos(encode('$'), ckmer.data());
     }
 
     verbose_cout("edges ", num_edges(), " / nodes ", num_nodes(), "\n");
@@ -1248,38 +1243,36 @@ void DBG_succ::construct_succ(unsigned int parallel) {
     kmers.clear();
 }
 
-/** This function takes a character c and appends it to the end of the graph sequence
- * given that the corresponding note is not part of the graph yet.
+/**
+ * This function takes a character c and appends it to the end of the graph
+ * sequence given that the corresponding note is not part of the graph yet.
  */
-uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
+uint64_t DBG_succ::append_pos(uint64_t c, TAlphabet *ckmer, uint64_t i) {
 
     // check that the last position of the graph is indeed a terminal
-    assert((*W)[p_] == 0);
-    uint64_t *p;
-    bool append = false;
-    uint64_t c_p = get_node_end_value(p_);
+    assert(get_W(p_) == 0);
+
+    TAlphabet c_p = get_node_end_value(p_);
     // get range of identical nodes (without W) pos current end position
     std::pair<uint64_t, uint64_t> R;
     //std::pair<uint64_t, uint64_t> R = get_equal_node_range(p_);
     //fprintf(stdout, "range [%i %i]\n", (int) R.first, (int) R.second);
 
+    bool append = i ? false : true;
     if (!i) {
-        p = &(p_);
-        append = true;
-        R.second = succ_last(*p);
+        R.second = succ_last(p_);
     } else {
-        append = false;
         R = get_equal_node_range(p_);
-        p = &(R.first);
     }
+    TAlphabet &p = i ? R.first : p_;
 
     // get position of first occurence of c in W after p
-    uint64_t next_c = succ_W(*p, c);
+    uint64_t next_c = succ_W(p, c);
     // check if c is part of range
     bool exist_c = (next_c <= R.second);
     if (!exist_c) {
         // get position of first occurence of c- in W after p
-        next_c = succ_W(*p, c + alph_size);
+        next_c = succ_W(p, c + alph_size);
         // check if c- is part of range
         exist_c = (next_c <= R.second);
     }
@@ -1291,38 +1284,38 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
     if (exist_c) {
         if (!append) {
             //if not appending, then this has already been observed and we only need to delete the extra pointer
-            for (i=0; (*W)[*p] == 0; ++i, ++(*p)) {
-                if (*p == p_)
+            for (i = 0; get_W(p) == 0; ++i, ++p) {
+                if (p == p_)
                     continue;
 
                 assert(i < 2);
-                assert(*p < R.second);
+                assert(p < R.second);
 
-                W->remove(*p);
-                last->deleteBit(*p);
+                W->remove(p);
+                last->deleteBit(p);
                 update_F(c_p, false);
-                if (*p <= p_) {
+                if (p <= p_) {
                     p_--;
-                    assert((*W)[*p] == 0);
+                    assert(get_W(p) == 0);
                 }
-                if (*p <= next_c)
+                if (p <= next_c)
                     next_c--;
             }
             return fwd(next_c);
         }
         uint64_t p_new = fwd(next_c);
         // remove old terminal symbol
-        last->deleteBit(*p);
-        W->remove(*p);
+        last->deleteBit(p);
+        W->remove(p);
         // adapt position if altered by previous deletion
-        p_new -= (*p < p_new);
+        p_new -= (p < p_new);
         // insert new terminal symbol
         // we have to insert 0 into last as the node already existed in the range
         // and the terminal symbol is always first
         last->insertBit(p_new, false);
         W->insert(p_new, 0);
         // update new terminal position
-        *p = p_new;
+        p = p_new;
         // take care of updating the offset array F
         update_F(c_p, false);
         //assert(get_node_end_value(p) == c);
@@ -1337,30 +1330,30 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
          */
         if (!append) {
             //we need to insert a new pointer
-            if (*p == p_)
-                (*p)++;
-            if (W->operator[](*p)) {
+            if (p == p_)
+                p++;
+            if (get_W(p)) {
                 //if no placeholder exists
-                W->insert(*p, 0);
+                W->insert(p, 0);
                 update_F(c_p, true);
-                last->insertBit(*p, false);
+                last->insertBit(p, false);
                 R.second++;
-                if (*p <= p_) {
-                    (p_)++;
-                    assert(W->operator[](p_) == 0);
+                if (p <= p_) {
+                    p_++;
+                    assert(get_W(p_) == 0);
                 }
             }
         }
         // get position of last occurence of c before p (including p - 1)
-        uint64_t last_c = pred_W(*p - 1, c);
+        uint64_t last_c = pred_W(p - 1, c);
         // if this position exists
         if (last_c > 0) {
             uint64_t x = fwd(last_c);
-            assert((*(last))[x]); // this should always be true - unless x is 0 - I do not get the logic in the reference implementation
+            assert((*last)[x]); // this should always be true - unless x is 0 - I do not get the logic in the reference implementation
 
             // check, if there are any c or c- symbols following after position p
-            uint64_t next_c = succ_W(*p + 1, c);
-            uint64_t next_cm = succ_W(*p + 1, c + alph_size);
+            uint64_t next_c = succ_W(p + 1, c);
+            uint64_t next_cm = succ_W(p + 1, c + alph_size);
             // there is no c between p and next_cm and next_cm is a c- ==> we should add a c-
             // all nodes between W[i] = c and W[j] = c- share a common suffix of length k-1
             bool minus1 = (next_cm < next_c);
@@ -1369,7 +1362,7 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
                 if (ckmer) {
                     minus1 = compare_node_suffix(ckmer, last_c);
                 } else {
-                    minus1 = compare_node_suffix(*p, last_c);
+                    minus1 = compare_node_suffix(p, last_c);
                 }
             }
 
@@ -1380,18 +1373,18 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
                 if (ckmer) {
                     minus2 = compare_node_suffix(ckmer, next_c);
                 } else {
-                    minus2 = compare_node_suffix(*p, next_c);
+                    minus2 = compare_node_suffix(p, next_c);
                 }
                 if (minus2) {
-                    W_set_value(next_c, (*(W))[next_c] + alph_size);
+                    W_set_value(next_c, get_W(next_c) + alph_size);
                 }
             }
 
-            W_set_value(*p, minus1 ? c + alph_size : c);
+            W_set_value(p, minus1 ? c + alph_size : c);
             // after we are done, assert that the order within the range we created
             // is still valid within W
-            if (*p - R.second > 0) {
-                sort_W_locally(*p, R.second);
+            if (p - R.second > 0) {
+                sort_W_locally(p, R.second);
             }
 
             // if minus1 is true, we share a k-1 suffix with the node at
@@ -1399,47 +1392,47 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
             // as we would like to insert before it. Otherwise we insert directly after
             // it as we are now sorted after it.
             if (minus1) {
-                *p = x;
+                p = x;
                 last->insertBit(x, false);
                 W->insert(x, 0);
             } else if (minus2) {
-                *p = x + 1;
+                p = x + 1;
                 last->insertBit(x + 1, false);
                 W->insert(x + 1, 0);
             // no node shares a k-1 suffix with last_c and thus the new node comes after
             // the forward of last_c (as the current node came after last_c as well)
             } else {
-                *p = x + 1;
+                p = x + 1;
                 last->insertBit(x + 1, true);
                 W->insert(x + 1, 0);
             }
         } else {
             uint64_t x = F[c] + 1;
-            uint64_t next_c = succ_W(*p + 1, c);
+            uint64_t next_c = succ_W(p + 1, c);
             bool minus = false;
             if (next_c < W->size()) {
                 if (ckmer) {
                     minus = compare_node_suffix(ckmer, next_c);
                 } else {
-                    minus = compare_node_suffix(*p, next_c);
+                    minus = compare_node_suffix(p, next_c);
                 }
             }
-            W_set_value(*p, c);
-            if (*p - R.second > 0) {
-                sort_W_locally(*p, R.second);
+            W_set_value(p, c);
+            if (p - R.second > 0) {
+                sort_W_locally(p, R.second);
             }
-            *p = x;
+            p = x;
             if (minus) {
-                W_set_value(next_c, (*(W))[next_c] + alph_size);
+                W_set_value(next_c, (*W)[next_c] + alph_size);
                 last->insertBit(x, false);
             } else {
                 last->insertBit(x, true);
             }
             W->insert(x, 0);
         }
-        if (*p < p_ || (!append && *p == p_)) {
-            (p_)++;
-            assert(W->operator[](p_) == 0);
+        if (p < p_ || (!append && p == p_)) {
+            p_++;
+            assert(get_W(p_) == 0);
         }
         update_F(c, true);
     }
@@ -1447,19 +1440,19 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t *ckmer, uint64_t i) {
     // with this we assert that $ is always inserted at the first position
     // of a range of equal nodes --> this will help us to prevent multiple insertions
     // of already existing nodes
-    R = get_equal_node_range(*p);
+    R = get_equal_node_range(p);
     if (R.second - R.first > 0) {
         sort_W_locally(R.first, R.second);
-        *p = R.first;
-        if (!append && *p == p_)
-            (*p)++;
+        p = R.first;
+        if (!append && p == p_)
+            p++;
         /*
-        while ((*(W))[*p] != 0)
-            (*p)--;
+        while ((*(W))[p] != 0)
+            (p)--;
         */
-        assert(W->operator[](*p)==0);
+        assert(get_W(p) == 0);
     }
-    return *p;
+    return p;
 }
 
 /** This function takes a pointer to a graph structure and concatenates the arrays W, last
