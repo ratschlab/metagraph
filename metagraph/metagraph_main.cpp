@@ -202,7 +202,6 @@ void parallel_merge_collect(DBG_succ *result) {
     }
     merge_data->result.clear();
     merge_data->bins_done = 0;
-    result->p_ = result->succ_W(1, 0);
 }
 
 /*
@@ -664,11 +663,8 @@ int main(int argc, const char *argv[]) {
                     //graph->toDynamic();
                     graph->switch_state(Config::DYN);
                 }
-                graph->p_ = graph->succ_W(1, 0);
-
-            // run normal merge procedure
             } else {
-
+                // run normal merge procedure
                 // some preliminaries to make command line options consistent
                 // if ((config->parts_total > 1) && (config->parts_total > (config->parallel * config->bins_per_thread)))
                 //    config->bins_per_thread = config->parts_total / config->parallel;

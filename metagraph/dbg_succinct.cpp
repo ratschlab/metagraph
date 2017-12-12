@@ -54,7 +54,7 @@ const TAlphabet kCharToNucleotide[128] = {
 
 
 DBG_succ::DBG_succ(size_t k, bool sentinel)
-      : F(alph_size, 0), k_(k), p_(0) {
+      : F(alph_size, 0), k_(k) {
 
     last->insertBit(0, false);
     W->insert(0, 0);
@@ -65,7 +65,6 @@ DBG_succ::DBG_succ(size_t k, bool sentinel)
         for (size_t j = 1; j < alph_size; j++) {
             F[j] = 1;
         }
-        p_ = 1;
     }
     state = Config::DYN;
 }
@@ -149,8 +148,6 @@ void DBG_succ::serialize(const std::string &outbase) const {
     }
     outstream << ">k\n"
               << k_ << "\n"
-              << ">p\n"
-              << p_ << "\n"
               << ">s\n"
               << state << "\n";
     outstream.close();
@@ -182,9 +179,6 @@ bool DBG_succ::load(const std::string &infbase) {
                     break;
                 case 'k':
                     k_ = std::stoul(cur_line);
-                    break;
-                case 'p':
-                    p_ = std::stoul(cur_line);
                     break;
                 case 's':
                     state = static_cast<Config::StateType>(std::stoul(cur_line));
@@ -932,9 +926,6 @@ void DBG_succ::print_state() const {
                                << (get_W(i) > alph_size
                                        ? "-"
                                        : "")
-                               << (i == this->p_
-                                      ? "<"
-                                      : "")
                                << std::endl;
     }
 }
@@ -974,14 +965,8 @@ void DBG_succ::print_seq() const {
 
         std::vector<std::string> nodes;
         for (uint64_t i = start; i < end; i++) {
-            if (p_ == i)
-                fprintf(stdout, "*");
-            else
-                fprintf(stdout, " ");
             nodes.push_back(get_node_str(i));
         }
-        fprintf(stdout, "\n");
-
         for (size_t l = 0; l < k_; l++) {
             for (uint64_t i = start; i < end; i++) {
                 fprintf(stdout, "%c", nodes[i - start][k_ - l - 1]);
@@ -1029,7 +1014,7 @@ void DBG_succ::print_adj_list(const std::string &filename) const {
 void DBG_succ::add_sequence(const std::string &seq) {
     std::vector<TAlphabet> ckmer(k_, encode('$'));
 
-    uint64_t source = p_;
+    uint64_t source = kDummySource;
 
     for (size_t i = 0; i < seq.length(); ++i) {
         // print the process
@@ -1040,7 +1025,7 @@ void DBG_succ::add_sequence(const std::string &seq) {
         }
 
         TAlphabet c = encode(seq[i]);
-        source = append_pos(c, &ckmer[i], source);
+        source = append_pos(c, source, &ckmer[i]);
         ckmer.push_back(c);
     }
 
@@ -1161,8 +1146,6 @@ void DBG_succ::construct_succ(unsigned int parallel) {
                 std::cerr << "Failure decoding kmer " << i << "\n" << kmers[i] << "\n" << curseq << "\n";
                 exit(1);
             }
-            if (!curW && curpos+i)
-                p_ = curpos + i;
             if (i) {
                 for (size_t j = i - 1; KMer::compare_kmer_suffix(kmers[j], kmers[i], 1); --j) {
                     //TODO: recalculating W is probably faster than doing a pragma for ordered
@@ -1200,13 +1183,10 @@ void DBG_succ::construct_succ(unsigned int parallel) {
  * This function takes a character c and appends it to the end of the graph
  * sequence given that the corresponding note is not part of the graph yet.
  */
-uint64_t DBG_succ::append_pos(uint64_t c, TAlphabet *ckmer, uint64_t source) {
+uint64_t DBG_succ::append_pos(uint64_t c, uint64_t source_node, TAlphabet *ckmer) {
     // get range of identical nodes (without W) pos current end position
-    if (source == 0)
-        source = p_;
-
-    uint64_t begin = pred_last(source - 1) + 1;
-    uint64_t end = succ_last(source) + 1;
+    uint64_t begin = pred_last(source_node - 1) + 1;
+    uint64_t end = succ_last(source_node) + 1;
 
     // get position of the first occurence of c or c- in W after p
     uint64_t next_c_pos = std::min(succ_W(begin, c),
@@ -1355,10 +1335,6 @@ void DBG_succ::remove_edges(const std::set<uint64_t> &edges) {
             last->deleteBit(edge_id - 1);
         } else {
             last->deleteBit(edge_id);
-        }
-        if (edge_id <= p_) {
-            p_--;
-            assert(W->operator[](p_) == 0);
         }
         shift++;
     }

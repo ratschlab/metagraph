@@ -33,7 +33,7 @@ void construct_succ(DBG_succ *graph) {
 
 void test_graph(DBG_succ *graph, const std::string &last,
                                  const std::string &W,
-                                 const std::string &F, const size_t &p) {
+                                 const std::string &F) {
     std::ostringstream ostr;
     ostr << *(graph->last);
     EXPECT_EQ(ostr.str(), last);
@@ -43,7 +43,6 @@ void test_graph(DBG_succ *graph, const std::string &last,
     EXPECT_EQ(ostr.str(), W);
     ostr.clear();
     ostr.str("");
-    EXPECT_EQ(graph->p_, p);
     for (size_t i = 0; i < graph->F.size(); ++i) {
         ostr << graph->F[i] << " ";
     }
@@ -79,7 +78,7 @@ TEST(DBGSuccinct, EmptyGraph) {
     DBG_succ *graph = init_graph();
     construct_succ(graph);
     graph->switch_state(Config::DYN);
-    test_graph(graph, "01111", "06660", "0 1 1 1 1 1 1 ", 4u);
+    test_graph(graph, "01111", "06660", "0 1 1 1 1 1 1 ");
     delete graph;
 }
 
@@ -98,8 +97,7 @@ TEST(Construct, SmallGraphTraversal) {
     //test graph construction
     test_graph(graph, "01011110111111111111111111111001",
                       "06241463411641812643366666131313013",
-                      "0 1 9 11 15 20 20 ",
-                      29u);
+                      "0 1 9 11 15 20 20 ");
 
     //traversal
     std::vector<size_t> outgoing_edges = { 21, 10, 16, 3, 17, 22, 12, 18, 4, 5,
@@ -110,16 +108,7 @@ TEST(Construct, SmallGraphTraversal) {
     for (size_t i = 0; i < outgoing_edges.size(); ++i) {
         //test forward traversal given an output edge label
         EXPECT_EQ(graph->outgoing(i + 1, graph->get_W(i + 1)), outgoing_edges[i]);
-        //test that there is only one terminus
 
-        uint64_t first_pos = graph->pred_last(graph->p_ - 1) + 1;
-        uint64_t last_pos = graph->succ_last(graph->p_);
-
-        if (i + 1 < first_pos || i + 1 > last_pos) {
-            EXPECT_EQ(graph->outgoing(i + 1, 0), 0u);
-        } else {
-            EXPECT_EQ(graph->outgoing(i + 1, 0), 1u);
-        }
         //test FM index property
         if (graph->get_W(i + 1) < graph->alph_size) {
             EXPECT_TRUE(graph->get_last(graph->fwd(i + 1)));
@@ -151,8 +140,7 @@ TEST(DBGSuccinct, Serialization) {
     //test graph construction
     test_graph(graph, "01011110111111111111111111111001",
                       "06241463411641812643366666131313013",
-                      "0 1 9 11 15 20 20 ",
-                      29u);
+                      "0 1 9 11 15 20 20 ");
 
     graph->serialize(test_dump_basename);
 

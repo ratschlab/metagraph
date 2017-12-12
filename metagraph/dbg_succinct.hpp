@@ -112,6 +112,9 @@ class DBG_succ { //: public GenomeGraph{
     // index of position that marks end in graph
     uint64_t p_;
 
+    // index of position that marks the source of the graph
+    const uint64_t kDummySource = 1;
+
     //Temporary storage for kmers before succinct representation construction
     //the second element stores an ID for each kmer indicating which sequence it came from
     //an even ID indicates that it's a normal kmer, an odd ID indicates that it's a bridge
@@ -270,7 +273,7 @@ class DBG_succ { //: public GenomeGraph{
      * This function takes a character c and appends it to the end of the graph
      * sequence given that the corresponding note is not part of the graph yet.
      */
-    uint64_t append_pos(uint64_t c, TAlphabet *ckmer = NULL, uint64_t source = 0);
+    uint64_t append_pos(uint64_t c, uint64_t source_node, TAlphabet *ckmer = NULL);
 
     /**
      * Uses the object's array W, a given position i in W and a character c

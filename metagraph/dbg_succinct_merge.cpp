@@ -238,7 +238,7 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
             val = Gm->get_W(nodeId) % Gt->alph_size;
             if ((val != 6 || !initial_k) && val != 0) {
                 initial_k = false;
-                Gt->append_pos(val % Gt->alph_size);
+                Gt->append_pos(val % Gt->alph_size, Gt->p_);
                 added++;
                 //std::cerr << "append " << val % alph_size << " nodeID: " << nodeId << std::endl;
                 //std::cerr << "p: " << p << " W size: " << W->n << std::endl;
@@ -259,7 +259,7 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
                     val = Gm->get_W(next) % Gt->alph_size;
                     if ((val != 6 || !initial_k) && val != 0) {
                         initial_k = false;
-                        Gt->append_pos(val % Gt->alph_size);
+                        Gt->append_pos(val % Gt->alph_size, Gt->p_);
                         added++;
                         //std::cerr << "..append " << val % alph_size << " nodeID: " << nodeId << std::endl;
                         //std::cerr << "p: " << p << " W size: " << W->n << std::endl;
@@ -295,7 +295,7 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
                         initial_k = false;
                         //std::cerr << "p (before): " << p << " W size: " << W->n << std::endl;
                         //this->print_seq();
-                        Gt->append_pos(c);
+                        Gt->append_pos(c, Gt->p_);
                         added++;
                         curr_p += (Gt->p_ <= curr_p);
                         //std::cerr << "append " << c % alph_size << " nodeID: " << nodeId << std::endl;
@@ -321,7 +321,7 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
                             c = Gm->get_W(next) % Gt->alph_size;
                             if ((c != 6 || !initial_k) && c != 0) {
                                 initial_k = false;
-                                Gt->append_pos(c);
+                                Gt->append_pos(c, Gt->p_);
                                 added++;
                                 //std::cerr << "...append " << c % alph_size << " nodeID: " << nodeId << std::endl;
                                 //std::cerr << "p: " << p << " W size: " << W->n << std::endl;
