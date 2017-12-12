@@ -111,8 +111,11 @@ TEST(Construct, SmallGraphTraversal) {
         //test forward traversal given an output edge label
         EXPECT_EQ(graph->outgoing(i + 1, graph->get_W(i + 1)), outgoing_edges[i]);
         //test that there is only one terminus
-        auto sink_rank = graph->get_equal_node_range(graph->p_);
-        if (i + 1 < sink_rank.first || i + 1 > sink_rank.second) {
+
+        uint64_t first_pos = graph->pred_last(graph->p_ - 1) + 1;
+        uint64_t last_pos = graph->succ_last(graph->p_);
+
+        if (i + 1 < first_pos || i + 1 > last_pos) {
             EXPECT_EQ(graph->outgoing(i + 1, 0), 0u);
         } else {
             EXPECT_EQ(graph->outgoing(i + 1, 0), 1u);
@@ -164,7 +167,7 @@ TEST(DBGSuccinct, AddSequence) {
     for (size_t k = 1; k < 10; ++k) {
         DBG_succ graph(k, true);
         graph.add_sequence(std::string(100, 'A'));
-        EXPECT_EQ(3 * k, graph.num_nodes());
-        EXPECT_EQ(3 * k + 2, graph.num_edges());
+        EXPECT_EQ(k + 1, graph.num_nodes());
+        EXPECT_EQ(k + 2, graph.num_edges());
     }
 }

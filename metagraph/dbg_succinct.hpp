@@ -267,16 +267,10 @@ class DBG_succ { //: public GenomeGraph{
 
   private:
     /**
-     * This is a convenience function to replace the value at
-     * position i in W with val.
-     */
-    void W_set_value(uint64_t i, TAlphabet val);
-
-    /**
      * This function takes a character c and appends it to the end of the graph
      * sequence given that the corresponding note is not part of the graph yet.
      */
-    uint64_t append_pos(uint64_t c, TAlphabet *ckmer = NULL);
+    uint64_t append_pos(uint64_t c, TAlphabet *ckmer = NULL, uint64_t source = 0);
 
     /**
      * Uses the object's array W, a given position i in W and a character c
@@ -290,12 +284,6 @@ class DBG_succ { //: public GenomeGraph{
      * the alphabet and returns the positions of the i-th occurence of c in W.
      */
     uint64_t select_W(uint64_t i, TAlphabet c) const;
-
-    /**
-     * Given a position i, this function returns the boundaries of the interval
-     * of nodes identical to node i (ignoring the values in W).
-     */
-    std::pair<uint64_t, uint64_t> get_equal_node_range(uint64_t i) const;
 
     /**
      * This function gets a local range in W from lower bound l

@@ -376,9 +376,11 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
     Gt->last->insertBit(Gt->p_, old_last);
 
     // locally update sorting
-    std::pair<uint64_t, uint64_t> R = Gt->get_equal_node_range(Gt->p_);
-    if (R.second - R.first > 0) {
-        Gt->sort_W_locally(R.first, R.second);
+    uint64_t first_pos = Gt->pred_last(Gt->p_ - 1) + 1;
+    uint64_t last_pos = Gt->succ_last(Gt->p_);
+
+    if (last_pos > first_pos) {
+        Gt->sort_W_locally(first_pos, last_pos);
         while ((*(Gt->W))[Gt->p_] != 0) {
             (Gt->p_)--;
         }

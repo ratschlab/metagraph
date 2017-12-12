@@ -308,7 +308,12 @@ uint64_t DBG_succ::pred_last(uint64_t i) const {
  * and a given position i the position of the first set bit in last[i..N].
  */
 uint64_t DBG_succ::succ_last(uint64_t i) const {
-    return select_last(rank_last(i - 1) + 1);
+    uint64_t next_rank = rank_last(i - 1) + 1;
+
+    if (next_rank > rank_last(last->size()))
+        return last->size();
+
+    return select_last(next_rank);
 }
 
 /**
@@ -321,7 +326,6 @@ uint64_t DBG_succ::bwd(uint64_t i) const {
     // get the offset for the last position in node i
     uint64_t o = F[c];
     // compute the offset for this position in W and select it
-    //usleep(500000);
     return select_W(rank_last(i) - rank_last(o), c);
 }
 
@@ -331,7 +335,7 @@ uint64_t DBG_succ::bwd(uint64_t i) const {
  */
 uint64_t DBG_succ::fwd(uint64_t i) const {
     // get value of W at position i
-    TAlphabet c = (*W)[i] % alph_size;
+    TAlphabet c = get_W(i) % alph_size;
     // get the offset for position c
     uint64_t o = F[c];
     // get the rank of c in W at position i
@@ -382,12 +386,14 @@ uint64_t DBG_succ::outgoing_edge_idx(uint64_t i, TAlphabet c) const {
         return 0;
     if (i == 0)
         return 0;
-    std::pair<uint64_t, uint64_t> R = get_equal_node_range(i);
 
-    uint64_t j1 = pred_W(R.second, c);
-    uint64_t j2 = pred_W(R.second, c + alph_size);
+    uint64_t first_pos = pred_last(i - 1) + 1;
+    uint64_t last_pos = succ_last(i);
+
+    uint64_t j1 = pred_W(last_pos, c);
+    uint64_t j2 = pred_W(last_pos, c + alph_size);
     uint64_t j = (j1 < j2) ? j2 : j1;
-    if (j < R.first || j >= W->size())
+    if (j < first_pos || j >= W->size())
         return 0;
 
     return j;
@@ -679,22 +685,14 @@ uint64_t DBG_succ::colex_upper_bound(std::deque<TAlphabet> str) const {
 }
 
 
-
-/**
- * Given a position i, this function returns the boundaries of the interval
- * of nodes identical to node i (ignoring the values in W).
- */
-std::pair<uint64_t, uint64_t> DBG_succ::get_equal_node_range(uint64_t i) const {
-    return std::make_pair(pred_last(i - 1) + 1, succ_last(i));
-}
-
 /**
  * Given index i of a node and a value k, this function
  * will return the k-th last character of node i.
  */
 std::pair<TAlphabet, uint64_t> DBG_succ::get_minus_k_value(uint64_t i, uint64_t k) const {
-    for (; k > 0; --k)
+    for (; k > 0; --k) {
         i = bwd(succ_last(i));
+    }
     return std::make_pair(get_node_last_char(i), bwd(succ_last(i)));
 }
 
@@ -804,17 +802,16 @@ std::vector<std::vector<HitInfo>> DBG_succ::align_fuzzy(const std::string &seque
     return hit_list;
 }
 
-/*
+/**
  * Returns the number of nodes on the current graph.
  */
 uint64_t DBG_succ::num_nodes() const {
-    return rank_last(last->size() - 1);
+    return rank_last(last->size());
 }
 
-/*
+/**
  * Return the number of edges in the current graph.
  */
- //TODO: Check this!!!
 uint64_t DBG_succ::num_edges() const {
     return W->size() - 1;
 }
@@ -844,26 +841,18 @@ void DBG_succ::sort_W_locally(uint64_t l, uint64_t u) {
         auto first = get_W(s - 1);
         auto second = get_W(s);
         if ((second % alph_size) < (first % alph_size)) {
-            W_set_value(s - 1, second);
-            W_set_value(s, first);
+            W->set(s - 1, second);
+            W->set(s, first);
         }
     }
     for (uint64_t s = l; s < u; ++s) {
         auto first = get_W(s);
         auto second = get_W(s + 1);
         if ((first % alph_size) > (second % alph_size)) {
-            W_set_value(s + 1, first);
-            W_set_value(s, second);
+            W->set(s + 1, first);
+            W->set(s, second);
         }
     }
-}
-
-/**
- * This is a convenience function to replace the value at
- * position i in W with val.
- */
-void DBG_succ::W_set_value(uint64_t i, TAlphabet val) {
-    W->set(i, val);
 }
 
 TAlphabet DBG_succ::encode(char s) {
@@ -1038,8 +1027,9 @@ void DBG_succ::print_adj_list(const std::string &filename) const {
 
 // add a full sequence to the graph
 void DBG_succ::add_sequence(const std::string &seq) {
-    /*
     std::vector<TAlphabet> ckmer(k_, encode('$'));
+
+    uint64_t source = p_;
 
     for (size_t i = 0; i < seq.length(); ++i) {
         // print the process
@@ -1050,46 +1040,8 @@ void DBG_succ::add_sequence(const std::string &seq) {
         }
 
         TAlphabet c = encode(seq[i]);
-        append_pos(c, &ckmer[i]);
+        source = append_pos(c, &ckmer[i], source);
         ckmer.push_back(c);
-    }
-
-    verbose_cout("edges ", num_edges(), " / nodes ", num_nodes(), "\n");
-    */
-
-    // Padding of the input genome / read
-    if (W->size() == 2) {
-        for (size_t j = 0; j < k_; j++) {
-            append_pos(encode('X'));
-        }
-    }
-
-    // Iterate over input sequence and enumerae all k-mers.
-    std::vector<TAlphabet> ckmer(k_ + 1, encode('X'));
-    ckmer[std::min(seq.length(), k_)] = encode('$');
-
-    for (size_t i = 0; i < seq.length(); ++i) {
-        if (i > 0 && i % 1'000 == 0) {
-            std::cout << "." << std::flush;
-            if (i % 10'000 == 0)
-                verbose_cout(i, " - edges ", num_edges(), " / nodes ", num_nodes(), "\n");
-        }
-
-        TAlphabet c = encode(seq[i]);
-        append_pos(c, ckmer.data());
-        memmove(ckmer.data(), &ckmer[1], sizeof(TAlphabet) * (k_ - 1));
-        ckmer[k_ - 1] = c;
-    }
-    assert(get_W(0) == encode('$'));
-
-    // Padding after sequence to get back into default state.
-    if (get_W(0) == 0) {
-        for (size_t j = 0; j < k_; j++) {
-            append_pos(encode('X'), ckmer.data());
-            memmove(ckmer.data(), &ckmer[1], sizeof(TAlphabet) * (k_ - 1));
-            ckmer[k_ - 1] = encode('X');
-        }
-        append_pos(encode('$'), ckmer.data());
     }
 
     verbose_cout("edges ", num_edges(), " / nodes ", num_nodes(), "\n");
@@ -1248,154 +1200,81 @@ void DBG_succ::construct_succ(unsigned int parallel) {
  * This function takes a character c and appends it to the end of the graph
  * sequence given that the corresponding note is not part of the graph yet.
  */
-uint64_t DBG_succ::append_pos(uint64_t c, TAlphabet *ckmer) {
-
-    // check that the last position of the graph is indeed a terminal
-    assert(get_W(p_) == encode('$'));
-
-    TAlphabet c_p = get_node_last_char(p_);
+uint64_t DBG_succ::append_pos(uint64_t c, TAlphabet *ckmer, uint64_t source) {
     // get range of identical nodes (without W) pos current end position
-    //std::pair<uint64_t, uint64_t> R = get_equal_node_range(p_);
-    // uint64_t begin = p_;
-    uint64_t end = succ_last(p_) + 1;
+    if (source == 0)
+        source = p_;
+
+    uint64_t begin = pred_last(source - 1) + 1;
+    uint64_t end = succ_last(source) + 1;
 
     // get position of the first occurence of c or c- in W after p
-    uint64_t next_c_pos = std::min(succ_W(p_, c),
-                                   succ_W(p_, c + alph_size));
+    uint64_t next_c_pos = std::min(succ_W(begin, c),
+                                   succ_W(begin, c + alph_size));
+    // if the character already exists return its index
+    if (next_c_pos < end)
+        return next_c_pos;
+
     /**
-     * check if c is part of range
-     * if the character already exists in the range, we delete the terminal symbol
-     * at p, insert c at fwd(next_c) and update p.
+     * We found that c does not yet exist in the current range and now have to
+     * figure out if we need to add c or c- to the range.
+     * To do this, we check if there is a following position j1 with W[j1] == c
+     * whose node shares a k-1 suffix with the current node.
+     * If yes, we add c- instead of c.
      */
-    if (next_c_pos < end) {
-        uint64_t p_new = fwd(next_c_pos);
-        // remove old terminal symbol
-        last->deleteBit(p_);
-        W->remove(p_);
-        // adapt position if altered by previous deletion
-        p_new -= (p_ < p_new);
-        // insert new terminal symbol
-        // we have to insert 0 into last as the node already existed in the range
-        // and the terminal symbol is always first
-        last->insertBit(p_new, false);
-        W->insert(p_new, 0);
-        // update new terminal position
-        p_ = p_new;
-        // take care of updating the offset array F
-        update_F(c_p, -1);
-        //assert(get_node_last_char(p) == c);
-        update_F(c, +1);
-    } else {
-        /**
-         * We found that c does not yet exist in the current range and now have to
-         * figure out if we need to add c or c- to the range.
-         * To do this, we check if there is a previous position j1 with W[j1] == c
-         * whose node shares a k-1 suffix with the current node. If yes, we add c-
-         * instead of c.
-         */
-        // get position of last occurence of c before p (including p - 1)
-        uint64_t last_c = pred_W(p_ - 1, c);
-        // if this position exists
-        if (last_c > 0) {
-            uint64_t x = fwd(last_c);
-            assert((*last)[x]); // this should always be true - unless x is 0 - I do not get the logic in the reference implementation
 
-            // check, if there are any c or c- symbols following after position p
-            uint64_t next_c = succ_W(p_ + 1, c);
-            uint64_t next_cm = succ_W(p_ + 1, c + alph_size);
-            // there is no c between p and next_cm and next_cm is a c- ==> we should add a c-
-            // all nodes between W[i] = c and W[j] = c- share a common suffix of length k-1
-            bool minus1 = (next_cm < next_c);
-            // check, if we share a k-1 suffix with last_c
-            if (!minus1) {
-                if (ckmer) {
-                    minus1 = compare_node_suffix(ckmer, last_c);
-                } else {
-                    minus1 = compare_node_suffix(p_, last_c);
-                }
-            }
+    bool is_last_incoming = true;
+    if (next_c_pos < W->size())
+        is_last_incoming = ckmer ? !compare_node_suffix(ckmer, next_c_pos)
+                                 : !compare_node_suffix(begin, next_c_pos);
+    if (!is_last_incoming) {
+        // insert the edge
+        update_F(get_node_last_char(begin), +1);
+        W->insert(begin, c + alph_size);
+        last->insertBit(begin, false);
+        sort_W_locally(begin, end);
+        return begin;
+    }
 
-            // adding a new node can influence following nodes that share a k-1 suffix with the
-            // new node -> need to adapt the respektive cc to a cc-
-            bool minus2 = false;
-            if (next_c < W->size()) {
-                if (ckmer) {
-                    minus2 = compare_node_suffix(ckmer, next_c);
-                } else {
-                    minus2 = compare_node_suffix(p_, next_c);
-                }
-                if (minus2) {
-                    W_set_value(next_c, get_W(next_c) + alph_size);
-                }
-            }
+    // adding a new node can influence one of the preceding nodes sharing the k-1 suffix
+    // get position of the last occurence of c before p (including p - 1)
+    uint64_t last_c = pred_W(begin - 1, c);
 
-            W_set_value(p_, minus1 ? c + alph_size : c);
-            // after we are done, assert that the order within the range we created
-            // is still valid within W
-            if (p_ >= end) {
-                sort_W_locally(p_, end - 1);
-            }
-
-            // if minus1 is true, we share a k-1 suffix with the node at
-            // last_c and thus need to adapt our insertion position by -1,
-            // as we would like to insert before it. Otherwise we insert directly after
-            // it as we are now sorted after it.
-            if (minus1) {
-                p_ = x;
-                last->insertBit(x, false);
-                W->insert(x, 0);
-            } else if (minus2) {
-                p_ = x + 1;
-                last->insertBit(x + 1, false);
-                W->insert(x + 1, 0);
-            // no node shares a k-1 suffix with last_c and thus the new node comes after
-            // the forward of last_c (as the current node came after last_c as well)
-            } else {
-                p_ = x + 1;
-                last->insertBit(x + 1, true);
-                W->insert(x + 1, 0);
-            }
-        } else {
-            uint64_t x = F[c] + 1;
-            uint64_t next_c = succ_W(p_ + 1, c);
-            bool minus = false;
-            if (next_c < W->size()) {
-                if (ckmer) {
-                    minus = compare_node_suffix(ckmer, next_c);
-                } else {
-                    minus = compare_node_suffix(p_, next_c);
-                }
-            }
-            W_set_value(p_, c);
-            if (p_ >= end) {
-                sort_W_locally(p_, end - 1);
-            }
-            p_ = x;
-            if (minus) {
-                W_set_value(next_c, (*W)[next_c] + alph_size);
-                last->insertBit(x, false);
-            } else {
-                last->insertBit(x, true);
-            }
-            W->insert(x, 0);
+    bool the_only_incoming = true;
+    if (last_c > 0) {
+        bool same_target = ckmer != NULL ? compare_node_suffix(ckmer, last_c)
+                                         : compare_node_suffix(begin, last_c);
+        if (same_target) {
+            // the inserted edge will not be the first incoming for the target node
+            the_only_incoming = false;
+            // need to adapt the respective cc to a cc-
+            W->set(last_c, c + alph_size);
         }
-        update_F(c, +1);
     }
-    // update sorting at new location of p
-    // with this we assert that $ is always inserted at the first position
-    // of a range of equal nodes --> this will help us to prevent multiple insertions
-    // of already existing nodes
-    auto R = get_equal_node_range(p_);
-    if (R.second - R.first > 0) {
-        sort_W_locally(R.first, R.second);
-        p_ = R.first;
-        /*
-        while ((*(W))[p] != 0)
-            (p)--;
-        */
-        assert(get_W(p_) == 0);
+
+    // insert the edge
+    if (begin > 1 && get_W(begin) == encode('$')) {
+        // the source node is the dead-end with outgoing sentinel
+        // replace this sentinel with proper label
+        W->set(begin, c);
+    } else {
+        // the source node already has some outgoing edges
+        update_F(get_node_last_char(begin), +1);
+        W->insert(begin, c);
+        last->insertBit(begin, false);
+        sort_W_locally(begin, end);
     }
-    return p_;
+
+    // Add sentinel if the target node is the new dead-end
+    if (!the_only_incoming)
+        return begin;
+
+    uint64_t sentinel_pos = select_last(rank_last(F[c]) + rank_W(last_c, c)) + 1;
+
+    update_F(c, +1);
+    W->insert(sentinel_pos, encode('$'));
+    last->insertBit(sentinel_pos, true);
+    return sentinel_pos;
 }
 
 /** This function takes a pointer to a graph structure and concatenates the arrays W, last
@@ -1462,7 +1341,7 @@ void DBG_succ::remove_edges(const std::set<uint64_t> &edges) {
             uint64_t j = succ_W(next, d);
             for (uint64_t i = next; i < j; ++i) {
                 if (W->operator[](i) == d + alph_size) {
-                    W_set_value(i, d);
+                    W->set(i, d);
                     break;
                 }
             }
