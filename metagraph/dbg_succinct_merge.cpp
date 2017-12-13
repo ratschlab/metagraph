@@ -34,7 +34,8 @@ void merge(DBG_succ *Gt,
         nv.at(i) = (nv.at(i) == 0) ? Gv.at(i)->get_W().size() : nv.at(i);
         // handle special cases where one or both input graphs are empty
         kv.at(i) = (kv.at(i) == 0) ? Gv.at(i)->get_W().size() : kv.at(i);
-        //std::cerr << "k(" << i << ") " << kv.at(i) << " n(" << i << ") " << nv.at(i) << std::endl;
+        //std::cerr << "k(" << i << ") " << kv.at(i)
+        //          << " n(" << i << ") " << nv.at(i) << std::endl;
     }
 
     // keep track of how many nodes we added
@@ -78,13 +79,14 @@ void merge(DBG_succ *Gt,
             if (added % 10'000 == 0) {
                 std::cout << "added " << added;
                 for (size_t i = 0; i < Gv.size(); i++)
-                    std::cout << " - G" << i << ": edge " << kv.at(i) << "/" << Gv.at(i)->get_W().size();
+                    std::cout << " - G" << i << ": edge " << kv.at(i)
+                                             << "/" << Gv.at(i)->get_W().size();
                 std::cout << std::endl;
             }
         }
 
         // find set of smallest pointers
-        std::pair<std::vector<bool>, uint64_t> smallest = utils::compare_nodes(Gv, kv, nv, cnt);
+        auto smallest = utils::compare_nodes(Gv, kv, nv, cnt);
         if (cnt == 0)
             break;
         size_t curr_k = std::max_element(smallest.first.begin(), smallest.first.end())
@@ -146,9 +148,10 @@ void pop_branch(std::stack<BranchInfoMerge> *branchnodes,
 
 
 /**
-* Heavily borrowing from the graph sequence traversal, this function gets a graph pointer Gm and merges its
-* nodes into the target graph object Gt. The edges of Gm are fully traversed and nodes are added to
-* Gt if not existing yet. This function is well suited to merge small graphs into large ones.
+* Heavily borrowing from the graph sequence traversal, this function gets 
+* a graph pointer Gm and merges its nodes into the target graph object Gt.
+* The edges of Gm are fully traversed and nodes are added to Gt if not existing yet.
+* This function is well suited to merge small graphs into large ones.
 */
 void merge(DBG_succ *Gt, DBG_succ *Gm) {
     // bool vector that keeps track of visited nodes
@@ -163,7 +166,7 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
     // store all branch nodes on the way
     std::stack<BranchInfoMerge> branchnodes;
     branchnodes.push({ Gm_source_node, source_kmer });
-    marked[Gm_source_node] = true;
+    marked[Gm->rank_last(Gm_source_node)] = true;
     bool new_branch_started = true;
 
     uint64_t added_counter = 0;
@@ -215,9 +218,9 @@ void merge(DBG_succ *Gt, DBG_succ *Gm) {
             //          << " Gm_source_node: " << Gm_source_node << std::endl;
             //this->print_seq();
 
-            if (marked.at(target_node))
+            if (marked.at(Gm->rank_last(target_node)))
                 continue;
-            marked.at(target_node) = true;
+            marked.at(Gm->rank_last(target_node)) = true;
 
             // push node information to stack
             target_kmer[Gt->get_k() - 1] = c;

@@ -159,3 +159,47 @@ TEST(DBGSuccinct, AddSequence) {
         EXPECT_EQ(k + 2, graph.num_edges());
     }
 }
+
+TEST(DBGSuccinct, MergeGraphs) {
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ first(k, true);
+        DBG_succ second(k, true);
+        first.add_sequence(std::string(100, 'A'));
+        merge::merge(&first, &second);
+        EXPECT_EQ(k + 1, first.num_nodes());
+        EXPECT_EQ(k + 2, first.num_edges());
+    }
+
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ first(k, true);
+        DBG_succ second(k, true);
+        second.add_sequence(std::string(100, 'A'));
+        merge::merge(&first, &second);
+        EXPECT_EQ(k + 1, first.num_nodes());
+        EXPECT_EQ(k + 2, first.num_edges());
+    }
+
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ first(k, true);
+        DBG_succ second(k, true);
+        first.add_sequence(std::string(100, 'A'));
+        second.add_sequence(std::string(50, 'A'));
+        merge::merge(&first, &second);
+        EXPECT_EQ(k + 1, first.num_nodes());
+        EXPECT_EQ(k + 1, second.num_nodes());
+        EXPECT_EQ(k + 2, first.num_edges());
+        EXPECT_EQ(k + 2, second.num_edges());
+    }
+
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ first(k, true);
+        DBG_succ second(k, true);
+        first.add_sequence(std::string(100, 'A'));
+        second.add_sequence(std::string(50, 'C'));
+        merge::merge(&first, &second);
+        EXPECT_EQ(2 * k + 1, first.num_nodes());
+        EXPECT_EQ(k + 1, second.num_nodes());
+        EXPECT_EQ(2 * k + 3, first.num_edges());
+        EXPECT_EQ(k + 2, second.num_edges());
+    }
+}
