@@ -54,7 +54,7 @@ const TAlphabet kCharToNucleotide[128] = {
 
 
 DBG_succ::DBG_succ(size_t k, bool sentinel)
-      : F(alph_size, 0), k_(k) {
+      : k_(k), F(alph_size, 0) {
 
     last->insertBit(0, false);
     W->insert(0, 0);

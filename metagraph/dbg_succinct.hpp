@@ -103,18 +103,6 @@ class DBG_succ { //: public GenomeGraph{
     // the array containing the edge labels
     std::vector<TAlphabet> W_stat;
 
-    // the offset array to mark the offsets for the last column in the implicit node list
-    std::vector<uint64_t> F;
-
-    // k-mer size
-    size_t k_;
-
-    // index of position that marks end in graph
-    uint64_t p_;
-
-    // index of position that marks the source of the graph
-    const uint64_t kDummySource = 1;
-
     //Temporary storage for kmers before succinct representation construction
     //the second element stores an ID for each kmer indicating which sequence it came from
     //an even ID indicates that it's a normal kmer, an odd ID indicates that it's a bridge
@@ -269,6 +257,15 @@ class DBG_succ { //: public GenomeGraph{
     void print_adj_list(const std::string &filename = "") const;
 
   private:
+    // k-mer size
+    size_t k_;
+
+    // index of position that marks the source of the graph
+    const uint64_t kDummySource = 1;
+
+    // the offset array to mark the offsets for the last column in the implicit node list
+    std::vector<uint64_t> F;
+
     /**
      * This function takes a character c and appends it to the end of the graph
      * sequence given that the corresponding note is not part of the graph yet.

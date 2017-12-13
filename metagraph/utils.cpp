@@ -43,11 +43,11 @@ uint64_t kFromFile(const std::string &infbase) {
 */
 std::pair<bool, bool> compare_nodes(DBG_succ *G1, uint64_t k1_node,
                                     DBG_succ *G2, uint64_t k2_node) {
-    assert(G1->k_ == G2->k_);
+    assert(G1->get_k() == G2->get_k());
     std::pair<TAlphabet, uint64_t> k1_val;
     std::pair<TAlphabet, uint64_t> k2_val;
 
-    for (uint64_t curr_k = 0; curr_k < G1->k_; ++curr_k) {
+    for (uint64_t curr_k = 0; curr_k < G1->get_k(); ++curr_k) {
         k1_val = G1->get_minus_k_value(k1_node, 0);
         k2_val = G2->get_minus_k_value(k2_node, 0);
         if (k1_val.first != k2_val.first) {
@@ -74,7 +74,7 @@ std::pair<std::vector<bool>, uint64_t> compare_nodes(std::vector<DBG_succ*> G,
     size_t s = G.size();
 
     uint64_t curr_k = 0;
-    while (curr_k < G.at(0)->k_) {
+    while (curr_k < G.at(0)->get_k()) {
         k_val.clear();
         for (size_t i = 0; i < s; i++) {
             //std::cerr << "curr_k: " << curr_k << " - i: " << i; 

@@ -310,7 +310,7 @@ int main(int argc, const char *argv[]) {
             }
 
             if (config->verbose)
-                std::cerr << "k is " << graph->k_ << std::endl;
+                std::cerr << "k is " << graph->get_k() << std::endl;
 
             if (config->fast) {
                 graph->switch_state(Config::CSTR);
@@ -351,7 +351,7 @@ int main(int argc, const char *argv[]) {
                                 tstart = clock();
                                 timelast = clock();
                                 vcf_parser vcf;
-                                if (!vcf.init(config->refpath, files[f], graph->k_)) {
+                                if (!vcf.init(config->refpath, files[f], graph->get_k())) {
                                     std::cerr << "ERROR reading VCF " << files[f] << std::endl;
                                     exit(1);
                                 }
