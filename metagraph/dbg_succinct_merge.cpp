@@ -13,15 +13,9 @@ namespace merge {
  * purpose of merging, so we know where to jump back to when we reached a dead end.
  */
 struct BranchInfoMerge {
-    uint64_t nodeId;
-    TAlphabet lastEdge;
-    std::deque<TAlphabet> last_k;
+    uint64_t node_id;
+    std::deque<TAlphabet> source_kmer;
 };
-
-
-BranchInfoMerge pop_branch(std::stack<BranchInfoMerge> &branchnodes,
-                           uint64_t &nodeId, uint64_t &lastEdge,
-                           std::deque<TAlphabet> &last_k);
 
 
 void merge(DBG_succ *Gt,
@@ -138,8 +132,18 @@ void merge(DBG_succ *Gt,
         if (updated == 0)
             break;
     }
-    Gt->p_ = Gt->succ_W(1, 0);
 }
+
+
+void pop_branch(std::stack<BranchInfoMerge> *branchnodes,
+                uint64_t *node_id,
+                std::deque<TAlphabet> *source_kmer) {
+    BranchInfoMerge &branch = branchnodes->top();
+    *node_id = branch.node_id;
+    *source_kmer = branch.source_kmer;
+    branchnodes->pop();
+}
+
 
 /**
 * Heavily borrowing from the graph sequence traversal, this function gets a graph pointer Gm and merges its
@@ -147,374 +151,81 @@ void merge(DBG_succ *Gt,
 * Gt if not existing yet. This function is well suited to merge small graphs into large ones.
 */
 void merge(DBG_succ *Gt, DBG_succ *Gm) {
+    // bool vector that keeps track of visited nodes
+    std::vector<bool> marked(Gm->rank_last(Gm->get_W().size() - 1), false);
+
+    // start at the source node
+    uint64_t Gt_source_node = 1;
+    uint64_t Gm_source_node = 1;
+    // keep a running list of the last k characters we have seen
+    std::deque<TAlphabet> source_kmer(Gt->get_k(), DBG_succ::encode('$'));
 
     // store all branch nodes on the way
     std::stack<BranchInfoMerge> branchnodes;
-    // bool vector that keeps track of visited nodes
-    std::vector<bool> visited(Gm->get_W().size(), false);
+    branchnodes.push({ Gm_source_node, source_kmer });
+    marked[Gm_source_node] = true;
+    bool new_branch_started = true;
 
-    // some initializations
-    uint64_t nodeId = 1; // start at source node
-    size_t out = Gm->outdegree(nodeId);
-    BranchInfoMerge branch;
-    TAlphabet val;
-    TAlphabet lastEdge = 0;
-    // keep a running list of the last k-1 characters we have seen
-    std::deque<TAlphabet> last_k;
-    bool new_branch = false;
-    bool old_last = (*Gt->last)[Gt->p_];
-    bool initial_k = true;
-    uint64_t added = 0;
-
-    // keep traversing until we reach the think and have worked off all branches from the stack
-    while (out > 0 || branchnodes.size() > 0) {
-
-        // verbose output
-        if (added > 0 && added % 1000 == 0) {
-            std::cout << "." << std::flush;
-            if (added % 10000 == 0) {
-                fprintf(stdout, "merged %" PRIu64
-                                    " / %" PRIu64
-                              " - edges %" PRIu64
-                              " / nodes %" PRIu64 "\n",
-                                added,
-                                Gm->get_W().size(),
-                                Gt->W->size() - 1,
-                                Gt->rank_last((Gt->last->size() - 1)));
-            }
-        }
-
-        // we have reached the sink but there are unvisited nodes left on the stack
-        if (out == 0) {
-            if (branchnodes.size() == 0)
-                break;
-            // get new branch
-            branch = pop_branch(branchnodes, nodeId, lastEdge, last_k);
-            out = Gm->outdegree(nodeId);
-            new_branch = true;
-        }
-        //std::cerr << "starting loop with nodID " << nodeId << std::endl;
-
-        if (new_branch) {
-            // find node where to restart insertion
-            uint64_t ridx = Gt->index(last_k, last_k.size());
-            // put at the beginning of equal node range
-            ridx = Gt->pred_last(ridx - 1) + 1;
-            ridx -= (Gt->p_ < ridx);
-            //std::cerr << "ridx: " << ridx << std::endl;
-            //std::cerr << "bef move " << std::endl;
-            //this->print_seq();
-            assert(!(*(Gt->last))[Gt->p_]); // must not remove a dangling end
-            // move p to last position
-            Gt->W->remove(Gt->p_);
-            Gt->last->deleteBit(Gt->p_);
-            Gt->update_F(Gt->get_node_last_char(Gt->p_), -1);
-            //std::cerr << "moving p from " << p << " to " << ridx << std::endl;
-            Gt->p_ = ridx;
-            Gt->W->insert(Gt->p_, 0);
-            Gt->last->insertBit(Gt->p_, 0); // it's at the beginning of a branch node
-            Gt->update_F(Gt->get_node_last_char(Gt->p_), +1);
-
-            new_branch = false;
-            //std::cerr << "aft move " << std::endl;
-            //this->print_seq();
-        }
-
-        // we have not visited that node before
-        if (!visited.at(nodeId)) {
-            visited.at(nodeId) = true;
-            val = Gm->get_W(nodeId) % Gt->alph_size;
-            //std::cerr << "current val " << val % alph_size
-            //          << " nodeID: " << nodeId << std::endl;
-            //G->print_seq();
-            last_k.push_back(Gm->get_node_last_char(nodeId));
-            if (last_k.size() > Gt->k_)
-                last_k.pop_front();
-        }
-
-        // there is only one child
-        if (out == 1) {
-            uint64_t next = Gm->fwd(nodeId);
-            val = Gm->get_W(nodeId) % Gt->alph_size;
-            if ((val != 6 || !initial_k) && val != 0) {
-                initial_k = false;
-                Gt->append_pos(val % Gt->alph_size, Gt->p_);
-                added++;
-                //std::cerr << "append " << val % alph_size << " nodeID: " << nodeId << std::endl;
-                //std::cerr << "p: " << p << " W size: " << W->n << std::endl;
-                //this->print_seq();
-            }
-
-            // the next node is new
-            if (!visited.at(next)) {
-                nodeId = next;
-                lastEdge = 0;
-            // we have seen the next node before
-            } else {
-                // there are no branches left
-                if (branchnodes.size() == 0)
-                    break;
-                // append next node
-                if ((*(Gt->last))[Gt->p_]) {
-                    val = Gm->get_W(next) % Gt->alph_size;
-                    if ((val != 6 || !initial_k) && val != 0) {
-                        initial_k = false;
-                        Gt->append_pos(val % Gt->alph_size, Gt->p_);
-                        added++;
-                        //std::cerr << "..append " << val % alph_size << " nodeID: " << nodeId << std::endl;
-                        //std::cerr << "p: " << p << " W size: " << W->n << std::endl;
-                        //this->print_seq();
-                    }
-                }
-                // otherwise go back to last branch
-                branch = pop_branch(branchnodes, nodeId, lastEdge, last_k);
-                out = Gm->outdegree(nodeId);
-                //std::cerr << "new branch 1 - nodeID: " << nodeId << " next is " << next << std::endl;
-                new_branch = true;
-            }
-        // there are several children
-        } else {
-            size_t cnt = 0;
-            bool updated = false;
-            // account for sentinel symbol as possible outgoing edge
-            if (Gm->get_W(nodeId) == 0)
-                cnt++;
-            // loop over outgoing edges
-            for (TAlphabet c = 1; c < Gt->alph_size; ++c) {
-                uint64_t next = Gm->outgoing(nodeId, c);
-                if (next > 0) {
-                    cnt++;
-                    // we already handled this edge erlier
-                    if (cnt <= lastEdge)
-                        continue;
-                    lastEdge++;
-
-                    //std::cerr << "mult edge - val is now " << c << std::endl;
-                    uint64_t curr_p = Gt->p_;
-                    if ((c != 6 || !initial_k) && c != 0) {
-                        initial_k = false;
-                        //std::cerr << "p (before): " << p << " W size: " << W->n << std::endl;
-                        //this->print_seq();
-                        Gt->append_pos(c, Gt->p_);
-                        added++;
-                        curr_p += (Gt->p_ <= curr_p);
-                        //std::cerr << "append " << c % alph_size << " nodeID: " << nodeId << std::endl;
-                        //std::cerr << "p: " << p << " W size: " << W->n << std::endl;
-                        //this->print_seq();
-                    }
-
-                    if (!visited.at(next)) {
-                        // there are remaining branches - push node to stack
-                        if (cnt < out && next != nodeId) {
-                            // push node information to stack
-                            branchnodes.push({ nodeId, lastEdge, last_k });
-                            //std::cerr << "pushing nodeID " << nodeId << " onto stack" << std::endl;
-                        }
-                        nodeId = next;
-                        updated = true;
-                        lastEdge = 0;
-                        break;
-                    } else {
-                        //std::cerr << "visited next before: " << next <<std::endl;
-                        // append next node
-                        if ((*(Gt->last))[Gt->p_]) {
-                            c = Gm->get_W(next) % Gt->alph_size;
-                            if ((c != 6 || !initial_k) && c != 0) {
-                                initial_k = false;
-                                Gt->append_pos(c, Gt->p_);
-                                added++;
-                                //std::cerr << "...append " << c % alph_size << " nodeID: " << nodeId << std::endl;
-                                //std::cerr << "p: " << p << " W size: " << W->n << std::endl;
-                                //this->print_seq();
-                            }
-                        }
-                        // reset to previous position
-                        if (nodeId != next) {
-                            Gt->W->remove(Gt->p_);
-                            Gt->last->deleteBit(Gt->p_);
-                            Gt->update_F(Gt->get_node_last_char(Gt->p_), -1);
-                            curr_p -= (Gt->p_ < curr_p);
-                            //std::cerr << ".moving p from " << p << " to " << curr_p << std::endl;
-                            Gt->p_ = curr_p;
-                            Gt->W->insert(Gt->p_, 0);
-                            Gt->last->insertBit(Gt->p_, 0); // it's at the beginning of a branch node
-                            Gt->update_F(Gt->get_node_last_char(Gt->p_), +1);
-                            //std::cerr << ".aft move " << std::endl;
-                            //this->print_seq();
-                        }
-                    }
-                }
-            }
-            // we are done with this branch
-            // we should end up here, when nodes branch to themselves with their last edge
-            if (!updated) {
-                // there are no branches left
-                if (branchnodes.size() == 0)
-                    break;
-                // otherwise go back to last branch
-                branch = pop_branch(branchnodes, nodeId, lastEdge, last_k);
-                out = Gm->outdegree(nodeId);
-                new_branch = true;
-                //std::cerr << "new branch 2" << std::endl;
-            }
-        }
-        out = Gm->outdegree(nodeId);
-    }
-    // bring graph into default state
-    std::deque<TAlphabet> tmp_p;
-    for (size_t t = 0; t < Gt->k_; t++) {
-        tmp_p.push_back(6);
-    }
-    uint64_t old_p = Gt->pred_last(Gt->index(tmp_p, tmp_p.size()) - 1) + 1;
-
-    old_p -= (Gt->p_ < old_p);
-    Gt->W->remove(Gt->p_);
-    Gt->last->deleteBit(Gt->p_);
-    Gt->update_F(Gt->get_node_last_char(Gt->p_), -1);
-    Gt->p_ = old_p;
-    Gt->W->insert(Gt->p_, 0);
-    Gt->last->insertBit(Gt->p_, old_last);
-
-    // locally update sorting
-    uint64_t first_pos = Gt->pred_last(Gt->p_ - 1) + 1;
-    uint64_t last_pos = Gt->succ_last(Gt->p_);
-
-    if (last_pos > first_pos) {
-        Gt->sort_W_locally(first_pos, last_pos);
-        while ((*(Gt->W))[Gt->p_] != 0) {
-            (Gt->p_)--;
-        }
-        assert((*(Gt->W))[Gt->p_] == 0);
-    }
-    Gt->update_F(Gt->get_node_last_char(Gt->p_), +1);
-}
-
-
-BranchInfoMerge pop_branch(std::stack<BranchInfoMerge> &branchnodes,
-                           uint64_t &nodeId, uint64_t &lastEdge,
-                           std::deque<TAlphabet> &last_k) {
-    BranchInfoMerge branch = branchnodes.top();
-    branchnodes.pop();
-    lastEdge = branch.lastEdge;
-    nodeId = branch.nodeId;
-    last_k = branch.last_k;
-
-    return branch;
-}
-
-
-void traversalHash(DBG_succ *G) {
-
-    // store all branch nodes on the way
-    std::stack<BranchInfoMerge> branchnodes;
-    // bool vector that keeps track of visited nodes
-    std::vector<bool> visited(G->get_W().size(), false);
-
-    // some initializations
-    uint64_t nodeId = 1; // start at source node
-    uint64_t count = 0;
-    size_t out = G->outdegree(nodeId);
-    BranchInfoMerge branch;
-    TAlphabet lastEdge = 0;
-    // keep a running list of the last k-1 characters we have seen
-    std::deque<TAlphabet> last_k;
+    uint64_t added_counter = 0;
 
     // keep traversing until we reach the sink and have worked off all branches from the stack
-    while (out > 0 || branchnodes.size() > 0) {
+    while (branchnodes.size()) {
+        // get new branch
+        pop_branch(&branchnodes, &Gm_source_node, &source_kmer);
 
-        if (count > 0 && count % 100'000 == 0) {
+        if (new_branch_started) {
+            // find node where to restart insertion
+            Gt_source_node = Gt->index(source_kmer, source_kmer.size());
+            // put at the beginning of equal node range
+            // Gt_source_node = Gt->pred_last(Gt_source_node - 1) + 1;
+            new_branch_started = false;
+        }
+        // verbose output
+        if (added_counter > 0 && added_counter % 1000 == 0) {
             std::cout << "." << std::flush;
-            if (count % 1'000'000 == 0)
-                std::cout << count << std::endl;
+            if (added_counter % 10000 == 0) {
+                std::cout << "merged " << std::to_string(added_counter)
+                          << " / " << std::to_string(Gm->get_W().size())
+                          << " - edges " << std::to_string(Gt->W->size() - 1)
+                          << " / nodes " << std::to_string(Gt->rank_last((Gt->last->size() - 1)))
+                          << "\n";
+            }
         }
 
         // we have reached the sink but there are unvisited nodes left on the stack
-        if (out == 0) {
-            if (branchnodes.size() == 0)
-                break;
-
-            // get new branch
-            branch = pop_branch(branchnodes, nodeId, lastEdge, last_k);
-            out = G->outdegree(nodeId);
+        if (Gm_source_node > 1 && Gm->get_W(Gm_source_node) == DBG_succ::encode('$')) {
+            new_branch_started = true;
+            continue;
         }
 
-        // we have not visited that node before
-        if (!visited.at(nodeId)) {
-            visited.at(nodeId) = true;
-            last_k.push_back(G->get_node_last_char(nodeId));
-            if (last_k.size() < G->k_)
-                last_k = G->get_node_seq(nodeId);
-            if (last_k.size() > G->k_)
-                last_k.pop_front();
+        std::deque<TAlphabet> target_kmer = source_kmer;
+        target_kmer.pop_front();
+        target_kmer.push_back(0);
+
+        // loop over outgoing edges
+        for (TAlphabet c = 1; c < Gt->alph_size; ++c) {
+            uint64_t target_node = Gm->outgoing(Gm_source_node, c);
+            if (!target_node)
+                continue;
+
+            //this->print_seq();
+            Gt_source_node = Gt->append_pos(c, Gt_source_node);
+            added_counter++;
+            //std::cerr << "append " << c % alph_size
+            //          << " Gm_source_node: " << Gm_source_node << std::endl;
+            //this->print_seq();
+
+            if (marked.at(target_node))
+                continue;
+            marked.at(target_node) = true;
+
+            // push node information to stack
+            target_kmer[Gt->get_k() - 1] = c;
+            branchnodes.push({ target_node, target_kmer });
+
+            new_branch_started = false;
         }
-
-        // there is only one child
-        if (out == 1) {
-
-            //std::cout << " " << get_alphabet_symbol(this->get_W(nodeId) % alph_size) << " " << nodeId << std::endl;
-            count++;
-            uint64_t next = G->fwd(nodeId);
-            // the next node is new
-            if (!visited.at(next)) {
-                nodeId = next;
-                lastEdge = 0;
-            // we have seen the next node before
-            // --> jump back to previous branch
-            } else {
-                // there are no branches left
-                if (branchnodes.size() == 0)
-                    break;
-                // otherwise go back to last branch
-                branch = pop_branch(branchnodes, nodeId, lastEdge, last_k);
-                out = G->outdegree(nodeId);
-            }
-        // there are several children
-        } else {
-            // account for sentinel symbol as possible outgoing edge
-            size_t cnt = (G->get_W(nodeId) == 0);
-            bool updated = false;
-            // loop over outgoing edges
-            for (TAlphabet c = 1; c < G->alph_size; ++c) {
-                uint64_t next = G->outgoing(nodeId, c);
-                if (next > 0) {
-                    cnt++;
-                    // we already handled this edge erlier
-                    if (cnt <= lastEdge)
-                        continue;
-                    lastEdge++;
-
-                    //std::cout << " " << get_alphabet_symbol(c) << " " << pred_W(nodeId, c) << std::endl;
-                    count++;
-
-                    if (!visited.at(next)) {
-                        // there are remaining branches - push node to stack
-                        if (cnt < out && next != nodeId) {
-                            // push node information to stack
-                            branchnodes.push({ nodeId, lastEdge, last_k });
-                        }
-                        nodeId = next;
-                        updated = true;
-                        lastEdge = 0;
-                        break;
-                    }
-                }
-            }
-            // we are done with this branch
-            // we should end up here, when nodes branch to themselves with their last edge
-            if (!updated) {
-                // there are no branches left
-                if (branchnodes.size() == 0)
-                    break;
-                // otherwise go back to last branch
-                branch = pop_branch(branchnodes, nodeId, lastEdge, last_k);
-                out = G->outdegree(nodeId);
-            }
-        }
-        out = G->outdegree(nodeId);
     }
-    // handle current end
-    std::cout << " " << G->decode(0) << " " << G->p_;
-    std::cout << std::endl;
 }
 
 } // namespace merge
