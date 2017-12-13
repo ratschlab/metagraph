@@ -23,7 +23,7 @@ namespace merge {
     * nodes into the target graph object |target|. The edges of |mergeable| are fully traversed and nodes are added to
     * G_t if not existing yet. This function is well suited to merge small graphs into large ones.
     */
-    void merge(DBG_succ *target, DBG_succ *mergeable);
+    void merge(DBG_succ *target, const DBG_succ &mergeable);
 
 }
 

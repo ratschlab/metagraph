@@ -375,18 +375,15 @@ TAlphabet DBG_succ::get_node_begin_value(uint64_t i) const {
  * index of the outgoing edge with label c.
  */
 uint64_t DBG_succ::outgoing_edge_idx(uint64_t i, TAlphabet c) const {
-
-    if (i > W->size())
-        return 0;
-    if (i == 0)
+    if (i == 0 || i > W->size())
         return 0;
 
     uint64_t first_pos = pred_last(i - 1) + 1;
     uint64_t last_pos = succ_last(i);
 
-    uint64_t j1 = pred_W(last_pos, c);
-    uint64_t j2 = pred_W(last_pos, c + alph_size);
-    uint64_t j = (j1 < j2) ? j2 : j1;
+    uint64_t j = std::max(pred_W(last_pos, c),
+                          pred_W(last_pos, c + alph_size));
+
     if (j < first_pos || j >= W->size())
         return 0;
 
@@ -400,17 +397,14 @@ uint64_t DBG_succ::outgoing_edge_idx(uint64_t i, TAlphabet c) const {
  * index of the node the edge is pointing to.
  */
 uint64_t DBG_succ::outgoing(uint64_t i, TAlphabet c) const {
-    if (i > W->size())
-        return 0;
-    if (i == 0)
-        return 0;
-
     uint64_t j = outgoing_edge_idx(i, c);
     if (j == 0)
         return 0;
+
     j = fwd(j);
     if (j == 0 || j == W->size())
         return 0;
+
     return j;
 }
 
@@ -800,7 +794,7 @@ std::vector<std::vector<HitInfo>> DBG_succ::align_fuzzy(const std::string &seque
  * Returns the number of nodes on the current graph.
  */
 uint64_t DBG_succ::num_nodes() const {
-    return rank_last(last->size());
+    return rank_last(last->size() - 1);
 }
 
 /**
@@ -1189,50 +1183,63 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t source_node, TAlphabet *ckmer
     uint64_t end = succ_last(source_node) + 1;
 
     // get position of the first occurence of c or c- in W after p
-    uint64_t next_c_pos = std::min(succ_W(begin, c),
-                                   succ_W(begin, c + alph_size));
+    uint64_t prev_c_pos = std::max(pred_W(end - 1, c),
+                                   pred_W(end - 1, c + alph_size));
     // if the character already exists return its index
-    if (next_c_pos < end)
-        return next_c_pos;
+    if (prev_c_pos >= begin)
+        return prev_c_pos;
 
     /**
      * We found that c does not yet exist in the current range and now have to
      * figure out if we need to add c or c- to the range.
-     * To do this, we check if there is a following position j1 with W[j1] == c
+     * To do this, we check if there is a preceding position j1 with W[j1] == c
      * whose node shares a k-1 suffix with the current node.
      * If yes, we add c- instead of c.
      */
 
-    bool is_last_incoming = true;
-    if (next_c_pos < W->size())
-        is_last_incoming = ckmer ? !compare_node_suffix(ckmer, next_c_pos)
-                                 : !compare_node_suffix(begin, next_c_pos);
-    if (!is_last_incoming) {
+    bool is_first_incoming = true;
+    if (prev_c_pos > 0)
+        is_first_incoming = ckmer ? !compare_node_suffix(ckmer, prev_c_pos)
+                                  : !compare_node_suffix(begin, prev_c_pos);
+
+    if (!is_first_incoming) {
         // insert the edge
-        update_F(get_node_last_char(begin), +1);
-        W->insert(begin, c + alph_size);
-        last->insertBit(begin, false);
-        sort_W_locally(begin, end);
+        insert_edge(c + alph_size, begin, end);
         return begin;
     }
 
-    // adding a new node can influence one of the preceding nodes sharing the k-1 suffix
-    // get position of the last occurence of c before p (including p - 1)
-    uint64_t last_c = pred_W(begin - 1, c);
+    // adding a new node can influence one of the following nodes sharing the k-1 suffix
+    // get position of the first occurence of c after p (including p + 1)
+    uint64_t first_c = succ_W(end, c);
 
     bool the_only_incoming = true;
-    if (last_c > 0) {
-        bool same_target = ckmer != NULL ? compare_node_suffix(ckmer, last_c)
-                                         : compare_node_suffix(begin, last_c);
-        if (same_target) {
+    if (first_c < W->size()) {
+        bool the_only_incoming = ckmer != NULL ? !compare_node_suffix(ckmer, first_c)
+                                               : !compare_node_suffix(begin, first_c);
+        if (!the_only_incoming) {
             // the inserted edge will not be the first incoming for the target node
-            the_only_incoming = false;
             // need to adapt the respective cc to a cc-
-            W->set(last_c, c + alph_size);
+            W->set(first_c, c + alph_size);
         }
     }
 
     // insert the edge
+    insert_edge(c, begin, end);
+
+    // Add sentinel if the target node is the new dead-end
+    if (!the_only_incoming)
+        return begin;
+
+    uint64_t sentinel_pos = select_last(rank_last(F[c]) + rank_W(begin - 1, c)) + 1;
+
+    update_F(c, +1);
+    W->insert(sentinel_pos, encode('$'));
+    last->insertBit(sentinel_pos, true);
+    return sentinel_pos;
+}
+
+
+void DBG_succ::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
     if (begin > 1 && get_W(begin) == encode('$')) {
         // the source node is the dead-end with outgoing sentinel
         // replace this sentinel with proper label
@@ -1244,17 +1251,6 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t source_node, TAlphabet *ckmer
         last->insertBit(begin, false);
         sort_W_locally(begin, end);
     }
-
-    // Add sentinel if the target node is the new dead-end
-    if (!the_only_incoming)
-        return begin;
-
-    uint64_t sentinel_pos = select_last(rank_last(F[c]) + rank_W(last_c, c)) + 1;
-
-    update_F(c, +1);
-    W->insert(sentinel_pos, encode('$'));
-    last->insertBit(sentinel_pos, true);
-    return sentinel_pos;
 }
 
 /** This function takes a pointer to a graph structure and concatenates the arrays W, last

@@ -153,81 +153,63 @@ void pop_branch(std::stack<BranchInfoMerge> *branchnodes,
 * The edges of Gm are fully traversed and nodes are added to Gt if not existing yet.
 * This function is well suited to merge small graphs into large ones.
 */
-void merge(DBG_succ *Gt, DBG_succ *Gm) {
+void merge(DBG_succ *Gt, const DBG_succ &Gm) {
+    // FYI: can be improved to handle different k_mer sizes
+    assert(Gt->get_k() == Gm.get_k());
+
     // bool vector that keeps track of visited nodes
-    std::vector<bool> marked(Gm->rank_last(Gm->get_W().size() - 1), false);
+    std::vector<bool> marked(Gm.num_nodes() + 1, false);
 
     // start at the source node
     uint64_t Gt_source_node = 1;
     uint64_t Gm_source_node = 1;
     // keep a running list of the last k characters we have seen
-    std::deque<TAlphabet> source_kmer(Gt->get_k(), DBG_succ::encode('$'));
+    std::deque<TAlphabet> k_mer(Gm.get_k(), DBG_succ::encode('$'));
 
     // store all branch nodes on the way
     std::stack<BranchInfoMerge> branchnodes;
-    branchnodes.push({ Gm_source_node, source_kmer });
-    marked[Gm->rank_last(Gm_source_node)] = true;
-    bool new_branch_started = true;
 
     uint64_t added_counter = 0;
 
     // keep traversing until we reach the sink and have worked off all branches from the stack
-    while (branchnodes.size()) {
-        // get new branch
-        pop_branch(&branchnodes, &Gm_source_node, &source_kmer);
-
-        if (new_branch_started) {
-            // find node where to restart insertion
-            Gt_source_node = Gt->index(source_kmer, source_kmer.size());
-            // put at the beginning of equal node range
-            // Gt_source_node = Gt->pred_last(Gt_source_node - 1) + 1;
-            new_branch_started = false;
-        }
+    while (true) {
         // verbose output
         if (added_counter > 0 && added_counter % 1000 == 0) {
             std::cout << "." << std::flush;
             if (added_counter % 10000 == 0) {
-                std::cout << "merged " << std::to_string(added_counter)
-                          << " / " << std::to_string(Gm->get_W().size())
-                          << " - edges " << std::to_string(Gt->W->size() - 1)
-                          << " / nodes " << std::to_string(Gt->rank_last((Gt->last->size() - 1)))
-                          << "\n";
+                std::cout << "merged " << added_counter
+                          << " / " << Gm.num_edges()
+                          << " - edges " << Gt->num_edges()
+                          << " / nodes " << Gt->num_nodes() << "\n";
             }
         }
 
-        // we have reached the sink but there are unvisited nodes left on the stack
-        if (Gm_source_node > 1 && Gm->get_W(Gm_source_node) == DBG_succ::encode('$')) {
-            new_branch_started = true;
-            continue;
-        }
-
-        std::deque<TAlphabet> target_kmer = source_kmer;
-        target_kmer.pop_front();
-        target_kmer.push_back(0);
+        k_mer.pop_front();
+        k_mer.push_back(0);
 
         // loop over outgoing edges
         for (TAlphabet c = 1; c < Gt->alph_size; ++c) {
-            uint64_t target_node = Gm->outgoing(Gm_source_node, c);
-            if (!target_node)
+            uint64_t Gm_target_node = Gm.outgoing(Gm_source_node, c);
+            if (!Gm_target_node)
                 continue;
 
-            //this->print_seq();
-            Gt_source_node = Gt->append_pos(c, Gt_source_node);
+            Gt->append_pos(c, Gt_source_node);
             added_counter++;
-            //std::cerr << "append " << c % alph_size
-            //          << " Gm_source_node: " << Gm_source_node << std::endl;
-            //this->print_seq();
 
-            if (marked.at(Gm->rank_last(target_node)))
+            if (marked.at(Gm.rank_last(Gm_target_node)))
                 continue;
-            marked.at(Gm->rank_last(target_node)) = true;
 
-            // push node information to stack
-            target_kmer[Gt->get_k() - 1] = c;
-            branchnodes.push({ target_node, target_kmer });
-
-            new_branch_started = false;
+            k_mer.back() = c;
+            branchnodes.push({ Gm_target_node, k_mer });
+            marked.at(Gm.rank_last(Gm_target_node)) = true;
         }
+        if (!branchnodes.size())
+            break;
+
+        // get new node
+        pop_branch(&branchnodes, &Gm_source_node, &k_mer);
+        // find node where to restart insertion
+        Gt_source_node = Gt->index(k_mer, k_mer.size());
     }
 }
 

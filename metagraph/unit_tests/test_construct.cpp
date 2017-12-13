@@ -107,7 +107,8 @@ TEST(Construct, SmallGraphTraversal) {
     std::vector<size_t> incoming_edges = {};
     for (size_t i = 0; i < outgoing_edges.size(); ++i) {
         //test forward traversal given an output edge label
-        EXPECT_EQ(graph->outgoing(i + 1, graph->get_W(i + 1)), outgoing_edges[i]);
+        EXPECT_EQ(outgoing_edges[i], graph->outgoing(i + 1, graph->get_W(i + 1)))
+            << "Edge index: " << i + 1;
 
         //test FM index property
         if (graph->get_W(i + 1) < graph->alph_size) {
@@ -151,55 +152,94 @@ TEST(DBGSuccinct, Serialization) {
     delete graph;
 }
 
-TEST(DBGSuccinct, AddSequence) {
+TEST(DBGSuccinct, AddSequenceSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
-        DBG_succ graph(k, true);
+        DBG_succ graph(k);
         graph.add_sequence(std::string(100, 'A'));
         EXPECT_EQ(k + 1, graph.num_nodes());
         EXPECT_EQ(k + 2, graph.num_edges());
     }
 }
 
-TEST(DBGSuccinct, MergeGraphs) {
+TEST(DBGSuccinct, AddSequence) {
+    {
+        DBG_succ graph(3);
+        graph.add_sequence("AAAC");
+        graph.add_sequence("CAAC");
+        EXPECT_EQ(8u, graph.num_nodes());
+        EXPECT_EQ(10u, graph.num_edges());
+    }
+    {
+        DBG_succ graph(3);
+        graph.add_sequence("AAAC");
+        graph.add_sequence("CAAC");
+        graph.add_sequence("GAAC");
+        EXPECT_EQ(11u, graph.num_nodes());
+        EXPECT_EQ(14u, graph.num_edges());
+    }
+}
+
+TEST(DBGSuccinct, MergeWithEmpty) {
     for (size_t k = 1; k < 10; ++k) {
         DBG_succ first(k, true);
         DBG_succ second(k, true);
         first.add_sequence(std::string(100, 'A'));
-        merge::merge(&first, &second);
+        merge::merge(&first, second);
         EXPECT_EQ(k + 1, first.num_nodes());
         EXPECT_EQ(k + 2, first.num_edges());
     }
+}
 
+TEST(DBGSuccinct, MergeEmpty) {
     for (size_t k = 1; k < 10; ++k) {
         DBG_succ first(k, true);
         DBG_succ second(k, true);
         second.add_sequence(std::string(100, 'A'));
-        merge::merge(&first, &second);
+        merge::merge(&first, second);
         EXPECT_EQ(k + 1, first.num_nodes());
         EXPECT_EQ(k + 2, first.num_edges());
     }
+}
 
+TEST(DBGSuccinct, MergeEqualPaths) {
     for (size_t k = 1; k < 10; ++k) {
         DBG_succ first(k, true);
         DBG_succ second(k, true);
         first.add_sequence(std::string(100, 'A'));
         second.add_sequence(std::string(50, 'A'));
-        merge::merge(&first, &second);
+        merge::merge(&first, second);
         EXPECT_EQ(k + 1, first.num_nodes());
         EXPECT_EQ(k + 1, second.num_nodes());
         EXPECT_EQ(k + 2, first.num_edges());
         EXPECT_EQ(k + 2, second.num_edges());
     }
+}
 
+TEST(DBGSuccinct, MergeTwoPaths) {
     for (size_t k = 1; k < 10; ++k) {
         DBG_succ first(k, true);
         DBG_succ second(k, true);
         first.add_sequence(std::string(100, 'A'));
         second.add_sequence(std::string(50, 'C'));
-        merge::merge(&first, &second);
+        merge::merge(&first, second);
         EXPECT_EQ(2 * k + 1, first.num_nodes());
         EXPECT_EQ(k + 1, second.num_nodes());
         EXPECT_EQ(2 * k + 3, first.num_edges());
         EXPECT_EQ(k + 2, second.num_edges());
+    }
+}
+
+TEST(DBGSuccinct, MergeSinglePathWithTwo) {
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ first(k, true);
+        DBG_succ second(k, true);
+        first.add_sequence(std::string(100, 'A'));
+        second.add_sequence(std::string(50, 'C'));
+        second.add_sequence(std::string(60, 'G'));
+        merge::merge(&first, second);
+        EXPECT_EQ(3 * k + 1, first.num_nodes());
+        EXPECT_EQ(2 * k + 1, second.num_nodes());
+        EXPECT_EQ(3 * k + 4, first.num_edges());
+        EXPECT_EQ(2 * k + 3, second.num_edges());
     }
 }

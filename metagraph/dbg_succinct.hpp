@@ -32,7 +32,7 @@ class DBGCondensed : public GenomeGraph {
 
 
 class DBG_succ { //: public GenomeGraph{
-    friend void merge::merge(DBG_succ *Gt, DBG_succ *Gm);
+    friend void merge::merge(DBG_succ *Gt, const DBG_succ &Gm);
 
     friend void merge::merge(DBG_succ *Gt,
                              std::vector<DBG_succ*> Gv,
@@ -271,6 +271,11 @@ class DBG_succ { //: public GenomeGraph{
      * sequence given that the corresponding note is not part of the graph yet.
      */
     uint64_t append_pos(uint64_t c, uint64_t source_node, TAlphabet *ckmer = NULL);
+
+    /**
+     * Helper function used by the append_pos function
+     */
+    void insert_edge(TAlphabet c, uint64_t begin, uint64_t end);
 
     /**
      * Uses the object's array W, a given position i in W and a character c
