@@ -1187,7 +1187,7 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t source_node, TAlphabet *ckmer
                                    pred_W(end - 1, c + alph_size));
     // if the character already exists return its index
     if (prev_c_pos >= begin)
-        return prev_c_pos;
+        return fwd(prev_c_pos);
 
     /**
      * We found that c does not yet exist in the current range and now have to
@@ -1205,7 +1205,7 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t source_node, TAlphabet *ckmer
     if (!is_first_incoming) {
         // insert the edge
         insert_edge(c + alph_size, begin, end);
-        return begin;
+        return fwd(prev_c_pos);
     }
 
     // adding a new node can influence one of the following nodes sharing the k-1 suffix
@@ -1214,8 +1214,8 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t source_node, TAlphabet *ckmer
 
     bool the_only_incoming = true;
     if (first_c < W->size()) {
-        bool the_only_incoming = ckmer != NULL ? !compare_node_suffix(ckmer, first_c)
-                                               : !compare_node_suffix(begin, first_c);
+        the_only_incoming = ckmer != NULL ? !compare_node_suffix(ckmer, first_c)
+                                          : !compare_node_suffix(begin, first_c);
         if (!the_only_incoming) {
             // the inserted edge will not be the first incoming for the target node
             // need to adapt the respective cc to a cc-
@@ -1228,7 +1228,7 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t source_node, TAlphabet *ckmer
 
     // Add sentinel if the target node is the new dead-end
     if (!the_only_incoming)
-        return begin;
+        return fwd(first_c + 1);
 
     uint64_t sentinel_pos = select_last(rank_last(F[c]) + rank_W(begin - 1, c)) + 1;
 

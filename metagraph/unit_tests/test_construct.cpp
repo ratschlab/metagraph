@@ -177,6 +177,21 @@ TEST(DBGSuccinct, AddSequence) {
         EXPECT_EQ(11u, graph.num_nodes());
         EXPECT_EQ(14u, graph.num_edges());
     }
+    {
+        DBG_succ graph(3);
+        graph.add_sequence("AAAC");
+        graph.add_sequence("AACG");
+        EXPECT_EQ(6u, graph.num_nodes());
+        EXPECT_EQ(8u, graph.num_edges());
+    }
+    {
+        DBG_succ graph(4);
+        graph.add_sequence("AGAC");
+        graph.add_sequence("GACT");
+        graph.add_sequence("ACTA");
+        EXPECT_EQ(12u, graph.num_nodes());
+        EXPECT_EQ(15u, graph.num_edges());
+    }
 }
 
 TEST(DBGSuccinct, MergeWithEmpty) {
