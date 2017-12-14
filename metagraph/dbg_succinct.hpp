@@ -34,10 +34,9 @@ class DBGCondensed : public GenomeGraph {
 class DBG_succ { //: public GenomeGraph{
     friend void merge::merge(DBG_succ *Gt, const DBG_succ &Gm);
 
-    friend void merge::merge(DBG_succ *Gt,
-                             std::vector<DBG_succ*> Gv,
-                             std::vector<uint64_t> kv,
-                             std::vector<uint64_t> nv);
+    friend DBG_succ* merge::merge(const std::vector<DBG_succ*> &Gv,
+                                  std::vector<uint64_t> kv,
+                                  std::vector<uint64_t> nv);
   public:
     // define an extended alphabet for W --> somehow this does not work properly as expected
     typedef uint64_t TAlphabet;

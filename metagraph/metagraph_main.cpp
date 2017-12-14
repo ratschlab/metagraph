@@ -192,17 +192,6 @@ const std::vector<std::string> annots = {
   "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"
 };
 
-void parallel_merge_collect(DBG_succ *result) {
-
-    for (size_t i = 0; i < merge_data->result.size(); ++i) {
-        if (merge_data->result.at(i)) {
-            result->append_graph(*merge_data->result.at(i));
-            delete merge_data->result.at(i);
-        }
-    }
-    merge_data->result.clear();
-    merge_data->bins_done = 0;
-}
 
 /*
  * Distribute the annotation of all k-mers in a sequence over
@@ -258,14 +247,17 @@ void* parallel_merge_wrapper(void *config_) {
             merge_data->idx++;
             pthread_mutex_unlock (&mutex_bin_idx);
 
-            graph = new DBG_succ(merge_data->k, false);
             std::vector<uint64_t> kv;
             std::vector<uint64_t> nv;
             for (size_t i = 0; i < merge_data->graphs.size(); i++) {
                 kv.push_back(merge_data->bins.at(i).at(curr_idx).first);
                 nv.push_back(merge_data->bins.at(i).at(curr_idx).second + 1);
             }
-            merge::merge(graph, merge_data->graphs, kv, nv);
+            graph = merge::merge(merge_data->graphs, kv, nv);
+            if (!graph) {
+                std::cerr << "ERROR: Merge gone wrong" << std::endl;
+                exit(1);
+            }
 
             pthread_mutex_lock (&mutex_merge_result);
             merge_data->result.at(curr_idx) = graph;
@@ -683,7 +675,6 @@ int main(int argc, const char *argv[]) {
                         kv.push_back(1);
                         nv.push_back(graph->get_W().size());
                 }
-                DBG_succ* target_graph = new DBG_succ(graphs.front()->get_k(), false);
 
                 if ((config->parallel > 1) || (config->parts_total > 1)) {
                     pthread_t *threads = NULL;
@@ -753,18 +744,26 @@ int main(int argc, const char *argv[]) {
 
                     // collect results
                     std::cerr << "Collecting results" << std::endl;
-                    parallel_merge_collect(target_graph);
 
-                    graph = target_graph;
+                    graph = new DBG_succ(graphs.front()->get_k(), false);
+
+                    for (size_t i = 0; i < merge_data->result.size(); ++i) {
+                        if (merge_data->result.at(i)) {
+                            graph->append_graph(*merge_data->result.at(i));
+                            delete merge_data->result.at(i);
+                        }
+                    }
+                    merge_data->result.clear();
+                    merge_data->bins_done = 0;
 
                     delete merge_data;
 
                 } else {
-                    merge::merge(target_graph, graphs, kv, nv);
-                    graph = target_graph;
+                    graph = merge::merge(graphs, kv, nv);
                 }
-                for (size_t f = 0; f < graphs.size(); f++)
+                for (size_t f = 0; f < graphs.size(); f++) {
                     delete graphs.at(f);
+                }
                 std::cerr << "... done merging." << std::endl;
             }
             break;

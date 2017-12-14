@@ -13,10 +13,9 @@ namespace merge {
      * Given a list of graph structures, this functions
      * integrates all of them into a new graph G.
      */
-    void merge(DBG_succ *Gt,
-               std::vector<DBG_succ*> Gv,
-               std::vector<uint64_t> kv,
-               std::vector<uint64_t> nv);
+    DBG_succ* merge(const std::vector<DBG_succ*> &Gv,
+                    std::vector<uint64_t> kv,
+                    std::vector<uint64_t> nv);
 
     /**
     * Heavily borrowing from the graph sequence traversal, this function gets a graph pointer |mergeable| and merges its

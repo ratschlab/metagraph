@@ -8,28 +8,19 @@
 
 namespace merge {
 
-/**
- * This object collects information about branches during graph traversal for the
- * purpose of merging, so we know where to jump back to when we reached a dead end.
- */
-struct BranchInfoMerge {
-    uint64_t node_id;
-    std::deque<TAlphabet> source_kmer;
-};
 
-
-void merge(DBG_succ *Gt,
-           std::vector<DBG_succ*> Gv,
-           std::vector<uint64_t> kv,
-           std::vector<uint64_t> nv) {
+DBG_succ* merge(const std::vector<DBG_succ*> &Gv,
+                std::vector<uint64_t> kv,
+                std::vector<uint64_t> nv) {
 
     // Preliminarities
+    DBG_succ *Gt = new DBG_succ(Gv.at(0)->get_k(), false);
+
     for (size_t i = 0; i < Gv.size(); i++) {
         // check whether we can merge the given graphs
-        if (i > 0 && (Gv.at(i)->get_k() != Gv.at(i-1)->get_k())) {
-            fprintf(stderr, "Graphs have different k-mer lengths - cannot be merged!\n");
-            exit(1);
-        }
+        assert(Gv.at(i)->get_k() == Gt->get_k()
+                && "Graphs have different k-mer lengths - cannot be merged!\n");
+
         // positions in the graph for respective traversal
         nv.at(i) = (nv.at(i) == 0) ? Gv.at(i)->get_W().size() : nv.at(i);
         // handle special cases where one or both input graphs are empty
@@ -134,7 +125,18 @@ void merge(DBG_succ *Gt,
         if (updated == 0)
             break;
     }
+    return Gt;
 }
+
+
+/**
+ * This object collects information about branches during graph traversal for the
+ * purpose of merging, so we know where to jump back to when we reached a dead end.
+ */
+struct BranchInfoMerge {
+    uint64_t node_id;
+    std::deque<TAlphabet> source_kmer;
+};
 
 
 void pop_branch(std::stack<BranchInfoMerge> *branchnodes,

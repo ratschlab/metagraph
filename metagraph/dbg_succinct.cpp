@@ -60,6 +60,7 @@ DBG_succ::DBG_succ(size_t k, bool sentinel)
     W->insert(0, 0);
 
     if (sentinel) {
+        // add the dummy source node
         last->insertBit(1, true);
         W->insert(0, 0);
         for (size_t j = 1; j < alph_size; j++) {
