@@ -194,6 +194,39 @@ TEST(DBGSuccinct, AddSequence) {
     }
 }
 
+TEST(DBGSuccinct, AppendSequence) {
+    {
+        DBG_succ graph(3);
+        graph.add_sequence("AAAC", true);
+        graph.add_sequence("AACG", true);
+        EXPECT_EQ(6u, graph.num_nodes());
+        EXPECT_EQ(7u, graph.num_edges());
+    }
+    {
+        DBG_succ graph(3);
+        graph.add_sequence("AGAC", true);
+        graph.add_sequence("GACT", true);
+        graph.add_sequence("ACTA", true);
+        EXPECT_EQ(7u, graph.num_nodes());
+        EXPECT_EQ(8u, graph.num_edges());
+    }
+    {
+        DBG_succ graph(4);
+        graph.add_sequence("AGAC", true);
+        graph.add_sequence("GACT", true);
+        graph.add_sequence("ACTA", true);
+        EXPECT_EQ(12u, graph.num_nodes());
+        EXPECT_EQ(15u, graph.num_edges());
+    }
+    {
+        DBG_succ graph(3);
+        graph.add_sequence("AAACT", true);
+        graph.add_sequence("AAATG", true);
+        EXPECT_EQ(8u, graph.num_nodes());
+        EXPECT_EQ(10u, graph.num_edges());
+    }
+}
+
 TEST(DBGSuccinct, MergeWithEmpty) {
     for (size_t k = 1; k < 10; ++k) {
         DBG_succ first(k, true);

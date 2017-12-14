@@ -57,8 +57,10 @@ class DBG_succ { //: public GenomeGraph{
 
     /**
      * Add a full sequence to the graph.
+     * If |try_extend| is true, search for the first k-mer in the graph
+     * and extend it from that point. If the search fails, start from the dummy source.
      */
-    void add_sequence(const std::string &seq);
+    void add_sequence(const std::string &seq, bool try_extend = false);
 
     void add_sequence_fast(const std::string &seq,
                            bool add_bridge = true,

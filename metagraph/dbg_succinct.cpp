@@ -1005,12 +1005,19 @@ void DBG_succ::print_adj_list(const std::string &filename) const {
 ///////////////
 
 // add a full sequence to the graph
-void DBG_succ::add_sequence(const std::string &seq) {
-    std::vector<TAlphabet> ckmer(k_, encode('$'));
+void DBG_succ::add_sequence(const std::string &seq, bool try_extend) {
+    std::vector<TAlphabet> sequence(seq.size());
+    std::transform(seq.begin(), seq.end(), sequence.begin(),
+                   [](char c) { return encode(c); });
 
-    uint64_t source = kDummySource;
+    uint64_t source;
 
-    for (size_t i = 0; i < seq.length(); ++i) {
+    if (!try_extend || seq.size() < k_ || !(source = index(sequence, k_))) {
+        sequence.insert(sequence.begin(), k_, encode('$'));
+        source = kDummySource;
+    }
+
+    for (size_t i = 0; i + k_ < sequence.size(); ++i) {
         // print the process
         if (i > 0 && i % 1'000 == 0) {
             std::cout << "." << std::flush;
@@ -1018,9 +1025,7 @@ void DBG_succ::add_sequence(const std::string &seq) {
                 verbose_cout(i, " - edges ", num_edges(), " / nodes ", num_nodes(), "\n");
         }
 
-        TAlphabet c = encode(seq[i]);
-        source = append_pos(c, source, &ckmer[i]);
-        ckmer.push_back(c);
+        source = append_pos(sequence[i + k_], source, &sequence[i]);
     }
 
     verbose_cout("edges ", num_edges(), " / nodes ", num_nodes(), "\n");
