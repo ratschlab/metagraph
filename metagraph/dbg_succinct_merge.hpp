@@ -3,11 +3,17 @@
 
 #include <cstdint>
 #include <vector>
+#include <string>
 
 
 class DBG_succ;
+class Config;
 
 namespace merge {
+
+    DBG_succ* build_chunk(const std::vector<DBG_succ*> &Gv, Config *config);
+
+    DBG_succ* merge_chunks(const std::string &filenamebase, size_t num_chunks);
 
     /*
      * Given a list of graph structures, this functions
