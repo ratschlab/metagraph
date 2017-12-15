@@ -1259,54 +1259,6 @@ void DBG_succ::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
     }
 }
 
-/** This function takes a pointer to a graph structure and concatenates the arrays W, last
- * and F to this graph's arrays. In almost all cases this will not produce a valid graph and
- * should only be used as a helper in the parallel merge procedure.
- */
-void DBG_succ::append_graph(const DBG_succ &G) {
-    verbose_cout("    adding ", G.W->size(), " edges\n");
-
-    // handle last and W
-    for (size_t j = 1, curr_pos = W->size(); j < G.W->size(); ++j, ++curr_pos) {
-        W->insert(curr_pos, G.get_W(j));
-        last->insertBit(curr_pos, G.get_last(j));
-    }
-
-    verbose_cout("new total edges: ", W->size(), "\n");
-
-    // handle F
-    assert(F.size() == G.F.size());
-    for (size_t j = 0; j < F.size(); ++j) {
-        F.at(j) += G.F.at(j);
-    }
-}
-
-/**
- * This function takes a pointer to a graph structure and concatenates the arrays W, last
- * and F to this graph's static containers last_stat and W_stat. In almost all cases
- * this will not produce a valid graph and should only be used as a helper in the
- * parallel merge procedure.
- */
-void DBG_succ::append_graph_static(const DBG_succ &G) {
-    verbose_cout("    adding ", G.W->size(), " edges\n");
-
-    assert(dynamic_cast<wavelet_tree_dyn*>(G.W));
-    auto G_W_stat = dynamic_cast<wavelet_tree_dyn*>(G.W)->to_vector();
-
-    W_stat.insert(W_stat.end(), G_W_stat.begin() + 1, G_W_stat.end());
-
-    for (size_t i = 1; i < G.W->size(); ++i) {
-        last_stat.push_back(G.get_last(i));
-    }
-
-    verbose_cout("new total edges: ", W->size(), "\n");
-
-    // handle F
-    assert(F.size() == G.F.size());
-    for (size_t j = 0; j < F.size(); ++j) {
-        F.at(j) += G.F.at(j);
-    }
-}
 
 // Given an edge list, remove them from the graph.
 void DBG_succ::remove_edges(const std::set<uint64_t> &edges) {

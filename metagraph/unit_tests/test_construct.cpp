@@ -19,7 +19,7 @@ const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
 
 
 DBG_succ* init_graph(size_t k = 3) {
-    DBG_succ *graph = new DBG_succ(k, false);
+    DBG_succ *graph = new DBG_succ(k);
     assert(graph);
     graph->add_sink();
     graph->switch_state(Config::CSTR);

@@ -60,8 +60,8 @@ std::vector<std::pair<uint64_t, uint64_t>> get_bins(DBG_succ *G, uint64_t bins) 
 
 
 std::vector<std::pair<uint64_t, uint64_t>> get_bins_relative(
-                                                DBG_succ* G_from,
-                                                DBG_succ* G_to,
+                                                DBG_succ *G_from,
+                                                DBG_succ *G_to,
                                                 std::vector<std::pair<uint64_t, uint64_t>> ref_bins,
                                                 uint64_t first_pos,
                                                 uint64_t last_pos
@@ -86,8 +86,8 @@ std::vector<std::pair<uint64_t, uint64_t>> get_bins_relative(
 
 
 struct ParallelMergeContainer {
-    std::vector<std::pair<uint64_t, uint64_t> > ref_bins;
-    std::vector<std::vector<std::pair<uint64_t, uint64_t> > > bins;
+    std::vector<std::pair<uint64_t, uint64_t>> ref_bins;
+    std::vector<std::vector<std::pair<uint64_t, uint64_t>>> bins;
     std::vector<DBG_succ*> result;
     std::vector<DBG_succ*> graphs;
     unsigned int idx;
@@ -297,7 +297,25 @@ DBG_succ* build_chunk(const std::vector<DBG_succ*> &graphs, Config *config) {
 
     for (size_t i = 0; i < merge_data->result.size(); ++i) {
         if (merge_data->result.at(i)) {
-            graph->append_graph(*merge_data->result.at(i));
+
+            graph->verbose_cout("    adding ", merge_data->result.at(i)->W->size(), " edges\n");
+
+            // handle last and W
+            for (size_t j = 1, curr_pos = graph->W->size();
+                                    j < merge_data->result.at(i)->W->size();
+                                    ++j, ++curr_pos) {
+                graph->W->insert(curr_pos, merge_data->result.at(i)->get_W(j));
+                graph->last->insertBit(curr_pos, merge_data->result.at(i)->get_last(j));
+            }
+
+            graph->verbose_cout("new total edges: ", graph->W->size(), "\n");
+
+            // handle F
+            assert(graph->F.size() == merge_data->result.at(i)->F.size());
+            for (size_t j = 0; j < graph->F.size(); ++j) {
+                graph->F.at(j) += merge_data->result.at(i)->F.at(j);
+            }
+
             delete merge_data->result.at(i);
         }
     }
@@ -332,7 +350,25 @@ DBG_succ* merge_chunks(const std::string &filenamebase, size_t num_chunks) {
             graph->last_stat.push_back(0);
             graph->W_stat.push_back(0);
         }
-        graph->append_graph_static(graph_to_append);
+
+        graph->verbose_cout("    adding ", graph_to_append.W->size(), " edges\n");
+
+        assert(dynamic_cast<wavelet_tree_dyn*>(graph_to_append.W));
+        auto G_W_stat = dynamic_cast<wavelet_tree_dyn*>(graph_to_append.W)->to_vector();
+
+        graph->W_stat.insert(graph->W_stat.end(), G_W_stat.begin() + 1, G_W_stat.end());
+
+        for (size_t i = 1; i < graph_to_append.W->size(); ++i) {
+            graph->last_stat.push_back(graph_to_append.get_last(i));
+        }
+
+        graph->verbose_cout("new total edges: ", graph->W->size(), "\n");
+
+        // handle F
+        assert(graph->F.size() == graph_to_append.F.size());
+        for (size_t j = 0; j < graph->F.size(); ++j) {
+            graph->F.at(j) += graph_to_append.F.at(j);
+        }
     }
     graph->switch_state(Config::DYN);
     return graph;

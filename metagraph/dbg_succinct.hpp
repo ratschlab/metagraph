@@ -32,6 +32,9 @@ class DBGCondensed : public GenomeGraph {
 
 
 class DBG_succ { //: public GenomeGraph{
+    friend DBG_succ* merge::build_chunk(const std::vector<DBG_succ*> &graphs, Config *config);
+    friend DBG_succ* merge::merge_chunks(const std::string &filenamebase, size_t num_chunks);
+
     friend void merge::merge(DBG_succ *Gt, const DBG_succ &Gm);
 
     friend DBG_succ* merge::merge(const std::vector<DBG_succ*> &Gv,
@@ -67,20 +70,6 @@ class DBG_succ { //: public GenomeGraph{
                            std::string suffix = "");
 
     void construct_succ(unsigned int parallel = 1);
-
-    /** This function takes a pointer to a graph structure and concatenates the arrays W, last
-     * and F to this graph's arrays. In almost all cases this will not produce a valid graph and
-     * should only be used as a helper in the parallel merge procedure.
-     */
-    void append_graph(const DBG_succ &other);
-
-    /**
-     * This function takes a pointer to a graph structure and concatenates the arrays W, last
-     * and F to this graph's static containers last_stat and W_stat. In almost all cases
-     * this will not produce a valid graph and should only be used as a helper in the
-     * parallel merge procedure.
-     */
-    void append_graph_static(const DBG_succ &other);
 
     void remove_edges(const std::set<uint64_t> &edges);
 
