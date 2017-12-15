@@ -48,6 +48,36 @@ class DBG_succ { //: public GenomeGraph{
     ~DBG_succ();
 
     /**
+     * Uses the object's array last and a position and
+     * returns the number of set bits up to that postion.
+     */
+    uint64_t rank_last(uint64_t i) const;
+
+    /**
+     * Uses the object's array last and a given position i and
+     * returns the position of the i-th set bit in last[1..i].
+     */
+    uint64_t select_last(uint64_t i) const;
+
+    /**
+     * This is a convenience function that returns for the object's array last
+     * and a given position i the position of the last set bit in last[1..i].
+     */
+    uint64_t pred_last(uint64_t i) const;
+
+    /**
+     * This is a convenience function that returns for the object's array last
+     * and a given position i the position of the first set bit in last[i..N].
+     */
+    uint64_t succ_last(uint64_t i) const;
+
+    /**
+     * This functions gets a position i reflecting the r-th occurence of the corresponding
+     * character c in W and returns the position of the r-th occurence of c in last.
+     */
+    uint64_t fwd(uint64_t i) const;
+
+    /**
     * Perform an element wise comparison of the arrays W, last and
     * F and will only check for identity. If any element differs, return
     * false and true otherwise.
@@ -108,42 +138,6 @@ class DBG_succ { //: public GenomeGraph{
 #else
     bool verbose = false;
 #endif
-
-    /**
-     * This is a convenience function that returns for array W, a position i and
-     * a character c the first index of a character c in W[i..N].
-     */
-    uint64_t succ_W(uint64_t i, TAlphabet c) const;
-
-    /**
-     * Uses the object's array last and a position and
-     * returns the number of set bits up to that postion.
-     */
-    uint64_t rank_last(uint64_t i) const;
-
-    /**
-     * Uses the object's array last and a given position i and
-     * returns the position of the i-th set bit in last[1..i].
-     */
-    uint64_t select_last(uint64_t i) const;
-
-    /**
-     * This is a convenience function that returns for the object's array last
-     * and a given position i the position of the last set bit in last[1..i].
-     */
-    uint64_t pred_last(uint64_t i) const;
-
-    /**
-     * This is a convenience function that returns for the object's array last
-     * and a given position i the position of the first set bit in last[i..N].
-     */
-    uint64_t succ_last(uint64_t i) const;
-
-    /**
-     * This functions gets a position i reflecting the r-th occurence of the corresponding
-     * character c in W and returns the position of the r-th occurence of c in last.
-     */
-    uint64_t fwd(uint64_t i) const;
 
     /**
      * Using the offset structure F this function returns the value of the last
@@ -219,12 +213,6 @@ class DBG_succ { //: public GenomeGraph{
 
     uint64_t num_edges() const;
 
-    /**
-     * This function gets a value of the alphabet c and updates the offset of
-     * all following values by adding |value|.
-     */
-    void update_F(TAlphabet c, int value);
-
     void switch_state(Config::StateType state);
 
     /**
@@ -255,6 +243,18 @@ class DBG_succ { //: public GenomeGraph{
 
     // the offset array to mark the offsets for the last column in the implicit node list
     std::vector<uint64_t> F;
+
+    /**
+     * This function gets a value of the alphabet c and updates the offset of
+     * all following values by adding |value|.
+     */
+    void update_F(TAlphabet c, int value);
+
+    /**
+     * This is a convenience function that returns for array W, a position i and
+     * a character c the first index of a character c in W[i..N].
+     */
+    uint64_t succ_W(uint64_t i, TAlphabet c) const;
 
     /**
      * This function takes a character c and appends it to the end of the graph
