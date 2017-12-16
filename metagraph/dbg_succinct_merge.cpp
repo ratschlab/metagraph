@@ -328,7 +328,15 @@ DBG_succ* build_chunk(const std::vector<DBG_succ*> &graphs, Config *config) {
 
 
 DBG_succ* merge_chunks(const std::string &filenamebase, size_t num_chunks) {
-    DBG_succ *graph = NULL;
+    // the bit array indicating the last outgoing edge of a node (static container for full init)
+    std::vector<bool> last_stat { 0 };
+
+    // the array containing the edge labels
+    std::vector<TAlphabet> W_stat { 0 };
+
+    std::vector<uint64_t> F(DBG_succ::alph_size, 0);
+
+    size_t k = 0;
 
     for (uint64_t f = 0; f < num_chunks; f++) {
         std::string filename = filenamebase
@@ -340,37 +348,40 @@ DBG_succ* merge_chunks(const std::string &filenamebase, size_t num_chunks) {
         if (!graph_to_append.load(filename)) {
             std::cerr << "ERROR: input file "
                       << filename << " corrupted" << std::endl;
-            if (graph)
-                delete graph;
             return NULL;
         }
+        k = graph_to_append.get_k();
 
-        if (f == 0) {
-            graph = new DBG_succ(graph_to_append.get_k(), false);
-            graph->last_stat.push_back(0);
-            graph->W_stat.push_back(0);
-        }
-
-        graph->verbose_cout("    adding ", graph_to_append.W->size(), " edges\n");
+        graph_to_append.verbose_cout("    adding ", graph_to_append.W->size(), " edges\n");
 
         assert(dynamic_cast<wavelet_tree_dyn*>(graph_to_append.W));
         auto G_W_stat = dynamic_cast<wavelet_tree_dyn*>(graph_to_append.W)->to_vector();
 
-        graph->W_stat.insert(graph->W_stat.end(), G_W_stat.begin() + 1, G_W_stat.end());
+        W_stat.insert(W_stat.end(), G_W_stat.begin() + 1, G_W_stat.end());
 
         for (size_t i = 1; i < graph_to_append.W->size(); ++i) {
-            graph->last_stat.push_back(graph_to_append.get_last(i));
+            last_stat.push_back(graph_to_append.get_last(i));
         }
 
-        graph->verbose_cout("new total edges: ", graph->W->size(), "\n");
+        graph_to_append.verbose_cout("new total edges: ", W_stat.size(), "\n");
 
         // handle F
-        assert(graph->F.size() == graph_to_append.F.size());
-        for (size_t j = 0; j < graph->F.size(); ++j) {
-            graph->F.at(j) += graph_to_append.F.at(j);
+        assert(F.size() == graph_to_append.F.size());
+        for (size_t j = 0; j < F.size(); ++j) {
+            F.at(j) += graph_to_append.F.at(j);
         }
     }
-    graph->switch_state(Config::DYN);
+
+    DBG_succ *graph = new DBG_succ(k, false);
+
+    delete graph->W;
+    graph->W = new wavelet_tree_dyn(4, W_stat);
+
+    delete graph->last;
+    graph->last = new bit_vector_dyn(last_stat);
+
+    graph->F = std::move(F);
+
     return graph;
 }
 

@@ -110,8 +110,6 @@ int main(int argc, const char *argv[]) {
                 std::cerr << "k is " << graph->get_k() << std::endl;
 
             if (config->fast) {
-                graph->switch_state(Config::CSTR);
-
                 //enumerate all suffices
                 assert(DBG_succ::alph_size > 1);
                 size_t suffix_len = std::min(
@@ -130,7 +128,7 @@ int main(int argc, const char *argv[]) {
                 for (size_t j = 0; j < suffices.size(); ++j) {
                     std::cout << "Suffix: " << suffices[j] << "\n";
                     //add sink nodes
-                    graph->add_sink(config->parallel, suffices[j]);
+                    // graph->add_sink(config->parallel, suffices[j]);
 
                     if (suffices[j].find("$") == std::string::npos) {
                         // iterate over input files
@@ -417,19 +415,18 @@ int main(int argc, const char *argv[]) {
                 //    config->bins_per_thread = config->parts_total / config->parallel;
 
                 std::vector<DBG_succ*> graphs;
-
+                std::vector<uint64_t> kv;
+                std::vector<uint64_t> nv;
+                for (unsigned int f = 0; f < files.size(); ++f) {
+                    std::cout << "Opening file " << files[f] << std::endl;
+                    graph = load_critical_graph_from_file(files[f]);
+                    graphs.push_back(graph);
+                    kv.push_back(1);
+                    nv.push_back(graph->get_W().size());
+                }
                 if (config->parallel > 1 || config->parts_total > 1) {
                     graph = merge::build_chunk(graphs, config);
                 } else {
-                    std::vector<uint64_t> kv;
-                    std::vector<uint64_t> nv;
-                    for (unsigned int f = 0; f < files.size(); ++f) {
-                        std::cout << "Opening file " << files[f] << std::endl;
-                        graph = load_critical_graph_from_file(files[f]);
-                        graphs.push_back(graph);
-                        kv.push_back(1);
-                        nv.push_back(graph->get_W().size());
-                    }
                     graph = merge::merge(graphs, kv, nv);
                 }
                 for (size_t f = 0; f < graphs.size(); f++) {

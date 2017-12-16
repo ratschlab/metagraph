@@ -103,8 +103,6 @@ class DBG_succ { //: public GenomeGraph{
 
     void remove_edges(const std::set<uint64_t> &edges);
 
-    void add_sink(unsigned int parallel = 1, std::string suffix = "");
-
     /**
      * Given index i of a node and a value k, this function
      * will return the k-th last character of node i.
@@ -116,12 +114,6 @@ class DBG_succ { //: public GenomeGraph{
 
     // the array containing the edge labels
     wavelet_tree *W = new wavelet_tree_dyn(4); // 4 is log (sigma)
-
-    // the bit array indicating the last outgoing edge of a node (static container for full init)
-    std::vector<bool> last_stat;
-
-    // the array containing the edge labels
-    std::vector<TAlphabet> W_stat;
 
     //Temporary storage for kmers before succinct representation construction
     //the second element stores an ID for each kmer indicating which sequence it came from
@@ -398,10 +390,10 @@ class DBG_succ { //: public GenomeGraph{
      */
     uint64_t pred_W(uint64_t i, TAlphabet c) const;
 
-    void verbose_cout() {}
+    void verbose_cout() const {}
 
     template <typename T, typename... Targs>
-    void verbose_cout(const T &arg, Targs ...rest) {
+    void verbose_cout(const T &arg, Targs ...rest) const {
         if (verbose) {
             std::cout << arg;
             verbose_cout(rest...);

@@ -48,7 +48,7 @@ class Config {
     };
     IdentityType identity = NO_IDENTITY;
 
-    enum StateType { STAT = 1, DYN, CSTR };
+    enum StateType { STAT = 1, DYN };
     StateType state = STAT;
 
     void print_usage(const std::string &prog_name, IdentityType identity = NO_IDENTITY);

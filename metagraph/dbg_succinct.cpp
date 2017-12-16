@@ -84,25 +84,25 @@ DBG_succ::~DBG_succ() {
 bool DBG_succ::operator==(const DBG_succ &other) const {
     // compare size
     if (W->size() != other.W->size()) {
-        std::cerr << "sizes of graphs differ" << std::endl;
-        std::cerr << "1: " << W->size() << std::endl;
-        std::cerr << "2: " << other.W->size() << std::endl;
+        verbose_cout("sizes of graphs differ", "\n",
+                     "1: ", W->size(), "\n",
+                     "2: ", other.W->size(), "\n");
         return false;
     }
 
     if (F.size() != other.F.size()) {
-        std::cerr << "sizes of F arrays differ" << std::endl;
-        std::cerr << "1: " << F.size() << std::endl;
-        std::cerr << "2: " << other.F.size() << std::endl;
+        verbose_cout("sizes of F arrays differ", "\n",
+                     "1: ", F.size(), "\n",
+                     "2: ", other.F.size(), "\n");
         return false;
     }
 
     // compare last
     for (size_t i = 0; i < W->size(); ++i) {
         if (get_last(i) != other.get_last(i)) {
-            std::cerr << "last differs at position " << i << std::endl;
-            std::cerr << "1: last[" << i << "] = " << get_last(i)  << std::endl;
-            std::cerr << "2: last[" << i << "] = " << other.get_last(i) << std::endl;
+            verbose_cout("last differs at position ", i, "\n",
+                         "1: last[", i, "] = ", get_last(i) , "\n",
+                         "2: last[", i, "] = ", other.get_last(i), "\n");
             return false;
         }
     }
@@ -110,9 +110,9 @@ bool DBG_succ::operator==(const DBG_succ &other) const {
     // compare W
     for (size_t i = 0; i < W->size(); ++i) {
         if (get_W(i) != other.get_W(i)) {
-            std::cerr << "W differs at position " << i << std::endl;
-            std::cerr << "1: W[" << i << "] = " << get_W(i)  << std::endl;
-            std::cerr << "2: W[" << i << "] = " << other.get_W(i) << std::endl;
+            verbose_cout("W differs at position ", i, "\n",
+                         "1: W[", i, "] = ", get_W(i) , "\n",
+                         "2: W[", i, "] = ", other.get_W(i), "\n");
             return false;
         }
     }
@@ -120,9 +120,9 @@ bool DBG_succ::operator==(const DBG_succ &other) const {
     // compare F
     for (size_t i = 0; i < F.size(); ++i) {
         if (get_F(i) != other.get_F(i)) {
-            std::cerr << "F differs at position " << i << std::endl;
-            std::cerr << "1: F[" << i << "] = " << get_F(i) << std::endl;
-            std::cerr << "2: F[" << i << "] = " << other.get_F(i) << std::endl;
+            verbose_cout("F differs at position ", i, "\n",
+                         "1: F[", i, "] = ", get_F(i), "\n",
+                         "2: F[", i, "] = ", other.get_F(i), "\n");
             return false;
         }
     }
@@ -205,9 +205,6 @@ bool DBG_succ::load(const std::string &infbase) {
                 W = new wavelet_tree_stat(4);
                 last = new bit_vector_stat();
                 break;
-            case Config::CSTR:
-                assert(false && "Must not happen");
-                return false;
         }
         std::ifstream instream_W(infbase + ".W.dbg");
         std::ifstream instream_l(infbase + ".l.dbg");
@@ -853,44 +850,22 @@ char DBG_succ::decode(TAlphabet c) {
     return alphabet[c];
 }
 
-void DBG_succ::switch_state(Config::StateType state) {
+void DBG_succ::switch_state(Config::StateType new_state) {
 
     //std::cerr << "switching state from " << this->state << " to " << state << std::endl;
-    if (this->state == state)
+    if (state == new_state)
         return;
 
-    switch (state) {
-        case Config::CSTR: {
-            this->state = Config::CSTR;
-            break;
-        }
+    switch (new_state) {
         case Config::DYN: {
-            if (this->state == Config::CSTR) {
-                delete W;
-                W = new wavelet_tree_dyn(4, W_stat);
-                W_stat.clear();
+            wavelet_tree *W_new = new wavelet_tree_dyn(4, *W);
+            delete W;
+            W = W_new;
 
-                delete last;
-                last = new bit_vector_dyn(last_stat);
-                last_stat.clear();
+            bit_vector *last_new = new bit_vector_dyn(*last);
+            delete last;
+            last = last_new;
 
-                //delete bridge;
-                //if (bridge_stat.size()) {
-                //    bridge = new bit_vector_dyn(bridge_stat);
-                //    bridge_stat.clear();
-                //} else {
-                //    bridge = NULL;
-                //}
-            } else {
-                wavelet_tree *W_new = new wavelet_tree_dyn(4, *W);
-                delete W;
-                W = W_new;
-
-                bit_vector *last_new = new bit_vector_dyn(*last);
-                delete last;
-                last = last_new;
-            }
-            this->state = Config::DYN;
             break;
         }
         case Config::STAT: {
@@ -902,10 +877,10 @@ void DBG_succ::switch_state(Config::StateType state) {
             delete last;
             last = last_new;
 
-            this->state = Config::STAT;
             break;
         }
     }
+    state = new_state;
 }
 
 
@@ -1040,29 +1015,23 @@ bool equal_encodings(const char first, const char second) {
 void DBG_succ::add_sequence_fast(const std::string &seq,
                                  bool add_bridge, unsigned int parallel,
                                  std::string suffix) {
-    std::vector<uint32_t> label_id;
-
     // ther is nothing to parse
-    if (!seq.size()) {
+    if (!seq.size())
         return;
-    }
 
-    char *bridge = (char*)malloc(k_ + 2);
-    memset(bridge, 'X', k_);
-    bridge[k_] = seq[0];
-    bridge[k_ + 1] = 0;
+    std::deque<char> bridge(k_, '$');
+    bridge.push_back(seq[0]);
 
-    size_t i = 0;
-    //std::cout << "Loading next sequence with " << parallel << " threads\n";
     if (add_bridge) {
-        for (i = 0; i < std::min(k_, seq.length()); ++i) {
-            if (std::equal(suffix.begin(), suffix.end(),
-                           bridge + k_ - suffix.length(),
+        for (size_t i = 0; i < std::min(k_, seq.length()); ++i) {
+            if (std::equal(suffix.rbegin(), suffix.rend(), bridge.rbegin() + 1,
                            equal_encodings)) {
-                kmers.push_back(KMer::from_string(std::string(bridge, k_ + 1), DBG_succ::encode));
+                kmers.push_back(
+                    KMer::from_string(bridge, DBG_succ::encode)
+                );
             }
-            memmove(bridge, bridge + 1, k_);
-            bridge[k_] = (i + 1 < seq.length()) ? seq[i + 1] : 'X';
+            bridge.pop_front();
+            bridge.push_back(i + 1 < seq.length() ? seq[i + 1] : '$');
         }
     }
     if (k_ < seq.length()) {
@@ -1070,7 +1039,7 @@ void DBG_succ::add_sequence_fast(const std::string &seq,
         {
             std::vector<KMer> kmer_priv;
             #pragma omp for nowait
-            for (i = 0; i < seq.length() - k_; ++i) {
+            for (size_t i = 0; i < seq.length() - k_; ++i) {
                 if (std::equal(suffix.begin(), suffix.end(),
                                seq.c_str() + i + k_ - suffix.length(),
                                equal_encodings)) {
@@ -1086,47 +1055,51 @@ void DBG_succ::add_sequence_fast(const std::string &seq,
                 std::make_move_iterator(kmer_priv.end())
             );
         }
-        memcpy(bridge, seq.c_str() + seq.length() - k_, k_);
-        bridge[k_] = 'X';
     }
     if (add_bridge) {
-        for (i = 0; i < k_; ++i) {
-            if (std::equal(suffix.begin(), suffix.end(),
-                           bridge + k_ - suffix.length(),
-                           equal_encodings)) {
-                kmers.push_back(KMer::from_string(std::string(bridge, k_ + 1), DBG_succ::encode));
-            }
-            memmove(bridge, bridge + 1, k_);
-            bridge[k_] = 'X';
+        bridge.assign(seq.end() - k_, seq.end());
+        bridge.push_back('$');
+        if (std::equal(suffix.begin(), suffix.end(),
+                       bridge.begin() + k_ - suffix.length(),
+                       equal_encodings)) {
+            kmers.push_back(
+                KMer::from_string(bridge, DBG_succ::encode)
+            );
         }
     }
-    free(bridge);
 }
 
 void DBG_succ::construct_succ(unsigned int parallel) {
 
+    for (size_t i = 1; i < W->size(); ++i) {
+        kmers.push_back(
+            KMer::from_string(get_node_str(i) + DBG_succ::decode(W->operator[](i)),
+                              DBG_succ::encode)
+        );
+    }
+
     // parallel sort of all kmers
     omp_set_num_threads(std::max(static_cast<int>(parallel), 1));
-    __gnu_parallel::sort(kmers.begin(),kmers.end());
+    __gnu_parallel::sort(kmers.begin(), kmers.end());
 
-    auto last = std::unique(kmers.begin(), kmers.end());
-    kmers.erase(last, kmers.end()); 
+    auto unique_end = std::unique(kmers.begin(), kmers.end());
+    kmers.erase(unique_end, kmers.end()); 
 
-    //DEBUG: output kmers in current bin
-    /*
-    std::cerr << "\n";
-    for (size_t i=0;i<kmers.size();++i) {
-        char* curseq = kmer_to_s(kmers[i].first, alphabet, alph_size);
-        std::cerr << kmers[i].first << "\t" << curseq+1 << " " << curseq[0] << " " << kmers[i].second << "\n";
-        free(curseq);
-    }
-    */
+    //DEBUG: output kmers
+    // for (const auto &kmer : kmers) {
+    //     std::cout << kmer.to_string(alphabet) << std::endl;
+    // }
+
+    // the bit array indicating the last outgoing edge of a node (static container for full init)
+    std::vector<uint8_t> last_stat_safe { 0 };
+
+    last_stat_safe.resize(last_stat_safe.size() + kmers.size(), 1);
+
+    // the array containing the edge labels
+    std::vector<TAlphabet> W_stat { 0 };
 
     size_t curpos = W_stat.size();
     W_stat.resize(W_stat.size() + kmers.size());
-
-    std::vector<uint8_t> last_stat_safe(last_stat.size() + kmers.size(), true);
-    std::copy(last_stat.begin(), last_stat.end(), last_stat_safe.begin());
 
     #pragma omp parallel num_threads(parallel)
     {
@@ -1134,16 +1107,15 @@ void DBG_succ::construct_succ(unsigned int parallel) {
         for (size_t i = 0; i < kmers.size(); ++i) {
             //set last
             if (i + 1 < kmers.size()) {
-                bool dup = KMer::compare_kmer_suffix(kmers[i], kmers[i + 1]);
-                if (dup) {
-                    last_stat_safe[curpos + i] = false;
+                if (KMer::compare_kmer_suffix(kmers[i], kmers[i + 1])) {
+                    last_stat_safe[curpos + i] = 0;
                 }
             }
             //set W
             uint8_t curW = kmers[i][0];
             if (curW == 127) {
-                std::string curseq = kmers[i].to_string(alphabet);
-                std::cerr << "Failure decoding kmer " << i << "\n" << kmers[i] << "\n" << curseq << "\n";
+                std::cerr << "Failure decoding kmer " << i << "\n" << kmers[i] << "\n"
+                          << kmers[i].to_string(alphabet) << "\n";
                 exit(1);
             }
             if (i) {
@@ -1157,26 +1129,30 @@ void DBG_succ::construct_succ(unsigned int parallel) {
                         break;
                 }
             }
-            W_stat[curpos+i] = curW;
+            W_stat[curpos + i] = curW;
         }
     }
-    last_stat.resize(last_stat_safe.size());
-    std::copy(last_stat_safe.begin(), last_stat_safe.end(), last_stat.begin());
+    std::vector<bool> last_stat(last_stat_safe.begin(), last_stat_safe.end());
 
+    size_t i;
     size_t lastlet = 0;
-
-    for (size_t i = 0; i < kmers.size(); ++i) {
-        char cF = alphabet[kmers[i][k_]];
-        if (cF != alphabet[lastlet]) {
-            for (lastlet++; lastlet < alph_size; lastlet++) {
-                F[lastlet] = curpos + i - 1;
-                if (alphabet[lastlet] == cF) {
-                    break;
-                }
-            }
+    F[0] = 0;
+    for (i = 0; i < kmers.size(); ++i) {
+        while (alphabet[lastlet] != alphabet[kmers[i][k_]] && lastlet + 1 < alph_size) {
+            F[++lastlet] = curpos + i - 1;
         }
     }
+    while (++lastlet < alph_size) {
+        F[lastlet] = curpos + i - 1;
+    }
+
     kmers.clear();
+
+    delete W;
+    W = new wavelet_tree_dyn(4, W_stat);
+
+    delete last;
+    last = new bit_vector_dyn(last_stat);
 }
 
 /**
@@ -1292,10 +1268,4 @@ void DBG_succ::remove_edges(const std::set<uint64_t> &edges) {
         }
         shift++;
     }
-}
-
-void DBG_succ::add_sink(unsigned int parallel, std::string suffix) {
-    add_sequence_fast(std::string(k_ - 1, alphabet[alph_size - 1]) + "$$",
-                      false, parallel, suffix);
-    add_sequence_fast("$", true, parallel, suffix);
 }

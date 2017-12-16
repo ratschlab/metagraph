@@ -17,38 +17,40 @@ const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
 
 
+void test_graph(DBG_succ *graph, const std::string &last,
+                                 const std::string &W,
+                                 const std::string &F,
+                                 Config::StateType state) {
+    graph->switch_state(state);
 
-DBG_succ* init_graph(size_t k = 3) {
-    DBG_succ *graph = new DBG_succ(k);
-    assert(graph);
-    graph->add_sink();
-    graph->switch_state(Config::CSTR);
-    return graph;
+    std::ostringstream ostr;
+
+    ostr << *graph->last;
+    EXPECT_EQ(last, ostr.str()) << "state: " << state;
+
+    ostr.clear();
+    ostr.str("");
+
+    ostr << *(graph->W);
+    EXPECT_EQ(W, ostr.str()) << "state: " << state;
+
+    ostr.clear();
+    ostr.str("");
+
+    for (size_t i = 0; i < graph->F.size(); ++i) {
+        ostr << graph->F[i] << " ";
+    }
+    EXPECT_EQ(F, ostr.str()) << "state: " << state;
 }
 
-void construct_succ(DBG_succ *graph) {
-    graph->construct_succ();
-    graph->switch_state(Config::DYN);
-}
 
 void test_graph(DBG_succ *graph, const std::string &last,
                                  const std::string &W,
                                  const std::string &F) {
-    std::ostringstream ostr;
-    ostr << *(graph->last);
-    EXPECT_EQ(ostr.str(), last);
-    ostr.clear();
-    ostr.str("");
-    ostr << *(graph->W);
-    EXPECT_EQ(ostr.str(), W);
-    ostr.clear();
-    ostr.str("");
-    for (size_t i = 0; i < graph->F.size(); ++i) {
-        ostr << graph->F[i] << " ";
-    }
-    EXPECT_EQ(ostr.str(), F);
-
+    test_graph(graph, last, W, F, Config::DYN);
+    test_graph(graph, last, W, F, Config::STAT);
 }
+
 
 TEST(Construct, GraphDefaultConstructor) {
     DBG_succ *graph_ = NULL;
@@ -75,60 +77,83 @@ TEST(Construct, GraphDefaultConstructor) {
 }
 
 TEST(DBGSuccinct, EmptyGraph) {
-    DBG_succ *graph = init_graph();
-    construct_succ(graph);
-    graph->switch_state(Config::DYN);
-    test_graph(graph, "01111", "06660", "0 1 1 1 1 1 1 ");
+    DBG_succ *graph = new DBG_succ(3);
+    graph->construct_succ();
+    test_graph(graph, "01", "00", "0 1 1 1 1 1 1 ");
     delete graph;
+}
+
+TEST(DBGSuccinct, SwitchState) {
+    DBG_succ *graph = new DBG_succ(3);
+    graph->construct_succ();
+    test_graph(graph, "01", "00", "0 1 1 1 1 1 1 ", Config::DYN);
+    test_graph(graph, "01", "00", "0 1 1 1 1 1 1 ", Config::STAT);
+    test_graph(graph, "01", "00", "0 1 1 1 1 1 1 ", Config::DYN);
+    delete graph;
+}
+
+TEST(DBGSuccinct, AddSequenceFast) {
+    gzFile input_p = gzopen(test_fasta.c_str(), "r");
+    kseq_t *read_stream = kseq_init(input_p);
+    ASSERT_TRUE(read_stream);
+    DBG_succ *graph = new DBG_succ(3);
+    for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
+        graph->add_sequence_fast(read_stream->seq.s);
+    }
+    kseq_destroy(read_stream);
+    gzclose(input_p);
+
+    graph->construct_succ();
+
+    //test graph construction
+    test_graph(graph, "00011101101111111111111",
+                      "00131124434010141820433",
+                      "0 3 11 13 17 22 22 ");
 }
 
 TEST(Construct, SmallGraphTraversal) {
     gzFile input_p = gzopen(test_fasta.c_str(), "r");
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
-    DBG_succ *graph = init_graph();
-    graph->add_sink();
+    DBG_succ *graph = new DBG_succ(3);
     for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
         graph->add_sequence_fast(read_stream->seq.s);
     }
-    graph->construct_succ();
-    graph->switch_state(Config::DYN);
+    kseq_destroy(read_stream);
+    gzclose(input_p);
 
-    //test graph construction
-    test_graph(graph, "01011110111111111111111111111001",
-                      "06241463411641812643366666131313013",
-                      "0 1 9 11 15 20 20 ");
+    graph->construct_succ();
 
     //traversal
-    std::vector<size_t> outgoing_edges = { 21, 10, 16, 3, 17, 22, 12, 18, 4, 5,
-                                           23, 19, 6, 6, 8, 11, 24, 20, 13, 14,
-                                           25, 26, 27, 28, 31, 31, 31, 31, 1, 9, 15 };
-    assert(outgoing_edges.size() == graph->num_edges());
-    std::vector<size_t> incoming_edges = {};
-    for (size_t i = 0; i < outgoing_edges.size(); ++i) {
+    std::vector<size_t> outgoing_edges = { 0, 3, 4, 14, 5, 7, 12, 18, 19, 15, 20, 0,
+                                           8, 0, 10, 21, 11, 11, 13, 0, 22, 16, 17 };
+    ASSERT_EQ(outgoing_edges.size(), graph->num_edges() + 1);
+
+    EXPECT_EQ(outgoing_edges[1], graph->outgoing(1, DBG_succ::encode('$')));
+
+    for (size_t i = 1; i < graph->W->size(); ++i) {
         //test forward traversal given an output edge label
-        EXPECT_EQ(outgoing_edges[i], graph->outgoing(i + 1, graph->get_W(i + 1)))
-            << "Edge index: " << i + 1;
+        if (graph->get_W(i) != DBG_succ::encode('$')) {
+            EXPECT_EQ(outgoing_edges[i], graph->outgoing(i, graph->get_W(i)))
+                << "Edge index: " << i;
+        }
 
         //test FM index property
-        if (graph->get_W(i + 1) < graph->alph_size) {
-            EXPECT_TRUE(graph->get_last(graph->fwd(i + 1)));
-            EXPECT_EQ(graph->get_W(i + 1),
-                      graph->get_node_last_char(graph->fwd(i + 1)));
+        EXPECT_TRUE(graph->get_last(graph->fwd(i)));
+        if (graph->get_W(i)) {
+            EXPECT_EQ(graph->get_W(i) % graph->alph_size,
+                      graph->get_node_last_char(graph->fwd(i)));
         }
     }
 
     delete graph;
-    kseq_destroy(read_stream);
-    gzclose(input_p);
 }
 
 TEST(DBGSuccinct, Serialization) {
     gzFile input_p = gzopen(test_fasta.c_str(), "r");
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
-    DBG_succ *graph = init_graph();
-    graph->add_sink();
+    DBG_succ *graph = new DBG_succ(3);
     for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
         graph->add_sequence_fast(read_stream->seq.s);
     }
@@ -136,18 +161,13 @@ TEST(DBGSuccinct, Serialization) {
     gzclose(input_p);
 
     graph->construct_succ();
-    graph->switch_state(Config::DYN);
-
-    //test graph construction
-    test_graph(graph, "01011110111111111111111111111001",
-                      "06241463411641812643366666131313013",
-                      "0 1 9 11 15 20 20 ");
 
     graph->serialize(test_dump_basename);
 
     DBG_succ loaded_graph;
     ASSERT_TRUE(loaded_graph.load(test_dump_basename)) << "Can't load the graph";
     EXPECT_EQ(*graph, loaded_graph) << "Loaded graph differs";
+    EXPECT_FALSE(DBG_succ() == loaded_graph);
 
     delete graph;
 }

@@ -65,6 +65,7 @@ class wavelet_tree_stat : public wavelet_tree {
     void serialise(std::ostream &out) const {
         if (requires_update_)
             const_cast<wavelet_tree_stat*>(this)->init_wt();
+
         int_vector_.serialize(out);
         wwt_.serialize(out);
     }
@@ -125,11 +126,12 @@ class wavelet_tree_stat : public wavelet_tree {
         requires_update_ = true;
         int_vector_[id] = val;
     }
-    
 
   protected:
-    void print(std::ostream& os) const {
-        os << wwt_;
+    void print(std::ostream &os) const {
+        for (uint64_t i = 0; i < size(); ++i) {
+            os << int_vector_[i];
+        }
     }
 
   private:
@@ -273,9 +275,8 @@ class wavelet_tree_dyn : public wavelet_tree {
         return W_stat;
     }
 
-  
   protected:
-    void print(std::ostream& os) const {
+    void print(std::ostream &os) const {
         os << wavelet_tree_;
     }
 

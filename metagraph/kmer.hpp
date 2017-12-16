@@ -37,13 +37,13 @@ class KMer {
     static bool compare_kmer_suffix(const KMer &k1,
                                     const KMer &k2, size_t minus = 0);
 
-    template <class Map>
-    static KMer from_string(const std::string &seq, Map &&to_alphabet) {
-        assert(seq.length() * kBitsPerChar < 256 && seq.length() >= 2
+    template <class Map, class String>
+    static KMer from_string(const String &seq, Map &&to_alphabet) {
+        assert(seq.size() * kBitsPerChar < 256 && seq.size() >= 2
                 && "String must be between lengths 2 and 256 / kBitsPerChar");
 
         ui256 kmer = 0;
-        for (int i = seq.length() - 2; i >= 0; --i) {
+        for (int i = seq.size() - 2; i >= 0; --i) {
             uint8_t cur = to_alphabet(seq[i]) + 1;
 
             assert(cur < kMax && "Alphabet size too big for the given number of bits");
@@ -51,7 +51,7 @@ class KMer {
             kmer = (kmer << kBitsPerChar) + cur;
         }
         kmer <<= kBitsPerChar;
-        kmer += to_alphabet(seq[seq.length() - 1]) + 1;
+        kmer += to_alphabet(seq[seq.size() - 1]) + 1;
         return KMer(kmer);
     }
 

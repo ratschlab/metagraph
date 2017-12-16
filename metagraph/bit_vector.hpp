@@ -25,6 +25,13 @@ class bit_vector {
     virtual void deleteBit(uint64_t id) = 0;
     virtual void serialise(std::ostream &out) const = 0;
     virtual bool deserialise(std::istream &in) = 0;
+    virtual std::vector<bool> to_vector() const {
+        std::vector<bool> result(size());
+        for (uint64_t i = 0; i < size(); ++i) {
+            result[i] = operator[](i);
+        }
+        return result;
+    }
 
     friend inline std::ostream& operator<<(std::ostream &os,
                                            const bit_vector &bv);
