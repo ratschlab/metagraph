@@ -38,8 +38,8 @@
 #include "serialization.hpp"
 
 
-const std::string DBG_succ::alphabet = "$ACGTNX$ACGTNXn";
-const size_t DBG_succ::alph_size = 7;
+const std::string DBG_succ::alphabet = "$ACGTN$ACGTNn";
+const size_t DBG_succ::alph_size = 6;
 
 const TAlphabet kCharToNucleotide[128] = {
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,

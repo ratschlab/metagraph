@@ -79,16 +79,16 @@ TEST(Construct, GraphDefaultConstructor) {
 TEST(DBGSuccinct, EmptyGraph) {
     DBG_succ *graph = new DBG_succ(3);
     graph->construct_succ();
-    test_graph(graph, "01", "00", "0 1 1 1 1 1 1 ");
+    test_graph(graph, "01", "00", "0 1 1 1 1 1 ");
     delete graph;
 }
 
 TEST(DBGSuccinct, SwitchState) {
     DBG_succ *graph = new DBG_succ(3);
     graph->construct_succ();
-    test_graph(graph, "01", "00", "0 1 1 1 1 1 1 ", Config::DYN);
-    test_graph(graph, "01", "00", "0 1 1 1 1 1 1 ", Config::STAT);
-    test_graph(graph, "01", "00", "0 1 1 1 1 1 1 ", Config::DYN);
+    test_graph(graph, "01", "00", "0 1 1 1 1 1 ", Config::DYN);
+    test_graph(graph, "01", "00", "0 1 1 1 1 1 ", Config::STAT);
+    test_graph(graph, "01", "00", "0 1 1 1 1 1 ", Config::DYN);
     delete graph;
 }
 
@@ -107,8 +107,8 @@ TEST(DBGSuccinct, AddSequenceFast) {
 
     //test graph construction
     test_graph(graph, "00011101101111111111111",
-                      "00131124434010141820433",
-                      "0 3 11 13 17 22 22 ");
+                      "00131124434010141720433",
+                      "0 3 11 13 17 22 ");
 }
 
 TEST(Construct, SmallGraphTraversal) {
