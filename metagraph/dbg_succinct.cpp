@@ -67,7 +67,6 @@ DBG_succ::DBG_succ(size_t k, bool sentinel)
             F[j] = 1;
         }
     }
-    state = Config::DYN;
 }
 
 DBG_succ::~DBG_succ() {

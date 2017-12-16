@@ -372,7 +372,7 @@ DBG_succ* merge_chunks(const std::string &filenamebase, size_t num_chunks) {
         }
     }
 
-    DBG_succ *graph = new DBG_succ(k, false);
+    DBG_succ *graph = new DBG_succ(k);
 
     delete graph->W;
     graph->W = new wavelet_tree_dyn(4, W_stat);

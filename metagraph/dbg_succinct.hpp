@@ -32,8 +32,11 @@ class DBGCondensed : public GenomeGraph {
 
 
 class DBG_succ { //: public GenomeGraph{
-    friend DBG_succ* merge::build_chunk(const std::vector<DBG_succ*> &graphs, Config *config);
-    friend DBG_succ* merge::merge_chunks(const std::string &filenamebase, size_t num_chunks);
+    friend DBG_succ* merge::build_chunk(const std::vector<DBG_succ*> &graphs,
+                                        Config *config);
+
+    friend DBG_succ* merge::merge_chunks(const std::string &filenamebase,
+                                         size_t num_chunks);
 
     friend void merge::merge(DBG_succ *Gt, const DBG_succ &Gm);
 
@@ -123,7 +126,7 @@ class DBG_succ { //: public GenomeGraph{
     static const std::string alphabet;
     static const size_t alph_size;
 
-    Config::StateType state;
+    Config::StateType state = Config::DYN;
 
 #ifdef DBGDEBUG
     bool verbose = true;
