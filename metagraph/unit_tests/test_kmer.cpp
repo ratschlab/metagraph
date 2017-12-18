@@ -7,7 +7,7 @@
 
 
 std::string kmer_codec(const std::string &test_kmer) {
-    std::string kmer_s = KMer::from_string(
+    std::string kmer_s = KMer(
         test_kmer,
         DBG_succ::encode
     ).to_string(
@@ -46,8 +46,8 @@ TEST(KmerEncodeTest, InvalidChars) {
 
 void test_kmer_less(std::string k1, std::string k2, bool truth) {
     KMer kmer[2] = {
-        KMer::from_string(k1, DBG_succ::encode),
-        KMer::from_string(k2, DBG_succ::encode)
+        KMer(k1, DBG_succ::encode),
+        KMer(k2, DBG_succ::encode)
     };
     ASSERT_EQ(kmer[0] < kmer[1], truth);
 }
@@ -62,8 +62,8 @@ TEST(KmerEncodeTest, Less) {
 
 void test_kmer_suffix(std::string k1, std::string k2, bool truth) {
     KMer kmer[2] = {
-        KMer::from_string(k1, DBG_succ::encode),
-        KMer::from_string(k2, DBG_succ::encode)
+        KMer(k1, DBG_succ::encode),
+        KMer(k2, DBG_succ::encode)
     };
     ASSERT_EQ(KMer::compare_kmer_suffix(kmer[0], kmer[1]), truth);
 }

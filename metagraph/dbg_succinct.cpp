@@ -38,7 +38,7 @@
 #include "serialization.hpp"
 
 
-const std::string DBG_succ::alphabet = "$ACGTN$ACGTNn";
+const std::string DBG_succ::alphabet = "$ACGTN$ACGTN";
 const size_t DBG_succ::alph_size = 6;
 
 const TAlphabet kCharToNucleotide[128] = {
@@ -47,9 +47,9 @@ const TAlphabet kCharToNucleotide[128] = {
     5, 5, 5, 5,  0, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  4, 4, 5, 5,  6, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  4, 4, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  4, 4, 5, 5,  6, 5, 5, 5,  5, 5, 5, 5
+    5, 5, 5, 5,  4, 4, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5
 };
 
 
@@ -1025,9 +1025,7 @@ void DBG_succ::add_sequence_fast(const std::string &seq,
         for (size_t i = 0; i < std::min(k_, seq.length()); ++i) {
             if (std::equal(suffix.rbegin(), suffix.rend(), bridge.rbegin() + 1,
                            equal_encodings)) {
-                kmers.push_back(
-                    KMer::from_string(bridge, DBG_succ::encode)
-                );
+                kmers.emplace_back(bridge, DBG_succ::encode);
             }
             bridge.pop_front();
             bridge.push_back(i + 1 < seq.length() ? seq[i + 1] : '$');
@@ -1042,10 +1040,10 @@ void DBG_succ::add_sequence_fast(const std::string &seq,
                 if (std::equal(suffix.begin(), suffix.end(),
                                seq.c_str() + i + k_ - suffix.length(),
                                equal_encodings)) {
-                    kmer_priv.push_back(KMer::from_string(
+                    kmer_priv.emplace_back(
                         std::string(seq.c_str() + i, k_ + 1),
                         DBG_succ::encode
-                    ));
+                    );
                 }
             }
             #pragma omp critical
@@ -1061,9 +1059,7 @@ void DBG_succ::add_sequence_fast(const std::string &seq,
         if (std::equal(suffix.begin(), suffix.end(),
                        bridge.begin() + k_ - suffix.length(),
                        equal_encodings)) {
-            kmers.push_back(
-                KMer::from_string(bridge, DBG_succ::encode)
-            );
+            kmers.emplace_back(bridge, DBG_succ::encode);
         }
     }
 }
@@ -1071,10 +1067,8 @@ void DBG_succ::add_sequence_fast(const std::string &seq,
 void DBG_succ::construct_succ(unsigned int parallel) {
 
     for (size_t i = 1; i < W->size(); ++i) {
-        kmers.push_back(
-            KMer::from_string(get_node_str(i) + DBG_succ::decode(W->operator[](i)),
-                              DBG_succ::encode)
-        );
+        kmers.emplace_back(get_node_str(i) + DBG_succ::decode(W->operator[](i)),
+                           DBG_succ::encode);
     }
 
     // parallel sort of all kmers

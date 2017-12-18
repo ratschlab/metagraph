@@ -25,6 +25,7 @@ class HitInfoCompare {
         return is_reverse_ ? lhs.distance < rhs.distance
                            : lhs.distance > rhs.distance;
     }
+
   private:
     bool is_reverse_;
 };
