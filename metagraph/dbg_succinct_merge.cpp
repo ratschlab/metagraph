@@ -20,7 +20,7 @@ pthread_attr_t attr;
  * Helper function to determine the bin boundaries, given
  * a number of bins.
  */
-std::vector<std::pair<uint64_t, uint64_t>> get_bins(DBG_succ *G, uint64_t bins) {
+std::vector<std::pair<uint64_t, uint64_t>> get_bins(const DBG_succ *G, uint64_t bins) {
 
     uint64_t nodes = G->rank_last(G->get_W().size() - 1);
     uint64_t orig_bins = bins;
@@ -60,12 +60,11 @@ std::vector<std::pair<uint64_t, uint64_t>> get_bins(DBG_succ *G, uint64_t bins) 
 
 
 std::vector<std::pair<uint64_t, uint64_t>> get_bins_relative(
-                                                DBG_succ *G_from,
-                                                DBG_succ *G_to,
+                                                const DBG_succ *G_from,
+                                                const DBG_succ *G_to,
                                                 std::vector<std::pair<uint64_t, uint64_t>> ref_bins,
                                                 uint64_t first_pos,
-                                                uint64_t last_pos
-                                            ) {
+                                                uint64_t last_pos) {
 
     std::vector<std::pair<uint64_t, uint64_t>> result;
     uint64_t pos = (first_pos == 0) ? 1 : G_from->colex_upper_bound(G_to->get_node_seq(first_pos)) + 1;
@@ -88,8 +87,8 @@ std::vector<std::pair<uint64_t, uint64_t>> get_bins_relative(
 struct ParallelMergeContainer {
     std::vector<std::pair<uint64_t, uint64_t>> ref_bins;
     std::vector<std::vector<std::pair<uint64_t, uint64_t>>> bins;
-    std::vector<DBG_succ*> result;
-    std::vector<DBG_succ*> graphs;
+    std::vector<const DBG_succ*> result;
+    std::vector<const DBG_succ*> graphs;
     unsigned int idx;
     unsigned int k;
     unsigned int bins_done;
@@ -219,7 +218,7 @@ void* parallel_merge_wrapper(void *config_) {
 }
 
 
-DBG_succ* build_chunk(const std::vector<DBG_succ*> &graphs, Config *config) {
+DBG_succ* build_chunk(const std::vector<const DBG_succ*> &graphs, Config *config) {
     pthread_t *threads = NULL;
     merge_data = new ParallelMergeContainer();
 
@@ -386,7 +385,7 @@ DBG_succ* merge_chunks(const std::string &filenamebase, size_t num_chunks) {
 }
 
 
-DBG_succ* merge(const std::vector<DBG_succ*> &Gv,
+DBG_succ* merge(const std::vector<const DBG_succ*> &Gv,
                 std::vector<uint64_t> kv,
                 std::vector<uint64_t> nv) {
 
@@ -470,7 +469,7 @@ DBG_succ* merge(const std::vector<DBG_succ*> &Gv,
         // check whether we already added a node whose outgoing edge points to the
         // same node as the current one
         auto it = last_added_nodes.find(smallest.second % Gt->alph_size);
-        if (it != last_added_nodes.end() && utils::seq_equal(seq1, it->second, 1)) {
+        if (it != last_added_nodes.end() && utils::seq_equal(seq1, it->second, 1) && val != DBG_succ::encode('$')) {
             Gt->W->insert(Gt->W->size(), val + Gt->alph_size);
         } else {
             Gt->W->insert(Gt->W->size(), smallest.second);
@@ -489,6 +488,11 @@ DBG_succ* merge(const std::vector<DBG_succ*> &Gv,
                      && it1 != it2
                      && utils::seq_equal(it1->second, it2->second)) {
                 Gt->last->set(Gt->W->size() - 2, false);
+                if (Gt->W->size() - 2 > 1 && Gt->get_W(Gt->W->size() - 2) == DBG_succ::encode('$')) {
+                    Gt->update_F(Gv.at(curr_k)->get_node_last_char(kv.at(curr_k)), -1);
+                    Gt->last->deleteBit(Gt->W->size() - 2);
+                    Gt->W->remove(Gt->W->size() - 2);
+                }
             }
         }
         uint64_t updated = 0;
@@ -588,7 +592,7 @@ void merge(DBG_succ *Gt, const DBG_succ &Gm) {
         // get new node
         pop_branch(&branchnodes, &Gm_source_node, &k_mer);
         // find node where to restart insertion
-        Gt_source_node = Gt->index(k_mer, k_mer.size());
+        Gt_source_node = Gt->index(k_mer);
     }
 }
 

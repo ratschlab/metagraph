@@ -387,8 +387,6 @@ uint64_t DBG_succ::outgoing_edge_idx(uint64_t i, TAlphabet c) const {
     return j;
 }
 
-
-
 /**
  * Given a position i in W and an edge label c, this function returns the
  * index of the node the edge is pointing to.
@@ -761,7 +759,7 @@ std::vector<uint64_t> DBG_succ::align(const std::string &sequence,
     std::vector<HitInfo> curr_result;
     for (uint64_t i = 0; i < sequence.size() - alignment_length + 1; ++i) {
         std::string kmer(sequence.data() + i, sequence.data() + i + alignment_length);
-        indices.push_back(this->index(kmer, kmer.size()));
+        indices.push_back(this->index(kmer));
     }
 
     return indices;
@@ -883,19 +881,19 @@ void DBG_succ::switch_state(Config::StateType new_state) {
 }
 
 
-void DBG_succ::print_state() const {
-    std::cout << "Index" << "\t" << "L"
-                         << "\t" << "Vertex"
-                         << "\t" << "W" << std::endl;
+void DBG_succ::print_state(std::ostream &os) const {
+    os << "Index" << "\t" << "L"
+                  << "\t" << "Vertex"
+                  << "\t" << "W" << std::endl;
 
     for (uint64_t i = 1; i < W->size(); i++) {
-        std::cout << i << "\t" << get_last(i)
-                       << "\t" << get_node_str(i)
-                       << "\t" << decode(get_W(i))
-                               << (get_W(i) > alph_size
-                                       ? "-"
-                                       : "")
-                               << std::endl;
+        os << i << "\t" << get_last(i)
+                << "\t" << get_node_str(i)
+                << "\t" << decode(get_W(i))
+                        << (get_W(i) >= alph_size
+                                ? "-"
+                                : "")
+                        << std::endl;
     }
 }
 
@@ -987,7 +985,7 @@ void DBG_succ::add_sequence(const std::string &seq, bool try_extend) {
 
     uint64_t source;
 
-    if (!try_extend || seq.size() < k_ || !(source = index(sequence, k_))) {
+    if (!try_extend || seq.size() <= k_ || !(source = index(sequence))) {
         sequence.insert(sequence.begin(), k_, encode('$'));
         source = kDummySource;
     }
@@ -1018,10 +1016,9 @@ void DBG_succ::add_sequence_fast(const std::string &seq,
     if (!seq.size())
         return;
 
-    std::deque<char> bridge(k_, '$');
-    bridge.push_back(seq[0]);
-
     if (add_bridge) {
+        std::deque<char> bridge(k_, '$');
+        bridge.push_back(seq[0]);
         for (size_t i = 0; i < std::min(k_, seq.length()); ++i) {
             if (std::equal(suffix.rbegin(), suffix.rend(), bridge.rbegin() + 1,
                            equal_encodings)) {
@@ -1054,7 +1051,7 @@ void DBG_succ::add_sequence_fast(const std::string &seq,
         }
     }
     if (add_bridge) {
-        bridge.assign(seq.end() - k_, seq.end());
+        std::deque<char> bridge(seq.end() - k_, seq.end());
         bridge.push_back('$');
         if (std::equal(suffix.begin(), suffix.end(),
                        bridge.begin() + k_ - suffix.length(),

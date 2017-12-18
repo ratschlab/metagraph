@@ -11,7 +11,7 @@ class Config;
 
 namespace merge {
 
-    DBG_succ* build_chunk(const std::vector<DBG_succ*> &Gv, Config *config);
+    DBG_succ* build_chunk(const std::vector<const DBG_succ*> &Gv, Config *config);
 
     DBG_succ* merge_chunks(const std::string &filenamebase, size_t num_chunks);
 
@@ -19,7 +19,7 @@ namespace merge {
      * Given a list of graph structures, this functions
      * integrates all of them into a new graph G.
      */
-    DBG_succ* merge(const std::vector<DBG_succ*> &Gv,
+    DBG_succ* merge(const std::vector<const DBG_succ*> &Gv,
                     std::vector<uint64_t> kv,
                     std::vector<uint64_t> nv);
 

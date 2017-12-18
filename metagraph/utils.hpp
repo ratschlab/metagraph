@@ -19,10 +19,10 @@ namespace utils {
     * returns a pair of bool with the first value set to true if G1(k1_node) < G2(k2_node) and the
     * second value set to true if G2(k2_node) < G1(k1_node).
     */
-    std::pair<bool, bool> compare_nodes(DBG_succ *G1, uint64_t k1_node,
-                                        DBG_succ *G2, uint64_t k2_node);
+    std::pair<bool, bool> compare_nodes(const DBG_succ *G1, uint64_t k1_node,
+                                        const DBG_succ *G2, uint64_t k2_node);
 
-    std::pair<std::vector<bool>, uint64_t> compare_nodes(std::vector<DBG_succ*> G,
+    std::pair<std::vector<bool>, uint64_t> compare_nodes(std::vector<const DBG_succ*> G,
                                                          std::vector<uint64_t> k,
                                                          std::vector<uint64_t> n,
                                                          size_t &cnt);

@@ -14,8 +14,10 @@ class bit_vector {
   public:
     virtual ~bit_vector() {};
 
+    // Computes the number of set bits in the subarray indexed by [0,1,...,id]
     virtual uint64_t rank1(uint64_t id) const = 0;
-    virtual uint64_t select1(uint64_t id) const = 0;
+    // Returns the i-th set bit, starting from 1
+    virtual uint64_t select1(uint64_t i) const = 0;
     virtual uint64_t size() const = 0;
     virtual void set(uint64_t id, bool val) = 0;
     // Can be redefined, e.g. without rebalancing

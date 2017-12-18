@@ -247,7 +247,40 @@ TEST(DBGSuccinct, AppendSequence) {
     }
 }
 
-TEST(DBGSuccinct, MergeWithEmpty) {
+
+TEST(DBGSuccinct, AppendSequenceAnyKmerSize) {
+    for (size_t k = 1; k < 10; ++k) {
+        {
+            DBG_succ graph(k);
+            graph.add_sequence("AAAC", true);
+            graph.add_sequence("AACG", true);
+        }
+        {
+            DBG_succ graph(k);
+            graph.add_sequence("AGAC", true);
+            graph.add_sequence("GACT", true);
+            graph.add_sequence("ACTA", true);
+        }
+        {
+            DBG_succ graph(k);
+            graph.add_sequence("AGAC", true);
+            graph.add_sequence("GACT", true);
+            graph.add_sequence("ACTA", true);
+        }
+        {
+            DBG_succ graph(k);
+            graph.add_sequence("AAACT", true);
+            graph.add_sequence("AAATG", true);
+        }
+        {
+            DBG_succ graph(k);
+            graph.add_sequence("AAACT", false);
+            graph.add_sequence("AAATG", false);
+        }
+    }
+}
+
+TEST(DBGSuccinct, TraversalMergeWithEmpty) {
     for (size_t k = 1; k < 10; ++k) {
         DBG_succ first(k, true);
         DBG_succ second(k, true);
@@ -258,7 +291,7 @@ TEST(DBGSuccinct, MergeWithEmpty) {
     }
 }
 
-TEST(DBGSuccinct, MergeEmpty) {
+TEST(DBGSuccinct, TraversalMergeEmpty) {
     for (size_t k = 1; k < 10; ++k) {
         DBG_succ first(k, true);
         DBG_succ second(k, true);
@@ -269,7 +302,7 @@ TEST(DBGSuccinct, MergeEmpty) {
     }
 }
 
-TEST(DBGSuccinct, MergeEqualPaths) {
+TEST(DBGSuccinct, TraversalMergeEqualPaths) {
     for (size_t k = 1; k < 10; ++k) {
         DBG_succ first(k, true);
         DBG_succ second(k, true);
@@ -283,7 +316,7 @@ TEST(DBGSuccinct, MergeEqualPaths) {
     }
 }
 
-TEST(DBGSuccinct, MergeTwoPaths) {
+TEST(DBGSuccinct, TraversalMergeTwoPaths) {
     for (size_t k = 1; k < 10; ++k) {
         DBG_succ first(k, true);
         DBG_succ second(k, true);
@@ -297,7 +330,7 @@ TEST(DBGSuccinct, MergeTwoPaths) {
     }
 }
 
-TEST(DBGSuccinct, MergeSinglePathWithTwo) {
+TEST(DBGSuccinct, TraversalMergeSinglePathWithTwo) {
     for (size_t k = 1; k < 10; ++k) {
         DBG_succ first(k, true);
         DBG_succ second(k, true);
@@ -309,5 +342,97 @@ TEST(DBGSuccinct, MergeSinglePathWithTwo) {
         EXPECT_EQ(2 * k + 1, second.num_nodes());
         EXPECT_EQ(3 * k + 4, first.num_edges());
         EXPECT_EQ(2 * k + 3, second.num_edges());
+    }
+}
+
+TEST(DBGSuccinct, TraversalMergeTwoGraphs) {
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ first(k, true);
+        DBG_succ second(k, true);
+        first.add_sequence(std::string(100, 'A'));
+        first.add_sequence(std::string(50, 'C'));
+        first.add_sequence(std::string(60, 'G'));
+        first.add_sequence("AAAGT");
+        second.add_sequence("AAACT", true);
+        second.add_sequence("AAATG", true);
+        second.add_sequence("ACTGA", true);
+        DBG_succ merged(k);
+        merge::merge(&merged, second);
+        merge::merge(&merged, first);
+        merge::merge(&first, second);
+        EXPECT_EQ(first, merged);
+    }
+}
+
+TEST(DBGSuccinct, ParallelMergeTwoPaths) {
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ first(k, true);
+        DBG_succ second(k, true);
+        first.add_sequence(std::string(100, 'A'));
+        second.add_sequence(std::string(50, 'C'));
+
+        std::vector<const DBG_succ*> graphs = { &first, &second };
+        std::vector<uint64_t> kv;
+        std::vector<uint64_t> nv;
+        for (size_t i = 0; i < graphs.size(); ++i) {
+            kv.push_back(1);
+            nv.push_back(graphs[i]->get_W().size());
+        }
+        DBG_succ *merged = merge::merge(graphs, kv, nv);
+
+        merge::merge(&first, second);
+
+        EXPECT_EQ(first, *merged);
+    }
+}
+
+TEST(DBGSuccinct, ParallelMergeSinglePathWithTwo) {
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ first(k, true);
+        DBG_succ second(k, true);
+        first.add_sequence(std::string(100, 'A'));
+        second.add_sequence(std::string(50, 'C'));
+        second.add_sequence(std::string(60, 'G'));
+
+        std::vector<const DBG_succ*> graphs = { &first, &second };
+        std::vector<uint64_t> kv;
+        std::vector<uint64_t> nv;
+        for (size_t i = 0; i < graphs.size(); ++i) {
+            kv.push_back(1);
+            nv.push_back(graphs[i]->get_W().size());
+        }
+        DBG_succ *merged = merge::merge(graphs, kv, nv);
+
+        merge::merge(&first, second);
+
+        EXPECT_EQ(first, *merged);
+    }
+}
+
+TEST(DBGSuccinct, ParallelMergeThreeGraphs) {
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ first(k, true);
+        DBG_succ second(k, true);
+        DBG_succ third(k, true);
+        first.add_sequence("AAACT", true);
+        first.add_sequence("ACTATG", true);
+        second.add_sequence(std::string(50, 'C'));
+        second.add_sequence(std::string(60, 'G'));
+        third.add_sequence(std::string(60, 'A'));
+        third.add_sequence(std::string(60, 'T'));
+
+        std::vector<const DBG_succ*> graphs = { &first, &second, &third };
+        std::vector<uint64_t> kv;
+        std::vector<uint64_t> nv;
+        for (size_t i = 0; i < graphs.size(); ++i) {
+            kv.push_back(1);
+            nv.push_back(graphs[i]->get_W().size());
+        }
+        DBG_succ *merged = merge::merge(graphs, kv, nv);
+
+        merge::merge(&first, second);
+        merge::merge(&first, third);
+
+        EXPECT_EQ(first, *merged);
     }
 }

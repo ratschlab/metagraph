@@ -32,7 +32,7 @@ class DBGCondensed : public GenomeGraph {
 
 
 class DBG_succ { //: public GenomeGraph{
-    friend DBG_succ* merge::build_chunk(const std::vector<DBG_succ*> &graphs,
+    friend DBG_succ* merge::build_chunk(const std::vector<const DBG_succ*> &graphs,
                                         Config *config);
 
     friend DBG_succ* merge::merge_chunks(const std::string &filenamebase,
@@ -40,7 +40,7 @@ class DBG_succ { //: public GenomeGraph{
 
     friend void merge::merge(DBG_succ *Gt, const DBG_succ &Gm);
 
-    friend DBG_succ* merge::merge(const std::vector<DBG_succ*> &Gv,
+    friend DBG_succ* merge::merge(const std::vector<const DBG_succ*> &Gv,
                                   std::vector<uint64_t> kv,
                                   std::vector<uint64_t> nv);
   public:
@@ -214,7 +214,7 @@ class DBG_succ { //: public GenomeGraph{
      * This is a debug function that prints the current representation of the graph to
      * the screen.
      */
-    void print_state() const;
+    void print_state(std::ostream &os) const;
 
     /**
      * Returns the sequence stored in W and prints the node
@@ -315,16 +315,15 @@ class DBG_succ { //: public GenomeGraph{
      * Given a node label s, this function returns the index
      * of the corresponding node, if this node exists and 0 otherwise.
      */
-    template <class T>
-    uint64_t index(const T &str, uint64_t length) const {
-        auto range = index_range(str, length);
-        if (range.first == 0 && range.second == 0) {
-            return 0;
-        } else {
-            return range.second > range.first
-                                    ? range.second
-                                    : range.first;
-        }
+    template <typename T>
+    uint64_t index(const T &k_mer) const {
+        static_assert(std::is_base_of<std::string, T>::value
+                        || std::is_base_of<std::deque<TAlphabet>, T>::value
+                        || std::is_base_of<std::vector<TAlphabet>, T>::value);
+        assert(k_mer.size() >= k_);
+
+        auto range = index_range(k_mer, k_);
+        return std::max(range.first, range.second);
     }
 
     /**
@@ -332,35 +331,46 @@ class DBG_succ { //: public GenomeGraph{
      * of nodes sharing the suffix str, if no such range exists, the pair
      (0, 0) is returnd.
      */
-    template <class T>
+    template <typename T>
     std::pair<uint64_t, uint64_t> index_range(const T &str, uint64_t length) const {
-
+        static_assert(std::is_base_of<std::string, T>::value
+                        || std::is_base_of<std::deque<TAlphabet>, T>::value
+                        || std::is_base_of<std::vector<TAlphabet>, T>::value);
         // get first
         TAlphabet s = std::is_same<T, std::string>::value
                         ? encode(str[0])
                         : str[0];
-        // init range
+
+        // initial range
         uint64_t rl = succ_last(F.at(s) + 1);
-        uint64_t ru = (s < F.size() - 1) ? F.at(s + 1) : (W->size() - 1); // upper bound
-        uint64_t pl;
-        //fprintf(stderr, "char: %i rl: %i ru: %i\n", (int) s, (int) rl, (int) ru);
+        uint64_t ru = s < F.size() - 1
+                            ? F.at(s + 1)
+                            : W->size() - 1; // upper bound
+        if (rl > ru)
+            return std::make_pair(0, 0);
+
         // update range iteratively while scanning through s
         for (uint64_t i = 1; i < length; ++i) {
-            if (std::is_same<T, std::string>::value) {
-                s = encode(str[i]);
-            } else {
-                s = str[i];
-            }
-            pl = pred_last(rl - 1) + 1;
-            rl = std::min(succ_W(pl, s), succ_W(pl, s + alph_size));
+            s = std::is_same<T, std::string>::value
+                        ? encode(str[i])
+                        : str[i];
+
+            // Include the head of the first node with the given suffix.
+            rl = pred_last(rl - 1) + 1;
+
+            // Tighten the range including all edges where
+            // the source nodes have the given suffix.
+            rl = std::min(succ_W(rl, s),
+                          succ_W(rl, s + alph_size));
             if (rl >= W->size())
                 return std::make_pair(0, 0);
-            ru = std::max(pred_W(ru, s), pred_W(ru, s + alph_size));
-            if (ru >= W->size())
-                return std::make_pair(0, 0);
+
+            ru = std::max(pred_W(ru, s),
+                          pred_W(ru, s + alph_size));
             if (rl > ru)
                 return std::make_pair(0, 0);
 
+            // Translate the node indices from the sources to the targets.
             rl = outgoing(rl, s);
             ru = outgoing(ru, s);
         }
@@ -403,5 +413,11 @@ class DBG_succ { //: public GenomeGraph{
         }
     }
 };
+
+inline std::ostream& operator<<(std::ostream &os,
+                                const DBG_succ &graph) {
+    graph.print_state(os);
+    return os;
+}
 
 #endif // __DBG_SUCCINCT_HPP__

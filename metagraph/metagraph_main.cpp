@@ -414,7 +414,7 @@ int main(int argc, const char *argv[]) {
                 // if ((config->parts_total > 1) && (config->parts_total > (config->parallel * config->bins_per_thread)))
                 //    config->bins_per_thread = config->parts_total / config->parallel;
 
-                std::vector<DBG_succ*> graphs;
+                std::vector<const DBG_succ*> graphs;
                 std::vector<uint64_t> kv;
                 std::vector<uint64_t> nv;
                 for (unsigned int f = 0; f < files.size(); ++f) {
@@ -460,7 +460,7 @@ int main(int argc, const char *argv[]) {
                 if (config->print_graph)
                     graph_->print_seq();
                 if (config->print_graph_succ)
-                    graph_->print_state();
+                    graph_->print_state(std::cout);
 
                 std::ifstream instream((files[f] + ".anno.dbg").c_str());
                 if (instream.good()) {
