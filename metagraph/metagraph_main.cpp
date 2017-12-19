@@ -415,19 +415,14 @@ int main(int argc, const char *argv[]) {
                 //    config->bins_per_thread = config->parts_total / config->parallel;
 
                 std::vector<const DBG_succ*> graphs;
-                std::vector<uint64_t> kv;
-                std::vector<uint64_t> nv;
                 for (unsigned int f = 0; f < files.size(); ++f) {
                     std::cout << "Opening file " << files[f] << std::endl;
-                    graph = load_critical_graph_from_file(files[f]);
-                    graphs.push_back(graph);
-                    kv.push_back(1);
-                    nv.push_back(graph->get_W().size());
+                    graphs.push_back(load_critical_graph_from_file(files[f]));
                 }
                 if (config->parallel > 1 || config->parts_total > 1) {
                     graph = merge::build_chunk(graphs, config);
                 } else {
-                    graph = merge::merge(graphs, kv, nv);
+                    graph = merge::merge(graphs);
                 }
                 for (size_t f = 0; f < graphs.size(); f++) {
                     delete graphs.at(f);

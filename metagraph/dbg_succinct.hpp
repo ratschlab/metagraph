@@ -45,7 +45,7 @@ class DBG_succ { //: public GenomeGraph{
     // define an extended alphabet for W --> somehow this does not work properly as expected
     typedef uint64_t TAlphabet;
 
-    DBG_succ(size_t k = 1, bool sentinel = true);
+    DBG_succ(size_t k = 1);
     ~DBG_succ();
 
     /**

@@ -53,19 +53,17 @@ const TAlphabet kCharToNucleotide[128] = {
 };
 
 
-DBG_succ::DBG_succ(size_t k, bool sentinel)
+DBG_succ::DBG_succ(size_t k)
       : k_(k), F(alph_size, 0) {
 
     last->insertBit(0, false);
     W->insert(0, 0);
 
-    if (sentinel) {
-        // add the dummy source node
-        last->insertBit(1, true);
-        W->insert(0, 0);
-        for (size_t j = 1; j < alph_size; j++) {
-            F[j] = 1;
-        }
+    // add the dummy source node
+    last->insertBit(1, true);
+    W->insert(0, 0);
+    for (size_t j = 1; j < alph_size; j++) {
+        F[j] = 1;
     }
 }
 

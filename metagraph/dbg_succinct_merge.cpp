@@ -292,7 +292,10 @@ DBG_succ* build_chunk(const std::vector<const DBG_succ*> &graphs, Config *config
     // collect results
     std::cerr << "Collecting results" << std::endl;
 
-    DBG_succ *graph = new DBG_succ(graphs.front()->get_k(), false);
+    DBG_succ *graph = new DBG_succ(graphs.front()->get_k());
+    graph->W->remove(1);
+    graph->last->deleteBit(1);
+    graph->update_F(DBG_succ::encode('$'), -1);
 
     for (size_t i = 0; i < merge_data->result.size(); ++i) {
         if (merge_data->result.at(i)) {
@@ -389,8 +392,22 @@ DBG_succ* merge(const std::vector<const DBG_succ*> &Gv,
                 std::vector<uint64_t> kv,
                 std::vector<uint64_t> nv) {
 
+    if (!kv.size()) {
+        for (size_t i = 0; i < Gv.size(); ++i) {
+            kv.push_back(1);
+            nv.push_back(Gv[i]->get_W().size());
+        }
+    }
+
+    assert(kv.size() == Gv.size());
+    assert(nv.size() == Gv.size());
+
     // Preliminarities
-    DBG_succ *Gt = new DBG_succ(Gv.at(0)->get_k(), false);
+    DBG_succ *Gt = new DBG_succ(Gv.at(0)->get_k());
+    Gt->W->remove(1);
+    Gt->last->deleteBit(1);
+    Gt->update_F(DBG_succ::encode('$'), -1);
+
 
     for (size_t i = 0; i < Gv.size(); i++) {
         // check whether we can merge the given graphs
@@ -457,7 +474,7 @@ DBG_succ* merge(const std::vector<const DBG_succ*> &Gv,
         if (cnt == 0)
             break;
         size_t curr_k = std::max_element(smallest.first.begin(), smallest.first.end())
-                                 - smallest.first.begin();
+                         - smallest.first.begin();
         std::deque<TAlphabet> seq1 = Gv.at(curr_k)->get_node_seq(kv.at(curr_k));
         uint64_t val = Gv.at(curr_k)->get_W(kv.at(curr_k)) % Gt->alph_size;
         //std::cerr << "val: " << val << std::endl;
@@ -469,7 +486,9 @@ DBG_succ* merge(const std::vector<const DBG_succ*> &Gv,
         // check whether we already added a node whose outgoing edge points to the
         // same node as the current one
         auto it = last_added_nodes.find(smallest.second % Gt->alph_size);
-        if (it != last_added_nodes.end() && utils::seq_equal(seq1, it->second, 1) && val != DBG_succ::encode('$')) {
+        if (it != last_added_nodes.end()
+                        && utils::seq_equal(seq1, it->second, 1)
+                        && val != DBG_succ::encode('$')) {
             Gt->W->insert(Gt->W->size(), val + Gt->alph_size);
         } else {
             Gt->W->insert(Gt->W->size(), smallest.second);
@@ -488,7 +507,8 @@ DBG_succ* merge(const std::vector<const DBG_succ*> &Gv,
                      && it1 != it2
                      && utils::seq_equal(it1->second, it2->second)) {
                 Gt->last->set(Gt->W->size() - 2, false);
-                if (Gt->W->size() - 2 > 1 && Gt->get_W(Gt->W->size() - 2) == DBG_succ::encode('$')) {
+                if (Gt->W->size() - 2 > 1
+                            && Gt->get_W(Gt->W->size() - 2) == DBG_succ::encode('$')) {
                     Gt->update_F(Gv.at(curr_k)->get_node_last_char(kv.at(curr_k)), -1);
                     Gt->last->deleteBit(Gt->W->size() - 2);
                     Gt->W->remove(Gt->W->size() - 2);
