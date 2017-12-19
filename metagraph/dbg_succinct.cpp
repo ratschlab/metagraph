@@ -581,9 +581,9 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(const std::string &str,
  * of the corresponding node or the closest predecessor, if no node
  * with the sequence is not found.
  */
-uint64_t DBG_succ::colex_upper_bound(std::deque<TAlphabet> str) const {
+uint64_t DBG_succ::pred_kmer(const std::deque<TAlphabet> &kmer) const {
     // get first
-    std::deque<TAlphabet>::iterator it = str.begin();
+    auto it = kmer.begin();
     TAlphabet s1 = *it % alph_size;
 
     // init range
@@ -614,7 +614,7 @@ uint64_t DBG_succ::colex_upper_bound(std::deque<TAlphabet> str) const {
     bool before = false;
     //fprintf(stderr, "char: %i rl: %i ru: %i\n", (int) s1, (int) rl, (int) ru);
     // update range iteratively while scanning through s
-    for (; it != str.end(); it++) {
+    for (; it != kmer.end(); ++it) {
         s1 = *it % alph_size;
         pll = this->pred_last(rl - 1) + 1;
         puu = this->succ_last(ru);

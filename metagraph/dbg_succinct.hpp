@@ -165,11 +165,11 @@ class DBG_succ { //: public GenomeGraph{
     uint64_t incoming(uint64_t i, TAlphabet c) const;
 
     /**
-     * Given a node label s, this function returns the index
+     * Given a node label kmer, this function returns the index
      * of the corresponding node or the closest predecessor, if no node
      * with the sequence is not found.
      */
-    uint64_t colex_upper_bound(std::deque<TAlphabet> str) const;
+    uint64_t pred_kmer(const std::deque<TAlphabet> &kmer) const;
 
     /**
     * Given a node index k_node, this function returns the k-mer sequence of the

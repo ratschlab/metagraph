@@ -67,13 +67,13 @@ std::vector<std::pair<uint64_t, uint64_t>> get_bins_relative(
                                                 uint64_t last_pos) {
 
     std::vector<std::pair<uint64_t, uint64_t>> result;
-    uint64_t pos = (first_pos == 0) ? 1 : G_from->colex_upper_bound(G_to->get_node_seq(first_pos)) + 1;
+    uint64_t pos = (first_pos == 0) ? 1 : G_from->pred_kmer(G_to->get_node_seq(first_pos)) + 1;
     uint64_t upper;
     for (size_t i = 0; i < ref_bins.size(); i++) {
         if (ref_bins.at(i).second == 0) { // this happens if we have more bins than nodes
             result.push_back(std::make_pair(0, 0));
         } else {
-            upper = G_from->colex_upper_bound(G_to->get_node_seq(ref_bins.at(i).second));
+            upper = G_from->pred_kmer(G_to->get_node_seq(ref_bins.at(i).second));
             std::cerr << "ref bin " << ref_bins.at(i).second << " rel upper " << upper << std::endl;
             result.push_back(std::make_pair(pos, upper));
             pos = upper + 1;
