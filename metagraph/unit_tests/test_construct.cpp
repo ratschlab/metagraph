@@ -285,7 +285,7 @@ TEST(DBGSuccinct, TraversalMergeWithEmpty) {
         DBG_succ first(k, true);
         DBG_succ second(k, true);
         first.add_sequence(std::string(100, 'A'));
-        merge::merge(&first, second);
+        first.merge(second);
         EXPECT_EQ(k + 1, first.num_nodes());
         EXPECT_EQ(k + 2, first.num_edges());
     }
@@ -296,7 +296,7 @@ TEST(DBGSuccinct, TraversalMergeEmpty) {
         DBG_succ first(k, true);
         DBG_succ second(k, true);
         second.add_sequence(std::string(100, 'A'));
-        merge::merge(&first, second);
+        first.merge(second);
         EXPECT_EQ(k + 1, first.num_nodes());
         EXPECT_EQ(k + 2, first.num_edges());
     }
@@ -308,7 +308,7 @@ TEST(DBGSuccinct, TraversalMergeEqualPaths) {
         DBG_succ second(k, true);
         first.add_sequence(std::string(100, 'A'));
         second.add_sequence(std::string(50, 'A'));
-        merge::merge(&first, second);
+        first.merge(second);
         EXPECT_EQ(k + 1, first.num_nodes());
         EXPECT_EQ(k + 1, second.num_nodes());
         EXPECT_EQ(k + 2, first.num_edges());
@@ -322,7 +322,7 @@ TEST(DBGSuccinct, TraversalMergeTwoPaths) {
         DBG_succ second(k, true);
         first.add_sequence(std::string(100, 'A'));
         second.add_sequence(std::string(50, 'C'));
-        merge::merge(&first, second);
+        first.merge(second);
         EXPECT_EQ(2 * k + 1, first.num_nodes());
         EXPECT_EQ(k + 1, second.num_nodes());
         EXPECT_EQ(2 * k + 3, first.num_edges());
@@ -337,7 +337,7 @@ TEST(DBGSuccinct, TraversalMergeSinglePathWithTwo) {
         first.add_sequence(std::string(100, 'A'));
         second.add_sequence(std::string(50, 'C'));
         second.add_sequence(std::string(60, 'G'));
-        merge::merge(&first, second);
+        first.merge(second);
         EXPECT_EQ(3 * k + 1, first.num_nodes());
         EXPECT_EQ(2 * k + 1, second.num_nodes());
         EXPECT_EQ(3 * k + 4, first.num_edges());
@@ -357,9 +357,9 @@ TEST(DBGSuccinct, TraversalMergeTwoGraphs) {
         second.add_sequence("AAATG", true);
         second.add_sequence("ACTGA", true);
         DBG_succ merged(k);
-        merge::merge(&merged, second);
-        merge::merge(&merged, first);
-        merge::merge(&first, second);
+        merged.merge(second);
+        merged.merge(first);
+        first.merge(second);
         EXPECT_EQ(first, merged);
     }
 }
@@ -380,7 +380,7 @@ TEST(DBGSuccinct, ParallelMergeTwoPaths) {
         }
         DBG_succ *merged = merge::merge(graphs, kv, nv);
 
-        merge::merge(&first, second);
+        first.merge(second);
 
         EXPECT_EQ(first, *merged);
     }
@@ -403,7 +403,7 @@ TEST(DBGSuccinct, ParallelMergeSinglePathWithTwo) {
         }
         DBG_succ *merged = merge::merge(graphs, kv, nv);
 
-        merge::merge(&first, second);
+        first.merge(second);
 
         EXPECT_EQ(first, *merged);
     }
@@ -430,8 +430,8 @@ TEST(DBGSuccinct, ParallelMergeThreeGraphs) {
         }
         DBG_succ *merged = merge::merge(graphs, kv, nv);
 
-        merge::merge(&first, second);
-        merge::merge(&first, third);
+        first.merge(second);
+        first.merge(third);
 
         EXPECT_EQ(first, *merged);
     }

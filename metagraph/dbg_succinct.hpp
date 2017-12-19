@@ -38,8 +38,6 @@ class DBG_succ { //: public GenomeGraph{
     friend DBG_succ* merge::merge_chunks(const std::string &filenamebase,
                                          size_t num_chunks);
 
-    friend void merge::merge(DBG_succ *Gt, const DBG_succ &Gm);
-
     friend DBG_succ* merge::merge(const std::vector<const DBG_succ*> &Gv,
                                   std::vector<uint64_t> kv,
                                   std::vector<uint64_t> nv);
@@ -105,6 +103,8 @@ class DBG_succ { //: public GenomeGraph{
     void construct_succ(unsigned int parallel = 1);
 
     void remove_edges(const std::set<uint64_t> &edges);
+
+    void merge(const DBG_succ &Gm);
 
     /**
      * Given index i of a node and a value k, this function

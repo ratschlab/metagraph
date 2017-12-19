@@ -1259,3 +1259,82 @@ void DBG_succ::remove_edges(const std::set<uint64_t> &edges) {
         shift++;
     }
 }
+
+/**
+ * This object collects information about branches during graph traversal for the
+ * purpose of merging, so we know where to jump back to when we reached a dead end.
+ */
+struct BranchInfoMerge {
+    uint64_t node_id;
+    std::deque<TAlphabet> source_kmer;
+};
+
+/**
+* Heavily borrowing from the graph sequence traversal, this function gets 
+* a graph pointer Gm and merges its nodes into the target graph object Gt.
+* The edges of Gm are fully traversed and nodes are added to Gt if not existing yet.
+* This function is well suited to merge small graphs into large ones.
+*/
+void DBG_succ::merge(const DBG_succ &Gm) {
+    // FYI: can be improved to handle different k_mer sizes
+    assert(k_ == Gm.get_k());
+
+    // bool vector that keeps track of visited nodes
+    std::vector<bool> marked(Gm.num_nodes() + 1, false);
+
+    // start at the source node
+    uint64_t Gt_source_node = 1;
+    uint64_t Gm_source_node = 1;
+    // keep a running list of the last k characters we have seen
+    std::deque<TAlphabet> k_mer(Gm.get_k(), DBG_succ::encode('$'));
+
+    // store all branch nodes on the way
+    std::stack<BranchInfoMerge> branchnodes;
+
+    uint64_t added_counter = 0;
+
+    // keep traversing until we reach the sink and have worked off all branches from the stack
+    while (true) {
+        // verbose output
+        if (added_counter > 0 && added_counter % 1000 == 0) {
+            std::cout << "." << std::flush;
+            if (added_counter % 10000 == 0) {
+                std::cout << "merged " << added_counter
+                          << " / " << Gm.num_edges()
+                          << " - edges " << num_edges()
+                          << " / nodes " << num_nodes() << "\n";
+            }
+        }
+
+        k_mer.pop_front();
+        k_mer.push_back(0);
+
+        // loop over outgoing edges
+        for (TAlphabet c = 1; c < alph_size; ++c) {
+            uint64_t Gm_target_node = Gm.outgoing(Gm_source_node, c);
+            if (!Gm_target_node)
+                continue;
+
+            append_pos(c, Gt_source_node);
+            added_counter++;
+
+            if (marked.at(Gm.rank_last(Gm_target_node)))
+                continue;
+
+            k_mer.back() = c;
+            branchnodes.push({ Gm_target_node, k_mer });
+            marked.at(Gm.rank_last(Gm_target_node)) = true;
+        }
+        if (!branchnodes.size())
+            break;
+
+        // get new node
+        BranchInfoMerge &branch = branchnodes.top();
+        Gm_source_node = branch.node_id;
+        k_mer = branch.source_kmer;
+        branchnodes.pop();
+
+        // find node where to restart insertion
+        Gt_source_node = index(k_mer);
+    }
+}
