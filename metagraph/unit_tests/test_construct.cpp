@@ -307,6 +307,32 @@ TEST(DBGSuccinct, TraversalMergeEmpty) {
     }
 }
 
+TEST(DBGSuccinct, TraversalMergeEmptyRandomTest) {
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ random(k);
+
+        for (size_t p = 0; p < 5; ++p) {
+            size_t length = rand() % 10;
+            std::string sequence(length, 'A');
+
+            for (size_t s = 0; s < sequence.size(); ++s) {
+                sequence[s] = DBG_succ::alphabet[1 + rand() % 4];
+            }
+            random.add_sequence(sequence, false);
+
+            for (size_t s = 0; s < sequence.size(); ++s) {
+                sequence[s] = DBG_succ::alphabet[1 + rand() % 4];
+            }
+            random.add_sequence(sequence, true);
+        }
+
+        DBG_succ result(k);
+        result.merge(random);
+
+        EXPECT_EQ(random, result);
+    }
+}
+
 TEST(DBGSuccinct, TraversalMergeEqualPaths) {
     for (size_t k = 1; k < 10; ++k) {
         DBG_succ first(k);
