@@ -181,6 +181,11 @@ TEST(DBGSuccinct, AddSequenceSimplePath) {
     }
 }
 
+TEST(DBGSuccinct, AddSequenceBugRevealingTestcase) {
+    DBG_succ graph(1);
+    graph.add_sequence("CTGAG", false);
+}
+
 TEST(DBGSuccinct, AddSequence) {
     {
         DBG_succ graph(3);

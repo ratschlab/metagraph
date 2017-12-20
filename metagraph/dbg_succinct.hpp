@@ -141,6 +141,12 @@ class DBG_succ { //: public GenomeGraph{
     TAlphabet get_node_last_char(uint64_t i) const;
 
     /**
+     * Given a node index k_node, this function returns the k-mer sequence of the
+     * node in a deque data structure.
+     */
+    std::deque<TAlphabet> get_node_seq(uint64_t k_node) const;
+
+    /**
      * Given a node index i, this function returns the number of outgoing
      * edges from node i.
      */
@@ -170,12 +176,6 @@ class DBG_succ { //: public GenomeGraph{
      * with the sequence is not found.
      */
     uint64_t pred_kmer(const std::deque<TAlphabet> &kmer) const;
-
-    /**
-    * Given a node index k_node, this function returns the k-mer sequence of the
-    * node in a deque data structure.
-    */
-    std::deque<TAlphabet> get_node_seq(uint64_t k_node) const;
 
     /**
      * Return k-mer length of current graph.
@@ -260,7 +260,7 @@ class DBG_succ { //: public GenomeGraph{
     /**
      * Helper function used by the append_pos function
      */
-    void insert_edge(TAlphabet c, uint64_t begin, uint64_t end);
+    bool insert_edge(TAlphabet c, uint64_t begin, uint64_t end);
 
     /**
      * Uses the object's array W, a given position i in W and a character c

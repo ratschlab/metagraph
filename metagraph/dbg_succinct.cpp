@@ -11,7 +11,6 @@
  */
 
 #include <assert.h>
-#include <pthread.h>
 #include <vector>
 #include <map>
 #include <stack>
@@ -173,7 +172,7 @@ bool DBG_succ::load(const std::string &infbase) {
             }
             switch (mode) {
                 case 'F':
-                    F.push_back(std::stoul(cur_line));
+                    F.push_back(std::stoull(cur_line));
                     break;
                 case 'k':
                     k_ = std::stoul(cur_line);
@@ -277,6 +276,8 @@ uint64_t DBG_succ::rank_last(uint64_t i) const {
  * returns the position of the i-th set bit in last[1..i].
  */
 uint64_t DBG_succ::select_last(uint64_t i) const {
+    assert(i < last->size());
+
     // deal with  border conditions
     if (i <= 0)
         return 0;
@@ -289,6 +290,8 @@ uint64_t DBG_succ::select_last(uint64_t i) const {
  * and a given position i the position of the last set bit in last[1..i].
  */
 uint64_t DBG_succ::pred_last(uint64_t i) const {
+    assert(i < W->size());
+
     return select_last(rank_last(i));
 }
 
@@ -310,6 +313,7 @@ uint64_t DBG_succ::succ_last(uint64_t i) const {
  * position in W that corresponds to the i-th node's last character.
  */
 uint64_t DBG_succ::bwd(uint64_t i) const {
+    assert(i < W->size());
     // get value of last position in node i
     TAlphabet c = get_node_last_char(i);
     // get the offset for the last position in node i
@@ -323,6 +327,7 @@ uint64_t DBG_succ::bwd(uint64_t i) const {
  * character c in W and returns the position of the r-th occurence of c in last.
  */
 uint64_t DBG_succ::fwd(uint64_t i) const {
+    assert(i < W->size());
     // get value of W at position i
     TAlphabet c = get_W(i) % alph_size;
     // get the offset for position c
@@ -339,6 +344,8 @@ uint64_t DBG_succ::fwd(uint64_t i) const {
  * position of node i.
  */
 TAlphabet DBG_succ::get_node_last_char(uint64_t i) const {
+    assert(i < W->size());
+
     if (i == 0)
         return 0;
     for (size_t j = 0; j < F.size(); j++) {
@@ -354,6 +361,8 @@ TAlphabet DBG_succ::get_node_last_char(uint64_t i) const {
  * first character of the node.
  */
 TAlphabet DBG_succ::get_node_begin_value(uint64_t i) const {
+    assert(i < W->size());
+
     if (i == 1)
         return 0;
 
@@ -579,6 +588,7 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(const std::string &str,
  * of the corresponding node or the closest predecessor, if no node
  * with the sequence is not found.
  */
+// TODO: write tests for this function
 uint64_t DBG_succ::pred_kmer(const std::deque<TAlphabet> &kmer) const {
     // get first
     auto it = kmer.begin();
@@ -620,16 +630,21 @@ uint64_t DBG_succ::pred_kmer(const std::deque<TAlphabet> &kmer) const {
 
         //std::cerr << "s: " << s1 << " rl: " << rl << " ru: " << ru << " pll: " << pll << std::endl;
 
-        rl = std::min(succ_W(pll, s1), succ_W(pll, s1 + alph_size));
-        ru = std::max(pred_W(puu, s1), pred_W(puu, s1 + alph_size));
+        rl = std::min(succ_W(pll, s1),
+                      succ_W(pll, s1 + alph_size));
+        ru = std::max(pred_W(puu, s1),
+                      pred_W(puu, s1 + alph_size));
         if (rl > puu) {
-            rl = std::max(pred_W(pll, s1), pred_W(pll, s1 + alph_size));
+            rl = std::max(pred_W(pll, s1),
+                          pred_W(pll, s1 + alph_size));
             if (rl == 0) {
-                rl = std::min(succ_W(pll, s1), succ_W(pll, s1 + alph_size));
+                rl = std::min(succ_W(pll, s1),
+                              succ_W(pll, s1 + alph_size));
                 if (rl >= W->size()) {
                     s1--;
                     while (s1 > 0) {
-                        rl = std::max(pred_W(W->size() - 1, s1), pred_W(W->size() - 1, s1));
+                        rl = std::max(pred_W(W->size() - 1, s1),
+                                      pred_W(W->size() - 1, s1));
                         if (rl < W->size())
                             break;
                         s1--;
@@ -638,7 +653,8 @@ uint64_t DBG_succ::pred_kmer(const std::deque<TAlphabet> &kmer) const {
                         s1 = (*it % alph_size) + 1;
                         before = true;
                         while (s1 < alph_size) {
-                            rl = std::min(succ_W(1, s1), succ_W(1 + alph_size, s1));
+                            rl = std::min(succ_W(1, s1),
+                                          succ_W(1 + alph_size, s1));
                             if (rl < W->size())
                                 break;
                             s1++;
@@ -878,7 +894,6 @@ void DBG_succ::switch_state(Config::StateType new_state) {
     state = new_state;
 }
 
-
 void DBG_succ::print_state(std::ostream &os) const {
     os << "Index" << "\t" << "L"
                   << "\t" << "Vertex"
@@ -977,9 +992,11 @@ void DBG_succ::print_adj_list(const std::string &filename) const {
 
 // add a full sequence to the graph
 void DBG_succ::add_sequence(const std::string &seq, bool try_extend) {
+    if (!seq.size())
+        return;
+
     std::vector<TAlphabet> sequence(seq.size());
-    std::transform(seq.begin(), seq.end(), sequence.begin(),
-                   [](char c) { return encode(c); });
+    std::transform(seq.begin(), seq.end(), sequence.begin(), encode);
 
     uint64_t source;
 
@@ -1062,7 +1079,7 @@ void DBG_succ::add_sequence_fast(const std::string &seq,
 void DBG_succ::construct_succ(unsigned int parallel) {
 
     for (size_t i = 1; i < W->size(); ++i) {
-        kmers.emplace_back(get_node_str(i) + DBG_succ::decode(W->operator[](i)),
+        kmers.emplace_back(get_node_str(i) + DBG_succ::decode(get_W(i)),
                            DBG_succ::encode);
     }
 
@@ -1194,11 +1211,11 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t source_node, TAlphabet *ckmer
     }
 
     // insert the edge
-    insert_edge(c, begin, end);
+    bool shift = insert_edge(c, begin, end);
 
     // Add sentinel if the target node is the new dead-end
     if (!the_only_incoming)
-        return fwd(first_c + 1);
+        return fwd(first_c + shift);
 
     uint64_t sentinel_pos = select_last(rank_last(F[c]) + rank_W(begin - 1, c)) + 1;
 
@@ -1209,17 +1226,19 @@ uint64_t DBG_succ::append_pos(uint64_t c, uint64_t source_node, TAlphabet *ckmer
 }
 
 
-void DBG_succ::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
+bool DBG_succ::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
     if (begin > 1 && get_W(begin) == encode('$')) {
         // the source node is the dead-end with outgoing sentinel
         // replace this sentinel with proper label
         W->set(begin, c);
+        return 0;
     } else {
         // the source node already has some outgoing edges
         update_F(get_node_last_char(begin), +1);
         W->insert(begin, c);
         last->insertBit(begin, false);
         sort_W_locally(begin, end);
+        return 1;
     }
 }
 
@@ -1232,13 +1251,13 @@ void DBG_succ::remove_edges(const std::set<uint64_t> &edges) {
         assert(edge >= shift);
         uint64_t edge_id = edge - shift;
 
-        uint64_t d = W->operator[](edge_id);
+        uint64_t d = get_W(edge_id);
         if (d < alph_size) {
             //fix W array
             uint64_t next = edge_id + 1;
             uint64_t j = succ_W(next, d);
             for (uint64_t i = next; i < j; ++i) {
-                if (W->operator[](i) == d + alph_size) {
+                if (get_W(i) == d + alph_size) {
                     W->set(i, d);
                     break;
                 }
