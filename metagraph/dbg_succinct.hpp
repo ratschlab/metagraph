@@ -342,12 +342,12 @@ class DBG_succ { //: public GenomeGraph{
                         : str[0];
 
         // initial range
-        uint64_t rl = F.at(s) < W->size() - 1
+        uint64_t rl = F.at(s) + 1 < W->size()
                       ? succ_last(F.at(s) + 1)
                       : W->size();
         uint64_t ru = s < F.size() - 1
-                            ? F.at(s + 1)
-                            : W->size() - 1; // upper bound
+                          ? F.at(s + 1)
+                          : W->size() - 1; // upper bound
         if (rl > ru)
             return std::make_pair(0, 0);
 

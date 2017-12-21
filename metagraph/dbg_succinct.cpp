@@ -501,8 +501,12 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(const std::string &str,
     // init match/mismatch to first pattern position
     TAlphabet s = encode(str[0]);
     for (TAlphabet b = 1; b < 5; ++b) {
-        rl = succ_last(F[b] + 1);
-        ru = F[b + 1];
+        rl = F[b] + 1 < W->size()
+             ? succ_last(F[b] + 1)
+             : W->size();
+        ru = b + 1 < F.size()
+             ? F[b + 1]
+             : W->size() - 1;
         //std::cout << "pushing: rl " << rl << " ru " << ru << " str_pos 1 max_distance " << (uint64_t) (b != s) << std::endl;
         //std::cout << "s " << s << " b " << b << std::endl;
         std::vector<uint64_t> tmp;
@@ -609,23 +613,25 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(const std::string &str,
  * of the corresponding node or the closest predecessor, if no node
  * with the sequence is not found.
  */
-// TODO: write tests for this function
+// TODO: write tests for this function, improve this function
 uint64_t DBG_succ::pred_kmer(const std::deque<TAlphabet> &kmer) const {
     // get first
     auto it = kmer.begin();
-    TAlphabet s1 = *it % alph_size;
 
     // init range
+    uint64_t rl, ru;
 
-    // lower bound
-    uint64_t rl = succ_last(F.at(s1) + 1);
-    // upper bound
-    uint64_t ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->size() - 1);
-    while (rl > ru && s1 > 0) {
+    TAlphabet s1 = *it % alph_size + 1;
+    do {
         s1--;
-        rl = succ_last(F.at(s1) + 1);
-        ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->size() - 1);
-    }
+        rl = F.at(s1) + 1 < last->size()
+             ? succ_last(F.at(s1) + 1)
+             : last->size();
+        ru = s1 < F.size() - 1
+             ? F.at(s1 + 1)
+             : W->size() - 1;
+    } while (rl > ru && s1 > 0);
+
     /*if (s1 == 0) {
         s1 = *it % alph_size + 1;
         rl = succ_last(F.at(s1) + 1);
@@ -636,40 +642,46 @@ uint64_t DBG_succ::pred_kmer(const std::deque<TAlphabet> &kmer) const {
             ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->n - 1);
         }
     }*/
-    //std::cerr << "s: " << s1 << " rl: " << rl << " ru: " << ru << std::endl;
-
-    it++;
-    uint64_t pll, puu;
     bool before = false;
-    //fprintf(stderr, "char: %i rl: %i ru: %i\n", (int) s1, (int) rl, (int) ru);
+
     // update range iteratively while scanning through s
-    for (; it != kmer.end(); ++it) {
+    while (++it != kmer.end()) {
         s1 = *it % alph_size;
-        pll = this->pred_last(rl - 1) + 1;
-        puu = this->succ_last(ru);
+        uint64_t pll = pred_last(rl - 1) + 1;
+        uint64_t puu = succ_last(ru);
         before = false;
 
-        //std::cerr << "s: " << s1 << " rl: " << rl << " ru: " << ru << " pll: " << pll << std::endl;
+        // std::cerr << "s: " << s1 << " rl: " << rl << " ru: " << ru << " pll: " << pll << std::endl;
 
         rl = std::min(succ_W(pll, s1),
                       succ_W(pll, s1 + alph_size));
+
         ru = std::max(pred_W(puu, s1),
                       pred_W(puu, s1 + alph_size));
+
         if (rl > puu) {
             rl = std::max(pred_W(pll, s1),
                           pred_W(pll, s1 + alph_size));
-            if (rl == 0) {
+
+            if (rl > 0) {
+                s1 = get_W(rl);
+
+            } else {
                 rl = std::min(succ_W(pll, s1),
                               succ_W(pll, s1 + alph_size));
-                if (rl >= W->size()) {
-                    s1--;
-                    while (s1 > 0) {
+
+                if (rl < W->size()) {
+                    s1 = get_W(rl);
+                    before = true;
+
+                } else {
+                    while (--s1 > 0) {
                         rl = std::max(pred_W(W->size() - 1, s1),
-                                      pred_W(W->size() - 1, s1));
-                        if (rl < W->size())
+                                      pred_W(W->size() - 1, s1 + alph_size));
+                        if (rl > 0)
                             break;
-                        s1--;
                     }
+
                     if (s1 == 0) {
                         s1 = (*it % alph_size) + 1;
                         before = true;
@@ -681,12 +693,7 @@ uint64_t DBG_succ::pred_kmer(const std::deque<TAlphabet> &kmer) const {
                             s1++;
                         }
                     }
-                } else {
-                    s1 = (*W)[rl];
-                    before = true;
                 }
-            } else {
-                s1 = (*W)[rl];
             }
         }
 
@@ -699,6 +706,8 @@ uint64_t DBG_succ::pred_kmer(const std::deque<TAlphabet> &kmer) const {
         rl = outgoing(rl, s1);
         ru = outgoing(ru, s1);
     }
+
+    assert(pred_last(rl) - before > 0);
     return pred_last(rl) - before;
 }
 
@@ -767,7 +776,7 @@ std::deque<TAlphabet> DBG_succ::get_node_seq(uint64_t k_node) const {
 
     std::deque<TAlphabet> ret;
 
-    for (uint64_t curr_k = 0; curr_k < this->k_; ++curr_k) {
+    for (uint64_t curr_k = 0; curr_k < k_; ++curr_k) {
         auto k_val = get_minus_k_value(k_node, 0);
         ret.push_front(k_val.first);
         k_node = k_val.second;
@@ -784,9 +793,11 @@ std::string DBG_succ::get_node_str(uint64_t k_node) const {
     assert(k_node < W->size());
 
     std::string node_string(k_, 0);
+
     auto node_encoding = get_node_seq(k_node);
-    std::transform(node_encoding.begin(), node_encoding.end(), node_string.begin(),
-                   [](TAlphabet c) { return decode(c); });
+
+    std::transform(node_encoding.begin(), node_encoding.end(),
+                   node_string.begin(), decode);
     return node_string;
 }
 
