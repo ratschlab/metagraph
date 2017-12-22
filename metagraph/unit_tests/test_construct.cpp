@@ -252,7 +252,6 @@ TEST(DBGSuccinct, AppendSequence) {
     }
 }
 
-
 TEST(DBGSuccinct, AppendSequenceAnyKmerSize) {
     for (size_t k = 1; k < 10; ++k) {
         {
@@ -282,6 +281,66 @@ TEST(DBGSuccinct, AppendSequenceAnyKmerSize) {
             graph.add_sequence("AAACT", false);
             graph.add_sequence("AAATG", false);
         }
+    }
+}
+
+void test_pred_kmer(const DBG_succ &graph,
+                    const std::string &kmer_s,
+                    uint64_t expected_idx) {
+    std::deque<TAlphabet> kmer(kmer_s.size());
+    std::transform(kmer_s.begin(), kmer_s.end(), kmer.begin(), DBG_succ::encode);
+    EXPECT_EQ(expected_idx, graph.pred_kmer(kmer)) << kmer_s << std::endl << graph;
+}
+
+TEST(DBGSuccinct, PredKmer) {
+    {
+        DBG_succ graph(5);
+
+        test_pred_kmer(graph, "ACGCG", 1);
+        test_pred_kmer(graph, "$$$$A", 1);
+        test_pred_kmer(graph, "TTTTT", 1);
+        test_pred_kmer(graph, "NNNNN", 1);
+        test_pred_kmer(graph, "$$$$$", 1);
+    }
+    {
+        DBG_succ graph(5);
+        graph.add_sequence("A");
+
+        test_pred_kmer(graph, "ACGCG", 3);
+        test_pred_kmer(graph, "$$$$A", 3);
+        test_pred_kmer(graph, "TTTTT", 3);
+        test_pred_kmer(graph, "NNNNN", 3);
+        test_pred_kmer(graph, "$$$$$", 2);
+    }
+    {
+        DBG_succ graph(5);
+        graph.add_sequence("AC");
+
+        test_pred_kmer(graph, "ACGCG", 4);
+        test_pred_kmer(graph, "$$$$A", 3);
+        test_pred_kmer(graph, "TTTTT", 4);
+        test_pred_kmer(graph, "NNNNN", 4);
+        test_pred_kmer(graph, "$$$$$", 2);
+    }
+    {
+        DBG_succ graph(5);
+        graph.add_sequence("AAACGTAGTATGTAGC");
+
+        test_pred_kmer(graph, "ACGCG", 13);
+        test_pred_kmer(graph, "$$$$A", 3);
+        test_pred_kmer(graph, "TTTTT", 18);
+        test_pred_kmer(graph, "NNNNN", 18);
+        test_pred_kmer(graph, "$$$$$", 2);
+    }
+    {
+        DBG_succ graph(5);
+        graph.add_sequence("AAACGAAGGAAGTACGC");
+
+        test_pred_kmer(graph, "ACGCG", 17);
+        test_pred_kmer(graph, "$$$$A", 3);
+        test_pred_kmer(graph, "TTTTT", 19);
+        test_pred_kmer(graph, "NNNNN", 19);
+        test_pred_kmer(graph, "$$$$$", 2);
     }
 }
 

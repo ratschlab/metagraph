@@ -613,102 +613,95 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(const std::string &str,
  * of the corresponding node or the closest predecessor, if no node
  * with the sequence is not found.
  */
-// TODO: write tests for this function, improve this function
+//TODO: this function can be improved
 uint64_t DBG_succ::pred_kmer(const std::deque<TAlphabet> &kmer) const {
+    assert(kmer.size() == k_);
+
     // get first
     auto it = kmer.begin();
 
     // init range
-    uint64_t rl, ru;
+    uint64_t first, last;
 
-    TAlphabet s1 = *it % alph_size + 1;
+    TAlphabet s = *it % alph_size + 1;
     do {
-        s1--;
-        rl = F.at(s1) + 1 < last->size()
-             ? succ_last(F.at(s1) + 1)
-             : last->size();
-        ru = s1 < F.size() - 1
-             ? F.at(s1 + 1)
-             : W->size() - 1;
-    } while (rl > ru && s1 > 0);
+        s--;
+        first = F.at(s) + 1;
+        last = s + 1 < F.size()
+               ? F.at(s + 1)
+               : W->size() - 1;
+    } while (first > last && s > 0);
+    assert(first > 0);
+    assert(first <= last);
 
-    /*if (s1 == 0) {
-        s1 = *it % alph_size + 1;
-        rl = succ_last(F.at(s1) + 1);
-        ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->n - 1);
-        while (rl > ru && s1 < alph_size) {
-            s1++;
-            rl = succ_last(F.at(s1) + 1);
-            ru = (s1 < F.size() - 1) ? F.at(s1 + 1) : (W->n - 1);
-        }
-    }*/
     bool before = false;
 
     // update range iteratively while scanning through s
     while (++it != kmer.end()) {
-        s1 = *it % alph_size;
-        uint64_t pll = pred_last(rl - 1) + 1;
-        uint64_t puu = succ_last(ru);
+        assert(first <= last);
+
+        s = *it % alph_size;
+        uint64_t first_old = first;
+        uint64_t last_old = last;
         before = false;
 
-        // std::cerr << "s: " << s1 << " rl: " << rl << " ru: " << ru << " pll: " << pll << std::endl;
+        first = std::min(succ_W(first_old, s),
+                         succ_W(first_old, s + alph_size));
 
-        rl = std::min(succ_W(pll, s1),
-                      succ_W(pll, s1 + alph_size));
+        last = std::max(pred_W(last_old, s),
+                        pred_W(last_old, s + alph_size));
 
-        ru = std::max(pred_W(puu, s1),
-                      pred_W(puu, s1 + alph_size));
+        if (first > last_old) {
+            first = std::max(pred_W(first_old, s),
+                             pred_W(first_old, s + alph_size));
 
-        if (rl > puu) {
-            rl = std::max(pred_W(pll, s1),
-                          pred_W(pll, s1 + alph_size));
-
-            if (rl > 0) {
-                s1 = get_W(rl);
+            if (first > 0) {
+                s = get_W(first);
 
             } else {
-                rl = std::min(succ_W(pll, s1),
-                              succ_W(pll, s1 + alph_size));
+                first = std::min(succ_W(first_old, s),
+                                 succ_W(first_old, s + alph_size));
 
-                if (rl < W->size()) {
-                    s1 = get_W(rl);
+                if (first < W->size()) {
+                    s = get_W(first);
                     before = true;
 
                 } else {
-                    while (--s1 > 0) {
-                        rl = std::max(pred_W(W->size() - 1, s1),
-                                      pred_W(W->size() - 1, s1 + alph_size));
-                        if (rl > 0)
-                            break;
+                    first = 0;
+
+                    while (!first && --s > 0) {
+                        first = std::max(pred_W(W->size() - 1, s),
+                                         pred_W(W->size() - 1, s + alph_size));
                     }
 
-                    if (s1 == 0) {
-                        s1 = (*it % alph_size) + 1;
+                    if (!first && s == 0) {
+                        s = *it % alph_size;
                         before = true;
-                        while (s1 < alph_size) {
-                            rl = std::min(succ_W(1, s1),
-                                          succ_W(1 + alph_size, s1));
-                            if (rl < W->size())
+
+                        while (++s < alph_size) {
+                            first = std::min(succ_W(1, s),
+                                             succ_W(1, s + alph_size));
+                            if (first < W->size())
                                 break;
-                            s1++;
                         }
+                        if (s == alph_size)
+                            return 1;
                     }
                 }
             }
         }
 
-        if (ru == 0)
-            ru = rl;
+        if (last == 0)
+            last = first;
 
-        //std::cerr << "endloop - rl: " << rl << " s1: " << s1 << " ru: " << ru << std::endl;
-        assert(rl <= ru);
+        assert(first <= last);
 
-        rl = outgoing(rl, s1);
-        ru = outgoing(ru, s1);
+        first = pred_last(outgoing(first, s) - 1) + 1;
+        last = succ_last(outgoing(last, s));
     }
 
-    assert(pred_last(rl) - before > 0);
-    return pred_last(rl) - before;
+    assert(pred_last(last) - before > 0);
+    return pred_last(last) - before;
 }
 
 
