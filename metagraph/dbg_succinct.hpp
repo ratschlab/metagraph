@@ -325,7 +325,8 @@ class DBG_succ { //: public GenomeGraph{
     uint64_t index(const T &k_mer) const {
         static_assert(std::is_base_of<std::string, T>::value
                         || std::is_base_of<std::deque<TAlphabet>, T>::value
-                        || std::is_base_of<std::vector<TAlphabet>, T>::value);
+                        || std::is_base_of<std::vector<TAlphabet>, T>::value,
+                      "Only string, vector, and deque are allowed");
         assert(k_mer.size() >= k_);
 
         auto range = index_range(k_mer, k_);
@@ -341,7 +342,8 @@ class DBG_succ { //: public GenomeGraph{
     std::pair<uint64_t, uint64_t> index_range(const T &str, uint64_t length) const {
         static_assert(std::is_base_of<std::string, T>::value
                         || std::is_base_of<std::deque<TAlphabet>, T>::value
-                        || std::is_base_of<std::vector<TAlphabet>, T>::value);
+                        || std::is_base_of<std::vector<TAlphabet>, T>::value,
+                      "Only string, vector, and deque are allowed");
         // get first
         TAlphabet s = std::is_same<T, std::string>::value
                         ? encode(str[0])
