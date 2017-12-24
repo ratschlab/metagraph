@@ -391,6 +391,7 @@ TAlphabet DBG_succ::get_node_begin_value(uint64_t i) const {
  */
 uint64_t DBG_succ::outgoing_edge_idx(uint64_t i, TAlphabet c) const {
     assert(i < W->size());
+    assert(c < alph_size);
 
     if (i == 0 || i > W->size())
         return 0;
@@ -413,6 +414,7 @@ uint64_t DBG_succ::outgoing_edge_idx(uint64_t i, TAlphabet c) const {
  */
 uint64_t DBG_succ::outgoing(uint64_t i, TAlphabet c) const {
     assert(i < W->size());
+    c = c % alph_size;
 
     uint64_t j = outgoing_edge_idx(i, c);
     if (j == 0)
@@ -613,95 +615,46 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(const std::string &str,
  * of the corresponding node or the closest predecessor, if no node
  * with the sequence is not found.
  */
-//TODO: this function can be improved
 uint64_t DBG_succ::pred_kmer(const std::deque<TAlphabet> &kmer) const {
     assert(kmer.size() == k_);
 
     // get first
-    auto it = kmer.begin();
+    auto kmer_it = kmer.begin();
 
-    // init range
-    uint64_t first, last;
-
-    TAlphabet s = *it % alph_size + 1;
-    do {
-        s--;
-        first = F.at(s) + 1;
-        last = s + 1 < F.size()
-               ? F.at(s + 1)
-               : W->size() - 1;
-    } while (first > last && s > 0);
-    assert(first > 0);
-    assert(first <= last);
-
-    bool before = false;
+    uint64_t last = *kmer_it + 1 < F.size()
+                    ? F.at(*kmer_it + 1)
+                    : W->size() - 1;
+    uint64_t shift = 0;
 
     // update range iteratively while scanning through s
-    while (++it != kmer.end()) {
-        assert(first <= last);
+    while (++kmer_it != kmer.end()) {
+        TAlphabet s = *kmer_it;
+        assert(s < alph_size);
 
-        s = *it % alph_size;
-        uint64_t first_old = first;
-        uint64_t last_old = last;
-        before = false;
-
-        first = std::min(succ_W(first_old, s),
-                         succ_W(first_old, s + alph_size));
-
-        last = std::max(pred_W(last_old, s),
-                        pred_W(last_old, s + alph_size));
-
-        if (first > last_old) {
-            first = std::max(pred_W(first_old, s),
-                             pred_W(first_old, s + alph_size));
-
-            if (first > 0) {
-                s = get_W(first);
-
-            } else {
-                first = std::min(succ_W(first_old, s),
-                                 succ_W(first_old, s + alph_size));
-
-                if (first < W->size()) {
-                    s = get_W(first);
-                    before = true;
-
-                } else {
-                    first = 0;
-
-                    while (!first && --s > 0) {
-                        first = std::max(pred_W(W->size() - 1, s),
-                                         pred_W(W->size() - 1, s + alph_size));
-                    }
-
-                    if (!first && s == 0) {
-                        s = *it % alph_size;
-                        before = true;
-
-                        while (++s < alph_size) {
-                            first = std::min(succ_W(1, s),
-                                             succ_W(1, s + alph_size));
-                            if (first < W->size())
-                                break;
-                        }
-                        if (s == alph_size)
-                            return 1;
-                    }
-                }
-            }
+        uint64_t last_target = std::max(pred_W(last, s),
+                                        pred_W(last, s + alph_size));
+        if (last_target > 0) {
+            if (rank_last(last_target - 1) < rank_last(last - 1))
+                shift = 0;
+            last = succ_last(outgoing(last_target, s));
+            continue;
         }
+        assert(s > 0);
 
-        if (last == 0)
-            last = first;
+        last_target = std::min(succ_W(last, s),
+                               succ_W(last, s + alph_size));
 
-        assert(first <= last);
-
-        first = pred_last(outgoing(first, s) - 1) + 1;
-        last = succ_last(outgoing(last, s));
+        if (last_target < W->size()) {
+            last = succ_last(outgoing(last_target, s));
+            shift = 1;
+        } else {
+            last = F[s];
+            shift = 0;
+        }
     }
 
-    assert(pred_last(last) - before > 0);
-    return pred_last(last) - before;
+    assert(pred_last(last - shift) > 0);
+    return pred_last(last - shift);
 }
 
 
@@ -770,6 +723,7 @@ std::deque<TAlphabet> DBG_succ::get_node_seq(uint64_t k_node) const {
     std::deque<TAlphabet> ret;
 
     for (uint64_t curr_k = 0; curr_k < k_; ++curr_k) {
+        assert(k_node < W->size());
         auto k_val = get_minus_k_value(k_node, 0);
         ret.push_front(k_val.first);
         k_node = k_val.second;

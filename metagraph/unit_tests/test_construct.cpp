@@ -9,6 +9,7 @@
 #define private public
 
 #include "dbg_succinct.hpp"
+#include "utils.hpp"
 
 KSEQ_INIT(gzFile, gzread)
 
@@ -341,6 +342,81 @@ TEST(DBGSuccinct, PredKmer) {
         test_pred_kmer(graph, "TTTTT", 19);
         test_pred_kmer(graph, "NNNNN", 19);
         test_pred_kmer(graph, "$$$$$", 2);
+    }
+    {
+        DBG_succ graph(2);
+        graph.add_sequence("ATAATATCC");
+        graph.add_sequence("ATACGC");
+        graph.add_sequence("ATACTC");
+        graph.add_sequence("ATACTA");
+        graph.add_sequence("CATT");
+        graph.add_sequence("CCC");
+        graph.add_sequence("GGGC");
+        graph.add_sequence("GGTGTGAC");
+        graph.add_sequence("GGTCT");
+        graph.add_sequence("GGTA");
+
+        test_pred_kmer(graph, "$$", 4);
+        test_pred_kmer(graph, "$A", 5);
+        test_pred_kmer(graph, "$T", 26);
+        test_pred_kmer(graph, "AT", 29);
+        test_pred_kmer(graph, "TT", 35);
+        test_pred_kmer(graph, "NT", 35);
+        test_pred_kmer(graph, "TN", 35);
+    }
+}
+
+TEST(DBGSuccinct, PredKmerRandomTest) {
+    for (size_t k = 1; k < 8; ++k) {
+        DBG_succ graph(k);
+
+        for (size_t p = 0; p < 10; ++p) {
+            size_t length = rand() % 400;
+            std::string sequence(length, 'A');
+
+            for (size_t s = 0; s < sequence.size(); ++s) {
+                sequence[s] = DBG_succ::alphabet[1 + rand() % 4];
+            }
+            graph.add_sequence(sequence, false);
+
+            for (size_t s = 0; s < sequence.size(); ++s) {
+                sequence[s] = DBG_succ::alphabet[1 + rand() % 4];
+            }
+            graph.add_sequence(sequence, true);
+        }
+
+        auto all_kmer_str = utils::generate_strings("ACGT", k);
+        for (size_t i = 1; i < k; ++i) {
+            auto kmer_str_suffices = utils::generate_strings("ACGT", i);
+            for (size_t j = 0; j < kmer_str_suffices.size(); ++j) {
+                all_kmer_str.push_back(std::string(k - i, '$')
+                                        + kmer_str_suffices[j]);
+            }
+        }
+        
+        for (const auto &kmer_str : all_kmer_str) {
+            std::deque<TAlphabet> kmer(kmer_str.size());
+            std::transform(kmer_str.begin(), kmer_str.end(),
+                           kmer.begin(), DBG_succ::encode);
+
+            uint64_t lower_bound = graph.pred_kmer(kmer);
+
+            EXPECT_FALSE(
+                utils::colexicographically_greater(
+                    graph.get_node_seq(lower_bound), kmer
+                )
+            ) << graph
+              << "kmer: " << kmer_str << std::endl
+              << "lower bound: " << lower_bound << std::endl
+              << "which is: " << graph.get_node_str(lower_bound) << std::endl;
+            if (lower_bound < graph.get_W().size() - 1) {
+                EXPECT_TRUE(
+                    utils::colexicographically_greater(
+                        graph.get_node_seq(lower_bound + 1), kmer
+                    )
+                );
+            }
+        }
     }
 }
 
