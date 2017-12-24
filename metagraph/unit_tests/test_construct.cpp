@@ -696,6 +696,14 @@ TEST(DBGSuccinct, ParallelMergeGraphsRandom_15_5_4_1_3) {
     random_testing_parallel_merge(15, 5, 4, 1, 3);
 }
 
+TEST(DBGSuccinct, ParallelMergeGraphsRandom_15_5_4_20_3) {
+    random_testing_parallel_merge(15, 5, 4, 20, 3);
+}
+
+TEST(DBGSuccinct, ParallelMergeGraphsRandom_15_10_30_20_3) {
+    random_testing_parallel_merge(15, 10, 30, 20, 3);
+}
+
 TEST(DBGSuccinct, ParallelMergeGraphsRandom_15_5_4_40_10) {
     random_testing_parallel_merge(15, 5, 4, 40, 10);
 }
@@ -704,6 +712,6 @@ TEST(DBGSuccinct, ParallelMergeGraphsRandom_15_5_20_39_10) {
     random_testing_parallel_merge(15, 5, 20, 39, 10);
 }
 
-TEST(DBGSuccinct, ParallelMergeGraphsRandom_20_10_10_40_10) {
+TEST(DBGSuccinct, ParallelMergeGraphsRandom_20_10_10_40_9) {
     random_testing_parallel_merge(20, 10, 10, 40, 9);
 }
