@@ -420,7 +420,10 @@ int main(int argc, const char *argv[]) {
                     graphs.push_back(load_critical_graph_from_file(files[f]));
                 }
                 if (config->parallel > 1 || config->parts_total > 1) {
-                    graph = merge::build_chunk(graphs, config);
+                    graph = merge::build_chunk(graphs, config->part_idx,
+                                                       config->parts_total,
+                                                       config->parallel,
+                                                       config->bins_per_thread);
                 } else {
                     graph = merge::merge(graphs);
                 }

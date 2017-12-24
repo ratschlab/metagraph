@@ -530,6 +530,25 @@ TEST(DBGSuccinct, TraversalMergeTwoGraphs) {
     }
 }
 
+TEST(DBGSuccinct, ParallelMergeEmptyGraphs) {
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ first(k);
+        DBG_succ second(k);
+
+        std::vector<const DBG_succ*> graphs = { &first, &second };
+
+        DBG_succ *merged = merge::merge(graphs);
+        DBG_succ *chunked_merged = merge::build_chunk(graphs, 0, 1, 1, 1);
+
+        first.merge(second);
+
+        EXPECT_EQ(first, *merged);
+        EXPECT_EQ(first, *chunked_merged);
+        delete merged;
+        delete chunked_merged;
+    }
+}
+
 TEST(DBGSuccinct, ParallelMergeTwoPaths) {
     for (size_t k = 1; k < 10; ++k) {
         DBG_succ first(k);
@@ -538,15 +557,16 @@ TEST(DBGSuccinct, ParallelMergeTwoPaths) {
         second.add_sequence(std::string(50, 'C'));
 
         std::vector<const DBG_succ*> graphs = { &first, &second };
-        std::vector<uint64_t> kv;
-        std::vector<uint64_t> nv;
 
-        DBG_succ *merged = merge::merge(graphs, kv, nv);
+        DBG_succ *merged = merge::merge(graphs);
+        DBG_succ *chunked_merged = merge::build_chunk(graphs, 0, 1, 1, 1);
 
         first.merge(second);
 
         EXPECT_EQ(first, *merged);
+        EXPECT_EQ(first, *chunked_merged);
         delete merged;
+        delete chunked_merged;
     }
 }
 
@@ -559,15 +579,16 @@ TEST(DBGSuccinct, ParallelMergeSinglePathWithTwo) {
         second.add_sequence(std::string(60, 'G'));
 
         std::vector<const DBG_succ*> graphs = { &first, &second };
-        std::vector<uint64_t> kv;
-        std::vector<uint64_t> nv;
 
-        DBG_succ *merged = merge::merge(graphs, kv, nv);
+        DBG_succ *merged = merge::merge(graphs);
+        DBG_succ *chunked_merged = merge::build_chunk(graphs, 0, 1, 1, 1);
 
         first.merge(second);
 
         EXPECT_EQ(first, *merged);
+        EXPECT_EQ(first, *chunked_merged);
         delete merged;
+        delete chunked_merged;
     }
 }
 
@@ -584,15 +605,105 @@ TEST(DBGSuccinct, ParallelMergeThreeGraphs) {
         third.add_sequence(std::string(60, 'T'));
 
         std::vector<const DBG_succ*> graphs = { &first, &second, &third };
-        std::vector<uint64_t> kv;
-        std::vector<uint64_t> nv;
 
-        DBG_succ *merged = merge::merge(graphs, kv, nv);
+        DBG_succ *merged = merge::merge(graphs);
+        DBG_succ *chunked_merged = merge::build_chunk(graphs, 0, 1, 1, 1);
 
         first.merge(second);
         first.merge(third);
 
         EXPECT_EQ(first, *merged);
+        EXPECT_EQ(first, *chunked_merged);
         delete merged;
+        delete chunked_merged;
     }
+}
+
+void random_testing_parallel_merge(size_t num_graphs, size_t num_sequences, size_t max_length,
+                                   size_t num_threads, size_t num_bins_per_thread) {
+    for (size_t k = 1; k < 10; ++k) {
+        std::vector<const DBG_succ*> graphs(num_graphs, NULL);
+
+        for (size_t i = 0; i < graphs.size(); ++i) {
+            DBG_succ *component = new DBG_succ(k);
+
+            for (size_t p = 0; p < num_sequences; ++p) {
+                size_t length = rand() % max_length;
+                std::string sequence(length, 'A');
+
+                for (size_t s = 0; s < sequence.size(); ++s) {
+                    sequence[s] = DBG_succ::alphabet[1 + rand() % 4];
+                }
+                component->add_sequence(sequence, false);
+
+                for (size_t s = 0; s < sequence.size(); ++s) {
+                    sequence[s] = DBG_succ::alphabet[1 + rand() % 4];
+                }
+                component->add_sequence(sequence, true);
+            }
+            graphs[i] = component;
+        }
+
+        DBG_succ *merged = merge::merge(graphs);
+        DBG_succ *chunked_merged = merge::build_chunk(graphs, 0, 1,
+                                                      num_threads,
+                                                      num_bins_per_thread);
+        DBG_succ result(k);
+        for (size_t i = 0; i < graphs.size(); ++i) {
+            result.merge(*graphs[i]);
+        }
+
+        ASSERT_EQ(result, *merged) << "The first merged graph is:\n"
+                                   << *graphs[0];
+
+        ASSERT_EQ(result, *chunked_merged) << "The first merged graph is:\n"
+                                           << *graphs[0];
+
+        for (size_t i = 0; i < graphs.size(); ++i) {
+            delete graphs[i];
+        }
+
+        delete merged;
+        delete chunked_merged;
+    }
+}
+
+TEST(DBGSuccinct, ParallelMergeGraphsRandom_1_5_10_1_1) {
+    random_testing_parallel_merge(1, 5, 10, 1, 1);
+}
+
+TEST(DBGSuccinct, ParallelMergeGraphsRandom_1_5_10_1_3) {
+    random_testing_parallel_merge(1, 5, 10, 1, 3);
+}
+
+TEST(DBGSuccinct, ParallelMergeGraphsRandom_1_5_4_1_300) {
+    random_testing_parallel_merge(1, 5, 4, 1, 300);
+}
+
+TEST(DBGSuccinct, ParallelMergeGraphsRandom_3_5_4_1_3) {
+    random_testing_parallel_merge(3, 5, 4, 1, 3);
+}
+
+TEST(DBGSuccinct, ParallelMergeGraphsRandom_3_3_1_1_1) {
+    random_testing_parallel_merge(3, 3, 1, 1, 1);
+}
+
+TEST(DBGSuccinct, ParallelMergeGraphsRandom_5_5_10_1_3) {
+    random_testing_parallel_merge(5, 5, 10, 1, 3);
+}
+
+TEST(DBGSuccinct, ParallelMergeGraphsRandom_15_5_4_1_3) {
+    random_testing_parallel_merge(15, 5, 4, 1, 3);
+}
+
+TEST(DBGSuccinct, ParallelMergeGraphsRandom_15_5_4_40_10) {
+    random_testing_parallel_merge(15, 5, 4, 40, 10);
+}
+
+TEST(DBGSuccinct, ParallelMergeGraphsRandom_15_5_20_39_10) {
+    random_testing_parallel_merge(15, 5, 20, 39, 10);
+}
+
+TEST(DBGSuccinct, ParallelMergeGraphsRandom_20_10_10_40_10) {
+    random_testing_parallel_merge(20, 10, 10, 40, 9);
 }

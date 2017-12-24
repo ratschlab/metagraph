@@ -33,14 +33,20 @@ class DBGCondensed : public GenomeGraph {
 
 class DBG_succ { //: public GenomeGraph{
     friend DBG_succ* merge::build_chunk(const std::vector<const DBG_succ*> &graphs,
-                                        Config *config);
+                                        size_t chunk_idx,
+                                        size_t num_chunks,
+                                        size_t num_threads,
+                                        size_t num_bins_per_thread);
 
     friend DBG_succ* merge::merge_chunks(const std::string &filenamebase,
                                          size_t num_chunks);
 
+    friend DBG_succ* merge::merge(const std::vector<const DBG_succ*> &Gv);
+
     friend DBG_succ* merge::merge(const std::vector<const DBG_succ*> &Gv,
                                   std::vector<uint64_t> kv,
                                   std::vector<uint64_t> nv);
+
   public:
     // define an extended alphabet for W --> somehow this does not work properly as expected
     typedef uint64_t TAlphabet;
@@ -329,7 +335,7 @@ class DBG_succ { //: public GenomeGraph{
     /**
      * Given a node label str, this function returns the index range
      * of nodes sharing the suffix str, if no such range exists, the pair
-     (0, 0) is returnd.
+     * (0, 0) is returnd.
      */
     template <typename T>
     std::pair<uint64_t, uint64_t> index_range(const T &str, uint64_t length) const {
@@ -346,8 +352,8 @@ class DBG_succ { //: public GenomeGraph{
                       ? succ_last(F.at(s) + 1)
                       : W->size();
         uint64_t ru = s < F.size() - 1
-                          ? F.at(s + 1)
-                          : W->size() - 1; // upper bound
+                      ? F.at(s + 1)
+                      : W->size() - 1; // upper bound
         if (rl > ru)
             return std::make_pair(0, 0);
 
