@@ -43,10 +43,6 @@ class DBG_succ { //: public GenomeGraph{
 
     friend DBG_succ* merge::merge(const std::vector<const DBG_succ*> &Gv);
 
-    friend DBG_succ* merge::merge(const std::vector<const DBG_succ*> &Gv,
-                                  std::vector<uint64_t> kv,
-                                  std::vector<uint64_t> nv);
-
   public:
     // define an extended alphabet for W --> somehow this does not work properly as expected
     typedef uint64_t TAlphabet;
@@ -77,6 +73,18 @@ class DBG_succ { //: public GenomeGraph{
      * and a given position i the position of the first set bit in last[i..N].
      */
     uint64_t succ_last(uint64_t i) const;
+
+    /**
+     * This is a convenience function that returns for array W, a position i and
+     * a character c the last index of a character c preceding in W[1..i].
+     */
+    uint64_t pred_W(uint64_t i, TAlphabet c) const;
+
+    /**
+     * This is a convenience function that returns for array W, a position i and
+     * a character c the first index of a character c in W[i..N].
+     */
+    uint64_t succ_W(uint64_t i, TAlphabet c) const;
 
     /**
      * This functions gets a position i reflecting the r-th occurence of the corresponding
@@ -252,12 +260,6 @@ class DBG_succ { //: public GenomeGraph{
     void update_F(TAlphabet c, int value);
 
     /**
-     * This is a convenience function that returns for array W, a position i and
-     * a character c the first index of a character c in W[i..N].
-     */
-    uint64_t succ_W(uint64_t i, TAlphabet c) const;
-
-    /**
      * This function takes a character c and appends it to the end of the graph
      * sequence given that the corresponding note is not part of the graph yet.
      */
@@ -406,12 +408,6 @@ class DBG_succ { //: public GenomeGraph{
      * position in W that corresponds to the i-th node's last character.
      */
     uint64_t bwd(uint64_t i) const;
-
-    /**
-     * This is a convenience function that returns for array W, a position i and
-     * a character c the last index of a character c preceding in W[1..i].
-     */
-    uint64_t pred_W(uint64_t i, TAlphabet c) const;
 
     void verbose_cout() const {}
 

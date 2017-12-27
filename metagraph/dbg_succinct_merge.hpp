@@ -25,10 +25,6 @@ namespace merge {
      */
     DBG_succ* merge(const std::vector<const DBG_succ*> &Gv);
 
-    DBG_succ* merge(const std::vector<const DBG_succ*> &Gv,
-                    std::vector<uint64_t> kv,
-                    std::vector<uint64_t> nv);
-
     /**
      * Heavily borrowing from the graph sequence traversal, this function gets a graph pointer |mergeable| and merges its
      * nodes into the target graph object |target|. The edges of |mergeable| are fully traversed and nodes are added to
