@@ -126,7 +126,7 @@ struct ParallelMergeContext {
 
 void merge(const std::vector<const DBG_succ*> &Gv,
            std::vector<uint64_t> kv,
-           std::vector<uint64_t> nv,
+           const std::vector<uint64_t> &nv,
            std::vector<TAlphabet> *W,
            std::vector<bool> *last,
            std::vector<uint64_t> *F);
@@ -376,10 +376,39 @@ DBG_succ* merge(const std::vector<const DBG_succ*> &Gv) {
     return graph;
 }
 
+std::vector<std::deque<TAlphabet>> get_last_added_nodes(const std::vector<const DBG_succ*> &Gv,
+                                                        const std::vector<uint64_t> &kv) {
+    std::vector<std::deque<TAlphabet>> last_added_nodes(DBG_succ::alph_size);
+    // init last added nodes, if not starting from the beginning
+    for (size_t i = 0; i < Gv.size(); i++) {
+        // check whether we can merge the given graphs
+        assert(Gv.at(i)->get_k() == Gv.at(0)->get_k()
+                && "Graphs have different k-mer lengths - cannot be merged!\n");
+
+        if (kv.at(i) < 2)
+            continue;
+
+        for (TAlphabet a = 0; a < DBG_succ::alph_size; a++) {
+            uint64_t pred_pos = std::max(
+                Gv.at(i)->pred_W(kv.at(i) - 1, a),
+                Gv.at(i)->pred_W(kv.at(i) - 1, a + DBG_succ::alph_size)
+            );
+            if (pred_pos == 0)
+                continue;
+
+            auto curr_seq = Gv.at(i)->get_node_seq(pred_pos);
+
+            if (!last_added_nodes[a].size()
+                 || utils::colexicographically_greater(curr_seq, last_added_nodes[a]))
+                last_added_nodes[a] = curr_seq;
+        }
+    }
+    return last_added_nodes;
+}
 
 void merge(const std::vector<const DBG_succ*> &Gv,
            std::vector<uint64_t> kv,
-           std::vector<uint64_t> nv,
+           const std::vector<uint64_t> &nv,
            std::vector<TAlphabet> *W,
            std::vector<bool> *last,
            std::vector<uint64_t> *F) {
@@ -391,45 +420,7 @@ void merge(const std::vector<const DBG_succ*> &Gv,
 
     auto verbose = Gv.at(0)->verbose;
 
-    for (size_t i = 0; i < Gv.size(); i++) {
-        // check whether we can merge the given graphs
-        assert(Gv.at(i)->get_k() == Gv.at(0)->get_k()
-                && "Graphs have different k-mer lengths - cannot be merged!\n");
-
-        // positions in the graph for respective traversal
-        nv.at(i) = (nv.at(i) == 0) ? Gv.at(i)->get_W().size() : nv.at(i);
-        // handle special cases where one or both input graphs are empty
-        kv.at(i) = (kv.at(i) == 0) ? Gv.at(i)->get_W().size() : kv.at(i);
-        //std::cerr << "k(" << i << ") " << kv.at(i)
-        //          << " n(" << i << ") " << nv.at(i) << std::endl;
-    }
-
-    // keep track of how many nodes we added
-    uint64_t added = 0;
-    size_t cnt = 0;
-    std::map<uint64_t, std::deque<TAlphabet>> last_added_nodes;
-    // init last added nodes, if not starting from the beginning
-    std::deque<TAlphabet> curr_seq;
-    for (size_t i = 0; i < Gv.size(); i++) {
-        if (kv.at(i) < 2)
-            continue;
-        for (size_t a = 0; a < DBG_succ::alph_size; a++) {
-            uint64_t sl = std::max(
-                Gv.at(i)->pred_W(kv.at(i) - 1, a),
-                Gv.at(i)->pred_W(kv.at(i) - 1, a + DBG_succ::alph_size)
-            );
-            if (sl == 0)
-                continue;
-
-            auto la = last_added_nodes.find(a);
-
-            curr_seq = Gv.at(i)->get_node_seq(sl);
-
-            if (la == last_added_nodes.end()
-                 || utils::colexicographically_greater(curr_seq, la->second))
-                last_added_nodes[a] = curr_seq;
-        }
-    }
+    auto last_added_nodes = get_last_added_nodes(Gv, kv);
 
     if (verbose) {
         std::cout << "Size of bins to merge: " << std::endl;
@@ -441,8 +432,11 @@ void merge(const std::vector<const DBG_succ*> &Gv,
     // Send parallel pointers running through each of the graphs. At each step, compare all
     // graph nodes at the respective positions with each other. Insert the lexicographically
     // smallest one into the common merge graph G (this).
-    while (true) {
 
+    // keep track of how many nodes we added
+    uint64_t added = 0;
+
+    while (true) {
         if (verbose && added > 0 && added % 1000 == 0) {
             std::cout << "." << std::flush;
             if (added % 10'000 == 0) {
@@ -455,69 +449,61 @@ void merge(const std::vector<const DBG_succ*> &Gv,
         }
 
         // find set of smallest pointers
-        auto smallest = utils::compare_nodes(Gv, kv, nv, cnt);
+        auto smallest = utils::smallest_nodes(Gv, kv, nv);
 
-        if (cnt == 0)
+        auto it = std::find(smallest.begin(), smallest.end(), true);
+        if (it == smallest.end())
             break;
-        size_t curr_k = std::max_element(smallest.first.begin(), smallest.first.end())
-                         - smallest.first.begin();
 
-        auto seq1 = Gv.at(curr_k)->get_node_seq(kv.at(curr_k));
+        size_t i = it - smallest.begin();
 
-        uint64_t val = Gv.at(curr_k)->get_W(kv.at(curr_k)) % DBG_succ::alph_size;
-        //std::cerr << "val: " << val << std::endl;
-        //usleep(1000000);
+        auto seq1 = Gv.at(i)->get_node_seq(kv.at(i));
 
-        assert(val == smallest.second % DBG_succ::alph_size);
+        uint64_t val = Gv.at(i)->get_W(kv.at(i)) % DBG_succ::alph_size;
 
-        //std::cerr << "inserting into W" << std::endl;
-        // check whether we already added a node whose outgoing edge points to the
-        // same node as the current one
-        auto it = last_added_nodes.find(smallest.second % DBG_succ::alph_size);
-        if (it != last_added_nodes.end()
-                        && utils::seq_equal(seq1, it->second, 1)
-                        && val != DBG_succ::encode('$')) {
-            W->push_back(val + DBG_succ::alph_size);
-        } else {
-            W->push_back(smallest.second);
-        }
-        last_added_nodes[val] = seq1;
-        for (TAlphabet i = Gv.at(curr_k)->get_node_last_char(kv.at(curr_k)) + 1;
-                       i < F->size(); ++i) {
-            F->at(i)++;
-        }
-        last->push_back(true);
+        bool remove_dummy_edge = false;
 
         // handle multiple outgoing edges
-        if (added > 0 && W->size() > 1 && last->at(last->size() - 2)) {
+        if (W->size() > 0 && val != W->back() % DBG_succ::alph_size) {
+            auto pred_node = last_added_nodes[W->back() % DBG_succ::alph_size];
+
             // compare the last two added nodes
-            auto it1 = last_added_nodes.find(W->at(W->size() - 2) % DBG_succ::alph_size);
-            auto it2 = last_added_nodes.find(W->at(W->size() - 1) % DBG_succ::alph_size);
-            if (it1 != last_added_nodes.end()
-                     && it2 != last_added_nodes.end()
-                     && it1 != it2
-                     && utils::seq_equal(it1->second, it2->second)) {
-                if (it2->second.back() != DBG_succ::encode('$')
-                        && W->at(W->size() - 2) == DBG_succ::encode('$')) {
-                    for (TAlphabet i = Gv.at(curr_k)->get_node_last_char(kv.at(curr_k)) + 1;
-                                   i < F->size(); ++i) {
-                        F->at(i)--;
-                    }
-                    last->erase(last->end() - 2);
-                    W->erase(W->end() - 2);
-                } else {
-                    last->at(last->size() - 2) = false;
+            if (utils::seq_equal(seq1, pred_node)) {
+                last->back() = false;
+
+                if (seq1.back() != DBG_succ::encode('$')
+                        && W->back() == DBG_succ::encode('$')) {
+                    remove_dummy_edge = true;
+                    W->resize(W->size() - 1);
+                    last->resize(last->size() - 1);
                 }
             }
         }
-        uint64_t updated = 0;
-        for (size_t i = 0; i < Gv.size(); i++) {
-            if (smallest.first.at(i)) {
-                updated += (kv.at(i) < nv.at(i));
-                kv.at(i) += (kv.at(i) < nv.at(i));
+        // check whether we already added a node whose outgoing edge points to the
+        // same node as the current one
+        if (val != DBG_succ::encode('$')
+                    && utils::seq_equal(seq1, last_added_nodes[val], 1)) {
+            W->push_back(val + DBG_succ::alph_size);
+        } else {
+            W->push_back(val);
+        }
+        if (!remove_dummy_edge) {
+            for (TAlphabet a = seq1.back() + 1; a < F->size(); ++a) {
+                F->at(a)++;
             }
         }
+        last->push_back(true);
+
+        last_added_nodes[val] = seq1;
         ++added;
+
+        uint64_t updated = 0;
+        for (size_t i = 0; i < Gv.size(); i++) {
+            if (smallest.at(i)) {
+                updated++;
+                kv.at(i)++;
+            }
+        }
         if (updated == 0)
             break;
     }

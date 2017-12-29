@@ -22,10 +22,9 @@ namespace utils {
     std::pair<bool, bool> compare_nodes(const DBG_succ *G1, uint64_t k1_node,
                                         const DBG_succ *G2, uint64_t k2_node);
 
-    std::pair<std::vector<bool>, uint64_t> compare_nodes(std::vector<const DBG_succ*> G,
-                                                         std::vector<uint64_t> k,
-                                                         std::vector<uint64_t> n,
-                                                         size_t &cnt);
+    std::vector<bool> smallest_nodes(const std::vector<const DBG_succ*> &G,
+                                     const std::vector<uint64_t> &k,
+                                     const std::vector<uint64_t> &n);
 
     /**
      *  This function checks whether two given strings are identical.

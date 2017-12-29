@@ -44,6 +44,7 @@ uint64_t kFromFile(const std::string &infbase) {
 std::pair<bool, bool> compare_nodes(const DBG_succ *G1, uint64_t k1_node,
                                     const DBG_succ *G2, uint64_t k2_node) {
     assert(G1->get_k() == G2->get_k());
+
     std::pair<TAlphabet, uint64_t> k1_val;
     std::pair<TAlphabet, uint64_t> k2_val;
 
@@ -56,80 +57,68 @@ std::pair<bool, bool> compare_nodes(const DBG_succ *G1, uint64_t k1_node,
         k1_node = k1_val.second;
         k2_node = k2_val.second;
     }
-    //std::cerr << "k1_val: " << k1_val.first << " k2_val: " << k2_val.first << " curr_k:" << curr_k << std::endl;
+
     return std::make_pair(k1_val.first < k2_val.first, k2_val.first < k1_val.first);
 }
 
 
-std::pair<std::vector<bool>, uint64_t> compare_nodes(std::vector<const DBG_succ*> G,
-                                                     std::vector<uint64_t> k,
-                                                     std::vector<uint64_t> n,
-                                                     size_t &cnt) {
+std::vector<bool> smallest_nodes(const std::vector<const DBG_succ*> &G,
+                                 const std::vector<uint64_t> &k,
+                                 const std::vector<uint64_t> &n) {
+    std::vector<bool> ignore(G.size());
+    for (size_t i = 0; i < G.size(); i++) {
+        ignore[i] = (k[i] >= n[i]);
+    }
+    std::vector<TAlphabet> k_val(G.size());
+    std::vector<uint64_t> k_tmp = k;
 
-    std::vector<bool> result (G.size(), false);
-    std::vector<bool> ignore (G.size(), false);
-    std::vector<std::pair<TAlphabet, uint64_t> > k_val;
-    std::pair<TAlphabet, uint64_t> min;
-    std::vector<uint64_t> k_tmp (k);
-    size_t s = G.size();
-
-    uint64_t curr_k = 0;
-    while (curr_k < G.at(0)->get_k()) {
-        k_val.clear();
-        for (size_t i = 0; i < s; i++) {
-            //std::cerr << "curr_k: " << curr_k << " - i: " << i; 
-            if ((k.at(i) < n.at(i)) && !ignore.at(i)) {
-                k_val.push_back(G.at(i)->get_minus_k_value(k_tmp.at(i), 0));
-            } else {
-                k_val.push_back(std::make_pair(G.at(0)->alph_size, 0));
-                ignore.at(i) = true;
+    for (uint64_t curr_k = 0; curr_k < G.at(0)->get_k(); ++curr_k) {
+        TAlphabet min = DBG_succ::alph_size;
+        for (size_t i = 0; i < G.size(); i++) {
+            if (!ignore[i]) {
+                auto ret = G[i]->get_minus_k_value(k_tmp[i], 0);
+                k_val[i] = ret.first;
+                k_tmp[i] = ret.second;
+                min = std::min(min, ret.first);
             }
-            //std::cerr << " k_val.first: " << k_val.back().first << " k_val.second: " << k_val.back().second << std::endl;
         }
-        
-        min = *std::min_element(k_val.begin(), k_val.end(),
-                [](const std::pair<TAlphabet, uint64_t> &a,
-                   const std::pair<TAlphabet, uint64_t> &b) {
-                     return a.first < b.first;
-                }
-        );
-        cnt = 0;
-        for (size_t i = 0; i < s; i++)
-            if ((k_val.at(i).first == min.first) && !ignore.at(i)) {
-                cnt++;
+
+        size_t cnt = 0;
+        for (size_t i = 0; i < G.size(); i++) {
+            if (ignore[i])
+                continue;
+
+            if (k_val[i] == min) {
+                cnt += 1;
             } else {
-                ignore.at(i) = true;
+                ignore[i] = true;
             }
+        }
+
+        if (cnt == 0)
+            return std::vector<bool>(G.size(), false);
+
         if (cnt == 1)
             break;
-        ++curr_k;
-        for (size_t i = 0; i < s; i++) {
-            if (!ignore.at(i))
-                k_tmp.at(i) = k_val.at(i).second;
+    }
+
+    uint64_t min_edge = DBG_succ::alph_size;    
+    // get minimal outgoing edge
+    std::vector<TAlphabet> edge_label(G.size());
+    for (size_t i = 0; i < G.size(); i++) {
+        if (!ignore[i]) {
+            edge_label[i] = G[i]->get_W(k[i]) % DBG_succ::alph_size;
+            min_edge = std::min(min_edge, edge_label[i]);
         }
     }
 
-    //std::cerr << "cnt: " << cnt << " s: " << s << std::endl;
-    if (cnt == 0) {
-        return std::make_pair(result, 0L);
-    } else {
-        uint64_t min_edge = G.at(0)->alph_size;    
-        uint64_t max_edge_val = 0; 
-        // get minimal outgoing edge
-        for (size_t i = 0; i < s; i++) {
-            if ((k_val.at(i).first == min.first) && !ignore.at(i))
-                min_edge = std::min(min_edge, G.at(i)->get_W(k.at(i)) % G.at(0)->alph_size);
+    std::vector<bool> smallest(G.size(), false);
+    for (size_t i = 0; i < G.size(); i++) {
+        if (!ignore[i] && edge_label[i] == min_edge) {
+            smallest[i] = true;
         }
-
-        for (size_t i = 0; i < s; i++) {
-            //std::cerr << "i: " << i << " k: " << k.at(i) << " W: " << G.at(i)->get_W(k.at(i)) << " min.f: " << min.first <<  " result: ";
-            result.at(i) = ((k_val.at(i).first == min.first) && (G.at(i)->get_W(k.at(i)) % G.at(i)->alph_size <= min_edge) && !ignore.at(i));
-            //std::cerr << result.at(i) << std::endl;
-            if (result.at(i))
-                max_edge_val = std::max(max_edge_val, G.at(i)->get_W(k.at(i)));
-        }
-        return std::make_pair(result, max_edge_val);
     }
+    return smallest;
 }
 
 
