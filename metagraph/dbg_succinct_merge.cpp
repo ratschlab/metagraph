@@ -459,7 +459,14 @@ void merge(const std::vector<const DBG_succ*> &Gv,
 
         auto seq1 = Gv.at(i)->get_node_seq(kv.at(i));
 
-        uint64_t val = Gv.at(i)->get_W(kv.at(i)) % DBG_succ::alph_size;
+        TAlphabet val = Gv.at(i)->get_W(kv.at(i)) % DBG_succ::alph_size;
+
+        // check whether we already added a node whose outgoing edge points to the
+        // same node as the current one
+        TAlphabet next_in_W = val != DBG_succ::encode('$')
+                                && utils::seq_equal(seq1, last_added_nodes[val], 1)
+                              ? val + DBG_succ::alph_size
+                              : val;
 
         bool remove_dummy_edge = false;
 
@@ -469,30 +476,22 @@ void merge(const std::vector<const DBG_succ*> &Gv,
 
             // compare the last two added nodes
             if (utils::seq_equal(seq1, pred_node)) {
-                last->back() = false;
-
                 if (seq1.back() != DBG_succ::encode('$')
                         && W->back() == DBG_succ::encode('$')) {
                     remove_dummy_edge = true;
-                    W->resize(W->size() - 1);
-                    last->resize(last->size() - 1);
+                    W->at(W->size() - 1) = next_in_W;
+                } else {
+                    last->back() = false;
                 }
             }
         }
-        // check whether we already added a node whose outgoing edge points to the
-        // same node as the current one
-        if (val != DBG_succ::encode('$')
-                    && utils::seq_equal(seq1, last_added_nodes[val], 1)) {
-            W->push_back(val + DBG_succ::alph_size);
-        } else {
-            W->push_back(val);
-        }
         if (!remove_dummy_edge) {
+            W->push_back(next_in_W);
             for (TAlphabet a = seq1.back() + 1; a < F->size(); ++a) {
                 F->at(a)++;
             }
+            last->push_back(true);
         }
-        last->push_back(true);
 
         last_added_nodes[val] = seq1;
         ++added;
