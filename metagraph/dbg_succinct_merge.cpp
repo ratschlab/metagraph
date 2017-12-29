@@ -118,18 +118,138 @@ void print_bin_stats(const std::vector<std::vector<uint64_t>> &bins) {
     std::cout << std::endl;
 }
 
+
 struct ParallelMergeContext {
     size_t idx = 0;
 
     std::mutex mu;
 };
 
+
+class graph_chunk {
+  public:
+    virtual ~graph_chunk() {}
+
+    virtual void push_back(TAlphabet W, TAlphabet F, bool last) = 0;
+
+    virtual TAlphabet get_W_back() const = 0;
+
+    virtual void alter_W_back(TAlphabet W) = 0;
+
+    virtual void alter_last_back(bool last) = 0;
+
+    virtual uint64_t size() const = 0;
+
+    virtual void extend(const graph_chunk &other) = 0;
+
+    virtual void initialize_graph(DBG_succ *graph) = 0;
+};
+
+
+class dynamic_graph_chunk : public graph_chunk {
+  public:
+    void push_back(TAlphabet W, TAlphabet F, bool last) {
+        W_.insert(W_.size(), W);
+        for (TAlphabet a = F + 1; a < F_.size(); ++a) {
+            F_[a]++;
+        }
+        last_.insertBit(last_.size(), last);
+    }
+
+    TAlphabet get_W_back() const { return W_[W_.size() - 1]; }
+
+    void alter_W_back(TAlphabet W) { W_.set(W_.size() - 1, W); }
+
+    void alter_last_back(bool last) { last_.set(last_.size() - 1, last); }
+
+    uint64_t size() const { return W_.size(); }
+
+    void extend(const graph_chunk &other) {
+        extend(dynamic_cast<const dynamic_graph_chunk&>(other));
+    }
+
+    void extend(const dynamic_graph_chunk &other) {
+        for (uint64_t j = 0; j < other.W_.size(); ++j) {
+            W_.insert(W_.size(), other.W_[j]);
+            last_.insertBit(last_.size(), other.last_[j]);
+        }
+
+        assert(F_.size() == other.F_.size());
+        for (size_t p = 0; p < other.F_.size(); ++p) {
+            F_[p] += other.F_[p];
+        }
+    }
+
+    void initialize_graph(DBG_succ *graph) {
+        delete graph->W;
+        graph->W = new wavelet_tree_dyn(4, W_);
+
+        delete graph->last;
+        graph->last = new bit_vector_dyn(last_);
+
+        graph->F = F_;
+    }
+
+  private:
+    wavelet_tree_dyn W_ = wavelet_tree_dyn(4);
+    bit_vector_dyn last_;
+    std::vector<uint64_t> F_ = std::vector<uint64_t>(DBG_succ::alph_size, 0);
+};
+
+
+class vector_graph_chunk : public graph_chunk {
+  public:
+    void push_back(TAlphabet W, TAlphabet F, bool last) {
+        W_.push_back(W);
+        for (TAlphabet a = F + 1; a < F_.size(); ++a) {
+            F_[a]++;
+        }
+        last_.push_back(last);
+    }
+
+    TAlphabet get_W_back() const { return W_.back(); }
+
+    void alter_W_back(TAlphabet W) { W_.back() = W; }
+
+    void alter_last_back(bool last) { last_.back() = last; }
+
+    uint64_t size() const { return W_.size(); }
+
+    void extend(const graph_chunk &other) {
+        extend(dynamic_cast<const vector_graph_chunk&>(other));
+    }
+
+    void extend(const vector_graph_chunk &other) {
+        W_.insert(W_.end(), other.W_.begin(), other.W_.end());
+        last_.insert(last_.end(), other.last_.begin(), other.last_.end());
+
+        assert(F_.size() == other.F_.size());
+        for (size_t p = 0; p < other.F_.size(); ++p) {
+            F_[p] += other.F_[p];
+        }
+    }
+
+    void initialize_graph(DBG_succ *graph) {
+        delete graph->W;
+        graph->W = new wavelet_tree_dyn(4, W_);
+
+        delete graph->last;
+        graph->last = new bit_vector_dyn(last_);
+
+        graph->F = F_;
+    }
+
+  private:
+    std::vector<TAlphabet> W_;
+    std::vector<bool> last_;
+    std::vector<uint64_t> F_ = std::vector<uint64_t>(DBG_succ::alph_size, 0);
+};
+
+
 void merge(const std::vector<const DBG_succ*> &Gv,
            std::vector<uint64_t> kv,
            const std::vector<uint64_t> &nv,
-           std::vector<TAlphabet> *W,
-           std::vector<bool> *last,
-           std::vector<uint64_t> *F);
+           graph_chunk *chunk);
 
 /**
  * Distribute the merging of a set of graph structures over
@@ -138,15 +258,11 @@ void merge(const std::vector<const DBG_succ*> &Gv,
 void parallel_merge_wrapper(const std::vector<const DBG_succ*> &graphs,
                             const std::vector<std::vector<uint64_t>> &bins,
                             ParallelMergeContext *context,
-                            std::vector<std::vector<TAlphabet>> *W_array,
-                            std::vector<std::vector<bool>> *last_array,
-                            std::vector<std::vector<uint64_t>> *F_array) {
+                            std::vector<graph_chunk*> *chunks) {
     assert(context);
     assert(graphs.size() > 0);
     assert(graphs.size() == bins.size());
-    assert(W_array->size() == bins.front().size() - 1);
-    assert(last_array->size() == bins.front().size() - 1);
-    assert(F_array->size() == bins.front().size() - 1);
+    assert(chunks->size() == bins.front().size() - 1);
 
     while (true) {
         context->mu.lock();
@@ -166,14 +282,11 @@ void parallel_merge_wrapper(const std::vector<const DBG_succ*> &graphs,
             kv.push_back(bins.at(i).at(curr_idx));
             nv.push_back(bins.at(i).at(curr_idx + 1));
         }
-        merge::merge(graphs, kv, nv,
-                     &W_array->at(curr_idx),
-                     &last_array->at(curr_idx),
-                     &F_array->at(curr_idx));
+        merge::merge(graphs, kv, nv, chunks->at(curr_idx));
     }
 }
 
-// TODO: return plain vectors instead of succinct graph
+// TODO: return raw chunks instead of succinct graph
 //       because it has to be merged with other chunks afterwards anyway.
 DBG_succ* build_chunk(const std::vector<const DBG_succ*> &graphs,
                       size_t chunk_idx,
@@ -228,20 +341,16 @@ DBG_succ* build_chunk(const std::vector<const DBG_succ*> &graphs,
     std::vector<std::thread> threads;
     ParallelMergeContext context;
 
-    std::vector<std::vector<TAlphabet>> W_array(bins.front().size() - 1);
-    std::vector<std::vector<bool>> last_array(bins.front().size() - 1);
-    std::vector<std::vector<uint64_t>> F_array(
-        bins.front().size() - 1,
-        std::vector<uint64_t>(DBG_succ::alph_size, 0)
-    );
+    std::vector<graph_chunk*> chunks(bins.front().size() - 1);
+    for (size_t i = 0; i < chunks.size(); ++i) {
+        chunks[i] = new vector_graph_chunk();
+    }
 
     for (size_t tid = 0; tid < num_threads; tid++) {
         threads.emplace_back(parallel_merge_wrapper, graphs,
                                                      bins,
                                                      &context,
-                                                     &W_array,
-                                                     &last_array,
-                                                     &F_array);
+                                                     &chunks);
         if (graphs.front()->verbose)
             std::cout << "starting thread " << tid << std::endl;
     }
@@ -258,32 +367,17 @@ DBG_succ* build_chunk(const std::vector<const DBG_succ*> &graphs,
     if (graphs.front()->verbose)
         std::cout << "Collecting results" << std::endl;
 
-    DBG_succ *graph = new DBG_succ(graphs.front()->get_k());
-    // remove dummy source
-    graph->W->remove(1);
-    graph->last->deleteBit(1);
-    graph->update_F(DBG_succ::encode('$'), -1);
-    uint64_t cur_pos = 1;
+    vector_graph_chunk merged_chunks;
+    merged_chunks.push_back(0, DBG_succ::alph_size, 0);
 
-    for (uint64_t i = 0; i < W_array.size(); ++i) {
-        graph->verbose_cout("    adding ", W_array[i].size(), " edges\n");
-
+    for (uint64_t i = 0; i < chunks.size(); ++i) {
         // handle last and W
-        for (uint64_t j = 0; j < W_array[i].size(); ++j) {
-            graph->W->insert(cur_pos, W_array[i][j]);
-            graph->last->insertBit(cur_pos, last_array[i][j]);
-            cur_pos++;
-        }
-
-        graph->verbose_cout("new total edges: ", graph->W->size(), "\n");
-
-        // handle F
-        assert(graph->F.size() == F_array[i].size());
-
-        for (size_t p = 0; p < graph->F.size(); ++p) {
-            graph->F.at(p) += F_array[i][p];
-        }
+        merged_chunks.extend(*chunks[i]);
+        delete chunks[i];
     }
+
+    DBG_succ *graph = new DBG_succ(graphs.front()->get_k());
+    merged_chunks.initialize_graph(graph);
 
     return graph;
 }
@@ -357,24 +451,17 @@ DBG_succ* merge(const std::vector<const DBG_succ*> &Gv) {
         nv.push_back(Gv[i]->get_W().size());
     }
 
-    std::vector<TAlphabet> W { 0 };
-    std::vector<bool> last { 0 };
-    std::vector<uint64_t> F(DBG_succ::alph_size, 0);
+    vector_graph_chunk merged_chunk;
+    merged_chunk.push_back(0, DBG_succ::alph_size, 0);
 
-    merge(Gv, kv, nv, &W, &last, &F);
+    merge(Gv, kv, nv, &merged_chunk);
 
     DBG_succ *graph = new DBG_succ(Gv.at(0)->get_k());
-
-    delete graph->W;
-    graph->W = new wavelet_tree_dyn(4, W);
-
-    delete graph->last;
-    graph->last = new bit_vector_dyn(last);
-
-    graph->F = std::move(F);
+    merged_chunk.initialize_graph(graph);
 
     return graph;
 }
+
 
 std::vector<std::deque<TAlphabet>> get_last_added_nodes(const std::vector<const DBG_succ*> &Gv,
                                                         const std::vector<uint64_t> &kv) {
@@ -409,11 +496,7 @@ std::vector<std::deque<TAlphabet>> get_last_added_nodes(const std::vector<const 
 void merge(const std::vector<const DBG_succ*> &Gv,
            std::vector<uint64_t> kv,
            const std::vector<uint64_t> &nv,
-           std::vector<TAlphabet> *W,
-           std::vector<bool> *last,
-           std::vector<uint64_t> *F) {
-
-    assert(F->size() == DBG_succ::alph_size);
+           graph_chunk *chunk) {
 
     assert(kv.size() == Gv.size());
     assert(nv.size() == Gv.size());
@@ -471,27 +554,22 @@ void merge(const std::vector<const DBG_succ*> &Gv,
         bool remove_dummy_edge = false;
 
         // handle multiple outgoing edges
-        if (W->size() > 0 && val != W->back() % DBG_succ::alph_size) {
-            auto pred_node = last_added_nodes[W->back() % DBG_succ::alph_size];
+        if (chunk->size() > 0 && val != chunk->get_W_back() % DBG_succ::alph_size) {
+            auto pred_node = last_added_nodes[chunk->get_W_back() % DBG_succ::alph_size];
 
             // compare the last two added nodes
             if (utils::seq_equal(seq1, pred_node)) {
                 if (seq1.back() != DBG_succ::encode('$')
-                        && W->back() == DBG_succ::encode('$')) {
+                        && chunk->get_W_back() == DBG_succ::encode('$')) {
                     remove_dummy_edge = true;
-                    W->at(W->size() - 1) = next_in_W;
+                    chunk->alter_W_back(next_in_W);
                 } else {
-                    last->back() = false;
+                    chunk->alter_last_back(false);
                 }
             }
         }
-        if (!remove_dummy_edge) {
-            W->push_back(next_in_W);
-            for (TAlphabet a = seq1.back() + 1; a < F->size(); ++a) {
-                F->at(a)++;
-            }
-            last->push_back(true);
-        }
+        if (!remove_dummy_edge)
+            chunk->push_back(next_in_W, seq1.back(), true);
 
         last_added_nodes[val] = seq1;
         ++added;

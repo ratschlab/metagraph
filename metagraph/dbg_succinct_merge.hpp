@@ -11,6 +11,9 @@ class Config;
 
 namespace merge {
 
+    class dynamic_graph_chunk;
+    class vector_graph_chunk;
+
     DBG_succ* build_chunk(const std::vector<const DBG_succ*> &graphs,
                           size_t chunk_idx,
                           size_t num_chunks,

@@ -143,7 +143,7 @@ size_t traverseGraph(DBG_succ *G,
     std::stack<BranchInfo> branchnodes;
     std::map<uint64_t, std::pair<uint64_t, uint64_t> > nodeId2seqId;
     // bool vector that keeps track of visited nodes
-    std::vector<bool> visited(G->last->size());
+    std::vector<bool> visited(G->get_W().size());
     for (std::vector<bool>::iterator it = visited.begin(); it != visited.end(); ++it) {
         *it = false;
     }

@@ -6,6 +6,7 @@
 #include <htslib/kseq.h>
 #include "gtest/gtest.h"
 
+#define protected public
 #define private public
 
 #include "dbg_succinct.hpp"

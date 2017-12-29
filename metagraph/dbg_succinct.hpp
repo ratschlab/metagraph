@@ -32,16 +32,11 @@ class DBGCondensed : public GenomeGraph {
 
 
 class DBG_succ { //: public GenomeGraph{
-    friend DBG_succ* merge::build_chunk(const std::vector<const DBG_succ*> &graphs,
-                                        size_t chunk_idx,
-                                        size_t num_chunks,
-                                        size_t num_threads,
-                                        size_t num_bins_per_thread);
-
     friend DBG_succ* merge::merge_chunks(const std::string &filenamebase,
                                          size_t num_chunks);
 
-    friend DBG_succ* merge::merge(const std::vector<const DBG_succ*> &Gv);
+    friend class merge::dynamic_graph_chunk;
+    friend class merge::vector_graph_chunk;
 
   public:
     // define an extended alphabet for W --> somehow this does not work properly as expected
@@ -125,17 +120,6 @@ class DBG_succ { //: public GenomeGraph{
      * will return the k-th last character of node i.
      */
     std::pair<TAlphabet, uint64_t> get_minus_k_value(uint64_t i, uint64_t k) const;
-
-    // the bit array indicating the last outgoing edge of a node
-    bit_vector *last = new bit_vector_dyn();
-
-    // the array containing the edge labels
-    wavelet_tree *W = new wavelet_tree_dyn(4); // 4 is log (sigma)
-
-    //Temporary storage for kmers before succinct representation construction
-    //the second element stores an ID for each kmer indicating which sequence it came from
-    //an even ID indicates that it's a normal kmer, an odd ID indicates that it's a bridge
-    std::vector<KMer> kmers;
 
     static const std::string alphabet;
     static const size_t alph_size;
@@ -247,11 +231,22 @@ class DBG_succ { //: public GenomeGraph{
     // k-mer size
     size_t k_;
 
-    // index of position that marks the source of the graph
-    const uint64_t kDummySource = 1;
+    // the bit array indicating the last outgoing edge of a node
+    bit_vector *last = new bit_vector_dyn();
 
     // the offset array to mark the offsets for the last column in the implicit node list
     std::vector<uint64_t> F;
+
+    // the array containing the edge labels
+    wavelet_tree *W = new wavelet_tree_dyn(4); // 4 is log (sigma)
+
+    // index of position that marks the source of the graph
+    const uint64_t kDummySource = 1;
+
+    //Temporary storage for kmers before succinct representation construction
+    //the second element stores an ID for each kmer indicating which sequence it came from
+    //an even ID indicates that it's a normal kmer, an odd ID indicates that it's a bridge
+    std::vector<KMer> kmers;
 
     /**
      * This function gets a value of the alphabet c and updates the offset of
