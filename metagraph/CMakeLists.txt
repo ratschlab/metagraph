@@ -94,3 +94,24 @@ add_dependencies(unit_tests metagraph)
 target_link_libraries(unit_tests -lgtest_main -lgtest metagraph ${METALIBS})
 
 add_test(NAME unit_tests COMMAND unit_tests)
+
+
+#-------------------
+# Python interfaces
+#-------------------
+if(INTERFACE_PYTHON)
+  FIND_PACKAGE(SWIG REQUIRED)
+  INCLUDE(${SWIG_USE_FILE})
+
+  FIND_PACKAGE(PythonLibs)
+  INCLUDE_DIRECTORIES(${PYTHON_INCLUDE_PATH})
+
+  SET(CMAKE_SWIG_FLAGS "")
+
+  file(GLOB interface_files "interfaces/*.i")
+
+  SET_SOURCE_FILES_PROPERTIES(${interface_files} PROPERTIES CPLUSPLUS ON)
+
+  SWIG_ADD_LIBRARY(metagraph LANGUAGE python SOURCES ${interface_files})
+  SWIG_LINK_LIBRARIES(metagraph metagraph ${METALIBS} ${PYTHON_LIBRARIES})
+endif()
