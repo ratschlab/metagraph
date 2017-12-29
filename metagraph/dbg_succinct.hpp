@@ -212,7 +212,7 @@ class DBG_succ { //: public GenomeGraph{
      * This is a debug function that prints the current representation of the graph to
      * the screen.
      */
-    void print_state(std::ostream &os) const;
+    void print_state(std::ostream &os = std::cout) const;
 
     /**
      * Returns the sequence stored in W and prints the node

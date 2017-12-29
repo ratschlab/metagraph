@@ -458,7 +458,7 @@ int main(int argc, const char *argv[]) {
                 if (config->print_graph)
                     graph_->print_seq();
                 if (config->print_graph_succ)
-                    graph_->print_state(std::cout);
+                    graph_->print_state();
 
                 std::ifstream instream((files[f] + ".anno.dbg").c_str());
                 if (instream.good()) {
