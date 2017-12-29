@@ -42,7 +42,7 @@ class DBG_succ { //: public GenomeGraph{
     // define an extended alphabet for W --> somehow this does not work properly as expected
     typedef uint64_t TAlphabet;
 
-    DBG_succ(size_t k = 1);
+    explicit DBG_succ(size_t k = 1);
     ~DBG_succ();
 
     /**
@@ -232,13 +232,13 @@ class DBG_succ { //: public GenomeGraph{
     size_t k_;
 
     // the bit array indicating the last outgoing edge of a node
-    bit_vector *last = new bit_vector_dyn();
+    bit_vector *last;
 
     // the offset array to mark the offsets for the last column in the implicit node list
     std::vector<uint64_t> F;
 
     // the array containing the edge labels
-    wavelet_tree *W = new wavelet_tree_dyn(4); // 4 is log (sigma)
+    wavelet_tree *W;
 
     // index of position that marks the source of the graph
     const uint64_t kDummySource = 1;

@@ -53,7 +53,9 @@ const TAlphabet kCharToNucleotide[128] = {
 
 
 DBG_succ::DBG_succ(size_t k)
-      : k_(k), F(alph_size, 0) {
+      : k_(k), last(new bit_vector_dyn()),
+               F(alph_size, 0),
+               W(new wavelet_tree_dyn(4)) {
 
     last->insertBit(0, false);
     W->insert(0, 0);
