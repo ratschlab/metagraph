@@ -1,8 +1,8 @@
 *.fa
 *.fai
-!metagraph/unit_tests/data/*.fa
-!metagraph/unit_tests/data/*.fai
-metagraph/unit_tests/data/*dump_test
+!metagraph/tests/data/*.fa
+!metagraph/tests/data/*.fai
+metagraph/tests/data/*dump_test
 .history
 */metagraph
 testrun*

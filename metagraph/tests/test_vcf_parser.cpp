@@ -4,7 +4,7 @@
 
 #include "vcf_parser.hpp"
 
-const std::string test_data_dir = "../unit_tests/data/";
+const std::string test_data_dir = "../tests/data/";
 const std::string ref_file = test_data_dir + "test_vcfparse.fa";
 const std::string vcf_file1 = test_data_dir + "test_vcfparse_1.vcf";
 const std::string vcf_file2 = test_data_dir + "test_vcfparse_2.vcf";
