@@ -156,7 +156,7 @@ bool DBG_succ::load(const std::string &infbase) {
     // if not specified in the file, the default for loading is dynamic
     state = Config::DYN;
 
-    // load F and k and p
+    // load F, k, and state
     F.resize(0);
     F.reserve(alph_size);
 

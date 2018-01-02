@@ -72,7 +72,8 @@ DBG_succ* load_critical_graph_from_file(const std::string &filename) {
     DBG_succ *graph = new DBG_succ();
     if (!graph->load(filename)) {
         std::cerr << "ERROR: input file "
-                                << filename << " corrupted" << std::endl;
+                  << filename << " corrupted" << std::endl;
+        delete graph;
         exit(1);
     }
     return graph;
@@ -96,11 +97,7 @@ int main(int argc, const char *argv[]) {
         //TODO: allow for building by appending/adding to an existing graph
         case Config::BUILD: {
             if (config->infbase.size()) {
-                graph = new DBG_succ();
-                if (!graph->load(config->infbase)) {
-                    fprintf(stderr, "ERROR: input file corrupted\n");
-                    exit(1);
-                }
+                graph = load_critical_graph_from_file(config->infbase);
                 // graph->annotationFromFile(config->infbase + ".anno.dbg");
             } else {
                 graph = new DBG_succ(config->k);
@@ -407,7 +404,9 @@ int main(int argc, const char *argv[]) {
         case Config::MERGE: {
             // collect results on an external merge
             if (config->collect > 1) {
-                graph = merge::merge_chunks(config->outfbase, config->collect);
+                graph = merge::merge_chunks(config->k,
+                                            std::vector<merge::graph_chunk*>(config->collect, NULL),
+                                            config->outfbase);
             } else {
                 // run normal merge procedure
                 // some preliminaries to make command line options consistent
@@ -420,10 +419,18 @@ int main(int argc, const char *argv[]) {
                     graphs.push_back(load_critical_graph_from_file(files[f]));
                 }
                 if (config->parallel > 1 || config->parts_total > 1) {
-                    graph = merge::build_chunk(graphs, config->part_idx,
-                                                       config->parts_total,
-                                                       config->parallel,
-                                                       config->bins_per_thread);
+                    auto *chunk = merge::build_chunk(graphs, config->part_idx,
+                                                             config->parts_total,
+                                                             config->parallel,
+                                                             config->bins_per_thread);
+                    if (!chunk) {
+                        std::cerr << "ERROR when building chunk " << config->part_idx << std::endl;
+                        exit(1);
+                    }
+                    chunk->serialize(config->outfbase
+                                      + "." + std::to_string(config->part_idx)
+                                      + "_" + std::to_string(config->parts_total));
+                    delete chunk;
                 } else {
                     graph = merge::merge(graphs);
                 }
@@ -585,9 +592,7 @@ int main(int argc, const char *argv[]) {
         if (!config->sqlfbase.empty())
             traverse::toSQL(graph, config->fname, config->sqlfbase);
         if (!config->outfbase.empty())
-            graph->serialize(config->outfbase
-                                + "." + std::to_string(config->part_idx)
-                                + "_" + std::to_string(config->parts_total));
+            graph->serialize(config->outfbase);
         delete graph;
     }
     delete config;

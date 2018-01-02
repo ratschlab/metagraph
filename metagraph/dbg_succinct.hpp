@@ -6,9 +6,13 @@
 #include "datatypes.hpp"
 #include "kmer.hpp"
 #include "config.hpp"
-#include "dbg_succinct_merge.hpp"
 #include "wavelet_tree.hpp"
 #include "bit_vector.hpp"
+
+namespace merge {
+    class dynamic_graph_chunk;
+    class vector_graph_chunk;
+} // namespace merge
 
 
 /*
@@ -32,9 +36,6 @@ class DBGCondensed : public GenomeGraph {
 
 
 class DBG_succ { //: public GenomeGraph{
-    friend DBG_succ* merge::merge_chunks(const std::string &filenamebase,
-                                         size_t num_chunks);
-
     friend class merge::dynamic_graph_chunk;
     friend class merge::vector_graph_chunk;
 
