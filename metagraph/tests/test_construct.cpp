@@ -134,11 +134,26 @@ TEST(Construct, SmallGraphTraversal) {
 
     EXPECT_EQ(outgoing_edges[1], graph->outgoing(1, DBG_succ::encode('$')));
 
-    for (size_t i = 1; i < graph->W->size(); ++i) {
+    for (size_t i = 1; i < graph->get_W().size(); ++i) {
         //test forward traversal given an output edge label
         if (graph->get_W(i) != DBG_succ::encode('$')) {
             EXPECT_EQ(outgoing_edges[i], graph->outgoing(i, graph->get_W(i)))
                 << "Edge index: " << i;
+
+            EXPECT_EQ(
+                graph->succ_last(i),
+                graph->incoming(graph->outgoing(i, graph->get_W(i)),
+                                graph->get_node_begin_value(i))
+            );
+            for (TAlphabet c = 0; c < DBG_succ::alph_size; ++c) {
+                uint64_t node_idx = graph->incoming(i, c);
+                if (node_idx) {
+                    EXPECT_EQ(
+                        graph->succ_last(i),
+                        graph->outgoing(node_idx, graph->get_node_last_char(i))
+                    );
+                }
+            }
         }
 
         //test FM index property
