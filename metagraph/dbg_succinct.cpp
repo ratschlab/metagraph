@@ -42,6 +42,7 @@
 
 const std::string DBG_succ::alphabet = "$ACGTN$ACGTN";
 const size_t DBG_succ::alph_size = 6;
+const SequenceGraph::node_iterator SequenceGraph::npos = 0;
 
 const TAlphabet kCharToNucleotide[128] = {
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
@@ -330,7 +331,7 @@ uint64_t DBG_succ::bwd(uint64_t i) const {
     CHECK_INDEX(i);
 
     // get value of last position in node i
-    TAlphabet c = get_node_last_char(i);
+    TAlphabet c = get_node_last_value(i);
     // get the offset for the last position in node i
     uint64_t o = F[c];
     // compute the offset for this position in W and select it
@@ -359,7 +360,7 @@ uint64_t DBG_succ::fwd(uint64_t i) const {
  * Using the offset structure F this function returns the value of the last
  * position of node i.
  */
-TAlphabet DBG_succ::get_node_last_char(uint64_t i) const {
+TAlphabet DBG_succ::get_node_last_value(uint64_t i) const {
     CHECK_INDEX(i);
 
     if (i == 0)
@@ -371,23 +372,27 @@ TAlphabet DBG_succ::get_node_last_char(uint64_t i) const {
     return F.size() - 1;
 }
 
-
 /**
  * Given index of node i, the function returns the
  * first character of the node.
  */
-TAlphabet DBG_succ::get_node_begin_value(uint64_t i) const {
+TAlphabet DBG_succ::get_node_first_value(uint64_t i) const {
     CHECK_INDEX(i);
 
-    if (i == 1)
-        return encode('$');
+    return get_minus_k_value(i, k_ - 1).first;
+}
 
-    for (size_t j = 0; j < k_ - 1; ++j) {
+/**
+ * Given index i of a node and a value k, this function
+ * will return the k-th last character of node i.
+ */
+std::pair<TAlphabet, uint64_t> DBG_succ::get_minus_k_value(uint64_t i, uint64_t k) const {
+    CHECK_INDEX(i);
+
+    for (; k > 0; --k) {
         i = bwd(succ_last(i));
-        if (i == 1)
-            return encode('$');
     }
-    return get_node_last_char(i);
+    return std::make_pair(get_node_last_value(i), bwd(succ_last(i)));
 }
 
 /**
@@ -420,7 +425,7 @@ uint64_t DBG_succ::outgoing_edge_idx(uint64_t i, TAlphabet c) const {
 uint64_t DBG_succ::outgoing(uint64_t i, TAlphabet c) const {
     CHECK_INDEX(i);
 
-    c = c % alph_size;
+    c %= alph_size;
 
     uint64_t j = outgoing_edge_idx(i, c);
     if (j == 0)
@@ -449,23 +454,31 @@ uint64_t DBG_succ::incoming(uint64_t i, TAlphabet c) const {
     // check if the first incoming edge has label `c`
     uint64_t x = bwd(succ_last(i));
 
-    if (get_node_begin_value(x) == c)
+    if (get_node_first_value(x) == c)
         return succ_last(x);
 
     if (x + 1 == get_W().size())
         return 0;
 
-    TAlphabet d = get_node_last_char(i);
+    TAlphabet d = get_node_last_value(i);
     uint64_t y = succ_W(x + 1, d);
 
     // iterate over the rest of the incoming edges
     while (x + 1 < y) {
         x = succ_W(x + 1, d + alph_size);
-        if (x < y && get_node_begin_value(x) == c) {
+        if (x < y && get_node_first_value(x) == c) {
             return succ_last(x);
         }
     }
     return 0;
+}
+
+DBG_succ::node_iterator DBG_succ::traverse(node_iterator node, char edge_label) const {
+    return outgoing(node, encode(edge_label));
+}
+
+DBG_succ::node_iterator DBG_succ::traverse_back(node_iterator node, char edge_label) const {
+    return incoming(node, encode(edge_label));
 }
 
 /**
@@ -489,7 +502,7 @@ uint64_t DBG_succ::indegree(uint64_t i) const {
     if (i < 2)
         return 0;
     uint64_t x = bwd(succ_last(i));
-    TAlphabet d = get_node_last_char(i);
+    TAlphabet d = get_node_last_value(i);
     uint64_t y = succ_W(x + 1, d);
     return 1 + rank_W(y, d + alph_size) - rank_W(x, d + alph_size);
 }
@@ -672,27 +685,12 @@ uint64_t DBG_succ::pred_kmer(const std::deque<TAlphabet> &kmer) const {
 
 
 /**
- * Given index i of a node and a value k, this function
- * will return the k-th last character of node i.
- */
-std::pair<TAlphabet, uint64_t> DBG_succ::get_minus_k_value(uint64_t i, uint64_t k) const {
-    CHECK_INDEX(i);
-
-    for (; k > 0; --k) {
-        i = bwd(succ_last(i));
-    }
-    return std::make_pair(get_node_last_char(i), bwd(succ_last(i)));
-}
-
-
-
-/**
  * This function gets two node indices and returns whether the
  * node labels share a k-1 suffix.
  */
 bool DBG_succ::compare_node_suffix(uint64_t i1, uint64_t i2) const {
     for (size_t ii = 0; ii < k_ - 1; ++ii) {
-        if (get_node_last_char(i1) != get_node_last_char(i2)) {
+        if (get_node_last_value(i1) != get_node_last_value(i2)) {
             return false;
         }
         i1 = bwd(succ_last(i1));
@@ -704,7 +702,7 @@ bool DBG_succ::compare_node_suffix(uint64_t i1, uint64_t i2) const {
 bool DBG_succ::compare_node_suffix(TAlphabet *ref, uint64_t i2) const {
     TAlphabet *i1 = &ref[k_ - 1];
     for (size_t ii=0; ii < k_ - 1; ii++) {
-        if (*i1 != get_node_last_char(i2)) {
+        if (*i1 != get_node_last_value(i2)) {
             return false;
         }
         i1 = &ref[k_ - 2 - ii];
@@ -756,6 +754,19 @@ std::string DBG_succ::get_node_str(uint64_t k_node) const {
     std::transform(node_encoding.begin(), node_encoding.end(),
                    node_string.begin(), decode);
     return node_string;
+}
+
+DBG_succ::node_iterator DBG_succ::find(const std::string &sequence) const {
+    auto kmer_indices = align(sequence);
+    if (!kmer_indices.size())
+        return npos;
+
+    for (const auto &index : kmer_indices) {
+        if (!index)
+            return npos;
+    }
+
+    return kmer_indices.back();
 }
 
 std::vector<uint64_t> DBG_succ::align(const std::string &sequence,
@@ -1237,7 +1248,7 @@ bool DBG_succ::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
         return 0;
     } else {
         // the source node already has some outgoing edges
-        update_F(get_node_last_char(begin), +1);
+        update_F(get_node_last_value(begin), +1);
         W->insert(begin, c);
         last->insertBit(begin, false);
         sort_W_locally(begin, end);
@@ -1267,7 +1278,7 @@ void DBG_succ::remove_edges(const std::set<uint64_t> &edges) {
             }
         }
         W->remove(edge_id);
-        update_F(get_node_last_char(edge_id), -1);
+        update_F(get_node_last_value(edge_id), -1);
         // If the current node has multiple outgoing edges,
         // remove one of the 0s from last instead of 1.
         if (get_last(edge_id) && (edge >= shift + 1)

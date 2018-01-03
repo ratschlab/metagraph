@@ -143,14 +143,14 @@ TEST(Construct, SmallGraphTraversal) {
             EXPECT_EQ(
                 graph->succ_last(i),
                 graph->incoming(graph->outgoing(i, graph->get_W(i)),
-                                graph->get_node_begin_value(i))
+                                graph->get_node_first_value(i))
             );
             for (TAlphabet c = 0; c < DBG_succ::alph_size; ++c) {
                 uint64_t node_idx = graph->incoming(i, c);
                 if (node_idx) {
                     EXPECT_EQ(
                         graph->succ_last(i),
-                        graph->outgoing(node_idx, graph->get_node_last_char(i))
+                        graph->outgoing(node_idx, graph->get_node_last_value(i))
                     );
                 }
             }
@@ -160,7 +160,7 @@ TEST(Construct, SmallGraphTraversal) {
         EXPECT_TRUE(graph->get_last(graph->fwd(i)));
         if (graph->get_W(i)) {
             EXPECT_EQ(graph->get_W(i) % graph->alph_size,
-                      graph->get_node_last_char(graph->fwd(i)));
+                      graph->get_node_last_value(graph->fwd(i)));
         }
     }
 
@@ -410,7 +410,7 @@ TEST(DBGSuccinct, PredKmerRandomTest) {
                                         + kmer_str_suffices[j]);
             }
         }
-        
+
         for (const auto &kmer_str : all_kmer_str) {
             std::deque<TAlphabet> kmer(kmer_str.size());
             std::transform(kmer_str.begin(), kmer_str.end(),
@@ -426,6 +426,7 @@ TEST(DBGSuccinct, PredKmerRandomTest) {
               << "kmer: " << kmer_str << std::endl
               << "lower bound: " << lower_bound << std::endl
               << "which is: " << graph.get_node_str(lower_bound) << std::endl;
+
             if (lower_bound < graph.get_W().size() - 1) {
                 EXPECT_TRUE(
                     utils::colexicographically_greater(
@@ -434,5 +435,36 @@ TEST(DBGSuccinct, PredKmerRandomTest) {
                 );
             }
         }
+    }
+}
+
+TEST(DBGSuccinct, FindSequence) {
+    for (size_t k = 1; k < 10; ++k) {
+        SequenceGraph *graph = new DBG_succ(k);
+
+        graph->add_sequence(std::string(100, 'A'));
+        EXPECT_EQ(k + 2, graph->find(std::string(k, 'A')));
+        EXPECT_EQ(k + 2, graph->find(std::string(2 * k, 'A')));
+        EXPECT_EQ(DBG_succ::npos, graph->find(std::string(k - 1, 'A')));
+
+        delete graph;
+    }
+}
+
+TEST(DBGSuccinct, Traversals) {
+    for (size_t k = 1; k < 10; ++k) {
+        SequenceGraph *graph = new DBG_succ(k);
+
+        graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
+
+        auto it = graph->find(std::string(k, 'A'));
+        ASSERT_EQ(k + 3, it);
+        EXPECT_EQ(it, graph->traverse(it, 'A'));
+        EXPECT_EQ(it + 1, graph->traverse(it, 'C'));
+        EXPECT_EQ(it, graph->traverse_back(it + 1, 'A'));
+        EXPECT_EQ(DBG_succ::npos, graph->traverse(it, 'G'));
+        EXPECT_EQ(DBG_succ::npos, graph->traverse_back(it + 1, 'G'));
+
+        delete graph;
     }
 }

@@ -23,7 +23,7 @@ namespace traverse {
 #endif
 
 /**
- * This object collects information about branches during graph traversal, so 
+ * This object collects information about branches during graph traversal, so
  * we know where to jump back to when we reached a dead end.
  */
 struct BranchInfo {
@@ -44,24 +44,6 @@ struct JoinInfo {
     uint64_t seqPos2 = 0;
 };
 
-
-/**
- * This object collects information about branches during graph traversal, so
- * we know where to jump back to when we reached a dead end.
- */
-struct BranchInfo;
-
-/**
- * This will hold the graph edges that will be written to the SQL graph output.
- */
-struct JoinInfo;
-
-
-size_t traverseGraph(DBG_succ *G,
-                     std::vector<JoinInfo> &joins,
-                     std::map<std::pair<uint64_t, DBG_succ::TAlphabet>, uint64_t> &branchMap,
-                     const std::string &sqlfbase,
-                     std::ofstream &SQLstream);
 
 void allelesFromSeq(DBG_succ *G,
                     kstring_t &seq,
@@ -95,42 +77,41 @@ bool finish_sequence(std::string &sequence,
                      uint64_t seqId,
                      const std::string &sqlfbase,
                      std::ofstream &SQLstream) {
-    if (sequence.length() > 0) {
-        if (seqId == 1)
-            SQLstream << "INSERT INTO FASTA VALUES (1, '"
-                                    << sqlfbase << ".fa');" << std::endl;
-        std::ofstream stream;
-        if (seqId == 1)
-            stream.open((sqlfbase + ".fa").c_str());
-        else
-            stream.open((sqlfbase + ".fa").c_str(), std::ofstream::app);
-        stream << ">seq" << seqId << std::endl;
-        uint64_t i = 0;
-        while ((i + 80) < sequence.length()) {
-            stream << sequence.substr(i, 80) << std::endl;
-            i += 80;
-        }
-        if (i != sequence.length())
-            stream << sequence.substr(i) << std::endl;
-        stream.close();
-
-        if (debug)
-            std::cout << sequence << std::endl;
-
-        std::string md5;
-        std::ostringstream test;
-        test << sequence;
-        libmaus2::util::MD5::md5(test.str(), md5);
-        SQLstream << "INSERT INTO Sequence VALUES ("
-                  << seqId << ", 1, 'seq"
-                  << seqId << "', '"
-                  << md5 << "', "
-                  << sequence.length() << ");" << std::endl;
-        sequence.clear();
-        return true;
-    } else {
+    if (!sequence.size())
         return false;
+
+    if (seqId == 1)
+        SQLstream << "INSERT INTO FASTA VALUES (1, '" << sqlfbase << ".fa');\n";
+    std::ofstream stream;
+    if (seqId == 1) {
+        stream.open(sqlfbase + ".fa");
+    } else {
+        stream.open(sqlfbase + ".fa", std::ofstream::app);
     }
+    stream << ">seq" << seqId << std::endl;
+    uint64_t i = 0;
+    while ((i + 80) < sequence.length()) {
+        stream << sequence.substr(i, 80) << std::endl;
+        i += 80;
+    }
+    if (i != sequence.length())
+        stream << sequence.substr(i) << std::endl;
+    stream.close();
+
+    if (debug)
+        std::cout << sequence << std::endl;
+
+    std::string md5;
+    std::ostringstream test;
+    test << sequence;
+    libmaus2::util::MD5::md5(test.str(), md5);
+    SQLstream << "INSERT INTO Sequence VALUES ("
+              << seqId << ", 1, 'seq"
+              << seqId << "', '"
+              << md5 << "', "
+              << sequence.length() << ");" << std::endl;
+    sequence.clear();
+    return true;
 }
 
 
@@ -143,10 +124,8 @@ size_t traverseGraph(DBG_succ *G,
     std::stack<BranchInfo> branchnodes;
     std::map<uint64_t, std::pair<uint64_t, uint64_t> > nodeId2seqId;
     // bool vector that keeps track of visited nodes
-    std::vector<bool> visited(G->get_W().size());
-    for (std::vector<bool>::iterator it = visited.begin(); it != visited.end(); ++it) {
-        *it = false;
-    }
+    std::vector<bool> visited(G->get_W().size(), false);
+
     std::string sequence;
     // for nodes with indegree > 1 we store sequence and index of the 
     // sequence that visited them, so we know where to anchor branches into it
@@ -189,7 +168,7 @@ size_t traverseGraph(DBG_succ *G,
             visited.at(nodeId) = true;
             seqPos += isFirst ? 0 : 1;
             isFirst = false;
-            val = G->get_node_last_char(nodeId);
+            val = G->get_node_last_value(nodeId);
             sequence.append(1, G->decode(val % G->alph_size));
             // store seq position of this node (we will join to it later)
             if (G->indegree(nodeId) > 1) {
@@ -394,7 +373,7 @@ void allelesFromSeq(DBG_succ* G, kstring_t &seq, unsigned int f,
     //     fprintf(stderr, "processing alleles for file %u\n", f);
 
     while (true) {
-        nodeVal = G->get_node_last_char(nodeId);
+        nodeVal = G->get_node_last_value(nodeId);
         if (nodeVal == 0) {
             nodeId = G->fwd(nodeId);
             alleleSeqPos++;
@@ -535,7 +514,7 @@ void toSQL(DBG_succ *G, const std::vector<std::string> &fname,
     // traverse the graph, thereby filling joins vector, branchMap and 
     // writing the sequences to individual fasta files
     size_t seqNum = traverseGraph(G, joins, branchMap, sqlfbase, SQLstream); 
-    
+
     // write graph joins to SQL file
     for (size_t i = 0; i < joins.size(); ++i) {
         if (joins.at(i).seqId1 < joins.at(i).seqId2 ||
@@ -578,8 +557,7 @@ void toSQL(DBG_succ *G, const std::vector<std::string> &fname,
             gzclose(input_p);
 
             // open variant set
-            SQLstream << "INSERT INTO VariantSet VALUES (1, 1, 'deBruijnGraph');"
-                      << std::endl;
+            SQLstream << "INSERT INTO VariantSet VALUES (1, 1, 'deBruijnGraph');\n";
         }
         // open stream to fasta file
         gzFile input_p = gzopen(fname.at(f).c_str(), "r");
@@ -617,4 +595,4 @@ void toSQL(DBG_succ *G, const std::vector<std::string> &fname,
     }
 }
 
-}
+} // namespace traverse

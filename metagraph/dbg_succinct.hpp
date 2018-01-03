@@ -15,27 +15,37 @@ namespace merge {
 } // namespace merge
 
 
-/*
-GenomeGraph {
+class SequenceGraph {
   public:
-    template <class T>
-    get_index(const T &k_mer)
-    get_indices(const std::string &sequence)
+    typedef uint64_t node_iterator;
+    static const node_iterator npos;
 
-    get_incoming_edges(node_it node, char edge_label)
-    get_outgoing_edges(node_it node, char edge_label)
+    virtual ~SequenceGraph() {};
 
-    void add_sequence(const std::string &sequence)
+    virtual void add_sequence(const std::string &sequence, bool try_extend = false) = 0;
+
+    // Traverse the graph aligning the sequence
+    // and return iterator to the last traversed node in graph.
+    virtual node_iterator find(const std::string &sequence) const = 0;
+
+    // Traverse the outgoing edge
+    virtual node_iterator traverse(node_iterator node, char edge_label) const = 0;
+    // Traverse the incoming edge
+    virtual node_iterator traverse_back(node_iterator node, char edge_label) const = 0;
+
+    virtual bool load(const std::string &filename_base) = 0;
+    virtual void serialize(const std::string &filename_base) const = 0;
 };
 
 
-class DBGCondensed : public GenomeGraph {
+/*
+class DBGCondensed : public SequenceGraph {
 
 };
 */
 
 
-class DBG_succ { //: public GenomeGraph{
+class DBG_succ : public SequenceGraph {
     friend class merge::dynamic_graph_chunk;
     friend class merge::vector_graph_chunk;
 
@@ -45,6 +55,140 @@ class DBG_succ { //: public GenomeGraph{
 
     explicit DBG_succ(size_t k = 1);
     ~DBG_succ();
+
+    /**
+    * Perform an element wise comparison of the arrays W, last and
+    * F and will only check for identity. If any element differs, return
+    * false and true otherwise.
+    */
+    bool operator==(const DBG_succ &other) const;
+
+    node_iterator traverse(node_iterator node, char edge_label) const;
+    node_iterator traverse_back(node_iterator node, char edge_label) const;
+
+    node_iterator find(const std::string &sequence) const;
+
+    bool load(const std::string &filename_base);
+    void serialize(const std::string &filename_base) const;
+
+    /**
+     * Add a full sequence to the graph.
+     * If |try_extend| is true, search for the first k-mer in the graph
+     * and extend it from that point. If the search fails, start from the dummy source.
+     */
+    void add_sequence(const std::string &seq, bool try_extend = false);
+
+    void add_sequence_fast(const std::string &seq,
+                           bool add_bridge = true,
+                           unsigned int parallel = 1,
+                           std::string suffix = "");
+
+    void construct_succ(unsigned int parallel = 1);
+
+    void remove_edges(const std::set<uint64_t> &edges);
+
+    void merge(const DBG_succ &Gm);
+
+    /**
+     * Return k-mer length of current graph.
+     */
+    uint64_t get_k() const { return this->k_; }
+
+    uint64_t num_nodes() const;
+
+    uint64_t num_edges() const;
+
+    /**
+     * Return value of W at position k.
+     */
+    TAlphabet get_W(uint64_t k) const { return (*W)[k]; }
+    const wavelet_tree& get_W() const { return *W; }
+
+    // Given the alphabet index return the corresponding symbol
+    static char decode(TAlphabet s);
+    // Given the alphabet character return its corresponding number
+    static TAlphabet encode(char s);
+
+    /**
+     * Breaks the seq into k-mers and searches for the index of each
+     * k-mer in the graph. Returns these indices.
+     */
+    std::vector<uint64_t> align(const std::string &sequence,
+                                uint64_t alignment_length = 0) const;
+
+    std::vector<std::vector<HitInfo>> align_fuzzy(const std::string &sequence,
+                                                  uint64_t max_distance = 0,
+                                                  uint64_t alignment_length = 0) const;
+
+    /**
+     * This is a debug function that prints the current representation of the graph to
+     * the screen.
+     */
+    void print_state(std::ostream &os = std::cout) const;
+
+    /**
+     * Returns the sequence stored in W and prints the node
+     * information in an overview.
+     * Useful for debugging purposes.
+     */
+    void print_seq() const;
+
+    /**
+     * Write the adjacency list to file |filename| or
+     * print it to stdout of the filename is not provided.
+     */
+    void print_adj_list(const std::string &filename = "") const;
+
+    void switch_state(Config::StateType state);
+
+    /**
+     * Given index i of a node and a value k, this function
+     * will return the k-th last character of node i.
+     */
+    std::pair<TAlphabet, uint64_t> get_minus_k_value(uint64_t i, uint64_t k) const;
+
+    /**
+     * Using the offset structure F this function returns the value of the last
+     * position of node i.
+     */
+    TAlphabet get_node_last_value(uint64_t i) const;
+
+    /**
+     * Given a node index k_node, this function returns the k-mer sequence of the
+     * node in a deque data structure.
+     */
+    std::deque<TAlphabet> get_node_seq(uint64_t k_node) const;
+
+    /**
+     * Given a node index i, this function returns the number of outgoing
+     * edges from node i.
+     */
+    uint64_t outdegree(uint64_t i) const;
+
+    /**
+     * Given a node index i, this function returns the number of incoming
+     * edges to node i.
+     */
+    uint64_t indegree(uint64_t i) const;
+
+    /**
+     * Given a position i in W and an edge label c, this function returns the
+     * index of the node the edge is pointing to.
+     */
+    uint64_t outgoing(uint64_t i, TAlphabet c) const;
+
+    /**
+     * Given a node index i and an edge label c, this function returns the
+     * index of the node the incoming edge belongs to.
+     */
+    uint64_t incoming(uint64_t i, TAlphabet c) const;
+
+    /**
+     * Given a node label kmer, this function returns the index
+     * of the corresponding node or the closest predecessor, if no node
+     * with the sequence is not found.
+     */
+    uint64_t pred_kmer(const std::deque<TAlphabet> &kmer) const;
 
     /**
      * Uses the object's array last and a position and
@@ -88,39 +232,6 @@ class DBG_succ { //: public GenomeGraph{
      */
     uint64_t fwd(uint64_t i) const;
 
-    /**
-    * Perform an element wise comparison of the arrays W, last and
-    * F and will only check for identity. If any element differs, return
-    * false and true otherwise.
-    */
-    bool operator==(const DBG_succ &other) const;
-
-    bool load(const std::string &filename_base);
-    void serialize(const std::string &filename_base) const;
-
-    /**
-     * Add a full sequence to the graph.
-     * If |try_extend| is true, search for the first k-mer in the graph
-     * and extend it from that point. If the search fails, start from the dummy source.
-     */
-    void add_sequence(const std::string &seq, bool try_extend = false);
-
-    void add_sequence_fast(const std::string &seq,
-                           bool add_bridge = true,
-                           unsigned int parallel = 1,
-                           std::string suffix = "");
-
-    void construct_succ(unsigned int parallel = 1);
-
-    void remove_edges(const std::set<uint64_t> &edges);
-
-    void merge(const DBG_succ &Gm);
-
-    /**
-     * Given index i of a node and a value k, this function
-     * will return the k-th last character of node i.
-     */
-    std::pair<TAlphabet, uint64_t> get_minus_k_value(uint64_t i, uint64_t k) const;
 
     static const std::string alphabet;
     static const size_t alph_size;
@@ -132,101 +243,6 @@ class DBG_succ { //: public GenomeGraph{
 #else
     bool verbose = false;
 #endif
-
-    /**
-     * Using the offset structure F this function returns the value of the last
-     * position of node i.
-     */
-    TAlphabet get_node_last_char(uint64_t i) const;
-
-    /**
-     * Given a node index k_node, this function returns the k-mer sequence of the
-     * node in a deque data structure.
-     */
-    std::deque<TAlphabet> get_node_seq(uint64_t k_node) const;
-
-    /**
-     * Given a node index i, this function returns the number of outgoing
-     * edges from node i.
-     */
-    uint64_t outdegree(uint64_t i) const;
-
-    /**
-     * Given a node index i, this function returns the number of incoming
-     * edges to node i.
-     */
-    uint64_t indegree(uint64_t i) const;
-
-    /**
-     * Given a position i in W and an edge label c, this function returns the
-     * index of the node the edge is pointing to.
-     */
-    uint64_t outgoing(uint64_t i, TAlphabet c) const;
-
-    /**
-     * Given a node index i and an edge label c, this function returns the
-     * index of the node the incoming edge belongs to.
-     */
-    uint64_t incoming(uint64_t i, TAlphabet c) const;
-
-    /**
-     * Given a node label kmer, this function returns the index
-     * of the corresponding node or the closest predecessor, if no node
-     * with the sequence is not found.
-     */
-    uint64_t pred_kmer(const std::deque<TAlphabet> &kmer) const;
-
-    /**
-     * Return k-mer length of current graph.
-     */
-    uint64_t get_k() const { return this->k_; }
-
-    /**
-     * Return value of W at position k.
-     */
-    TAlphabet get_W(uint64_t k) const { return (*W)[k]; }
-    const wavelet_tree& get_W() const { return *W; }
-
-    // Given the alphabet index return the corresponding symbol
-    static char decode(TAlphabet s);
-    // Given the alphabet character return its corresponding number
-    static TAlphabet encode(char s);
-
-    /**
-     * Breaks the seq into k-mers and searches for the index of each
-     * k-mer in the graph. Returns these indices.
-     */
-    std::vector<uint64_t> align(const std::string &sequence,
-                                uint64_t alignment_length = 0) const;
-
-    std::vector<std::vector<HitInfo>> align_fuzzy(const std::string &sequence,
-                                                  uint64_t max_distance = 0,
-                                                  uint64_t alignment_length = 0) const;
-
-    uint64_t num_nodes() const;
-
-    uint64_t num_edges() const;
-
-    void switch_state(Config::StateType state);
-
-    /**
-     * This is a debug function that prints the current representation of the graph to
-     * the screen.
-     */
-    void print_state(std::ostream &os = std::cout) const;
-
-    /**
-     * Returns the sequence stored in W and prints the node
-     * information in an overview.
-     * Useful for debugging purposes.
-     */
-    void print_seq() const;
-
-    /**
-     * Write the adjacency list to file |filename| or
-     * print it to stdout of the filename is not provided.
-     */
-    void print_adj_list(const std::string &filename = "") const;
 
   private:
     // k-mer size
@@ -397,7 +413,7 @@ class DBG_succ { //: public GenomeGraph{
      * Given index of node i, the function returns the
      * first character of the node.
      */
-    TAlphabet get_node_begin_value(uint64_t i) const;
+    TAlphabet get_node_first_value(uint64_t i) const;
 
     /**
      * This function gets a position i that reflects the i-th node and returns the

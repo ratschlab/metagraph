@@ -22,21 +22,17 @@ namespace merge {
         virtual ~graph_chunk() {}
 
         virtual void push_back(TAlphabet W, TAlphabet F, bool last) = 0;
-
         virtual TAlphabet get_W_back() const = 0;
-
         virtual void alter_W_back(TAlphabet W) = 0;
-
         virtual void alter_last_back(bool last) = 0;
 
-        virtual uint64_t size() const = 0;
-
         virtual void extend(const graph_chunk &other) = 0;
+
+        virtual uint64_t size() const = 0;
 
         virtual void initialize_graph(DBG_succ *graph) = 0;
 
         virtual bool load(const std::string &filename_base) = 0;
-
         virtual void serialize(const std::string &filename_base) const = 0;
     };
 
