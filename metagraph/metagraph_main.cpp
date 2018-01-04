@@ -119,7 +119,7 @@ int main(int argc, const char *argv[]) {
 
                 DBG_succ::VectorChunk graph_data;
                 // add the dummy source node
-                graph_data.push_back(0, DBG_succ::alph_size, 0);
+                graph_data.push_back(1, DBG_succ::alph_size, 0);
 
                 //one pass per suffix
                 for (size_t j = 0; j < suffices.size(); ++j) {
@@ -129,75 +129,71 @@ int main(int argc, const char *argv[]) {
 
                     std::vector<KMer> kmers;
 
-                    if (suffices[j].find("$") == std::string::npos) {
-
-                        // iterate over input files
-                        for (unsigned int f = 0; f < files.size(); ++f) {
-                            if (config->verbose) {
-                                std::cout << std::endl << "Parsing " << files[f] << std::endl;
-                            }
-                            // open stream
-                            gzFile input_p = gzopen(files[f].c_str(), "r");
-
-                            if (utils::get_filetype(files[f]) == "VCF") {
-                                //READ FROM VCF
-                                uint64_t nbp = 0;
-                                uint64_t nbplast = 0;
-                                tstart = clock();
-                                timelast = clock();
-                                vcf_parser vcf;
-                                if (!vcf.init(config->refpath, files[f], graph->get_k())) {
-                                    std::cerr << "ERROR reading VCF " << files[f] << std::endl;
-                                    exit(1);
-                                }
-                                std::cerr << "Loading VCF with " << config->parallel << " threads per line\n";
-                                std::string sequence;
-                                std::string annotation;
-                                for (size_t i = 1; vcf.get_seq(annots, &sequence, &annotation); ++i) {
-                                    if (i % 10'000 == 0) {
-                                        std::cout << "." << std::flush;
-                                        if (i % 100'000 == 0) {
-                                            fprintf(stdout, "%zu - bp %" PRIu64 " / runtime %lu / BPph %" PRIu64 "\n",
-                                                            i,
-                                                            nbp,
-                                                            (clock() - tstart) / CLOCKS_PER_SEC,
-                                                            uint64_t(60) * uint64_t(60)
-                                                                * CLOCKS_PER_SEC * (nbp - nbplast)
-                                                                / (clock() - timelast));
-                                            nbplast = nbp;
-                                            timelast = clock();
-                                        }
-                                    }
-                                    annotation = "VCF:" + annotation;
-                                    nbp += sequence.length();
-                                    add_sequence_fast(sequence, graph->get_k(), &kmers,
-                                                      false, config->parallel);
-                                }
-                            } else {
-                                //READ FROM FASTA
-                                //TODO: handle read_stream->qual
-                                kseq_t *read_stream = kseq_init(input_p);
-                                if (read_stream == NULL) {
-                                    std::cerr << "ERROR while opening input file " << files[f] << std::endl;
-                                    exit(1);
-                                }
-                                for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
-                                //while (kseq_read(read_stream) >= 0) {
-                                    // possibly reverse k-mers
-                                    if (config->reverse)
-                                        reverse_complement(read_stream->seq);
-                                    // add all k-mers of seq to the graph
-                                    add_sequence_fast(std::string(read_stream->seq.s, read_stream->seq.l),
-                                                      graph->get_k(), &kmers,
-                                                      true, config->parallel);
-                                }
-                                kseq_destroy(read_stream);
-                            }
-                            gzclose(input_p);
-                            //graph->update_counters();
-                            //graph->print_stats();
-                            //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
+                    // iterate over input files
+                    for (unsigned int f = 0; f < files.size(); ++f) {
+                        if (config->verbose) {
+                            std::cout << std::endl << "Parsing " << files[f] << std::endl;
                         }
+                        // open stream
+                        gzFile input_p = gzopen(files[f].c_str(), "r");
+
+                        if (utils::get_filetype(files[f]) == "VCF") {
+                            //READ FROM VCF
+                            uint64_t nbp = 0;
+                            uint64_t nbplast = 0;
+                            tstart = clock();
+                            timelast = clock();
+                            vcf_parser vcf;
+                            if (!vcf.init(config->refpath, files[f], graph->get_k())) {
+                                std::cerr << "ERROR reading VCF " << files[f] << std::endl;
+                                exit(1);
+                            }
+                            std::cerr << "Loading VCF with " << config->parallel << " threads per line\n";
+                            std::string sequence;
+                            std::string annotation;
+                            for (size_t i = 1; vcf.get_seq(annots, &sequence, &annotation); ++i) {
+                                if (i % 10'000 == 0) {
+                                    std::cout << "." << std::flush;
+                                    if (i % 100'000 == 0) {
+                                        fprintf(stdout, "%zu - bp %" PRIu64 " / runtime %lu / BPph %" PRIu64 "\n",
+                                                        i,
+                                                        nbp,
+                                                        (clock() - tstart) / CLOCKS_PER_SEC,
+                                                        uint64_t(60) * uint64_t(60)
+                                                            * CLOCKS_PER_SEC * (nbp - nbplast)
+                                                            / (clock() - timelast));
+                                        nbplast = nbp;
+                                        timelast = clock();
+                                    }
+                                }
+                                annotation = "VCF:" + annotation;
+                                nbp += sequence.length();
+                                add_sequence_fast(sequence, graph->get_k(), &kmers,
+                                                  false, config->parallel);
+                            }
+                        } else {
+                            //READ FROM FASTA
+                            //TODO: handle read_stream->qual
+                            kseq_t *read_stream = kseq_init(input_p);
+                            if (read_stream == NULL) {
+                                std::cerr << "ERROR while opening input file " << files[f] << std::endl;
+                                exit(1);
+                            }
+                            for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
+                            //while (kseq_read(read_stream) >= 0) {
+                                // possibly reverse k-mers
+                                if (config->reverse)
+                                    reverse_complement(read_stream->seq);
+                                // add all k-mers of seq to the graph
+                                add_sequence_fast(std::string(read_stream->seq.s, read_stream->seq.l),
+                                                  graph->get_k(), &kmers,
+                                                  true, config->parallel);
+                            }
+                            kseq_destroy(read_stream);
+                        }
+                        gzclose(input_p);
+                        //graph->print_stats();
+                        //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
                     }
                     get_RAM();
                     //append to succinct representation and clear kmer list
@@ -208,15 +204,14 @@ int main(int argc, const char *argv[]) {
                     graph_data.extend(*next_block);
                     delete next_block;
 
-                    std::cout << (clock()-tstart)/CLOCKS_PER_SEC << "\n\n";
+                    std::cout << (clock() - tstart) / CLOCKS_PER_SEC << "\n\n";
                 }
                 graph_data.initialize_graph(graph);
 
-                //TODO: cleanup
-                tstart = clock();
                 std::cerr << "Converting static graph to dynamic\t";
+                tstart = clock();
                 graph->switch_state(Config::DYN);
-                std::cout << (clock()-tstart)/CLOCKS_PER_SEC << "\n";
+                std::cout << (clock() - tstart) / CLOCKS_PER_SEC << std::endl;
             } else {
                 //slower method
                 //TODO: merge in optimizations from seqmerge branch
