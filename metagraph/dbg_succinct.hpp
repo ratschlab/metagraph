@@ -9,11 +9,6 @@
 #include "wavelet_tree.hpp"
 #include "bit_vector.hpp"
 
-namespace merge {
-    class dynamic_graph_chunk;
-    class vector_graph_chunk;
-} // namespace merge
-
 
 class SequenceGraph {
   public:
@@ -46,9 +41,6 @@ class DBGCondensed : public SequenceGraph {
 
 
 class DBG_succ : public SequenceGraph {
-    friend class merge::dynamic_graph_chunk;
-    friend class merge::vector_graph_chunk;
-
   public:
     // define an extended alphabet for W --> somehow this does not work properly as expected
     typedef uint64_t TAlphabet;
@@ -430,6 +422,11 @@ class DBG_succ : public SequenceGraph {
             verbose_cout(rest...);
         }
     }
+
+  public:
+    class Chunk;
+    class DynamicChunk;
+    class VectorChunk;
 };
 
 inline std::ostream& operator<<(std::ostream &os,

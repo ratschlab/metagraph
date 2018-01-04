@@ -14,7 +14,6 @@
 #include <vector>
 #include <map>
 #include <stack>
-#include <queue>
 #include <deque>
 #include <algorithm>
 #include <iostream>
@@ -27,14 +26,6 @@
 #include <cstdio>
 #include <parallel/algorithm>
 
-/**
- * We use libmaus 2 for representing dynamic succint data structures
- * such as the dynamic bit array and the dynamic wavelet tree.
- */
-#include <libmaus2/util/NumberSerialisation.hpp>
-#include <zlib.h>
-
-#include "serialization.hpp"
 
 #define CHECK_INDEX(idx) \
     assert(idx < W->size()); \

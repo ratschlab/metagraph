@@ -3,6 +3,7 @@
 #include <zlib.h>
 
 #include "dbg_succinct.hpp"
+#include "dbg_succinct_chunk.hpp"
 #include "config.hpp"
 #include "helpers.hpp"
 #include "utils.hpp"
@@ -404,9 +405,11 @@ int main(int argc, const char *argv[]) {
         case Config::MERGE: {
             // collect results on an external merge
             if (config->collect > 1) {
-                graph = merge::merge_chunks(config->k,
-                                            std::vector<merge::graph_chunk*>(config->collect, NULL),
-                                            config->outfbase);
+                graph = merge::merge_chunks(
+                    config->k,
+                    std::vector<DBG_succ::Chunk*>(config->collect, NULL),
+                    config->outfbase
+                );
             } else {
                 // run normal merge procedure
                 // some preliminaries to make command line options consistent
@@ -419,10 +422,10 @@ int main(int argc, const char *argv[]) {
                     graphs.push_back(load_critical_graph_from_file(files[f]));
                 }
                 if (config->parallel > 1 || config->parts_total > 1) {
-                    auto *chunk = merge::build_chunk(graphs, config->part_idx,
-                                                             config->parts_total,
-                                                             config->parallel,
-                                                             config->bins_per_thread);
+                    auto *chunk = merge::merge_blocks_to_chunk(graphs, config->part_idx,
+                                                                       config->parts_total,
+                                                                       config->parallel,
+                                                                       config->bins_per_thread);
                     if (!chunk) {
                         std::cerr << "ERROR when building chunk " << config->part_idx << std::endl;
                         exit(1);

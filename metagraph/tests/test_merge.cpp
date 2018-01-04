@@ -136,7 +136,7 @@ TEST(DBGSuccinctMerge, ParallelMergeEmptyGraphs) {
         DBG_succ *merged = merge::merge(graphs);
         DBG_succ *chunked_merged = merge::merge_chunks(
             k,
-            { merge::build_chunk(graphs, 0, 1, 1, 1) }
+            { merge::merge_blocks_to_chunk(graphs, 0, 1, 1, 1) }
         );
 
         first.merge(second);
@@ -160,7 +160,7 @@ TEST(DBGSuccinctMerge, ParallelMergeTwoPaths) {
         DBG_succ *merged = merge::merge(graphs);
         DBG_succ *chunked_merged = merge::merge_chunks(
             k,
-            { merge::build_chunk(graphs, 0, 1, 1, 1) }
+            { merge::merge_blocks_to_chunk(graphs, 0, 1, 1, 1) }
         );
 
         first.merge(second);
@@ -185,7 +185,7 @@ TEST(DBGSuccinctMerge, ParallelMergeSinglePathWithTwo) {
         DBG_succ *merged = merge::merge(graphs);
         DBG_succ *chunked_merged = merge::merge_chunks(
             k,
-            { merge::build_chunk(graphs, 0, 1, 1, 1) }
+            { merge::merge_blocks_to_chunk(graphs, 0, 1, 1, 1) }
         );
 
         first.merge(second);
@@ -214,7 +214,7 @@ TEST(DBGSuccinctMerge, ParallelMergeThreeGraphs) {
         DBG_succ *merged = merge::merge(graphs);
         DBG_succ *chunked_merged = merge::merge_chunks(
             k,
-            { merge::build_chunk(graphs, 0, 1, 1, 1) }
+            { merge::merge_blocks_to_chunk(graphs, 0, 1, 1, 1) }
         );
 
         first.merge(second);
@@ -244,9 +244,9 @@ TEST(DBGSuccinctMerge, ParallelChunkedMergeThreeGraphs) {
         DBG_succ *merged = merge::merge(graphs);
         DBG_succ *chunked_merged = merge::merge_chunks(
             k,
-            { merge::build_chunk(graphs, 0, 3, 1, 1),
-              merge::build_chunk(graphs, 1, 3, 1, 1), 
-              merge::build_chunk(graphs, 2, 3, 1, 1) }
+            { merge::merge_blocks_to_chunk(graphs, 0, 3, 1, 1),
+              merge::merge_blocks_to_chunk(graphs, 1, 3, 1, 1), 
+              merge::merge_blocks_to_chunk(graphs, 2, 3, 1, 1) }
         );
 
         first.merge(second);
@@ -276,7 +276,7 @@ TEST(DBGSuccinctMerge, ParallelDumpedChunkedMergeThreeGraphs) {
         DBG_succ *merged = merge::merge(graphs);
         size_t num_chunks = 3;
         for (size_t i = 0; i < num_chunks; ++i) {
-            auto chunk = merge::build_chunk(graphs, i, num_chunks, 1, 1);
+            auto chunk = merge::merge_blocks_to_chunk(graphs, i, num_chunks, 1, 1);
             ASSERT_TRUE(chunk);
             chunk->serialize(test_data_dir + "/chunks_to_merge"
                               + "." + std::to_string(i)
@@ -284,7 +284,7 @@ TEST(DBGSuccinctMerge, ParallelDumpedChunkedMergeThreeGraphs) {
         }
         DBG_succ *chunked_merged = merge::merge_chunks(
             k,
-            std::vector<merge::graph_chunk*>(num_chunks, NULL),
+            std::vector<DBG_succ::Chunk*>(num_chunks, NULL),
             test_data_dir + "/chunks_to_merge"
         );
         ASSERT_TRUE(chunked_merged);
@@ -327,7 +327,7 @@ void random_testing_parallel_merge(size_t num_graphs, size_t num_sequences, size
         DBG_succ *merged = merge::merge(graphs);
         DBG_succ *chunked_merged = merge::merge_chunks(
             k,
-            { merge::build_chunk(graphs, 0, 1, num_threads, num_bins_per_thread) }
+            { merge::merge_blocks_to_chunk(graphs, 0, 1, num_threads, num_bins_per_thread) }
         );
         DBG_succ result(k);
         for (size_t i = 0; i < graphs.size(); ++i) {

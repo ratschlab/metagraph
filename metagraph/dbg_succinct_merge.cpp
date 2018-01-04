@@ -5,11 +5,7 @@
 #include <mutex>
 
 #include "utils.hpp"
-#include "dbg_succinct.hpp"
 #include "config.hpp"
-
-using libmaus2::util::NumberSerialisation;
-using libmaus2::util::NumberSerialisation;
 
 
 namespace merge {
@@ -129,188 +125,10 @@ struct ParallelMergeContext {
 };
 
 
-/*
-// TODO: Do we need this version? Probably more memory efficient but it's much slower.
-class dynamic_graph_chunk : public graph_chunk {
-  public:
-    void push_back(TAlphabet W, TAlphabet F, bool last) {
-        W_.insert(W_.size(), W);
-        for (TAlphabet a = F + 1; a < F_.size(); ++a) {
-            F_[a]++;
-        }
-        last_.insertBit(last_.size(), last);
-    }
-
-    TAlphabet get_W_back() const { return W_[W_.size() - 1]; }
-
-    void alter_W_back(TAlphabet W) { W_.set(W_.size() - 1, W); }
-
-    void alter_last_back(bool last) { last_.set(last_.size() - 1, last); }
-
-    uint64_t size() const { return W_.size(); }
-
-    void extend(const graph_chunk &other) {
-        extend(dynamic_cast<const dynamic_graph_chunk&>(other));
-    }
-
-    void extend(const dynamic_graph_chunk &other) {
-        for (uint64_t j = 0; j < other.W_.size(); ++j) {
-            W_.insert(W_.size(), other.W_[j]);
-            last_.insertBit(last_.size(), other.last_[j]);
-        }
-
-        assert(F_.size() == other.F_.size());
-        for (size_t p = 0; p < other.F_.size(); ++p) {
-            F_[p] += other.F_[p];
-        }
-    }
-
-    void initialize_graph(DBG_succ *graph) {
-        delete graph->W;
-        graph->W = new wavelet_tree_dyn(4, W_);
-
-        delete graph->last;
-        graph->last = new bit_vector_dyn(last_);
-
-        graph->F = F_;
-    }
-
-    bool load(const std::string &infbase) {
-        F_.resize(0);
-
-        try {
-            std::ifstream instream(infbase + ".F.dbg");
-            std::string cur_line;
-
-            while (std::getline(instream, cur_line)) {
-                F_.push_back(std::stoull(cur_line));
-            }
-            instream.close();
-
-            if (F_.size() != DBG_succ::alph_size)
-                return false;
-
-            // load W and last arrays
-            std::ifstream instream_W(infbase + ".W.dbg");
-            std::ifstream instream_l(infbase + ".l.dbg");
-            return W_.deserialise(instream_W) && last_.deserialise(instream_l);
-        } catch (...) {
-            return false;
-        }
-    }
-
-    void serialize(const std::string &outbase) const {
-        std::ofstream outstream(outbase + ".W.dbg");
-        W->serialise(outstream);
-        outstream.close();
-
-        // write last array
-        outstream.open(outbase + ".l.dbg");
-        last->serialise(outstream);
-        outstream.close();
-
-        // write F values and k
-        outstream.open(outbase + ".F.dbg");
-        for (size_t i = 0; i < F.size(); ++i) {
-            outstream << F.at(i) << "\n";
-        }
-        outstream.close();
-    }
-
-  private:
-    wavelet_tree_dyn W_ = wavelet_tree_dyn(4);
-    bit_vector_dyn last_;
-    std::vector<uint64_t> F_ = std::vector<uint64_t>(DBG_succ::alph_size, 0);
-};
-*/
-
-class vector_graph_chunk : public graph_chunk {
-  public:
-    void push_back(TAlphabet W, TAlphabet F, bool last) {
-        W_.push_back(W);
-        for (TAlphabet a = F + 1; a < F_.size(); ++a) {
-            F_[a]++;
-        }
-        last_.push_back(last);
-    }
-
-    TAlphabet get_W_back() const { return W_.back(); }
-
-    void alter_W_back(TAlphabet W) { W_.back() = W; }
-
-    void alter_last_back(bool last) { last_.back() = last; }
-
-    uint64_t size() const { return W_.size(); }
-
-    void extend(const graph_chunk &other) {
-        extend(dynamic_cast<const vector_graph_chunk&>(other));
-    }
-
-    void extend(const vector_graph_chunk &other) {
-        W_.insert(W_.end(), other.W_.begin(), other.W_.end());
-        last_.insert(last_.end(), other.last_.begin(), other.last_.end());
-
-        assert(F_.size() == other.F_.size());
-        for (size_t p = 0; p < other.F_.size(); ++p) {
-            F_[p] += other.F_[p];
-        }
-    }
-
-    void initialize_graph(DBG_succ *graph) {
-        delete graph->W;
-        graph->W = new wavelet_tree_dyn(4, W_);
-
-        delete graph->last;
-        graph->last = new bit_vector_dyn(last_);
-
-        graph->F = F_;
-    }
-
-    bool load(const std::string &infbase) {
-        try {
-            std::ifstream instream_W(infbase + ".W.dbg");
-            W_ = NumberSerialisation::deserialiseNumberVector<TAlphabet>(instream_W);
-            instream_W.close();
-
-            std::ifstream instream_l(infbase + ".l.dbg");
-            last_ = NumberSerialisation::deserialiseNumberVector<bool>(instream_l);
-            instream_l.close();
-
-            std::ifstream instream_F(infbase + ".F.dbg");
-            F_ = NumberSerialisation::deserialiseNumberVector<uint64_t>(instream_F);
-            instream_F.close();
-
-            return F_.size() == DBG_succ::alph_size;
-        } catch (...) {
-            return false;
-        }
-    }
-
-    void serialize(const std::string &outbase) const {
-        std::ofstream outstream(outbase + ".W.dbg");
-        NumberSerialisation::serialiseNumberVector(outstream, W_);
-        outstream.close();
-
-        outstream.open(outbase + ".l.dbg");
-        NumberSerialisation::serialiseNumberVector(outstream, last_);
-        outstream.close();
-
-        outstream.open(outbase + ".F.dbg");
-        NumberSerialisation::serialiseNumberVector(outstream, F_);
-        outstream.close();
-    }
-
-  private:
-    std::vector<TAlphabet> W_;
-    std::vector<bool> last_;
-    std::vector<uint64_t> F_ = std::vector<uint64_t>(DBG_succ::alph_size, 0);
-};
-
-
 void merge_blocks(const std::vector<const DBG_succ*> &Gv,
                   std::vector<uint64_t> kv,
                   const std::vector<uint64_t> &nv,
-                  graph_chunk *chunk);
+                  DBG_succ::Chunk *chunk);
 
 /**
  * Distribute the merging of a set of graph structures over
@@ -319,7 +137,7 @@ void merge_blocks(const std::vector<const DBG_succ*> &Gv,
 void parallel_merge_wrapper(const std::vector<const DBG_succ*> &graphs,
                             const std::vector<std::vector<uint64_t>> &bins,
                             ParallelMergeContext *context,
-                            std::vector<graph_chunk*> *chunks) {
+                            std::vector<DBG_succ::Chunk*> *chunks) {
     assert(context);
     assert(graphs.size() > 0);
     assert(graphs.size() == bins.size());
@@ -348,11 +166,11 @@ void parallel_merge_wrapper(const std::vector<const DBG_succ*> &graphs,
 }
 
 
-graph_chunk* build_chunk(const std::vector<const DBG_succ*> &graphs,
-                         size_t chunk_idx,
-                         size_t num_chunks,
-                         size_t num_threads,
-                         size_t num_bins_per_thread) {
+DBG_succ::Chunk* merge_blocks_to_chunk(const std::vector<const DBG_succ*> &graphs,
+                                       size_t chunk_idx,
+                                       size_t num_chunks,
+                                       size_t num_threads,
+                                       size_t num_bins_per_thread) {
     assert(graphs.size() > 0);
     assert(num_chunks > 0);
     assert(chunk_idx < num_chunks);
@@ -401,9 +219,9 @@ graph_chunk* build_chunk(const std::vector<const DBG_succ*> &graphs,
     std::vector<std::thread> threads;
     ParallelMergeContext context;
 
-    std::vector<graph_chunk*> blocks(bins.front().size() - 1);
+    std::vector<DBG_succ::Chunk*> blocks(bins.front().size() - 1);
     for (size_t i = 0; i < blocks.size(); ++i) {
-        blocks[i] = new vector_graph_chunk();
+        blocks[i] = new DBG_succ::VectorChunk();
     }
 
     for (size_t tid = 0; tid < num_threads; tid++) {
@@ -427,7 +245,7 @@ graph_chunk* build_chunk(const std::vector<const DBG_succ*> &graphs,
     if (graphs.front()->verbose)
         std::cout << "Collecting results" << std::endl;
 
-    graph_chunk *chunk = new vector_graph_chunk();
+    DBG_succ::Chunk *chunk = new DBG_succ::VectorChunk();
 
     for (uint64_t i = 0; i < blocks.size(); ++i) {
         chunk->extend(*blocks[i]);
@@ -444,18 +262,18 @@ graph_chunk* build_chunk(const std::vector<const DBG_succ*> &graphs,
  * load chunks from files "filenamebase.<chunk_idx>_<num_chunks>".
  */
 DBG_succ* merge_chunks(size_t k,
-                       const std::vector<graph_chunk*> &graph_chunks,
+                       const std::vector<DBG_succ::Chunk*> &graph_chunks,
                        const std::string &filenamebase) {
 
     DBG_succ *graph = new DBG_succ(k);
     if (!graph_chunks.size())
         return graph;
 
-    graph_chunk *merged = new vector_graph_chunk();
+    DBG_succ::Chunk *merged = new DBG_succ::VectorChunk();
     merged->push_back(0, DBG_succ::alph_size, 0);
 
     for (uint64_t f = 0; f < graph_chunks.size(); f++) {
-        graph_chunk *chunk = graph_chunks[f];
+        DBG_succ::Chunk *chunk = graph_chunks[f];
 
         // load from file if undefined
         if (!chunk) {
@@ -463,7 +281,7 @@ DBG_succ* merge_chunks(size_t k,
                                     + "." + std::to_string(f)
                                     + "_" + std::to_string(graph_chunks.size());
 
-            chunk = new vector_graph_chunk();
+            chunk = new DBG_succ::VectorChunk();
             if (!chunk->load(filename)) {
                 std::cerr << "ERROR: input file "
                           << filename << " corrupted" << std::endl;
@@ -493,7 +311,7 @@ DBG_succ* merge(const std::vector<const DBG_succ*> &Gv) {
         nv.push_back(Gv[i]->get_W().size());
     }
 
-    vector_graph_chunk merged;
+    DBG_succ::VectorChunk merged;
     merged.push_back(0, DBG_succ::alph_size, 0);
 
     merge_blocks(Gv, kv, nv, &merged);
@@ -538,7 +356,7 @@ std::vector<std::deque<TAlphabet>> get_last_added_nodes(const std::vector<const 
 void merge_blocks(const std::vector<const DBG_succ*> &Gv,
                   std::vector<uint64_t> kv,
                   const std::vector<uint64_t> &nv,
-                  graph_chunk *chunk) {
+                  DBG_succ::Chunk *chunk) {
 
     assert(kv.size() == Gv.size());
     assert(nv.size() == Gv.size());
