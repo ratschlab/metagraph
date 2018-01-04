@@ -80,9 +80,9 @@ class DBG_succ::VectorChunk : public DBG_succ::Chunk {
 
 
 /**
- * Extend the temporary kmers storage with kmers from the given sequence.
+ * Break the sequence to kmers and extend the temporary kmers storage.
  */
-void add_sequence_fast(const std::string &seq,
+void sequence_to_kmers(const std::string &seq,
                        size_t k,
                        std::vector<KMer> *kmers,
                        bool add_bridge = true,

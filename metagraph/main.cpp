@@ -168,7 +168,7 @@ int main(int argc, const char *argv[]) {
                                 }
                                 annotation = "VCF:" + annotation;
                                 nbp += sequence.length();
-                                add_sequence_fast(sequence, graph->get_k(), &kmers,
+                                sequence_to_kmers(sequence, graph->get_k(), &kmers,
                                                   false, config->parallel);
                             }
                         } else {
@@ -185,7 +185,7 @@ int main(int argc, const char *argv[]) {
                                 if (config->reverse)
                                     reverse_complement(read_stream->seq);
                                 // add all k-mers of seq to the graph
-                                add_sequence_fast(std::string(read_stream->seq.s, read_stream->seq.l),
+                                sequence_to_kmers(std::string(read_stream->seq.s, read_stream->seq.l),
                                                   graph->get_k(), &kmers,
                                                   true, config->parallel);
                             }

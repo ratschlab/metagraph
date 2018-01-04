@@ -61,7 +61,7 @@ DBG_succ::DBG_succ(size_t k, const std::vector<std::string> &sequences, size_t p
 
         // break the sequences down into kmers
         for (const auto &seq : sequences) {
-            add_sequence_fast(seq, k_, &kmers, true, parallel);
+            sequence_to_kmers(seq, k_, &kmers, true, parallel);
         }
         // build the graph chunk from kmers
         auto chunk = DBG_succ::VectorChunk::build_from_kmers(k_, &kmers, parallel);
