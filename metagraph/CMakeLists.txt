@@ -25,9 +25,10 @@ include_directories(
 file(GLOB src_files "*.cpp" "*.h" "*.hpp")
 
 list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
+list(FILTER src_files EXCLUDE REGEX ".*\\main.cpp")
 
 add_library(metagraph STATIC ${src_files})
-add_executable(metagengraph "metagraph_main.cpp")
+add_executable(metagengraph "main.cpp")
 add_dependencies(metagengraph metagraph)
 
 #set(CMAKE_EXE_LINKER_FLAGS "-static")
