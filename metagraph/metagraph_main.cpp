@@ -97,12 +97,7 @@ int main(int argc, const char *argv[]) {
     switch (config->identity) {
         //TODO: allow for building by appending/adding to an existing graph
         case Config::BUILD: {
-            if (config->infbase.size()) {
-                graph = load_critical_graph_from_file(config->infbase);
-                // graph->annotationFromFile(config->infbase + ".anno.dbg");
-            } else {
-                graph = new DBG_succ(config->k);
-            }
+            graph = new DBG_succ(config->k);
 
             if (config->verbose)
                 std::cerr << "k is " << graph->get_k() << std::endl;
@@ -122,13 +117,20 @@ int main(int argc, const char *argv[]) {
 
                 clock_t tstart, timelast;
 
+                DBG_succ::VectorChunk graph_data;
+                // add the dummy source node
+                graph_data.push_back(0, DBG_succ::alph_size, 0);
+
                 //one pass per suffix
                 for (size_t j = 0; j < suffices.size(); ++j) {
                     std::cout << "Suffix: " << suffices[j] << "\n";
                     //add sink nodes
                     // graph->add_sink(config->parallel, suffices[j]);
 
+                    std::vector<KMer> kmers;
+
                     if (suffices[j].find("$") == std::string::npos) {
+
                         // iterate over input files
                         for (unsigned int f = 0; f < files.size(); ++f) {
                             if (config->verbose) {
@@ -168,9 +170,8 @@ int main(int argc, const char *argv[]) {
                                     }
                                     annotation = "VCF:" + annotation;
                                     nbp += sequence.length();
-                                    graph->add_sequence_fast(sequence,
-                                                             false, config->parallel,
-                                                             suffices[j]);
+                                    add_sequence_fast(sequence, graph->get_k(), &kmers,
+                                                      false, config->parallel);
                                 }
                             } else {
                                 //READ FROM FASTA
@@ -186,8 +187,9 @@ int main(int argc, const char *argv[]) {
                                     if (config->reverse)
                                         reverse_complement(read_stream->seq);
                                     // add all k-mers of seq to the graph
-                                    graph->add_sequence_fast(std::string(read_stream->seq.s, read_stream->seq.l),
-                                                             true, config->parallel, suffices[j]);
+                                    add_sequence_fast(std::string(read_stream->seq.s, read_stream->seq.l),
+                                                      graph->get_k(), &kmers,
+                                                      true, config->parallel);
                                 }
                                 kseq_destroy(read_stream);
                             }
@@ -200,10 +202,16 @@ int main(int argc, const char *argv[]) {
                     get_RAM();
                     //append to succinct representation and clear kmer list
                     tstart = clock();
+
                     std::cout << "Sorting kmers and appending succinct representation from current bin\t";
-                    graph->construct_succ(config->parallel);
+                    auto next_block = DBG_succ::VectorChunk::build_from_kmers(graph->get_k(), &kmers, config->parallel);
+                    graph_data.extend(*next_block);
+                    delete next_block;
+
                     std::cout << (clock()-tstart)/CLOCKS_PER_SEC << "\n\n";
                 }
+                graph_data.initialize_graph(graph);
+
                 //TODO: cleanup
                 tstart = clock();
                 std::cerr << "Converting static graph to dynamic\t";
@@ -238,6 +246,7 @@ int main(int argc, const char *argv[]) {
                     gzclose(input_p);
                 }
             }
+
             graph->switch_state(config->state);
             config->infbase = config->outfbase;
             // graph->annotationToFile(config->infbase + ".anno.dbg");

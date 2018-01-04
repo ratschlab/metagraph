@@ -68,10 +68,26 @@ class DBG_succ::VectorChunk : public DBG_succ::Chunk {
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
 
+    static VectorChunk* build_from_kmers(size_t k,
+                                         std::vector<KMer> *kmers,
+                                         unsigned int parallel = 1);
+
   private:
     std::vector<TAlphabet> W_;
     std::vector<bool> last_;
     std::vector<uint64_t> F_ = std::vector<uint64_t>(DBG_succ::alph_size, 0);
 };
+
+
+/**
+ * Extend the temporary kmers storage with kmers from the given sequence.
+ */
+void add_sequence_fast(const std::string &seq,
+                       size_t k,
+                       std::vector<KMer> *kmers,
+                       bool add_bridge = true,
+                       unsigned int parallel = 1,
+                       std::string suffix = "");
+
 
 #endif // __DBG_SUCCINCT_CHUNK_HPP__

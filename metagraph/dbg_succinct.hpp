@@ -45,7 +45,10 @@ class DBG_succ : public SequenceGraph {
     // define an extended alphabet for W --> somehow this does not work properly as expected
     typedef uint64_t TAlphabet;
 
-    explicit DBG_succ(size_t k = 1);
+    DBG_succ(size_t k = 1,
+             const std::vector<std::string> &sequences = {},
+             size_t parallel = 1);
+
     ~DBG_succ();
 
     /**
@@ -70,16 +73,15 @@ class DBG_succ : public SequenceGraph {
      */
     void add_sequence(const std::string &seq, bool try_extend = false);
 
-    void add_sequence_fast(const std::string &seq,
-                           bool add_bridge = true,
-                           unsigned int parallel = 1,
-                           std::string suffix = "");
-
-    void construct_succ(unsigned int parallel = 1);
-
     void remove_edges(const std::set<uint64_t> &edges);
 
-    void merge(const DBG_succ &Gm);
+    /**
+    * Heavily borrowing from the graph sequence traversal, this function gets 
+    * a graph `other` and merges its nodes into the target graph object.
+    * The edges of `other` are fully traversed and nodes are added if not existing yet.
+    * This function is well suited to merge small graphs into large ones.
+    */
+    void merge(const DBG_succ &other);
 
     /**
      * Return k-mer length of current graph.
@@ -248,14 +250,6 @@ class DBG_succ : public SequenceGraph {
 
     // the array containing the edge labels
     wavelet_tree *W;
-
-    // index of position that marks the source of the graph
-    const uint64_t kDummySource = 1;
-
-    //Temporary storage for kmers before succinct representation construction
-    //the second element stores an ID for each kmer indicating which sequence it came from
-    //an even ID indicates that it's a normal kmer, an odd ID indicates that it's a bridge
-    std::vector<KMer> kmers;
 
     /**
      * This function gets a value of the alphabet c and updates the offset of

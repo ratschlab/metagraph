@@ -1,5 +1,6 @@
 #include "dbg_succinct_chunk.hpp"
 
+#include <parallel/algorithm>
 /**
  * We use libmaus 2 for representing dynamic succint data structures
  * such as the dynamic bit array and the dynamic wavelet tree.
@@ -167,4 +168,145 @@ void DBG_succ::VectorChunk::serialize(const std::string &outbase) const {
     outstream.open(outbase + ".F.dbg");
     NumberSerialisation::serialiseNumberVector(outstream, F_);
     outstream.close();
+}
+
+
+bool equal_encodings(const char first, const char second) {
+    return DBG_succ::encode(first) == DBG_succ::encode(second);
+}
+
+void add_sequence_fast(const std::string &seq,
+                       size_t k,
+                       std::vector<KMer> *kmers,
+                       bool add_bridge,
+                       unsigned int parallel,
+                       std::string suffix) {
+    // there is nothing to parse
+    if (!seq.size())
+        return;
+
+    if (add_bridge) {
+        std::deque<char> bridge(k, '$');
+        bridge.push_back(seq[0]);
+        for (size_t i = 0; i < std::min(k, seq.length()); ++i) {
+            if (std::equal(suffix.rbegin(), suffix.rend(), bridge.rbegin() + 1,
+                           equal_encodings)) {
+                kmers->emplace_back(bridge, DBG_succ::encode);
+            }
+            bridge.pop_front();
+            bridge.push_back(i + 1 < seq.length() ? seq[i + 1] : '$');
+        }
+    }
+    if (k < seq.length()) {
+        #pragma omp parallel num_threads(parallel)
+        {
+            std::vector<KMer> kmer_priv;
+            #pragma omp for nowait
+            for (size_t i = 0; i < seq.length() - k; ++i) {
+                if (std::equal(suffix.begin(), suffix.end(),
+                               seq.c_str() + i + k - suffix.length(),
+                               equal_encodings)) {
+                    kmer_priv.emplace_back(
+                        std::string(seq.c_str() + i, k + 1),
+                        DBG_succ::encode
+                    );
+                }
+            }
+            #pragma omp critical
+            kmers->insert(kmers->end(),
+                std::make_move_iterator(kmer_priv.begin()),
+                std::make_move_iterator(kmer_priv.end())
+            );
+        }
+    }
+    if (add_bridge) {
+        std::deque<char> bridge(seq.end() - k, seq.end());
+        bridge.push_back('$');
+        if (std::equal(suffix.begin(), suffix.end(),
+                       bridge.begin() + k - suffix.length(),
+                       equal_encodings)) {
+            kmers->emplace_back(bridge, DBG_succ::encode);
+        }
+    }
+}
+
+DBG_succ::VectorChunk* DBG_succ::VectorChunk::build_from_kmers(size_t k,
+                                                               std::vector<KMer> *kmers,
+                                                               unsigned int parallel) {
+    // parallel sort of all kmers
+    omp_set_num_threads(std::max(static_cast<int>(parallel), 1));
+    __gnu_parallel::sort(kmers->begin(), kmers->end());
+
+    auto unique_end = std::unique(kmers->begin(), kmers->end());
+    kmers->erase(unique_end, kmers->end()); 
+
+    //DEBUG: output kmers
+    // for (const auto &kmer : kmers) {
+    //     std::cout << kmer.to_string(DBG_succ::alphabet) << std::endl;
+    // }
+
+    DBG_succ::VectorChunk *result = new DBG_succ::VectorChunk();
+
+    // the bit array indicating the last outgoing edge of a node (static container for full init)
+    std::vector<uint8_t> last_stat_safe { 0 };
+
+    last_stat_safe.resize(last_stat_safe.size() + kmers->size(), 1);
+
+    // the array containing the edge labels
+    std::vector<TAlphabet> &W_stat = result->W_;
+    W_stat.push_back(0);
+
+    size_t curpos = W_stat.size();
+    W_stat.resize(W_stat.size() + kmers->size());
+
+    #pragma omp parallel num_threads(parallel)
+    {
+        #pragma omp for nowait
+        for (size_t i = 0; i < kmers->size(); ++i) {
+            //set last
+            if (i + 1 < kmers->size()) {
+                if (KMer::compare_kmer_suffix((*kmers)[i], (*kmers)[i + 1])) {
+                    last_stat_safe[curpos + i] = 0;
+                }
+            }
+            //set W
+            uint8_t curW = (*kmers)[i][0];
+            if (curW == 127) {
+                std::cerr << "Failure decoding kmer " << i << "\n" << (*kmers)[i] << "\n"
+                          << (*kmers)[i].to_string(DBG_succ::alphabet) << "\n";
+                exit(1);
+            }
+            if (i) {
+                for (size_t j = i - 1; KMer::compare_kmer_suffix((*kmers)[j], (*kmers)[i], 1); --j) {
+                    //TODO: recalculating W is probably faster than doing a pragma for ordered
+                    if ((*kmers)[j][0] == curW) {
+                        curW += DBG_succ::alph_size;
+                        break;
+                    }
+                    if (!j)
+                        break;
+                }
+            }
+            W_stat[curpos + i] = curW;
+        }
+    }
+    result->last_.assign(last_stat_safe.begin(), last_stat_safe.end());
+
+    size_t i;
+    size_t lastlet = 0;
+
+    result->F_.at(0) = 0;
+    for (i = 0; i < kmers->size(); ++i) {
+        while (DBG_succ::alphabet[lastlet] != DBG_succ::alphabet[(*kmers)[i][k]]
+                    && lastlet + 1 < DBG_succ::alph_size) {
+            result->F_.at(++lastlet) = curpos + i - 1;
+        }
+    }
+    while (++lastlet < DBG_succ::alph_size) {
+        result->F_.at(lastlet) = curpos + i - 1;
+    }
+
+    kmers->clear();
+
+    return result;
 }

@@ -81,14 +81,12 @@ TEST(Construct, GraphDefaultConstructor) {
 
 TEST(DBGSuccinct, EmptyGraph) {
     DBG_succ *graph = new DBG_succ(3);
-    graph->construct_succ();
     test_graph(graph, "01", "00", "0 1 1 1 1 1 ");
     delete graph;
 }
 
 TEST(DBGSuccinct, SwitchState) {
     DBG_succ *graph = new DBG_succ(3);
-    graph->construct_succ();
     test_graph(graph, "01", "00", "0 1 1 1 1 1 ", Config::DYN);
     test_graph(graph, "01", "00", "0 1 1 1 1 1 ", Config::STAT);
     test_graph(graph, "01", "00", "0 1 1 1 1 1 ", Config::DYN);
@@ -99,14 +97,14 @@ TEST(DBGSuccinct, AddSequenceFast) {
     gzFile input_p = gzopen(test_fasta.c_str(), "r");
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
-    DBG_succ *graph = new DBG_succ(3);
+    std::vector<std::string> sequences;
     for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
-        graph->add_sequence_fast(read_stream->seq.s);
+        sequences.push_back(read_stream->seq.s);
     }
     kseq_destroy(read_stream);
     gzclose(input_p);
 
-    graph->construct_succ();
+    DBG_succ *graph = new DBG_succ(3, sequences);
 
     //test graph construction
     test_graph(graph, "00011101101111111111111",
@@ -118,14 +116,14 @@ TEST(Construct, SmallGraphTraversal) {
     gzFile input_p = gzopen(test_fasta.c_str(), "r");
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
-    DBG_succ *graph = new DBG_succ(3);
+    std::vector<std::string> sequences;
     for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
-        graph->add_sequence_fast(read_stream->seq.s);
+        sequences.push_back(read_stream->seq.s);
     }
     kseq_destroy(read_stream);
     gzclose(input_p);
 
-    graph->construct_succ();
+    DBG_succ *graph = new DBG_succ(3, sequences);
 
     //traversal
     std::vector<size_t> outgoing_edges = { 0, 3, 4, 14, 5, 7, 12, 18, 19, 15, 20, 0,
@@ -171,14 +169,14 @@ TEST(DBGSuccinct, Serialization) {
     gzFile input_p = gzopen(test_fasta.c_str(), "r");
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
-    DBG_succ *graph = new DBG_succ(3);
+    std::vector<std::string> sequences;
     for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
-        graph->add_sequence_fast(read_stream->seq.s);
+        sequences.push_back(read_stream->seq.s);
     }
     kseq_destroy(read_stream);
     gzclose(input_p);
 
-    graph->construct_succ();
+    DBG_succ *graph = new DBG_succ(3, sequences);
 
     graph->serialize(test_dump_basename);
 

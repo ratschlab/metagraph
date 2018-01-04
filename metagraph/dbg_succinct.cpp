@@ -24,7 +24,8 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <cstdio>
-#include <parallel/algorithm>
+
+#include "dbg_succinct_chunk.hpp"
 
 
 #define CHECK_INDEX(idx) \
@@ -47,19 +48,38 @@ const TAlphabet kCharToNucleotide[128] = {
 };
 
 
-DBG_succ::DBG_succ(size_t k)
+DBG_succ::DBG_succ(size_t k, const std::vector<std::string> &sequences, size_t parallel)
       : k_(k), last(new bit_vector_dyn()),
                F(alph_size, 0),
                W(new wavelet_tree_dyn(4)) {
 
-    last->insertBit(0, false);
-    W->insert(0, 0);
+    if (sequences.size()) {
+        std::vector<KMer> kmers;
 
-    // add the dummy source node
-    last->insertBit(1, true);
-    W->insert(0, 0);
-    for (size_t j = 1; j < alph_size; j++) {
-        F[j] = 1;
+        // add dummy edge as a kmer
+        kmers.emplace_back(std::deque<char>(k_ + 1, '$'), DBG_succ::encode);
+
+        // break the sequences down into kmers
+        for (const auto &seq : sequences) {
+            add_sequence_fast(seq, k_, &kmers, true, parallel);
+        }
+        // build the graph chunk from kmers
+        auto chunk = DBG_succ::VectorChunk::build_from_kmers(k_, &kmers, parallel);
+        // initialize graph from the chunk built
+        chunk->initialize_graph(this);
+        delete chunk;
+    } else {
+        // no sequences to add
+
+        last->insertBit(0, false);
+        W->insert(0, 0);
+
+        // add the dummy source node
+        last->insertBit(1, true);
+        W->insert(0, 0);
+        for (size_t j = 1; j < alph_size; j++) {
+            F[j] = 1;
+        }
     }
 }
 
@@ -1003,7 +1023,7 @@ void DBG_succ::add_sequence(const std::string &seq, bool try_extend) {
 
     if (!try_extend || seq.size() <= k_ || !(source = index(sequence))) {
         sequence.insert(sequence.begin(), k_, encode('$'));
-        source = kDummySource;
+        source = 1; // the dummy source node
     }
 
     for (size_t i = 0; i + k_ < sequence.size(); ++i) {
@@ -1018,147 +1038,6 @@ void DBG_succ::add_sequence(const std::string &seq, bool try_extend) {
     }
 
     verbose_cout("edges ", num_edges(), " / nodes ", num_nodes(), "\n");
-}
-
-
-bool equal_encodings(const char first, const char second) {
-    return DBG_succ::encode(first) == DBG_succ::encode(second);
-}
-
-void DBG_succ::add_sequence_fast(const std::string &seq,
-                                 bool add_bridge, unsigned int parallel,
-                                 std::string suffix) {
-    // ther is nothing to parse
-    if (!seq.size())
-        return;
-
-    if (add_bridge) {
-        std::deque<char> bridge(k_, '$');
-        bridge.push_back(seq[0]);
-        for (size_t i = 0; i < std::min(k_, seq.length()); ++i) {
-            if (std::equal(suffix.rbegin(), suffix.rend(), bridge.rbegin() + 1,
-                           equal_encodings)) {
-                kmers.emplace_back(bridge, DBG_succ::encode);
-            }
-            bridge.pop_front();
-            bridge.push_back(i + 1 < seq.length() ? seq[i + 1] : '$');
-        }
-    }
-    if (k_ < seq.length()) {
-        #pragma omp parallel num_threads(parallel)
-        {
-            std::vector<KMer> kmer_priv;
-            #pragma omp for nowait
-            for (size_t i = 0; i < seq.length() - k_; ++i) {
-                if (std::equal(suffix.begin(), suffix.end(),
-                               seq.c_str() + i + k_ - suffix.length(),
-                               equal_encodings)) {
-                    kmer_priv.emplace_back(
-                        std::string(seq.c_str() + i, k_ + 1),
-                        DBG_succ::encode
-                    );
-                }
-            }
-            #pragma omp critical
-            kmers.insert(kmers.end(),
-                std::make_move_iterator(kmer_priv.begin()),
-                std::make_move_iterator(kmer_priv.end())
-            );
-        }
-    }
-    if (add_bridge) {
-        std::deque<char> bridge(seq.end() - k_, seq.end());
-        bridge.push_back('$');
-        if (std::equal(suffix.begin(), suffix.end(),
-                       bridge.begin() + k_ - suffix.length(),
-                       equal_encodings)) {
-            kmers.emplace_back(bridge, DBG_succ::encode);
-        }
-    }
-}
-
-void DBG_succ::construct_succ(unsigned int parallel) {
-
-    for (size_t i = 1; i < W->size(); ++i) {
-        kmers.emplace_back(get_node_str(i) + DBG_succ::decode(get_W(i)),
-                           DBG_succ::encode);
-    }
-
-    // parallel sort of all kmers
-    omp_set_num_threads(std::max(static_cast<int>(parallel), 1));
-    __gnu_parallel::sort(kmers.begin(), kmers.end());
-
-    auto unique_end = std::unique(kmers.begin(), kmers.end());
-    kmers.erase(unique_end, kmers.end()); 
-
-    //DEBUG: output kmers
-    // for (const auto &kmer : kmers) {
-    //     std::cout << kmer.to_string(alphabet) << std::endl;
-    // }
-
-    // the bit array indicating the last outgoing edge of a node (static container for full init)
-    std::vector<uint8_t> last_stat_safe { 0 };
-
-    last_stat_safe.resize(last_stat_safe.size() + kmers.size(), 1);
-
-    // the array containing the edge labels
-    std::vector<TAlphabet> W_stat { 0 };
-
-    size_t curpos = W_stat.size();
-    W_stat.resize(W_stat.size() + kmers.size());
-
-    #pragma omp parallel num_threads(parallel)
-    {
-        #pragma omp for nowait
-        for (size_t i = 0; i < kmers.size(); ++i) {
-            //set last
-            if (i + 1 < kmers.size()) {
-                if (KMer::compare_kmer_suffix(kmers[i], kmers[i + 1])) {
-                    last_stat_safe[curpos + i] = 0;
-                }
-            }
-            //set W
-            uint8_t curW = kmers[i][0];
-            if (curW == 127) {
-                std::cerr << "Failure decoding kmer " << i << "\n" << kmers[i] << "\n"
-                          << kmers[i].to_string(alphabet) << "\n";
-                exit(1);
-            }
-            if (i) {
-                for (size_t j = i - 1; KMer::compare_kmer_suffix(kmers[j], kmers[i], 1); --j) {
-                    //TODO: recalculating W is probably faster than doing a pragma for ordered
-                    if (kmers[j][0] == curW) {
-                        curW += alph_size;
-                        break;
-                    }
-                    if (!j)
-                        break;
-                }
-            }
-            W_stat[curpos + i] = curW;
-        }
-    }
-    std::vector<bool> last_stat(last_stat_safe.begin(), last_stat_safe.end());
-
-    size_t i;
-    size_t lastlet = 0;
-    F[0] = 0;
-    for (i = 0; i < kmers.size(); ++i) {
-        while (alphabet[lastlet] != alphabet[kmers[i][k_]] && lastlet + 1 < alph_size) {
-            F[++lastlet] = curpos + i - 1;
-        }
-    }
-    while (++lastlet < alph_size) {
-        F[lastlet] = curpos + i - 1;
-    }
-
-    kmers.clear();
-
-    delete W;
-    W = new wavelet_tree_dyn(4, W_stat);
-
-    delete last;
-    last = new bit_vector_dyn(last_stat);
 }
 
 /**
