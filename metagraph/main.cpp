@@ -134,8 +134,6 @@ int main(int argc, const char *argv[]) {
                         if (config->verbose) {
                             std::cout << std::endl << "Parsing " << files[f] << std::endl;
                         }
-                        // open stream
-                        gzFile input_p = gzopen(files[f].c_str(), "r");
 
                         if (utils::get_filetype(files[f]) == "VCF") {
                             //READ FROM VCF
@@ -173,6 +171,10 @@ int main(int argc, const char *argv[]) {
                             }
                         } else {
                             //READ FROM FASTA
+
+                            // open stream
+                            gzFile input_p = gzopen(files[f].c_str(), "r");
+
                             //TODO: handle read_stream->qual
                             kseq_t *read_stream = kseq_init(input_p);
                             if (read_stream == NULL) {
@@ -190,8 +192,9 @@ int main(int argc, const char *argv[]) {
                                                   true, config->parallel);
                             }
                             kseq_destroy(read_stream);
+
+                            gzclose(input_p);
                         }
-                        gzclose(input_p);
                         //graph->print_stats();
                         //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
                     }
