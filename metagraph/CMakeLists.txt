@@ -31,7 +31,7 @@ add_library(metagraph STATIC ${src_files})
 add_executable(metagengraph "main.cpp")
 add_dependencies(metagengraph metagraph)
 
-if(LINUX)
+if(UNIX AND NOT APPLE)
   set(CMAKE_EXE_LINKER_FLAGS "-static")
 endif()
 
