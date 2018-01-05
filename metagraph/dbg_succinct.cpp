@@ -512,10 +512,15 @@ uint64_t DBG_succ::indegree(uint64_t i) const {
 
     if (i < 2)
         return 0;
+
     uint64_t x = bwd(succ_last(i));
+    if (x + 1 == W->size())
+        return 1;
+
     TAlphabet d = get_node_last_value(i);
+
     uint64_t y = succ_W(x + 1, d);
-    return 1 + rank_W(y, d + alph_size) - rank_W(x, d + alph_size);
+    return 1 + rank_W(y - 1, d + alph_size) - rank_W(x - 1, d + alph_size);
 }
 
 
@@ -962,7 +967,7 @@ void DBG_succ::print_seq() const {
         for (uint64_t i = start; i < end; i++) {
             fprintf(stdout, "%c", decode(get_W(i)));
         }
-        fprintf(stdout, "\n");
+        fprintf(stdout, "\n\n");
 
         std::vector<std::string> nodes;
         for (uint64_t i = start; i < end; i++) {

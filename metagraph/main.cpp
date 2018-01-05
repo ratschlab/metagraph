@@ -596,6 +596,8 @@ int main(int argc, const char *argv[]) {
         // graph output
         if (config->print_graph)
             graph->print_seq();
+        if (config->print_graph_succ)
+            graph->print_state();
         if (!config->sqlfbase.empty())
             traverse::toSQL(graph, config->fname, config->sqlfbase);
         if (!config->outfbase.empty())
