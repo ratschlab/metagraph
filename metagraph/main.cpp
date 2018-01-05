@@ -84,7 +84,7 @@ DBG_succ* load_critical_graph_from_file(const std::string &filename) {
 int main(int argc, const char *argv[]) {
 
     // parse command line arguments and options
-    Config *config = new Config(argc, argv);
+    std::unique_ptr<Config> config(new Config(argc, argv));
 
     if (config->verbose)
         std::cout << "Welcome to MetaGraph" << std::endl;
@@ -488,17 +488,23 @@ int main(int argc, const char *argv[]) {
             }
             break;
         }
-        case Config::DUMP: {
+        case Config::TRANSFORM: {
             //for (unsigned int f = 0; f < files.size(); ++f) {
                 //DBG_succ* graph_ = new DBG_succ(files[f]);
-                DBG_succ *graph_ = load_critical_graph_from_file(config->infbase);
+                DBG_succ *graph_ = load_critical_graph_from_file(files[0]);
                 // checks whether annotation exists and creates an empty one if not
                 // graph_->annotationFromFile(config->infbase + ".anno.dbg");
-                graph_->print_adj_list();
-                //graph_->print_adj_list(config->outfbase);
+                if (config->to_adj_list) {
+                    if (config->outfbase.size()) {
+                        std::ofstream outstream(config->outfbase + ".adjlist");
+                        graph_->print_adj_list(outstream);
+                    } else {
+                        graph_->print_adj_list(std::cout);
+                    }
+                }
                 delete graph_;
             //}
-            break;
+            return 0;
         }
         case Config::ALIGN: {
             // load graph
@@ -607,7 +613,6 @@ int main(int argc, const char *argv[]) {
             graph->serialize(config->outfbase);
         delete graph;
     }
-    delete config;
 
     return 0;
 }

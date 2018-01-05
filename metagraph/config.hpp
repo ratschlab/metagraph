@@ -16,6 +16,7 @@ class Config {
     bool reverse = false;
     bool fast = false;
     bool add_anno = false;
+    bool to_adj_list = false;
 
     unsigned int k = 3;
     unsigned int distance = 0;
@@ -43,7 +44,7 @@ class Config {
         ALIGN,
         STATS,
         ANNOTATE,
-        DUMP,
+        TRANSFORM,
         CLASSIFY
     };
     IdentityType identity = NO_IDENTITY;

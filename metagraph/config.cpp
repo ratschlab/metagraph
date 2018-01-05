@@ -25,8 +25,8 @@ Config::Config(int argc, const char *argv[]) {
         identity = ANNOTATE;
     } else if (!strcmp(argv[1], "classify")) {
         identity = CLASSIFY;
-    } else if (!strcmp(argv[1], "dump")) {
-        identity = DUMP;
+    } else if (!strcmp(argv[1], "transform")) {
+        identity = TRANSFORM;
     }
 
     // provide help screen for chosen identity
@@ -79,6 +79,8 @@ Config::Config(int argc, const char *argv[]) {
             sqlfbase = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-i") || !strcmp(argv[i], "--infile-base")) {
             infbase = std::string(argv[++i]);
+        } else if (!strcmp(argv[i], "--to-adj-list")) {
+            to_adj_list = true;
         } else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--collect")) {
             collect = atoi(argv[++i]);
         //} else if (!strcmp(argv[i], "-t") || !strcmp(argv[i], "--threads")) {
@@ -131,9 +133,10 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s)\n\n");
 
             fprintf(stderr, "\tannotate\tgiven a graph and a fast[a|q] file, annotate\n");
-            fprintf(stderr, "\t\t\tthe respective kmers\n");
+            fprintf(stderr, "\t\t\tthe respective kmers\n\n");
 
-            fprintf(stderr, "\n");
+            fprintf(stderr, "\ttransform\tgiven a graph, transform it to other formats\n\n");
+
             return;
         }
         case BUILD: {
@@ -200,9 +203,11 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-i --infile-base [STR] \tbasename for graph with annotation used for classifying\n");
             fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
         } break;
-        case DUMP: {
-            //TODO: add help message
-            fprintf(stderr, "Usage: %s dump TODO", prog_name.c_str());
+        case TRANSFORM: {
+            fprintf(stderr, "Usage: %s transform [options] GRAPH\n\n", prog_name.c_str());
+
+            fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
+            fprintf(stderr, "\t   --to-adj-list \t\twrite the adjacency list to file [off]\n");
         } break;
     }
 
