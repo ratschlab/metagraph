@@ -174,6 +174,10 @@ int main(int argc, const char *argv[]) {
 
                             // open stream
                             gzFile input_p = gzopen(files[f].c_str(), "r");
+                            if (input_p == Z_NULL) {
+                                std::cerr << "ERROR no such file " << files[f] << std::endl;
+                                exit(1);
+                            }
 
                             //TODO: handle read_stream->qual
                             kseq_t *read_stream = kseq_init(input_p);
@@ -224,11 +228,15 @@ int main(int argc, const char *argv[]) {
                         std::cout << std::endl << "Parsing " << files[f] << std::endl;
                     }
                     // open stream
-                    gzFile input_p = gzopen(files[f].c_str(), "r");
                     if (utils::get_filetype(files[f]) == "VCF") {
                         std::cerr << "ERROR: this method of reading VCFs not yet implemented" << std::endl;
                         exit(1);
                     } else {
+                        gzFile input_p = gzopen(files[f].c_str(), "r");
+                        if (input_p == Z_NULL) {
+                            std::cerr << "ERROR no such file " << files[f] << std::endl;
+                            exit(1);
+                        }
                         kseq_t *read_stream = kseq_init(input_p);
                         if (read_stream == NULL) {
                             std::cerr << "ERROR while opening input file " << files[f] << std::endl;
@@ -240,8 +248,8 @@ int main(int argc, const char *argv[]) {
                             graph->add_sequence(std::string(read_stream->seq.s, read_stream->seq.l));
                         }
                         kseq_destroy(read_stream);
+                        gzclose(input_p);
                     }
-                    gzclose(input_p);
                 }
             }
 
@@ -364,6 +372,10 @@ int main(int argc, const char *argv[]) {
 
                 // open stream to fasta file
                 gzFile input_p = gzopen(files[f].c_str(), "r");
+                if (input_p == Z_NULL) {
+                    std::cerr << "ERROR no such file " << files[f] << std::endl;
+                    exit(1);
+                }
                 kseq_t *read_stream = kseq_init(input_p);
 
                 if (read_stream == NULL) {
@@ -519,6 +531,10 @@ int main(int argc, const char *argv[]) {
 
                 // open stream to input fasta
                 gzFile input_p = gzopen(files[f].c_str(), "r");
+                if (input_p == Z_NULL) {
+                    std::cerr << "ERROR no such file " << files[f] << std::endl;
+                    exit(1);
+                }
                 kseq_t *read_stream = kseq_init(input_p);
                 if (read_stream == NULL) {
                   std::cerr << "ERROR while opening input file " << config->ALIGN << std::endl;
