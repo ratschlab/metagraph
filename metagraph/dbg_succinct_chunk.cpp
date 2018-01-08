@@ -45,12 +45,14 @@ void DBG_succ::DynamicChunk::extend(const DynamicChunk &other) {
 
 void DBG_succ::DynamicChunk::initialize_graph(DBG_succ *graph) {
     delete graph->W;
-    graph->W = new wavelet_tree_dyn(4, W_);
+    graph->W = new wavelet_tree_stat(4, W_);
 
     delete graph->last;
-    graph->last = new bit_vector_dyn(last_);
+    graph->last = new bit_vector_stat(last_);
 
     graph->F = F_;
+
+    graph->state = Config::STAT;
 }
 
 bool DBG_succ::DynamicChunk::load(const std::string &infbase) {
@@ -134,6 +136,8 @@ void DBG_succ::VectorChunk::initialize_graph(DBG_succ *graph) {
     graph->last = new bit_vector_dyn(last_);
 
     graph->F = F_;
+
+    graph->state = Config::DYN;
 }
 
 bool DBG_succ::VectorChunk::load(const std::string &infbase) {
