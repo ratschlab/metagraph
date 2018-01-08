@@ -126,18 +126,20 @@ std::vector<bool> smallest_nodes(const std::vector<const DBG_succ*> &G,
  *  Returns the input file type, given a filename
  */
 std::string get_filetype(const std::string &fname) {
-    int dotind = fname.rfind(".");
-    std::string ext;
-    if (dotind < 0) {
-        std::cerr << "ERROR: Filetype unknown\n";
-        exit(1);
-    }
-    if (fname.substr(dotind) == ".gz") {
-        int nextind = fname.substr(0, dotind - 1).rfind(".");
+    size_t dotind = fname.rfind(".");
+    if (dotind == std::string::npos)
+        return "";
+
+    std::string ext = fname.substr(dotind);
+
+    if (ext == ".gz") {
+        size_t nextind = fname.substr(0, dotind - 1).rfind(".");
+        if (nextind == std::string::npos)
+            return "";
+
         ext = fname.substr(nextind, dotind - nextind);
-    } else {
-        ext = fname.substr(dotind);
     }
+
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
     if (ext == ".vcf") {
         return "VCF";

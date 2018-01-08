@@ -169,9 +169,7 @@ int main(int argc, const char *argv[]) {
                                 sequence_to_kmers(sequence, graph->get_k(), &kmers,
                                                   false, config->parallel);
                             }
-                        } else {
-                            //READ FROM FASTA
-
+                        } else if (utils::get_filetype(files[f]) == "FASTA") {
                             // open stream
                             gzFile input_p = gzopen(files[f].c_str(), "r");
                             if (input_p == Z_NULL) {
@@ -198,6 +196,9 @@ int main(int argc, const char *argv[]) {
                             kseq_destroy(read_stream);
 
                             gzclose(input_p);
+                        } else {
+                            std::cerr << "ERROR: Filetype unknown for file " << files[f] << std::endl;
+                            exit(1);
                         }
                         //graph->print_stats();
                         //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
@@ -233,7 +234,7 @@ int main(int argc, const char *argv[]) {
                     if (utils::get_filetype(files[f]) == "VCF") {
                         std::cerr << "ERROR: this method of reading VCFs not yet implemented" << std::endl;
                         exit(1);
-                    } else {
+                    } else if (utils::get_filetype(files[f]) == "FASTA") {
                         gzFile input_p = gzopen(files[f].c_str(), "r");
                         if (input_p == Z_NULL) {
                             std::cerr << "ERROR no such file " << files[f] << std::endl;
@@ -251,6 +252,9 @@ int main(int argc, const char *argv[]) {
                         }
                         kseq_destroy(read_stream);
                         gzclose(input_p);
+                    } else {
+                        std::cerr << "ERROR: Filetype unknown for file " << files[f] << std::endl;
+                        exit(1);
                     }
                 }
             }

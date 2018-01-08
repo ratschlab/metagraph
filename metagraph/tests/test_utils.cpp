@@ -27,6 +27,13 @@ TEST(get_filetype, FASTQ) {
     EXPECT_EQ("FASTQ", utils::get_filetype("file.FQ.gz"));
 }
 
+TEST(get_filetype, IncorrectFiletype) {
+    EXPECT_EQ("", utils::get_filetype("fq"));
+    EXPECT_EQ("", utils::get_filetype("fasta"));
+    EXPECT_EQ("", utils::get_filetype("bz2"));
+    EXPECT_EQ("", utils::get_filetype("file.gz"));
+    EXPECT_EQ("", utils::get_filetype("fasta.gz"));
+}
 
 bool colexicographically_greater(const std::string &s1, const std::string &s2) {
     return utils::colexicographically_greater(s1, s2);
