@@ -208,10 +208,12 @@ int main(int argc, const char *argv[]) {
                 }
                 graph_data.initialize_graph(graph);
 
-                std::cerr << "Converting static graph to dynamic\t";
-                tstart = clock();
-                graph->switch_state(Config::DYN);
-                std::cout << (clock() - tstart) / CLOCKS_PER_SEC << std::endl;
+                if (config->state == Config::DYN) {
+                    std::cerr << "Converting static graph to dynamic\t";
+                    tstart = clock();
+                    graph->switch_state(Config::DYN);
+                    std::cout << (clock() - tstart) / CLOCKS_PER_SEC << std::endl;
+                }
             } else {
                 //slower method
                 //TODO: merge in optimizations from seqmerge branch
