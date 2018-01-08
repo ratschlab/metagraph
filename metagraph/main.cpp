@@ -119,7 +119,7 @@ int main(int argc, const char *argv[]) {
 
                 DBG_succ::VectorChunk graph_data;
                 // add the dummy source node
-                graph_data.push_back(1, DBG_succ::alph_size, 0);
+                graph_data.push_back(0, DBG_succ::alph_size, 0);
 
                 //one pass per suffix
                 for (size_t j = 0; j < suffices.size(); ++j) {

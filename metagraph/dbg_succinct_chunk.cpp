@@ -265,7 +265,7 @@ void sequence_to_kmers(const std::string &seq,
                        std::vector<KMer> *kmers,
                        bool add_bridge,
                        unsigned int parallel,
-                       std::string suffix) {
+                       const std::string &suffix) {
     // there is nothing to parse
     if (!seq.size())
         return;

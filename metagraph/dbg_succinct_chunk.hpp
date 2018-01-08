@@ -87,7 +87,7 @@ void sequence_to_kmers(const std::string &seq,
                        std::vector<KMer> *kmers,
                        bool add_bridge = true,
                        unsigned int parallel = 1,
-                       std::string suffix = "");
+                       const std::string &suffix = "");
 
 
 #endif // __DBG_SUCCINCT_CHUNK_HPP__
