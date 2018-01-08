@@ -998,17 +998,12 @@ void DBG_succ::print_seq() const {
     }
 }
 
-void DBG_succ::print_adj_list(const std::string &filename) const {
-    std::ofstream of;
-    std::ostream &outstream = filename != ""
-                                       ? (of = std::ofstream(filename))
-                                       : std::cout;
-
+void DBG_succ::print_adj_list(std::ostream &os) const {
     for (uint64_t edge = 1; edge < W->size(); ++edge) {
-        outstream << rank_last(succ_last(edge))
-                  << "\t"
-                  << rank_last(outgoing(edge, get_W(edge)))
-                  << "\n";
+        os << 1 + rank_last(fwd(edge) - 1)
+           << " ";
+        if (get_last(edge))
+            os << "\n";
     }
 }
 

@@ -131,7 +131,7 @@ class DBG_succ : public SequenceGraph {
      * Write the adjacency list to file |filename| or
      * print it to stdout of the filename is not provided.
      */
-    void print_adj_list(const std::string &filename = "") const;
+    void print_adj_list(std::ostream &os = std::cout) const;
 
     void switch_state(Config::StateType state);
 

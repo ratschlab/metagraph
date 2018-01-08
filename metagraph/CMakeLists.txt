@@ -31,10 +31,12 @@ add_library(metagraph STATIC ${src_files})
 add_executable(metagengraph "main.cpp")
 add_dependencies(metagengraph metagraph)
 
-#set(CMAKE_EXE_LINKER_FLAGS "-static")
+if(UNIX AND NOT APPLE)
+  set(CMAKE_EXE_LINKER_FLAGS "-static")
+endif()
 
 set(METALIBS
-  -lhts -lz -lbz2
+  -lhts -lz -lbz2 -lcurl
   -lmaus2 -lmaus2_simd_align_128 -lmaus2_simd_align_256
   -lsdsl -ldivsufsort -ldivsufsort64
   -lssl -lcrypto -llzma

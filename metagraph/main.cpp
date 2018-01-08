@@ -84,7 +84,7 @@ DBG_succ* load_critical_graph_from_file(const std::string &filename) {
 int main(int argc, const char *argv[]) {
 
     // parse command line arguments and options
-    Config *config = new Config(argc, argv);
+    std::unique_ptr<Config> config(new Config(argc, argv));
 
     if (config->verbose)
         std::cout << "Welcome to MetaGraph" << std::endl;
@@ -134,8 +134,6 @@ int main(int argc, const char *argv[]) {
                         if (config->verbose) {
                             std::cout << std::endl << "Parsing " << files[f] << std::endl;
                         }
-                        // open stream
-                        gzFile input_p = gzopen(files[f].c_str(), "r");
 
                         if (utils::get_filetype(files[f]) == "VCF") {
                             //READ FROM VCF
@@ -173,6 +171,14 @@ int main(int argc, const char *argv[]) {
                             }
                         } else {
                             //READ FROM FASTA
+
+                            // open stream
+                            gzFile input_p = gzopen(files[f].c_str(), "r");
+                            if (input_p == Z_NULL) {
+                                std::cerr << "ERROR no such file " << files[f] << std::endl;
+                                exit(1);
+                            }
+
                             //TODO: handle read_stream->qual
                             kseq_t *read_stream = kseq_init(input_p);
                             if (read_stream == NULL) {
@@ -190,8 +196,9 @@ int main(int argc, const char *argv[]) {
                                                   true, config->parallel);
                             }
                             kseq_destroy(read_stream);
+
+                            gzclose(input_p);
                         }
-                        gzclose(input_p);
                         //graph->print_stats();
                         //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
                     }
@@ -223,11 +230,15 @@ int main(int argc, const char *argv[]) {
                         std::cout << std::endl << "Parsing " << files[f] << std::endl;
                     }
                     // open stream
-                    gzFile input_p = gzopen(files[f].c_str(), "r");
                     if (utils::get_filetype(files[f]) == "VCF") {
                         std::cerr << "ERROR: this method of reading VCFs not yet implemented" << std::endl;
                         exit(1);
                     } else {
+                        gzFile input_p = gzopen(files[f].c_str(), "r");
+                        if (input_p == Z_NULL) {
+                            std::cerr << "ERROR no such file " << files[f] << std::endl;
+                            exit(1);
+                        }
                         kseq_t *read_stream = kseq_init(input_p);
                         if (read_stream == NULL) {
                             std::cerr << "ERROR while opening input file " << files[f] << std::endl;
@@ -239,8 +250,8 @@ int main(int argc, const char *argv[]) {
                             graph->add_sequence(std::string(read_stream->seq.s, read_stream->seq.l));
                         }
                         kseq_destroy(read_stream);
+                        gzclose(input_p);
                     }
-                    gzclose(input_p);
                 }
             }
 
@@ -363,6 +374,10 @@ int main(int argc, const char *argv[]) {
 
                 // open stream to fasta file
                 gzFile input_p = gzopen(files[f].c_str(), "r");
+                if (input_p == Z_NULL) {
+                    std::cerr << "ERROR no such file " << files[f] << std::endl;
+                    exit(1);
+                }
                 kseq_t *read_stream = kseq_init(input_p);
 
                 if (read_stream == NULL) {
@@ -487,17 +502,23 @@ int main(int argc, const char *argv[]) {
             }
             break;
         }
-        case Config::DUMP: {
+        case Config::TRANSFORM: {
             //for (unsigned int f = 0; f < files.size(); ++f) {
                 //DBG_succ* graph_ = new DBG_succ(files[f]);
-                DBG_succ *graph_ = load_critical_graph_from_file(config->infbase);
+                DBG_succ *graph_ = load_critical_graph_from_file(files[0]);
                 // checks whether annotation exists and creates an empty one if not
                 // graph_->annotationFromFile(config->infbase + ".anno.dbg");
-                graph_->print_adj_list();
-                //graph_->print_adj_list(config->outfbase);
+                if (config->to_adj_list) {
+                    if (config->outfbase.size()) {
+                        std::ofstream outstream(config->outfbase + ".adjlist");
+                        graph_->print_adj_list(outstream);
+                    } else {
+                        graph_->print_adj_list(std::cout);
+                    }
+                }
                 delete graph_;
             //}
-            break;
+            return 0;
         }
         case Config::ALIGN: {
             // load graph
@@ -512,6 +533,10 @@ int main(int argc, const char *argv[]) {
 
                 // open stream to input fasta
                 gzFile input_p = gzopen(files[f].c_str(), "r");
+                if (input_p == Z_NULL) {
+                    std::cerr << "ERROR no such file " << files[f] << std::endl;
+                    exit(1);
+                }
                 kseq_t *read_stream = kseq_init(input_p);
                 if (read_stream == NULL) {
                   std::cerr << "ERROR while opening input file " << config->ALIGN << std::endl;
@@ -606,7 +631,6 @@ int main(int argc, const char *argv[]) {
             graph->serialize(config->outfbase);
         delete graph;
     }
-    delete config;
 
     return 0;
 }
