@@ -22,6 +22,7 @@ TEST(get_filetype, FASTA) {
 TEST(get_filetype, FASTQ) {
     EXPECT_EQ("FASTQ", utils::get_filetype("file.fq"));
     EXPECT_EQ("FASTQ", utils::get_filetype("file.FQ"));
+    EXPECT_EQ("FASTQ", utils::get_filetype("file.fastq"));
     EXPECT_EQ("FASTQ", utils::get_filetype("file.fq.gz"));
     EXPECT_EQ("FASTQ", utils::get_filetype("file.FQ.gz"));
 }

@@ -141,7 +141,7 @@ std::string get_filetype(const std::string &fname) {
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
     if (ext == ".vcf") {
         return "VCF";
-    } else if (ext == ".fq") {
+    } else if ((ext == ".fq") || (ext == ".fastq")) {
         return "FASTQ";
     } else {
         return "FASTA";
