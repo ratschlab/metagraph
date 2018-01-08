@@ -879,7 +879,8 @@ void DBG_succ::sort_W_locally(uint64_t l, uint64_t u) {
 }
 
 TAlphabet DBG_succ::encode(char s) {
-    return kCharToNucleotide[static_cast<int>(s)];
+    assert(static_cast<size_t>(s) < 128);
+    return kCharToNucleotide[static_cast<size_t>(s)];
 }
 
 char DBG_succ::decode(TAlphabet c) {

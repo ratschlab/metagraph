@@ -3,7 +3,7 @@ project(MetaGenGraph)
 
 enable_testing()
 
-list(APPEND CMAKE_CXX_FLAGS "\
+string(APPEND CMAKE_CXX_FLAGS " \
   -std=c++14 -Wall -Wextra -Werror -O3 \
   -msse4.2 -fopenmp -D_THREAD_SAFE -pthread") # -DDBGDEBUG
 
@@ -39,7 +39,7 @@ set(METALIBS
 )
 
 if(BUILD_STATIC)
-  set(CMAKE_EXE_LINKER_FLAGS "-static")
+  set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} -static)
   set(METALIBS ${METALIBS} -lcurl)
 endif()
 
