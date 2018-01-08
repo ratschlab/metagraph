@@ -142,6 +142,15 @@ class bit_vector_stat : public bit_vector {
         }
     }
 
+    bit_vector_stat(const std::vector<bool> &other)
+            : vector_(other.size(), 0) {
+        for (uint64_t i = 0; i < other.size(); ++i) {
+            if (other.at(i))
+                vector_[i] = 1;
+        }
+    }
+
+
     bit_vector_stat(std::initializer_list<bool> init) : vector_(init) {}
 
     bit_vector_stat(std::istream &in) {
