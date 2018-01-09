@@ -26,31 +26,6 @@ class DBG_succ::Chunk {
 };
 
 
-// TODO: Do we need this version? Probably more memory efficient but it's much slower.
-class DBG_succ::DynamicChunk : public DBG_succ::Chunk {
-  public:
-    void push_back(TAlphabet W, TAlphabet F, bool last);
-    TAlphabet get_W_back() const;
-    void alter_W_back(TAlphabet W);
-    void alter_last_back(bool last);
-
-    void extend(const Chunk &other);
-    void extend(const DynamicChunk &other);
-
-    uint64_t size() const;
-
-    void initialize_graph(DBG_succ *graph);
-
-    bool load(const std::string &filename_base);
-    void serialize(const std::string &filename_base) const;
-
-  private:
-    wavelet_tree_dyn W_ = wavelet_tree_dyn(4);
-    bit_vector_dyn last_;
-    std::vector<uint64_t> F_ = std::vector<uint64_t>(DBG_succ::alph_size, 0);
-};
-
-
 class DBG_succ::VectorChunk : public DBG_succ::Chunk {
   public:
     void push_back(TAlphabet W, TAlphabet F, bool last);
