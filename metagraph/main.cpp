@@ -124,6 +124,7 @@ int main(int argc, const char *argv[]) {
                 //one pass per suffix
                 for (size_t j = 0; j < suffices.size(); ++j) {
                     std::cout << "Suffix: " << suffices[j] << "\n";
+                    auto suffix_code = prepare_sequence(suffices[j]);
                     //add sink nodes
                     // graph->add_sink(config->parallel, suffices[j]);
 
@@ -136,6 +137,9 @@ int main(int argc, const char *argv[]) {
                         }
 
                         if (utils::get_filetype(files[f]) == "VCF") {
+                            if (suffices[j].find('$') != std::string::npos)
+                                continue;
+
                             //READ FROM VCF
                             uint64_t nbp = 0;
                             uint64_t nbplast = 0;
@@ -167,12 +171,7 @@ int main(int argc, const char *argv[]) {
                                 annotation = "VCF:" + annotation;
                                 nbp += sequence.length();
 
-                                std::vector<TAlphabet> sequence_encoded(sequence.size());
-                                std::transform(sequence.begin(), sequence.end(),
-                                               sequence_encoded.begin(), DBG_succ::encode);
-
-                                sequence_to_kmers(sequence_encoded, graph->get_k(), &kmers,
-                                                  false, config->parallel);
+                                sequence_to_kmers(prepare_sequence(sequence), graph->get_k(), &kmers, suffix_code);
                             }
                         } else if ((utils::get_filetype(files[f]) == "FASTA") || (utils::get_filetype(files[f]) == "FASTQ")) {
                             // open stream
@@ -195,13 +194,9 @@ int main(int argc, const char *argv[]) {
                                     reverse_complement(read_stream->seq);
                                 // add all k-mers of seq to the graph
 
-                                std::vector<TAlphabet> sequence_encoded(read_stream->seq.l);
-                                std::transform(read_stream->seq.s, read_stream->seq.s + read_stream->seq.l,
-                                               sequence_encoded.begin(), DBG_succ::encode);
-
-                                sequence_to_kmers(sequence_encoded,
-                                                  graph->get_k(), &kmers,
-                                                  true, config->parallel);
+                                kmers.reserve(kmers.size() + read_stream->seq.l);
+                                sequence_to_kmers(prepare_sequence(read_stream->seq.s, graph->get_k(), true),
+                                                  graph->get_k(), &kmers, suffix_code);
                             }
                             kseq_destroy(read_stream);
 
@@ -217,8 +212,8 @@ int main(int argc, const char *argv[]) {
                     //append to succinct representation and clear kmer list
                     tstart = clock();
 
-                    std::cout << "Sorting kmers and appending succinct representation from current bin..." << std::endl;
-                    auto next_block = DBG_succ::VectorChunk::build_from_kmers(graph->get_k(), &kmers, config->parallel);
+                    std::cout << "Sorting kmers and appending succinct representation from current bin...\t" << std::flush;
+                    auto next_block = DBG_succ::VectorChunk::build_from_kmers(graph->get_k(), &kmers);
                     graph_data.extend(*next_block);
                     delete next_block;
 
@@ -227,7 +222,7 @@ int main(int argc, const char *argv[]) {
                 graph_data.initialize_graph(graph);
 
                 if (config->state == Config::DYN) {
-                    std::cerr << "Converting static graph to dynamic..." << std::endl;
+                    std::cerr << "Converting static graph to dynamic...\t" << std::flush;
                     tstart = clock();
                     graph->switch_state(Config::DYN);
                     std::cout << (clock() - tstart) / CLOCKS_PER_SEC << "sec" << std::endl;

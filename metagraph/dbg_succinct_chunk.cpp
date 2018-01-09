@@ -171,56 +171,31 @@ DBG_succ::VectorChunk* DBG_succ::VectorChunk::build_from_kmers(size_t k,
 }
 
 
-bool equal_encodings(const char first, const char second) {
-    return DBG_succ::encode(first) == DBG_succ::encode(second);
+std::vector<TAlphabet> prepare_sequence(const std::string &sequence,
+                                        size_t k, bool add_bridge) {
+    const std::string &seq = add_bridge
+                                ? std::string(k, '$') + sequence + "$"
+                                : sequence;
+
+    std::vector<TAlphabet> sequence_encoded(seq.size());
+    std::transform(seq.begin(), seq.end(),
+                   sequence_encoded.begin(), DBG_succ::encode);
+
+    return sequence_encoded;
 }
+
 
 void sequence_to_kmers(const std::vector<TAlphabet> &seq,
                        size_t k,
                        std::vector<KMer> *kmers,
-                       bool add_bridge,
-                       unsigned int parallel,
                        const std::vector<TAlphabet> &suffix) {
-    // there is nothing to parse
-    if (!seq.size())
+    if (seq.size() < k + 1)
         return;
 
-    kmers->reserve(kmers->size() + seq.size());
-    if (add_bridge) {
-        std::deque<TAlphabet> bridge(k, 0);
-        bridge.push_back(seq[0]);
-        for (size_t i = 0; i < std::min(k, seq.size()); ++i) {
-            if (std::equal(suffix.rbegin(), suffix.rend(), bridge.rbegin() + 1)) {
-                kmers->emplace_back(bridge, bridge.size());
-            }
-            bridge.pop_front();
-            bridge.push_back(i + 1 < seq.size() ? seq[i + 1] : 0);
-        }
-    }
-    if (k < seq.size()) {
-        #pragma omp parallel num_threads(parallel)
-        {
-            std::vector<KMer> kmer_priv;
-            #pragma omp for nowait
-            for (size_t i = 0; i < seq.size() - k; ++i) {
-                if (std::equal(suffix.begin(), suffix.end(),
-                               seq.data() + i + k - suffix.size())) {
-                    kmer_priv.emplace_back(seq.data() + i, k + 1);
-                }
-            }
-            #pragma omp critical
-            kmers->insert(kmers->end(),
-                std::make_move_iterator(kmer_priv.begin()),
-                std::make_move_iterator(kmer_priv.end())
-            );
-        }
-    }
-    if (add_bridge) {
-        std::deque<TAlphabet> bridge(seq.end() - k, seq.end());
-        bridge.push_back(0);
+    for (size_t i = 0; i < seq.size() - k; ++i) {
         if (std::equal(suffix.begin(), suffix.end(),
-                       bridge.begin() + k - suffix.size())) {
-            kmers->emplace_back(bridge, bridge.size());
+                       seq.data() + i + k - suffix.size())) {
+            kmers->emplace_back(seq.data() + i, k + 1);
         }
     }
 }
