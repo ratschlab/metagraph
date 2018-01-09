@@ -4,8 +4,16 @@ project(MetaGenGraph)
 enable_testing()
 
 string(APPEND CMAKE_CXX_FLAGS " \
-  -std=c++14 -Wall -Wextra -Werror -O3 \
+  -std=c++14 -Wall -Wextra -Werror \
   -msse4.2 -fopenmp -D_THREAD_SAFE -pthread") # -DDBGDEBUG
+
+# Profile build type
+set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O2")
+set(CMAKE_EXE_LINKER_FLAGS_PROFILE "-pg")
+set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg")
+
+# Debug build type
+set(CMAKE_CXX_FLAGS_DEBUG "-O3")
 
 set(CMAKE_VERBOSE_MAKEFILE 1)
 cmake_policy(SET CMP0015 NEW)
@@ -103,7 +111,7 @@ add_test(NAME unit_tests COMMAND unit_tests)
 #-------------------
 # Python interfaces
 #-------------------
-if(INTERFACE_PYTHON)
+if(PYTHON_INTERFACE)
   FIND_PACKAGE(SWIG REQUIRED)
   INCLUDE(${SWIG_USE_FILE})
 
