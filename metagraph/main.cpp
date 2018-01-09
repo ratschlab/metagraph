@@ -166,7 +166,12 @@ int main(int argc, const char *argv[]) {
                                 }
                                 annotation = "VCF:" + annotation;
                                 nbp += sequence.length();
-                                sequence_to_kmers(sequence, graph->get_k(), &kmers,
+
+                                std::vector<TAlphabet> sequence_encoded(sequence.size());
+                                std::transform(sequence.begin(), sequence.end(),
+                                               sequence_encoded.begin(), DBG_succ::encode);
+
+                                sequence_to_kmers(sequence_encoded, graph->get_k(), &kmers,
                                                   false, config->parallel);
                             }
                         } else if ((utils::get_filetype(files[f]) == "FASTA") || (utils::get_filetype(files[f]) == "FASTQ")) {
@@ -189,7 +194,12 @@ int main(int argc, const char *argv[]) {
                                 if (config->reverse)
                                     reverse_complement(read_stream->seq);
                                 // add all k-mers of seq to the graph
-                                sequence_to_kmers(std::string(read_stream->seq.s, read_stream->seq.l),
+
+                                std::vector<TAlphabet> sequence_encoded(read_stream->seq.l);
+                                std::transform(read_stream->seq.s, read_stream->seq.s + read_stream->seq.l,
+                                               sequence_encoded.begin(), DBG_succ::encode);
+
+                                sequence_to_kmers(sequence_encoded,
                                                   graph->get_k(), &kmers,
                                                   true, config->parallel);
                             }

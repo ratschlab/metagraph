@@ -358,7 +358,7 @@ void allelesFromSeq(DBG_succ* G, kstring_t &seq, unsigned int f,
     uint64_t edge = 0;
     uint64_t currStart = 0;
     unsigned int alleleCnt = 1;
-    DBG_succ::TAlphabet seqVal, seqValNext;
+    DBG_succ::TAlphabet seqValNext;
     DBG_succ::TAlphabet nodeVal;
     JoinInfo currJoin;
     std::vector<bool> isRef;
@@ -380,9 +380,9 @@ void allelesFromSeq(DBG_succ* G, kstring_t &seq, unsigned int f,
             currStart++;
             continue;
         }
-        seqVal = G->encode(seq.s[seqPos]);
 
-        assert(nodeVal % G->alph_size == 6 || nodeVal % G->alph_size == seqVal);
+        assert(nodeVal % G->alph_size == 6 || nodeVal % G->alph_size == G->encode(seq.s[seqPos]));
+
         if (seqPos + 1 == seq.l)
             break;
         if (nodeVal % G->alph_size != 6) {

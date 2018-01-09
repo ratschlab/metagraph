@@ -119,7 +119,10 @@ void DBG_succ::VectorChunk::extend(const DBG_succ::Chunk &other) {
 }
 
 void DBG_succ::VectorChunk::extend(const DBG_succ::VectorChunk &other) {
+    W_.reserve(W_.size() + other.W_.size());
     W_.insert(W_.end(), other.W_.begin(), other.W_.end());
+
+    last_.reserve(last_.size() + other.last_.size());
     last_.insert(last_.end(), other.last_.begin(), other.last_.end());
 
     assert(F_.size() == other.F_.size());
@@ -179,7 +182,7 @@ DBG_succ::VectorChunk* DBG_succ::VectorChunk::build_from_kmers(size_t k,
                                                                unsigned int parallel) {
     // parallel sort of all kmers
     omp_set_num_threads(std::max(static_cast<int>(parallel), 1));
-    __gnu_parallel::sort(kmers->begin(), kmers->end());
+    __gnu_parallel::sort(kmers->data(), kmers->data() + kmers->size());
 
     auto unique_end = std::unique(kmers->begin(), kmers->end());
     kmers->erase(unique_end, kmers->end()); 
@@ -260,41 +263,38 @@ bool equal_encodings(const char first, const char second) {
     return DBG_succ::encode(first) == DBG_succ::encode(second);
 }
 
-void sequence_to_kmers(const std::string &seq,
+void sequence_to_kmers(const std::vector<TAlphabet> &seq,
                        size_t k,
                        std::vector<KMer> *kmers,
                        bool add_bridge,
                        unsigned int parallel,
-                       const std::string &suffix) {
+                       const std::vector<TAlphabet> &suffix) {
     // there is nothing to parse
     if (!seq.size())
         return;
 
+    // kmers->reserve(kmers->size() + seq.size() + k);
+
     if (add_bridge) {
-        std::deque<char> bridge(k, '$');
+        std::deque<TAlphabet> bridge(k, 0);
         bridge.push_back(seq[0]);
-        for (size_t i = 0; i < std::min(k, seq.length()); ++i) {
-            if (std::equal(suffix.rbegin(), suffix.rend(), bridge.rbegin() + 1,
-                           equal_encodings)) {
-                kmers->emplace_back(bridge, DBG_succ::encode);
+        for (size_t i = 0; i < std::min(k, seq.size()); ++i) {
+            if (std::equal(suffix.rbegin(), suffix.rend(), bridge.rbegin() + 1)) {
+                kmers->emplace_back(bridge, bridge.size());
             }
             bridge.pop_front();
-            bridge.push_back(i + 1 < seq.length() ? seq[i + 1] : '$');
+            bridge.push_back(i + 1 < seq.size() ? seq[i + 1] : 0);
         }
     }
-    if (k < seq.length()) {
+    if (k < seq.size()) {
         #pragma omp parallel num_threads(parallel)
         {
             std::vector<KMer> kmer_priv;
             #pragma omp for nowait
-            for (size_t i = 0; i < seq.length() - k; ++i) {
+            for (size_t i = 0; i < seq.size() - k; ++i) {
                 if (std::equal(suffix.begin(), suffix.end(),
-                               seq.c_str() + i + k - suffix.length(),
-                               equal_encodings)) {
-                    kmer_priv.emplace_back(
-                        std::string(seq.c_str() + i, k + 1),
-                        DBG_succ::encode
-                    );
+                               seq.data() + i + k - suffix.size())) {
+                    kmer_priv.emplace_back(seq.data() + i, k + 1);
                 }
             }
             #pragma omp critical
@@ -305,12 +305,11 @@ void sequence_to_kmers(const std::string &seq,
         }
     }
     if (add_bridge) {
-        std::deque<char> bridge(seq.end() - k, seq.end());
-        bridge.push_back('$');
+        std::deque<TAlphabet> bridge(seq.end() - k, seq.end());
+        bridge.push_back(0);
         if (std::equal(suffix.begin(), suffix.end(),
-                       bridge.begin() + k - suffix.length(),
-                       equal_encodings)) {
-            kmers->emplace_back(bridge, DBG_succ::encode);
+                       bridge.begin() + k - suffix.size())) {
+            kmers->emplace_back(bridge, bridge.size());
         }
     }
 }

@@ -57,11 +57,13 @@ DBG_succ::DBG_succ(size_t k, const std::vector<std::string> &sequences, size_t p
         std::vector<KMer> kmers;
 
         // add dummy edge as a kmer
-        kmers.emplace_back(std::deque<char>(k_ + 1, '$'), DBG_succ::encode);
+        kmers.emplace_back(std::vector<size_t>(k_ + 1, 0), k_ + 1);
 
         // break the sequences down into kmers
         for (const auto &seq : sequences) {
-            sequence_to_kmers(seq, k_, &kmers, true, parallel);
+            std::vector<TAlphabet> sequence(seq.size());
+            std::transform(seq.begin(), seq.end(), sequence.begin(), DBG_succ::encode);
+            sequence_to_kmers(sequence, k_, &kmers, true, parallel);
         }
         // build the graph chunk from kmers
         auto chunk = DBG_succ::VectorChunk::build_from_kmers(k_, &kmers, parallel);

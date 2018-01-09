@@ -82,12 +82,12 @@ class DBG_succ::VectorChunk : public DBG_succ::Chunk {
 /**
  * Break the sequence to kmers and extend the temporary kmers storage.
  */
-void sequence_to_kmers(const std::string &seq,
+void sequence_to_kmers(const std::vector<TAlphabet> &seq,
                        size_t k,
                        std::vector<KMer> *kmers,
                        bool add_bridge = true,
                        unsigned int parallel = 1,
-                       const std::string &suffix = "");
+                       const std::vector<TAlphabet> &suffix = {});
 
 
 #endif // __DBG_SUCCINCT_CHUNK_HPP__
