@@ -3,6 +3,8 @@ project(MetaGenGraph)
 
 enable_testing()
 
+set(default_build_type "Debug")
+
 string(APPEND CMAKE_CXX_FLAGS " \
   -std=c++14 -Wall -Wextra -Werror \
   -msse4.2 -fopenmp -D_THREAD_SAFE -pthread") # -DDBGDEBUG
