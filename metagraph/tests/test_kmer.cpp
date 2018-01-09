@@ -77,5 +77,5 @@ TEST(KmerEncodeTest, CompareSuffixFalse) {
 }
 
 TEST(KmerTest, SizeOfClass) {
-    EXPECT_EQ(sizeof(ui256), sizeof(KMer));
+    EXPECT_EQ(sizeof(uint256_t), sizeof(KMer));
 }

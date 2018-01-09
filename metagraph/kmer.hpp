@@ -9,8 +9,8 @@
 
 #include <htslib/kseq.h>
 
-typedef boost::multiprecision::uint256_t ui256;
-typedef boost::multiprecision::cpp_int cpp_int;
+using boost::multiprecision::uint256_t;
+using boost::multiprecision::cpp_int;
 typedef uint64_t TAlphabet;
 
 const int kBitsPerChar = 3;
@@ -29,8 +29,8 @@ class KMer {
 
     KMer(KMer &&other) : seq_(other.seq_) {}
     KMer(const KMer &other) : seq_(other.seq_) {}
-    explicit KMer(ui256 &&seq) : seq_(seq) {}
-    explicit KMer(const ui256 &seq) : seq_(seq) {}
+    explicit KMer(uint256_t &&seq) : seq_(seq) {}
+    explicit KMer(const uint256_t &seq) : seq_(seq) {}
 
     KMer& operator=(KMer &&other) { seq_ = other.seq_; return *this; }
     KMer& operator=(const KMer &other) { seq_ = other.seq_; return *this; }
@@ -47,7 +47,7 @@ class KMer {
     std::string to_string(const std::string &alphabet) const;
 
   private:
-    ui256 seq_; // kmer sequence
+    uint256_t seq_; // kmer sequence
 
     TAlphabet get(size_t i) const;
 };

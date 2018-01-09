@@ -217,20 +217,20 @@ int main(int argc, const char *argv[]) {
                     //append to succinct representation and clear kmer list
                     tstart = clock();
 
-                    std::cout << "Sorting kmers and appending succinct representation from current bin\t";
+                    std::cout << "Sorting kmers and appending succinct representation from current bin..." << std::endl;
                     auto next_block = DBG_succ::VectorChunk::build_from_kmers(graph->get_k(), &kmers, config->parallel);
                     graph_data.extend(*next_block);
                     delete next_block;
 
-                    std::cout << (clock() - tstart) / CLOCKS_PER_SEC << "\n\n";
+                    std::cout << (clock() - tstart) / CLOCKS_PER_SEC << "sec\n" << std::endl;
                 }
                 graph_data.initialize_graph(graph);
 
                 if (config->state == Config::DYN) {
-                    std::cerr << "Converting static graph to dynamic\t";
+                    std::cerr << "Converting static graph to dynamic..." << std::endl;
                     tstart = clock();
                     graph->switch_state(Config::DYN);
-                    std::cout << (clock() - tstart) / CLOCKS_PER_SEC << std::endl;
+                    std::cout << (clock() - tstart) / CLOCKS_PER_SEC << "sec" << std::endl;
                 }
             } else {
                 //slower method

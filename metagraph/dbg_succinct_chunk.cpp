@@ -185,8 +185,7 @@ void sequence_to_kmers(const std::vector<TAlphabet> &seq,
     if (!seq.size())
         return;
 
-    // kmers->reserve(kmers->size() + seq.size() + k);
-
+    kmers->reserve(kmers->size() + seq.size());
     if (add_bridge) {
         std::deque<TAlphabet> bridge(k, 0);
         bridge.push_back(seq[0]);
