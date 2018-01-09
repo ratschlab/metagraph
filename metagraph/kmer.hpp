@@ -5,6 +5,7 @@
 #include <boost/multiprecision/cpp_int.hpp>
 #include <string>
 #include <algorithm>
+#include <vector>
 
 #include <htslib/kseq.h>
 
