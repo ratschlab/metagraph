@@ -3,7 +3,9 @@ project(MetaGenGraph)
 
 enable_testing()
 
-set(default_build_type "Debug")
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE "DEBUG")
+endif()
 
 string(APPEND CMAKE_CXX_FLAGS " \
   -std=c++14 -Wall -Wextra -Werror \
