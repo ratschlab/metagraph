@@ -169,7 +169,7 @@ int main(int argc, const char *argv[]) {
                                 sequence_to_kmers(sequence, graph->get_k(), &kmers,
                                                   false, config->parallel);
                             }
-                        } else if (utils::get_filetype(files[f]) == "FASTA") {
+                        } else if ((utils::get_filetype(files[f]) == "FASTA") || (utils::get_filetype(files[f]) == "FASTQ")) {
                             // open stream
                             gzFile input_p = gzopen(files[f].c_str(), "r");
                             if (input_p == Z_NULL) {
@@ -234,7 +234,7 @@ int main(int argc, const char *argv[]) {
                     if (utils::get_filetype(files[f]) == "VCF") {
                         std::cerr << "ERROR: this method of reading VCFs not yet implemented" << std::endl;
                         exit(1);
-                    } else if (utils::get_filetype(files[f]) == "FASTA") {
+                    } else if ((utils::get_filetype(files[f]) == "FASTA") || (utils::get_filetype(files[f]) == "FASTQ")) {
                         gzFile input_p = gzopen(files[f].c_str(), "r");
                         if (input_p == Z_NULL) {
                             std::cerr << "ERROR no such file " << files[f] << std::endl;
