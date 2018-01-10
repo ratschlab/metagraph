@@ -187,13 +187,13 @@ int main(int argc, const char *argv[]) {
                                 std::cerr << "ERROR while opening input file " << files[f] << std::endl;
                                 exit(1);
                             }
-                            for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
-                            //while (kseq_read(read_stream) >= 0) {
+                            while (kseq_read(read_stream) >= 0) {
+
                                 // possibly reverse k-mers
                                 if (config->reverse)
                                     reverse_complement(read_stream->seq);
-                                // add all k-mers of seq to the graph
 
+                                // add all k-mers of seq to the graph
                                 kmers.reserve(kmers.size() + read_stream->seq.l);
                                 sequence_to_kmers(prepare_sequence(read_stream->seq.s, graph->get_k(), true),
                                                   graph->get_k(), &kmers, suffix_code);
@@ -205,7 +205,6 @@ int main(int argc, const char *argv[]) {
                             std::cerr << "ERROR: Filetype unknown for file " << files[f] << std::endl;
                             exit(1);
                         }
-                        //graph->print_stats();
                         //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
                     }
                     get_RAM();
@@ -280,12 +279,6 @@ int main(int argc, const char *argv[]) {
 
            //  // load annotation (if file does not exist, empty annotation is created)
            //  // graph->annotationFromFile(config->infbase + ".anno.dbg");
-
-           //  // set up rocksdb
-           // // rocksdb::Options options;
-           // // options.create_if_missing = true;
-           // // rocksdb::DB* db;
-           // // rocksdb::Status status = rocksdb::DB::Open(options, config->dbpath, &db);
 
            //  uint64_t total_seqs = 0;
 
