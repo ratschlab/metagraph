@@ -1,5 +1,7 @@
 #include "kmer.hpp"
 
+const uint256_t kErasingFirstCodeMask = ~uint256_t((1 << kBitsPerChar) - 1);
+
 
 bool KMer::compare_kmer_suffix(const KMer &k1, const KMer &k2, size_t minus) {
     return k1.seq_ >> ((minus + 1) * kBitsPerChar)
@@ -23,4 +25,18 @@ TAlphabet KMer::get(size_t i) const {
 
 std::ostream& operator<<(std::ostream &os, const KMer &kmer) {
     return os << kmer.seq_;
+}
+
+/**
+ * Construct the next k-mer for s[6]s[5]s[4]s[3]s[2]s[1]s[7].
+ * next = s[7]s[6]s[5]s[4]s[3]s[2]s[8]
+ *      = s[7] << k + (kmer & mask) >> 1 + s[8].
+ */
+void update_kmer(size_t k, TAlphabet next,
+                 uint256_t *edge_label, uint256_t *kmer) {
+    *kmer >>= kBitsPerChar;
+    *kmer += (*edge_label + 1) << (kBitsPerChar * k);
+    *kmer &= kErasingFirstCodeMask;
+    *kmer += next + 1;
+    *edge_label = next;
 }

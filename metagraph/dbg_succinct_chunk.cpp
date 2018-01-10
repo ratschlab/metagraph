@@ -188,10 +188,20 @@ void sequence_to_kmers(const std::vector<TAlphabet> &seq,
     if (seq.size() < k + 1)
         return;
 
-    for (size_t i = 0; i < seq.size() - k; ++i) {
+    auto kmer = KMer::pack_kmer(seq.data(), k + 1);
+    uint256_t pred_edge_label = seq[k];
+
+    if (std::equal(suffix.begin(), suffix.end(),
+                   seq.data() + k - suffix.size())) {
+        kmers->emplace_back(kmer);
+    }
+
+    for (size_t i = 1; i < seq.size() - k; ++i) {
+        update_kmer(k, seq[i + k], &pred_edge_label, &kmer);
+
         if (std::equal(suffix.begin(), suffix.end(),
                        seq.data() + i + k - suffix.size())) {
-            kmers->emplace_back(seq.data() + i, k + 1);
+            kmers->emplace_back(kmer);
         }
     }
 }
