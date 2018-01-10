@@ -138,26 +138,20 @@ bool DBG_succ::operator==(const DBG_succ &other) const {
 }
 
 void DBG_succ::serialize(const std::string &outbase) const {
+
+    std::ofstream outstream(outbase + ".dbg");
+
+    // write F values, k, and state
+    libmaus2::util::NumberSerialisation::serialiseNumberVector(outstream, F);
+    libmaus2::util::NumberSerialisation::serialiseNumber(outstream, k_);
+    libmaus2::util::NumberSerialisation::serialiseNumber(outstream, state);
+
     // write Wavelet Tree
-    std::ofstream outstream(outbase + ".W.dbg");
     W->serialise(outstream);
-    outstream.close();
 
     // write last array
-    outstream.open(outbase + ".l.dbg");
     last->serialise(outstream);
-    outstream.close();
 
-    // write F values and k
-    outstream.open(outbase + ".F.dbg");
-    outstream << ">F" << std::endl;
-    for (size_t i = 0; i < F.size(); ++i) {
-        outstream << F.at(i) << "\n";
-    }
-    outstream << ">k\n"
-              << k_ << "\n"
-              << ">s\n"
-              << state << "\n";
     outstream.close();
 }
 
@@ -165,37 +159,13 @@ bool DBG_succ::load(const std::string &infbase) {
     // if not specified in the file, the default for loading is dynamic
     state = Config::DYN;
 
-    // load F, k, and state
-    F.resize(0);
-    F.reserve(alph_size);
-
     try {
-        std::ifstream instream(infbase + ".F.dbg");
-        char mode = 0;
-        std::string cur_line;
+        std::ifstream instream(infbase + ".dbg");
 
-        while (std::getline(instream, cur_line)) {
-            if (cur_line[0] == '>') {
-                if (cur_line.length() < 2)
-                    return false;
-                mode = cur_line[1];
-                continue;
-            }
-            switch (mode) {
-                case 'F':
-                    F.push_back(std::stoull(cur_line));
-                    break;
-                case 'k':
-                    k_ = std::stoul(cur_line);
-                    break;
-                case 's':
-                    state = static_cast<Config::StateType>(std::stoul(cur_line));
-                    break;
-                default:
-                    return false;
-            }
-        }
-        instream.close();
+        // load F, k, and state
+        F = libmaus2::util::NumberSerialisation::deserialiseNumberVector<uint64_t>(instream);
+        k_ = libmaus2::util::NumberSerialisation::deserialiseNumber(instream);
+        state = static_cast<Config::StateType>(libmaus2::util::NumberSerialisation::deserialiseNumber(instream));
 
         if (F.size() != alph_size)
             return false;
@@ -213,9 +183,7 @@ bool DBG_succ::load(const std::string &infbase) {
                 last = new bit_vector_stat();
                 break;
         }
-        std::ifstream instream_W(infbase + ".W.dbg");
-        std::ifstream instream_l(infbase + ".l.dbg");
-        return W->deserialise(instream_W) && last->deserialise(instream_l);
+        return W->deserialise(instream) && last->deserialise(instream);
     } catch (...) {
         return false;
     }
