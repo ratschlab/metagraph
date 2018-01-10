@@ -4,10 +4,13 @@
 #include <type_traits>
 
 #include "datatypes.hpp"
-#include "kmer.hpp"
 #include "config.hpp"
 #include "wavelet_tree.hpp"
 #include "bit_vector.hpp"
+
+
+// define an extended alphabet for W --> somehow this does not work properly as expected
+typedef uint64_t TAlphabet;
 
 
 class SequenceGraph {
@@ -42,9 +45,6 @@ class DBGCondensed : public SequenceGraph {
 
 class DBG_succ : public SequenceGraph {
   public:
-    // define an extended alphabet for W --> somehow this does not work properly as expected
-    typedef uint64_t TAlphabet;
-
     DBG_succ(size_t k = 1,
              const std::vector<std::string> &sequences = {},
              size_t parallel = 1);

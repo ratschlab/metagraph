@@ -1,11 +1,9 @@
 #include "utils.hpp"
 
-#include <iostream>
-#include <sstream>
 #include <fstream>
-#include <string>
-#include <vector>
 #include <algorithm>
+
+#include "dbg_succinct.hpp"
 
 
 namespace utils {

@@ -6,6 +6,7 @@
  * such as the dynamic bit array and the dynamic wavelet tree.
  */
 #include "serialization.hpp"
+#include "kmer.hpp"
 
 using libmaus2::util::NumberSerialisation;
 
@@ -97,12 +98,7 @@ DBG_succ::VectorChunk* DBG_succ::VectorChunk::build_from_kmers(size_t k,
     __gnu_parallel::sort(kmers->data(), kmers->data() + kmers->size());
 
     auto unique_end = std::unique(kmers->begin(), kmers->end());
-    kmers->erase(unique_end, kmers->end()); 
-
-    //DEBUG: output kmers
-    // for (const auto &kmer : kmers) {
-    //     std::cout << kmer.to_string(DBG_succ::alphabet) << std::endl;
-    // }
+    kmers->erase(unique_end, kmers->end());
 
     DBG_succ::VectorChunk *result = new DBG_succ::VectorChunk();
 

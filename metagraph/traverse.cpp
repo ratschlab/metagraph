@@ -30,7 +30,7 @@ struct BranchInfo {
     uint64_t nodeId = 0;
     uint64_t seqId = 0;
     uint64_t seqPos = 0;
-    DBG_succ::TAlphabet lastEdge = 0;
+    TAlphabet lastEdge = 0;
 };
 
 
@@ -49,7 +49,7 @@ void allelesFromSeq(DBG_succ *G,
                     kstring_t &seq,
                     unsigned int f,
                     std::vector<JoinInfo> &joins,
-                    std::map<std::pair<uint64_t, DBG_succ::TAlphabet>, uint64_t> &branchMap,
+                    std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap,
                     std::ofstream &SQLstream,
                     bool isRefRun = false,
                     size_t seqNum = 0);
@@ -117,7 +117,7 @@ bool finish_sequence(std::string &sequence,
 
 size_t traverseGraph(DBG_succ *G,
                      std::vector<JoinInfo> &joins,
-                     std::map<std::pair<uint64_t, DBG_succ::TAlphabet>, uint64_t> &branchMap,
+                     std::map<std::pair<uint64_t, TAlphabet>, uint64_t> &branchMap,
                      const std::string &sqlfbase,
                      std::ofstream &SQLstream) {
     // store all branch nodes on the way
@@ -141,9 +141,9 @@ size_t traverseGraph(DBG_succ *G,
     size_t out = G->outdegree(nodeId);
     std::pair<uint64_t, uint64_t> branchPos;
     BranchInfo branch;
-    DBG_succ::TAlphabet val;
-    DBG_succ::TAlphabet lastEdge = 0;
-    DBG_succ::TAlphabet joinEdge = 0;
+    TAlphabet val;
+    TAlphabet lastEdge = 0;
+    TAlphabet joinEdge = 0;
     bool joinOpen = false;
     JoinInfo currJoin;
 
@@ -227,7 +227,7 @@ size_t traverseGraph(DBG_succ *G,
         } else {
             size_t cnt = 0;
             bool updated = false;
-            for (DBG_succ::TAlphabet c = 1; c < G->alph_size; ++c) {
+            for (TAlphabet c = 1; c < G->alph_size; ++c) {
                 uint64_t next = G->outgoing(nodeId, c);
                 if (next > 0) {
                     cnt++;
@@ -345,7 +345,7 @@ size_t traverseGraph(DBG_succ *G,
 
 void allelesFromSeq(DBG_succ* G, kstring_t &seq, unsigned int f,
                     std::vector<JoinInfo> &joins,
-                    std::map< std::pair<uint64_t, DBG_succ::TAlphabet>, uint64_t > &branchMap,
+                    std::map< std::pair<uint64_t, TAlphabet>, uint64_t > &branchMap,
                     std::ofstream &SQLstream,
                     bool isRefRun, size_t seqNum) {
     
@@ -358,8 +358,8 @@ void allelesFromSeq(DBG_succ* G, kstring_t &seq, unsigned int f,
     uint64_t edge = 0;
     uint64_t currStart = 0;
     unsigned int alleleCnt = 1;
-    DBG_succ::TAlphabet seqValNext;
-    DBG_succ::TAlphabet nodeVal;
+    TAlphabet seqValNext;
+    TAlphabet nodeVal;
     JoinInfo currJoin;
     std::vector<bool> isRef;
 
@@ -506,7 +506,7 @@ void toSQL(DBG_succ *G, const std::vector<std::string> &fname,
     std::vector<JoinInfo> joins;
     // we also store for each branching edge the join it creates
     // we will use this for allele traversal
-    std::map<std::pair<uint64_t, DBG_succ::TAlphabet>, uint64_t> branchMap;
+    std::map<std::pair<uint64_t, TAlphabet>, uint64_t> branchMap;
 
     // open sql filestream
     std::ofstream SQLstream(sqlfbase + ".sql");

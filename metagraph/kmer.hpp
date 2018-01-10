@@ -10,7 +10,6 @@
 #include <htslib/kseq.h>
 
 using boost::multiprecision::uint256_t;
-using boost::multiprecision::cpp_int;
 typedef uint64_t TAlphabet;
 
 const int kBitsPerChar = 3;
@@ -22,7 +21,8 @@ class KMer {
 
   public:
     template <typename T>
-    KMer(const T &arr, size_t k);
+    KMer(const T &arr, size_t k)
+       : seq_(pack_kmer(arr, k)) {}
 
     template <class Map, class String>
     KMer(const String &seq, Map &&to_alphabet);
@@ -46,6 +46,9 @@ class KMer {
 
     std::string to_string(const std::string &alphabet) const;
 
+    template<typename T>
+    static uint256_t pack_kmer(const T &arr, size_t k);
+
   private:
     uint256_t seq_; // kmer sequence
 
@@ -53,18 +56,20 @@ class KMer {
 };
 
 template <typename T>
-KMer::KMer(const T &arr, size_t k) : seq_(0) {
+uint256_t KMer::pack_kmer(const T &arr, size_t k) {
+    uint256_t result(0);
     assert(k * kBitsPerChar < 256 && k >= 2
             && "String must be between lengths 2 and 256 / kBitsPerChar");
 
     for (int i = k - 2; i >= 0; --i) {
         assert(arr[i] + 1 < kMax && "Alphabet size too big for the given number of bits");
 
-        seq_ <<= kBitsPerChar;
-        seq_ += arr[i] + 1;
+        result <<= kBitsPerChar;
+        result += arr[i] + 1;
     }
-    seq_ <<= kBitsPerChar;
-    seq_ += arr[k - 1] + 1;
+    result <<= kBitsPerChar;
+    result += arr[k - 1] + 1;
+    return result;
 }
 
 template <class Map, class String>

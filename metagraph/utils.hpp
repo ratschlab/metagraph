@@ -1,12 +1,12 @@
 #ifndef __UTILS_HPP__
 #define __UTILS_HPP__
 
-#include <string>
 #include <cstdint>
+#include <string>
 #include <vector>
 #include <deque>
 
-#include "dbg_succinct.hpp"
+class DBG_succ;
 
 
 namespace utils {

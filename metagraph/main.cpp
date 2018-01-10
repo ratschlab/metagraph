@@ -12,6 +12,7 @@
 #include "dbg_succinct_merge.hpp"
 #include "annotate.hpp"
 #include "unix_tools.hpp"
+#include "kmer.hpp"
 
 
 KSEQ_INIT(gzFile, gzread)

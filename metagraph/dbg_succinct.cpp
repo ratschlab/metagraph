@@ -10,22 +10,16 @@
  * that has been used as a reference for this implementation.
  */
 
-#include <assert.h>
+#include <cassert>
 #include <vector>
-#include <map>
 #include <stack>
 #include <deque>
 #include <algorithm>
-#include <iostream>
-#include <sstream>
-#include <fstream>
 #include <string>
-#include <cmath>
-#include <unordered_set>
-#include <unordered_map>
 #include <cstdio>
 
 #include "dbg_succinct_chunk.hpp"
+#include "kmer.hpp"
 
 
 #define CHECK_INDEX(idx) \

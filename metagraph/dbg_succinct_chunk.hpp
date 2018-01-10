@@ -5,6 +5,8 @@
 
 #include "dbg_succinct.hpp"
 
+class KMer;
+
 
 class DBG_succ::Chunk {
   public:

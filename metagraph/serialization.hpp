@@ -1,9 +1,8 @@
 #ifndef __SERIALIZATION_HPP__
 #define __SERIALIZATION_HPP__
 
-#include <assert.h>
+#include <cassert>
 #include <string>
-#include <set>
 #include <unordered_map>
 #include <map>
 #include <cmath>

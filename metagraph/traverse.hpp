@@ -1,13 +1,10 @@
 #ifndef __TRAVERSE_HPP__
 #define __TRAVERSE_HPP__
 
-#include <stack>
-#include <cstdint>
 #include <string>
-#include <map>
 #include <vector>
 
-#include "dbg_succinct.hpp"
+class DBG_succ;
 
 
 namespace traverse {

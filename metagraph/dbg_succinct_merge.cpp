@@ -1,11 +1,9 @@
 #include "dbg_succinct_merge.hpp"
 
-#include <unistd.h>
 #include <thread>
 #include <mutex>
 
 #include "utils.hpp"
-#include "config.hpp"
 
 
 namespace merge {

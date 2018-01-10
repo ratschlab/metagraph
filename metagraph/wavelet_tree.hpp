@@ -1,7 +1,7 @@
 #ifndef __WAVELET_TREE_HPP__
 #define __WAVELET_TREE_HPP__
 
-#include <assert.h>
+#include <cassert>
 
 #define __STDC_FORMAT_MACROS 1
 #include <cinttypes>
