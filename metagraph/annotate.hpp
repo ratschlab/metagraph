@@ -9,27 +9,83 @@
 #include "dbg_succinct.hpp"
 
 
+namespace annotate {
+
+typedef uint64_t Index;
+
+
+// class GenomeAnnotation {
+//   public:
+//     typedef uint64_t Index;
+//     enum Label {
+//         OUTGOING_EDGE_LABELS = 0,
+//         SEQUENCE_NAME,
+//     };
+
+//     virtual const Annotation& get(Index i, Label j) const = 0;
+//     virtual void set(Index i, Label j, const Annotation &label) = 0;
+//     virtual void merge(const GenomeAnnotation &annotation) = 0;
+
+//     virtual bool load(const std::string &filename) = 0;
+//     virtual void serialize(const std::string &filename) const = 0;
+// };
+
+
+template <typename LabelType>
+class AnnotationCategory {
+  public:
+    virtual const LabelType& get(Index i) const = 0;
+    virtual void set(Index i, const LabelType &label) = 0;
+
+    virtual bool exists(Index i, const LabelType &label) const = 0;
+
+    virtual bool load(const std::string &filename) = 0;
+    virtual void serialize(const std::string &filename) const = 0;
+};
+
+
+// class ColorWiseMatrix : public UncompressedMatrix {
+//   public:
+//     // annotation containers
+//     std::deque<uint32_t> annotation; // list that associates each node in the graph with an annotation hash
+//     std::vector<std::string> id_to_label; // maps the label ID back to the original string
+//     std::unordered_map<std::string, uint32_t> label_to_id_map; // maps each label string to an integer ID
+//     std::map<uint32_t, uint32_t> annotation_map; // maps the hash of a combination to the position in the combination vector
+
+//     //std::vector<sdsl::rrr_vector<63>* > annotation_full;
+//     std::vector<sdsl::sd_vector<>* > annotation_full;
+// };
+
+
+template <typename LabelType>
+class ColorCompressed : public AnnotationCategory<LabelType> {
+  public:
+    ColorCompressed(const std::vector<ColorCompressed<LabelType>> &categories,
+                    const std::vector<std::set<size_t>> &merge_plan);
+
+    virtual const LabelType& get(Index i) const;
+
+    virtual bool exists(Index i, const LabelType &label) const;
+
+    virtual void set(Index i, const LabelType &label);
+
+    virtual bool load(const std::string &filename);
+    virtual void serialize(const std::string &filename) const;
+
+  private:
+    //Members
+};
+
+
 /*
-class GenomeAnnotation {
+class EdgeWiseMatrix : public UncompressedMatrix {
   public:
-      get_annotation = 0;
-      get_annotation
-      get_annotated_edges(G, annotation)
-
-      serialize
-      load
-
-      print
-      std::ostream& operator<<();
 };
+*/
 
 
+/*
 class WaveletTrie : parent GenomeAnnotation {
-  public:
-};
-
-
-class ColorCompressed : parent GenomeAnnotation {
   public:
 };
 
@@ -44,33 +100,11 @@ class ColorBloomFilter : parent GenomeAnnotation {
 };
 
 
-class UncompressedMatrix : parent GenomeAnnotation {
-  public:
-};
-
-
-class EdgeWiseMatrix : parent UncompressedMatrix {
-  public:
-};
-
-
-class ColorWiseMatrix : parent UncompressedMatrix {
-  public:
-    // annotation containers
-    std::deque<uint32_t> annotation; // list that associates each node in the graph with an annotation hash
-    std::vector<std::string> id_to_label; // maps the label ID back to the original string
-    std::unordered_map<std::string, uint32_t> label_to_id_map; // maps each label string to an integer ID
-    std::map<uint32_t, uint32_t> annotation_map; // maps the hash of a combination to the position in the combination vector
-
-    //std::vector<sdsl::rrr_vector<63>* > annotation_full;
-    std::vector<sdsl::sd_vector<>* > annotation_full;
-};
 
 */
 
 
 //TODO: remove this
-namespace annotate {
 
     // sdsl::bit_vector* inflate_annotation(DBG_succ *G, uint64_t id);
 
