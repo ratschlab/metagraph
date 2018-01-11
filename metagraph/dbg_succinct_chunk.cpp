@@ -179,7 +179,6 @@ void sequence_to_kmers(const std::vector<TAlphabet> &seq,
         return;
 
     auto kmer = KMer::pack_kmer(seq.data(), k + 1);
-    uint256_t pred_edge_label = seq[k];
 
     if (std::equal(suffix.begin(), suffix.end(),
                    seq.data() + k - suffix.size())) {
@@ -187,7 +186,7 @@ void sequence_to_kmers(const std::vector<TAlphabet> &seq,
     }
 
     for (size_t i = 1; i < seq.size() - k; ++i) {
-        update_kmer(k, seq[i + k], &pred_edge_label, &kmer);
+        update_kmer(k, seq[i + k], seq[i + k - 1], &kmer);
 
         if (std::equal(suffix.begin(), suffix.end(),
                        seq.data() + i + k - suffix.size())) {

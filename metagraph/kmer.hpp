@@ -84,7 +84,9 @@ KMer::KMer(const String &seq, Map &&to_alphabet) {
  * next = s[7]s[6]s[5]s[4]s[3]s[2]s[8]
  *      = s[7] << k + (kmer & mask) >> 1 + s[8].
  */
-void update_kmer(size_t k, TAlphabet next,
-                 uint256_t *edge_label, uint256_t *kmer);
+void update_kmer(size_t k,
+                 TAlphabet edge_label,
+                 TAlphabet last,
+                 uint256_t *kmer);
 
 #endif // __KMER_HPP__
