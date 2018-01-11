@@ -21,6 +21,7 @@
 #include "dbg_succinct_chunk.hpp"
 #include "kmer.hpp"
 
+using libmaus2::util::NumberSerialisation;
 
 #define CHECK_INDEX(idx) \
     assert(idx < W->size()); \
@@ -142,9 +143,9 @@ void DBG_succ::serialize(const std::string &outbase) const {
     std::ofstream outstream(outbase + ".dbg");
 
     // write F values, k, and state
-    libmaus2::util::NumberSerialisation::serialiseNumberVector(outstream, F);
-    libmaus2::util::NumberSerialisation::serialiseNumber(outstream, k_);
-    libmaus2::util::NumberSerialisation::serialiseNumber(outstream, state);
+    NumberSerialisation::serialiseNumberVector(outstream, F);
+    NumberSerialisation::serialiseNumber(outstream, k_);
+    NumberSerialisation::serialiseNumber(outstream, state);
 
     // write Wavelet Tree
     W->serialise(outstream);
@@ -163,9 +164,9 @@ bool DBG_succ::load(const std::string &infbase) {
         std::ifstream instream(infbase + ".dbg");
 
         // load F, k, and state
-        F = libmaus2::util::NumberSerialisation::deserialiseNumberVector<uint64_t>(instream);
-        k_ = libmaus2::util::NumberSerialisation::deserialiseNumber(instream);
-        state = static_cast<Config::StateType>(libmaus2::util::NumberSerialisation::deserialiseNumber(instream));
+        F = NumberSerialisation::deserialiseNumberVector<uint64_t>(instream);
+        k_ = NumberSerialisation::deserialiseNumber(instream);
+        state = static_cast<Config::StateType>(NumberSerialisation::deserialiseNumber(instream));
 
         if (F.size() != alph_size)
             return false;

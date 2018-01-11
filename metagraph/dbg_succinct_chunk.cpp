@@ -58,7 +58,7 @@ void DBG_succ::VectorChunk::initialize_graph(DBG_succ *graph) {
 
 bool DBG_succ::VectorChunk::load(const std::string &infbase) {
     try {
-        std::ifstream instream(infbase + ".dbg");
+        std::ifstream instream(infbase + ".dbgchunk");
 
         W_ = NumberSerialisation::deserialiseNumberVector<TAlphabet>(instream);
         last_ = NumberSerialisation::deserialiseNumberVector<bool>(instream);
@@ -73,7 +73,7 @@ bool DBG_succ::VectorChunk::load(const std::string &infbase) {
 }
 
 void DBG_succ::VectorChunk::serialize(const std::string &outbase) const {
-    std::ofstream outstream(outbase + ".dbg");
+    std::ofstream outstream(outbase + ".dbgchunk");
     NumberSerialisation::serialiseNumberVector(outstream, W_);
     NumberSerialisation::serialiseNumberVector(outstream, last_);
     NumberSerialisation::serialiseNumberVector(outstream, F_);
