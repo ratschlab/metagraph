@@ -362,22 +362,22 @@ TEST(DBGSuccinct, PredKmer) {
     }
     {
         DBG_succ graph(5);
-        graph.add_sequence("A");
+        graph.add_sequence("AAAAA");
 
-        test_pred_kmer(graph, "ACGCG", 3);
+        test_pred_kmer(graph, "ACGCG", 7);
         test_pred_kmer(graph, "$$$$A", 3);
-        test_pred_kmer(graph, "TTTTT", 3);
-        test_pred_kmer(graph, "NNNNN", 3);
+        test_pred_kmer(graph, "TTTTT", 7);
+        test_pred_kmer(graph, "NNNNN", 7);
         test_pred_kmer(graph, "$$$$$", 2);
     }
     {
         DBG_succ graph(5);
-        graph.add_sequence("AC");
+        graph.add_sequence("ACACA");
 
-        test_pred_kmer(graph, "ACGCG", 4);
+        test_pred_kmer(graph, "ACGCG", 7);
         test_pred_kmer(graph, "$$$$A", 3);
-        test_pred_kmer(graph, "TTTTT", 4);
-        test_pred_kmer(graph, "NNNNN", 4);
+        test_pred_kmer(graph, "TTTTT", 7);
+        test_pred_kmer(graph, "NNNNN", 7);
         test_pred_kmer(graph, "$$$$$", 2);
     }
     {

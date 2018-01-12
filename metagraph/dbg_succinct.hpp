@@ -52,11 +52,18 @@ class DBG_succ : public SequenceGraph {
     ~DBG_succ();
 
     /**
-    * Perform an element wise comparison of the arrays W, last and
-    * F and will only check for identity. If any element differs, return
-    * false and true otherwise.
-    */
+     * Check whether graphs store the same data.
+     * FYI: this function reconstructs all the kmers, and
+     * the complexity is at least O(k x n).
+     */
     bool operator==(const DBG_succ &other) const;
+
+    /**
+     * Perform an element wise comparison of the arrays W, last and
+     * F and will only check for identity. If any element differs, return
+     * false and true otherwise.
+     */
+    bool equals_internally(const DBG_succ &other) const;
 
     node_iterator traverse(node_iterator node, char edge_label) const;
     node_iterator traverse_back(node_iterator node, char edge_label) const;

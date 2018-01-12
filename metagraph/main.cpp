@@ -125,7 +125,11 @@ int main(int argc, const char *argv[]) {
                 //one pass per suffix
                 for (size_t j = 0; j < suffices.size(); ++j) {
                     std::cout << "Suffix: " << suffices[j] << "\n";
-                    auto suffix_code = prepare_sequence(suffices[j]);
+
+                    std::vector<TAlphabet> suffix_encoded(suffices[j].size());
+                    std::transform(suffices[j].begin(), suffices[j].end(),
+                                   suffix_encoded.begin(), DBG_succ::encode);
+
                     //add sink nodes
                     // graph->add_sink(config->parallel, suffices[j]);
 
@@ -172,9 +176,11 @@ int main(int argc, const char *argv[]) {
                                 annotation = "VCF:" + annotation;
                                 nbp += sequence.length();
 
-                                sequence_to_kmers(prepare_sequence(sequence), graph->get_k(), &kmers, suffix_code);
+                                sequence_to_kmers(sequence, graph->get_k(),
+                                                  &kmers, suffix_encoded);
                             }
-                        } else if ((utils::get_filetype(files[f]) == "FASTA") || (utils::get_filetype(files[f]) == "FASTQ")) {
+                        } else if (utils::get_filetype(files[f]) == "FASTA"
+                                    || utils::get_filetype(files[f]) == "FASTQ") {
                             // open stream
                             gzFile input_p = gzopen(files[f].c_str(), "r");
                             if (input_p == Z_NULL) {
@@ -195,15 +201,19 @@ int main(int argc, const char *argv[]) {
                                     reverse_complement(read_stream->seq);
 
                                 // add all k-mers of seq to the graph
-                                kmers.reserve(kmers.size() + read_stream->seq.l);
-                                sequence_to_kmers(prepare_sequence(read_stream->seq.s, graph->get_k(), true),
-                                                  graph->get_k(), &kmers, suffix_code);
+                                // TODO: This reserve makes the program super slow... why?..
+                                // kmers.reserve(kmers.size() + read_stream->seq.l);
+                                sequence_to_kmers(read_stream->seq.s,
+                                                  graph->get_k(),
+                                                  &kmers,
+                                                  suffix_encoded);
                             }
                             kseq_destroy(read_stream);
 
                             gzclose(input_p);
                         } else {
-                            std::cerr << "ERROR: Filetype unknown for file " << files[f] << std::endl;
+                            std::cerr << "ERROR: Filetype unknown for file "
+                                      << files[f] << std::endl;
                             exit(1);
                         }
                         //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));

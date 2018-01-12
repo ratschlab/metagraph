@@ -56,14 +56,10 @@ class DBG_succ::VectorChunk : public DBG_succ::Chunk {
 };
 
 
-std::vector<TAlphabet> prepare_sequence(const std::string &sequence,
-                                        size_t k = 0, bool add_bridge = false);
-
-
 /**
  * Break the sequence to kmers and extend the temporary kmers storage.
  */
-void sequence_to_kmers(const std::vector<TAlphabet> &seq,
+void sequence_to_kmers(const std::string &sequence,
                        size_t k,
                        std::vector<KMer> *kmers,
                        const std::vector<TAlphabet> &suffix = {});

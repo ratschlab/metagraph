@@ -52,11 +52,11 @@ DBG_succ::DBG_succ(size_t k, const std::vector<std::string> &sequences, size_t p
         std::vector<KMer> kmers;
 
         // add dummy edge as a kmer
-        kmers.emplace_back(std::vector<size_t>(k_ + 1, 0), k_ + 1);
+        kmers.emplace_back(std::vector<size_t>(k_ + 1, encode('$')), k_ + 1);
 
         // break the sequences down into kmers
         for (const auto &seq : sequences) {
-            sequence_to_kmers(prepare_sequence(seq, k_, true), k_, &kmers);
+            sequence_to_kmers(seq, k_, &kmers);
         }
         // build the graph chunk from kmers
         auto chunk = DBG_succ::VectorChunk::build_from_kmers(k_, &kmers, parallel);
@@ -84,12 +84,12 @@ DBG_succ::~DBG_succ() {
 }
 
 /**
-* Given a pointer to a graph structures G1 and G2, the function compares their elements to the
-* each other. It will perform an element wise comparison of the arrays W, last and
-* F and will only check for identity. If any element differs, the function will return
-* false and true otherwise.
-*/
-bool DBG_succ::operator==(const DBG_succ &other) const {
+ * Given a pointer to a graph structures G1 and G2, the function compares their elements to the
+ * each other. It will perform an element wise comparison of the arrays W, last and
+ * F and will only check for identity. If any element differs, the function will return
+ * false and true otherwise.
+ */
+bool DBG_succ::equals_internally(const DBG_succ &other) const {
     // compare size
     if (W->size() != other.W->size()) {
         verbose_cout("sizes of graphs differ", "\n",
@@ -136,6 +136,46 @@ bool DBG_succ::operator==(const DBG_succ &other) const {
     }
 
     return true;
+}
+
+/**
+ * Check whether graphs store the same data.
+ * FYI: this function reconstructs all the kmers, so
+ * the complexity is at least O(k x n).
+ */
+bool DBG_succ::operator==(const DBG_succ &other) const {
+    uint64_t i = 1;
+    uint64_t j = 1;
+
+    while (i < W->size() && j < other.W->size()) {
+
+        std::string first_node, second_node;
+        bool first_last, second_last;
+        char first_label, second_label;
+
+        do {
+            first_node = get_node_str(i);
+            first_last = get_last(i);
+            first_label = DBG_succ::decode(get_W(i));
+            i++;
+        } while (first_node.find('$') != std::string::npos && i < W->size());
+
+        do {
+            second_node = other.get_node_str(j);
+            second_last = other.get_last(j);
+            second_label = DBG_succ::decode(other.get_W(j));
+            j++;
+        } while (second_node.find('$') != std::string::npos && j < other.W->size());
+
+        if (i == W->size() || j == other.W->size())
+            break;
+
+        if (first_node != second_node
+                || first_last != second_last
+                || first_label != second_label)
+            return false;
+    }
+    return i == W->size() && j == other.W->size();
 }
 
 void DBG_succ::serialize(const std::string &outbase) const {
@@ -977,7 +1017,7 @@ void DBG_succ::print_adj_list(std::ostream &os) const {
 
 // add a full sequence to the graph
 void DBG_succ::add_sequence(const std::string &seq, bool try_extend) {
-    if (!seq.size())
+    if (seq.size() < k_)
         return;
 
     std::vector<TAlphabet> sequence(seq.size());
@@ -985,12 +1025,12 @@ void DBG_succ::add_sequence(const std::string &seq, bool try_extend) {
 
     uint64_t source;
 
-    if (!try_extend || seq.size() <= k_ || !(source = index(sequence))) {
+    if (!try_extend || !(source = index(sequence))) {
         sequence.insert(sequence.begin(), k_, encode('$'));
         source = 1; // the dummy source node
     }
 
-    for (size_t i = 0; i + k_ < sequence.size(); ++i) {
+    for (size_t i = 0; i < sequence.size() - k_; ++i) {
         // print the process
         if (i > 0 && i % 1'000 == 0) {
             std::cout << "." << std::flush;
