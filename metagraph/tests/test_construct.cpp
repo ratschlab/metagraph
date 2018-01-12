@@ -188,6 +188,48 @@ TEST(DBGSuccinct, Serialization) {
     delete graph;
 }
 
+TEST(DBGSuccinct, ConstructionEQAppendingSimplePath) {
+    for (size_t k = 1; k < 80; ++k) {
+        DBG_succ constructed(k, { std::string(100, 'A') });
+
+        DBG_succ appended(k);
+        appended.add_sequence(std::string(100, 'A'));
+
+        EXPECT_EQ(constructed, appended);
+    }
+}
+
+TEST(DBGSuccinct, ConstructionEQAppendingTwoPaths) {
+    for (size_t k = 1; k < 80; ++k) {
+        DBG_succ constructed(k, { std::string(100, 'A'),
+                                  std::string(50, 'B') });
+        DBG_succ appended(k);
+        appended.add_sequence(std::string(100, 'A'));
+        appended.add_sequence(std::string(50, 'B'));
+
+        EXPECT_EQ(constructed, appended);
+    }
+}
+
+TEST(DBGSuccinct, ConstructionEQAppending) {
+    for (size_t k = 1; k < 80; ++k) {
+        std::vector<std::string> input_data = {
+            "ACAGCTAGCTAGCTAGCTAGCTG",
+            "ATATTATAAAAAATTTTAAAAAA",
+            "ATATATTCTCTCTCTCTCATA",
+            "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+        };
+        DBG_succ constructed(k, input_data);
+
+        DBG_succ appended(k);
+        for (const auto &sequence : input_data) {
+            appended.add_sequence(sequence);
+        }
+
+        EXPECT_EQ(constructed, appended);
+    }
+}
+
 TEST(DBGSuccinct, AddSequenceSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
         DBG_succ graph(k);

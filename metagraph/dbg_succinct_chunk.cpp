@@ -93,65 +93,62 @@ DBG_succ::VectorChunk* DBG_succ::VectorChunk::build_from_kmers(size_t k,
     DBG_succ::VectorChunk *result = new DBG_succ::VectorChunk();
 
     // the bit array indicating the last outgoing edge of a node (static container for full init)
-    std::vector<uint8_t> last_stat_safe { 0 };
-
-    last_stat_safe.resize(last_stat_safe.size() + kmers->size(), 1);
+    std::vector<uint8_t> last_stat_safe(1 + kmers->size(), 1);
+    last_stat_safe[0] = 0;
 
     // the array containing the edge labels
     std::vector<TAlphabet> &W_stat = result->W_;
-    W_stat.push_back(0);
-
-    size_t curpos = W_stat.size();
-    W_stat.resize(W_stat.size() + kmers->size());
-
-    #pragma omp parallel num_threads(parallel)
-    {
-        #pragma omp for nowait
-        for (size_t i = 0; i < kmers->size(); ++i) {
-            //set last
-            if (i + 1 < kmers->size()) {
-                if (KMer::compare_kmer_suffix((*kmers)[i], (*kmers)[i + 1])) {
-                    last_stat_safe[curpos + i] = 0;
-                }
-            }
-            //set W
-            uint8_t curW = (*kmers)[i][0];
-            if (curW == 127) {
-                std::cerr << "Failure decoding kmer " << i << "\n" << (*kmers)[i] << "\n"
-                          << (*kmers)[i].to_string(DBG_succ::alphabet) << "\n";
-                exit(1);
-            }
-            if (i) {
-                for (size_t j = i - 1; KMer::compare_kmer_suffix((*kmers)[j], (*kmers)[i], 1); --j) {
-                    //TODO: recalculating W is probably faster than doing a pragma for ordered
-                    if ((*kmers)[j][0] == curW) {
-                        curW += DBG_succ::alph_size;
-                        break;
-                    }
-                    if (!j)
-                        break;
-                }
-            }
-            W_stat[curpos + i] = curW;
-        }
-    }
-    result->last_.assign(last_stat_safe.begin(), last_stat_safe.end());
-
-    size_t i;
-    size_t lastlet = 0;
+    W_stat.resize(1 + kmers->size());
+    W_stat[0] = 0;
 
     result->F_.at(0) = 0;
-    for (i = 0; i < kmers->size(); ++i) {
-        while (DBG_succ::alphabet[lastlet] != DBG_succ::alphabet[(*kmers)[i][k]]
-                    && lastlet + 1 < DBG_succ::alph_size) {
-            result->F_.at(++lastlet) = curpos + i - 1;
+
+    size_t curpos = 1;
+    TAlphabet lastF = 0;
+
+    for (size_t i = 0; i < kmers->size(); ++i) {
+        TAlphabet curW = kmers->at(i)[0];
+        TAlphabet curF = kmers->at(i)[k];
+
+        assert(curW < DBG_succ::alph_size);
+
+        // check redundancy and set last
+        if (i + 1 < kmers->size()
+                && KMer::compare_kmer_suffix(kmers->at(i), kmers->at(i + 1))) {
+            // skip redundant dummy edges
+            if (curW == 0 && curF > 0)
+                continue;
+
+            last_stat_safe[curpos] = 0;
         }
+        //set W
+        if (i > 0) {
+            for (size_t j = i - 1; KMer::compare_kmer_suffix(kmers->at(i), kmers->at(j), 1); --j) {
+                //TODO: recalculating W is probably faster than doing a pragma for ordered
+                if (curW > 0 && kmers->at(j)[0] == curW) {
+                    curW += DBG_succ::alph_size;
+                    break;
+                }
+                if (j == 0)
+                    break;
+            }
+        }
+        W_stat[curpos] = curW;
+
+        while (lastF + 1 < DBG_succ::alph_size && curF != lastF) {
+            result->F_.at(++lastF) = curpos - 1;
+        }
+        curpos++;
     }
-    while (++lastlet < DBG_succ::alph_size) {
-        result->F_.at(lastlet) = curpos + i - 1;
+    while (++lastF < DBG_succ::alph_size) {
+        result->F_.at(lastF) = curpos - 1;
     }
 
     kmers->clear();
+
+    W_stat.resize(curpos);
+    last_stat_safe.resize(curpos);
+    result->last_.assign(last_stat_safe.begin(), last_stat_safe.end());
 
     return result;
 }
