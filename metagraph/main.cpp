@@ -155,20 +155,23 @@ int main(int argc, const char *argv[]) {
                                 std::cerr << "ERROR reading VCF " << files[f] << std::endl;
                                 exit(1);
                             }
-                            std::cerr << "Loading VCF with " << config->parallel << " threads per line\n";
+                            std::cerr << "Loading VCF with " << config->parallel
+                                                             << " threads per line\n";
                             std::string sequence;
                             std::string annotation;
                             for (size_t i = 1; vcf.get_seq(annots, &sequence, &annotation); ++i) {
                                 if (i % 10'000 == 0) {
                                     std::cout << "." << std::flush;
                                     if (i % 100'000 == 0) {
-                                        fprintf(stdout, "%zu - bp %" PRIu64 " / runtime %lu / BPph %" PRIu64 "\n",
-                                                        i,
-                                                        nbp,
-                                                        (clock() - tstart) / CLOCKS_PER_SEC,
-                                                        uint64_t(60) * uint64_t(60)
-                                                            * CLOCKS_PER_SEC * (nbp - nbplast)
-                                                            / (clock() - timelast));
+                                        fprintf(stdout,
+                                            "%zu - bp %" PRIu64 " / runtime %lu / BPph %" PRIu64 "\n",
+                                            i,
+                                            nbp,
+                                            (clock() - tstart) / CLOCKS_PER_SEC,
+                                            uint64_t(60) * uint64_t(60)
+                                                * CLOCKS_PER_SEC * (nbp - nbplast)
+                                                / (clock() - timelast)
+                                        );
                                         nbplast = nbp;
                                         timelast = clock();
                                     }
@@ -191,7 +194,8 @@ int main(int argc, const char *argv[]) {
                             //TODO: handle read_stream->qual
                             kseq_t *read_stream = kseq_init(input_p);
                             if (read_stream == NULL) {
-                                std::cerr << "ERROR while opening input file " << files[f] << std::endl;
+                                std::cerr << "ERROR while opening input file "
+                                          << files[f] << std::endl;
                                 exit(1);
                             }
                             while (kseq_read(read_stream) >= 0) {
@@ -222,7 +226,8 @@ int main(int argc, const char *argv[]) {
                     //append to succinct representation and clear kmer list
                     tstart = clock();
 
-                    std::cout << "Sorting kmers and appending succinct representation from current bin...\t" << std::flush;
+                    std::cout << "Sorting kmers and appending succinct"
+                              << " representation from current bin...\t" << std::flush;
                     auto next_block = DBG_succ::VectorChunk::build_from_kmers(graph->get_k(), &kmers);
                     graph_data.extend(*next_block);
                     delete next_block;

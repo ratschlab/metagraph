@@ -98,12 +98,7 @@ bool DBG_succ::equals_internally(const DBG_succ &other) const {
         return false;
     }
 
-    if (F.size() != other.F.size()) {
-        verbose_cout("sizes of F arrays differ", "\n",
-                     "1: ", F.size(), "\n",
-                     "2: ", other.F.size(), "\n");
-        return false;
-    }
+    assert(F.size() == other.F.size());
 
     // compare last
     for (size_t i = 0; i < W->size(); ++i) {
