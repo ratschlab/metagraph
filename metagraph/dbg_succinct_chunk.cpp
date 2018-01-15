@@ -143,12 +143,14 @@ void recover_source_dummy_nodes(size_t k, std::vector<KMer> *kmers) {
 
 DBG_succ::VectorChunk* DBG_succ::VectorChunk::build_from_kmers(size_t k,
                                                                std::vector<KMer> *kmers,
+                                                               bool suffix_filtered,
                                                                unsigned int parallel) {
     omp_set_num_threads(std::max(static_cast<int>(parallel), 1));
 
     sort_and_remove_duplicates(kmers);
 
-    recover_source_dummy_nodes(k, kmers);
+    if (!suffix_filtered)
+        recover_source_dummy_nodes(k, kmers);
 
     DBG_succ::VectorChunk *result = new DBG_succ::VectorChunk();
 
@@ -213,7 +215,6 @@ DBG_succ::VectorChunk* DBG_succ::VectorChunk::build_from_kmers(size_t k,
     return result;
 }
 
-
 void sequence_to_kmers(const std::string &sequence,
                        size_t k,
                        std::vector<KMer> *kmers,
@@ -222,10 +223,13 @@ void sequence_to_kmers(const std::string &sequence,
         return;
 
     // encode sequence
-    std::vector<TAlphabet> seq(sequence.size() + 2);
-    seq[0] = DBG_succ::encode('$');
+    size_t dummy_prefix_size = suffix.size() > 0 ? k : 1;
+    std::vector<TAlphabet> seq(sequence.size() + dummy_prefix_size + 1);
+    for (size_t i = 0; i < dummy_prefix_size; ++i) {
+        seq[i] = DBG_succ::encode('$');
+    }
     std::transform(sequence.begin(), sequence.end(),
-                   &seq[1], DBG_succ::encode);
+                   &seq[dummy_prefix_size], DBG_succ::encode);
     seq.back() = DBG_succ::encode('$');
 
     // initialize and add the first kmer from sequence

@@ -47,6 +47,7 @@ class DBG_succ::VectorChunk : public DBG_succ::Chunk {
 
     static VectorChunk* build_from_kmers(size_t k,
                                          std::vector<KMer> *kmers,
+                                         bool suffix_filtered,
                                          unsigned int parallel = 1);
 
   private:

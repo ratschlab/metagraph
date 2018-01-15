@@ -123,15 +123,15 @@ int main(int argc, const char *argv[]) {
                 graph_data.push_back(0, DBG_succ::alph_size, 0);
 
                 //one pass per suffix
-                for (size_t j = 0; j < suffices.size(); ++j) {
-                    std::cout << "Suffix: " << suffices[j] << "\n";
+                for (const std::string &suffix : suffices) {
+                    std::cout << "Suffix: " << suffix << std::endl;
 
-                    std::vector<TAlphabet> suffix_encoded(suffices[j].size());
-                    std::transform(suffices[j].begin(), suffices[j].end(),
+                    std::vector<TAlphabet> suffix_encoded(suffix.size());
+                    std::transform(suffix.begin(), suffix.end(),
                                    suffix_encoded.begin(), DBG_succ::encode);
 
                     //add sink nodes
-                    // graph->add_sink(config->parallel, suffices[j]);
+                    // graph->add_sink(config->parallel, suffix);
 
                     std::vector<KMer> kmers;
 
@@ -142,7 +142,7 @@ int main(int argc, const char *argv[]) {
                         }
 
                         if (utils::get_filetype(files[f]) == "VCF") {
-                            if (suffices[j].find('$') != std::string::npos)
+                            if (suffix.find('$') != std::string::npos)
                                 continue;
 
                             //READ FROM VCF
@@ -228,7 +228,10 @@ int main(int argc, const char *argv[]) {
 
                     std::cout << "Sorting kmers and appending succinct"
                               << " representation from current bin...\t" << std::flush;
-                    auto next_block = DBG_succ::VectorChunk::build_from_kmers(graph->get_k(), &kmers);
+                    auto next_block = DBG_succ::VectorChunk::build_from_kmers(graph->get_k(),
+                                                                              &kmers,
+                                                                              suffix_encoded.size() > 0,
+                                                                              config->parallel);
                     graph_data.extend(*next_block);
                     delete next_block;
 
