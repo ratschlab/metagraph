@@ -20,6 +20,7 @@ class KMer {
     friend std::ostream& operator<<(std::ostream &os, const KMer &kmer);
 
   public:
+    KMer() {}
     template <typename T>
     KMer(const T &arr, size_t k)
        : seq_(pack_kmer(arr, k)) {}
@@ -39,7 +40,10 @@ class KMer {
     bool operator==(const KMer &other) const { return seq_ == other.seq_; }
     bool operator!=(const KMer &other) const { return seq_ != other.seq_; }
 
-    TAlphabet operator[](size_t i) const { return get(i) - 1; }
+    TAlphabet operator[](size_t i) const;
+
+    template <size_t bits_per_digit>
+    uint64_t get_digit(size_t i) const;
 
     static bool compare_kmer_suffix(const KMer &k1,
                                     const KMer &k2, size_t minus = 0);
@@ -51,8 +55,6 @@ class KMer {
 
   private:
     uint256_t seq_; // kmer sequence
-
-    TAlphabet get(size_t i) const;
 };
 
 template <typename T>
@@ -77,6 +79,13 @@ KMer::KMer(const String &seq, Map &&to_alphabet) {
     std::vector<uint8_t> arr(seq.size());
     std::transform(seq.begin(), seq.end(), arr.begin(), to_alphabet);
     *this = KMer(arr.data(), arr.size());
+}
+
+template <size_t digit_size>
+uint64_t KMer::get_digit(size_t i) const {
+    static_assert(digit_size <= 64, "too big digit");
+    return static_cast<uint64_t>(seq_ >> (digit_size * i))
+             % (1llu << digit_size);
 }
 
 /**
