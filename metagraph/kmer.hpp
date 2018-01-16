@@ -23,6 +23,7 @@ class KMer {
     template <typename T>
     friend KMer& operator<<(KMer &kmer, const T &shift);
   public:
+    KMer() {}
     template <typename T>
     KMer(const T &arr, size_t k) {
         memset(s_, 0, sizeof(s_));
@@ -119,10 +120,26 @@ class KMer {
         return !(*this != other);
     }
 
-    TAlphabet operator[](size_t i) const { return get(i) - 1; }
+    TAlphabet operator[](size_t i) const;
 
-    static bool compare_kmer_suffix(const KMer &k1,
-                                    const KMer &k2, size_t minus = 0);
+    template <size_t bits_per_digit>
+    uint64_t get_digit(size_t i) const {
+        static_assert(bits_per_digit <= 64, "too big digit");
+        int bit = bits_per_digit * i;
+        if (bit % 64 == 0) {
+            return static_cast<uint64_t>(this->nth(bit / 64) % (1llu << bits_per_digit));
+        }
+        else {
+            size_t result = this->nth(bit / 64) >> (bit % 64);
+            if (bit / 64 < 3) {
+                return static_cast<uint64_t>((result | ((this->nth(bit / 64 + 1)) << (64 - (bit % 64)))) % (1llu << bits_per_digit));
+            } else {
+                return static_cast<uint64_t>(result % (1llu << bits_per_digit));
+            }
+        }
+    }
+
+    
 
     std::string to_string(const std::string &alphabet) const;
 
@@ -214,6 +231,8 @@ class KMer {
         s_[0] |= other;
         return *this;
     }
+
+    
     /**
      * Construct the next k-mer for s[6]s[5]s[4]s[3]s[2]s[1]s[7].
      * next = s[7]s[6]s[5]s[4]s[3]s[2]s[8]
@@ -231,15 +250,17 @@ class KMer {
         return *this;
     }
 
+    static bool compare_kmer_suffix(const KMer &k1,
+                                    const KMer &k2, size_t minus = 0);
+
   private:
     uint64_t s_[4]; // kmer sequence
     //__m256i seq_;
-
-    TAlphabet get(size_t i) const;
-
     static const long kErasingFirstCodeMask = ~((1l << kBitsPerChar) - 1);
 
-    };
+    // a character in the array + 1
+    TAlphabet get(size_t i) const { return get_digit<kBitsPerChar>(i); }
+};
 
 
 template <class Map, class String>
@@ -248,5 +269,6 @@ KMer::KMer(const String &seq, Map &&to_alphabet) {
     std::transform(seq.begin(), seq.end(), arr.begin(), to_alphabet);
     *this = KMer(arr.data(), arr.size());
 }
+
 
 #endif // __KMER_HPP__

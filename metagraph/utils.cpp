@@ -4,11 +4,12 @@
 #include <algorithm>
 
 #include "dbg_succinct.hpp"
+#include "kmer.hpp"
+
+const size_t kBitsPerDigit = 17;
 
 
 namespace utils {
-
-typedef uint64_t TAlphabet;
 
 uint64_t kFromFile(const std::string &infbase) {
     uint64_t k = 0;
@@ -164,6 +165,35 @@ std::deque<std::string> generate_strings(const std::string &alphabet,
     }
     assert(suffices.size() == std::pow(alphabet.size(), length));
     return suffices;
+}
+
+
+template <size_t bits_per_digit>
+void radix_sort(std::vector<KMer> &data, size_t num_digits) {
+    const uint64_t max_digit = 1llu << bits_per_digit;
+
+    std::vector<KMer> unsorted(data.size());
+    std::array<size_t, max_digit> count;
+
+    for (size_t digit = 0; digit < num_digits; ++digit) {
+
+        count.fill(0);
+        for (const auto &kmer : data) {
+            count[kmer.get_digit<bits_per_digit>(digit)]++;
+        }
+
+        std::partial_sum(count.begin(), count.end(), count.begin());
+
+        unsorted.swap(data);
+        for (auto it = unsorted.rbegin(); it != unsorted.rend(); ++it) {
+            data[--count[it->get_digit<bits_per_digit>(digit)]] = *it;
+        }
+    }
+}
+
+void radix_sort(std::vector<KMer> &data, size_t k) {
+    radix_sort<kBitsPerDigit>(data,
+                              ((k + 1) * kBitsPerChar - 1) / kBitsPerDigit + 1);
 }
 
 
