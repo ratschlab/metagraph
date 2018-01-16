@@ -1,6 +1,5 @@
 #include "dbg_succinct_chunk.hpp"
 
-#include <parallel/algorithm>
 /**
  * We use libmaus 2 for representing dynamic succint data structures
  * such as the dynamic bit array and the dynamic wavelet tree.
@@ -10,6 +9,9 @@
 
 using libmaus2::util::NumberSerialisation;
 
+
+DBG_succ::VectorChunk::VectorChunk()
+      : W_(1, 0), last_(1, 0), F_(DBG_succ::alph_size, 0) {}
 
 void DBG_succ::VectorChunk::push_back(TAlphabet W, TAlphabet F, bool last) {
     W_.push_back(W);
@@ -25,18 +27,18 @@ void DBG_succ::VectorChunk::alter_W_back(TAlphabet W) { W_.back() = W; }
 
 void DBG_succ::VectorChunk::alter_last_back(bool last) { last_.back() = last; }
 
-uint64_t DBG_succ::VectorChunk::size() const { return W_.size(); }
+uint64_t DBG_succ::VectorChunk::size() const { return W_.size() - 1; }
 
 void DBG_succ::VectorChunk::extend(const DBG_succ::Chunk &other) {
     extend(dynamic_cast<const DBG_succ::VectorChunk&>(other));
 }
 
 void DBG_succ::VectorChunk::extend(const DBG_succ::VectorChunk &other) {
-    W_.reserve(W_.size() + other.W_.size());
-    W_.insert(W_.end(), other.W_.begin(), other.W_.end());
+    W_.reserve(W_.size() + other.size());
+    W_.insert(W_.end(), other.W_.begin() + 1, other.W_.end());
 
-    last_.reserve(last_.size() + other.last_.size());
-    last_.insert(last_.end(), other.last_.begin(), other.last_.end());
+    last_.reserve(last_.size() + other.size());
+    last_.insert(last_.end(), other.last_.begin() + 1, other.last_.end());
 
     assert(F_.size() == other.F_.size());
     for (size_t p = 0; p < other.F_.size(); ++p) {
@@ -82,77 +84,9 @@ void DBG_succ::VectorChunk::serialize(const std::string &outbase) const {
     outstream.close();
 }
 
-void sort_and_remove_duplicates(std::vector<KMer> *kmers) {
-    // sort
-    __gnu_parallel::sort(kmers->data(), kmers->data() + kmers->size());
-
-    // remove duplicates
-    auto unique_end = std::unique(kmers->begin(), kmers->end());
-    kmers->erase(unique_end, kmers->end());
-}
-
-void recover_source_dummy_nodes(size_t k, std::vector<KMer> *kmers) {
-    // remove redundant dummy kmers inplace
-    size_t cur_pos = 0;
-    std::vector<KMer> prev_dummy_kmers;
-    prev_dummy_kmers.reserve(kmers->size());
-
-    for (size_t i = 0; i < kmers->size(); ++i) {
-        const KMer &kmer = kmers->at(i);
-        // we never add reads shorter than k
-        assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
-
-        TAlphabet edge_label;
-
-        // check if it's not a source dummy kmer
-        if (kmer[1] > 0 || (edge_label = kmer[0]) == 0) {
-            kmers->at(cur_pos++) = kmer;
-            continue;
-        }
-
-        bool redundant = false;
-        for (size_t j = i + 1; j < kmers->size()
-                                    && KMer::compare_kmer_suffix(kmer, kmers->at(j), 1); ++j) {
-            if (edge_label == kmers->at(j)[0]) {
-                // This source dummy kmer is redundant and has to be erased
-                redundant = true;
-                break;
-            }
-        }
-        if (redundant)
-            continue;
-
-        // leave this dummy kmer in the list
-        kmers->at(cur_pos++) = kmer;
-
-        // anchor it to the dummy source node
-        auto anchor_kmer = KMer::pack_kmer(std::vector<TAlphabet>(k + 1, 0), k + 1);
-        for (size_t c = 2; c < k + 1; ++c) {
-            update_kmer(k, kmer[c], kmer[c - 1], &anchor_kmer);
-            prev_dummy_kmers.emplace_back(anchor_kmer);
-        }
-    }
-    kmers->erase(kmers->begin() + cur_pos, kmers->end());
-
-    sort_and_remove_duplicates(&prev_dummy_kmers);
-
-    std::vector<KMer> proper_kmers;
-    kmers->swap(proper_kmers);
-    __gnu_parallel::merge(proper_kmers.begin(), proper_kmers.end(),
-                          prev_dummy_kmers.begin(), prev_dummy_kmers.end(),
-                          std::back_inserter(*kmers));
-}
-
 DBG_succ::VectorChunk* DBG_succ::VectorChunk::build_from_kmers(size_t k,
-                                                               std::vector<KMer> *kmers,
-                                                               bool suffix_filtered,
-                                                               unsigned int parallel) {
-    omp_set_num_threads(std::max(static_cast<int>(parallel), 1));
-
-    sort_and_remove_duplicates(kmers);
-
-    if (!suffix_filtered)
-        recover_source_dummy_nodes(k, kmers);
+                                                               std::vector<KMer> *kmers) {
+    assert(std::is_sorted(kmers->begin(), kmers->end()));
 
     DBG_succ::VectorChunk *result = new DBG_succ::VectorChunk();
 
@@ -215,40 +149,4 @@ DBG_succ::VectorChunk* DBG_succ::VectorChunk::build_from_kmers(size_t k,
     result->last_.assign(last_stat_safe.begin(), last_stat_safe.end());
 
     return result;
-}
-
-void sequence_to_kmers(const std::string &sequence,
-                       size_t k,
-                       std::vector<KMer> *kmers,
-                       const std::vector<TAlphabet> &suffix) {
-    if (sequence.size() < k)
-        return;
-
-    // encode sequence
-    size_t dummy_prefix_size = suffix.size() > 0 ? k : 1;
-    std::vector<TAlphabet> seq(sequence.size() + dummy_prefix_size + 1);
-    for (size_t i = 0; i < dummy_prefix_size; ++i) {
-        seq[i] = DBG_succ::encode('$');
-    }
-    std::transform(sequence.begin(), sequence.end(),
-                   &seq[dummy_prefix_size], DBG_succ::encode);
-    seq.back() = DBG_succ::encode('$');
-
-    // initialize and add the first kmer from sequence
-    auto kmer = KMer::pack_kmer(seq.data(), k + 1);
-
-    if (std::equal(suffix.begin(), suffix.end(),
-                   seq.data() + k - suffix.size())) {
-        kmers->emplace_back(kmer);
-    }
-
-    // add all other kmers
-    for (size_t i = 1; i < seq.size() - k; ++i) {
-        update_kmer(k, seq[i + k], seq[i + k - 1], &kmer);
-
-        if (std::equal(suffix.begin(), suffix.end(),
-                       seq.data() + i + k - suffix.size())) {
-            kmers->emplace_back(kmer);
-        }
-    }
 }

@@ -268,7 +268,6 @@ DBG_succ* merge_chunks(size_t k,
         return graph;
 
     DBG_succ::Chunk *merged = new DBG_succ::VectorChunk();
-    merged->push_back(0, DBG_succ::alph_size, 0);
 
     for (uint64_t f = 0; f < graph_chunks.size(); f++) {
         DBG_succ::Chunk *chunk = graph_chunks[f];
@@ -310,7 +309,6 @@ DBG_succ* merge(const std::vector<const DBG_succ*> &Gv) {
     }
 
     DBG_succ::VectorChunk merged;
-    merged.push_back(0, DBG_succ::alph_size, 0);
 
     merge_blocks(Gv, kv, nv, &merged);
 

@@ -281,6 +281,7 @@ TEST(DBGSuccinctMerge, ParallelDumpedChunkedMergeThreeGraphs) {
             chunk->serialize(test_data_dir + "/chunks_to_merge"
                               + "." + std::to_string(i)
                               + "_" + std::to_string(num_chunks));
+            delete chunk;
         }
         DBG_succ *chunked_merged = merge::merge_chunks(
             k,

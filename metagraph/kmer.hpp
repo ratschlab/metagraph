@@ -13,7 +13,6 @@ using boost::multiprecision::uint256_t;
 typedef uint64_t TAlphabet;
 
 const int kBitsPerChar = 3;
-const int kMax = 1llu << kBitsPerChar;
 
 
 class KMer {
@@ -64,7 +63,8 @@ uint256_t KMer::pack_kmer(const T &arr, size_t k) {
             && "String must be between lengths 2 and 256 / kBitsPerChar");
 
     for (int i = k - 2; i >= 0; --i) {
-        assert(arr[i] + 1 < kMax && "Alphabet size too big for the given number of bits");
+        assert(static_cast<uint64_t>(arr[i] + 1) < (1llu << kBitsPerChar)
+                 && "Alphabet size too big for the given number of bits");
 
         result <<= kBitsPerChar;
         result += arr[i] + 1;

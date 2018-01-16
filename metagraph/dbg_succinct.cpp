@@ -18,8 +18,7 @@
 #include <string>
 #include <cstdio>
 
-#include "dbg_succinct_chunk.hpp"
-#include "kmer.hpp"
+#include "dbg_succinct_construct.hpp"
 
 using libmaus2::util::NumberSerialisation;
 
@@ -43,40 +42,28 @@ const TAlphabet kCharToNucleotide[128] = {
 };
 
 
-DBG_succ::DBG_succ(size_t k, const std::vector<std::string> &sequences, size_t parallel)
+DBG_succ::DBG_succ(size_t k)
       : k_(k), last(new bit_vector_dyn()),
                F(alph_size, 0),
                W(new wavelet_tree_dyn(4)) {
+    last->insertBit(0, false);
+    W->insert(0, 0);
 
-    if (sequences.size()) {
-        std::vector<KMer> kmers;
-
-        // add dummy edge as a kmer
-        kmers.emplace_back(std::vector<size_t>(k_ + 1, encode('$')), k_ + 1);
-
-        // break the sequences down into kmers
-        for (const auto &seq : sequences) {
-            sequence_to_kmers(seq, k_, &kmers);
-        }
-        // build the graph chunk from kmers
-        auto chunk = DBG_succ::VectorChunk::build_from_kmers(k_, &kmers, false, parallel);
-
-        // initialize graph from the chunk built
-        chunk->initialize_graph(this);
-        delete chunk;
-    } else {
-        // no sequences to add
-
-        last->insertBit(0, false);
-        W->insert(0, 0);
-
-        // add the dummy source node
-        last->insertBit(1, true);
-        W->insert(0, 0);
-        for (size_t j = 1; j < alph_size; j++) {
-            F[j] = 1;
-        }
+    // add the dummy source node
+    last->insertBit(1, true);
+    W->insert(0, 0);
+    for (size_t j = 1; j < alph_size; j++) {
+        F[j] = 1;
     }
+    assert(is_valid());
+}
+
+DBG_succ::DBG_succ(DBGSuccConstructor *builder) : DBG_succ::DBG_succ() {
+    assert(builder);
+
+    k_ = builder->get_k();
+    builder->build_graph(this);
+    assert(is_valid());
 }
 
 DBG_succ::~DBG_succ() {
@@ -1248,6 +1235,10 @@ void DBG_succ::merge(const DBG_succ &Gm) {
 }
 
 bool DBG_succ::is_valid() const {
+    assert(W->size() >= 2);
+    assert(get_node_str(1) == std::string(k_, '$') && "First kmer must be dummy");
+    assert(get_W(1) == encode('$') && "First kmer must be dummy");
+
     for (uint64_t i = 1; i < W->size(); i++) {
         auto node_str = get_node_str(i);
         for (char c : node_str) {

@@ -11,6 +11,7 @@
 
 #include "dbg_succinct.hpp"
 #include "dbg_succinct_merge.hpp"
+#include "dbg_succinct_construct.hpp"
 #include "utils.hpp"
 
 KSEQ_INIT(gzFile, gzread)
@@ -79,6 +80,55 @@ TEST(Construct, GraphDefaultConstructor) {
     });
 }
 
+TEST(Construct, ConstructionEQAppendingSimplePath) {
+    for (size_t k = 1; k < 80; ++k) {
+        KMerDBGSuccConstructor constructor(k);
+        constructor.add_reads({ std::string(100, 'A') });
+        DBG_succ constructed(&constructor);
+
+        DBG_succ appended(k);
+        appended.add_sequence(std::string(100, 'A'));
+
+        EXPECT_EQ(constructed, appended);
+    }
+}
+
+TEST(Construct, ConstructionEQAppendingTwoPaths) {
+    for (size_t k = 1; k < 80; ++k) {
+        KMerDBGSuccConstructor constructor(k);
+        constructor.add_reads({ std::string(100, 'A'),
+                                std::string(50, 'B') });
+        DBG_succ constructed(&constructor);
+
+        DBG_succ appended(k);
+        appended.add_sequence(std::string(100, 'A'));
+        appended.add_sequence(std::string(50, 'B'));
+
+        EXPECT_EQ(constructed, appended);
+    }
+}
+
+TEST(Construct, ConstructionEQAppending) {
+    for (size_t k = 1; k < 80; ++k) {
+        std::vector<std::string> input_data = {
+            "ACAGCTAGCTAGCTAGCTAGCTG",
+            "ATATTATAAAAAATTTTAAAAAA",
+            "ATATATTCTCTCTCTCTCATA",
+            "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+        };
+        KMerDBGSuccConstructor constructor(k);
+        constructor.add_reads(input_data);
+        DBG_succ constructed(&constructor);
+
+        DBG_succ appended(k);
+        for (const auto &sequence : input_data) {
+            appended.add_sequence(sequence);
+        }
+
+        EXPECT_EQ(constructed, appended);
+    }
+}
+
 TEST(DBGSuccinct, EmptyGraph) {
     DBG_succ *graph = new DBG_succ(3);
     test_graph(graph, "01", "00", "0 1 1 1 1 1 ");
@@ -97,33 +147,38 @@ TEST(DBGSuccinct, AddSequenceFast) {
     gzFile input_p = gzopen(test_fasta.c_str(), "r");
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
-    std::vector<std::string> sequences;
+
+    KMerDBGSuccConstructor constructor(3);
+
     for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
-        sequences.push_back(read_stream->seq.s);
+        constructor.add_reads({ read_stream->seq.s });
     }
     kseq_destroy(read_stream);
     gzclose(input_p);
 
-    DBG_succ *graph = new DBG_succ(3, sequences);
+    DBG_succ *graph = new DBG_succ(&constructor);
 
     //test graph construction
     test_graph(graph, "00011101101111111111111",
                       "00131124434010141720433",
                       "0 3 11 13 17 22 ");
+    delete graph;
 }
 
 TEST(Construct, SmallGraphTraversal) {
     gzFile input_p = gzopen(test_fasta.c_str(), "r");
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
-    std::vector<std::string> sequences;
+
+    KMerDBGSuccConstructor constructor(3);
+
     for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
-        sequences.push_back(read_stream->seq.s);
+        constructor.add_reads({ read_stream->seq.s });
     }
     kseq_destroy(read_stream);
     gzclose(input_p);
 
-    DBG_succ *graph = new DBG_succ(3, sequences);
+    DBG_succ *graph = new DBG_succ(&constructor);
 
     //traversal
     std::vector<size_t> outgoing_edges = { 0, 3, 4, 14, 5, 7, 12, 18, 19, 15, 20, 0,
@@ -169,14 +224,16 @@ TEST(DBGSuccinct, Serialization) {
     gzFile input_p = gzopen(test_fasta.c_str(), "r");
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
-    std::vector<std::string> sequences;
+
+    KMerDBGSuccConstructor constructor(3);
+
     for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
-        sequences.push_back(read_stream->seq.s);
+        constructor.add_reads({ read_stream->seq.s });
     }
     kseq_destroy(read_stream);
     gzclose(input_p);
 
-    DBG_succ *graph = new DBG_succ(3, sequences);
+    DBG_succ *graph = new DBG_succ(&constructor);
 
     graph->serialize(test_dump_basename);
 
@@ -186,48 +243,6 @@ TEST(DBGSuccinct, Serialization) {
     EXPECT_FALSE(DBG_succ() == loaded_graph);
 
     delete graph;
-}
-
-TEST(DBGSuccinct, ConstructionEQAppendingSimplePath) {
-    for (size_t k = 1; k < 80; ++k) {
-        DBG_succ constructed(k, { std::string(100, 'A') });
-
-        DBG_succ appended(k);
-        appended.add_sequence(std::string(100, 'A'));
-
-        EXPECT_EQ(constructed, appended);
-    }
-}
-
-TEST(DBGSuccinct, ConstructionEQAppendingTwoPaths) {
-    for (size_t k = 1; k < 80; ++k) {
-        DBG_succ constructed(k, { std::string(100, 'A'),
-                                  std::string(50, 'B') });
-        DBG_succ appended(k);
-        appended.add_sequence(std::string(100, 'A'));
-        appended.add_sequence(std::string(50, 'B'));
-
-        EXPECT_EQ(constructed, appended);
-    }
-}
-
-TEST(DBGSuccinct, ConstructionEQAppending) {
-    for (size_t k = 1; k < 80; ++k) {
-        std::vector<std::string> input_data = {
-            "ACAGCTAGCTAGCTAGCTAGCTG",
-            "ATATTATAAAAAATTTTAAAAAA",
-            "ATATATTCTCTCTCTCTCATA",
-            "GTGTGTGTGGGGGGCCCTTTTTTCATA",
-        };
-        DBG_succ constructed(k, input_data);
-
-        DBG_succ appended(k);
-        for (const auto &sequence : input_data) {
-            appended.add_sequence(sequence);
-        }
-
-        EXPECT_EQ(constructed, appended);
-    }
 }
 
 TEST(DBGSuccinct, AddSequenceSimplePath) {

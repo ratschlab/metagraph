@@ -4,6 +4,7 @@
 
 #include "dbg_succinct.hpp"
 #include "dbg_succinct_chunk.hpp"
+#include "dbg_succinct_construct.hpp"
 #include "config.hpp"
 #include "helpers.hpp"
 #include "utils.hpp"
@@ -119,21 +120,18 @@ int main(int argc, const char *argv[]) {
                 clock_t tstart, timelast;
 
                 DBG_succ::VectorChunk graph_data;
-                // add the dummy source node
-                graph_data.push_back(0, DBG_succ::alph_size, 0);
 
                 //one pass per suffix
                 for (const std::string &suffix : suffices) {
                     std::cout << "Suffix: " << suffix << std::endl;
 
-                    std::vector<TAlphabet> suffix_encoded(suffix.size());
-                    std::transform(suffix.begin(), suffix.end(),
-                                   suffix_encoded.begin(), DBG_succ::encode);
-
                     //add sink nodes
                     // graph->add_sink(config->parallel, suffix);
 
-                    std::vector<KMer> kmers;
+                    std::unique_ptr<KMerDBGSuccChunkConstructor> constructor(
+                        new KMerDBGSuccChunkConstructor(graph->get_k(),
+                                                        suffix, config->parallel)
+                    );
 
                     // iterate over input files
                     for (unsigned int f = 0; f < files.size(); ++f) {
@@ -179,8 +177,7 @@ int main(int argc, const char *argv[]) {
                                 annotation = "VCF:" + annotation;
                                 nbp += sequence.length();
 
-                                sequence_to_kmers(sequence, graph->get_k(),
-                                                  &kmers, suffix_encoded);
+                                constructor->add_read(sequence);
                             }
                         } else if (utils::get_filetype(files[f]) == "FASTA"
                                     || utils::get_filetype(files[f]) == "FASTQ") {
@@ -204,13 +201,7 @@ int main(int argc, const char *argv[]) {
                                 if (config->reverse)
                                     reverse_complement(read_stream->seq);
 
-                                // add all k-mers of seq to the graph
-                                // TODO: This reserve makes the program super slow... why?..
-                                // kmers.reserve(kmers.size() + read_stream->seq.l);
-                                sequence_to_kmers(read_stream->seq.s,
-                                                  graph->get_k(),
-                                                  &kmers,
-                                                  suffix_encoded);
+                                constructor->add_read(read_stream->seq.s);
                             }
                             kseq_destroy(read_stream);
 
@@ -228,10 +219,7 @@ int main(int argc, const char *argv[]) {
 
                     std::cout << "Sorting kmers and appending succinct"
                               << " representation from current bin...\t" << std::flush;
-                    auto next_block = DBG_succ::VectorChunk::build_from_kmers(graph->get_k(),
-                                                                              &kmers,
-                                                                              suffix_encoded.size() > 0,
-                                                                              config->parallel);
+                    auto next_block = constructor->build_chunk();
                     graph_data.extend(*next_block);
                     delete next_block;
 

@@ -9,6 +9,7 @@ bool KMer::compare_kmer_suffix(const KMer &k1, const KMer &k2, size_t minus) {
 }
 
 TAlphabet KMer::operator[](size_t i) const {
+    assert(get_digit<kBitsPerChar>(i) > 0);
     return get_digit<kBitsPerChar>(i) - 1;
 }
 

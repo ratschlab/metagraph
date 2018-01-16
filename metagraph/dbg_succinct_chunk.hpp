@@ -30,6 +30,8 @@ class DBG_succ::Chunk {
 
 class DBG_succ::VectorChunk : public DBG_succ::Chunk {
   public:
+    VectorChunk();
+
     void push_back(TAlphabet W, TAlphabet F, bool last);
     TAlphabet get_W_back() const;
     void alter_W_back(TAlphabet W);
@@ -45,25 +47,16 @@ class DBG_succ::VectorChunk : public DBG_succ::Chunk {
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
 
-    static VectorChunk* build_from_kmers(size_t k,
-                                         std::vector<KMer> *kmers,
-                                         bool suffix_filtered,
-                                         unsigned int parallel = 1);
+    /**
+     * Initialize graph chunk from a list of sorted kmers.
+     */
+    static VectorChunk* build_from_kmers(size_t k, std::vector<KMer> *kmers);
 
   private:
     std::vector<TAlphabet> W_;
     std::vector<bool> last_;
-    std::vector<uint64_t> F_ = std::vector<uint64_t>(DBG_succ::alph_size, 0);
+    std::vector<uint64_t> F_;
 };
-
-
-/**
- * Break the sequence to kmers and extend the temporary kmers storage.
- */
-void sequence_to_kmers(const std::string &sequence,
-                       size_t k,
-                       std::vector<KMer> *kmers,
-                       const std::vector<TAlphabet> &suffix = {});
 
 
 #endif // __DBG_SUCCINCT_CHUNK_HPP__

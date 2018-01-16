@@ -8,6 +8,8 @@
 #include "wavelet_tree.hpp"
 #include "bit_vector.hpp"
 
+class DBGSuccConstructor;
+
 
 // define an extended alphabet for W --> somehow this does not work properly as expected
 typedef uint64_t TAlphabet;
@@ -45,9 +47,9 @@ class DBGCondensed : public SequenceGraph {
 
 class DBG_succ : public SequenceGraph {
   public:
-    DBG_succ(size_t k = 1,
-             const std::vector<std::string> &sequences = {},
-             size_t parallel = 1);
+    explicit DBG_succ(size_t k = 1);
+
+    explicit DBG_succ(DBGSuccConstructor *builder);
 
     ~DBG_succ();
 
