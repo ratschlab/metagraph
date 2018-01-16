@@ -1,11 +1,21 @@
 #include "kmer.hpp"
 
-const uint256_t kErasingFirstCodeMask = ~uint256_t((1 << kBitsPerChar) - 1);
+KMer operator>>(const KMer &kmer, const size_t &shift) {
+    KMer that(kmer);
+    that >>= shift;
+    return that;
+}
+
+size_t operator|(const KMer &kmer, const int &a) {
+    KMer that(kmer);
+    that |= a;
+    return that.nth(0);
+}
 
 
 bool KMer::compare_kmer_suffix(const KMer &k1, const KMer &k2, size_t minus) {
-    return k1.seq_ >> ((minus + 1) * kBitsPerChar)
-             == k2.seq_ >> ((minus + 1) * kBitsPerChar);
+    return k1 >> ((minus + 1) * kBitsPerChar)
+             == k2 >> ((minus + 1) * kBitsPerChar);
 }
 
 std::string KMer::to_string(const std::string &alphabet) const {
@@ -20,24 +30,29 @@ std::string KMer::to_string(const std::string &alphabet) const {
 }
 
 TAlphabet KMer::get(size_t i) const {
-    return ((seq_ >> (kBitsPerChar * i)) % kMax).convert_to<TAlphabet>();
+    int bit = kBitsPerChar * i;
+    if (bit % 64 == 0) {
+        return this->nth(bit / 64) % kMax;
+    } else {
+        TAlphabet result = this->nth(bit / 64) >> (bit % 64);
+        if (bit / 64 < 3) {
+            return (result | ((this->nth(bit / 64 + 1)) << (64 - (bit % 64)))) % kMax;
+        } else {
+            return result % kMax;
+        }
+    }
 }
 
 std::ostream& operator<<(std::ostream &os, const KMer &kmer) {
-    return os << kmer.seq_;
+    for (uint8_t i = 0; i < 4; ++i) {
+        os << kmer.s_[i] << " ";
+    }
+    return os;
 }
 
-/**
- * Construct the next k-mer for s[6]s[5]s[4]s[3]s[2]s[1]s[7].
- * next = s[7]s[6]s[5]s[4]s[3]s[2]s[8]
- *      = s[7] << k + (kmer & mask) >> 1 + s[8].
- */
-void update_kmer(size_t k,
-                 TAlphabet edge_label,
-                 TAlphabet last,
-                 uint256_t *kmer) {
-    *kmer >>= kBitsPerChar;
-    *kmer += uint256_t(last + 1) << (kBitsPerChar * k);
-    *kmer &= kErasingFirstCodeMask;
-    *kmer += edge_label + 1;
+KMer operator<<(const KMer &kmer, const size_t &shift) {
+    KMer that(kmer);
+    that <<= shift;
+    return that;
 }
+

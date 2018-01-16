@@ -124,10 +124,9 @@ void recover_source_dummy_nodes(size_t k, std::vector<KMer> *kmers) {
         kmers->at(cur_pos++) = kmer;
 
         // anchor it to the dummy source node
-        auto anchor_kmer = KMer::pack_kmer(std::vector<TAlphabet>(k + 1, 0), k + 1);
+        KMer anchor_kmer(std::vector<TAlphabet>(k + 1, 0), k + 1);
         for (size_t c = 2; c < k + 1; ++c) {
-            update_kmer(k, kmer[c], kmer[c - 1], &anchor_kmer);
-            prev_dummy_kmers.emplace_back(anchor_kmer);
+            prev_dummy_kmers.emplace_back(anchor_kmer.update(k, kmer[c]));
         }
     }
     kmers->erase(kmers->begin() + cur_pos, kmers->end());
@@ -146,7 +145,9 @@ DBG_succ::VectorChunk* DBG_succ::VectorChunk::build_from_kmers(size_t k,
                                                                unsigned int parallel) {
     omp_set_num_threads(std::max(static_cast<int>(parallel), 1));
 
+
     sort_and_remove_duplicates(kmers);
+            
 
     recover_source_dummy_nodes(k, kmers);
 
@@ -229,7 +230,7 @@ void sequence_to_kmers(const std::string &sequence,
     seq.back() = DBG_succ::encode('$');
 
     // initialize and add the first kmer from sequence
-    auto kmer = KMer::pack_kmer(seq.data(), k + 1);
+    KMer kmer(seq.data(), k + 1);
 
     if (std::equal(suffix.begin(), suffix.end(),
                    seq.data() + k - suffix.size())) {
@@ -238,7 +239,7 @@ void sequence_to_kmers(const std::string &sequence,
 
     // add all other kmers
     for (size_t i = 1; i < seq.size() - k; ++i) {
-        update_kmer(k, seq[i + k], seq[i + k - 1], &kmer);
+        kmer.update(k, seq[i + k]);
 
         if (std::equal(suffix.begin(), suffix.end(),
                        seq.data() + i + k - suffix.size())) {
