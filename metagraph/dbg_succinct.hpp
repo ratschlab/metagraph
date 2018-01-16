@@ -424,6 +424,8 @@ class DBG_succ : public SequenceGraph {
         }
     }
 
+    bool is_valid() const;
+
   public:
     class Chunk;
     class DynamicChunk;

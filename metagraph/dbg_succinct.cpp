@@ -60,6 +60,7 @@ DBG_succ::DBG_succ(size_t k, const std::vector<std::string> &sequences, size_t p
         }
         // build the graph chunk from kmers
         auto chunk = DBG_succ::VectorChunk::build_from_kmers(k_, &kmers, false, parallel);
+
         // initialize graph from the chunk built
         chunk->initialize_graph(this);
         delete chunk;
@@ -1244,4 +1245,17 @@ void DBG_succ::merge(const DBG_succ &Gm) {
         // find node where to restart insertion
         Gt_source_node = index(k_mer);
     }
+}
+
+bool DBG_succ::is_valid() const {
+    for (uint64_t i = 1; i < W->size(); i++) {
+        auto node_str = get_node_str(i);
+        for (char c : node_str) {
+            if (alphabet.find(c) == std::string::npos)
+                return false;
+        }
+        if (get_W(i) >= alphabet.size())
+            return false;
+    }
+    return true;
 }

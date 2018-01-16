@@ -54,6 +54,8 @@ void DBG_succ::VectorChunk::initialize_graph(DBG_succ *graph) {
     graph->F = F_;
 
     graph->state = Config::STAT;
+
+    assert(graph->is_valid());
 }
 
 bool DBG_succ::VectorChunk::load(const std::string &infbase) {
