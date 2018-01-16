@@ -7,6 +7,7 @@
 #include <deque>
 
 class DBG_succ;
+class KMer;
 
 
 namespace utils {
@@ -60,6 +61,8 @@ namespace utils {
 
     std::deque<std::string> generate_strings(const std::string &alphabet,
                                              size_t length);
+
+    void radix_sort(std::vector<KMer> &data, size_t k);
 
 } // namespace utils
 
