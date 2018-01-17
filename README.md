@@ -4,7 +4,6 @@
 Prerequisites
 - cmake 3.6.1
 - C++14
-- boost
 - HTSlib
 
 Install
