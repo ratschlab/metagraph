@@ -65,10 +65,10 @@ TEST(KmerEncodeTest, BitShiftBuild) {
     KMer kmer_builtup(std::string(long_seq.rbegin() + 1,
                       long_seq.rbegin() + 3), DBG_succ::encode);
     for (int i = long_seq.length() - 4; i >= 0; --i) {
-        kmer_builtup.seq_ <<= kBitsPerChar;
+        kmer_builtup.seq_ = kmer_builtup.seq_ << kBitsPerChar;
         kmer_builtup.seq_ |= DBG_succ::encode(long_seq[i]) + 1;
     }
-    kmer_builtup.seq_ <<= kBitsPerChar;
+    kmer_builtup.seq_ = kmer_builtup.seq_ << kBitsPerChar;
     kmer_builtup.seq_ |= DBG_succ::encode(long_seq[long_seq.length() - 1]) + 1;
     std::string dec = kmer_builtup.to_string(DBG_succ::alphabet);
     dec.push_back(dec.front());
@@ -86,7 +86,7 @@ TEST(KmerEncodeTest, UpdateKmer) {
     };
     update_kmer(3, DBG_succ::encode('T'),
                    DBG_succ::encode('C'), &kmer[0].seq_);
-    EXPECT_EQ(kmer[0], kmer[1]);
+    EXPECT_EQ(kmer[1], kmer[0]);
 }
 
 TEST(KmerEncodeTest, UpdateKmerLong) {
@@ -105,9 +105,9 @@ TEST(KmerEncodeTest, UpdateKmerLong) {
                 DBG_succ::encode('T'),
                 DBG_succ::encode(long_seq.back()),
                 &kmer[0].seq_);
-    EXPECT_EQ(kmer[0], kmer[1]);
-    EXPECT_EQ(kmer[0].to_string(DBG_succ::alphabet),
-              kmer[1].to_string(DBG_succ::alphabet));
+    EXPECT_EQ(kmer[1], kmer[0]);
+    EXPECT_EQ(kmer[1].to_string(DBG_succ::alphabet),
+              kmer[0].to_string(DBG_succ::alphabet));
 }
 
 
@@ -133,7 +133,7 @@ void test_kmer_less(std::string k1, std::string k2, bool truth) {
         KMer(k1, DBG_succ::encode),
         KMer(k2, DBG_succ::encode)
     };
-    ASSERT_EQ(kmer[0] < kmer[1], truth);
+    ASSERT_EQ(truth, kmer[0] < kmer[1]);
 }
 
 TEST(KmerEncodeTest, LessEdge) {
@@ -157,7 +157,7 @@ void test_kmer_suffix(std::string k1, std::string k2, bool truth) {
         KMer(k1, DBG_succ::encode),
         KMer(k2, DBG_succ::encode)
     };
-    ASSERT_EQ(KMer::compare_kmer_suffix(kmer[0], kmer[1], 1), truth);
+    ASSERT_EQ(truth, KMer::compare_kmer_suffix(kmer[0], kmer[1], 1));
 }
 
 TEST(KmerEncodeTest, CompareSuffixTrue) {
@@ -181,15 +181,15 @@ TEST(KmerEncodeTest, CompareSuffixTrueLong) {
         KMer(long_seq, DBG_succ::encode),
         KMer(long_seq_alt, DBG_succ::encode)
     };
-    ASSERT_EQ(KMer::compare_kmer_suffix(kmer[0], kmer[1], 1), true);
+    ASSERT_TRUE(KMer::compare_kmer_suffix(kmer[0], kmer[1], 1));
 
     //shift, then compare
     long_seq_alt[22] = 'T';
 
-    kmer[0].seq_ >>= 66;
+    kmer[0].seq_ = kmer[0].seq_ >> 66;
     kmer[1] = KMer(long_seq_alt.substr(22), DBG_succ::encode);
 
-    ASSERT_EQ(KMer::compare_kmer_suffix(kmer[0], kmer[1], 1), true);
+    ASSERT_TRUE(KMer::compare_kmer_suffix(kmer[0], kmer[1], 1));
 }
 
 TEST(KmerEncodeTest, CompareSuffixFalseLong) {
@@ -206,5 +206,5 @@ TEST(KmerEncodeTest, CompareSuffixFalseLong) {
 }
 
 TEST(KmerTest, SizeOfClass) {
-    EXPECT_EQ(sizeof(uint64_t) * 6, sizeof(KMer));
+    EXPECT_EQ(32u, sizeof(KMer));
 }

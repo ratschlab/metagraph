@@ -1,6 +1,8 @@
 #include "kmer.hpp"
 
-const uint256_t kErasingFirstCodeMask = ~uint256_t((1 << kBitsPerChar) - 1);
+using sdsl::uint256_t;
+
+const uint256_t kFirstCharMask = (1 << kBitsPerChar) - 1;
 
 
 bool KMer::compare_kmer_suffix(const KMer &k1, const KMer &k2, size_t minus) {
@@ -37,8 +39,9 @@ void update_kmer(size_t k,
                  TAlphabet edge_label,
                  TAlphabet last,
                  uint256_t *kmer) {
-    *kmer >>= kBitsPerChar;
-    *kmer += uint256_t(last + 1) << (kBitsPerChar * k);
-    *kmer &= kErasingFirstCodeMask;
+    *kmer = *kmer >> kBitsPerChar;
+    *kmer += uint256_t(last + 1).operator<<(kBitsPerChar * k);
+    *kmer |= kFirstCharMask;
+    *kmer -= kFirstCharMask;
     *kmer += edge_label + 1;
 }

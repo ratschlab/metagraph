@@ -2,14 +2,13 @@
 #define __KMER_HPP__
 
 #include <iostream>
-#include <boost/multiprecision/cpp_int.hpp>
 #include <string>
 #include <algorithm>
 #include <vector>
 
-#include <htslib/kseq.h>
+#include <sdsl/uint256_t.hpp>
 
-using boost::multiprecision::uint256_t;
+using sdsl::uint256_t;
 typedef uint64_t TAlphabet;
 
 const int kBitsPerChar = 3;
@@ -29,8 +28,8 @@ class KMer {
 
     KMer(KMer &&other) : seq_(other.seq_) {}
     KMer(const KMer &other) : seq_(other.seq_) {}
-    explicit KMer(uint256_t &&seq) : seq_(seq) {}
-    explicit KMer(const uint256_t &seq) : seq_(seq) {}
+    explicit KMer(sdsl::uint256_t &&seq) : seq_(seq) {}
+    explicit KMer(const sdsl::uint256_t &seq) : seq_(seq) {}
 
     KMer& operator=(KMer &&other) { seq_ = other.seq_; return *this; }
     KMer& operator=(const KMer &other) { seq_ = other.seq_; return *this; }
@@ -50,15 +49,15 @@ class KMer {
     std::string to_string(const std::string &alphabet) const;
 
     template<typename T>
-    static uint256_t pack_kmer(const T &arr, size_t k);
+    static sdsl::uint256_t pack_kmer(const T &arr, size_t k);
 
   private:
-    uint256_t seq_; // kmer sequence
+    sdsl::uint256_t seq_; // kmer sequence
 };
 
 template <typename T>
-uint256_t KMer::pack_kmer(const T &arr, size_t k) {
-    uint256_t result(0);
+sdsl::uint256_t KMer::pack_kmer(const T &arr, size_t k) {
+    sdsl::uint256_t result(0);
     assert(k * kBitsPerChar < 256 && k >= 2
             && "String must be between lengths 2 and 256 / kBitsPerChar");
 
@@ -66,10 +65,10 @@ uint256_t KMer::pack_kmer(const T &arr, size_t k) {
         assert(static_cast<uint64_t>(arr[i] + 1) < (1llu << kBitsPerChar)
                  && "Alphabet size too big for the given number of bits");
 
-        result <<= kBitsPerChar;
+        result = result << kBitsPerChar;
         result += arr[i] + 1;
     }
-    result <<= kBitsPerChar;
+    result = result << kBitsPerChar;
     result += arr[k - 1] + 1;
     return result;
 }
@@ -96,6 +95,6 @@ uint64_t KMer::get_digit(size_t i) const {
 void update_kmer(size_t k,
                  TAlphabet edge_label,
                  TAlphabet last,
-                 uint256_t *kmer);
+                 sdsl::uint256_t *kmer);
 
 #endif // __KMER_HPP__
