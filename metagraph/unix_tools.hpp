@@ -15,11 +15,10 @@
  * http://nadeausoftware.com/articles/2012/07/c_c_tip_how_get_process_resident_set_size_physical_memory_use
  */
 size_t get_curr_mem2() {
-    FILE *fp = NULL;
-
-    if ( (fp = fopen( "/proc/self/statm", "r")) == NULL ) {
+    FILE *fp = fopen( "/proc/self/statm", "r");
+    if (!fp)
         return 0;      /* Can't open? */
-    }
+
     long rss = 0L;
     if ( fscanf(fp, "%*s%ld", &rss) != 1 ) {
         fclose(fp);
@@ -38,6 +37,9 @@ size_t get_curr_mem2() {
 void get_RAM() {
     //output total RAM usage
     FILE *sfile = fopen("/proc/self/status", "r");
+    if (!sfile)
+        return;
+
     char line[128];
     while (fgets(line, 128, sfile) != NULL) {
         if (strncmp(line, "VmRSS:", 6) == 0) {
@@ -47,5 +49,6 @@ void get_RAM() {
     }
     fclose(sfile);
 }
+
 
 #endif // __UNIX_TOOLS_HPP__
