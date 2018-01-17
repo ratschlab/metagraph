@@ -1,11 +1,11 @@
 #include <stdio.h>
+#include <utility>
 
 #include "gtest/gtest.h"
 
 #include "dbg_succinct.hpp"
 #include "kmer.hpp"
 
-#include <utility>
 
 std::string kmer_codec(const std::string &test_kmer) {
     std::string kmer_s = KMer(
@@ -30,7 +30,6 @@ TEST(KmerEncodeTest, Invertible) {
 }
 
 /*
-
 TEST(KmerEncodeTest, Operations) {
     for (uint8_t j = 1; j <= kMax; ++j) {
         char curchar = DBG_succ::decode(j - 1);
@@ -187,5 +186,3 @@ TEST(KmerEncodeTest, CompareSuffixFalseLong) {
 TEST(KmerTest, SizeOfClass) {
     EXPECT_EQ(sizeof(uint64_t) * 4, sizeof(KMer));
 }
-
-

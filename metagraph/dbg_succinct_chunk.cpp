@@ -146,9 +146,7 @@ DBG_succ::VectorChunk* DBG_succ::VectorChunk::build_from_kmers(size_t k,
                                                                unsigned int parallel) {
     omp_set_num_threads(std::max(static_cast<int>(parallel), 1));
 
-
     sort_and_remove_duplicates(kmers);
-            
 
     if (!suffix_filtered)
         recover_source_dummy_nodes(k, kmers);
