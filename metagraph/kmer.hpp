@@ -58,10 +58,10 @@ class KMer {
     }
 
     KMer& operator=(const KMer &other) {
-        if (&(s_[0]) != &(other.s_[0])) {
-            //TODO: vectorize this
-            memcpy(s_, other.s_, sizeof(s_));
-        }
+        s_[0] = other.s_[0];
+        s_[1] = other.s_[1];
+        s_[2] = other.s_[2];
+        s_[3] = other.s_[3];
         return *this;
     }
 
@@ -72,9 +72,10 @@ class KMer {
     }
 
     KMer& flip() {
-        for (uint8_t i = 0; i < 4; ++i) {
-            s_[i] = ~s_[i];
-        }
+        s_[0] = ~s_[0];
+        s_[1] = ~s_[1];
+        s_[2] = ~s_[2];
+        s_[3] = ~s_[3];
         return *this;
     }
 
@@ -88,15 +89,17 @@ class KMer {
 
     bool operator!=(const KMer &other) const {
         //TODO: vectorize this
-        for (int i = 3; i >= 0; --i) {
-            if (s_[i] != other.s_[i])
-                return true;
-        }
-        return false;
+        return s_[0] != other.s_[0]
+                || s_[1] != other.s_[1]
+                || s_[2] != other.s_[2]
+                || s_[3] != other.s_[3];
     }
 
     bool operator==(const KMer &other) const {
-        return !(*this != other);
+        return s_[0] == other.s_[0]
+                && s_[1] == other.s_[1]
+                && s_[2] == other.s_[2]
+                && s_[3] == other.s_[3];
     }
 
     uint64_t operator[](size_t i) const;
