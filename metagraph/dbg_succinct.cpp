@@ -743,9 +743,9 @@ std::deque<TAlphabet> DBG_succ::get_node_seq(uint64_t k_node) const {
 }
 
 /**
-* Given a node index k_node, this function returns the k-mer sequence of the
-* node as a string.
-*/
+ * Given a node index k_node, this function returns the k-mer sequence of the
+ * node as a string.
+ */
 std::string DBG_succ::get_node_str(uint64_t k_node) const {
     CHECK_INDEX(k_node);
 
@@ -773,15 +773,19 @@ DBG_succ::node_iterator DBG_succ::find(const std::string &sequence) const {
 
 std::vector<uint64_t> DBG_succ::align(const std::string &sequence,
                                       uint64_t alignment_length) const {
-    std::vector<uint64_t> indices;
-
-    if (alignment_length == 0)
+    if (alignment_length == 0 || alignment_length > k_)
         alignment_length = k_;
 
+    std::vector<TAlphabet> seq_encoded(sequence.size());
+    std::transform(sequence.begin(), sequence.end(),
+                   seq_encoded.begin(), encode);
+
+    std::vector<uint64_t> indices;
     std::vector<HitInfo> curr_result;
-    for (uint64_t i = 0; i < sequence.size() - alignment_length + 1; ++i) {
-        std::string kmer(sequence.data() + i, sequence.data() + i + alignment_length);
-        indices.push_back(this->index(kmer));
+    for (uint64_t i = 0; i < seq_encoded.size() - alignment_length + 1; ++i) {
+        auto range = index_range(seq_encoded.data() + i,
+                                 seq_encoded.data() + i + alignment_length);
+        indices.push_back(std::max(range.first, range.second));
     }
 
     return indices;
@@ -1008,7 +1012,7 @@ void DBG_succ::add_sequence(const std::string &seq, bool try_extend) {
 
     uint64_t source;
 
-    if (!try_extend || !(source = index(sequence))) {
+    if (!try_extend || !(source = index(sequence.data(), sequence.data() + k_))) {
         sequence.insert(sequence.begin(), k_, encode('$'));
         source = 1; // the dummy source node
     }
@@ -1230,7 +1234,7 @@ void DBG_succ::merge(const DBG_succ &Gm) {
         branchnodes.pop();
 
         // find node where to restart insertion
-        Gt_source_node = index(k_mer);
+        Gt_source_node = index(k_mer.begin(), k_mer.end());
     }
 }
 

@@ -602,7 +602,8 @@ int main(int argc, const char *argv[]) {
                         std::cout << std::endl;
                     } else {
 
-                        auto graphindices = graph->align(read_stream->seq.s);
+                        auto graphindices = graph->align(read_stream->seq.s,
+                                                         config->alignment_length);
 
                         if (config->query) {
                             size_t num_discovered = std::count_if(

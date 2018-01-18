@@ -63,6 +63,8 @@ Config::Config(int argc, const char *argv[]) {
             bins_per_thread = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-k") || !strcmp(argv[i], "--kmer-length")) {
             k = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--align-length")) {
+            alignment_length = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
             frequency = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--distance")) {
@@ -175,6 +177,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for align:\n");
             fprintf(stderr, "\t   --query \tPrint the number of k-mers discovered [off]\n");
+            fprintf(stderr, "\t-a --align-length [INT] \tLength of subsequences to align [k]\n");
             fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
         } break;
         case COMPARE: {

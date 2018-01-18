@@ -28,6 +28,7 @@ class Config {
     unsigned int collect = 1;
     unsigned int frequency = 1;
     unsigned int nsplits = 1;
+    unsigned int alignment_length = 0;
 
     std::vector<std::string> fname;
     std::string outfbase;

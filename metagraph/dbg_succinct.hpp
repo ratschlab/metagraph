@@ -330,15 +330,14 @@ class DBG_succ : public SequenceGraph {
      * Given a node label s, this function returns the index
      * of the corresponding node, if this node exists and 0 otherwise.
      */
-    template <typename T>
-    uint64_t index(const T &k_mer) const {
-        static_assert(std::is_base_of<std::string, T>::value
-                        || std::is_base_of<std::deque<TAlphabet>, T>::value
-                        || std::is_base_of<std::vector<TAlphabet>, T>::value,
-                      "Only string, vector, and deque are allowed");
-        assert(k_mer.size() >= k_);
+    template <typename RandomAccessIt>
+    uint64_t index(RandomAccessIt begin, RandomAccessIt end) const {
+        static_assert(std::is_same<TAlphabet&, decltype(*begin)>::value,
+                      "Only encoded sequences can be queried");
 
-        auto range = index_range(k_mer, k_);
+        assert(begin + k_ == end);
+
+        auto range = index_range(begin, end);
         return std::max(range.first, range.second);
     }
 
@@ -347,16 +346,16 @@ class DBG_succ : public SequenceGraph {
      * of nodes sharing the suffix str, if no such range exists, the pair
      * (0, 0) is returnd.
      */
-    template <typename T>
-    std::pair<uint64_t, uint64_t> index_range(const T &str, uint64_t length) const {
-        static_assert(std::is_base_of<std::string, T>::value
-                        || std::is_base_of<std::deque<TAlphabet>, T>::value
-                        || std::is_base_of<std::vector<TAlphabet>, T>::value,
-                      "Only string, vector, and deque are allowed");
+    template <typename RandomAccessIt>
+    std::pair<uint64_t, uint64_t> index_range(RandomAccessIt begin,
+                                              RandomAccessIt end) const {
+        static_assert(std::is_same<TAlphabet&, decltype(*begin)>::value,
+                      "Only encoded sequences can be queried");
+
+        assert(end > begin);
+
         // get first
-        TAlphabet s = std::is_same<T, std::string>::value
-                        ? encode(str[0])
-                        : str[0];
+        TAlphabet s = *begin;
 
         // initial range
         uint64_t rl = F.at(s) + 1 < W->size()
@@ -369,10 +368,8 @@ class DBG_succ : public SequenceGraph {
             return std::make_pair(0, 0);
 
         // update range iteratively while scanning through s
-        for (uint64_t i = 1; i < length; ++i) {
-            s = std::is_same<T, std::string>::value
-                        ? encode(str[i])
-                        : str[i];
+        for (auto it = ++begin; it != end; ++it) {
+            s = *it;
 
             // Include the head of the first node with the given suffix.
             rl = pred_last(rl - 1) + 1;
