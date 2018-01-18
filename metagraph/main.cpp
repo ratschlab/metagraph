@@ -408,6 +408,8 @@ int main(int argc, const char *argv[]) {
                 kseq_destroy(read_stream);
                 gzclose(input_p);
             }
+            delete graph;
+            graph = NULL;
             break;
         }
         case Config::COMPARE: {
@@ -425,6 +427,8 @@ int main(int argc, const char *argv[]) {
                 }
                 delete second;
             }
+            delete graph;
+            graph = NULL;
             break;
         }
         case Config::MERGE: {
@@ -466,8 +470,8 @@ int main(int argc, const char *argv[]) {
                 } else {
                     graph = merge::merge(graphs);
                 }
-                for (auto *graph : graphs) {
-                    delete graph;
+                for (auto *graph_ : graphs) {
+                    delete graph_;
                 }
                 std::cerr << "... done merging." << std::endl;
             }
@@ -628,6 +632,8 @@ int main(int argc, const char *argv[]) {
                 kseq_destroy(read_stream);
                 gzclose(input_p);
             }
+            delete graph;
+            graph = NULL;
             break;
         }
         case Config::NO_IDENTITY: {

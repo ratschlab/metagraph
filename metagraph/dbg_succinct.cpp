@@ -782,10 +782,29 @@ std::vector<uint64_t> DBG_succ::align(const std::string &sequence,
 
     std::vector<uint64_t> indices;
     std::vector<HitInfo> curr_result;
+
     for (uint64_t i = 0; i < seq_encoded.size() - alignment_length + 1; ++i) {
         auto range = index_range(seq_encoded.data() + i,
                                  seq_encoded.data() + i + alignment_length);
         indices.push_back(std::max(range.first, range.second));
+
+        if (alignment_length != k_ || !indices.back())
+            continue;
+
+        // This boost is valid only if alignment length equals k since
+        // otherwise, when alignment length is less than k,
+        // the existence of an edge between node ending with preceeding
+        // aligned substring and node ending with the next aligned substring
+        // is not guaranteed. It may be a suffix of some other k-mer.
+        while (i < seq_encoded.size() - alignment_length) {
+            auto next = outgoing(indices.back(),
+                                 seq_encoded[alignment_length + i]);
+            if (next == 0)
+                break;
+
+            indices.push_back(next);
+            i++;
+        }
     }
 
     return indices;
