@@ -245,7 +245,8 @@ int main(int argc, const char *argv[]) {
                     if (utils::get_filetype(files[f]) == "VCF") {
                         std::cerr << "ERROR: this method of reading VCFs not yet implemented" << std::endl;
                         exit(1);
-                    } else if ((utils::get_filetype(files[f]) == "FASTA") || (utils::get_filetype(files[f]) == "FASTQ")) {
+                    } else if (utils::get_filetype(files[f]) == "FASTA"
+                                || utils::get_filetype(files[f]) == "FASTQ") {
                         gzFile input_p = gzopen(files[f].c_str(), "r");
                         if (input_p == Z_NULL) {
                             std::cerr << "ERROR no such file " << files[f] << std::endl;
@@ -253,18 +254,20 @@ int main(int argc, const char *argv[]) {
                         }
                         kseq_t *read_stream = kseq_init(input_p);
                         if (read_stream == NULL) {
-                            std::cerr << "ERROR while opening input file " << files[f] << std::endl;
+                            std::cerr << "ERROR while opening input file "
+                                      << files[f] << std::endl;
                             exit(1);
                         }
                         for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
                             if (config->reverse)
                                 reverse_complement(read_stream->seq);
-                            graph->add_sequence(std::string(read_stream->seq.s, read_stream->seq.l));
+                            graph->add_sequence(read_stream->seq.s);
                         }
                         kseq_destroy(read_stream);
                         gzclose(input_p);
                     } else {
-                        std::cerr << "ERROR: Filetype unknown for file " << files[f] << std::endl;
+                        std::cerr << "ERROR: Filetype unknown for file "
+                                  << files[f] << std::endl;
                         exit(1);
                     }
                 }
@@ -278,10 +281,6 @@ int main(int argc, const char *argv[]) {
         }
         case Config::ANNOTATE: {
            //  // load graph
-           //  if (config->infbase.empty()) {
-           //    std::cerr << "Requires input <de bruijn graph> for annotation. Use option -I. " << std::endl;
-           //    exit(1);
-           //  }
            //  graph = new DBG_succ(config->infbase);
 
            //  // load annotation (if file does not exist, empty annotation is created)
@@ -366,10 +365,6 @@ int main(int argc, const char *argv[]) {
         }
         case Config::CLASSIFY: {
             // load graph
-            if (config->infbase.empty()) {
-              std::cerr << "Requires input <de bruijn graph> for annotation. Use option -I. " << std::endl;
-              exit(1);
-            }
             graph = load_critical_graph_from_file(config->infbase);
 
             // load annotatioun (if file does not exist, empty annotation is created)
@@ -447,9 +442,9 @@ int main(int argc, const char *argv[]) {
                 //    config->bins_per_thread = config->parts_total / config->parallel;
 
                 std::vector<const DBG_succ*> graphs;
-                for (unsigned int f = 0; f < files.size(); ++f) {
-                    std::cout << "Opening file " << files[f] << std::endl;
-                    graphs.push_back(load_critical_graph_from_file(files[f]));
+                for (const auto &file : files) {
+                    std::cout << "Opening file " << file << std::endl;
+                    graphs.push_back(load_critical_graph_from_file(file));
                 }
                 if (config->parallel > 1 || config->parts_total > 1) {
                     auto *chunk = merge::merge_blocks_to_chunk(graphs, config->part_idx,
@@ -460,15 +455,19 @@ int main(int argc, const char *argv[]) {
                         std::cerr << "ERROR when building chunk " << config->part_idx << std::endl;
                         exit(1);
                     }
-                    chunk->serialize(config->outfbase
-                                      + "." + std::to_string(config->part_idx)
-                                      + "_" + std::to_string(config->parts_total));
+                    if (config->parts_total > 1) {
+                        chunk->serialize(config->outfbase
+                                          + "." + std::to_string(config->part_idx)
+                                          + "_" + std::to_string(config->parts_total));
+                    } else {
+                        chunk->initialize_graph(graph);
+                    }
                     delete chunk;
                 } else {
                     graph = merge::merge(graphs);
                 }
-                for (size_t f = 0; f < graphs.size(); f++) {
-                    delete graphs.at(f);
+                for (auto *graph : graphs) {
+                    delete graph;
                 }
                 std::cerr << "... done merging." << std::endl;
             }
@@ -477,20 +476,20 @@ int main(int argc, const char *argv[]) {
         case Config::STATS: {
             std::ofstream outstream;
             if (!config->outfbase.empty()) {
-                outstream.open((config->outfbase + ".stats.dbg").c_str());
+                outstream.open(config->outfbase + ".stats.dbg");
                 outstream << "file\tnodes\tedges\tk" << std::endl;
             }
-            for (unsigned int f = 0; f < files.size(); ++f) {
-                DBG_succ *graph_ = load_critical_graph_from_file(files[f]);
+            for (const auto &file : files) {
+                DBG_succ *graph_ = load_critical_graph_from_file(file);
 
                 if (!config->quiet) {
-                    std::cout << "Statistics for file " << files[f] << std::endl;
+                    std::cout << "Statistics for file " << file << std::endl;
                     std::cout << "nodes: " << graph_->num_nodes() << std::endl;
                     std::cout << "edges: " << graph_->num_edges() << std::endl;
                     std::cout << "k: " << graph_->get_k() << std::endl;
                 }
-                if (!config->outfbase.empty()) {
-                    outstream << files[f] << "\t"
+                if (outstream.is_open()) {
+                    outstream << file << "\t"
                               << graph_->num_nodes() << "\t"
                               << graph_->num_edges() << "\t"
                               << graph_->get_k() << std::endl;
@@ -500,12 +499,11 @@ int main(int argc, const char *argv[]) {
                 if (config->print_graph_succ)
                     graph_->print_state();
 
-                std::ifstream instream((files[f] + ".anno.dbg").c_str());
+                std::ifstream instream(file + ".anno.dbg");
                 if (instream.good()) {
                     size_t anno_size = libmaus2::util::NumberSerialisation::deserialiseNumber(instream);
                     std::cout << "annot: " << anno_size << std::endl;
                 }
-                instream.close();
 
                 delete graph_;
             }
@@ -531,34 +529,31 @@ int main(int argc, const char *argv[]) {
         }
         case Config::ALIGN: {
             // load graph
-            if (config->infbase.empty()) {
-              std::cerr << "Requires input <de bruijn graph> to align reads." << config->ALIGN << std::endl;
-              exit(1);
-            }
+            assert(config->infbase.size());
+
             graph = load_critical_graph_from_file(config->infbase);
 
-            for (unsigned int f = 0; f < files.size(); ++f) {
-                std::cout << "Opening file for alignment ..." << files[f] << std::endl;
+            for (const auto &file : files) {
+                std::cout << "Opening file for alignment ..." << file << std::endl;
 
                 // open stream to input fasta
-                gzFile input_p = gzopen(files[f].c_str(), "r");
+                gzFile input_p = gzopen(file.c_str(), "r");
                 if (input_p == Z_NULL) {
-                    std::cerr << "ERROR no such file " << files[f] << std::endl;
+                    std::cerr << "ERROR no such file " << file << std::endl;
                     exit(1);
                 }
                 kseq_t *read_stream = kseq_init(input_p);
                 if (read_stream == NULL) {
-                  std::cerr << "ERROR while opening input file " << config->ALIGN << std::endl;
-                  exit(1);
+                    std::cerr << "ERROR while opening input file " << file << std::endl;
+                    exit(1);
                 }
 
                 while (kseq_read(read_stream) >= 0) {
-
-                    //graph->print_seq();
-                    uint64_t aln_len = read_stream->seq.l;
                     //bool reverse = false;
 
                     if (config->distance > 0) {
+                        uint64_t aln_len = read_stream->seq.l;
+
                         // since we set aln_len = read_stream->seq.l, we only get a single hit vector
                         auto graphindices = graph->align_fuzzy(
                             std::string(read_stream->seq.s, read_stream->seq.l),
@@ -567,7 +562,11 @@ int main(int argc, const char *argv[]) {
                         );
                         //for (size_t i = 0; i < graphindices.size(); ++i) {
                         size_t i = 0;
-                        int print_len = (i + aln_len < read_stream->seq.l) ? aln_len : (read_stream->seq.l - i);
+
+                        int print_len = i + aln_len < read_stream->seq.l
+                                        ? aln_len
+                                        : (read_stream->seq.l - i);
+
                         printf("%.*s: ", print_len, read_stream->seq.s + i);
 
                         for (size_t l = 0;  l < graphindices.at(i).size(); ++l) {
@@ -602,15 +601,24 @@ int main(int argc, const char *argv[]) {
                         }
                         std::cout << std::endl;
                     } else {
-                        std::vector<uint64_t> graphindices = graph->align(
-                            std::string(read_stream->seq.s, read_stream->seq.l)
-                        );
 
-                        for (size_t i = 0; i < graphindices.size(); ++i) {
-                            for (uint64_t j = 0; j < graph->get_k(); ++j) {
-                                std::cout << read_stream->seq.s[i+j];
+                        auto graphindices = graph->align(read_stream->seq.s);
+
+                        if (config->query) {
+                            size_t num_discovered = std::count_if(
+                                graphindices.begin(), graphindices.end(),
+                                [](const auto &x) { return x > 0; }
+                            );
+                            std::cout << num_discovered
+                                      << " / "
+                                      << read_stream->seq.l << std::endl;
+                        } else {
+                            for (size_t i = 0; i < graphindices.size(); ++i) {
+                                for (uint64_t j = 0; j < graph->get_k(); ++j) {
+                                    std::cout << read_stream->seq.s[i + j];
+                                }
+                                std::cout << ": " << graphindices[i] << std::endl;
                             }
-                            std::cout << ": " << graphindices[i] << std::endl;
                         }
                     }
                 }

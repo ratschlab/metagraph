@@ -45,6 +45,8 @@ Config::Config(int argc, const char *argv[]) {
             print_graph = true;
         } else if (!strcmp(argv[i], "--print")) {
             print_graph_succ = true;
+        } else if (!strcmp(argv[i], "--query")) {
+            query = true;
         } else if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--reverse")) {
             reverse = true;
         } else if (!strcmp(argv[i], "--fast")) {
@@ -99,8 +101,22 @@ Config::Config(int argc, const char *argv[]) {
         }
     }
 
-    // if no input files are passed, provide help screen for chosen identity
-    if (!fname.size()) {
+    bool print_usage_and_exit = false;
+
+    if (!fname.size())
+        print_usage_and_exit = true;
+
+    if (identity == ALIGN && infbase.empty())
+        print_usage_and_exit = true;
+
+    if (identity == CLASSIFY && infbase.empty())
+        print_usage_and_exit = true;
+
+    if (identity == ANNOTATE && infbase.empty())
+        print_usage_and_exit = true;
+
+    // if misused, provide help screen for chosen identity and exit
+    if (print_usage_and_exit) {
         print_usage(argv[0], identity);
         exit(-1);
     }
@@ -155,9 +171,10 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-s --num-splits \tDefine the minimum number of bins to split kmers into [1]\n");
         } break;
         case ALIGN: {
-            fprintf(stderr, "Usage: %s align [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s align -i <graph_basename> [options] <FASTQ1> [[FASTQ2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for align:\n");
+            fprintf(stderr, "\t   --query \tPrint the number of k-mers discovered [off]\n");
             fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
         } break;
         case COMPARE: {
@@ -188,19 +205,20 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --print-state \tprint graph to the screen horizontally [off]\n");
         } break;
         case ANNOTATE: {
-            fprintf(stderr, "Usage: %s annotate [options] PATH1 [[PATH2] ...]\n\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s annotate -i <graph_basename> [options] <PATH1> [[PATH2] ...]\n"
+                            "\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
             //fprintf(stderr, "\t   --db-path \tpath that is used to store the annotations database []\n");
-            fprintf(stderr, "\t-i --infile-base [STR] \tbasename for loading graph to be annotated\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [1]\n");
             fprintf(stderr, "\t-f --frequency [INT] \t\twhen a, annotate only every a-th kmer [1]\n");
         } break;
         case CLASSIFY: {
-            fprintf(stderr, "Usage: %s classify [options] FILE1 [[FILE2] ...]\n\tEach read file is given in fasta or fastq format.\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s classify -i <graph_basename> [options] <FILE1> [[FILE2] ...]\n"
+                            "\tEach read file is given in fasta or fastq format.\n\n", prog_name.c_str());
 
-            fprintf(stderr, "\t-i --infile-base [STR] \tbasename for graph with annotation used for classifying\n");
+            fprintf(stderr, "Available options for classify:\n");
             fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
         } break;
         case TRANSFORM: {
