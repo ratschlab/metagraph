@@ -109,31 +109,9 @@ void recover_source_dummy_nodes(size_t k, std::vector<KMer> *kmers) {
 }
 
 
-KMerDBGSuccConstructor::KMerDBGSuccConstructor(size_t k, size_t num_threads)
-      : k_(k), num_threads_(num_threads) {}
-
-void KMerDBGSuccConstructor::add_read(const std::string &read) {
-    sequence_to_kmers(read, k_, &kmers_);
-}
-
-void KMerDBGSuccConstructor::add_reads(const std::vector<std::string> &reads) {
-    // break the sequences down into kmers
-    for (const auto &sequence : reads) {
-        add_read(sequence);
-    }
-}
-
 void KMerDBGSuccConstructor::build_graph(DBG_succ *graph) {
-    assert(k_ == graph->get_k());
-
-    omp_set_num_threads(std::max(static_cast<int>(num_threads_), 1));
-
-    sort_and_remove_duplicates(&kmers_);
-
-    recover_source_dummy_nodes(k_, &kmers_);
-
     // build the graph chunk from kmers
-    auto chunk = DBG_succ::VectorChunk::build_from_kmers(k_, &kmers_);
+    auto chunk = constructor_.build_chunk();
     // initialize graph from the chunk built
     chunk->initialize_graph(graph);
     delete chunk;
