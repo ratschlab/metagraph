@@ -4,6 +4,7 @@
 
 #include "kmer.hpp"
 #include "dbg_succinct_chunk.hpp"
+#include "utils.hpp"
 
 
 /**

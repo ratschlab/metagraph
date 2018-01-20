@@ -63,6 +63,7 @@ namespace utils {
                                              size_t length);
 
     void radix_sort(std::vector<KMer> &data, size_t k);
+    void bucket_sort(std::vector<KMer> &data, size_t k);
 
 } // namespace utils
 

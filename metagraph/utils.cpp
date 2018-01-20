@@ -169,31 +169,101 @@ std::deque<std::string> generate_strings(const std::string &alphabet,
 
 
 template <size_t bits_per_digit>
-void radix_sort(std::vector<KMer> &data, size_t num_digits) {
+void counting_sort(KMer *begin, KMer *end) {
+    assert(end >= begin);
+
     const uint64_t max_digit = 1llu << bits_per_digit;
 
-    std::vector<KMer> unsorted(data.size());
-    std::array<size_t, max_digit> count;
+    std::array<size_t, max_digit> count {};
+    for (const KMer *it = begin; it != end; ++it) {
+        count[it->get_digit<bits_per_digit>(0)]++;
+    }
 
-    for (size_t digit = 0; digit < num_digits; ++digit) {
+    std::vector<KMer> unsorted(begin, end);
+    std::partial_sum(count.begin(), count.end(), count.begin());
 
-        count.fill(0);
-        for (const auto &kmer : data) {
-            count[kmer.get_digit<bits_per_digit>(digit)]++;
+    for (auto it = unsorted.rbegin(); it != unsorted.rend(); ++it) {
+        begin[--count[it->get_digit<bits_per_digit>(0)]] = *it;
+    }
+}
+
+
+template <size_t bits_per_digit>
+void radix_sort(KMer *begin, KMer *end, size_t num_digits) {
+    const uint64_t max_digit = 1llu << bits_per_digit;
+
+    std::vector<std::array<size_t, max_digit>> counts(
+        num_digits,
+        std::array<size_t, max_digit>{}
+    );
+    for (const KMer *it = begin; it != end; ++it) {
+        for (size_t digit = 0; digit < num_digits; ++digit) {
+            counts[digit][it->get_digit<bits_per_digit>(digit)]++;
         }
+    }
 
+    std::vector<KMer> unsorted(begin, end);
+    for (size_t digit = 0; digit < num_digits; ++digit) {
+        auto &count = counts[digit];
         std::partial_sum(count.begin(), count.end(), count.begin());
 
-        unsorted.swap(data);
         for (auto it = unsorted.rbegin(); it != unsorted.rend(); ++it) {
-            data[--count[it->get_digit<bits_per_digit>(digit)]] = *it;
+            begin[--count[it->get_digit<bits_per_digit>(digit)]] = *it;
         }
     }
 }
 
 void radix_sort(std::vector<KMer> &data, size_t k) {
-    radix_sort<kBitsPerDigit>(data,
+    radix_sort<kBitsPerDigit>(data.data(), data.data() + data.size(),
                               ((k + 1) * kBitsPerChar - 1) / kBitsPerDigit + 1);
+}
+
+
+template <size_t bits_per_digit>
+void bucket_sort(KMer *begin, KMer *end, size_t num_digits) {
+    const uint64_t num_buckets = 1llu << bits_per_digit;
+
+    std::array<size_t, num_buckets> count {};
+
+    for (const KMer *it = begin; it != end; ++it) {
+        count[it->get_digit<bits_per_digit>(num_digits - 1)]++;
+    }
+    std::partial_sum(count.begin(), count.end(), count.begin());
+    std::array<size_t, num_buckets + 1> bucket_bins {};
+    std::copy(count.begin(), count.end(), bucket_bins.begin() + 1);
+
+    for (size_t i = 0; begin + i < end; ++i) {
+        size_t bucket = begin[i].get_digit<bits_per_digit>(num_digits - 1);
+        while (i < bucket_bins[bucket] || i >= bucket_bins[bucket + 1]) {
+            std::swap(begin[i], begin[--count[bucket]]);
+            bucket = begin[i].get_digit<bits_per_digit>(num_digits - 1);
+        }
+    }
+    if (num_digits == 1)
+        return;
+
+    for (size_t b = 0; b < num_buckets; ++b) {
+        const size_t num_bits_for_counting = 20;
+        if (bucket_bins[b + 1] - bucket_bins[b] < 100'000) {
+            std::sort(begin + bucket_bins[b],
+                      begin + bucket_bins[b + 1]);
+        } else if ((num_digits - 1) * bits_per_digit <= num_bits_for_counting
+                    && bucket_bins[b + 1] - bucket_bins[b] < 800'000) {
+            counting_sort<num_bits_for_counting>(begin + bucket_bins[b],
+                                                 begin + bucket_bins[b + 1]);
+        } else {
+            bucket_sort<bits_per_digit>(begin + bucket_bins[b],
+                                        begin + bucket_bins[b + 1],
+                                        num_digits - 1);
+        }
+    }
+}
+
+void bucket_sort(std::vector<KMer> &data, size_t k) {
+    const size_t bits_per_digit = 4;
+    bucket_sort<bits_per_digit>(data.data(),
+                                data.data() + data.size(),
+                                ((k + 1) * kBitsPerChar - 1) / bits_per_digit + 1);
 }
 
 
