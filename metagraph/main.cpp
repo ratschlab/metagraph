@@ -85,6 +85,8 @@ DBG_succ* load_critical_graph_from_file(const std::string &filename) {
 
 int main(int argc, const char *argv[]) {
 
+    Timer timer;
+
     // parse command line arguments and options
     std::unique_ptr<Config> config(new Config(argc, argv));
 
@@ -117,13 +119,14 @@ int main(int argc, const char *argv[]) {
                     suffix_len
                 );
 
-                clock_t tstart, timelast;
-
                 DBG_succ::VectorChunk graph_data;
 
                 //one pass per suffix
                 for (const std::string &suffix : suffices) {
-                    std::cout << "Suffix: " << suffix << std::endl;
+                    if (suffix.size())
+                        std::cout << "Suffix: " << suffix << std::endl;
+
+                    std::cout << "Start reading data and extracting k-mers..." << std::endl;
 
                     //add sink nodes
                     // graph->add_sink(config->parallel, suffix);
@@ -146,8 +149,9 @@ int main(int argc, const char *argv[]) {
                             //READ FROM VCF
                             uint64_t nbp = 0;
                             uint64_t nbplast = 0;
-                            tstart = clock();
-                            timelast = clock();
+
+                            Timer data_reading_timer;
+
                             vcf_parser vcf;
                             if (!vcf.init(config->refpath, files[f], graph->get_k())) {
                                 std::cerr << "ERROR reading VCF " << files[f] << std::endl;
@@ -162,16 +166,16 @@ int main(int argc, const char *argv[]) {
                                     std::cout << "." << std::flush;
                                     if (i % 100'000 == 0) {
                                         fprintf(stdout,
-                                            "%zu - bp %" PRIu64 " / runtime %lu / BPph %" PRIu64 "\n",
+                                            "%zu - bp %" PRIu64 " / runtime %f sec / BPph %" PRIu64 "\n",
                                             i,
                                             nbp,
-                                            (clock() - tstart) / CLOCKS_PER_SEC,
-                                            uint64_t(60) * uint64_t(60)
-                                                * CLOCKS_PER_SEC * (nbp - nbplast)
-                                                / (clock() - timelast)
+                                            timer.elapsed(),
+                                            static_cast<uint64_t>(60 * 60
+                                                * (nbp - nbplast)
+                                                / data_reading_timer.elapsed())
                                         );
                                         nbplast = nbp;
-                                        timelast = clock();
+                                        data_reading_timer.reset();
                                     }
                                 }
                                 annotation = "VCF:" + annotation;
@@ -214,24 +218,24 @@ int main(int argc, const char *argv[]) {
                         //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
                     }
                     get_RAM();
-                    //append to succinct representation and clear kmer list
-                    tstart = clock();
+                    std::cout << "Reading data finished\t" << timer.elapsed() << "sec" << std::endl;
 
                     std::cout << "Sorting kmers and appending succinct"
                               << " representation from current bin...\t" << std::flush;
+                    timer.reset();
                     auto next_block = constructor->build_chunk();
                     graph_data.extend(*next_block);
                     delete next_block;
 
-                    std::cout << (clock() - tstart) / CLOCKS_PER_SEC << "sec\n" << std::endl;
+                    std::cout << timer.elapsed() << "sec" << std::endl;
                 }
                 graph_data.initialize_graph(graph);
 
                 if (config->state == Config::DYN) {
                     std::cerr << "Converting static graph to dynamic...\t" << std::flush;
-                    tstart = clock();
+                    timer.reset();
                     graph->switch_state(Config::DYN);
-                    std::cout << (clock() - tstart) / CLOCKS_PER_SEC << "sec" << std::endl;
+                    std::cout << timer.elapsed() << "sec" << std::endl;
                 }
             } else {
                 //slower method

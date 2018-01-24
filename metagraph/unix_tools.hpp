@@ -7,6 +7,7 @@
  */
 
 #include <stdio.h>
+#include <chrono>
 
 
 /** This returns the currently used memory by the process.
@@ -49,6 +50,25 @@ void get_RAM() {
     }
     fclose(sfile);
 }
+
+
+class Timer {
+  public:
+    Timer() { reset(); }
+
+    void reset() {
+        time_point_ = clock_::now();
+    }
+
+    double elapsed() const {
+        return std::chrono::duration<double>(clock_::now() - time_point_).count();
+    }
+
+  private:
+    typedef std::chrono::high_resolution_clock clock_;
+
+    std::chrono::time_point<clock_> time_point_;
+};
 
 
 #endif // __UNIX_TOOLS_HPP__

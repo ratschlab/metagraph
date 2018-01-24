@@ -130,8 +130,6 @@ KMerDBGSuccChunkConstructor::KMerDBGSuccChunkConstructor(
 
 void KMerDBGSuccChunkConstructor::add_read(const std::string &sequence) {
     // add all k-mers of seq to the graph
-    // TODO: This reserve makes the program super slow... why?..
-    // kmers.reserve(kmers.size() + read_stream->seq.l);
     sequence_to_kmers(sequence, k_, &kmers_, filter_suffix_encoded_);
 }
 
