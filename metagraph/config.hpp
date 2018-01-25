@@ -11,7 +11,6 @@ class Config {
 
     bool verbose = false;
     bool quiet = false;
-    bool print_graph = false;
     bool print_graph_succ = false;
     bool reverse = false;
     bool fast = false;

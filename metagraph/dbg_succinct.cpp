@@ -291,7 +291,7 @@ uint64_t DBG_succ::select_last(uint64_t i) const {
     // deal with  border conditions
     if (i <= 0)
         return 0;
-    // for some reason the libmaus2 select is 0 based ...
+
     return std::min(last->select1(i), last->size());
 }
 
@@ -946,68 +946,6 @@ void DBG_succ::print_state(std::ostream &os) const {
     }
 }
 
-/*
- * Returns the sequence stored in W and prints the node
- * information in an overview.
- * Useful for debugging purposes.
- */
-void DBG_succ::print_seq() const {
-
-    const uint64_t linelen = 80;
-
-    for (uint64_t start = 1; start < W->size(); start += linelen) {
-        uint64_t end = start + linelen < W->size() ? start + linelen : W->size();
-
-        for (uint64_t i = start; i < end; i++) {
-            if (i % 10 == 0)
-                fprintf(stdout, "%d", static_cast<int>((i / 10) % 10));
-            else
-                fprintf(stdout, " ");
-        }
-        fprintf(stdout, "\n");
-
-        for (uint64_t i = start; i < end; i++) {
-            if (get_W(i) >= alph_size)
-                fprintf(stdout, "|");
-            else
-                fprintf(stdout, " ");
-        }
-        fprintf(stdout, "\n");
-
-        for (uint64_t i = start; i < end; i++) {
-            fprintf(stdout, "%c", decode(get_W(i)));
-        }
-        fprintf(stdout, "\n\n");
-
-        std::vector<std::string> nodes;
-        for (uint64_t i = start; i < end; i++) {
-            nodes.push_back(get_node_str(i));
-        }
-        for (size_t l = 0; l < k_; l++) {
-            for (uint64_t i = start; i < end; i++) {
-                fprintf(stdout, "%c", nodes[i - start][k_ - l - 1]);
-            }
-            fprintf(stdout, "\n");
-        }
-        fprintf(stdout, "\n");
-
-        for (uint64_t i = start; i < end; i++) {
-            fprintf(stdout, "%d", get_last(i));
-        }
-        fprintf(stdout, "\n\n");
-
-        for (uint64_t i = start; i < end; ++i) {
-            fprintf(stdout, "%d", static_cast<int>(outdegree(i)));
-        }
-        fprintf(stdout, "\n");
-
-        for (uint64_t i = start; i < end; ++i) {
-            fprintf(stdout, "%d", static_cast<int>(indegree(i)));
-        }
-        fprintf(stdout, "\n\n");
-    }
-}
-
 void DBG_succ::print_adj_list(std::ostream &os) const {
     for (uint64_t edge = 1; edge < W->size(); ++edge) {
         os << 1 + rank_last(fwd(edge) - 1)
@@ -1186,6 +1124,7 @@ struct BranchInfoMerge {
 * The edges of Gm are fully traversed and nodes are added to Gt if not existing yet.
 * This function is well suited to merge small graphs into large ones.
 */
+//TODO: make this function work with disconnected graphs.
 void DBG_succ::merge(const DBG_succ &Gm) {
     // FYI: can be improved to handle different k_mer sizes
     assert(k_ == Gm.get_k());
@@ -1272,4 +1211,9 @@ bool DBG_succ::is_valid() const {
             return false;
     }
     return true;
+}
+
+std::ostream& operator<<(std::ostream &os, const DBG_succ &graph) {
+    graph.print_state(os);
+    return os;
 }

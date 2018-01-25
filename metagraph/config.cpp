@@ -41,8 +41,6 @@ Config::Config(int argc, const char *argv[]) {
             verbose = true;
         } else if (!strcmp(argv[i], "-q") || !strcmp(argv[i], "--quiet")) {
             quiet = true;
-        } else if (!strcmp(argv[i], "--print-state")) {
-            print_graph = true;
         } else if (!strcmp(argv[i], "--print")) {
             print_graph_succ = true;
         } else if (!strcmp(argv[i], "--query")) {

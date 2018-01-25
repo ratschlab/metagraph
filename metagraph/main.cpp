@@ -286,7 +286,7 @@ int main(int argc, const char *argv[]) {
             graph->switch_state(config->state);
             config->infbase = config->outfbase;
             // graph->annotationToFile(config->infbase + ".anno.dbg");
-            //graph->print_seq();
+            //graph->print_state();
             break;
         }
         case Config::ANNOTATE: {
@@ -491,6 +491,8 @@ int main(int argc, const char *argv[]) {
                     std::cerr << "ERROR when building chunk " << config->part_idx << std::endl;
                     exit(1);
                 }
+                std::cout << "Blocks merged\t" << timer.elapsed() << "sec" << std::endl;
+
                 if (config->parts_total > 1) {
                     chunk->serialize(config->outfbase
                                       + "." + std::to_string(config->part_idx)
@@ -498,10 +500,9 @@ int main(int argc, const char *argv[]) {
                 } else {
                     graph = new DBG_succ(graphs[0]->get_k());
                     chunk->initialize_graph(graph);
+                    std::cout << "Graphs merged\t" << timer.elapsed() << "sec" << std::endl;
                 }
                 delete chunk;
-
-                std::cout << "Blocks merged\t" << timer.elapsed() << "sec" << std::endl;
             } else {
                 std::cout << "Start merging graphs" << std::endl;
                 timer.reset();
@@ -539,8 +540,6 @@ int main(int argc, const char *argv[]) {
                               << graph_->num_edges() << "\t"
                               << graph_->get_k() << std::endl;
                 }
-                if (config->print_graph)
-                    graph_->print_seq();
                 if (config->print_graph_succ)
                     graph_->print_state();
 
@@ -686,8 +685,6 @@ int main(int argc, const char *argv[]) {
     // output and cleanup
     if (graph) {
         // graph output
-        if (config->print_graph)
-            graph->print_seq();
         if (config->print_graph_succ)
             graph->print_state();
         if (!config->sqlfbase.empty())

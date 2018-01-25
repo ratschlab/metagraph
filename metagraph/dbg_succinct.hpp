@@ -130,13 +130,6 @@ class DBG_succ : public SequenceGraph {
     void print_state(std::ostream &os = std::cout) const;
 
     /**
-     * Returns the sequence stored in W and prints the node
-     * information in an overview.
-     * Useful for debugging purposes.
-     */
-    void print_seq() const;
-
-    /**
      * Write the adjacency list to file |filename| or
      * print it to stdout of the filename is not provided.
      */
@@ -428,10 +421,6 @@ class DBG_succ : public SequenceGraph {
     class VectorChunk;
 };
 
-inline std::ostream& operator<<(std::ostream &os,
-                                const DBG_succ &graph) {
-    graph.print_state(os);
-    return os;
-}
+std::ostream& operator<<(std::ostream &os, const DBG_succ &graph);
 
 #endif // __DBG_SUCCINCT_HPP__
