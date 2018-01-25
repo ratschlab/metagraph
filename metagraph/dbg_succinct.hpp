@@ -241,12 +241,6 @@ class DBG_succ : public SequenceGraph {
 
     Config::StateType state = Config::DYN;
 
-#ifdef DBGDEBUG
-    bool verbose = true;
-#else
-    bool verbose = false;
-#endif
-
   private:
     // k-mer size
     size_t k_;
@@ -415,13 +409,16 @@ class DBG_succ : public SequenceGraph {
 
     void verbose_cout() const {}
 
+#ifdef DBGDEBUG
     template <typename T, typename... Targs>
     void verbose_cout(const T &arg, Targs ...rest) const {
-        if (verbose) {
-            std::cout << arg;
-            verbose_cout(rest...);
-        }
+        std::cout << arg;
+        verbose_cout(rest...);
     }
+#else
+    template <typename T, typename... Targs>
+    void verbose_cout(const T&, Targs...) const {}
+#endif
 
     bool is_valid() const;
 

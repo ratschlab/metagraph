@@ -47,6 +47,8 @@ Config::Config(int argc, const char *argv[]) {
             print_graph_succ = true;
         } else if (!strcmp(argv[i], "--query")) {
             query = true;
+        } else if (!strcmp(argv[i], "--traversal")) {
+            traversal_merge = true;
         } else if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--reverse")) {
             reverse = true;
         } else if (!strcmp(argv[i], "--fast")) {
@@ -60,7 +62,7 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "--part-idx")) {
             part_idx = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-b") || !strcmp(argv[i], "--bins-per-thread")) {
-            bins_per_thread = atoi(argv[++i]);
+            num_bins_per_thread = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-k") || !strcmp(argv[i], "--kmer-length")) {
             k = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--align-length")) {
@@ -115,6 +117,9 @@ Config::Config(int argc, const char *argv[]) {
         print_usage_and_exit = true;
 
     if (identity == ANNOTATE && infbase.empty())
+        print_usage_and_exit = true;
+
+    if (identity == MERGE && fname.size() < 2)
         print_usage_and_exit = true;
 
     // if misused, provide help screen for chosen identity and exit
@@ -187,14 +192,15 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-i --infile-base [STR] \tbasename for loading graph input file\n");
         } break;
         case MERGE: {
-            fprintf(stderr, "Usage: %s merge [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s merge [options] GRAPH1 GRAPH2 [[GRAPH3] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for merge:\n");
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [1]\n");
-            fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
-            fprintf(stderr, "\t   --print-state \tprint graph to the screen horizontally [off]\n");
+            fprintf(stderr, "\t   --traversal \t\t\tmerge by traversing [off]\n");
+            fprintf(stderr, "\t   --print \t\t\tprint graph table to the screen [off]\n");
+            fprintf(stderr, "\t   --print-state \t\tprint graph to the screen horizontally [off]\n");
             fprintf(stderr, "\t   --part-idx [INT] \t\tidx to use when doing external merge []\n");
             fprintf(stderr, "\t   --parts-total [INT] \t\ttotal number of parts in external merge[]\n");
             fprintf(stderr, "\t-c --collect [INT] \t\tinitiate collection of external merge, provide total number of splits [1]\n");

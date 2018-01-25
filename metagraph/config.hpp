@@ -18,11 +18,12 @@ class Config {
     bool add_anno = false;
     bool to_adj_list = false;
     bool query = false;
+    bool traversal_merge = false;
 
     unsigned int k = 3;
     unsigned int distance = 0;
     unsigned int parallel = 1;
-    unsigned int bins_per_thread = 1;
+    unsigned int num_bins_per_thread = 1;
     unsigned int parts_total = 1;
     unsigned int part_idx = 0;
     unsigned int collect = 1;

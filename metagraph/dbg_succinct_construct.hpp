@@ -21,12 +21,13 @@ class DBGSuccConstructor {
 };
 
 
-//TODO: implement
 class SuffixArrayDBGSuccConstructor : public DBGSuccConstructor {
   public:
     explicit SuffixArrayDBGSuccConstructor(size_t k);
 
-    void construct_graph(DBG_succ *graph);
+    void add_read(const std::string &read);
+
+    void build_graph(DBG_succ *graph);
 
     size_t get_k() const { return k_; }
 

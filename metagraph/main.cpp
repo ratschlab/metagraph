@@ -72,8 +72,14 @@ const std::vector<std::string> annots = {
 
 
 DBG_succ* load_critical_graph_from_file(const std::string &filename) {
+    std::string filetype = ".dbg";
+    std::string filebase =
+        std::equal(filetype.rbegin(), filetype.rend(), filename.rbegin())
+        ? filename.substr(0, filename.size() - filetype.size())
+        : filename;
+
     DBG_succ *graph = new DBG_succ();
-    if (!graph->load(filename)) {
+    if (!graph->load(filebase)) {
         std::cerr << "ERROR: input file "
                   << filename << " corrupted" << std::endl;
         delete graph;
@@ -321,7 +327,7 @@ int main(int argc, const char *argv[]) {
            //              anno_data->graph = graph;
            //              anno_data->config = config;
            //              anno_data->idx = 0;
-           //              anno_data->binsize = (read_stream->seq.l + 1) / (config->parallel * config->bins_per_thread);
+           //              anno_data->binsize = (read_stream->seq.l + 1) / (config->parallel * config->num_bins_per_thread);
            //              anno_data->total_bins = ((read_stream->seq.l + anno_data->binsize - 1) / anno_data->binsize);
 
            //              // create threads
@@ -443,42 +449,73 @@ int main(int argc, const char *argv[]) {
                     std::vector<DBG_succ::Chunk*>(config->collect, NULL),
                     config->outfbase
                 );
-            } else {
-                // run normal merge procedure
-                // some preliminaries to make command line options consistent
-                // if ((config->parts_total > 1) && (config->parts_total > (config->parallel * config->bins_per_thread)))
-                //    config->bins_per_thread = config->parts_total / config->parallel;
-
-                std::vector<const DBG_succ*> graphs;
-                for (const auto &file : files) {
-                    std::cout << "Opening file " << file << std::endl;
-                    graphs.push_back(load_critical_graph_from_file(file));
-                }
-                if (config->parallel > 1 || config->parts_total > 1) {
-                    auto *chunk = merge::merge_blocks_to_chunk(graphs, config->part_idx,
-                                                                       config->parts_total,
-                                                                       config->parallel,
-                                                                       config->bins_per_thread);
-                    if (!chunk) {
-                        std::cerr << "ERROR when building chunk " << config->part_idx << std::endl;
-                        exit(1);
-                    }
-                    if (config->parts_total > 1) {
-                        chunk->serialize(config->outfbase
-                                          + "." + std::to_string(config->part_idx)
-                                          + "_" + std::to_string(config->parts_total));
-                    } else {
-                        chunk->initialize_graph(graph);
-                    }
-                    delete chunk;
-                } else {
-                    graph = merge::merge(graphs);
-                }
-                for (auto *graph_ : graphs) {
-                    delete graph_;
-                }
-                std::cerr << "... done merging." << std::endl;
+                break;
             }
+
+            timer.reset();
+            std::vector<const DBG_succ*> graphs;
+            for (const auto &file : files) {
+                std::cout << "Opening file " << file << std::endl;
+                graphs.push_back(load_critical_graph_from_file(file));
+                if (config->verbose) {
+                    std::cout << "nodes: " << graphs.back()->num_nodes() << std::endl;
+                    std::cout << "edges: " << graphs.back()->num_edges() << std::endl;
+                    std::cout << "k: " << graphs.back()->get_k() << std::endl;
+                }
+            }
+            std::cout << "Graphs are loaded\t" << timer.elapsed() << "sec" << std::endl;
+
+            if (config->traversal_merge) {
+                std::cout << "Start merging traversal" << std::endl;
+                timer.reset();
+
+                graph = const_cast<DBG_succ*>(graphs.at(0));
+                graphs.erase(graphs.begin());
+
+                for (size_t i = 0; i < graphs.size(); ++i) {
+                    graph->merge(*graphs[i]);
+                    std::cout << "traversal " << files[i + 1] << " done\t"
+                              << timer.elapsed() << "sec" << std::endl;
+                }
+                std::cout << "Graphs merged\t" << timer.elapsed() << "sec" << std::endl;
+            } else if (config->parallel > 1 || config->parts_total > 1) {
+                std::cout << "Start merging blocks" << std::endl;
+                timer.reset();
+
+                auto *chunk = merge::merge_blocks_to_chunk(graphs, config->part_idx,
+                                                                   config->parts_total,
+                                                                   config->parallel,
+                                                                   config->num_bins_per_thread,
+                                                                   config->verbose);
+                if (!chunk) {
+                    std::cerr << "ERROR when building chunk " << config->part_idx << std::endl;
+                    exit(1);
+                }
+                if (config->parts_total > 1) {
+                    chunk->serialize(config->outfbase
+                                      + "." + std::to_string(config->part_idx)
+                                      + "_" + std::to_string(config->parts_total));
+                } else {
+                    graph = new DBG_succ(graphs[0]->get_k());
+                    chunk->initialize_graph(graph);
+                }
+                delete chunk;
+
+                std::cout << "Blocks merged\t" << timer.elapsed() << "sec" << std::endl;
+            } else {
+                std::cout << "Start merging graphs" << std::endl;
+                timer.reset();
+
+                graph = merge::merge(graphs, config->verbose);
+
+                std::cout << "Graphs merged\t" << timer.elapsed() << "sec" << std::endl;
+            }
+
+            for (auto *graph_ : graphs) {
+                delete graph_;
+            }
+
+            std::cerr << "... done merging." << std::endl;
             break;
         }
         case Config::STATS: {

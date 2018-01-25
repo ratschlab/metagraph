@@ -15,3 +15,4 @@ database-cli
 *._*
 build
 .*.swp
+.ipynb_checkpoints

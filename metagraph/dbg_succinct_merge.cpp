@@ -13,12 +13,12 @@ namespace merge {
  * a number of bins basen on the total number of nodes in graph.
  * [v[0], v[1]), [v[1], v[2]), ...
  */
-std::vector<uint64_t> get_bins(const DBG_succ &G, uint64_t num_bins) {
+std::vector<uint64_t> get_bins(const DBG_succ &G, uint64_t num_bins, bool verbose) {
     assert(num_bins > 0);
 
     uint64_t num_nodes = G.rank_last(G.get_W().size() - 1);
 
-    if (G.verbose && num_bins > num_nodes) {
+    if (verbose && num_bins > num_nodes) {
         std::cerr << "WARNING: There are max "
                   << num_nodes << " slots available for binning. Your current choice is "
                   << num_bins << " which will create "
@@ -126,7 +126,8 @@ struct ParallelMergeContext {
 void merge_blocks(const std::vector<const DBG_succ*> &Gv,
                   std::vector<uint64_t> kv,
                   const std::vector<uint64_t> &nv,
-                  DBG_succ::Chunk *chunk);
+                  DBG_succ::Chunk *chunk,
+                  bool verbose);
 
 /**
  * Distribute the merging of a set of graph structures over
@@ -135,7 +136,8 @@ void merge_blocks(const std::vector<const DBG_succ*> &Gv,
 void parallel_merge_wrapper(const std::vector<const DBG_succ*> &graphs,
                             const std::vector<std::vector<uint64_t>> &bins,
                             ParallelMergeContext *context,
-                            std::vector<DBG_succ::Chunk*> *chunks) {
+                            std::vector<DBG_succ::Chunk*> *chunks,
+                            bool verbose) {
     assert(context);
     assert(graphs.size() > 0);
     assert(graphs.size() == bins.size());
@@ -159,7 +161,7 @@ void parallel_merge_wrapper(const std::vector<const DBG_succ*> &graphs,
             kv.push_back(bins.at(i).at(curr_idx));
             nv.push_back(bins.at(i).at(curr_idx + 1));
         }
-        merge_blocks(graphs, kv, nv, chunks->at(curr_idx));
+        merge_blocks(graphs, kv, nv, chunks->at(curr_idx), verbose);
     }
 }
 
@@ -168,13 +170,14 @@ DBG_succ::Chunk* merge_blocks_to_chunk(const std::vector<const DBG_succ*> &graph
                                        size_t chunk_idx,
                                        size_t num_chunks,
                                        size_t num_threads,
-                                       size_t num_bins_per_thread) {
+                                       size_t num_bins_per_thread,
+                                       bool verbose) {
     assert(graphs.size() > 0);
     assert(num_chunks > 0);
     assert(chunk_idx < num_chunks);
 
     // get bins in graphs according to required threads
-    if (graphs.front()->verbose) {
+    if (verbose) {
         std::cout << "Collecting reference bins" << std::endl;
         std::cout << "parallel " << num_threads
                   << " per thread " << num_bins_per_thread
@@ -183,7 +186,8 @@ DBG_succ::Chunk* merge_blocks_to_chunk(const std::vector<const DBG_succ*> &graph
 
     auto ref_bins = subset_bins(
         get_bins(*graphs.front(),
-                 num_threads * num_bins_per_thread * num_chunks),
+                 num_threads * num_bins_per_thread * num_chunks,
+                 verbose),
         chunk_idx,
         num_chunks
     );
@@ -201,7 +205,7 @@ DBG_succ::Chunk* merge_blocks_to_chunk(const std::vector<const DBG_succ*> &graph
         border_kmers.back()[0] = DBG_succ::encode('$');
     }
 
-    if (graphs.front()->verbose)
+    if (verbose)
         std::cout << "Collecting relative bins" << std::endl;
 
     std::vector<std::vector<uint64_t>> bins;
@@ -210,7 +214,7 @@ DBG_succ::Chunk* merge_blocks_to_chunk(const std::vector<const DBG_succ*> &graph
     }
 
     // print bin stats
-    if (graphs.front()->verbose)
+    if (verbose)
         print_bin_stats(bins);
 
     // create threads and start the jobs
@@ -226,13 +230,14 @@ DBG_succ::Chunk* merge_blocks_to_chunk(const std::vector<const DBG_succ*> &graph
         threads.emplace_back(parallel_merge_wrapper, graphs,
                                                      bins,
                                                      &context,
-                                                     &blocks);
-        if (graphs.front()->verbose)
+                                                     &blocks,
+                                                     verbose);
+        if (verbose)
             std::cout << "starting thread " << tid << std::endl;
     }
 
     // join threads
-    if (graphs.front()->verbose)
+    if (verbose)
         std::cout << "Waiting for threads to join" << std::endl;
 
     for (size_t tid = 0; tid < threads.size(); tid++) {
@@ -240,7 +245,7 @@ DBG_succ::Chunk* merge_blocks_to_chunk(const std::vector<const DBG_succ*> &graph
     }
 
     // collect results
-    if (graphs.front()->verbose)
+    if (verbose)
         std::cout << "Collecting results" << std::endl;
 
     DBG_succ::Chunk *chunk = new DBG_succ::VectorChunk();
@@ -299,7 +304,8 @@ DBG_succ* merge_chunks(size_t k,
 }
 
 
-DBG_succ* merge(const std::vector<const DBG_succ*> &Gv) {
+DBG_succ* merge(const std::vector<const DBG_succ*> &Gv,
+                bool verbose) {
     std::vector<uint64_t> kv;
     std::vector<uint64_t> nv;
 
@@ -310,7 +316,7 @@ DBG_succ* merge(const std::vector<const DBG_succ*> &Gv) {
 
     DBG_succ::VectorChunk merged;
 
-    merge_blocks(Gv, kv, nv, &merged);
+    merge_blocks(Gv, kv, nv, &merged, verbose);
 
     DBG_succ *graph = new DBG_succ(Gv.at(0)->get_k());
     merged.initialize_graph(graph);
@@ -352,12 +358,11 @@ std::vector<std::deque<TAlphabet>> get_last_added_nodes(const std::vector<const 
 void merge_blocks(const std::vector<const DBG_succ*> &Gv,
                   std::vector<uint64_t> kv,
                   const std::vector<uint64_t> &nv,
-                  DBG_succ::Chunk *chunk) {
+                  DBG_succ::Chunk *chunk,
+                  bool verbose) {
 
     assert(kv.size() == Gv.size());
     assert(nv.size() == Gv.size());
-
-    auto verbose = Gv.at(0)->verbose;
 
     auto last_added_nodes = get_last_added_nodes(Gv, kv);
 

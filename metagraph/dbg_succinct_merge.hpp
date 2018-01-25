@@ -15,13 +15,15 @@ namespace merge {
      * Given a list of graph structures, this functions
      * integrates all of them into a new graph G.
      */
-    DBG_succ* merge(const std::vector<const DBG_succ*> &graphs);
+    DBG_succ* merge(const std::vector<const DBG_succ*> &graphs,
+                    bool verbose = false);
 
     DBG_succ::Chunk* merge_blocks_to_chunk(const std::vector<const DBG_succ*> &graphs,
                                            size_t chunk_idx,
                                            size_t num_chunks,
                                            size_t num_threads,
-                                           size_t num_bins_per_thread);
+                                           size_t num_bins_per_thread,
+                                           bool verbose = false);
 
     /**
      * Merge graph chunks from the vector passed and release the chunks afterwards.
