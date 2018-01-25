@@ -16,7 +16,7 @@ namespace merge {
 std::vector<uint64_t> get_bins(const DBG_succ &G, uint64_t num_bins, bool verbose) {
     assert(num_bins > 0);
 
-    uint64_t num_nodes = G.rank_last(G.get_W().size() - 1);
+    uint64_t num_nodes = G.num_nodes();
 
     if (verbose && num_bins > num_nodes) {
         std::cerr << "WARNING: There are max "

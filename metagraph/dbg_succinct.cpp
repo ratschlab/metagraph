@@ -275,10 +275,7 @@ uint64_t DBG_succ::succ_W(uint64_t i, TAlphabet c) const {
 uint64_t DBG_succ::rank_last(uint64_t i) const {
     assert(i < last->size());
 
-    // deal with  border conditions
-    if (i <= 0)
-        return 0;
-    return last->rank1(i);
+    return i == 0 ? 0 : last->rank1(i);
 }
 
 /**
@@ -286,13 +283,9 @@ uint64_t DBG_succ::rank_last(uint64_t i) const {
  * returns the position of the i-th set bit in last[1..i].
  */
 uint64_t DBG_succ::select_last(uint64_t i) const {
-    assert(i < last->size());
+    assert(i <= last->get_num_set_bits());
 
-    // deal with  border conditions
-    if (i <= 0)
-        return 0;
-
-    return std::min(last->select1(i), last->size());
+    return i == 0 ? 0 : last->select1(i);
 }
 
 /**
@@ -300,7 +293,7 @@ uint64_t DBG_succ::select_last(uint64_t i) const {
  * and a given position i the position of the last set bit in last[1..i].
  */
 uint64_t DBG_succ::pred_last(uint64_t i) const {
-    assert(i < W->size());
+    assert(i < last->size());
 
     return select_last(rank_last(i));
 }
@@ -834,7 +827,7 @@ std::vector<std::vector<HitInfo>> DBG_succ::align_fuzzy(const std::string &seque
  * Returns the number of nodes on the current graph.
  */
 uint64_t DBG_succ::num_nodes() const {
-    return rank_last(last->size() - 1);
+    return last->get_num_set_bits();
 }
 
 /**
@@ -1165,12 +1158,12 @@ void DBG_succ::merge(const DBG_succ &Gm) {
             if (!Gm_target_node)
                 continue;
 
-            uint64_t num_all_nodes_old = rank_last(last->size() - 1);
+            uint64_t num_all_nodes_old = last->get_num_set_bits();
 
             uint64_t Gt_target_node = append_pos(c, Gt_source_node);
             added_counter++;
 
-            if (rank_last(last->size() - 1) > num_all_nodes_old
+            if (last->get_num_set_bits() > num_all_nodes_old
                     && Gt_target_node <= Gt_source_node) {
                 Gt_source_node++;
             }
