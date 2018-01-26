@@ -389,12 +389,6 @@ class DBG_succ : public SequenceGraph {
     uint64_t outgoing_edge_idx(uint64_t i, TAlphabet c) const;
 
     /**
-     * Given index of node i, the function returns the
-     * first character of the node.
-     */
-    TAlphabet get_node_first_value(uint64_t i) const;
-
-    /**
      * This function gets a position i that reflects the i-th node and returns the
      * position in W that corresponds to the i-th node's last character.
      */

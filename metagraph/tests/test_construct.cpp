@@ -196,7 +196,7 @@ TEST(Construct, SmallGraphTraversal) {
             EXPECT_EQ(
                 graph->succ_last(i),
                 graph->incoming(graph->outgoing(i, graph->get_W(i)),
-                                graph->get_node_first_value(i))
+                                graph->get_minus_k_value(i, graph->get_k() - 1).first)
             );
             for (TAlphabet c = 0; c < DBG_succ::alph_size; ++c) {
                 uint64_t node_idx = graph->incoming(i, c);
