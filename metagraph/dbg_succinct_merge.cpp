@@ -377,13 +377,30 @@ void merge_blocks(const std::vector<const DBG_succ*> &Gv,
     // graph nodes at the respective positions with each other. Insert the lexicographically
     // smallest one into the common merge graph G (this).
 
+    auto compare_edges = [](const std::deque<TAlphabet> &first,
+                            const std::deque<TAlphabet> &second) {
+        return utils::colexicographically_greater(second, first);
+    };
+    std::map<std::deque<TAlphabet>,
+             std::vector<size_t>,
+             decltype(compare_edges)> min_kmers(compare_edges);
+
+    // find set of smallest pointers
+    for (size_t i = 0; i < Gv.size(); ++i) {
+        if (kv[i] < nv[i]) {
+            auto seq = Gv[i]->get_node_seq(kv[i]);
+            seq.push_front(Gv[i]->get_W(kv[i]) % DBG_succ::alph_size);
+            min_kmers[seq].push_back(i);
+        }
+    }
+
     // keep track of how many nodes we added
     uint64_t added = 0;
 
-    while (true) {
-        if (verbose && added > 0 && added % 1000 == 0) {
+    while (min_kmers.size()) {
+        if (verbose && added > 0 && added % 10'000 == 0) {
             std::cout << "." << std::flush;
-            if (added % 10'000 == 0) {
+            if (added % 100'000 == 0) {
                 std::cout << "added " << added;
                 for (size_t i = 0; i < Gv.size(); i++)
                     std::cout << " - G" << i << ": edge " << kv.at(i)
@@ -392,18 +409,14 @@ void merge_blocks(const std::vector<const DBG_succ*> &Gv,
             }
         }
 
-        // find set of smallest pointers
-        auto smallest = utils::smallest_nodes(Gv, kv, nv);
+        auto it = min_kmers.begin();
 
-        auto it = std::find(smallest.begin(), smallest.end(), true);
-        if (it == smallest.end())
-            break;
+        auto seq1 = std::move(it->first);
+        auto emptying_blocks = std::move(it->second);
+        min_kmers.erase(it);
 
-        size_t i = it - smallest.begin();
-
-        auto seq1 = Gv.at(i)->get_node_seq(kv.at(i));
-
-        TAlphabet val = Gv.at(i)->get_W(kv.at(i)) % DBG_succ::alph_size;
+        TAlphabet val = seq1.front();
+        seq1.pop_front();
 
         // check whether we already added a node whose outgoing edge points to the
         // same node as the current one
@@ -435,15 +448,14 @@ void merge_blocks(const std::vector<const DBG_succ*> &Gv,
         last_added_nodes[val] = seq1;
         ++added;
 
-        uint64_t updated = 0;
-        for (size_t i = 0; i < Gv.size(); i++) {
-            if (smallest.at(i)) {
-                updated++;
-                kv.at(i)++;
+        for (size_t i : emptying_blocks) {
+            kv[i]++;
+            if (kv[i] < nv[i]) {
+                auto seq = Gv[i]->get_node_seq(kv[i]);
+                seq.push_front(Gv[i]->get_W(kv[i]) % DBG_succ::alph_size);
+                min_kmers[seq].push_back(i);
             }
         }
-        if (updated == 0)
-            break;
     }
 }
 

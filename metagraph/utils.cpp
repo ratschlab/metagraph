@@ -61,66 +61,6 @@ std::pair<bool, bool> compare_nodes(const DBG_succ *G1, uint64_t k1_node,
 }
 
 
-std::vector<bool> smallest_nodes(const std::vector<const DBG_succ*> &G,
-                                 const std::vector<uint64_t> &k,
-                                 const std::vector<uint64_t> &n) {
-    std::vector<bool> ignore(G.size());
-    for (size_t i = 0; i < G.size(); i++) {
-        ignore[i] = (k[i] >= n[i]);
-    }
-    std::vector<TAlphabet> k_val(G.size());
-    std::vector<uint64_t> k_tmp = k;
-
-    for (uint64_t curr_k = 0; curr_k < G.at(0)->get_k(); ++curr_k) {
-        TAlphabet min = DBG_succ::alph_size;
-        for (size_t i = 0; i < G.size(); i++) {
-            if (!ignore[i]) {
-                auto ret = G[i]->get_minus_k_value(k_tmp[i], 0);
-                k_val[i] = ret.first;
-                k_tmp[i] = ret.second;
-                min = std::min(min, ret.first);
-            }
-        }
-
-        size_t cnt = 0;
-        for (size_t i = 0; i < G.size(); i++) {
-            if (ignore[i])
-                continue;
-
-            if (k_val[i] == min) {
-                cnt += 1;
-            } else {
-                ignore[i] = true;
-            }
-        }
-
-        if (cnt == 0)
-            return std::vector<bool>(G.size(), false);
-
-        if (cnt == 1)
-            break;
-    }
-
-    uint64_t min_edge = DBG_succ::alph_size;    
-    // get minimal outgoing edge
-    std::vector<TAlphabet> edge_label(G.size());
-    for (size_t i = 0; i < G.size(); i++) {
-        if (!ignore[i]) {
-            edge_label[i] = G[i]->get_W(k[i]) % DBG_succ::alph_size;
-            min_edge = std::min(min_edge, edge_label[i]);
-        }
-    }
-
-    std::vector<bool> smallest(G.size(), false);
-    for (size_t i = 0; i < G.size(); i++) {
-        if (!ignore[i] && edge_label[i] == min_edge) {
-            smallest[i] = true;
-        }
-    }
-    return smallest;
-}
-
-
 /**
  *  Returns the input file type, given a filename
  */
