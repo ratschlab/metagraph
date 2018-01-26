@@ -215,7 +215,7 @@ bool DBG_succ::load(const std::string &infbase) {
 
 //
 //
-// QUERY FUNCTIONS
+// HELPER QUERY FUNCTIONS
 //
 //
 
@@ -227,10 +227,7 @@ bool DBG_succ::load(const std::string &infbase) {
 uint64_t DBG_succ::rank_W(uint64_t i, TAlphabet c) const {
     assert(i < W->size());
 
-    // deal with  border conditions
-    if (i <= 0)
-        return 0;
-    return W->rank(c, std::min(i, W->size() - 1)) - (c == 0);
+    return i == 0 ? 0 : W->rank(c, i) - (c == 0);
 }
 
 /**
@@ -238,14 +235,9 @@ uint64_t DBG_succ::rank_W(uint64_t i, TAlphabet c) const {
  * the alphabet and returns the position of the i-th occurence of c in W.
  */
 uint64_t DBG_succ::select_W(uint64_t i, TAlphabet c) const {
+    assert(i + (c == 0) <= W->rank(c, W->size() - 1));
 
-    // deal with  border conditions
-    if (i <= 0)
-        return 0;
-
-    return i + (c == 0) <= W->rank(c, W->size() - 1)
-                ? W->select(c, i + (c == 0))
-                : W->size();
+    return i == 0 ? 0 : W->select(c, i + (c == 0));
 }
 
 /**
@@ -254,6 +246,9 @@ uint64_t DBG_succ::select_W(uint64_t i, TAlphabet c) const {
  */
 uint64_t DBG_succ::pred_W(uint64_t i, TAlphabet c) const {
     assert(i < W->size());
+
+    if (get_W(i) == c)
+        return i;
 
     return select_W(rank_W(i, c), c);
 }
@@ -265,7 +260,14 @@ uint64_t DBG_succ::pred_W(uint64_t i, TAlphabet c) const {
 uint64_t DBG_succ::succ_W(uint64_t i, TAlphabet c) const {
     assert(i < W->size());
 
-    return select_W(rank_W(i - 1, c) + 1, c);
+    if (get_W(i) == c)
+        return i;
+
+    uint64_t rk = rank_W(i, c);
+    if (rk == W->rank(c, W->size() - 1))
+        return W->size();
+
+    return select_W(rk + 1, c);
 }
 
 /**
