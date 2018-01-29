@@ -36,6 +36,10 @@ class Annotator {
             this->graph = graph;
         }
 
+        bool exact_enabled() {
+            return annotation_exact != NULL;
+        }
+
         void add_sequences(const std::vector<KMer>::iterator &begin,
                            const std::vector<KMer>::iterator &end,
                            const size_t &category) {

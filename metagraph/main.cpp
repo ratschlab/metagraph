@@ -108,7 +108,7 @@ int main(int argc, const char *argv[]) {
 
     //TODO: set this value
     Annotator annotator(graph, 2);
-    annotator.init_exact_hasher();
+    //annotator.init_exact_hasher();
 
     const auto &files = config->fname;
 
@@ -271,12 +271,14 @@ int main(int argc, const char *argv[]) {
 
                 std::cout << timer.elapsed() << "sec" << std::endl;
 
-                //FP after continuity
-                std::cout << "Approximating FPP...\t" << std::flush;
-                timer.reset();
-                //TODO: set this value
-                annotator.test_fp_all(1000);
-                std::cout << timer.elapsed() << "sec" << std::endl;
+                if (annotator.exact_enabled()) {
+                    //Check FPP
+                    std::cout << "Approximating FPP...\t" << std::flush;
+                    timer.reset();
+                    //TODO: set this value
+                    annotator.test_fp_all(1000);
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+                }
 
                 if (config->state == Config::DYN) {
                     std::cerr << "Converting static graph to dynamic...\t" << std::flush;
