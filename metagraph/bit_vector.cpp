@@ -47,9 +47,18 @@ uint64_t bit_vector_dyn::rank1(uint64_t id) const {
     return vector_.rank1(id);
 }
 
+uint64_t bit_vector_dyn::rank0(uint64_t id) const {
+    return vector_.rank0(id);
+}
+
 uint64_t bit_vector_dyn::select1(uint64_t id) const {
     assert(id > 0 && size() > 0 && id <= rank1(size() - 1));
     return vector_.select1(id - 1);
+}
+
+uint64_t bit_vector_dyn::select0(uint64_t id) const {
+    assert(id > 0 && size() > 0 && id <= rank0(size() - 1));
+    return vector_.select0(id - 1);
 }
 
 void bit_vector_dyn::set(uint64_t id, bool val) {
@@ -132,6 +141,13 @@ uint64_t bit_vector_stat::rank1(uint64_t id) const {
     return rk_(id >= this->size() ? this->size() : id + 1);
 }
 
+uint64_t bit_vector_stat::rank0(uint64_t id) const {
+    if (requires_update_)
+        const_cast<bit_vector_stat*>(this)->init_rs();
+    //the rank method in SDSL does not include id in the count
+    return rk0_(id >= this->size() ? this->size() : id + 1);
+}
+
 uint64_t bit_vector_stat::select1(uint64_t id) const {
     assert(id > 0 && size() > 0 && id <= num_set_bits_);
     assert(num_set_bits_ == rank1(size() - 1));
@@ -139,6 +155,15 @@ uint64_t bit_vector_stat::select1(uint64_t id) const {
     if (requires_update_)
         const_cast<bit_vector_stat*>(this)->init_rs();
     return slct_(id);
+}
+
+uint64_t bit_vector_stat::select0(uint64_t id) const {
+    assert(id > 0 && size() > 0 && id <= size() - num_set_bits_);
+    assert(size() - num_set_bits_ == rank0(size() - 1));
+
+    if (requires_update_)
+        const_cast<bit_vector_stat*>(this)->init_rs();
+    return slct0_(id);
 }
 
 void bit_vector_stat::set(uint64_t id, bool val) {
@@ -200,5 +225,7 @@ void bit_vector_stat::serialise(std::ostream &out) const {
 void bit_vector_stat::init_rs() {
     rk_ = sdsl::rank_support_v5<>(&vector_);
     slct_ = sdsl::select_support_mcl<>(&vector_);
+    rk0_ = sdsl::rank_support_v5<0>(&vector_);
+    slct0_ = sdsl::select_support_mcl<0>(&vector_);
     requires_update_ = false;
 }

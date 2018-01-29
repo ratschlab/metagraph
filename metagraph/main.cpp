@@ -4,6 +4,7 @@
 
 #include "dbg_succinct.hpp"
 #include "dbg_succinct_chunk.hpp"
+#include "dbg_succinct_annotate.hpp"
 #include "dbg_succinct_construct.hpp"
 #include "config.hpp"
 #include "helpers.hpp"
@@ -105,12 +106,16 @@ int main(int argc, const char *argv[]) {
     // create graph pointer
     DBG_succ *graph = NULL;
 
+    //TODO: set this value
+    Annotator annotator(graph, 2);
+
     const auto &files = config->fname;
 
     switch (config->identity) {
         //TODO: allow for building by appending/adding to an existing graph
         case Config::BUILD: {
             graph = new DBG_succ(config->k);
+            annotator.set_graph(graph);
 
             if (config->verbose)
                 std::cerr << "k is " << graph->get_k() << std::endl;
@@ -222,16 +227,18 @@ int main(int argc, const char *argv[]) {
                                 exit(1);
                             }
                             while (kseq_read(read_stream) >= 0) {
+                                auto& kmers = constructor->data();
+                                size_t last_size = kmers.size();
 
                                 constructor->add_read(read_stream->seq.s);
 
                                 if (config->reverse) {
                                     reverse_complement(read_stream->seq);
                                     constructor->add_read(read_stream->seq.s);
-                                }
+                                }                                
+                                annotator.add_category(kmers.begin() + last_size, kmers.end());
                             }
                             kseq_destroy(read_stream);
-
                             gzclose(input_p);
                         } else {
                             std::cerr << "ERROR: Filetype unknown for file "
@@ -246,13 +253,29 @@ int main(int argc, const char *argv[]) {
                     std::cout << "Sorting kmers and appending succinct"
                               << " representation from current bin...\t" << std::flush;
                     timer.reset();
+
                     auto next_block = constructor->build_chunk();
                     graph_data.extend(*next_block);
                     delete next_block;
 
                     std::cout << timer.elapsed() << "sec" << std::endl;
                 }
+
                 graph_data.initialize_graph(graph);
+
+                //construct continuity bit
+                std::cout << "Constructing junction bits...\t" << std::flush;
+                timer.reset();
+                annotator.set_junction();
+
+                std::cout << timer.elapsed() << "sec" << std::endl;
+
+                //FP after continuity
+                std::cout << "Approximating FPP...\t" << std::flush;
+                timer.reset();
+                //TODO: set this value
+                annotator.test_fp_all(1000);
+                std::cout << timer.elapsed() << "sec" << std::endl;
 
                 if (config->state == Config::DYN) {
                     std::cerr << "Converting static graph to dynamic...\t" << std::flush;
@@ -711,8 +734,11 @@ int main(int argc, const char *argv[]) {
             traverse::toSQL(graph, config->fname, config->sqlfbase);
         if (!config->outfbase.empty())
             graph->serialize(config->outfbase);
+        if (!config->outfbase.empty())
+            annotator.serialize(config->outfbase);
         delete graph;
     }
 
     return 0;
 }
+

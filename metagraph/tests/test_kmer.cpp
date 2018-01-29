@@ -7,6 +7,7 @@
 
 #include "dbg_succinct.hpp"
 #include "kmer.hpp"
+#include <sdsl/uint128_t.hpp>
 
 
 std::string kmer_codec(const std::string &test_kmer) {
@@ -111,6 +112,29 @@ TEST(KmerEncodeTest, UpdateKmerLong) {
 }
 
 
+TEST(KmerEncodeTest, UpdateKmerVsConstruct) {
+    std::string long_seq0 = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAA$";
+    std::string long_seq1 =  "AGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAA$T";
+    std::deque<TAlphabet> seq0(long_seq0.length());
+    std::transform(long_seq0.begin(), long_seq0.end(), seq0.begin(), DBG_succ::encode);
+    KMer kmer0(KMer::pack_kmer(seq0.begin(), seq0.size()));
+    update_kmer(
+            long_seq0.length() - 1,
+            DBG_succ::encode('T'),
+            DBG_succ::encode('$'),
+            kmer0.begin_256());
+    std::string reconst_seq1 = kmer0.to_string(DBG_succ::alphabet);
+    reconst_seq1.push_back(reconst_seq1[0]);
+    reconst_seq1 = reconst_seq1.substr(1);
+    EXPECT_EQ(long_seq1, reconst_seq1);
+
+    seq0.emplace_back(DBG_succ::encode('T'));
+    KMer kmer1(KMer::pack_kmer(seq0.begin() + 1, seq0.size() - 1));
+    std::string reconst_seq2 = kmer1.to_string(DBG_succ::alphabet);
+    reconst_seq2.push_back(reconst_seq2[0]);
+    reconst_seq2 = reconst_seq2.substr(1);
+    EXPECT_EQ(long_seq1, reconst_seq2);
+}
 
 TEST(KmerEncodeTest, InvertibleEndDol) {
     test_kmer_codec("ATG$", "ATG$");
@@ -207,4 +231,13 @@ TEST(KmerEncodeTest, CompareSuffixFalseLong) {
 
 TEST(KmerTest, SizeOfClass) {
     EXPECT_EQ(32u, sizeof(KMer));
+}
+
+TEST(KmerTest, Iterators) {
+    sdsl::uint256_t test1(2llu, 2llu, sdsl::uint128_t(2llu, 2llu));
+    KMer kmer(test1);
+    ASSERT_EQ(kmer.end() - kmer.begin(), 4);
+    for (auto it = kmer.begin(); it != kmer.end(); ++it) {
+        ASSERT_EQ(*it, 2llu);
+    }
 }
