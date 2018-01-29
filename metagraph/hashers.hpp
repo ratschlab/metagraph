@@ -14,8 +14,6 @@
 
 #include <MurmurHash3.h>
 
-#include <tsl/htrie_set.h>
-
 namespace annotate {
 
 class ExactFilter {

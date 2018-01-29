@@ -30,11 +30,12 @@ link_directories(
 include_directories(
   external-libraries/libmaus2/include
   external-libraries/sdsl-lite/include
+  external-libraries/smhasher/src
 )
 
 #add_subdirectory()
 
-file(GLOB src_files "*.cpp" "*.h" "*.hpp")
+file(GLOB src_files "*.cpp" "*.h" "*.hpp" "external-libraries/smhasher/src/MurmurHash3.cpp")
 
 list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER src_files EXCLUDE REGEX ".*\\main.cpp")

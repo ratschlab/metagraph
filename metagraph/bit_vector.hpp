@@ -50,7 +50,9 @@ class bit_vector_dyn : public bit_vector {
     explicit bit_vector_dyn(std::istream &in);
 
     uint64_t rank1(uint64_t id) const;
+    uint64_t rank0(uint64_t id) const;
     uint64_t select1(uint64_t id) const;
+    uint64_t select0(uint64_t id) const;
 
     void set(uint64_t id, bool val);
     void setBitQuick(uint64_t id, bool val) override;
@@ -82,7 +84,9 @@ class bit_vector_stat : public bit_vector {
     explicit bit_vector_stat(std::istream &in);
 
     uint64_t rank1(uint64_t id) const;
+    uint64_t rank0(uint64_t id) const;
     uint64_t select1(uint64_t id) const;
+    uint64_t select0(uint64_t id) const;
 
     void set(uint64_t id, bool val);
     bool operator[](uint64_t id) const;

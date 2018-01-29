@@ -1,4 +1,5 @@
 #include "dbg_succinct.hpp"
+#include "annotate.hpp"
 #include "kmer.hpp"
 #include <unordered_set>
 

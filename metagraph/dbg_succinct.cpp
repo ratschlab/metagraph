@@ -304,7 +304,7 @@ uint64_t DBG_succ::select_last(uint64_t i) const {
  * Uses the object's array last and a given position i and
  * returns the position of the i-th unset bit in last[1..i].
  */
-uint64_t DBG_succ::select_last(uint64_t i) const {
+uint64_t DBG_succ::select0_last(uint64_t i) const {
     assert(i <= last->size() - last->get_num_set_bits());
 
     return i == 0 ? 0 : last->select0(i);
