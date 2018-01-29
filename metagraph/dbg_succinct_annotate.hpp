@@ -4,12 +4,33 @@
 #include <unordered_set>
 
 class Annotator {
+    private:
+        DBG_succ *graph = NULL;
+        double bloom_size_factor = 0;
+        std::vector<size_t> sizes_v;
+
+        //TODO: set this value
+        annotate::HashAnnotation<annotate::BloomFilter<5>> annotation;
+        annotate::HashAnnotation<annotate::ExactFilter> *annotation_exact = NULL;
     public:
 
         Annotator(DBG_succ *graph, double&& bloom_size_factor) 
             : graph(graph), bloom_size_factor(bloom_size_factor) { }
         Annotator(DBG_succ *graph, const double &bloom_size_factor) 
             : graph(graph), bloom_size_factor(bloom_size_factor) { }
+
+        void init_exact_hasher() {
+            if (annotation_exact) {
+                std::cerr << "ERROR: exact hasher already exists.\n";
+                exit(1);
+            }
+            annotation_exact = new annotate::HashAnnotation<annotate::ExactFilter>();
+        }
+
+        ~Annotator() {
+            if (annotation_exact)
+                delete annotation_exact;
+        }
 
         void set_graph(DBG_succ *graph) {
             this->graph = graph;
@@ -20,7 +41,8 @@ class Annotator {
                            const size_t &category) {
             for (auto it = begin; it != end; ++it) {
                 annotation.insert(it->begin(), it->end(), category);
-                annotation_exact.insert(it->begin(), it->end(), category);
+                if (annotation_exact)
+                    annotation_exact->insert(it->begin(), it->end(), category);
             }
         }
 
@@ -30,7 +52,8 @@ class Annotator {
                            T *cat_begin, T *cat_end) {
             for (auto it = begin; it != end; ++it) {
                 annotation.insert(it->begin(), it->end(), cat_begin, cat_end);
-                annotation_exact.insert(it->begin(), it->end(), cat_begin, cat_end);
+                if (annotation_exact)
+                    annotation_exact->insert(it->begin(), it->end(), cat_begin, cat_end);
             }
         }
 
@@ -38,7 +61,8 @@ class Annotator {
                           const std::vector<KMer>::iterator &end) {
             sizes_v.emplace_back(end - begin);
             annotation.append_bit((size_t)((double)sizes_v.back() * bloom_size_factor));
-            annotation_exact.append_bit();
+            if (annotation_exact)
+                annotation_exact->append_bit();
             add_sequences(begin, end, annotation.size() - 1);
         }
 
@@ -90,7 +114,11 @@ class Annotator {
         }
 
         std::vector<size_t> annotation_exact_from_kmer(KMer &kmer) {
-            return annotation_exact.find(kmer.begin(), kmer.end());
+            if (!annotation_exact) {
+                std::cerr << "ERROR: exact hasher not initialized.\n";
+                exit(1);
+            }
+            return annotation_exact->find(kmer.begin(), kmer.end());
         }
 
         KMer kmer_from_index(const DBG_succ::node_iterator &i) {
@@ -157,6 +185,10 @@ class Annotator {
         }
 
         std::vector<uint8_t> test_fp(const DBG_succ::node_iterator &i) {
+            if (!annotation_exact) {
+                std::cerr << "ERROR: exact hasher not initialized.\n";
+                exit(1);
+            }
             KMer int_kmer = kmer_from_index(i);
             auto test = annotation_from_kmer(int_kmer);
             auto test_exact = annotation_exact_from_kmer(int_kmer);
@@ -229,12 +261,4 @@ class Annotator {
             out.close();
         }
 
-    private:
-        DBG_succ *graph = NULL;
-        double bloom_size_factor = 0;
-        std::vector<size_t> sizes_v;
-
-        //TODO: set this value
-        annotate::HashAnnotation<annotate::BloomFilter<5>> annotation;
-        annotate::HashAnnotation<annotate::ExactFilter> annotation_exact;
 };
