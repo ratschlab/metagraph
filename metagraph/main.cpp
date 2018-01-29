@@ -188,6 +188,14 @@ int main(int argc, const char *argv[]) {
                                 nbp += sequence.length();
 
                                 constructor->add_read(sequence);
+
+                                if (config->reverse) {
+                                    kstring_t kseq;
+                                    kseq.s = &sequence[0];
+                                    kseq.l = sequence.length();
+                                    reverse_complement(kseq);
+                                    constructor->add_read(kseq.s);
+                                }
                             }
                         } else if (utils::get_filetype(files[f]) == "FASTA"
                                     || utils::get_filetype(files[f]) == "FASTQ") {
@@ -207,11 +215,12 @@ int main(int argc, const char *argv[]) {
                             }
                             while (kseq_read(read_stream) >= 0) {
 
-                                // possibly reverse k-mers
-                                if (config->reverse)
-                                    reverse_complement(read_stream->seq);
-
                                 constructor->add_read(read_stream->seq.s);
+
+                                if (config->reverse) {
+                                    reverse_complement(read_stream->seq);
+                                    constructor->add_read(read_stream->seq.s);
+                                }
                             }
                             kseq_destroy(read_stream);
 
@@ -269,9 +278,12 @@ int main(int argc, const char *argv[]) {
                             exit(1);
                         }
                         for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
-                            if (config->reverse)
-                                reverse_complement(read_stream->seq);
                             graph->add_sequence(read_stream->seq.s);
+
+                            if (config->reverse) {
+                                reverse_complement(read_stream->seq);
+                                graph->add_sequence(read_stream->seq.s);
+                            }
                         }
                         kseq_destroy(read_stream);
                         gzclose(input_p);
