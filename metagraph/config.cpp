@@ -131,6 +131,9 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == MERGE && fname.size() < 2)
         print_usage_and_exit = true;
 
+    if (identity == COMPARE && fname.size() != 2)
+        print_usage_and_exit = true;
+
     // if misused, provide help screen for chosen identity and exit
     if (print_usage_and_exit) {
         print_usage(argv[0], identity);
@@ -194,10 +197,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
         } break;
         case COMPARE: {
-            fprintf(stderr, "Usage: %s compare [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s compare [options] GRAPH1 GRAPH2\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for compare:\n");
-            fprintf(stderr, "\t-i --infile-base [STR] \tbasename for loading graph input file\n");
         } break;
         case MERGE: {
             fprintf(stderr, "Usage: %s merge [options] GRAPH1 GRAPH2 [[GRAPH3] ...]\n\n", prog_name.c_str());
