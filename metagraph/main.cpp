@@ -108,7 +108,7 @@ int main(int argc, const char *argv[]) {
 
     //TODO: set this value
     Annotator annotator(graph, 2);
-    //annotator.init_exact_hasher();
+    annotator.init_exact_hasher();
 
     const auto &files = config->fname;
 

@@ -138,7 +138,7 @@ class Annotator {
 
 
         std::vector<size_t> get_annotation_corrected(const DBG_succ::node_iterator &i) {
-            std::unordered_set<size_t> visited;
+            //std::unordered_set<size_t> visited;
 
             KMer int_kmer = kmer_from_index(i);
             auto curannot = annotation_from_kmer(int_kmer);
@@ -147,7 +147,7 @@ class Annotator {
             DBG_succ::node_iterator j = i;
             TAlphabet curW = graph->get_W(i) % DBG_succ::alph_size;
 			TAlphabet newW;
-            visited.insert(i);
+            //visited.insert(i);
             size_t pcount_old = annotate::HashAnnotation<>::bigint_popcount(curannot);
             size_t pcount_new = 0;
             auto nextannot = curannot;
@@ -164,9 +164,9 @@ class Annotator {
                     if (graph->indegree(j) > 1 
                      || annotation.is_junction(ckmer.begin(), ckmer.end()))
                         break;
-                    if (!visited.insert(j).second) {
-                        break;
-                    }   
+                    //if (!visited.insert(j).second) {
+                    //    break;
+                    //}   
     
                     curW = newW;
                     nextannot = annotation.find(ckmer.begin(), ckmer.end());
