@@ -96,8 +96,11 @@ int main(int argc, const char *argv[]) {
     // parse command line arguments and options
     std::unique_ptr<Config> config(new Config(argc, argv));
 
-    if (config->verbose)
-        std::cout << "Welcome to MetaGraph" << std::endl;
+    if (config->verbose) {
+        std::cout << "#############################\n"
+                  << "### Welcome to MetaGraph! ###\n"
+                  << "#############################\n" << std::endl;
+    }
 
     // create graph pointer
     DBG_succ *graph = NULL;
@@ -138,8 +141,13 @@ int main(int argc, const char *argv[]) {
                     // graph->add_sink(config->parallel, suffix);
 
                     std::unique_ptr<KMerDBGSuccChunkConstructor> constructor(
-                        new KMerDBGSuccChunkConstructor(graph->get_k(),
-                                                        suffix, config->parallel)
+                        new KMerDBGSuccChunkConstructor(
+                            graph->get_k(),
+                            suffix,
+                            config->parallel,
+                            static_cast<uint64_t>(config->memory_available) << 30,
+                            config->verbose
+                        )
                     );
 
                     // iterate over input files

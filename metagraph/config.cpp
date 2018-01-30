@@ -63,6 +63,8 @@ Config::Config(int argc, const char *argv[]) {
             num_bins_per_thread = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-k") || !strcmp(argv[i], "--kmer-length")) {
             k = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--mem-cap-gb")) {
+            memory_available = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--align-length")) {
             alignment_length = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
@@ -165,13 +167,13 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for build:\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence []\n");
-            fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
+            fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
             fprintf(stderr, "\t   --sql-base [STR] \tbasename for SQL output file\n");
-            fprintf(stderr, "\t-i --infile-base [STR] \tbasename for loading graph input file\n");
+            fprintf(stderr, "\t   --mem-cap-gb [INT] \tmaximum memory available, in Gb [inf]\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
-            fprintf(stderr, "\t-r --reverse \tbuild graph from reverse complement of input [off]\n");
-            fprintf(stderr, "\t   --fast \tuse fast build method [off]\n");
-            fprintf(stderr, "\t   --print \tprint graph table to the screen [off]\n");
+            fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
+            fprintf(stderr, "\t   --fast \t\tuse fast build method [off]\n");
+            fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t   --print-state \tprint graph to the screen horizontally [off]\n");
             fprintf(stderr, "\t-s --num-splits \tDefine the minimum number of bins to split kmers into [1]\n");
         } break;

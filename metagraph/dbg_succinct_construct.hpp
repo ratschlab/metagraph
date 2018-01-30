@@ -41,7 +41,9 @@ class KMerDBGSuccChunkConstructor {
   public:
     KMerDBGSuccChunkConstructor(size_t k,
                                 const std::string &filter_suffix,
-                                size_t num_threads = 1);
+                                size_t num_threads = 1,
+                                double memory_available = 0,
+                                bool verbose = false);
 
     void add_read(const std::string &sequence);
 
@@ -52,7 +54,12 @@ class KMerDBGSuccChunkConstructor {
   private:
     size_t k_;
     std::vector<KMer> kmers_;
+    size_t end_sorted_;
+
     size_t num_threads_;
+    size_t max_num_kmers_;
+    bool verbose_;
+
     std::vector<TAlphabet> filter_suffix_encoded_;
 };
 

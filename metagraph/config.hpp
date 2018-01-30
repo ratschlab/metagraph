@@ -29,6 +29,7 @@ class Config {
     unsigned int frequency = 1;
     unsigned int nsplits = 1;
     unsigned int alignment_length = 0;
+    unsigned int memory_available = 0;
 
     std::vector<std::string> fname;
     std::string outfbase;
