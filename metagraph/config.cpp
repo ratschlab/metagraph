@@ -1,6 +1,7 @@
 #include "config.hpp"
 
 #include <cstring>
+#include <iostream>
 
 
 Config::Config(int argc, const char *argv[]) {
@@ -105,6 +106,14 @@ Config::Config(int argc, const char *argv[]) {
         }
     }
 
+    if (!fname.size()) {
+        std::string line;
+        while (std::getline(std::cin, line)) {
+            if (line.size())
+                fname.push_back(line);
+        }
+    }
+
     bool print_usage_and_exit = false;
 
     if (!fname.size())
@@ -174,7 +183,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
             fprintf(stderr, "\t   --fast \t\tuse fast build method [off]\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
-            fprintf(stderr, "\t   --print-state \tprint graph to the screen horizontally [off]\n");
             fprintf(stderr, "\t-s --num-splits \tDefine the minimum number of bins to split kmers into [1]\n");
         } break;
         case ALIGN: {
@@ -200,7 +208,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [1]\n");
             fprintf(stderr, "\t   --traversal \t\t\tmerge by traversing [off]\n");
             fprintf(stderr, "\t   --print \t\t\tprint graph table to the screen [off]\n");
-            fprintf(stderr, "\t   --print-state \t\tprint graph to the screen horizontally [off]\n");
             fprintf(stderr, "\t   --part-idx [INT] \t\tidx to use when doing external merge []\n");
             fprintf(stderr, "\t   --parts-total [INT] \t\ttotal number of parts in external merge[]\n");
             fprintf(stderr, "\t-c --collect [INT] \t\tinitiate collection of external merge, provide total number of splits [1]\n");
@@ -211,7 +218,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for stats:\n");
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t   --print \tprint graph table to the screen [off]\n");
-            fprintf(stderr, "\t   --print-state \tprint graph to the screen horizontally [off]\n");
         } break;
         case ANNOTATE: {
             fprintf(stderr, "Usage: %s annotate -i <graph_basename> [options] <PATH1> [[PATH2] ...]\n"
