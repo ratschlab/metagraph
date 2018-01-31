@@ -106,6 +106,11 @@ class DBG_succ : public SequenceGraph {
      */
     TAlphabet get_W(uint64_t k) const { return (*W)[k]; }
     const wavelet_tree& get_W() const { return *W; }
+    
+    /**
+     * Return value of last at position k.
+     */
+    bool get_last(uint64_t k) const { return (*last)[k]; }
 
     // Given the alphabet index return the corresponding symbol
     static char decode(TAlphabet s);
@@ -193,22 +198,10 @@ class DBG_succ : public SequenceGraph {
     uint64_t rank_last(uint64_t i) const;
 
     /**
-      * Uses the object's array last and a position and
-      * returns the number of unset bits up to that postion.
-      */
-    uint64_t rank0_last(uint64_t i) const;
-
-    /**
      * Uses the object's array last and a given position i and
      * returns the position of the i-th set bit in last[1..i].
      */
     uint64_t select_last(uint64_t i) const;
-
-    /**
-     * Uses the object's array last and a given position i and
-     * returns the position of the i-th unset bit in last[1..i].
-     */
-    uint64_t select0_last(uint64_t i) const;
 
     /**
      * This is a convenience function that returns for the object's array last
@@ -218,21 +211,9 @@ class DBG_succ : public SequenceGraph {
 
     /**
      * This is a convenience function that returns for the object's array last
-     * and a given position i the position of the last unset bit in last[1..i].
-     */
-    uint64_t pred0_last(uint64_t i) const;
-
-    /**
-     * This is a convenience function that returns for the object's array last
      * and a given position i the position of the first set bit in last[i..N].
      */
     uint64_t succ_last(uint64_t i) const;
-
-    /**
-     * This is a convenience function that returns for the object's array last
-     * and a given position i the position of the first unset bit in last[i..N].
-     */
-    uint64_t succ0_last(uint64_t i) const;
 
     /**
      * This is a convenience function that returns for array W, a position i and
@@ -307,11 +288,6 @@ class DBG_succ : public SequenceGraph {
      * righ location.
      */
     void sort_W_locally(uint64_t l, uint64_t u);
-
-    /**
-     * Return value of last at position k.
-     */
-    bool get_last(uint64_t k) const { return (*last)[k]; }
 
     /**
      * Return value of F vector at index k.

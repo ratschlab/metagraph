@@ -19,6 +19,9 @@ set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg")
 # Debug build type
 set(CMAKE_CXX_FLAGS_DEBUG "-O3")
 
+# Debug without asserts
+set(CMAKE_CXX_FLAGS_DEBUGGER "-pg -O2 -g -DNDEBUG")
+
 set(CMAKE_VERBOSE_MAKEFILE 1)
 cmake_policy(SET CMP0015 NEW)
 

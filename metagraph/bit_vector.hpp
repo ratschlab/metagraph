@@ -16,12 +16,8 @@ class bit_vector {
 
     // Computes the number of set bits in the subarray indexed by [0,1,...,id]
     virtual uint64_t rank1(uint64_t id) const = 0;
-    // Computes the number of unset bits in the subarray indexed by [0,1,...,id]
-    virtual uint64_t rank0(uint64_t id) const = 0;
     // Returns the i-th set bit, starting from 1
     virtual uint64_t select1(uint64_t i) const = 0;
-    // Returns the i-th unset bit, starting from 1
-    virtual uint64_t select0(uint64_t i) const = 0;
     virtual void set(uint64_t id, bool val) = 0;
     // Can be redefined, e.g. without rebalancing
     virtual void setBitQuick(uint64_t id, bool val) { set(id, val); };
@@ -50,9 +46,7 @@ class bit_vector_dyn : public bit_vector {
     explicit bit_vector_dyn(std::istream &in);
 
     uint64_t rank1(uint64_t id) const;
-    uint64_t rank0(uint64_t id) const;
     uint64_t select1(uint64_t id) const;
-    uint64_t select0(uint64_t id) const;
 
     void set(uint64_t id, bool val);
     void setBitQuick(uint64_t id, bool val) override;
@@ -84,9 +78,7 @@ class bit_vector_stat : public bit_vector {
     explicit bit_vector_stat(std::istream &in);
 
     uint64_t rank1(uint64_t id) const;
-    uint64_t rank0(uint64_t id) const;
     uint64_t select1(uint64_t id) const;
-    uint64_t select0(uint64_t id) const;
 
     void set(uint64_t id, bool val);
     bool operator[](uint64_t id) const;
@@ -110,8 +102,6 @@ class bit_vector_stat : public bit_vector {
     // maintain rank/select operations
     sdsl::rank_support_v5<> rk_;
     sdsl::select_support_mcl<> slct_;
-    sdsl::rank_support_v5<0> rk0_;
-    sdsl::select_support_mcl<0> slct0_;
     bool requires_update_ = true;
 
     void init_rs();

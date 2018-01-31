@@ -107,7 +107,7 @@ int main(int argc, const char *argv[]) {
     DBG_succ *graph = NULL;
 
     //TODO: set this value
-    Annotator annotator(graph, 2);
+    Annotator annotator(graph, 0.4);
     annotator.init_exact_hasher();
 
     const auto &files = config->fname;
@@ -228,16 +228,43 @@ int main(int argc, const char *argv[]) {
                                 exit(1);
                             }
                             while (kseq_read(read_stream) >= 0) {
-                                auto& kmers = constructor->data();
-                                size_t last_size = kmers.size();
+                                {
+                                    std::string fixed = std::string("N") + read_stream->seq.s + "N";
+                                    //std::string fixed = read_stream->seq.s;
 
-                                constructor->add_read(read_stream->seq.s);
-
+                                    auto& kmers = constructor->data();
+                                    size_t last_size = kmers.size();
+                                    constructor->add_read(fixed);
+                                    //constructor->add_read(read_stream->seq.s);
+                                    if (suffices.size() == 1) {
+                                        if (utils::get_filetype(files[f]) == "FASTQ") {
+                                            //assume each FASTQ file is one column
+                                            annotator.add_sequences(kmers.begin() + last_size, kmers.end(), f);
+                                        } else {
+                                            //assume each sequence in each FASTA file is a column
+                                            annotator.add_column(kmers.begin() + last_size, kmers.end());
+                                        }
+                                    }
+                                }
                                 if (config->reverse) {
                                     reverse_complement(read_stream->seq);
-                                    constructor->add_read(read_stream->seq.s);
-                                }                                
-                                annotator.add_category(kmers.begin() + last_size, kmers.end());
+                                    std::string fixed = std::string("N") + read_stream->seq.s + "N";
+                                    //std::string fixed = read_stream->seq.s;
+
+                                    auto& kmers = constructor->data();
+                                    size_t last_size = kmers.size();
+                                    constructor->add_read(fixed);
+                                    //constructor->add_read(read_stream->seq.s);
+                                    if (suffices.size() == 1) {
+                                        if (utils::get_filetype(files[f]) == "FASTQ") {
+                                            //assume each FASTQ file is one column
+                                            annotator.add_sequences(kmers.begin() + last_size, kmers.end(), f);
+                                        } else {
+                                            //assume each sequence in each FASTA file is a column
+                                            annotator.add_column(kmers.begin() + last_size, kmers.end());
+                                        }
+                                    }
+                                }
                             }
                             kseq_destroy(read_stream);
                             gzclose(input_p);
@@ -268,7 +295,6 @@ int main(int argc, const char *argv[]) {
                 std::cout << "Constructing junction bits...\t" << std::flush;
                 timer.reset();
                 annotator.set_junction();
-
                 std::cout << timer.elapsed() << "sec" << std::endl;
 
                 if (annotator.exact_enabled()) {

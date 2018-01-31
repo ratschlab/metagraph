@@ -281,16 +281,6 @@ uint64_t DBG_succ::rank_last(uint64_t i) const {
 }
 
 /**
- * Uses the object's array last and a position and
- * returns the number of unset bits up to that postion.
- */
-uint64_t DBG_succ::rank0_last(uint64_t i) const {
-    assert(i < last->size());
-
-    return i == 0 ? 0 : last->rank0(i);
-}
-
-/**
  * Uses the object's array last and a given position i and
  * returns the position of the i-th set bit in last[1..i].
  */
@@ -301,16 +291,6 @@ uint64_t DBG_succ::select_last(uint64_t i) const {
 }
 
 /**
- * Uses the object's array last and a given position i and
- * returns the position of the i-th unset bit in last[1..i].
- */
-uint64_t DBG_succ::select0_last(uint64_t i) const {
-    assert(i <= last->size() - last->get_num_set_bits());
-
-    return i == 0 ? 0 : last->select0(i);
-}
-
-/**
  * This is a convenience function that returns for the object's array last
  * and a given position i the position of the last set bit in last[1..i].
  */
@@ -318,16 +298,6 @@ uint64_t DBG_succ::pred_last(uint64_t i) const {
     assert(i < last->size());
 
     return select_last(rank_last(i));
-}
-
-/**
- * This is a convenience function that returns for the object's array last
- * and a given position i the position of the last unset bit in last[1..i].
- */
-uint64_t DBG_succ::pred0_last(uint64_t i) const {
-    assert(i < last->size());
-
-    return select0_last(rank0_last(i));
 }
 
 /**
@@ -346,24 +316,6 @@ uint64_t DBG_succ::succ_last(uint64_t i) const {
         return last->size();
 
     return select_last(next_rank);
-}
-
-/**
- * This is a convenience function that returns for the object's array last
- * and a given position i the position of the first set bit in last[i..N].
- */
-uint64_t DBG_succ::succ0_last(uint64_t i) const {
-    CHECK_INDEX(i);
-
-    if (!get_last(i))
-        return i;
-
-    uint64_t next_rank = rank0_last(i - 1) + 1;
-
-    if (next_rank > last->size() - last->get_num_set_bits())
-        return last->size();
-
-    return select0_last(next_rank);
 }
 
 /**

@@ -3,20 +3,32 @@
 #include "kmer.hpp"
 #include <unordered_set>
 
+size_t total_traversed = 0;
+
+//TODO
+class DeBruijnGraphWrapper {
+    public:
+        DeBruijnGraphWrapper();
+
+
+};
+
 class Annotator {
     private:
         DBG_succ *graph = NULL;
         double bloom_size_factor = 0;
+
+        //TODO: get rid of this if not using degree Bloom filter
         std::vector<size_t> sizes_v;
 
         //TODO: set this value
-        annotate::HashAnnotation<annotate::BloomFilter<5>> annotation;
+        annotate::HashAnnotation<annotate::BloomFilter<1>> annotation;
         annotate::HashAnnotation<annotate::ExactFilter> *annotation_exact = NULL;
     public:
 
-        Annotator(DBG_succ *graph, double&& bloom_size_factor) 
+        Annotator(DBG_succ *graph, double&& bloom_size_factor)
             : graph(graph), bloom_size_factor(bloom_size_factor) { }
-        Annotator(DBG_succ *graph, const double &bloom_size_factor) 
+        Annotator(DBG_succ *graph, const double &bloom_size_factor)
             : graph(graph), bloom_size_factor(bloom_size_factor) { }
 
         void init_exact_hasher() {
@@ -42,11 +54,19 @@ class Annotator {
 
         void add_sequences(const std::vector<KMer>::iterator &begin,
                            const std::vector<KMer>::iterator &end,
-                           const size_t &category) {
+                           size_t column) {
+            if (column >= annotation.size()) {
+                annotation.resize(column);
+                sizes_v.emplace_back(end - begin);
+                annotation.append_bit((size_t)((double)sizes_v.back() * bloom_size_factor));
+            }
+            if (annotation[column].size() == 0) {
+                annotation[column].resize((size_t)((double)(end - begin) * bloom_size_factor));
+            }
             for (auto it = begin; it != end; ++it) {
-                annotation.insert(it->begin(), it->end(), category);
+                annotation.insert(it->begin(), it->end(), column);
                 if (annotation_exact)
-                    annotation_exact->insert(it->begin(), it->end(), category);
+                    annotation_exact->insert(it->begin(), it->end(), column);
             }
         }
 
@@ -61,7 +81,7 @@ class Annotator {
             }
         }
 
-        void add_category(const std::vector<KMer>::iterator &begin,
+        void add_column(const std::vector<KMer>::iterator &begin,
                           const std::vector<KMer>::iterator &end) {
             sizes_v.emplace_back(end - begin);
             annotation.append_bit((size_t)((double)sizes_v.back() * bloom_size_factor));
@@ -72,45 +92,55 @@ class Annotator {
 
         void set_junction(int size = -1) {
             if (size == -1) {
-                size = *(std::max_element(sizes_v.begin(), sizes_v.end()));
+                //size = *(std::max_element(sizes_v.begin(), sizes_v.end()));
+                size = std::accumulate(sizes_v.begin(), sizes_v.end(), 0);
             }
             annotation.set_cont(size);
-            //compute using succ0_last
-            for (size_t i = 1; i < graph->get_W().size(); i = graph->succ0_last(i)) {
-                auto kmer = graph->get_node_seq(i);
-                kmer.emplace_back(0);
-                size_t next = graph->succ_last(i);
-                for (; i <= next; ++i) {
-                    kmer.back() = graph->get_W(i) % DBG_succ::alph_size;
+
+            //compute junction bits
+            for (size_t i = 1; i < graph->get_W().size(); ++i) {
+                //outdegree > 1
+                if (!graph->get_last(i) && graph->get_last(i - 1)) {
+                    auto kmer = graph->get_node_seq(i);
+                    kmer.emplace_back(0);
+                    //for every edge with last == 0
+                    auto j = i;
+                    for (; !graph->get_last(j); ++j) {
+                        kmer.back() = graph->get_W(j);
+                        KMer int_kmer(KMer::pack_kmer(kmer.begin(), kmer.size()));
+                        annotation.set_junction(int_kmer.begin(), int_kmer.end());
+                    }
+                    //for last outgoing edge
+                    kmer.back() = graph->get_W(j);
+                    KMer int_kmer(KMer::pack_kmer(kmer.begin(), kmer.size()));
+                    annotation.set_junction(int_kmer.begin(), int_kmer.end());
+                }
+                //indegree > 1
+                if (graph->get_W(i) >= DBG_succ::alph_size) {
+                    size_t j = graph->outgoing(i, graph->get_W(i));
+                    auto kmer = graph->get_node_seq(j);
+                    kmer.emplace_back(0);
+                    for (; !graph->get_last(j); ++j) {
+                        kmer.back() = graph->get_W(j);
+                        KMer int_kmer(KMer::pack_kmer(kmer.begin(), kmer.size()));
+                        annotation.set_junction(int_kmer.begin(), int_kmer.end());
+                    }
+                    kmer.back() = graph->get_W(j);
                     KMer int_kmer(KMer::pack_kmer(kmer.begin(), kmer.size()));
                     annotation.set_junction(int_kmer.begin(), int_kmer.end());
                 }
             }
-            //compute using succ_last
-            /*
-            size_t last = 1;
-            size_t cur;
-            while (last < graph->get_W().size()) {
-                cur = graph->succ_last(last + 1);
-                if (cur - last > 1) {
-                    auto kmer = graph->get_node_seq(cur);
-                    kmer.push_back(0);
-                    for (auto it = last + 1; it <= cur; ++it) {
-                        kmer.back() = graph->get_W(it) % DBG_succ::alph_size;
-                        KMer int_kmer(KMer::pack_kmer(kmer.begin(), kmer.size()));
-                        annotation.set_junction(int_kmer.begin(), int_kmer.end());
-                    }
-                } else {
-                    if (graph->indegree(cur) > 1) {
-                        auto kmer = graph->get_node_seq(cur);
-                        kmer.emplace_back(graph->get_W(cur) % DBG_succ::alph_size);
-                        KMer int_kmer(KMer::pack_kmer(kmer.begin(), kmer.size()));
-                        annotation.set_junction(int_kmer.begin(), int_kmer.end());
-                    }
-                }
-                last = cur;
-            }
-            */
+        }
+
+        template <typename KmerVector>
+        std::vector<size_t> annotation_from_seq(KmerVector kvector) {
+            KMer kmer(KMer::pack_kmer(kvector, kvector.size()));
+            return annotation.find(kmer.begin(), kmer.end());
+        }
+
+        std::vector<size_t> annotation_from_index(size_t i) {
+            auto seq = graph->get_node_seq(i);
+            return annotation_from_seq(seq);
         }
 
         std::vector<size_t> annotation_from_kmer(KMer &kmer) {
@@ -128,7 +158,7 @@ class Annotator {
         KMer kmer_from_index(const DBG_succ::node_iterator &i) {
             auto kmer = graph->get_node_seq(i);
             kmer.emplace_back(graph->get_W(i) % DBG_succ::alph_size);
-            return KMer(KMer::pack_kmer(kmer.begin(), kmer.size()));
+            return KMer(KMer::pack_kmer(kmer, kmer.size()));
         }
 
         std::vector<size_t> get_annotation(const DBG_succ::node_iterator &i) {
@@ -137,52 +167,97 @@ class Annotator {
         }
 
 
-        std::vector<size_t> get_annotation_corrected(const DBG_succ::node_iterator &i) {
-            //std::unordered_set<size_t> visited;
+        std::vector<size_t> get_annotation_corrected(const DBG_succ::node_iterator &i, size_t path_cutoff = 50) {
+            //initial raw annotation
+            auto orig_kmer = graph->get_node_seq(i);
+            orig_kmer.emplace_back(graph->get_W(i) % DBG_succ::alph_size);
+            auto ckmer = orig_kmer;
 
-            KMer int_kmer = kmer_from_index(i);
-            auto curannot = annotation_from_kmer(int_kmer);
+            auto curannot = annotation_from_seq(ckmer);
 
-            KMer ckmer = int_kmer;
-            DBG_succ::node_iterator j = i;
-            TAlphabet curW = graph->get_W(i) % DBG_succ::alph_size;
-			TAlphabet newW;
-            //visited.insert(i);
             size_t pcount_old = annotate::HashAnnotation<>::bigint_popcount(curannot);
             size_t pcount_new = 0;
             auto nextannot = curannot;
             size_t path = 0;
-            std::string str_kmer = ckmer.to_string(DBG_succ::alphabet).substr(0,2);
-            if (str_kmer[0] != '$' && str_kmer[1] != '$' && pcount_old > 1) {
-                while (true) {
-                    j = graph->outgoing(j, graph->get_W(j));
-                    newW = graph->get_W(j) % DBG_succ::alph_size;
-                    if (!newW) {
-                        break;
-                    }   
-                    update_kmer(graph->get_k(), newW, curW, ckmer.begin_256());
-                    if (graph->indegree(j) > 1 
-                     || annotation.is_junction(ckmer.begin(), ckmer.end()))
-                        break;
-                    //if (!visited.insert(j).second) {
-                    //    break;
-                    //}   
-    
-                    curW = newW;
-                    nextannot = annotation.find(ckmer.begin(), ckmer.end());
-                    annotate::HashAnnotation<>::merge_and(curannot, nextannot);
-                    pcount_new = annotate::HashAnnotation<>::bigint_popcount(curannot);
-                    if (pcount_new < pcount_old) {
-                        path = 0;
-                    } else {
-                        path++;
-                    }   
-                    if (pcount_new == 1 || path > 5) {
-                        break;
-                    }   
-                }   
-            }   
-            //TODO:move backward
+            DBG_succ::node_iterator j = i;
+
+            //TODO: checking for ckmer.back() and ckmer.front() means that no
+            // dummy edges can be annotation. Either find a better heuristic, or find
+            // a way to label them.
+
+            while (ckmer.back() && pcount_old && path++ < path_cutoff) {
+                //move forward
+                j = graph->outgoing(j, ckmer.back());
+
+                ckmer.emplace_back(graph->get_W(j) % DBG_succ::alph_size);
+                ckmer.pop_front();
+
+                total_traversed++;
+                //update_kmer(graph->get_k(), nextW, curW, &ckmer);
+
+                //check outdegree
+                if (!graph->get_last(j) || !graph->get_last(j - 1))
+                    break;
+
+                //curW = nextW;
+
+                //bitwise AND annotations
+                nextannot = annotate::HashAnnotation<>::merge_and(
+                        curannot, 
+                        //annotation.find(ckmer.begin(), ckmer.end())
+                        annotation_from_seq(ckmer)
+                );
+
+                //check popcounts
+                pcount_new = annotate::HashAnnotation<>::bigint_popcount(nextannot);
+                assert(pcount_new <= pcount_old);
+
+                //if zero, then start of new sequence
+                if (pcount_new == 0) {
+                    break;
+                }
+
+                //the new annotatation is "correct", so accept it
+                curannot = nextannot;
+
+                //path length stopping conditions
+                if (pcount_new < pcount_old) {
+                    path = 0;
+                    pcount_old = pcount_new;
+                }
+                //std::cout << pcount_old << " " << path << "\n";
+            }
+
+            //backward correction
+            ckmer = orig_kmer;
+            j = i;
+            path = 0;
+            while (ckmer.front() && graph->indegree(j) == 1 && pcount_old && path++ < path_cutoff) {
+                j = graph->get_minus_k_value(j, 0).second;
+
+                ckmer.emplace_front(graph->get_minus_k_value(j, graph->get_k() - 1).first);
+                ckmer.pop_back();
+
+                total_traversed++;
+                nextannot = annotate::HashAnnotation<>::merge_and(
+                        curannot, 
+                        //annotation.find(ckmer.begin(), ckmer.end())
+                        annotation_from_seq(ckmer)
+                );
+
+                pcount_new = annotate::HashAnnotation<>::bigint_popcount(nextannot);
+                assert(pcount_new <= pcount_old);
+
+                if (pcount_new == 0) {
+                    break;
+                }
+                curannot = nextannot;
+
+                if (pcount_new < pcount_old) {
+                    path = 0;
+                    pcount_old = pcount_new;
+                }
+            }
 
 
 			return curannot;
@@ -235,8 +310,10 @@ class Annotator {
             size_t fp = 0;
             size_t fp_pre = 0;
             size_t fn = 0;
-            size_t total = graph->get_W().size() / step;
+            //size_t total = graph->get_W().size() / step;
+            size_t total = 0;
             for (DBG_succ::node_iterator i = 1; i < graph->get_W().size(); i += step) {
+                total++;
                 auto stats = test_fp(i);
                 fp_pre += stats[0];
                 fp += stats[1];
@@ -253,6 +330,7 @@ class Annotator {
                       << "FP:\t" << fp_pre << " "
                       << (double)fp_pre / (double)total << "\t"
                       << "\n";
+            std::cout << "Total traversed: " << total_traversed << "\n";
         }
 
         void serialize(std::ostream &out) {

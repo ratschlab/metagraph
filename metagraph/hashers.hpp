@@ -62,6 +62,15 @@ class BloomFilter {
         ~BloomFilter() {
         }
 
+        size_t size() {
+            return n_bits;
+        }
+
+        void resize(size_t size) {
+            this->n_bits = size;
+            bits.resize((n_bits >> 6) + 1);
+        }
+
     //Hasher
     private:
         template <typename T>
@@ -302,6 +311,15 @@ class HashAnnotation {
             cont_bit = Filter(*(b - 1));
         }
 
+        void resize(size_t size) {
+            assert(size > color_bits.size());
+            color_bits.resize(size);
+        }
+
+        Filter& operator[](size_t i) {
+            return color_bits[i];
+        }
+
         /*
         template <class T>
         HashAnnotation(const std::vector<T> &a) 
@@ -423,7 +441,7 @@ class HashAnnotation {
             for (auto it = color_bits.begin(); it != color_bits.end(); ++it) {
                 it->serialize(out);
             }
-            cont_bit.serialize(out);
+            //cont_bit.serialize(out);
         }
 
         void deserialize(std::istream &in) {
@@ -434,7 +452,7 @@ class HashAnnotation {
             for (auto it = color_bits.begin(); it != color_bits.end(); ++it) {
                 it->deserialize(in);
             }
-            cont_bit.deserialize(in);
+            //cont_bit.deserialize(in);
         }
 
         bool operator==(const HashAnnotation<Filter> &a) {
@@ -501,21 +519,19 @@ static bool merge_or (std::vector<uint64_t> &a, const std::vector<uint64_t> &b) 
     return changed;
 }
 
-static bool merge_and (std::vector<uint64_t> &a, const std::vector<uint64_t> &b) {
-    bool changed = false;
+static std::vector<uint64_t> merge_and (std::vector<uint64_t> &a, const std::vector<uint64_t> &b) {
     if (a.size() != b.size()) {
         std::cerr << "ANDing different sizes: " << a.size() << " " << b.size() << "\n";
     }
+    std::vector<uint64_t> merged(a.size());
     auto jt = b.begin();
-    uint64_t temp;
-    for (auto it = a.begin(); it != a.end(); ++it, ++jt) {
-        temp = *it & *jt;
-        if (!changed && temp != *it)
-            changed = true;
-        *it = temp;
+    auto kt = merged.begin();
+    for (auto it = a.begin(); it != a.end(); ++it, ++jt, ++kt) {
+        *kt = *it & *jt;
     }
-    return changed;
+    return merged;
 }
+
 
 static uint64_t bigint_popcount(std::vector<uint64_t> &a) {
     uint64_t popcount = 0;

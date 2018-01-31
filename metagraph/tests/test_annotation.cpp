@@ -76,9 +76,20 @@ TEST(Annotate, RandomHashAnnotator) {
                     //check if it's there
                     testbloom = bloomhash.find(&kmers[i], &kmers[i] + 1, j);
                     testexact = exacthash.find(&kmers[i], &kmers[i] + 1, j);
-                    ASSERT_EQ(testbloom[0] | testexact[0], testbloom[0]);
+
+                    //test OR
+                    auto testbloom_merged = testbloom;
+                    annotate::HashAnnotation<>::merge_or(testbloom_merged, testexact);
+                    ASSERT_EQ(testbloom_merged[0], testbloom[0]);
+
+                    //test bit
                     ASSERT_EQ(testbloom[0] | (1lu << j), testbloom[0]);
                     ASSERT_EQ(testexact[0] | (1lu << j), testexact[0]);
+
+                    //test AND
+                    auto testbloom_and = testbloom;
+                    annotate::HashAnnotation<>::merge_and(testbloom_merged, testexact);
+                    ASSERT_EQ(testbloom_and[0], testexact[0]);
                 }
             }
         }
