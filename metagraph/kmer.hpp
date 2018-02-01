@@ -54,19 +54,14 @@ class KMer {
     uint64_t* data() {
         return reinterpret_cast<uint64_t*>(&seq_);
     }
+
     typedef uint64_t* iterator;
+
     iterator begin() {
         return data();
     }
     iterator end() {
         return data() + (sizeof(seq_) / sizeof(uint64_t));
-    }
-
-    sdsl::uint256_t* begin_256() {
-        return &seq_;
-    }
-    sdsl::uint256_t* end_256() {
-        return begin_256() + 1;
     }
 
   private:

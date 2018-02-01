@@ -122,7 +122,7 @@ TEST(KmerEncodeTest, UpdateKmerVsConstruct) {
             long_seq0.length() - 1,
             DBG_succ::encode('T'),
             DBG_succ::encode('$'),
-            kmer0.begin_256());
+            reinterpret_cast<sdsl::uint256_t*>(&kmer0));
     std::string reconst_seq1 = kmer0.to_string(DBG_succ::alphabet);
     reconst_seq1.push_back(reconst_seq1[0]);
     reconst_seq1 = reconst_seq1.substr(1);

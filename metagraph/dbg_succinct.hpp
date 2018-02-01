@@ -106,7 +106,7 @@ class DBG_succ : public SequenceGraph {
      */
     TAlphabet get_W(uint64_t k) const { return (*W)[k]; }
     const wavelet_tree& get_W() const { return *W; }
-    
+
     /**
      * Return value of last at position k.
      */

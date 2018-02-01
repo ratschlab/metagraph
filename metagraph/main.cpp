@@ -4,7 +4,6 @@
 
 #include "dbg_succinct.hpp"
 #include "dbg_succinct_chunk.hpp"
-#include "dbg_succinct_annotate.hpp"
 #include "dbg_succinct_construct.hpp"
 #include "config.hpp"
 #include "helpers.hpp"

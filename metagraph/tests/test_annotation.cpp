@@ -1,11 +1,12 @@
 #include <stdio.h>
+#include <random>
 
 #include "gtest/gtest.h"
 
 #include "dbg_succinct.hpp"
 #include "config.hpp"
 #include "annotate.hpp"
-#include <random>
+
 
 std::vector<sdsl::uint256_t> generate_kmers(size_t num) {
     std::vector<sdsl::uint256_t> kmers(num);

@@ -6,6 +6,7 @@
 #include "dbg_succinct.hpp"
 #include "annotate.hpp"
 #include "kmer.hpp"
+#include "hashers.hpp"
 
 
 //TODO
@@ -193,7 +194,7 @@ class Annotator {
 
             //bitwise AND annotations
             nextannot = annotate::HashAnnotation<>::merge_and(
-                    curannot, 
+                    curannot,
                     //annotation.find(ckmer.begin(), ckmer.end())
                     annotation_from_seq(ckmer)
             );
@@ -235,7 +236,7 @@ class Annotator {
 
             total_traversed_++;
             nextannot = annotate::HashAnnotation<>::merge_and(
-                    curannot, 
+                    curannot,
                     //annotation.find(ckmer.begin(), ckmer.end())
                     annotation_from_seq(ckmer)
             );

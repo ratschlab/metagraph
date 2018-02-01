@@ -7,7 +7,7 @@
 #include <string>
 
 #include "dbg_succinct.hpp"
-#include "hashers.hpp"
+#include "dbg_bloom_annotator.hpp"
 
 
 namespace annotate {

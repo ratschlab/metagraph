@@ -184,7 +184,7 @@ KMerDBGSuccChunkConstructor::KMerDBGSuccChunkConstructor(
     }
     omp_set_num_threads(std::max(static_cast<int>(num_threads_), 1));
 
-    if (std::all_of(filter_suffix.begin(), filter_suffix.end(), 
+    if (std::all_of(filter_suffix.begin(), filter_suffix.end(),
                     [](char c){ return c == '$'; })) {
         kmers_.emplace_back(KMer::pack_kmer(std::vector<TAlphabet>(k + 1, 0), k + 1));
     }
