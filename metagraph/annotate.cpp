@@ -9,6 +9,93 @@
 
 namespace annotate {
 
+template<typename LabelType>
+ColorCompressed<LabelType>::ColorCompressed(const std::vector<ColorCompressed<LabelType>> &categories,
+                                            const std::vector<std::set<size_t>> &merge_plan) :
+                                             annotation_curr_(NULL) {
+                                            }
+
+template<typename LabelType>
+void ColorCompressed<LabelType>::set(Index i, const LabelType &label) {
+    
+    auto id_it = label_to_id_.find(label);
+    uint64_t id = 0;
+
+    // current label does not exist yet -> assign new column
+    if (id_it == label_to_id_.end()) {
+        id = id_to_label_.size();
+        id_to_label_.emplace_back(label);
+        label_to_id_[label] = id;
+        bitmatrix_.push_back(NULL);
+
+        if (annotation_curr_) {
+            flush();
+            delete annotation_curr_;
+        }
+        annotation_curr_ = new sdsl::bit_vector(graph_size_, 0);
+        label_curr_ = label;
+
+    // decompress existing column
+    } else if (!annotation_curr_) {
+        id = id_it->second;
+        if (bitmatrix_.at(id - 1) != NULL) {
+            annotation_curr_ = inflate_column(id - 1);
+        } else {
+            annotation_curr_ = new sdsl::bit_vector(graph_size_, 0);
+        }
+    }
+
+    annotation_curr_->operator[](i) = 1;
+}
+
+
+template<typename LabelType>
+void ColorCompressed<LabelType>::flush() {
+    
+    if (annotation_curr_) {
+        auto id_it = label_to_id_.find(label_curr_);
+        if (id_it != label_to_id_.end()) {
+            uint64_t id = id_it->second;
+            while(bitmatrix_.size() < id)
+                bitmatrix_.push_back(NULL);
+
+            if (bitmatrix_.at(id - 1) != NULL) {
+                sdsl::bit_vector* tmp = inflate_column(id - 1);
+                *annotation_curr_ |= *tmp;
+                delete tmp;
+                delete bitmatrix_.at(id - 1);
+            }
+
+            bitmatrix_.at(id - 1) = new sdsl::sd_vector<>(*annotation_curr_);
+            delete annotation_curr_;
+            annotation_curr_ = NULL;
+        }
+    }
+}
+
+
+template<typename LabelType>
+sdsl::bit_vector* ColorCompressed<LabelType>::inflate_column(const uint64_t id) const { 
+
+   sdsl::sd_vector<>* col = bitmatrix_.at(id);
+   sdsl::select_support_sd<> slct = sdsl::select_support_sd<>(col);
+   sdsl::rank_support_sd<> rank = sdsl::rank_support_sd<>(col);
+
+   size_t maxrank = rank(col->size());
+   sdsl::bit_vector* result = new sdsl::bit_vector(col->size(), 0);
+   size_t idx = 0;
+   for (size_t i = 1; i <= maxrank; ++i) {
+       idx = slct(i);
+       if (idx < col->size()) {
+           result->operator[](idx) = col->operator[](idx);
+           continue;
+       }
+       break;
+   }
+        
+   return result;
+}
+
 // void annotate_kmer(DBG_succ *G, sdsl::bit_vector *annotation_curr,
 //                    std::string &kmer, uint64_t &idx, bool ignore) {
 
@@ -33,21 +120,6 @@ namespace annotate {
 //         return;
 
 //     annotation_curr->operator[](idx) = 1;
-// }
-
-// sdsl::bit_vector* inflate_annotation(DBG_succ* G, uint64_t id) {
-//     sdsl::select_support_sd<> slct = sdsl::select_support_sd<>(G->annotation_full.at(id));
-//     sdsl::rank_support_sd<> rank = sdsl::rank_support_sd<>(G->annotation_full.at(id));
-//     size_t maxrank = rank(G->annotation_full.at(id)->size());
-//     sdsl::bit_vector* result = new sdsl::bit_vector(G->annotation_full.at(id)->size(), 0);
-//     size_t idx;
-//     for (size_t i = 1; i <= maxrank; ++i) {
-//         idx = slct(i);
-//         if (idx < G->annotation_full.at(id)->size()) {
-//             result->operator[](idx) = G->annotation_full.at(id)->operator[](idx);
-//         }
-//     }
-//     return result;
 // }
 
 // void annotate_seq(DBG_succ *G, Config *config, kstring_t &seq, kstring_t &label,
@@ -147,36 +219,7 @@ namespace annotate {
 //         for (size_t j = 0; j < G->annotation_full.size(); ++j) {
 //             labels.at(j) = (*(G->annotation_full.at(j)))[path.at(i)] ? 1 : std::max(labels.at(j), 0u);
 //         }
-//         /*curr_anno = G->annotation.at(path.at(i));
-//         if (curr_anno > 0) {
-//             current_combination = get_curr_combination(G->combination_vector, G->annotation_map[curr_anno]);
-//             for (std::vector<uint32_t>::iterator c = current_combination.begin(); c != current_combination.end(); c++) {
-//                 if (label_counter.find(*c) != label_counter.end()) {
-//                     label_counter[*c] += 1;
-//                 } else {
-//                     label_counter[*c] = 1;
-//                 }
-//             }
-//         }*/
 //     }
-
-//     /*
-//     // take majority vote as consensus for now
-//     if (label_counter.size() == 1) {
-//         labels.push_back(label_counter.begin()->first);
-//     } else if (label_counter.size() > 0) {
-//         uint32_t curr_max = 0;
-//         for (std::map<uint32_t, uint64_t>::iterator c = label_counter.begin(); c != label_counter.end(); c++) {
-//             if (c->second > curr_max) {
-//                 labels.clear();
-//                 curr_max = c->second;
-//             }
-//             if (c->second == curr_max) {
-//                 labels.push_back(c->first);
-//             }
-//         }
-//     }*/
-
 //     return labels;
 // }
 

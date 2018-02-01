@@ -67,13 +67,24 @@ class ColorCompressed : public AnnotationCategory<LabelType> {
 
     virtual bool exists(Index i, const LabelType &label) const;
 
-    virtual void set(Index i, const LabelType &label);
+    void set(Index i, const LabelType &label);
 
     virtual bool load(const std::string &filename);
     virtual void serialize(const std::string &filename) const;
 
+    void flush();
+
   private:
-    //Members
+    uint64_t graph_size_;
+
+    std::unordered_map<LabelType, uint64_t> label_to_id_; 
+    std::vector<LabelType> id_to_label_;
+    std::vector<sdsl::sd_vector<>*> bitmatrix_;
+    sdsl::bit_vector* annotation_curr_;
+    LabelType label_curr_;
+
+    sdsl::bit_vector* inflate_column(const uint64_t id) const;
+
 };
 
 
