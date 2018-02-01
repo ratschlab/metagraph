@@ -1194,12 +1194,11 @@ bool DBG_succ::is_valid() const {
     assert(get_W(1) == encode('$') && "First kmer must be dummy");
 
     for (uint64_t i = 1; i < W->size(); i++) {
-        auto node_str = get_node_str(i);
-        for (char c : node_str) {
-            if (alphabet.find(c) == std::string::npos)
-                return false;
-        }
-        if (get_W(i) >= alphabet.size())
+        auto index_pred = bwd(i);
+        if (index_pred < 1
+                || index_pred >= W->size()
+                || get_node_last_value(index_pred) >= alph_size
+                || get_W(index_pred) >= alphabet.size())
             return false;
     }
     return true;
