@@ -51,19 +51,6 @@ class KMer {
     template<typename T>
     static sdsl::uint256_t pack_kmer(const T &arr, size_t k);
 
-    uint64_t* data() {
-        return reinterpret_cast<uint64_t*>(&seq_);
-    }
-
-    typedef uint64_t* iterator;
-
-    iterator begin() {
-        return data();
-    }
-    iterator end() {
-        return data() + (sizeof(seq_) / sizeof(uint64_t));
-    }
-
   private:
     sdsl::uint256_t seq_; // kmer sequence
 };

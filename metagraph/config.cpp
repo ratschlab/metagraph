@@ -66,6 +66,12 @@ Config::Config(int argc, const char *argv[]) {
             k = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
             memory_available = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--bloom-bits-per-edge")) {
+            bloom_bits_per_edge = std::stof(argv[++i]);
+        } else if (!strcmp(argv[i], "--bloom-hash-functions")) {
+            bloom_num_hash_functions = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--bloom-test-stepsize")) {
+            bloom_test_stepsize = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--align-length")) {
             alignment_length = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
@@ -183,6 +189,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --sql-base [STR] \tbasename for SQL output file\n");
             fprintf(stderr, "\t   --mem-cap-gb [INT] \tmaximum memory available, in Gb [inf]\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
+            fprintf(stderr, "\t   --bloom-bits-per-edge [FLOAT] \tBits per edge used in bloom filter annotator [0.4]\n");
+            fprintf(stderr, "\t   --bloom-hash-functions [INT] \tNumber of hash functions used in bloom filter [1]\n");
+            fprintf(stderr, "\t   --bloom-test-stepsize \tEstimate false positive rate for every n-th k-mer [0]\n");
             fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
             fprintf(stderr, "\t   --fast \t\tuse fast build method [off]\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");

@@ -105,17 +105,22 @@ int main(int argc, const char *argv[]) {
     // create graph pointer
     DBG_succ *graph = NULL;
 
-    //TODO: set this value
-    Annotator annotator(graph, 0.4);
-    annotator.init_exact_hasher();
-
     const auto &files = config->fname;
 
     switch (config->identity) {
         //TODO: allow for building by appending/adding to an existing graph
         case Config::BUILD: {
             graph = new DBG_succ(config->k);
-            annotator.set_graph(graph);
+
+            BloomAnnotator *annotator = NULL;
+            PreciseAnnotator *precise_annotator = NULL;
+
+            if (config->bloom_num_hash_functions) {
+                annotator = new BloomAnnotator(config->bloom_num_hash_functions,
+                                               graph, config->bloom_bits_per_edge);
+                if (config->bloom_test_stepsize > 0)
+                    precise_annotator = new PreciseAnnotator(graph->get_k());
+            }
 
             if (config->verbose)
                 std::cerr << "k is " << graph->get_k() << std::endl;
@@ -231,36 +236,41 @@ int main(int argc, const char *argv[]) {
                                     std::string fixed = std::string("N") + read_stream->seq.s + "N";
                                     //std::string fixed = read_stream->seq.s;
 
-                                    auto& kmers = constructor->data();
-                                    size_t last_size = kmers.size();
                                     constructor->add_read(fixed);
                                     //constructor->add_read(read_stream->seq.s);
-                                    if (suffices.size() == 1) {
+                                    if (annotator && suffix == suffices[0]) {
                                         if (utils::get_filetype(files[f]) == "FASTQ") {
                                             //assume each FASTQ file is one column
-                                            annotator.add_sequences(kmers.begin() + last_size, kmers.end(), f);
+                                            annotator->add_sequence(fixed, f);
+                                            if (precise_annotator)
+                                                precise_annotator->add_sequence(fixed, f);
                                         } else {
                                             //assume each sequence in each FASTA file is a column
-                                            annotator.add_column(kmers.begin() + last_size, kmers.end());
+                                            annotator->add_column(fixed);
+                                            if (precise_annotator)
+                                                precise_annotator->add_column(fixed);
                                         }
                                     }
                                 }
                                 if (config->reverse) {
                                     reverse_complement(read_stream->seq);
+
                                     std::string fixed = std::string("N") + read_stream->seq.s + "N";
                                     //std::string fixed = read_stream->seq.s;
 
-                                    auto& kmers = constructor->data();
-                                    size_t last_size = kmers.size();
                                     constructor->add_read(fixed);
                                     //constructor->add_read(read_stream->seq.s);
-                                    if (suffices.size() == 1) {
+                                    if (annotator && suffix == suffices[0]) {
                                         if (utils::get_filetype(files[f]) == "FASTQ") {
                                             //assume each FASTQ file is one column
-                                            annotator.add_sequences(kmers.begin() + last_size, kmers.end(), f);
+                                            annotator->add_sequence(fixed, f);
+                                            if (precise_annotator)
+                                                precise_annotator->add_sequence(fixed, f);
                                         } else {
                                             //assume each sequence in each FASTA file is a column
-                                            annotator.add_column(kmers.begin() + last_size, kmers.end());
+                                            annotator->add_column(fixed);
+                                            if (precise_annotator)
+                                                precise_annotator->add_column(fixed);
                                         }
                                     }
                                 }
@@ -290,18 +300,12 @@ int main(int argc, const char *argv[]) {
 
                 graph_data.initialize_graph(graph);
 
-                //construct continuity bit
-                std::cout << "Constructing junction bits...\t" << std::flush;
-                timer.reset();
-                annotator.set_junction();
-                std::cout << timer.elapsed() << "sec" << std::endl;
-
-                if (annotator.exact_enabled()) {
+                if (precise_annotator) {
                     //Check FPP
                     std::cout << "Approximating FPP...\t" << std::flush;
                     timer.reset();
                     //TODO: set this value
-                    annotator.test_fp_all(1000);
+                    annotator->test_fp_all(*precise_annotator, config->bloom_test_stepsize);
                     std::cout << timer.elapsed() << "sec" << std::endl;
                 }
 
@@ -358,7 +362,26 @@ int main(int argc, const char *argv[]) {
             config->infbase = config->outfbase;
             // graph->annotationToFile(config->infbase + ".anno.dbg");
             //graph->print_state();
-            break;
+
+            // output and cleanup
+
+            // graph output
+            if (config->print_graph_succ)
+                graph->print_state();
+            if (!config->sqlfbase.empty())
+                traverse::toSQL(graph, config->fname, config->sqlfbase);
+            if (!config->outfbase.empty())
+                graph->serialize(config->outfbase);
+            if (!config->outfbase.empty() && annotator)
+                annotator->serialize(config->outfbase);
+            delete graph;
+
+            if (annotator)
+                delete annotator;
+            if (precise_annotator)
+                delete precise_annotator;
+
+            return 0;
         }
         case Config::ANNOTATE: {
            //  // load graph
@@ -762,8 +785,6 @@ int main(int argc, const char *argv[]) {
             traverse::toSQL(graph, config->fname, config->sqlfbase);
         if (!config->outfbase.empty())
             graph->serialize(config->outfbase);
-        if (!config->outfbase.empty())
-            annotator.serialize(config->outfbase);
         delete graph;
     }
 

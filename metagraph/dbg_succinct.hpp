@@ -161,6 +161,12 @@ class DBG_succ : public SequenceGraph {
     std::deque<TAlphabet> get_node_seq(uint64_t k_node) const;
 
     /**
+    * Given a node index k, this function returns the k-mer sequence of the
+    * node as a string.
+    */
+    std::string get_node_str(uint64_t k) const;
+
+    /**
      * Given a node index i, this function returns the number of outgoing
      * edges from node i.
      */
@@ -294,12 +300,6 @@ class DBG_succ : public SequenceGraph {
      * The index is over the alphabet!
      */
     TAlphabet get_F(size_t k) const { return F.at(k); }
-
-    /**
-    * Given a node index k, this function returns the k-mer sequence of the
-    * node as a string.
-    */
-    std::string get_node_str(uint64_t k) const;
 
     /**
      * This function returns true if node i is a terminal node.

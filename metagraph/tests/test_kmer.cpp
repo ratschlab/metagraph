@@ -232,12 +232,3 @@ TEST(KmerEncodeTest, CompareSuffixFalseLong) {
 TEST(KmerTest, SizeOfClass) {
     EXPECT_EQ(32u, sizeof(KMer));
 }
-
-TEST(KmerTest, Iterators) {
-    sdsl::uint256_t test1(2llu, 2llu, sdsl::uint128_t(2llu, 2llu));
-    KMer kmer(test1);
-    ASSERT_EQ(kmer.end() - kmer.begin(), 4);
-    for (auto it = kmer.begin(); it != kmer.end(); ++it) {
-        ASSERT_EQ(*it, 2llu);
-    }
-}

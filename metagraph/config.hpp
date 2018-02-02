@@ -30,6 +30,10 @@ class Config {
     unsigned int nsplits = 1;
     unsigned int alignment_length = 0;
     unsigned int memory_available = 0;
+    unsigned int bloom_num_hash_functions = 1;
+    unsigned int bloom_test_stepsize = 0;
+
+    double bloom_bits_per_edge = 0.4;
 
     std::vector<std::string> fname;
     std::string outfbase;
