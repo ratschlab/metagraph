@@ -28,6 +28,31 @@ std::vector<uint64_t> merge_and(const std::vector<uint64_t> &a,
 
 uint64_t popcount(const std::vector<uint64_t> &a);
 
+//multihash container
+struct MultiHash {
+    MultiHash(size_t num_hash = 0) : hashes(num_hash) { }
+
+    template <typename T>
+    MultiHash(const T *data, const size_t len, size_t num_hash = 0) : hashes(num_hash) {
+        std::copy(data, data + len, hashes.begin());
+    }
+
+    //vector to store hashes (one per seed/hash function)
+    std::vector<size_t> hashes;
+};
+
+//HASH WRAPPER STRUCTS
+struct {
+    template <typename T, typename S>
+    void operator()(const T *data, const size_t len, const uint32_t seed, S *hash) {
+        //WARNING: make sure that the size of space allocated to hash is at least 8
+        MurmurHash3_x64_128(
+                reinterpret_cast<const char*>(data),
+                len * sizeof(S),
+                seed, hash
+        );
+    }
+} Murmur3Hasher;
 
 class ExactFilter {
   public:
@@ -38,30 +63,26 @@ class ExactFilter {
 
     template <typename Object>
     bool find(Object *a, Object *b) const {
-        return set.find(hash_(a, b)) != set.end();
+        return set_.find(hash_(a, b)) != set_.end();
     }
 
     template <typename Object>
     bool insert(Object *a, Object *b) {
-        return !set.insert(hash_(a, b)).second;
+        return !set_.insert(hash_(a, b)).second;
     }
 
   private:
+    std::unordered_set<uint64_t> set_;
+
     template <typename Object>
     static uint64_t hash_(Object *a, Object *b) {
         __uint128_t hash = 0;
-        MurmurHash3_x64_128(
-            reinterpret_cast<const char*>(a),
-            reinterpret_cast<const char*>(b) - reinterpret_cast<const char*>(a),
-            0,
-            &hash
-        );
+        Murmur3Hasher(a, b - a, 0, &hash);
         uint64_t first_hash;
         std::copy(reinterpret_cast<const uint64_t*>(&hash),
                   reinterpret_cast<const uint64_t*>(&hash) + 1, &first_hash);
         return first_hash;
     }
-    std::unordered_set<uint64_t> set;
 };
 
 
@@ -259,14 +280,11 @@ class BloomFilter {
   private:
     template <typename T>
     inline bool hash_helper(T *a, T *b) const {
-        const char *begin = reinterpret_cast<const char*>(a);
-        size_t len = static_cast<size_t>(b - a) * sizeof(T);
-
         __uint128_t hash = 0;
         uint64_t select;
 
         for (auto it = seeds.begin(); it != seeds.end(); ++it) {
-            MurmurHash3_x64_128(begin, len, *it, &hash);
+            Murmur3Hasher(a, b - a, *it, &hash);
             select = hash % n_bits;
             auto jt = bits.begin() + (select >> 6);
             if (jt >= bits.end()) {
@@ -284,15 +302,12 @@ class BloomFilter {
     inline bool hash_helper_insert(T *a, T *b) {
         assert(b >= a);
 
-        const char *begin = reinterpret_cast<const char*>(a);
-        size_t len = static_cast<size_t>(b - a) * sizeof(T);
-
         __uint128_t hash = 0;
         uint64_t select;
         bool might_contain = true;
         uint64_t last;
         for (auto it = seeds.begin(); it != seeds.end(); ++it) {
-            MurmurHash3_x64_128(begin, len, *it, &hash);
+            Murmur3Hasher(a, b - a, *it, &hash);
             select = hash % n_bits;
 
             auto jt = bits.begin() + (select >> 6);
