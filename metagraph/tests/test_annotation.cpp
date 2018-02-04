@@ -45,9 +45,7 @@ TEST(Annotate, RandomTestNoFalseNegative) {
             }
         }
     }
-    //check to make sure the Bloom filter isn't full
-    std::cerr << "Total: " << total << " FP: " << fp << std::endl;
-    EXPECT_TRUE(total > fp);
+    EXPECT_TRUE(total > fp) << "Total: " << total << " FP: " << fp << std::endl;
 }
 
 TEST(Annotate, RandomHashAnnotator) {

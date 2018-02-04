@@ -112,14 +112,21 @@ int main(int argc, const char *argv[]) {
         case Config::BUILD: {
             graph = new DBG_succ(config->k);
 
-            BloomAnnotator *annotator = NULL;
-            PreciseAnnotator *precise_annotator = NULL;
+            annotate::BloomAnnotator *annotator = NULL;
+            annotate::PreciseAnnotator *precise_annotator = NULL;
+            annotate::DBGSuccAnnotWrapper graph_anno_wrapper(*graph);
 
             if (config->bloom_num_hash_functions) {
-                annotator = new BloomAnnotator(config->bloom_num_hash_functions,
-                                               graph, config->bloom_bits_per_edge);
-                if (config->bloom_test_stepsize > 0)
-                    precise_annotator = new PreciseAnnotator(graph->get_k());
+                annotator = new annotate::BloomAnnotator(
+                    config->bloom_num_hash_functions,
+                    graph_anno_wrapper,
+                    config->bloom_bits_per_edge
+                );
+                if (config->bloom_test_stepsize > 0) {
+                    precise_annotator = new annotate::PreciseAnnotator(
+                        graph_anno_wrapper
+                    );
+                }
             }
 
             if (config->verbose)

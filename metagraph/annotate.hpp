@@ -116,6 +116,66 @@ class ColorBloomFilter : parent GenomeAnnotation {
 */
 
 
+class DBGSuccAnnotWrapper : public DeBruijnGraphWrapper {
+  public:
+    DBGSuccAnnotWrapper(const DBG_succ &graph) : graph_(graph) {}
+
+    size_t get_k() const { return graph_.get_k(); }
+
+    edge_index first_edge() const { return 1; }
+    edge_index last_edge() const { return graph_.get_W().size() - 1; }
+
+    // Transform sequence to the same kind as the de bruijn graph stores
+    std::string encode_sequence(const std::string &sequence) const {
+        auto result = sequence;
+        for (char &c : result) {
+            c = graph_.decode(graph_.encode(c));
+        }
+        return result;
+    }
+
+    std::string get_node_kmer(edge_index i) const {
+        assert(i >= first_edge() && i <= last_edge());
+        return graph_.get_node_str(i);
+    }
+
+    char get_edge_label(edge_index i) const {
+        assert(i >= first_edge() && i <= last_edge());
+        return graph_.decode(graph_.get_W(i));
+    }
+
+    // Check if the source k-mer for this edge has the only outgoing edge
+    bool has_the_only_outgoing_edge(edge_index i) const {
+        assert(i >= first_edge() && i <= last_edge());
+        return graph_.get_last(i) && ((i == 1) || graph_.get_last(i - 1));
+    }
+
+    bool has_the_only_incoming_edge(edge_index i) const {
+        assert(i >= first_edge() && i <= last_edge());
+        return graph_.indegree(i) == 1;
+    }
+
+    bool is_dummy_edge(const std::string &kmer) const {
+        assert(kmer.length() == graph_.get_k() + 1);
+        return kmer.front() == '$' || kmer.back() == '$';
+    }
+
+    edge_index next_edge(edge_index i, char edge_label) const {
+        assert(i >= first_edge() && i <= last_edge());
+        return graph_.traverse(i, edge_label);
+    }
+
+    edge_index prev_edge(edge_index i) const {
+        assert(i >= first_edge() && i <= last_edge());
+        assert(has_the_only_incoming_edge(i));
+        return graph_.get_minus_k_value(i, 0).second;
+    }
+
+  private:
+    const DBG_succ &graph_;
+};
+
+
 //TODO: remove this
 
     // sdsl::bit_vector* inflate_annotation(DBG_succ *G, uint64_t id);

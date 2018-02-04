@@ -384,7 +384,7 @@ class HashAnnotation {
 
     template <typename T, typename S>
     std::vector<size_t> find(T *a, T *b, S begin, S end) const {
-        std::vector<size_t> annot((color_bits.size() >> 6) + 1);
+        std::vector<size_t> annot((color_bits.size() >> 6) + 1, 0);
         for (auto it = begin; it != end; ++it) {
             if (*it >= color_bits.size()) {
                 std::cerr << "ERROR: Index " << *it << " >= " << color_bits.size() << "\n";
