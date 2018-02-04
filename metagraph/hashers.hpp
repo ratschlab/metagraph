@@ -48,8 +48,9 @@ struct {
         //WARNING: make sure that the size of space allocated to hash is at least 8
         MurmurHash3_x64_128(
                 reinterpret_cast<const char*>(data),
-                len * sizeof(S),
-                seed, hash
+                len * sizeof(T),
+                seed,
+                reinterpret_cast<uint64_t*>(hash)
         );
     }
 } Murmur3Hasher;
