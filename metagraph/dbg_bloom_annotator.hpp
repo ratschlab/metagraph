@@ -65,24 +65,24 @@ class BloomAnnotator {
 
     std::vector<size_t> annotation_from_kmer(const std::string &kmer) const;
 
-    std::vector<size_t> get_annotation(DeBruijnGraphWrapper::edge_index i);
+    std::vector<size_t> get_annotation(DeBruijnGraphWrapper::edge_index i) const;
 
     std::vector<size_t> get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
-                                                 size_t path_cutoff = 50);
+                                                 size_t path_cutoff = 50) const;
 
-    void test_fp_all(const PreciseAnnotator &annotation_exact, size_t step = 1);
+    void test_fp_all(const PreciseAnnotator &annotation_exact, size_t step = 1) const;
 
-    void serialize(std::ostream &out);
+    void serialize(std::ostream &out) const;
 
-    void serialize(const std::string &filename);
+    void serialize(const std::string &filename) const;
 
-    std::vector<size_t> unpack(const std::vector<size_t> &packed) const;
+    static std::vector<size_t> unpack(const std::vector<size_t> &packed);
 
   private:
     std::string kmer_from_index(DeBruijnGraphWrapper::edge_index index) const;
 
     std::vector<uint8_t> test_fp(DeBruijnGraphWrapper::edge_index i,
-                                 const PreciseAnnotator &annotation_exact);
+                                 const PreciseAnnotator &annotation_exact) const;
 
     annotate::HashAnnotation<annotate::BloomFilter> annotation;
 

@@ -80,13 +80,13 @@ BloomAnnotator::annotation_from_kmer(const std::string &kmer) const {
 }
 
 std::vector<size_t>
-BloomAnnotator::get_annotation(DeBruijnGraphWrapper::edge_index i) {
+BloomAnnotator::get_annotation(DeBruijnGraphWrapper::edge_index i) const {
     return annotation_from_kmer(kmer_from_index(i));
 }
 
 std::vector<size_t>
 BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
-                                         size_t path_cutoff) {
+                                         size_t path_cutoff) const {
     //initial raw annotation
     std::string orig_kmer = kmer_from_index(i);
 
@@ -108,7 +108,7 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
     auto j = i;
     size_t path = 0;
     while (path++ < path_cutoff) {
-        total_traversed_++;
+        const_cast<size_t&>(total_traversed_)++;
 
         //traverse forward
         j = graph_.next_edge(j, cur_kmer.back());
@@ -150,7 +150,7 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
     path = 0;
     while (graph_.has_the_only_incoming_edge(j)
             && path++ < path_cutoff) {
-        total_traversed_++;
+        const_cast<size_t&>(total_traversed_)++;
 
         j = graph_.prev_edge(j);
 
@@ -182,7 +182,7 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
 }
 
 void BloomAnnotator::test_fp_all(const PreciseAnnotator &annotation_exact,
-                                 size_t step) {
+                                 size_t step) const {
     size_t fp = 0;
     size_t fp_pre = 0;
     size_t fn = 0;
@@ -210,18 +210,18 @@ void BloomAnnotator::test_fp_all(const PreciseAnnotator &annotation_exact,
     std::cout << "Total traversed: " << total_traversed_ << "\n";
 }
 
-void BloomAnnotator::serialize(std::ostream &out) {
+void BloomAnnotator::serialize(std::ostream &out) const {
     annotation.serialize(out);
 }
 
-void BloomAnnotator::serialize(const std::string &filename) {
+void BloomAnnotator::serialize(const std::string &filename) const {
     std::ofstream out(filename + ".annot.dbg");
     serialize(out);
     out.close();
 }
 
 std::vector<size_t>
-BloomAnnotator::unpack(const std::vector<size_t> &packed) const {
+BloomAnnotator::unpack(const std::vector<size_t> &packed) {
     std::vector<size_t> labels;
     for (size_t i = 0; i < packed.size() * 64; ++i) {
         if (packed[i / 64] & (1llu << (i % 64)))
@@ -237,7 +237,7 @@ BloomAnnotator::kmer_from_index(DeBruijnGraphWrapper::edge_index index) const {
 
 std::vector<uint8_t>
 BloomAnnotator::test_fp(DeBruijnGraphWrapper::edge_index i,
-                        const PreciseAnnotator &annotation_exact) {
+                        const PreciseAnnotator &annotation_exact) const {
 
     auto int_kmer = kmer_from_index(i);
 

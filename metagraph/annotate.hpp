@@ -36,10 +36,10 @@ template <typename LabelType>
 class AnnotationCategory {
   public:
     virtual ~AnnotationCategory() {}
-    virtual const LabelType& get(Index i) const = 0;
-    virtual void set(Index i, const LabelType &label) = 0;
+    virtual LabelType get(Index i) const = 0;
+    virtual void set_label(Index i, const LabelType &label) = 0;
 
-    virtual bool exists(Index i, const LabelType &label) const = 0;
+    virtual bool has_label(Index i, const LabelType &label) const = 0;
 
     virtual bool load(const std::string &filename) = 0;
     virtual void serialize(const std::string &filename) const = 0;
@@ -65,14 +65,14 @@ class ColorCompressed : public AnnotationCategory<LabelType> {
     ColorCompressed(const std::vector<ColorCompressed<LabelType>> &categories,
                     const std::vector<std::set<size_t>> &merge_plan);
 
-    virtual const LabelType& get(Index i) const;
+    const LabelType& get(Index i) const;
 
-    virtual bool exists(Index i, const LabelType &label) const;
+    bool has_label(Index i, const LabelType &label) const;
 
-    void set(Index i, const LabelType &label);
+    void set_label(Index i, const LabelType &label);
 
-    virtual bool load(const std::string &filename);
-    virtual void serialize(const std::string &filename) const;
+    bool load(const std::string &filename);
+    void serialize(const std::string &filename) const;
 
     void flush();
 
@@ -98,21 +98,14 @@ class EdgeWiseMatrix : public UncompressedMatrix {
 
 
 /*
-class WaveletTrie : parent GenomeAnnotation {
+class WaveletTrie : public GenomeAnnotation {
   public:
 };
 
 
-class EdgeCompressed : parent GenomeAnnotation {
+class EdgeCompressed : public GenomeAnnotation {
   public:
 };
-
-
-class ColorBloomFilter : parent GenomeAnnotation {
-  public:
-};
-
-
 
 */
 
@@ -174,6 +167,79 @@ class DBGSuccAnnotWrapper : public DeBruijnGraphWrapper {
 
   private:
     const DBG_succ &graph_;
+};
+
+
+class AnnotationCategoryBloom;
+
+
+class AnnotationCategoryHash : public AnnotationCategory<std::set<std::string>> {
+  public:
+    typedef std::set<std::string> SetStr;
+
+    AnnotationCategoryHash(const DBG_succ &graph);
+
+    SetStr get(Index i) const;
+
+    void set_label(Index i, const SetStr &label);
+
+    void add_label(const std::string &sequence,
+                   const std::string &label);
+
+    bool has_label(Index i, const SetStr &label) const;
+
+    bool load(const std::string &filename);
+    void serialize(const std::string &filename) const;
+
+    void compare_annotations(const AnnotationCategoryBloom &bloom,
+                             size_t step = 1) const;
+
+    void compare_annotations(const BloomAnnotator &bloom_annotator,
+                             size_t step) const;
+
+  private:
+    DBGSuccAnnotWrapper graph_;
+    PreciseAnnotator annotator_;
+
+    std::vector<std::string> column_to_label_;
+    std::unordered_map<std::string, size_t> label_to_column_;
+};
+
+
+class AnnotationCategoryBloom : public AnnotationCategory<std::set<std::string>> {
+  public:
+    typedef std::set<std::string> SetStr;
+
+    AnnotationCategoryBloom(const DBG_succ &graph,
+                            size_t num_hash_functions,
+                            double bloom_size_factor,
+                            bool verbose = false);
+
+    ~AnnotationCategoryBloom() {}
+
+    SetStr get(Index i) const;
+
+    void set_label(Index i, const SetStr &label);
+
+    void add_label(const std::string &sequence,
+                   const std::string &label);
+
+    bool has_label(Index i, const SetStr &label) const;
+
+    bool load(const std::string &filename);
+    void serialize(const std::string &filename) const;
+
+    void compare_annotations(const AnnotationCategoryHash &exact,
+                             size_t step = 1) const {
+        exact.compare_annotations(annotator_, step);
+    }
+
+  private:
+    DBGSuccAnnotWrapper graph_;
+    BloomAnnotator annotator_;
+
+    std::vector<std::string> column_to_label_;
+    std::unordered_map<std::string, size_t> label_to_column_;
 };
 
 
