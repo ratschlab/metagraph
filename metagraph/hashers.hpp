@@ -55,6 +55,7 @@ struct {
     }
 } Murmur3Hasher;
 
+//same interface as ntHash, for turning any hash function into an iterative multihasher
 template <class HashStruct>
 class HashIterator {
     private:
@@ -123,6 +124,12 @@ class HashIterator {
       size_t k_;
       std::unique_ptr<HashIterator> end_;
 };
+
+
+template <class HashIterator>
+std::vector<MultiHash> hash(HashIterator &hash_it);
+
+std::vector<size_t> annotate(MultiHash &multihash, const size_t max_size);
 
 class ExactFilter {
   public:
@@ -378,20 +385,6 @@ class HashAnnotation {
     std::vector<size_t> find(T *a, T *b, size_t ind) const {
         return find(a, b, &ind, &ind + 1);
     }
-
-    // struct Hash {
-    //     __uint128_t hash;
-    // };
-
-    // std::vector<Hash> hash(const std::string &sequence, size_t k) const {
-    //     assert(sequence.length() >= k);
-    //     //TODO
-    // }
-
-    // template <typename T>
-    // std::vector<size_t> annotate(const Hash &hashed_kmer) const {
-    //     //TODO
-    // }
 
     size_t size() const {
         return color_bits.size();
