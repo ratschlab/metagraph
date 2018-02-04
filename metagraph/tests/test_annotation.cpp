@@ -81,26 +81,100 @@ TEST(Annotate, RandomHashAnnotator) {
                 //test OR
                 auto testbloom_merged = testbloom;
                 annotate::merge_or(testbloom_merged, testexact);
-                ASSERT_EQ(testbloom_merged[0], testbloom[0]);
+                ASSERT_TRUE(annotate::equal(testbloom, testbloom_merged));
 
                 //test bit
-                ASSERT_EQ(testbloom[0] | (1lu << j), testbloom[0]);
-                ASSERT_EQ(testexact[0] | (1lu << j), testexact[0]);
+                ASSERT_TRUE(annotate::test_bit(testbloom, j));
+                ASSERT_TRUE(annotate::test_bit(testexact, j));
 
                 //test AND
                 auto testbloom_and = testbloom;
                 annotate::merge_and(testbloom_merged, testexact);
-                ASSERT_EQ(testbloom_and[0], testexact[0]);
+                ASSERT_TRUE(annotate::equal(testexact, testbloom_and));
             }
         }
         auto testbloom = bloomhash.find(&kmers[i], &kmers[i] + 1);
         auto testexact = exacthash.find(&kmers[i], &kmers[i] + 1);
-        auto it = testbloom.begin();
-        auto jt = testexact.begin();
-        for (; it != testbloom.end(); ++it, ++jt) {
-            ASSERT_EQ(*it | *jt, *it);
-        }
+        ASSERT_TRUE(annotate::equal(testbloom, annotate::merge_or(testbloom, testexact)));
     }
+}
+
+TEST(Annotate, HashIterator) {
+    std::string test_string;
+    for (size_t i = 0; i < 8; ++i) {
+        test_string += std::string("$NATGC");
+    }
+    ASSERT_EQ(48llu, test_string.length());
+
+    size_t num_hash_functions = 5;
+    size_t kmer_size = 20;
+
+    annotate::HashIterator hash_it(test_string, num_hash_functions, kmer_size);
+    auto pos = hash_it.pos();
+    ASSERT_EQ(num_hash_functions, hash_it.size());
+    ASSERT_EQ(0llu, pos);
+
+    auto hashes = annotate::hash_murmur(
+            test_string,
+            num_hash_functions,
+            kmer_size
+    );
+    
+    ASSERT_EQ(test_string.length() - kmer_size + 1, hashes.size());
+
+    uint64_t bigint[2];
+    for (size_t i = 0; i + kmer_size <= test_string.length(); ++i) {
+        for (uint32_t j = 0; j < num_hash_functions; ++j) {
+            ASSERT_NE('\0', *(&test_string[i] + kmer_size - 1));
+            annotate::Murmur3Hasher(&test_string[i], kmer_size, j, &bigint[0]);
+            ASSERT_EQ(bigint[0], (*hash_it)[j]);
+            ASSERT_EQ(bigint[0], hashes[i][j]);
+        }
+        ++hash_it;
+    }
+    EXPECT_EQ(hashes.size(), hash_it.pos());
+}
+
+TEST(Annotate, HashIteratorInsert) {
+    std::string test_string;
+    for (size_t i = 0; i < 8; ++i) {
+        test_string += std::string("$NATGC");
+    }
+    ASSERT_EQ(48llu, test_string.length());
+
+    size_t num_hash_functions = 5;
+    size_t kmer_size = 20;
+
+    annotate::HashIterator hash_it(test_string, num_hash_functions, kmer_size);
+    ASSERT_EQ(num_hash_functions, hash_it.size());
+
+    auto hashes = annotate::hash_murmur(
+            test_string,
+            num_hash_functions,
+            kmer_size
+    );
+    
+    ASSERT_EQ(test_string.length() - kmer_size + 1, hashes.size());
+    
+    annotate::HashAnnotation<annotate::BloomFilter> bloomhash(num_hash_functions);
+    annotate::HashAnnotation<annotate::ExactFilter> exacthash;
+    annotate::HashAnnotation<annotate::BloomFilter> bloomhash_it(num_hash_functions);
+    annotate::HashAnnotation<annotate::ExactFilter> exacthash_it;
+
+    bloomhash.append_bit(1000);
+    exacthash.append_bit(1000);
+    bloomhash_it.append_bit(1000);
+    exacthash_it.append_bit(1000);
+
+    for (size_t i = 0; i + kmer_size < test_string.length(); ++i) {
+        bloomhash.insert(&test_string[i], &test_string[i] + kmer_size, 0);
+        exacthash.insert(&test_string[i], &test_string[i] + kmer_size, 0);
+        bloomhash_it.insert(hashes[i], 0);
+        exacthash_it.insert(hashes[i], 0);
+    }
+    EXPECT_TRUE(bloomhash == bloomhash_it);
+    EXPECT_TRUE(exacthash == exacthash_it);
+
 }
 
 

@@ -15,6 +15,7 @@
 #include <boost/serialization/vector.hpp>
 
 #include <MurmurHash3.h>
+#include <ntHashIterator.hpp>
 
 
 namespace annotate {
@@ -28,17 +29,39 @@ std::vector<uint64_t> merge_and(const std::vector<uint64_t> &a,
 
 uint64_t popcount(const std::vector<uint64_t> &a);
 
+bool equal(const std::vector<uint64_t> &a, const std::vector<uint64_t> &b);
+
+bool test_bit(const std::vector<uint64_t> &a, const size_t col);
+
+void set_bit(std::vector<uint64_t> &a, const size_t col);
+
 //multihash container
-struct MultiHash {
-    MultiHash(size_t num_hash = 0) : hashes(num_hash) { }
+class MultiHash {
+    public:
+      MultiHash(size_t num_hash = 0) : hashes_(num_hash) { }
 
-    template <typename T>
-    MultiHash(const T *data, const size_t num_hash = 0) : hashes(num_hash) {
-        std::copy(data, data + num_hash, hashes.begin());
-    }
+      template <typename T>
+      MultiHash(const T *data, const size_t num_hash = 0) : hashes_(num_hash) {
+          std::copy(data, data + num_hash, hashes_.begin());
+      }
 
-    //vector to store hashes (one per seed/hash function)
-    std::vector<size_t> hashes;
+      size_t size() const { return hashes_.size(); }
+
+      size_t& operator[](const size_t ind) { return hashes_[ind]; }
+
+      const size_t& operator[](const size_t ind) const { return hashes_[ind]; }
+
+      std::vector<size_t>::iterator begin() { return hashes_.begin(); }
+
+      std::vector<size_t>::iterator end() { return hashes_.end(); }
+
+      std::vector<size_t>::const_iterator begin() const { return hashes_.begin(); }
+
+      std::vector<size_t>::const_iterator end() const { return hashes_.end(); }
+
+    private:
+      //vector to store hashes (one per seed/hash function)
+      std::vector<size_t> hashes_;
 };
 
 //HASH WRAPPER STRUCTS
@@ -46,12 +69,15 @@ struct {
     template <typename T, typename S>
     void operator()(const T *data, const size_t len, const uint32_t seed, S *hash) {
         //WARNING: make sure that the size of space allocated to hash is at least 8
+        uint64_t bigint[2];
+        const char *begin = reinterpret_cast<const char*>(data);
         MurmurHash3_x64_128(
-                reinterpret_cast<const char*>(data),
+                begin,
                 len * sizeof(T),
                 seed,
-                reinterpret_cast<uint64_t*>(hash)
+                &bigint[0]
         );
+        *hash = bigint[0];
     }
 } Murmur3Hasher;
 
@@ -67,44 +93,26 @@ class HashIterator {
           return *this;
       }
 
-      HashIterator(const char *seq_begin, const char *seq_end, const size_t num_hash, const size_t k)
-          : seq_begin(seq_begin),
-            seq_cur(seq_begin),
-            seq_end(seq_end),
-            hashes_(num_hash),
-            k_(k) {
-      }
-
       HashIterator(const std::string &sequence, const size_t num_hash, const size_t k)
           : seq_begin(sequence.c_str()),
             seq_cur(seq_begin),
             seq_end(sequence.c_str() + sequence.length()),
             hashes_(num_hash),
             k_(k) {
-          end_ = std::make_unique<HashIterator>(seq_end - k, seq_end, num_hash, k);
+          assert(sequence.length() >= k_);
           operator++();
       }
 
-      bool operator==(const HashIterator &that) {
-          return
-              seq_begin == that.seq_begin
-              && seq_cur == that.seq_cur
-              && seq_end == that.seq_end
-              && k_ == that.k_
-              && hashes_.size() == that.hashes_.size();
+      bool operator==(const char *that) const {
+          return seq_cur == that;
       }
 
-      bool operator!=(const HashIterator &that) {
-          return
-              seq_begin != that.seq_begin
-              || seq_cur != that.seq_cur
-              || seq_end != that.seq_end
-              || k_ != that.k_
-              || hashes_.size() != that.hashes_.size();
+      bool operator!=(const char *that) const {
+          return seq_cur != that;
       }
 
-      const HashIterator& end() const {
-          return *end_;
+      const char* end() const {
+          return seq_end - k_ + 2;
       }
 
       size_t size() const {
@@ -116,26 +124,25 @@ class HashIterator {
       }
 
       size_t pos() const {
-          return seq_cur - seq_begin;
+          return seq_cur - seq_begin - 1;
       }
 
     private:
       const char *seq_begin, *seq_cur, *seq_end;
       std::vector<uint64_t> hashes_;
       size_t k_;
-      std::unique_ptr<HashIterator> end_;
 };
 
 
 template <class HashIterator>
-std::vector<MultiHash> hash(HashIterator &hash_it);
+std::vector<MultiHash> hash(HashIterator&& hash_it);
 
 std::vector<MultiHash> hash_murmur(
         const std::string &sequence,
         const size_t num_hash,
         const size_t k);
 
-std::vector<size_t> annotate(MultiHash &multihash, const size_t max_size);
+std::vector<size_t> annotate(const MultiHash &multihash, const size_t max_size);
 
 class ExactFilter {
   public:
@@ -149,9 +156,43 @@ class ExactFilter {
         return set_.find(hash_(a, b)) != set_.end();
     }
 
+    bool find(const MultiHash &hash) const {
+        assert(hash.size());
+        return set_.find(hash[0]) != set_.end();
+    }
+
     template <typename Object>
     bool insert(Object *a, Object *b) {
         return !set_.insert(hash_(a, b)).second;
+    }
+
+    bool insert(const MultiHash &hash) {
+        assert(hash.size());
+        return !set_.insert(hash[0]).second;
+    }
+
+    bool operator==(const ExactFilter &that) const {
+        if (set_.size() != that.set_.size())
+            return false;
+        auto it = set_.begin();
+        auto jt = that.set_.begin();
+        for (; it != set_.end(); ++it, ++jt) {
+            if (*it != *jt)
+                return false;
+        }
+        return true;
+    }
+
+    bool operator!=(const ExactFilter &that) const {
+        if (set_.size() != that.set_.size())
+            return true;
+        auto it = set_.begin();
+        auto jt = that.set_.begin();
+        for (; it != set_.end(); ++it, ++jt) {
+            if (*it == *jt)
+                return false;
+        }
+        return true;
     }
 
   private:
@@ -202,6 +243,33 @@ class BloomFilter {
     template <typename T>
     bool find(const T &a) const {
         return find(&a, &a + sizeof(a));
+    }
+
+    bool find(const MultiHash &multihash) const {
+        for (auto it = multihash.begin(); it != multihash.end(); ++it) {
+            if (!test_bit(bits, *it % n_bits)) {
+                return false;
+            }
+        }
+        return true;
+        //return equal(merge_or(bits, annotate(hash, n_bits)), bits);
+    }
+
+    bool insert(const MultiHash &multihash) {
+        bool might_contain = true;
+        for (auto it = multihash.begin(); it != multihash.end(); ++it) {
+            if (!test_bit(bits, *it % n_bits)) {
+                might_contain = false;
+            }
+            set_bit(bits, *it % n_bits);
+        }
+        return might_contain;
+        /*
+        auto merged = merge_or(bits, annotate(hash, n_bits));
+        bool might_contain = equal(merged, bits);
+        std::copy(merged.begin(), merged.end(), bits.begin());
+        return might_contain;
+        */
     }
 
     template <typename T>
@@ -349,7 +417,8 @@ class HashAnnotation {
             }
             if (color_bits[*it].insert(a, b)) {
                 //might contain
-                annot[*it >> 6] |= (1llu << (*it % 64));
+                set_bit(annot, *it);
+                //annot[*it >> 6] |= (1llu << (*it % 64));
             }
         }
         return annot;
@@ -358,6 +427,26 @@ class HashAnnotation {
     template <typename T>
     std::vector<size_t> insert(T *a, T *b, size_t ind) {
         return insert(a, b, &ind, &ind + 1);
+    }
+
+    template <typename S>
+    std::vector<size_t> insert(const MultiHash &hash, S begin, S end) {
+        std::vector<size_t> annot((color_bits.size() >> 6) + 1);
+        for (auto it = begin; it != end; ++it) {
+            if (*it >= color_bits.size()) {
+                std::cerr << "ERROR: Index " << *it << " >= " << color_bits.size() << "\n";
+                exit(1);
+            }
+            if (color_bits[*it].insert(hash)) {
+                set_bit(annot, *it);
+                //annot[*it >> 6] |= (1llu << (*it % 64));
+            }
+        }
+        return annot;
+    }
+
+    std::vector<size_t> insert(const MultiHash &hash, size_t ind) {
+        return insert(hash, &ind, &ind + 1);
     }
 
     template <typename T, typename S>
@@ -370,7 +459,8 @@ class HashAnnotation {
             }
             if (color_bits[*it].find(a, b)) {
                 //might contain
-                annot[*it >> 6] |= (1llu << (*it % 64));
+                set_bit(annot, *it);
+                //annot[*it >> 6] |= (1llu << (*it % 64));
             }
         }
         return annot;
@@ -381,7 +471,8 @@ class HashAnnotation {
         std::vector<size_t> annot((color_bits.size() >> 6) + 1);
         for (size_t i = 0; i < color_bits.size(); ++i) {
             if (color_bits[i].find(a, b)) {
-                annot[i >> 6] |= (1llu << (i % 64));
+                set_bit(annot, i);
+                //annot[i >> 6] |= (1llu << (i % 64));
             }
         }
         return annot;
@@ -392,8 +483,33 @@ class HashAnnotation {
         return find(a, b, &ind, &ind + 1);
     }
 
+    template <typename S>
+    std::vector<size_t> find(const MultiHash &hash, S begin, S end) {
+        std::vector<size_t> annot((color_bits.size() >> 6) + 1);
+        for (auto it = begin; it != end; ++it) {
+            if (*it >= color_bits.size()) {
+                std::cerr << "ERROR: Index " << *it << " >= " << color_bits.size() << "\n";
+                exit(1);
+            }
+            if (color_bits[*it].find(hash)) {
+                set_bit(annot, *it);
+                //annot[*it >> 6] |= (1llu << (*it % 64));
+            }
+        }
+        return annot;
+    }
+
+    std::vector<size_t> find(const MultiHash &hash, size_t ind) {
+        return find(hash, &ind, &ind + 1);
+    }
+
+
     size_t size() const {
         return color_bits.size();
+    }
+
+    size_t num_hash_functions() const {
+        return num_hash_functions_;
     }
 
     void serialize(std::ostream &out) const {
@@ -415,7 +531,7 @@ class HashAnnotation {
         }
     }
 
-    bool operator==(const HashAnnotation<Filter> &a) {
+    bool operator==(const HashAnnotation<Filter> &a) const {
         if (color_bits.size() != a.color_bits.size()) {
             std::cerr << "Different number of filters\n";
             return false;

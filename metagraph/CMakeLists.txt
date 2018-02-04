@@ -12,12 +12,12 @@ string(APPEND CMAKE_CXX_FLAGS " \
   -msse4.2 -fopenmp -D_THREAD_SAFE -pthread") # -DDBGDEBUG
 
 # Profile build type
-set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O2")
-set(CMAKE_EXE_LINKER_FLAGS_PROFILE "-pg")
-set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg")
+set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O2 -g")
+set(CMAKE_EXE_LINKER_FLAGS_PROFILE "-pg -g")
+set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg -g")
 
 # Debug build type
-set(CMAKE_CXX_FLAGS_DEBUG "-O3")
+set(CMAKE_CXX_FLAGS_DEBUG "-O3 -g")
 
 # Debug without asserts
 set(CMAKE_CXX_FLAGS_DEBUGGER "-pg -O2 -g -DNDEBUG")
@@ -34,6 +34,7 @@ include_directories(
   external-libraries/libmaus2/include
   external-libraries/sdsl-lite/include
   external-libraries/smhasher/src
+  external-libraries/ntHash
 )
 
 #add_subdirectory()

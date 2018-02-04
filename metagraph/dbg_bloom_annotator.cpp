@@ -15,12 +15,23 @@ void PreciseAnnotator::add_sequence(const std::string &sequence, size_t column) 
     if (column >= annotation_exact.size())
         annotation_exact.resize(column + 1);
 
+    auto hashes = hash_murmur(preprocessed_seq, 1, graph_.get_k() + 1);
+    //auto hashes = hash(ntHashIterator(preprocessed_seq, 1, graph_.get_k() + 1));
+
+    for (auto it = hashes.begin(); it != hashes.end(); ++it) {
+        annotation_exact.insert(*it, column);
+    }
+
+    /*
     for (size_t i = 0; i + graph_.get_k() < preprocessed_seq.size(); ++i) {
         annotation_exact.insert(
-            &preprocessed_seq[i],
-            &preprocessed_seq[i] + graph_.get_k() + 1, column
+                &preprocessed_seq[i],
+                &preprocessed_seq[i] + graph_.get_k() + 1,
+                column
         );
     }
+    */
+
 }
 
 void PreciseAnnotator::add_column(const std::string &sequence) {
@@ -60,13 +71,24 @@ void BloomAnnotator::add_sequence(const std::string &sequence, size_t column) {
         );
     }
 
+
+    auto hashes = hash_murmur(preprocessed_seq, annotation.num_hash_functions(), graph_.get_k() + 1);
+
+    for (auto it = hashes.begin(); it != hashes.end(); ++it) {
+        annotation.insert(*it, column);
+    }
+
+    /*
+    
     for (size_t i = 0; i + graph_.get_k() < preprocessed_seq.size(); ++i) {
         annotation.insert(
-            &preprocessed_seq[i],
-            &preprocessed_seq[i] + graph_.get_k() + 1,
-            column
+                &preprocessed_seq[i],
+                &preprocessed_seq[i] + graph_.get_k() + 1,
+                column
         );
     }
+    */
+
 }
 
 void BloomAnnotator::add_column(const std::string &sequence) {
