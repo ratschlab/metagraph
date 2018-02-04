@@ -98,8 +98,7 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
         return curannot;
     }
 
-    size_t pcount_old
-        = annotate::popcount(curannot);
+    size_t pcount_old = annotate::popcount(curannot);
 
     if (!pcount_old)
         return curannot;
@@ -127,8 +126,7 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
         );
 
         //check popcounts
-        size_t pcount_new
-            = annotate::popcount(nextannot);
+        size_t pcount_new = annotate::popcount(nextannot);
 
         assert(pcount_new <= pcount_old);
 
@@ -163,8 +161,7 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
             annotation_from_kmer(cur_kmer)
         );
 
-        auto pcount_new
-            = annotate::popcount(nextannot);
+        auto pcount_new = annotate::popcount(nextannot);
 
         assert(pcount_new <= pcount_old);
 

@@ -55,6 +55,75 @@ struct {
     }
 } Murmur3Hasher;
 
+template <class HashStruct>
+class HashIterator {
+    private:
+      HashIterator(const char *seq_begin, const char *seq_end, const size_t num_hash, const size_t k)
+          : seq_begin(seq_begin), seq_cur(seq_begin), seq_end(seq_end), hashes_(num_hash), k_(k) {
+      }
+      void init_end(const char *seq_end, const size_t num_hash, const size_t k) {
+          end_ = std::make_unique<HashIterator>(seq_end - k, seq_end, num_hash, k);
+      }
+    public:
+      HashIterator& operator++() {
+          for (size_t i = 0; i < hashes_.size(); ++i) {
+              //use index as seed
+              HashStruct(seq_cur, k_, i, &hashes_[i]);
+          }
+          seq_cur++;
+      }
+
+      HashIterator(std::string &sequence, const size_t num_hash, const size_t k)
+          : hashes_(num_hash),
+            seq_begin(sequence.c_str()),
+            seq_cur(seq_begin),
+            seq_end(sequence.c_str() + sequence.length()),
+            k_(k) {
+          init_end();
+          *(this)++;
+      }
+
+      bool operator==(const HashIterator &that) {
+          return
+              seq_begin == that.seq_begin
+              && seq_cur == that.seq_cur
+              && seq_end == that.seq_end
+              && k_ == that.k_
+              && hashes_.size() == that.hashes_.size();
+      }
+
+      bool operator!=(const HashIterator &that) {
+          return
+              seq_begin != that.seq_begin
+              || seq_cur != that.seq_cur
+              || seq_end != that.seq_end
+              || k_ != that.k_
+              || hashes_.size() != that.hashes_.size();
+      }
+
+      const HashIterator& end() const {
+          return *end_;
+      }
+
+      size_t size() const {
+          return hashes_.size();
+      }
+
+      const uint64_t* operator*() const {
+          return hashes_.data();
+      }
+
+      size_t pos() const {
+          return seq_cur - seq_begin;
+      }
+
+    private:
+      std::vector<uint64_t> hashes_;
+      const char *seq_begin, *seq_cur, *seq_end;
+      size_t k_;
+      std::unique_ptr<HashIterator> end_;
+};
+
 class ExactFilter {
   public:
     ExactFilter(size_t num_hash_functions = 0, size_t size = 0) {
@@ -89,8 +158,6 @@ class ExactFilter {
 
 class BloomFilter {
   public:
-    typedef std::vector<uint64_t> big_int;
-
     BloomFilter(size_t num_hash_functions, size_t _n_bits = 0) {
         seeds.resize(num_hash_functions);
         std::iota(seeds.begin(), seeds.end(), 0);
@@ -124,109 +191,20 @@ class BloomFilter {
         return find(&a, &a + sizeof(a));
     }
 
-    /*
-    template <typename T>
-    bool annotate(T *a, T *b) {
-        bool annot = 1;
-        for (auto it = a; it != b; ++it) {
-            annot &= find(*it);
-        }
-        return annot;
-    }
-    */
-
     template <typename T>
     bool insert(T *a, T *b) {
         return hash_helper_insert(a, b);
     }
-    /*
-    template <typename T>
-    bool insert(const std::vector<T> &a) {
-        return insert(&(*(a.begin())), &(*(a.end())));
-    }
-    */
-    /*
-    template <typename T>
-    bool insert(const T &a) {
-        return insert(&a, &a + sizeof(a));
-    }
-    */
 
     void serialize(std::ostream &out) const {
-        /*
-        //shift
-        out.write(reinterpret_cast<const char*>(&shift), sizeof(shift));
-
-        //seeds
-        char *buffer;
-        size_t size = seeds.size();
-        out.write(reinterpret_cast<const char*>(&size), sizeof(size));
-        buffer = (char*)malloc(seeds.size() * sizeof(seeds[0]));
-        memcpy(buffer, reinterpret_cast<const char*>(&(*seeds.begin())), seeds.size() * sizeof(seeds[0]));
-        //std::copy(seeds.begin(), seeds.end(), reinterpret_cast<size_t*>(buffer));
-        out.write(buffer, seeds.size() * sizeof(seeds[0]));
-        free(buffer);
-
-        //bits
-        size = bits.size();
-        out.write(reinterpret_cast<const char*>(&size), sizeof(size));
-        buffer = (char*)malloc(bits.size() * sizeof(bits[0]));
-        memcpy(buffer, reinterpret_cast<const char*>(&(*bits.begin())), bits.size() * sizeof(bits[0]));
-        //std::copy(bits.begin(), bits.end(), reinterpret_cast<size_t*>(buffer));
-        out.write(buffer, bits.size() * sizeof(bits[0]));
-        free(buffer);
-        */
         out << n_bits << "\n";
-        /*
-        out << seeds.size() << "\n";
-        for (auto it = seeds.begin(); it != seeds.end(); ++it) {
-            out << *it << " ";
-        }
-        out << bits.size() << "\n";
-        for (auto it = bits.begin(); it != bits.end(); ++it) {
-            out << *it << " ";
-        }
-        */
         boost::archive::binary_oarchive oar(out);
         oar & seeds;
         oar & bits;
     }
 
     void deserialize(std::istream &in) {
-        //size_t size;
-        /*
-        //shift
-        in.read(reinterpret_cast<char*>(&shift), sizeof(shift));
-
-        //seeds
-        in.read(reinterpret_cast<char*>(&size), sizeof(size));
-        seeds.resize(size);
-        char *buffer;
-        buffer = (char*)malloc(seeds.size() * sizeof(seeds[0]));
-        in.read(buffer, seeds.size() * sizeof(seeds[0]));
-        std::copy(buffer, buffer + seeds.size() * sizeof(seeds[0]), reinterpret_cast<char*>(&seeds[0]));
-        free(buffer);
-
-        //bits
-        in.read(reinterpret_cast<char*>(&size), sizeof(size));
-        bits.resize(size);
-        buffer = (char*)malloc(bits.size() * sizeof(bits[0]));
-        std::copy(buffer, buffer + bits.size() * sizeof(bits[0]), reinterpret_cast<char*>(&bits[0]));
-        free(buffer);
-        */
         in >> n_bits;
-        /*
-        in >> size;
-        seeds.resize(size);
-        for (auto it = seeds.begin(); it != seeds.end(); ++it) {
-            in >> *it;
-        }
-        in >> size;
-        bits.resize(size);
-        for (auto it = bits.begin(); it != bits.end(); ++it) {
-            in >> *it;
-        }
-        */
         boost::archive::binary_iarchive iar(in);
         iar & seeds;
         iar & bits;
@@ -323,7 +301,7 @@ class BloomFilter {
         return might_contain;
     }
 
-    big_int bits;
+    std::vector<uint64_t> bits;
     uint64_t n_bits = 0;
     std::vector<uint64_t> seeds;
 };
@@ -334,23 +312,6 @@ class HashAnnotation {
   public:
     HashAnnotation(size_t num_hash_functions = 0)
           : num_hash_functions_(num_hash_functions) {}
-
-    // template <typename T>
-    // HashAnnotation(T *a, T *b) {
-    //     color_bits.resize(b - a - 1);
-    //     for (auto it = a; it != b - 1; ++it) {
-    //         color_bits[it - a] = *it;
-    //     }
-    // }
-    // template <typename T>
-    // HashAnnotation(const T *a, const T *b) {
-    //     //init from vector of sizes, last is size of cont bit
-    //     assert(b - a > 1);
-    //     color_bits.resize(b - a - 1);
-    //     for (auto it = a; it != b - 1; ++it) {
-    //         color_bits[it - a] = Filter(*it);
-    //     }
-    // }
 
     void resize(size_t size) {
         assert(size > color_bits.size());
@@ -364,29 +325,6 @@ class HashAnnotation {
     const Filter& operator[](size_t i) const {
         return color_bits[i];
     }
-
-    /*
-    template <class T>
-    HashAnnotation(const std::vector<T> &a)
-        : HashAnnotation(&(*(a.begin())), &(*(a.end()))) { }
-    */
-
-    /*
-    template <typename T, typename S>
-    void insert(const T &a, const S &begin, const S &end, bool&& change = false) {
-        //insert a into Bloom filters with indices in *begin, ...
-        for (auto it = begin; it != end; ++it) {
-            if (*it >= color_bits.size()) {
-                std::cerr << "Index " << *it << " >= " << color_bits.size() << "\n";
-                exit(1);
-            }
-            color_bits[*it].insert(a);
-        }
-        if (change) {
-            cont_bit.insert(a);
-        }
-    }
-    */
 
     template <typename T, typename S>
     std::vector<size_t> insert(T *a, T *b, S begin, S end) {
@@ -454,18 +392,6 @@ class HashAnnotation {
     // std::vector<size_t> annotate(const Hash &hashed_kmer) const {
     //     //TODO
     // }
-
-    /*
-    template <typename T, typename S>
-    std::vector<size_t> insert(const std::vector<T> &a, const S &begin,
-                               const S &end, bool&& change = false, bool query = false) {
-        return insert(&(*(a.begin())), &(*(a.end())), begin, end, change, query);
-    }
-    template <typename T, typename S>
-    std::vector<size_t> insert(T a, S begin, S end, bool change = false, bool query = false) {
-        return insert(&a, &a + sizeof(a), begin, end, change, query);
-    }
-    */
 
     size_t size() const {
         return color_bits.size();
