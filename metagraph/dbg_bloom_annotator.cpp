@@ -99,7 +99,7 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
     }
 
     size_t pcount_old
-        = annotate::HashAnnotation<>::bigint_popcount(curannot);
+        = annotate::popcount(curannot);
 
     if (!pcount_old)
         return curannot;
@@ -121,14 +121,14 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
             break;
 
         //bitwise AND annotations
-        auto nextannot = annotate::HashAnnotation<>::merge_and(
+        auto nextannot = annotate::merge_and(
             curannot,
             annotation_from_kmer(cur_kmer)
         );
 
         //check popcounts
         size_t pcount_new
-            = annotate::HashAnnotation<>::bigint_popcount(nextannot);
+            = annotate::popcount(nextannot);
 
         assert(pcount_new <= pcount_old);
 
@@ -158,13 +158,13 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
         if (graph_.is_dummy_edge(cur_kmer))
             break;
 
-        auto nextannot = annotate::HashAnnotation<>::merge_and(
+        auto nextannot = annotate::merge_and(
             curannot,
             annotation_from_kmer(cur_kmer)
         );
 
         auto pcount_new
-            = annotate::HashAnnotation<>::bigint_popcount(nextannot);
+            = annotate::popcount(nextannot);
 
         assert(pcount_new <= pcount_old);
 

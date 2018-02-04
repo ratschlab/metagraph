@@ -19,6 +19,16 @@
 
 namespace annotate {
 
+//MERGING
+
+std::vector<uint64_t> merge_or(const std::vector<uint64_t> &a,
+                                      const std::vector<uint64_t> &b);
+std::vector<uint64_t> merge_and(const std::vector<uint64_t> &a,
+                                       const std::vector<uint64_t> &b);
+
+uint64_t popcount(const std::vector<uint64_t> &a);
+
+
 class ExactFilter {
   public:
     ExactFilter(size_t num_hash_functions = 0, size_t size = 0) {
@@ -495,35 +505,7 @@ class HashAnnotation {
         return occ;
     }
 
-    static std::vector<uint64_t> merge_or(const std::vector<uint64_t> &a,
-                                          const std::vector<uint64_t> &b) {
-        assert(a.size() == b.size() && "ORing different sizes");
 
-        std::vector<uint64_t> merged(a.size());
-        for (size_t i = 0; i < merged.size(); ++i) {
-            merged[i] = a[i] | b[i];
-        }
-        return merged;
-    }
-
-    static std::vector<uint64_t> merge_and(const std::vector<uint64_t> &a,
-                                           const std::vector<uint64_t> &b) {
-        assert(a.size() == b.size() && "ANDing different sizes");
-
-        std::vector<uint64_t> merged(a.size());
-        for (size_t i = 0; i < merged.size(); ++i) {
-            merged[i] = a[i] & b[i];
-        }
-        return merged;
-    }
-
-    static uint64_t bigint_popcount(const std::vector<uint64_t> &a) {
-        uint64_t popcount = 0;
-        for (auto value : a) {
-            popcount += __builtin_popcountl(value);
-        }
-        return popcount;
-    }
 
   private:
     std::vector<Filter> color_bits;

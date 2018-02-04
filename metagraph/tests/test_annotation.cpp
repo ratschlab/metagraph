@@ -80,7 +80,7 @@ TEST(Annotate, RandomHashAnnotator) {
 
                 //test OR
                 auto testbloom_merged = testbloom;
-                annotate::HashAnnotation<>::merge_or(testbloom_merged, testexact);
+                annotate::merge_or(testbloom_merged, testexact);
                 ASSERT_EQ(testbloom_merged[0], testbloom[0]);
 
                 //test bit
@@ -89,7 +89,7 @@ TEST(Annotate, RandomHashAnnotator) {
 
                 //test AND
                 auto testbloom_and = testbloom;
-                annotate::HashAnnotation<>::merge_and(testbloom_merged, testexact);
+                annotate::merge_and(testbloom_merged, testexact);
                 ASSERT_EQ(testbloom_and[0], testexact[0]);
             }
         }
