@@ -33,8 +33,8 @@ struct MultiHash {
     MultiHash(size_t num_hash = 0) : hashes(num_hash) { }
 
     template <typename T>
-    MultiHash(const T *data, const size_t len, size_t num_hash = 0) : hashes(num_hash) {
-        std::copy(data, data + len, hashes.begin());
+    MultiHash(const T *data, const size_t num_hash = 0) : hashes(num_hash) {
+        std::copy(data, data + num_hash, hashes.begin());
     }
 
     //vector to store hashes (one per seed/hash function)
@@ -56,32 +56,33 @@ struct {
 } Murmur3Hasher;
 
 //same interface as ntHash, for turning any hash function into an iterative multihasher
-template <class HashStruct>
 class HashIterator {
-    private:
-      HashIterator(const char *seq_begin, const char *seq_end, const size_t num_hash, const size_t k)
-          : seq_begin(seq_begin), seq_cur(seq_begin), seq_end(seq_end), hashes_(num_hash), k_(k) {
-      }
-      void init_end(const char *seq_end, const size_t num_hash, const size_t k) {
-          end_ = std::make_unique<HashIterator>(seq_end - k, seq_end, num_hash, k);
-      }
     public:
       HashIterator& operator++() {
           for (size_t i = 0; i < hashes_.size(); ++i) {
               //use index as seed
-              HashStruct(seq_cur, k_, i, &hashes_[i]);
+              Murmur3Hasher(seq_cur, k_, i, &hashes_[i]);
           }
           seq_cur++;
+          return *this;
       }
 
-      HashIterator(std::string &sequence, const size_t num_hash, const size_t k)
-          : hashes_(num_hash),
-            seq_begin(sequence.c_str()),
+      HashIterator(const char *seq_begin, const char *seq_end, const size_t num_hash, const size_t k)
+          : seq_begin(seq_begin),
+            seq_cur(seq_begin),
+            seq_end(seq_end),
+            hashes_(num_hash),
+            k_(k) {
+      }
+
+      HashIterator(const std::string &sequence, const size_t num_hash, const size_t k)
+          : seq_begin(sequence.c_str()),
             seq_cur(seq_begin),
             seq_end(sequence.c_str() + sequence.length()),
+            hashes_(num_hash),
             k_(k) {
-          init_end();
-          *(this)++;
+          end_ = std::make_unique<HashIterator>(seq_end - k, seq_end, num_hash, k);
+          operator++();
       }
 
       bool operator==(const HashIterator &that) {
@@ -119,8 +120,8 @@ class HashIterator {
       }
 
     private:
-      std::vector<uint64_t> hashes_;
       const char *seq_begin, *seq_cur, *seq_end;
+      std::vector<uint64_t> hashes_;
       size_t k_;
       std::unique_ptr<HashIterator> end_;
 };
@@ -128,6 +129,11 @@ class HashIterator {
 
 template <class HashIterator>
 std::vector<MultiHash> hash(HashIterator &hash_it);
+
+std::vector<MultiHash> hash_murmur(
+        const std::string &sequence,
+        const size_t num_hash,
+        const size_t k);
 
 std::vector<size_t> annotate(MultiHash &multihash, const size_t max_size);
 
