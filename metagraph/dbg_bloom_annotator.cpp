@@ -79,7 +79,7 @@ void BloomAnnotator::add_sequence(const std::string &sequence, size_t column) {
     }
 
     /*
-    
+
     for (size_t i = 0; i + graph_.get_k() < preprocessed_seq.size(); ++i) {
         annotation.insert(
                 &preprocessed_seq[i],

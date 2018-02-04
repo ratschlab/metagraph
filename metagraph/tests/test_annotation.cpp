@@ -119,7 +119,7 @@ TEST(Annotate, HashIterator) {
             num_hash_functions,
             kmer_size
     );
-    
+
     ASSERT_EQ(test_string.length() - kmer_size + 1, hashes.size());
 
     uint64_t bigint[2];
@@ -153,9 +153,9 @@ TEST(Annotate, HashIteratorInsert) {
             num_hash_functions,
             kmer_size
     );
-    
+
     ASSERT_EQ(test_string.length() - kmer_size + 1, hashes.size());
-    
+
     annotate::HashAnnotation<annotate::BloomFilter> bloomhash(num_hash_functions);
     annotate::HashAnnotation<annotate::ExactFilter> exacthash;
     annotate::HashAnnotation<annotate::BloomFilter> bloomhash_it(num_hash_functions);
