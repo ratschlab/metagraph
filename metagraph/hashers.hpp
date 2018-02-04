@@ -7,6 +7,7 @@
 #include <cmath>
 #include <vector>
 #include <algorithm>
+#include <numeric>
 #include <unordered_set>
 
 #include <boost/archive/binary_oarchive.hpp>

@@ -35,6 +35,7 @@ typedef uint64_t Index;
 template <typename LabelType>
 class AnnotationCategory {
   public:
+    virtual ~AnnotationCategory() {}
     virtual const LabelType& get(Index i) const = 0;
     virtual void set(Index i, const LabelType &label) = 0;
 
@@ -78,7 +79,7 @@ class ColorCompressed : public AnnotationCategory<LabelType> {
   private:
     uint64_t graph_size_;
 
-    std::unordered_map<LabelType, uint64_t> label_to_id_; 
+    std::unordered_map<LabelType, uint64_t> label_to_id_;
     std::vector<LabelType> id_to_label_;
     std::vector<sdsl::sd_vector<>*> bitmatrix_;
     sdsl::bit_vector* annotation_curr_;

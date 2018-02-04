@@ -82,9 +82,6 @@ void recover_source_dummy_nodes(size_t k,
     // remove redundant dummy kmers inplace
     size_t cur_pos = 0;
     size_t end_sorted = kmers->size();
-    std::vector<KMer> prev_dummy_kmers;
-
-    kmers->emplace_back(KMer::pack_kmer(std::vector<TAlphabet>(k + 1, 0), k + 1));
 
     for (size_t i = 0; i < end_sorted; ++i) {
         const KMer &kmer = kmers->at(i);
@@ -184,8 +181,7 @@ KMerDBGSuccChunkConstructor::KMerDBGSuccChunkConstructor(
     }
     omp_set_num_threads(std::max(static_cast<int>(num_threads_), 1));
 
-    if (std::all_of(filter_suffix.begin(), filter_suffix.end(),
-                    [](char c){ return c == '$'; })) {
+    if (filter_suffix == std::string(filter_suffix.size(), '$')) {
         kmers_.emplace_back(KMer::pack_kmer(std::vector<TAlphabet>(k + 1, 0), k + 1));
     }
 }

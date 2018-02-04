@@ -93,7 +93,7 @@ TEST(Annotate, RandomHashAnnotator) {
                 ASSERT_EQ(testbloom_and[0], testexact[0]);
             }
         }
-        auto testbloom = bloomhash.find(&kmers[i], &kmers[i] + 1); 
+        auto testbloom = bloomhash.find(&kmers[i], &kmers[i] + 1);
         auto testexact = exacthash.find(&kmers[i], &kmers[i] + 1);
         auto it = testbloom.begin();
         auto jt = testexact.begin();

@@ -51,8 +51,6 @@ class KMerDBGSuccChunkConstructor {
 
     size_t get_k() const { return k_; }
 
-    std::vector<KMer>& data() { return kmers_; }
-
   private:
     size_t k_;
     std::vector<KMer> kmers_;

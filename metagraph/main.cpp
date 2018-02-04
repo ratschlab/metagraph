@@ -240,8 +240,8 @@ int main(int argc, const char *argv[]) {
                             }
                             while (kseq_read(read_stream) >= 0) {
                                 {
-                                    std::string fixed = std::string("N") + read_stream->seq.s + "N";
-                                    //std::string fixed = read_stream->seq.s;
+                                    // std::string fixed = std::string("N") + read_stream->seq.s + "N";
+                                    std::string fixed = read_stream->seq.s;
 
                                     constructor->add_read(fixed);
                                     //constructor->add_read(read_stream->seq.s);
@@ -262,8 +262,8 @@ int main(int argc, const char *argv[]) {
                                 if (config->reverse) {
                                     reverse_complement(read_stream->seq);
 
-                                    std::string fixed = std::string("N") + read_stream->seq.s + "N";
-                                    //std::string fixed = read_stream->seq.s;
+                                    // std::string fixed = std::string("N") + read_stream->seq.s + "N";
+                                    std::string fixed = read_stream->seq.s;
 
                                     constructor->add_read(fixed);
                                     //constructor->add_read(read_stream->seq.s);
@@ -797,4 +797,3 @@ int main(int argc, const char *argv[]) {
 
     return 0;
 }
-

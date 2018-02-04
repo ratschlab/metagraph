@@ -9,15 +9,15 @@
 
 namespace annotate {
 
-template<typename LabelType>
-ColorCompressed<LabelType>::ColorCompressed(const std::vector<ColorCompressed<LabelType>> &categories,
-                                            const std::vector<std::set<size_t>> &merge_plan) :
-                                             annotation_curr_(NULL) {
-                                            }
+template <typename LabelType>
+ColorCompressed<LabelType>::ColorCompressed(
+    const std::vector<ColorCompressed<LabelType>> &categories,
+    const std::vector<std::set<size_t>> &merge_plan
+) : annotation_curr_(NULL) {}
 
-template<typename LabelType>
+template <typename LabelType>
 void ColorCompressed<LabelType>::set(Index i, const LabelType &label) {
-    
+
     auto id_it = label_to_id_.find(label);
     uint64_t id = 0;
 
@@ -49,9 +49,9 @@ void ColorCompressed<LabelType>::set(Index i, const LabelType &label) {
 }
 
 
-template<typename LabelType>
+template <typename LabelType>
 void ColorCompressed<LabelType>::flush() {
-    
+
     if (annotation_curr_) {
         auto id_it = label_to_id_.find(label_curr_);
         if (id_it != label_to_id_.end()) {
@@ -74,26 +74,26 @@ void ColorCompressed<LabelType>::flush() {
 }
 
 
-template<typename LabelType>
-sdsl::bit_vector* ColorCompressed<LabelType>::inflate_column(const uint64_t id) const { 
+template <typename LabelType>
+sdsl::bit_vector* ColorCompressed<LabelType>::inflate_column(const uint64_t id) const {
 
-   sdsl::sd_vector<>* col = bitmatrix_.at(id);
-   sdsl::select_support_sd<> slct = sdsl::select_support_sd<>(col);
-   sdsl::rank_support_sd<> rank = sdsl::rank_support_sd<>(col);
+    sdsl::sd_vector<>* col = bitmatrix_.at(id);
+    sdsl::select_support_sd<> slct = sdsl::select_support_sd<>(col);
+    sdsl::rank_support_sd<> rank = sdsl::rank_support_sd<>(col);
 
-   size_t maxrank = rank(col->size());
-   sdsl::bit_vector* result = new sdsl::bit_vector(col->size(), 0);
-   size_t idx = 0;
-   for (size_t i = 1; i <= maxrank; ++i) {
-       idx = slct(i);
-       if (idx < col->size()) {
-           result->operator[](idx) = col->operator[](idx);
-           continue;
-       }
-       break;
-   }
-        
-   return result;
+    size_t maxrank = rank(col->size());
+    sdsl::bit_vector* result = new sdsl::bit_vector(col->size(), 0);
+    size_t idx = 0;
+    for (size_t i = 1; i <= maxrank; ++i) {
+        idx = slct(i);
+        if (idx < col->size()) {
+            result->operator[](idx) = col->operator[](idx);
+            continue;
+        }
+        break;
+    }
+
+    return result;
 }
 
 // void annotate_kmer(DBG_succ *G, sdsl::bit_vector *annotation_curr,
