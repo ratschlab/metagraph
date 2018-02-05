@@ -9,3 +9,6 @@
 [submodule "metagraph/external-libraries/smhasher"]
 	path = metagraph/external-libraries/smhasher
 	url = https://github.com/aappleby/smhasher
+[submodule "metagraph/external-libraries/ntHash"]
+	path = metagraph/external-libraries/ntHash
+	url = https://github.com/bcgsc/ntHash
