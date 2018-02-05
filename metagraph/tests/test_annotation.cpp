@@ -3,6 +3,7 @@
 #include "gtest/gtest.h"
 
 #include "annotate.hpp"
+#include "hashers.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
@@ -124,15 +125,37 @@ TEST(Annotate, HashIterator) {
 
     uint64_t bigint[2];
     for (size_t i = 0; i + kmer_size <= test_string.length(); ++i) {
+        auto hash = annotate::hash_murmur(
+                std::string(&test_string[i], kmer_size),
+                num_hash_functions,
+                kmer_size
+        );
+        ASSERT_EQ(1llu, hash.size());
         for (uint32_t j = 0; j < num_hash_functions; ++j) {
             ASSERT_NE('\0', *(&test_string[i] + kmer_size - 1));
             annotate::Murmur3Hasher(&test_string[i], kmer_size, j, &bigint[0]);
             ASSERT_EQ(bigint[0], (*hash_it)[j]);
             ASSERT_EQ(bigint[0], hashes[i][j]);
+            ASSERT_EQ(bigint[0], hash[0][j]);
         }
         ++hash_it;
     }
     EXPECT_EQ(hashes.size(), hash_it.pos());
+}
+
+TEST(Annotate, ntHash) {
+
+    //TODO: if N in string, ntHashIterator fails
+    std::string test_string("NATGCA");
+
+    size_t num_hash = 5;
+
+    ntHashIterator hash_nt(test_string, num_hash, test_string.length());
+    ASSERT_NE(hash_nt, hash_nt.end());
+
+    auto hashes = annotate::hash(hash_nt, num_hash);
+    ASSERT_EQ(1llu, hashes.size());
+
 }
 
 TEST(Annotate, HashIteratorInsert) {
@@ -146,6 +169,7 @@ TEST(Annotate, HashIteratorInsert) {
     size_t kmer_size = 20;
 
     annotate::HashIterator hash_it(test_string, num_hash_functions, kmer_size);
+    ntHashIterator hash_nt_it(test_string, num_hash_functions, kmer_size);
     ASSERT_EQ(num_hash_functions, hash_it.size());
 
     auto hashes = annotate::hash_murmur(
@@ -160,13 +184,27 @@ TEST(Annotate, HashIteratorInsert) {
     annotate::HashAnnotation<annotate::ExactFilter> exacthash;
     annotate::HashAnnotation<annotate::BloomFilter> bloomhash_it(num_hash_functions);
     annotate::HashAnnotation<annotate::ExactFilter> exacthash_it;
+    annotate::HashAnnotation<annotate::ExactFilter> exacthash_it2;
+    annotate::HashAnnotation<annotate::ExactFilter> exacthash_nt_it;
 
     bloomhash.append_bit(1000);
     exacthash.append_bit(1000);
     bloomhash_it.append_bit(1000);
     exacthash_it.append_bit(1000);
+    exacthash_it2.append_bit(1000);
+    exacthash_nt_it.append_bit(1000);
 
-    for (size_t i = 0; i + kmer_size < test_string.length(); ++i) {
+    while (hash_it != hash_it.end()) {
+        exacthash_it2.insert(annotate::MultiHash(*hash_it, num_hash_functions), 0);
+        ++hash_it;
+    }
+
+    while (hash_nt_it != hash_nt_it.end()) {
+        exacthash_nt_it.insert(annotate::MultiHash(*hash_nt_it, num_hash_functions), 0);
+        ++hash_nt_it;
+    }
+
+    for (size_t i = 0; i + kmer_size <= test_string.length(); ++i) {
         bloomhash.insert(&test_string[i], &test_string[i] + kmer_size, 0);
         exacthash.insert(&test_string[i], &test_string[i] + kmer_size, 0);
         bloomhash_it.insert(hashes[i], 0);
@@ -174,7 +212,17 @@ TEST(Annotate, HashIteratorInsert) {
     }
     EXPECT_TRUE(bloomhash == bloomhash_it);
     EXPECT_TRUE(exacthash == exacthash_it);
+    EXPECT_TRUE(exacthash == exacthash_it2);
 
+    for (size_t i = 0; i + kmer_size <= test_string.length(); ++i) {
+        auto hash = annotate::hash_murmur(std::string(&test_string[i], kmer_size), num_hash_functions, kmer_size)[0];
+        ASSERT_TRUE(exacthash.find(hash)[0]);
+        ASSERT_TRUE(exacthash_it.find(hash)[0]);
+        ASSERT_TRUE(exacthash_it2.find(hash)[0]);
+        ASSERT_TRUE(bloomhash.find(hash)[0]);
+        ASSERT_TRUE(bloomhash_it.find(hash)[0]);
+        //ASSERT_TRUE(bloomhash_it2.find(hash)[0]);
+    }
 }
 
 

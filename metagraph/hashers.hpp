@@ -42,7 +42,10 @@ class MultiHash {
 
       template <typename T>
       MultiHash(const T *data, const size_t num_hash = 0) : hashes_(num_hash) {
-          std::copy(data, data + num_hash, hashes_.begin());
+          //std::copy(data, data + num_hash, hashes_.begin());
+          for (size_t i = 0; i < num_hash; ++i) {
+              hashes_[i] = data[i];
+          }
       }
 
       size_t size() const { return hashes_.size(); }
@@ -59,7 +62,8 @@ class MultiHash {
 
       std::vector<size_t>::const_iterator end() const { return hashes_.end(); }
 
-    private:
+    //private:
+    public:
       //vector to store hashes (one per seed/hash function)
       std::vector<size_t> hashes_;
 };
@@ -134,8 +138,8 @@ class HashIterator {
 };
 
 
-template <class HashIterator>
-std::vector<MultiHash> hash(HashIterator&& hash_it);
+template <class HashIt>
+std::vector<MultiHash> hash(HashIt&& hash_it, const size_t num_hash);
 
 std::vector<MultiHash> hash_murmur(
         const std::string &sequence,
@@ -258,7 +262,7 @@ class BloomFilter {
     bool insert(const MultiHash &multihash) {
         bool might_contain = true;
         for (auto it = multihash.begin(); it != multihash.end(); ++it) {
-            if (!test_bit(bits, *it % n_bits)) {
+            if (might_contain && !test_bit(bits, *it % n_bits)) {
                 might_contain = false;
             }
             set_bit(bits, *it % n_bits);
@@ -346,12 +350,17 @@ class BloomFilter {
         for (auto it = seeds.begin(); it != seeds.end(); ++it) {
             Murmur3Hasher(a, b - a, *it, &hash);
             select = hash % n_bits;
+            /*
             auto jt = bits.begin() + (select >> 6);
             if (jt >= bits.end()) {
                 std::cerr << "Out of bounds\n";
                 exit(1);
             }
             if ((*jt | (1llu << (select % 64))) != *jt) {
+                return false;
+            }
+            */
+            if (!test_bit(bits, select)) {
                 return false;
             }
         }
@@ -365,11 +374,12 @@ class BloomFilter {
         __uint128_t hash = 0;
         uint64_t select;
         bool might_contain = true;
-        uint64_t last;
+        //uint64_t last;
         for (auto it = seeds.begin(); it != seeds.end(); ++it) {
             Murmur3Hasher(a, b - a, *it, &hash);
             select = hash % n_bits;
 
+            /*
             auto jt = bits.begin() + (select >> 6);
             assert(jt < bits.end());
 
@@ -378,6 +388,11 @@ class BloomFilter {
             if (might_contain && *jt != last) {
                 might_contain = false;
             }
+            */
+            if (might_contain && !test_bit(bits, select)) {
+                might_contain = false;
+            }
+            set_bit(bits, select);
         }
         return might_contain;
     }
@@ -484,7 +499,7 @@ class HashAnnotation {
     }
 
     template <typename S>
-    std::vector<size_t> find(const MultiHash &hash, S begin, S end) {
+    std::vector<size_t> find(const MultiHash &hash, S begin, S end) const {
         std::vector<size_t> annot((color_bits.size() >> 6) + 1);
         for (auto it = begin; it != end; ++it) {
             if (*it >= color_bits.size()) {
@@ -499,8 +514,18 @@ class HashAnnotation {
         return annot;
     }
 
-    std::vector<size_t> find(const MultiHash &hash, size_t ind) {
+    std::vector<size_t> find(const MultiHash &hash, size_t ind) const {
         return find(hash, &ind, &ind + 1);
+    }
+
+    std::vector<size_t> find(const MultiHash &hash) const {
+        std::vector<size_t> annot((color_bits.size() >> 6) + 1);
+        for (size_t i = 0; i < color_bits.size(); ++i) {
+            if (color_bits[i].find(hash)) {
+                set_bit(annot, i);
+            }
+        }
+        return annot;
     }
 
 
