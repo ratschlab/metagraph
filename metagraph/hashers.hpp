@@ -12,9 +12,6 @@
 #include <boost/archive/binary_iarchive.hpp>
 #include <boost/serialization/vector.hpp>
 #include <MurmurHash3.h>
-//#include <cyclichash.h>
-//#include <ntHashIterator.hpp>
-
 
 namespace annotate {
 
