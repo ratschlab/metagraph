@@ -60,13 +60,6 @@ void print(const std::vector<uint64_t> &a) {
 
 //HASH ITERATORS
 
-HashIterator& HashIterator::operator++() {
-    if (seq_cur + k_ <= seq_end)
-        compute_hashes();
-    seq_cur++;
-    return *this;
-}
-
 HashIterator::HashIterator(const std::string &sequence, const size_t num_hash, const size_t k)
   : seq_begin(sequence.c_str()),
     seq_cur(seq_begin),
@@ -96,6 +89,49 @@ std::vector<MultiHash> HashIterator::generate_hashes() {
     return hashes;
 }
 
+//MurmurHash
+void MurmurHashIterator::compute_hashes() {
+    for (size_t i = 0; i < hashes_.size(); ++i) {
+        //use index as seed
+        Murmur3Hasher(seq_cur, k_, i, &hashes_[i]);
+    }
+}
+
+MurmurHashIterator& MurmurHashIterator::operator++() {
+    if (seq_cur + k_ <= seq_end)
+        compute_hashes();
+    seq_cur++;
+    return *this;
+}
+
+MurmurHashIterator::MurmurHashIterator(const std::string &kmer, const size_t num_hash)
+  : HashIterator(num_hash, kmer.length()),
+    cache_(kmer.begin(), kmer.end()) {
+    for (size_t i = 0; i < hashes_.size(); ++i) {
+        Murmur3Hasher(kmer.c_str(), kmer.length(), i, &hashes_[i]);
+    }
+    assert(kmer.length() == k_ || *this != end());
+}
+
+MurmurHashIterator& MurmurHashIterator::update(const char next) {
+    cache_.push_back(next);
+    cache_.pop_front();
+    std::string kmer(cache_.begin(), cache_.end());
+    for (size_t i = 0; i < hashes_.size(); ++i) {
+        Murmur3Hasher(kmer.c_str(), kmer.length(), i, &hashes_[i]);
+    }
+    return *this;
+}
+
+MurmurHashIterator& MurmurHashIterator::reverse_update(const char prev) {
+    cache_.push_front(prev);
+    cache_.pop_back();
+    std::string kmer(cache_.begin(), cache_.end());
+    for (size_t i = 0; i < hashes_.size(); ++i) {
+        Murmur3Hasher(kmer.c_str(), kmer.length(), i, &hashes_[i]);
+    }
+    return *this;
+}
 
 //CyclicHashIterator
 void CyclicHashIterator::init(const std::string &sequence) {
@@ -113,9 +149,19 @@ void CyclicHashIterator::compute_hashes() {
     assert(seq_cur + k_ <= seq_end);
     assert(seq_cur > seq_begin);
     for (size_t i = 0; i < hashes_.size(); ++i) {
-        reinterpret_cast<CyclicHash<uint64_t>*>(chashers_[i])->update(*(seq_cur - 1), *(seq_cur - 1 + k_));
         hashes_[i] = reinterpret_cast<CyclicHash<uint64_t>*>(chashers_[i])->hashvalue;
     }
+}
+
+CyclicHashIterator& CyclicHashIterator::operator++() {
+    if (seq_cur + k_ <= seq_end) {
+        for (size_t i = 0; i < hashes_.size(); ++i) {
+            reinterpret_cast<CyclicHash<uint64_t>*>(chashers_[i])->update(*(seq_cur - 1), *(seq_cur - 1 + k_));
+        }
+        compute_hashes();
+    }
+    seq_cur++;
+    return *this;
 }
 
 CyclicHashIterator::CyclicHashIterator(const std::string &kmer, const size_t num_hash)

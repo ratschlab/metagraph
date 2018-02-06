@@ -110,19 +110,19 @@ TEST(Annotate, HashIterator) {
     size_t num_hash_functions = 5;
     size_t kmer_size = 20;
 
-    annotate::MurmurHashIterator hash_it(test_string, num_hash_functions, kmer_size);
+    annotate::CyclicHashIterator hash_it(test_string, num_hash_functions, kmer_size);
+    annotate::CyclicHashIterator hash_it_up(test_string.substr(0, kmer_size), num_hash_functions);
     auto pos = hash_it.pos();
     ASSERT_EQ(num_hash_functions, hash_it.size());
     ASSERT_EQ(0llu, pos);
 
-    uint64_t bigint[2];
     for (size_t i = 0; i + kmer_size <= test_string.length(); ++i) {
+        ASSERT_NE('\0', *(&test_string[i] + kmer_size - 1));
         for (uint32_t j = 0; j < num_hash_functions; ++j) {
-            ASSERT_NE('\0', *(&test_string[i] + kmer_size - 1));
-            annotate::Murmur3Hasher(&test_string[i], kmer_size, j, &bigint[0]);
-            ASSERT_EQ(bigint[0], (*hash_it)[j]);
+            ASSERT_EQ((*hash_it)[j], (*hash_it_up)[j]);
         }
         ++hash_it;
+        hash_it_up.update(test_string[i + kmer_size]);
     }
     EXPECT_EQ(test_string.length() - kmer_size + 1, hash_it.pos());
 }

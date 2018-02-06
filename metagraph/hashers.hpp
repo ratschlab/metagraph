@@ -89,7 +89,7 @@ class HashIterator {
     protected:
       virtual void compute_hashes() = 0;
     public:
-      HashIterator& operator++();
+      virtual HashIterator& operator++() = 0;
 
       HashIterator(const std::string &sequence, const size_t num_hash, const size_t k);
 
@@ -105,7 +105,7 @@ class HashIterator {
 
       const char* end() const { return seq_end - k_ + 2; }
 
-      size_t pos() const { return seq_cur - seq_begin; }
+      size_t pos() const { return seq_cur - seq_begin - 1; }
 
       MultiHash get_hash();
 
@@ -119,13 +119,13 @@ class HashIterator {
 
 class MurmurHashIterator : public HashIterator {
     protected:
-      void compute_hashes() {
-          for (size_t i = 0; i < hashes_.size(); ++i) {
-              //use index as seed
-              Murmur3Hasher(seq_cur, k_, i, &hashes_[i]);
-          }
-      }
+      void compute_hashes();
+
     public:
+      MurmurHashIterator& operator++();
+
+      MurmurHashIterator(const std::string &kmer, const size_t num_hash);
+
       MurmurHashIterator(const std::string &sequence, const size_t num_hash, const size_t k)
         : HashIterator(sequence, num_hash, k) {
           compute_hashes();
@@ -134,6 +134,12 @@ class MurmurHashIterator : public HashIterator {
       }
       MurmurHashIterator(const size_t num_hash, const size_t k)
           : HashIterator(num_hash, k) { }
+
+      MurmurHashIterator& update(const char next);
+      
+      MurmurHashIterator& reverse_update(const char prev);
+    private:
+      std::deque<char> cache_;
 };
 
 class CyclicHashIterator : public HashIterator {
@@ -142,6 +148,8 @@ class CyclicHashIterator : public HashIterator {
     protected:
       void compute_hashes();
     public:
+      CyclicHashIterator& operator++();
+
       CyclicHashIterator(const std::string &kmer, const size_t num_hash);
 
       CyclicHashIterator(const std::string &sequence, const size_t num_hash, const size_t k);
