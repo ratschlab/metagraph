@@ -5,8 +5,8 @@
 
 namespace annotate {
 
-//typedef CyclicHashIterator HashIt;
-typedef MurmurHashIterator HashIt;
+typedef CyclicHashIterator HashIt;
+//typedef MurmurHashIterator HashIt;
 
 class DeBruijnGraphWrapper {
   public:

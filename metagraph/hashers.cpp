@@ -137,7 +137,7 @@ MurmurHashIterator& MurmurHashIterator::reverse_update(const char prev) {
 void CyclicHashIterator::init(const std::string &sequence) {
     chashers_.reserve(hashes_.size());
     for (uint32_t j = 0; j < hashes_.size(); ++j) {
-        chashers_.push_back(new CyclicHash<uint64_t>(k_, j, j, 64lu));
+        chashers_.push_back(new CyclicHash<uint64_t>(k_, j, j + 1, 64lu));
         for (size_t i = 0; i < k_; ++i) {
             reinterpret_cast<CyclicHash<uint64_t>*>(chashers_.back())->eat(sequence[i]);
         }
