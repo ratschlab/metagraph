@@ -11,4 +11,4 @@
 	url = https://github.com/aappleby/smhasher
 [submodule "metagraph/external-libraries/rollinghashcpp"]
 	path = metagraph/external-libraries/rollinghashcpp
-	url = https://github.com/lemire/rollinghashcpp
+	url = https://github.com/hmusta/rollinghashcpp
