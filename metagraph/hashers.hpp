@@ -3,19 +3,17 @@
 
 #include <iostream>
 #include <cassert>
-#include <cstring>
-#include <cmath>
 #include <vector>
 #include <algorithm>
 #include <numeric>
 #include <unordered_set>
-
+#include <deque>
 #include <boost/archive/binary_oarchive.hpp>
 #include <boost/archive/binary_iarchive.hpp>
 #include <boost/serialization/vector.hpp>
-
 #include <MurmurHash3.h>
-#include <ntHashIterator.hpp>
+//#include <cyclichash.h>
+//#include <ntHashIterator.hpp>
 
 
 namespace annotate {
@@ -24,6 +22,7 @@ namespace annotate {
 
 std::vector<uint64_t> merge_or(const std::vector<uint64_t> &a,
                                       const std::vector<uint64_t> &b);
+
 std::vector<uint64_t> merge_and(const std::vector<uint64_t> &a,
                                        const std::vector<uint64_t> &b);
 
@@ -85,68 +84,79 @@ struct {
     }
 } Murmur3Hasher;
 
-//same interface as ntHash, for turning any hash function into an iterative multihasher
+//same interface as ntHash
 class HashIterator {
+    protected:
+      virtual void compute_hashes() = 0;
     public:
-      HashIterator& operator++() {
-          for (size_t i = 0; i < hashes_.size(); ++i) {
-              //use index as seed
-              Murmur3Hasher(seq_cur, k_, i, &hashes_[i]);
-          }
-          seq_cur++;
-          return *this;
-      }
+      HashIterator& operator++();
 
-      HashIterator(const std::string &sequence, const size_t num_hash, const size_t k)
-          : seq_begin(sequence.c_str()),
-            seq_cur(seq_begin),
-            seq_end(sequence.c_str() + sequence.length()),
-            hashes_(num_hash),
-            k_(k) {
-          assert(sequence.length() >= k_);
-          operator++();
-      }
+      HashIterator(const std::string &sequence, const size_t num_hash, const size_t k);
 
-      bool operator==(const char *that) const {
-          return seq_cur == that;
-      }
+      HashIterator(const size_t num_hash, const size_t k);
 
-      bool operator!=(const char *that) const {
-          return seq_cur != that;
-      }
+      bool operator==(const char *that) const { return seq_cur == that; }
 
-      const char* end() const {
-          return seq_end - k_ + 2;
-      }
+      bool operator!=(const char *that) const { return seq_cur != that; }
 
-      size_t size() const {
-          return hashes_.size();
-      }
+      size_t size() const { return hashes_.size(); }
 
-      const uint64_t* operator*() const {
-          return hashes_.data();
-      }
+      const uint64_t* operator*() const { return hashes_.data(); }
 
-      size_t pos() const {
-          return seq_cur - seq_begin - 1;
-      }
+      const char* end() const { return seq_end - k_ + 2; }
 
-    private:
+      size_t pos() const { return seq_cur - seq_begin; }
+
+      MultiHash get_hash();
+
+      std::vector<MultiHash> generate_hashes();
+
+    protected:
       const char *seq_begin, *seq_cur, *seq_end;
       std::vector<uint64_t> hashes_;
       size_t k_;
 };
 
+class MurmurHashIterator : public HashIterator {
+    protected:
+      void compute_hashes() {
+          for (size_t i = 0; i < hashes_.size(); ++i) {
+              //use index as seed
+              Murmur3Hasher(seq_cur, k_, i, &hashes_[i]);
+          }
+      }
+    public:
+      MurmurHashIterator(const std::string &sequence, const size_t num_hash, const size_t k)
+        : HashIterator(sequence, num_hash, k) {
+          compute_hashes();
+          seq_cur++;
+          assert(sequence.length() == k_ || *this != end());
+      }
+      MurmurHashIterator(const size_t num_hash, const size_t k)
+          : HashIterator(num_hash, k) { }
+};
 
-template <class HashIt>
-std::vector<MultiHash> hash(HashIt&& hash_it, const size_t num_hash);
+class CyclicHashIterator : public HashIterator {
+    private:
+      void init(const std::string &sequence);
+    protected:
+      void compute_hashes();
+    public:
+      CyclicHashIterator(const std::string &kmer, const size_t num_hash);
 
-std::vector<MultiHash> hash_murmur(
-        const std::string &sequence,
-        const size_t num_hash,
-        const size_t k);
+      CyclicHashIterator(const std::string &sequence, const size_t num_hash, const size_t k);
 
-std::vector<size_t> annotate(const MultiHash &multihash, const size_t max_size);
+      ~CyclicHashIterator();
+
+      CyclicHashIterator& update(const char next);
+
+      CyclicHashIterator& reverse_update(const char prev);
+
+    private:
+      //using void to prevent including cyclichasher.h here
+      std::vector<void*> chashers_;
+      std::deque<char> cache_;
+};
 
 class ExactFilter {
   public:
@@ -586,8 +596,6 @@ class HashAnnotation {
         }
         return occ;
     }
-
-
 
   private:
     std::vector<Filter> color_bits;

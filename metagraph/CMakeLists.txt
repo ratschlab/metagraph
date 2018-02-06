@@ -35,6 +35,7 @@ include_directories(
   external-libraries/sdsl-lite/include
   external-libraries/smhasher/src
   external-libraries/ntHash
+  external-libraries/rollinghashcpp
 )
 
 #add_subdirectory()

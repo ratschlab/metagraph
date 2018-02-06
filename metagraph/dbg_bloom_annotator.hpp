@@ -3,7 +3,6 @@
 
 #include "hashers.hpp"
 
-
 namespace annotate {
 
 class DeBruijnGraphWrapper {

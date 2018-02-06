@@ -110,54 +110,24 @@ TEST(Annotate, HashIterator) {
     size_t num_hash_functions = 5;
     size_t kmer_size = 20;
 
-    annotate::HashIterator hash_it(test_string, num_hash_functions, kmer_size);
+    annotate::MurmurHashIterator hash_it(test_string, num_hash_functions, kmer_size);
     auto pos = hash_it.pos();
     ASSERT_EQ(num_hash_functions, hash_it.size());
     ASSERT_EQ(0llu, pos);
 
-    auto hashes = annotate::hash_murmur(
-            test_string,
-            num_hash_functions,
-            kmer_size
-    );
-
-    ASSERT_EQ(test_string.length() - kmer_size + 1, hashes.size());
-
     uint64_t bigint[2];
     for (size_t i = 0; i + kmer_size <= test_string.length(); ++i) {
-        auto hash = annotate::hash_murmur(
-                std::string(&test_string[i], kmer_size),
-                num_hash_functions,
-                kmer_size
-        );
-        ASSERT_EQ(1llu, hash.size());
         for (uint32_t j = 0; j < num_hash_functions; ++j) {
             ASSERT_NE('\0', *(&test_string[i] + kmer_size - 1));
             annotate::Murmur3Hasher(&test_string[i], kmer_size, j, &bigint[0]);
             ASSERT_EQ(bigint[0], (*hash_it)[j]);
-            ASSERT_EQ(bigint[0], hashes[i][j]);
-            ASSERT_EQ(bigint[0], hash[0][j]);
         }
         ++hash_it;
     }
-    EXPECT_EQ(hashes.size(), hash_it.pos());
+    EXPECT_EQ(test_string.length() - kmer_size + 1, hash_it.pos());
 }
 
-TEST(Annotate, ntHash) {
-
-    //TODO: if N in string, ntHashIterator fails
-    std::string test_string("NATGCA");
-
-    size_t num_hash = 5;
-
-    ntHashIterator hash_nt(test_string, num_hash, test_string.length());
-    ASSERT_NE(hash_nt, hash_nt.end());
-
-    auto hashes = annotate::hash(hash_nt, num_hash);
-    ASSERT_EQ(1llu, hashes.size());
-
-}
-
+/*
 TEST(Annotate, HashIteratorInsert) {
     std::string test_string;
     for (size_t i = 0; i < 8; ++i) {
@@ -168,17 +138,9 @@ TEST(Annotate, HashIteratorInsert) {
     size_t num_hash_functions = 5;
     size_t kmer_size = 20;
 
-    annotate::HashIterator hash_it(test_string, num_hash_functions, kmer_size);
+    annotate::MurmurHashIterator hash_it(test_string, num_hash_functions, kmer_size);
     ntHashIterator hash_nt_it(test_string, num_hash_functions, kmer_size);
     ASSERT_EQ(num_hash_functions, hash_it.size());
-
-    auto hashes = annotate::hash_murmur(
-            test_string,
-            num_hash_functions,
-            kmer_size
-    );
-
-    ASSERT_EQ(test_string.length() - kmer_size + 1, hashes.size());
 
     annotate::HashAnnotation<annotate::BloomFilter> bloomhash(num_hash_functions);
     annotate::HashAnnotation<annotate::ExactFilter> exacthash;
@@ -224,7 +186,7 @@ TEST(Annotate, HashIteratorInsert) {
         //ASSERT_TRUE(bloomhash_it2.find(hash)[0]);
     }
 }
-
+*/
 
 TEST(ColorCompressed, EmptyConstructor) {
     annotate::ColorCompressed annotation(5);
@@ -360,3 +322,4 @@ TEST(ColorCompressed, set_label_random) {
         ASSERT_EQ(1u, annotation.get(i).size());
     }
 }
+
