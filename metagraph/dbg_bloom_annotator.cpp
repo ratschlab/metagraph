@@ -2,7 +2,6 @@
 
 #include <fstream>
 
-
 namespace annotate {
 
 void PreciseAnnotator::add_sequence(const std::string &sequence, size_t column) {
@@ -169,24 +168,28 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
     }
 
     //backward correction
-    std::deque<DeBruijnGraphWrapper::edge_index> indices { i };
+    std::vector<DeBruijnGraphWrapper::edge_index> indices(graph_.get_k() + 1);
+    assert(orig_kmer.length() == indices.size());
+    indices[0] = i;
 
     auto back_hasher = hasher_from_kmer(orig_kmer);
     j = i;
     for (size_t m = 0; m < graph_.get_k(); ++m) {
         j = graph_.prev_edge(j);
-        indices.push_front(j);
+        indices[m + 1] = j;
     }
-    assert(orig_kmer.front() == graph_.get_edge_label(indices.front()));
+    size_t back = graph_.get_k(); //index of the back
+    assert(orig_kmer.front() == graph_.get_edge_label(indices[back]));
+    assert(orig_kmer.back() == graph_.get_edge_label(indices[(back + 1) % indices.size()]));
     path = 0;
-    while (graph_.has_the_only_incoming_edge(indices.back())
+    while (graph_.has_the_only_incoming_edge(indices[(back + 1) % indices.size()])
             && path++ < path_cutoff) {
         const_cast<size_t&>(total_traversed_)++;
 
-        indices.push_front(graph_.prev_edge(indices.front()));
-        indices.pop_back();
+        indices[(back + 1) % indices.size()] = graph_.prev_edge(indices[back]);
+        back = (back + 1) % indices.size();
 
-        char cur_first = graph_.get_edge_label(indices.front());
+        char cur_first = graph_.get_edge_label(indices[back]);
 
         if (graph_.is_dummy_label(cur_first))
             break;

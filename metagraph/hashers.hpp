@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <numeric>
 #include <unordered_set>
-#include <deque>
 #include <boost/archive/binary_oarchive.hpp>
 #include <boost/archive/binary_iarchive.hpp>
 #include <boost/serialization/vector.hpp>
@@ -136,10 +135,11 @@ class MurmurHashIterator : public HashIterator {
           : HashIterator(num_hash, k) { }
 
       MurmurHashIterator& update(const char next);
-      
+
       MurmurHashIterator& reverse_update(const char prev);
     private:
-      std::deque<char> cache_;
+      std::vector<char> cache_;
+      size_t back_;
 };
 
 class CyclicHashIterator : public HashIterator {
@@ -163,7 +163,8 @@ class CyclicHashIterator : public HashIterator {
     private:
       //using void to prevent including cyclichasher.h here
       std::vector<void*> chashers_;
-      std::deque<char> cache_;
+      std::vector<char> cache_;
+      size_t back_;
 };
 
 class ExactFilter {
