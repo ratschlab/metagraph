@@ -5,9 +5,6 @@
 
 namespace annotate {
 
-typedef CyclicHashIterator HashIt;
-//typedef MurmurHashIterator HashIt;
-
 void PreciseAnnotator::add_sequence(const std::string &sequence, size_t column) {
     std::string preprocessed_seq = graph_.encode_sequence(sequence);
 
@@ -81,16 +78,27 @@ void BloomAnnotator::add_column(const std::string &sequence) {
     add_sequence(sequence, annotation.size());
 }
 
+HashIt BloomAnnotator::hasher_from_kmer(const std::string &kmer) const {
+    assert(kmer.length() == graph_.get_k() + 1);
+    return HashIt(kmer, annotation.num_hash_functions());
+}
+
+//TODO: replace size_t with uint64_t
+std::vector<size_t>
+BloomAnnotator::annotation_from_hasher(HashIt& hash_it) const {
+    auto hashes = hash_it.get_hash();
+    return annotation.find(hashes);
+}
+
+std::vector<size_t>
+BloomAnnotator::annotation_from_hasher(HashIt&& hash_it) const {
+    auto hashes = hash_it.get_hash();
+    return annotation.find(hashes);
+}
+
 std::vector<size_t>
 BloomAnnotator::annotation_from_kmer(const std::string &kmer) const {
-    assert(kmer.length() == graph_.get_k() + 1);
-    auto hash_it = HashIt(kmer, annotation.num_hash_functions(), graph_.get_k() + 1);
-    auto hashes = hash_it.generate_hashes();
-    if (hashes.size() != 1) {
-        std::cout << hashes.size() << "\n" << kmer << "\n";
-    }
-    assert(hashes.size() == 1);
-    return annotation.find(hashes[0]);
+    return annotation_from_hasher(hasher_from_kmer(kmer));
 }
 
 std::vector<size_t>
@@ -103,8 +111,10 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
                                          size_t path_cutoff) const {
     //initial raw annotation
     std::string orig_kmer = kmer_from_index(i);
+    auto hasher = hasher_from_kmer(orig_kmer);
 
-    auto curannot = annotation_from_kmer(orig_kmer);
+    //auto curannot = annotation_from_kmer(orig_kmer);
+    auto curannot = annotation_from_hasher(hasher);
 
     // Dummy edges are not supposed to be annotated
     if (graph_.is_dummy_edge(orig_kmer)) {
@@ -117,26 +127,28 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
     if (!pcount_old)
         return curannot;
 
-    std::string cur_kmer = orig_kmer;
+    char cur_edge = orig_kmer.back();
     auto j = i;
     size_t path = 0;
     while (path++ < path_cutoff) {
         const_cast<size_t&>(total_traversed_)++;
 
         //traverse forward
-        j = graph_.next_edge(j, cur_kmer.back());
+        j = graph_.next_edge(j, cur_edge);
 
-        cur_kmer = kmer_from_index(j);
+        cur_edge = graph_.get_edge_label(j);
 
         //check outdegree
-        if (graph_.is_dummy_edge(cur_kmer)
+        if (graph_.is_dummy_label(cur_edge)
                 || !graph_.has_the_only_outgoing_edge(j))
             break;
+
+        hasher.update(cur_edge);
 
         //bitwise AND annotations
         auto nextannot = annotate::merge_and(
             curannot,
-            annotation_from_kmer(cur_kmer)
+            annotation_from_hasher(hasher)
         );
 
         //check popcounts
@@ -157,22 +169,33 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
     }
 
     //backward correction
-    cur_kmer = orig_kmer;
+    std::deque<DeBruijnGraphWrapper::edge_index> indices { i };
+
+    auto back_hasher = hasher_from_kmer(orig_kmer);
     j = i;
+    for (size_t m = 0; m < graph_.get_k(); ++m) {
+        j = graph_.prev_edge(j);
+        indices.push_front(j);
+    }
+    assert(orig_kmer.front() == graph_.get_edge_label(indices.front()));
     path = 0;
-    while (graph_.has_the_only_incoming_edge(j)
+    while (graph_.has_the_only_incoming_edge(indices.back())
             && path++ < path_cutoff) {
         const_cast<size_t&>(total_traversed_)++;
 
-        j = graph_.prev_edge(j);
+        indices.push_front(graph_.prev_edge(indices.front()));
+        indices.pop_back();
 
-        cur_kmer = kmer_from_index(j);
-        if (graph_.is_dummy_edge(cur_kmer))
+        char cur_first = graph_.get_edge_label(indices.front());
+
+        if (graph_.is_dummy_label(cur_first))
             break;
+
+        back_hasher.reverse_update(cur_first);
 
         auto nextannot = annotate::merge_and(
             curannot,
-            annotation_from_kmer(cur_kmer)
+            annotation_from_hasher(back_hasher)
         );
 
         auto pcount_new = annotate::popcount(nextannot);

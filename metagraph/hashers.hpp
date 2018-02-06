@@ -27,6 +27,8 @@ uint64_t popcount(const std::vector<uint64_t> &a);
 
 bool equal(const std::vector<uint64_t> &a, const std::vector<uint64_t> &b);
 
+void print(const std::vector<uint64_t> &a);
+
 bool test_bit(const std::vector<uint64_t> &a, const size_t col);
 
 void set_bit(std::vector<uint64_t> &a, const size_t col);
@@ -34,10 +36,11 @@ void set_bit(std::vector<uint64_t> &a, const size_t col);
 //multihash container
 class MultiHash {
     public:
-      MultiHash(size_t num_hash = 0) : hashes_(num_hash) { }
+      //MultiHash(size_t num_hash = 0) : hashes_(num_hash) { }
 
       template <typename T>
-      MultiHash(const T *data, const size_t num_hash = 0) : hashes_(num_hash) {
+      MultiHash(const T *data, const size_t num_hash = 0)
+        : hashes_(num_hash) {
           //std::copy(data, data + num_hash, hashes_.begin());
           for (size_t i = 0; i < num_hash; ++i) {
               hashes_[i] = data[i];

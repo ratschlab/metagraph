@@ -51,7 +51,12 @@ void set_bit(std::vector<uint64_t> &a, const size_t col) {
     a[col >> 6] |= 1llu << (col % 64);
 }
 
-
+void print(const std::vector<uint64_t> &a) {
+    for (auto it = a.begin(); it != a.end(); ++it) {
+        std::cout << *it << " ";
+    }
+    std::cout << "\n";
+}
 
 //HASH ITERATORS
 
@@ -79,6 +84,7 @@ HashIterator::HashIterator(const size_t num_hash, const size_t k)
     k_(k) { }
 
 MultiHash HashIterator::get_hash() {
+    assert(hashes_.size());
     return MultiHash(operator*(), hashes_.size());
 }
 

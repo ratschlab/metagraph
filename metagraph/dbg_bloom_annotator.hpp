@@ -5,6 +5,9 @@
 
 namespace annotate {
 
+typedef CyclicHashIterator HashIt;
+//typedef MurmurHashIterator HashIt;
+
 class DeBruijnGraphWrapper {
   public:
     typedef uint64_t edge_index;
@@ -28,6 +31,7 @@ class DeBruijnGraphWrapper {
     virtual bool has_the_only_outgoing_edge(edge_index i) const = 0;
     virtual bool has_the_only_incoming_edge(edge_index i) const = 0;
 
+    virtual bool is_dummy_label(const char edge_label) const = 0;
     virtual bool is_dummy_edge(const std::string &kmer) const = 0;
 
     virtual edge_index next_edge(edge_index i, char edge_label) const = 0;
@@ -62,6 +66,9 @@ class BloomAnnotator {
 
     void add_column(const std::string &sequence);
 
+    HashIt hasher_from_kmer(const std::string &kmer) const;
+    std::vector<size_t> annotation_from_hasher(HashIt& hash_it) const;
+    std::vector<size_t> annotation_from_hasher(HashIt&& hash_it) const;
     std::vector<size_t> annotation_from_kmer(const std::string &kmer) const;
 
     std::vector<size_t> get_annotation(DeBruijnGraphWrapper::edge_index i) const;
