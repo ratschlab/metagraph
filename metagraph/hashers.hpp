@@ -160,9 +160,9 @@ class ExactFilter {
 
     bool find(const MultiHash &hash) const {
         std::cerr << "This function must not be used due to collisions\n";
-        if (&hash) {
-            exit(1);
-        }
+        std::cerr << "This function must not be used due to collisions\n";
+        std::cerr << &hash << "\n";
+        exit(1);
         return false;
     }
 
@@ -174,9 +174,8 @@ class ExactFilter {
 
     bool insert(const MultiHash &hash) {
         std::cerr << "This function must not be used due to collisions\n";
-        if (&hash) {
-            exit(1);
-        }
+        std::cerr << &hash << "\n";
+        exit(1);
         return false;
     }
 
