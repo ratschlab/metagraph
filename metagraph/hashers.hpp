@@ -144,6 +144,7 @@ class CyclicHashIterator : public HashIterator {
       size_t back_;
 };
 
+
 class ExactFilter {
   public:
     ExactFilter(size_t num_hash_functions = 0, size_t size = 0) {
@@ -151,56 +152,40 @@ class ExactFilter {
         size++;
     }
 
-    template <typename Object>
-    bool find(Object *a, Object *b) const {
-        return set_.find(hash_(a, b)) != set_.end();
+    template <typename T>
+    bool find(const T *begin, const T *end) const {
+        return set_.find(std::string(reinterpret_cast<const char*>(begin),
+                                     reinterpret_cast<const char*>(end))) != set_.end();
     }
 
     bool find(const MultiHash &hash) const {
-        assert(hash.size());
-        return set_.find(hash[0]) != set_.end();
+        std::cerr << "This function must not be used due to collisions\n";
+        if (&hash) {
+            exit(1);
+        }
+        return false;
     }
 
-    template <typename Object>
-    bool insert(Object *a, Object *b) {
-        return !set_.insert(hash_(a, b)).second;
+    template <typename T>
+    bool insert(const T *begin, const T *end) {
+        return !set_.emplace(reinterpret_cast<const char*>(begin),
+                             reinterpret_cast<const char*>(end)).second;
     }
 
     bool insert(const MultiHash &hash) {
-        assert(hash.size());
-        return !set_.insert(hash[0]).second;
-    }
-
-    bool operator==(const ExactFilter &that) const {
-        if (set_.size() != that.set_.size())
-            return false;
-        auto it = set_.begin();
-        auto jt = that.set_.begin();
-        for (; it != set_.end(); ++it, ++jt) {
-            if (*it != *jt)
-                return false;
+        std::cerr << "This function must not be used due to collisions\n";
+        if (&hash) {
+            exit(1);
         }
-        return true;
-    }
-
-    bool operator!=(const ExactFilter &that) const {
-        if (set_.size() != that.set_.size())
-            return true;
-        auto it = set_.begin();
-        auto jt = that.set_.begin();
-        for (; it != set_.end(); ++it, ++jt) {
-            if (*it == *jt)
-                return false;
-        }
-        return true;
+        return false;
     }
 
   private:
-    std::unordered_set<uint64_t> set_;
+    std::unordered_set<std::string> set_;
 
-    template <typename Object>
-    static uint64_t hash_(Object *a, Object *b) {
-        return compute_murmur_hash(a, b - a, 0);
+    template <typename T>
+    static uint64_t hash_(T *begin, T *end) {
+        return compute_murmur_hash(begin, end - begin, 0);
     }
 };
 

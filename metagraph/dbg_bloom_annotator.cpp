@@ -15,13 +15,12 @@ void PreciseAnnotator::add_sequence(const std::string &sequence, size_t column) 
     if (column >= annotation_exact.size())
         annotation_exact.resize(column + 1);
 
-    auto hash_it = HashIt(preprocessed_seq, 1, graph_.get_k() + 1);
-    auto hashes = hash_it.generate_hashes();
-
-    for (auto it = hashes.begin(); it != hashes.end(); ++it) {
-        annotation_exact.insert(*it, column);
+    for (size_t i = 0; i + graph_.get_k() < preprocessed_seq.size(); ++i) {
+        annotation_exact.insert(
+            &preprocessed_seq[i],
+            &preprocessed_seq[i] + graph_.get_k() + 1, column
+        );
     }
-
 }
 
 void PreciseAnnotator::add_column(const std::string &sequence) {
@@ -31,10 +30,7 @@ void PreciseAnnotator::add_column(const std::string &sequence) {
 std::vector<uint64_t>
 PreciseAnnotator::annotation_from_kmer(const std::string &kmer) const {
     assert(kmer.length() == graph_.get_k() + 1);
-    auto hash_it = HashIt(kmer, 1, graph_.get_k() + 1);
-    auto hashes = hash_it.generate_hashes();
-    assert(hashes.size() == 1);
-    return annotation_exact.find(hashes[0]);
+    return annotation_exact.find(kmer.data(), kmer.data() + kmer.size());
 }
 
 

@@ -48,9 +48,6 @@ class PreciseAnnotator {
     std::vector<uint64_t> annotation_from_kmer(const std::string &kmer) const;
 
   private:
-    typedef CyclicHashIterator HashIt;
-    //typedef MurmurHashIterator HashIt;
-
     annotate::HashAnnotation<annotate::ExactFilter> annotation_exact;
     const DeBruijnGraphWrapper &graph_;
 };
