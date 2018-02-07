@@ -168,7 +168,7 @@ class DBGSuccAnnotWrapper : public DeBruijnGraphWrapper {
         return kmer.front() == '$' || kmer.back() == '$';
     }
 
-    bool is_dummy_label(const char edge_label) const {
+    bool is_dummy_label(char edge_label) const {
         return edge_label == '$';
     }
 

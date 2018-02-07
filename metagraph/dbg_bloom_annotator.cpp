@@ -2,6 +2,7 @@
 
 #include <fstream>
 
+
 namespace annotate {
 
 void PreciseAnnotator::add_sequence(const std::string &sequence, size_t column) {
@@ -27,7 +28,7 @@ void PreciseAnnotator::add_column(const std::string &sequence) {
     add_sequence(sequence, annotation_exact.size());
 }
 
-std::vector<size_t>
+std::vector<uint64_t>
 PreciseAnnotator::annotation_from_kmer(const std::string &kmer) const {
     assert(kmer.length() == graph_.get_k() + 1);
     auto hash_it = HashIt(kmer, 1, graph_.get_k() + 1);
@@ -35,6 +36,7 @@ PreciseAnnotator::annotation_from_kmer(const std::string &kmer) const {
     assert(hashes.size() == 1);
     return annotation_exact.find(hashes[0]);
 }
+
 
 BloomAnnotator::BloomAnnotator(size_t num_hash_functions,
                                const DeBruijnGraphWrapper &graph,
@@ -64,48 +66,45 @@ void BloomAnnotator::add_sequence(const std::string &sequence, size_t column) {
     }
 
 
-    auto hash_it = HashIt(preprocessed_seq, annotation.num_hash_functions(), graph_.get_k() + 1);
+    auto hash_it = HashIt(preprocessed_seq,
+                          annotation.num_hash_functions(),
+                          graph_.get_k() + 1);
     auto hashes = hash_it.generate_hashes();
 
     for (auto it = hashes.begin(); it != hashes.end(); ++it) {
         annotation.insert(*it, column);
     }
-
 }
 
 void BloomAnnotator::add_column(const std::string &sequence) {
     add_sequence(sequence, annotation.size());
 }
 
-HashIt BloomAnnotator::hasher_from_kmer(const std::string &kmer) const {
+BloomAnnotator::HashIt
+BloomAnnotator::hasher_from_kmer(const std::string &kmer) const {
     assert(kmer.length() == graph_.get_k() + 1);
     return HashIt(kmer, annotation.num_hash_functions());
 }
 
 //TODO: replace size_t with uint64_t
-std::vector<size_t>
-BloomAnnotator::annotation_from_hasher(HashIt& hash_it) const {
+std::vector<uint64_t>
+BloomAnnotator::annotation_from_hasher(HashIt &hash_it) const {
     auto hashes = hash_it.get_hash();
     return annotation.find(hashes);
 }
 
-std::vector<size_t>
-BloomAnnotator::annotation_from_hasher(HashIt&& hash_it) const {
-    auto hashes = hash_it.get_hash();
-    return annotation.find(hashes);
-}
-
-std::vector<size_t>
+std::vector<uint64_t>
 BloomAnnotator::annotation_from_kmer(const std::string &kmer) const {
-    return annotation_from_hasher(hasher_from_kmer(kmer));
+    auto hasher = hasher_from_kmer(kmer);
+    return annotation_from_hasher(hasher);
 }
 
-std::vector<size_t>
+std::vector<uint64_t>
 BloomAnnotator::get_annotation(DeBruijnGraphWrapper::edge_index i) const {
     return annotation_from_kmer(kmer_from_index(i));
 }
 
-std::vector<size_t>
+std::vector<uint64_t>
 BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
                                          size_t path_cutoff) const {
     //initial raw annotation
@@ -258,7 +257,7 @@ void BloomAnnotator::serialize(const std::string &filename) const {
 }
 
 std::vector<size_t>
-BloomAnnotator::unpack(const std::vector<size_t> &packed) {
+BloomAnnotator::unpack(const std::vector<uint64_t> &packed) {
     std::vector<size_t> labels;
     for (size_t i = 0; i < packed.size() * 64; ++i) {
         if (packed[i / 64] & (1llu << (i % 64)))

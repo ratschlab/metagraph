@@ -17,103 +17,80 @@ namespace annotate {
 //MERGING
 
 std::vector<uint64_t> merge_or(const std::vector<uint64_t> &a,
-                                      const std::vector<uint64_t> &b);
+                               const std::vector<uint64_t> &b);
 
 std::vector<uint64_t> merge_and(const std::vector<uint64_t> &a,
-                                       const std::vector<uint64_t> &b);
+                                const std::vector<uint64_t> &b);
 
-uint64_t popcount(const std::vector<uint64_t> &a);
-
-bool equal(const std::vector<uint64_t> &a, const std::vector<uint64_t> &b);
-
-void print(const std::vector<uint64_t> &a);
+size_t popcount(const std::vector<uint64_t> &a);
 
 bool test_bit(const std::vector<uint64_t> &a, const size_t col);
 
 void set_bit(std::vector<uint64_t> &a, const size_t col);
 
+bool equal(const std::vector<uint64_t> &a, const std::vector<uint64_t> &b);
+
 //multihash container
 class MultiHash {
-    public:
-      //MultiHash(size_t num_hash = 0) : hashes_(num_hash) { }
+  public:
+    template <typename T>
+    MultiHash(const T *data, const size_t num_hash_functions = 0)
+        : hashes_(data, data + num_hash_functions) {}
 
-      template <typename T>
-      MultiHash(const T *data, const size_t num_hash = 0)
-        : hashes_(num_hash) {
-          //std::copy(data, data + num_hash, hashes_.begin());
-          for (size_t i = 0; i < num_hash; ++i) {
-              hashes_[i] = data[i];
-          }
-      }
+    size_t size() const { return hashes_.size(); }
 
-      size_t size() const { return hashes_.size(); }
+    size_t operator[](const size_t ind) const { return hashes_[ind]; }
 
-      size_t& operator[](const size_t ind) { return hashes_[ind]; }
+    std::vector<size_t>::const_iterator begin() const { return hashes_.begin(); }
+    std::vector<size_t>::const_iterator end() const { return hashes_.end(); }
 
-      const size_t& operator[](const size_t ind) const { return hashes_[ind]; }
-
-      std::vector<size_t>::iterator begin() { return hashes_.begin(); }
-
-      std::vector<size_t>::iterator end() { return hashes_.end(); }
-
-      std::vector<size_t>::const_iterator begin() const { return hashes_.begin(); }
-
-      std::vector<size_t>::const_iterator end() const { return hashes_.end(); }
-
-    //private:
-    public:
-      //vector to store hashes (one per seed/hash function)
-      std::vector<size_t> hashes_;
+  private:
+    //vector to store hashes (one per seed/hash function)
+    std::vector<size_t> hashes_;
 };
 
 //HASH WRAPPER STRUCTS
-struct {
-    template <typename T, typename S>
-    void operator()(const T *data, const size_t len, const uint32_t seed, S *hash) {
-        //WARNING: make sure that the size of space allocated to hash is at least 8
-        uint64_t bigint[2];
-        const char *begin = reinterpret_cast<const char*>(data);
-        MurmurHash3_x64_128(
-                begin,
-                len * sizeof(T),
-                seed,
-                &bigint[0]
-        );
-        *hash = bigint[0];
-    }
-} Murmur3Hasher;
+template <typename T>
+uint64_t compute_murmur_hash(const T *data, size_t len, uint32_t seed) {
+    //WARNING: make sure that the size of space allocated to hash is at least 8
+    uint64_t bigint[2];
+    const char *begin = reinterpret_cast<const char*>(data);
+    MurmurHash3_x64_128(begin, len * sizeof(T), seed, &bigint[0]);
+    return bigint[0];
+}
 
 //same interface as ntHash
 class HashIterator {
-    protected:
-      virtual void compute_hashes() = 0;
-    public:
-      virtual HashIterator& operator++() = 0;
+  protected:
+    virtual void compute_hashes() = 0;
 
-      HashIterator(const std::string &sequence, const size_t num_hash, const size_t k);
+  public:
+    virtual HashIterator& operator++() = 0;
 
-      HashIterator(const size_t num_hash, const size_t k);
+    HashIterator(const std::string &sequence, size_t num_hash, size_t k);
 
-      bool operator==(const char *that) const { return seq_cur == that; }
+    HashIterator(const size_t num_hash, size_t k);
 
-      bool operator!=(const char *that) const { return seq_cur != that; }
+    bool operator==(const char *that) const { return seq_cur == that; }
 
-      size_t size() const { return hashes_.size(); }
+    bool operator!=(const char *that) const { return seq_cur != that; }
 
-      const uint64_t* operator*() const { return hashes_.data(); }
+    size_t size() const { return hashes_.size(); }
 
-      const char* end() const { return seq_end - k_ + 2; }
+    const uint64_t* operator*() const { return hashes_.data(); }
 
-      size_t pos() const { return seq_cur - seq_begin - 1; }
+    const char* end() const { return seq_end - k_ + 2; }
 
-      MultiHash get_hash();
+    size_t pos() const { return seq_cur - seq_begin - 1; }
 
-      std::vector<MultiHash> generate_hashes();
+    MultiHash get_hash();
 
-    protected:
-      const char *seq_begin, *seq_cur, *seq_end;
-      std::vector<uint64_t> hashes_;
-      size_t k_;
+    std::vector<MultiHash> generate_hashes();
+
+  protected:
+    const char *seq_begin, *seq_cur, *seq_end;
+    std::vector<uint64_t> hashes_;
+    size_t k_;
 };
 
 class MurmurHashIterator : public HashIterator {
@@ -223,12 +200,7 @@ class ExactFilter {
 
     template <typename Object>
     static uint64_t hash_(Object *a, Object *b) {
-        __uint128_t hash = 0;
-        Murmur3Hasher(a, b - a, 0, &hash);
-        uint64_t first_hash;
-        std::copy(reinterpret_cast<const uint64_t*>(&hash),
-                  reinterpret_cast<const uint64_t*>(&hash) + 1, &first_hash);
-        return first_hash;
+        return compute_murmur_hash(a, b - a, 0);
     }
 };
 
@@ -363,12 +335,8 @@ class BloomFilter {
   private:
     template <typename T>
     inline bool hash_helper(T *a, T *b) const {
-        __uint128_t hash = 0;
-        uint64_t select;
-
         for (auto it = seeds.begin(); it != seeds.end(); ++it) {
-            Murmur3Hasher(a, b - a, *it, &hash);
-            select = hash % n_bits;
+            uint64_t select = compute_murmur_hash(a, b - a, *it) % n_bits;
             /*
             auto jt = bits.begin() + (select >> 6);
             if (jt >= bits.end()) {
@@ -390,13 +358,10 @@ class BloomFilter {
     inline bool hash_helper_insert(T *a, T *b) {
         assert(b >= a);
 
-        __uint128_t hash = 0;
-        uint64_t select;
         bool might_contain = true;
         //uint64_t last;
         for (auto it = seeds.begin(); it != seeds.end(); ++it) {
-            Murmur3Hasher(a, b - a, *it, &hash);
-            select = hash % n_bits;
+            uint64_t select = compute_murmur_hash(a, b - a, *it) % n_bits;
 
             /*
             auto jt = bits.begin() + (select >> 6);

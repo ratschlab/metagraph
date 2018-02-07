@@ -3,10 +3,8 @@
 
 #include "hashers.hpp"
 
-namespace annotate {
 
-typedef CyclicHashIterator HashIt;
-//typedef MurmurHashIterator HashIt;
+namespace annotate {
 
 class DeBruijnGraphWrapper {
   public:
@@ -31,7 +29,7 @@ class DeBruijnGraphWrapper {
     virtual bool has_the_only_outgoing_edge(edge_index i) const = 0;
     virtual bool has_the_only_incoming_edge(edge_index i) const = 0;
 
-    virtual bool is_dummy_label(const char edge_label) const = 0;
+    virtual bool is_dummy_label(char edge_label) const = 0;
     virtual bool is_dummy_edge(const std::string &kmer) const = 0;
 
     virtual edge_index next_edge(edge_index i, char edge_label) const = 0;
@@ -47,15 +45,21 @@ class PreciseAnnotator {
 
     void add_column(const std::string &sequence);
 
-    std::vector<size_t> annotation_from_kmer(const std::string &kmer) const;
+    std::vector<uint64_t> annotation_from_kmer(const std::string &kmer) const;
 
   private:
+    typedef CyclicHashIterator HashIt;
+    //typedef MurmurHashIterator HashIt;
+
     annotate::HashAnnotation<annotate::ExactFilter> annotation_exact;
     const DeBruijnGraphWrapper &graph_;
 };
 
 
 class BloomAnnotator {
+    typedef CyclicHashIterator HashIt;
+    //typedef MurmurHashIterator HashIt;
+
   public:
     BloomAnnotator(size_t num_hash_functions,
                    const DeBruijnGraphWrapper &graph,
@@ -66,15 +70,10 @@ class BloomAnnotator {
 
     void add_column(const std::string &sequence);
 
-    HashIt hasher_from_kmer(const std::string &kmer) const;
-    std::vector<size_t> annotation_from_hasher(HashIt& hash_it) const;
-    std::vector<size_t> annotation_from_hasher(HashIt&& hash_it) const;
-    std::vector<size_t> annotation_from_kmer(const std::string &kmer) const;
+    std::vector<uint64_t> get_annotation(DeBruijnGraphWrapper::edge_index i) const;
 
-    std::vector<size_t> get_annotation(DeBruijnGraphWrapper::edge_index i) const;
-
-    std::vector<size_t> get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
-                                                 size_t path_cutoff = 50) const;
+    std::vector<uint64_t> get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
+                                                   size_t path_cutoff = 50) const;
 
     void test_fp_all(const PreciseAnnotator &annotation_exact, size_t step = 1) const;
 
@@ -82,9 +81,15 @@ class BloomAnnotator {
 
     void serialize(const std::string &filename) const;
 
-    static std::vector<size_t> unpack(const std::vector<size_t> &packed);
+    static std::vector<size_t> unpack(const std::vector<uint64_t> &packed);
 
   private:
+    HashIt hasher_from_kmer(const std::string &kmer) const;
+
+    std::vector<uint64_t> annotation_from_hasher(HashIt &hash_it) const;
+
+    std::vector<uint64_t> annotation_from_kmer(const std::string &kmer) const;
+
     std::string kmer_from_index(DeBruijnGraphWrapper::edge_index index) const;
 
     std::vector<uint8_t> test_fp(DeBruijnGraphWrapper::edge_index i,
