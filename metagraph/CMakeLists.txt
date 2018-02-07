@@ -39,11 +39,13 @@ include_directories(
 file(GLOB src_files "*.cpp" "*.h" "*.hpp" "external-libraries/smhasher/src/MurmurHash3.cpp")
 
 list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
-list(FILTER src_files EXCLUDE REGEX ".*\\main.cpp")
+list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
 
 add_library(metagraph STATIC ${src_files})
 add_executable(metagengraph "main.cpp")
 add_dependencies(metagengraph metagraph)
+add_executable(annograph "annotation_main.cpp")
+add_dependencies(annograph metagraph)
 
 set(METALIBS
   -lhts -lz -lbz2
@@ -59,6 +61,10 @@ endif()
 
 target_link_libraries(
   metagengraph metagraph ${METALIBS}
+)
+
+target_link_libraries(
+  annograph metagraph ${METALIBS}
 )
 
 

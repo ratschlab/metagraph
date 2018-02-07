@@ -15,6 +15,8 @@ class DBGHash : public annotate::DeBruijnGraphWrapper {
     edge_index first_edge() const { return 0; }
     edge_index last_edge() const { return indices_.size() - 1; }
 
+    std::string encode_sequence(const std::string &sequence) const;
+
     std::string get_node_kmer(edge_index i) const;
 
     char get_edge_label(edge_index i) const { return kmers_[i].back(); }

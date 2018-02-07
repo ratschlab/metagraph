@@ -1,7 +1,17 @@
 #include "dbg_hash.hpp"
 
-const std::string kAlphabet = "ACGT";
+const std::string kAlphabet = "ACGTN$";
 
+
+std::string DBGHash::encode_sequence(const std::string &sequence) const {
+    std::string result = sequence;
+
+    for (char &c : result) {
+        if (kAlphabet.find(c) == std::string::npos)
+            c = 'N';
+    }
+    return result;
+}
 
 std::string DBGHash::get_node_kmer(edge_index i) const {
     std::string kmer = kmers_[i];
@@ -22,7 +32,7 @@ bool DBGHash::has_the_only_outgoing_edge(edge_index i) const {
 }
 
 bool DBGHash::has_the_only_incoming_edge(edge_index i) const {
-    std::string kmer("A");
+    std::string kmer("$");
     kmer += kmers_[i];
     kmer.pop_back();
 
@@ -45,7 +55,7 @@ bool DBGHash::is_dummy_edge(const std::string &kmer) const {
 }
 
 bool DBGHash::is_dummy_label(char c) const {
-    return c != 'A' && c != 'C' && c != 'G' && c != 'T';
+    return c == '$';
 }
 
 DBGHash::edge_index DBGHash::next_edge(edge_index i, char edge_label) const {
@@ -53,7 +63,7 @@ DBGHash::edge_index DBGHash::next_edge(edge_index i, char edge_label) const {
     kmer.back() = edge_label;
 
     kmer.erase(kmer.begin());
-    kmer.push_back('A');
+    kmer.push_back('$');
 
     for (char c : kAlphabet) {
         kmer.back() = c;
@@ -61,12 +71,12 @@ DBGHash::edge_index DBGHash::next_edge(edge_index i, char edge_label) const {
         if (it != indices_.end())
             return it->second;
     }
-    assert(false);
+    assert(false && "Can't traverse if there are no outgoing edges");
     return 0;
 }
 
 DBGHash::edge_index DBGHash::prev_edge(edge_index i) const {
-    std::string kmer("A");
+    std::string kmer("$");
     kmer += kmers_[i];
     kmer.pop_back();
 
@@ -76,7 +86,7 @@ DBGHash::edge_index DBGHash::prev_edge(edge_index i) const {
         if (it != indices_.end())
             return it->second;
     }
-    assert(false);
+    assert(false && "Can't traverse if there are not incoming edges");
     return 0;
 }
 
@@ -85,8 +95,12 @@ void DBGHash::add_sequence(const std::string &sequence) {
     if (sequence.size() < k_ + 1)
         return;
 
-    for (size_t i = 0; i + k_ < sequence.size(); ++i) {
-        std::string kmer = sequence.substr(i, k_ + 1);
+    std::string transformed_seq = std::string(k_ + 1, '$')
+                                    + encode_sequence(sequence)
+                                    + '$';
+
+    for (size_t i = 0; i + k_ < transformed_seq.size(); ++i) {
+        std::string kmer = transformed_seq.substr(i, k_ + 1);
         if (indices_.find(kmer) == indices_.end()) {
             indices_[kmer] = kmers_.size();
             kmers_.push_back(kmer);
