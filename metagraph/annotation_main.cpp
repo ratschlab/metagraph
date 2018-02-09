@@ -124,6 +124,10 @@ int main(int argc, const char *argv[]) {
         );
 
         //one pass per suffix
+        double file_read_time = 0;
+        double graph_const_time = 0;
+        double bloom_const_time = 0;
+        double precise_const_time = 0;
         for (const std::string &suffix : suffices) {
             if (suffix.size())
                 std::cout << "Suffix: " << suffix << std::endl;
@@ -201,43 +205,44 @@ int main(int argc, const char *argv[]) {
                                   << files[f] << std::endl;
                         exit(1);
                     }
+                    Timer result_timer;
                     while (kseq_read(read_stream) >= 0) {
                         {
-                            hashing_graph.add_sequence(read_stream->seq.s);
-                            //constructor->add_read(read_stream->seq.s);
-                            if (annotator && suffix == suffices[0]) {
-                                if (utils::get_filetype(files[f]) == "FASTQ") {
-                                    //assume each FASTQ file is one column
-                                    annotator->add_sequence(read_stream->seq.s, f);
-                                    if (precise_annotator)
-                                        precise_annotator->add_sequence(read_stream->seq.s, f);
-                                } else {
-                                    //assume each sequence in each FASTA file is a column
-                                    annotator->add_column(read_stream->seq.s);
-                                    if (precise_annotator)
-                                        precise_annotator->add_column(read_stream->seq.s);
-                                }
-                            }
-                        }
-                        if (config->reverse) {
-                            reverse_complement(read_stream->seq);
+                            file_read_time += result_timer.elapsed();
 
+                            result_timer.reset();
                             hashing_graph.add_sequence(read_stream->seq.s);
+                            graph_const_time += result_timer.elapsed();
+
                             //constructor->add_read(read_stream->seq.s);
-                            if (annotator && suffix == suffices[0]) {
+                            {
                                 if (utils::get_filetype(files[f]) == "FASTQ") {
                                     //assume each FASTQ file is one column
+
+                                    result_timer.reset();
                                     annotator->add_sequence(read_stream->seq.s, f);
-                                    if (precise_annotator)
+                                    bloom_const_time += result_timer.elapsed();
+
+                                    if (precise_annotator) {
+                                        result_timer.reset();
                                         precise_annotator->add_sequence(read_stream->seq.s, f);
+                                        precise_const_time += result_timer.elapsed();
+                                    }
                                 } else {
                                     //assume each sequence in each FASTA file is a column
+                                    result_timer.reset();
                                     annotator->add_column(read_stream->seq.s);
-                                    if (precise_annotator)
+                                    bloom_const_time += result_timer.elapsed();
+
+                                    if (precise_annotator) {
+                                        result_timer.reset();
                                         precise_annotator->add_column(read_stream->seq.s);
+                                        precise_const_time += result_timer.elapsed();
+                                    }
                                 }
                             }
                         }
+                        result_timer.reset();
                     }
                     kseq_destroy(read_stream);
                     gzclose(input_p);
@@ -251,6 +256,13 @@ int main(int argc, const char *argv[]) {
             get_RAM();
             std::cout << "Reading data finished\t" << timer.elapsed() << "sec" << std::endl;
         }
+
+        //Runtime stats
+        std::cout << "Runtime statistics" << std::endl;
+        std::cout << "File reading\t" << file_read_time << std::endl;
+        std::cout << "Graph construction\t" << graph_const_time << std::endl;
+        std::cout << "Bloom filter\t" << bloom_const_time << std::endl;
+        std::cout << "Precise filter\t" << precise_const_time << std::endl;
 
         if (precise_annotator) {
             //Check FPP
