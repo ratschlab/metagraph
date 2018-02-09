@@ -22,11 +22,11 @@ std::vector<uint64_t> merge_or(const std::vector<uint64_t> &a,
 std::vector<uint64_t> merge_and(const std::vector<uint64_t> &a,
                                 const std::vector<uint64_t> &b);
 
-size_t popcount(const std::vector<uint64_t> &a);
+uint64_t popcount(const std::vector<uint64_t> &a);
 
-bool test_bit(const std::vector<uint64_t> &a, const size_t col);
+bool test_bit(const std::vector<uint64_t> &a, size_t col);
 
-void set_bit(std::vector<uint64_t> &a, const size_t col);
+void set_bit(std::vector<uint64_t> &a, size_t col);
 
 bool equal(const std::vector<uint64_t> &a, const std::vector<uint64_t> &b);
 
@@ -34,12 +34,12 @@ bool equal(const std::vector<uint64_t> &a, const std::vector<uint64_t> &b);
 class MultiHash {
   public:
     template <typename T>
-    MultiHash(const T *data, const size_t num_hash_functions = 0)
+    MultiHash(const T *data, size_t num_hash_functions = 0)
         : hashes_(data, data + num_hash_functions) {}
 
     size_t size() const { return hashes_.size(); }
 
-    size_t operator[](const size_t ind) const { return hashes_[ind]; }
+    size_t operator[](size_t ind) const { return hashes_[ind]; }
 
     std::vector<size_t>::const_iterator begin() const { return hashes_.begin(); }
     std::vector<size_t>::const_iterator end() const { return hashes_.end(); }
@@ -69,7 +69,7 @@ class HashIterator {
 
     HashIterator(const std::string &sequence, size_t num_hash, size_t k);
 
-    HashIterator(const size_t num_hash, size_t k);
+    HashIterator(size_t num_hash, size_t k);
 
     bool operator==(const char *that) const { return seq_cur == that; }
 
@@ -100,20 +100,20 @@ class MurmurHashIterator : public HashIterator {
     public:
       MurmurHashIterator& operator++();
 
-      MurmurHashIterator(const std::string &kmer, const size_t num_hash);
+      MurmurHashIterator(const std::string &kmer, size_t num_hash);
 
-      MurmurHashIterator(const std::string &sequence, const size_t num_hash, const size_t k)
+      MurmurHashIterator(const std::string &sequence, size_t num_hash, size_t k)
         : HashIterator(sequence, num_hash, k) {
           compute_hashes();
           seq_cur++;
           assert(sequence.length() == k_ || *this != end());
       }
-      MurmurHashIterator(const size_t num_hash, const size_t k)
+      MurmurHashIterator(size_t num_hash, size_t k)
           : HashIterator(num_hash, k) { }
 
-      MurmurHashIterator& update(const char next);
+      MurmurHashIterator& update(char next);
 
-      MurmurHashIterator& reverse_update(const char prev);
+      MurmurHashIterator& reverse_update(char prev);
     private:
       std::vector<char> cache_;
       size_t back_;
@@ -127,15 +127,15 @@ class CyclicHashIterator : public HashIterator {
     public:
       CyclicHashIterator& operator++();
 
-      CyclicHashIterator(const std::string &kmer, const size_t num_hash);
+      CyclicHashIterator(const std::string &kmer, size_t num_hash);
 
-      CyclicHashIterator(const std::string &sequence, const size_t num_hash, const size_t k);
+      CyclicHashIterator(const std::string &sequence, size_t num_hash, size_t k);
 
       ~CyclicHashIterator();
 
-      CyclicHashIterator& update(const char next);
+      CyclicHashIterator& update(char next);
 
-      CyclicHashIterator& reverse_update(const char prev);
+      CyclicHashIterator& reverse_update(char prev);
 
     private:
       //using void to prevent including cyclichasher.h here
@@ -391,8 +391,8 @@ class HashAnnotation {
     }
 
     template <typename T, typename S>
-    std::vector<size_t> insert(T *a, T *b, S begin, S end) {
-        std::vector<size_t> annot((color_bits.size() >> 6) + 1);
+    std::vector<uint64_t> insert(T *a, T *b, S begin, S end) {
+        std::vector<uint64_t> annot((color_bits.size() >> 6) + 1);
         for (auto it = begin; it != end; ++it) {
             if (*it >= color_bits.size()) {
                 std::cerr << "ERROR: Index " << *it << " >= " << color_bits.size() << "\n";
@@ -408,13 +408,13 @@ class HashAnnotation {
     }
 
     template <typename T>
-    std::vector<size_t> insert(T *a, T *b, size_t ind) {
+    std::vector<uint64_t> insert(T *a, T *b, size_t ind) {
         return insert(a, b, &ind, &ind + 1);
     }
 
     template <typename S>
-    std::vector<size_t> insert(const MultiHash &hash, S begin, S end) {
-        std::vector<size_t> annot((color_bits.size() >> 6) + 1);
+    std::vector<uint64_t> insert(const MultiHash &hash, S begin, S end) {
+        std::vector<uint64_t> annot((color_bits.size() >> 6) + 1);
         for (auto it = begin; it != end; ++it) {
             if (*it >= color_bits.size()) {
                 std::cerr << "ERROR: Index " << *it << " >= " << color_bits.size() << "\n";
@@ -428,13 +428,13 @@ class HashAnnotation {
         return annot;
     }
 
-    std::vector<size_t> insert(const MultiHash &hash, size_t ind) {
+    std::vector<uint64_t> insert(const MultiHash &hash, size_t ind) {
         return insert(hash, &ind, &ind + 1);
     }
 
     template <typename T, typename S>
-    std::vector<size_t> find(T *a, T *b, S begin, S end) const {
-        std::vector<size_t> annot((color_bits.size() >> 6) + 1, 0);
+    std::vector<uint64_t> find(T *a, T *b, S begin, S end) const {
+        std::vector<uint64_t> annot((color_bits.size() >> 6) + 1, 0);
         for (auto it = begin; it != end; ++it) {
             if (*it >= color_bits.size()) {
                 std::cerr << "ERROR: Index " << *it << " >= " << color_bits.size() << "\n";
@@ -450,8 +450,8 @@ class HashAnnotation {
     }
 
     template <typename T>
-    std::vector<size_t> find(T *a, T *b) const {
-        std::vector<size_t> annot((color_bits.size() >> 6) + 1);
+    std::vector<uint64_t> find(T *a, T *b) const {
+        std::vector<uint64_t> annot((color_bits.size() >> 6) + 1);
         for (size_t i = 0; i < color_bits.size(); ++i) {
             if (color_bits[i].find(a, b)) {
                 set_bit(annot, i);
@@ -462,13 +462,13 @@ class HashAnnotation {
     }
 
     template <typename T>
-    std::vector<size_t> find(T *a, T *b, size_t ind) const {
+    std::vector<uint64_t> find(T *a, T *b, size_t ind) const {
         return find(a, b, &ind, &ind + 1);
     }
 
     template <typename S>
-    std::vector<size_t> find(const MultiHash &hash, S begin, S end) const {
-        std::vector<size_t> annot((color_bits.size() >> 6) + 1);
+    std::vector<uint64_t> find(const MultiHash &hash, S begin, S end) const {
+        std::vector<uint64_t> annot((color_bits.size() >> 6) + 1);
         for (auto it = begin; it != end; ++it) {
             if (*it >= color_bits.size()) {
                 std::cerr << "ERROR: Index " << *it << " >= " << color_bits.size() << "\n";
@@ -482,12 +482,12 @@ class HashAnnotation {
         return annot;
     }
 
-    std::vector<size_t> find(const MultiHash &hash, size_t ind) const {
+    std::vector<uint64_t> find(const MultiHash &hash, size_t ind) const {
         return find(hash, &ind, &ind + 1);
     }
 
-    std::vector<size_t> find(const MultiHash &hash) const {
-        std::vector<size_t> annot((color_bits.size() >> 6) + 1);
+    std::vector<uint64_t> find(const MultiHash &hash) const {
+        std::vector<uint64_t> annot((color_bits.size() >> 6) + 1);
         for (size_t i = 0; i < color_bits.size(); ++i) {
             if (color_bits[i].find(hash)) {
                 set_bit(annot, i);

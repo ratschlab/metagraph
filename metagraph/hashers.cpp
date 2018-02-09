@@ -1,6 +1,7 @@
 #include "hashers.hpp"
 #include <cyclichash.h>
 
+
 namespace annotate {
 
 std::vector<uint64_t> merge_or(const std::vector<uint64_t> &a,

@@ -85,8 +85,9 @@ TEST(DBGHash, TwoPathsDegree) {
     for (size_t i = graph.first_edge() + 5; i <= graph.last_edge(); ++i) {
         auto kmer = graph.get_node_kmer(i);
         auto label = graph.get_edge_label(i);
-        if (kmer.front() != '$' && label != '$')
+        if (kmer.front() != '$' && label != '$') {
             ASSERT_FALSE(graph.is_dummy_edge(kmer + label));
+        }
         if (kmer[kmer.size() - 1] == 'A') {
             ASSERT_FALSE(graph.has_the_only_outgoing_edge(i))
                 << i << ": " << kmer + label;

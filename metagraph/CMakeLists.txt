@@ -36,7 +36,7 @@ include_directories(
 
 #add_subdirectory()
 
-file(GLOB src_files "*.cpp" "*.h" "*.hpp" "external-libraries/smhasher/src/MurmurHash3.cpp")
+file(GLOB src_files "*.cpp" "*.h" "*.hpp")
 
 list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
