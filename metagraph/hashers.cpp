@@ -1,5 +1,7 @@
 #include "hashers.hpp"
-#include <cyclichash.h>
+
+#include "MurmurHash3.h"
+#include "cyclichash.h"
 
 
 namespace annotate {
@@ -81,13 +83,13 @@ HashIterator::HashIterator(size_t num_hash, size_t k)
 
 MultiHash HashIterator::get_hash() {
     assert(hashes_.size());
-    return MultiHash(operator*(), hashes_.size());
+    return hashes_;
 }
 
 std::vector<MultiHash> HashIterator::generate_hashes() {
     std::vector<MultiHash> hashes;
     for (; *this != end(); operator++()) {
-        hashes.emplace_back(operator*(), hashes_.size());
+        hashes.push_back(hashes_);
     }
     return hashes;
 }
@@ -108,9 +110,9 @@ MurmurHashIterator& MurmurHashIterator::operator++() {
 }
 
 MurmurHashIterator::MurmurHashIterator(const std::string &kmer, size_t num_hash)
-  : HashIterator(num_hash, kmer.length()),
-    cache_(kmer.begin(), kmer.end()),
-    back_(kmer.length() - 1) {
+      : HashIterator(num_hash, kmer.length()),
+        cache_(kmer.begin(), kmer.end()),
+        back_(kmer.length() - 1) {
     for (size_t i = 0; i < hashes_.size(); ++i) {
         hashes_[i] = compute_murmur_hash(kmer.c_str(), kmer.length(), i);
     }
@@ -219,6 +221,13 @@ CyclicHashIterator& CyclicHashIterator::reverse_update(char prev) {
     cache_[back_] = prev;
     back_ = (back_ + cache_.size() - 1) % cache_.size();
     return *this;
+}
+
+uint64_t compute_murmur_hash(const char *data, size_t len, uint32_t seed) {
+    //WARNING: make sure that the size of space allocated to hash is at least 8
+    uint64_t bigint[2];
+    MurmurHash3_x64_128(data, len, seed, &bigint[0]);
+    return bigint[0];
 }
 
 } // namespace annotate

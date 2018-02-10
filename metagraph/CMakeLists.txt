@@ -9,7 +9,8 @@ endif()
 
 string(APPEND CMAKE_CXX_FLAGS " \
   -std=c++14 -Wall -Wextra -Werror \
-  -msse4.2 -mavx -mavx2 -mbmi -mbmi2 -fopenmp -D_THREAD_SAFE -pthread") # -DDBGDEBUG
+  -msse4.2 -mavx -mavx2 -mbmi -mbmi2 \
+  -fopenmp -D_THREAD_SAFE -pthread") # -DDBGDEBUG
 
 # Profile build type
 set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O2 -g")
@@ -36,7 +37,7 @@ include_directories(
 
 #add_subdirectory()
 
-file(GLOB src_files "*.cpp" "*.h" "*.hpp")
+file(GLOB src_files "*.cpp" "*.h" "*.hpp" "external-libraries/smhasher/src/MurmurHash3.cpp")
 
 list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
