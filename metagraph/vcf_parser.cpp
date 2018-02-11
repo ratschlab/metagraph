@@ -57,7 +57,7 @@ void vcf_parser::print_line() {
 
 bool vcf_parser::get_seq(const std::vector<std::string> &annots,
                          std::string *sequence,
-                         std::string *annotation) {
+                         std::vector<std::string> &annotation) {
     while (rec_) {
         curi++;
         if (curi >= rec_->n_allele || !bcf_has_filter(hdr_, rec_, passfilt)) {
@@ -94,11 +94,12 @@ bool vcf_parser::get_seq(const std::vector<std::string> &annots,
         //TODO: check if these annots are part of the INFO, if not, check genotypes
         //ngt = bcf_get_genotypes(sr->readers[0].header, line0, &gt_arr, &ngt_arr); //get genotypes
         //annot=1;
-        annotation->append(seq_names_[rec_->rid]);
+        //annotation->append(seq_names_[rec_->rid]);
+        annotation.emplace_back(seq_names_[rec_->rid]);
         for (const auto &annot : annots) {
             bcf_info_t *curinfo = bcf_get_info(hdr_, rec_, annot.c_str());
             if (curinfo && curinfo->v1.i) {
-                annotation->append(std::string(":") + annot);
+                annotation.emplace_back(annot);
             }
         }
 
@@ -114,8 +115,7 @@ bool vcf_parser::get_seq(const std::vector<std::string> &annots,
                 }
                 if ((cur & 5) == 5) {
                     //at least one parent has this allele
-                    annotation->append(std::string(":")
-                                       + std::string(hdr_->samples[i]));
+                    annotation.emplace_back(hdr_->samples[i]);
                 }
             }
             if (gt_arr)

@@ -90,14 +90,14 @@ DBGHash::edge_index DBGHash::prev_edge(edge_index i) const {
     return 0;
 }
 
-void DBGHash::add_sequence(const std::string &sequence) {
+void DBGHash::add_sequence(const std::string &sequence, bool rooted) {
     // Don't annotate short sequences
     if (sequence.size() < k_ + 1)
         return;
 
-    std::string transformed_seq = std::string(k_ + 1, '$')
+    std::string transformed_seq = (!rooted ? std::string(k_ + 1, '$') : std::string())
                                     + encode_sequence(sequence)
-                                    + '$';
+                                    + (!rooted ? std::string(1, '$') : std::string());
 
     for (size_t i = 0; i + k_ < transformed_seq.size(); ++i) {
         std::string kmer = transformed_seq.substr(i, k_ + 1);

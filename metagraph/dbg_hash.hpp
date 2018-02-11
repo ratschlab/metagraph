@@ -33,7 +33,7 @@ class DBGHash : public annotate::DeBruijnGraphWrapper {
 
     edge_index prev_edge(edge_index i) const;
 
-    void add_sequence(const std::string &sequence);
+    void add_sequence(const std::string &sequence, bool rooted = false);
 
     size_t get_num_edges() const;
 

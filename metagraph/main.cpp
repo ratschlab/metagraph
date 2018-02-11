@@ -175,9 +175,10 @@ int main(int argc, const char *argv[]) {
                             std::cerr << "Loading VCF with " << config->parallel
                                                              << " threads per line\n";
                             std::string sequence;
-                            std::string annotation;
+                            //std::string annotation;
+                            std::vector<std::string> annotation;
                             size_t class_count = 0;
-                            for (size_t i = 1; vcf.get_seq(annots, &sequence, &annotation); ++i) {
+                            for (size_t i = 1; vcf.get_seq(annots, &sequence, annotation); ++i) {
                                 //measure rate
                                 if (i % 10'000 == 0) {
                                     std::cout << "." << std::flush;
@@ -199,10 +200,8 @@ int main(int argc, const char *argv[]) {
                                 //annotation = "VCF:" + annotation;
                                 //annotation is a color-separated list of string annotations
                                 if (annotator && suffix == suffices[0]) {
-                                    std::istringstream sin(annotation);
-                                    std::string curannot;
-                                    while (std::getline(sin, curannot, ':')) {
-                                        auto map_ins = annot_map.insert(std::pair<std::string,size_t>(curannot, class_count++));
+                                    for (auto it = annotation.begin(); it != annotation.end(); ++it) {
+                                        auto map_ins = annot_map.insert(std::pair<std::string,size_t>(*it, class_count++));
                                         annotator->add_sequence(sequence, files.size() + map_ins.first->second);
                                         if (precise_annotator)
                                             precise_annotator->add_sequence(sequence, files.size() + map_ins.first->second);
@@ -217,10 +216,8 @@ int main(int argc, const char *argv[]) {
                                     kseq.l = sequence.length();
                                     reverse_complement(kseq);
                                     if (annotator && suffix == suffices[0]) {
-                                        std::istringstream sin(annotation);
-                                        std::string curannot;
-                                        while (std::getline(sin, curannot, ':')) {
-                                            auto map_ins = annot_map.insert(std::pair<std::string,size_t>(curannot, class_count++));
+                                        for (auto it = annotation.begin(); it != annotation.end(); ++it) {
+                                            auto map_ins = annot_map.insert(std::pair<std::string,size_t>(*it, class_count++));
                                             std::string kseq_r(kseq.s);
                                             annotator->add_sequence(kseq_r, files.size() + map_ins.first->second);
                                             if (precise_annotator)

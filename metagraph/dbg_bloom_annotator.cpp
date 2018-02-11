@@ -131,7 +131,6 @@ BloomAnnotator::hasher_from_kmer(const std::string &kmer) const {
     return HashIt(kmer, annotation.num_hash_functions());
 }
 
-//TODO: replace size_t with uint64_t
 std::vector<uint64_t>
 BloomAnnotator::annotation_from_hasher(HashIt &hash_it) const {
     auto hashes = hash_it.get_hash();

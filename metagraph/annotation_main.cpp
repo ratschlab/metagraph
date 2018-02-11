@@ -146,6 +146,7 @@ int main(int argc, const char *argv[]) {
         double graph_const_time = 0;
         double bloom_const_time = 0;
         double precise_const_time = 0;
+        std::map<std::string, size_t> annot_map;
         for (const std::string &suffix : suffices) {
             if (suffix.size())
                 std::cout << "Suffix: " << suffix << std::endl;
@@ -179,8 +180,8 @@ int main(int argc, const char *argv[]) {
                     std::cerr << "Loading VCF with " << config->parallel
                                                      << " threads per line\n";
                     std::string sequence;
-                    std::string annotation;
-                    for (size_t i = 1; vcf.get_seq(annots, &sequence, &annotation); ++i) {
+                    std::vector<std::string> annotation;
+                    for (size_t i = 1; vcf.get_seq(annots, &sequence, annotation); ++i) {
                         if (i % 10'000 == 0) {
                             std::cout << "." << std::flush;
                             if (i % 100'000 == 0) {
@@ -197,8 +198,29 @@ int main(int argc, const char *argv[]) {
                                 data_reading_timer.reset();
                             }
                         }
-                        annotation = "VCF:" + annotation;
+                        //annotation = "VCF:" + annotation;
                         nbp += sequence.length();
+
+                        hashing_graph.add_sequence(sequence, true);
+
+                        {
+                            //std::istringstream sin(annotation);
+                            //std::string curannot;
+                            //while (std::getline(sin, curannot, ':')) {
+                            for (auto it = annotation.begin(); it != annotation.end(); ++it) {
+                                auto map_ins = annot_map.insert(
+                                        std::pair<std::string,size_t>(
+                                            *it,
+                                            annot_map.size()));
+                                if (map_ins.second) {
+                                    annotator->add_column(sequence);
+                                } else {
+                                    annotator->add_sequence(sequence, map_ins.first->second);
+                                }
+                                if (precise_annotator)
+                                    precise_annotator->add_sequence(sequence, map_ins.first->second);
+                            }
+                        }
 
                         if (config->reverse) {
                             kstring_t kseq;
@@ -206,6 +228,7 @@ int main(int argc, const char *argv[]) {
                             kseq.l = sequence.length();
                             reverse_complement(kseq);
                         }
+                        annotation.clear();
                     }
                 } else if (utils::get_filetype(files[f]) == "FASTA"
                             || utils::get_filetype(files[f]) == "FASTQ") {
@@ -224,6 +247,15 @@ int main(int argc, const char *argv[]) {
                         exit(1);
                     }
                     Timer result_timer;
+                    bool fastq = utils::get_filetype(files[f]) == "FASTQ";
+                    std::pair<std::map<std::string, size_t>::iterator, bool> map_ins;
+                    if (fastq) {
+                        map_ins = annot_map.insert(
+                                std::pair<std::string,size_t>(
+                                    files[f],
+                                    annot_map.size()));
+                    }
+
                     while (kseq_read(read_stream) >= 0) {
                         {
                             file_read_time += result_timer.elapsed();
@@ -234,27 +266,37 @@ int main(int argc, const char *argv[]) {
 
                             //constructor->add_read(read_stream->seq.s);
                             {
-                                if (utils::get_filetype(files[f]) == "FASTQ") {
+                                if (fastq) {
                                     //assume each FASTQ file is one column
 
                                     result_timer.reset();
-                                    annotator->add_sequence(read_stream->seq.s, f);
+                                    annotator->add_sequence(read_stream->seq.s, map_ins.first->second);
                                     bloom_const_time += result_timer.elapsed();
 
                                     if (precise_annotator) {
                                         result_timer.reset();
-                                        precise_annotator->add_sequence(read_stream->seq.s, f);
+                                        precise_annotator->add_sequence(read_stream->seq.s, map_ins.first->second);
                                         precise_const_time += result_timer.elapsed();
                                     }
                                 } else {
                                     //assume each sequence in each FASTA file is a column
                                     result_timer.reset();
-                                    annotator->add_column(read_stream->seq.s);
+                                    map_ins = annot_map.insert(
+                                        std::pair<std::string,size_t>(
+                                            std::string(read_stream->name.s),
+                                            annot_map.size()));
+                                    if (map_ins.second)
+                                        annotator->add_column(read_stream->seq.s);
+                                    else
+                                        annotator->add_sequence(read_stream->seq.s, map_ins.first->second);
                                     bloom_const_time += result_timer.elapsed();
 
                                     if (precise_annotator) {
                                         result_timer.reset();
-                                        precise_annotator->add_column(read_stream->seq.s);
+                                        if (map_ins.second)
+                                            precise_annotator->add_column(read_stream->seq.s);
+                                        else
+                                            precise_annotator->add_sequence(read_stream->seq.s, map_ins.first->second);
                                         precise_const_time += result_timer.elapsed();
                                     }
                                 }

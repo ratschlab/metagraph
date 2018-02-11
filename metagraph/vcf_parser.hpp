@@ -21,7 +21,7 @@ class vcf_parser {
     //TODO: make a parallel version of this that outputs n lines at a time?
     bool get_seq(const std::vector<std::string> &annots,
                  std::string *sequence,
-                 std::string *annotation);
+                 std::vector<std::string> &annotation);
 
   private:
     faidx_t *reference_ = NULL;
