@@ -97,18 +97,36 @@ int main(int argc, const char *argv[]) {
 
     DBGHash hashing_graph(config->k);
 
-    if (config->bloom_num_hash_functions) {
-        annotator = new annotate::BloomAnnotator(
-            config->bloom_num_hash_functions,
-            hashing_graph,
-            config->bloom_bits_per_edge,
-            config->verbose
-        );
+    if (config->bloom_fpp > -0.5
+            || config->bloom_bits_per_edge > -0.5
+            || config->bloom_num_hash_functions > 0) {
+        if (config->bloom_fpp > -0.5) {
+            // Expected FPP is set, optimize other parameters automatically
+            annotator = new annotate::BloomAnnotator(hashing_graph,
+                                                     config->bloom_fpp,
+                                                     config->verbose);
+        } else {
+            assert(config->bloom_bits_per_edge >= 0);
+            // Experiment mode, estimate FPP given other parameters,
+            // optimize the number of hash functions if it's set to zero
+            annotator = new annotate::BloomAnnotator(
+                hashing_graph,
+                config->bloom_bits_per_edge,
+                config->bloom_num_hash_functions,
+                config->verbose
+            );
+        }
         if (config->bloom_test_stepsize > 0) {
             precise_annotator = new annotate::PreciseAnnotator(
                 hashing_graph
             );
         }
+    }
+    if (annotator) {
+        std::cout << "Bloom filter settings" << std::endl;
+        std::cout << "\tBits per edge:\t" << annotator->size_factor() << std::endl;
+        std::cout << "\tNum hash functions:\t" << annotator->num_hash_functions() << std::endl;
+        std::cout << "\tApprox false pos prob:\t" << annotator->approx_false_positive_rate() << std::endl;
     }
 
     if (config->verbose)

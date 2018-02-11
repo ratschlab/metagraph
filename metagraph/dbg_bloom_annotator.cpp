@@ -1,6 +1,7 @@
 #include "dbg_bloom_annotator.hpp"
 
 #include <fstream>
+#include <cmath>
 
 
 namespace annotate {
@@ -33,16 +34,64 @@ PreciseAnnotator::annotation_from_kmer(const std::string &kmer) const {
     return annotation_exact.find(kmer.data(), kmer.data() + kmer.size());
 }
 
+size_t compute_optimal_num_hashes(double bloom_fpp, double bloom_size_factor = -1) {
+    return bloom_size_factor > -0.5
+           ? static_cast<size_t>(ceil(bloom_size_factor * std::log(2)))
+           : bloom_fpp > -0.5
+               ? static_cast<size_t>(ceil(-std::log2(bloom_fpp)))
+               : 0;
+}
 
-BloomAnnotator::BloomAnnotator(size_t num_hash_functions,
-                               const DeBruijnGraphWrapper &graph,
-                               double bloom_size_factor,
+double compute_optimal_bloom_size_factor(double bloom_fpp) {
+    return -std::log2(bloom_fpp) / std::log(2);
+}
+
+// Computes optimal `bloom_size_factor` and `num_hash_functions` automatically
+BloomAnnotator::BloomAnnotator(const DeBruijnGraphWrapper &graph,
+                               double bloom_fpp,
                                bool verbose)
-    : annotation(num_hash_functions),
-      graph_(graph),
-      bloom_size_factor_(bloom_size_factor),
-      total_traversed_(0),
-      verbose_(verbose) {}
+      : graph_(graph),
+        bloom_size_factor_(compute_optimal_bloom_size_factor(bloom_fpp)),
+        bloom_fpp_(bloom_fpp),
+        annotation(compute_optimal_num_hashes(bloom_fpp_, bloom_size_factor_)),
+        total_traversed_(0),
+        verbose_(verbose) {
+    if (!annotation.num_hash_functions()) {
+        std::cerr << "ERROR: invalid Bloom filter parameters" << std::endl;
+        exit(1);
+    }
+}
+
+// If not provided, computes optimal `num_hash_functions` automatically
+BloomAnnotator::BloomAnnotator(const DeBruijnGraphWrapper &graph,
+                               double bloom_size_factor,
+                               size_t num_hash_functions,
+                               bool verbose)
+      : graph_(graph),
+        bloom_size_factor_(bloom_size_factor),
+        bloom_fpp_(exp(-bloom_size_factor_ * std::log(2) * std::log(2))),
+        annotation(num_hash_functions
+                      ? num_hash_functions
+                      : compute_optimal_num_hashes(bloom_fpp_, bloom_size_factor_)),
+        total_traversed_(0),
+        verbose_(verbose) {
+    if (!annotation.num_hash_functions()) {
+        std::cerr << "ERROR: invalid Bloom filter parameters" << std::endl;
+        exit(1);
+    }
+}
+
+size_t BloomAnnotator::num_hash_functions() const {
+    return annotation.num_hash_functions();
+}
+
+double BloomAnnotator::size_factor() const {
+    return bloom_size_factor_;
+}
+
+double BloomAnnotator::approx_false_positive_rate() const {
+    return bloom_fpp_;
+}
 
 void BloomAnnotator::add_sequence(const std::string &sequence, size_t column) {
     std::string preprocessed_seq = graph_.encode_sequence(sequence);
@@ -215,6 +264,9 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
 
 void BloomAnnotator::test_fp_all(const PreciseAnnotator &annotation_exact,
                                  size_t step) const {
+    double fp_per_bit = 0;
+    double fp_pre_per_bit = 0;
+    double fn_per_bit = 0;
     size_t fp = 0;
     size_t fp_pre = 0;
     size_t fn = 0;
@@ -224,20 +276,35 @@ void BloomAnnotator::test_fp_all(const PreciseAnnotator &annotation_exact,
             continue;
         total++;
         auto stats = test_fp(i, annotation_exact);
-        fp_pre += stats[0];
-        fp += stats[1];
-        fn += stats[2];
+        fp_pre_per_bit += (double)stats[0];
+        fp_per_bit     += (double)stats[1];
+        fn_per_bit     += (double)stats[2];
+        fp_pre         += stats[0] > 0;
+        fp             += stats[1] > 0;
+        fn             += stats[2] > 0;
     }
     std::cout << "\n";
     std::cout << "Total:\t" << total << "\n";
     std::cout << "Post:\t"
-              << "FP:\t" << fp << " "
-              << (double)fp / (double)total << "\t"
-              << "FN:\t" << fn
+              << "FP(edges):\t" << fp << "\t"
+              << "FP(per edge):\t" << (double)fp / (double)total << "\t"
+              << "FN(edges):\t" << fn
               << "\n";
     std::cout << "Pre:\t"
-              << "FP:\t" << fp_pre << " "
-              << (double)fp_pre / (double)total << "\t"
+              << "FP(edges):\t" << fp_pre << "\t"
+              << "FP(per edge):\t" << (double)fp_pre / (double)total << "\t"
+              << "\n";
+    std::cout << "Per bit" << "\n";
+    std::cout << "Post:\t"
+              << "FP(bits):\t" << (double)fp_per_bit << "\t"
+              << "FP(bits/edge):\t" << (double)fp_per_bit / (double)total << "\t"
+              << "Avg. FPP:\t" << (double)fp_per_bit / (double)total / (double)annotation.size() << "\t"
+              << "FN(bits):\t" << (double)fn_per_bit
+              << "\n";
+    std::cout << "Pre:\t"
+              << "FP(bits):\t" << (double)fp_pre_per_bit << "\t"
+              << "FP(bits/edge):\t" << (double)fp_pre_per_bit / (double)total << "\t"
+              << "Avg. FPP:\t" << (double)fp_pre_per_bit / (double)total / (double)annotation.size() << "\t"
               << "\n";
     std::cout << "Total traversed: " << total_traversed_ << "\n";
 }
@@ -267,7 +334,7 @@ BloomAnnotator::kmer_from_index(DeBruijnGraphWrapper::edge_index index) const {
     return graph_.get_node_kmer(index) + graph_.get_edge_label(index);
 }
 
-std::vector<uint8_t>
+std::vector<size_t>
 BloomAnnotator::test_fp(DeBruijnGraphWrapper::edge_index i,
                         const PreciseAnnotator &annotation_exact) const {
 
@@ -282,32 +349,32 @@ BloomAnnotator::test_fp(DeBruijnGraphWrapper::edge_index i,
     auto kt = test_exact.begin();
     auto lt = curannot.begin();
 
-    std::vector<uint8_t> stats(3, 0);
+    std::vector<size_t> stats(3, 0);
 
     for (; jt != test.end(); ++jt, ++kt, ++lt) {
         //check for false negatives
         if ((*jt | *kt) != *jt) {
-            std::cerr << "Encoding " << i << " failed\n";
+            std::cerr << "Encoding " << i << " failed" << std::endl;
             exit(1);
         }
         //correction introduced extra bits
         if ((*lt | *jt) != *jt) {
-            std::cerr << "False bits added\n";
+            std::cerr << "False bits added" << std::endl;
             exit(1);
         }
         //false positives before correction
-        if (!stats[0] && (*jt | *kt) != *kt) {
-            stats[0] = 1;
+        if ((*jt | *kt) != *kt) {
+            stats[0]++;
         }
         //false positives after correction
-        if (!stats[1] && (*lt | *kt) != *kt) {
-            stats[1] = 1;
+        if ((*lt | *kt) != *kt) {
+            stats[1]++;
             if (verbose_)
                 std::cout << "FP: " << int_kmer << std::endl;
         }
         //false negatives after correction
-        if (!stats[2] && (*lt | *kt) != *lt) {
-            stats[2] = 1;
+        if ((*lt | *kt) != *lt) {
+            stats[2]++;
             if (verbose_) {
                 std::cout << "FN: " << int_kmer << std::endl;
                 auto unpacked_labels = unpack(test_exact);
@@ -324,9 +391,9 @@ BloomAnnotator::test_fp(DeBruijnGraphWrapper::edge_index i,
                 std::cout << std::endl;
             }
         }
-        if (stats[0] && stats[1] && stats[2]) {
-            break;
-        }
+        //if (stats[0] && stats[1] && stats[2]) {
+        //    break;
+        //}
     }
     return stats;
 }

@@ -33,7 +33,8 @@ class Config {
     unsigned int bloom_num_hash_functions = 0;
     unsigned int bloom_test_stepsize = 0;
 
-    double bloom_bits_per_edge = 0.4;
+    double bloom_fpp = -1;
+    double bloom_bits_per_edge = -1;
     double discovery_fraction = 1.0;
 
     std::vector<std::string> fname;

@@ -58,9 +58,15 @@ class BloomAnnotator {
     //typedef MurmurHashIterator HashIt;
 
   public:
-    BloomAnnotator(size_t num_hash_functions,
-                   const DeBruijnGraphWrapper &graph,
+    // Computes optimal `bloom_size_factor` and `num_hash_functions` automatically
+    BloomAnnotator(const DeBruijnGraphWrapper &graph,
+                   double bloom_fpp,
+                   bool verbose = false);
+
+    // If not provided, computes optimal `num_hash_functions` automatically
+    BloomAnnotator(const DeBruijnGraphWrapper &graph,
                    double bloom_size_factor,
+                   size_t num_hash_functions,
                    bool verbose = false);
 
     void add_sequence(const std::string &sequence, size_t column);
@@ -80,6 +86,12 @@ class BloomAnnotator {
 
     static std::vector<size_t> unpack(const std::vector<uint64_t> &packed);
 
+    size_t num_hash_functions() const;
+
+    double size_factor() const;
+
+    double approx_false_positive_rate() const;
+
   private:
     HashIt hasher_from_kmer(const std::string &kmer) const;
 
@@ -89,13 +101,14 @@ class BloomAnnotator {
 
     std::string kmer_from_index(DeBruijnGraphWrapper::edge_index index) const;
 
-    std::vector<uint8_t> test_fp(DeBruijnGraphWrapper::edge_index i,
+    std::vector<size_t> test_fp(DeBruijnGraphWrapper::edge_index i,
                                  const PreciseAnnotator &annotation_exact) const;
 
-    annotate::HashAnnotation<annotate::BloomFilter> annotation;
 
     const DeBruijnGraphWrapper &graph_;
     double bloom_size_factor_;
+    double bloom_fpp_;
+    annotate::HashAnnotation<annotate::BloomFilter> annotation;
 
     //TODO: get rid of this if not using degree Bloom filter
     std::vector<size_t> sizes_v;

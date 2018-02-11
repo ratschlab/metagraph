@@ -342,7 +342,7 @@ AnnotationCategoryBloom::AnnotationCategoryBloom(const DBG_succ &graph,
                                                  double bloom_size_factor,
                                                  bool verbose)
       : graph_(graph),
-        annotator_(num_hash_functions, graph_, bloom_size_factor, verbose) {
+        annotator_(graph_, bloom_size_factor, num_hash_functions, verbose) {
 }
 
 AnnotationCategoryBloom::SetStr

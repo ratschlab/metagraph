@@ -87,11 +87,24 @@ int main(int argc, const char *argv[]) {
 
             std::map<std::string, size_t> annot_map;
 
-            if (config->bloom_num_hash_functions) {
+            if (config->bloom_fpp > -0.5) {
+                // Expected FPP is set, optimize other parameters automatically
+                annotator = new annotate::BloomAnnotator(graph_anno_wrapper,
+                                                         config->bloom_fpp,
+                                                         config->verbose);
+                if (config->bloom_test_stepsize > 0) {
+                    precise_annotator = new annotate::PreciseAnnotator(
+                        graph_anno_wrapper
+                    );
+                }
+            } else if (config->bloom_bits_per_edge > -0.5) {
+                // Experiment mode, estimate FPP given other parameters,
+                // optimize the number of hash functions if it's set to zero
                 annotator = new annotate::BloomAnnotator(
-                    config->bloom_num_hash_functions,
                     graph_anno_wrapper,
-                    config->bloom_bits_per_edge
+                    config->bloom_bits_per_edge,
+                    config->bloom_num_hash_functions,
+                    config->verbose
                 );
                 if (config->bloom_test_stepsize > 0) {
                     precise_annotator = new annotate::PreciseAnnotator(
