@@ -107,3 +107,7 @@ void DBGHash::add_sequence(const std::string &sequence) {
         }
     }
 }
+
+size_t DBGHash::get_num_edges() const {
+    return kmers_.size();
+}

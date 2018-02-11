@@ -372,7 +372,7 @@ BloomAnnotator::test_fp(DeBruijnGraphWrapper::edge_index i,
         }
         //false negatives after correction
         if ((*lt | *kt) != *lt) {
-            stats[2] += __builtin_popcountll(*kt) - __builtin_popcountll(*lt);
+            stats[2] += __builtin_popcountll(*lt | *kt) - __builtin_popcountll(*lt);
             if (verbose_) {
                 std::cout << "FN: " << int_kmer << std::endl;
                 auto unpacked_labels = unpack(test_exact);

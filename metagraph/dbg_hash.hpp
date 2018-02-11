@@ -35,6 +35,8 @@ class DBGHash : public annotate::DeBruijnGraphWrapper {
 
     void add_sequence(const std::string &sequence);
 
+    size_t get_num_edges() const;
+
   private:
     size_t k_;
     std::unordered_map<std::string, size_t> indices_;

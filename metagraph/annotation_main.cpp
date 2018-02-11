@@ -337,6 +337,8 @@ int main(int argc, const char *argv[]) {
         }
     }
 
+    std::cout << "Graph size(edges):\t" << hashing_graph.get_num_edges() << std::endl;
+
     config->infbase = config->outfbase;
     // graph->annotationToFile(config->infbase + ".anno.dbg");
     //graph->print_state();
