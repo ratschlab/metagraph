@@ -37,9 +37,9 @@ PreciseAnnotator::annotation_from_kmer(const std::string &kmer) const {
 size_t compute_optimal_num_hashes(double bloom_fpp, double bloom_size_factor = -1) {
     return bloom_size_factor > -0.5
            ? static_cast<size_t>(ceil(bloom_size_factor * std::log(2)))
-           : bloom_fpp > -0.5
-               ? static_cast<size_t>(ceil(-std::log2(bloom_fpp)))
-               : 0;
+           : (bloom_fpp > -0.5
+                 ? static_cast<size_t>(ceil(-std::log2(bloom_fpp)))
+                 : 0);
 }
 
 double compute_optimal_bloom_size_factor(double bloom_fpp) {
@@ -296,13 +296,11 @@ void BloomAnnotator::test_fp_all(const PreciseAnnotator &annotation_exact,
               << "\n";
     std::cout << "Per bit" << "\n";
     std::cout << "Post:\t"
-              << "FP(bits):\t" << (double)fp_per_bit << "\t"
               << "FP(bits/edge):\t" << (double)fp_per_bit / (double)total << "\t"
               << "Avg. FPP:\t" << (double)fp_per_bit / (double)total / (double)annotation.size() << "\t"
               << "FN(bits):\t" << (double)fn_per_bit
               << "\n";
     std::cout << "Pre:\t"
-              << "FP(bits):\t" << (double)fp_pre_per_bit << "\t"
               << "FP(bits/edge):\t" << (double)fp_pre_per_bit / (double)total << "\t"
               << "Avg. FPP:\t" << (double)fp_pre_per_bit / (double)total / (double)annotation.size() << "\t"
               << "\n";
@@ -364,17 +362,17 @@ BloomAnnotator::test_fp(DeBruijnGraphWrapper::edge_index i,
         }
         //false positives before correction
         if ((*jt | *kt) != *kt) {
-            stats[0]++;
+            stats[0] += __builtin_popcountll(*jt) - __builtin_popcountll(*kt);
         }
         //false positives after correction
         if ((*lt | *kt) != *kt) {
-            stats[1]++;
+            stats[1] += __builtin_popcountll(*lt) - __builtin_popcountll(*kt);
             if (verbose_)
                 std::cout << "FP: " << int_kmer << std::endl;
         }
         //false negatives after correction
         if ((*lt | *kt) != *lt) {
-            stats[2]++;
+            stats[2] += __builtin_popcountll(*kt) - __builtin_popcountll(*lt);
             if (verbose_) {
                 std::cout << "FN: " << int_kmer << std::endl;
                 auto unpacked_labels = unpack(test_exact);
