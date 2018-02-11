@@ -46,6 +46,45 @@ class AnnotationCategory {
 };
 
 
+class ColorCompressed : public AnnotationCategory<std::set<std::string>> {
+  public:
+    typedef std::set<std::string> SetStr;
+
+    ColorCompressed(uint64_t graph_size)
+          : graph_size_(graph_size), annotation_curr_(NULL) {}
+
+    // Merge constructor
+    ColorCompressed(const std::vector<ColorCompressed> &categories,
+                    const std::vector<std::vector<size_t>> &merge_plan);
+
+    ~ColorCompressed() { release(); }
+
+    SetStr get(Index i) const;
+
+    bool has_label(Index i, const SetStr &label) const;
+    bool has_label(Index i, const std::string &label) const;
+
+    void set_label(Index i, const SetStr &label);
+    void add_label(Index i, const std::string &label);
+
+    bool load(const std::string &filename);
+    void serialize(const std::string &filename) const;
+
+  private:
+    void release();
+    void flush();
+    sdsl::bit_vector* inflate_column(const uint32_t id) const;
+
+    uint64_t graph_size_;
+    std::unordered_map<std::string, uint32_t> label_to_id_;
+    std::vector<std::string> id_to_label_;
+    std::vector<sdsl::sd_vector<>*> bitmatrix_;
+
+    uint32_t curr_id_;
+    sdsl::bit_vector *annotation_curr_;
+};
+
+
 // class ColorWiseMatrix : public UncompressedMatrix {
 //   public:
 //     // annotation containers
@@ -57,37 +96,6 @@ class AnnotationCategory {
 //     //std::vector<sdsl::rrr_vector<63>* > annotation_full;
 //     std::vector<sdsl::sd_vector<>* > annotation_full;
 // };
-
-
-template <typename LabelType>
-class ColorCompressed : public AnnotationCategory<LabelType> {
-  public:
-    ColorCompressed(const std::vector<ColorCompressed<LabelType>> &categories,
-                    const std::vector<std::set<size_t>> &merge_plan);
-
-    const LabelType& get(Index i) const;
-
-    bool has_label(Index i, const LabelType &label) const;
-
-    void set_label(Index i, const LabelType &label);
-
-    bool load(const std::string &filename);
-    void serialize(const std::string &filename) const;
-
-    void flush();
-
-  private:
-    uint64_t graph_size_;
-
-    std::unordered_map<LabelType, uint64_t> label_to_id_;
-    std::vector<LabelType> id_to_label_;
-    std::vector<sdsl::sd_vector<>*> bitmatrix_;
-    sdsl::bit_vector* annotation_curr_;
-    LabelType label_curr_;
-
-    sdsl::bit_vector* inflate_column(const uint64_t id) const;
-
-};
 
 
 /*
@@ -188,8 +196,8 @@ class AnnotationCategoryHash : public AnnotationCategory<std::set<std::string>> 
 
     bool has_label(Index i, const SetStr &label) const;
 
-    bool load(const std::string &filename);
-    void serialize(const std::string &filename) const;
+    // bool load(const std::string &filename);
+    // void serialize(const std::string &filename) const;
 
     void compare_annotations(const AnnotationCategoryBloom &bloom,
                              size_t step = 1) const;
@@ -226,8 +234,8 @@ class AnnotationCategoryBloom : public AnnotationCategory<std::set<std::string>>
 
     bool has_label(Index i, const SetStr &label) const;
 
-    bool load(const std::string &filename);
-    void serialize(const std::string &filename) const;
+    // bool load(const std::string &filename);
+    // void serialize(const std::string &filename) const;
 
     void compare_annotations(const AnnotationCategoryHash &exact,
                              size_t step = 1) const {
@@ -241,50 +249,6 @@ class AnnotationCategoryBloom : public AnnotationCategory<std::set<std::string>>
     std::vector<std::string> column_to_label_;
     std::unordered_map<std::string, size_t> label_to_column_;
 };
-
-
-//TODO: remove this
-
-    // sdsl::bit_vector* inflate_annotation(DBG_succ *G, uint64_t id);
-
-    // void annotate_seq(DBG_succ *G, Config *config, kstring_t &seq, kstring_t &label,
-    //                   uint64_t start = 0, uint64_t end = 0,
-    //                   pthread_mutex_t *anno_mutex = NULL);
-
-    // // get_annotation(const DBG_succ *G, const std::vector<uint64_t> &node_indices);
-    // std::vector<uint32_t> classify_path(DBG_succ *G, std::vector<uint64_t> node_indices);
-
-    // // get_annotation
-    // std::set<uint32_t> classify_read(DBG_succ *G, kstring_t &read, uint64_t max_distance);
-
-    // // print
-    // void annotationToScreen(DBG_succ *G);
-
-// // write annotation to disk
-// void DBG_succ::annotationToFile(const std::string &filename) {
-//     std::ofstream outstream(filename);
-//     libmaus2::util::NumberSerialisation::serialiseNumber(outstream, annotation_full.size());
-//     for (size_t i = 0; i < annotation_full.size(); ++i) {
-//         annotation_full.at(i)->serialize(outstream);
-//     }
-// }
-
-// // read annotation from disk
-// void DBG_succ::annotationFromFile(const std::string &filename) {
-//     // generate annotation object
-//     // populate it with existing annotation if available
-//     std::ifstream instream(filename);
-//     if (instream.good()) {
-//         //if (config->verbose)
-//         //    std::cerr << "get annotation from disk" << std::endl;
-//         size_t anno_size = libmaus2::util::NumberSerialisation::deserialiseNumber(instream);
-//         for (size_t i = 0; i < anno_size; ++i) {
-//             //annotation_full.push_back(new sdsl::rrr_vector<63>());
-//             annotation_full.push_back(new sdsl::sd_vector<>());
-//             annotation_full.back()->load(instream);
-//         }
-//     }
-// }
 
 } // namespace annotate
 

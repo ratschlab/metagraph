@@ -2,7 +2,7 @@
 *.fai
 !metagraph/tests/data/*.fa
 !metagraph/tests/data/*.fai
-metagraph/tests/data/*dump_test
+metagraph/tests/data/*dump_test*
 .history
 */metagraph
 testrun*
