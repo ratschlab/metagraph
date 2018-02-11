@@ -286,7 +286,7 @@ class BloomFilter {
     double occupancy() const {
         size_t count = 0;
         for (auto it = bits.begin(); it != bits.end(); ++it) {
-            count += __builtin_popcountl(*it);
+            count += __builtin_popcountll(*it);
         }
         return static_cast<double>(count) / (bits.size() * 64);
     }
