@@ -69,9 +69,9 @@ class BloomAnnotator {
                    size_t num_hash_functions,
                    bool verbose = false);
 
-    void add_sequence(const std::string &sequence, size_t column, bool reverse = false);
+    void add_sequence(const std::string &sequence, size_t column, size_t num_elements = 0);
 
-    void add_column(const std::string &sequence, bool reverse = false);
+    void add_column(const std::string &sequence, size_t num_elements = 0);
 
     std::vector<uint64_t> get_annotation(DeBruijnGraphWrapper::edge_index i) const;
 

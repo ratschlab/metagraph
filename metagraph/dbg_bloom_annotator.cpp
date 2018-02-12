@@ -93,7 +93,7 @@ double BloomAnnotator::approx_false_positive_rate() const {
     return bloom_fpp_;
 }
 
-void BloomAnnotator::add_sequence(const std::string &sequence, size_t column, bool reverse) {
+void BloomAnnotator::add_sequence(const std::string &sequence, size_t column, size_t num_elements) {
     std::string preprocessed_seq = graph_.encode_sequence(sequence);
 
     // Don't annotate short sequences
@@ -105,11 +105,9 @@ void BloomAnnotator::add_sequence(const std::string &sequence, size_t column, bo
 
     if (annotation[column].size() == 0) {
         annotation[column].resize(
-            bloom_size_factor_
-                * (
-                    preprocessed_seq.size() * (static_cast<size_t>(reverse) + 1)
-                    - graph_.get_k()
-                ) + 1
+            bloom_size_factor_ 
+            * (num_elements ? num_elements : preprocessed_seq.size() - graph_.get_k()) 
+            + 1
         );
     }
 
@@ -124,8 +122,8 @@ void BloomAnnotator::add_sequence(const std::string &sequence, size_t column, bo
     }
 }
 
-void BloomAnnotator::add_column(const std::string &sequence, bool reverse) {
-    add_sequence(sequence, annotation.size(), reverse);
+void BloomAnnotator::add_column(const std::string &sequence, size_t num_elements) {
+    add_sequence(sequence, annotation.size(), num_elements);
 }
 
 BloomAnnotator::HashIt

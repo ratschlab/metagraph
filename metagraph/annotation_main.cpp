@@ -199,9 +199,18 @@ int main(int argc, const char *argv[]) {
                                             annot_map.size()));
                                 data_reading_timer.reset();
                                 if (map_ins.second) {
-                                    annotator->add_column(sequence, config->reverse);
+                                    annotator->add_column(
+                                            sequence, 
+                                            (sequence.length() - hashing_graph.get_k())
+                                                * (static_cast<size_t>(config->reverse) + 1)
+                                    );
                                 } else {
-                                    annotator->add_sequence(sequence, map_ins.first->second, config->reverse);
+                                    annotator->add_sequence(
+                                            sequence, 
+                                            map_ins.first->second, 
+                                            (sequence.length() - hashing_graph.get_k())
+                                                * (static_cast<size_t>(config->reverse) + 1)
+                                    );
                                 }
                                 bloom_const_time += data_reading_timer.elapsed();
                                 if (precise_annotator) {
@@ -265,7 +274,9 @@ int main(int argc, const char *argv[]) {
                                     result_timer.reset();
                                     //TODO: for reads this leads to a much smaller filter than needed
                                     //TODO: tell the annotator to allocate a much larger space for reads
-                                    annotator->add_sequence(read_stream->seq.s, map_ins.first->second, config->reverse);
+                                    annotator->add_sequence(
+                                            read_stream->seq.s, 
+                                            map_ins.first->second);
                                     bloom_const_time += result_timer.elapsed();
 
                                     if (precise_annotator) {
@@ -281,9 +292,18 @@ int main(int argc, const char *argv[]) {
                                             std::string(read_stream->name.s),
                                             annot_map.size()));
                                     if (map_ins.second)
-                                        annotator->add_column(read_stream->seq.s, config->reverse);
+                                        annotator->add_column(
+                                                read_stream->seq.s, 
+                                                (read_stream->seq.l - hashing_graph.get_k())
+                                                    * (static_cast<size_t>(config->reverse) + 1)
+                                        );
                                     else
-                                        annotator->add_sequence(read_stream->seq.s, map_ins.first->second, config->reverse);
+                                        annotator->add_sequence(
+                                                read_stream->seq.s, 
+                                                map_ins.first->second, 
+                                                (read_stream->seq.l - hashing_graph.get_k())
+                                                    * (static_cast<size_t>(config->reverse) + 1)
+                                        );
                                     bloom_const_time += result_timer.elapsed();
 
                                     if (precise_annotator) {
