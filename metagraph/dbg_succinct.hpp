@@ -123,7 +123,7 @@ class DBG_succ : public SequenceGraph {
      * Breaks the seq into k-mers and searches for the index of each
      * k-mer in the graph. Returns these indices.
      */
-    std::vector<uint64_t> align(const std::string &sequence,
+    std::vector<uint64_t> index(const std::string &sequence,
                                 uint64_t alignment_length = 0) const;
 
     std::vector<std::vector<HitInfo>> align_fuzzy(const std::string &sequence,

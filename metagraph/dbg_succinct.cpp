@@ -753,7 +753,7 @@ std::string DBG_succ::get_node_str(uint64_t k_node) const {
 DBG_succ::node_iterator
 DBG_succ::find(const std::string &sequence,
                const std::function<void(node_iterator)> &callback) const {
-    auto kmer_indices = align(sequence);
+    auto kmer_indices = index(sequence);
     if (!kmer_indices.size())
         return npos;
 
@@ -766,7 +766,7 @@ DBG_succ::find(const std::string &sequence,
     return kmer_indices.back();
 }
 
-std::vector<uint64_t> DBG_succ::align(const std::string &sequence,
+std::vector<uint64_t> DBG_succ::index(const std::string &sequence,
                                       uint64_t alignment_length) const {
     if (alignment_length == 0 || alignment_length > k_)
         alignment_length = k_;
