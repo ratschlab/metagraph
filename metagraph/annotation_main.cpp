@@ -263,6 +263,8 @@ int main(int argc, const char *argv[]) {
                                     //assume each FASTQ file is one column
 
                                     result_timer.reset();
+                                    //TODO: for reads this leads to a much smaller filter than needed
+                                    //TODO: tell the annotator to allocate a much larger space for reads
                                     annotator->add_sequence(read_stream->seq.s, map_ins.first->second, config->reverse);
                                     bloom_const_time += result_timer.elapsed();
 
