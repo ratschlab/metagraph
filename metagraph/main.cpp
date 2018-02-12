@@ -92,7 +92,7 @@ int main(int argc, const char *argv[]) {
                 annotator = new annotate::BloomAnnotator(graph_anno_wrapper,
                                                          config->bloom_fpp,
                                                          config->verbose);
-                if (config->bloom_test_stepsize > 0) {
+                if (config->bloom_test_num_kmers > 0) {
                     precise_annotator = new annotate::PreciseAnnotator(
                         graph_anno_wrapper
                     );
@@ -106,7 +106,7 @@ int main(int argc, const char *argv[]) {
                     config->bloom_num_hash_functions,
                     config->verbose
                 );
-                if (config->bloom_test_stepsize > 0) {
+                if (config->bloom_test_num_kmers > 0) {
                     precise_annotator = new annotate::PreciseAnnotator(
                         graph_anno_wrapper
                     );
@@ -319,7 +319,7 @@ int main(int argc, const char *argv[]) {
                     std::cout << "Approximating FPP...\t" << std::flush;
                     timer.reset();
                     //TODO: set this value
-                    annotator->test_fp_all(*precise_annotator, config->bloom_test_stepsize);
+                    annotator->test_fp_all(*precise_annotator, config->bloom_test_num_kmers);
                     std::cout << timer.elapsed() << "sec" << std::endl;
                 }
 

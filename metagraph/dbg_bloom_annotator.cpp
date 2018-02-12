@@ -93,7 +93,7 @@ double BloomAnnotator::approx_false_positive_rate() const {
     return bloom_fpp_;
 }
 
-void BloomAnnotator::add_sequence(const std::string &sequence, size_t column) {
+void BloomAnnotator::add_sequence(const std::string &sequence, size_t column, bool reverse) {
     std::string preprocessed_seq = graph_.encode_sequence(sequence);
 
     // Don't annotate short sequences
@@ -106,7 +106,10 @@ void BloomAnnotator::add_sequence(const std::string &sequence, size_t column) {
     if (annotation[column].size() == 0) {
         annotation[column].resize(
             bloom_size_factor_
-                * (preprocessed_seq.size() - graph_.get_k()) + 1
+                * (
+                    preprocessed_seq.size() * (static_cast<size_t>(reverse) + 1)
+                    - graph_.get_k()
+                ) + 1
         );
     }
 
@@ -121,8 +124,8 @@ void BloomAnnotator::add_sequence(const std::string &sequence, size_t column) {
     }
 }
 
-void BloomAnnotator::add_column(const std::string &sequence) {
-    add_sequence(sequence, annotation.size());
+void BloomAnnotator::add_column(const std::string &sequence, bool reverse) {
+    add_sequence(sequence, annotation.size(), reverse);
 }
 
 BloomAnnotator::HashIt
@@ -262,7 +265,7 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
 }
 
 void BloomAnnotator::test_fp_all(const PreciseAnnotator &annotation_exact,
-                                 size_t step) const {
+                                 size_t num) const {
     double fp_per_bit = 0;
     double fp_pre_per_bit = 0;
     double fn_per_bit = 0;
@@ -270,6 +273,11 @@ void BloomAnnotator::test_fp_all(const PreciseAnnotator &annotation_exact,
     size_t fp_pre = 0;
     size_t fn = 0;
     size_t total = 0;
+    assert(num);
+    size_t step = std::max(
+        static_cast<size_t>(1),
+        static_cast<size_t>((graph_.last_edge() - graph_.first_edge() + 1) / num)
+    );
     for (auto i = graph_.first_edge(); i <= graph_.last_edge(); i += step) {
         if (graph_.is_dummy_edge(kmer_from_index(i)))
             continue;

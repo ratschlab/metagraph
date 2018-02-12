@@ -69,16 +69,16 @@ class BloomAnnotator {
                    size_t num_hash_functions,
                    bool verbose = false);
 
-    void add_sequence(const std::string &sequence, size_t column);
+    void add_sequence(const std::string &sequence, size_t column, bool reverse = false);
 
-    void add_column(const std::string &sequence);
+    void add_column(const std::string &sequence, bool reverse = false);
 
     std::vector<uint64_t> get_annotation(DeBruijnGraphWrapper::edge_index i) const;
 
     std::vector<uint64_t> get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
                                                    size_t path_cutoff = 50) const;
 
-    void test_fp_all(const PreciseAnnotator &annotation_exact, size_t step = 1) const;
+    void test_fp_all(const PreciseAnnotator &annotation_exact, size_t num = 0) const;
 
     void serialize(std::ostream &out) const;
 

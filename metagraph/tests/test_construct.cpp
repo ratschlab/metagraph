@@ -150,11 +150,20 @@ TEST(DBGSuccinct, AddSequenceFast) {
 
     KMerDBGSuccConstructor constructor(3);
 
+    std::vector<std::string> names;
+
     for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
         constructor.add_reads({ read_stream->seq.s });
+        names.emplace_back(read_stream->name.s);
     }
     kseq_destroy(read_stream);
     gzclose(input_p);
+
+    EXPECT_EQ(4llu, names.size());
+    EXPECT_EQ("1", names[0]);
+    EXPECT_EQ("2", names[1]);
+    EXPECT_EQ("3", names[2]);
+    EXPECT_EQ("4", names[3]);
 
     DBG_succ *graph = new DBG_succ(&constructor);
 

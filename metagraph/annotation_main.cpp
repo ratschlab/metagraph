@@ -116,7 +116,7 @@ int main(int argc, const char *argv[]) {
                 config->verbose
             );
         }
-        if (config->bloom_test_stepsize > 0) {
+        if (config->bloom_test_num_kmers > 0) {
             precise_annotator = new annotate::PreciseAnnotator(
                 hashing_graph
             );
@@ -167,9 +167,6 @@ int main(int argc, const char *argv[]) {
                         continue;
 
                     //READ FROM VCF
-                    uint64_t nbp = 0;
-                    uint64_t nbplast = 0;
-
                     Timer data_reading_timer;
 
                     vcf_parser vcf;
@@ -181,54 +178,49 @@ int main(int argc, const char *argv[]) {
                                                      << " threads per line\n";
                     std::string sequence;
                     std::vector<std::string> annotation;
+                    data_reading_timer.reset();
                     for (size_t i = 1; vcf.get_seq(annots, &sequence, annotation); ++i) {
-                        if (i % 10'000 == 0) {
+                        file_read_time += data_reading_timer.elapsed();
+                        if (config->verbose && i % 10'000 == 0) {
                             std::cout << "." << std::flush;
-                            if (i % 100'000 == 0) {
-                                fprintf(stdout,
-                                    "%zu - bp %" PRIu64 " / runtime %f sec / BPph %" PRIu64 "\n",
-                                    i,
-                                    nbp,
-                                    timer.elapsed(),
-                                    static_cast<uint64_t>(60 * 60
-                                        * (nbp - nbplast)
-                                        / data_reading_timer.elapsed())
-                                );
-                                nbplast = nbp;
-                                data_reading_timer.reset();
+                            if (i % 1'000'000 == 0) {
+                                std::cout << std::endl;
                             }
                         }
-                        //annotation = "VCF:" + annotation;
-                        nbp += sequence.length();
+                        for (size_t j = 0; j < 2; ++j) {
+                            data_reading_timer.reset();
+                            hashing_graph.add_sequence(sequence, true);
+                            graph_const_time += data_reading_timer.elapsed();
 
-                        hashing_graph.add_sequence(sequence, true);
-
-                        {
-                            //std::istringstream sin(annotation);
-                            //std::string curannot;
-                            //while (std::getline(sin, curannot, ':')) {
                             for (auto it = annotation.begin(); it != annotation.end(); ++it) {
                                 auto map_ins = annot_map.insert(
                                         std::pair<std::string,size_t>(
                                             *it,
                                             annot_map.size()));
+                                data_reading_timer.reset();
                                 if (map_ins.second) {
-                                    annotator->add_column(sequence);
+                                    annotator->add_column(sequence, config->reverse);
                                 } else {
-                                    annotator->add_sequence(sequence, map_ins.first->second);
+                                    annotator->add_sequence(sequence, map_ins.first->second, config->reverse);
                                 }
-                                if (precise_annotator)
-                                    precise_annotator->add_sequence(sequence, map_ins.first->second);
+                                bloom_const_time += data_reading_timer.elapsed();
+                                if (precise_annotator) {
+                                    data_reading_timer.reset();
+                                    if (map_ins.second) {
+                                        precise_annotator->add_column(sequence);
+                                    } else {
+                                        precise_annotator->add_sequence(sequence, map_ins.first->second);
+                                    }
+                                    precise_const_time += data_reading_timer.elapsed();
+                                }
                             }
+                            annotation.clear();
+                            if (config->reverse) {
+                                reverse_complement(sequence.begin(), sequence.end());
+                            }
+                            else
+                                break;
                         }
-
-                        if (config->reverse) {
-                            kstring_t kseq;
-                            kseq.s = &sequence[0];
-                            kseq.l = sequence.length();
-                            reverse_complement(kseq);
-                        }
-                        annotation.clear();
                     }
                 } else if (utils::get_filetype(files[f]) == "FASTA"
                             || utils::get_filetype(files[f]) == "FASTQ") {
@@ -260,17 +252,18 @@ int main(int argc, const char *argv[]) {
                         {
                             file_read_time += result_timer.elapsed();
 
-                            result_timer.reset();
-                            hashing_graph.add_sequence(read_stream->seq.s);
-                            graph_const_time += result_timer.elapsed();
+                            for (size_t j = 0; j < 2; ++j) {
 
-                            //constructor->add_read(read_stream->seq.s);
-                            {
+                                result_timer.reset();
+                                hashing_graph.add_sequence(read_stream->seq.s);
+                                graph_const_time += result_timer.elapsed();
+
+                                //constructor->add_read(read_stream->seq.s);
                                 if (fastq) {
                                     //assume each FASTQ file is one column
 
                                     result_timer.reset();
-                                    annotator->add_sequence(read_stream->seq.s, map_ins.first->second);
+                                    annotator->add_sequence(read_stream->seq.s, map_ins.first->second, config->reverse);
                                     bloom_const_time += result_timer.elapsed();
 
                                     if (precise_annotator) {
@@ -286,9 +279,9 @@ int main(int argc, const char *argv[]) {
                                             std::string(read_stream->name.s),
                                             annot_map.size()));
                                     if (map_ins.second)
-                                        annotator->add_column(read_stream->seq.s);
+                                        annotator->add_column(read_stream->seq.s, config->reverse);
                                     else
-                                        annotator->add_sequence(read_stream->seq.s, map_ins.first->second);
+                                        annotator->add_sequence(read_stream->seq.s, map_ins.first->second, config->reverse);
                                     bloom_const_time += result_timer.elapsed();
 
                                     if (precise_annotator) {
@@ -300,6 +293,10 @@ int main(int argc, const char *argv[]) {
                                         precise_const_time += result_timer.elapsed();
                                     }
                                 }
+                                if (config->reverse)
+                                    reverse_complement(read_stream->seq);
+                                else
+                                    break;
                             }
                         }
                         result_timer.reset();
@@ -329,7 +326,7 @@ int main(int argc, const char *argv[]) {
             std::cout << "Approximating FPP...\t" << std::flush;
             timer.reset();
             //TODO: set this value
-            annotator->test_fp_all(*precise_annotator, config->bloom_test_stepsize);
+            annotator->test_fp_all(*precise_annotator, config->bloom_test_num_kmers);
             std::cout << timer.elapsed() << "sec" << std::endl;
         }
 
