@@ -105,8 +105,8 @@ void BloomAnnotator::add_sequence(const std::string &sequence, size_t column, si
 
     if (annotation[column].size() == 0) {
         annotation[column].resize(
-            bloom_size_factor_ 
-            * (num_elements ? num_elements : preprocessed_seq.size() - graph_.get_k()) 
+            bloom_size_factor_
+            * (num_elements ? num_elements : preprocessed_seq.size() - graph_.get_k())
             + 1
         );
     }
