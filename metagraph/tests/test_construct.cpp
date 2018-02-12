@@ -498,9 +498,26 @@ TEST(DBGSuccinct, FindSequence) {
         SequenceGraph *graph = new DBG_succ(k);
 
         graph->add_sequence(std::string(100, 'A'));
-        EXPECT_EQ(k + 2, graph->find(std::string(k, 'A')));
-        EXPECT_EQ(k + 2, graph->find(std::string(2 * k, 'A')));
-        EXPECT_EQ(DBG_succ::npos, graph->find(std::string(k - 1, 'A')));
+
+        uint64_t index = 0;
+        graph->align(std::string(k, 'A'), [&](uint64_t i) { index = i; });
+        EXPECT_EQ(k + 2, index);
+        graph->align(std::string(2 * k, 'A'), [&](uint64_t i) { index = i; });
+        EXPECT_EQ(k + 2, index);
+
+        EXPECT_FALSE(graph->find(std::string(k - 1, 'A'), 1));
+        EXPECT_FALSE(graph->find(std::string(k - 1, 'A'), 0));
+        EXPECT_TRUE(graph->find(std::string(k, 'A'), 1));
+        EXPECT_TRUE(graph->find(std::string(k, 'A'), 0));
+        EXPECT_TRUE(graph->find(std::string(k + 1, 'A'), 1));
+        EXPECT_TRUE(graph->find(std::string(k + 1, 'A'), 0));
+
+        EXPECT_FALSE(graph->find(std::string(k - 1, 'B'), 1));
+        EXPECT_FALSE(graph->find(std::string(k - 1, 'B'), 0));
+        EXPECT_FALSE(graph->find(std::string(k, 'B'), 1));
+        EXPECT_TRUE(graph->find(std::string(k, 'B'), 0));
+        EXPECT_FALSE(graph->find(std::string(k + 1, 'B'), 1));
+        EXPECT_TRUE(graph->find(std::string(k + 1, 'B'), 0));
 
         delete graph;
     }
@@ -512,7 +529,8 @@ TEST(DBGSuccinct, Traversals) {
 
         graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
 
-        auto it = graph->find(std::string(k, 'A'));
+        uint64_t it = 0;
+        graph->align(std::string(k, 'A'), [&](uint64_t i) { it = i; });
         ASSERT_EQ(k + 3, it);
         EXPECT_EQ(it, graph->traverse(it, 'A'));
         EXPECT_EQ(it + 1, graph->traverse(it, 'C'));

@@ -25,9 +25,14 @@ class SequenceGraph {
     virtual void add_sequence(const std::string &sequence, bool try_extend = false) = 0;
 
     // Traverse graph aligning the sequence
-    // and return iterator to the last traversed node in graph.
-    virtual node_iterator find(const std::string &sequence,
-                               const std::function<void(node_iterator)> &callback = {}) const = 0;
+    // and run callback until the termination condition is satisfied
+    virtual void align(const std::string &sequence,
+                       const std::function<void(node_iterator)> &callback,
+                       const std::function<bool()> &terminate = [](){ return false; }) const = 0;
+
+    // Check whether graph contains fraction of nodes from the sequence
+    virtual bool find(const std::string &sequence,
+                      double discovery_fraction = 1) const = 0;
 
     // Traverse the outgoing edge
     virtual node_iterator traverse(node_iterator node, char edge_label) const = 0;
@@ -71,8 +76,15 @@ class DBG_succ : public SequenceGraph {
     node_iterator traverse(node_iterator node, char edge_label) const;
     node_iterator traverse_back(node_iterator node, char edge_label) const;
 
-    node_iterator find(const std::string &sequence,
-                       const std::function<void(node_iterator)> &callback = {}) const;
+    // Traverse graph aligning k-mers to the sequence
+    // and run callback until the termination condition is satisfied
+    void align(const std::string &sequence,
+               const std::function<void(node_iterator)> &callback,
+               const std::function<bool()> &terminate = [](){ return false; }) const;
+
+    // Check whether graph contains fraction of k-mers from the sequence
+    bool find(const std::string &sequence,
+              double kmer_discovery_fraction = 1) const;
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;

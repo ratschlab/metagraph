@@ -361,7 +361,7 @@ int main(int argc, const char *argv[]) {
             graph = load_critical_graph_from_file(config->infbase);
 
             // initialize empty annotation
-            annotate::ColorCompressed annotation(graph->num_edges());
+            annotate::ColorCompressed annotation(1 + graph->num_edges());
 
             size_t total_seqs = 0;
 
@@ -388,17 +388,15 @@ int main(int argc, const char *argv[]) {
                         exit(1);
                     }
                     while (kseq_read(read_stream) >= 0) {
-                        graph->find(read_stream->seq.s,
-                                    [&](uint64_t i) {
-                                        annotation.add_label(i, file); // read_stream->name.s
-                                    });
+                        graph->align(read_stream->seq.s, [&](uint64_t i) {
+                            if (i > 0) annotation.add_label(i, file); // read_stream->name.s
+                        });
 
                         if (config->reverse) {
                             reverse_complement(read_stream->seq);
-                            graph->find(read_stream->seq.s,
-                                        [&](uint64_t i) {
-                                            annotation.add_label(i, file);
-                                        });
+                            graph->align(read_stream->seq.s, [&](uint64_t i) {
+                                if (i > 0) annotation.add_label(i, file);
+                            });
                         }
                         total_seqs += 1;
                         if (config->verbose && total_seqs % 10000 == 0) {
@@ -423,7 +421,7 @@ int main(int argc, const char *argv[]) {
             graph = load_critical_graph_from_file(config->infbase);
 
             // load annotatioun (if file does not exist, empty annotation is created)
-            annotate::ColorCompressed annotation(graph->num_edges());
+            annotate::ColorCompressed annotation(1 + graph->num_edges());
             if (!annotation.load(config->infbase + ".anno.dbg")) {
                 std::cerr << "ERROR: can't load annotations from "
                           << config->infbase + ".anno.dbg"
@@ -453,7 +451,9 @@ int main(int argc, const char *argv[]) {
                     std::cout << read_stream->name.s << ":\t";
 
                     std::set<std::string> labels_fwd;
-                    graph->find(read_stream->seq.s, [&](uint64_t i) {
+                    graph->align(read_stream->seq.s, [&](uint64_t i) {
+                        if (i == 0)
+                            return;
                         auto labels = annotation.get(i);
                         labels_fwd.insert(labels.begin(), labels.end());
                     });
@@ -464,7 +464,9 @@ int main(int argc, const char *argv[]) {
 
                     reverse_complement(read_stream->seq);
                     std::set<std::string> labels_rev;
-                    graph->find(read_stream->seq.s, [&](uint64_t i) {
+                    graph->align(read_stream->seq.s, [&](uint64_t i) {
+                        if (i == 0)
+                            return;
                         auto labels = annotation.get(i);
                         labels_fwd.insert(labels.begin(), labels.end());
                     });

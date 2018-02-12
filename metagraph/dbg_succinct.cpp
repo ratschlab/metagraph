@@ -750,20 +750,58 @@ std::string DBG_succ::get_node_str(uint64_t k_node) const {
     return node_string;
 }
 
-DBG_succ::node_iterator
-DBG_succ::find(const std::string &sequence,
-               const std::function<void(node_iterator)> &callback) const {
-    auto kmer_indices = index(sequence);
-    if (!kmer_indices.size())
-        return npos;
+void DBG_succ::align(const std::string &sequence,
+                     const std::function<void(node_iterator)> &callback,
+                     const std::function<bool()> &terminate) const {
+    std::vector<TAlphabet> seq_encoded(sequence.size());
+    std::transform(sequence.begin(), sequence.end(),
+                   seq_encoded.begin(), encode);
 
-    for (const auto &index : kmer_indices) {
-        if (!index)
-            return npos;
-        callback(index);
+    for (uint64_t i = 0; i < seq_encoded.size() - k_ + 1; ++i) {
+        auto range = index_range(&seq_encoded[i],
+                                 &seq_encoded[i + k_]);
+        auto kmer_index = std::max(range.first, range.second);
+
+        callback(kmer_index);
+
+        if (terminate())
+            return;
+
+        if (kmer_index == 0)
+            continue;
+
+        while (i < seq_encoded.size() - k_) {
+            auto next = outgoing(kmer_index, seq_encoded[i + k_]);
+            if (next == 0)
+                break;
+
+            kmer_index = next;
+
+            callback(kmer_index);
+
+            if (terminate())
+                return;
+
+            i++;
+        }
     }
+}
 
-    return kmer_indices.back();
+bool DBG_succ::find(const std::string &sequence,
+                    double kmer_discovery_fraction) const {
+    if (sequence.length() < k_)
+        return false;
+
+    size_t num_kmers = sequence.length() - k_ + 1;
+    size_t num_kmers_missing = 0;
+
+    size_t max_kmers_missing = num_kmers * (1 - kmer_discovery_fraction);
+
+    align(sequence,
+        [&](uint64_t i) { num_kmers_missing += (i == 0); },
+        [&]() { return num_kmers_missing > max_kmers_missing; }
+    );
+    return num_kmers_missing <= max_kmers_missing;
 }
 
 std::vector<uint64_t> DBG_succ::index(const std::string &sequence,
@@ -771,12 +809,14 @@ std::vector<uint64_t> DBG_succ::index(const std::string &sequence,
     if (alignment_length == 0 || alignment_length > k_)
         alignment_length = k_;
 
+    if (sequence.size() < alignment_length)
+        return {};
+
     std::vector<TAlphabet> seq_encoded(sequence.size());
     std::transform(sequence.begin(), sequence.end(),
                    seq_encoded.begin(), encode);
 
     std::vector<uint64_t> indices;
-    std::vector<HitInfo> curr_result;
 
     for (uint64_t i = 0; i < seq_encoded.size() - alignment_length + 1; ++i) {
         auto range = index_range(seq_encoded.data() + i,
