@@ -37,40 +37,6 @@ const std::vector<std::string> annots = {
 };
 
 
-/*
- * Distribute the annotation of all k-mers in a sequence over
- * a number of parallel bins.
- */
-// void* parallel_annotate_wrapper(void *) {
-
-//     uint64_t curr_idx, start, end;
-
-//     while (true) {
-//         pthread_mutex_lock (&mutex_bin_idx);
-//         if (anno_data->idx == anno_data->total_bins) {
-//             pthread_mutex_unlock (&mutex_bin_idx);
-//             break;
-//         } else {
-//             curr_idx = anno_data->idx;
-//             anno_data->idx++;
-//             pthread_mutex_unlock (&mutex_bin_idx);
-
-//             start = curr_idx * anno_data->binsize;
-//             //end = std::min(((curr_idx + 1) * anno_data->binsize) + anno_data->graph->k - 1, anno_data->seq->l);
-//             end = std::min((curr_idx + 1) * anno_data->binsize,
-//                            static_cast<uint64_t>(anno_data->seq->l));
-//             //std::cerr << "start " << start << " end " << end << std::endl;
-//             annotate::annotate_seq(anno_data->graph,
-//                                    anno_data->config,
-//                                    *(anno_data->seq),
-//                                    *(anno_data->label),
-//                                    start, end, &mutex_annotate);
-//         }
-//     }
-//     pthread_exit((void*) 0);
-// }
-
-
 DBG_succ* load_critical_graph_from_file(const std::string &filename) {
     std::string filetype = ".dbg";
     std::string filebase =
@@ -391,95 +357,78 @@ int main(int argc, const char *argv[]) {
             return 0;
         }
         case Config::ANNOTATE: {
-           //  // load graph
-           //  graph = new DBG_succ(config->infbase);
+            // load graph
+            graph = load_critical_graph_from_file(config->infbase);
 
-           //  // load annotation (if file does not exist, empty annotation is created)
-           //  // graph->annotationFromFile(config->infbase + ".anno.dbg");
+            // initialize empty annotation
+            annotate::ColorCompressed annotation(graph->num_edges());
 
-           //  uint64_t total_seqs = 0;
+            size_t total_seqs = 0;
 
-           //  // iterate over input files
-           //  for (unsigned int f = 0; f < files.size(); ++f) {
+            // iterate over input files
+            for (const auto &file : files) {
+                if (config->verbose) {
+                    std::cout << std::endl << "Parsing " << file << std::endl;
+                }
+                // open stream
+                if (utils::get_filetype(file) == "VCF") {
+                    std::cerr << "ERROR: this method of reading VCFs not yet implemented" << std::endl;
+                    exit(1);
+                } else if (utils::get_filetype(file) == "FASTA"
+                            || utils::get_filetype(file) == "FASTQ") {
+                    gzFile input_p = gzopen(file.c_str(), "r");
+                    if (input_p == Z_NULL) {
+                        std::cerr << "ERROR no such file " << file << std::endl;
+                        exit(1);
+                    }
+                    kseq_t *read_stream = kseq_init(input_p);
+                    if (read_stream == NULL) {
+                        std::cerr << "ERROR while opening input file "
+                                  << file << std::endl;
+                        exit(1);
+                    }
+                    while (kseq_read(read_stream) >= 0) {
+                        graph->find(read_stream->seq.s,
+                                    [&](uint64_t i) {
+                                        annotation.add_label(i, file); // read_stream->name.s
+                                    });
 
-           //      if (config->verbose) {
-           //          std::cout << std::endl << "Parsing " << files[f] << std::endl;
-           //      }
-
-           //      // open stream to fasta file
-           //      gzFile input_p = gzopen(files[f].c_str(), "r");
-           //      kseq_t *read_stream = kseq_init(input_p);
-
-           //      if (read_stream == NULL) {
-           //          std::cerr << "ERROR while opening input file " << files[f] << std::endl;
-           //          exit(1);
-           //      }
-
-           //      while (kseq_read(read_stream) >= 0) {
-
-           //          if (config->reverse)
-           //              reverse_complement(read_stream->seq);
-
-           //          if (config->parallel > 1) {
-           //              pthread_t* threads = NULL;
-
-           //              anno_data->seq = &(read_stream->seq);
-           //              anno_data->label = &(read_stream->name);
-           //              anno_data->graph = graph;
-           //              anno_data->config = config;
-           //              anno_data->idx = 0;
-           //              anno_data->binsize = (read_stream->seq.l + 1) / (config->parallel * config->num_bins_per_thread);
-           //              anno_data->total_bins = ((read_stream->seq.l + anno_data->binsize - 1) / anno_data->binsize);
-
-           //              // create threads
-           //              threads = new pthread_t[config->parallel];
-           //              pthread_attr_init(&attr);
-           //              pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-
-           //              // do the work
-           //              for (size_t tid = 0; tid < config->parallel; tid++) {
-           //                 pthread_create(&threads[tid], &attr, parallel_annotate_wrapper, (void *) tid);
-           //                 //std::cerr << "starting thread " << tid << std::endl;
-           //              }
-
-           //              // join threads
-           //              //if (config->verbose)
-           //              //    std::cout << "Waiting for threads to join" << std::endl;
-           //              for (size_t tid = 0; tid < config->parallel; tid++) {
-           //                  pthread_join(threads[tid], NULL);
-           //              }
-           //              delete[] threads;
-
-           //              total_seqs += 1;
-
-           //              //if (config->verbose)
-           //              //    std::cout << "added labels for " << total_seqs
-           //              //              << " sequences, last was " << std::string(read_stream->name.s) << std::endl;
-           //          } else {
-           //              annotate::annotate_seq(graph, config, read_stream->seq, read_stream->name);
-           //          }
-           //          if (config->verbose) {
-           //              //std::cout << "entries in annotation map: " << graph->combination_count << std::endl
-           //              //          << "length of combination vector: " << graph->combination_vector.size() << std::endl;
-           //              //std::cout << "added labels for " << total_seqs << " sequences, last was " << std::string(read_stream->name.s) << std::endl;
-           //          }
-           //      }
-           //      kseq_destroy(read_stream);
-           //      gzclose(input_p);
-           //  }
-
-           //  if (config->print_graph)
-           //      annotate::annotationToScreen(graph);
-
-           //  graph->annotationToFile(config->infbase + ".anno.dbg");
-            break;
+                        if (config->reverse) {
+                            reverse_complement(read_stream->seq);
+                            graph->find(read_stream->seq.s,
+                                        [&](uint64_t i) {
+                                            annotation.add_label(i, file);
+                                        });
+                        }
+                        total_seqs += 1;
+                        if (config->verbose && total_seqs % 10000 == 0) {
+                            std::cout << "added labels for " << total_seqs
+                                      << " sequences, last was "
+                                      << read_stream->name.s << std::endl;
+                        }
+                    }
+                    kseq_destroy(read_stream);
+                    gzclose(input_p);
+                } else {
+                    std::cerr << "ERROR: Filetype unknown for file "
+                              << file << std::endl;
+                    exit(1);
+                }
+            }
+            annotation.serialize(config->infbase + ".anno.dbg");
+            return 0;
         }
         case Config::CLASSIFY: {
             // load graph
             graph = load_critical_graph_from_file(config->infbase);
 
             // load annotatioun (if file does not exist, empty annotation is created)
-            // graph->annotationFromFile(config->infbase + ".anno.dbg");
+            annotate::ColorCompressed annotation(graph->num_edges());
+            if (!annotation.load(config->infbase + ".anno.dbg")) {
+                std::cerr << "ERROR: can't load annotations from "
+                          << config->infbase + ".anno.dbg"
+                          << " corrupted" << std::endl;
+            }
 
             // iterate over input files
             for (unsigned int f = 0; f < files.size(); ++f) {
@@ -500,21 +449,29 @@ int main(int argc, const char *argv[]) {
                     exit(1);
                 }
 
-                std::set<uint32_t> labels_fwd;
-                std::set<uint32_t> labels_rev;
                 while (kseq_read(read_stream) >= 0) {
+                    std::cout << read_stream->name.s << ":\t";
 
-                    std::cout << std::string(read_stream->name.s) << ": ";
-                    // labels_fwd = annotate::classify_read(graph, read_stream->seq, config->distance);
-                    // for (auto it = labels_fwd.begin(); it != labels_fwd.end(); it++)
-                    //     std::cout << graph->id_to_label.at(*it + 1) << ":";
-                    // std::cout << "\t";
+                    std::set<std::string> labels_fwd;
+                    graph->find(read_stream->seq.s, [&](uint64_t i) {
+                        auto labels = annotation.get(i);
+                        labels_fwd.insert(labels.begin(), labels.end());
+                    });
+                    for (const auto &label : labels_fwd) {
+                        std::cout << label << ",";
+                    }
+                    std::cout << "\t";
 
                     reverse_complement(read_stream->seq);
-                    // labels_rev = annotate::classify_read(graph, read_stream->seq, config->distance);
-                    // for (auto it = labels_rev.begin(); it != labels_rev.end(); it++)
-                    //     std::cout << graph->id_to_label.at(*it + 1) << ":";
-                    // std::cout << std::endl;
+                    std::set<std::string> labels_rev;
+                    graph->find(read_stream->seq.s, [&](uint64_t i) {
+                        auto labels = annotation.get(i);
+                        labels_fwd.insert(labels.begin(), labels.end());
+                    });
+                    for (auto &label : labels_fwd) {
+                        std::cout << label << ",";
+                    }
+                    std::cout << std::endl;
                 }
                 kseq_destroy(read_stream);
                 gzclose(input_p);

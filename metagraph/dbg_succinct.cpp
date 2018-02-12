@@ -750,7 +750,9 @@ std::string DBG_succ::get_node_str(uint64_t k_node) const {
     return node_string;
 }
 
-DBG_succ::node_iterator DBG_succ::find(const std::string &sequence) const {
+DBG_succ::node_iterator
+DBG_succ::find(const std::string &sequence,
+               const std::function<void(node_iterator)> &callback) const {
     auto kmer_indices = align(sequence);
     if (!kmer_indices.size())
         return npos;
@@ -758,6 +760,7 @@ DBG_succ::node_iterator DBG_succ::find(const std::string &sequence) const {
     for (const auto &index : kmer_indices) {
         if (!index)
             return npos;
+        callback(index);
     }
 
     return kmer_indices.back();
