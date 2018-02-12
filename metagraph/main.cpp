@@ -468,9 +468,9 @@ int main(int argc, const char *argv[]) {
                         if (i == 0)
                             return;
                         auto labels = annotation.get(i);
-                        labels_fwd.insert(labels.begin(), labels.end());
+                        labels_rev.insert(labels.begin(), labels.end());
                     });
-                    for (auto &label : labels_fwd) {
+                    for (auto &label : labels_rev) {
                         std::cout << label << ",";
                     }
                     std::cout << std::endl;
