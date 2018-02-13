@@ -44,40 +44,52 @@ class HashIterator {
     virtual const MultiHash* operator->() const = 0;
 };
 
+class CyclicMultiHash {
+  public:
+    CyclicMultiHash(const char *data, size_t k, size_t num_hash);
+
+    CyclicMultiHash(const std::string &sequence, size_t num_hash)
+          : CyclicMultiHash(&sequence[0], sequence.length(), num_hash) {}
+
+    CyclicMultiHash(CyclicMultiHash &&other) = default;
+    CyclicMultiHash& operator=(CyclicMultiHash &&other) = default;
+
+    ~CyclicMultiHash();
+
+    void update(char next);
+    void reverse_update(char prev);
+
+    const MultiHash& get_hash() const { return hashes_; }
+
+  private:
+    MultiHash hashes_;
+    size_t k_;
+
+    std::string cache_;
+    size_t begin_;
+    //using void* to prevent including cyclichasher.h here
+    std::vector<void*> chashers_;
+};
+
 class CyclicHashIterator : public HashIterator {
   public:
     CyclicHashIterator(const char *begin, const char *end,
-                       size_t num_hash, size_t k);
+                       size_t k, size_t num_hash);
+    CyclicHashIterator(const std::string &sequence, size_t k, size_t num_hash);
 
-    CyclicHashIterator(const std::string &sequence, size_t num_hash, size_t k)
-          : CyclicHashIterator(&sequence.front(), &sequence.back() + 1,
-                               num_hash, k) {}
-
-    ~CyclicHashIterator();
+    CyclicHashIterator(CyclicHashIterator &&other) = default;
+    CyclicHashIterator& operator=(CyclicHashIterator &&other) = default;
 
     CyclicHashIterator& operator++();
+    bool is_end() const { return next_ >= end_; }
 
-    CyclicHashIterator& update(char next);
-    CyclicHashIterator& reverse_update(char prev);
-
-    bool is_end() const { return seq_cur >= seq_end - k_ + 2; }
-
-    const MultiHash& operator*() const { return hashes_; }
-    const MultiHash* operator->() const { return &hashes_; }
+    const MultiHash& operator*() const { return hasher_.get_hash(); }
+    const MultiHash* operator->() const { return &hasher_.get_hash(); }
 
   private:
-    void init(const char *data);
-    void compute_hashes();
-
-    MultiHash hashes_;
-    size_t k_;
-    const char *seq_cur;
-    const char *seq_end;
-
-    std::vector<char> cache_;
-    size_t back_;
-    //using void* to prevent including cyclichasher.h here
-    std::vector<void*> chashers_;
+    CyclicMultiHash hasher_;
+    const char *next_;
+    const char *end_;
 };
 
 
@@ -243,13 +255,12 @@ class BloomFilter {
   private:
     template <typename T>
     MultiHash compute_hash(const T *begin, const T *end) const {
-        CyclicHashIterator hasher(
+        CyclicMultiHash hasher(
             reinterpret_cast<const char*>(begin),
-            reinterpret_cast<const char*>(end),
-            seeds.size(),
-            (end - begin) * sizeof(T)
+            (end - begin) * sizeof(T),
+            seeds.size()
         );
-        return *hasher;
+        return hasher.get_hash();
     }
 
     std::vector<uint64_t> bits;

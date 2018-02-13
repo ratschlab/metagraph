@@ -62,82 +62,70 @@ void print(const std::vector<uint64_t> &a) {
 }
 
 
-//CyclicHashIterator
-CyclicHashIterator::CyclicHashIterator(const char *begin, const char *end,
-                                       size_t num_hash, size_t k)
+//CyclicHash
+CyclicMultiHash::CyclicMultiHash(const char *data, size_t k, size_t num_hash)
       : hashes_(num_hash),
         k_(k),
-        seq_cur(begin), seq_end(end),
-        cache_(begin, end),
-        back_(k - 1) {
-
+        cache_(data, k),
+        begin_(0),
+        chashers_(num_hash, NULL) {
     assert(k_);
-    assert(end - begin >= static_cast<int>(k_));
 
-    init(begin);
-    seq_cur++;
-
-    assert(end - begin == static_cast<int>(k_) || !is_end());
+    for (uint32_t j = 0; j < hashes_.size(); ++j) {
+        auto *cyclic_hash = new CyclicHash<uint64_t>(k_, j, j + 1, 64lu);
+        for (size_t i = 0; i < k_; ++i) {
+            cyclic_hash->eat(data[i]);
+        }
+        chashers_[j] = cyclic_hash;
+        hashes_[j] = cyclic_hash->hashvalue;
+    }
 }
 
-CyclicHashIterator::~CyclicHashIterator() {
+CyclicMultiHash::~CyclicMultiHash() {
     for (size_t i = 0; i < chashers_.size(); ++i) {
         delete reinterpret_cast<CyclicHash<uint64_t>*>(chashers_[i]);
     }
 }
 
-void CyclicHashIterator::init(const char *data) {
-    chashers_.reserve(hashes_.size());
-    for (uint32_t j = 0; j < hashes_.size(); ++j) {
-        chashers_.push_back(new CyclicHash<uint64_t>(k_, j, j + 1, 64lu));
-        auto *cyclic_hash = reinterpret_cast<CyclicHash<uint64_t>*>(chashers_.back());
-        for (size_t i = 0; i < k_; ++i) {
-            cyclic_hash->eat(data[i]);
-        }
-        hashes_[j] = cyclic_hash->hashvalue;
+void CyclicMultiHash::update(char next) {
+    for (size_t i = 0; i < chashers_.size(); ++i) {
+        auto *cyclic_hash = reinterpret_cast<CyclicHash<uint64_t>*>(chashers_[i]);
+        cyclic_hash->update(cache_[begin_], next);
+        hashes_[i] = cyclic_hash->hashvalue;
     }
+    cache_[begin_] = next;
+    begin_ = (begin_ == cache_.size() - 1 ? 0 : begin_ + 1);
 }
 
-void CyclicHashIterator::compute_hashes() {
-    assert(seq_cur + k_ <= seq_end);
-    for (size_t i = 0; i < hashes_.size(); ++i) {
-        hashes_[i] = reinterpret_cast<CyclicHash<uint64_t>*>(chashers_[i])->hashvalue;
+void CyclicMultiHash::reverse_update(char prev) {
+    begin_ = (begin_ == 0 ? cache_.size() - 1 : begin_ - 1);
+    for (size_t i = 0; i < chashers_.size(); ++i) {
+        auto *cyclic_hash = reinterpret_cast<CyclicHash<uint64_t>*>(chashers_[i]);
+        cyclic_hash->reverse_update(prev, cache_[begin_]);
+        hashes_[i] = cyclic_hash->hashvalue;
     }
+    cache_[begin_] = prev;
 }
+
+
+//CyclicHashIterator
+CyclicHashIterator::CyclicHashIterator(const char *begin, const char *end,
+                                       size_t k, size_t num_hash)
+      : hasher_(begin, k, num_hash),
+        next_(begin + k),
+        end_(end) {
+    assert(next_ < end_ || (next_ == end_ && !is_end()));
+}
+
+CyclicHashIterator::CyclicHashIterator(const std::string &sequence,
+                                       size_t k, size_t num_hash)
+      : CyclicHashIterator(&sequence.front(), &sequence.back() + 1, k, num_hash) {}
 
 CyclicHashIterator& CyclicHashIterator::operator++() {
-    if (seq_cur + k_ <= seq_end) {
-        for (size_t i = 0; i < hashes_.size(); ++i) {
-            reinterpret_cast<CyclicHash<uint64_t>*>(chashers_[i])->update(
-                *(seq_cur - 1),
-                *(seq_cur - 1 + k_)
-            );
-        }
-        compute_hashes();
+    if (next_ < end_) {
+        hasher_.update(*next_);
     }
-    seq_cur++;
-    return *this;
-}
-
-CyclicHashIterator& CyclicHashIterator::update(char next) {
-    back_ = (back_ + 1) % cache_.size();
-    for (size_t i = 0; i < chashers_.size(); ++i) {
-        auto *cyclic_hash = reinterpret_cast<CyclicHash<uint64_t>*>(chashers_[i]);
-        cyclic_hash->update(cache_[back_], next);
-        hashes_[i] = cyclic_hash->hashvalue;
-    }
-    cache_[back_] = next;
-    return *this;
-}
-
-CyclicHashIterator& CyclicHashIterator::reverse_update(char prev) {
-    for (size_t i = 0; i < chashers_.size(); ++i) {
-        auto *cyclic_hash = reinterpret_cast<CyclicHash<uint64_t>*>(chashers_[i]);
-        cyclic_hash->reverse_update(prev, cache_[back_]);
-        hashes_[i] = cyclic_hash->hashvalue;
-    }
-    cache_[back_] = prev;
-    back_ = (back_ + cache_.size() - 1) % cache_.size();
+    next_++;
     return *this;
 }
 

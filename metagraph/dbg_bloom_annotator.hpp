@@ -54,8 +54,6 @@ class PreciseAnnotator {
 
 
 class BloomAnnotator {
-    typedef CyclicHashIterator HashIt;
-
   public:
     // Computes optimal `bloom_size_factor` and `num_hash_functions` automatically
     BloomAnnotator(const DeBruijnGraphWrapper &graph,
@@ -92,9 +90,9 @@ class BloomAnnotator {
     double approx_false_positive_rate() const;
 
   private:
-    HashIt hasher_from_kmer(const std::string &kmer) const;
+    CyclicMultiHash hasher_from_kmer(const std::string &kmer) const;
 
-    std::vector<uint64_t> annotation_from_hasher(const HashIt &hash_it) const;
+    std::vector<uint64_t> annotation_from_hash(const MultiHash &hash) const;
 
     std::vector<uint64_t> annotation_from_kmer(const std::string &kmer) const;
 

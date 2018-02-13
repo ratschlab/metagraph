@@ -111,18 +111,15 @@ TEST(Annotate, HashIterator) {
     size_t num_hash_functions = 5;
     size_t kmer_size = 20;
 
-    annotate::CyclicHashIterator hash_it(test_string,
-                                         num_hash_functions,
-                                         kmer_size);
-    annotate::CyclicHashIterator hash_it_up(test_string.substr(0, kmer_size),
-                                            num_hash_functions,
-                                            kmer_size);
+    annotate::CyclicHashIterator hash_it(test_string, kmer_size, num_hash_functions);
+    annotate::CyclicMultiHash hash_it_up(test_string.substr(0, kmer_size),
+                                         num_hash_functions);
     ASSERT_EQ(num_hash_functions, hash_it->size());
 
     for (size_t i = 0; i + kmer_size <= test_string.length(); ++i) {
         ASSERT_NE('\0', test_string[i + kmer_size - 1]);
         for (uint32_t j = 0; j < num_hash_functions; ++j) {
-            ASSERT_EQ(hash_it->at(j), hash_it_up->at(j));
+            ASSERT_EQ(hash_it->at(j), hash_it_up.get_hash()[j]);
         }
         ++hash_it;
         hash_it_up.update(test_string[i + kmer_size]);

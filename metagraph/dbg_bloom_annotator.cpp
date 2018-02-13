@@ -111,9 +111,9 @@ void BloomAnnotator::add_sequence(const std::string &sequence, size_t column, si
         );
     }
 
-    for (auto hash_it = HashIt(preprocessed_seq,
-                               annotation.num_hash_functions(),
-                               graph_.get_k() + 1);
+    for (auto hash_it = CyclicHashIterator(preprocessed_seq,
+                                           graph_.get_k() + 1,
+                                           annotation.num_hash_functions());
                 !hash_it.is_end(); ++hash_it) {
         annotation.insert(*hash_it, column);
     }
@@ -123,21 +123,21 @@ void BloomAnnotator::add_column(const std::string &sequence, size_t num_elements
     add_sequence(sequence, annotation.size(), num_elements);
 }
 
-BloomAnnotator::HashIt
+CyclicMultiHash
 BloomAnnotator::hasher_from_kmer(const std::string &kmer) const {
     assert(kmer.length() == graph_.get_k() + 1);
-    return HashIt(kmer, annotation.num_hash_functions(), graph_.get_k() + 1);
+    return CyclicMultiHash(kmer, annotation.num_hash_functions());
 }
 
 std::vector<uint64_t>
-BloomAnnotator::annotation_from_hasher(const HashIt &hash_it) const {
-    return annotation.find(*hash_it);
+BloomAnnotator::annotation_from_hash(const MultiHash &hash) const {
+    return annotation.find(hash);
 }
 
 std::vector<uint64_t>
 BloomAnnotator::annotation_from_kmer(const std::string &kmer) const {
     auto hasher = hasher_from_kmer(kmer);
-    return annotation_from_hasher(hasher);
+    return annotation_from_hash(hasher.get_hash());
 }
 
 std::vector<uint64_t>
@@ -153,7 +153,7 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
     auto hasher = hasher_from_kmer(orig_kmer);
 
     //auto curannot = annotation_from_kmer(orig_kmer);
-    auto curannot = annotation_from_hasher(hasher);
+    auto curannot = annotation_from_hash(hasher.get_hash());
 
     // Dummy edges are not supposed to be annotated
     if (graph_.is_dummy_edge(orig_kmer)) {
@@ -187,7 +187,7 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
         //bitwise AND annotations
         auto nextannot = annotate::merge_and(
             curannot,
-            annotation_from_hasher(hasher)
+            annotation_from_hash(hasher.get_hash())
         );
 
         //check popcounts
@@ -238,7 +238,7 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
 
         auto nextannot = annotate::merge_and(
             curannot,
-            annotation_from_hasher(back_hasher)
+            annotation_from_hash(back_hasher.get_hash())
         );
 
         auto pcount_new = annotate::popcount(nextannot);
