@@ -7,7 +7,7 @@
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
-const size_t num_random_kmers = 10;
+const size_t num_random_kmers = 1000;
 
 
 std::vector<sdsl::uint256_t> generate_kmers(size_t num) {

@@ -123,12 +123,6 @@ void BloomAnnotator::add_column(const std::string &sequence, size_t num_elements
     add_sequence(sequence, annotation.size(), num_elements);
 }
 
-CyclicMultiHash
-BloomAnnotator::hasher_from_kmer(const std::string &kmer) const {
-    assert(kmer.length() == graph_.get_k() + 1);
-    return CyclicMultiHash(kmer, annotation.num_hash_functions());
-}
-
 std::vector<uint64_t>
 BloomAnnotator::annotation_from_hash(const MultiHash &hash) const {
     return annotation.find(hash);
@@ -136,8 +130,7 @@ BloomAnnotator::annotation_from_hash(const MultiHash &hash) const {
 
 std::vector<uint64_t>
 BloomAnnotator::annotation_from_kmer(const std::string &kmer) const {
-    auto hasher = hasher_from_kmer(kmer);
-    return annotation_from_hash(hasher.get_hash());
+    return annotation_from_hash(annotation.compute_hash(kmer));
 }
 
 std::vector<uint64_t>
@@ -150,7 +143,8 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
                                          size_t path_cutoff) const {
     //initial raw annotation
     std::string orig_kmer = kmer_from_index(i);
-    auto hasher = hasher_from_kmer(orig_kmer);
+    assert(orig_kmer.length() == graph_.get_k() + 1);
+    auto hasher = CyclicMultiHash(orig_kmer, annotation.num_hash_functions());
 
     //auto curannot = annotation_from_kmer(orig_kmer);
     auto curannot = annotation_from_hash(hasher.get_hash());
@@ -212,7 +206,7 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
     assert(orig_kmer.length() == indices.size());
     indices[0] = i;
 
-    auto back_hasher = hasher_from_kmer(orig_kmer);
+    auto back_hasher = CyclicMultiHash(orig_kmer, annotation.num_hash_functions());
     j = i;
     for (size_t m = 0; m < graph_.get_k(); ++m) {
         j = graph_.prev_edge(j);

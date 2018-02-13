@@ -56,6 +56,8 @@ class CyclicMultiHash {
 
     ~CyclicMultiHash();
 
+    bool reinitialize(const char *data, size_t k, size_t num_hash);
+
     void update(char next);
     void reverse_update(char prev);
 
@@ -143,6 +145,11 @@ class BloomFilter {
             bits.resize((n_bits_ >> 6) + 1);
     }
 
+    ~BloomFilter() {
+        if (hasher_)
+            delete hasher_;
+    }
+
     size_t size() const {
         return n_bits_;
     }
@@ -152,7 +159,6 @@ class BloomFilter {
         bits.resize((n_bits_ >> 6) + 1);
     }
 
-  public:
     template <typename T>
     bool find(T *a, T *b) const {
         assert(b >= a);
@@ -252,20 +258,29 @@ class BloomFilter {
         return static_cast<double>(count) / (bits.size() * 64);
     }
 
-  private:
     template <typename T>
     MultiHash compute_hash(const T *begin, const T *end) const {
-        CyclicMultiHash hasher(
-            reinterpret_cast<const char*>(begin),
-            (end - begin) * sizeof(T),
-            seeds.size()
-        );
-        return hasher.get_hash();
+        CyclicMultiHash *&cyclic_hasher = const_cast<CyclicMultiHash*&>(hasher_);
+        if (cyclic_hasher
+                && !cyclic_hasher->reinitialize(reinterpret_cast<const char*>(begin),
+                                                (end - begin) * sizeof(T),
+                                                seeds.size())) {
+            delete cyclic_hasher;
+            cyclic_hasher = NULL;
+        }
+        if (!cyclic_hasher) {
+            cyclic_hasher = new CyclicMultiHash(reinterpret_cast<const char*>(begin),
+                                                (end - begin) * sizeof(T),
+                                                seeds.size());
+        }
+        return cyclic_hasher->get_hash();
     }
 
+  private:
     std::vector<uint64_t> bits;
     uint64_t n_bits_ = 0;
     std::vector<uint64_t> seeds;
+    CyclicMultiHash *hasher_ = NULL;
 };
 
 
@@ -451,6 +466,11 @@ class HashAnnotation {
             occ[i] = color_bits[i].occupancy();
         }
         return occ;
+    }
+
+    MultiHash compute_hash(const std::string &sequence) const {
+        CyclicMultiHash hasher(sequence, num_hash_functions_);
+        return hasher.get_hash();
     }
 
   private:

@@ -87,6 +87,16 @@ CyclicMultiHash::~CyclicMultiHash() {
     }
 }
 
+bool CyclicMultiHash::reinitialize(const char *data, size_t k, size_t num_hash) {
+    if (k != k_ || num_hash != hashes_.size())
+        return false;
+
+    for (size_t i = 0; i < k_; ++i) {
+        update(data[i]);
+    }
+    return true;
+}
+
 void CyclicMultiHash::update(char next) {
     for (size_t i = 0; i < chashers_.size(); ++i) {
         auto *cyclic_hash = reinterpret_cast<CyclicHash<uint64_t>*>(chashers_[i]);

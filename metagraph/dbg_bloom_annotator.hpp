@@ -90,8 +90,6 @@ class BloomAnnotator {
     double approx_false_positive_rate() const;
 
   private:
-    CyclicMultiHash hasher_from_kmer(const std::string &kmer) const;
-
     std::vector<uint64_t> annotation_from_hash(const MultiHash &hash) const;
 
     std::vector<uint64_t> annotation_from_kmer(const std::string &kmer) const;
