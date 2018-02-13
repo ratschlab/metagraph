@@ -33,6 +33,34 @@ ColorCompressed::SetStr ColorCompressed::get(Index i) const {
     return label;
 }
 
+std::vector<uint64_t> ColorCompressed::get_row(Index i) const {
+    assert(i < graph_size_);
+
+    std::vector<uint64_t> row((bitmatrix_.size() + 63) >> 6);
+
+    for (size_t j = 0; j < bitmatrix_.size(); ++j) {
+        assert(bitmatrix_[j]);
+        if (bitmatrix_[j]->operator[](i)) {
+            row[j >> 6] |= (1llu << (j % 64));
+        }
+    }
+    return row;
+}
+
+void ColorCompressed::serialize_uncompressed_rows(const std::string &filename) const {
+    const_cast<ColorCompressed*>(this)->flush();
+    std::ofstream outstream(filename);
+    libmaus2::util::NumberSerialisation::serialiseNumber(outstream, graph_size_);
+
+    std::cout << graph_size_ << " " << bitmatrix_.size() << "\n";
+
+    for (size_t i = 0; i < graph_size_; ++i) {
+        auto row = get_row(i);
+        libmaus2::util::NumberSerialisation::serialiseNumberVector(outstream, row);
+    }
+    outstream.close();
+}
+
 bool ColorCompressed::has_label(Index i, const SetStr &label) const {
     assert(i < graph_size_);
 
