@@ -1,6 +1,5 @@
 #include "hashers.hpp"
 
-#include "MurmurHash3.h"
 #include "cyclichash.h"
 
 
@@ -47,12 +46,12 @@ bool equal(const std::vector<uint64_t> &a,
     return true;
 }
 
-bool test_bit(const std::vector<uint64_t> &a, size_t col) {
-    return a[col >> 6] & (1llu << (col % 64));
+bool test_bit(const std::vector<uint64_t> &a, size_t i) {
+    return a[i >> 6] & (1llu << (i % 64));
 }
 
-void set_bit(std::vector<uint64_t> &a, size_t col) {
-    a[col >> 6] |= 1llu << (col % 64);
+void set_bit(std::vector<uint64_t> &a, size_t i) {
+    a[i >> 6] |= 1llu << (i % 64);
 }
 
 void print(const std::vector<uint64_t> &a) {
@@ -62,95 +61,38 @@ void print(const std::vector<uint64_t> &a) {
     std::cout << "\n";
 }
 
-//HASH ITERATORS
-
-HashIterator::HashIterator(const std::string &sequence,
-                           size_t num_hash, size_t k)
-      : seq_begin(sequence.c_str()),
-        seq_cur(seq_begin),
-        seq_end(sequence.c_str() + sequence.length()),
-        hashes_(num_hash),
-        k_(k) {
-    assert(sequence.length() >= k_);
-}
-
-HashIterator::HashIterator(size_t num_hash, size_t k)
-      : seq_begin(NULL),
-        seq_cur(NULL),
-        seq_end(NULL),
-        hashes_(num_hash),
-        k_(k) {}
-
-MultiHash HashIterator::get_hash() {
-    assert(hashes_.size());
-    return hashes_;
-}
-
-std::vector<MultiHash> HashIterator::generate_hashes() {
-    std::vector<MultiHash> hashes;
-    for (; *this != end(); operator++()) {
-        hashes.push_back(hashes_);
-    }
-    return hashes;
-}
-
-//MurmurHash
-void MurmurHashIterator::compute_hashes() {
-    for (size_t i = 0; i < hashes_.size(); ++i) {
-        //use index as seed
-        hashes_[i] = compute_murmur_hash(seq_cur, k_, i);
-    }
-}
-
-MurmurHashIterator& MurmurHashIterator::operator++() {
-    if (seq_cur + k_ <= seq_end)
-        compute_hashes();
-    seq_cur++;
-    return *this;
-}
-
-MurmurHashIterator::MurmurHashIterator(const std::string &kmer, size_t num_hash)
-      : HashIterator(num_hash, kmer.length()),
-        cache_(kmer.begin(), kmer.end()),
-        back_(kmer.length() - 1) {
-    for (size_t i = 0; i < hashes_.size(); ++i) {
-        hashes_[i] = compute_murmur_hash(kmer.c_str(), kmer.length(), i);
-    }
-    assert(kmer.length() == k_ || *this != end());
-}
-
-MurmurHashIterator& MurmurHashIterator::update(char next) {
-    back_ = (back_ + 1) % cache_.size();
-    cache_[back_] = next;
-    std::string kmer =
-        std::string(cache_.begin() + ((back_ + 1) % cache_.size()), cache_.end())
-        + std::string(cache_.begin(), cache_.begin() + ((back_ + 1) % cache_.size()));
-    for (size_t i = 0; i < hashes_.size(); ++i) {
-        hashes_[i] = compute_murmur_hash(kmer.c_str(), kmer.length(), i);
-    }
-    return *this;
-}
-
-MurmurHashIterator& MurmurHashIterator::reverse_update(char prev) {
-    cache_[back_] = prev;
-    back_ = (back_ + cache_.size() - 1) % cache_.size();
-    std::string kmer =
-        std::string(cache_.begin() + ((back_ + 1) % cache_.size()), cache_.end())
-        + std::string(cache_.begin(), cache_.begin() + ((back_ + 1) % cache_.size()));
-    for (size_t i = 0; i < hashes_.size(); ++i) {
-        hashes_[i] = compute_murmur_hash(kmer.c_str(), kmer.length(), i);
-    }
-    return *this;
-}
 
 //CyclicHashIterator
-void CyclicHashIterator::init(const std::string &sequence) {
+CyclicHashIterator::CyclicHashIterator(const char *begin, const char *end,
+                                       size_t num_hash, size_t k)
+      : hashes_(num_hash),
+        k_(k),
+        seq_cur(begin), seq_end(end),
+        cache_(begin, end),
+        back_(k - 1) {
+
+    assert(k_);
+    assert(end - begin >= static_cast<int>(k_));
+
+    init(begin);
+    seq_cur++;
+
+    assert(end - begin == static_cast<int>(k_) || !is_end());
+}
+
+CyclicHashIterator::~CyclicHashIterator() {
+    for (size_t i = 0; i < chashers_.size(); ++i) {
+        delete reinterpret_cast<CyclicHash<uint64_t>*>(chashers_[i]);
+    }
+}
+
+void CyclicHashIterator::init(const char *data) {
     chashers_.reserve(hashes_.size());
     for (uint32_t j = 0; j < hashes_.size(); ++j) {
         chashers_.push_back(new CyclicHash<uint64_t>(k_, j, j + 1, 64lu));
         auto *cyclic_hash = reinterpret_cast<CyclicHash<uint64_t>*>(chashers_.back());
         for (size_t i = 0; i < k_; ++i) {
-            cyclic_hash->eat(sequence[i]);
+            cyclic_hash->eat(data[i]);
         }
         hashes_[j] = cyclic_hash->hashvalue;
     }
@@ -158,7 +100,6 @@ void CyclicHashIterator::init(const std::string &sequence) {
 
 void CyclicHashIterator::compute_hashes() {
     assert(seq_cur + k_ <= seq_end);
-    assert(seq_cur > seq_begin);
     for (size_t i = 0; i < hashes_.size(); ++i) {
         hashes_[i] = reinterpret_cast<CyclicHash<uint64_t>*>(chashers_[i])->hashvalue;
     }
@@ -176,29 +117,6 @@ CyclicHashIterator& CyclicHashIterator::operator++() {
     }
     seq_cur++;
     return *this;
-}
-
-CyclicHashIterator::CyclicHashIterator(const std::string &kmer,
-                                       size_t num_hash)
-      : HashIterator(num_hash, kmer.length()),
-    cache_(kmer.begin(), kmer.end()),
-    back_(kmer.length() - 1) {
-    init(kmer);
-    assert(kmer.length() == k_ || *this != end());
-}
-
-CyclicHashIterator::CyclicHashIterator(const std::string &sequence,
-                                       size_t num_hash, size_t k)
-      : HashIterator(sequence, num_hash, k) {
-    init(sequence);
-    seq_cur++;
-    assert(sequence.length() == k_ || *this != end());
-}
-
-CyclicHashIterator::~CyclicHashIterator() {
-    for (size_t i = 0; i < chashers_.size(); ++i) {
-        delete reinterpret_cast<CyclicHash<uint64_t>*>(chashers_[i]);
-    }
 }
 
 CyclicHashIterator& CyclicHashIterator::update(char next) {
@@ -223,11 +141,5 @@ CyclicHashIterator& CyclicHashIterator::reverse_update(char prev) {
     return *this;
 }
 
-uint64_t compute_murmur_hash(const char *data, size_t len, uint32_t seed) {
-    //WARNING: make sure that the size of space allocated to hash is at least 8
-    uint64_t bigint[2];
-    MurmurHash3_x64_128(data, len, seed, &bigint[0]);
-    return bigint[0];
-}
 
 } // namespace annotate

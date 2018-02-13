@@ -7,6 +7,7 @@
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
+const size_t num_random_kmers = 10;
 
 
 std::vector<sdsl::uint256_t> generate_kmers(size_t num) {
@@ -23,10 +24,10 @@ std::vector<sdsl::uint256_t> generate_kmers(size_t num) {
 
 TEST(Annotate, RandomTestNoFalseNegative) {
     //create annotation
-    annotate::BloomFilter bloom(7, 1000);
+    annotate::BloomFilter bloom(7, num_random_kmers);
     annotate::ExactFilter exact;
     //generate a bunch of kmers
-    auto kmers = generate_kmers(1000);
+    auto kmers = generate_kmers(num_random_kmers);
     size_t total = 0, fp = 0;
     for (size_t i = 0; i < kmers.size(); ++i) {
         if (i < kmers.size() / 2) {
@@ -46,7 +47,7 @@ TEST(Annotate, RandomTestNoFalseNegative) {
             }
         }
     }
-    EXPECT_TRUE(total > fp) << "Total: " << total << " FP: " << fp << std::endl;
+    EXPECT_TRUE(total >= fp) << "Total: " << total << " FP: " << fp << std::endl;
 }
 
 TEST(Annotate, RandomHashAnnotator) {
@@ -61,7 +62,7 @@ TEST(Annotate, RandomHashAnnotator) {
     }
     ASSERT_EQ(bloomhash.size(), num_bits);
     ASSERT_EQ(exacthash.size(), num_bits);
-    auto kmers = generate_kmers(1000);
+    auto kmers = generate_kmers(num_random_kmers);
     for (size_t i = 0; i < kmers.size(); ++i) {
         size_t pick_bits = 0;
         if (i < kmers.size()) {
@@ -110,21 +111,22 @@ TEST(Annotate, HashIterator) {
     size_t num_hash_functions = 5;
     size_t kmer_size = 20;
 
-    annotate::CyclicHashIterator hash_it(test_string, num_hash_functions, kmer_size);
-    annotate::CyclicHashIterator hash_it_up(test_string.substr(0, kmer_size), num_hash_functions);
-    auto pos = hash_it.pos();
-    ASSERT_EQ(num_hash_functions, hash_it.size());
-    ASSERT_EQ(0llu, pos);
+    annotate::CyclicHashIterator hash_it(test_string,
+                                         num_hash_functions,
+                                         kmer_size);
+    annotate::CyclicHashIterator hash_it_up(test_string.substr(0, kmer_size),
+                                            num_hash_functions,
+                                            kmer_size);
+    ASSERT_EQ(num_hash_functions, hash_it->size());
 
     for (size_t i = 0; i + kmer_size <= test_string.length(); ++i) {
-        ASSERT_NE('\0', *(&test_string[i] + kmer_size - 1));
+        ASSERT_NE('\0', test_string[i + kmer_size - 1]);
         for (uint32_t j = 0; j < num_hash_functions; ++j) {
-            ASSERT_EQ((*hash_it)[j], (*hash_it_up)[j]);
+            ASSERT_EQ(hash_it->at(j), hash_it_up->at(j));
         }
         ++hash_it;
         hash_it_up.update(test_string[i + kmer_size]);
     }
-    EXPECT_EQ(test_string.length() - kmer_size + 1, hash_it.pos());
 }
 
 /*

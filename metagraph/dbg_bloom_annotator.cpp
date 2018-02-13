@@ -111,14 +111,11 @@ void BloomAnnotator::add_sequence(const std::string &sequence, size_t column, si
         );
     }
 
-
-    auto hash_it = HashIt(preprocessed_seq,
-                          annotation.num_hash_functions(),
-                          graph_.get_k() + 1);
-    auto hashes = hash_it.generate_hashes();
-
-    for (auto it = hashes.begin(); it != hashes.end(); ++it) {
-        annotation.insert(*it, column);
+    for (auto hash_it = HashIt(preprocessed_seq,
+                               annotation.num_hash_functions(),
+                               graph_.get_k() + 1);
+                !hash_it.is_end(); ++hash_it) {
+        annotation.insert(*hash_it, column);
     }
 }
 
@@ -129,13 +126,12 @@ void BloomAnnotator::add_column(const std::string &sequence, size_t num_elements
 BloomAnnotator::HashIt
 BloomAnnotator::hasher_from_kmer(const std::string &kmer) const {
     assert(kmer.length() == graph_.get_k() + 1);
-    return HashIt(kmer, annotation.num_hash_functions());
+    return HashIt(kmer, annotation.num_hash_functions(), graph_.get_k() + 1);
 }
 
 std::vector<uint64_t>
-BloomAnnotator::annotation_from_hasher(HashIt &hash_it) const {
-    auto hashes = hash_it.get_hash();
-    return annotation.find(hashes);
+BloomAnnotator::annotation_from_hasher(const HashIt &hash_it) const {
+    return annotation.find(*hash_it);
 }
 
 std::vector<uint64_t>

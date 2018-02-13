@@ -26,88 +26,32 @@ std::vector<uint64_t> merge_and(const std::vector<uint64_t> &a,
 
 uint64_t popcount(const std::vector<uint64_t> &a);
 
-bool test_bit(const std::vector<uint64_t> &a, size_t col);
+bool test_bit(const std::vector<uint64_t> &a, size_t i);
 
-void set_bit(std::vector<uint64_t> &a, size_t col);
+void set_bit(std::vector<uint64_t> &a, size_t i);
 
 bool equal(const std::vector<uint64_t> &a, const std::vector<uint64_t> &b);
 
-uint64_t compute_murmur_hash(const char *data, size_t len, uint32_t seed);
 
-//HASH WRAPPER STRUCTS
-template <typename T>
-uint64_t compute_murmur_hash(const T *data, size_t len, uint32_t seed) {
-    const char *begin = reinterpret_cast<const char*>(data);
-    return compute_murmur_hash(begin, len * sizeof(T), seed);
-}
-
-
-//same interface as ntHash
 class HashIterator {
-  protected:
-    virtual void compute_hashes() = 0;
-
   public:
-    HashIterator(const std::string &sequence, size_t num_hash, size_t k);
-    HashIterator(size_t num_hash, size_t k);
     virtual ~HashIterator() {}
 
-    bool operator==(const char *that) const { return seq_cur == that; }
-    bool operator!=(const char *that) const { return seq_cur != that; }
-
-    size_t size() const { return hashes_.size(); }
-
     virtual HashIterator& operator++() = 0;
+    virtual bool is_end() const = 0;
 
-    const uint64_t* operator*() const { return hashes_.data(); }
-
-    const char* end() const { return seq_end - k_ + 2; }
-
-    size_t pos() const { return seq_cur - seq_begin - 1; }
-
-    MultiHash get_hash();
-
-    std::vector<MultiHash> generate_hashes();
-
-  protected:
-    const char *seq_begin, *seq_cur, *seq_end;
-    std::vector<uint64_t> hashes_;
-    size_t k_;
-};
-
-class MurmurHashIterator : public HashIterator {
-  protected:
-    void compute_hashes();
-
-  public:
-    MurmurHashIterator(const std::string &kmer, size_t num_hash);
-    MurmurHashIterator(const std::string &sequence, size_t num_hash, size_t k)
-          : HashIterator(sequence, num_hash, k) {
-        compute_hashes();
-        seq_cur++;
-        assert(sequence.length() == k_ || *this != end());
-    }
-    MurmurHashIterator(size_t num_hash, size_t k)
-        : HashIterator(num_hash, k) { }
-
-    MurmurHashIterator& operator++();
-
-    MurmurHashIterator& update(char next);
-    MurmurHashIterator& reverse_update(char prev);
-
-  private:
-    std::vector<char> cache_;
-    size_t back_;
+    virtual const MultiHash& operator*() const = 0;
+    virtual const MultiHash* operator->() const = 0;
 };
 
 class CyclicHashIterator : public HashIterator {
-  protected:
-    void compute_hashes();
-
   public:
-    CyclicHashIterator(const std::string &kmer, size_t num_hash);
+    CyclicHashIterator(const char *begin, const char *end,
+                       size_t num_hash, size_t k);
 
-    CyclicHashIterator(const std::string &sequence, size_t num_hash, size_t k);
+    CyclicHashIterator(const std::string &sequence, size_t num_hash, size_t k)
+          : CyclicHashIterator(&sequence.front(), &sequence.back() + 1,
+                               num_hash, k) {}
 
     ~CyclicHashIterator();
 
@@ -116,12 +60,24 @@ class CyclicHashIterator : public HashIterator {
     CyclicHashIterator& update(char next);
     CyclicHashIterator& reverse_update(char prev);
 
+    bool is_end() const { return seq_cur >= seq_end - k_ + 2; }
+
+    const MultiHash& operator*() const { return hashes_; }
+    const MultiHash* operator->() const { return &hashes_; }
+
   private:
-    void init(const std::string &sequence);
-    //using void to prevent including cyclichasher.h here
-    std::vector<void*> chashers_;
+    void init(const char *data);
+    void compute_hashes();
+
+    MultiHash hashes_;
+    size_t k_;
+    const char *seq_cur;
+    const char *seq_end;
+
     std::vector<char> cache_;
     size_t back_;
+    //using void* to prevent including cyclichasher.h here
+    std::vector<void*> chashers_;
 };
 
 
@@ -166,60 +122,52 @@ class ExactFilter {
 
 class BloomFilter {
   public:
-    BloomFilter(size_t num_hash_functions, size_t _n_bits = 0) {
+    BloomFilter(size_t num_hash_functions, size_t n_bits = 0)
+          : n_bits_(n_bits) {
         seeds.resize(num_hash_functions);
         std::iota(seeds.begin(), seeds.end(), 0);
 
-        n_bits = _n_bits;
-        if (n_bits > 0)
-            bits.resize((n_bits >> 6) + 1);
+        if (n_bits_ > 0)
+            bits.resize((n_bits_ >> 6) + 1);
     }
 
-    size_t size() {
-        return n_bits;
+    size_t size() const {
+        return n_bits_;
     }
 
     void resize(size_t new_size) {
-        n_bits = new_size;
-        bits.resize((n_bits >> 6) + 1);
+        n_bits_ = new_size;
+        bits.resize((n_bits_ >> 6) + 1);
     }
 
   public:
     template <typename T>
     bool find(T *a, T *b) const {
-        return hash_helper(a, b);
-    }
-
-    template <typename T>
-    bool find(const std::vector<T> &a) const {
-        return find(&(*(a.begin())), &(*(a.end())));
-    }
-    template <typename T>
-    bool find(const T &a) const {
-        return find(&a, &a + sizeof(a));
+        assert(b >= a);
+        return find(compute_hash(a, b));
     }
 
     bool find(const MultiHash &multihash) const {
-        for (auto it = multihash.begin(); it != multihash.end(); ++it) {
-            if (!test_bit(bits, *it % n_bits)) {
+        for (auto hash : multihash) {
+            if (!test_bit(bits, hash % n_bits_)) {
                 return false;
             }
         }
         return true;
-        //return equal(merge_or(bits, annotate(hash, n_bits)), bits);
+        //return equal(merge_or(bits, annotate(hash, n_bits_)), bits);
     }
 
     bool insert(const MultiHash &multihash) {
         bool might_contain = true;
-        for (auto it = multihash.begin(); it != multihash.end(); ++it) {
-            if (might_contain && !test_bit(bits, *it % n_bits)) {
+        for (auto hash : multihash) {
+            if (might_contain && !test_bit(bits, hash % n_bits_)) {
                 might_contain = false;
             }
-            set_bit(bits, *it % n_bits);
+            set_bit(bits, hash % n_bits_);
         }
         return might_contain;
         /*
-        auto merged = merge_or(bits, annotate(hash, n_bits));
+        auto merged = merge_or(bits, annotate(hash, n_bits_));
         bool might_contain = equal(merged, bits);
         std::copy(merged.begin(), merged.end(), bits.begin());
         return might_contain;
@@ -228,27 +176,28 @@ class BloomFilter {
 
     template <typename T>
     bool insert(T *a, T *b) {
-        return hash_helper_insert(a, b);
+        assert(b >= a);
+        return insert(compute_hash(a, b));
     }
 
     void serialize(std::ostream &out) const {
-        out << n_bits << "\n";
+        out << n_bits_ << "\n";
         boost::archive::binary_oarchive oar(out);
         oar & seeds;
         oar & bits;
     }
 
     void deserialize(std::istream &in) {
-        in >> n_bits;
+        in >> n_bits_;
         boost::archive::binary_iarchive iar(in);
         iar & seeds;
         iar & bits;
     }
 
     bool operator==(const BloomFilter &a) const {
-        if (n_bits != a.n_bits) {
+        if (n_bits_ != a.n_bits_) {
             std::cerr << "Different number of bits\n";
-            std::cerr << n_bits << " " << a.n_bits << "\n";
+            std::cerr << n_bits_ << " " << a.n_bits_ << "\n";
             return false;
         }
         if (seeds.size() != a.seeds.size()) {
@@ -293,42 +242,18 @@ class BloomFilter {
 
   private:
     template <typename T>
-    std::vector<uint64_t> compute_hash(const T *data, size_t len) const {
-        std::vector<uint64_t> result(seeds.size());
-        for (size_t i = 0; i < seeds.size(); ++i) {
-            result[i] = compute_murmur_hash(data, len, seeds[i]) % n_bits;
-        }
-        return result;
-    }
-
-    template <typename T>
-    inline bool hash_helper(T *a, T *b) const {
-        auto hashes = compute_hash(a, b - a);
-        for (auto hash : hashes) {
-            if (!test_bit(bits, hash))
-                return false;
-        }
-        return true;
-    }
-
-    template <typename T>
-    inline bool hash_helper_insert(T *a, T *b) {
-        assert(b >= a);
-
-        bool might_contain = true;
-        //uint64_t last;
-        auto hashes = compute_hash(a, b - a);
-        for (auto hash : hashes) {
-            if (might_contain && !test_bit(bits, hash)) {
-                might_contain = false;
-            }
-            set_bit(bits, hash);
-        }
-        return might_contain;
+    MultiHash compute_hash(const T *begin, const T *end) const {
+        CyclicHashIterator hasher(
+            reinterpret_cast<const char*>(begin),
+            reinterpret_cast<const char*>(end),
+            seeds.size(),
+            (end - begin) * sizeof(T)
+        );
+        return *hasher;
     }
 
     std::vector<uint64_t> bits;
-    uint64_t n_bits = 0;
+    uint64_t n_bits_ = 0;
     std::vector<uint64_t> seeds;
 };
 

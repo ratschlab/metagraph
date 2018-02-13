@@ -55,7 +55,6 @@ class PreciseAnnotator {
 
 class BloomAnnotator {
     typedef CyclicHashIterator HashIt;
-    //typedef MurmurHashIterator HashIt;
 
   public:
     // Computes optimal `bloom_size_factor` and `num_hash_functions` automatically
@@ -95,7 +94,7 @@ class BloomAnnotator {
   private:
     HashIt hasher_from_kmer(const std::string &kmer) const;
 
-    std::vector<uint64_t> annotation_from_hasher(HashIt &hash_it) const;
+    std::vector<uint64_t> annotation_from_hasher(const HashIt &hash_it) const;
 
     std::vector<uint64_t> annotation_from_kmer(const std::string &kmer) const;
 
