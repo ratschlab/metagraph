@@ -52,8 +52,8 @@ Config::Config(int argc, const char *argv[]) {
             reverse = true;
         } else if (!strcmp(argv[i], "--fast")) {
             fast = true;
-        } else if (!strcmp(argv[i], "--anno")) {
-            add_anno = true;
+        } else if (!strcmp(argv[i], "--fasta-anno")) {
+            fasta_anno = true;
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
             parallel = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--parts-total")) {
@@ -68,6 +68,8 @@ Config::Config(int argc, const char *argv[]) {
             memory_available = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--bloom-bits-per-edge")) {
             bloom_bits_per_edge = std::stof(argv[++i]);
+        } else if (!strcmp(argv[i], "--discovery-fraction")) {
+            discovery_fraction = std::stof(argv[++i]);
         } else if (!strcmp(argv[i], "--bloom-hash-functions")) {
             bloom_num_hash_functions = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--bloom-test-stepsize")) {
@@ -235,17 +237,21 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                             "\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
+            fprintf(stderr, "\t-r --reverse \t\talso annotate reverse complement reads [off]\n");
+            fprintf(stderr, "\t   --fasta-anno \textract annotations from file instead of using filenames [off]\n");
             //fprintf(stderr, "\t   --db-path \tpath that is used to store the annotations database []\n");
-            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
-            fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [1]\n");
-            fprintf(stderr, "\t-f --frequency [INT] \t\twhen a, annotate only every a-th kmer [1]\n");
+            // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+            // fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [1]\n");
+            // fprintf(stderr, "\t-f --frequency [INT] \t\twhen a, annotate only every a-th kmer [1]\n");
         } break;
         case CLASSIFY: {
             fprintf(stderr, "Usage: %s classify -i <graph_basename> [options] <FILE1> [[FILE2] ...]\n"
-                            "\tEach read file is given in fasta or fastq format.\n\n", prog_name.c_str());
+                            "\tEach file is given in fasta or fastq format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for classify:\n");
-            fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
+            fprintf(stderr, "\t-r --reverse \t\t\tclassify reverse complement sequences [off]\n");
+            fprintf(stderr, "\t   --discovery-fraction \tfraction of labeled k-mers required for annotation [1.0]\n");
+            // fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
         } break;
         case TRANSFORM: {
             fprintf(stderr, "Usage: %s transform [options] GRAPH\n\n", prog_name.c_str());

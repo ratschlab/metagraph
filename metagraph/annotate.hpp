@@ -70,6 +70,8 @@ class ColorCompressed : public AnnotationCategory<std::set<std::string>> {
     bool load(const std::string &filename);
     void serialize(const std::string &filename) const;
 
+    std::vector<std::string> get_label_names() const { return id_to_label_; }
+
   private:
     void release();
     void flush();

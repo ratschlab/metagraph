@@ -388,21 +388,25 @@ int main(int argc, const char *argv[]) {
                         exit(1);
                     }
                     while (kseq_read(read_stream) >= 0) {
+                        auto label = config->fasta_anno
+                                        ? read_stream->name.s
+                                        : file;
                         graph->align(read_stream->seq.s, [&](uint64_t i) {
-                            if (i > 0) annotation.add_label(i, file); // read_stream->name.s
+                            if (i > 0) annotation.add_label(i, label);
                         });
 
                         if (config->reverse) {
                             reverse_complement(read_stream->seq);
                             graph->align(read_stream->seq.s, [&](uint64_t i) {
-                                if (i > 0) annotation.add_label(i, file);
+                                if (i > 0) annotation.add_label(i, label);
                             });
                         }
                         total_seqs += 1;
                         if (config->verbose && total_seqs % 10000 == 0) {
                             std::cout << "added labels for " << total_seqs
-                                      << " sequences, last was "
-                                      << read_stream->name.s << std::endl;
+                                      << " sequences"
+                                      << ", last was " << read_stream->name.s
+                                      << ", annotated as " << label << std::endl;
                         }
                     }
                     kseq_destroy(read_stream);
@@ -422,11 +426,13 @@ int main(int argc, const char *argv[]) {
 
             // load annotatioun (if file does not exist, empty annotation is created)
             annotate::ColorCompressed annotation(1 + graph->num_edges());
+
             if (!annotation.load(config->infbase + ".anno.dbg")) {
                 std::cerr << "ERROR: can't load annotations from "
                           << config->infbase + ".anno.dbg"
                           << " corrupted" << std::endl;
             }
+            const auto labels = annotation.get_label_names();
 
             // iterate over input files
             for (unsigned int f = 0; f < files.size(); ++f) {
@@ -450,28 +456,32 @@ int main(int argc, const char *argv[]) {
                 while (kseq_read(read_stream) >= 0) {
                     std::cout << read_stream->name.s << ":\t";
 
-                    std::set<std::string> labels_fwd;
-                    graph->align(read_stream->seq.s, [&](uint64_t i) {
-                        if (i == 0)
-                            return;
-                        auto labels = annotation.get(i);
-                        labels_fwd.insert(labels.begin(), labels.end());
-                    });
-                    for (const auto &label : labels_fwd) {
-                        std::cout << label << ",";
-                    }
-                    std::cout << "\t";
+                    if (config->reverse)
+                        reverse_complement(read_stream->seq);
 
-                    reverse_complement(read_stream->seq);
-                    std::set<std::string> labels_rev;
-                    graph->align(read_stream->seq.s, [&](uint64_t i) {
-                        if (i == 0)
-                            return;
-                        auto labels = annotation.get(i);
-                        labels_rev.insert(labels.begin(), labels.end());
-                    });
-                    for (auto &label : labels_rev) {
-                        std::cout << label << ",";
+                    size_t max_kmers_missing =
+                        (read_stream->seq.l - graph->get_k() + 1)
+                            * (1 - config->discovery_fraction);
+
+                    std::map<std::string, size_t> labels_counter;
+                    for (const auto &label : labels) {
+                        labels_counter[label] = 0;
+                    }
+                    graph->align(read_stream->seq.s,
+                        [&](uint64_t i) {
+                            for (auto it = labels_counter.begin(); it != labels_counter.end();) {
+                                if ((i > 0 && annotation.has_label(i, it->first))
+                                        || ++(it->second) <= max_kmers_missing) {
+                                    ++it;
+                                } else {
+                                    labels_counter.erase(it++);
+                                }
+                            }
+                        },
+                        [&]() { return labels_counter.size() == 0; }
+                    );
+                    for (auto it = labels_counter.begin(); it != labels_counter.end(); ++it) {
+                        std::cout << it->first << ",";
                     }
                     std::cout << std::endl;
                 }

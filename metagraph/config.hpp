@@ -14,7 +14,7 @@ class Config {
     bool print_graph_succ = false;
     bool reverse = false;
     bool fast = false;
-    bool add_anno = false;
+    bool fasta_anno = false;
     bool to_adj_list = false;
     bool query = false;
     bool traversal_merge = false;
@@ -34,6 +34,7 @@ class Config {
     unsigned int bloom_test_stepsize = 0;
 
     double bloom_bits_per_edge = 0.4;
+    double discovery_fraction = 1.0;
 
     std::vector<std::string> fname;
     std::string outfbase;
