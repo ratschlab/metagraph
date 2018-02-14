@@ -48,7 +48,7 @@ class PreciseAnnotator {
     std::vector<uint64_t> annotation_from_kmer(const std::string &kmer) const;
 
   private:
-    annotate::HashAnnotation<annotate::ExactFilter> annotation_exact;
+    ExactHashAnnotation annotation_exact;
     const DeBruijnGraphWrapper &graph_;
 };
 
@@ -90,8 +90,6 @@ class BloomAnnotator {
     double approx_false_positive_rate() const;
 
   private:
-    std::vector<uint64_t> annotation_from_hash(const MultiHash &hash) const;
-
     std::vector<uint64_t> annotation_from_kmer(const std::string &kmer) const;
 
     std::string kmer_from_index(DeBruijnGraphWrapper::edge_index index) const;
@@ -99,11 +97,10 @@ class BloomAnnotator {
     std::vector<size_t> test_fp(DeBruijnGraphWrapper::edge_index i,
                                  const PreciseAnnotator &annotation_exact) const;
 
-
     const DeBruijnGraphWrapper &graph_;
     double bloom_size_factor_;
     double bloom_fpp_;
-    annotate::HashAnnotation<annotate::BloomFilter> annotation;
+    BloomHashAnnotation annotation;
 
     //TODO: get rid of this if not using degree Bloom filter
     std::vector<size_t> sizes_v;

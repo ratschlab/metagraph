@@ -124,13 +124,8 @@ void BloomAnnotator::add_column(const std::string &sequence, size_t num_elements
 }
 
 std::vector<uint64_t>
-BloomAnnotator::annotation_from_hash(const MultiHash &hash) const {
-    return annotation.find(hash);
-}
-
-std::vector<uint64_t>
 BloomAnnotator::annotation_from_kmer(const std::string &kmer) const {
-    return annotation_from_hash(annotation.compute_hash(kmer));
+    return annotation.find(annotation.compute_hash(kmer));
 }
 
 std::vector<uint64_t>
@@ -147,7 +142,7 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
     auto hasher = CyclicMultiHash(orig_kmer, annotation.num_hash_functions());
 
     //auto curannot = annotation_from_kmer(orig_kmer);
-    auto curannot = annotation_from_hash(hasher.get_hash());
+    auto curannot = annotation.find(hasher.get_hash());
 
     // Dummy edges are not supposed to be annotated
     if (graph_.is_dummy_edge(orig_kmer)) {
@@ -181,7 +176,7 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
         //bitwise AND annotations
         auto nextannot = annotate::merge_and(
             curannot,
-            annotation_from_hash(hasher.get_hash())
+            annotation.find(hasher.get_hash())
         );
 
         //check popcounts
@@ -232,7 +227,7 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
 
         auto nextannot = annotate::merge_and(
             curannot,
-            annotation_from_hash(back_hasher.get_hash())
+            annotation.find(back_hasher.get_hash())
         );
 
         auto pcount_new = annotate::popcount(nextannot);

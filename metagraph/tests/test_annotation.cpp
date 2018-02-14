@@ -24,24 +24,26 @@ std::vector<sdsl::uint256_t> generate_kmers(size_t num) {
 
 TEST(Annotate, RandomTestNoFalseNegative) {
     //create annotation
-    annotate::BloomFilter bloom(7, num_random_kmers);
+    annotate::BloomHashAnnotation bloom_anno;
+    annotate::ExactHashAnnotation exact_anno;
+    annotate::BloomFilter bloom(num_random_kmers);
     annotate::ExactFilter exact;
     //generate a bunch of kmers
     auto kmers = generate_kmers(num_random_kmers);
     size_t total = 0, fp = 0;
     for (size_t i = 0; i < kmers.size(); ++i) {
         if (i < kmers.size() / 2) {
-            bloom.insert(&kmers[i], &kmers[i] + 1);
-            exact.insert(&kmers[i], &kmers[i] + 1);
-            ASSERT_TRUE(bloom.find(&kmers[i], &kmers[i] + 1));
-            ASSERT_TRUE(exact.find(&kmers[i], &kmers[i] + 1));
+            bloom.insert(bloom_anno.compute_hash(&kmers[i], &kmers[i] + 1));
+            exact.insert(exact_anno.compute_hash(&kmers[i], &kmers[i] + 1));
+            ASSERT_TRUE(bloom.find(bloom_anno.compute_hash(&kmers[i], &kmers[i] + 1)));
+            ASSERT_TRUE(exact.find(exact_anno.compute_hash(&kmers[i], &kmers[i] + 1)));
         } else {
-            if (exact.find(&kmers[i], &kmers[i] + 1)) {
-                ASSERT_TRUE(bloom.find(&kmers[i], &kmers[i] + 1));
+            if (exact.find(exact_anno.compute_hash(&kmers[i], &kmers[i] + 1))) {
+                ASSERT_TRUE(bloom.find(bloom_anno.compute_hash(&kmers[i], &kmers[i] + 1)));
             }
-            if (!exact.find(&kmers[i], &kmers[i] + 1)) {
+            if (!exact.find(exact_anno.compute_hash(&kmers[i], &kmers[i] + 1))) {
                 total++;
-                if (bloom.find(&kmers[i], &kmers[i] + 1)) {
+                if (bloom.find(bloom_anno.compute_hash(&kmers[i], &kmers[i] + 1))) {
                     fp++;
                 }
             }
@@ -51,8 +53,8 @@ TEST(Annotate, RandomTestNoFalseNegative) {
 }
 
 TEST(Annotate, RandomHashAnnotator) {
-    annotate::HashAnnotation<annotate::BloomFilter> bloomhash(7);
-    annotate::HashAnnotation<annotate::ExactFilter> exacthash;
+    annotate::BloomHashAnnotation bloomhash(7);
+    annotate::ExactHashAnnotation exacthash;
     size_t num_bits = 5;
     std::vector<size_t> bounds(num_bits);
     std::iota(bounds.begin(), bounds.end(), 0);
