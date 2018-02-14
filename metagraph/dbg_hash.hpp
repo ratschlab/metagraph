@@ -1,7 +1,12 @@
 #ifndef __DBG_HASH_HPP__
 #define __DBG_HASH_HPP__
 
+#include <fstream>
 #include <unordered_map>
+#include <boost/serialization/serialization.hpp>
+#include <boost/serialization/unordered_map.hpp>
+#include <boost/archive/binary_oarchive.hpp>
+#include <boost/archive/binary_iarchive.hpp>
 
 #include "dbg_bloom_annotator.hpp"
 
@@ -36,6 +41,10 @@ class DBGHash : public annotate::DeBruijnGraphWrapper {
     void add_sequence(const std::string &sequence, bool rooted = false);
 
     size_t get_num_edges() const;
+
+    void serialize(const std::string &filename) const;
+
+    void load(const std::string &filename);
 
   private:
     size_t k_;

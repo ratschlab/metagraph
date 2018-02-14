@@ -2,6 +2,27 @@
 
 const std::string kAlphabet = "ACGTN$";
 
+void DBGHash::serialize(const std::string &filename) const {
+    std::ofstream out(filename);
+    boost::archive::binary_oarchive oarch(out);
+    oarch & kmers_.size();
+    oarch & k_;
+    oarch & indices_;
+    out.close();
+}
+
+void DBGHash::load(const std::string &filename) {
+    std::ifstream in(filename);
+    boost::archive::binary_iarchive iarch(in);
+    size_t size;
+    iarch & size;
+    iarch & k_;
+    kmers_.resize(size);
+    iarch & indices_;
+    for (auto &kmer : indices_)
+        kmers_[kmer.second] = kmer.first;
+    in.close();
+}
 
 std::string DBGHash::encode_sequence(const std::string &sequence) const {
     std::string result = sequence;
