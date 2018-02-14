@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <numeric>
 #include <unordered_set>
+#include <unordered_map>
+#include <set>
 
 
 namespace annotate {
@@ -327,8 +329,8 @@ class HashAnnotation {
         return !(*this == a);
     }
 
-    void append_bit(size_t num_bits = 0) {
-        color_bits.push_back(Filter(num_bits));
+    void append_bit(size_t filter_size = 0) {
+        color_bits.push_back(Filter(filter_size));
     }
 
     std::vector<double> occupancy() const {
@@ -368,7 +370,71 @@ class HashAnnotation {
 
 
 typedef HashAnnotation<BloomFilter, MultiHash, CyclicMultiHash> BloomHashAnnotation;
-typedef HashAnnotation<ExactFilter, std::string, DummyHasher> ExactHashAnnotation;
+//typedef HashAnnotation<ExactFilter, std::string, DummyHasher> ExactHashAnnotation;
+
+class ExactHashAnnotation {
+    public:
+    ExactHashAnnotation() : num_columns_(0) { }
+
+    template <typename T>
+    std::vector<uint64_t> find(const T *begin, const T *end, long long i = -1) const {
+        return find(compute_hash(begin, end), i);
+    }
+
+    template <typename T>
+    std::vector<uint64_t> insert(const T *begin, const T *end, size_t i) {
+        return insert(compute_hash(begin, end), i);
+    }
+
+    std::vector<uint64_t> find(const std::string &kmer, long long i = -1) const {
+        std::vector<uint64_t> annot((num_columns_ + 63) >> 6, 0);
+        auto it = kmer_map_.find(kmer);
+        if (it == kmer_map_.end())
+            return annot;
+        if (i == -1) {
+            for (auto &index : it->second) {
+                set_bit(annot, index);
+            }
+        } else {
+            if (it->second.find(i) != it->second.end())
+                set_bit(annot, i);
+        }
+        return annot;
+    }
+
+    std::vector<uint64_t> insert(const std::string &kmer, size_t i) {
+        num_columns_ = std::max(num_columns_, i + 1);
+        std::vector<uint64_t> annot((num_columns_ + 63) >> 6, 0);
+        auto &indices = kmer_map_[kmer];
+        indices.insert(i);
+        for (auto &index : indices) {
+            set_bit(annot, index);
+        }
+        return annot;
+    }
+
+    size_t size() const {
+        return num_columns_;
+    }
+
+    void resize(size_t size) {
+        num_columns_ = size;
+    }
+
+    void append_bit() {
+        num_columns_++;
+    }
+
+    template <typename T>
+    std::string compute_hash(const T *begin, const T *end) const {
+        return std::string(reinterpret_cast<const char*>(begin),
+                           reinterpret_cast<const char*>(end));
+    }
+
+    private:
+        std::unordered_map<std::string, std::set<size_t>> kmer_map_;
+        size_t num_columns_;
+};
 
 
 } // namespace annotate
