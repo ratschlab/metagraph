@@ -119,6 +119,7 @@ TEST(Annotate, HashIterator) {
     ASSERT_EQ(num_hash_functions, hash_it->size());
 
     for (size_t i = 0; i + kmer_size <= test_string.length(); ++i) {
+        ASSERT_FALSE(hash_it.is_end());
         ASSERT_NE('\0', test_string[i + kmer_size - 1]);
         for (uint32_t j = 0; j < num_hash_functions; ++j) {
             ASSERT_EQ(hash_it->at(j), hash_it_up.get_hash()[j]);
@@ -126,8 +127,19 @@ TEST(Annotate, HashIterator) {
         ++hash_it;
         hash_it_up.update(test_string[i + kmer_size]);
     }
+    ASSERT_TRUE(hash_it.is_end());
 }
 
+TEST(Annotate, HashIteratorEmpty) {
+    size_t num_hash_functions = 1;
+    annotate::CyclicHashIterator hash_it("", 1, num_hash_functions);
+    ASSERT_TRUE(hash_it.is_end());
+
+    annotate::CyclicHashIterator hash_it2("1", 5, num_hash_functions);
+    ASSERT_TRUE(hash_it.is_end());
+}
+
+//TODO: WRITE A UNIT TEST TO MAKE SURE BLOOM FILTERS ARE SUPERSET OF EXACT FILTER
 /*
 TEST(Annotate, HashIteratorInsert) {
     std::string test_string;

@@ -138,7 +138,7 @@ CyclicHashIterator::CyclicHashIterator(const std::string &sequence,
       : CyclicHashIterator(&sequence.front(), &sequence.back() + 1, k, num_hash) {}
 
 CyclicHashIterator& CyclicHashIterator::operator++() {
-    if (next_ < end_) {
+    if (!is_end()) {
         hasher_.update(*next_);
     }
     next_++;

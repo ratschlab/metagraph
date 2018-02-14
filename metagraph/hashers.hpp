@@ -107,7 +107,7 @@ class CyclicHashIterator : public HashIterator {
     CyclicHashIterator& operator=(CyclicHashIterator &&other) = default;
 
     CyclicHashIterator& operator++();
-    bool is_end() const { return next_ >= end_; }
+    bool is_end() const { return next_ > end_; }
 
     const MultiHash& operator*() const { return hasher_.get_hash(); }
     const MultiHash* operator->() const { return &hasher_.get_hash(); }
