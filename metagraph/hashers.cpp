@@ -1,11 +1,4 @@
 #include "hashers.hpp"
-
-#include <boost/archive/binary_oarchive.hpp>
-#include <boost/archive/binary_iarchive.hpp>
-#include <boost/serialization/vector.hpp>
-#include <boost/archive/impl/basic_binary_oprimitive.ipp>
-#include <boost/archive/impl/basic_binary_iprimitive.ipp>
-
 #include "cyclichash.h"
 
 

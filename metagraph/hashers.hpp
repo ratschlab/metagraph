@@ -2,6 +2,7 @@
 #define __ANNOBLOOM__
 
 #include <iostream>
+#include <fstream>
 #include <cassert>
 #include <vector>
 #include <algorithm>
@@ -9,7 +10,13 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <set>
-
+#include <boost/archive/binary_oarchive.hpp>
+#include <boost/archive/binary_iarchive.hpp>
+#include <boost/serialization/vector.hpp>
+#include <boost/serialization/set.hpp>
+#include <boost/serialization/unordered_map.hpp>
+#include <boost/archive/impl/basic_binary_oprimitive.ipp>
+#include <boost/archive/impl/basic_binary_iprimitive.ipp>
 
 namespace annotate {
 
@@ -429,6 +436,29 @@ class ExactHashAnnotation {
     std::string compute_hash(const T *begin, const T *end) const {
         return std::string(reinterpret_cast<const char*>(begin),
                            reinterpret_cast<const char*>(end));
+    }
+
+    void serialize(std::ostream &out) const {
+        boost::archive::binary_oarchive oarch(out);
+        oarch & kmer_map_;
+        oarch & num_columns_;
+    }
+    void serialize(const std::string &filename) const {
+        std::ofstream fout(filename);
+        serialize(fout);
+        fout.close();
+    }
+
+    void load(std::istream &in) {
+        boost::archive::binary_iarchive iarch(in);
+        iarch & kmer_map_;
+        iarch & num_columns_;
+    }
+
+    void load(const std::string &filename) {
+        std::ifstream fin(filename);
+        load(fin);
+        fin.close();
     }
 
     private:
