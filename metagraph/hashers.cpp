@@ -130,7 +130,7 @@ CyclicHashIterator::CyclicHashIterator(const char *begin, const char *end,
       : hasher_(begin, k, num_hash),
         next_(begin + k),
         end_(end) {
-    assert(next_ < end_ || (next_ == end_ && !is_end()));
+    assert(begin <= end);
 }
 
 CyclicHashIterator::CyclicHashIterator(const std::string &sequence,
