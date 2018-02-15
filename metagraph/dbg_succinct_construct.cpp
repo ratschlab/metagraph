@@ -21,21 +21,32 @@ void sequence_to_kmers(const TAlphabet *begin,
     if (begin + k + 1 > end)
         return;
 
-    // initialize and add the first kmer from sequence
-    auto kmer = KMer::pack_kmer(begin, k + 1);
-
-    if (std::equal(suffix.begin(), suffix.end(),
-                   begin + k - suffix.size())) {
-        kmers->emplace_back(kmer);
-    }
-
-    // add all other kmers
-    for (auto cur = begin + 1; cur < end - k; ++cur) {
-        update_kmer(k, cur[k], cur[k - 1], &kmer);
+    // based on performance comparison
+    // for KMer::pack_kmer and KMer::update_kmer
+    if (suffix.size() > 1) {
+        for (auto cur = begin; cur < end - k; ++cur) {
+            if (std::equal(suffix.begin(), suffix.end(),
+                           cur + k - suffix.size())) {
+                kmers->emplace_back(cur, k + 1);
+            }
+        }
+    } else {
+        // initialize and add the first kmer from sequence
+        auto kmer = KMer::pack_kmer(begin, k + 1);
 
         if (std::equal(suffix.begin(), suffix.end(),
-                       cur + k - suffix.size())) {
+                       begin + k - suffix.size())) {
             kmers->emplace_back(kmer);
+        }
+
+        // add all other kmers
+        for (auto cur = begin + 1; cur < end - k; ++cur) {
+            KMer::update_kmer(k, cur[k], cur[k - 1], &kmer);
+
+            if (std::equal(suffix.begin(), suffix.end(),
+                           cur + k - suffix.size())) {
+                kmers->emplace_back(kmer);
+            }
         }
     }
 }
@@ -133,7 +144,7 @@ void recover_source_dummy_nodes(size_t k,
         // anchor it to the dummy source node
         auto anchor_kmer = KMer::pack_kmer(std::vector<TAlphabet>(k + 1, 0), k + 1);
         for (size_t c = 2; c < k + 1; ++c) {
-            update_kmer(k, kmers->at(i)[c], kmers->at(i)[c - 1], &anchor_kmer);
+            KMer::update_kmer(k, kmers->at(i)[c], kmers->at(i)[c - 1], &anchor_kmer);
 
             kmers->emplace_back(anchor_kmer);
         }
@@ -177,7 +188,7 @@ KMerDBGSuccChunkConstructor::KMerDBGSuccChunkConstructor(
     omp_set_num_threads(std::max(static_cast<int>(num_threads_), 1));
 
     if (filter_suffix == std::string(filter_suffix.size(), '$')) {
-        kmers_.emplace_back(KMer::pack_kmer(std::vector<TAlphabet>(k + 1, 0), k + 1));
+        kmers_.emplace_back(std::vector<TAlphabet>(k + 1, 0), k + 1);
     }
 }
 

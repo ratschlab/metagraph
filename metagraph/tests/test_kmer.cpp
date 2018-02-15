@@ -85,7 +85,7 @@ TEST(KmerEncodeTest, UpdateKmer) {
         KMer(std::string("ATGC"), DBG_succ::encode),
         KMer(std::string("TGCT"), DBG_succ::encode)
     };
-    update_kmer(3, DBG_succ::encode('T'),
+    KMer::update_kmer(3, DBG_succ::encode('T'),
                    DBG_succ::encode('C'), &kmer[0].seq_);
     EXPECT_EQ(kmer[1], kmer[0]);
 }
@@ -102,7 +102,7 @@ TEST(KmerEncodeTest, UpdateKmerLong) {
         KMer(long_seq, DBG_succ::encode),
         KMer(long_seq_alt, DBG_succ::encode)
     };
-    update_kmer(long_seq.length() - 1,
+    KMer::update_kmer(long_seq.length() - 1,
                 DBG_succ::encode('T'),
                 DBG_succ::encode(long_seq.back()),
                 &kmer[0].seq_);
@@ -118,7 +118,7 @@ TEST(KmerEncodeTest, UpdateKmerVsConstruct) {
     std::deque<TAlphabet> seq0(long_seq0.length());
     std::transform(long_seq0.begin(), long_seq0.end(), seq0.begin(), DBG_succ::encode);
     KMer kmer0(KMer::pack_kmer(seq0.begin(), seq0.size()));
-    update_kmer(
+    KMer::update_kmer(
             long_seq0.length() - 1,
             DBG_succ::encode('T'),
             DBG_succ::encode('$'),

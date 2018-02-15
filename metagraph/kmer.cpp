@@ -35,10 +35,10 @@ std::ostream& operator<<(std::ostream &os, const KMer &kmer) {
  * next = s[7]s[6]s[5]s[4]s[3]s[2]s[8]
  *      = s[7] << k + (kmer & mask) >> 1 + s[8].
  */
-void update_kmer(size_t k,
-                 TAlphabet edge_label,
-                 TAlphabet last,
-                 uint256_t *kmer) {
+void KMer::update_kmer(size_t k,
+                       TAlphabet edge_label,
+                       TAlphabet last,
+                       uint256_t *kmer) {
     *kmer = *kmer >> kBitsPerChar;
     *kmer += uint256_t(last + 1).operator<<(kBitsPerChar * k);
     *kmer |= kFirstCharMask;

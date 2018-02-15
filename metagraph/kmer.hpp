@@ -51,6 +51,15 @@ class KMer {
     template<typename T>
     static sdsl::uint256_t pack_kmer(const T &arr, size_t k);
 
+    /**
+     * Construct the next k-mer for s[6]s[5]s[4]s[3]s[2]s[1]s[7].
+     * next = s[7]s[6]s[5]s[4]s[3]s[2]s[8]
+     *      = s[7] << k + (kmer & mask) >> 1 + s[8].
+     */
+    static void update_kmer(size_t k,
+                            TAlphabet edge_label,
+                            TAlphabet last,
+                            sdsl::uint256_t *kmer);
   private:
     sdsl::uint256_t seq_; // kmer sequence
 };
@@ -86,15 +95,5 @@ uint64_t KMer::get_digit(size_t i) const {
     return static_cast<uint64_t>(seq_ >> (digit_size * i))
              % (1llu << digit_size);
 }
-
-/**
- * Construct the next k-mer for s[6]s[5]s[4]s[3]s[2]s[1]s[7].
- * next = s[7]s[6]s[5]s[4]s[3]s[2]s[8]
- *      = s[7] << k + (kmer & mask) >> 1 + s[8].
- */
-void update_kmer(size_t k,
-                 TAlphabet edge_label,
-                 TAlphabet last,
-                 sdsl::uint256_t *kmer);
 
 #endif // __KMER_HPP__

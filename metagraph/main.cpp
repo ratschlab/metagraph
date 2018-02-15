@@ -116,6 +116,7 @@ int main(int argc, const char *argv[]) {
                 }
                 //enumerate all suffices
                 assert(DBG_succ::alph_size > 1);
+                assert(config->nsplits > 0);
                 size_t suffix_len = std::min(
                     static_cast<uint64_t>(std::ceil(std::log2(config->nsplits)
                                                     / std::log2(DBG_succ::alph_size - 1))),

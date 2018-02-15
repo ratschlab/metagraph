@@ -128,6 +128,11 @@ Config::Config(int argc, const char *argv[]) {
 
     bool print_usage_and_exit = false;
 
+    if (nsplits == 0) {
+        std::cerr << "Error: Invalid number of splits" << std::endl;
+        print_usage_and_exit = true;
+    }
+
     if (!fname.size())
         print_usage_and_exit = true;
 
