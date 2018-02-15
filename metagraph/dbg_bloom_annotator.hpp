@@ -1,6 +1,8 @@
 #ifndef __DBG_BLOOM_ANNOTATOR_HPP__
 #define __DBG_BLOOM_ANNOTATOR_HPP__
 
+#include <libmaus2/util/NumberSerialisation.hpp>
+
 #include "hashers.hpp"
 
 
@@ -34,6 +36,7 @@ class DeBruijnGraphWrapper {
 
     virtual edge_index next_edge(edge_index i, char edge_label) const = 0;
     virtual edge_index prev_edge(edge_index i) const = 0;
+
 };
 
 
@@ -46,6 +49,15 @@ class PreciseAnnotator {
     void add_column(const std::string &sequence);
 
     std::vector<uint64_t> annotation_from_kmer(const std::string &kmer) const;
+
+    void serialize(std::ostream &out) const;
+    void serialize(const std::string &filename) const;
+
+    void load(std::istream &in);
+    void load(const std::string &filename);
+
+    void export_rows(std::ostream &out) const;
+    void export_rows(const std::string &filename) const;
 
   private:
     ExactHashAnnotation annotation_exact;

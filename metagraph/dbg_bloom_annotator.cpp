@@ -6,6 +6,40 @@
 
 namespace annotate {
 
+void PreciseAnnotator::serialize(std::ostream &out) const {
+    annotation_exact.serialize(out);
+}
+
+void PreciseAnnotator::serialize(const std::string &filename) const {
+    std::ofstream fout(filename);
+    serialize(fout);
+    fout.close();
+}
+
+void PreciseAnnotator::load(std::istream &in) {
+    annotation_exact.load(in);
+}
+
+void PreciseAnnotator::load(const std::string &filename) {
+    std::ifstream fin(filename);
+    load(fin);
+    fin.close();
+}
+
+void PreciseAnnotator::export_rows(std::ostream &out) const {
+    libmaus2::util::NumberSerialisation::serialiseNumber(out, annotation_exact.kmer_map_.size());
+    for (auto &kmer : annotation_exact.kmer_map_) {
+        auto annot = annotation_from_kmer(kmer.first);
+        libmaus2::util::NumberSerialisation::serialiseNumberVector(out, annot);
+    }
+}
+
+void PreciseAnnotator::export_rows(const std::string &filename) const {
+    std::ofstream fout(filename);
+    export_rows(fout);
+    fout.close();
+}
+
 void PreciseAnnotator::add_sequence(const std::string &sequence, size_t column) {
     std::string preprocessed_seq = graph_.encode_sequence(sequence);
 

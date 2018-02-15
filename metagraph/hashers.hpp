@@ -461,6 +461,7 @@ class ExactHashAnnotation {
         fin.close();
     }
 
+    friend class PreciseAnnotator;
     private:
         std::unordered_map<std::string, std::set<size_t>> kmer_map_;
         size_t num_columns_;
