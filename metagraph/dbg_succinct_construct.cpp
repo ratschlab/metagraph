@@ -10,41 +10,36 @@
 /**
  * Break the sequence to kmers and extend the temporary kmers storage.
  */
-void sequence_to_kmers(const std::string &sequence,
+void sequence_to_kmers(const TAlphabet *begin,
+                       const TAlphabet *end,
                        size_t k,
                        std::vector<KMer> *kmers,
-                       const std::vector<TAlphabet> &suffix = {}) {
-    if (sequence.size() < k)
+                       const std::vector<TAlphabet> &suffix) {
+    assert(k);
+    assert(suffix.size() <= k);
+
+    if (begin + k + 1 > end)
         return;
 
-    // encode sequence
-    size_t dummy_prefix_size = suffix.size() > 0 ? k + 1 : 1;
-    std::vector<TAlphabet> seq(sequence.size() + dummy_prefix_size + 1);
-    for (size_t i = 0; i < dummy_prefix_size; ++i) {
-        seq[i] = DBG_succ::encode('$');
-    }
-    std::transform(sequence.begin(), sequence.end(),
-                   &seq[dummy_prefix_size], DBG_succ::encode);
-    seq.back() = DBG_succ::encode('$');
-
     // initialize and add the first kmer from sequence
-    auto kmer = KMer::pack_kmer(seq.data(), k + 1);
+    auto kmer = KMer::pack_kmer(begin, k + 1);
 
     if (std::equal(suffix.begin(), suffix.end(),
-                   seq.data() + k - suffix.size())) {
+                   begin + k - suffix.size())) {
         kmers->emplace_back(kmer);
     }
 
     // add all other kmers
-    for (size_t i = 1; i < seq.size() - k; ++i) {
-        update_kmer(k, seq[i + k], seq[i + k - 1], &kmer);
+    for (auto cur = begin + 1; cur < end - k; ++cur) {
+        update_kmer(k, cur[k], cur[k - 1], &kmer);
 
         if (std::equal(suffix.begin(), suffix.end(),
-                       seq.data() + i + k - suffix.size())) {
+                       cur + k - suffix.size())) {
             kmers->emplace_back(kmer);
         }
     }
 }
+
 
 void sort_and_remove_duplicates(std::vector<KMer> *kmers, size_t end_sorted = 0) {
     if (omp_get_num_threads() <= 3) {
@@ -187,6 +182,9 @@ KMerDBGSuccChunkConstructor::KMerDBGSuccChunkConstructor(
 }
 
 void KMerDBGSuccChunkConstructor::add_read(const std::string &sequence) {
+    if (sequence.size() < k_)
+        return;
+
     if (kmers_.size() + sequence.size() > max_num_kmers_) {
         if (verbose_) {
             std::cout << "Memory limit exceeded, filter out non-unique k-mers..." << std::flush;
@@ -207,8 +205,20 @@ void KMerDBGSuccChunkConstructor::add_read(const std::string &sequence) {
         }
     }
 
+    // encode sequence
+    size_t dummy_prefix_size = filter_suffix_encoded_.size() > 0 ? k_ + 1 : 1;
+    std::vector<TAlphabet> seq(sequence.size() + dummy_prefix_size + 1);
+    for (size_t i = 0; i < dummy_prefix_size; ++i) {
+        seq[i] = DBG_succ::encode('$');
+    }
+    std::transform(sequence.begin(), sequence.end(),
+                   &seq[dummy_prefix_size], DBG_succ::encode);
+    seq.back() = DBG_succ::encode('$');
+
     // add all k-mers of seq to the graph
-    sequence_to_kmers(sequence, k_, &kmers_, filter_suffix_encoded_);
+    sequence_to_kmers(seq.data(), seq.data() + seq.size(),
+                      k_, &kmers_,
+                      filter_suffix_encoded_);
 }
 
 DBG_succ::Chunk* KMerDBGSuccChunkConstructor::build_chunk() {
