@@ -58,6 +58,28 @@ DBG_succ* load_critical_graph_from_file(const std::string &filename) {
 }
 
 
+template <class Callback>
+void read_fasta_file_critical(const std::string &filename, Callback callback) {
+    gzFile input_p = gzopen(filename.c_str(), "r");
+    if (input_p == Z_NULL) {
+        std::cerr << "ERROR no such file " << filename << std::endl;
+        exit(1);
+    }
+    //TODO: handle read_stream->qual
+    kseq_t *read_stream = kseq_init(input_p);
+    if (read_stream == NULL) {
+        std::cerr << "ERROR while opening input file "
+                  << filename << std::endl;
+        exit(1);
+    }
+    while (kseq_read(read_stream) >= 0) {
+        callback(read_stream);
+    }
+    kseq_destroy(read_stream);
+    gzclose(input_p);
+}
+
+
 int main(int argc, const char *argv[]) {
 
     Timer timer;
@@ -77,46 +99,21 @@ int main(int argc, const char *argv[]) {
     const auto &files = config->fname;
 
     switch (config->identity) {
+        case Config::EXPERIMENT: {
+            break;
+        }
         //TODO: allow for building by appending/adding to an existing graph
         case Config::BUILD: {
             graph = new DBG_succ(config->k);
 
-            annotate::BloomAnnotator *annotator = NULL;
-            annotate::PreciseAnnotator *precise_annotator = NULL;
-            annotate::DBGSuccAnnotWrapper graph_anno_wrapper(*graph);
-
-            std::map<std::string, size_t> annot_map;
-
-            if (config->bloom_fpp > -0.5) {
-                // Expected FPP is set, optimize other parameters automatically
-                annotator = new annotate::BloomAnnotator(graph_anno_wrapper,
-                                                         config->bloom_fpp,
-                                                         config->verbose);
-                if (config->bloom_test_num_kmers > 0) {
-                    precise_annotator = new annotate::PreciseAnnotator(
-                        graph_anno_wrapper
-                    );
-                }
-            } else if (config->bloom_bits_per_edge > -0.5) {
-                // Experiment mode, estimate FPP given other parameters,
-                // optimize the number of hash functions if it's set to zero
-                annotator = new annotate::BloomAnnotator(
-                    graph_anno_wrapper,
-                    config->bloom_bits_per_edge,
-                    config->bloom_num_hash_functions,
-                    config->verbose
-                );
-                if (config->bloom_test_num_kmers > 0) {
-                    precise_annotator = new annotate::PreciseAnnotator(
-                        graph_anno_wrapper
-                    );
-                }
-            }
-
             if (config->verbose)
-                std::cerr << "k is " << graph->get_k() << std::endl;
+                std::cout << "Build Succinct De Bruijn Graph with k-mer size k="
+                          << graph->get_k() << std::endl;
 
             if (config->fast) {
+                if (config->verbose) {
+                    std::cout << "Start reading data and extracting k-mers" << std::endl;
+                }
                 //enumerate all suffices
                 assert(DBG_succ::alph_size > 1);
                 size_t suffix_len = std::min(
@@ -133,13 +130,9 @@ int main(int argc, const char *argv[]) {
 
                 //one pass per suffix
                 for (const std::string &suffix : suffices) {
-                    if (suffix.size())
-                        std::cout << "Suffix: " << suffix << std::endl;
-
-                    std::cout << "Start reading data and extracting k-mers..." << std::endl;
-
-                    //add sink nodes
-                    // graph->add_sink(config->parallel, suffix);
+                    if (suffix.size()) {
+                        std::cout << "\nSuffix: " << suffix << std::endl;
+                    }
 
                     std::unique_ptr<KMerDBGSuccChunkConstructor> constructor(
                         new KMerDBGSuccChunkConstructor(
@@ -157,57 +150,21 @@ int main(int argc, const char *argv[]) {
                             std::cout << std::endl << "Parsing " << files[f] << std::endl;
                         }
 
+                        Timer data_reading_timer;
+
                         if (utils::get_filetype(files[f]) == "VCF") {
                             if (suffix.find('$') != std::string::npos)
                                 continue;
-
-                            //READ FROM VCF
-                            uint64_t nbp = 0;
-                            uint64_t nbplast = 0;
-
-                            Timer data_reading_timer;
 
                             vcf_parser vcf;
                             if (!vcf.init(config->refpath, files[f], graph->get_k())) {
                                 std::cerr << "ERROR reading VCF " << files[f] << std::endl;
                                 exit(1);
                             }
-                            std::cerr << "Loading VCF with " << config->parallel
-                                                             << " threads per line\n";
-                            std::string sequence;
-                            //std::string annotation;
-                            std::vector<std::string> annotation;
-                            size_t class_count = 0;
-                            for (size_t i = 1; vcf.get_seq(annots, &sequence, annotation); ++i) {
-                                //measure rate
-                                if (i % 10'000 == 0) {
-                                    std::cout << "." << std::flush;
-                                    if (i % 100'000 == 0) {
-                                        fprintf(stdout,
-                                            "%zu - bp %" PRIu64 " / runtime %f sec / BPph %" PRIu64 "\n",
-                                            i,
-                                            nbp,
-                                            timer.elapsed(),
-                                            static_cast<uint64_t>(60 * 60
-                                                * (nbp - nbplast)
-                                                / data_reading_timer.elapsed())
-                                        );
-                                        nbplast = nbp;
-                                        data_reading_timer.reset();
-                                    }
-                                }
-                                nbp += sequence.length();
-                                //annotation = "VCF:" + annotation;
-                                //annotation is a color-separated list of string annotations
-                                if (annotator && suffix == suffices[0]) {
-                                    for (auto it = annotation.begin(); it != annotation.end(); ++it) {
-                                        auto map_ins = annot_map.insert(std::pair<std::string,size_t>(*it, class_count++));
-                                        annotator->add_sequence(sequence, files.size() + map_ins.first->second);
-                                        if (precise_annotator)
-                                            precise_annotator->add_sequence(sequence, files.size() + map_ins.first->second);
-                                    }
-                                }
 
+                            std::string sequence;
+                            std::vector<std::string> annotation;
+                            for (size_t i = 1; vcf.get_seq(annots, &sequence, annotation); ++i) {
                                 constructor->add_read(sequence);
 
                                 if (config->reverse) {
@@ -215,120 +172,57 @@ int main(int argc, const char *argv[]) {
                                     kseq.s = &sequence[0];
                                     kseq.l = sequence.length();
                                     reverse_complement(kseq);
-                                    if (annotator && suffix == suffices[0]) {
-                                        for (auto it = annotation.begin(); it != annotation.end(); ++it) {
-                                            auto map_ins = annot_map.insert(std::pair<std::string,size_t>(*it, class_count++));
-                                            std::string kseq_r(kseq.s);
-                                            annotator->add_sequence(kseq_r, files.size() + map_ins.first->second);
-                                            if (precise_annotator)
-                                                precise_annotator->add_sequence(kseq_r, files.size() + map_ins.first->second);
-
-                                        }
-                                    }
 
                                     constructor->add_read(kseq.s);
                                 }
                             }
                         } else if (utils::get_filetype(files[f]) == "FASTA"
                                     || utils::get_filetype(files[f]) == "FASTQ") {
-                            // open stream
-                            gzFile input_p = gzopen(files[f].c_str(), "r");
-                            if (input_p == Z_NULL) {
-                                std::cerr << "ERROR no such file " << files[f] << std::endl;
-                                exit(1);
-                            }
-
-                            //TODO: handle read_stream->qual
-                            kseq_t *read_stream = kseq_init(input_p);
-                            if (read_stream == NULL) {
-                                std::cerr << "ERROR while opening input file "
-                                          << files[f] << std::endl;
-                                exit(1);
-                            }
-                            while (kseq_read(read_stream) >= 0) {
-                                {
-                                    std::string fixed = std::string("N") + read_stream->seq.s + "N";
-                                    //std::string fixed = read_stream->seq.s;
-
-                                    constructor->add_read(fixed);
-                                    //constructor->add_read(read_stream->seq.s);
-                                    if (annotator && suffix == suffices[0]) {
-                                        if (utils::get_filetype(files[f]) == "FASTQ") {
-                                            //assume each FASTQ file is one column
-                                            annotator->add_sequence(fixed, f);
-                                            if (precise_annotator)
-                                                precise_annotator->add_sequence(fixed, f);
-                                        } else {
-                                            //assume each sequence in each FASTA file is a column
-                                            annotator->add_column(fixed);
-                                            if (precise_annotator)
-                                                precise_annotator->add_column(fixed);
-                                        }
-                                    }
-                                }
+                            read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
+                                // add read to the graph constructor as a callback
+                                constructor->add_read(read_stream->seq.s);
                                 if (config->reverse) {
                                     reverse_complement(read_stream->seq);
-
-                                    std::string fixed = std::string("N") + read_stream->seq.s + "N";
-                                    //std::string fixed = read_stream->seq.s;
-
-                                    constructor->add_read(fixed);
-                                    //constructor->add_read(read_stream->seq.s);
-                                    if (annotator && suffix == suffices[0]) {
-                                        if (utils::get_filetype(files[f]) == "FASTQ") {
-                                            //assume each FASTQ file is one column
-                                            annotator->add_sequence(fixed, f);
-                                            if (precise_annotator)
-                                                precise_annotator->add_sequence(fixed, f);
-                                        } else {
-                                            //assume each sequence in each FASTA file is a column
-                                            annotator->add_column(fixed);
-                                            if (precise_annotator)
-                                                precise_annotator->add_column(fixed);
-                                        }
-                                    }
+                                    constructor->add_read(read_stream->seq.s);
                                 }
-                            }
-                            kseq_destroy(read_stream);
-                            gzclose(input_p);
+                            });
                         } else {
                             std::cerr << "ERROR: Filetype unknown for file "
                                       << files[f] << std::endl;
                             exit(1);
                         }
-                        //fprintf(stdout, "current mem usage: %lu MB\n", get_curr_mem() / (1<<20));
+                        if (config->verbose) {
+                            std::cout << "File processed in "
+                                      << data_reading_timer.elapsed()
+                                      << "sec, current mem usage: "
+                                      << get_curr_mem2() / (1<<20) << " MB"
+                                      << ", total time: " << timer.elapsed()
+                                      << "sec" << std::endl;
+                        }
                     }
+                    std::cout << std::endl;
                     get_RAM();
                     std::cout << "Reading data finished\t" << timer.elapsed() << "sec" << std::endl;
 
                     std::cout << "Sorting kmers and appending succinct"
                               << " representation from current bin...\t" << std::flush;
                     timer.reset();
-
                     auto next_block = constructor->build_chunk();
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+
+                    if (config->outfbase.size() && suffix.size()) {
+                        std::cout << "Serialize the graph chunk for suffix '"
+                                  << suffix << "'...\t" << std::flush;
+                        timer.reset();
+                        next_block->serialize(config->outfbase + "." + suffix);
+                        std::cout << timer.elapsed() << "sec" << std::endl;
+                    }
+
                     graph_data.extend(*next_block);
                     delete next_block;
-
-                    std::cout << timer.elapsed() << "sec" << std::endl;
                 }
 
                 graph_data.initialize_graph(graph);
-
-                if (precise_annotator) {
-                    //Check FPP
-                    std::cout << "Approximating FPP...\t" << std::flush;
-                    timer.reset();
-                    //TODO: set this value
-                    annotator->test_fp_all(*precise_annotator, config->bloom_test_num_kmers);
-                    std::cout << timer.elapsed() << "sec" << std::endl;
-                }
-
-                if (config->state == Config::DYN) {
-                    std::cerr << "Converting static graph to dynamic...\t" << std::flush;
-                    timer.reset();
-                    graph->switch_state(Config::DYN);
-                    std::cout << timer.elapsed() << "sec" << std::endl;
-                }
             } else {
                 //slower method
                 //TODO: merge in optimizations from seqmerge branch
@@ -343,27 +237,13 @@ int main(int argc, const char *argv[]) {
                         exit(1);
                     } else if (utils::get_filetype(files[f]) == "FASTA"
                                 || utils::get_filetype(files[f]) == "FASTQ") {
-                        gzFile input_p = gzopen(files[f].c_str(), "r");
-                        if (input_p == Z_NULL) {
-                            std::cerr << "ERROR no such file " << files[f] << std::endl;
-                            exit(1);
-                        }
-                        kseq_t *read_stream = kseq_init(input_p);
-                        if (read_stream == NULL) {
-                            std::cerr << "ERROR while opening input file "
-                                      << files[f] << std::endl;
-                            exit(1);
-                        }
-                        for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
+                        read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
                             graph->add_sequence(read_stream->seq.s);
-
                             if (config->reverse) {
                                 reverse_complement(read_stream->seq);
                                 graph->add_sequence(read_stream->seq.s);
                             }
-                        }
-                        kseq_destroy(read_stream);
-                        gzclose(input_p);
+                        });
                     } else {
                         std::cerr << "ERROR: Filetype unknown for file "
                                   << files[f] << std::endl;
@@ -372,28 +252,21 @@ int main(int argc, const char *argv[]) {
                 }
             }
 
+            if (config->state == Config::DYN) {
+                std::cout << "Converting static graph to dynamic...\t" << std::flush;
+                timer.reset();
+                graph->switch_state(Config::DYN);
+                std::cout << timer.elapsed() << "sec" << std::endl;
+            }
             graph->switch_state(config->state);
             config->infbase = config->outfbase;
-            // graph->annotationToFile(config->infbase + ".anno.dbg");
-            //graph->print_state();
-
-            // output and cleanup
 
             // graph output
             if (config->print_graph_succ)
                 graph->print_state();
-            if (!config->sqlfbase.empty())
-                traverse::toSQL(graph, config->fname, config->sqlfbase);
             if (!config->outfbase.empty())
                 graph->serialize(config->outfbase);
-            if (!config->outfbase.empty() && annotator)
-                annotator->serialize(config->outfbase);
             delete graph;
-
-            if (annotator)
-                delete annotator;
-            if (precise_annotator)
-                delete precise_annotator;
 
             return 0;
         }
@@ -417,18 +290,7 @@ int main(int argc, const char *argv[]) {
                     exit(1);
                 } else if (utils::get_filetype(file) == "FASTA"
                             || utils::get_filetype(file) == "FASTQ") {
-                    gzFile input_p = gzopen(file.c_str(), "r");
-                    if (input_p == Z_NULL) {
-                        std::cerr << "ERROR no such file " << file << std::endl;
-                        exit(1);
-                    }
-                    kseq_t *read_stream = kseq_init(input_p);
-                    if (read_stream == NULL) {
-                        std::cerr << "ERROR while opening input file "
-                                  << file << std::endl;
-                        exit(1);
-                    }
-                    while (kseq_read(read_stream) >= 0) {
+                    read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                         auto label = config->fasta_anno
                                         ? read_stream->name.s
                                         : file;
@@ -449,9 +311,7 @@ int main(int argc, const char *argv[]) {
                                       << ", last was " << read_stream->name.s
                                       << ", annotated as " << label << std::endl;
                         }
-                    }
-                    kseq_destroy(read_stream);
-                    gzclose(input_p);
+                    });
                 } else {
                     std::cerr << "ERROR: Filetype unknown for file "
                               << file << std::endl;
@@ -482,20 +342,7 @@ int main(int argc, const char *argv[]) {
                     std::cout << std::endl << "Parsing " << files[f] << std::endl;
                 }
 
-                // open stream to fasta file
-                gzFile input_p = gzopen(files[f].c_str(), "r");
-                if (input_p == Z_NULL) {
-                    std::cerr << "ERROR no such file " << files[f] << std::endl;
-                    exit(1);
-                }
-                kseq_t *read_stream = kseq_init(input_p);
-
-                if (read_stream == NULL) {
-                    std::cerr << "ERROR while opening input file " << files[f] << std::endl;
-                    exit(1);
-                }
-
-                while (kseq_read(read_stream) >= 0) {
+                read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
                     std::cout << read_stream->name.s << ":\t";
 
                     if (config->reverse)
@@ -526,9 +373,7 @@ int main(int argc, const char *argv[]) {
                         std::cout << it->first << ",";
                     }
                     std::cout << std::endl;
-                }
-                kseq_destroy(read_stream);
-                gzclose(input_p);
+                });
             }
             delete graph;
             graph = NULL;
@@ -628,7 +473,7 @@ int main(int argc, const char *argv[]) {
                 delete graph_;
             }
 
-            std::cerr << "... done merging." << std::endl;
+            std::cout << "... done merging." << std::endl;
             break;
         }
         case Config::STATS: {
@@ -692,21 +537,7 @@ int main(int argc, const char *argv[]) {
             for (const auto &file : files) {
                 std::cout << "Opening file for alignment ..." << file << std::endl;
 
-                // open stream to input fasta
-                gzFile input_p = gzopen(file.c_str(), "r");
-                if (input_p == Z_NULL) {
-                    std::cerr << "ERROR no such file " << file << std::endl;
-                    exit(1);
-                }
-                kseq_t *read_stream = kseq_init(input_p);
-                if (read_stream == NULL) {
-                    std::cerr << "ERROR while opening input file " << file << std::endl;
-                    exit(1);
-                }
-
-                while (kseq_read(read_stream) >= 0) {
-                    //bool reverse = false;
-
+                read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                     if (config->distance > 0) {
                         uint64_t aln_len = read_stream->seq.l;
 
@@ -778,11 +609,7 @@ int main(int argc, const char *argv[]) {
                             }
                         }
                     }
-                }
-
-                // close stream
-                kseq_destroy(read_stream);
-                gzclose(input_p);
+                });
             }
             delete graph;
             graph = NULL;

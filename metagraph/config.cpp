@@ -20,6 +20,8 @@ Config::Config(int argc, const char *argv[]) {
         identity = ALIGN;
     } else if (!strcmp(argv[1], "build")) {
         identity = BUILD;
+    } else if (!strcmp(argv[1], "experiment")) {
+        identity = EXPERIMENT;
     } else if (!strcmp(argv[1], "stats")) {
         identity = STATS;
     } else if (!strcmp(argv[1], "annotate")) {
@@ -163,6 +165,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available commands:\n\n");
 
+            fprintf(stderr, "\texperiment\trun experiments\n\n");
+
             fprintf(stderr, "\tbuild\t\tconstruct a graph object from input sequence\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats or integrate sequence\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats into a given graph\n\n");
@@ -184,7 +188,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             return;
         }
-        case BUILD: {
+        case EXPERIMENT: {
             fprintf(stderr, "Usage: %s build [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for build:\n");
@@ -201,6 +205,20 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --fast \t\t\tuse fast build method [off]\n");
             fprintf(stderr, "\t   --print \t\t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t-s --num-splits \t\tDefine the minimum number of bins to split kmers into [1]\n");
+        } break;
+        case BUILD: {
+            fprintf(stderr, "Usage: %s build [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for build:\n");
+            fprintf(stderr, "\t   --reference [STR] \t\tbasename of reference sequence []\n");
+            fprintf(stderr, "\t-o --outfile-base [STR]\t\tbasename of output file []\n");
+            fprintf(stderr, "\t   --mem-cap-gb [INT] \t\tmaximum memory available, in Gb [inf]\n");
+            fprintf(stderr, "\t-k --kmer-length [INT] \t\tlength of the k-mer to use [3]\n");
+            fprintf(stderr, "\t-r --reverse \t\t\tadd reverse complement reads [off]\n");
+            fprintf(stderr, "\t   --fast \t\t\tuse fast build method [off]\n");
+            fprintf(stderr, "\t   --print \t\t\tprint graph table to the screen [off]\n");
+            fprintf(stderr, "\t-s --num-splits \t\tDefine the minimum number of bins to split kmers into [1]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case ALIGN: {
             fprintf(stderr, "Usage: %s align -i <graph_basename> [options] <FASTQ1> [[FASTQ2] ...]\n\n", prog_name.c_str());

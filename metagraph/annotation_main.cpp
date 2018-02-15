@@ -87,8 +87,8 @@ int main(int argc, const char *argv[]) {
 
     const auto &files = config->fname;
 
-    if (config->identity != Config::BUILD) {
-        std::cerr << "Error: Only BUILD mode is supported" << std::endl;
+    if (config->identity != Config::EXPERIMENT) {
+        std::cerr << "Error: Only EXPERIMENT mode is supported" << std::endl;
         exit(1);
     }
 
