@@ -130,6 +130,8 @@ int main(int argc, const char *argv[]) {
 
                 //one pass per suffix
                 for (const std::string &suffix : suffices) {
+                    timer.reset();
+
                     if (suffix.size()) {
                         std::cout << "\nSuffix: " << suffix << std::endl;
                     }
