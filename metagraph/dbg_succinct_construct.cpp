@@ -51,6 +51,25 @@ void sequence_to_kmers(const TAlphabet *begin,
     }
 }
 
+void sequence_to_kmers_parallel(const TAlphabet *begin,
+                                const TAlphabet *end,
+                                size_t k,
+                                std::vector<KMer> *kmers,
+                                const std::vector<TAlphabet> &suffix,
+                                std::mutex *mutex) {
+    assert(mutex);
+
+    // parallel mode
+    std::vector<KMer> temp_storage;
+    temp_storage.reserve(end - begin - k);
+
+    sequence_to_kmers(begin, end, k, &temp_storage, suffix);
+
+    std::unique_lock<std::mutex> lock(*mutex);
+    std::copy(temp_storage.begin(), temp_storage.end(),
+              std::back_inserter(*kmers));
+}
+
 
 void sort_and_remove_duplicates(std::vector<KMer> *kmers,
                                 size_t num_threads,
@@ -206,7 +225,7 @@ void KMerDBGSuccChunkConstructor::add_read(const std::string &sequence) {
             std::cout << "Memory limit exceeded, filter out non-unique k-mers..." << std::flush;
         }
 
-        sort_and_remove_duplicates(&kmers_, end_sorted_);
+        sort_and_remove_duplicates(&kmers_, num_threads_, end_sorted_);
         end_sorted_ = kmers_.size();
 
         if (verbose_) {

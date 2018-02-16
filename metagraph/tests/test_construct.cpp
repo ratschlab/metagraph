@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string>
 #include <sstream>
+#include <mutex>
 
 #include <zlib.h>
 #include <htslib/kseq.h>
@@ -650,4 +651,38 @@ TEST(ExtractKmers, ExtractKmersWithFilteringTwo) {
                                          << ", length: " << length;
         }
     }
+}
+
+TEST(ExtractKmers, ExtractKmersAppend) {
+    std::vector<KMer> result;
+    std::vector<TAlphabet> sequence(500, 6);
+
+    sequence_to_kmers(sequence.data(), sequence.data() + sequence.size(),
+                      1, &result, {});
+    ASSERT_EQ(sequence.size() - 1, result.size());
+
+    sequence_to_kmers(sequence.data(), sequence.data() + sequence.size(),
+                      1, &result, {});
+    ASSERT_EQ((sequence.size() - 1) * 2, result.size());
+}
+
+void sequence_to_kmers_parallel(const TAlphabet *begin,
+                                const TAlphabet *end,
+                                size_t k,
+                                std::vector<KMer> *kmers,
+                                const std::vector<TAlphabet> &suffix,
+                                std::mutex *mutex);
+
+TEST(ExtractKmers, ExtractKmersAppendParallel) {
+    std::vector<KMer> result;
+    std::vector<TAlphabet> sequence(500, 6);
+    std::mutex mu;
+
+    sequence_to_kmers_parallel(sequence.data(), sequence.data() + sequence.size(),
+                               1, &result, {}, &mu);
+    ASSERT_EQ(sequence.size() - 1, result.size());
+
+    sequence_to_kmers_parallel(sequence.data(), sequence.data() + sequence.size(),
+                               1, &result, {}, &mu);
+    ASSERT_EQ((sequence.size() - 1) * 2, result.size());
 }
