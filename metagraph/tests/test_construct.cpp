@@ -553,31 +553,27 @@ TEST(DBGSuccinct, Traversals) {
 }
 
 
-void sequence_to_kmers(const TAlphabet *begin,
-                       const TAlphabet *end,
+void sequence_to_kmers(std::vector<TAlphabet>&& seq,
                        size_t k,
                        std::vector<KMer> *kmers,
                        const std::vector<TAlphabet> &suffix);
 
 TEST(ExtractKmers, ExtractKmersEmptySuffix) {
-    const std::vector<TAlphabet> sequence(1000, 6);
     for (size_t k = 1; k < 85; ++k) {
         std::vector<KMer> result;
 
-        sequence_to_kmers(sequence.data(), sequence.data() - 1, k, &result, {});
-        ASSERT_TRUE(result.empty());
-
         for (size_t length = 0; length < k; ++length) {
-            sequence_to_kmers(sequence.data(), sequence.data() + length,
-                              k, &result, {});
+            std::vector<TAlphabet> sequence(length, 6);
+
+            sequence_to_kmers(std::move(sequence), k, &result, {});
             ASSERT_TRUE(result.empty());
         }
 
-        for (size_t length = k; length < sequence.size(); ++length) {
+        for (size_t length = k; length < 1000; ++length) {
             result.clear();
+            std::vector<TAlphabet> sequence(length, 6);
 
-            sequence_to_kmers(sequence.data(), sequence.data() + length,
-                              k, &result, {});
+            sequence_to_kmers(std::move(sequence), k, &result, {});
             ASSERT_EQ(length - k, result.size()) << "k: " << k
                                                  << ", length: " << length;
         }
@@ -587,16 +583,12 @@ TEST(ExtractKmers, ExtractKmersEmptySuffix) {
 TEST(ExtractKmers, ExtractKmersWithFilteringOne) {
     std::vector<TAlphabet> suffix = { 0 };
 
-    std::vector<TAlphabet> sequence(500, 6);
     for (size_t k = 1; k < 85; ++k) {
         std::vector<KMer> result;
 
-        sequence_to_kmers(sequence.data(), sequence.data() - 1, k, &result, suffix);
-        ASSERT_TRUE(result.empty());
-
-        for (size_t length = 0; length < sequence.size(); ++length) {
-            sequence_to_kmers(sequence.data(), sequence.data() + length,
-                              k, &result, suffix);
+        for (size_t length = 0; length < 500; ++length) {
+            std::vector<TAlphabet> sequence(length, 6);
+            sequence_to_kmers(std::move(sequence), k, &result, suffix);
             ASSERT_TRUE(result.empty());
         }
     }
@@ -605,20 +597,17 @@ TEST(ExtractKmers, ExtractKmersWithFilteringOne) {
     for (size_t k = 1; k < 85; ++k) {
         std::vector<KMer> result;
 
-        sequence_to_kmers(sequence.data(), sequence.data() - 1, k, &result, suffix);
-        ASSERT_TRUE(result.empty());
-
         for (size_t length = 0; length < k; ++length) {
-            sequence_to_kmers(sequence.data(), sequence.data() + length,
-                              k, &result, suffix);
+            std::vector<TAlphabet> sequence(length, 6);
+            sequence_to_kmers(std::move(sequence), k, &result, suffix);
             ASSERT_TRUE(result.empty());
         }
 
-        for (size_t length = k; length < sequence.size(); ++length) {
+        for (size_t length = k; length < 500; ++length) {
             result.clear();
 
-            sequence_to_kmers(sequence.data(), sequence.data() + length,
-                              k, &result, suffix);
+            std::vector<TAlphabet> sequence(length, 6);
+            sequence_to_kmers(std::move(sequence), k, &result, suffix);
             ASSERT_EQ(length - k, result.size()) << "k: " << k
                                                  << ", length: " << length;
         }
@@ -630,23 +619,19 @@ TEST(ExtractKmers, ExtractKmersWithFilteringTwo) {
     for (size_t k = 2; k < 85; ++k) {
         std::vector<KMer> result;
 
-        std::vector<TAlphabet> sequence(500, 6);
-        sequence[k - 1] = 1;
-
-        sequence_to_kmers(sequence.data(), sequence.data() - 1, k, &result, suffix);
-        ASSERT_TRUE(result.empty());
-
         for (size_t length = 0; length <= k; ++length) {
-            sequence_to_kmers(sequence.data(), sequence.data() + length,
-                              k, &result, suffix);
+            std::vector<TAlphabet> sequence(length, 6);
+            sequence_to_kmers(std::move(sequence), k, &result, suffix);
             ASSERT_TRUE(result.empty());
         }
 
-        for (size_t length = k + 1; length < sequence.size(); ++length) {
+        for (size_t length = k + 1; length < 500; ++length) {
             result.clear();
 
-            sequence_to_kmers(sequence.data(), sequence.data() + length,
-                              k, &result, suffix);
+            std::vector<TAlphabet> sequence(length, 6);
+            sequence[k - 1] = 1;
+
+            sequence_to_kmers(std::move(sequence), k, &result, suffix);
             ASSERT_EQ(1u, result.size()) << "k: " << k
                                          << ", length: " << length;
         }
@@ -657,17 +642,14 @@ TEST(ExtractKmers, ExtractKmersAppend) {
     std::vector<KMer> result;
     std::vector<TAlphabet> sequence(500, 6);
 
-    sequence_to_kmers(sequence.data(), sequence.data() + sequence.size(),
-                      1, &result, {});
+    sequence_to_kmers(std::move(sequence), 1, &result, {});
     ASSERT_EQ(sequence.size() - 1, result.size());
 
-    sequence_to_kmers(sequence.data(), sequence.data() + sequence.size(),
-                      1, &result, {});
+    sequence_to_kmers(std::move(sequence), 1, &result, {});
     ASSERT_EQ((sequence.size() - 1) * 2, result.size());
 }
 
-void sequence_to_kmers_parallel(const TAlphabet *begin,
-                                const TAlphabet *end,
+void sequence_to_kmers_parallel(std::vector<TAlphabet>&& seq,
                                 size_t k,
                                 std::vector<KMer> *kmers,
                                 const std::vector<TAlphabet> &suffix,
@@ -678,11 +660,9 @@ TEST(ExtractKmers, ExtractKmersAppendParallel) {
     std::vector<TAlphabet> sequence(500, 6);
     std::mutex mu;
 
-    sequence_to_kmers_parallel(sequence.data(), sequence.data() + sequence.size(),
-                               1, &result, {}, &mu);
+    sequence_to_kmers_parallel(std::move(sequence), 1, &result, {}, &mu);
     ASSERT_EQ(sequence.size() - 1, result.size());
 
-    sequence_to_kmers_parallel(sequence.data(), sequence.data() + sequence.size(),
-                               1, &result, {}, &mu);
+    sequence_to_kmers_parallel(std::move(sequence), 1, &result, {}, &mu);
     ASSERT_EQ((sequence.size() - 1) * 2, result.size());
 }

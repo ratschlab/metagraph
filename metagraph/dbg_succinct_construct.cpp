@@ -10,60 +10,61 @@
 /**
  * Break the sequence to kmers and extend the temporary kmers storage.
  */
-void sequence_to_kmers(const TAlphabet *begin,
-                       const TAlphabet *end,
+void sequence_to_kmers(std::vector<TAlphabet>&& seq,
                        size_t k,
                        std::vector<KMer> *kmers,
                        const std::vector<TAlphabet> &suffix) {
     assert(k);
     assert(suffix.size() <= k);
 
-    if (begin + k + 1 > end)
+    if (seq.size() < k + 1)
         return;
 
     // based on performance comparison
     // for KMer::pack_kmer and KMer::update_kmer
     if (suffix.size() > 1) {
-        for (auto cur = begin; cur < end - k; ++cur) {
+        for (size_t i = 0; i < seq.size() - k; ++i) {
             if (std::equal(suffix.begin(), suffix.end(),
-                           cur + k - suffix.size())) {
-                kmers->emplace_back(cur, k + 1);
+                           &seq[i + k] - suffix.size())) {
+                kmers->emplace_back(&seq[i], k + 1);
             }
         }
     } else {
         // initialize and add the first kmer from sequence
-        auto kmer = KMer::pack_kmer(begin, k + 1);
+        auto kmer = KMer::pack_kmer(seq.data(), k + 1);
 
         if (std::equal(suffix.begin(), suffix.end(),
-                       begin + k - suffix.size())) {
+                       &seq[k] - suffix.size())) {
             kmers->emplace_back(kmer);
         }
 
         // add all other kmers
-        for (auto cur = begin + 1; cur < end - k; ++cur) {
-            KMer::update_kmer(k, cur[k], cur[k - 1], &kmer);
+        for (size_t i = 1; i < seq.size() - k; ++i) {
+            KMer::update_kmer(k, seq[i + k], seq[i + k - 1], &kmer);
 
             if (std::equal(suffix.begin(), suffix.end(),
-                           cur + k - suffix.size())) {
+                           &seq[i + k] - suffix.size())) {
                 kmers->emplace_back(kmer);
             }
         }
     }
 }
 
-void sequence_to_kmers_parallel(const TAlphabet *begin,
-                                const TAlphabet *end,
+void sequence_to_kmers_parallel(std::vector<TAlphabet>&& seq,
                                 size_t k,
                                 std::vector<KMer> *kmers,
                                 const std::vector<TAlphabet> &suffix,
                                 std::mutex *mutex) {
     assert(mutex);
 
+    if (seq.size() < k + 1)
+        return;
+
     // parallel mode
     std::vector<KMer> temp_storage;
-    temp_storage.reserve(end - begin - k);
+    temp_storage.reserve(seq.size() - k);
 
-    sequence_to_kmers(begin, end, k, &temp_storage, suffix);
+    sequence_to_kmers(std::move(seq), k, &temp_storage, suffix);
 
     std::unique_lock<std::mutex> lock(*mutex);
     std::copy(temp_storage.begin(), temp_storage.end(),
@@ -251,7 +252,7 @@ void KMerDBGSuccChunkConstructor::add_read(const std::string &sequence) {
     seq.back() = DBG_succ::encode('$');
 
     // add all k-mers of seq to the graph
-    sequence_to_kmers(seq.data(), seq.data() + seq.size(),
+    sequence_to_kmers(std::move(seq),
                       k_, &kmers_,
                       filter_suffix_encoded_);
 }
