@@ -72,3 +72,154 @@ TEST(seq_equal, basics) {
     EXPECT_TRUE(utils::seq_equal(std::string("ABAAACD"), std::string("BAAAACD"), 7));
     EXPECT_TRUE(utils::seq_equal(std::string("ABAAACD"), std::string("BAAAACD"), 100));
 }
+
+TEST(ThreadPool, SingleThreadEmpty) {
+    utils::ThreadPool pool(1);
+    pool.join();
+}
+
+TEST(ThreadPool, SingleThread) {
+    utils::ThreadPool pool(1);
+    std::vector<size_t> result;
+    std::mutex mu;
+
+    pool.enqueue([&](size_t i) {
+        mu.lock();
+        result.push_back(i);
+        mu.unlock();
+    }, 1);
+    pool.enqueue([&](size_t i) {
+        mu.lock();
+        result.push_back(i);
+        mu.unlock();
+    }, 1);
+    pool.enqueue([&](size_t i) {
+        mu.lock();
+        result.push_back(i);
+        mu.unlock();
+    }, 1);
+    pool.enqueue([&](size_t i) {
+        mu.lock();
+        result.push_back(i);
+        mu.unlock();
+    }, 1);
+    pool.enqueue([&](size_t i) {
+        mu.lock();
+        result.push_back(i);
+        mu.unlock();
+    }, 1);
+
+    pool.join();
+
+    ASSERT_EQ(5u, result.size());
+    for (int value : result) {
+        ASSERT_EQ(1, value);
+    }
+}
+
+TEST(ThreadPool, MultiThreadTwo) {
+    utils::ThreadPool pool(2);
+    size_t num_tasks = 10000;
+
+    std::vector<size_t> result;
+    std::mutex mu;
+    for (size_t t = 0; t < num_tasks; ++t) {
+        pool.enqueue([&](size_t i) {
+            size_t count = 3;
+            for (size_t k = 0; k < num_tasks + i; ++k) {
+                count += count * 3 - count / 2 + 1;
+            }
+            mu.lock();
+            result.push_back(count);
+            mu.unlock();
+        }, t);
+    }
+
+    pool.join();
+
+    ASSERT_EQ(num_tasks, result.size());
+}
+
+TEST(ThreadPool, MultiThreadFour) {
+    utils::ThreadPool pool(4);
+    size_t num_tasks = 10000;
+
+    std::vector<size_t> result;
+    std::mutex mu;
+    for (size_t t = 0; t < num_tasks; ++t) {
+        pool.enqueue([&](size_t i) {
+            size_t count = 3;
+            for (size_t k = 0; k < num_tasks + i; ++k) {
+                count += count * 3 - count / 2 + 1;
+            }
+            mu.lock();
+            result.push_back(count);
+            mu.unlock();
+        }, t);
+    }
+
+    pool.join();
+
+    ASSERT_EQ(num_tasks, result.size());
+}
+
+TEST(ThreadPool, MultiThread) {
+    for (size_t i = 2; i < 20; ++i) {
+        utils::ThreadPool pool(i);
+        std::vector<size_t> result;
+        std::mutex mu;
+        for (size_t t = 0; t < 1000; ++t) {
+            pool.enqueue([&](size_t i) {
+                mu.lock();
+                result.push_back(i);
+                mu.unlock();
+            }, 1);
+        }
+
+        pool.join();
+
+        ASSERT_EQ(1000u, result.size());
+        for (int value : result) {
+            ASSERT_EQ(1, value);
+        }
+    }
+}
+
+TEST(ThreadPool, MultiThreadFuture) {
+    for (size_t i = 2; i < 20; ++i) {
+        utils::ThreadPool pool(i);
+
+        std::vector<std::future<size_t>> result;
+        for (size_t t = 0; t < 1000; ++t) {
+            result.emplace_back(pool.enqueue([&](size_t i) { return i; }, 1));
+        }
+
+        ASSERT_EQ(1000u, result.size());
+        for (auto &value : result) {
+            ASSERT_EQ(1u, value.get());
+        }
+    }
+}
+
+TEST(ThreadPool, MultiThreadException) {
+    for (size_t i = 2; i < 20; ++i) {
+        try {
+            utils::ThreadPool pool(i);
+
+            std::vector<std::future<size_t>> result;
+            for (size_t t = 0; t < 1000; ++t) {
+                result.emplace_back(pool.enqueue([&](size_t i) {
+                    throw std::runtime_error("error");
+                    return i;
+                }, 1));
+            }
+
+            ASSERT_EQ(1000u, result.size());
+            for (auto &value : result) {
+                ASSERT_EQ(1u, value.get());
+            }
+        } catch (...) {
+            continue;
+        }
+    }
+}
