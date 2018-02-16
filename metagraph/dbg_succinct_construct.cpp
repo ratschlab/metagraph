@@ -52,9 +52,12 @@ void sequence_to_kmers(const TAlphabet *begin,
 }
 
 
-void sort_and_remove_duplicates(std::vector<KMer> *kmers, size_t end_sorted = 0) {
-    if (omp_get_num_threads() <= 3) {
+void sort_and_remove_duplicates(std::vector<KMer> *kmers,
+                                size_t num_threads,
+                                size_t end_sorted = 0) {
+    if (num_threads <= 3) {
         // sort
+        omp_set_num_threads(num_threads);
         __gnu_parallel::sort(kmers->data() + end_sorted,
                              kmers->data() + kmers->size());
         kmers->erase(std::unique(kmers->begin() + end_sorted, kmers->end()),
@@ -74,6 +77,7 @@ void sort_and_remove_duplicates(std::vector<KMer> *kmers, size_t end_sorted = 0)
 #endif
     } else {
         // sort
+        omp_set_num_threads(num_threads);
         __gnu_parallel::sort(kmers->data(), kmers->data() + kmers->size());
     }
     // remove duplicates
@@ -84,6 +88,7 @@ void sort_and_remove_duplicates(std::vector<KMer> *kmers, size_t end_sorted = 0)
 void recover_source_dummy_nodes(size_t k,
                                 std::vector<KMer> *kmers,
                                 size_t max_num_kmers,
+                                size_t num_threads,
                                 bool verbose) {
     // remove redundant dummy kmers inplace
     size_t cur_pos = 0;
@@ -122,6 +127,7 @@ void recover_source_dummy_nodes(size_t k,
                 std::cout << "Memory limit exceeded, filter out non-unique k-mers..." << std::flush;
             }
 
+            omp_set_num_threads(num_threads);
             __gnu_parallel::sort(kmers->data() + end_sorted,
                                  kmers->data() + kmers->size());
             kmers->erase(
@@ -153,7 +159,7 @@ void recover_source_dummy_nodes(size_t k,
               kmers->begin() + cur_pos);
     kmers->resize(kmers->size() - end_sorted + cur_pos);
 
-    sort_and_remove_duplicates(kmers, cur_pos);
+    sort_and_remove_duplicates(kmers, num_threads, cur_pos);
 }
 
 
@@ -185,7 +191,6 @@ KMerDBGSuccChunkConstructor::KMerDBGSuccChunkConstructor(
     } else {
         kmers_.reserve(max_num_kmers_);
     }
-    omp_set_num_threads(std::max(static_cast<int>(num_threads_), 1));
 
     if (filter_suffix == std::string(filter_suffix.size(), '$')) {
         kmers_.emplace_back(std::vector<TAlphabet>(k + 1, 0), k + 1);
@@ -233,10 +238,11 @@ void KMerDBGSuccChunkConstructor::add_read(const std::string &sequence) {
 }
 
 DBG_succ::Chunk* KMerDBGSuccChunkConstructor::build_chunk() {
-    sort_and_remove_duplicates(&kmers_, end_sorted_);
+    sort_and_remove_duplicates(&kmers_, num_threads_, end_sorted_);
 
     if (!filter_suffix_encoded_.size()) {
-        recover_source_dummy_nodes(k_, &kmers_, max_num_kmers_, verbose_);
+        recover_source_dummy_nodes(k_, &kmers_, max_num_kmers_,
+                                   num_threads_, verbose_);
     }
 
     DBG_succ::Chunk *result = DBG_succ::VectorChunk::build_from_kmers(k_, &kmers_);
