@@ -50,31 +50,73 @@ void sequence_to_kmers(std::vector<TAlphabet>&& seq,
     }
 }
 
-void sequence_to_kmers_parallel(std::vector<TAlphabet>&& seq,
-                                size_t k,
-                                std::vector<KMer> *kmers,
-                                const std::vector<TAlphabet> &suffix,
-                                std::mutex *mutex) {
-    assert(mutex);
+/**
+ * Break the sequence to kmers and extend the temporary kmers storage.
+ */
+void sequence_to_kmers(const std::string &sequence,
+                       size_t k,
+                       std::vector<KMer> *kmers,
+                       const std::vector<TAlphabet> &suffix) {
+    assert(k);
+    assert(suffix.size() <= k);
 
-    if (seq.size() < k + 1)
+    if (sequence.size() < k)
         return;
 
-    // parallel mode
-    std::vector<KMer> temp_storage;
-    temp_storage.reserve(seq.size() - k);
+    // encode sequence
+    size_t dummy_prefix_size = suffix.size() > 0 ? k : 1;
 
-    sequence_to_kmers(std::move(seq), k, &temp_storage, suffix);
+    std::vector<TAlphabet> seq(sequence.size() + dummy_prefix_size + 1);
 
-    std::unique_lock<std::mutex> lock(*mutex);
-    std::copy(temp_storage.begin(), temp_storage.end(),
-              std::back_inserter(*kmers));
+    for (size_t i = 0; i < dummy_prefix_size; ++i) {
+        seq[i] = DBG_succ::encode('$');
+    }
+    std::transform(sequence.begin(), sequence.end(),
+                   &seq[dummy_prefix_size], DBG_succ::encode);
+    seq.back() = DBG_succ::encode('$');
+
+    sequence_to_kmers(std::move(seq), k, kmers, suffix);
 }
-
 
 void sort_and_remove_duplicates(std::vector<KMer> *kmers,
                                 size_t num_threads,
-                                size_t end_sorted = 0) {
+                                size_t end_sorted = 0);
+
+// takes the ownership of the allocated sequence and releases when finishes
+void sequence_to_kmers_parallel(std::vector<std::string> *reads,
+                                size_t k,
+                                std::vector<KMer> *kmers,
+                                const std::vector<TAlphabet> &suffix,
+                                std::mutex *mutex,
+                                bool remove_redundant) {
+    assert(mutex);
+
+    // parallel mode
+    std::vector<KMer> temp_storage;
+
+    size_t num_basepairs = 0;
+    for (auto &read : *reads) {
+        num_basepairs += read.size() + 2;
+    }
+    temp_storage.reserve(num_basepairs);
+
+    for (const auto &read : *reads) {
+        sequence_to_kmers(read, k, &temp_storage, suffix);
+    }
+    delete reads;
+
+    if (remove_redundant)
+        sort_and_remove_duplicates(&temp_storage, 1);
+
+    std::unique_lock<std::mutex> lock(*mutex);
+    for (auto &kmer : temp_storage) {
+        kmers->emplace_back(kmer);
+    }
+}
+
+void sort_and_remove_duplicates(std::vector<KMer> *kmers,
+                                size_t num_threads,
+                                size_t end_sorted) {
     if (num_threads <= 3) {
         // sort
         omp_set_num_threads(num_threads);
@@ -206,6 +248,7 @@ KMerDBGSuccChunkConstructor::KMerDBGSuccChunkConstructor(
     filter_suffix_encoded_.resize(filter_suffix.size());
     std::transform(filter_suffix.begin(), filter_suffix.end(),
                    filter_suffix_encoded_.begin(), DBG_succ::encode);
+
     if (max_num_kmers_ == 0) {
         max_num_kmers_ = static_cast<size_t>(-1);
     } else {
@@ -241,20 +284,8 @@ void KMerDBGSuccChunkConstructor::add_read(const std::string &sequence) {
         }
     }
 
-    // encode sequence
-    size_t dummy_prefix_size = filter_suffix_encoded_.size() > 0 ? k_ + 1 : 1;
-    std::vector<TAlphabet> seq(sequence.size() + dummy_prefix_size + 1);
-    for (size_t i = 0; i < dummy_prefix_size; ++i) {
-        seq[i] = DBG_succ::encode('$');
-    }
-    std::transform(sequence.begin(), sequence.end(),
-                   &seq[dummy_prefix_size], DBG_succ::encode);
-    seq.back() = DBG_succ::encode('$');
-
     // add all k-mers of seq to the graph
-    sequence_to_kmers(std::move(seq),
-                      k_, &kmers_,
-                      filter_suffix_encoded_);
+    sequence_to_kmers(sequence, k_, &kmers_, filter_suffix_encoded_);
 }
 
 DBG_succ::Chunk* KMerDBGSuccChunkConstructor::build_chunk() {
