@@ -13,6 +13,7 @@
 #include <functional>
 #include <stdexcept>
 #include <queue>
+#include <atomic>
 
 class DBG_succ;
 class KMer;
@@ -77,75 +78,39 @@ namespace utils {
      */
     class ThreadPool {
       public:
-        ThreadPool(size_t num_threads) : stop(false) {
-            for(size_t i = 0; i < num_threads; ++i) {
-                workers.emplace_back([this]() {
-                    while (true) {
-                        std::function<void()> task;
-                        {
-                            std::unique_lock<std::mutex> lock(this->queue_mutex);
-                            this->condition.wait(lock, [this]() {
-                                return this->stop || !this->tasks.empty();
-                            });
-                            if (this->stop && this->tasks.empty())
-                                return;
-                            task = std::move(this->tasks.front());
-                            this->tasks.pop();
-                        }
-
-                        task();
-                    }
-                });
-            }
-        }
+        ThreadPool(size_t num_threads);
 
         template <class F, typename... Args>
-        auto enqueue(F&& f, Args&&... args)
-                -> std::future<typename std::result_of<F(Args...)>::type> {
+        auto enqueue(F&& f, Args&&... args) -> std::future<decltype(f(args...))> {
             using return_type = typename std::result_of<F(Args...)>::type;
-
             auto task = std::make_shared<std::packaged_task<return_type()>>(
                 std::bind(std::forward<F>(f), std::forward<Args>(args)...)
             );
 
-            std::future<return_type> res = task->get_future();
             {
                 std::unique_lock<std::mutex> lock(queue_mutex);
-
-                // don't allow enqueueing after stopping the pool
-                if (stop) {
-                    throw std::runtime_error("enqueue on stopped ThreadPool");
-                }
-
                 tasks.emplace([task](){ (*task)(); });
             }
             condition.notify_one();
-            return res;
+
+            return task->get_future();
         }
 
-        void join() {
-            {
-                std::unique_lock<std::mutex> lock(queue_mutex);
-                stop = true;
-            }
-            condition.notify_all();
-            for (std::thread &worker : workers) {
-                worker.join();
-            }
-        }
+        void join();
 
-        ~ThreadPool() {
-            if (!stop)
-                join();
-        }
+        ~ThreadPool();
 
       private:
+        void initialize(size_t num_threads);
+
         std::vector<std::thread> workers;
         std::queue<std::function<void()>> tasks;
 
         std::mutex queue_mutex;
         std::condition_variable condition;
-        bool stop;
+
+        bool joining_;
+        bool stop_;
     };
 
 } // namespace utils

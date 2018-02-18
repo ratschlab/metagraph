@@ -207,4 +207,60 @@ void bucket_sort(std::vector<KMer> &data, size_t k) {
 }
 
 
+ThreadPool::ThreadPool(size_t num_threads) : stop_(false) {
+    assert(num_threads > 0);
+    initialize(num_threads);
+}
+
+void ThreadPool::join() {
+    size_t num_threads = workers.size();
+    {
+        std::unique_lock<std::mutex> lock(queue_mutex);
+        assert(!joining_);
+        joining_ = true;
+    }
+    condition.notify_all();
+
+    for (std::thread &worker : workers) {
+        worker.join();
+    }
+    workers.clear();
+
+    if (!stop_)
+        initialize(num_threads);
+}
+
+ThreadPool::~ThreadPool() {
+    stop_ = true;
+    join();
+}
+
+void ThreadPool::initialize(size_t num_threads) {
+    assert(num_threads > 0);
+    assert(!stop_);
+    assert(workers.size() == 0);
+    joining_ = false;
+
+    for(size_t i = 0; i < num_threads; ++i) {
+        workers.emplace_back([this]() {
+            while (true) {
+                std::function<void()> task;
+                {
+                    std::unique_lock<std::mutex> lock(this->queue_mutex);
+                    this->condition.wait(lock, [this]() {
+                        return this->joining_ || !this->tasks.empty();
+                    });
+                    if (this->tasks.empty())
+                        return;
+
+                    task = std::move(this->tasks.front());
+                    this->tasks.pop();
+                }
+
+                task();
+            }
+        });
+    }
+}
+
 } // namespace utils

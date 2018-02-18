@@ -73,9 +73,39 @@ TEST(seq_equal, basics) {
     EXPECT_TRUE(utils::seq_equal(std::string("ABAAACD"), std::string("BAAAACD"), 100));
 }
 
-TEST(ThreadPool, SingleThreadEmpty) {
+TEST(ThreadPool, EmptyConstructor) {
     utils::ThreadPool pool(1);
+    utils::ThreadPool pool2(2);
+    utils::ThreadPool pool4(4);
+    utils::ThreadPool pool20(20);
+}
+
+TEST(ThreadPool, EmptyTasks) {
+    for (size_t i = 1; i < 20; ++i) {
+        utils::ThreadPool pool(i);
+        for (size_t t = 0; t < 1000; ++t) {
+            pool.enqueue([]() {});
+        }
+    }
+}
+
+TEST(ThreadPool, EmptyJoin) {
+    utils::ThreadPool pool(1);
+    utils::ThreadPool pool2(2);
+    utils::ThreadPool pool4(4);
+    utils::ThreadPool pool20(20);
     pool.join();
+    pool2.join();
+    pool4.join();
+    pool20.join();
+    pool.join();
+    pool2.join();
+    pool4.join();
+    pool20.join();
+    pool.join();
+    pool2.join();
+    pool4.join();
+    pool20.join();
 }
 
 TEST(ThreadPool, SingleThread) {
