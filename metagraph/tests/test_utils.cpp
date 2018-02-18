@@ -253,3 +253,44 @@ TEST(ThreadPool, MultiThreadException) {
         }
     }
 }
+
+TEST(ThreadPool, DummyEmptyJoin) {
+    utils::ThreadPool pool(0);
+    pool.join();
+    pool.join();
+    pool.join();
+}
+
+TEST(ThreadPool, DummyPoolRun) {
+    utils::ThreadPool pool(0);
+    std::vector<size_t> result;
+    std::mutex mu;
+    for (size_t t = 0; t < 1000; ++t) {
+        pool.enqueue([&](size_t i) {
+            mu.lock();
+            result.push_back(i);
+            mu.unlock();
+        }, 1);
+    }
+
+    pool.join();
+
+    ASSERT_EQ(1000u, result.size());
+    for (int value : result) {
+        ASSERT_EQ(1, value);
+    }
+}
+
+TEST(ThreadPool, DummyFuture) {
+    utils::ThreadPool pool(0);
+
+    std::vector<std::future<size_t>> result;
+    for (size_t t = 0; t < 1000; ++t) {
+        result.emplace_back(pool.enqueue([&](size_t i) { return i; }, 1));
+    }
+
+    ASSERT_EQ(1000u, result.size());
+    for (auto &value : result) {
+        ASSERT_EQ(1u, value.get());
+    }
+}

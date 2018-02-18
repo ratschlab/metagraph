@@ -78,7 +78,7 @@ namespace utils {
      */
     class ThreadPool {
       public:
-        ThreadPool(size_t num_threads);
+        ThreadPool(size_t num_workers);
 
         template <class F, typename... Args>
         auto enqueue(F&& f, Args&&... args) -> std::future<decltype(f(args...))> {
@@ -87,7 +87,10 @@ namespace utils {
                 std::bind(std::forward<F>(f), std::forward<Args>(args)...)
             );
 
-            {
+            if (!workers.size()) {
+                (*task)();
+                return task->get_future();
+            } else {
                 std::unique_lock<std::mutex> lock(queue_mutex);
                 tasks.emplace([task](){ (*task)(); });
             }

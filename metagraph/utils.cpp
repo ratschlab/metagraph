@@ -207,14 +207,16 @@ void bucket_sort(std::vector<KMer> &data, size_t k) {
 }
 
 
-ThreadPool::ThreadPool(size_t num_threads) : stop_(false) {
-    assert(num_threads > 0);
-    initialize(num_threads);
+ThreadPool::ThreadPool(size_t num_workers) : stop_(false) {
+    initialize(num_workers);
 }
 
 void ThreadPool::join() {
-    size_t num_threads = workers.size();
-    {
+    size_t num_workers = workers.size();
+
+    if (!num_workers) {
+        return;
+    } else {
         std::unique_lock<std::mutex> lock(queue_mutex);
         assert(!joining_);
         joining_ = true;
@@ -227,7 +229,7 @@ void ThreadPool::join() {
     workers.clear();
 
     if (!stop_)
-        initialize(num_threads);
+        initialize(num_workers);
 }
 
 ThreadPool::~ThreadPool() {
@@ -235,13 +237,15 @@ ThreadPool::~ThreadPool() {
     join();
 }
 
-void ThreadPool::initialize(size_t num_threads) {
-    assert(num_threads > 0);
+void ThreadPool::initialize(size_t num_workers) {
     assert(!stop_);
     assert(workers.size() == 0);
     joining_ = false;
 
-    for(size_t i = 0; i < num_threads; ++i) {
+    if (!num_workers)
+        return;
+
+    for(size_t i = 0; i < num_workers; ++i) {
         workers.emplace_back([this]() {
             while (true) {
                 std::function<void()> task;
