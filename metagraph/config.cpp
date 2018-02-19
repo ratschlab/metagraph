@@ -90,6 +90,8 @@ Config::Config(int argc, const char *argv[]) {
             refpath = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-s") || !strcmp(argv[i], "--num-splits")) {
             nsplits = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--suffix")) {
+            suffix = argv[++i];
         } else if (!strcmp(argv[i], "-t") || !strcmp(argv[i], "--state")) {
             state = static_cast<StateType>(atoi(argv[++i]));
         //} else if (!strcmp(argv[i], "--db-path")) {
@@ -215,15 +217,16 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s build [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for build:\n");
-            fprintf(stderr, "\t   --reference [STR] \t\tbasename of reference sequence []\n");
-            fprintf(stderr, "\t-o --outfile-base [STR]\t\tbasename of output file []\n");
-            fprintf(stderr, "\t   --mem-cap-gb [INT] \t\tmaximum memory available, in Gb [inf]\n");
-            fprintf(stderr, "\t-k --kmer-length [INT] \t\tlength of the k-mer to use [3]\n");
-            fprintf(stderr, "\t-r --reverse \t\t\tadd reverse complement reads [off]\n");
-            fprintf(stderr, "\t   --fast \t\t\tuse fast build method [off]\n");
-            fprintf(stderr, "\t   --print \t\t\tprint graph table to the screen [off]\n");
-            fprintf(stderr, "\t-s --num-splits \t\tDefine the minimum number of bins to split kmers into [1]\n");
-            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence []\n");
+            fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
+            fprintf(stderr, "\t   --mem-cap-gb [INT] \tmaximum memory available, in Gb [inf]\n");
+            fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
+            fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
+            fprintf(stderr, "\t   --fast \t\tuse fast build method [off]\n");
+            fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
+            fprintf(stderr, "\t   --suffix \t\tbuild graph chunk only for k-mers with the suffix given [off]\n");
+            fprintf(stderr, "\t-s --num-splits \tdefine the minimum number of bins to split kmers into [1]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case ALIGN: {
             fprintf(stderr, "Usage: %s align -i <graph_basename> [options] <FASTQ1> [[FASTQ2] ...]\n\n", prog_name.c_str());

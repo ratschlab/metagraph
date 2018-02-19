@@ -122,10 +122,12 @@ int main(int argc, const char *argv[]) {
                                                     / std::log2(DBG_succ::alph_size - 1))),
                     graph->get_k() - 1
                 );
-                auto suffices = utils::generate_strings(
+                std::deque<std::string> suffices = utils::generate_strings(
                     DBG_succ::alphabet.substr(0, DBG_succ::alph_size),
                     suffix_len
                 );
+                if (config->suffix.size())
+                    suffices = { config->suffix };
 
                 DBG_succ::VectorChunk graph_data;
 
@@ -213,7 +215,7 @@ int main(int argc, const char *argv[]) {
                     auto next_block = constructor->build_chunk();
                     std::cout << timer.elapsed() << "sec" << std::endl;
 
-                    if (config->outfbase.size() && suffix.size()) {
+                    if (config->outfbase.size() && config->suffix.size()) {
                         std::cout << "Serialize the graph chunk for suffix '"
                                   << suffix << "'...\t" << std::flush;
                         timer.reset();
