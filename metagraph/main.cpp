@@ -320,7 +320,9 @@ int main(int argc, const char *argv[]) {
             }
             annotation.serialize(config->infbase + ".anno.dbg");
             //annotation.serialize_uncompressed_rows(config->infbase + ".anno.rawrows.dbg");
-            return 0;
+            delete graph;
+            graph = NULL;
+            break;
         }
         case Config::CLASSIFY: {
             // load graph
