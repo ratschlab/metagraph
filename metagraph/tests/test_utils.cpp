@@ -294,3 +294,75 @@ TEST(ThreadPool, DummyFuture) {
         ASSERT_EQ(1u, value.get());
     }
 }
+
+
+TEST(AsyncActivity, RunUniqueOnly) {
+    utils::AsyncActivity async;
+
+    ASSERT_EQ(1, async.run_unique([](int i) { return i; }, 1));
+    ASSERT_EQ('a', async.run_unique([]() { return 'a'; }));
+    ASSERT_EQ("abc", async.run_unique([](char a, char b, char c) {
+                                         return std::string(1, a) + b + c;
+                                      }, 'a', 'b', 'c'));
+}
+
+TEST(AsyncActivity, RunAsyncOnly) {
+    utils::AsyncActivity async;
+
+    ASSERT_EQ(1, async.run_async([](int i) { return i; }, 1));
+    ASSERT_EQ('a', async.run_async([]() { return 'a'; }));
+    ASSERT_EQ("abc", async.run_async([](char a, char b, char c) {
+                                        return std::string(1, a) + b + c;
+                                     }, 'a', 'b', 'c'));
+}
+
+TEST(AsyncActivity, RunBoth) {
+    utils::AsyncActivity async;
+
+    ASSERT_EQ(1, async.run_async([](int i) { return i; }, 1));
+    ASSERT_EQ('a', async.run_async([]() { return 'a'; }));
+    ASSERT_EQ("abc", async.run_async([](char a, char b, char c) {
+                                        return std::string(1, a) + b + c;
+                                     }, 'a', 'b', 'c'));
+
+    ASSERT_EQ(1, async.run_unique([](int i) { return i; }, 1));
+    ASSERT_EQ('a', async.run_unique([]() { return 'a'; }));
+    ASSERT_EQ("abc", async.run_unique([](char a, char b, char c) {
+                                         return std::string(1, a) + b + c;
+                                      }, 'a', 'b', 'c'));
+}
+
+TEST(AsyncActivity, RunBothParallel) {
+    utils::AsyncActivity async;
+
+    std::string result;
+
+    std::thread t1([&](std::string *result) {
+                    async.run_async(
+                        [](std::string *result_) {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                            result_->push_back('a');
+                            return true;
+                        }, result);
+                    }, &result);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    async.run_unique([](std::string *result_) { result_->push_back('b'); }, &result);
+    ASSERT_EQ(2u, result.size()) << result;
+    EXPECT_EQ('b', result.back()) << result;
+
+    std::thread t2([&](std::string *result) {
+                    async.run_async(
+                        [](std::string *result_) {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                            result_->push_back('a');
+                            return true;
+                        }, result);
+                    }, &result);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    async.run_unique([](std::string *result_) { result_->push_back('c'); }, &result);
+    ASSERT_EQ(4u, result.size()) << result;
+    EXPECT_EQ('c', result.back()) << result;
+
+    t1.join();
+    t2.join();
+}

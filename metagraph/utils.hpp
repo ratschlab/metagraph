@@ -116,6 +116,40 @@ namespace utils {
         bool stop_;
     };
 
+
+    class AsyncActivity {
+      public:
+        template <class F, typename... Args>
+        auto run_async(F&& f, Args&&... args) -> decltype(f(args...)) {
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                parallel_jobs_++;
+            }
+            auto result = f(args...);
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                parallel_jobs_--;
+            }
+            cond_var_.notify_one();
+            return std::move(result);
+        }
+
+        template <class F, typename... Args>
+        auto run_unique(F&& f, Args&&... args) -> decltype(f(args...)) {
+            std::unique_lock<std::mutex> lock(mutex_);
+            while (parallel_jobs_ > 0) {
+                cond_var_.wait(lock);
+            }
+            return f(args...);
+        }
+
+      private:
+        size_t parallel_jobs_ = 0;
+
+        std::mutex mutex_;
+        std::condition_variable cond_var_;
+    };
+
 } // namespace utils
 
 #endif // __UTILS_HPP__
