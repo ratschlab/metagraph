@@ -82,6 +82,31 @@ void sort_and_remove_duplicates(std::vector<KMer> *kmers,
                                 size_t num_threads,
                                 size_t end_sorted = 0);
 
+void shrink_kmers(std::vector<KMer> *kmers,
+                  size_t *end_sorted,
+                  size_t max_size_allowed,
+                  size_t num_threads,
+                  bool verbose) {
+    if (verbose) {
+        std::cout << "Memory limit exceeded, filter out non-unique k-mers..."
+                  << std::flush;
+    }
+
+    sort_and_remove_duplicates(kmers, num_threads, *end_sorted);
+    *end_sorted = kmers->size();
+
+    if (verbose) {
+        std::cout << " done. Number of kmers: " << *end_sorted << ", "
+                  << (*end_sorted * sizeof(KMer) >> 20) << "Mb" << std::endl;
+    }
+
+    if (kmers->size() > max_size_allowed) {
+        std::cerr << "ERROR: Not enough memory."
+                  << " Try to increase the memory limit." << std::endl;
+        exit(1);
+    }
+}
+
 // takes the ownership of the allocated sequence and releases when finishes
 void sequence_to_kmers_parallel(std::vector<std::string> *reads,
                                 size_t k,
@@ -265,23 +290,10 @@ void KMerDBGSuccChunkConstructor::add_read(const std::string &sequence) {
         return;
 
     if (kmers_.size() + sequence.size() > max_num_kmers_) {
-        if (verbose_) {
-            std::cout << "Memory limit exceeded, filter out non-unique k-mers..." << std::flush;
-        }
-
-        sort_and_remove_duplicates(&kmers_, num_threads_, end_sorted_);
-        end_sorted_ = kmers_.size();
-
-        if (verbose_) {
-            std::cout << " done. Number of kmers: " << end_sorted_ << ", "
-                      << (end_sorted_ * sizeof(KMer) >> 20) << "Mb" << std::endl;
-        }
-
-        if (kmers_.size() + sequence.size() > max_num_kmers_ - max_num_kmers_ / 50) {
-            std::cerr << "ERROR: Not enough memory."
-                      << " Try to increase the memory limit." << std::endl;
-            exit(1);
-        }
+        size_t max_size = max_num_kmers_ > max_num_kmers_ / 50 + sequence.size()
+                          ? max_num_kmers_ - max_num_kmers_ / 50 - sequence.size()
+                          : 0;
+        shrink_kmers(&kmers_, &end_sorted_, max_size, num_threads_, verbose_);
     }
 
     // add all k-mers of seq to the graph
