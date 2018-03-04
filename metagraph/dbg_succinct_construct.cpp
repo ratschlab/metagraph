@@ -7,6 +7,9 @@
 #include "utils.hpp"
 
 
+const size_t kNumBasepairsInTask = 1'000'000;
+
+
 /**
  * Break the sequence to kmers and extend the temporary kmers storage.
  */
@@ -84,26 +87,21 @@ void sort_and_remove_duplicates(std::vector<KMer> *kmers,
 
 void shrink_kmers(std::vector<KMer> *kmers,
                   size_t *end_sorted,
-                  size_t max_size_allowed,
                   size_t num_threads,
                   bool verbose) {
     if (verbose) {
-        std::cout << "Memory limit exceeded, filter out non-unique k-mers..."
+        std::cout << "Allocated capacity exceeded, filter out non-unique k-mers..."
                   << std::flush;
     }
 
+    size_t prev_num_kmers = kmers->size();
     sort_and_remove_duplicates(kmers, num_threads, *end_sorted);
     *end_sorted = kmers->size();
 
     if (verbose) {
-        std::cout << " done. Number of kmers: " << *end_sorted << ", "
+        std::cout << " done. Number of kmers reduced from " << prev_num_kmers
+                                                  << " to " << *end_sorted << ", "
                   << (*end_sorted * sizeof(KMer) >> 20) << "Mb" << std::endl;
-    }
-
-    if (kmers->size() > max_size_allowed) {
-        std::cerr << "ERROR: Not enough memory."
-                  << " Try to increase the memory limit." << std::endl;
-        exit(1);
     }
 }
 
@@ -111,7 +109,10 @@ void shrink_kmers(std::vector<KMer> *kmers,
 void sequence_to_kmers_parallel(std::vector<std::string> *reads,
                                 size_t k,
                                 std::vector<KMer> *kmers,
+                                size_t *end_sorted,
                                 const std::vector<TAlphabet> &suffix,
+                                size_t num_threads,
+                                bool verbose,
                                 std::mutex *mutex,
                                 bool remove_redundant) {
     assert(mutex);
@@ -130,13 +131,31 @@ void sequence_to_kmers_parallel(std::vector<std::string> *reads,
     }
     delete reads;
 
-    if (remove_redundant)
-        sort_and_remove_duplicates(&temp_storage, 1);
-
-    std::unique_lock<std::mutex> lock(*mutex);
-    for (auto &kmer : temp_storage) {
-        kmers->emplace_back(kmer);
+    if (remove_redundant) {
+        sort_and_remove_duplicates(&temp_storage, 1, 0);
     }
+
+    // acquire the mutex to restrict the number of writing threads
+    std::lock_guard<std::mutex> lock(*mutex);
+
+    // shrink collected k-mers if the memory limit is exceeded
+    if (kmers->size() + temp_storage.size() > kmers->capacity()) {
+        shrink_kmers(kmers, end_sorted, num_threads, verbose);
+        kmers->reserve(kmers->size()
+                        + std::max(temp_storage.size(), kmers->size() / 2));
+        if (kmers->size() + temp_storage.size() > kmers->capacity()) {
+            std::cerr << "ERROR: Can't reallocate. Not enough memory" << std::endl;
+        }
+    }
+    // try {
+    for (auto &kmer : temp_storage) {
+        kmers->push_back(kmer);
+    }
+    // } catch (...) {
+    //     std::cerr << "ERROR: Not enough memory."
+    //               << " Try to increase the memory limit." << std::endl;
+    //     exit(1);
+    // }
 }
 
 void sort_and_remove_duplicates(std::vector<KMer> *kmers,
@@ -174,7 +193,6 @@ void sort_and_remove_duplicates(std::vector<KMer> *kmers,
 
 void recover_source_dummy_nodes(size_t k,
                                 std::vector<KMer> *kmers,
-                                size_t max_num_kmers,
                                 size_t num_threads,
                                 bool verbose) {
     // remove redundant dummy kmers inplace
@@ -209,9 +227,10 @@ void recover_source_dummy_nodes(size_t k,
         // leave this dummy kmer in the list
         kmers->at(cur_pos++) = kmer;
 
-        if (kmers->size() + k > max_num_kmers) {
+        if (kmers->size() + k > kmers->capacity()) {
             if (verbose) {
-                std::cout << "Memory limit exceeded, filter out non-unique k-mers..." << std::flush;
+                std::cout << "Allocated capacity exceeded,"
+                          << " filter out non-unique k-mers..." << std::flush;
             }
 
             omp_set_num_threads(num_threads);
@@ -225,12 +244,6 @@ void recover_source_dummy_nodes(size_t k,
             if (verbose) {
                 std::cout << " done. Number of kmers: " << kmers->size() << ", "
                           << (kmers->size() * sizeof(KMer) >> 20) << "Mb" << std::endl;
-            }
-
-            if (kmers->size() + k > max_num_kmers - max_num_kmers / 100) {
-                std::cerr << "ERROR: Not enough memory."
-                          << " Try to increase the memory limit." << std::endl;
-                exit(1);
             }
         }
 
@@ -263,22 +276,21 @@ KMerDBGSuccChunkConstructor::KMerDBGSuccChunkConstructor(
                                             size_t k,
                                             const std::string &filter_suffix,
                                             size_t num_threads,
-                                            double memory_available,
+                                            double memory_preallocated,
                                             bool verbose)
       : k_(k),
         end_sorted_(0),
         num_threads_(num_threads),
-        max_num_kmers_(memory_available / sizeof(KMer)),
+        thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1),
+        stored_reads_size_(0),
         verbose_(verbose) {
+    assert(num_threads_ > 0);
+
     filter_suffix_encoded_.resize(filter_suffix.size());
     std::transform(filter_suffix.begin(), filter_suffix.end(),
                    filter_suffix_encoded_.begin(), DBG_succ::encode);
 
-    if (max_num_kmers_ == 0) {
-        max_num_kmers_ = static_cast<size_t>(-1);
-    } else {
-        kmers_.reserve(max_num_kmers_);
-    }
+    kmers_.reserve(memory_preallocated / sizeof(KMer));
 
     if (filter_suffix == std::string(filter_suffix.size(), '$')) {
         kmers_.emplace_back(std::vector<TAlphabet>(k + 1, 0), k + 1);
@@ -289,23 +301,37 @@ void KMerDBGSuccChunkConstructor::add_read(const std::string &sequence) {
     if (sequence.size() < k_)
         return;
 
-    if (kmers_.size() + sequence.size() > max_num_kmers_) {
-        size_t max_size = max_num_kmers_ > max_num_kmers_ / 50 + sequence.size()
-                          ? max_num_kmers_ - max_num_kmers_ / 50 - sequence.size()
-                          : 0;
-        shrink_kmers(&kmers_, &end_sorted_, max_size, num_threads_, verbose_);
-    }
+    // put read into temporary storage
+    stored_reads_size_ += sequence.size();
+    reads_storage_.emplace_back(sequence);
 
-    // add all k-mers of seq to the graph
-    sequence_to_kmers(sequence, k_, &kmers_, filter_suffix_encoded_);
+    if (stored_reads_size_ < kNumBasepairsInTask)
+        return;
+
+    // extract all k-mers from sequences accumulated in the temporary storage
+    release_task_to_pool();
+
+    assert(!stored_reads_size_);
+    assert(!reads_storage_.size());
+}
+
+void KMerDBGSuccChunkConstructor::release_task_to_pool() {
+    auto *current_reads_storage = new std::vector<std::string>();
+    current_reads_storage->swap(reads_storage_);
+    stored_reads_size_ = 0;
+
+    thread_pool_.enqueue(sequence_to_kmers_parallel, current_reads_storage,
+                         k_, &kmers_, &end_sorted_, filter_suffix_encoded_,
+                         num_threads_, verbose_, &mutex_, true);
 }
 
 DBG_succ::Chunk* KMerDBGSuccChunkConstructor::build_chunk() {
+    release_task_to_pool();
+    thread_pool_.join();
     sort_and_remove_duplicates(&kmers_, num_threads_, end_sorted_);
 
     if (!filter_suffix_encoded_.size()) {
-        recover_source_dummy_nodes(k_, &kmers_, max_num_kmers_,
-                                   num_threads_, verbose_);
+        recover_source_dummy_nodes(k_, &kmers_, num_threads_, verbose_);
     }
 
     DBG_succ::Chunk *result = DBG_succ::VectorChunk::build_from_kmers(k_, &kmers_);

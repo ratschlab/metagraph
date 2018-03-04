@@ -217,7 +217,7 @@ void ThreadPool::join() {
     if (!num_workers) {
         return;
     } else {
-        std::unique_lock<std::mutex> lock(queue_mutex);
+        std::lock_guard<std::mutex> lock(queue_mutex);
         assert(!joining_);
         joining_ = true;
     }

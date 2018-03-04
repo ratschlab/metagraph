@@ -91,7 +91,7 @@ namespace utils {
                 (*task)();
                 return task->get_future();
             } else {
-                std::unique_lock<std::mutex> lock(queue_mutex);
+                std::lock_guard<std::mutex> lock(queue_mutex);
                 tasks.emplace([task](){ (*task)(); });
             }
             condition.notify_one();

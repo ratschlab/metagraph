@@ -3,6 +3,7 @@
 
 #include "dbg_succinct.hpp"
 #include "kmer.hpp"
+#include "utils.hpp"
 
 
 class DBGSuccConstructor {
@@ -42,7 +43,7 @@ class KMerDBGSuccChunkConstructor {
     KMerDBGSuccChunkConstructor(size_t k,
                                 const std::string &filter_suffix,
                                 size_t num_threads = 1,
-                                double memory_available = 0,
+                                double memory_preallocated = 0,
                                 bool verbose = false);
 
     void add_read(const std::string &sequence);
@@ -52,12 +53,19 @@ class KMerDBGSuccChunkConstructor {
     size_t get_k() const { return k_; }
 
   private:
+    void release_task_to_pool();
+
     size_t k_;
     std::vector<KMer> kmers_;
     size_t end_sorted_;
+    std::mutex mutex_;
 
     size_t num_threads_;
-    size_t max_num_kmers_;
+    utils::ThreadPool thread_pool_;
+
+    std::vector<std::string> reads_storage_;
+    size_t stored_reads_size_;
+
     bool verbose_;
 
     std::vector<TAlphabet> filter_suffix_encoded_;
