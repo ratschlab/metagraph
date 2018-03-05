@@ -207,7 +207,11 @@ void bucket_sort(std::vector<KMer> &data, size_t k) {
 }
 
 
-ThreadPool::ThreadPool(size_t num_workers) : stop_(false) {
+ThreadPool::ThreadPool(size_t num_workers, size_t max_num_tasks)
+      : stop_(false) {
+    max_num_tasks_ = max_num_tasks == 0
+                     ? num_workers * 5
+                     : max_num_tasks;
     initialize(num_workers);
 }
 
@@ -221,7 +225,7 @@ void ThreadPool::join() {
         assert(!joining_);
         joining_ = true;
     }
-    condition.notify_all();
+    empty_condition.notify_all();
 
     for (std::thread &worker : workers) {
         worker.join();
@@ -251,7 +255,7 @@ void ThreadPool::initialize(size_t num_workers) {
                 std::function<void()> task;
                 {
                     std::unique_lock<std::mutex> lock(this->queue_mutex);
-                    this->condition.wait(lock, [this]() {
+                    this->empty_condition.wait(lock, [this]() {
                         return this->joining_ || !this->tasks.empty();
                     });
                     if (this->tasks.empty())
@@ -259,6 +263,7 @@ void ThreadPool::initialize(size_t num_workers) {
 
                     task = std::move(this->tasks.front());
                     this->tasks.pop();
+                    full_condition.notify_one();
                 }
 
                 task();

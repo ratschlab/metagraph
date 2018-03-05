@@ -78,7 +78,7 @@ namespace utils {
      */
     class ThreadPool {
       public:
-        ThreadPool(size_t num_workers);
+        ThreadPool(size_t num_workers, size_t max_num_tasks = 0);
 
         template <class F, typename... Args>
         auto enqueue(F&& f, Args&&... args) -> std::future<decltype(f(args...))> {
@@ -91,10 +91,13 @@ namespace utils {
                 (*task)();
                 return task->get_future();
             } else {
-                std::lock_guard<std::mutex> lock(queue_mutex);
+                std::unique_lock<std::mutex> lock(queue_mutex);
+                full_condition.wait(lock, [this]() {
+                    return this->tasks.size() < this->max_num_tasks_;
+                });
                 tasks.emplace([task](){ (*task)(); });
             }
-            condition.notify_one();
+            empty_condition.notify_one();
 
             return task->get_future();
         }
@@ -108,9 +111,11 @@ namespace utils {
 
         std::vector<std::thread> workers;
         std::queue<std::function<void()>> tasks;
+        size_t max_num_tasks_;
 
         std::mutex queue_mutex;
-        std::condition_variable condition;
+        std::condition_variable empty_condition;
+        std::condition_variable full_condition;
 
         bool joining_;
         bool stop_;
