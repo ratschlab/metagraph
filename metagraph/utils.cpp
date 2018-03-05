@@ -208,10 +208,7 @@ void bucket_sort(std::vector<KMer> &data, size_t k) {
 
 
 ThreadPool::ThreadPool(size_t num_workers, size_t max_num_tasks)
-      : stop_(false) {
-    max_num_tasks_ = max_num_tasks == 0
-                     ? num_workers * 5
-                     : max_num_tasks;
+      : max_num_tasks_(std::max(max_num_tasks, num_workers * 5)), stop_(false) {
     initialize(num_workers);
 }
 

@@ -106,6 +106,38 @@ void shrink_kmers(std::vector<KMer> *kmers,
 }
 
 // takes the ownership of the allocated sequence and releases when finishes
+void extend_kmer_storage(const std::vector<KMer> &temp_storage,
+                         std::vector<KMer> *kmers,
+                         size_t *end_sorted,
+                         size_t num_threads,
+                         bool verbose,
+                         std::mutex *mutex) {
+    assert(mutex);
+
+    // acquire the mutex to restrict the number of writing threads
+    std::lock_guard<std::mutex> lock(*mutex);
+
+    // shrink collected k-mers if the memory limit is exceeded
+    if (kmers->size() + temp_storage.size() > kmers->capacity()) {
+        shrink_kmers(kmers, end_sorted, num_threads, verbose);
+        kmers->reserve(kmers->size()
+                        + std::max(temp_storage.size(), kmers->size() / 2));
+        if (kmers->size() + temp_storage.size() > kmers->capacity()) {
+            std::cerr << "ERROR: Can't reallocate. Not enough memory" << std::endl;
+        }
+    }
+    // try {
+    for (auto &kmer : temp_storage) {
+        kmers->push_back(kmer);
+    }
+    // } catch (...) {
+    //     std::cerr << "ERROR: Not enough memory."
+    //               << " Try to increase the memory limit." << std::endl;
+    //     exit(1);
+    // }
+}
+
+// takes the ownership of the allocated sequence and releases when finishes
 void sequence_to_kmers_parallel(std::vector<std::string> *reads,
                                 size_t k,
                                 std::vector<KMer> *kmers,
@@ -135,27 +167,8 @@ void sequence_to_kmers_parallel(std::vector<std::string> *reads,
         sort_and_remove_duplicates(&temp_storage, 1, 0);
     }
 
-    // acquire the mutex to restrict the number of writing threads
-    std::lock_guard<std::mutex> lock(*mutex);
-
-    // shrink collected k-mers if the memory limit is exceeded
-    if (kmers->size() + temp_storage.size() > kmers->capacity()) {
-        shrink_kmers(kmers, end_sorted, num_threads, verbose);
-        kmers->reserve(kmers->size()
-                        + std::max(temp_storage.size(), kmers->size() / 2));
-        if (kmers->size() + temp_storage.size() > kmers->capacity()) {
-            std::cerr << "ERROR: Can't reallocate. Not enough memory" << std::endl;
-        }
-    }
-    // try {
-    for (auto &kmer : temp_storage) {
-        kmers->push_back(kmer);
-    }
-    // } catch (...) {
-    //     std::cerr << "ERROR: Not enough memory."
-    //               << " Try to increase the memory limit." << std::endl;
-    //     exit(1);
-    // }
+    extend_kmer_storage(temp_storage, kmers, end_sorted,
+                        num_threads, verbose, mutex);
 }
 
 void sort_and_remove_duplicates(std::vector<KMer> *kmers,
