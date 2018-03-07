@@ -353,6 +353,45 @@ DBG_succ::Chunk* KMerDBGSuccChunkConstructor::build_chunk() {
     return result;
 }
 
+typedef std::function<void(const std::string&)> CallbackRead;
+
+void extract_kmers(std::function<void(CallbackRead)> generate_reads,
+                   size_t k,
+                   std::vector<KMer> *kmers,
+                   size_t *end_sorted,
+                   const std::vector<TAlphabet> &suffix,
+                   size_t num_threads,
+                   bool verbose,
+                   std::mutex *mutex) {
+    std::vector<KMer> temp_storage;
+
+    generate_reads([&](const std::string &read) {
+        sequence_to_kmers(read, k, &temp_storage, suffix);
+
+        if (temp_storage.size() < 20'000'000)
+            return;
+
+        sort_and_remove_duplicates(&temp_storage, 1, 0);
+
+        if (temp_storage.size() < 18'000'000)
+            return;
+
+        extend_kmer_storage(temp_storage, kmers, end_sorted,
+                            num_threads, verbose, mutex);
+        temp_storage.clear();
+    });
+
+    sort_and_remove_duplicates(&temp_storage, 1, 0);
+    extend_kmer_storage(temp_storage, kmers, end_sorted,
+                        num_threads, verbose, mutex);
+}
+
+void KMerDBGSuccChunkConstructor::add_reads(std::function<void(CallbackRead)> generate_reads) {
+    thread_pool_.enqueue(extract_kmers, generate_reads,
+                         k_, &kmers_, &end_sorted_, filter_suffix_encoded_,
+                         num_threads_, verbose_, &mutex_);
+}
+
 
 SuffixArrayDBGSuccConstructor::SuffixArrayDBGSuccConstructor(size_t k)
       : k_(k), data_("$") {}

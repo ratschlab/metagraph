@@ -39,6 +39,8 @@ class SuffixArrayDBGSuccConstructor : public DBGSuccConstructor {
 
 
 class KMerDBGSuccChunkConstructor {
+    typedef std::function<void(const std::string&)> CallbackRead;
+
   public:
     KMerDBGSuccChunkConstructor(size_t k,
                                 const std::string &filter_suffix,
@@ -47,6 +49,8 @@ class KMerDBGSuccChunkConstructor {
                                 bool verbose = false);
 
     void add_read(const std::string &sequence);
+
+    void add_reads(std::function<void(CallbackRead)> generate_reads);
 
     DBG_succ::Chunk* build_chunk();
 

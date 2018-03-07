@@ -183,14 +183,31 @@ int main(int argc, const char *argv[]) {
                             }
                         } else if (utils::get_filetype(files[f]) == "FASTA"
                                     || utils::get_filetype(files[f]) == "FASTQ") {
-                            read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
-                                // add read to the graph constructor as a callback
-                                constructor->add_read(read_stream->seq.s);
-                                if (config->reverse) {
-                                    reverse_complement(read_stream->seq);
+                            if (files.size() >= config->parallel) {
+                                auto reverse = config->reverse;
+                                auto file = files[f];
+                                // capture all required values by copying to be able
+                                // to run task from other threads
+                                constructor->add_reads([=](auto callback) {
+                                    read_fasta_file_critical(file, [=](kseq_t *read_stream) {
+                                        // add read to the graph constructor as a callback
+                                        callback(read_stream->seq.s);
+                                        if (reverse) {
+                                            reverse_complement(read_stream->seq);
+                                            callback(read_stream->seq.s);
+                                        }
+                                    });
+                                });
+                            } else {
+                                read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
+                                    // add read to the graph constructor as a callback
                                     constructor->add_read(read_stream->seq.s);
-                                }
-                            });
+                                    if (config->reverse) {
+                                        reverse_complement(read_stream->seq);
+                                        constructor->add_read(read_stream->seq.s);
+                                    }
+                                });
+                            }
                         } else {
                             std::cerr << "ERROR: Filetype unknown for file "
                                       << files[f] << std::endl;
