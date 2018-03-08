@@ -9,6 +9,8 @@
 
 const size_t kNumBasepairsInTask = 1'000'000;
 
+const size_t kMaxCounterSize = 10'000'000;
+
 
 /**
  * Break the sequence to kmers and extend the temporary kmers storage.
@@ -386,9 +388,95 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
                         num_threads, verbose, mutex);
 }
 
-void KMerDBGSuccChunkConstructor::add_reads(std::function<void(CallbackRead)> generate_reads) {
-    thread_pool_.enqueue(extract_kmers, generate_reads,
-                         k_, &kmers_, &end_sorted_, filter_suffix_encoded_,
+struct KMerHash {
+    size_t operator()(const KMer &kmer) const {
+        const uint32_t *ker_ptr = reinterpret_cast<const uint32_t*>(&kmer);
+        // computes the hash of a k-mer using a variant
+        // of the Fowler-Noll-Vo hash function
+        size_t result = ker_ptr[0];
+
+        for (size_t i = 1; i < sizeof(KMer) / sizeof(uint32_t); ++i) {
+            result = (result * 16777619) ^ ker_ptr[i];
+        }
+
+        return result;
+    }
+};
+
+typedef std::unordered_map<KMer, uint32_t, KMerHash, std::equal_to<KMer>,
+                           std::allocator<std::pair<const KMer, uint32_t>>> Counter;
+
+void move_kmers_to_storage(Counter *counter,
+                           std::vector<KMer> *kmers,
+                           size_t *end_sorted,
+                           size_t noise_kmer_frequency,
+                           size_t num_threads,
+                           bool verbose,
+                           std::mutex *mutex) {
+    std::vector<KMer> temp_storage;
+
+    size_t counter_sum = 0;
+
+    for (auto it = counter->begin(); it != counter->end(); ++it) {
+        counter_sum += it->second;
+        if (it->second > noise_kmer_frequency)
+            temp_storage.push_back(it->first);
+    }
+
+    if (verbose) {
+        std::cout << "\nFiltering out the k-mers collected...\n";
+        std::cout << "Total k-mers:    " << counter_sum << std::endl;
+        std::cout << "Distinct k-mers: " << counter->size() << std::endl;
+        std::cout << "Filtered k-mers: " << temp_storage.size() << std::endl;
+    }
+    counter->clear();
+
+    extend_kmer_storage(temp_storage, kmers, end_sorted,
+                        num_threads, verbose, mutex);
+}
+
+void count_kmers(std::function<void(CallbackRead)> generate_reads,
+                 size_t k,
+                 std::vector<KMer> *kmers,
+                 size_t *end_sorted,
+                 const std::vector<TAlphabet> &suffix,
+                 size_t noise_kmer_frequency,
+                 size_t num_threads,
+                 bool verbose,
+                 std::mutex *mutex) {
+    if (noise_kmer_frequency == 0) {
+        extract_kmers(generate_reads, k, kmers, end_sorted, suffix,
+                      num_threads, verbose, mutex);
+        return;
+    }
+
+    Counter counter;
+    std::vector<KMer> temp_storage;
+
+    generate_reads([&](const std::string &read) {
+        sequence_to_kmers(read, k, &temp_storage, suffix);
+
+        for (const auto &kmer : temp_storage) {
+            counter[kmer]++;
+        }
+        temp_storage.resize(0);
+
+        if (counter.size() > kMaxCounterSize) {
+            move_kmers_to_storage(&counter, kmers, end_sorted,
+                                  noise_kmer_frequency,
+                                  num_threads, verbose, mutex);
+        }
+    });
+    move_kmers_to_storage(&counter, kmers, end_sorted,
+                          noise_kmer_frequency * counter.size() / kMaxCounterSize,
+                          num_threads, verbose, mutex);
+}
+
+void KMerDBGSuccChunkConstructor::add_reads(std::function<void(CallbackRead)> generate_reads,
+                                            size_t noise_kmer_frequency) {
+    thread_pool_.enqueue(count_kmers, generate_reads,
+                         k_, &kmers_, &end_sorted_,
+                         filter_suffix_encoded_, noise_kmer_frequency,
                          num_threads_, verbose_, &mutex_);
 }
 

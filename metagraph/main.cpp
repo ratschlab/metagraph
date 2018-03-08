@@ -183,7 +183,8 @@ int main(int argc, const char *argv[]) {
                             }
                         } else if (utils::get_filetype(files[f]) == "FASTA"
                                     || utils::get_filetype(files[f]) == "FASTQ") {
-                            if (files.size() >= config->parallel) {
+                            if (config->noise_kmer_frequency > 0
+                                    || files.size() >= config->parallel) {
                                 auto reverse = config->reverse;
                                 auto file = files[f];
                                 // capture all required values by copying to be able
@@ -197,7 +198,7 @@ int main(int argc, const char *argv[]) {
                                             callback(read_stream->seq.s);
                                         }
                                     });
-                                });
+                                }, config->noise_kmer_frequency);
                             } else {
                                 read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
                                     // add read to the graph constructor as a callback

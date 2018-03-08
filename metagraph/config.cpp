@@ -66,6 +66,8 @@ Config::Config(int argc, const char *argv[]) {
             num_bins_per_thread = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-k") || !strcmp(argv[i], "--kmer-length")) {
             k = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--noise-freq")) {
+            noise_kmer_frequency = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
             memory_available = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--bloom-false-pos-prob")) {
@@ -221,6 +223,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
             fprintf(stderr, "\t   --mem-cap-gb [INT] \tmaximum memory available, in Gb [inf]\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
+            fprintf(stderr, "\t   --noise-freq [INT] \ttake only more frequently occurring k-mers [0]\n");
             fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
             fprintf(stderr, "\t   --fast \t\tuse fast build method [off]\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
