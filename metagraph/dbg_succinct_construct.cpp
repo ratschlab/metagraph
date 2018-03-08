@@ -403,8 +403,9 @@ struct KMerHash {
     }
 };
 
+// use a custom allocator since the default one is too slow
 typedef std::unordered_map<KMer, uint32_t, KMerHash, std::equal_to<KMer>,
-                           std::allocator<std::pair<const KMer, uint32_t>>> Counter;
+                           utils::plalloc<std::pair<const KMer, uint32_t>>> Counter;
 
 void move_kmers_to_storage(Counter *counter,
                            std::vector<KMer> *kmers,
@@ -451,6 +452,7 @@ void count_kmers(std::function<void(CallbackRead)> generate_reads,
     }
 
     Counter counter;
+    counter.reserve(kMaxCounterSize);
     std::vector<KMer> temp_storage;
 
     generate_reads([&](const std::string &read) {
@@ -465,6 +467,7 @@ void count_kmers(std::function<void(CallbackRead)> generate_reads,
             move_kmers_to_storage(&counter, kmers, end_sorted,
                                   noise_kmer_frequency,
                                   num_threads, verbose, mutex);
+            counter.reserve(kMaxCounterSize);
         }
     });
     move_kmers_to_storage(&counter, kmers, end_sorted,
