@@ -59,7 +59,8 @@ DBG_succ* load_critical_graph_from_file(const std::string &filename) {
 
 
 template <class Callback>
-void read_fasta_file_critical(const std::string &filename, Callback callback) {
+void read_fasta_file_critical(const std::string &filename,
+                              Callback callback, Timer *timer = NULL) {
     gzFile input_p = gzopen(filename.c_str(), "r");
     if (input_p == Z_NULL) {
         std::cerr << "ERROR no such file " << filename << std::endl;
@@ -72,8 +73,15 @@ void read_fasta_file_critical(const std::string &filename, Callback callback) {
                   << filename << std::endl;
         exit(1);
     }
+    if (timer) {
+        std::cout << "Start extracting sequences from file " << filename << std::endl;
+    }
     while (kseq_read(read_stream) >= 0) {
         callback(read_stream);
+    }
+    if (timer) {
+        std::cout << "Finished extracting sequences from file " << filename
+                  << " in " << timer->elapsed() << "sec" << std::endl;
     }
     kseq_destroy(read_stream);
     gzclose(input_p);
@@ -183,6 +191,8 @@ int main(int argc, const char *argv[]) {
                             }
                         } else if (utils::get_filetype(files[f]) == "FASTA"
                                     || utils::get_filetype(files[f]) == "FASTQ") {
+                            Timer *timer_ptr = config->verbose ? &timer : NULL;
+
                             if (config->noise_kmer_frequency > 0
                                     || files.size() >= config->parallel) {
                                 auto reverse = config->reverse;
@@ -197,7 +207,7 @@ int main(int argc, const char *argv[]) {
                                             reverse_complement(read_stream->seq);
                                             callback(read_stream->seq.s);
                                         }
-                                    });
+                                    }, timer_ptr);
                                 }, config->noise_kmer_frequency);
                             } else {
                                 read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
@@ -207,7 +217,7 @@ int main(int argc, const char *argv[]) {
                                         reverse_complement(read_stream->seq);
                                         constructor->add_read(read_stream->seq.s);
                                     }
-                                });
+                                }, timer_ptr);
                             }
                         } else {
                             std::cerr << "ERROR: Filetype unknown for file "

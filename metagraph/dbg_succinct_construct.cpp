@@ -370,12 +370,12 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
     generate_reads([&](const std::string &read) {
         sequence_to_kmers(read, k, &temp_storage, suffix);
 
-        if (temp_storage.size() < 20'000'000)
+        if (temp_storage.size() < kMaxCounterSize)
             return;
 
         sort_and_remove_duplicates(&temp_storage, 1, 0);
 
-        if (temp_storage.size() < 18'000'000)
+        if (temp_storage.size() < 0.9 * kMaxCounterSize)
             return;
 
         extend_kmer_storage(temp_storage, kmers, end_sorted,
@@ -458,17 +458,16 @@ void count_kmers(std::function<void(CallbackRead)> generate_reads,
     generate_reads([&](const std::string &read) {
         sequence_to_kmers(read, k, &temp_storage, suffix);
 
-        for (const auto &kmer : temp_storage) {
-            counter[kmer]++;
-        }
-        temp_storage.resize(0);
-
-        if (counter.size() > kMaxCounterSize) {
+        if (counter.size() + temp_storage.size() > kMaxCounterSize) {
             move_kmers_to_storage(&counter, kmers, end_sorted,
                                   noise_kmer_frequency,
                                   num_threads, verbose, mutex);
             counter.reserve(kMaxCounterSize);
         }
+        for (const auto &kmer : temp_storage) {
+            counter[kmer]++;
+        }
+        temp_storage.resize(0);
     });
     move_kmers_to_storage(&counter, kmers, end_sorted,
                           noise_kmer_frequency * counter.size() / kMaxCounterSize,
