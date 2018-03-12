@@ -43,8 +43,8 @@ class KMer {
     template <size_t bits_per_digit>
     uint64_t get_digit(size_t i) const;
 
-    static bool compare_kmer_suffix(const KMer &k1,
-                                    const KMer &k2, size_t minus = 0);
+    static bool compare_suffix(const KMer &k1,
+                               const KMer &k2, size_t minus = 0);
 
     std::string to_string(const std::string &alphabet) const;
 

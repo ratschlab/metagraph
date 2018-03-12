@@ -236,7 +236,7 @@ void recover_source_dummy_nodes(size_t k,
 
         bool redundant = false;
         for (size_t j = i + 1; j < end_sorted
-                                && KMer::compare_kmer_suffix(kmer, kmers->at(j), 1); ++j) {
+                                && KMer::compare_suffix(kmer, kmers->at(j), 1); ++j) {
             if (edge_label == kmers->at(j)[0]) {
                 // This source dummy kmer is redundant and has to be erased
                 redundant = true;

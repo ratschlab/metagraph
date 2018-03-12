@@ -112,7 +112,7 @@ DBG_succ::VectorChunk* DBG_succ::VectorChunk::build_from_kmers(size_t k,
 
         // check redundancy and set last
         if (i + 1 < kmers->size()
-                && KMer::compare_kmer_suffix(kmers->at(i), kmers->at(i + 1))) {
+                && KMer::compare_suffix(kmers->at(i), kmers->at(i + 1))) {
             // skip redundant dummy edges
             if (curW == 0 && curF > 0)
                 continue;
@@ -121,7 +121,7 @@ DBG_succ::VectorChunk* DBG_succ::VectorChunk::build_from_kmers(size_t k,
         }
         //set W
         if (i > 0) {
-            for (size_t j = i - 1; KMer::compare_kmer_suffix(kmers->at(i), kmers->at(j), 1); --j) {
+            for (size_t j = i - 1; KMer::compare_suffix(kmers->at(i), kmers->at(j), 1); --j) {
                 //TODO: recalculating W is probably faster than doing a pragma for ordered
                 if (curW > 0 && kmers->at(j)[0] == curW) {
                     curW += DBG_succ::alph_size;

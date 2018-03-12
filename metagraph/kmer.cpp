@@ -5,7 +5,7 @@ using sdsl::uint256_t;
 const uint256_t kFirstCharMask = (1 << kBitsPerChar) - 1;
 
 
-bool KMer::compare_kmer_suffix(const KMer &k1, const KMer &k2, size_t minus) {
+bool KMer::compare_suffix(const KMer &k1, const KMer &k2, size_t minus) {
     return k1.seq_ >> ((minus + 1) * kBitsPerChar)
              == k2.seq_ >> ((minus + 1) * kBitsPerChar);
 }

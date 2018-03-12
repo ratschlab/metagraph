@@ -181,7 +181,7 @@ void test_kmer_suffix(std::string k1, std::string k2, bool truth) {
         KMer(k1, DBG_succ::encode),
         KMer(k2, DBG_succ::encode)
     };
-    ASSERT_EQ(truth, KMer::compare_kmer_suffix(kmer[0], kmer[1], 1));
+    ASSERT_EQ(truth, KMer::compare_suffix(kmer[0], kmer[1], 1));
 }
 
 TEST(KmerEncodeTest, CompareSuffixTrue) {
@@ -205,7 +205,7 @@ TEST(KmerEncodeTest, CompareSuffixTrueLong) {
         KMer(long_seq, DBG_succ::encode),
         KMer(long_seq_alt, DBG_succ::encode)
     };
-    ASSERT_TRUE(KMer::compare_kmer_suffix(kmer[0], kmer[1], 1));
+    ASSERT_TRUE(KMer::compare_suffix(kmer[0], kmer[1], 1));
 
     //shift, then compare
     long_seq_alt[22] = 'T';
@@ -213,7 +213,7 @@ TEST(KmerEncodeTest, CompareSuffixTrueLong) {
     kmer[0].seq_ = kmer[0].seq_ >> 66;
     kmer[1] = KMer(long_seq_alt.substr(22), DBG_succ::encode);
 
-    ASSERT_TRUE(KMer::compare_kmer_suffix(kmer[0], kmer[1], 1));
+    ASSERT_TRUE(KMer::compare_suffix(kmer[0], kmer[1], 1));
 }
 
 TEST(KmerEncodeTest, CompareSuffixFalseLong) {
