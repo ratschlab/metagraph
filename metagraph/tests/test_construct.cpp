@@ -721,26 +721,36 @@ TEST(ExtractKmers, ExtractKmersFromStringAppend) {
 }
 
 
-void sequence_to_kmers_parallel(std::vector<std::string> *reads,
-                                size_t k,
-                                std::vector<KMer> *kmers,
-                                size_t *end_sorted,
-                                const std::vector<TAlphabet> &suffix,
-                                size_t num_threads,
-                                bool verbose,
-                                std::mutex *mutex,
-                                bool remove_redundant);
+typedef std::function<void(const std::string&)> CallbackRead;
+
+void extract_kmers(std::function<void(CallbackRead)> generate_reads,
+                   size_t k,
+                   std::vector<KMer> *kmers,
+                   size_t *end_sorted,
+                   const std::vector<TAlphabet> &suffix,
+                   size_t num_threads,
+                   bool verbose,
+                   std::mutex *mutex,
+                   bool remove_redundant = true,
+                   size_t preallocated_size = 0);
 
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
-                                size_t k,
-                                std::vector<KMer> *kmers,
-                                const std::vector<TAlphabet> &suffix,
-                                std::mutex *mutex,
-                                bool remove_redundant) {
+                                        size_t k,
+                                        std::vector<KMer> *kmers,
+                                        const std::vector<TAlphabet> &suffix,
+                                        std::mutex *mutex,
+                                        bool remove_redundant) {
     size_t end_sorted = 0;
     kmers->reserve(100'000);
-    sequence_to_kmers_parallel(reads, k, kmers, &end_sorted, suffix,
-                               1, false, mutex, remove_redundant);
+    extract_kmers([reads](CallbackRead callback) {
+            for (auto &&read : *reads) {
+                callback(std::move(read));
+            }
+        },
+        k, kmers, &end_sorted, suffix,
+        1, false, mutex, remove_redundant, 100'000
+    );
+    delete reads;
 }
 
 TEST(ExtractKmers, ExtractKmersAppendParallel) {

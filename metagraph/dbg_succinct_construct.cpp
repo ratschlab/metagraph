@@ -139,38 +139,45 @@ void extend_kmer_storage(const std::vector<KMer> &temp_storage,
     // }
 }
 
-// takes the ownership of the allocated sequence and releases when finishes
-void sequence_to_kmers_parallel(std::vector<std::string> *reads,
-                                size_t k,
-                                std::vector<KMer> *kmers,
-                                size_t *end_sorted,
-                                const std::vector<TAlphabet> &suffix,
-                                size_t num_threads,
-                                bool verbose,
-                                std::mutex *mutex,
-                                bool remove_redundant) {
-    assert(mutex);
+typedef std::function<void(const std::string&)> CallbackRead;
 
-    // parallel mode
+void extract_kmers(std::function<void(CallbackRead)> generate_reads,
+                   size_t k,
+                   std::vector<KMer> *kmers,
+                   size_t *end_sorted,
+                   const std::vector<TAlphabet> &suffix,
+                   size_t num_threads,
+                   bool verbose,
+                   std::mutex *mutex,
+                   bool remove_redundant = true,
+                   size_t num_appended_kmers = kMaxCounterSize) {
     std::vector<KMer> temp_storage;
+    temp_storage.reserve(1.1 * num_appended_kmers);
 
-    size_t num_basepairs = 0;
-    for (auto &read : *reads) {
-        num_basepairs += read.size() + 2;
-    }
-    temp_storage.reserve(num_basepairs);
-
-    for (const auto &read : *reads) {
+    generate_reads([&](const std::string &read) {
         sequence_to_kmers(read, k, &temp_storage, suffix);
-    }
-    delete reads;
 
-    if (remove_redundant) {
-        sort_and_remove_duplicates(&temp_storage, 1, 0);
-    }
+        if (temp_storage.size() < num_appended_kmers)
+            return;
 
-    extend_kmer_storage(temp_storage, kmers, end_sorted,
-                        num_threads, verbose, mutex);
+        if (remove_redundant) {
+            sort_and_remove_duplicates(&temp_storage, 1, 0);
+        }
+
+        if (temp_storage.size() > 0.9 * num_appended_kmers) {
+            extend_kmer_storage(temp_storage, kmers, end_sorted,
+                                num_threads, verbose, mutex);
+            temp_storage.resize(0);
+        }
+    });
+
+    if (temp_storage.size()) {
+        if (remove_redundant) {
+            sort_and_remove_duplicates(&temp_storage, 1, 0);
+        }
+        extend_kmer_storage(temp_storage, kmers, end_sorted,
+                            num_threads, verbose, mutex);
+    }
 }
 
 void sort_and_remove_duplicates(std::vector<KMer> *kmers,
@@ -333,11 +340,21 @@ void KMerDBGSuccChunkConstructor::add_read(const std::string &sequence) {
 void KMerDBGSuccChunkConstructor::release_task_to_pool() {
     auto *current_reads_storage = new std::vector<std::string>();
     current_reads_storage->swap(reads_storage_);
-    stored_reads_size_ = 0;
 
-    thread_pool_.enqueue(sequence_to_kmers_parallel, current_reads_storage,
+    thread_pool_.enqueue(extract_kmers,
+                         [current_reads_storage](CallbackRead callback) {
+                             for (auto &&read : *current_reads_storage) {
+                                 callback(std::move(read));
+                             }
+                             delete current_reads_storage;
+                         },
                          k_, &kmers_, &end_sorted_, filter_suffix_encoded_,
-                         num_threads_, verbose_, &mutex_, true);
+                         num_threads_, verbose_, &mutex_, true,
+                         std::min(kMaxCounterSize,
+                                  stored_reads_size_
+                                    + (k_ + 2) * current_reads_storage->size()));
+
+    stored_reads_size_ = 0;
 }
 
 DBG_succ::Chunk* KMerDBGSuccChunkConstructor::build_chunk() {
@@ -353,39 +370,6 @@ DBG_succ::Chunk* KMerDBGSuccChunkConstructor::build_chunk() {
     kmers_.clear();
 
     return result;
-}
-
-typedef std::function<void(const std::string&)> CallbackRead;
-
-void extract_kmers(std::function<void(CallbackRead)> generate_reads,
-                   size_t k,
-                   std::vector<KMer> *kmers,
-                   size_t *end_sorted,
-                   const std::vector<TAlphabet> &suffix,
-                   size_t num_threads,
-                   bool verbose,
-                   std::mutex *mutex) {
-    std::vector<KMer> temp_storage;
-
-    generate_reads([&](const std::string &read) {
-        sequence_to_kmers(read, k, &temp_storage, suffix);
-
-        if (temp_storage.size() < kMaxCounterSize)
-            return;
-
-        sort_and_remove_duplicates(&temp_storage, 1, 0);
-
-        if (temp_storage.size() < 0.9 * kMaxCounterSize)
-            return;
-
-        extend_kmer_storage(temp_storage, kmers, end_sorted,
-                            num_threads, verbose, mutex);
-        temp_storage.clear();
-    });
-
-    sort_and_remove_duplicates(&temp_storage, 1, 0);
-    extend_kmer_storage(temp_storage, kmers, end_sorted,
-                        num_threads, verbose, mutex);
 }
 
 struct KMerHash {
