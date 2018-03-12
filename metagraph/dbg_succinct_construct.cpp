@@ -441,7 +441,8 @@ void filter_reads(std::vector<std::string> *reads,
     }
 }
 
-void extract_frequent_kmers(std::vector<std::string> *reads,
+void extract_frequent_kmers(std::vector<std::string> *frequent_reads,
+                            std::vector<std::string> *reads,
                             Counter *counter,
                             size_t k,
                             std::vector<KMer> *kmers,
@@ -453,16 +454,20 @@ void extract_frequent_kmers(std::vector<std::string> *reads,
                             std::mutex *mutex) {
     filter_reads(reads, counter, k, noise_kmer_frequency, verbose);
     counter->clear();
+    for (auto &&read : *reads) {
+        frequent_reads->emplace_back(std::move(read));
+    }
+    reads->clear();
 
     extract_kmers(
-        [&reads](CallbackRead callback) {
-            for (auto &&read : *reads) {
+        [frequent_reads](CallbackRead callback) {
+            for (auto &&read : *frequent_reads) {
                 callback(std::move(read));
             }
+            frequent_reads->clear();
         },
         k, kmers, end_sorted, suffix, num_threads, verbose, mutex
     );
-    reads->clear();
 }
 
 void count_kmers(std::function<void(CallbackRead)> generate_reads,
@@ -484,26 +489,33 @@ void count_kmers(std::function<void(CallbackRead)> generate_reads,
     counter.reserve(kMaxCounterSize);
 
     std::vector<std::string> reads;
+    std::vector<std::string> frequent_reads;
     std::vector<KMer> read_kmers;
 
     generate_reads([&](const std::string &read) {
         sequence_to_kmers(read, k, &read_kmers, {});
 
         if (counter.size() + read_kmers.size() > kMaxCounterSize) {
-            extract_frequent_kmers(&reads, &counter, k, kmers, end_sorted, suffix,
+            extract_frequent_kmers(&frequent_reads, &reads, &counter, k, kmers, end_sorted, suffix,
                                    noise_kmer_frequency,
                                    num_threads, verbose, mutex);
             counter.reserve(kMaxCounterSize);
         }
 
-        reads.push_back(read);
+        bool frequent = true;
         for (size_t i = 1; i + 1 < read_kmers.size(); ++i) {
-            counter[read_kmers[i]]++;
+            if (++counter[read_kmers[i]] <= noise_kmer_frequency)
+                frequent = false;
+        }
+        if (frequent) {
+            frequent_reads.push_back(read);
+        } else {
+            reads.push_back(read);
         }
         read_kmers.clear();
     });
 
-    extract_frequent_kmers(&reads, &counter, k, kmers, end_sorted, suffix,
+    extract_frequent_kmers(&frequent_reads, &reads, &counter, k, kmers, end_sorted, suffix,
                            noise_kmer_frequency * counter.size() / kMaxCounterSize,
                            num_threads, verbose, mutex);
 }
