@@ -107,8 +107,8 @@ void shrink_kmers(std::vector<KMer> *kmers,
     }
 }
 
-// takes the ownership of the allocated sequence and releases when finishes
-void extend_kmer_storage(const std::vector<KMer> &temp_storage,
+template <class Array>
+void extend_kmer_storage(const Array &temp_storage,
                          std::vector<KMer> *kmers,
                          size_t *end_sorted,
                          size_t num_threads,
@@ -161,7 +161,7 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
             return;
 
         if (remove_redundant) {
-            sort_and_remove_duplicates(&temp_storage, 1, 0);
+            sort_and_remove_duplicates(&temp_storage, num_threads);
         }
 
         if (temp_storage.size() > 0.9 * num_appended_kmers) {
@@ -173,7 +173,7 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
 
     if (temp_storage.size()) {
         if (remove_redundant) {
-            sort_and_remove_duplicates(&temp_storage, 1, 0);
+            sort_and_remove_duplicates(&temp_storage, num_threads);
         }
         extend_kmer_storage(temp_storage, kmers, end_sorted,
                             num_threads, verbose, mutex);
