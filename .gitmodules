@@ -9,3 +9,6 @@
 [submodule "metagraph/external-libraries/rollinghashcpp"]
 	path = metagraph/external-libraries/rollinghashcpp
 	url = https://github.com/hmusta/rollinghashcpp
+[submodule "metagraph/external-libraries/hopscotch-map"]
+	path = metagraph/external-libraries/hopscotch-map
+	url = https://github.com/Tessil/hopscotch-map.git

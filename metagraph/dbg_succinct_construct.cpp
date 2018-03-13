@@ -1,6 +1,7 @@
 #include "dbg_succinct_construct.hpp"
 
 #include <parallel/algorithm>
+#include <hopscotch_map.h>
 
 #include "kmer.hpp"
 #include "dbg_succinct_chunk.hpp"
@@ -387,9 +388,7 @@ struct KMerHash {
     }
 };
 
-// use a custom allocator since the default one is too slow
-typedef std::unordered_map<KMer, uint32_t, KMerHash, std::equal_to<KMer>,
-                           utils::plalloc<std::pair<const KMer, uint32_t>>> Counter;
+typedef tsl::hopscotch_map<KMer, uint32_t, KMerHash> Counter;
 
 void filter_reads(std::vector<std::string> *reads,
                   Counter *counter,
@@ -454,6 +453,8 @@ void extract_frequent_kmers(std::vector<std::string> *frequent_reads,
                             std::mutex *mutex) {
     filter_reads(reads, counter, k, noise_kmer_frequency, verbose);
     counter->clear();
+    counter->rehash(0);
+
     for (auto &&read : *reads) {
         frequent_reads->emplace_back(std::move(read));
     }
@@ -486,7 +487,7 @@ void count_kmers(std::function<void(CallbackRead)> generate_reads,
     }
 
     Counter counter;
-    counter.reserve(kMaxCounterSize);
+    counter.rehash(kMaxCounterSize);
 
     std::vector<std::string> reads;
     std::vector<std::string> frequent_reads;
@@ -499,7 +500,7 @@ void count_kmers(std::function<void(CallbackRead)> generate_reads,
             extract_frequent_kmers(&frequent_reads, &reads, &counter, k, kmers, end_sorted, suffix,
                                    noise_kmer_frequency,
                                    num_threads, verbose, mutex);
-            counter.reserve(kMaxCounterSize);
+            counter.rehash(kMaxCounterSize);
         }
 
         bool frequent = true;

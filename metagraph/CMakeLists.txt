@@ -36,6 +36,7 @@ link_directories(
 include_directories(
   external-libraries/libmaus2/include
   external-libraries/sdsl-lite/include
+  external-libraries/hopscotch-map/src
   external-libraries/rollinghashcpp
 )
 
