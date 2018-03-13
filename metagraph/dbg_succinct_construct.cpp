@@ -398,12 +398,14 @@ void filter_reads(std::vector<std::string> *reads,
     size_t num_distinct_kmers = counter->size();
     size_t num_reads = reads->size();
     size_t counter_sum = 0;
+    size_t filtered_sum = 0;
 
     for (auto it = counter->begin(); it != counter->end(); ) {
         counter_sum += it->second;
         if (it->second <= noise_kmer_frequency) {
             it = counter->erase(it);
         } else {
+            filtered_sum += it->second;
             ++it;
         }
     }
@@ -435,8 +437,9 @@ void filter_reads(std::vector<std::string> *reads,
         std::cout << "\nFiltering out the k-mers collected...\n";
         std::cout << "Total reads:     " << num_reads << "\n";
         std::cout << "Frequent reads:  " << reads->size() << "\n";
-        std::cout << "Total k-mers:      " << counter_sum << "\n";
         std::cout << "Distinct k-mers:   " << num_distinct_kmers << std::endl;
+        std::cout << "Total k-mers:      " << counter_sum << "\n";
+        std::cout << "Filtered k-mers:   " << filtered_sum << std::endl;
     }
 }
 
