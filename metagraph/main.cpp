@@ -19,7 +19,9 @@
 #include "kmer.hpp"
 
 
-KSEQ_INIT(gzFile, gzread)
+using libmaus2::util::NumberSerialisation;
+
+KSEQ_INIT(gzFile, gzread);
 
 
 struct ParallelAnnotateContainer {
@@ -60,7 +62,19 @@ DBG_succ* load_critical_graph_from_file(const std::string &filename) {
 
 template <class Callback>
 void read_fasta_file_critical(const std::string &filename,
-                              Callback callback, Timer *timer = NULL) {
+                              Callback callback, Timer *timer = NULL,
+                              const std::string &filter_filename = "") {
+    bit_vector_stat filter;
+    if (filter_filename.size()) {
+        std::ifstream instream(filter_filename);
+        if (!instream.good() || !filter.deserialise(instream)) {
+            std::cerr << "ERROR: Filter file " << filter_filename
+                      << " is corrupted" << std::endl;
+            exit(1);
+        }
+    }
+    size_t seq_count = 0;
+
     gzFile input_p = gzopen(filename.c_str(), "r");
     if (input_p == Z_NULL) {
         std::cerr << "ERROR no such file " << filename << std::endl;
@@ -69,19 +83,32 @@ void read_fasta_file_critical(const std::string &filename,
     //TODO: handle read_stream->qual
     kseq_t *read_stream = kseq_init(input_p);
     if (read_stream == NULL) {
-        std::cerr << "ERROR while opening input file "
-                  << filename << std::endl;
+        std::cerr << "ERROR while opening input file " << filename << std::endl;
         exit(1);
     }
     if (timer) {
         std::cout << "Start extracting sequences from file " << filename << std::endl;
     }
     while (kseq_read(read_stream) >= 0) {
-        callback(read_stream);
+        if (filter_filename.size() && filter.size() <= seq_count) {
+            std::cerr << "ERROR: Filter file " << filter_filename
+                      << " has fewer sequences" << std::endl;
+            exit(1);
+        }
+        if (!filter_filename.size() || filter[seq_count])
+            callback(read_stream);
+
+        seq_count++;
+    }
+    if (filter_filename.size() && filter.size() != seq_count) {
+        std::cerr << "ERROR: Filter file " << filter_filename
+                  << " has more sequences" << std::endl;
+        exit(1);
     }
     if (timer) {
         std::cout << "Finished extracting sequences from file " << filename
-                  << " in " << timer->elapsed() << "sec" << std::endl;
+                  << " in " << timer->elapsed() << "sec"
+                  << ", sequences extracted: " << seq_count << std::endl;
     }
     kseq_destroy(read_stream);
     gzclose(input_p);
@@ -197,6 +224,16 @@ int main(int argc, const char *argv[]) {
                                     || files.size() >= config->parallel) {
                                 auto reverse = config->reverse;
                                 auto file = files[f];
+
+                                std::string filter_filename
+                                    = file + ".filter_" + std::to_string(config->noise_kmer_frequency);
+                                auto noise_kmer_frequency = 0;
+
+                                if (!std::ifstream(filter_filename).good()) {
+                                    filter_filename = "";
+                                    noise_kmer_frequency = config->noise_kmer_frequency;
+                                }
+
                                 // capture all required values by copying to be able
                                 // to run task from other threads
                                 constructor->add_reads([=](auto callback) {
@@ -207,8 +244,8 @@ int main(int argc, const char *argv[]) {
                                             reverse_complement(read_stream->seq);
                                             callback(read_stream->seq.s);
                                         }
-                                    }, timer_ptr);
-                                }, config->noise_kmer_frequency);
+                                    }, timer_ptr, filter_filename);
+                                }, noise_kmer_frequency);
                             } else {
                                 read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
                                     // add read to the graph constructor as a callback
@@ -300,6 +337,58 @@ int main(int argc, const char *argv[]) {
             if (!config->outfbase.empty())
                 graph->serialize(config->outfbase);
             delete graph;
+
+            return 0;
+        }
+        case Config::FILTER: {
+            if (config->verbose) {
+                std::cout << "Filter out reads with rare k-mers" << std::endl;
+                std::cout << "Start reading data and extracting k-mers" << std::endl;
+            }
+
+            utils::ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
+
+            // iterate over input files
+            for (const auto &file : files) {
+                if (utils::get_filetype(file) != "FASTA"
+                        && utils::get_filetype(file) != "FASTQ") {
+                    std::cerr << "ERROR: Filetype unknown for file "
+                              << file << std::endl;
+                    exit(1);
+                }
+
+                Timer *timer_ptr = config->verbose ? &timer : NULL;
+                // capture all required values by copying to be able
+                // to run task from other threads
+                thread_pool.enqueue([=](size_t k,
+                                        size_t noise_kmer_frequency,
+                                        bool verbose,
+                                        bool reverse) {
+                        // compute read filter, bit vector indicating filtered reads
+                        // TODO: fix for the case of reverse complement reads
+                        bit_vector_stat filter(filter_reads([=](auto callback) {
+                                read_fasta_file_critical(file, [=](kseq_t *read_stream) {
+                                    // add read to the graph constructor as a callback
+                                    callback(read_stream->seq.s);
+                                    if (reverse) {
+                                        reverse_complement(read_stream->seq);
+                                        callback(read_stream->seq.s);
+                                    }
+                                }, timer_ptr);
+                            },
+                            k, noise_kmer_frequency, verbose
+                        ));
+
+                        // dump filter
+                        std::ofstream outstream(
+                            file + ".filter_" + std::to_string(noise_kmer_frequency)
+                        );
+                        filter.serialise(outstream);
+                    },
+                    config->k, config->noise_kmer_frequency,
+                    config->verbose, config->reverse
+                );
+            }
 
             return 0;
         }

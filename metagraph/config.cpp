@@ -20,6 +20,8 @@ Config::Config(int argc, const char *argv[]) {
         identity = ALIGN;
     } else if (!strcmp(argv[1], "build")) {
         identity = BUILD;
+    } else if (!strcmp(argv[1], "filter")) {
+        identity = FILTER;
     } else if (!strcmp(argv[1], "experiment")) {
         identity = EXPERIMENT;
     } else if (!strcmp(argv[1], "stats")) {
@@ -140,6 +142,9 @@ Config::Config(int argc, const char *argv[]) {
     if (!fname.size())
         print_usage_and_exit = true;
 
+    if (identity == FILTER && noise_kmer_frequency == 0)
+        print_usage_and_exit = true;
+
     if (identity == ALIGN && infbase.empty())
         print_usage_and_exit = true;
 
@@ -179,6 +184,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\tbuild\t\tconstruct a graph object from input sequence\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats or integrate sequence\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats into a given graph\n\n");
+
+            fprintf(stderr, "\tfilter\t\tfilter out reads with rare k-mers\n");
+            fprintf(stderr, "\t\t\tand dump the filters to disk\n\n");
 
             fprintf(stderr, "\tmerge\t\tintegrate a given set of graph structures\n");
             fprintf(stderr, "\t\t\tand output a new graph structure\n\n");
@@ -229,6 +237,14 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t   --suffix \t\tbuild graph chunk only for k-mers with the suffix given [off]\n");
             fprintf(stderr, "\t-s --num-splits \tdefine the minimum number of bins to split kmers into [1]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+        } break;
+        case FILTER: {
+            fprintf(stderr, "Usage: %s filter [options] --noise-freq <cutoff> FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for filter:\n");
+            fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
+            fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case ALIGN: {

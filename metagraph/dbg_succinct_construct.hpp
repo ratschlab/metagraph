@@ -38,9 +38,15 @@ class SuffixArrayDBGSuccConstructor : public DBGSuccConstructor {
 };
 
 
-class KMerDBGSuccChunkConstructor {
-    typedef std::function<void(const std::string&)> CallbackRead;
+typedef std::function<void(const std::string&)> CallbackRead;
 
+std::vector<bool> filter_reads(std::function<void(CallbackRead)> generate_reads,
+                               size_t k,
+                               size_t noise_kmer_frequency,
+                               bool verbose);
+
+
+class KMerDBGSuccChunkConstructor {
   public:
     KMerDBGSuccChunkConstructor(size_t k,
                                 const std::string &filter_suffix,

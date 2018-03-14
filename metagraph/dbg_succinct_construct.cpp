@@ -544,6 +544,53 @@ void KMerDBGSuccChunkConstructor::add_reads(std::function<void(CallbackRead)> ge
 }
 
 
+std::vector<bool> filter_reads(std::function<void(CallbackRead)> generate_reads,
+                               size_t k,
+                               size_t noise_kmer_frequency,
+                               bool verbose) {
+    std::vector<bool> filter;
+
+    Counter counter;
+    counter.rehash(kMaxCounterSize);
+
+    std::vector<std::string> reads;
+    std::vector<KMer> read_kmers;
+
+    generate_reads([&](const std::string &read) {
+        read_kmers.clear();
+        sequence_to_kmers(read, k, &read_kmers, {});
+        // consider only non-dummy k-mers
+        if (read_kmers.size() <= 2)
+            return;
+
+        if (counter.size() + read_kmers.size() > kMaxCounterSize) {
+            auto filter_block = filter_reads(reads, &counter, k,
+                                             noise_kmer_frequency, verbose);
+            reads.clear();
+            counter.clear();
+            counter.rehash(kMaxCounterSize);
+
+            filter.insert(filter.end(), filter_block.begin(), filter_block.end());
+        }
+
+        reads.push_back(read);
+        for (size_t i = 1; i + 1 < read_kmers.size(); ++i) {
+            counter[read_kmers[i]]++;
+        }
+    });
+
+    if (reads.size()) {
+        auto filter_block = filter_reads(
+            reads, &counter, k,
+            noise_kmer_frequency * counter.size() / kMaxCounterSize,
+            verbose
+        );
+        filter.insert(filter.end(), filter_block.begin(), filter_block.end());
+    }
+    return filter;
+}
+
+
 SuffixArrayDBGSuccConstructor::SuffixArrayDBGSuccConstructor(size_t k)
       : k_(k), data_("$") {}
 
