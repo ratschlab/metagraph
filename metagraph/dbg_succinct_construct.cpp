@@ -390,15 +390,18 @@ struct KMerHash {
 
 typedef tsl::hopscotch_map<KMer, uint32_t, KMerHash> Counter;
 
-void filter_reads(std::vector<std::string> *reads,
-                  Counter *counter,
-                  size_t k,
-                  size_t noise_kmer_frequency,
-                  bool verbose) {
+std::vector<bool> filter_reads(const std::vector<std::string> &reads,
+                               Counter *counter,
+                               size_t k,
+                               size_t noise_kmer_frequency,
+                               bool verbose) {
     size_t num_distinct_kmers = counter->size();
-    size_t num_reads = reads->size();
+    size_t num_reads = reads.size();
+    size_t num_frequent_reads = reads.size();
     size_t counter_sum = 0;
     size_t filtered_sum = 0;
+
+    std::vector<bool> filter(reads.size(), true);
 
     for (auto it = counter->begin(); it != counter->end(); ) {
         counter_sum += it->second;
@@ -411,36 +414,37 @@ void filter_reads(std::vector<std::string> *reads,
     }
     counter->rehash(counter->size());
 
-    std::vector<std::string> filtered_reads;
     std::vector<KMer> read_kmers;
 
-    for (auto &&read : *reads) {
-        sequence_to_kmers(read, k, &read_kmers, {});
+    for (size_t j = 0; j < reads.size(); ++j) {
+        if (reads[j].size() <= k) {
+            filter[j] = false;
+            continue;
+        }
 
-        bool is_noisy = false;
+        sequence_to_kmers(reads[j], k, &read_kmers, {});
+
         // iterate through all non-dummy k-mers
         for (size_t i = 1; i + 1 < read_kmers.size(); ++i) {
             // all frequent k-mers are kept in counter here
             if (!counter->count(read_kmers[i])) {
-                is_noisy = true;
+                num_frequent_reads--;
+                filter[j] = false;
                 break;
             }
         }
-        if (!is_noisy) {
-            filtered_reads.emplace_back(std::move(read));
-        }
         read_kmers.clear();
     }
-    reads->swap(filtered_reads);
 
     if (verbose) {
         std::cout << "\nFiltering out the k-mers collected...\n";
         std::cout << "Total reads:     " << num_reads << "\n";
-        std::cout << "Frequent reads:  " << reads->size() << "\n";
+        std::cout << "Filtered reads:  " << num_frequent_reads << "\n";
         std::cout << "Distinct k-mers:   " << num_distinct_kmers << std::endl;
         std::cout << "Total k-mers:      " << counter_sum << "\n";
-        std::cout << "Filtered k-mers:   " << filtered_sum << std::endl;
+        std::cout << "Frequent k-mers:   " << filtered_sum << std::endl;
     }
+    return filter;
 }
 
 void extract_frequent_kmers(std::vector<std::string> *frequent_reads,
@@ -454,15 +458,19 @@ void extract_frequent_kmers(std::vector<std::string> *frequent_reads,
                             size_t num_threads,
                             bool verbose,
                             std::mutex *mutex) {
-    filter_reads(reads, counter, k, noise_kmer_frequency, verbose);
+    // filter out reads with noisy k-mers
+    auto filter = filter_reads(*reads, counter, k, noise_kmer_frequency, verbose);
+
     counter->clear();
     counter->rehash(0);
 
-    for (auto &&read : *reads) {
-        frequent_reads->emplace_back(std::move(read));
+    for (size_t i = 0; i < reads->size(); ++i) {
+        if (filter[i])
+            frequent_reads->emplace_back(std::move(reads->at(i)));
     }
     reads->clear();
 
+    // extract k-mers from the reads filtered
     extract_kmers(
         [frequent_reads](CallbackRead callback) {
             for (auto &&read : *frequent_reads) {
@@ -497,7 +505,11 @@ void count_kmers(std::function<void(CallbackRead)> generate_reads,
     std::vector<KMer> read_kmers;
 
     generate_reads([&](const std::string &read) {
+        read_kmers.clear();
         sequence_to_kmers(read, k, &read_kmers, {});
+        // consider only non-dummy k-mers
+        if (read_kmers.size() <= 2)
+            return;
 
         if (counter.size() + read_kmers.size() > kMaxCounterSize) {
             extract_frequent_kmers(&frequent_reads, &reads, &counter, k, kmers, end_sorted, suffix,
@@ -516,7 +528,6 @@ void count_kmers(std::function<void(CallbackRead)> generate_reads,
         } else {
             reads.push_back(read);
         }
-        read_kmers.clear();
     });
 
     extract_frequent_kmers(&frequent_reads, &reads, &counter, k, kmers, end_sorted, suffix,
