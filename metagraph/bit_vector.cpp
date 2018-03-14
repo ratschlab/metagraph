@@ -40,7 +40,9 @@ bit_vector_dyn::bit_vector_dyn(const bit_vector &v)
 }
 
 bit_vector_dyn::bit_vector_dyn(std::istream &in) {
-    this->deserialise(in);
+    if (!deserialise(in)) {
+        throw "ERROR: deserialisation error";
+    }
 }
 
 uint64_t bit_vector_dyn::rank1(uint64_t id) const {
@@ -75,6 +77,10 @@ void bit_vector_dyn::deleteBit(uint64_t id) {
 }
 
 bool bit_vector_dyn::deserialise(std::istream &in) {
+    if (!in.good())
+        return false;
+
+    //TODO: catch reading errors
     vector_.deserialise(in);
     return true;
 }
@@ -122,7 +128,9 @@ bit_vector_stat::bit_vector_stat(std::initializer_list<bool> init)
 }
 
 bit_vector_stat::bit_vector_stat(std::istream &in) {
-    deserialise(in);
+    if (!deserialise(in)) {
+        throw "ERROR: deserialisation error";
+    }
 }
 
 uint64_t bit_vector_stat::rank1(uint64_t id) const {
@@ -187,10 +195,17 @@ void bit_vector_stat::deleteBit(uint64_t id) {
 }
 
 bool bit_vector_stat::deserialise(std::istream &in) {
-    vector_.load(in);
-    num_set_bits_ = std::count(vector_.begin(), vector_.end(), 1);
-    requires_update_ = true;
-    return true;
+    if (!in.good())
+        return false;
+
+    try {
+        vector_.load(in);
+        num_set_bits_ = std::count(vector_.begin(), vector_.end(), 1);
+        requires_update_ = true;
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 void bit_vector_stat::serialise(std::ostream &out) const {

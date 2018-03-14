@@ -54,12 +54,19 @@ class wavelet_tree_stat : public wavelet_tree {
     uint64_t size() const { return n_; }
 
     bool deserialise(std::istream &in) {
-        int_vector_.load(in);
-        wwt_.load(in);
-        n_ = int_vector_.size();
-        // we assume the wwt_ has been build before serialization
-        requires_update_ = false;
-        return true;
+        if (!in.good())
+            return false;
+
+        try {
+            int_vector_.load(in);
+            wwt_.load(in);
+            n_ = int_vector_.size();
+            // we assume the wwt_ has been build before serialization
+            requires_update_ = false;
+            return true;
+        } catch (...) {
+            return false;
+        }
     }
 
     void serialise(std::ostream &out) const {
@@ -165,6 +172,10 @@ class wavelet_tree_dyn : public wavelet_tree {
     }
 
     bool deserialise(std::istream &in) {
+        if (!in.good())
+            return false;
+
+        //TODO: catch reading errors
         wavelet_tree_.R =
             libmaus2::wavelet::DynamicWaveletTree<6, 64>::loadBitBTree(in);
         const_cast<uint64_t&>(wavelet_tree_.b) =
