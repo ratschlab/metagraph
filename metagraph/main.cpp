@@ -1,9 +1,4 @@
-#include <fstream>
-#include <ctime>
 #include <zlib.h>
-
-#include <map>
-#include <sstream>
 
 #include "dbg_succinct.hpp"
 #include "dbg_succinct_chunk.hpp"
@@ -18,28 +13,16 @@
 #include "unix_tools.hpp"
 #include "kmer.hpp"
 
-
 using libmaus2::util::NumberSerialisation;
 
-KSEQ_INIT(gzFile, gzread);
-
-
-struct ParallelAnnotateContainer {
-    kstring_t *seq;
-    kstring_t *label;
-    DBG_succ *graph;
-    Config *config;
-    uint64_t idx;
-    uint64_t binsize;
-    uint64_t total_bins;
-    //pthread_mutex_t* anno_mutex;
-};
-
+const size_t kMaxNumParallelReadFiles = 5;
 
 const std::vector<std::string> annots = {
   "AC_AFR", "AC_EAS", "AC_AMR", "AC_ASJ",
   "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"
 };
+
+KSEQ_INIT(gzFile, gzread);
 
 
 DBG_succ* load_critical_graph_from_file(const std::string &filename) {
@@ -346,7 +329,8 @@ int main(int argc, const char *argv[]) {
                 std::cout << "Start reading data and extracting k-mers" << std::endl;
             }
 
-            utils::ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
+            utils::ThreadPool thread_pool_files(kMaxNumParallelReadFiles);
+            utils::ThreadPool thread_pool(std::max(1u, config->parallel) - 1, 1);
 
             // iterate over input files
             for (const auto &file : files) {
@@ -358,12 +342,13 @@ int main(int argc, const char *argv[]) {
                 }
 
                 Timer *timer_ptr = config->verbose ? &timer : NULL;
+                auto *thread_pool_ptr = &thread_pool;
                 // capture all required values by copying to be able
                 // to run task from other threads
-                thread_pool.enqueue([=](size_t k,
-                                        size_t noise_kmer_frequency,
-                                        bool verbose,
-                                        bool reverse) {
+                thread_pool_files.enqueue([=](size_t k,
+                                              size_t noise_kmer_frequency,
+                                              bool verbose,
+                                              bool reverse) {
                         // compute read filter, bit vector indicating filtered reads
                         // TODO: fix for the case of reverse complement reads
                         bit_vector_stat filter(filter_reads([=](auto callback) {
@@ -376,7 +361,7 @@ int main(int argc, const char *argv[]) {
                                     }
                                 }, timer_ptr);
                             },
-                            k, noise_kmer_frequency, verbose
+                            k, noise_kmer_frequency, verbose, thread_pool_ptr
                         ));
 
                         // dump filter
@@ -389,6 +374,8 @@ int main(int argc, const char *argv[]) {
                     config->verbose, config->reverse
                 );
             }
+            thread_pool_files.join();
+            thread_pool.join();
 
             return 0;
         }

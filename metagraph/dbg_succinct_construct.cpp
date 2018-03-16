@@ -10,7 +10,7 @@
 
 const size_t kNumBasepairsInTask = 1'000'000;
 
-const size_t kMaxCounterSize = 10'000'000;
+const size_t kMaxKmersChunkSize = 30'000'000;
 
 
 /**
@@ -151,7 +151,7 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
                    bool verbose,
                    std::mutex *mutex,
                    bool remove_redundant = true,
-                   size_t num_appended_kmers = kMaxCounterSize) {
+                   size_t num_appended_kmers = kMaxKmersChunkSize) {
     std::vector<KMer> temp_storage;
     temp_storage.reserve(1.1 * num_appended_kmers);
 
@@ -162,7 +162,7 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
             return;
 
         if (remove_redundant) {
-            sort_and_remove_duplicates(&temp_storage, num_threads);
+            sort_and_remove_duplicates(&temp_storage, 1);
         }
 
         if (temp_storage.size() > 0.9 * num_appended_kmers) {
@@ -174,7 +174,7 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
 
     if (temp_storage.size()) {
         if (remove_redundant) {
-            sort_and_remove_duplicates(&temp_storage, num_threads);
+            sort_and_remove_duplicates(&temp_storage, 1);
         }
         extend_kmer_storage(temp_storage, kmers, end_sorted,
                             num_threads, verbose, mutex);
@@ -351,10 +351,9 @@ void KMerDBGSuccChunkConstructor::release_task_to_pool() {
                          },
                          k_, &kmers_, &end_sorted_, filter_suffix_encoded_,
                          num_threads_, verbose_, &mutex_, true,
-                         std::min(kMaxCounterSize,
+                         std::min(kMaxKmersChunkSize,
                                   stored_reads_size_
                                     + (k_ + 2) * current_reads_storage->size()));
-
     stored_reads_size_ = 0;
 }
 
@@ -447,9 +446,58 @@ std::vector<bool> filter_reads(const std::vector<std::string> &reads,
     return filter;
 }
 
-void extract_frequent_kmers(std::vector<std::string> *frequent_reads,
-                            std::vector<std::string> *reads,
-                            Counter *counter,
+// Remove noisy k-mers from |reads| and return
+// vector indicating reads with frequent k-mers
+std::vector<bool> count_kmers_and_filter_reads(std::vector<std::string> *reads,
+                                               size_t k,
+                                               size_t noise_kmer_frequency,
+                                               bool verbose) {
+    std::vector<bool> frequent(reads->size(), true);
+
+    std::vector<std::string> filtering_reads;
+    filtering_reads.reserve(reads->size());
+
+    std::vector<std::string> frequent_reads;
+    frequent_reads.reserve(reads->size());
+
+    Counter counter;
+    counter.rehash(kMaxKmersChunkSize / 3);
+
+    std::vector<KMer> read_kmers;
+
+    for (size_t j = 0; j < reads->size(); ++j) {
+        sequence_to_kmers(reads->at(j), k, &read_kmers, {});
+
+        // consider only non-dummy k-mers
+        for (size_t i = 1; i + 1 < read_kmers.size(); ++i) {
+            if (++counter[read_kmers[i]] <= noise_kmer_frequency)
+                frequent[j] = false;
+        }
+        if (frequent[j]) {
+            frequent_reads.emplace_back(std::move(reads->at(j)));
+        } else {
+            filtering_reads.emplace_back(std::move(reads->at(j)));
+        }
+        read_kmers.clear();
+    }
+    reads->clear();
+
+    auto filter = filter_reads(filtering_reads, &counter,
+                               k, noise_kmer_frequency, verbose);
+
+    for (size_t i = 0, j = 0; j < frequent.size(); ++j) {
+        if (!frequent[j] && filter[i++]) {
+            frequent[j] = true;
+            frequent_reads.emplace_back(std::move(filtering_reads[i - 1]));
+        }
+    }
+    filtering_reads.clear();
+
+    reads->swap(frequent_reads);
+    return frequent;
+}
+
+void extract_frequent_kmers(std::vector<std::string> *reads,
                             size_t k,
                             std::vector<KMer> *kmers,
                             size_t *end_sorted,
@@ -458,25 +506,15 @@ void extract_frequent_kmers(std::vector<std::string> *frequent_reads,
                             size_t num_threads,
                             bool verbose,
                             std::mutex *mutex) {
-    // filter out reads with noisy k-mers
-    auto filter = filter_reads(*reads, counter, k, noise_kmer_frequency, verbose);
-
-    counter->clear();
-    counter->rehash(0);
-
-    for (size_t i = 0; i < reads->size(); ++i) {
-        if (filter[i])
-            frequent_reads->emplace_back(std::move(reads->at(i)));
-    }
-    reads->clear();
+    count_kmers_and_filter_reads(reads, k, noise_kmer_frequency, verbose);
 
     // extract k-mers from the reads filtered
     extract_kmers(
-        [frequent_reads](CallbackRead callback) {
-            for (auto &&read : *frequent_reads) {
+        [&reads](CallbackRead callback) {
+            for (auto &&read : *reads) {
                 callback(std::move(read));
             }
-            frequent_reads->clear();
+            reads->clear();
         },
         k, kmers, end_sorted, suffix, num_threads, verbose, mutex
     );
@@ -497,41 +535,29 @@ void count_kmers(std::function<void(CallbackRead)> generate_reads,
         return;
     }
 
-    Counter counter;
-    counter.rehash(kMaxCounterSize);
-
     std::vector<std::string> reads;
-    std::vector<std::string> frequent_reads;
-    std::vector<KMer> read_kmers;
+    size_t valid_kmers_collected = 0;
 
     generate_reads([&](const std::string &read) {
-        read_kmers.clear();
-        sequence_to_kmers(read, k, &read_kmers, {});
-        // consider only non-dummy k-mers
-        if (read_kmers.size() <= 2)
+        if (read.size() <= k)
             return;
 
-        if (counter.size() + read_kmers.size() > kMaxCounterSize) {
-            extract_frequent_kmers(&frequent_reads, &reads, &counter, k, kmers, end_sorted, suffix,
+        size_t num_valid_kmers = read.size() - k;
+
+        if (valid_kmers_collected + num_valid_kmers > kMaxKmersChunkSize) {
+            extract_frequent_kmers(&reads, k, kmers, end_sorted, suffix,
                                    noise_kmer_frequency,
                                    num_threads, verbose, mutex);
-            counter.rehash(kMaxCounterSize);
+            reads.clear();
+            valid_kmers_collected = 0;
         }
 
-        bool frequent = true;
-        for (size_t i = 1; i + 1 < read_kmers.size(); ++i) {
-            if (++counter[read_kmers[i]] <= noise_kmer_frequency)
-                frequent = false;
-        }
-        if (frequent) {
-            frequent_reads.push_back(read);
-        } else {
-            reads.push_back(read);
-        }
+        reads.push_back(read);
+        valid_kmers_collected += num_valid_kmers;
     });
 
-    extract_frequent_kmers(&frequent_reads, &reads, &counter, k, kmers, end_sorted, suffix,
-                           noise_kmer_frequency * counter.size() / kMaxCounterSize,
+    extract_frequent_kmers(&reads, k, kmers, end_sorted, suffix,
+                           noise_kmer_frequency * valid_kmers_collected / kMaxKmersChunkSize,
                            num_threads, verbose, mutex);
 }
 
@@ -543,51 +569,65 @@ void KMerDBGSuccChunkConstructor::add_reads(std::function<void(CallbackRead)> ge
                          num_threads_, verbose_, &mutex_);
 }
 
+// RAII, releases reads when finished
+std::vector<bool>
+count_kmers_and_filter_reads_raii(std::vector<std::string> *reads,
+                                  size_t k,
+                                  size_t noise_kmer_frequency,
+                                  bool verbose) {
+    auto result = count_kmers_and_filter_reads(
+        reads, k, noise_kmer_frequency, verbose
+    );
+    delete reads;
+    return result;
+}
 
 std::vector<bool> filter_reads(std::function<void(CallbackRead)> generate_reads,
                                size_t k,
                                size_t noise_kmer_frequency,
-                               bool verbose) {
-    std::vector<bool> filter;
+                               bool verbose,
+                               utils::ThreadPool *thread_pool) {
+    std::vector<std::future<std::vector<bool>>> future_filters;
 
-    Counter counter;
-    counter.rehash(kMaxCounterSize);
-
-    std::vector<std::string> reads;
-    std::vector<KMer> read_kmers;
+    auto *reads = new std::vector<std::string>();
+    size_t valid_kmers_collected = 0;
 
     generate_reads([&](const std::string &read) {
-        read_kmers.clear();
-        sequence_to_kmers(read, k, &read_kmers, {});
-        // consider only non-dummy k-mers
-        if (read_kmers.size() <= 2)
-            return;
+        size_t num_valid_kmers = read.size() > k
+                                    ? read.size() - k
+                                    : 0;
 
-        if (counter.size() + read_kmers.size() > kMaxCounterSize) {
-            auto filter_block = filter_reads(reads, &counter, k,
-                                             noise_kmer_frequency, verbose);
-            reads.clear();
-            counter.clear();
-            counter.rehash(kMaxCounterSize);
-
-            filter.insert(filter.end(), filter_block.begin(), filter_block.end());
+        if (valid_kmers_collected + num_valid_kmers > kMaxKmersChunkSize) {
+            future_filters.emplace_back(
+                thread_pool->enqueue(
+                    count_kmers_and_filter_reads_raii,
+                    reads, k, noise_kmer_frequency, verbose
+                )
+            );
+            reads = new std::vector<std::string>();
+            valid_kmers_collected = 0;
         }
 
-        reads.push_back(read);
-        for (size_t i = 1; i + 1 < read_kmers.size(); ++i) {
-            counter[read_kmers[i]]++;
-        }
+        reads->push_back(read);
+        valid_kmers_collected += num_valid_kmers;
     });
 
-    if (reads.size()) {
-        auto filter_block = filter_reads(
-            reads, &counter, k,
-            noise_kmer_frequency * counter.size() / kMaxCounterSize,
+    future_filters.emplace_back(
+        thread_pool->enqueue(
+            count_kmers_and_filter_reads_raii,
+            reads, k,
+            noise_kmer_frequency * valid_kmers_collected / kMaxKmersChunkSize,
             verbose
-        );
-        filter.insert(filter.end(), filter_block.begin(), filter_block.end());
+        )
+    );
+
+    std::vector<bool> reads_filter;
+    for (auto &future_filter_block : future_filters) {
+        auto filter_block = future_filter_block.get();
+        reads_filter.insert(reads_filter.end(), filter_block.begin(), filter_block.end());
     }
-    return filter;
+
+    return reads_filter;
 }
 
 
