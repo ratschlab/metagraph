@@ -966,8 +966,11 @@ void DBG_succ::switch_state(Config::StateType new_state) {
 }
 
 void DBG_succ::print_state(std::ostream &os) const {
+    auto vertex_header = std::string("Vertex");
+    vertex_header.resize(k_, ' ');
+
     os << "Index" << "\t" << "L"
-                  << "\t" << "Vertex"
+                  << "\t" << vertex_header
                   << "\t" << "W" << std::endl;
 
     for (uint64_t i = 1; i < W->size(); i++) {
