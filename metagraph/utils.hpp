@@ -245,6 +245,18 @@ namespace utils {
         std::vector<T*> available;
     };
 
+    struct KMerHash {
+        size_t operator()(const KMer &kmer) const;
+    };
+
+    /**
+     * Break the sequence to kmers and extend the temporary kmers storage.
+     */
+    void sequence_to_kmers(const std::string &sequence,
+                           size_t k,
+                           std::vector<KMer> *kmers,
+                           const std::vector<uint64_t> &suffix);
+
 } // namespace utils
 
 #endif // __UTILS_HPP__

@@ -269,4 +269,88 @@ void ThreadPool::initialize(size_t num_workers) {
     }
 }
 
+size_t KMerHash::operator()(const KMer &kmer) const {
+    const uint32_t *ker_ptr = reinterpret_cast<const uint32_t*>(&kmer);
+    // computes the hash of a k-mer using a variant
+    // of the Fowler-Noll-Vo hash function
+    size_t result = ker_ptr[0];
+
+    for (size_t i = 1; i < sizeof(KMer) / sizeof(uint32_t); ++i) {
+        result = (result * 16777619) ^ ker_ptr[i];
+    }
+
+    return result;
+}
+
+/**
+ * Break the sequence to kmers and extend the temporary kmers storage.
+ */
+void sequence_to_kmers(std::vector<TAlphabet>&& seq,
+                       size_t k,
+                       std::vector<KMer> *kmers,
+                       const std::vector<TAlphabet> &suffix) {
+    assert(k);
+    assert(suffix.size() <= k);
+
+    if (seq.size() < k + 1)
+        return;
+
+    // based on performance comparison
+    // for KMer::pack_kmer and KMer::update_kmer
+    if (suffix.size() > 1) {
+        for (size_t i = 0; i < seq.size() - k; ++i) {
+            if (std::equal(suffix.begin(), suffix.end(),
+                           &seq[i + k] - suffix.size())) {
+                kmers->emplace_back(&seq[i], k + 1);
+            }
+        }
+    } else {
+        // initialize and add the first kmer from sequence
+        auto kmer = KMer::pack_kmer(seq.data(), k + 1);
+
+        if (std::equal(suffix.begin(), suffix.end(),
+                       &seq[k] - suffix.size())) {
+            kmers->emplace_back(kmer);
+        }
+
+        // add all other kmers
+        for (size_t i = 1; i < seq.size() - k; ++i) {
+            KMer::update_kmer(k, seq[i + k], seq[i + k - 1], &kmer);
+
+            if (std::equal(suffix.begin(), suffix.end(),
+                           &seq[i + k] - suffix.size())) {
+                kmers->emplace_back(kmer);
+            }
+        }
+    }
+}
+
+/**
+ * Break the sequence to kmers and extend the temporary kmers storage.
+ */
+void sequence_to_kmers(const std::string &sequence,
+                       size_t k,
+                       std::vector<KMer> *kmers,
+                       const std::vector<TAlphabet> &suffix) {
+    assert(k);
+    assert(suffix.size() <= k);
+
+    if (sequence.size() < k)
+        return;
+
+    // encode sequence
+    size_t dummy_prefix_size = suffix.size() > 0 ? k : 1;
+
+    std::vector<TAlphabet> seq(sequence.size() + dummy_prefix_size + 1);
+
+    for (size_t i = 0; i < dummy_prefix_size; ++i) {
+        seq[i] = DBG_succ::encode('$');
+    }
+    std::transform(sequence.begin(), sequence.end(),
+                   &seq[dummy_prefix_size], DBG_succ::encode);
+    seq.back() = DBG_succ::encode('$');
+
+    sequence_to_kmers(std::move(seq), k, kmers, suffix);
+}
+
 } // namespace utils
