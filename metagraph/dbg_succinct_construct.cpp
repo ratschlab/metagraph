@@ -8,8 +8,6 @@
 #include "reads_filtering.hpp"
 
 
-const size_t kNumBasepairsInTask = 1'000'000;
-
 const size_t kMaxKmersChunkSize = 30'000'000;
 
 
@@ -108,22 +106,21 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
                    size_t num_threads,
                    bool verbose,
                    std::mutex *mutex,
-                   bool remove_redundant = true,
-                   size_t num_appended_kmers = kMaxKmersChunkSize) {
+                   bool remove_redundant = true) {
     std::vector<KMer> temp_storage;
-    temp_storage.reserve(1.1 * num_appended_kmers);
+    temp_storage.reserve(1.1 * kMaxKmersChunkSize);
 
     generate_reads([&](const std::string &read) {
         utils::sequence_to_kmers(read, k, &temp_storage, suffix);
 
-        if (temp_storage.size() < num_appended_kmers)
+        if (temp_storage.size() < kMaxKmersChunkSize)
             return;
 
         if (remove_redundant) {
             sort_and_remove_duplicates(&temp_storage, 1);
         }
 
-        if (temp_storage.size() > 0.9 * num_appended_kmers) {
+        if (temp_storage.size() > 0.9 * kMaxKmersChunkSize) {
             extend_kmer_storage(temp_storage, kmers, end_sorted,
                                 num_threads, verbose, mutex);
             temp_storage.resize(0);
@@ -253,7 +250,7 @@ void KMerDBGSuccChunkConstructor::add_read(const std::string &sequence) {
     stored_reads_size_ += sequence.size();
     reads_storage_.emplace_back(sequence);
 
-    if (stored_reads_size_ < kNumBasepairsInTask)
+    if (stored_reads_size_ < kMaxKmersChunkSize)
         return;
 
     // extract all k-mers from sequences accumulated in the temporary storage
@@ -275,10 +272,7 @@ void KMerDBGSuccChunkConstructor::release_task_to_pool() {
                              delete current_reads_storage;
                          },
                          k_, &kmers_, &end_sorted_, filter_suffix_encoded_,
-                         num_threads_, verbose_, &mutex_, true,
-                         std::min(kMaxKmersChunkSize,
-                                  stored_reads_size_
-                                    + (k_ + 2) * current_reads_storage->size()));
+                         num_threads_, verbose_, &mutex_, true);
     stored_reads_size_ = 0;
 }
 
@@ -297,76 +291,11 @@ DBG_succ::Chunk* KMerDBGSuccChunkConstructor::build_chunk() {
     return result;
 }
 
-void extract_frequent_kmers(std::vector<std::string> *reads,
-                            size_t k,
-                            std::vector<KMer> *kmers,
-                            size_t *end_sorted,
-                            const std::vector<TAlphabet> &suffix,
-                            size_t noise_kmer_frequency,
-                            size_t num_threads,
-                            bool verbose,
-                            std::mutex *mutex) {
-    count_kmers_and_filter_reads(reads, k, noise_kmer_frequency, verbose);
-
-    // extract k-mers from the reads filtered
-    extract_kmers(
-        [&reads](CallbackRead callback) {
-            for (auto &&read : *reads) {
-                callback(std::move(read));
-            }
-            reads->clear();
-        },
-        k, kmers, end_sorted, suffix, num_threads, verbose, mutex
-    );
-}
-
-void count_kmers(std::function<void(CallbackRead)> generate_reads,
-                 size_t k,
-                 std::vector<KMer> *kmers,
-                 size_t *end_sorted,
-                 const std::vector<TAlphabet> &suffix,
-                 size_t noise_kmer_frequency,
-                 size_t num_threads,
-                 bool verbose,
-                 std::mutex *mutex) {
-    if (noise_kmer_frequency == 0) {
-        extract_kmers(generate_reads, k, kmers, end_sorted, suffix,
-                      num_threads, verbose, mutex);
-        return;
-    }
-
-    std::vector<std::string> reads;
-    size_t valid_kmers_collected = 0;
-
-    generate_reads([&](const std::string &read) {
-        if (read.size() <= k)
-            return;
-
-        size_t num_valid_kmers = read.size() - k;
-
-        if (valid_kmers_collected + num_valid_kmers > kMaxKmersChunkSize) {
-            extract_frequent_kmers(&reads, k, kmers, end_sorted, suffix,
-                                   noise_kmer_frequency,
-                                   num_threads, verbose, mutex);
-            reads.clear();
-            valid_kmers_collected = 0;
-        }
-
-        reads.push_back(read);
-        valid_kmers_collected += num_valid_kmers;
-    });
-
-    extract_frequent_kmers(&reads, k, kmers, end_sorted, suffix,
-                           noise_kmer_frequency * valid_kmers_collected / kMaxKmersChunkSize,
-                           num_threads, verbose, mutex);
-}
-
-void KMerDBGSuccChunkConstructor::add_reads(std::function<void(CallbackRead)> generate_reads,
-                                            size_t noise_kmer_frequency) {
-    thread_pool_.enqueue(count_kmers, generate_reads,
+void KMerDBGSuccChunkConstructor::add_reads(std::function<void(CallbackRead)> generate_reads) {
+    thread_pool_.enqueue(extract_kmers, generate_reads,
                          k_, &kmers_, &end_sorted_,
-                         filter_suffix_encoded_, noise_kmer_frequency,
-                         num_threads_, verbose_, &mutex_);
+                         filter_suffix_encoded_,
+                         num_threads_, verbose_, &mutex_, true);
 }
 
 

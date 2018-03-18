@@ -6,11 +6,13 @@
 
 typedef std::function<void(const std::string&)> CallbackRead;
 
+
 std::vector<bool> filter_reads(std::function<void(CallbackRead)> generate_reads,
                                size_t k,
                                size_t noise_kmer_frequency,
                                bool verbose,
                                utils::ThreadPool *thread_pool);
+
 
 // Remove noisy k-mers from |reads| and return
 // vector indicating reads with frequent k-mers

@@ -57,8 +57,7 @@ class KMerDBGSuccChunkConstructor {
 
     void add_read(const std::string &sequence);
 
-    void add_reads(std::function<void(CallbackRead)> generate_reads,
-                   size_t noise_kmer_frequency = 0);
+    void add_reads(std::function<void(CallbackRead)> generate_reads);
 
     DBG_succ::Chunk* build_chunk();
 

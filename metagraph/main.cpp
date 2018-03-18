@@ -208,13 +208,17 @@ int main(int argc, const char *argv[]) {
                                 auto reverse = config->reverse;
                                 auto file = files[f];
 
-                                std::string filter_filename
-                                    = file + ".filter_" + std::to_string(config->noise_kmer_frequency);
-                                auto noise_kmer_frequency = 0;
+                                std::string filter_filename = config->noise_kmer_frequency > 0
+                                    ? file + ".filter_" +
+                                        std::to_string(config->noise_kmer_frequency)
+                                    : "";
 
-                                if (!std::ifstream(filter_filename).good()) {
-                                    filter_filename = "";
-                                    noise_kmer_frequency = config->noise_kmer_frequency;
+                                if (filter_filename.size()
+                                        && !std::ifstream(filter_filename).good()) {
+                                    std::cerr << "ERROR: read filter "
+                                              << filter_filename << " does not exist."
+                                              << " Filter reads first." << std::endl;
+                                    exit(1);
                                 }
 
                                 // capture all required values by copying to be able
@@ -228,7 +232,7 @@ int main(int argc, const char *argv[]) {
                                             callback(read_stream->seq.s);
                                         }
                                     }, timer_ptr, filter_filename);
-                                }, noise_kmer_frequency);
+                                });
                             } else {
                                 read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
                                     // add read to the graph constructor as a callback

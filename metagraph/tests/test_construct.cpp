@@ -726,8 +726,7 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
                    size_t num_threads,
                    bool verbose,
                    std::mutex *mutex,
-                   bool remove_redundant = true,
-                   size_t preallocated_size = 0);
+                   bool remove_redundant = true);
 
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
@@ -743,7 +742,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
             }
         },
         k, kmers, &end_sorted, suffix,
-        1, false, mutex, remove_redundant, 100'000
+        1, false, mutex, remove_redundant
     );
     delete reads;
 }
