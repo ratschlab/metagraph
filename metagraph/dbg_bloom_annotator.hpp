@@ -24,6 +24,10 @@ class DeBruijnGraphWrapper {
         return sequence;
     }
 
+    virtual std::string transform_sequence(const std::string &sequence, bool rooted = false) const {
+        return rooted ? sequence : sequence;
+    }
+
     virtual std::string get_node_kmer(edge_index i) const = 0;
     virtual char get_edge_label(edge_index i) const = 0;
 

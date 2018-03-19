@@ -24,7 +24,7 @@ class DBGHash : public annotate::DeBruijnGraphWrapper {
 
     std::string get_node_kmer(edge_index i) const;
 
-    char get_edge_label(edge_index i) const { return kmers_[i].back(); }
+    char get_edge_label(edge_index i) const { return kmers_[i]->back(); }
 
     // Check if the source k-mer for this edge has the only outgoing edge
     bool has_the_only_outgoing_edge(edge_index i) const;
@@ -46,10 +46,12 @@ class DBGHash : public annotate::DeBruijnGraphWrapper {
 
     void load(const std::string &filename);
 
+    std::string transform_sequence(const std::string &sequence, bool rooted = false) const;
+
   private:
     size_t k_;
     std::unordered_map<std::string, size_t> indices_;
-    std::vector<std::string> kmers_;
+    std::vector<const std::string*> kmers_;
 };
 
 

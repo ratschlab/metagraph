@@ -19,8 +19,9 @@ void DBGHash::load(const std::string &filename) {
     iarch & k_;
     kmers_.resize(size);
     iarch & indices_;
+    //kmers_.resize(indices_.size());
     for (auto &kmer : indices_)
-        kmers_[kmer.second] = kmer.first;
+        kmers_[kmer.second] = &kmer.first;
     in.close();
 }
 
@@ -35,13 +36,13 @@ std::string DBGHash::encode_sequence(const std::string &sequence) const {
 }
 
 std::string DBGHash::get_node_kmer(edge_index i) const {
-    std::string kmer = kmers_[i];
+    std::string kmer = *kmers_[i];
     kmer.pop_back();
     return kmer;
 }
 
 bool DBGHash::has_the_only_outgoing_edge(edge_index i) const {
-    std::string kmer = kmers_[i];
+    std::string kmer = *kmers_[i];
 
     size_t num_edges = 0;
     for (char c : kAlphabet) {
@@ -54,7 +55,7 @@ bool DBGHash::has_the_only_outgoing_edge(edge_index i) const {
 
 bool DBGHash::has_the_only_incoming_edge(edge_index i) const {
     std::string kmer("$");
-    kmer += kmers_[i];
+    kmer += *kmers_[i];
     kmer.pop_back();
 
     size_t num_edges = 0;
@@ -80,7 +81,7 @@ bool DBGHash::is_dummy_label(char c) const {
 }
 
 DBGHash::edge_index DBGHash::next_edge(edge_index i, char edge_label) const {
-    std::string kmer = kmers_[i];
+    std::string kmer = *kmers_[i];
     kmer.back() = edge_label;
 
     kmer.erase(kmer.begin());
@@ -98,7 +99,7 @@ DBGHash::edge_index DBGHash::next_edge(edge_index i, char edge_label) const {
 
 DBGHash::edge_index DBGHash::prev_edge(edge_index i) const {
     std::string kmer("$");
-    kmer += kmers_[i];
+    kmer += *kmers_[i];
     kmer.pop_back();
 
     for (char c : kAlphabet) {
@@ -111,20 +112,30 @@ DBGHash::edge_index DBGHash::prev_edge(edge_index i) const {
     return 0;
 }
 
+std::string DBGHash::transform_sequence(const std::string &sequence, bool rooted) const {
+    return (!rooted ? std::string(k_ + 1, '$') : std::string())
+        + encode_sequence(sequence)
+        + (!rooted ? std::string(1, '$') : std::string());
+}
+
 void DBGHash::add_sequence(const std::string &sequence, bool rooted) {
     // Don't annotate short sequences
     if (sequence.size() < k_ + 1)
         return;
 
-    std::string transformed_seq = (!rooted ? std::string(k_ + 1, '$') : std::string())
-                                    + encode_sequence(sequence)
-                                    + (!rooted ? std::string(1, '$') : std::string());
+    std::string transformed_seq = transform_sequence(sequence, rooted);
 
     for (size_t i = 0; i + k_ < transformed_seq.size(); ++i) {
         std::string kmer = transformed_seq.substr(i, k_ + 1);
+        /*
         if (indices_.find(kmer) == indices_.end()) {
             indices_[kmer] = kmers_.size();
             kmers_.push_back(kmer);
+        }
+        */
+        auto index_insert = indices_.insert(std::make_pair(kmer, kmers_.size()));
+        if (index_insert.second) {
+            kmers_.push_back(&(index_insert.first->first));
         }
     }
 }
