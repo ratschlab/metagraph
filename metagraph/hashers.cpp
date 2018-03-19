@@ -150,6 +150,10 @@ void BloomFilter::resize(size_t new_size) {
 }
 
 bool BloomFilter::find(const MultiHash &multihash) const {
+    if (!n_bits_) {
+        std::cerr << "ERROR: Bloom filter not initialized\n";
+        exit(1);
+    }
     for (auto hash : multihash) {
         if (!test_bit(bits, hash % n_bits_)) {
             return false;

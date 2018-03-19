@@ -187,6 +187,8 @@ class HashAnnotation {
 
     size_t size() const { return color_bits.size(); }
 
+    size_t get_size(size_t i) const { return color_bits.at(i).size(); }
+
     size_t num_hash_functions() const { return num_hash_functions_; }
 
     Filter& operator[](size_t i) { return color_bits[i]; }
@@ -410,10 +412,12 @@ class ExactHashAnnotation {
     }
 
     std::vector<uint64_t> insert(const std::string &kmer, size_t i) {
-        num_columns_ = std::max(num_columns_, i + 1);
+        if (i < -1llu)
+            num_columns_ = std::max(num_columns_, i + 1);
         std::vector<uint64_t> annot((num_columns_ + 63) >> 6, 0);
         auto &indices = kmer_map_[kmer];
-        indices.insert(i);
+        if (i < -1llu)
+            indices.insert(i);
         for (auto &index : indices) {
             set_bit(annot, index);
         }
