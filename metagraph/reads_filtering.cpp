@@ -1,24 +1,27 @@
 #include "reads_filtering.hpp"
 
-#include <hopscotch_map.h>
+#include <numeric>
+
+#include <hopscotch_sc_map.h>
 
 #include "kmer.hpp"
 #include "utils.hpp"
+#include "unix_tools.hpp"
 
 
 const size_t kMaxKmersChunkSize = 30'000'000;
 
 
-typedef tsl::hopscotch_map<KMer, uint32_t, utils::KMerHash> Counter;
+typedef tsl::hopscotch_sc_map<const KMer, uint32_t, utils::Hash<KMer>> Counter;
 
 std::vector<bool> filter_reads(const std::vector<std::string> &reads,
                                Counter *counter,
                                size_t k,
                                size_t noise_kmer_frequency,
                                bool verbose) {
+    Timer timer;
+
     size_t num_distinct_kmers = counter->size();
-    size_t num_reads = reads.size();
-    size_t num_frequent_reads = reads.size();
     size_t counter_sum = 0;
     size_t filtered_sum = 0;
 
@@ -49,19 +52,17 @@ std::vector<bool> filter_reads(const std::vector<std::string> &reads,
         for (size_t i = 1; i + 1 < read_kmers.size(); ++i) {
             // all frequent k-mers are kept in counter here
             if (!counter->count(read_kmers[i])) {
-                num_frequent_reads--;
                 filter[j] = false;
                 break;
             }
         }
-        read_kmers.clear();
+        read_kmers.resize(0);
     }
 
     if (verbose) {
-        std::cout << "\nFiltering out the k-mers collected...\n";
-        std::cout << "Total reads:     " << num_reads << "\n";
-        std::cout << "Filtered reads:  " << num_frequent_reads << "\n";
-        std::cout << "Distinct k-mers:   " << num_distinct_kmers << std::endl;
+        std::cout << "\nFiltering out the k-mers collected... "
+                                                << timer.elapsed() << "sec\n";
+        std::cout << "Distinct k-mers:   " << num_distinct_kmers << "\n";
         std::cout << "Total k-mers:      " << counter_sum << "\n";
         std::cout << "Frequent k-mers:   " << filtered_sum << std::endl;
     }
@@ -82,8 +83,11 @@ std::vector<bool> count_kmers_and_filter_reads(std::vector<std::string> *reads,
     std::vector<std::string> frequent_reads;
     frequent_reads.reserve(reads->size());
 
-    Counter counter;
-    counter.rehash(kMaxKmersChunkSize / 3);
+    Counter counter(std::accumulate(reads->begin(), reads->end(), 0,
+        [&](size_t sum, const std::string &read) {
+            return sum + std::max(read.size(), k) - k + 2;
+        })
+    );
 
     std::vector<KMer> read_kmers;
 
@@ -100,7 +104,7 @@ std::vector<bool> count_kmers_and_filter_reads(std::vector<std::string> *reads,
         } else {
             filtering_reads.emplace_back(std::move(reads->at(j)));
         }
-        read_kmers.clear();
+        read_kmers.resize(0);
     }
     reads->clear();
 
@@ -114,6 +118,11 @@ std::vector<bool> count_kmers_and_filter_reads(std::vector<std::string> *reads,
         }
     }
     filtering_reads.clear();
+
+    if (verbose) {
+        std::cout << "Total reads:     " << frequent.size() << "\n";
+        std::cout << "Filtered reads:  " << frequent_reads.size() << std::endl;
+    }
 
     reads->swap(frequent_reads);
     return frequent;

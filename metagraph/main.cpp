@@ -209,8 +209,8 @@ int main(int argc, const char *argv[]) {
                                 auto file = files[f];
 
                                 std::string filter_filename = config->noise_kmer_frequency > 0
-                                    ? file + ".filter_" +
-                                        std::to_string(config->noise_kmer_frequency)
+                                    ? file + ".filter_k" + std::to_string(config->k)
+                                           + "_s" + std::to_string(config->noise_kmer_frequency)
                                     : "";
 
                                 if (filter_filename.size()
@@ -370,7 +370,8 @@ int main(int argc, const char *argv[]) {
 
                         // dump filter
                         std::ofstream outstream(
-                            file + ".filter_" + std::to_string(noise_kmer_frequency)
+                            file + ".filter_k" + std::to_string(k)
+                                 + "_s" + std::to_string(noise_kmer_frequency)
                         );
                         filter.serialise(outstream);
                     },

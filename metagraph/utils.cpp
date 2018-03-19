@@ -269,19 +269,6 @@ void ThreadPool::initialize(size_t num_workers) {
     }
 }
 
-size_t KMerHash::operator()(const KMer &kmer) const {
-    const uint32_t *ker_ptr = reinterpret_cast<const uint32_t*>(&kmer);
-    // computes the hash of a k-mer using a variant
-    // of the Fowler-Noll-Vo hash function
-    size_t result = ker_ptr[0];
-
-    for (size_t i = 1; i < sizeof(KMer) / sizeof(uint32_t); ++i) {
-        result = (result * 16777619) ^ ker_ptr[i];
-    }
-
-    return result;
-}
-
 /**
  * Break the sequence to kmers and extend the temporary kmers storage.
  */

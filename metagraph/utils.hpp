@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <queue>
 #include <atomic>
+#include <bitset>
 
 class DBG_succ;
 class KMer;
@@ -245,8 +246,13 @@ namespace utils {
         std::vector<T*> available;
     };
 
-    struct KMerHash {
-        size_t operator()(const KMer &kmer) const;
+    template <typename T>
+    struct Hash {
+        size_t operator()(const T &x) const {
+            return hasher(reinterpret_cast<const std::bitset<sizeof(T) * 8>&>(x));
+        }
+
+        std::hash<std::bitset<sizeof(T) * 8>> hasher;
     };
 
     /**
