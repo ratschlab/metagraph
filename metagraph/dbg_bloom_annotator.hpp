@@ -89,9 +89,11 @@ class BloomAnnotator {
     std::vector<uint64_t> get_annotation(DeBruijnGraphWrapper::edge_index i) const;
 
     std::vector<uint64_t> get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
+                                                   bool check_both_directions = false,
                                                    size_t path_cutoff = 50) const;
 
-    void test_fp_all(const PreciseAnnotator &annotation_exact, size_t num = 0) const;
+    template <typename Annotator>
+    void test_fp_all(const Annotator &annotation_exact, size_t num = 0, bool check_both_directions = false) const;
 
     void serialize(std::ostream &out) const;
 
@@ -105,13 +107,17 @@ class BloomAnnotator {
 
     double approx_false_positive_rate() const;
 
+    size_t get_size(size_t i) const;
+
   private:
     std::vector<uint64_t> annotation_from_kmer(const std::string &kmer) const;
 
     std::string kmer_from_index(DeBruijnGraphWrapper::edge_index index) const;
 
+    template <typename Annotator>
     std::vector<size_t> test_fp(DeBruijnGraphWrapper::edge_index i,
-                                 const PreciseAnnotator &annotation_exact) const;
+                                 const Annotator &annotation_exact,
+                                 bool check_both_directions = false) const;
 
     const DeBruijnGraphWrapper &graph_;
     double bloom_size_factor_;

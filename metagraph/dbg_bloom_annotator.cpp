@@ -128,6 +128,10 @@ double BloomAnnotator::approx_false_positive_rate() const {
     return bloom_fpp_;
 }
 
+size_t BloomAnnotator::get_size(size_t i) const {
+    return annotation.get_size(i);
+}
+
 void BloomAnnotator::add_sequence(const std::string &sequence, size_t column, size_t num_elements) {
     std::string preprocessed_seq = graph_.encode_sequence(sequence);
 
@@ -174,6 +178,7 @@ BloomAnnotator::get_annotation(DeBruijnGraphWrapper::edge_index i) const {
 
 std::vector<uint64_t>
 BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
+                                         bool check_both_directions,
                                          size_t path_cutoff) const {
     //initial raw annotation
     std::string orig_kmer = kmer_from_index(i);
@@ -207,7 +212,8 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
 
         //check outdegree
         if (graph_.is_dummy_label(cur_edge)
-                || !graph_.has_the_only_outgoing_edge(j))
+                || !graph_.has_the_only_outgoing_edge(j)
+                || (check_both_directions && !graph_.has_the_only_incoming_edge(j)))
             break;
 
         hasher.update(cur_edge);
@@ -251,6 +257,7 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
     assert(orig_kmer.back() == graph_.get_edge_label(indices[(back + 1) % indices.size()]));
     path = 0;
     while (graph_.has_the_only_incoming_edge(indices[(back + 1) % indices.size()])
+            && (!check_both_directions || graph_.has_the_only_outgoing_edge(indices[(back + 1) % indices.size()]))
             && path++ < path_cutoff) {
         const_cast<size_t&>(total_traversed_)++;
 
@@ -286,8 +293,10 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
 	return curannot;
 }
 
-void BloomAnnotator::test_fp_all(const PreciseAnnotator &annotation_exact,
-                                 size_t num) const {
+template <typename Annotator>
+void BloomAnnotator::test_fp_all(const Annotator &annotation_exact,
+                                 size_t num,
+                                 bool check_both_directions) const {
     double fp_per_bit = 0;
     double fp_pre_per_bit = 0;
     double fn_per_bit = 0;
@@ -304,13 +313,15 @@ void BloomAnnotator::test_fp_all(const PreciseAnnotator &annotation_exact,
         if (graph_.is_dummy_edge(kmer_from_index(i)))
             continue;
         total++;
-        auto stats = test_fp(i, annotation_exact);
+        auto stats = test_fp(i, annotation_exact, check_both_directions);
         fp_pre_per_bit += (double)stats[0];
         fp_per_bit     += (double)stats[1];
         fn_per_bit     += (double)stats[2];
         fp_pre         += stats[0] > 0;
         fp             += stats[1] > 0;
         fn             += stats[2] > 0;
+        //if (stats[2] > 0)
+        //    step -= step - 1;
     }
     std::cout << "\n";
     std::cout << "Total:\t" << total << "\n";
@@ -361,16 +372,36 @@ BloomAnnotator::kmer_from_index(DeBruijnGraphWrapper::edge_index index) const {
     return graph_.get_node_kmer(index) + graph_.get_edge_label(index);
 }
 
+std::vector<size_t> get_annotation_exact(const PreciseAnnotator &annotation_exact, DeBruijnGraphWrapper::edge_index i, std::string &int_kmer) {
+    ++i;
+    return annotation_exact.annotation_from_kmer(int_kmer);
+}
+
+std::vector<size_t> get_annotation_exact(const ColorCompressed &annotation_exact, DeBruijnGraphWrapper::edge_index i, std::string int_kmer) {
+    int_kmer = "";
+    auto labels = annotation_exact.get_label_names();
+    std::vector<size_t> annot((labels.size() + 63) >> 6);
+    for (size_t j = 0; j < labels.size(); ++j) {
+        if (annotation_exact.has_label(i, labels[j])) {
+            set_bit(annot, j);
+        }
+    }
+    return annot;
+}
+
+template <typename Annotator>
 std::vector<size_t>
 BloomAnnotator::test_fp(DeBruijnGraphWrapper::edge_index i,
-                        const PreciseAnnotator &annotation_exact) const {
+                        const Annotator &annotation_exact,
+                        bool check_both_directions) const {
 
     auto int_kmer = kmer_from_index(i);
 
     auto test = annotation_from_kmer(int_kmer);
-    auto test_exact = annotation_exact.annotation_from_kmer(int_kmer);
+    //auto test_exact = annotation_exact.annotation_from_kmer(int_kmer);
+    auto test_exact = get_annotation_exact(annotation_exact, i, int_kmer);
 
-    auto curannot = get_annotation_corrected(i);
+    auto curannot = get_annotation_corrected(i, check_both_directions);
 
     auto jt = test.begin();
     auto kt = test_exact.begin();
@@ -382,26 +413,43 @@ BloomAnnotator::test_fp(DeBruijnGraphWrapper::edge_index i,
         //check for false negatives
         if ((*jt | *kt) != *jt) {
             std::cerr << "Encoding " << i << " failed" << std::endl;
-            exit(1);
+            std::cout << "FN: " << int_kmer << std::endl;
+            auto unpacked_labels = unpack(test_exact);
+            std::cout << "True annotation:\t";
+            for (size_t value : unpacked_labels) {
+                std::cout << value << " ";
+            }
+            std::cout << std::endl;
+            unpacked_labels = unpack(test);
+            std::cout << "Uncorrected annotation:\t";
+            for (size_t value : unpacked_labels) {
+                std::cout << value << " ";
+            }
+            std::cout << std::endl;
+
+            //exit(1);
         }
         //correction introduced extra bits
         if ((*lt | *jt) != *jt) {
             std::cerr << "False bits added" << std::endl;
-            exit(1);
+            //exit(1);
         }
         //false positives before correction
         if ((*jt | *kt) != *kt) {
-            stats[0] += __builtin_popcountll(*jt) - __builtin_popcountll(*kt);
+            //stats[0] += __builtin_popcountll(*jt) - __builtin_popcountll(*kt);
+            stats[0] += __builtin_popcountll(*jt & (~(*kt)));
         }
         //false positives after correction
         if ((*lt | *kt) != *kt) {
-            stats[1] += __builtin_popcountll(*lt) - __builtin_popcountll(*kt);
+            //stats[1] += __builtin_popcountll(*lt) - __builtin_popcountll(*kt);
+            stats[1] += __builtin_popcountll(*lt & (~(*kt)));
             if (verbose_)
                 std::cout << "FP: " << int_kmer << std::endl;
         }
         //false negatives after correction
         if ((*lt | *kt) != *lt) {
-            stats[2] += __builtin_popcountll(*lt | *kt) - __builtin_popcountll(*lt);
+            //stats[2] += __builtin_popcountll(*lt | *kt) - __builtin_popcountll(*lt);
+            stats[2] += __builtin_popcountll(*kt & (~(*lt)));
             if (verbose_) {
                 std::cout << "FN: " << int_kmer << std::endl;
                 auto unpacked_labels = unpack(test_exact);
@@ -424,5 +472,9 @@ BloomAnnotator::test_fp(DeBruijnGraphWrapper::edge_index i,
     }
     return stats;
 }
+template std::vector<size_t> BloomAnnotator::test_fp(DeBruijnGraphWrapper::edge_index,const PreciseAnnotator&,bool) const;
+template std::vector<size_t> BloomAnnotator::test_fp(DeBruijnGraphWrapper::edge_index,const ColorCompressed&,bool) const;
+template void BloomAnnotator::test_fp_all(const PreciseAnnotator&, size_t, bool) const ;
+template void BloomAnnotator::test_fp_all(const ColorCompressed&, size_t, bool) const ;
 
 } // namespace annotate
