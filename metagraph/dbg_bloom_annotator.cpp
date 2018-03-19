@@ -1,4 +1,5 @@
 #include "dbg_bloom_annotator.hpp"
+#include "annotate.hpp"
 
 #include <fstream>
 #include <cmath>
@@ -40,14 +41,14 @@ void PreciseAnnotator::export_rows(const std::string &filename) const {
     fout.close();
 }
 
-void PreciseAnnotator::add_sequence(const std::string &sequence, size_t column) {
-    std::string preprocessed_seq = graph_.encode_sequence(sequence);
+void PreciseAnnotator::add_sequence(const std::string &sequence, size_t column, bool rooted) {
+    std::string preprocessed_seq = graph_.transform_sequence(sequence, rooted);
 
     // Don't annotate short sequences
     if (preprocessed_seq.size() < graph_.get_k() + 1)
         return;
 
-    if (column >= annotation_exact.size())
+    if (column < -1llu && column >= annotation_exact.size())
         annotation_exact.resize(column + 1);
 
     for (size_t i = 0; i + graph_.get_k() < preprocessed_seq.size(); ++i) {
@@ -58,8 +59,8 @@ void PreciseAnnotator::add_sequence(const std::string &sequence, size_t column) 
     }
 }
 
-void PreciseAnnotator::add_column(const std::string &sequence) {
-    add_sequence(sequence, annotation_exact.size());
+void PreciseAnnotator::add_column(const std::string &sequence, bool rooted) {
+    add_sequence(sequence, annotation_exact.size(), rooted);
 }
 
 std::vector<uint64_t>
@@ -143,6 +144,10 @@ void BloomAnnotator::add_sequence(const std::string &sequence, size_t column, si
             * (num_elements ? num_elements : preprocessed_seq.size() - graph_.get_k())
             + 1
         );
+        if (annotation[column].size() == 0) {
+            std::cerr << "ERROR: resize failed" << std::endl;
+            exit(1);
+        }
     }
 
     for (auto hash_it = CyclicHashIterator(preprocessed_seq,

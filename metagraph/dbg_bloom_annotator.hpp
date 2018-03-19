@@ -48,9 +48,9 @@ class PreciseAnnotator {
   public:
     PreciseAnnotator(const DeBruijnGraphWrapper &graph) : graph_(graph) {}
 
-    void add_sequence(const std::string &sequence, size_t column);
+    void add_sequence(const std::string &sequence, size_t column = -1llu, bool rooted = false);
 
-    void add_column(const std::string &sequence);
+    void add_column(const std::string &sequence, bool rooted = false);
 
     std::vector<uint64_t> annotation_from_kmer(const std::string &kmer) const;
 
