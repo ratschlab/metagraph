@@ -72,8 +72,7 @@ namespace utils {
     void bucket_sort(std::vector<KMer> &data, size_t k);
 
 
-    /** This returns the currently used memory by the process.
-     *
+    /**
      * The code was copied and has been modified from:
      * https://github.com/progschj/ThreadPool/blob/master/ThreadPool.h
      */
