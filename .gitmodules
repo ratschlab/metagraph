@@ -12,3 +12,6 @@
 [submodule "metagraph/external-libraries/hopscotch-map"]
 	path = metagraph/external-libraries/hopscotch-map
 	url = https://github.com/Tessil/hopscotch-map.git
+[submodule "metagraph/external-libraries/ips4o"]
+	path = metagraph/external-libraries/ips4o
+	url = https://github.com/SaschaWitt/ips4o.git

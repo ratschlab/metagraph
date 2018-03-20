@@ -38,6 +38,7 @@ include_directories(
   external-libraries/sdsl-lite/include
   external-libraries/hopscotch-map/src
   external-libraries/rollinghashcpp
+  external-libraries/ips4o
 )
 
 #add_subdirectory()
@@ -58,6 +59,7 @@ set(METALIBS
   -lmaus2 -lmaus2_simd_align_128 -lmaus2_simd_align_256
   -lsdsl -ldivsufsort -ldivsufsort64
   -lssl -lcrypto -llzma -lboost_serialization
+  -latomic
 )
 
 if(BUILD_STATIC)

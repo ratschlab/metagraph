@@ -1,6 +1,6 @@
 #include "dbg_succinct_construct.hpp"
 
-#include <parallel/algorithm>
+#include <ips4o.hpp>
 
 #include "kmer.hpp"
 #include "dbg_succinct_chunk.hpp"
@@ -16,9 +16,9 @@ void sort_and_remove_duplicates(std::vector<KMer> *kmers,
                                 size_t end_sorted = 0) {
     if (num_threads <= 3) {
         // sort
-        omp_set_num_threads(num_threads);
-        __gnu_parallel::sort(kmers->data() + end_sorted,
-                             kmers->data() + kmers->size());
+        ips4o::parallel::sort(kmers->data() + end_sorted,
+                              kmers->data() + kmers->size(),
+                              std::less<KMer>(), num_threads);
         kmers->erase(std::unique(kmers->begin() + end_sorted, kmers->end()),
                      kmers->end());
 
@@ -36,8 +36,8 @@ void sort_and_remove_duplicates(std::vector<KMer> *kmers,
 #endif
     } else {
         // sort
-        omp_set_num_threads(num_threads);
-        __gnu_parallel::sort(kmers->data(), kmers->data() + kmers->size());
+        ips4o::parallel::sort(kmers->data(), kmers->data() + kmers->size(),
+                              std::less<KMer>(), num_threads);
     }
     // remove duplicates
     auto unique_end = std::unique(kmers->begin(), kmers->end());
@@ -178,9 +178,10 @@ void recover_source_dummy_nodes(size_t k,
                           << " filter out non-unique k-mers..." << std::flush;
             }
 
-            omp_set_num_threads(num_threads);
-            __gnu_parallel::sort(kmers->data() + end_sorted,
-                                 kmers->data() + kmers->size());
+            ips4o::parallel::sort(kmers->data() + end_sorted,
+                                  kmers->data() + kmers->size(),
+                                  std::less<KMer>(),
+                                  num_threads);
             kmers->erase(
                 std::unique(kmers->begin() + end_sorted, kmers->end()),
                 kmers->end()
