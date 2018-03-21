@@ -92,6 +92,8 @@ Config::Config(int argc, const char *argv[]) {
             outfbase = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "--reference")) {
             refpath = std::string(argv[++i]);
+        } else if (!strcmp(argv[i], "--fasta-header-delimiter")) {
+            fasta_header_delimiter = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-s") || !strcmp(argv[i], "--num-splits")) {
             nsplits = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--suffix")) {
@@ -210,6 +212,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for build:\n");
             fprintf(stderr, "\t   --reference [STR] \t\tbasename of reference sequence []\n");
+            fprintf(stderr, "\t   --fasta-header-delimiter [STR] \t\theader delimiter (for setting multiple annotations) []\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\t\tbasename of output file []\n");
             fprintf(stderr, "\t   --sql-base [STR] \t\tbasename for SQL output file\n");
             fprintf(stderr, "\t   --mem-cap-gb [INT] \t\tmaximum memory available, in Gb [inf]\n");

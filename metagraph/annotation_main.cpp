@@ -10,7 +10,6 @@
 #include "annotate.hpp"
 #include "unix_tools.hpp"
 
-
 KSEQ_INIT(gzFile, gzread);
 
 
@@ -92,10 +91,30 @@ int main(int argc, const char *argv[]) {
         exit(1);
     }
 
+    if (config->fasta_header_delimiter.length() > 1) {
+        std::cerr << "FASTA header delimiter must be at most one character" << std::endl;
+        exit(1);
+    }
+
     annotate::BloomAnnotator *annotator = NULL;
     annotate::PreciseAnnotator *precise_annotator = NULL;
 
+    double graph_const_time = 0;
+    double precise_const_time = 0;
+    Timer result_timer;
     DBGHash hashing_graph(config->k);
+    precise_annotator = new annotate::PreciseAnnotator(hashing_graph);
+    std::unordered_map<std::string, size_t> annot_map;
+    if (!config->infbase.empty()) {
+        result_timer.reset();
+        std::cout << "Loading graph file:\t" << std::flush;
+            std::cout << "hashing" << std::endl;
+            hashing_graph.load(config->infbase + ".graph.dbg");
+            graph_const_time += result_timer.elapsed();
+            result_timer.reset();
+            precise_annotator->load(config->infbase + ".precise.dbg");
+            precise_const_time += result_timer.elapsed();
+    }
 
     if (config->bloom_fpp > -0.5
             || config->bloom_bits_per_edge > -0.5
@@ -115,10 +134,6 @@ int main(int argc, const char *argv[]) {
                 config->bloom_num_hash_functions,
                 config->verbose
             );
-        }
-        if (config->bloom_test_num_kmers > 0) {
-            precise_annotator = new annotate::PreciseAnnotator(
-                hashing_graph
             );
         }
     }
@@ -128,6 +143,8 @@ int main(int argc, const char *argv[]) {
         std::cout << "\tNum hash functions:\t" << annotator->num_hash_functions() << std::endl;
         std::cout << "\tApprox false pos prob:\t" << annotator->approx_false_positive_rate() << std::endl;
     }
+
+    bool has_vcf = false;
 
     if (config->verbose)
         std::cerr << "k is " << config->k << std::endl;
@@ -143,10 +160,7 @@ int main(int argc, const char *argv[]) {
 
         //one pass per suffix
         double file_read_time = 0;
-        double graph_const_time = 0;
         double bloom_const_time = 0;
-        double precise_const_time = 0;
-        std::map<std::string, size_t> annot_map;
         for (const std::string &suffix : suffices) {
             if (suffix.size())
                 std::cout << "Suffix: " << suffix << std::endl;
@@ -163,6 +177,7 @@ int main(int argc, const char *argv[]) {
                 }
 
                 if (utils::get_filetype(files[f]) == "VCF") {
+                    has_vcf = true;
                     if (suffix.find('$') != std::string::npos)
                         continue;
 
@@ -174,13 +189,22 @@ int main(int argc, const char *argv[]) {
                         std::cerr << "ERROR reading VCF " << files[f] << std::endl;
                         exit(1);
                     }
-                    std::cerr << "Loading VCF with " << config->parallel
-                                                     << " threads per line\n";
+                    std::cout << "Reading VCF" << std::endl;
                     std::string sequence;
                     std::vector<std::string> annotation;
+                    std::map<size_t, std::string> variants;
                     data_reading_timer.reset();
                     for (size_t i = 1; vcf.get_seq(annots, &sequence, annotation); ++i) {
                         file_read_time += data_reading_timer.elapsed();
+                        //doesn't cover the no annot case
+                        for (auto &annot : annotation) {
+                            auto insert_annot_map = annot_map.insert(std::make_pair(annot, annot_map.size()));
+                            auto insert_annot = variants.insert(std::make_pair(insert_annot_map.first->second, sequence));
+                            if (!insert_annot.second) {
+                                insert_annot.first->second += std::string("$") + sequence;
+                            }
+                        }
+                        /*
                         if (config->verbose && i % 10'000 == 0) {
                             std::cout << "." << std::flush;
                             if (i % 1'000'000 == 0) {
@@ -188,47 +212,75 @@ int main(int argc, const char *argv[]) {
                             }
                         }
                         for (size_t j = 0; j < 2; ++j) {
-                            data_reading_timer.reset();
-                            hashing_graph.add_sequence(sequence, true);
-                            graph_const_time += data_reading_timer.elapsed();
-
-                            for (auto it = annotation.begin(); it != annotation.end(); ++it) {
-                                auto map_ins = annot_map.insert(
-                                        std::pair<std::string,size_t>(
-                                            *it,
-                                            annot_map.size()));
+                            if (config->infbase.empty()) {
                                 data_reading_timer.reset();
-                                if (map_ins.second) {
-                                    annotator->add_column(
-                                            sequence,
-                                            (sequence.length() - hashing_graph.get_k())
-                                                * (static_cast<size_t>(config->reverse) + 1)
-                                    );
-                                } else {
-                                    annotator->add_sequence(
-                                            sequence,
-                                            map_ins.first->second,
-                                            (sequence.length() - hashing_graph.get_k())
-                                                * (static_cast<size_t>(config->reverse) + 1)
-                                    );
+                                hashing_graph.add_sequence(sequence, true);
+                                graph_const_time += data_reading_timer.elapsed();
+                            }
+                            auto it = annotation.begin();
+                            std::map<std::string, size_t>::iterator ref_ind = annot_map.end();
+                            if (it != annotation.end()) {
+                                ref_ind = annot_map.find(*it);
+                                if (config->fasta_header_delimiter.empty()) {
+                                    ++it; //skip backbone
                                 }
-                                bloom_const_time += data_reading_timer.elapsed();
+                            }
+                            if (it == annotation.end() && precise_annotator && config->infbase.empty()) {
+                                //if unannotated, add it as such
+                                data_reading_timer.reset();
+                                precise_annotator->add_sequence(sequence, -1llu, true);
+                                precise_const_time += data_reading_timer.elapsed();
+                            }
+                            for (; it != annotation.end(); ++it) {
+                                auto map_ins = annot_map.insert(std::make_pair(*it, annot_map.size()));
+                                if (precise_annotator && config->infbase.empty()) {
+                                    data_reading_timer.reset();
+                                    precise_annotator->add_sequence(sequence, map_ins.first->second, true);
+                                    precise_const_time += data_reading_timer.elapsed();
+                                }
+                                if (annotator) {
+                                    data_reading_timer.reset();
+                                    annotator->add_sequence(sequence, map_ins.first->second,
+                                            (double)(annotator->get_size(ref_ind->second)) / annotator->size_factor());
+                                            //(sequence.length() - hashing_graph.get_k())
+                                            //    * (static_cast<size_t>(config->reverse) + 1));
+                                    bloom_const_time += data_reading_timer.elapsed();
+                                }
+                            }
+                            if (config->reverse) {
+                                reverse_complement(sequence.begin(), sequence.end());
+                            } else {
+                                break;
+                            }
+                        }
+                        */
+                        annotation.clear();
+                    }
+                    file_read_time += data_reading_timer.elapsed();
+                    for (auto &variant : variants) {
+                        for (size_t j = 0; j < 2; ++j) {
+                            if (config->infbase.empty()) {
+                                data_reading_timer.reset();
+                                hashing_graph.add_sequence(variant.second, true);
+                                graph_const_time += data_reading_timer.elapsed();
                                 if (precise_annotator) {
                                     data_reading_timer.reset();
-                                    if (map_ins.second) {
-                                        precise_annotator->add_column(sequence);
-                                    } else {
-                                        precise_annotator->add_sequence(sequence, map_ins.first->second);
-                                    }
+                                    precise_annotator->add_sequence(variant.second, variant.first, true);
                                     precise_const_time += data_reading_timer.elapsed();
                                 }
                             }
-                            annotation.clear();
-                            if (config->reverse) {
-                                reverse_complement(sequence.begin(), sequence.end());
+                            if (annotator) {
+                                data_reading_timer.reset();
+                                annotator->add_sequence(variant.second, variant.first,
+                                            (variant.second.length() - hashing_graph.get_k())
+                                                * (static_cast<size_t>(config->reverse) + 1));
+                                bloom_const_time += data_reading_timer.elapsed();
                             }
-                            else
+                            if (config->reverse) {
+                                reverse_complement(variant.second.begin(), variant.second.end());
+                            } else {
                                 break;
+                            }
                         }
                     }
                 } else if (utils::get_filetype(files[f]) == "FASTA"
@@ -247,79 +299,67 @@ int main(int argc, const char *argv[]) {
                                   << files[f] << std::endl;
                         exit(1);
                     }
-                    Timer result_timer;
+                    result_timer.reset();
                     bool fastq = utils::get_filetype(files[f]) == "FASTQ";
-                    std::pair<std::map<std::string, size_t>::iterator, bool> map_ins;
+                    std::pair<std::unordered_map<std::string, size_t>::iterator, bool> map_ins;
+                    std::vector<std::string> annotation;
                     if (fastq) {
-                        map_ins = annot_map.insert(
-                                std::pair<std::string,size_t>(
-                                    files[f],
-                                    annot_map.size()));
+                        //TODO annotations for reference genome
+                        map_ins = annot_map.insert(std::make_pair(files[f], annot_map.size()));
+                        annotation.push_back(files[f]);
                     }
 
                     while (kseq_read(read_stream) >= 0) {
-                        {
-                            file_read_time += result_timer.elapsed();
+                        file_read_time += result_timer.elapsed();
+                        if (!fastq) {
+                            //TODO: better way to handle backbone bits
+                            annotation.clear();
+                            char *sep = NULL;
+                            if (!config->fasta_header_delimiter.empty())
+                                sep = strchr(read_stream->name.s, config->fasta_header_delimiter[0]);
+                            if (sep) {
+                                annotation.emplace_back(sep);
+                                annotation.emplace_back(std::string(read_stream->name.s, sep));
+                            } else {
+                                annotation.emplace_back(read_stream->name.s);
+                            }
+                        }
+                        for (size_t _j = 0; _j < 2; ++_j) {
 
-                            for (size_t j = 0; j < 2; ++j) {
-
+                            if (config->infbase.empty()) {
                                 result_timer.reset();
                                 hashing_graph.add_sequence(read_stream->seq.s);
                                 graph_const_time += result_timer.elapsed();
-
-                                //constructor->add_read(read_stream->seq.s);
-                                if (fastq) {
-                                    //assume each FASTQ file is one column
-
-                                    result_timer.reset();
-                                    //TODO: for reads this leads to a much smaller filter than needed
-                                    //TODO: tell the annotator to allocate a much larger space for reads
-                                    annotator->add_sequence(
-                                            read_stream->seq.s,
-                                            map_ins.first->second);
-                                    bloom_const_time += result_timer.elapsed();
-
-                                    if (precise_annotator) {
-                                        result_timer.reset();
-                                        precise_annotator->add_sequence(read_stream->seq.s, map_ins.first->second);
-                                        precise_const_time += result_timer.elapsed();
-                                    }
-                                } else {
-                                    //assume each sequence in each FASTA file is a column
-                                    result_timer.reset();
-                                    map_ins = annot_map.insert(
-                                        std::pair<std::string,size_t>(
-                                            std::string(read_stream->name.s),
-                                            annot_map.size()));
-                                    if (map_ins.second)
-                                        annotator->add_column(
-                                                read_stream->seq.s,
-                                                (read_stream->seq.l - hashing_graph.get_k())
-                                                    * (static_cast<size_t>(config->reverse) + 1)
-                                        );
-                                    else
-                                        annotator->add_sequence(
-                                                read_stream->seq.s,
-                                                map_ins.first->second,
-                                                (read_stream->seq.l - hashing_graph.get_k())
-                                                    * (static_cast<size_t>(config->reverse) + 1)
-                                        );
-                                    bloom_const_time += result_timer.elapsed();
-
-                                    if (precise_annotator) {
-                                        result_timer.reset();
-                                        if (map_ins.second)
-                                            precise_annotator->add_column(read_stream->seq.s);
-                                        else
-                                            precise_annotator->add_sequence(read_stream->seq.s, map_ins.first->second);
-                                        precise_const_time += result_timer.elapsed();
-                                    }
-                                }
-                                if (config->reverse)
-                                    reverse_complement(read_stream->seq);
-                                else
-                                    break;
                             }
+
+                            if (annotation.empty() && precise_annotator && config->infbase.empty()) {
+                                result_timer.reset();
+                                precise_annotator->add_sequence(read_stream->seq.s);
+                                precise_const_time += result_timer.elapsed();
+                            }
+
+                            for (auto &annot : annotation) {
+                                if (!fastq) {
+                                    map_ins = annot_map.insert(std::make_pair(annot, annot_map.size()));
+                                }
+                                if (annotator) {
+                                    result_timer.reset();
+                                    annotator->add_sequence(read_stream->seq.s, map_ins.first->second,
+                                            (read_stream->seq.l - hashing_graph.get_k())
+                                            * (static_cast<size_t>(config->reverse) + 1));
+                                    bloom_const_time += result_timer.elapsed();
+                                }
+                                if (precise_annotator && config->infbase.empty()) {
+                                    result_timer.reset();
+                                    precise_annotator->add_sequence(read_stream->seq.s, map_ins.first->second);
+                                    precise_const_time += result_timer.elapsed();
+                                }
+                            }
+
+                            if (config->reverse)
+                                reverse_complement(read_stream->seq);
+                            else
+                                break;
                         }
                         result_timer.reset();
                     }
@@ -340,15 +380,17 @@ int main(int argc, const char *argv[]) {
         std::cout << "Runtime statistics" << std::endl;
         std::cout << "File reading\t" << file_read_time << std::endl;
         std::cout << "Graph construction\t" << graph_const_time << std::endl;
-        std::cout << "Bloom filter\t" << bloom_const_time << std::endl;
-        std::cout << "Precise filter\t" << precise_const_time << std::endl;
-
+        if (annotator)
+            std::cout << "Bloom filter\t" << bloom_const_time << std::endl;
         if (precise_annotator) {
+            std::cout << "Precise filter\t" << precise_const_time << std::endl;
+            std::cout << "# Annotation types\t" << annot_map.size() << std::endl;
+        }
+        if (annotator && (precise_annotator && !config->succinct)) {
             //Check FPP
             std::cout << "Approximating FPP...\t" << std::flush;
             timer.reset();
-            //TODO: set this value
-            annotator->test_fp_all(*precise_annotator, config->bloom_test_num_kmers);
+            annotator->test_fp_all(*precise_annotator, config->bloom_test_num_kmers, has_vcf);
             std::cout << timer.elapsed() << "sec" << std::endl;
         }
 
@@ -400,15 +442,26 @@ int main(int argc, const char *argv[]) {
 
     std::cout << "Graph size(edges):\t" << hashing_graph.get_num_edges() << std::endl;
 
-    config->infbase = config->outfbase;
+    //config->infbase = config->outfbase;
     // graph->annotationToFile(config->infbase + ".anno.dbg");
     //graph->print_state();
 
     // output and cleanup
 
     // graph output
+    if (!config->outfbase.empty() && config->infbase.empty()) {
+        hashing_graph.serialize(config->outfbase + ".graph.dbg");
+    }
     if (!config->outfbase.empty() && annotator)
         annotator->serialize(config->outfbase);
+
+    if (!config->outfbase.empty() && precise_annotator && config->infbase.empty()) {
+        std::cout << "Serializing precise annotation...\t" << std::flush;
+        timer.reset();
+        precise_annotator->serialize(config->outfbase + ".precise.dbg");
+        precise_annotator->export_rows(config->outfbase + ".anno.rawrows.dbg");
+        std::cout << timer.elapsed() << std::endl;
+    }
 
     if (annotator)
         delete annotator;

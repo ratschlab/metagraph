@@ -45,6 +45,7 @@ class Config {
     std::string dbpath;
     std::string refpath;
     std::string suffix;
+    std::string fasta_header_delimiter;
 
     enum IdentityType {
         NO_IDENTITY = -1,
