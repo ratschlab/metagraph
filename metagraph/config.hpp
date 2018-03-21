@@ -18,6 +18,7 @@ class Config {
     bool to_adj_list = false;
     bool query = false;
     bool traversal_merge = false;
+    bool succinct = false;
 
     unsigned int k = 3;
     unsigned int distance = 0;

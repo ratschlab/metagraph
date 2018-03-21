@@ -72,6 +72,8 @@ Config::Config(int argc, const char *argv[]) {
             noise_kmer_frequency = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
             memory_available = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--succinct")) {
+            succinct = true;
         } else if (!strcmp(argv[i], "--bloom-false-pos-prob")) {
             bloom_fpp = std::stof(argv[++i]);
         } else if (!strcmp(argv[i], "--bloom-bits-per-edge")) {

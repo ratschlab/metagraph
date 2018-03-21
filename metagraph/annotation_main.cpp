@@ -103,17 +103,55 @@ int main(int argc, const char *argv[]) {
     double precise_const_time = 0;
     Timer result_timer;
     DBGHash hashing_graph(config->k);
+    DBG_succ *graph_ = NULL;
+    annotate::DBGSuccAnnotWrapper *graph = NULL;
+    annotate::ColorCompressed *ccannotation = NULL;
     precise_annotator = new annotate::PreciseAnnotator(hashing_graph);
     std::unordered_map<std::string, size_t> annot_map;
     if (!config->infbase.empty()) {
         result_timer.reset();
         std::cout << "Loading graph file:\t" << std::flush;
+        if (config->succinct) {
+            std::cout << "succinct" << std::endl;
+            graph_ = load_critical_graph_from_file(config->infbase);
+            graph = new annotate::DBGSuccAnnotWrapper(*graph_);
+            delete precise_annotator;
+            //TODO: this doens't work, hack the cheker to use colorcompressed
+            //precise_annotator = new annotate::PreciseAnnotator(*graph);
+            precise_annotator = NULL;
+
+            ccannotation = new annotate::ColorCompressed(1 + graph_->num_edges());
+            if (!ccannotation->load(config->infbase + ".anno.dbg")) {
+                delete graph_;
+                delete graph;
+                std::cerr << "FAIL\n";
+                exit(1);
+            }
+            const auto labels = ccannotation->get_label_names();
+            std::cout << "Loaded " << labels.size() << " labels" << std::endl;
+            for (auto &label : labels)
+                annot_map.insert(std::make_pair(label, annot_map.size()));
+            /*
+            size_t step = std::max(static_cast<size_t>(1),
+                    static_cast<size_t>((graph->last_edge() - graph->first_edge() + 1) / config->bloom_test_num_kmers));
+            for (auto i = graph->first_edge(); i <= graph->last_edge(); i += step) {
+                std::string sequence = graph->get_node_kmer(i) + graph->get_edge_label(i);
+                for (const auto &label : labels) {
+                    if (ccannotation->has_label(i, label)) {
+                        auto ins = annot_map.insert(std::make_pair(label, annot_map.size()));
+                        precise_annotator->add_sequence(sequence, ins.first->second, true);
+                    }
+                }
+            }
+            */
+        } else {
             std::cout << "hashing" << std::endl;
             hashing_graph.load(config->infbase + ".graph.dbg");
             graph_const_time += result_timer.elapsed();
             result_timer.reset();
             precise_annotator->load(config->infbase + ".precise.dbg");
             precise_const_time += result_timer.elapsed();
+        }
     }
 
     if (config->bloom_fpp > -0.5
@@ -121,20 +159,34 @@ int main(int argc, const char *argv[]) {
             || config->bloom_num_hash_functions > 0) {
         if (config->bloom_fpp > -0.5) {
             // Expected FPP is set, optimize other parameters automatically
+            if (config->succinct) {
+            annotator = new annotate::BloomAnnotator(*graph,
+                                                     config->bloom_fpp,
+                                                     config->verbose);
+            } else {
             annotator = new annotate::BloomAnnotator(hashing_graph,
                                                      config->bloom_fpp,
                                                      config->verbose);
+            }
         } else {
             assert(config->bloom_bits_per_edge >= 0);
             // Experiment mode, estimate FPP given other parameters,
             // optimize the number of hash functions if it's set to zero
+            if (config->succinct) {
+            annotator = new annotate::BloomAnnotator(
+                *graph,
+                config->bloom_bits_per_edge,
+                config->bloom_num_hash_functions,
+                config->verbose
+            );
+            } else {
             annotator = new annotate::BloomAnnotator(
                 hashing_graph,
                 config->bloom_bits_per_edge,
                 config->bloom_num_hash_functions,
                 config->verbose
             );
-            );
+            }
         }
     }
     if (annotator) {
@@ -195,10 +247,13 @@ int main(int argc, const char *argv[]) {
                     std::map<size_t, std::string> variants;
                     data_reading_timer.reset();
                     for (size_t i = 1; vcf.get_seq(annots, &sequence, annotation); ++i) {
-                        file_read_time += data_reading_timer.elapsed();
                         //doesn't cover the no annot case
                         for (auto &annot : annotation) {
                             auto insert_annot_map = annot_map.insert(std::make_pair(annot, annot_map.size()));
+                            if (ccannotation && insert_annot_map.second) {
+                                std::cerr << "ERROR: new annotation not in provided reference" << std::endl;
+                                exit(1);
+                            }
                             auto insert_annot = variants.insert(std::make_pair(insert_annot_map.first->second, sequence));
                             if (!insert_annot.second) {
                                 insert_annot.first->second += std::string("$") + sequence;
@@ -271,9 +326,15 @@ int main(int argc, const char *argv[]) {
                             }
                             if (annotator) {
                                 data_reading_timer.reset();
+                                if (config->succinct) {
+                                annotator->add_sequence(variant.second, variant.first,
+                                            (variant.second.length() - graph->get_k())
+                                                * (static_cast<size_t>(config->reverse) + 1));
+                                } else {
                                 annotator->add_sequence(variant.second, variant.first,
                                             (variant.second.length() - hashing_graph.get_k())
                                                 * (static_cast<size_t>(config->reverse) + 1));
+                                }
                                 bloom_const_time += data_reading_timer.elapsed();
                             }
                             if (config->reverse) {
@@ -344,9 +405,15 @@ int main(int argc, const char *argv[]) {
                                 }
                                 if (annotator) {
                                     result_timer.reset();
+                                    if (config->succinct) {
+                                    annotator->add_sequence(read_stream->seq.s, map_ins.first->second,
+                                            (read_stream->seq.l - graph->get_k())
+                                            * (static_cast<size_t>(config->reverse) + 1));
+                                    } else {
                                     annotator->add_sequence(read_stream->seq.s, map_ins.first->second,
                                             (read_stream->seq.l - hashing_graph.get_k())
                                             * (static_cast<size_t>(config->reverse) + 1));
+                                    }
                                     bloom_const_time += result_timer.elapsed();
                                 }
                                 if (precise_annotator && config->infbase.empty()) {
@@ -386,10 +453,13 @@ int main(int argc, const char *argv[]) {
             std::cout << "Precise filter\t" << precise_const_time << std::endl;
             std::cout << "# Annotation types\t" << annot_map.size() << std::endl;
         }
-        if (annotator && (precise_annotator && !config->succinct)) {
+        if (annotator && ((ccannotation && config->succinct) || (precise_annotator && !config->succinct))) {
             //Check FPP
             std::cout << "Approximating FPP...\t" << std::flush;
             timer.reset();
+            if (config->succinct)
+            annotator->test_fp_all(*ccannotation, config->bloom_test_num_kmers, has_vcf);
+            else
             annotator->test_fp_all(*precise_annotator, config->bloom_test_num_kmers, has_vcf);
             std::cout << timer.elapsed() << "sec" << std::endl;
         }
@@ -440,6 +510,9 @@ int main(int argc, const char *argv[]) {
         }
     }
 
+    if (config->succinct)
+    std::cout << "Graph size(edges):\t" << graph->last_edge() - graph->first_edge() + 1 << std::endl;
+    else
     std::cout << "Graph size(edges):\t" << hashing_graph.get_num_edges() << std::endl;
 
     //config->infbase = config->outfbase;
@@ -467,6 +540,12 @@ int main(int argc, const char *argv[]) {
         delete annotator;
     if (precise_annotator)
         delete precise_annotator;
+    if (graph)
+        delete graph;
+    if (graph_)
+        delete graph_;
+    if (ccannotation)
+        delete ccannotation;
 
     return 0;
 }
