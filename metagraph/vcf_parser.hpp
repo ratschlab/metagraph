@@ -9,6 +9,8 @@
 
 class vcf_parser {
   public:
+    std::string seq;
+
     ~vcf_parser();
 
     // reference_file -- file name of the FASTA file
@@ -20,8 +22,7 @@ class vcf_parser {
 
     //TODO: make a parallel version of this that outputs n lines at a time?
     bool get_seq(const std::vector<std::string> &annots,
-                 std::string *sequence,
-                 std::vector<std::string> &annotation);
+                 std::vector<std::string> *annotation = NULL);
 
   private:
     faidx_t *reference_ = NULL;

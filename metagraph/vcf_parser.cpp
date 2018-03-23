@@ -56,8 +56,7 @@ void vcf_parser::print_line() {
 }
 
 bool vcf_parser::get_seq(const std::vector<std::string> &annots,
-                         std::string *sequence,
-                         std::vector<std::string> &annotation) {
+                         std::vector<std::string> *annotation) {
     while (rec_) {
         curi++;
         if (curi >= rec_->n_allele || !bcf_has_filter(hdr_, rec_, passfilt)) {
@@ -89,17 +88,22 @@ bool vcf_parser::get_seq(const std::vector<std::string> &annots,
         } else {
             curalt = rec_->d.allele[curi];
         }
+
+        //construct sequence
+        seq = kmer1_ + curalt + kmer3_;
+        if (!annotation)
+            return true;
+
         //annotation is a bit vector indicating inclusion in the different ethnic groups
         //the first bit is always 1. if not, then the file is done and no sequence was output
         //TODO: check if these annots are part of the INFO, if not, check genotypes
         //ngt = bcf_get_genotypes(sr->readers[0].header, line0, &gt_arr, &ngt_arr); //get genotypes
         //annot=1;
-        //annotation->append(seq_names_[rec_->rid]);
-        annotation.emplace_back(seq_names_[rec_->rid]);
+        annotation->emplace_back(seq_names_[rec_->rid]);
         for (const auto &annot : annots) {
             bcf_info_t *curinfo = bcf_get_info(hdr_, rec_, annot.c_str());
             if (curinfo && curinfo->v1.i) {
-                annotation.emplace_back(annot);
+                annotation->emplace_back(annot);
             }
         }
 
@@ -115,14 +119,13 @@ bool vcf_parser::get_seq(const std::vector<std::string> &annots,
                 }
                 if ((cur & 5) == 5) {
                     //at least one parent has this allele
-                    annotation.emplace_back(hdr_->samples[i]);
+                    annotation->emplace_back(hdr_->samples[i]);
                 }
             }
             if (gt_arr)
                 free(gt_arr);
         }
 
-        *sequence = kmer1_ + curalt + kmer3_;
         return true;
     }
     return false;

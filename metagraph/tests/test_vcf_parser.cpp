@@ -10,7 +10,7 @@ const std::string vcf_file1 = test_data_dir + "test_vcfparse_1.vcf";
 const std::string vcf_file2 = test_data_dir + "test_vcfparse_2.vcf";
 
 const std::vector<std::string> annots = {
-    "AC_AFR", 
+    "AC_AFR",
     "AC_AMR",
     "AC_ASJ",
     "AC_EAS",
@@ -28,86 +28,81 @@ TEST(VcfParse, LoadVCF) {
 TEST(VcfParse, TestKmer) {
     vcf_parser vcf;
     ASSERT_TRUE(vcf.init(ref_file, vcf_file1, 3));
-    std::string seq;
     std::vector<std::string> annot;
-    ASSERT_TRUE(vcf.get_seq(annots, &seq, annot));
-    EXPECT_EQ("TGCGCGC", seq);
+    ASSERT_TRUE(vcf.get_seq(annots, &annot));
+    EXPECT_EQ("TGCGCGC", vcf.seq);
     EXPECT_EQ(4llu, annot.size());
     EXPECT_EQ("test", annot[0]);
     EXPECT_EQ("A", annot[1]);
     EXPECT_EQ("B", annot[2]);
     EXPECT_EQ("C", annot[3]);
-    EXPECT_FALSE(vcf.get_seq(annots, &seq, annot));
+    EXPECT_FALSE(vcf.get_seq(annots, &annot));
 }
 
 TEST(VcfParse, TestKmerEdge) {
     vcf_parser vcf;
     ASSERT_TRUE(vcf.init(ref_file, vcf_file1, 4));
-    std::string seq;
     std::vector<std::string> annot;
-    ASSERT_TRUE(vcf.get_seq(annots, &seq, annot));
-    EXPECT_EQ("ATGCGCGCG", seq);
+    ASSERT_TRUE(vcf.get_seq(annots, &annot));
+    EXPECT_EQ("ATGCGCGCG", vcf.seq);
     EXPECT_EQ(4llu, annot.size());
     EXPECT_EQ("test", annot[0]);
     EXPECT_EQ("A", annot[1]);
     EXPECT_EQ("B", annot[2]);
     EXPECT_EQ("C", annot[3]);
-    EXPECT_FALSE(vcf.get_seq(annots, &seq, annot));
+    EXPECT_FALSE(vcf.get_seq(annots, &annot));
 }
 
 TEST(VcfParse, TestKmerOverLeftEdge) {
     vcf_parser vcf;
     ASSERT_TRUE(vcf.init(ref_file, vcf_file1, 5));
-    std::string seq;
     std::vector<std::string> annot;
-    ASSERT_TRUE(vcf.get_seq(annots, &seq, annot));
-    EXPECT_EQ("ATGCGCGCGC", seq);
+    ASSERT_TRUE(vcf.get_seq(annots, &annot));
+    EXPECT_EQ("ATGCGCGCGC", vcf.seq);
     EXPECT_EQ(4llu, annot.size());
     EXPECT_EQ("test", annot[0]);
     EXPECT_EQ("A", annot[1]);
     EXPECT_EQ("B", annot[2]);
     EXPECT_EQ("C", annot[3]);
-    EXPECT_FALSE(vcf.get_seq(annots, &seq, annot));
+    EXPECT_FALSE(vcf.get_seq(annots, &annot));
 }
 
 TEST(VcfParse, TestKmerOverBothEdges) {
     vcf_parser vcf;
     ASSERT_TRUE(vcf.init(ref_file, vcf_file1, 16));
-    std::string seq;
     std::vector<std::string> annot;
-    ASSERT_TRUE(vcf.get_seq(annots, &seq, annot));
-    EXPECT_EQ("ATGCGCGCGCGCTCTCGCGCA", seq);
+    ASSERT_TRUE(vcf.get_seq(annots, &annot));
+    EXPECT_EQ("ATGCGCGCGCGCTCTCGCGCA", vcf.seq);
     EXPECT_EQ(4llu, annot.size());
     EXPECT_EQ("test", annot[0]);
     EXPECT_EQ("A", annot[1]);
     EXPECT_EQ("B", annot[2]);
     EXPECT_EQ("C", annot[3]);
-    EXPECT_FALSE(vcf.get_seq(annots, &seq, annot));
+    EXPECT_FALSE(vcf.get_seq(annots, &annot));
 }
 
 TEST(VcfParse, TestKmerInfoCopyNumber) {
     vcf_parser vcf;
     ASSERT_TRUE(vcf.init(ref_file, vcf_file2, 3));
-    std::string seq;
     std::vector<std::string> annot;
-    ASSERT_TRUE(vcf.get_seq(annots, &seq, annot));
-    EXPECT_EQ("TGCCCGC", seq);
+    ASSERT_TRUE(vcf.get_seq(annots, &annot));
+    EXPECT_EQ("TGCCCGC", vcf.seq);
     EXPECT_EQ(2llu, annot.size());
     EXPECT_EQ("test", annot[0]);
     EXPECT_EQ("AC_AMR", annot[1]);
     annot.clear();
 
-    EXPECT_TRUE(vcf.get_seq(annots, &seq, annot));
-    EXPECT_EQ("TGCTTCGC", seq);
+    EXPECT_TRUE(vcf.get_seq(annots, &annot));
+    EXPECT_EQ("TGCTTCGC", vcf.seq);
     EXPECT_EQ(1llu, annot.size());
     EXPECT_EQ("test", annot[0]);
     annot.clear();
 
-    EXPECT_TRUE(vcf.get_seq(annots, &seq, annot));
-    EXPECT_EQ("TGCTTTTCGC", seq);
+    EXPECT_TRUE(vcf.get_seq(annots, &annot));
+    EXPECT_EQ("TGCTTTTCGC", vcf.seq);
     EXPECT_EQ(1llu, annot.size());
     EXPECT_EQ("test", annot[0]);
 
-    EXPECT_FALSE(vcf.get_seq(annots, &seq, annot));
+    EXPECT_FALSE(vcf.get_seq(annots, &annot));
 }
 

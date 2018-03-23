@@ -242,11 +242,10 @@ int main(int argc, const char *argv[]) {
                         exit(1);
                     }
                     std::cout << "Reading VCF" << std::endl;
-                    std::string sequence;
                     std::vector<std::string> annotation;
                     std::map<size_t, std::string> variants;
                     data_reading_timer.reset();
-                    for (size_t i = 1; vcf.get_seq(annots, &sequence, annotation); ++i) {
+                    for (size_t i = 1; vcf.get_seq(annots, &annotation); ++i) {
                         //doesn't cover the no annot case
                         for (auto &annot : annotation) {
                             auto insert_annot_map = annot_map.insert(std::make_pair(annot, annot_map.size()));
@@ -254,9 +253,9 @@ int main(int argc, const char *argv[]) {
                                 std::cerr << "ERROR: new annotation not in provided reference" << std::endl;
                                 exit(1);
                             }
-                            auto insert_annot = variants.insert(std::make_pair(insert_annot_map.first->second, sequence));
+                            auto insert_annot = variants.insert(std::make_pair(insert_annot_map.first->second, vcf.seq));
                             if (!insert_annot.second) {
-                                insert_annot.first->second += std::string("$") + sequence;
+                                insert_annot.first->second += std::string("$") + vcf.seq;
                             }
                         }
                         /*
