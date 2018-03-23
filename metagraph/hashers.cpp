@@ -124,6 +124,7 @@ CyclicHashIterator::CyclicHashIterator(const char *begin, const char *end,
         next_(begin + k),
         end_(end) {
     assert(begin <= end);
+    assert((begin + k > end) == is_end());
 }
 
 CyclicHashIterator::CyclicHashIterator(const std::string &sequence,
