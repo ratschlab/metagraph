@@ -465,6 +465,20 @@ class ExactHashAnnotation {
         fin.close();
     }
 
+    typedef std::unordered_map<std::string, std::set<size_t>>::const_iterator const_iterator;
+
+    const_iterator begin() const {
+        return kmer_map_.begin();
+    }
+
+    const_iterator end() const {
+        return kmer_map_.end();
+    }
+
+    size_t get_num_edges() const {
+        return kmer_map_.size();
+    }
+
     friend class PreciseAnnotator;
     private:
         std::unordered_map<std::string, std::set<size_t>> kmer_map_;
