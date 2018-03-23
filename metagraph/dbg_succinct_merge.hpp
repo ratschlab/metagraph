@@ -30,9 +30,9 @@ namespace merge {
      * If the null pointers are passed,
      * load chunks from files "filenamebase.<chunk_idx>_<num_chunks>".
      */
-    DBG_succ* merge_chunks(size_t k,
+    DBG_succ* build_graph_from_chunks(size_t k,
                            const std::vector<DBG_succ::Chunk*> &graph_chunks,
-                           const std::string &filenamebase = "");
+                           const std::vector<std::string> &filenames = {});
 
 } // namespace merge
 

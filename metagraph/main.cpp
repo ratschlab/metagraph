@@ -279,7 +279,9 @@ int main(int argc, const char *argv[]) {
                     delete next_block;
                 }
 
-                graph_data.initialize_graph(graph);
+                if (!config->suffix.size())
+                    graph_data.initialize_graph(graph);
+
             } else {
                 //slower method
                 //TODO: merge in optimizations from seqmerge branch
@@ -316,12 +318,11 @@ int main(int argc, const char *argv[]) {
                 std::cout << timer.elapsed() << "sec" << std::endl;
             }
             graph->switch_state(config->state);
-            config->infbase = config->outfbase;
 
             // graph output
-            if (config->print_graph_succ)
+            if (config->print_graph_succ && !config->suffix.size())
                 graph->print_state();
-            if (!config->outfbase.empty())
+            if (!config->outfbase.empty() && !config->suffix.size())
                 graph->serialize(config->outfbase);
             delete graph;
 
@@ -518,10 +519,10 @@ int main(int argc, const char *argv[]) {
         case Config::MERGE: {
             // collect results on an external merge
             if (config->collect > 1) {
-                graph = merge::merge_chunks(
+                graph = merge::build_graph_from_chunks(
                     config->k,
-                    std::vector<DBG_succ::Chunk*>(config->collect, NULL),
-                    config->outfbase
+                    std::vector<DBG_succ::Chunk*>(files.size(), NULL),
+                    files
                 );
                 break;
             }
