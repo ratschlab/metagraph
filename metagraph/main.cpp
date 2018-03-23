@@ -334,7 +334,8 @@ int main(int argc, const char *argv[]) {
             }
 
             utils::ThreadPool thread_pool_files(kMaxNumParallelReadFiles);
-            utils::ThreadPool thread_pool(std::max(1u, config->parallel) - 1, 1);
+            utils::ThreadPool thread_pool(std::max(1u, config->parallel) - 1,
+                                          std::max(1u, config->parallel));
 
             // iterate over input files
             for (const auto &file : files) {
@@ -618,7 +619,7 @@ int main(int argc, const char *argv[]) {
 
                 std::ifstream instream(file + ".anno.dbg");
                 if (instream.good()) {
-                    size_t anno_size = libmaus2::util::NumberSerialisation::deserialiseNumber(instream);
+                    size_t anno_size = NumberSerialisation::deserialiseNumber(instream);
                     std::cout << "annot: " << anno_size << std::endl;
                 }
 

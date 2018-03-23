@@ -78,7 +78,7 @@ namespace utils {
      */
     class ThreadPool {
       public:
-        ThreadPool(size_t num_workers, size_t max_num_tasks = 0);
+        ThreadPool(size_t num_workers, size_t max_num_tasks = -1);
 
         template <class F, typename... Args>
         auto enqueue(F&& f, Args&&... args) -> std::future<decltype(f(args...))> {
