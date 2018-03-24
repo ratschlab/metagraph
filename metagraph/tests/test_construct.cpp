@@ -15,11 +15,17 @@
 #include "dbg_succinct_construct.hpp"
 #include "utils.hpp"
 
-KSEQ_INIT(gzFile, gzread)
+KSEQ_INIT(gzFile, gzread);
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
+
+#ifdef _PROTEIN_GRAPH
+const int kMaxK = 51;
+#else
+const int kMaxK = 85;
+#endif
 
 
 void test_graph(DBG_succ *graph, const std::string &last,
@@ -82,7 +88,7 @@ TEST(Construct, GraphDefaultConstructor) {
 }
 
 TEST(Construct, ConstructionEQAppendingSimplePath) {
-    for (size_t k = 1; k < 80; ++k) {
+    for (size_t k = 1; k < kMaxK; ++k) {
         KMerDBGSuccConstructor constructor(k);
         constructor.add_reads({ std::string(100, 'A') });
         DBG_succ constructed(&constructor);
@@ -95,7 +101,7 @@ TEST(Construct, ConstructionEQAppendingSimplePath) {
 }
 
 TEST(Construct, ConstructionEQAppendingTwoPaths) {
-    for (size_t k = 1; k < 80; ++k) {
+    for (size_t k = 1; k < kMaxK; ++k) {
         KMerDBGSuccConstructor constructor(k);
         constructor.add_reads({ std::string(100, 'A'),
                                 std::string(50, 'B') });
@@ -110,7 +116,7 @@ TEST(Construct, ConstructionEQAppendingTwoPaths) {
 }
 
 TEST(Construct, ConstructionEQAppending) {
-    for (size_t k = 1; k < 80; ++k) {
+    for (size_t k = 1; k < kMaxK; ++k) {
         std::vector<std::string> input_data = {
             "ACAGCTAGCTAGCTAGCTAGCTG",
             "ATATTATAAAAAATTTTAAAAAA",
@@ -130,6 +136,7 @@ TEST(Construct, ConstructionEQAppending) {
     }
 }
 
+#ifndef _PROTEIN_GRAPH
 TEST(DBGSuccinct, EmptyGraph) {
     DBG_succ *graph = new DBG_succ(3);
     test_graph(graph, "01", "00", "0 1 1 1 1 1 ");
@@ -174,6 +181,7 @@ TEST(DBGSuccinct, AddSequenceFast) {
                       "0 3 11 13 17 22 ");
     delete graph;
 }
+#endif
 
 TEST(Construct, SmallGraphTraversal) {
     gzFile input_p = gzopen(test_fasta.c_str(), "r");
@@ -405,6 +413,7 @@ TEST(DBGSuccinct, PredKmer) {
         test_pred_kmer(graph, "NNNNN", 7);
         test_pred_kmer(graph, "$$$$$", 2);
     }
+#ifndef _PROTEIN_GRAPH
     {
         DBG_succ graph(5);
         graph.add_sequence("AAACGTAGTATGTAGC");
@@ -446,6 +455,7 @@ TEST(DBGSuccinct, PredKmer) {
         test_pred_kmer(graph, "NT", 35);
         test_pred_kmer(graph, "TN", 35);
     }
+#endif
 }
 
 TEST(DBGSuccinct, PredKmerRandomTest) {
@@ -560,7 +570,7 @@ namespace utils {
 }
 
 TEST(ExtractKmers, ExtractKmersEmptySuffix) {
-    for (size_t k = 1; k < 85; ++k) {
+    for (size_t k = 1; k < kMaxK; ++k) {
         std::vector<KMer> result;
 
         for (size_t length = 0; length < k; ++length) {
@@ -580,7 +590,7 @@ TEST(ExtractKmers, ExtractKmersEmptySuffix) {
 TEST(ExtractKmers, ExtractKmersWithFilteringOne) {
     std::vector<TAlphabet> suffix = { 0 };
 
-    for (size_t k = 1; k < 85; ++k) {
+    for (size_t k = 1; k < kMaxK; ++k) {
         std::vector<KMer> result;
 
         for (size_t length = 0; length < 500; ++length) {
@@ -590,7 +600,7 @@ TEST(ExtractKmers, ExtractKmersWithFilteringOne) {
     }
 
     suffix.assign({ 6 });
-    for (size_t k = 1; k < 85; ++k) {
+    for (size_t k = 1; k < kMaxK; ++k) {
         std::vector<KMer> result;
 
         for (size_t length = 0; length < k; ++length) {
@@ -609,7 +619,7 @@ TEST(ExtractKmers, ExtractKmersWithFilteringOne) {
 
 TEST(ExtractKmers, ExtractKmersWithFilteringTwo) {
     std::vector<TAlphabet> suffix = { 6, 1 };
-    for (size_t k = 2; k < 85; ++k) {
+    for (size_t k = 2; k < kMaxK; ++k) {
         std::vector<KMer> result;
 
         for (size_t length = 0; length <= k; ++length) {
@@ -641,7 +651,7 @@ TEST(ExtractKmers, ExtractKmersAppend) {
 }
 
 TEST(ExtractKmers, ExtractKmersFromStringWithoutFiltering) {
-    for (size_t k = 2; k < 85; ++k) {
+    for (size_t k = 2; k < kMaxK; ++k) {
         std::vector<KMer> result;
 
         for (size_t length = 0; length < k; ++length) {
@@ -661,11 +671,13 @@ TEST(ExtractKmers, ExtractKmersFromStringWithoutFiltering) {
 }
 
 TEST(ExtractKmers, ExtractKmersFromStringWithFilteringTwo) {
-    for (size_t k = 2; k < 85; ++k) {
+    for (size_t k = 2; k < kMaxK; ++k) {
         std::vector<KMer> result;
 
         for (size_t length = 0; length < k; ++length) {
-            utils::sequence_to_kmers(std::string(length, 'N'), k, &result, { 5, 5 });
+            utils::sequence_to_kmers(std::string(length, 'N'), k, &result,
+                                     { DBG_succ::encode('N'),
+                                       DBG_succ::encode('N') });
             ASSERT_TRUE(result.empty()) << "k: " << k
                                         << ", length: " << length;
         }
@@ -676,11 +688,14 @@ TEST(ExtractKmers, ExtractKmersFromStringWithFilteringTwo) {
             ASSERT_EQ(1u, result.size()) << "k: " << k
                                          << ", length: " << length;
             result.clear();
-            utils::sequence_to_kmers(std::string(length, 'N'), k, &result, { 0, 5 });
+            utils::sequence_to_kmers(std::string(length, 'N'), k, &result,
+                                     { 0, DBG_succ::encode('N') });
             ASSERT_EQ(1u, result.size()) << "k: " << k
                                          << ", length: " << length;
             result.clear();
-            utils::sequence_to_kmers(std::string(length, 'N'), k, &result, { 5, 5 });
+            utils::sequence_to_kmers(std::string(length, 'N'), k, &result,
+                                     { DBG_succ::encode('N'),
+                                       DBG_succ::encode('N') });
             ASSERT_EQ(length - 1, result.size()) << "k: " << k
                                                  << ", length: " << length;
         }
@@ -688,7 +703,8 @@ TEST(ExtractKmers, ExtractKmersFromStringWithFilteringTwo) {
         result.clear();
 
         for (size_t length = 0; length <= k; ++length) {
-            utils::sequence_to_kmers(std::string(length, 'N'), k, &result, { 5, 1 });
+            utils::sequence_to_kmers(std::string(length, 'N'), k, &result,
+                                     { DBG_succ::encode('N'), 1 });
             ASSERT_TRUE(result.empty());
         }
 
@@ -698,7 +714,8 @@ TEST(ExtractKmers, ExtractKmersFromStringWithFilteringTwo) {
             std::string sequence(length, 'N');
             sequence[k - 1] = 'A';
 
-            utils::sequence_to_kmers(sequence, k, &result, { 5, 1 });
+            utils::sequence_to_kmers(sequence, k, &result,
+                                     { DBG_succ::encode('N'), 1 });
             ASSERT_EQ(1u, result.size()) << "k: " << k
                                          << ", length: " << length;
         }

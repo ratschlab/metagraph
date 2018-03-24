@@ -1,5 +1,6 @@
 #include <stdio.h>
 
+#include <sdsl/uint128_t.hpp>
 #include "gtest/gtest.h"
 
 #define private public
@@ -7,7 +8,6 @@
 
 #include "dbg_succinct.hpp"
 #include "kmer.hpp"
-#include <sdsl/uint128_t.hpp>
 
 
 std::string kmer_codec(const std::string &test_kmer) {
@@ -111,7 +111,7 @@ TEST(KmerEncodeTest, UpdateKmerLong) {
               kmer[0].to_string(DBG_succ::alphabet));
 }
 
-
+#ifndef _PROTEIN_GRAPH
 TEST(KmerEncodeTest, UpdateKmerVsConstruct) {
     std::string long_seq0 = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAA$";
     std::string long_seq1 =  "AGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAA$T";
@@ -135,6 +135,7 @@ TEST(KmerEncodeTest, UpdateKmerVsConstruct) {
     reconst_seq2 = reconst_seq2.substr(1);
     EXPECT_EQ(long_seq1, reconst_seq2);
 }
+#endif
 
 TEST(KmerEncodeTest, InvertibleEndDol) {
     test_kmer_codec("ATG$", "ATG$");
@@ -148,9 +149,11 @@ TEST(KmerEncodeTest, InvertibleBothDol) {
     test_kmer_codec("$ATG$", "$ATG$");
 }
 
+#ifndef _PROTEIN_GRAPH
 TEST(KmerEncodeTest, InvalidChars) {
     test_kmer_codec("ATGH", "ATGN");
 }
+#endif
 
 void test_kmer_less(std::string k1, std::string k2, bool truth) {
     KMer kmer[2] = {
@@ -169,11 +172,11 @@ TEST(KmerEncodeTest, Less) {
 }
 
 TEST(KmerEncodeTest, LessLong) {
-    test_kmer_less(std::string(79, 'A') +  "C",
-                   std::string(79, 'A') +  "T", true);
+    test_kmer_less(std::string(256 / kBitsPerChar - 1, 'A') +  "C",
+                   std::string(256 / kBitsPerChar - 1, 'A') +  "T", true);
 
-    test_kmer_less(std::string(79, 'A') + "CA",
-                   std::string(79, 'A') + "TA", true);
+    test_kmer_less(std::string(256 / kBitsPerChar - 2, 'A') + "CA",
+                   std::string(256 / kBitsPerChar - 2, 'A') + "TA", true);
 }
 
 void test_kmer_suffix(std::string k1, std::string k2, bool truth) {
@@ -210,7 +213,7 @@ TEST(KmerEncodeTest, CompareSuffixTrueLong) {
     //shift, then compare
     long_seq_alt[22] = 'T';
 
-    kmer[0].seq_ = kmer[0].seq_ >> 66;
+    kmer[0].seq_ = kmer[0].seq_ >> 22 * kBitsPerChar;
     kmer[1] = KMer(long_seq_alt.substr(22), DBG_succ::encode);
 
     ASSERT_TRUE(KMer::compare_suffix(kmer[0], kmer[1], 1));

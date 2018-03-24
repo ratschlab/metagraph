@@ -11,7 +11,11 @@
 using sdsl::uint256_t;
 typedef uint64_t TAlphabet;
 
+#ifdef _PROTEIN_GRAPH
+const int kBitsPerChar = 5;
+#else
 const int kBitsPerChar = 3;
+#endif
 
 
 class KMer {

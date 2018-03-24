@@ -26,10 +26,22 @@ using libmaus2::util::NumberSerialisation;
     assert(idx < W->size()); \
     assert(idx > 0)
 
+#ifdef _PROTEIN_GRAPH
+const std::string DBG_succ::alphabet = "$ABCDEFGHIJKLMNOPQRSTUVWYZX"
+                                       "$ABCDEFGHIJKLMNOPQRSTUVWYZX";
+const TAlphabet kCharToNucleotide[128] = {
+    26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
+    26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
+    26, 26, 26, 26,   0, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
+    26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
+    26,  1,  2,  3,   4,  5,  6,  7,   8,  9, 10, 11,  12, 13, 14, 15,
+    16, 17, 18, 19,  20, 21, 22, 23,  26, 24, 25, 26,  26, 26, 26, 26,
+    26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
+    26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26
+};
+const size_t kLogSigma = 6;
+#else
 const std::string DBG_succ::alphabet = "$ACGTN$ACGTN";
-const size_t DBG_succ::alph_size = 6;
-const SequenceGraph::node_iterator SequenceGraph::npos = 0;
-
 const TAlphabet kCharToNucleotide[128] = {
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
@@ -40,12 +52,18 @@ const TAlphabet kCharToNucleotide[128] = {
     5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 5, 5, 5,  4, 4, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5
 };
+const size_t kLogSigma = 4;
+#endif
+
+const size_t DBG_succ::alph_size = DBG_succ::alphabet.size() / 2;
+
+const SequenceGraph::node_iterator SequenceGraph::npos = 0;
 
 
 DBG_succ::DBG_succ(size_t k)
       : k_(k), last(new bit_vector_dyn()),
                F(alph_size, 0),
-               W(new wavelet_tree_dyn(4)) {
+               W(new wavelet_tree_dyn(kLogSigma)) {
     last->insertBit(0, false);
     W->insert(0, 0);
 
@@ -199,11 +217,11 @@ bool DBG_succ::load(const std::string &infbase) {
         delete last;
         switch (state) {
             case Config::DYN:
-                W = new wavelet_tree_dyn(4);
+                W = new wavelet_tree_dyn(kLogSigma);
                 last = new bit_vector_dyn();
                 break;
             case Config::STAT:
-                W = new wavelet_tree_stat(4);
+                W = new wavelet_tree_stat(kLogSigma);
                 last = new bit_vector_stat();
                 break;
         }
@@ -940,7 +958,7 @@ void DBG_succ::switch_state(Config::StateType new_state) {
 
     switch (new_state) {
         case Config::DYN: {
-            wavelet_tree *W_new = new wavelet_tree_dyn(4, *W);
+            wavelet_tree *W_new = new wavelet_tree_dyn(kLogSigma, *W);
             delete W;
             W = W_new;
 
@@ -951,7 +969,7 @@ void DBG_succ::switch_state(Config::StateType new_state) {
             break;
         }
         case Config::STAT: {
-            wavelet_tree *W_new = new wavelet_tree_stat(4, *W);
+            wavelet_tree *W_new = new wavelet_tree_stat(kLogSigma, *W);
             delete W;
             W = W_new;
 

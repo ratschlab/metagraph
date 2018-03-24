@@ -35,3 +35,6 @@ use `glibtoolize` instead of `libtoolize` on MacOS
 - `-DCMAKE_BUILD_TYPE=[Debug|Release|Profile]` -- build modes (`Debug` by default)
 - `-DBUILD_STATIC=ON` -- link statically (OFF by default)
 - `-DPYTHON_INTERFACE=ON` -- compile python interface (requires shared libraries, OFF by default)
+
+### Compile in the amino acid mode
+- `-DCMAKE_DBG_ALPHABET=Protein` -- use the alphabet of amino acids (`DNA` by default)

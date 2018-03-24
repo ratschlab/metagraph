@@ -7,6 +7,16 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "DEBUG")
 endif()
 
+if(NOT CMAKE_DBG_ALPHABET)
+  set(CMAKE_DBG_ALPHABET "DNA")
+endif()
+
+if(CMAKE_DBG_ALPHABET STREQUAL "DNA")
+  string(APPEND CMAKE_CXX_FLAGS " -D_DNA_GRAPH")
+else()
+  string(APPEND CMAKE_CXX_FLAGS " -D_PROTEIN_GRAPH")
+endif()
+
 string(APPEND CMAKE_CXX_FLAGS " \
   -std=c++14 -Wall -Wextra -Werror \
   -msse4.2 -mavx -mavx2 -mbmi -mbmi2 \
