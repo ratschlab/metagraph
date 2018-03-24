@@ -251,3 +251,17 @@ TEST(wavelet_tree_dyn, Serialization) {
 
     delete vector;
 }
+
+TEST(wavelet_tree_stat, BeyondTheDNA) {
+    std::vector<uint64_t> numbers = { 0, 57, 0, 1, 100, 1, 1, 0,
+                                      0, 1, 89, 0, 3, 2, 75, 1 };
+    wavelet_tree_stat vector(7, numbers);
+    EXPECT_EQ(numbers, vector.to_vector());
+}
+
+TEST(wavelet_tree_dyn, BeyondTheDNA) {
+    std::vector<uint64_t> numbers = { 0, 57, 0, 1, 100, 1, 1, 0,
+                                      0, 1, 89, 0, 3, 2, 75, 1 };
+    wavelet_tree_dyn vector(7, numbers);
+    EXPECT_EQ(numbers, vector.to_vector());
+}

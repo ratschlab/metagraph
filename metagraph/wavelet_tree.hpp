@@ -223,7 +223,7 @@ class wavelet_tree_dyn : public wavelet_tree {
 
         size_t n = size();
 
-        const size_t b = 4;
+        const size_t b = wavelet_tree_.b;
 
         std::vector<uint64_t> offsets(1ull << b, 0);
         std::queue<uint64_t> blocks;
