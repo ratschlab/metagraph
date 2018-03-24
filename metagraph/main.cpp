@@ -17,11 +17,6 @@ using libmaus2::util::NumberSerialisation;
 
 const size_t kMaxNumParallelReadFiles = 5;
 
-const std::vector<std::string> annots = {
-  "AC_AFR", "AC_EAS", "AC_AMR", "AC_ASJ",
-  "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"
-};
-
 KSEQ_INIT(gzFile, gzread);
 
 
@@ -97,6 +92,39 @@ void read_fasta_file_critical(const std::string &filename,
     gzclose(input_p);
 }
 
+template <class Callback>
+void read_vcf_file_critical(const std::string &filename,
+                            const std::string &ref_filename,
+                            size_t k,
+                            std::vector<std::string> *annotation,
+                            Callback callback, Timer *timer = NULL) {
+
+    //TODO: make this a configurable option
+    //default list of tokens to extract as annotations
+    const std::vector<std::string> annots = {
+      "AC_AFR", "AC_EAS", "AC_AMR", "AC_ASJ",
+      "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"
+    };
+
+    vcf_parser vcf;
+    if (!vcf.init(ref_filename, filename, k)) {
+        std::cerr << "ERROR reading VCF " << filename << std::endl;
+        exit(1);
+    }
+    if (timer) {
+        std::cout << "Extracting sequences from file " << filename << std::endl;
+    }
+    size_t seq_count = 0;
+    while (vcf.get_seq(annots, annotation)) {
+        callback(vcf.seq, annotation);
+        seq_count++;
+    }
+    if (timer) {
+        std::cout << "Finished extracting sequences from file " << filename
+                  << " in " << timer->elapsed() << "sec"
+                  << ", sequences extracted: " << seq_count << std::endl;
+    }
+}
 
 int main(int argc, const char *argv[]) {
 
@@ -179,27 +207,16 @@ int main(int argc, const char *argv[]) {
                             if (suffix.find('$') != std::string::npos)
                                 continue;
 
-                            vcf_parser vcf;
-                            if (!vcf.init(config->refpath, files[f], graph->get_k())) {
-                                std::cerr << "ERROR reading VCF " << files[f] << std::endl;
-                                exit(1);
-                            }
-
-                            std::vector<std::string> annotation;
-                            for (size_t i = 1; vcf.get_seq(annots, &annotation); ++i) {
-                                //measure rate
-                                constructor->add_read(vcf.seq);
-
+                            Timer *timer_ptr = config->verbose ? &timer : NULL;
+                            //assume VCF contains no noise
+                            read_vcf_file_critical(files[f], config->refpath, graph->get_k(), NULL,
+                                [&](std::string &seq, std::vector<std::string> *variant_annotations = NULL) {
+                                constructor->add_read(seq);
                                 if (config->reverse) {
-                                    kstring_t kseq;
-                                    kseq.s = &vcf.seq[0];
-                                    kseq.l = vcf.seq.length();
-                                    reverse_complement(kseq);
-
-                                    constructor->add_read(kseq.s);
+                                    reverse_complement(seq.begin(), seq.end());
+                                    constructor->add_read(seq);
                                 }
-                                annotation.clear();
-                            }
+                            }, timer_ptr);
                         } else if (utils::get_filetype(files[f]) == "FASTA"
                                     || utils::get_filetype(files[f]) == "FASTQ") {
                             Timer *timer_ptr = config->verbose ? &timer : NULL;
@@ -293,8 +310,14 @@ int main(int argc, const char *argv[]) {
                     }
                     // open stream
                     if (utils::get_filetype(files[f]) == "VCF") {
-                        std::cerr << "ERROR: this method of reading VCFs not yet implemented" << std::endl;
-                        exit(1);
+                        read_vcf_file_critical(files[f], config->refpath, graph->get_k(), NULL,
+                            [&](std::string &seq, std::vector<std::string> *variant_annotations = NULL) {
+                            graph->add_sequence(seq);
+                            if (config->reverse) {
+                                reverse_complement(seq.begin(), seq.end());
+                                graph->add_sequence(seq);
+                            }
+                        });
                     } else if (utils::get_filetype(files[f]) == "FASTA"
                                 || utils::get_filetype(files[f]) == "FASTQ") {
                         read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
@@ -403,56 +426,37 @@ int main(int argc, const char *argv[]) {
                 }
                 // open stream
                 if (utils::get_filetype(file) == "VCF") {
-                    //std::cerr << "ERROR: this method of reading VCFs not yet implemented" << std::endl;
-                    //exit(1);
-                    Timer data_reading_timer;
-                    vcf_parser vcf;
-                    if (!vcf.init(config->refpath, file, config->k)) {
-                        std::cerr << "Error reading\n";
-                        exit(1);
-                    }
-                    std::cout << "Reading VCF" << std::endl;
-                    std::vector<std::string> curannots;
-                    std::map<std::string, std::string> variants;
-                    data_reading_timer.reset();
-                    for (size_t i = 1; vcf.get_seq(annots, &curannots); ++i) {
-                        //doesn't cover the no annot case
-                        for (auto &annot : curannots) {
-                            //auto insert_annot_map = annot_map.insert(std::make_pair(annot, annot_map.size()));
-                            auto insert_annot = variants.insert(std::make_pair(annot, vcf.seq));
-                            if (!insert_annot.second) {
-                                insert_annot.first->second += std::string("$") + vcf.seq;
-                            }
-                        }
-                        //annotation.clear();
-                        curannots.clear();
-                    }
-                    /*
-                    file_read_time += data_reading_timer.elapsed();
-                    for (auto &variant : variants) {
-                        for (size_t j = 0; j < 2; ++j) {
-                            //if (annotator) {
-                                data_reading_timer.reset();
-
-                                if (config->succinct) {
-                                annotator->add_sequence(variant.second, variant.first,
-                                            (variant.second.length() - graph->get_k())
-                                                * (static_cast<size_t>(config->reverse) + 1));
-                                } else {
-                                annotator->add_sequence(variant.second, variant.first,
-                                            (variant.second.length() - hashing_graph.get_k())
-                                                * (static_cast<size_t>(config->reverse) + 1));
+                    //TODO: Bloom filter annotator
+                    std::vector<std::string> variant_annotations;
+                    std::unordered_map<std::string, std::set<size_t>> label_map;
+                    read_vcf_file_critical(file, config->refpath, graph->get_k(), &variant_annotations,
+                        [&](std::string &seq, std::vector<std::string> *variant_annotations) {
+                            assert(variant_annotations);
+                            graph->align(seq, [&](uint64_t i) {
+                                if (i > 0) {
+                                    for (auto &label : *variant_annotations) {
+                                        label_map[label].insert(i);
+                                    }
                                 }
-                                bloom_const_time += data_reading_timer.elapsed();
-                            //}
+                            });
                             if (config->reverse) {
-                                reverse_complement(variant.second.begin(), variant.second.end());
-                            } else {
-                                break;
+                                reverse_complement(seq.begin(), seq.end());
+                                graph->align(seq, [&](uint64_t i) {
+                                    if (i > 0) {
+                                        for (auto &label : *variant_annotations) {
+                                            label_map[label].insert(i);
+                                        }
+                                    }
+                                });
                             }
+                            variant_annotations->clear();
+                        }
+                    );
+                    for (auto &label : label_map) {
+                        for (auto &index : label.second) {
+                            annotation.add_label(index, label.first);
                         }
                     }
-                    */
                 } else if (utils::get_filetype(file) == "FASTA"
                             || utils::get_filetype(file) == "FASTQ") {
                     read_fasta_file_critical(file, [&](kseq_t *read_stream) {
