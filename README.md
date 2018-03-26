@@ -11,9 +11,10 @@ Can be installed with `brew` or `linuxbrew`.
 ### Install
 1. `git clone --recursive https://github.com/ratschlab/projects2014-metagenome.git`
 2. install **libmaus2** and **sdsl-lite** in `metagraph/external-libraries/` following the corresponding istructions  
-or simply run the following script from the `metagraph/` dir
+or simply run the following script
 ```bash
-cd external-libraries/sdsl-lite
+git submodule update --init --recursive
+cd metagraph/external-libraries/sdsl-lite
 ./install.sh $(pwd)
 
 cd ../libmaus2
