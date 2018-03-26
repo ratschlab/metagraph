@@ -12,8 +12,9 @@ __author__ = 'Mikhail Karasikov'
 
 
 class DBGVisualizer():
-    def __init__(self, executable):
+    def __init__(self, executable, fast_mode=False):
         self.executable = executable
+        self.fast_mode = fast_mode
 
     def visualize(self, k, sequences):
         output = []
@@ -31,9 +32,7 @@ class DBGVisualizer():
             state_repr, out_log = self.__get_state_representation(graph_filename)
             output.append(out_log)
 
-            os.remove(graph_filename + '.W.dbg')
-            os.remove(graph_filename + '.l.dbg')
-            os.remove(graph_filename + '.F.dbg')
+            os.remove(graph_filename + '.dbg')
 
             return state_repr, '\n'.join([x for x in output if len(x)])
 
@@ -47,7 +46,9 @@ class DBGVisualizer():
             graph_file.close()
 
             output = subprocess.check_output(
-                [ self.executable, 'build', '-k', str(k), '-o', graph_file.name, fasta_filename ],
+                [ self.executable, 'build', '-k', str(k) ] +
+                    ([ '--fast' ] if self.fast_mode else []) +
+                    [ '-o', graph_file.name, fasta_filename ],
                 stderr=subprocess.STDOUT
             ).decode()
 
