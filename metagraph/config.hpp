@@ -19,6 +19,7 @@ class Config {
     bool query = false;
     bool traversal_merge = false;
     bool succinct = false;
+    bool dump_raw_anno = false;
 
     unsigned int k = 3;
     unsigned int distance = 0;

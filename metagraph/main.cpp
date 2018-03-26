@@ -414,10 +414,39 @@ int main(int argc, const char *argv[]) {
             // load graph
             graph = load_critical_graph_from_file(config->infbase);
 
+            // initialize empty Bloom filter annotation
+            annotate::BloomAnnotator *bloom_annotation = NULL;
+            annotate::DBGSuccAnnotWrapper *graph_wrapper = NULL;
+            if (config->bloom_fpp > -0.5
+                    || config->bloom_bits_per_edge > -0.5
+                    || config->bloom_num_hash_functions > 0) {
+                graph_wrapper = new annotate::DBGSuccAnnotWrapper(*graph);
+                if (config->bloom_fpp > -0.5) {
+                    // Expected FPP is set, optimize other parameters automatically
+                    bloom_annotation = new annotate::BloomAnnotator(
+                        *graph_wrapper,
+                        config->bloom_fpp,
+                        config->verbose
+                    );
+                } else {
+                    assert(config->bloom_bits_per_edge >= 0);
+                    // Experiment mode, estimate FPP given other parameters,
+                    // optimize the number of hash functions if it's set to zero
+                    bloom_annotation = new annotate::BloomAnnotator(
+                        *graph_wrapper,
+                        config->bloom_bits_per_edge,
+                        config->bloom_num_hash_functions,
+                        config->verbose
+                    );
+                }
+            }
+
             // initialize empty annotation
             annotate::ColorCompressed annotation(1 + graph->num_edges());
+            std::unordered_map<std::string, size_t> label_store;
 
             size_t total_seqs = 0;
+            bool has_vcf = false;
 
             // iterate over input files
             for (const auto &file : files) {
@@ -426,15 +455,28 @@ int main(int argc, const char *argv[]) {
                 }
                 // open stream
                 if (utils::get_filetype(file) == "VCF") {
-                    //TODO: Bloom filter annotator
-                    std::vector<std::string> variant_annotations;
+                    has_vcf = true;
+                    std::vector<std::string> variant_labels;
                     std::unordered_map<std::string, std::set<size_t>> label_map;
-                    read_vcf_file_critical(file, config->refpath, graph->get_k(), &variant_annotations,
-                        [&](std::string &seq, std::vector<std::string> *variant_annotations) {
-                            assert(variant_annotations);
+                    std::map<size_t, std::string> accum_variants;
+                    read_vcf_file_critical(file, config->refpath, graph->get_k(), &variant_labels,
+                        [&](std::string &seq, std::vector<std::string> *variant_labels) {
+                            assert(variant_labels);
+                            for (auto &label : *variant_labels) {
+                                auto label_ins = label_store.insert(std::make_pair(label, label_store.size()));
+                                if (bloom_annotation) {
+                                    auto accum_variants_ins = accum_variants.insert(std::make_pair(
+                                        label_ins.first->second,
+                                        seq
+                                    ));
+                                    if (!accum_variants_ins.second) {
+                                        accum_variants_ins.first->second += std::string("$") + seq;
+                                    }
+                                }
+                            }
                             graph->align(seq, [&](uint64_t i) {
                                 if (i > 0) {
-                                    for (auto &label : *variant_annotations) {
+                                    for (auto &label : *variant_labels) {
                                         label_map[label].insert(i);
                                     }
                                 }
@@ -443,35 +485,83 @@ int main(int argc, const char *argv[]) {
                                 reverse_complement(seq.begin(), seq.end());
                                 graph->align(seq, [&](uint64_t i) {
                                     if (i > 0) {
-                                        for (auto &label : *variant_annotations) {
+                                        for (auto &label : *variant_labels) {
                                             label_map[label].insert(i);
                                         }
                                     }
                                 });
                             }
-                            variant_annotations->clear();
+                            variant_labels->clear();
                         }
                     );
-                    for (auto &label : label_map) {
-                        for (auto &index : label.second) {
-                            annotation.add_label(index, label.first);
+                    if (bloom_annotation) {
+                        for (auto &variant : accum_variants) {
+                            bloom_annotation->add_sequence(
+                                variant.second,
+                                variant.first,
+                                (variant.second.length() - graph->get_k())
+                                    * (static_cast<size_t>(config->reverse) + 1)
+                            );
+                            if (config->reverse) {
+                                reverse_complement(variant.second.begin(), variant.second.end());
+                                bloom_annotation->add_sequence(
+                                    variant.second,
+                                    variant.first,
+                                    (variant.second.length() - graph->get_k())
+                                        * (static_cast<size_t>(config->reverse) + 1)
+                                );
+                            }
+                        }
+                    }
+                    if (!bloom_annotation || config->bloom_test_num_kmers) {
+                        for (auto &label : label_map) {
+                            for (auto &index : label.second) {
+                                annotation.add_label(index, label.first);
+                            }
                         }
                     }
                 } else if (utils::get_filetype(file) == "FASTA"
                             || utils::get_filetype(file) == "FASTQ") {
+                    //TODO: Bloom filters too small for FASTQ files
+                    std::string label;
+                    std::pair<std::unordered_map<std::string, size_t>::iterator, bool> label_ins;
+                    if (!config->fasta_anno) {
+                        label = file;
+                        label_ins = label_store.insert(std::make_pair(label, label_store.size()));
+                    }
                     read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-                        auto label = config->fasta_anno
-                                        ? read_stream->name.s
-                                        : file;
-                        graph->align(read_stream->seq.s, [&](uint64_t i) {
-                            if (i > 0) annotation.add_label(i, label);
-                        });
-
-                        if (config->reverse) {
-                            reverse_complement(read_stream->seq);
+                        if (config->fasta_anno) {
+                            label = read_stream->name.s;
+                            label_ins = label_store.insert(std::make_pair(label, label_store.size()));
+                        }
+                        if (bloom_annotation) {
+                            bloom_annotation->add_sequence(
+                                read_stream->seq.s,
+                                label_ins.first->second,
+                                (read_stream->seq.l - graph->get_k())
+                                    * (static_cast<size_t>(config->reverse) + 1)
+                            );
+                        }
+                        if (!bloom_annotation || config->bloom_test_num_kmers) {
                             graph->align(read_stream->seq.s, [&](uint64_t i) {
                                 if (i > 0) annotation.add_label(i, label);
                             });
+                        }
+                        if (config->reverse) {
+                            reverse_complement(read_stream->seq);
+                            if (bloom_annotation) {
+                                bloom_annotation->add_sequence(
+                                    read_stream->seq.s,
+                                    label_ins.first->second,
+                                    (read_stream->seq.l - graph->get_k())
+                                        * (static_cast<size_t>(config->reverse) + 1)
+                                );
+                            }
+                            if (!bloom_annotation || config->bloom_test_num_kmers) {
+                                graph->align(read_stream->seq.s, [&](uint64_t i) {
+                                    if (i > 0) annotation.add_label(i, label);
+                                });
+                            }
                         }
                         total_seqs += 1;
                         if (config->verbose && total_seqs % 10000 == 0) {
@@ -487,8 +577,23 @@ int main(int argc, const char *argv[]) {
                     exit(1);
                 }
             }
+            if (bloom_annotation && config->bloom_test_num_kmers) {
+                std::cout << "Approximating FPP...\t" << std::flush;
+                bloom_annotation->test_fp_all(annotation, config->bloom_test_num_kmers, has_vcf);
+                std::cout << std::endl;
+            }
             annotation.serialize(config->infbase + ".anno.dbg");
-            //annotation.serialize_uncompressed_rows(config->infbase + ".anno.rawrows.dbg");
+            if (config->dump_raw_anno) {
+                annotation.serialize_uncompressed_rows(config->infbase + ".anno.rawrows.dbg");
+            }
+            if (bloom_annotation) {
+                bloom_annotation->serialize(config->infbase + ".anno.bloom.dbg");
+                assert(graph_wrapper);
+                delete graph_wrapper;
+                delete bloom_annotation;
+                bloom_annotation = NULL;
+                graph_wrapper = NULL;
+            }
             delete graph;
             graph = NULL;
             break;
