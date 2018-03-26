@@ -352,7 +352,7 @@ void BloomAnnotator::serialize(std::ostream &out) const {
 }
 
 void BloomAnnotator::serialize(const std::string &filename) const {
-    std::ofstream out(filename + ".annot.dbg");
+    std::ofstream out(filename);
     serialize(out);
     out.close();
 }
