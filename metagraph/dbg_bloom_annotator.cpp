@@ -372,15 +372,15 @@ BloomAnnotator::kmer_from_index(DeBruijnGraphWrapper::edge_index index) const {
     return graph_.get_node_kmer(index) + graph_.get_edge_label(index);
 }
 
-std::vector<size_t> get_annotation_exact(const PreciseAnnotator &annotation_exact, DeBruijnGraphWrapper::edge_index i, std::string &int_kmer) {
+std::vector<uint64_t> get_annotation_exact(const PreciseAnnotator &annotation_exact, DeBruijnGraphWrapper::edge_index i, std::string &int_kmer) {
     ++i;
     return annotation_exact.annotation_from_kmer(int_kmer);
 }
 
-std::vector<size_t> get_annotation_exact(const ColorCompressed &annotation_exact, DeBruijnGraphWrapper::edge_index i, std::string int_kmer) {
+std::vector<uint64_t> get_annotation_exact(const ColorCompressed &annotation_exact, DeBruijnGraphWrapper::edge_index i, std::string int_kmer) {
     int_kmer = "";
     auto labels = annotation_exact.get_label_names();
-    std::vector<size_t> annot((labels.size() + 63) >> 6);
+    std::vector<uint64_t> annot((labels.size() + 63) >> 6);
     for (size_t j = 0; j < labels.size(); ++j) {
         if (annotation_exact.has_label(i, labels[j])) {
             set_bit(annot, j);

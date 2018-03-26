@@ -61,8 +61,6 @@ list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
 add_library(metagraph STATIC ${src_files})
 add_executable(metagengraph "main.cpp")
 add_dependencies(metagengraph metagraph)
-add_executable(annograph "annotation_main.cpp")
-add_dependencies(annograph metagraph)
 
 set(METALIBS
   -lhts -lz -lbz2
@@ -79,10 +77,6 @@ endif()
 
 target_link_libraries(
   metagengraph metagraph ${METALIBS}
-)
-
-target_link_libraries(
-  annograph metagraph ${METALIBS}
 )
 
 
