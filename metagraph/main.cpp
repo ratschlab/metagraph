@@ -419,7 +419,7 @@ int main(int argc, const char *argv[]) {
             graph = load_critical_graph_from_file(config->infbase);
 
             // initialize empty Bloom filter annotation
-            annotate::BloomAnnotator *bloom_annotation = NULL;
+            hash_annotate::BloomAnnotator *bloom_annotation = NULL;
             annotate::DBGSuccAnnotWrapper *graph_wrapper = NULL;
             if (config->bloom_fpp > -0.5
                     || config->bloom_bits_per_edge > -0.5
@@ -427,7 +427,7 @@ int main(int argc, const char *argv[]) {
                 graph_wrapper = new annotate::DBGSuccAnnotWrapper(*graph);
                 if (config->bloom_fpp > -0.5) {
                     // Expected FPP is set, optimize other parameters automatically
-                    bloom_annotation = new annotate::BloomAnnotator(
+                    bloom_annotation = new hash_annotate::BloomAnnotator(
                         *graph_wrapper,
                         config->bloom_fpp,
                         config->verbose
@@ -436,7 +436,7 @@ int main(int argc, const char *argv[]) {
                     assert(config->bloom_bits_per_edge >= 0);
                     // Experiment mode, estimate FPP given other parameters,
                     // optimize the number of hash functions if it's set to zero
-                    bloom_annotation = new annotate::BloomAnnotator(
+                    bloom_annotation = new hash_annotate::BloomAnnotator(
                         *graph_wrapper,
                         config->bloom_bits_per_edge,
                         config->bloom_num_hash_functions,

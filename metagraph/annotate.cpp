@@ -347,7 +347,7 @@ AnnotationCategoryBloom::AnnotationCategoryBloom(const DBG_succ &graph,
 
 AnnotationCategoryBloom::SetStr
 AnnotationCategoryBloom::get(Index i) const {
-    auto annotation = BloomAnnotator::unpack(annotator_.get_annotation(i));
+    auto annotation = hash_annotate::BloomAnnotator::unpack(annotator_.get_annotation(i));
     SetStr result;
     for (size_t value : annotation) {
         result.insert(column_to_label_[value]);
@@ -381,7 +381,7 @@ bool AnnotationCategoryBloom::has_label(Index i, const SetStr &label) const {
         sorted_labels.insert(it->second);
     }
 
-    auto annotation = BloomAnnotator::unpack(annotator_.get_annotation(i));
+    auto annotation = hash_annotate::BloomAnnotator::unpack(annotator_.get_annotation(i));
     return std::equal(sorted_labels.begin(), sorted_labels.end(),
                       annotation.begin(), annotation.end());
 }
@@ -429,7 +429,9 @@ bool AnnotationCategoryHash::has_label(Index i, const SetStr &label) const {
     }
 
     auto kmer_edge = graph_.get_node_kmer(i) + graph_.get_edge_label(i);
-    auto annotation = BloomAnnotator::unpack(annotator_.annotation_from_kmer(kmer_edge));
+    auto annotation = hash_annotate::BloomAnnotator::unpack(
+        annotator_.annotation_from_kmer(kmer_edge)
+    );
     return std::equal(sorted_labels.begin(), sorted_labels.end(),
                       annotation.begin(), annotation.end());
 }
@@ -439,7 +441,7 @@ void AnnotationCategoryHash::compare_annotations(const AnnotationCategoryBloom &
     bloom.compare_annotations(*this, step);
 }
 
-void AnnotationCategoryHash::compare_annotations(const BloomAnnotator &bloom_annotator,
+void AnnotationCategoryHash::compare_annotations(const hash_annotate::BloomAnnotator &bloom_annotator,
                                                  size_t step) const {
     bloom_annotator.test_fp_all(annotator_, step);
 }

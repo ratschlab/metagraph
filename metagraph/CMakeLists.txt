@@ -49,9 +49,12 @@ include_directories(
   external-libraries/hopscotch-map/src
   external-libraries/rollinghashcpp
   external-libraries/ips4o
+  external-libraries/graph_annotation/annograph/bloom_annotator
 )
 
-#add_subdirectory()
+add_subdirectory(
+  external-libraries/graph_annotation/annograph/bloom_annotator
+)
 
 file(GLOB src_files "*.cpp" "*.h" "*.hpp")
 
@@ -60,7 +63,6 @@ list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
 
 add_library(metagraph STATIC ${src_files})
 add_executable(metagengraph "main.cpp")
-add_dependencies(metagengraph metagraph)
 
 set(METALIBS
   -lhts -lz -lbz2
@@ -74,6 +76,10 @@ if(BUILD_STATIC)
   set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} -static)
   set(METALIBS ${METALIBS} -lcurl -lssl)
 endif()
+
+target_link_libraries(
+  metagraph bloom_annotator ${METALIBS}
+)
 
 target_link_libraries(
   metagengraph metagraph ${METALIBS}
@@ -125,7 +131,6 @@ link_directories(
 )
 
 add_executable(unit_tests ${unit_tests_files})
-add_dependencies(unit_tests metagraph)
 
 target_link_libraries(unit_tests -lgtest_main -lgtest metagraph ${METALIBS})
 

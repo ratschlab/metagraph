@@ -91,12 +91,12 @@ class ColorCompressed : public AnnotationCategory<std::set<std::string>> {
 };
 
 
-class PreciseColorCompressedAnnotator : public PreciseAnnotator {
+class PreciseColorCompressedAnnotator : public hash_annotate::PreciseAnnotator {
   public:
     PreciseColorCompressedAnnotator(const ColorCompressed &color_compressed)
           : color_compressed_(color_compressed) {}
 
-    std::vector<uint64_t> annotate_edge(DeBruijnGraphWrapper::edge_index i) const {
+    std::vector<uint64_t> annotate_edge(hash_annotate::DeBruijnGraphWrapper::edge_index i) const {
         return color_compressed_.get_row(i);
     }
 
@@ -138,7 +138,7 @@ class EdgeCompressed : public GenomeAnnotation {
 */
 
 
-class DBGSuccAnnotWrapper : public DeBruijnGraphWrapper {
+class DBGSuccAnnotWrapper : public hash_annotate::DeBruijnGraphWrapper {
   public:
     DBGSuccAnnotWrapper(const DBG_succ &graph) : graph_(graph) {}
 
@@ -226,12 +226,12 @@ class AnnotationCategoryHash : public AnnotationCategory<std::set<std::string>> 
     void compare_annotations(const AnnotationCategoryBloom &bloom,
                              size_t step = 1) const;
 
-    void compare_annotations(const BloomAnnotator &bloom_annotator,
+    void compare_annotations(const hash_annotate::BloomAnnotator &bloom_annotator,
                              size_t step) const;
 
   private:
     DBGSuccAnnotWrapper graph_;
-    PreciseHashAnnotator annotator_;
+    hash_annotate::PreciseHashAnnotator annotator_;
 
     std::vector<std::string> column_to_label_;
     std::unordered_map<std::string, size_t> label_to_column_;
@@ -268,7 +268,7 @@ class AnnotationCategoryBloom : public AnnotationCategory<std::set<std::string>>
 
   private:
     DBGSuccAnnotWrapper graph_;
-    BloomAnnotator annotator_;
+    hash_annotate::BloomAnnotator annotator_;
 
     std::vector<std::string> column_to_label_;
     std::unordered_map<std::string, size_t> label_to_column_;

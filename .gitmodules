@@ -15,3 +15,7 @@
 [submodule "metagraph/external-libraries/ips4o"]
 	path = metagraph/external-libraries/ips4o
 	url = https://github.com/SaschaWitt/ips4o.git
+[submodule "metagraph/external-libraries/graph_annotation"]
+	path = metagraph/external-libraries/graph_annotation
+	url = https://github.com/ratschlab/graph_annotation.git
+  ignore = untracked
