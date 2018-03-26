@@ -522,7 +522,6 @@ int main(int argc, const char *argv[]) {
                     }
                 } else if (utils::get_filetype(file) == "FASTA"
                             || utils::get_filetype(file) == "FASTQ") {
-                    //TODO: Bloom filters too small for FASTQ files
                     std::string label;
                     std::pair<std::unordered_map<std::string, size_t>::iterator, bool> label_ins;
                     if (!config->fasta_anno) {
@@ -534,12 +533,15 @@ int main(int argc, const char *argv[]) {
                             label = read_stream->name.s;
                             label_ins = label_store.insert(std::make_pair(label, label_store.size()));
                         }
+                        size_t seq_length = (utils::get_filetype(file) == "FASTA") ?
+                            (read_stream->seq.l - graph->get_k())
+                                * (static_cast<size_t>(config->reverse) + 1) :
+                            graph->num_edges();
                         if (bloom_annotation) {
                             bloom_annotation->add_sequence(
                                 read_stream->seq.s,
                                 label_ins.first->second,
-                                (read_stream->seq.l - graph->get_k())
-                                    * (static_cast<size_t>(config->reverse) + 1)
+                                seq_length
                             );
                         }
                         if (!bloom_annotation || config->bloom_test_num_kmers) {
@@ -553,8 +555,7 @@ int main(int argc, const char *argv[]) {
                                 bloom_annotation->add_sequence(
                                     read_stream->seq.s,
                                     label_ins.first->second,
-                                    (read_stream->seq.l - graph->get_k())
-                                        * (static_cast<size_t>(config->reverse) + 1)
+                                    seq_length
                                 );
                             }
                             if (!bloom_annotation || config->bloom_test_num_kmers) {
