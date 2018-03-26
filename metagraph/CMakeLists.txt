@@ -74,7 +74,7 @@ set(METALIBS
 
 if(BUILD_STATIC)
   set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} -static)
-  set(METALIBS ${METALIBS} -lcurl)
+  set(METALIBS ${METALIBS} -lcurl -lssl)
 endif()
 
 target_link_libraries(
