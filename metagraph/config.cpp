@@ -74,8 +74,10 @@ Config::Config(int argc, const char *argv[]) {
             memory_available = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--succinct")) {
             succinct = true;
+            //TODO: add into some USAGE description
         } else if (!strcmp(argv[i], "--dump-raw-anno")) {
             dump_raw_anno = true;
+            //TODO: add into some USAGE description
         } else if (!strcmp(argv[i], "--bloom-false-pos-prob")) {
             bloom_fpp = std::stof(argv[++i]);
         } else if (!strcmp(argv[i], "--bloom-bits-per-edge")) {

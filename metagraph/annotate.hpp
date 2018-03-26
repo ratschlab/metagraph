@@ -91,6 +91,20 @@ class ColorCompressed : public AnnotationCategory<std::set<std::string>> {
 };
 
 
+class PreciseColorCompressedAnnotator : public PreciseAnnotator {
+  public:
+    PreciseColorCompressedAnnotator(const ColorCompressed &color_compressed)
+          : color_compressed_(color_compressed) {}
+
+    std::vector<uint64_t> annotate_edge(DeBruijnGraphWrapper::edge_index i) const {
+        return color_compressed_.get_row(i);
+    }
+
+  private:
+    const ColorCompressed &color_compressed_;
+};
+
+
 // class ColorWiseMatrix : public UncompressedMatrix {
 //   public:
 //     // annotation containers
@@ -217,7 +231,7 @@ class AnnotationCategoryHash : public AnnotationCategory<std::set<std::string>> 
 
   private:
     DBGSuccAnnotWrapper graph_;
-    PreciseAnnotator annotator_;
+    PreciseHashAnnotator annotator_;
 
     std::vector<std::string> column_to_label_;
     std::unordered_map<std::string, size_t> label_to_column_;

@@ -92,6 +92,7 @@ void read_fasta_file_critical(const std::string &filename,
     gzclose(input_p);
 }
 
+
 template <class Callback>
 void read_vcf_file_critical(const std::string &filename,
                             const std::string &ref_filename,
@@ -125,6 +126,7 @@ void read_vcf_file_critical(const std::string &filename,
                   << ", sequences extracted: " << seq_count << std::endl;
     }
 }
+
 
 int main(int argc, const char *argv[]) {
 
@@ -211,12 +213,13 @@ int main(int argc, const char *argv[]) {
                             //assume VCF contains no noise
                             read_vcf_file_critical(files[f], config->refpath, graph->get_k(), NULL,
                                 [&](std::string &seq, std::vector<std::string> *variant_annotations = NULL) {
-                                constructor->add_read(seq);
-                                if (config->reverse) {
-                                    reverse_complement(seq.begin(), seq.end());
                                     constructor->add_read(seq);
-                                }
-                            }, timer_ptr);
+                                    if (config->reverse) {
+                                        reverse_complement(seq.begin(), seq.end());
+                                        constructor->add_read(seq);
+                                    }
+                                }, timer_ptr
+                            );
                         } else if (utils::get_filetype(files[f]) == "FASTA"
                                     || utils::get_filetype(files[f]) == "FASTQ") {
                             Timer *timer_ptr = config->verbose ? &timer : NULL;
@@ -312,12 +315,13 @@ int main(int argc, const char *argv[]) {
                     if (utils::get_filetype(files[f]) == "VCF") {
                         read_vcf_file_critical(files[f], config->refpath, graph->get_k(), NULL,
                             [&](std::string &seq, std::vector<std::string> *variant_annotations = NULL) {
-                            graph->add_sequence(seq);
-                            if (config->reverse) {
-                                reverse_complement(seq.begin(), seq.end());
                                 graph->add_sequence(seq);
+                                if (config->reverse) {
+                                    reverse_complement(seq.begin(), seq.end());
+                                    graph->add_sequence(seq);
+                                }
                             }
-                        });
+                        );
                     } else if (utils::get_filetype(files[f]) == "FASTA"
                                 || utils::get_filetype(files[f]) == "FASTQ") {
                         read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
@@ -580,7 +584,10 @@ int main(int argc, const char *argv[]) {
             }
             if (bloom_annotation && config->bloom_test_num_kmers) {
                 std::cout << "Approximating FPP...\t" << std::flush;
-                bloom_annotation->test_fp_all(annotation, config->bloom_test_num_kmers, has_vcf);
+                bloom_annotation->test_fp_all(
+                    annotate::PreciseColorCompressedAnnotator(annotation),
+                    config->bloom_test_num_kmers, has_vcf
+                );
                 std::cout << std::endl;
             }
             annotation.serialize(config->infbase + ".anno.dbg");

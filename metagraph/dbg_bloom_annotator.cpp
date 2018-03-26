@@ -1,47 +1,54 @@
 #include "dbg_bloom_annotator.hpp"
-#include "annotate.hpp"
 
 #include <fstream>
 #include <cmath>
 
+#include <libmaus2/util/NumberSerialisation.hpp>
+
+using libmaus2::util::NumberSerialisation;
+
 
 namespace annotate {
 
-void PreciseAnnotator::serialize(std::ostream &out) const {
+void PreciseHashAnnotator::serialize(std::ostream &out) const {
     annotation_exact.serialize(out);
 }
 
-void PreciseAnnotator::serialize(const std::string &filename) const {
+void PreciseHashAnnotator::serialize(const std::string &filename) const {
     std::ofstream fout(filename);
     serialize(fout);
     fout.close();
 }
 
-void PreciseAnnotator::load(std::istream &in) {
+void PreciseHashAnnotator::load(std::istream &in) {
     annotation_exact.load(in);
 }
 
-void PreciseAnnotator::load(const std::string &filename) {
+void PreciseHashAnnotator::load(const std::string &filename) {
     std::ifstream fin(filename);
     load(fin);
     fin.close();
 }
 
-void PreciseAnnotator::export_rows(std::ostream &out) const {
-    libmaus2::util::NumberSerialisation::serialiseNumber(out, annotation_exact.kmer_map_.size());
+void PreciseHashAnnotator::export_rows(std::ostream &out) const {
+    NumberSerialisation::serialiseNumber(
+        out, annotation_exact.kmer_map_.size()
+    );
     for (auto &kmer : annotation_exact.kmer_map_) {
         auto annot = annotation_from_kmer(kmer.first);
-        libmaus2::util::NumberSerialisation::serialiseNumberVector(out, annot);
+        NumberSerialisation::serialiseNumberVector(out, annot);
     }
 }
 
-void PreciseAnnotator::export_rows(const std::string &filename) const {
+void PreciseHashAnnotator::export_rows(const std::string &filename) const {
     std::ofstream fout(filename);
     export_rows(fout);
     fout.close();
 }
 
-void PreciseAnnotator::add_sequence(const std::string &sequence, size_t column, bool rooted) {
+void PreciseHashAnnotator::add_sequence(const std::string &sequence,
+                                    size_t column,
+                                    bool rooted) {
     std::string preprocessed_seq = graph_.transform_sequence(sequence, rooted);
 
     // Don't annotate short sequences
@@ -59,12 +66,12 @@ void PreciseAnnotator::add_sequence(const std::string &sequence, size_t column, 
     }
 }
 
-void PreciseAnnotator::add_column(const std::string &sequence, bool rooted) {
+void PreciseHashAnnotator::add_column(const std::string &sequence, bool rooted) {
     add_sequence(sequence, annotation_exact.size(), rooted);
 }
 
 std::vector<uint64_t>
-PreciseAnnotator::annotation_from_kmer(const std::string &kmer) const {
+PreciseHashAnnotator::annotation_from_kmer(const std::string &kmer) const {
     assert(kmer.length() == graph_.get_k() + 1);
     return annotation_exact.find(kmer.data(), kmer.data() + kmer.size());
 }
@@ -129,7 +136,7 @@ double BloomAnnotator::approx_false_positive_rate() const {
 }
 
 size_t BloomAnnotator::get_size(size_t i) const {
-    return annotation.get_size(i);
+    return annotation[i].size();
 }
 
 void BloomAnnotator::add_sequence(const std::string &sequence, size_t column, size_t num_elements) {
@@ -293,8 +300,7 @@ BloomAnnotator::get_annotation_corrected(DeBruijnGraphWrapper::edge_index i,
 	return curannot;
 }
 
-template <typename Annotator>
-void BloomAnnotator::test_fp_all(const Annotator &annotation_exact,
+void BloomAnnotator::test_fp_all(const PreciseAnnotator &annotation_exact,
                                  size_t num,
                                  bool check_both_directions) const {
     double fp_per_bit = 0;
@@ -372,34 +378,22 @@ BloomAnnotator::kmer_from_index(DeBruijnGraphWrapper::edge_index index) const {
     return graph_.get_node_kmer(index) + graph_.get_edge_label(index);
 }
 
-std::vector<uint64_t> get_annotation_exact(const PreciseAnnotator &annotation_exact, DeBruijnGraphWrapper::edge_index i, std::string &int_kmer) {
-    ++i;
-    return annotation_exact.annotation_from_kmer(int_kmer);
+std::vector<uint64_t>
+PreciseHashAnnotator::annotate_edge(DeBruijnGraphWrapper::edge_index i) const {
+    auto kmer_edge = graph_.get_node_kmer(i) + graph_.get_edge_label(i);
+    return annotation_from_kmer(kmer_edge);
 }
 
-std::vector<uint64_t> get_annotation_exact(const ColorCompressed &annotation_exact, DeBruijnGraphWrapper::edge_index i, std::string int_kmer) {
-    int_kmer = "";
-    auto labels = annotation_exact.get_label_names();
-    std::vector<uint64_t> annot((labels.size() + 63) >> 6);
-    for (size_t j = 0; j < labels.size(); ++j) {
-        if (annotation_exact.has_label(i, labels[j])) {
-            set_bit(annot, j);
-        }
-    }
-    return annot;
-}
-
-template <typename Annotator>
 std::vector<size_t>
 BloomAnnotator::test_fp(DeBruijnGraphWrapper::edge_index i,
-                        const Annotator &annotation_exact,
+                        const PreciseAnnotator &annotation_exact,
                         bool check_both_directions) const {
 
     auto int_kmer = kmer_from_index(i);
 
     auto test = annotation_from_kmer(int_kmer);
-    //auto test_exact = annotation_exact.annotation_from_kmer(int_kmer);
-    auto test_exact = get_annotation_exact(annotation_exact, i, int_kmer);
+
+    auto test_exact = annotation_exact.annotate_edge(i);
 
     auto curannot = get_annotation_corrected(i, check_both_directions);
 
@@ -472,9 +466,5 @@ BloomAnnotator::test_fp(DeBruijnGraphWrapper::edge_index i,
     }
     return stats;
 }
-template std::vector<size_t> BloomAnnotator::test_fp(DeBruijnGraphWrapper::edge_index,const PreciseAnnotator&,bool) const;
-template std::vector<size_t> BloomAnnotator::test_fp(DeBruijnGraphWrapper::edge_index,const ColorCompressed&,bool) const;
-template void BloomAnnotator::test_fp_all(const PreciseAnnotator&, size_t, bool) const ;
-template void BloomAnnotator::test_fp_all(const ColorCompressed&, size_t, bool) const ;
 
 } // namespace annotate

@@ -1,8 +1,6 @@
 #ifndef __DBG_BLOOM_ANNOTATOR_HPP__
 #define __DBG_BLOOM_ANNOTATOR_HPP__
 
-#include <libmaus2/util/NumberSerialisation.hpp>
-
 #include "hashers.hpp"
 
 
@@ -24,7 +22,8 @@ class DeBruijnGraphWrapper {
         return sequence;
     }
 
-    virtual std::string transform_sequence(const std::string &sequence, bool rooted = false) const {
+    virtual std::string transform_sequence(const std::string &sequence,
+                                           bool rooted = false) const {
         return rooted ? sequence : sequence;
     }
 
@@ -46,13 +45,22 @@ class DeBruijnGraphWrapper {
 
 class PreciseAnnotator {
   public:
-    PreciseAnnotator(const DeBruijnGraphWrapper &graph) : graph_(graph) {}
+    virtual std::vector<uint64_t> annotate_edge(DeBruijnGraphWrapper::edge_index i) const = 0;
+};
 
-    void add_sequence(const std::string &sequence, size_t column = -1llu, bool rooted = false);
+
+class PreciseHashAnnotator : public PreciseAnnotator {
+  public:
+    PreciseHashAnnotator(const DeBruijnGraphWrapper &graph) : graph_(graph) {}
+
+    void add_sequence(const std::string &sequence,
+                      size_t column = -1,
+                      bool rooted = false);
 
     void add_column(const std::string &sequence, bool rooted = false);
 
     std::vector<uint64_t> annotation_from_kmer(const std::string &kmer) const;
+    std::vector<uint64_t> annotate_edge(DeBruijnGraphWrapper::edge_index i) const;
 
     void serialize(std::ostream &out) const;
     void serialize(const std::string &filename) const;
@@ -92,8 +100,9 @@ class BloomAnnotator {
                                                    bool check_both_directions = false,
                                                    size_t path_cutoff = 50) const;
 
-    template <typename Annotator>
-    void test_fp_all(const Annotator &annotation_exact, size_t num = 0, bool check_both_directions = false) const;
+    void test_fp_all(const PreciseAnnotator &annotation_exact,
+                     size_t num = 0,
+                     bool check_both_directions = false) const;
 
     void serialize(std::ostream &out) const;
 
@@ -114,10 +123,9 @@ class BloomAnnotator {
 
     std::string kmer_from_index(DeBruijnGraphWrapper::edge_index index) const;
 
-    template <typename Annotator>
     std::vector<size_t> test_fp(DeBruijnGraphWrapper::edge_index i,
-                                 const Annotator &annotation_exact,
-                                 bool check_both_directions = false) const;
+                                const PreciseAnnotator &annotation_exact,
+                                bool check_both_directions = false) const;
 
     const DeBruijnGraphWrapper &graph_;
     double bloom_size_factor_;

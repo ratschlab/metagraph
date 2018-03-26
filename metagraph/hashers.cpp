@@ -1,4 +1,14 @@
 #include "hashers.hpp"
+
+#include <fstream>
+#include <boost/archive/binary_oarchive.hpp>
+#include <boost/archive/binary_iarchive.hpp>
+#include <boost/serialization/vector.hpp>
+#include <boost/serialization/set.hpp>
+#include <boost/serialization/unordered_map.hpp>
+#include <boost/archive/impl/basic_binary_oprimitive.ipp>
+#include <boost/archive/impl/basic_binary_iprimitive.ipp>
+
 #include "cyclichash.h"
 
 
@@ -221,6 +231,30 @@ double BloomFilter::occupancy() const {
         count += __builtin_popcountll(*it);
     }
     return static_cast<double>(count) / (bits.size() * 64);
+}
+
+void ExactHashAnnotation::serialize(std::ostream &out) const {
+    boost::archive::binary_oarchive oarch(out);
+    oarch & kmer_map_;
+    oarch & num_columns_;
+}
+
+void ExactHashAnnotation::serialize(const std::string &filename) const {
+    std::ofstream fout(filename);
+    serialize(fout);
+    fout.close();
+}
+
+void ExactHashAnnotation::load(std::istream &in) {
+    boost::archive::binary_iarchive iarch(in);
+    iarch & kmer_map_;
+    iarch & num_columns_;
+}
+
+void ExactHashAnnotation::load(const std::string &filename) {
+    std::ifstream fin(filename);
+    load(fin);
+    fin.close();
 }
 
 

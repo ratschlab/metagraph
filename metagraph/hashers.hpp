@@ -2,7 +2,6 @@
 #define __ANNOBLOOM__
 
 #include <iostream>
-#include <fstream>
 #include <cassert>
 #include <vector>
 #include <algorithm>
@@ -10,13 +9,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <set>
-#include <boost/archive/binary_oarchive.hpp>
-#include <boost/archive/binary_iarchive.hpp>
-#include <boost/serialization/vector.hpp>
-#include <boost/serialization/set.hpp>
-#include <boost/serialization/unordered_map.hpp>
-#include <boost/archive/impl/basic_binary_oprimitive.ipp>
-#include <boost/archive/impl/basic_binary_iprimitive.ipp>
+
 
 namespace annotate {
 
@@ -186,8 +179,6 @@ class HashAnnotation {
     }
 
     size_t size() const { return color_bits.size(); }
-
-    size_t get_size(size_t i) const { return color_bits.at(i).size(); }
 
     size_t num_hash_functions() const { return num_hash_functions_; }
 
@@ -412,12 +403,14 @@ class ExactHashAnnotation {
     }
 
     std::vector<uint64_t> insert(const std::string &kmer, size_t i) {
-        if (i < -1llu)
+        if (i < -1llu) {
             num_columns_ = std::max(num_columns_, i + 1);
+        }
         std::vector<uint64_t> annot((num_columns_ + 63) >> 6, 0);
         auto &indices = kmer_map_[kmer];
-        if (i < -1llu)
+        if (i < -1llu) {
             indices.insert(i);
+        }
         for (auto &index : indices) {
             set_bit(annot, index);
         }
@@ -442,47 +435,16 @@ class ExactHashAnnotation {
                            reinterpret_cast<const char*>(end));
     }
 
-    void serialize(std::ostream &out) const {
-        boost::archive::binary_oarchive oarch(out);
-        oarch & kmer_map_;
-        oarch & num_columns_;
-    }
-    void serialize(const std::string &filename) const {
-        std::ofstream fout(filename);
-        serialize(fout);
-        fout.close();
-    }
+    void serialize(std::ostream &out) const;
+    void serialize(const std::string &filename) const;
+    void load(std::istream &in);
+    void load(const std::string &filename);
 
-    void load(std::istream &in) {
-        boost::archive::binary_iarchive iarch(in);
-        iarch & kmer_map_;
-        iarch & num_columns_;
-    }
+    friend class PreciseHashAnnotator;
 
-    void load(const std::string &filename) {
-        std::ifstream fin(filename);
-        load(fin);
-        fin.close();
-    }
-
-    typedef std::unordered_map<std::string, std::set<size_t>>::const_iterator const_iterator;
-
-    const_iterator begin() const {
-        return kmer_map_.begin();
-    }
-
-    const_iterator end() const {
-        return kmer_map_.end();
-    }
-
-    size_t get_num_edges() const {
-        return kmer_map_.size();
-    }
-
-    friend class PreciseAnnotator;
-    private:
-        std::unordered_map<std::string, std::set<size_t>> kmer_map_;
-        size_t num_columns_;
+  private:
+    std::unordered_map<std::string, std::set<size_t>> kmer_map_;
+    size_t num_columns_;
 };
 
 
