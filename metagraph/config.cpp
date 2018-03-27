@@ -305,6 +305,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s transform [options] GRAPH\n\n", prog_name.c_str());
 
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
+            fprintf(stderr, "\t-t --state [1|2] \t\tchange graph state [STAT=1]\n");
             fprintf(stderr, "\t   --sql-base [STR] \t\tbasename for SQL output file\n");
             fprintf(stderr, "\t   --to-adj-list \t\twrite the adjacency list to file [off]\n");
         } break;

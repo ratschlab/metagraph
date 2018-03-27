@@ -142,11 +142,6 @@ int main(int argc, const char *argv[]) {
 
     switch (config->identity) {
         case Config::EXPERIMENT: {
-            Timer timer;
-            std::unique_ptr<DBG_succ> graph {
-                load_critical_graph_from_file(files.at(0))
-            };
-
             break;
         }
         case Config::BUILD: {
@@ -339,12 +334,6 @@ int main(int argc, const char *argv[]) {
                 }
             }
 
-            if (config->state == Config::DYN) {
-                std::cout << "Converting static graph to dynamic...\t" << std::flush;
-                timer.reset();
-                graph->switch_state(Config::DYN);
-                std::cout << timer.elapsed() << "sec" << std::endl;
-            }
             graph->switch_state(config->state);
 
             // graph output
@@ -797,10 +786,11 @@ int main(int argc, const char *argv[]) {
                 };
 
                 if (!config->quiet) {
-                    std::cout << "Statistics for file " << file << std::endl;
+                    std::cout << "Statistics for graph " << file << std::endl;
                     std::cout << "nodes: " << graph->num_nodes() << std::endl;
                     std::cout << "edges: " << graph->num_edges() << std::endl;
                     std::cout << "k: " << graph->get_k() << std::endl;
+                    std::cout << "state: " << graph->state << std::endl;
                 }
                 if (outstream.is_open()) {
                     outstream << file << "\t"
@@ -838,7 +828,7 @@ int main(int argc, const char *argv[]) {
                     graph->print_adj_list(std::cout);
                 }
                 if (config->verbose) {
-                    std::cout << timer.elapsed() << " sec" << std::endl;
+                    std::cout << timer.elapsed() << "sec" << std::endl;
                 }
             }
             if (config->sqlfbase.size()) {
@@ -848,18 +838,31 @@ int main(int argc, const char *argv[]) {
                 timer.reset();
                 traverse::toSQL(graph.get(), files, config->sqlfbase);
                 if (config->verbose) {
-                    std::cout << timer.elapsed() << " sec" << std::endl;
+                    std::cout << timer.elapsed() << "sec" << std::endl;
                 }
             }
-
-            if (config->state == Config::DYN) {
+            if (graph->state != config->state) {
                 if (config->verbose) {
-                    std::cout << "Converting static graph to dynamic...\t" << std::flush;
+                    std::cout << "Converting graph to state " << config->state
+                              << "...\t" << std::flush;
+                    timer.reset();
                 }
-                timer.reset();
-                graph->switch_state(Config::DYN);
+
+                graph->switch_state(config->state);
+
                 if (config->verbose) {
-                    std::cout << timer.elapsed() << " sec" << std::endl;
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+                }
+
+                if (config->outfbase.size()) {
+                    if (config->verbose) {
+                        std::cout << "Serializing transformed graph...\t" << std::flush;
+                        timer.reset();
+                    }
+                    graph->serialize(config->outfbase);
+                    if (config->verbose) {
+                        std::cout << timer.elapsed() << "sec" << std::endl;
+                    }
                 }
             }
 
