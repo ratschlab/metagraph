@@ -18,7 +18,6 @@ class Config {
     bool to_adj_list = false;
     bool query = false;
     bool traversal_merge = false;
-    bool succinct = false;
     bool dump_raw_anno = false;
 
     unsigned int k = 3;

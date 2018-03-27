@@ -72,9 +72,6 @@ Config::Config(int argc, const char *argv[]) {
             noise_kmer_frequency = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
             memory_available = atoi(argv[++i]);
-        } else if (!strcmp(argv[i], "--succinct")) {
-            succinct = true;
-            //TODO: add into some USAGE description
         } else if (!strcmp(argv[i], "--dump-raw-anno")) {
             dump_raw_anno = true;
             //TODO: add into some USAGE description
