@@ -129,11 +129,8 @@ void read_vcf_file_critical(const std::string &filename,
 
 
 int main(int argc, const char *argv[]) {
-
-    Timer timer;
-
     // parse command line arguments and options
-    std::unique_ptr<Config> config(new Config(argc, argv));
+    std::unique_ptr<Config> config { new Config(argc, argv) };
 
     if (config->verbose) {
         std::cout << "#############################\n"
@@ -141,22 +138,20 @@ int main(int argc, const char *argv[]) {
                   << "#############################\n" << std::endl;
     }
 
-    // create graph pointer
-    DBG_succ *graph = NULL;
-
     const auto &files = config->fname;
 
     switch (config->identity) {
         case Config::EXPERIMENT: {
             break;
         }
-        //TODO: allow for building by appending/adding to an existing graph
         case Config::BUILD: {
-            graph = new DBG_succ(config->k);
+            DBG_succ *graph = new DBG_succ(config->k);
 
             if (config->verbose)
                 std::cout << "Build Succinct De Bruijn Graph with k-mer size k="
                           << graph->get_k() << std::endl;
+
+            Timer timer;
 
             if (config->fast) {
                 if (config->verbose) {
@@ -306,8 +301,6 @@ int main(int argc, const char *argv[]) {
 
             } else {
                 //slower method
-                //TODO: merge in optimizations from seqmerge branch
-                //TODO: add VCF parsing (needs previous merge)
                 for (unsigned int f = 0; f < files.size(); ++f) {
                     if (config->verbose) {
                         std::cout << std::endl << "Parsing " << files[f] << std::endl;
@@ -367,6 +360,7 @@ int main(int argc, const char *argv[]) {
             utils::ThreadPool thread_pool_files(kMaxNumParallelReadFiles);
             utils::ThreadPool thread_pool(std::max(1u, config->parallel) - 1,
                                           std::max(1u, config->parallel));
+            Timer timer;
 
             // iterate over input files
             for (const auto &file : files) {
@@ -418,7 +412,9 @@ int main(int argc, const char *argv[]) {
         }
         case Config::ANNOTATE: {
             // load graph
-            graph = load_critical_graph_from_file(config->infbase);
+            std::unique_ptr<DBG_succ> graph {
+                load_critical_graph_from_file(config->infbase)
+            };
 
             // initialize empty Bloom filter annotation
             hash_annotate::BloomAnnotator *bloom_annotation = NULL;
@@ -607,13 +603,14 @@ int main(int argc, const char *argv[]) {
                 bloom_annotation = NULL;
                 graph_wrapper = NULL;
             }
-            delete graph;
-            graph = NULL;
-            break;
+
+            return 0;
         }
         case Config::CLASSIFY: {
             // load graph
-            graph = load_critical_graph_from_file(config->infbase);
+            std::unique_ptr<DBG_succ> graph {
+                load_critical_graph_from_file(config->infbase)
+            };
 
             // load annotatioun (if file does not exist, empty annotation is created)
             annotate::ColorCompressed annotation(1 + graph->num_edges());
@@ -664,14 +661,15 @@ int main(int argc, const char *argv[]) {
                     std::cout << std::endl;
                 });
             }
-            delete graph;
-            graph = NULL;
-            break;
+
+            return 0;
         }
         case Config::COMPARE: {
             assert(files.size());
-            std::cout << "Opening file " << files[0] << std::endl;
-            graph = load_critical_graph_from_file(files[0]);
+            std::cout << "Opening file " << files.at(0) << std::endl;
+            std::unique_ptr<DBG_succ> graph {
+                load_critical_graph_from_file(files.at(0))
+            };
 
             for (size_t f = 1; f < files.size(); ++f) {
                 std::cout << "Opening file for comparison ..." << files[f] << std::endl;
@@ -683,11 +681,12 @@ int main(int argc, const char *argv[]) {
                 }
                 delete second;
             }
-            delete graph;
-            graph = NULL;
-            break;
+
+            return 0;
         }
         case Config::MERGE: {
+            DBG_succ *graph = NULL;
+
             // collect results on an external merge
             if (config->collect > 1) {
                 graph = merge::build_graph_from_chunks(
@@ -695,133 +694,153 @@ int main(int argc, const char *argv[]) {
                     std::vector<DBG_succ::Chunk*>(files.size(), NULL),
                     files
                 );
-                break;
-            }
-
-            timer.reset();
-            std::vector<const DBG_succ*> graphs;
-            for (const auto &file : files) {
-                std::cout << "Opening file " << file << std::endl;
-                graphs.push_back(load_critical_graph_from_file(file));
-                if (config->verbose) {
-                    std::cout << "nodes: " << graphs.back()->num_nodes() << std::endl;
-                    std::cout << "edges: " << graphs.back()->num_edges() << std::endl;
-                    std::cout << "k: " << graphs.back()->get_k() << std::endl;
-                }
-            }
-            std::cout << "Graphs are loaded\t" << timer.elapsed() << "sec" << std::endl;
-
-            if (config->traversal_merge) {
-                std::cout << "Start merging traversal" << std::endl;
-                timer.reset();
-
-                graph = const_cast<DBG_succ*>(graphs.at(0));
-                graphs.erase(graphs.begin());
-
-                for (size_t i = 0; i < graphs.size(); ++i) {
-                    graph->merge(*graphs[i]);
-                    std::cout << "traversal " << files[i + 1] << " done\t"
-                              << timer.elapsed() << "sec" << std::endl;
-                }
-                std::cout << "Graphs merged\t" << timer.elapsed() << "sec" << std::endl;
-            } else if (config->parallel > 1 || config->parts_total > 1) {
-                std::cout << "Start merging blocks" << std::endl;
-                timer.reset();
-
-                auto *chunk = merge::merge_blocks_to_chunk(graphs, config->part_idx,
-                                                                   config->parts_total,
-                                                                   config->parallel,
-                                                                   config->num_bins_per_thread,
-                                                                   config->verbose);
-                if (!chunk) {
-                    std::cerr << "ERROR when building chunk " << config->part_idx << std::endl;
-                    exit(1);
-                }
-                std::cout << "Blocks merged\t" << timer.elapsed() << "sec" << std::endl;
-
-                if (config->parts_total > 1) {
-                    chunk->serialize(config->outfbase
-                                      + "." + std::to_string(config->part_idx)
-                                      + "_" + std::to_string(config->parts_total));
-                } else {
-                    graph = new DBG_succ(graphs[0]->get_k());
-                    chunk->initialize_graph(graph);
-                    std::cout << "Graphs merged\t" << timer.elapsed() << "sec" << std::endl;
-                }
-                delete chunk;
             } else {
-                std::cout << "Start merging graphs" << std::endl;
-                timer.reset();
+                Timer timer;
 
-                graph = merge::merge(graphs, config->verbose);
+                std::vector<const DBG_succ*> graphs;
+                for (const auto &file : files) {
+                    std::cout << "Opening file " << file << std::endl;
+                    graphs.push_back(load_critical_graph_from_file(file));
+                    if (config->verbose) {
+                        std::cout << "nodes: " << graphs.back()->num_nodes() << "\n";
+                        std::cout << "edges: " << graphs.back()->num_edges() << "\n";
+                        std::cout << "k: " << graphs.back()->get_k() << std::endl;
+                    }
+                }
+                std::cout << "Graphs are loaded\t" << timer.elapsed()
+                                                   << "sec" << std::endl;
 
-                std::cout << "Graphs merged\t" << timer.elapsed() << "sec" << std::endl;
+                if (config->traversal_merge) {
+                    std::cout << "Start merging traversal" << std::endl;
+                    timer.reset();
+
+                    graph = const_cast<DBG_succ*>(graphs.at(0));
+                    graphs.erase(graphs.begin());
+
+                    for (size_t i = 0; i < graphs.size(); ++i) {
+                        graph->merge(*graphs[i]);
+                        std::cout << "traversal " << files[i + 1] << " done\t"
+                                  << timer.elapsed() << "sec" << std::endl;
+                    }
+                    std::cout << "Graphs merged\t" << timer.elapsed()
+                                                   << "sec" << std::endl;
+                } else if (config->parallel > 1 || config->parts_total > 1) {
+                    std::cout << "Start merging blocks" << std::endl;
+                    timer.reset();
+
+                    auto *chunk = merge::merge_blocks_to_chunk(
+                        graphs,
+                        config->part_idx,
+                        config->parts_total,
+                        config->parallel,
+                        config->num_bins_per_thread,
+                        config->verbose
+                    );
+                    if (!chunk) {
+                        std::cerr << "ERROR when building chunk "
+                                  << config->part_idx << std::endl;
+                        exit(1);
+                    }
+                    std::cout << "Blocks merged\t" << timer.elapsed()
+                              << "sec" << std::endl;
+
+                    if (config->parts_total > 1) {
+                        chunk->serialize(config->outfbase
+                                          + "." + std::to_string(config->part_idx)
+                                          + "_" + std::to_string(config->parts_total));
+                    } else {
+                        graph = new DBG_succ(graphs[0]->get_k());
+                        chunk->initialize_graph(graph);
+                        std::cout << "Graphs merged\t" << timer.elapsed()
+                                  << "sec" << std::endl;
+                    }
+                    delete chunk;
+                } else {
+                    std::cout << "Start merging graphs" << std::endl;
+                    timer.reset();
+
+                    graph = merge::merge(graphs, config->verbose);
+
+                    std::cout << "Graphs merged\t" << timer.elapsed()
+                              << "sec" << std::endl;
+                }
+
+                for (auto *graph_ : graphs) {
+                    delete graph_;
+                }
+
+                std::cout << "... done merging." << std::endl;
             }
 
-            for (auto *graph_ : graphs) {
-                delete graph_;
-            }
+            // graph output
+            if (graph && config->print_graph_succ)
+                graph->print_state();
+            if (graph && !config->outfbase.empty())
+                graph->serialize(config->outfbase);
 
-            std::cout << "... done merging." << std::endl;
-            break;
+            return 0;
         }
         case Config::STATS: {
             std::ofstream outstream;
             if (!config->outfbase.empty()) {
-                outstream.open(config->outfbase + ".stats.dbg");
+                outstream.open(config->outfbase + ".dbgstats");
                 outstream << "file\tnodes\tedges\tk" << std::endl;
             }
             for (const auto &file : files) {
-                DBG_succ *graph_ = load_critical_graph_from_file(file);
+                std::unique_ptr<DBG_succ> graph {
+                    load_critical_graph_from_file(file)
+                };
 
                 if (!config->quiet) {
                     std::cout << "Statistics for file " << file << std::endl;
-                    std::cout << "nodes: " << graph_->num_nodes() << std::endl;
-                    std::cout << "edges: " << graph_->num_edges() << std::endl;
-                    std::cout << "k: " << graph_->get_k() << std::endl;
+                    std::cout << "nodes: " << graph->num_nodes() << std::endl;
+                    std::cout << "edges: " << graph->num_edges() << std::endl;
+                    std::cout << "k: " << graph->get_k() << std::endl;
                 }
                 if (outstream.is_open()) {
                     outstream << file << "\t"
-                              << graph_->num_nodes() << "\t"
-                              << graph_->num_edges() << "\t"
-                              << graph_->get_k() << std::endl;
+                              << graph->num_nodes() << "\t"
+                              << graph->num_edges() << "\t"
+                              << graph->get_k() << std::endl;
                 }
                 if (config->print_graph_succ)
-                    graph_->print_state();
+                    graph->print_state();
 
                 std::ifstream instream(file + ".anno.dbg");
                 if (instream.good()) {
                     size_t anno_size = NumberSerialisation::deserialiseNumber(instream);
                     std::cout << "annot: " << anno_size << std::endl;
                 }
-
-                delete graph_;
             }
-            break;
+
+            return 0;
         }
         case Config::TRANSFORM: {
-            //for (unsigned int f = 0; f < files.size(); ++f) {
-                //DBG_succ* graph_ = new DBG_succ(files[f]);
-                DBG_succ *graph_ = load_critical_graph_from_file(files[0]);
-                // checks whether annotation exists and creates an empty one if not
-                // graph_->annotationFromFile(config->infbase + ".anno.dbg");
-                if (config->to_adj_list) {
-                    if (config->outfbase.size()) {
-                        std::ofstream outstream(config->outfbase + ".adjlist");
-                        graph_->print_adj_list(outstream);
-                    } else {
-                        graph_->print_adj_list(std::cout);
-                    }
+            std::unique_ptr<DBG_succ> graph {
+                load_critical_graph_from_file(files.at(0))
+            };
+
+            if (config->to_adj_list) {
+                if (config->outfbase.size()) {
+                    std::ofstream outstream(config->outfbase + ".adjlist");
+                    graph->print_adj_list(outstream);
+                } else {
+                    graph->print_adj_list(std::cout);
                 }
-                delete graph_;
-            //}
+            }
+            if (config->sqlfbase.size()) {
+                traverse::toSQL(graph.get(), files, config->sqlfbase);
+            }
+
             return 0;
         }
         case Config::ALIGN: {
-            // load graph
             assert(config->infbase.size());
 
-            graph = load_critical_graph_from_file(config->infbase);
+            // load graph
+            std::unique_ptr<DBG_succ> graph {
+                load_critical_graph_from_file(config->infbase)
+            };
 
             for (const auto &file : files) {
                 std::cout << "Opening file for alignment ..." << file << std::endl;
@@ -900,26 +919,13 @@ int main(int argc, const char *argv[]) {
                     }
                 });
             }
-            delete graph;
-            graph = NULL;
-            break;
+
+            return 0;
         }
         case Config::NO_IDENTITY: {
             assert(false);
             break;
         }
-    }
-
-    // output and cleanup
-    if (graph) {
-        // graph output
-        if (config->print_graph_succ)
-            graph->print_state();
-        if (!config->sqlfbase.empty())
-            traverse::toSQL(graph, config->fname, config->sqlfbase);
-        if (!config->outfbase.empty())
-            graph->serialize(config->outfbase);
-        delete graph;
     }
 
     return 0;

@@ -159,6 +159,9 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == ANNOTATE && infbase.empty())
         print_usage_and_exit = true;
 
+    if (identity == TRANSFORM && fname.size() != 1)
+        print_usage_and_exit = true;
+
     if (identity == MERGE && fname.size() < 2)
         print_usage_and_exit = true;
 
@@ -211,23 +214,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             return;
         }
         case EXPERIMENT: {
-            fprintf(stderr, "Usage: %s build [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for build:\n");
-            fprintf(stderr, "\t   --reference [STR] \t\tbasename of reference sequence []\n");
-            fprintf(stderr, "\t   --fasta-header-delimiter [STR] \t\theader delimiter (for setting multiple annotations) []\n");
-            fprintf(stderr, "\t-o --outfile-base [STR]\t\tbasename of output file []\n");
-            fprintf(stderr, "\t   --sql-base [STR] \t\tbasename for SQL output file\n");
-            fprintf(stderr, "\t   --mem-cap-gb [INT] \t\tmaximum memory available, in Gb [inf]\n");
-            fprintf(stderr, "\t-k --kmer-length [INT] \t\tlength of the k-mer to use [3]\n");
-            fprintf(stderr, "\t   --bloom-false-pos-prob [FLOAT] \tFalse positive probability in bloom filter [-1]\n");
-            fprintf(stderr, "\t   --bloom-bits-per-edge [FLOAT] \tBits per edge used in bloom filter annotator [0.4]\n");
-            fprintf(stderr, "\t   --bloom-hash-functions [INT] \tNumber of hash functions used in bloom filter [off]\n");
-            fprintf(stderr, "\t   --bloom-test-num-kmers \tEstimate false positive rate for every n k-mers [0]\n");
-            fprintf(stderr, "\t-r --reverse \t\t\tadd reverse complement reads [off]\n");
-            fprintf(stderr, "\t   --fast \t\t\tuse fast build method [off]\n");
-            fprintf(stderr, "\t   --print \t\t\tprint graph table to the screen [off]\n");
-            fprintf(stderr, "\t-s --num-splits \t\tDefine the minimum number of bins to split kmers into [1]\n");
+            fprintf(stderr, "Usage: %s experiment ???\n\n", prog_name.c_str());
         } break;
         case BUILD: {
             fprintf(stderr, "Usage: %s build [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
@@ -310,6 +297,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s transform [options] GRAPH\n\n", prog_name.c_str());
 
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
+            fprintf(stderr, "\t   --sql-base [STR] \t\tbasename for SQL output file\n");
             fprintf(stderr, "\t   --to-adj-list \t\twrite the adjacency list to file [off]\n");
         } break;
     }
