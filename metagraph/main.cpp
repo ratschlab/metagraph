@@ -142,6 +142,11 @@ int main(int argc, const char *argv[]) {
 
     switch (config->identity) {
         case Config::EXPERIMENT: {
+            Timer timer;
+            std::unique_ptr<DBG_succ> graph {
+                load_critical_graph_from_file(files.at(0))
+            };
+
             break;
         }
         case Config::BUILD: {
@@ -816,20 +821,46 @@ int main(int argc, const char *argv[]) {
             return 0;
         }
         case Config::TRANSFORM: {
+            Timer timer;
             std::unique_ptr<DBG_succ> graph {
                 load_critical_graph_from_file(files.at(0))
             };
 
             if (config->to_adj_list) {
+                if (config->verbose) {
+                    std::cout << "Converting graph to adjacency list...\t" << std::flush;
+                }
+                timer.reset();
                 if (config->outfbase.size()) {
                     std::ofstream outstream(config->outfbase + ".adjlist");
                     graph->print_adj_list(outstream);
                 } else {
                     graph->print_adj_list(std::cout);
                 }
+                if (config->verbose) {
+                    std::cout << timer.elapsed() << " sec" << std::endl;
+                }
             }
             if (config->sqlfbase.size()) {
+                if (config->verbose) {
+                    std::cout << "Converting graph to SQL DB...\t" << std::flush;
+                }
+                timer.reset();
                 traverse::toSQL(graph.get(), files, config->sqlfbase);
+                if (config->verbose) {
+                    std::cout << timer.elapsed() << " sec" << std::endl;
+                }
+            }
+
+            if (config->state == Config::DYN) {
+                if (config->verbose) {
+                    std::cout << "Converting static graph to dynamic...\t" << std::flush;
+                }
+                timer.reset();
+                graph->switch_state(Config::DYN);
+                if (config->verbose) {
+                    std::cout << timer.elapsed() << " sec" << std::endl;
+                }
             }
 
             return 0;
