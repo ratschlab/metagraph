@@ -874,7 +874,7 @@ int main(int argc, const char *argv[]) {
             };
 
             for (const auto &file : files) {
-                std::cout << "Opening file for alignment ..." << file << std::endl;
+                std::cout << "Opening file " << file << " for alignment" << std::endl;
 
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                     if (config->distance > 0) {

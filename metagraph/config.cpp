@@ -32,6 +32,9 @@ Config::Config(int argc, const char *argv[]) {
         identity = CLASSIFY;
     } else if (!strcmp(argv[1], "transform")) {
         identity = TRANSFORM;
+    } else {
+        print_usage(argv[0]);
+        exit(-1);
     }
 
     // provide help screen for chosen identity
@@ -185,24 +188,22 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         case NO_IDENTITY: {
             fprintf(stderr, "Usage: %s <command> [command specific options]\n\n", prog_name.c_str());
 
-            fprintf(stderr, "Available commands:\n\n");
+            fprintf(stderr, "Available commands:\n");
 
-            fprintf(stderr, "\texperiment\trun experiments\n\n");
+            fprintf(stderr, "\tfilter\t\tfilter out reads with rare k-mers and dump\n");
+            fprintf(stderr, "\t\t\tfilters to disk\n\n");
 
             fprintf(stderr, "\tbuild\t\tconstruct a graph object from input sequence\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats or integrate sequence\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats into a given graph\n\n");
-
-            fprintf(stderr, "\tfilter\t\tfilter out reads with rare k-mers\n");
-            fprintf(stderr, "\t\t\tand dump the filters to disk\n\n");
 
             fprintf(stderr, "\tmerge\t\tintegrate a given set of graph structures\n");
             fprintf(stderr, "\t\t\tand output a new graph structure\n\n");
 
             fprintf(stderr, "\tcompare\t\tcheck whether two given graphs are identical\n\n");
 
-            fprintf(stderr, "\talign\t\talign the reads provided in files in fast[a|q]\n");
-            fprintf(stderr, "\t\t\tformats to the graph\n\n");
+            fprintf(stderr, "\talign\t\talign sequences provided in fast[a|q] files\n");
+            fprintf(stderr, "\t\t\tto graph\n\n");
 
             fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s)\n\n");
 
@@ -243,8 +244,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s align -i <graph_basename> [options] <FASTQ1> [[FASTQ2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for align:\n");
-            fprintf(stderr, "\t   --query \tPrint the number of k-mers discovered [off]\n");
-            fprintf(stderr, "\t-a --align-length [INT] \tLength of subsequences to align [k]\n");
+            fprintf(stderr, "\t   --query \t\tPrint the number of k-mers discovered [off]\n");
+            fprintf(stderr, "\t-a --align-length [INT]\tLength of subsequences to align [k]\n");
             fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
         } break;
         case COMPARE: {
