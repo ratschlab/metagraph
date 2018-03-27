@@ -51,8 +51,8 @@ Config::Config(int argc, const char *argv[]) {
             quiet = true;
         } else if (!strcmp(argv[i], "--print")) {
             print_graph_succ = true;
-        } else if (!strcmp(argv[i], "--query")) {
-            query = true;
+        } else if (!strcmp(argv[i], "--count-kmers")) {
+            count_kmers_query = true;
         } else if (!strcmp(argv[i], "--traversal")) {
             traversal_merge = true;
         } else if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--reverse")) {
@@ -84,6 +84,8 @@ Config::Config(int argc, const char *argv[]) {
             bloom_bits_per_edge = std::stof(argv[++i]);
         } else if (!strcmp(argv[i], "--discovery-fraction")) {
             discovery_fraction = std::stof(argv[++i]);
+        } else if (!strcmp(argv[i], "--query-presence")) {
+            query_presence = true;
         } else if (!strcmp(argv[i], "--bloom-hash-functions")) {
             bloom_num_hash_functions = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--bloom-test-num-kmers")) {
@@ -171,6 +173,9 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == COMPARE && fname.size() != 2)
         print_usage_and_exit = true;
 
+    if (discovery_fraction < 0 || discovery_fraction > 1)
+        print_usage_and_exit = true;
+
     // if misused, provide help screen for chosen identity and exit
     if (print_usage_and_exit) {
         print_usage(argv[0], identity);
@@ -244,9 +249,11 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s align -i <graph_basename> [options] <FASTQ1> [[FASTQ2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for align:\n");
-            fprintf(stderr, "\t   --query \t\tPrint the number of k-mers discovered [off]\n");
-            fprintf(stderr, "\t-a --align-length [INT]\tLength of subsequences to align [k]\n");
-            fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
+            fprintf(stderr, "\t   --query-presence\t\tTest sequences for presence [off]\n");
+            fprintf(stderr, "\t   --discovery-fraction [FLOAT]\tFraction of k-mers required to count sequence [1.0]\n");
+            fprintf(stderr, "\t   --count-kmers \t\tQuery the number of k-mers discovered [off]\n");
+            fprintf(stderr, "\t-a --align-length [INT]\t\tLength of subsequences to align [k]\n");
+            fprintf(stderr, "\t-d --distance [INT] \t\tMax allowed alignment distance [0]\n");
         } break;
         case COMPARE: {
             fprintf(stderr, "Usage: %s compare [options] GRAPH1 GRAPH2\n\n", prog_name.c_str());

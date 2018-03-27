@@ -873,8 +873,17 @@ int main(int argc, const char *argv[]) {
                 load_critical_graph_from_file(config->infbase)
             };
 
+            if (!config->alignment_length
+                    || config->alignment_length > graph->get_k()) {
+                config->alignment_length = graph->get_k();
+            }
+
+            std::cout << "Align sequences against a de Bruijn graph with ";
+            std::cout << "k=" << graph->get_k() << "\n"
+                      << "Length of aligning k-mers: " << config->alignment_length << std::endl;
+
             for (const auto &file : files) {
-                std::cout << "Opening file " << file << " for alignment" << std::endl;
+                std::cout << "Align sequences from file " << file << std::endl;
 
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                     if (config->distance > 0) {
@@ -926,27 +935,49 @@ int main(int argc, const char *argv[]) {
                             }
                         }
                         std::cout << std::endl;
-                    } else {
+                        return;
+                    }
 
-                        auto graphindices = graph->index(read_stream->seq.s,
-                                                         config->alignment_length);
+                    if (config->verbose) {
+                        std::cout << "Sequence: " << read_stream->seq.s << "\n";
+                    }
 
-                        if (config->query) {
-                            size_t num_discovered = std::count_if(
-                                graphindices.begin(), graphindices.end(),
-                                [](const auto &x) { return x > 0; }
-                            );
-                            std::cout << num_discovered
-                                      << " / "
-                                      << read_stream->seq.l << std::endl;
-                        } else {
-                            for (size_t i = 0; i < graphindices.size(); ++i) {
-                                for (uint64_t j = 0; j < graph->get_k(); ++j) {
-                                    std::cout << read_stream->seq.s[i + j];
-                                }
-                                std::cout << ": " << graphindices[i] << std::endl;
-                            }
+                    if (config->query_presence
+                            && config->alignment_length == graph->get_k()) {
+                        std::cout << graph->find(read_stream->seq.s,
+                                                 config->discovery_fraction) << "\n";
+                        return;
+                    }
+
+                    auto graphindices = graph->index(read_stream->seq.s,
+                                                     config->alignment_length);
+
+                    size_t num_discovered = std::count_if(
+                        graphindices.begin(), graphindices.end(),
+                        [](const auto &x) { return x > 0; }
+                    );
+
+                    if (config->query_presence) {
+                        const size_t num_kmers = read_stream->seq.l - graph->get_k() + 1;
+                        const size_t min_kmers_discovered =
+                            num_kmers - num_kmers * (1 - config->discovery_fraction);
+
+                        std::cout << (num_discovered >= min_kmers_discovered) << "\n";
+                        return;
+                    }
+
+                    if (config->count_kmers_query) {
+                        std::cout << num_discovered << "/"
+                                  << read_stream->seq.l
+                                        - config->alignment_length + 1 << "\n";
+                        return;
+                    }
+
+                    for (size_t i = 0; i < graphindices.size(); ++i) {
+                        for (uint64_t j = 0; j < config->alignment_length; ++j) {
+                            std::cout << read_stream->seq.s[i + j];
                         }
+                        std::cout << ": " << graphindices[i] << "\n";
                     }
                 });
             }

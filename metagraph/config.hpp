@@ -16,7 +16,8 @@ class Config {
     bool fast = false;
     bool fasta_anno = false;
     bool to_adj_list = false;
-    bool query = false;
+    bool count_kmers_query = false;
+    bool query_presence = false;
     bool traversal_merge = false;
     bool dump_raw_anno = false;
 

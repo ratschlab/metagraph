@@ -810,14 +810,23 @@ bool DBG_succ::find(const std::string &sequence,
     if (sequence.length() < k_)
         return false;
 
-    size_t num_kmers = sequence.length() - k_ + 1;
+    const size_t num_kmers = sequence.length() - k_ + 1;
+    size_t num_kmers_discovered = 0;
     size_t num_kmers_missing = 0;
 
-    size_t max_kmers_missing = num_kmers * (1 - kmer_discovery_fraction);
+    const size_t max_kmers_missing = num_kmers * (1 - kmer_discovery_fraction);
+    const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
 
     align(sequence,
-        [&](uint64_t i) { num_kmers_missing += (i == 0); },
-        [&]() { return num_kmers_missing > max_kmers_missing; }
+        [&](uint64_t i) {
+            if (i > 0) {
+                num_kmers_discovered++;
+            } else {
+                num_kmers_missing++;
+            }
+        },
+        [&]() { return num_kmers_missing > max_kmers_missing
+                        || num_kmers_discovered >= min_kmers_discovered; }
     );
     return num_kmers_missing <= max_kmers_missing;
 }
