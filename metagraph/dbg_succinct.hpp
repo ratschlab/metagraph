@@ -253,6 +253,11 @@ class DBG_succ : public SequenceGraph {
      */
     uint64_t fwd(uint64_t i) const;
 
+    /**
+     * TODO: new function: given a list of edges, remove a minimal superset of that edge
+     * set that results in a valid graph.
+     */
+
 
     static const std::string alphabet;
     static const size_t alph_size;
