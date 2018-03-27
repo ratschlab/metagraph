@@ -40,6 +40,7 @@ class bit_vector_dyn : public bit_vector {
   public:
     bit_vector_dyn() : vector_() {}
     bit_vector_dyn(uint64_t size, bool value) : vector_(size, value) {}
+    explicit bit_vector_dyn(const std::vector<uint64_t> &v, size_t num_bits);
     explicit bit_vector_dyn(const std::vector<bool> &v);
     explicit bit_vector_dyn(const bit_vector_dyn &v);
     explicit bit_vector_dyn(const bit_vector &v);

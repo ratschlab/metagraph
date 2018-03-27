@@ -164,9 +164,6 @@ class wavelet_tree_dyn : public wavelet_tree {
     wavelet_tree_dyn(uint64_t b, const Vector &W_stat, unsigned int parallel = 1)
         : wavelet_tree_(initialize_tree(W_stat, b, parallel), b, W_stat.size()) {}
 
-    wavelet_tree_dyn(uint64_t b, libmaus2::bitbtree::BitBTree<6, 64> *bt, uint64_t n)
-        : wavelet_tree_(bt, b, n) {}
-
     uint64_t size() const {
         return wavelet_tree_.size();
     }

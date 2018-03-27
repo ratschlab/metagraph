@@ -1,6 +1,7 @@
 #include "bit_vector.hpp"
 
 #include <cassert>
+#include <libmaus2/bitio/putBit.hpp>
 
 
 std::vector<bool> bit_vector::to_vector() const {
@@ -21,23 +22,25 @@ std::ostream& operator<<(std::ostream &os, const bit_vector &bv) {
 // bit_vector_dyn, libmaus //
 /////////////////////////////
 
-bit_vector_dyn::bit_vector_dyn(const std::vector<bool> &v)
-      : vector_(v.size(), false) {
-    for (uint64_t i = 0; i < v.size(); ++i) {
-        if (v.at(i))
-            set(i, true);
+std::vector<uint64_t> pack_bits(const std::vector<bool> &v) {
+    std::vector<uint64_t> bits((v.size() + 63) / 64);
+    for (size_t i = 0; i < v.size(); ++i) {
+        libmaus2::bitio::putBit(bits.data(), i, v[i]);
     }
+    return bits;
 }
 
-bit_vector_dyn::bit_vector_dyn(const bit_vector_dyn &v) : vector_(v.vector_) {}
+bit_vector_dyn::bit_vector_dyn(const std::vector<uint64_t> &v, size_t num_bits)
+      : vector_(num_bits, v.data()) {}
+
+bit_vector_dyn::bit_vector_dyn(const std::vector<bool> &v)
+      : bit_vector_dyn(pack_bits(v), v.size()) {}
+
+bit_vector_dyn::bit_vector_dyn(const bit_vector_dyn &v)
+      : vector_(v.vector_) {}
 
 bit_vector_dyn::bit_vector_dyn(const bit_vector &v)
-      : vector_(v.size(), false) {
-    for (uint64_t i = 0; i < v.size(); ++i) {
-        if (v[i])
-            set(i, true);
-    }
-}
+      : bit_vector_dyn(v.to_vector()) {}
 
 bit_vector_dyn::bit_vector_dyn(std::istream &in) {
     if (!deserialise(in)) {
