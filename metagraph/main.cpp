@@ -212,12 +212,13 @@ int main(int argc, const char *argv[]) {
                             Timer *timer_ptr = config->verbose ? &timer : NULL;
                             //assume VCF contains no noise
                             read_vcf_file_critical(files[f], config->refpath, graph->get_k(), NULL,
-                                [&](std::string &seq, std::vector<std::string> *variant_annotations = NULL) {
+                                [&](std::string &seq, auto *variant_annotations) {
                                     constructor->add_read(seq);
                                     if (config->reverse) {
                                         reverse_complement(seq.begin(), seq.end());
                                         constructor->add_read(seq);
                                     }
+                                    std::ignore = variant_annotations;
                                 }, timer_ptr
                             );
                         } else if (utils::get_filetype(files[f]) == "FASTA"
@@ -314,12 +315,13 @@ int main(int argc, const char *argv[]) {
                     // open stream
                     if (utils::get_filetype(files[f]) == "VCF") {
                         read_vcf_file_critical(files[f], config->refpath, graph->get_k(), NULL,
-                            [&](std::string &seq, std::vector<std::string> *variant_annotations = NULL) {
+                            [&](std::string &seq, auto *variant_annotations) {
                                 graph->add_sequence(seq);
                                 if (config->reverse) {
                                     reverse_complement(seq.begin(), seq.end());
                                     graph->add_sequence(seq);
                                 }
+                                std::ignore = variant_annotations;
                             }
                         );
                     } else if (utils::get_filetype(files[f]) == "FASTA"
