@@ -480,6 +480,10 @@ int main(int argc, const char *argv[]) {
                                     }
                                 }
                             }
+                            variant_labels->clear();
+                            if (bloom_annotation && !config->bloom_test_num_kmers) {
+                                return;
+                            }
                             graph->align(seq, [&](uint64_t i) {
                                 if (i > 0) {
                                     for (auto &label : *variant_labels) {
@@ -497,7 +501,6 @@ int main(int argc, const char *argv[]) {
                                     }
                                 });
                             }
-                            variant_labels->clear();
                         }
                     );
                     if (bloom_annotation) {
