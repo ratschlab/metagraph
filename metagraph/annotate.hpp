@@ -242,10 +242,9 @@ class AnnotationCategoryBloom : public AnnotationCategory<std::set<std::string>>
   public:
     typedef std::set<std::string> SetStr;
 
-    AnnotationCategoryBloom(const DBG_succ &graph,
-                            size_t num_hash_functions,
-                            double bloom_size_factor,
-                            bool verbose = false);
+    template <typename... Args>
+    AnnotationCategoryBloom(const DBG_succ &graph, Args& ...args)
+          : graph_(graph), annotator_(graph_, args...) {}
 
     ~AnnotationCategoryBloom() {}
 
@@ -258,8 +257,8 @@ class AnnotationCategoryBloom : public AnnotationCategory<std::set<std::string>>
 
     bool has_label(Index i, const SetStr &label) const;
 
-    // bool load(const std::string &filename);
-    // void serialize(const std::string &filename) const;
+    bool load(const std::string &filename);
+    void serialize(const std::string &filename) const;
 
     void compare_annotations(const AnnotationCategoryHash &exact,
                              size_t step = 1) const {
@@ -271,7 +270,7 @@ class AnnotationCategoryBloom : public AnnotationCategory<std::set<std::string>>
     hash_annotate::BloomAnnotator annotator_;
 
     std::vector<std::string> column_to_label_;
-    std::unordered_map<std::string, size_t> label_to_column_;
+    std::unordered_map<std::string, uint32_t> label_to_column_;
 };
 
 } // namespace annotate

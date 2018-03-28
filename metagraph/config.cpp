@@ -28,6 +28,8 @@ Config::Config(int argc, const char *argv[]) {
         identity = STATS;
     } else if (!strcmp(argv[1], "annotate")) {
         identity = ANNOTATE;
+    } else if (!strcmp(argv[1], "bloom")) {
+        identity = ANNOTATE_BLOOM;
     } else if (!strcmp(argv[1], "classify")) {
         identity = CLASSIFY;
     } else if (!strcmp(argv[1], "transform")) {
@@ -100,7 +102,7 @@ Config::Config(int argc, const char *argv[]) {
             outfbase = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "--reference")) {
             refpath = std::string(argv[++i]);
-        } else if (!strcmp(argv[i], "--fasta-header-delimiter")) {
+        } else if (!strcmp(argv[i], "--fasta-anno-delimiter")) {
             fasta_header_delimiter = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-s") || !strcmp(argv[i], "--num-splits")) {
             nsplits = atoi(argv[++i]);
@@ -215,6 +217,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\tannotate\tgiven a graph and a fast[a|q] file, annotate\n");
             fprintf(stderr, "\t\t\tthe respective kmers\n\n");
 
+            fprintf(stderr, "\tbloom\t\tgiven a graph and a fast[a|q] file, annotate\n");
+            fprintf(stderr, "\t\t\tthe respective kmers using Bloom filters\n\n");
+
             fprintf(stderr, "\ttransform\tgiven a graph, transform it to other formats\n\n");
 
             return;
@@ -285,12 +290,29 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                             "\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
-            fprintf(stderr, "\t-r --reverse \t\talso annotate reverse complement reads [off]\n");
-            fprintf(stderr, "\t   --fasta-anno \textract annotations from file instead of using filenames [off]\n");
+            fprintf(stderr, "\t   --reference [STR] \t\tbasename of reference sequence []\n");
+            fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
+            fprintf(stderr, "\t   --fasta-anno \t\textract annotations from headers of sequences in files [off]\n");
+            fprintf(stderr, "\t   --fasta-anno-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
             //fprintf(stderr, "\t   --db-path \tpath that is used to store the annotations database []\n");
+            // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+        } break;
+        case ANNOTATE_BLOOM: {
+            fprintf(stderr, "Usage: %s bloom -i <graph_basename> [options] <PATH1> [[PATH2] ...]\n"
+                            "\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for bloom:\n");
+            fprintf(stderr, "\t   --reference [STR] \t\t\tbasename of reference sequence []\n");
+            fprintf(stderr, "\t-r --reverse \t\t\t\talso annotate reverse complement reads [off]\n");
+            fprintf(stderr, "\t   --fasta-anno \t\t\textract annotations from headers of sequences in files [off]\n");
+            fprintf(stderr, "\t   --fasta-anno-delimiter [STR]\t\tdelimiter for splitting annotation header into multiple labels [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
             // fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [1]\n");
             // fprintf(stderr, "\t-f --frequency [INT] \t\twhen a, annotate only every a-th kmer [1]\n");
+            fprintf(stderr, "\t   --bloom-false-pos-prob [FLOAT]\tFalse positive probability in bloom filter [-1]\n");
+            fprintf(stderr, "\t   --bloom-bits-per-edge [FLOAT] \tBits per edge used in bloom filter annotator [0.4]\n");
+            fprintf(stderr, "\t   --bloom-hash-functions [INT] \tNumber of hash functions used in bloom filter [off]\n");
+            fprintf(stderr, "\t   --bloom-test-num-kmers \t\tEstimate false positive rate for every n k-mers [0]\n");
         } break;
         case CLASSIFY: {
             fprintf(stderr, "Usage: %s classify -i <graph_basename> [options] <FILE1> [[FILE2] ...]\n"

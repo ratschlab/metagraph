@@ -337,14 +337,6 @@ sdsl::bit_vector* ColorCompressed::inflate_column(uint32_t id) const {
 // }
 
 
-AnnotationCategoryBloom::AnnotationCategoryBloom(const DBG_succ &graph,
-                                                 size_t num_hash_functions,
-                                                 double bloom_size_factor,
-                                                 bool verbose)
-      : graph_(graph),
-        annotator_(graph_, bloom_size_factor, num_hash_functions, verbose) {
-}
-
 AnnotationCategoryBloom::SetStr
 AnnotationCategoryBloom::get(Index i) const {
     auto annotation = hash_annotate::BloomAnnotator::unpack(annotator_.get_annotation(i));
@@ -384,6 +376,25 @@ bool AnnotationCategoryBloom::has_label(Index i, const SetStr &label) const {
     auto annotation = hash_annotate::BloomAnnotator::unpack(annotator_.get_annotation(i));
     return std::equal(sorted_labels.begin(), sorted_labels.end(),
                       annotation.begin(), annotation.end());
+}
+
+bool AnnotationCategoryBloom::load(const std::string &filename) {
+    std::ifstream instream(filename);
+    if (!instream.good())
+        return false;
+
+    label_to_column_ = load_string_number_map(instream);
+    column_to_label_ = libmaus2::util::StringSerialisation::deserialiseStringVector(instream);
+    // TODO: implement
+    // annotator_.load(outstream);
+    return true;
+}
+
+void AnnotationCategoryBloom::serialize(const std::string &filename) const {
+    std::ofstream outstream(filename);
+    serialize_string_number_map(outstream, label_to_column_);
+    libmaus2::util::StringSerialisation::serialiseStringVector(outstream, column_to_label_);
+    annotator_.serialize(outstream);
 }
 
 

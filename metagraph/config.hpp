@@ -59,6 +59,7 @@ class Config {
         ALIGN,
         STATS,
         ANNOTATE,
+        ANNOTATE_BLOOM,
         TRANSFORM,
         CLASSIFY
     };
