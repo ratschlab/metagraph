@@ -15,7 +15,8 @@ const size_t kLogSigma = 6;
 const size_t kLogSigma = 4;
 #endif
 
-static_assert(sizeof(TAlphabet) * 8 >= kLogSigma);
+static_assert(sizeof(TAlphabet) * 8 >= kLogSigma,
+              "Choose the TAlphabet type accordingly");
 
 
 DBG_succ::VectorChunk::VectorChunk()
