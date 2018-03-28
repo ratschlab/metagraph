@@ -60,7 +60,7 @@ void allelesFromSeq(DBG_succ *G,
  */
 BranchInfo pop_branch(std::stack<BranchInfo> &branchnodes,
                       uint64_t &seqId, uint64_t &seqPos,
-                      uint64_t &nodeId, uint64_t &lastEdge, bool &isFirst) {
+                      uint64_t &nodeId, TAlphabet &lastEdge, bool &isFirst) {
     BranchInfo branch = branchnodes.top();
     branchnodes.pop();
     isFirst = true;
@@ -250,11 +250,11 @@ size_t traverseGraph(DBG_succ *G,
                             // push node information to stack
                             branchnodes.push({ nodeId, seqId, seqPos, lastEdge });
                             if (debug)
-                                fprintf(stderr, " -- pushed %" PRIu64
-                                                " : seqId %" PRIu64
-                                                " seqPos %" PRIu64
-                                                " lastEdge %" PRIu64 " -- ",
-                                                nodeId, seqId, seqPos, lastEdge); 
+                                std::cerr << " -- pushed " << nodeId
+                                          << " : seqId " << seqId
+                                          << " seqPos " << seqPos
+                                          << " lastEdge " << static_cast<int>(lastEdge)
+                                          << " -- ";
                         }
                         if (joinOpen) {
                             if (sequence.length() > 0) {

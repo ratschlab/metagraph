@@ -12,7 +12,7 @@ class DBGSuccConstructor;
 
 
 // define an extended alphabet for W --> somehow this does not work properly as expected
-typedef uint64_t TAlphabet;
+typedef uint8_t TAlphabet;
 
 
 class SequenceGraph {
@@ -260,7 +260,7 @@ class DBG_succ : public SequenceGraph {
 
 
     static const std::string alphabet;
-    static const size_t alph_size;
+    static const TAlphabet alph_size;
 
     Config::StateType state = Config::DYN;
 
@@ -318,7 +318,7 @@ class DBG_succ : public SequenceGraph {
      * Return value of F vector at index k.
      * The index is over the alphabet!
      */
-    TAlphabet get_F(size_t k) const { return F.at(k); }
+    uint64_t get_F(TAlphabet k) const { return F.at(k); }
 
     /**
      * This function returns true if node i is a terminal node.

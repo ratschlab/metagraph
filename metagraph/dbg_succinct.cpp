@@ -55,7 +55,7 @@ const TAlphabet kCharToNucleotide[128] = {
 const size_t kLogSigma = 4;
 #endif
 
-const size_t DBG_succ::alph_size = DBG_succ::alphabet.size() / 2;
+const TAlphabet DBG_succ::alph_size = DBG_succ::alphabet.size() / 2;
 
 const SequenceGraph::node_iterator SequenceGraph::npos = 0;
 
@@ -383,11 +383,11 @@ TAlphabet DBG_succ::get_node_last_value(uint64_t i) const {
     if (i == 0)
         return 0;
 
-    for (size_t j = 0; j < F.size(); j++) {
-        if (F[j] >= i)
-            return j - 1;
+    for (TAlphabet c = 0; c < alph_size; c++) {
+        if (F[c] >= i)
+            return c - 1;
     }
-    return F.size() - 1;
+    return alph_size - 1;
 }
 
 /**
@@ -541,11 +541,13 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(const std::string &str,
 
     // init match/mismatch to first pattern position
     TAlphabet s = encode(str[0]);
+    assert(alph_size == 6 && "This function is defined for DNA sequences only");
+    // TODO: review and test out this function for protein graphs
     for (TAlphabet b = 1; b < 5; ++b) {
         rl = F[b] + 1 < W->size()
              ? succ_last(F[b] + 1)
              : W->size();
-        ru = b + 1 < F.size()
+        ru = b + 1 < alph_size
              ? F[b + 1]
              : W->size() - 1;
         //std::cout << "pushing: rl " << rl << " ru " << ru << " str_pos 1 max_distance " << (uint64_t) (b != s) << std::endl;
@@ -660,7 +662,7 @@ uint64_t DBG_succ::pred_kmer(const std::deque<TAlphabet> &kmer) const {
     // get first
     auto kmer_it = kmer.begin();
 
-    uint64_t last = *kmer_it + 1 < F.size()
+    uint64_t last = *kmer_it + 1 < alph_size
                     ? F.at(*kmer_it + 1)
                     : W->size() - 1;
     uint64_t shift = 0;
@@ -914,7 +916,7 @@ void DBG_succ::update_F(TAlphabet c, int value) {
     assert(c < alph_size);
     assert(std::abs(value) == 1);
 
-    for (TAlphabet i = c + 1; i < F.size(); i++) {
+    for (TAlphabet i = c + 1; i < alph_size; i++) {
         F[i] += value;
     }
 }

@@ -16,7 +16,8 @@
 #include <atomic>
 #include <bitset>
 
-class DBG_succ;
+#include "dbg_succinct.hpp"
+
 class KMer;
 
 
@@ -260,7 +261,7 @@ namespace utils {
     void sequence_to_kmers(const std::string &sequence,
                            size_t k,
                            std::vector<KMer> *kmers,
-                           const std::vector<uint64_t> &suffix);
+                           const std::vector<TAlphabet> &suffix);
 
 } // namespace utils
 

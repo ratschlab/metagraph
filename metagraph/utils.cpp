@@ -3,7 +3,6 @@
 #include <fstream>
 #include <algorithm>
 
-#include "dbg_succinct.hpp"
 #include "kmer.hpp"
 
 const size_t kBitsPerDigit = 17;

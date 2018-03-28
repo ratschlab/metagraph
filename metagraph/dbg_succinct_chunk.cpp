@@ -15,6 +15,8 @@ const size_t kLogSigma = 6;
 const size_t kLogSigma = 4;
 #endif
 
+static_assert(sizeof(TAlphabet) * 8 >= kLogSigma);
+
 
 DBG_succ::VectorChunk::VectorChunk()
       : W_(1, 0), last_(1, 0), F_(DBG_succ::alph_size, 0) {}

@@ -9,7 +9,7 @@
 #include <sdsl/uint256_t.hpp>
 
 using sdsl::uint256_t;
-typedef uint64_t TAlphabet;
+typedef uint64_t KMerCharType;
 
 #ifdef _PROTEIN_GRAPH
 const int kBitsPerChar = 5;
@@ -42,7 +42,7 @@ class KMer {
     bool operator==(const KMer &other) const { return seq_ == other.seq_; }
     bool operator!=(const KMer &other) const { return seq_ != other.seq_; }
 
-    TAlphabet operator[](size_t i) const;
+    KMerCharType operator[](size_t i) const;
 
     template <size_t bits_per_digit>
     uint64_t get_digit(size_t i) const;
@@ -61,8 +61,8 @@ class KMer {
      *      = s[7] << k + (kmer & mask) >> 1 + s[8].
      */
     static void update_kmer(size_t k,
-                            TAlphabet edge_label,
-                            TAlphabet last,
+                            KMerCharType edge_label,
+                            KMerCharType last,
                             sdsl::uint256_t *kmer);
   private:
     sdsl::uint256_t seq_; // kmer sequence
