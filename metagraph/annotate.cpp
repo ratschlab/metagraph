@@ -407,8 +407,7 @@ bool AnnotationCategoryBloom::load(const std::string &filename) {
 
     label_to_column_ = load_string_number_map(instream);
     column_to_label_ = libmaus2::util::StringSerialisation::deserialiseStringVector(instream);
-    // TODO: implement
-    // annotator_.load(outstream);
+    annotator_.load(instream);
     return true;
 }
 
