@@ -127,19 +127,75 @@ void read_vcf_file_critical(const std::string &filename,
     }
 }
 
+template <class Annotator>
+void annotate_data(const std::vector<std::string> &files,
+                   const std::string &ref_sequence_path,
+                   const DBG_succ &graph,
+                   Annotator *annotator,
+                   bool reverse,
+                   bool fasta_anno,
+                   bool verbose) {
+    size_t total_seqs = 0;
 
-void annotate_sequence(const std::string &seq,
-                       const std::vector<std::string> &labels,
-                       const DBG_succ &graph,
-                       annotate::ColorCompressed *annotation) {
-    graph.align(seq, [&](uint64_t i) {
-        if (i > 0) {
-            for (const auto &label : labels) {
-                annotation->add_label(i, label);
-            }
+    // iterate over input files
+    for (const auto &file : files) {
+        if (verbose) {
+            std::cout << std::endl << "Parsing " << file << std::endl;
         }
-    });
-};
+        // open stream
+        if (utils::get_filetype(file) == "VCF") {
+            std::vector<std::string> variant_labels;
+
+            read_vcf_file_critical(file, ref_sequence_path, graph.get_k(), &variant_labels,
+                [&](std::string &seq, std::vector<std::string> *variant_labels) {
+                    assert(variant_labels);
+
+                    variant_labels->push_back(file);
+
+                    annotator->add_labels(seq, std::set<std::string>(variant_labels->begin(), variant_labels->end()));
+                    if (reverse) {
+                        reverse_complement(seq.begin(), seq.end());
+                        annotator->add_labels(seq, std::set<std::string>(variant_labels->begin(), variant_labels->end()));
+                    }
+                    variant_labels->clear();
+                }
+            );
+        } else if (utils::get_filetype(file) == "FASTA"
+                    || utils::get_filetype(file) == "FASTQ") {
+            read_fasta_file_critical(file, [&](kseq_t *read_stream) {
+                std::set<std::string> labels = { file, };
+
+                if (fasta_anno) {
+                    // TODO: split string by |fasta_header_delimiter|
+                    labels.emplace(read_stream->name.s);
+                }
+
+                annotator->add_labels(read_stream->seq.s, labels);
+                if (reverse) {
+                    reverse_complement(read_stream->seq);
+                    annotator->add_labels(read_stream->seq.s, labels);
+                }
+
+                total_seqs += 1;
+                if (verbose && total_seqs % 10000 == 0) {
+                    std::cout << "added labels for " << total_seqs
+                              << " sequences"
+                              << ", last was " << read_stream->name.s
+                              << ", annotated as ";
+                    for (const auto &label : labels) {
+                        std::cout << "<" << label << ">";
+                    }
+                    std::cout << std::endl;
+                }
+            });
+        } else {
+            std::cerr << "ERROR: Filetype unknown for file "
+                      << file << std::endl;
+            exit(1);
+        }
+    }
+}
+
 
 
 int main(int argc, const char *argv[]) {
@@ -425,67 +481,15 @@ int main(int argc, const char *argv[]) {
             };
 
             // initialize empty annotation
-            annotate::ColorCompressed annotation(1 + graph->num_edges());
+            annotate::ColorCompressed annotation(*graph);
 
-            size_t total_seqs = 0;
-
-            // iterate over input files
-            for (const auto &file : files) {
-                if (config->verbose) {
-                    std::cout << std::endl << "Parsing " << file << std::endl;
-                }
-                // open stream
-                if (utils::get_filetype(file) == "VCF") {
-                    std::vector<std::string> variant_labels;
-
-                    read_vcf_file_critical(file, config->refpath, graph->get_k(), &variant_labels,
-                        [&](std::string &seq, std::vector<std::string> *variant_labels) {
-                            assert(variant_labels);
-
-                            variant_labels->push_back(file);
-
-                            annotate_sequence(seq, *variant_labels, *graph, &annotation);
-                            if (config->reverse) {
-                                reverse_complement(seq.begin(), seq.end());
-                                annotate_sequence(seq, *variant_labels, *graph, &annotation);
-                            }
-                            variant_labels->clear();
-                        }
-                    );
-                } else if (utils::get_filetype(file) == "FASTA"
-                            || utils::get_filetype(file) == "FASTQ") {
-                    read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-                        std::vector<std::string> labels = { file, };
-
-                        if (config->fasta_anno) {
-                            // TODO: split string by |fasta_header_delimiter|
-                            labels.emplace_back(read_stream->name.s);
-                        }
-
-                        annotate_sequence(read_stream->seq.s, labels, *graph, &annotation);
-                        if (config->reverse) {
-                            reverse_complement(read_stream->seq);
-                            annotate_sequence(read_stream->seq.s, labels, *graph, &annotation);
-                        }
-
-                        total_seqs += 1;
-                        if (config->verbose && total_seqs % 10000 == 0) {
-                            std::cout << "added labels for " << total_seqs
-                                      << " sequences"
-                                      << ", last was " << read_stream->name.s
-                                      << ", annotated as ";
-                            for (const auto &label : labels) {
-                                std::cout << "<" << label << ">";
-                            }
-                            std::cout << std::endl;
-                        }
-                    });
-                } else {
-                    std::cerr << "ERROR: Filetype unknown for file "
-                              << file << std::endl;
-                    exit(1);
-                }
-            }
+            annotate_data(files,
+                          config->refpath,
+                          *graph,
+                          &annotation,
+                          config->reverse,
+                          config->fasta_anno,
+                          config->verbose);
 
             annotation.serialize(config->infbase + ".anno.dbg");
 
@@ -498,11 +502,11 @@ int main(int argc, const char *argv[]) {
             };
 
             // initialize empty Bloom filter annotation
-            std::unique_ptr<annotate::AnnotationCategoryBloom> bloom_annotation;
+            std::unique_ptr<annotate::AnnotationCategoryBloom> annotation;
 
             if (config->bloom_fpp > -0.5) {
                 // Expected FPP is set, optimize other parameters automatically
-                bloom_annotation.reset(
+                annotation.reset(
                     new annotate::AnnotationCategoryBloom(
                         *graph,
                         config->bloom_fpp,
@@ -513,7 +517,7 @@ int main(int argc, const char *argv[]) {
                 assert(config->bloom_bits_per_edge >= 0);
                 // Experiment mode, estimate FPP given other parameters,
                 // optimize the number of hash functions if it's set to zero
-                bloom_annotation.reset(
+                annotation.reset(
                     new annotate::AnnotationCategoryBloom(
                         *graph,
                         config->bloom_bits_per_edge,
@@ -523,9 +527,15 @@ int main(int argc, const char *argv[]) {
                 );
             }
 
-            //TODO: initialize annotations
+            annotate_data(files,
+                          config->refpath,
+                          *graph,
+                          annotation.get(),
+                          config->reverse,
+                          config->fasta_anno,
+                          config->verbose);
 
-            bloom_annotation->serialize(config->infbase + ".anno.bloom.dbg");
+            annotation->serialize(config->infbase + ".anno.bloom.dbg");
 
             return 0;
         }
@@ -536,7 +546,7 @@ int main(int argc, const char *argv[]) {
             };
 
             // load annotatioun (if file does not exist, empty annotation is created)
-            annotate::ColorCompressed annotation(1 + graph->num_edges());
+            annotate::ColorCompressed annotation(*graph);
 
             if (!annotation.load(config->infbase + ".anno.dbg")) {
                 std::cerr << "ERROR: can't load annotations from "

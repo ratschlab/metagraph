@@ -50,12 +50,16 @@ class ColorCompressed : public AnnotationCategory<std::set<std::string>> {
   public:
     typedef std::set<std::string> SetStr;
 
-    ColorCompressed(uint64_t graph_size)
-          : graph_size_(graph_size), annotation_curr_(NULL) {}
+    ColorCompressed(const DBG_succ &graph)
+          : graph_(&graph), graph_size_(graph.num_edges() + 1), annotation_curr_(NULL) {}
+
+    ColorCompressed(size_t graph_size)
+          : graph_(NULL), graph_size_(graph_size), annotation_curr_(NULL) {}
 
     // Merge constructor
-    ColorCompressed(const std::vector<ColorCompressed> &categories,
-                    const std::vector<std::vector<size_t>> &merge_plan);
+    //ColorCompressed(const DBG_succ &graph,
+    //                const std::vector<ColorCompressed> &categories,
+    //                const std::vector<std::vector<size_t>> &merge_plan);
 
     ~ColorCompressed() { release(); }
 
@@ -70,6 +74,7 @@ class ColorCompressed : public AnnotationCategory<std::set<std::string>> {
 
     void set_label(Index i, const SetStr &label);
     void add_label(Index i, const std::string &label);
+    void add_labels(const std::string &sequence, const SetStr &labels);
 
     bool load(const std::string &filename);
     void serialize(const std::string &filename) const;
@@ -77,6 +82,7 @@ class ColorCompressed : public AnnotationCategory<std::set<std::string>> {
     std::vector<std::string> get_label_names() const { return id_to_label_; }
 
   private:
+    const DBG_succ *graph_;
     void release();
     void flush();
     sdsl::bit_vector* inflate_column(const uint32_t id) const;
@@ -254,6 +260,8 @@ class AnnotationCategoryBloom : public AnnotationCategory<std::set<std::string>>
 
     void add_label(const std::string &sequence,
                    const std::string &label);
+    void add_labels(const std::string &sequence,
+                    const SetStr &labels);
 
     bool has_label(Index i, const SetStr &label) const;
 

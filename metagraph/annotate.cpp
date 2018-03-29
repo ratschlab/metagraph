@@ -3,6 +3,7 @@
 #include <pthread.h>
 #include <string>
 #include <algorithm>
+#include <stdexcept>
 
 #include "datatypes.hpp"
 #include "serialization.hpp"
@@ -89,6 +90,19 @@ void ColorCompressed::set_label(Index i, const SetStr &label) {
     for (const auto &value : label) {
         add_label(i, value);
     }
+}
+
+void ColorCompressed::add_labels(const std::string &sequence, const SetStr &labels) {
+    if (!graph_) {
+        throw std::runtime_error("Please initialize with a graph\n");
+    }
+    graph_->align(sequence, [&](uint64_t i) {
+        if (i > 0) {
+            for (const auto &label : labels) {
+                add_label(i, label);
+            }
+        }
+    });
 }
 
 void ColorCompressed::add_label(Index i, const std::string &label) {
@@ -355,8 +369,16 @@ void AnnotationCategoryBloom::set_label(Index i, const SetStr &label) {
     }
 }
 
+void AnnotationCategoryBloom::add_labels(const std::string &sequence,
+                                         const SetStr &labels) {
+    for (const auto &label : labels) {
+        add_label(sequence, label);
+    }
+}
+
 void AnnotationCategoryBloom::add_label(const std::string &sequence,
                                         const std::string &label) {
+    //TODO: set size of the Bloom filter based on the number of edges in graph
     if (label_to_column_.find(label) == label_to_column_.end()) {
         label_to_column_[label] = column_to_label_.size();
         column_to_label_.push_back(label);
