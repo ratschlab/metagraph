@@ -252,6 +252,35 @@ TEST(wavelet_tree_dyn, Serialization) {
     delete vector;
 }
 
+TEST(wavelet_tree_dyn, MoveConstructor) {
+    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                      0, 1, 2, 0, 3, 2, 1, 1 };
+
+    sdsl::int_vector<> int_vector(numbers.size());
+    for (size_t i = 0; i < numbers.size(); ++i) {
+        int_vector[i] = numbers[i];
+    }
+
+    wavelet_tree_stat vector(std::move(int_vector));
+
+    reference_based_test(vector, numbers);
+}
+
+TEST(wavelet_tree_dyn, MoveAssignment) {
+    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                      0, 1, 2, 0, 3, 2, 1, 1 };
+
+    sdsl::int_vector<> int_vector(numbers.size());
+    for (size_t i = 0; i < numbers.size(); ++i) {
+        int_vector[i] = numbers[i];
+    }
+
+    wavelet_tree_stat vector(1);
+    vector = std::move(int_vector);
+
+    reference_based_test(vector, numbers);
+}
+
 TEST(wavelet_tree_stat, BeyondTheDNA) {
     std::vector<uint64_t> numbers = { 0, 57, 0, 1, 100, 1, 1, 0,
                                       0, 1, 89, 0, 3, 2, 75, 1 };

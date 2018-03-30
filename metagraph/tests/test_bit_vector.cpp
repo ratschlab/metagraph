@@ -234,3 +234,34 @@ TEST(bit_vector_stat, Serialization) {
 
     delete vector;
 }
+
+TEST(bit_vector_stat, MoveConstructor) {
+    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+
+    std::vector<bool> numbers(init_list);
+    sdsl::bit_vector bit_vector(numbers.size());
+    for (size_t i = 0; i < numbers.size(); ++i) {
+        bit_vector[i] = numbers[i];
+    }
+
+    bit_vector_stat vector(std::move(bit_vector));
+
+    reference_based_test(vector, numbers);
+}
+
+TEST(bit_vector_stat, MoveAssignment) {
+    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+
+    std::vector<bool> numbers(init_list);
+    sdsl::bit_vector bit_vector(numbers.size());
+    for (size_t i = 0; i < numbers.size(); ++i) {
+        bit_vector[i] = numbers[i];
+    }
+
+    bit_vector_stat vector;
+    vector = std::move(bit_vector);
+
+    reference_based_test(vector, numbers);
+}

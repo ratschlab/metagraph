@@ -1,10 +1,7 @@
 #ifndef __BIT_VECTOR_HPP__
 #define __BIT_VECTOR_HPP__
 
-#include <cassert>
-
-#define __STDC_FORMAT_MACROS 1
-#include <cinttypes>
+#include <cstdint>
 
 #include <sdsl/wavelet_trees.hpp>
 #include <libmaus2/bitbtree/bitbtree.hpp>
@@ -77,6 +74,9 @@ class bit_vector_stat : public bit_vector {
     explicit bit_vector_stat(const std::vector<bool> &other);
     explicit bit_vector_stat(std::initializer_list<bool> init);
     explicit bit_vector_stat(std::istream &in);
+
+    bit_vector_stat(sdsl::bit_vector&& vector);
+    bit_vector_stat& operator=(sdsl::bit_vector&& vector);
 
     uint64_t rank1(uint64_t id) const;
     uint64_t select1(uint64_t id) const;

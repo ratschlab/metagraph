@@ -136,6 +136,17 @@ bit_vector_stat::bit_vector_stat(std::istream &in) {
     }
 }
 
+bit_vector_stat::bit_vector_stat(sdsl::bit_vector&& vector)
+      : vector_(std::move(vector)) {
+    num_set_bits_ = std::count(vector_.begin(), vector_.end(), 1);
+}
+
+bit_vector_stat& bit_vector_stat::operator=(sdsl::bit_vector&& vector) {
+    vector_ = std::move(vector);
+    num_set_bits_ = std::count(vector_.begin(), vector_.end(), 1);
+    return *this;
+}
+
 uint64_t bit_vector_stat::rank1(uint64_t id) const {
     if (requires_update_)
         const_cast<bit_vector_stat*>(this)->init_rs();
