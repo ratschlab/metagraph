@@ -166,26 +166,11 @@ void parallel_merge_wrapper(const std::vector<const DBG_succ*> &graphs,
 }
 
 
-DBG_succ::Chunk* stack_graph_chunks(const std::vector<DBG_succ::Chunk*> &graph_chunks,
-                                    const std::vector<std::string> &filenames = {}) {
-    assert(!filenames.size() || filenames.size() == graph_chunks.size());
+DBG_succ::Chunk* stack_graph_chunks(const std::vector<DBG_succ::Chunk*> &graph_chunks) {
+    DBG_succ::Chunk *merged = new DBG_succ::Chunk();
 
-    DBG_succ::Chunk *merged = new DBG_succ::VectorChunk();
-
-    for (uint64_t f = 0; f < graph_chunks.size(); f++) {
-        DBG_succ::Chunk *chunk = graph_chunks[f];
-
-        // load from file if undefined
-        if (!chunk) {
-            chunk = new DBG_succ::VectorChunk();
-            if (!chunk->load(filenames.at(f))) {
-                std::cerr << "ERROR: input file "
-                          << filenames.at(f) << " corrupted" << std::endl;
-                delete merged;
-                delete chunk;
-                return NULL;
-            }
-        }
+    for (DBG_succ::Chunk *chunk : graph_chunks) {
+        assert(chunk);
         merged->extend(*chunk);
         delete chunk;
     }
@@ -251,7 +236,7 @@ DBG_succ::Chunk* merge_blocks_to_chunk(const std::vector<const DBG_succ*> &graph
 
     std::vector<DBG_succ::Chunk*> blocks(bins.front().size() - 1);
     for (size_t i = 0; i < blocks.size(); ++i) {
-        blocks[i] = new DBG_succ::VectorChunk();
+        blocks[i] = new DBG_succ::Chunk();
     }
 
     for (size_t tid = 0; tid < num_threads; tid++) {
@@ -280,33 +265,7 @@ DBG_succ::Chunk* merge_blocks_to_chunk(const std::vector<const DBG_succ*> &graph
 }
 
 
-/**
- * Merge graph chunks from the vector passed and release the chunks afterwards.
- * If the null pointers are passed,
- * load chunks from files "filenamebase.<chunk_idx>_<num_chunks>".
- */
-DBG_succ* build_graph_from_chunks(size_t k,
-                       const std::vector<DBG_succ::Chunk*> &graph_chunks,
-                       const std::vector<std::string> &filenames) {
-    assert(!filenames.size() || filenames.size() == graph_chunks.size());
-
-    DBG_succ *graph = new DBG_succ(k);
-    if (!graph_chunks.size())
-        return graph;
-
-    auto merged = stack_graph_chunks(graph_chunks, filenames);
-    if (!merged)
-        return NULL;
-
-    merged->initialize_graph(graph);
-    delete merged;
-
-    return graph;
-}
-
-
-DBG_succ* merge(const std::vector<const DBG_succ*> &Gv,
-                bool verbose) {
+DBG_succ* merge(const std::vector<const DBG_succ*> &Gv, bool verbose) {
     std::vector<uint64_t> kv;
     std::vector<uint64_t> nv;
 
@@ -315,14 +274,12 @@ DBG_succ* merge(const std::vector<const DBG_succ*> &Gv,
         nv.push_back(Gv[i]->get_W().size());
     }
 
-    DBG_succ::VectorChunk merged;
+    auto *merged = new DBG_succ::Chunk();
 
-    merge_blocks(Gv, kv, nv, &merged, verbose);
+    merge_blocks(Gv, kv, nv, merged, verbose);
 
-    DBG_succ *graph = new DBG_succ(Gv.at(0)->get_k());
-    merged.initialize_graph(graph);
-
-    return graph;
+    return DBG_succ::Chunk::build_graph_from_chunks(Gv.at(0)->get_k(),
+                                                    { merged, });
 }
 
 

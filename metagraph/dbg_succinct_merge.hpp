@@ -25,15 +25,6 @@ namespace merge {
                                            size_t num_bins_per_thread,
                                            bool verbose = false);
 
-    /**
-     * Merge graph chunks from the vector passed and release the chunks afterwards.
-     * If the null pointers are passed,
-     * load chunks from files "filenamebase.<chunk_idx>_<num_chunks>".
-     */
-    DBG_succ* build_graph_from_chunks(size_t k,
-                           const std::vector<DBG_succ::Chunk*> &graph_chunks,
-                           const std::vector<std::string> &filenames = {});
-
 } // namespace merge
 
 #endif // __MERGE_HPP__

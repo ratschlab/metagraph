@@ -430,8 +430,6 @@ class DBG_succ : public SequenceGraph {
 
   public:
     class Chunk;
-    class DynamicChunk;
-    class VectorChunk;
 };
 
 std::ostream& operator<<(std::ostream &os, const DBG_succ &graph);

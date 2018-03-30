@@ -208,7 +208,6 @@ void recover_source_dummy_nodes(size_t k,
     sort_and_remove_duplicates(kmers, num_threads, cur_pos);
 }
 
-
 void KMerDBGSuccConstructor::build_graph(DBG_succ *graph) {
     // build the graph chunk from kmers
     auto chunk = constructor_.build_chunk();
@@ -216,7 +215,6 @@ void KMerDBGSuccConstructor::build_graph(DBG_succ *graph) {
     chunk->initialize_graph(graph);
     delete chunk;
 }
-
 
 KMerDBGSuccChunkConstructor::KMerDBGSuccChunkConstructor(
                                             size_t k,
@@ -287,7 +285,7 @@ DBG_succ::Chunk* KMerDBGSuccChunkConstructor::build_chunk() {
         recover_source_dummy_nodes(k_, &kmers_, num_threads_, verbose_);
     }
 
-    DBG_succ::Chunk *result = DBG_succ::VectorChunk::build_from_kmers(k_, &kmers_);
+    DBG_succ::Chunk *result = DBG_succ::Chunk::build_from_kmers(k_, &kmers_);
     kmers_.clear();
 
     return result;
@@ -311,6 +309,6 @@ void SuffixArrayDBGSuccConstructor::add_read(const std::string &read) {
 
 // Implement SA construction and extract the kmers from the result
 void SuffixArrayDBGSuccConstructor::build_graph(DBG_succ *graph) {
-    DBG_succ::VectorChunk result;
+    DBG_succ::Chunk result;
     result.initialize_graph(graph);
 }

@@ -242,7 +242,7 @@ int main(int argc, const char *argv[]) {
                 if (config->suffix.size())
                     suffices = { config->suffix };
 
-                DBG_succ::VectorChunk graph_data;
+                DBG_succ::Chunk graph_data;
 
                 //one pass per suffix
                 for (const std::string &suffix : suffices) {
@@ -622,11 +622,20 @@ int main(int argc, const char *argv[]) {
 
             // collect results on an external merge
             if (config->collect > 1) {
-                graph = merge::build_graph_from_chunks(
-                    config->k,
-                    std::vector<DBG_succ::Chunk*>(files.size(), NULL),
-                    files
-                );
+                std::vector<DBG_succ::Chunk*> graph_chunks;
+
+                for (const auto &filename : files) {
+                    graph_chunks.push_back(new DBG_succ::Chunk());
+
+                    if (!graph_chunks.back()->load(filename)) {
+                        std::cerr << "ERROR: input file "
+                                  << filename << " corrupted" << std::endl;
+                        exit(1);
+                    }
+                }
+
+                graph = DBG_succ::Chunk::build_graph_from_chunks(config->k,
+                                                                 graph_chunks);
             } else {
                 Timer timer;
 

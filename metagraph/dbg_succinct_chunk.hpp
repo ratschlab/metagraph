@@ -10,27 +10,7 @@ class KMer;
 
 class DBG_succ::Chunk {
   public:
-    virtual ~Chunk() {}
-
-    virtual void push_back(TAlphabet W, TAlphabet F, bool last) = 0;
-    virtual TAlphabet get_W_back() const = 0;
-    virtual void alter_W_back(TAlphabet W) = 0;
-    virtual void alter_last_back(bool last) = 0;
-
-    virtual void extend(const Chunk &other) = 0;
-
-    virtual uint64_t size() const = 0;
-
-    virtual void initialize_graph(DBG_succ *graph) = 0;
-
-    virtual bool load(const std::string &filename_base) = 0;
-    virtual void serialize(const std::string &filename_base) const = 0;
-};
-
-
-class DBG_succ::VectorChunk : public DBG_succ::Chunk {
-  public:
-    VectorChunk();
+    Chunk();
 
     void push_back(TAlphabet W, TAlphabet F, bool last);
     TAlphabet get_W_back() const;
@@ -38,19 +18,25 @@ class DBG_succ::VectorChunk : public DBG_succ::Chunk {
     void alter_last_back(bool last);
 
     void extend(const Chunk &other);
-    void extend(const VectorChunk &other);
 
     uint64_t size() const;
-
-    void initialize_graph(DBG_succ *graph);
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
 
+    void initialize_graph(DBG_succ *graph) const;
+
+    /**
+     * Merge graph chunks from the vector
+     * passed and release the chunks afterwards
+     */
+    static DBG_succ* build_graph_from_chunks(size_t k,
+                                const std::vector<Chunk*> &graph_chunks);
+
     /**
      * Initialize graph chunk from a list of sorted kmers.
      */
-    static VectorChunk* build_from_kmers(size_t k, std::vector<KMer> *kmers);
+    static Chunk* build_from_kmers(size_t k, std::vector<KMer> *kmers);
 
   private:
     std::vector<TAlphabet> W_;
