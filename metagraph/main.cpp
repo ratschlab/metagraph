@@ -102,6 +102,7 @@ void read_vcf_file_critical(const std::string &filename,
 
     //TODO: make this a configurable option
     //default list of tokens to extract as annotations
+    //TODO: extract these guys directly from vcf parsed
     const std::vector<std::string> annots = {
       "AC_AFR", "AC_EAS", "AC_AMR", "AC_ASJ",
       "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"
@@ -134,6 +135,7 @@ void annotate_data(const std::vector<std::string> &files,
                    Annotator *annotator,
                    bool reverse,
                    bool fasta_anno,
+                   const std::string &fasta_header_delimiter,
                    bool verbose) {
     size_t total_seqs = 0;
 
@@ -146,16 +148,25 @@ void annotate_data(const std::vector<std::string> &files,
         if (utils::get_filetype(file) == "VCF") {
             std::vector<std::string> variant_labels;
 
-            read_vcf_file_critical(file, ref_sequence_path, graph.get_k(), &variant_labels,
+            read_vcf_file_critical(file,
+                                   ref_sequence_path,
+                                   graph.get_k(),
+                                   &variant_labels,
                 [&](std::string &seq, std::vector<std::string> *variant_labels) {
                     assert(variant_labels);
 
                     variant_labels->push_back(file);
 
-                    annotator->add_labels(seq, std::set<std::string>(variant_labels->begin(), variant_labels->end()));
+                    annotator->add_labels(seq,
+                        std::set<std::string>(variant_labels->begin(),
+                                              variant_labels->end())
+                    );
                     if (reverse) {
                         reverse_complement(seq.begin(), seq.end());
-                        annotator->add_labels(seq, std::set<std::string>(variant_labels->begin(), variant_labels->end()));
+                        annotator->add_labels(seq,
+                            std::set<std::string>(variant_labels->begin(),
+                                                  variant_labels->end())
+                        );
                     }
                     variant_labels->clear();
                 }
@@ -166,6 +177,7 @@ void annotate_data(const std::vector<std::string> &files,
                 std::set<std::string> labels = { file, };
 
                 if (fasta_anno) {
+                    std::ignore = fasta_header_delimiter;
                     // TODO: split string by |fasta_header_delimiter|
                     labels.emplace(read_stream->name.s);
                 }
@@ -489,6 +501,7 @@ int main(int argc, const char *argv[]) {
                           &annotation,
                           config->reverse,
                           config->fasta_anno,
+                          config->fasta_header_delimiter,
                           config->verbose);
 
             annotation.serialize(config->infbase + ".anno.dbg");
@@ -533,6 +546,7 @@ int main(int argc, const char *argv[]) {
                           annotation.get(),
                           config->reverse,
                           config->fasta_anno,
+                          config->fasta_header_delimiter,
                           config->verbose);
 
             annotation->serialize(config->infbase + ".anno.bloom.dbg");
@@ -545,51 +559,68 @@ int main(int argc, const char *argv[]) {
                 load_critical_graph_from_file(config->infbase)
             };
 
-            // load annotatioun (if file does not exist, empty annotation is created)
             annotate::ColorCompressed annotation(*graph);
 
             if (!annotation.load(config->infbase + ".anno.dbg")) {
                 std::cerr << "ERROR: can't load annotations from "
                           << config->infbase + ".anno.dbg"
-                          << " corrupted" << std::endl;
+                          << ", file corrupted" << std::endl;
             }
             const auto labels = annotation.get_label_names();
 
             // iterate over input files
-            for (unsigned int f = 0; f < files.size(); ++f) {
+            for (const auto &file : files) {
                 if (config->verbose) {
-                    std::cout << std::endl << "Parsing " << files[f] << std::endl;
+                    std::cout << std::endl << "Parsing " << file << std::endl;
                 }
 
-                read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
+                read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                     std::cout << read_stream->name.s << ":\t";
 
                     if (config->reverse)
                         reverse_complement(read_stream->seq);
 
-                    size_t max_kmers_missing =
+                    const size_t max_kmers_missing =
                         (read_stream->seq.l - graph->get_k() + 1)
                             * (1 - config->discovery_fraction);
+
+                    const size_t min_kmers_discovered =
+                        (read_stream->seq.l - graph->get_k() + 1)
+                            - max_kmers_missing;
 
                     std::map<std::string, size_t> labels_counter;
                     for (const auto &label : labels) {
                         labels_counter[label] = 0;
                     }
+
+                    size_t kmers_checked = 0;
+                    std::vector<std::string> labels_discovered;
+
                     graph->align(read_stream->seq.s,
                         [&](uint64_t i) {
+                            kmers_checked++;
                             for (auto it = labels_counter.begin(); it != labels_counter.end();) {
-                                if ((i > 0 && annotation.has_label(i, it->first))
-                                        || ++(it->second) <= max_kmers_missing) {
-                                    ++it;
-                                } else {
+                                if (i > 0 && annotation.has_label(i, it->first))
+                                    it->second++;
+
+                                if (it->second >= min_kmers_discovered) {
+                                    labels_discovered.push_back(it->first);
                                     labels_counter.erase(it++);
+                                } else if (kmers_checked - it->second > max_kmers_missing) {
+                                    labels_counter.erase(it++);
+                                } else {
+                                    ++it;
                                 }
                             }
                         },
                         [&]() { return labels_counter.size() == 0; }
                     );
-                    for (auto it = labels_counter.begin(); it != labels_counter.end(); ++it) {
-                        std::cout << it->first << ",";
+
+                    if (labels_discovered.size()) {
+                        std::cout << ":";
+                    }
+                    for (auto &label : labels_discovered) {
+                        std::cout << label << ":";
                     }
                     std::cout << std::endl;
                 });
