@@ -7,8 +7,6 @@
 #include "serialization.hpp"
 #include "kmer.hpp"
 
-using libmaus2::util::NumberSerialisation;
-
 #ifdef _PROTEIN_GRAPH
 const size_t kLogSigma = 6;
 #else
@@ -123,9 +121,9 @@ bool DBG_succ::Chunk::load(const std::string &infbase) {
     try {
         std::ifstream instream(infbase + ".dbgchunk");
 
-        W_ = NumberSerialisation::deserialiseNumberVector<TAlphabet>(instream);
-        last_ = NumberSerialisation::deserialiseNumberVector<bool>(instream);
-        F_ = NumberSerialisation::deserialiseNumberVector<uint64_t>(instream);
+        W_ = load_number_vector<TAlphabet>(instream);
+        last_ = load_number_vector<bool>(instream);
+        F_ = load_number_vector<uint64_t>(instream);
 
         instream.close();
 
@@ -137,9 +135,9 @@ bool DBG_succ::Chunk::load(const std::string &infbase) {
 
 void DBG_succ::Chunk::serialize(const std::string &outbase) const {
     std::ofstream outstream(outbase + ".dbgchunk");
-    NumberSerialisation::serialiseNumberVector(outstream, W_);
-    NumberSerialisation::serialiseNumberVector(outstream, last_);
-    NumberSerialisation::serialiseNumberVector(outstream, F_);
+    serialize_number_vector(outstream, W_, kLogSigma);
+    serialize_number_vector(outstream, last_);
+    serialize_number_vector(outstream, F_);
     outstream.close();
 }
 

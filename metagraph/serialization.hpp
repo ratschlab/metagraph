@@ -7,6 +7,14 @@
 #include <unordered_map>
 
 
+template <typename T>
+void serialize_number_vector(std::ostream &out,
+                             const std::vector<T> &vector,
+                             size_t bits_per_number = sizeof(T) * 8);
+
+template <typename T>
+std::vector<T> load_number_vector(std::istream &in);
+
 void serialize_number_number_map(std::ostream &out,
                                  const std::map<uint32_t, uint32_t> &M);
 
