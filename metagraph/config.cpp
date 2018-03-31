@@ -104,6 +104,8 @@ Config::Config(int argc, const char *argv[]) {
             refpath = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "--fasta-anno-delimiter")) {
             fasta_header_delimiter = std::string(argv[++i]);
+        } else if (!strcmp(argv[i], "--labels-delimiter")) {
+            anno_labels_delimiter = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-s") || !strcmp(argv[i], "--num-splits")) {
             nsplits = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--suffix")) {
@@ -294,7 +296,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
             fprintf(stderr, "\t   --fasta-anno \t\textract annotations from headers of sequences in files [off]\n");
             fprintf(stderr, "\t   --fasta-anno-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
-            //fprintf(stderr, "\t   --db-path \tpath that is used to store the annotations database []\n");
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case ANNOTATE_BLOOM: {
@@ -309,6 +310,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
             // fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [1]\n");
             // fprintf(stderr, "\t-f --frequency [INT] \t\twhen a, annotate only every a-th kmer [1]\n");
+            // fprintf(stderr, "\t   --db-path \tpath that is used to store the annotations database []\n");
             fprintf(stderr, "\t   --bloom-false-pos-prob [FLOAT]\tFalse positive probability in bloom filter [-1]\n");
             fprintf(stderr, "\t   --bloom-bits-per-edge [FLOAT] \tBits per edge used in bloom filter annotator [0.4]\n");
             fprintf(stderr, "\t   --bloom-hash-functions [INT] \tNumber of hash functions used in bloom filter [off]\n");
@@ -321,6 +323,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for classify:\n");
             fprintf(stderr, "\t-r --reverse \t\t\tclassify reverse complement sequences [off]\n");
             fprintf(stderr, "\t   --discovery-fraction \tfraction of labeled k-mers required for annotation [1.0]\n");
+            fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
             // fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
         } break;
         case TRANSFORM: {

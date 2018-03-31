@@ -48,6 +48,7 @@ class Config {
     std::string refpath;
     std::string suffix;
     std::string fasta_header_delimiter;
+    std::string anno_labels_delimiter = ":";
 
     enum IdentityType {
         NO_IDENTITY = -1,

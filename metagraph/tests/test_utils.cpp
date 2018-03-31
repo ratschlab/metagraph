@@ -366,3 +366,45 @@ TEST(AsyncActivity, RunBothParallel) {
     t1.join();
     t2.join();
 }
+
+TEST(Misc, SplitString) {
+    EXPECT_EQ(std::vector<std::string>(),
+              utils::split_string("", ""));
+
+    EXPECT_EQ(std::vector<std::string>({ "123" }),
+              utils::split_string("123", ""));
+
+    EXPECT_EQ(std::vector<std::string>({ "23" }),
+              utils::split_string("123", "1"));
+
+    EXPECT_EQ(std::vector<std::string>({ "1", "3" }),
+              utils::split_string("123", "2"));
+
+    EXPECT_EQ(std::vector<std::string>({ "1", "34", "67" }),
+              utils::split_string("12342672", "2"));
+
+    EXPECT_EQ(std::vector<std::string>({ "1", "34", "72" }),
+              utils::split_string("126342672", "26"));
+
+    EXPECT_EQ(std::vector<std::string>({ "126342672" }),
+              utils::split_string("126342672", ""));
+}
+
+TEST(Misc, JoinStrings) {
+    EXPECT_EQ("", utils::join_strings({ "" }, ""));
+    EXPECT_EQ("23", utils::join_strings({ "23" }, ":"));
+    EXPECT_EQ("1:3", utils::join_strings(
+                std::vector<std::string>({ "1", "3" }), ":"));
+    EXPECT_EQ("1:34:67", utils::join_strings(
+                std::vector<std::string>({ "1", "34", "67" }), ":"));
+    EXPECT_EQ("1::34::72", utils::join_strings(
+                std::vector<std::string>({ "1", "34", "72" }), "::"));
+    EXPECT_EQ("13472", utils::join_strings(
+                std::vector<std::string>({ "1", "34", "72" }), ""));
+
+    EXPECT_EQ(std::vector<std::string>({ "123" }),
+              utils::split_string("123", ""));
+
+    EXPECT_EQ(std::vector<std::string>({ "23" }),
+              utils::split_string("123", "1"));
+}

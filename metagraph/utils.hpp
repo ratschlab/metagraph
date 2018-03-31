@@ -23,6 +23,13 @@ class KMer;
 
 namespace utils {
 
+    std::string join_strings(const std::vector<std::string> &strings,
+                             const std::string &delimiter);
+
+    std::vector<std::string> split_string(const std::string &string,
+                                          const std::string &delimiter);
+
+
     uint64_t kFromFile(const std::string &infbase);
 
     /**

@@ -10,6 +10,47 @@ const size_t kBitsPerDigit = 17;
 
 namespace utils {
 
+std::string join_strings(const std::vector<std::string> &strings,
+                         const std::string &delimiter) {
+    if (!strings.size())
+        return "";
+
+    if (strings.size() == 1)
+        return strings[0];
+
+    std::string result = strings[0];
+    for (size_t i = 1; i < strings.size(); ++i) {
+        result += delimiter + strings[i];
+    }
+    return result;
+}
+
+std::vector<std::string> split_string(const std::string &string,
+                                      const std::string &delimiter) {
+    if (!string.size())
+        return {};
+
+    if (!delimiter.size())
+        return { string, };
+
+    std::vector<std::string> result;
+
+    size_t current_pos = 0;
+    size_t delimiter_pos;
+
+    while ((delimiter_pos = string.find(delimiter, current_pos))
+                                             != std::string::npos) {
+        if (delimiter_pos > current_pos)
+            result.push_back(string.substr(current_pos, delimiter_pos - current_pos));
+        current_pos = delimiter_pos + delimiter.size();
+    }
+    if (current_pos < string.size()) {
+        result.push_back(string.substr(current_pos));
+    }
+    return result;
+}
+
+
 uint64_t kFromFile(const std::string &infbase) {
     uint64_t k = 0;
     std::ifstream instream((infbase + ".F.dbg").c_str()); 

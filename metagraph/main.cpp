@@ -177,9 +177,9 @@ void annotate_data(const std::vector<std::string> &files,
                 std::set<std::string> labels = { file, };
 
                 if (fasta_anno) {
-                    std::ignore = fasta_header_delimiter;
-                    // TODO: split string by |fasta_header_delimiter|
-                    labels.emplace(read_stream->name.s);
+                    auto header_labels = utils::split_string(read_stream->name.s,
+                                                             fasta_header_delimiter);
+                    labels.insert(header_labels.begin(), header_labels.end());
                 }
 
                 annotator->add_labels(read_stream->seq.s, labels);
@@ -616,13 +616,9 @@ int main(int argc, const char *argv[]) {
                         [&]() { return labels_counter.size() == 0; }
                     );
 
-                    if (labels_discovered.size()) {
-                        std::cout << ":";
-                    }
-                    for (auto &label : labels_discovered) {
-                        std::cout << label << ":";
-                    }
-                    std::cout << std::endl;
+                    std::cout << utils::join_strings(labels_discovered,
+                                                     config->anno_labels_delimiter)
+                              << std::endl;
                 });
             }
 
