@@ -222,6 +222,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\tbloom\t\tgiven a graph and a fast[a|q] file, annotate\n");
             fprintf(stderr, "\t\t\tthe respective kmers using Bloom filters\n\n");
 
+            fprintf(stderr, "\tclassify\tannotate sequences from fast[a|q] files\n\n");
+
             fprintf(stderr, "\ttransform\tgiven a graph, transform it to other formats\n\n");
 
             return;
