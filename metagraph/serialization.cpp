@@ -27,6 +27,9 @@ template void serialize_number_vector<bool>(std::ostream &out,
                                             const std::vector<bool> &vector,
                                             size_t bits_per_number = 1);
 
+uint64_t load_number_vector_size(std::istream &in) {
+    return NumberSerialisation::deserialiseNumber(in);
+}
 
 template <typename T>
 std::vector<T> load_number_vector(std::istream &in) {

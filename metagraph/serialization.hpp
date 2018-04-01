@@ -12,6 +12,8 @@ void serialize_number_vector(std::ostream &out,
                              const std::vector<T> &vector,
                              size_t bits_per_number = sizeof(T) * 8);
 
+uint64_t load_number_vector_size(std::istream &in);
+
 template <typename T>
 std::vector<T> load_number_vector(std::istream &in);
 

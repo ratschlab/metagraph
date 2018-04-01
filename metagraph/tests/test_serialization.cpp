@@ -80,10 +80,15 @@ void test_random_vector(size_t length) {
         serialize_number_vector(outstream, numbers);
         outstream.close();
 
-        std::ifstream instream(test_dump_basename);
-        auto loaded_vector = load_number_vector<uint8_t>(instream);
-
-        ASSERT_EQ(numbers, loaded_vector);
+        {
+            std::ifstream instream(test_dump_basename);
+            ASSERT_EQ(numbers.size(), load_number_vector_size(instream));
+        }
+        {
+            std::ifstream instream(test_dump_basename);
+            auto loaded_vector = load_number_vector<uint8_t>(instream);
+            ASSERT_EQ(numbers, loaded_vector);
+        }
     }
 }
 
