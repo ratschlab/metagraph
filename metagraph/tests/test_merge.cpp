@@ -134,9 +134,14 @@ TEST(DBGSuccinctMerge, ParallelMergeEmptyGraphs) {
         std::vector<const DBG_succ*> graphs = { &first, &second };
 
         DBG_succ *merged = merge::merge(graphs);
+
+        std::unique_ptr<DBG_succ::Chunk> chunk {
+            merge::merge_blocks_to_chunk(graphs, 0, 1, 1, 1)
+        };
+        chunk->serialize(test_data_dir + "/1");
         DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
             k,
-            { merge::merge_blocks_to_chunk(graphs, 0, 1, 1, 1) }
+            { test_data_dir + "/1" }
         );
 
         first.merge(second);
@@ -158,9 +163,14 @@ TEST(DBGSuccinctMerge, ParallelMergeTwoPaths) {
         std::vector<const DBG_succ*> graphs = { &first, &second };
 
         DBG_succ *merged = merge::merge(graphs);
+
+        std::unique_ptr<DBG_succ::Chunk> chunk {
+            merge::merge_blocks_to_chunk(graphs, 0, 1, 1, 1)
+        };
+        chunk->serialize(test_data_dir + "/1");
         DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
             k,
-            { merge::merge_blocks_to_chunk(graphs, 0, 1, 1, 1) }
+            { test_data_dir + "/1" }
         );
 
         first.merge(second);
@@ -183,9 +193,14 @@ TEST(DBGSuccinctMerge, ParallelMergeSinglePathWithTwo) {
         std::vector<const DBG_succ*> graphs = { &first, &second };
 
         DBG_succ *merged = merge::merge(graphs);
+
+        std::unique_ptr<DBG_succ::Chunk> chunk {
+            merge::merge_blocks_to_chunk(graphs, 0, 1, 1, 1)
+        };
+        chunk->serialize(test_data_dir + "/1");
         DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
             k,
-            { merge::merge_blocks_to_chunk(graphs, 0, 1, 1, 1) }
+            { test_data_dir + "/1" }
         );
 
         first.merge(second);
@@ -212,9 +227,14 @@ TEST(DBGSuccinctMerge, ParallelMergeThreeGraphs) {
         std::vector<const DBG_succ*> graphs = { &first, &second, &third };
 
         DBG_succ *merged = merge::merge(graphs);
+
+        std::unique_ptr<DBG_succ::Chunk> chunk {
+            merge::merge_blocks_to_chunk(graphs, 0, 1, 1, 1)
+        };
+        chunk->serialize(test_data_dir + "/1");
         DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
             k,
-            { merge::merge_blocks_to_chunk(graphs, 0, 1, 1, 1) }
+            { test_data_dir + "/1" }
         );
 
         first.merge(second);
@@ -242,11 +262,30 @@ TEST(DBGSuccinctMerge, ParallelChunkedMergeThreeGraphs) {
         std::vector<const DBG_succ*> graphs = { &first, &second, &third };
 
         DBG_succ *merged = merge::merge(graphs);
+
+        {
+            std::unique_ptr<DBG_succ::Chunk> chunk {
+                merge::merge_blocks_to_chunk(graphs, 0, 3, 1, 1)
+            };
+            chunk->serialize(test_data_dir + "/1");
+        }
+        {
+            std::unique_ptr<DBG_succ::Chunk> chunk {
+                merge::merge_blocks_to_chunk(graphs, 1, 3, 1, 1)
+            };
+            chunk->serialize(test_data_dir + "/2");
+        }
+        {
+            std::unique_ptr<DBG_succ::Chunk> chunk {
+                merge::merge_blocks_to_chunk(graphs, 2, 3, 1, 1)
+            };
+            chunk->serialize(test_data_dir + "/3");
+        }
         DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
             k,
-            { merge::merge_blocks_to_chunk(graphs, 0, 3, 1, 1),
-              merge::merge_blocks_to_chunk(graphs, 1, 3, 1, 1), 
-              merge::merge_blocks_to_chunk(graphs, 2, 3, 1, 1) }
+            { test_data_dir + "/1",
+              test_data_dir + "/2",
+              test_data_dir + "/3", }
         );
 
         first.merge(second);
@@ -287,15 +326,9 @@ TEST(DBGSuccinctMerge, ParallelDumpedChunkedMergeThreeGraphs) {
             delete chunk;
         }
 
-        std::vector<DBG_succ::Chunk*> graph_chunks;
-
-        for (const auto &filename : files) {
-            graph_chunks.push_back(new DBG_succ::Chunk());
-            ASSERT_TRUE(graph_chunks.back()->load(filename));
-        }
         DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
             k,
-            graph_chunks
+            files
         );
         ASSERT_TRUE(chunked_merged);
 
@@ -335,10 +368,16 @@ void random_testing_parallel_merge(size_t num_graphs, size_t num_sequences, size
         }
 
         DBG_succ *merged = merge::merge(graphs);
+
+        std::unique_ptr<DBG_succ::Chunk> chunk {
+            merge::merge_blocks_to_chunk(graphs, 0, 1, num_threads, num_bins_per_thread)
+        };
+        chunk->serialize(test_data_dir + "/1");
         DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
             k,
-            { merge::merge_blocks_to_chunk(graphs, 0, 1, num_threads, num_bins_per_thread) }
+            { test_data_dir + "/1" }
         );
+
         DBG_succ result(k);
         for (size_t i = 0; i < graphs.size(); ++i) {
             result.merge(*graphs[i]);

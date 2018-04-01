@@ -63,51 +63,64 @@ void DBG_succ::Chunk::initialize_graph(DBG_succ *graph) const {
     assert(graph->is_valid());
 }
 
-/**
- * Merge graph chunks from the vector
- * passed and release the chunks afterwards
- */
 DBG_succ* DBG_succ::Chunk::build_graph_from_chunks(size_t k,
-                        const std::vector<Chunk*> &graph_chunks,
+                        const std::vector<std::string> &chunk_filenames,
                         bool verbose) {
     DBG_succ *graph = new DBG_succ(k);
-    if (!graph_chunks.size())
+    if (!chunk_filenames.size())
         return graph;
 
-    auto size = std::accumulate(
-        graph_chunks.cbegin(), graph_chunks.cend(),
-        static_cast<uint64_t>(1),
-        [](uint64_t size, const Chunk *chunk) {
-            return size + chunk->size();
+    uint64_t cumulative_size = 1;
+    for (const auto &file : chunk_filenames) {
+        std::ifstream chunk_in(file + ".dbgchunk");
+        if (!chunk_in.good()) {
+            std::cerr << "ERROR: input file "
+                      << file + ".dbgchunk" << " corrupted" << std::endl;
+            exit(1);
         }
-    );
+        cumulative_size += load_number_vector_size(chunk_in) - 1;
+    }
 
     if (verbose)
         std::cout << "Cumulative size of chunks: "
-                  << size << std::endl;
+                  << cumulative_size << std::endl;
 
-    sdsl::int_vector<> W(size, 0, kLogSigma);
-    sdsl::bit_vector last(size, 0);
+    sdsl::int_vector<> W(cumulative_size, 0, kLogSigma);
+    sdsl::bit_vector last(cumulative_size, 0);
     std::vector<uint64_t> F(DBG_succ::alph_size, 0);
     uint64_t pos = 1;
 
     if (verbose)
         std::cout << "Succinct arrays initialized" << std::endl;
 
-    for (Chunk *chunk : graph_chunks) {
-        assert(chunk);
+    for (const auto &filename : chunk_filenames) {
+        DBG_succ::Chunk graph_chunk;
 
-        for (size_t i = 1; i < chunk->W_.size(); ++i) {
-            W[pos] = chunk->W_[i];
-            last[pos] = chunk->last_[i];
+        if (!graph_chunk.load(filename)) {
+            std::cerr << "ERROR: input file "
+                      << filename << " corrupted" << std::endl;
+            exit(1);
+        }
+        if (verbose) {
+            std::cout << "Chunk " << filename
+                      << " loaded" << std::endl;
+        }
+
+        for (size_t i = 1; i < graph_chunk.W_.size(); ++i) {
+            W[pos] = graph_chunk.W_[i];
+            last[pos] = graph_chunk.last_[i];
             pos++;
         }
 
-        assert(chunk->F_.size() == F.size());
+        assert(graph_chunk.F_.size() == F.size());
         for (size_t p = 0; p < F.size(); ++p) {
-            F[p] += chunk->F_[p];
+            F[p] += graph_chunk.F_[p];
         }
-        delete chunk;
+
+        if (verbose) {
+            std::cout << "Chunk " << filename
+                      << " concatenated" << std::endl;
+        }
     }
 
     delete graph->W;

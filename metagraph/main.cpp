@@ -649,27 +649,8 @@ int main(int argc, const char *argv[]) {
 
             // collect results on an external merge
             if (config->collect > 1) {
-                Timer timer;
-
-                std::vector<DBG_succ::Chunk*> graph_chunks;
-
-                for (const auto &filename : files) {
-                    graph_chunks.push_back(new DBG_succ::Chunk());
-
-                    if (!graph_chunks.back()->load(filename)) {
-                        std::cerr << "ERROR: input file "
-                                  << filename << " corrupted" << std::endl;
-                        exit(1);
-                    }
-                    if (config->verbose) {
-                        std::cout << "Chunk " << filename
-                                  << " loaded " << timer.elapsed()
-                                  << "sec" << std::endl;
-                    }
-                }
-
                 graph = DBG_succ::Chunk::build_graph_from_chunks(config->k,
-                                                                 graph_chunks,
+                                                                 files,
                                                                  config->verbose);
             } else {
                 Timer timer;

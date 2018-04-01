@@ -27,11 +27,10 @@ class DBG_succ::Chunk {
     void initialize_graph(DBG_succ *graph) const;
 
     /**
-     * Merge graph chunks from the vector
-     * passed and release the chunks afterwards
+     * Merge graph chunks loaded from the files passed
      */
     static DBG_succ* build_graph_from_chunks(size_t k,
-                                const std::vector<Chunk*> &graph_chunks,
+                                const std::vector<std::string> &chunk_filenames,
                                 bool verbose = false);
 
     /**

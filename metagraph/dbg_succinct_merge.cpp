@@ -274,12 +274,12 @@ DBG_succ* merge(const std::vector<const DBG_succ*> &Gv, bool verbose) {
         nv.push_back(Gv[i]->get_W().size());
     }
 
-    auto *merged = new DBG_succ::Chunk();
+    DBG_succ::Chunk merged;
+    merge_blocks(Gv, kv, nv, &merged, verbose);
 
-    merge_blocks(Gv, kv, nv, merged, verbose);
-
-    return DBG_succ::Chunk::build_graph_from_chunks(Gv.at(0)->get_k(),
-                                                    { merged, });
+    DBG_succ *graph = new DBG_succ(Gv.at(0)->get_k());
+    merged.initialize_graph(graph);
+    return graph;
 }
 
 
