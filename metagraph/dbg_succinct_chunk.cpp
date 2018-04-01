@@ -68,7 +68,8 @@ void DBG_succ::Chunk::initialize_graph(DBG_succ *graph) const {
  * passed and release the chunks afterwards
  */
 DBG_succ* DBG_succ::Chunk::build_graph_from_chunks(size_t k,
-                        const std::vector<Chunk*> &graph_chunks) {
+                        const std::vector<Chunk*> &graph_chunks,
+                        bool verbose) {
     DBG_succ *graph = new DBG_succ(k);
     if (!graph_chunks.size())
         return graph;
@@ -81,10 +82,17 @@ DBG_succ* DBG_succ::Chunk::build_graph_from_chunks(size_t k,
         }
     );
 
+    if (verbose)
+        std::cout << "Cumulative size of chunks: "
+                  << size << std::endl;
+
     sdsl::int_vector<> W(size, 0, kLogSigma);
     sdsl::bit_vector last(size, 0);
     std::vector<uint64_t> F(DBG_succ::alph_size, 0);
     uint64_t pos = 1;
+
+    if (verbose)
+        std::cout << "Succinct arrays initialized" << std::endl;
 
     for (Chunk *chunk : graph_chunks) {
         assert(chunk);
@@ -113,6 +121,9 @@ DBG_succ* DBG_succ::Chunk::build_graph_from_chunks(size_t k,
     graph->state = Config::STAT;
 
     assert(graph->is_valid());
+
+    if (verbose)
+        std::cout << "Succinct graph has been assembled" << std::endl;
 
     return graph;
 }

@@ -31,7 +31,8 @@ class DBG_succ::Chunk {
      * passed and release the chunks afterwards
      */
     static DBG_succ* build_graph_from_chunks(size_t k,
-                                const std::vector<Chunk*> &graph_chunks);
+                                const std::vector<Chunk*> &graph_chunks,
+                                bool verbose = false);
 
     /**
      * Initialize graph chunk from a list of sorted kmers.

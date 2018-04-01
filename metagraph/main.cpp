@@ -669,7 +669,8 @@ int main(int argc, const char *argv[]) {
                 }
 
                 graph = DBG_succ::Chunk::build_graph_from_chunks(config->k,
-                                                                 graph_chunks);
+                                                                 graph_chunks,
+                                                                 config->verbose);
             } else {
                 Timer timer;
 
