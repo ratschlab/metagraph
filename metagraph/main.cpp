@@ -649,6 +649,8 @@ int main(int argc, const char *argv[]) {
 
             // collect results on an external merge
             if (config->collect > 1) {
+                Timer timer;
+
                 std::vector<DBG_succ::Chunk*> graph_chunks;
 
                 for (const auto &filename : files) {
@@ -658,6 +660,11 @@ int main(int argc, const char *argv[]) {
                         std::cerr << "ERROR: input file "
                                   << filename << " corrupted" << std::endl;
                         exit(1);
+                    }
+                    if (config->verbose) {
+                        std::cout << "Chunk " << filename
+                                  << " loaded " << timer.elapsed()
+                                  << "sec" << std::endl;
                     }
                 }
 
