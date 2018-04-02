@@ -259,9 +259,12 @@ class AnnotationCategoryBloom : public AnnotationCategory<std::set<std::string>>
     void set_label(Index i, const SetStr &label);
 
     void add_label(const std::string &sequence,
-                   const std::string &label);
+                   const std::string &label,
+                   size_t num_elements = 0);
+
     void add_labels(const std::string &sequence,
-                    const SetStr &labels);
+                    const SetStr &labels,
+                    size_t num_elements = 0);
 
     bool has_label(Index i, const SetStr &label) const;
 

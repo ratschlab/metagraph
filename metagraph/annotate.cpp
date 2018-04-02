@@ -370,20 +370,22 @@ void AnnotationCategoryBloom::set_label(Index i, const SetStr &label) {
 }
 
 void AnnotationCategoryBloom::add_labels(const std::string &sequence,
-                                         const SetStr &labels) {
+                                         const SetStr &labels,
+                                         size_t num_elements) {
     for (const auto &label : labels) {
-        add_label(sequence, label);
+        add_label(sequence, label, num_elements);
     }
 }
 
 void AnnotationCategoryBloom::add_label(const std::string &sequence,
-                                        const std::string &label) {
+                                        const std::string &label,
+                                        size_t num_elements) {
     //TODO: set size of the Bloom filter based on the number of edges in graph
     if (label_to_column_.find(label) == label_to_column_.end()) {
         label_to_column_[label] = column_to_label_.size();
         column_to_label_.push_back(label);
     }
-    annotator_.add_sequence(sequence, label_to_column_[label]);
+    annotator_.add_sequence(sequence, label_to_column_[label], num_elements);
 }
 
 bool AnnotationCategoryBloom::has_label(Index i, const SetStr &label) const {

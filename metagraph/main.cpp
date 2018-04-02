@@ -128,7 +128,7 @@ void read_vcf_file_critical(const std::string &filename,
     }
 }
 
-template <class Annotator>
+template <class Annotator, typename... Args>
 void annotate_data(const std::vector<std::string> &files,
                    const std::string &ref_sequence_path,
                    const DBG_succ &graph,
@@ -136,7 +136,8 @@ void annotate_data(const std::vector<std::string> &files,
                    bool reverse,
                    bool fasta_anno,
                    const std::string &fasta_header_delimiter,
-                   bool verbose) {
+                   bool verbose,
+                   Args... args) {
     size_t total_seqs = 0;
 
     // iterate over input files
@@ -159,13 +160,15 @@ void annotate_data(const std::vector<std::string> &files,
 
                     annotator->add_labels(seq,
                         std::set<std::string>(variant_labels->begin(),
-                                              variant_labels->end())
+                                              variant_labels->end()),
+                        args...
                     );
                     if (reverse) {
                         reverse_complement(seq.begin(), seq.end());
                         annotator->add_labels(seq,
                             std::set<std::string>(variant_labels->begin(),
-                                                  variant_labels->end())
+                                                  variant_labels->end()),
+                            args...
                         );
                     }
                     variant_labels->clear();
@@ -182,10 +185,18 @@ void annotate_data(const std::vector<std::string> &files,
                     labels.insert(header_labels.begin(), header_labels.end());
                 }
 
-                annotator->add_labels(read_stream->seq.s, labels);
-                if (reverse) {
-                    reverse_complement(read_stream->seq);
+                if (utils::get_filetype(file) == "FASTQ") {
+                    annotator->add_labels(read_stream->seq.s, labels, args...);
+                    if (reverse) {
+                        reverse_complement(read_stream->seq);
+                        annotator->add_labels(read_stream->seq.s, labels, args...);
+                    }
+                } else {
                     annotator->add_labels(read_stream->seq.s, labels);
+                    if (reverse) {
+                        reverse_complement(read_stream->seq);
+                        annotator->add_labels(read_stream->seq.s, labels);
+                    }
                 }
 
                 total_seqs += 1;
@@ -527,7 +538,11 @@ int main(int argc, const char *argv[]) {
                     )
                 );
             } else {
-                assert(config->bloom_bits_per_edge >= 0);
+                if (config->bloom_bits_per_edge < 0) {
+                    std::cerr << "ERROR: please specify either a false positive probability\
+                                  or the number of bits per edge." << std::endl;
+                    exit(1);
+                }
                 // Experiment mode, estimate FPP given other parameters,
                 // optimize the number of hash functions if it's set to zero
                 annotation.reset(
@@ -547,7 +562,8 @@ int main(int argc, const char *argv[]) {
                           config->reverse,
                           config->fasta_anno,
                           config->fasta_header_delimiter,
-                          config->verbose);
+                          config->verbose,
+                          graph->num_edges());
 
             annotation->serialize(config->infbase + ".anno.bloom.dbg");
 
