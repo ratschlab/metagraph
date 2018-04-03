@@ -49,7 +49,7 @@ include_directories(
   external-libraries/hopscotch-map/src
   external-libraries/rollinghashcpp
   external-libraries/ips4o
-  external-libraries/graph_annotation/annograph/bloom_annotator
+  external-libraries/graph_annotation
 )
 
 add_subdirectory(

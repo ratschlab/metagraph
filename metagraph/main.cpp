@@ -9,7 +9,8 @@
 #include "vcf_parser.hpp"
 #include "traverse.hpp"
 #include "dbg_succinct_merge.hpp"
-#include "annotate.hpp"
+#include "annotate_color_compressed.hpp"
+#include "annotate_bloom_filter.hpp"
 #include "unix_tools.hpp"
 #include "kmer.hpp"
 
