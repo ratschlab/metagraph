@@ -18,6 +18,8 @@ using libmaus2::util::NumberSerialisation;
 
 const size_t kMaxNumParallelReadFiles = 5;
 
+const size_t kNumCachedColors = 10;
+
 KSEQ_INIT(gzFile, gzread);
 
 
@@ -505,7 +507,7 @@ int main(int argc, const char *argv[]) {
             };
 
             // initialize empty annotation
-            annotate::ColorCompressed annotation(*graph, 10);
+            annotate::ColorCompressed annotation(*graph, kNumCachedColors);
 
             annotate_data(files,
                           config->refpath,
