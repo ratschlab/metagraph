@@ -505,7 +505,7 @@ int main(int argc, const char *argv[]) {
             };
 
             // initialize empty annotation
-            annotate::ColorCompressed annotation(*graph);
+            annotate::ColorCompressed annotation(*graph, 10);
 
             annotate_data(files,
                           config->refpath,

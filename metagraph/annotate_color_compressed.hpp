@@ -1,6 +1,9 @@
 #ifndef __ANNOTATE_COLOR_COMPRESSED_HPP__
 #define __ANNOTATE_COLOR_COMPRESSED_HPP__
 
+#include <cache.hpp>
+#include <lru_cache_policy.hpp>
+
 #include "annotate.hpp"
 #include "dbg_succinct.hpp"
 
@@ -11,11 +14,9 @@ class ColorCompressed : public AnnotationCategory<std::set<std::string>> {
   public:
     typedef std::set<std::string> SetStr;
 
-    ColorCompressed(const DBG_succ &graph)
-          : graph_(&graph), graph_size_(graph.num_edges() + 1), annotation_curr_(NULL) {}
+    ColorCompressed(const DBG_succ &graph, size_t cache_size = 1);
 
-    ColorCompressed(size_t graph_size)
-          : graph_(NULL), graph_size_(graph_size), annotation_curr_(NULL) {}
+    ColorCompressed(uint64_t graph_size, size_t cache_size = 1);
 
     // Merge constructor
     //ColorCompressed(const DBG_succ &graph,
@@ -46,6 +47,7 @@ class ColorCompressed : public AnnotationCategory<std::set<std::string>> {
     const DBG_succ *graph_;
     void release();
     void flush();
+    void flush(uint32_t curr_id, sdsl::bit_vector *annotation_curr);
     sdsl::bit_vector* inflate_column(const uint32_t id) const;
 
     uint64_t graph_size_;
@@ -53,8 +55,9 @@ class ColorCompressed : public AnnotationCategory<std::set<std::string>> {
     std::vector<std::string> id_to_label_;
     std::vector<sdsl::sd_vector<>*> bitmatrix_;
 
-    uint32_t curr_id_;
-    sdsl::bit_vector *annotation_curr_;
+    caches::fixed_sized_cache<uint32_t,
+                              sdsl::bit_vector*,
+                              caches::LRUCachePolicy<uint32_t>> cached_colors_;
 };
 
 } // namespace annotate

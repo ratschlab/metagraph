@@ -16,3 +16,6 @@
 	path = metagraph/external-libraries/graph_annotation
 	url = https://github.com/ratschlab/graph_annotation.git
   ignore = untracked
+[submodule "metagraph/external-libraries/caches"]
+	path = metagraph/external-libraries/caches
+	url = https://github.com/karasikov/caches.git
