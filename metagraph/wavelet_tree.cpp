@@ -140,7 +140,10 @@ void wavelet_tree_stat::print(std::ostream &os) const {
 void wavelet_tree_stat::init_wt() {
     // std::cout << "Initializing WT index" << std::endl;
     int_vector_.resize(n_);
-    sdsl::construct_im(wwt_, int_vector_);
+    // release obsolete wavelet tree
+    wwt_ = decltype(wwt_)();
+    // initialize new wavelet tree
+    wwt_ = decltype(wwt_)(int_vector_);
     requires_update_ = false;
 }
 
