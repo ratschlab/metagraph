@@ -187,13 +187,14 @@ void DBG_succ::serialize(const std::string &outbase) const {
     NumberSerialisation::serialiseNumberVector(outstream, F);
     NumberSerialisation::serialiseNumber(outstream, k_);
     NumberSerialisation::serialiseNumber(outstream, state);
+    outstream.flush();
 
     // write Wavelet Tree
     W->serialise(outstream);
+    outstream.flush();
 
     // write last array
     last->serialise(outstream);
-
     outstream.close();
 }
 
