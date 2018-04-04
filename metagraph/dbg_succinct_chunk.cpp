@@ -135,9 +135,6 @@ DBG_succ* DBG_succ::Chunk::build_graph_from_chunks(size_t k,
 
     assert(graph->is_valid());
 
-    if (verbose)
-        std::cout << "Succinct graph has been assembled" << std::endl;
-
     return graph;
 }
 

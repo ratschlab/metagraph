@@ -671,6 +671,15 @@ int main(int argc, const char *argv[]) {
                 graph = DBG_succ::Chunk::build_graph_from_chunks(config->k,
                                                                  files,
                                                                  config->verbose);
+                assert(graph);
+
+                if (config->verbose) {
+                    std::cout << "Succinct graph has been assembled" << std::endl;
+                    std::cout << "nodes: " << graph->num_nodes() << std::endl;
+                    std::cout << "edges: " << graph->num_edges() << std::endl;
+                    std::cout << "k: " << graph->get_k() << std::endl;
+                    std::cout << "state: " << graph->state << std::endl;
+                }
             } else {
                 Timer timer;
 
