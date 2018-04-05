@@ -132,7 +132,7 @@ class AnnotationCategoryBloom : public AnnotationCategory<std::set<std::string>>
     typedef std::set<std::string> SetStr;
 
     template <typename... Args>
-    AnnotationCategoryBloom(const DBG_succ &graph, Args& ...args)
+    AnnotationCategoryBloom(const DBG_succ &graph, Args&& ...args)
           : graph_(graph), annotator_(graph_, args...) {}
 
     ~AnnotationCategoryBloom() {}
