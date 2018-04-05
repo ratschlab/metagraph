@@ -13,8 +13,14 @@ template <typename T>
 void serialize_number_vector(std::ostream &out,
                              const std::vector<T> &vector,
                              size_t bits_per_number) {
-    std::ignore = bits_per_number;
-    NumberSerialisation::serialiseNumberVector(out, vector);
+    if (!out.good()) {
+        throw std::ofstream::failure("Bad stream");
+    }
+    sdsl::int_vector<> int_vector(vector.size(), 0, bits_per_number);
+    for (size_t i = 0; i < vector.size(); ++i) {
+        int_vector[i] = vector[i];
+    }
+    int_vector.serialize(out);
 }
 
 template void serialize_number_vector<uint64_t>(std::ostream &out,
@@ -28,12 +34,27 @@ template void serialize_number_vector<bool>(std::ostream &out,
                                             size_t bits_per_number = 1);
 
 uint64_t load_number_vector_size(std::istream &in) {
-    return NumberSerialisation::deserialiseNumber(in);
+    if (!in.good()) {
+        throw std::ifstream::failure("Bad stream");
+    }
+    typename sdsl::int_vector<>::size_type size;
+    typename sdsl::int_vector<>::int_width_type int_width;
+    sdsl::int_vector<>::read_header(size, int_width, in);
+    return size / int_width;
 }
 
 template <typename T>
 std::vector<T> load_number_vector(std::istream &in) {
-    return NumberSerialisation::deserialiseNumberVector<T>(in);
+    if (!in.good()) {
+        throw std::ifstream::failure("Bad stream");
+    }
+    try {
+        sdsl::int_vector<> int_vector;
+        int_vector.load(in);
+        return std::vector<T>(int_vector.begin(), int_vector.end());
+    } catch (...) {
+        throw std::ifstream::failure("Bad stream");
+    }
 }
 
 template std::vector<uint64_t> load_number_vector<uint64_t>(std::istream &in);

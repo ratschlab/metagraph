@@ -61,13 +61,13 @@ std::vector<uint64_t> ColorCompressed::get_row(Index i) const {
 void ColorCompressed::serialize_uncompressed_rows(const std::string &filename) const {
     const_cast<ColorCompressed*>(this)->flush();
     std::ofstream outstream(filename);
-    libmaus2::util::NumberSerialisation::serialiseNumber(outstream, graph_size_);
+    NumberSerialisation::serialiseNumber(outstream, graph_size_);
 
     std::cout << graph_size_ << " " << bitmatrix_.size() << "\n";
 
     for (uint64_t i = 0; i < graph_size_; ++i) {
         auto row = get_row(i);
-        libmaus2::util::NumberSerialisation::serialiseNumberVector(outstream, row);
+        NumberSerialisation::serialiseNumberVector(outstream, row);
     }
     outstream.close();
 }
