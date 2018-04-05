@@ -10,6 +10,7 @@
 #include "traverse.hpp"
 #include "dbg_succinct_merge.hpp"
 #include "annotate_color_compressed.hpp"
+#include "annotate_row_compressed.hpp"
 #include "annotate_bloom_filter.hpp"
 #include "unix_tools.hpp"
 #include "kmer.hpp"
@@ -507,18 +508,23 @@ int main(int argc, const char *argv[]) {
             };
 
             // initialize empty annotation
-            annotate::ColorCompressed annotation(*graph, kNumCachedColors);
+            std::unique_ptr<annotate::AnnotationCategory<std::set<std::string>>> annotation;
+            if (config->use_row_annotator) {
+                annotation.reset(new annotate::RowCompressed(*graph));
+            } else {
+                annotation.reset(new annotate::ColorCompressed(*graph, kNumCachedColors));
+            }
 
             annotate_data(files,
                           config->refpath,
                           *graph,
-                          &annotation,
+                          annotation.get(),
                           config->reverse,
                           config->fasta_anno,
                           config->fasta_header_delimiter,
                           config->verbose);
 
-            annotation.serialize(config->infbase + ".anno.dbg");
+            annotation->serialize(config->infbase + ".anno.dbg");
 
             return 0;
         }

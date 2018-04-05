@@ -34,6 +34,8 @@ class AnnotationCategory {
     virtual LabelType get(Index i) const = 0;
     virtual void set_label(Index i, const LabelType &label) = 0;
 
+    virtual void add_labels(const std::string &sequence, const LabelType &labels) = 0;
+
     virtual bool has_label(Index i, const LabelType &label) const = 0;
 
     virtual bool load(const std::string &filename) = 0;

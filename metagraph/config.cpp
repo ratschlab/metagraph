@@ -63,6 +63,8 @@ Config::Config(int argc, const char *argv[]) {
             fast = true;
         } else if (!strcmp(argv[i], "--fasta-anno")) {
             fasta_anno = true;
+        } else if (!strcmp(argv[i], "--row-annotator")) {
+            use_row_annotator = true;
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
             parallel = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--parts-total")) {
@@ -298,6 +300,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
             fprintf(stderr, "\t   --fasta-anno \t\textract annotations from headers of sequences in files [off]\n");
             fprintf(stderr, "\t   --fasta-anno-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
+            fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column based colors compressor [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case ANNOTATE_BLOOM: {

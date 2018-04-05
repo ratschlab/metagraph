@@ -20,6 +20,7 @@ class Config {
     bool query_presence = false;
     bool traversal_merge = false;
     bool dump_raw_anno = false;
+    bool use_row_annotator = false;
 
     unsigned int k = 3;
     unsigned int distance = 0;
