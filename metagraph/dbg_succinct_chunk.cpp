@@ -161,7 +161,7 @@ bool DBG_succ::Chunk::load(const std::string &infbase) {
 void DBG_succ::Chunk::serialize(const std::string &outbase) const {
     std::ofstream outstream(outbase + ".dbgchunk");
     serialize_number_vector(outstream, W_, kLogSigma);
-    serialize_number_vector(outstream, last_);
+    serialize_number_vector(outstream, last_, 1);
     serialize_number_vector(outstream, F_);
     outstream.close();
 }
