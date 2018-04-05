@@ -64,7 +64,7 @@ class wavelet_tree_stat : public wavelet_tree {
 
   private:
     sdsl::int_vector<> int_vector_;
-    sdsl::wt_int<> wwt_;
+    sdsl::wt_huff<> wwt_;
     bool requires_update_ = true;
     uint64_t n_;
 
