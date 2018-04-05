@@ -120,6 +120,12 @@ Config::Config(int argc, const char *argv[]) {
             sqlfbase = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-i") || !strcmp(argv[i], "--infile-base")) {
             infbase = std::string(argv[++i]);
+            // why C++, why????
+            if (infbase.substr(std::max(
+                            static_cast<size_t>(infbase.size()),
+                            static_cast<size_t>(4)) - 4) == ".dbg") {
+                infbase.resize(infbase.size() - 4);
+            }
         } else if (!strcmp(argv[i], "--to-adj-list")) {
             to_adj_list = true;
         } else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--collect")) {
