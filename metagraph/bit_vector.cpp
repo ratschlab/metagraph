@@ -217,6 +217,9 @@ bool bit_vector_stat::deserialise(std::istream &in) {
         num_set_bits_ = std::count(vector_.begin(), vector_.end(), 1);
         requires_update_ = true;
         return true;
+    } catch (const std::bad_alloc &exception) {
+        std::cerr << "ERROR: Not enough memory to load bit_vector_stat." << std::endl;
+        return false;
     } catch (...) {
         return false;
     }

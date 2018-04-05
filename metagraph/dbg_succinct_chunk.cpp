@@ -149,6 +149,10 @@ bool DBG_succ::Chunk::load(const std::string &infbase) {
         instream.close();
 
         return F_.size() == DBG_succ::alph_size;
+    } catch (const std::bad_alloc &exception) {
+        std::cerr << "ERROR: Not enough memory to load graph chunk from "
+                  << infbase << "." << std::endl;
+        return false;
     } catch (...) {
         return false;
     }

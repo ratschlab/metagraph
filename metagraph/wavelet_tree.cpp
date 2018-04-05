@@ -61,6 +61,9 @@ bool wavelet_tree_stat::deserialise(std::istream &in) {
         // we assume the wwt_ has been build before serialization
         requires_update_ = false;
         return true;
+    } catch (const std::bad_alloc &exception) {
+        std::cerr << "ERROR: Not enough memory to load wavelet_tree_stat." << std::endl;
+        return false;
     } catch (...) {
         return false;
     }

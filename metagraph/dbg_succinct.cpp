@@ -227,6 +227,10 @@ bool DBG_succ::load(const std::string &infbase) {
                 break;
         }
         return W->deserialise(instream) && last->deserialise(instream);
+    } catch (const std::bad_alloc &exception) {
+        std::cerr << "ERROR: Not enough memory to load DBG_succ from "
+                  << infbase << "." << std::endl;
+        return false;
     } catch (...) {
         return false;
     }
