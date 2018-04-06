@@ -90,6 +90,8 @@ Config::Config(int argc, const char *argv[]) {
             discovery_fraction = std::stof(argv[++i]);
         } else if (!strcmp(argv[i], "--query-presence")) {
             query_presence = true;
+        } else if (!strcmp(argv[i], "--count-labels")) {
+            count_labels = true;
         } else if (!strcmp(argv[i], "--bloom-hash-functions")) {
             bloom_num_hash_functions = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--bloom-test-num-kmers")) {
@@ -344,6 +346,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for classify:\n");
             fprintf(stderr, "\t-r --reverse \t\t\tclassify reverse complement sequences [off]\n");
             fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column based colors compressor [off]\n");
+            fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
             fprintf(stderr, "\t   --discovery-fraction \tfraction of labeled k-mers required for annotation [1.0]\n");
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
             // fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");

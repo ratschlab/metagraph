@@ -270,6 +270,26 @@ std::vector<std::string> discover_labels(const DBG_succ &graph,
 }
 
 
+std::map<std::string, size_t> count_labels(
+        const DBG_succ &graph,
+        const annotate::AnnotationCategory<std::set<std::string>> &annotator,
+        const std::string &sequence) {
+    std::map<std::string, size_t> labels_counter;
+
+    graph.align(sequence,
+        [&](uint64_t i) {
+            if (i) {
+                const std::set<std::string> &coloring = annotator.get(i);
+                for (const std::string &label : coloring) {
+                    labels_counter[label]++;
+                }
+            }
+        }
+    );
+
+    return labels_counter;
+}
+
 
 int main(int argc, const char *argv[]) {
     // parse command line arguments and options
@@ -652,14 +672,37 @@ int main(int argc, const char *argv[]) {
                     if (config->reverse)
                         reverse_complement(read_stream->seq);
 
-                    auto labels_discovered = discover_labels(
-                        *graph, *annotation, annotation->get_label_names(),
-                        read_stream->seq.s, config->discovery_fraction
-                    );
+                    if (config->count_labels) {
+                        auto labels_counter = count_labels(*graph, *annotation,
+                                                           read_stream->seq.s);
 
-                    std::cout << utils::join_strings(labels_discovered,
-                                                     config->anno_labels_delimiter)
-                              << std::endl;
+                        std::vector<std::pair<std::string, size_t>> counts(
+                            labels_counter.begin(), labels_counter.end()
+                        );
+                        std::sort(counts.begin(), counts.end(),
+                                    [](const auto &first, const auto &second) {
+                                        return first.second < second.second;
+                                    });
+
+                        if (counts.size()) {
+                            std::cout << "<" << counts[0].first << ">: "
+                                      << counts[0].second;
+                        }
+                        for (size_t i = 1; i < counts.size(); ++i) {
+                            std::cout << ", <" << counts[i].first << ">: "
+                                      << counts[i].second;
+                        }
+                        std::cout << std::endl;
+                    } else {
+                        auto labels_discovered = discover_labels(
+                            *graph, *annotation, annotation->get_label_names(),
+                            read_stream->seq.s, config->discovery_fraction
+                        );
+
+                        std::cout << utils::join_strings(labels_discovered,
+                                                         config->anno_labels_delimiter)
+                                  << std::endl;
+                    }
                 });
             }
 
