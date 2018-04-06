@@ -176,6 +176,16 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == ANNOTATE && infbase.empty())
         print_usage_and_exit = true;
 
+    if (identity == ANNOTATE_BLOOM && infbase.empty())
+        print_usage_and_exit = true;
+
+    if (identity == ANNOTATE_BLOOM && bloom_fpp < 0
+                                   && bloom_bits_per_edge < 0) {
+        std::cerr << "ERROR: please specify either a false positive probability"
+                  << " or the number of bits per edge." << std::endl;
+        print_usage_and_exit = true;
+    }
+
     if (identity == TRANSFORM && fname.size() != 1)
         print_usage_and_exit = true;
 

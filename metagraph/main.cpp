@@ -593,11 +593,8 @@ int main(int argc, const char *argv[]) {
                     )
                 );
             } else {
-                if (config->bloom_bits_per_edge < 0) {
-                    std::cerr << "ERROR: please specify either a false positive probability\
-                                  or the number of bits per edge." << std::endl;
-                    exit(1);
-                }
+                assert(config->bloom_bits_per_edge >= 0);
+
                 // Experiment mode, estimate FPP given other parameters,
                 // optimize the number of hash functions if it's set to zero
                 annotation.reset(
