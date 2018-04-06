@@ -71,7 +71,8 @@ class Config {
     enum StateType { STAT = 1, DYN };
     StateType state = STAT;
 
-    void print_usage(const std::string &prog_name, IdentityType identity = NO_IDENTITY);
+    void print_usage(const std::string &prog_name,
+                     IdentityType identity = NO_IDENTITY);
 };
 
 #endif // __CONFIG_HPP__

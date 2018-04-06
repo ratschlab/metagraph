@@ -15,11 +15,6 @@ class RowCompressed : public AnnotationCategory<std::set<std::string>> {
 
     RowCompressed(uint64_t graph_size);
 
-    // Merge constructor
-    //ColorCompressed(const DBG_succ &graph,
-    //                const std::vector<ColorCompressed> &categories,
-    //                const std::vector<std::vector<size_t>> &merge_plan);
-
     SetStr get(Index i) const;
 
     std::vector<uint64_t> get_row(Index i) const;
@@ -47,7 +42,6 @@ class RowCompressed : public AnnotationCategory<std::set<std::string>> {
     std::vector<std::string> id_to_label_;
 
     std::pair<IndexContainer::const_iterator, bool> find(Index i, uint32_t id) const;
-
 };
 
 } // namespace annotate

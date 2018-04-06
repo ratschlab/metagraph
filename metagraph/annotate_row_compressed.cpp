@@ -72,7 +72,8 @@ void RowCompressed::set_label(Index i, const SetStr &label) {
     }
 }
 
-void RowCompressed::add_labels(const std::string &sequence, const SetStr &labels) {
+void RowCompressed::add_labels(const std::string &sequence,
+                               const SetStr &labels) {
     if (!graph_) {
         throw std::runtime_error("Please initialize with a graph\n");
     }
@@ -110,12 +111,14 @@ void RowCompressed::add_label(Index i, const std::string &label) {
 
 // write annotation to disk
 void RowCompressed::serialize(const std::string &filename) const {
-
     std::ofstream outstream(filename + ".row.annodbg");
+
     NumberSerialisation::serialiseNumber(outstream, index_to_ids_.size());
+
     serialize_string_number_map(outstream, label_to_id_);
     StringSerialisation::serialiseStringVector(outstream, id_to_label_);
-    std::vector<uint64_t> full_vector;
+
+    std::vector<uint32_t> full_vector;
     for (auto &indices : index_to_ids_) {
         for (auto &j : indices) {
             full_vector.push_back(j + 1);
@@ -129,34 +132,43 @@ void RowCompressed::serialize(const std::string &filename) const {
 
 // read annotation from disk
 bool RowCompressed::load(const std::string &filename) {
-
     std::ifstream instream(filename + ".row.annodbg");
     if (!instream.good())
         return false;
 
-    size_t graph_size_ = NumberSerialisation::deserialiseNumber(instream);
-    label_to_id_ = load_string_number_map(instream);
-    id_to_label_ = StringSerialisation::deserialiseStringVector(instream);
-    index_to_ids_.clear();
-    index_to_ids_.resize(graph_size_);
-    size_t j = 0;
-    auto full_vector = load_number_vector<uint32_t>(instream);
-    for (size_t i = 0; i < full_vector.size(); ++i) {
-        if (!full_vector[i]) {
-            j++;
-            continue;
+    try {
+        size_t graph_size_ = NumberSerialisation::deserialiseNumber(instream);
+
+        label_to_id_ = load_string_number_map(instream);
+        id_to_label_ = StringSerialisation::deserialiseStringVector(instream);
+
+        index_to_ids_.clear();
+        index_to_ids_.resize(graph_size_);
+
+        auto full_vector = load_number_vector<uint32_t>(instream);
+        for (size_t j = 0, i = 0; i < full_vector.size(); ++i) {
+            if (full_vector[i]) {
+                index_to_ids_[j].push_back(full_vector[i] - 1);
+            } else {
+                j++;
+            }
         }
-        index_to_ids_[j].insert(index_to_ids_[j].end(), full_vector[i] - 1);
+        return true;
+    } catch (...) {
+        return false;
     }
-    return true;
 }
 
 // assumes the indices are in order
-std::pair<RowCompressed::IndexContainer::const_iterator, bool> RowCompressed::find(Index i, uint32_t id) const {
-    IndexContainer::const_iterator it = index_to_ids_[i].begin();
-    while (it != index_to_ids_[i].end() && *it < id)
+std::pair<RowCompressed::IndexContainer::const_iterator, bool>
+RowCompressed::find(Index i, uint32_t id) const {
+    auto it = index_to_ids_[i].begin();
+    while (it != index_to_ids_[i].end() && *it < id) {
         ++it;
-    return std::make_pair(it, it != index_to_ids_[i].end() ? *it == id : false);
+    }
+    return std::make_pair(it, it != index_to_ids_[i].end()
+                                ? *it == id
+                                : false);
 }
 
 } // namespace annotate

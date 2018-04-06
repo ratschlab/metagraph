@@ -16,6 +16,7 @@
 #include "kmer.hpp"
 
 using libmaus2::util::NumberSerialisation;
+typedef annotate::AnnotationCategory<std::set<std::string>> Annotator;
 
 const size_t kMaxNumParallelReadFiles = 5;
 
@@ -270,10 +271,9 @@ std::vector<std::string> discover_labels(const DBG_succ &graph,
 }
 
 
-std::map<std::string, size_t> count_labels(
-        const DBG_succ &graph,
-        const annotate::AnnotationCategory<std::set<std::string>> &annotator,
-        const std::string &sequence) {
+std::map<std::string, size_t> count_labels(const DBG_succ &graph,
+                                           const Annotator &annotator,
+                                           const std::string &sequence) {
     std::map<std::string, size_t> labels_counter;
 
     graph.align(sequence,
@@ -574,7 +574,7 @@ int main(int argc, const char *argv[]) {
             };
 
             // initialize empty annotation
-            std::unique_ptr<annotate::AnnotationCategory<std::set<std::string>>> annotation;
+            std::unique_ptr<Annotator> annotation;
             if (config->use_row_annotator) {
                 annotation.reset(new annotate::RowCompressed(*graph));
             } else {
@@ -647,7 +647,7 @@ int main(int argc, const char *argv[]) {
                 load_critical_graph_from_file(config->infbase)
             };
 
-            std::unique_ptr<annotate::AnnotationCategory<std::set<std::string>>> annotation;
+            std::unique_ptr<Annotator> annotation;
             if (config->use_row_annotator) {
                 annotation.reset(new annotate::RowCompressed(*graph));
             } else {
@@ -655,7 +655,7 @@ int main(int argc, const char *argv[]) {
             }
 
             if (!annotation->load(config->infbase)) {
-                std::cerr << "ERROR: can't load annotations from "
+                std::cerr << "ERROR: can't load annotations for "
                           << config->infbase + ".dbg"
                           << ", file corrupted" << std::endl;
             }

@@ -26,6 +26,9 @@ void serialize_number_vector(std::ostream &out,
 template void serialize_number_vector<uint64_t>(std::ostream &out,
                                                 const std::vector<uint64_t> &vector,
                                                 size_t bits_per_number = 64);
+template void serialize_number_vector<uint32_t>(std::ostream &out,
+                                                const std::vector<uint32_t> &vector,
+                                                size_t bits_per_number = 32);
 template void serialize_number_vector<uint8_t>(std::ostream &out,
                                                const std::vector<uint8_t> &vector,
                                                size_t bits_per_number = 8);
