@@ -61,6 +61,8 @@ Config::Config(int argc, const char *argv[]) {
             reverse = true;
         } else if (!strcmp(argv[i], "--fast")) {
             fast = true;
+        } else if (!strcmp(argv[i], "--skip-filename-anno")) {
+            filename_anno = false;
         } else if (!strcmp(argv[i], "--fasta-anno")) {
             fasta_anno = true;
         } else if (!strcmp(argv[i], "--row-annotator")) {
@@ -317,6 +319,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for annotate:\n");
             fprintf(stderr, "\t   --reference [STR] \t\tbasename of reference sequence []\n");
             fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
+            fprintf(stderr, "\t   --skip-filename-anno \tnot include fasta filenames as annotation labels [off]\n");
             fprintf(stderr, "\t   --fasta-anno \t\textract annotations from headers of sequences in files [off]\n");
             fprintf(stderr, "\t   --fasta-anno-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
             fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column based colors compressor [off]\n");
@@ -329,6 +332,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for bloom:\n");
             fprintf(stderr, "\t   --reference [STR] \t\t\tbasename of reference sequence []\n");
             fprintf(stderr, "\t-r --reverse \t\t\t\talso annotate reverse complement reads [off]\n");
+            fprintf(stderr, "\t   --skip-filename-anno \t\tnot include fasta filenames as annotation labels [off]\n");
             fprintf(stderr, "\t   --fasta-anno \t\t\textract annotations from headers of sequences in files [off]\n");
             fprintf(stderr, "\t   --fasta-anno-delimiter [STR]\t\tdelimiter for splitting annotation header into multiple labels [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");

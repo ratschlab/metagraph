@@ -14,6 +14,7 @@ class Config {
     bool print_graph_succ = false;
     bool reverse = false;
     bool fast = false;
+    bool filename_anno = true;
     bool fasta_anno = false;
     bool to_adj_list = false;
     bool count_kmers_query = false;

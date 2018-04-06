@@ -139,6 +139,7 @@ void annotate_data(const std::vector<std::string> &files,
                    const DBG_succ &graph,
                    Annotator *annotator,
                    bool reverse,
+                   bool filename_anno,
                    bool fasta_anno,
                    const std::string &fasta_header_delimiter,
                    bool verbose,
@@ -182,7 +183,9 @@ void annotate_data(const std::vector<std::string> &files,
         } else if (utils::get_filetype(file) == "FASTA"
                     || utils::get_filetype(file) == "FASTQ") {
             read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-                std::set<std::string> labels = { file, };
+                std::set<std::string> labels;
+                if (filename_anno)
+                    labels.insert(file);
 
                 if (fasta_anno) {
                     auto header_labels = utils::split_string(read_stream->name.s,
@@ -190,18 +193,10 @@ void annotate_data(const std::vector<std::string> &files,
                     labels.insert(header_labels.begin(), header_labels.end());
                 }
 
-                if (utils::get_filetype(file) == "FASTQ") {
+                annotator->add_labels(read_stream->seq.s, labels, args...);
+                if (reverse) {
+                    reverse_complement(read_stream->seq);
                     annotator->add_labels(read_stream->seq.s, labels, args...);
-                    if (reverse) {
-                        reverse_complement(read_stream->seq);
-                        annotator->add_labels(read_stream->seq.s, labels, args...);
-                    }
-                } else {
-                    annotator->add_labels(read_stream->seq.s, labels);
-                    if (reverse) {
-                        reverse_complement(read_stream->seq);
-                        annotator->add_labels(read_stream->seq.s, labels);
-                    }
                 }
 
                 total_seqs += 1;
@@ -586,6 +581,7 @@ int main(int argc, const char *argv[]) {
                           *graph,
                           annotation.get(),
                           config->reverse,
+                          config->filename_anno,
                           config->fasta_anno,
                           config->fasta_header_delimiter,
                           config->verbose);
@@ -632,6 +628,7 @@ int main(int argc, const char *argv[]) {
                           *graph,
                           annotation.get(),
                           config->reverse,
+                          config->filename_anno,
                           config->fasta_anno,
                           config->fasta_header_delimiter,
                           config->verbose,
