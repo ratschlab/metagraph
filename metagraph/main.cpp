@@ -584,14 +584,19 @@ int main(int argc, const char *argv[]) {
                 load_critical_graph_from_file(config->infbase)
             };
 
-            annotate::ColorCompressed annotation(*graph);
+            std::unique_ptr<annotate::AnnotationCategory<std::set<std::string>>> annotation;
+            if (config->use_row_annotator) {
+                annotation.reset(new annotate::RowCompressed(*graph));
+            } else {
+                annotation.reset(new annotate::ColorCompressed(*graph, kNumCachedColors));
+            }
 
-            if (!annotation.load(config->infbase)) {
+            if (!annotation->load(config->infbase)) {
                 std::cerr << "ERROR: can't load annotations from "
                           << config->infbase + ".dbg"
                           << ", file corrupted" << std::endl;
             }
-            const auto labels = annotation.get_label_names();
+            const auto labels = annotation->get_label_names();
 
             // iterate over input files
             for (const auto &file : files) {
@@ -625,7 +630,7 @@ int main(int argc, const char *argv[]) {
                         [&](uint64_t i) {
                             kmers_checked++;
                             for (auto it = labels_counter.begin(); it != labels_counter.end();) {
-                                if (i > 0 && annotation.has_label(i, it->first))
+                                if (i > 0 && annotation->has_label(i, { it->first }))
                                     it->second++;
 
                                 if (it->second >= min_kmers_discovered) {

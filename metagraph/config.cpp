@@ -333,6 +333,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for classify:\n");
             fprintf(stderr, "\t-r --reverse \t\t\tclassify reverse complement sequences [off]\n");
+            fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column based colors compressor [off]\n");
             fprintf(stderr, "\t   --discovery-fraction \tfraction of labeled k-mers required for annotation [1.0]\n");
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
             // fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
