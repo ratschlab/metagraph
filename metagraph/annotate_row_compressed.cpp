@@ -44,19 +44,6 @@ std::vector<uint64_t> RowCompressed::get_row(Index i) const {
     return row;
 }
 
-void RowCompressed::serialize_uncompressed_rows(const std::string &filename) const {
-    std::ofstream outstream(filename);
-    libmaus2::util::NumberSerialisation::serialiseNumber(outstream, index_to_ids_.size());
-
-    std::cout << index_to_ids_.size() << " " << id_to_label_.size() << "\n";
-
-    for (uint64_t i = 0; i < index_to_ids_.size(); ++i) {
-        auto row = get_row(i);
-        libmaus2::util::NumberSerialisation::serialiseNumberVector(outstream, row);
-    }
-    outstream.close();
-}
-
 bool RowCompressed::has_label(Index i, const SetStr &label) const {
     assert(i < index_to_ids_.size());
 
@@ -124,34 +111,42 @@ void RowCompressed::add_label(Index i, const std::string &label) {
 // write annotation to disk
 void RowCompressed::serialize(const std::string &filename) const {
 
-    std::ofstream outstream(filename);
+    std::ofstream outstream(filename + ".row.annodbg");
     NumberSerialisation::serialiseNumber(outstream, index_to_ids_.size());
     serialize_string_number_map(outstream, label_to_id_);
     StringSerialisation::serialiseStringVector(outstream, id_to_label_);
+    std::vector<uint64_t> full_vector;
     for (auto &indices : index_to_ids_) {
-        NumberSerialisation::serialiseNumber(outstream, indices.size());
         for (auto &j : indices) {
-            NumberSerialisation::serialiseNumber(outstream, j);
+            full_vector.push_back(j + 1);
         }
+        full_vector.push_back(0);
     }
+    serialize_number_vector(outstream,
+                            full_vector,
+                            std::log2(label_to_id_.size() + 1) + 1);
 }
 
 // read annotation from disk
 bool RowCompressed::load(const std::string &filename) {
 
-    std::ifstream instream(filename);
+    std::ifstream instream(filename + ".row.annodbg");
     if (!instream.good())
         return false;
 
     size_t graph_size_ = NumberSerialisation::deserialiseNumber(instream);
     label_to_id_ = load_string_number_map(instream);
     id_to_label_ = StringSerialisation::deserialiseStringVector(instream);
+    index_to_ids_.clear();
     index_to_ids_.resize(graph_size_);
-    for (auto &indices : index_to_ids_) {
-        size_t num_indices = NumberSerialisation::deserialiseNumber(instream);
-        while (num_indices--) {
-            indices.insert(indices.end(), NumberSerialisation::deserialiseNumber(instream));
+    size_t j = 0;
+    auto full_vector = load_number_vector<uint32_t>(instream);
+    for (size_t i = 0; i < full_vector.size(); ++i) {
+        if (!full_vector[i]) {
+            j++;
+            continue;
         }
+        index_to_ids_[j].insert(index_to_ids_[j].end(), full_vector[i] - 1);
     }
     return true;
 }

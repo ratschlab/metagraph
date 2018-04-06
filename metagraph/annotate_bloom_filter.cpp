@@ -57,7 +57,7 @@ bool AnnotationCategoryBloom::has_label(Index i, const SetStr &label) const {
 }
 
 bool AnnotationCategoryBloom::load(const std::string &filename) {
-    std::ifstream instream(filename);
+    std::ifstream instream(filename + ".bloom.annodbg");
     if (!instream.good())
         return false;
 
@@ -68,7 +68,7 @@ bool AnnotationCategoryBloom::load(const std::string &filename) {
 }
 
 void AnnotationCategoryBloom::serialize(const std::string &filename) const {
-    std::ofstream outstream(filename);
+    std::ofstream outstream(filename + ".bloom.annodbg");
     serialize_string_number_map(outstream, label_to_column_);
     libmaus2::util::StringSerialisation::serialiseStringVector(outstream, column_to_label_);
     annotator_.serialize(outstream);

@@ -58,20 +58,6 @@ std::vector<uint64_t> ColorCompressed::get_row(Index i) const {
     return row;
 }
 
-void ColorCompressed::serialize_uncompressed_rows(const std::string &filename) const {
-    const_cast<ColorCompressed*>(this)->flush();
-    std::ofstream outstream(filename);
-    NumberSerialisation::serialiseNumber(outstream, graph_size_);
-
-    std::cout << graph_size_ << " " << bitmatrix_.size() << "\n";
-
-    for (uint64_t i = 0; i < graph_size_; ++i) {
-        auto row = get_row(i);
-        NumberSerialisation::serialiseNumberVector(outstream, row);
-    }
-    outstream.close();
-}
-
 bool ColorCompressed::has_label(Index i, const SetStr &label) const {
     assert(i < graph_size_);
 
@@ -146,7 +132,7 @@ void ColorCompressed::add_label(Index i, const std::string &label) {
 void ColorCompressed::serialize(const std::string &filename) const {
     const_cast<ColorCompressed*>(this)->flush();
 
-    std::ofstream outstream(filename);
+    std::ofstream outstream(filename + ".color.annodbg");
     NumberSerialisation::serialiseNumber(outstream, graph_size_);
     serialize_string_number_map(outstream, label_to_id_);
     StringSerialisation::serialiseStringVector(outstream, id_to_label_);
@@ -160,7 +146,7 @@ void ColorCompressed::serialize(const std::string &filename) const {
 bool ColorCompressed::load(const std::string &filename) {
     release();
 
-    std::ifstream instream(filename);
+    std::ifstream instream(filename + ".color.annodbg");
     if (!instream.good())
         return false;
 

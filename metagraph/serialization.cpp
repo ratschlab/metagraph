@@ -58,6 +58,7 @@ std::vector<T> load_number_vector(std::istream &in) {
 }
 
 template std::vector<uint64_t> load_number_vector<uint64_t>(std::istream &in);
+template std::vector<uint32_t> load_number_vector<uint32_t>(std::istream &in);
 template std::vector<uint8_t> load_number_vector<uint8_t>(std::istream &in);
 template std::vector<bool> load_number_vector<bool>(std::istream &in);
 

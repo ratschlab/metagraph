@@ -29,8 +29,6 @@ class ColorCompressed : public AnnotationCategory<std::set<std::string>> {
 
     std::vector<uint64_t> get_row(Index i) const;
 
-    void serialize_uncompressed_rows(const std::string &filename) const;
-
     bool has_label(Index i, const SetStr &label) const;
     bool has_label(Index i, const std::string &label) const;
 

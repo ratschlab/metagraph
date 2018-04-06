@@ -524,7 +524,7 @@ int main(int argc, const char *argv[]) {
                           config->fasta_header_delimiter,
                           config->verbose);
 
-            annotation->serialize(config->infbase + ".anno.dbg");
+            annotation->serialize(config->infbase);
 
             return 0;
         }
@@ -574,7 +574,7 @@ int main(int argc, const char *argv[]) {
                           config->verbose,
                           graph->num_edges());
 
-            annotation->serialize(config->infbase + ".anno.bloom.dbg");
+            annotation->serialize(config->infbase);
 
             return 0;
         }
@@ -586,9 +586,9 @@ int main(int argc, const char *argv[]) {
 
             annotate::ColorCompressed annotation(*graph);
 
-            if (!annotation.load(config->infbase + ".anno.dbg")) {
+            if (!annotation.load(config->infbase)) {
                 std::cerr << "ERROR: can't load annotations from "
-                          << config->infbase + ".anno.dbg"
+                          << config->infbase + ".dbg"
                           << ", file corrupted" << std::endl;
             }
             const auto labels = annotation.get_label_names();
@@ -799,11 +799,14 @@ int main(int argc, const char *argv[]) {
                 if (config->print_graph_succ)
                     graph->print_state();
 
+                //TODO: fix this, options for different annotations
+                /*
                 std::ifstream instream(file + ".anno.dbg");
                 if (instream.good()) {
                     size_t anno_size = NumberSerialisation::deserialiseNumber(instream);
                     std::cout << "annot: " << anno_size << std::endl;
                 }
+                */
             }
 
             return 0;
