@@ -3,7 +3,7 @@
 
 #include <cstdint>
 #include <string>
-
+#include <vector>
 
 namespace annotate {
 
@@ -37,6 +37,8 @@ class AnnotationCategory {
     virtual void add_labels(const std::string &sequence, const LabelType &labels) = 0;
 
     virtual bool has_label(Index i, const LabelType &label) const = 0;
+
+    virtual std::vector<std::string> get_label_names() const;
 
     virtual bool load(const std::string &filename) = 0;
     virtual void serialize(const std::string &filename) const = 0;

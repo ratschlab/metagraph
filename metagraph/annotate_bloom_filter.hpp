@@ -118,6 +118,10 @@ class AnnotationCategoryHash : public AnnotationCategory<std::set<std::string>> 
     void compare_annotations(const hash_annotate::BloomAnnotator &bloom_annotator,
                              size_t step) const;
 
+    std::vector<std::string> get_label_names() const {
+        return column_to_label_;
+    }
+
   private:
     DBGSuccAnnotWrapper graph_;
     hash_annotate::PreciseHashAnnotator annotator_;
@@ -162,6 +166,10 @@ class AnnotationCategoryBloom : public AnnotationCategory<std::set<std::string>>
     void compare_annotations(const AnnotationCategoryHash &exact,
                              size_t step = 1) const {
         exact.compare_annotations(annotator_, step);
+    }
+
+    std::vector<std::string> get_label_names() const {
+        return column_to_label_;
     }
 
   private:
