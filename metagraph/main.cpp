@@ -658,6 +658,7 @@ int main(int argc, const char *argv[]) {
                 std::cerr << "ERROR: can't load annotations for "
                           << config->infbase + ".dbg"
                           << ", file corrupted" << std::endl;
+                exit(1);
             }
 
             // iterate over input files
@@ -679,20 +680,25 @@ int main(int argc, const char *argv[]) {
                         std::vector<std::pair<std::string, size_t>> counts(
                             labels_counter.begin(), labels_counter.end()
                         );
+                        // sort in decreasing order
                         std::sort(counts.begin(), counts.end(),
-                                    [](const auto &first, const auto &second) {
-                                        return first.second < second.second;
-                                    });
+                                  [](const auto &first, const auto &second) {
+                                      return first.second > second.second;
+                                  });
 
-                        if (counts.size()) {
+                        auto num_labels = std::min(
+                            counts.size(),
+                            static_cast<size_t>(config->num_top_labels)
+                        );
+                        if (num_labels) {
                             std::cout << "<" << counts[0].first << ">: "
                                       << counts[0].second;
                         }
-                        for (size_t i = 1; i < counts.size(); ++i) {
+                        for (size_t i = 1; i < num_labels; ++i) {
                             std::cout << ", <" << counts[i].first << ">: "
                                       << counts[i].second;
                         }
-                        std::cout << std::endl;
+                        std::cout << "\n";
                     } else {
                         auto labels_discovered = discover_labels(
                             *graph, *annotation, annotation->get_label_names(),
@@ -701,7 +707,7 @@ int main(int argc, const char *argv[]) {
 
                         std::cout << utils::join_strings(labels_discovered,
                                                          config->anno_labels_delimiter)
-                                  << std::endl;
+                                  << "\n";
                     }
                 });
             }

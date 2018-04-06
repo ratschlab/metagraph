@@ -112,6 +112,8 @@ Config::Config(int argc, const char *argv[]) {
             anno_labels_delimiter = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-s") || !strcmp(argv[i], "--num-splits")) {
             nsplits = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--num-top-labels")) {
+            num_top_labels = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--suffix")) {
             suffix = argv[++i];
         } else if (!strcmp(argv[i], "-t") || !strcmp(argv[i], "--state")) {
@@ -346,6 +348,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-r --reverse \t\t\tclassify reverse complement sequences [off]\n");
             fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column based colors compressor [off]\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
+            fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
             fprintf(stderr, "\t   --discovery-fraction \tfraction of labeled k-mers required for annotation [1.0]\n");
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
             // fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");

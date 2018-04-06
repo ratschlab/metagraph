@@ -37,6 +37,7 @@ class Config {
     unsigned int bloom_num_hash_functions = 0;
     unsigned int bloom_test_num_kmers = 0;
     unsigned int noise_kmer_frequency = 0;
+    unsigned int num_top_labels = -1;
 
     double bloom_fpp = -1;
     double bloom_bits_per_edge = -1;
