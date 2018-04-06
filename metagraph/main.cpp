@@ -224,6 +224,52 @@ void annotate_data(const std::vector<std::string> &files,
 }
 
 
+template <class Annotator>
+std::vector<std::string> discover_labels(const DBG_succ &graph,
+                                         const Annotator &annotator,
+                                         const std::vector<std::string> labels,
+                                         const std::string &sequence,
+                                         double discovery_fraction) {
+    const size_t max_kmers_missing =
+        (sequence.size() - graph.get_k() + 1)
+            * (1 - discovery_fraction);
+
+    const size_t min_kmers_discovered =
+        (sequence.size() - graph.get_k() + 1)
+            - max_kmers_missing;
+
+    std::map<std::string, size_t> labels_counter;
+    for (const auto &label : labels) {
+        labels_counter[label] = 0;
+    }
+
+    size_t kmers_checked = 0;
+    std::vector<std::string> labels_discovered;
+
+    graph.align(sequence,
+        [&](uint64_t i) {
+            kmers_checked++;
+            for (auto it = labels_counter.begin(); it != labels_counter.end();) {
+                if (i > 0 && annotator.has_label(i, { it->first }))
+                    it->second++;
+
+                if (it->second >= min_kmers_discovered) {
+                    labels_discovered.push_back(it->first);
+                    labels_counter.erase(it++);
+                } else if (kmers_checked - it->second > max_kmers_missing) {
+                    labels_counter.erase(it++);
+                } else {
+                    ++it;
+                }
+            }
+        },
+        [&]() { return labels_counter.size() == 0; }
+    );
+
+    return labels_discovered;
+}
+
+
 
 int main(int argc, const char *argv[]) {
     // parse command line arguments and options
@@ -596,7 +642,6 @@ int main(int argc, const char *argv[]) {
                           << config->infbase + ".dbg"
                           << ", file corrupted" << std::endl;
             }
-            const auto labels = annotation->get_label_names();
 
             // iterate over input files
             for (const auto &file : files) {
@@ -610,40 +655,9 @@ int main(int argc, const char *argv[]) {
                     if (config->reverse)
                         reverse_complement(read_stream->seq);
 
-                    const size_t max_kmers_missing =
-                        (read_stream->seq.l - graph->get_k() + 1)
-                            * (1 - config->discovery_fraction);
-
-                    const size_t min_kmers_discovered =
-                        (read_stream->seq.l - graph->get_k() + 1)
-                            - max_kmers_missing;
-
-                    std::map<std::string, size_t> labels_counter;
-                    for (const auto &label : labels) {
-                        labels_counter[label] = 0;
-                    }
-
-                    size_t kmers_checked = 0;
-                    std::vector<std::string> labels_discovered;
-
-                    graph->align(read_stream->seq.s,
-                        [&](uint64_t i) {
-                            kmers_checked++;
-                            for (auto it = labels_counter.begin(); it != labels_counter.end();) {
-                                if (i > 0 && annotation->has_label(i, { it->first }))
-                                    it->second++;
-
-                                if (it->second >= min_kmers_discovered) {
-                                    labels_discovered.push_back(it->first);
-                                    labels_counter.erase(it++);
-                                } else if (kmers_checked - it->second > max_kmers_missing) {
-                                    labels_counter.erase(it++);
-                                } else {
-                                    ++it;
-                                }
-                            }
-                        },
-                        [&]() { return labels_counter.size() == 0; }
+                    auto labels_discovered = discover_labels(
+                        *graph, *annotation, annotation->get_label_names(),
+                        read_stream->seq.s, config->discovery_fraction
                     );
 
                     std::cout << utils::join_strings(labels_discovered,
