@@ -164,9 +164,6 @@ bool ColorCompressed::load(const std::string &filename) {
 void ColorCompressed::release() {
     label_to_id_.clear();
     id_to_label_.clear();
-    for (auto it = cached_colors_.Begin(); it != cached_colors_.End(); ++it) {
-        delete it->second;
-    }
     cached_colors_.Clear();
     for (auto *column : bitmatrix_) {
         if (column)
@@ -176,8 +173,8 @@ void ColorCompressed::release() {
 }
 
 void ColorCompressed::flush() {
-    for (auto it = cached_colors_.Begin(); it != cached_colors_.End(); ++it) {
-        flush(it->first, it->second);
+    for (const auto &cached_vector : cached_colors_) {
+        flush(cached_vector.first, cached_vector.second);
     }
 }
 
