@@ -193,10 +193,12 @@ void annotate_data(const std::vector<std::string> &files,
                     labels.insert(header_labels.begin(), header_labels.end());
                 }
 
-                annotator->add_labels(read_stream->seq.s, labels, args...);
-                if (reverse) {
-                    reverse_complement(read_stream->seq);
+                if (strlen(read_stream->seq.s) >= graph.get_k()) {
                     annotator->add_labels(read_stream->seq.s, labels, args...);
+                    if (reverse) {
+                        reverse_complement(read_stream->seq);
+                        annotator->add_labels(read_stream->seq.s, labels, args...);
+                    }
                 }
 
                 total_seqs += 1;
