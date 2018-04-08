@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <unordered_map>
+
 
 namespace annotate {
 
@@ -42,6 +44,52 @@ class AnnotationCategory {
 
     virtual bool load(const std::string &filename) = 0;
     virtual void serialize(const std::string &filename) const = 0;
+};
+
+
+// Terminology
+//
+// An annotated graph is a graph with labeled edges.
+//
+// A labeled edge is an edge carrying a corresponding label.
+//
+// If the edge labels represent inclusion of the edges into
+// some edge categories, each of these categories is called
+// an edge color, and the edge labels are called the edge colorings.
+template <typename Index, typename Color>
+class MultiColorAnnotation {
+  public:
+    typedef std::vector<Color> Coloring;
+
+    virtual ~MultiColorAnnotation() {}
+
+    // General functionality
+    virtual Coloring get_coloring(Index i) const = 0;
+    virtual std::vector<Coloring>
+    get_colorings(const std::vector<Index> &indices) const = 0;
+
+    virtual void add_color(Index i, const Color &color) = 0;
+    virtual void add_colors(Index i, const Coloring &coloring) = 0;
+    virtual void add_colors(const std::vector<Index> &indices,
+                            const Coloring &coloring) = 0;
+
+    virtual bool is_colored(Index i, const Color &color) const = 0;
+
+    virtual bool load(const std::string &filename) = 0;
+    virtual void serialize(const std::string &filename) const = 0;
+
+    // Special queries
+
+    // Compute the union of colorings excluding colors
+    // observed in less than |filtering_ratio| colorings.
+    virtual Coloring aggregate_colors(const std::vector<Index> &indices,
+                                      double filtering_ratio) const = 0;
+
+    // Count all colors collected from extracted colorings
+    // and return top |num_top| with the counts computed.
+    virtual std::unordered_map<Color, size_t>
+    get_most_frequent_colors(const std::vector<Index> &indices,
+                             size_t num_top) const = 0;
 };
 
 
