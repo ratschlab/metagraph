@@ -91,44 +91,7 @@ class DBGSuccAnnotWrapper : public hash_annotate::DeBruijnGraphWrapper {
 };
 
 
-class AnnotationCategoryBloom;
-
-
-class AnnotationCategoryHash : public AnnotationCategory<std::set<std::string>> {
-  public:
-    typedef std::set<std::string> SetStr;
-
-    AnnotationCategoryHash(const DBG_succ &graph);
-
-    SetStr get(Index i) const;
-
-    void set_label(Index i, const SetStr &label);
-
-    void add_label(const std::string &sequence,
-                   const std::string &label);
-
-    bool has_label(Index i, const SetStr &label) const;
-
-    // bool load(const std::string &filename);
-    // void serialize(const std::string &filename) const;
-
-    void compare_annotations(const AnnotationCategoryBloom &bloom,
-                             size_t step = 1) const;
-
-    void compare_annotations(const hash_annotate::BloomAnnotator &bloom_annotator,
-                             size_t step) const;
-
-    std::vector<std::string> get_label_names() const {
-        return column_to_label_;
-    }
-
-  private:
-    DBGSuccAnnotWrapper graph_;
-    hash_annotate::PreciseHashAnnotator annotator_;
-
-    std::vector<std::string> column_to_label_;
-    std::unordered_map<std::string, size_t> label_to_column_;
-};
+class AnnotationCategoryHash;
 
 
 class AnnotationCategoryBloom : public AnnotationCategory<std::set<std::string>> {
@@ -164,9 +127,7 @@ class AnnotationCategoryBloom : public AnnotationCategory<std::set<std::string>>
     void serialize(const std::string &filename) const;
 
     void compare_annotations(const AnnotationCategoryHash &exact,
-                             size_t step = 1) const {
-        exact.compare_annotations(annotator_, step);
-    }
+                             size_t step = 1) const;
 
     std::vector<std::string> get_label_names() const {
         return column_to_label_;
