@@ -13,20 +13,6 @@
 
 namespace annotate {
 
-class PreciseColorCompressedAnnotator : public hash_annotate::PreciseAnnotator {
-  public:
-    PreciseColorCompressedAnnotator(const ColorCompressed &color_compressed)
-          : color_compressed_(color_compressed) {}
-
-    std::vector<uint64_t> annotate_edge(hash_annotate::DeBruijnGraphWrapper::edge_index i) const {
-        return color_compressed_.get_row(i);
-    }
-
-  private:
-    const ColorCompressed &color_compressed_;
-};
-
-
 class DBGSuccAnnotWrapper : public hash_annotate::DeBruijnGraphWrapper {
   public:
     DBGSuccAnnotWrapper(const DBG_succ &graph) : graph_(graph) {}
@@ -125,9 +111,6 @@ class AnnotationCategoryBloom : public AnnotationCategory<std::set<std::string>>
 
     bool load(const std::string &filename);
     void serialize(const std::string &filename) const;
-
-    void compare_annotations(const AnnotationCategoryHash &exact,
-                             size_t step = 1) const;
 
     std::vector<std::string> get_label_names() const {
         return column_to_label_;
