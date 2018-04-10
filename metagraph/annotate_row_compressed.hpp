@@ -40,9 +40,7 @@ class RowCompressed : public MultiColorAnnotation<uint64_t, Color> {
                              size_t num_top = static_cast<size_t>(-1)) const;
 
   private:
-    typedef std::list<uint32_t> ColoringContainer;
-
-    std::vector<ColoringContainer> encoded_colorings_;
+    std::vector<std::vector<uint32_t>> encoded_colorings_;
     std::unique_ptr<ColorEncoder<Color>> color_encoder_;
 };
 

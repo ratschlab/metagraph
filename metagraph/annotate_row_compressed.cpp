@@ -116,7 +116,8 @@ bool RowCompressed<Color, Encoder>::load(const std::string &filename) {
 
     try {
         size_t num_rows = NumberSerialisation::deserialiseNumber(instream);
-        encoded_colorings_ = decltype(encoded_colorings_)(num_rows);
+        encoded_colorings_.clear();
+        encoded_colorings_.resize(num_rows);
 
         if (!color_encoder_->load(instream))
             return false;
@@ -126,7 +127,7 @@ bool RowCompressed<Color, Encoder>::load(const std::string &filename) {
             if (full_vector[i]) {
                 encoded_colorings_[j].push_back(full_vector[i] - 1);
             } else {
-                j++;
+                encoded_colorings_[j++].shrink_to_fit();
             }
         }
         return true;
@@ -173,7 +174,7 @@ template <typename Color, class Encoder>
 std::vector<std::pair<Color, size_t>>
 RowCompressed<Color, Encoder>::get_most_frequent_colors(const std::vector<Index> &indices,
                                                         size_t num_top) const {
-    std::unordered_map<size_t, size_t> encoded_counter;
+    std::vector<size_t> encoded_counter(color_encoder_->size(), 0);
 
     for (Index i : indices) {
         for (auto code : encoded_colorings_[i]) {
@@ -181,9 +182,13 @@ RowCompressed<Color, Encoder>::get_most_frequent_colors(const std::vector<Index>
         }
     }
 
-    std::vector<std::pair<size_t, size_t>> counts(
-        encoded_counter.begin(), encoded_counter.end()
-    );
+    std::vector<std::pair<size_t, size_t>> counts;
+    counts.reserve(encoded_counter.size());
+    for (size_t j = 0; j < encoded_counter.size(); ++j) {
+        if (encoded_counter[j])
+            counts.emplace_back(j, encoded_counter[j]);
+    }
+
     // sort in decreasing order
     std::sort(counts.begin(), counts.end(),
               [](const auto &first, const auto &second) {
