@@ -21,4 +21,4 @@
 	url = https://github.com/karasikov/caches.git
 [submodule "metagraph/external-libraries/eigen"]
 	path = metagraph/external-libraries/eigen
-	url = https://github.com/madlib/eigen.git
+	url = https://github.com/eigenteam/eigen-git-mirror.git
