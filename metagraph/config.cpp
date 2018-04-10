@@ -67,6 +67,8 @@ Config::Config(int argc, const char *argv[]) {
             fasta_anno = true;
         } else if (!strcmp(argv[i], "--row-annotator")) {
             use_row_annotator = true;
+        } else if (!strcmp(argv[i], "--sparse")) {
+            sparse = true;
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
             parallel = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--parts-total")) {
@@ -323,6 +325,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --fasta-anno \t\textract annotations from headers of sequences in files [off]\n");
             fprintf(stderr, "\t   --fasta-anno-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
             fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column based colors compressor [off]\n");
+            fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate colors [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case ANNOTATE_BLOOM: {
@@ -351,6 +354,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for classify:\n");
             fprintf(stderr, "\t-r --reverse \t\t\tclassify reverse complement sequences [off]\n");
             fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column based colors compressor [off]\n");
+            fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate colors [off]\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
             fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
             fprintf(stderr, "\t   --discovery-fraction \tfraction of labeled k-mers required for annotation [1.0]\n");

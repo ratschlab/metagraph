@@ -12,17 +12,87 @@ using libmaus2::util::StringSerialisation;
 
 namespace annotate {
 
+class VectorVectorMatrix : public RowMajorSparseBinaryMatrix {
+  public:
+    VectorVectorMatrix(size_t num_rows) : vector_(num_rows) {}
+
+    void set_bit(size_t i, size_t j) {
+        if (!is_set_bit(i, j))
+            vector_[i].push_back(j);
+    }
+    bool is_set_bit(size_t i, size_t j) const {
+        return std::find(vector_[i].begin(), vector_[i].end(), j)
+                    != vector_[i].end();
+    }
+
+    size_t select(size_t i, size_t k) const { return vector_[i][k]; }
+
+    size_t size() const { return vector_.size(); }
+    size_t size(size_t i) const { return vector_[i].size(); }
+
+    void clear(size_t i) { vector_[i].clear(); }
+
+    void reinitialize(size_t num_rows) {
+        vector_ = std::vector<std::vector<uint32_t>>();
+        vector_.resize(num_rows);
+    }
+
+  private:
+    std::vector<std::vector<uint32_t>> vector_;
+};
+
+class EigenSparserMatrix : public RowMajorSparseBinaryMatrix {
+    typedef Eigen::SparseMatrix<bool, Eigen::RowMajor> SparseMatrix;
+
+  public:
+    EigenSparserMatrix(size_t num_rows) { reinitialize(num_rows); }
+
+    void set_bit(size_t i, size_t j) { mat_.coeffRef(i, j) = 1; }
+
+    bool is_set_bit(size_t i, size_t j) const { return mat_.coeff(i, j); }
+
+    size_t select(size_t i, size_t k) const {
+        return mat_.innerIndexPtr()[mat_.outerIndexPtr()[i] + k];
+    }
+
+    size_t size() const { return mat_.rows(); }
+    size_t size(size_t i) const { return mat_.innerVector(i).nonZeros(); }
+
+    void clear(size_t i) {
+        for (SparseMatrix::InnerIterator it(mat_, i); it; ++it) {
+            it.valueRef() = 0;
+        }
+    }
+
+    void reinitialize(size_t num_rows) {
+        mat_ = Eigen::SparseMatrix<bool, Eigen::RowMajor>(num_rows, kMaxNumCols);
+        mat_.reserve(num_rows);
+    }
+
+  private:
+    const size_t kMaxNumCols = 10'000'000;
+
+    SparseMatrix mat_;
+};
+
+
 template <typename Color, class Encoder>
-RowCompressed<Color, Encoder>::RowCompressed(uint64_t num_rows)
-      : encoded_colorings_(num_rows), color_encoder_(new Encoder()) {}
+RowCompressed<Color, Encoder>::RowCompressed(uint64_t num_rows, bool sparse)
+      : color_encoder_(new Encoder()) {
+    if (sparse) {
+        matrix_.reset(new EigenSparserMatrix(num_rows));
+    } else {
+        matrix_.reset(new VectorVectorMatrix(num_rows));
+    }
+}
 
 template <typename Color, class Encoder>
 void RowCompressed<Color, Encoder>::set_coloring(Index i, const Coloring &coloring) {
-    assert(i < encoded_colorings_.size());
+    assert(i < matrix_->size());
 
-    encoded_colorings_[i].clear();
+    matrix_->clear(i);
     for (const auto &color : coloring) {
-        encoded_colorings_[i].push_back(color_encoder_->encode(color, true));
+        matrix_->set_bit(i, color_encoder_->encode(color, true));
     }
 }
 
@@ -30,19 +100,15 @@ template <typename Color, class Encoder>
 typename RowCompressed<Color, Encoder>::Coloring
 RowCompressed<Color, Encoder>::get_coloring(Index i) const {
     Coloring coloring;
-    for (auto code : encoded_colorings_[i]) {
-        coloring.push_back(color_encoder_->decode(code));
+    for (size_t k = 0; k < matrix_->size(i); ++k) {
+        coloring.push_back(color_encoder_->decode(matrix_->select(i, k)));
     }
     return coloring;
 }
 
 template <typename Color, class Encoder>
 void RowCompressed<Color, Encoder>::add_color(Index i, const Color &color) {
-    auto code = color_encoder_->encode(color, true);
-    if (std::find(encoded_colorings_[i].begin(),
-                  encoded_colorings_[i].end(), code)
-            == encoded_colorings_[i].end())
-        encoded_colorings_[i].push_back(code);
+    matrix_->set_bit(i, color_encoder_->encode(color, true));
 }
 
 template <typename Color, class Encoder>
@@ -63,10 +129,7 @@ void RowCompressed<Color, Encoder>::add_colors(const std::vector<Index> &indices
 template <typename Color, class Encoder>
 bool RowCompressed<Color, Encoder>::has_color(Index i, const Color &color) const {
     try {
-        return std::find(encoded_colorings_[i].begin(),
-                         encoded_colorings_[i].end(),
-                         color_encoder_->encode(color))
-                != encoded_colorings_[i].end();
+        return matrix_->is_set_bit(i, color_encoder_->encode(color));
     } catch (...) {
         return false;
     }
@@ -82,8 +145,10 @@ bool RowCompressed<Color, Encoder>::has_colors(Index i, const Coloring &coloring
     } catch (...) {
         return false;
     }
-    std::set<size_t> encoded_coloring(encoded_colorings_[i].begin(),
-                                      encoded_colorings_[i].end());
+    std::set<size_t> encoded_coloring;
+    for (size_t k = 0; k < matrix_->size(i); ++k) {
+        encoded_coloring.insert(matrix_->select(i, k));
+    }
     return std::includes(encoded_coloring.begin(), encoded_coloring.end(),
                          querying_codes.begin(), querying_codes.end());
 }
@@ -92,14 +157,14 @@ template <typename Color, class Encoder>
 void RowCompressed<Color, Encoder>::serialize(const std::string &filename) const {
     std::ofstream outstream(filename + ".row.annodbg");
 
-    NumberSerialisation::serialiseNumber(outstream, encoded_colorings_.size());
+    NumberSerialisation::serialiseNumber(outstream, matrix_->size());
 
     color_encoder_->serialize(outstream);
 
     std::vector<uint32_t> full_vector;
-    for (const auto &indices : encoded_colorings_) {
-        for (auto j : indices) {
-            full_vector.push_back(j + 1);
+    for (size_t i = 0; i < matrix_->size(); ++i) {
+        for (size_t k = 0; k < matrix_->size(i); ++k) {
+            full_vector.push_back(matrix_->select(i, k) + 1);
         }
         full_vector.push_back(0);
     }
@@ -116,20 +181,20 @@ bool RowCompressed<Color, Encoder>::load(const std::string &filename) {
 
     try {
         size_t num_rows = NumberSerialisation::deserialiseNumber(instream);
-        encoded_colorings_.clear();
-        encoded_colorings_.resize(num_rows);
+        matrix_->reinitialize(num_rows);
 
         if (!color_encoder_->load(instream))
             return false;
 
         auto full_vector = load_number_vector<uint32_t>(instream);
-        for (size_t j = 0, i = 0; i < full_vector.size(); ++i) {
-            if (full_vector[i]) {
-                encoded_colorings_[j].push_back(full_vector[i] - 1);
+        for (size_t k = 0, i = 0; k < full_vector.size(); ++k) {
+            if (full_vector[k]) {
+                matrix_->set_bit(i, full_vector[k] - 1);
             } else {
-                encoded_colorings_[j++].shrink_to_fit();
+                i++;
             }
         }
+
         return true;
     } catch (...) {
         return false;
@@ -153,8 +218,8 @@ RowCompressed<Color, Encoder>::aggregate_colors(const std::vector<Index> &indice
     std::unordered_map<size_t, size_t> encoded_counter;
 
     for (Index i : indices) {
-        for (auto code : encoded_colorings_[i]) {
-            encoded_counter[code]++;
+        for (size_t k = 0; k < matrix_->size(i); ++k) {
+            encoded_counter[matrix_->select(i, k)]++;
         }
     }
 
@@ -177,8 +242,8 @@ RowCompressed<Color, Encoder>::get_most_frequent_colors(const std::vector<Index>
     std::vector<size_t> encoded_counter(color_encoder_->size(), 0);
 
     for (Index i : indices) {
-        for (auto code : encoded_colorings_[i]) {
-            encoded_counter[code]++;
+        for (size_t k = 0; k < matrix_->size(i); ++k) {
+            encoded_counter[matrix_->select(i, k)]++;
         }
     }
 

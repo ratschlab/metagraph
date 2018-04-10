@@ -19,3 +19,6 @@
 [submodule "metagraph/external-libraries/caches"]
 	path = metagraph/external-libraries/caches
 	url = https://github.com/karasikov/caches.git
+[submodule "metagraph/external-libraries/eigen"]
+	path = metagraph/external-libraries/eigen
+	url = https://github.com/madlib/eigen.git

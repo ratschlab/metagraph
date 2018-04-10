@@ -527,12 +527,13 @@ int main(int argc, const char *argv[]) {
             std::unique_ptr<Annotator> annotation;
             if (config->use_row_annotator) {
                 annotation.reset(
-                    new annotate::RowCompressed<>(graph->num_edges() + 1)
+                    new annotate::RowCompressed<>(graph->num_edges() + 1,
+                                                  config->sparse)
                 );
             } else {
                 annotation.reset(
                     new annotate::ColorCompressed<>(graph->num_edges() + 1,
-                                                        kNumCachedColors)
+                                                    kNumCachedColors)
                 );
             }
 
@@ -606,10 +607,9 @@ int main(int argc, const char *argv[]) {
 
             std::unique_ptr<Annotator> annotation;
             if (config->use_row_annotator) {
-                annotation.reset(new annotate::RowCompressed<>(graph->num_edges() + 1));
+                annotation.reset(new annotate::RowCompressed<>(0, config->sparse));
             } else {
-                annotation.reset(new annotate::ColorCompressed<>(graph->num_edges() + 1,
-                                                                     kNumCachedColors));
+                annotation.reset(new annotate::ColorCompressed<>(0, kNumCachedColors));
             }
 
             if (!annotation->load(config->infbase)) {

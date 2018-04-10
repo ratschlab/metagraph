@@ -1,11 +1,31 @@
 #ifndef __ANNOTATE_ROW_COMPRESSED_HPP__
 #define __ANNOTATE_ROW_COMPRESSED_HPP__
 
+#include <Eigen/Sparse>
+
 #include "annotate.hpp"
 #include "dbg_succinct.hpp"
 
 
 namespace annotate {
+
+class RowMajorSparseBinaryMatrix {
+  public:
+    virtual ~RowMajorSparseBinaryMatrix() {}
+
+    virtual void set_bit(size_t i, size_t j) = 0;
+    virtual bool is_set_bit(size_t i, size_t j) const = 0;
+
+    virtual size_t select(size_t i, size_t k) const = 0;
+
+    virtual size_t size() const = 0;
+    virtual size_t size(size_t i) const = 0;
+
+    virtual void clear(size_t i) = 0;
+
+    virtual void reinitialize(size_t num_rows) = 0;
+};
+
 
 template <typename Color = std::string, class Encoder = StringEncoder>
 class RowCompressed : public MultiColorAnnotation<uint64_t, Color> {
@@ -13,7 +33,7 @@ class RowCompressed : public MultiColorAnnotation<uint64_t, Color> {
     using Index = typename MultiColorAnnotation<uint64_t, Color>::Index;
     using Coloring = typename MultiColorAnnotation<uint64_t, Color>::Coloring;
 
-    RowCompressed(uint64_t num_rows);
+    RowCompressed(uint64_t num_rows, bool sparse = false);
 
     void set_coloring(Index i, const Coloring &coloring);
     Coloring get_coloring(Index i) const;
@@ -40,7 +60,7 @@ class RowCompressed : public MultiColorAnnotation<uint64_t, Color> {
                              size_t num_top = static_cast<size_t>(-1)) const;
 
   private:
-    std::vector<std::vector<uint32_t>> encoded_colorings_;
+    std::unique_ptr<RowMajorSparseBinaryMatrix> matrix_;
     std::unique_ptr<ColorEncoder<Color>> color_encoder_;
 };
 

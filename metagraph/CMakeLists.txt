@@ -49,6 +49,7 @@ include_directories(
   external-libraries/hopscotch-map/src
   external-libraries/rollinghashcpp
   external-libraries/ips4o
+  external-libraries/eigen
   external-libraries/caches/include
   external-libraries/graph_annotation
 )

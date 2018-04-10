@@ -22,6 +22,7 @@ class Config {
     bool traversal_merge = false;
     bool dump_raw_anno = false;
     bool use_row_annotator = false;
+    bool sparse = false;
     bool count_labels = false;
 
     unsigned int k = 3;
