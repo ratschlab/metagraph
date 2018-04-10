@@ -69,7 +69,7 @@ set(METALIBS
   -lhts -lz -lbz2
   -lmaus2 -lmaus2_simd_align_128 -lmaus2_simd_align_256
   -lsdsl -ldivsufsort -ldivsufsort64
-  -lssl -lcrypto -llzma -lboost_serialization
+  -lssl -lcrypto -llzma
   -latomic
 )
 
