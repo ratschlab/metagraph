@@ -12,210 +12,288 @@ using libmaus2::util::StringSerialisation;
 
 namespace annotate {
 
-ColorCompressed::ColorCompressed(const DBG_succ &graph, size_t cache_size)
-      : ColorCompressed(graph.num_edges() + 1, cache_size) {
-    graph_ = &graph;
+template <typename Color, class Encoder>
+ColorCompressed<Color, Encoder>::ColorCompressed(uint64_t num_rows,
+                                                 size_t num_columns_cached)
+      : num_rows_(num_rows),
+        cached_colors_(
+            num_columns_cached,
+            caches::LRUCachePolicy<size_t>(),
+            [this](size_t j, sdsl::bit_vector *col_uncompressed) {
+                this->flush(j, col_uncompressed);
+                delete col_uncompressed;
+            }
+        ),
+        color_encoder_(new Encoder()) {}
+
+template <typename Color, class Encoder>
+ColorCompressed<Color, Encoder>::~ColorCompressed() {
+    cached_colors_.Clear();
+
+    for (auto *column : bitmatrix_) {
+        if (column)
+            delete column;
+    }
 }
 
-ColorCompressed::ColorCompressed(uint64_t graph_size, size_t cache_size)
-      : graph_(NULL),
-        graph_size_(graph_size),
-        cached_colors_(
-            cache_size,
-            caches::LRUCachePolicy<uint32_t>(),
-            [this](uint32_t curr_id, sdsl::bit_vector *annotation_curr) {
-                this->flush(curr_id, annotation_curr);
-                delete annotation_curr;
-            }
-        ) {}
+template <typename Color, class Encoder>
+void
+ColorCompressed<Color, Encoder>
+::set_coloring(Index i, const Coloring &coloring) {
+    assert(i < num_rows_);
 
-ColorCompressed::SetStr ColorCompressed::get(Index i) const {
-    assert(i < graph_size_);
+    for (size_t j = 0; j < color_encoder_->size(); ++j) {
+        uncompress(j)[i] = 0;
+    }
+    for (const auto &color : coloring) {
+        uncompress(color_encoder_->encode(color, true))[i] = 1;
+    }
+}
+
+template <typename Color, class Encoder>
+typename ColorCompressed<Color, Encoder>::Coloring
+ColorCompressed<Color, Encoder>::get_coloring(Index i) const {
+    assert(i < num_rows_);
 
     const_cast<ColorCompressed*>(this)->flush();
 
-    SetStr label;
+    Coloring coloring;
     for (size_t j = 0; j < bitmatrix_.size(); ++j) {
         assert(bitmatrix_[j]);
-        if (bitmatrix_[j]->operator[](i)) {
-            label.insert(id_to_label_[j]);
-        }
+
+        if ((*bitmatrix_[j])[i])
+            coloring.push_back(color_encoder_->decode(j));
     }
-    return label;
+    return coloring;
 }
 
-std::vector<uint64_t> ColorCompressed::get_row(Index i) const {
-    assert(i < graph_size_);
+template <typename Color, class Encoder>
+void ColorCompressed<Color, Encoder>::add_color(Index i, const Color &color) {
+    assert(i < num_rows_);
 
-    std::vector<uint64_t> row((bitmatrix_.size() + 63) >> 6);
-
-    for (size_t j = 0; j < bitmatrix_.size(); ++j) {
-        assert(bitmatrix_[j]);
-        if (bitmatrix_[j]->operator[](i)) {
-            row[j >> 6] |= (1llu << (j % 64));
-        }
-    }
-    return row;
+    uncompress(color_encoder_->encode(color, true))[i] = 1;
 }
 
-bool ColorCompressed::has_label(Index i, const SetStr &label) const {
-    assert(i < graph_size_);
+template <typename Color, class Encoder>
+void ColorCompressed<Color, Encoder>::add_colors(Index i, const Coloring &coloring) {
+    for (const auto &color : coloring) {
+        add_color(i, color);
+    }
+}
 
-    for (auto &column_name : label) {
-        if (!has_label(i, column_name))
+template <typename Color, class Encoder>
+void ColorCompressed<Color, Encoder>::add_colors(const std::vector<Index> &indices,
+                                                 const Coloring &coloring) {
+    for (const auto &color : coloring) {
+        for (Index i : indices) {
+            add_color(i, color);
+        }
+    }
+}
+
+template <typename Color, class Encoder>
+bool
+ColorCompressed<Color, Encoder>
+::has_color(Index i, const Color &color) const {
+    try {
+        auto j = color_encoder_->encode(color);
+        if (cached_colors_.Cached(j)) {
+            return (*cached_colors_.Get(j))[i];
+        } else {
+            return (*bitmatrix_[j])[i];
+        }
+    } catch (...) {
+        return false;
+    }
+}
+
+template <typename Color, class Encoder>
+bool
+ColorCompressed<Color, Encoder>
+::has_colors(Index i, const Coloring &coloring) const {
+    for (const auto &color : coloring) {
+        if (!has_color(i, color))
             return false;
     }
     return true;
 }
 
-bool ColorCompressed::has_label(Index i, const std::string &label) const {
-    assert(i < graph_size_);
-
-    auto it = label_to_id_.find(label);
-    if (it == label_to_id_.end())
-        return false;
-
-    if (cached_colors_.Cached(it->second))
-        const_cast<ColorCompressed*>(this)->flush(it->second,
-                                                  cached_colors_.Get(it->second));
-
-    return bitmatrix_[it->second]->operator[](i);
-}
-
-void ColorCompressed::set_label(Index i, const SetStr &label) {
-    assert(i < graph_size_);
-
-    for (const auto &value : label) {
-        add_label(i, value);
-    }
-}
-
-void ColorCompressed::add_labels(const std::string &sequence, const SetStr &labels) {
-    if (!graph_) {
-        throw std::runtime_error("Please initialize with a graph\n");
-    }
-    graph_->align(sequence, [&](uint64_t i) {
-        if (i > 0) {
-            for (const auto &label : labels) {
-                add_label(i, label);
-            }
-        }
-    });
-}
-
-void ColorCompressed::add_label(Index i, const std::string &label) {
-    assert(i < graph_size_);
-
-    auto id_it = label_to_id_.find(label);
-    size_t curr_id;
-
-    if (id_it == label_to_id_.end()) {
-        // current label does not exist yet -> assign new column
-        curr_id = id_to_label_.size();
-        cached_colors_.Put(curr_id, new sdsl::bit_vector(graph_size_, 0));
-
-        label_to_id_[label] = curr_id;
-        id_to_label_.push_back(label);
-
-    } else {
-        curr_id = id_it->second;
-
-        if (!cached_colors_.Cached(id_it->second))
-            cached_colors_.Put(curr_id, new sdsl::bit_vector(graph_size_, 0));
-    }
-
-    assert(cached_colors_.Cached(curr_id));
-    (*cached_colors_.Get(curr_id))[i] = 1;
-}
-
-// write annotation to disk
-void ColorCompressed::serialize(const std::string &filename) const {
+template <typename Color, class Encoder>
+void ColorCompressed<Color, Encoder>::serialize(const std::string &filename) const {
     const_cast<ColorCompressed*>(this)->flush();
 
     std::ofstream outstream(filename + ".color.annodbg");
-    NumberSerialisation::serialiseNumber(outstream, graph_size_);
-    serialize_string_number_map(outstream, label_to_id_);
-    StringSerialisation::serialiseStringVector(outstream, id_to_label_);
+
+    NumberSerialisation::serialiseNumber(outstream, num_rows_);
+
+    color_encoder_->serialize(outstream);
+
     for (auto *column : bitmatrix_) {
         assert(column);
         column->serialize(outstream);
     }
 }
 
-// read annotation from disk
-bool ColorCompressed::load(const std::string &filename) {
-    release();
+template <typename Color, class Encoder>
+bool ColorCompressed<Color, Encoder>::load(const std::string &filename) {
+    // release the columns stored
+    cached_colors_.Clear();
+
+    for (auto *column : bitmatrix_) {
+        if (column)
+            delete column;
+    }
 
     std::ifstream instream(filename + ".color.annodbg");
     if (!instream.good())
         return false;
 
-    graph_size_ = NumberSerialisation::deserialiseNumber(instream);
-    label_to_id_ = load_string_number_map(instream);
-    id_to_label_ = StringSerialisation::deserialiseStringVector(instream);
-    bitmatrix_.resize(id_to_label_.size(), NULL);
-    for (auto &column : bitmatrix_) {
-        column = new sdsl::sd_vector<>();
-        column->load(instream);
+    // load annotation from file
+    try {
+        num_rows_ = NumberSerialisation::deserialiseNumber(instream);
+
+        if (!color_encoder_->load(instream))
+            return false;
+
+        bitmatrix_.assign(color_encoder_->size(), NULL);
+        for (auto &column : bitmatrix_) {
+            column = new sdsl::sd_vector<>();
+            column->load(instream);
+        }
+        return true;
+    } catch (...) {
+        return false;
     }
-    return true;
 }
 
-void ColorCompressed::release() {
-    label_to_id_.clear();
-    id_to_label_.clear();
-    cached_colors_.Clear();
-    for (auto *column : bitmatrix_) {
-        if (column)
-            delete column;
+// Get colors that occur at least in |discovery_ratio| colorings.
+// If |discovery_ratio| = 0, return the union of colorings.
+template <typename Color, class Encoder>
+typename ColorCompressed<Color, Encoder>::Coloring
+ColorCompressed<Color, Encoder>
+::aggregate_colors(const std::vector<Index> &indices,
+                   double discovery_ratio) const {
+    assert(discovery_ratio >= 0 && discovery_ratio <= 1);
+
+    const_cast<ColorCompressed*>(this)->flush();
+
+    const size_t min_colors_discovered =
+                        discovery_ratio == 0
+                            ? 1
+                            : std::ceil(indices.size() * discovery_ratio);
+    const size_t max_colors_missing = indices.size() - min_colors_discovered;
+
+    Coloring filtered_colors;
+
+    for (size_t j = 0; j < bitmatrix_.size(); ++j) {
+        uint64_t discovered = 0;
+        uint64_t missing = 0;
+
+        for (Index i : indices) {
+            if ((*bitmatrix_[j])[i]) {
+                if (++discovered >= min_colors_discovered) {
+                    filtered_colors.push_back(color_encoder_->decode(j));
+                    break;
+                }
+            } else if (++missing > max_colors_missing) {
+                break;
+            }
+        }
     }
-    bitmatrix_.clear();
+
+    return filtered_colors;
 }
 
-void ColorCompressed::flush() {
+// Count all colors collected from extracted colorings
+// and return top |num_top| with the counts computed.
+template <typename Color, class Encoder>
+std::vector<std::pair<Color, size_t>>
+ColorCompressed<Color, Encoder>
+::get_most_frequent_colors(const std::vector<Index> &indices,
+                           size_t num_top) const {
+    const_cast<ColorCompressed*>(this)->flush();
+
+    std::vector<uint64_t> counter(bitmatrix_.size(), 0);
+    for (size_t j = 0; j < bitmatrix_.size(); ++j) {
+        for (Index i : indices) {
+            if ((*bitmatrix_[j])[i])
+                counter[j]++;
+        }
+    }
+
+    std::vector<std::pair<size_t, size_t>> counts;
+    for (size_t j = 0; j < bitmatrix_.size(); ++j) {
+        if (counter[j])
+            counts.emplace_back(j, counter[j]);
+    }
+    // sort in decreasing order
+    std::sort(counts.begin(), counts.end(),
+              [](const auto &first, const auto &second) {
+                  return first.second > second.second;
+              });
+
+    counts.resize(std::min(counts.size(), num_top));
+
+    std::vector<std::pair<Color, size_t>> top_counts;
+    for (const auto &encoded_pair : counts) {
+        top_counts.emplace_back(color_encoder_->decode(encoded_pair.first),
+                                encoded_pair.second);
+    }
+
+    return top_counts;
+}
+
+template <typename Color, class Encoder>
+void ColorCompressed<Color, Encoder>::flush() {
     for (const auto &cached_vector : cached_colors_) {
         flush(cached_vector.first, cached_vector.second);
     }
+    assert(bitmatrix_.size() == color_encoder_->size());
 }
 
-void ColorCompressed::flush(uint32_t curr_id,
-                            sdsl::bit_vector *annotation_curr) {
-    assert(annotation_curr);
+template <typename Color, class Encoder>
+void ColorCompressed<Color, Encoder>::flush(size_t j, sdsl::bit_vector *vector) {
+    assert(vector);
+    assert(cached_colors_.Cached(j));
 
-    if (bitmatrix_.size() <= curr_id) {
-        bitmatrix_.resize(curr_id + 1, NULL);
-    }
-    assert(curr_id < bitmatrix_.size());
-
-    if (bitmatrix_[curr_id]) {
-        // decompress existing column
-        std::unique_ptr<sdsl::bit_vector> tmp(inflate_column(curr_id));
-        *annotation_curr |= *tmp;
-        delete bitmatrix_[curr_id];
+    while (bitmatrix_.size() <= j) {
+        bitmatrix_.push_back(NULL);
     }
 
-    bitmatrix_[curr_id] = new sdsl::sd_vector<>(*annotation_curr);
+    if (bitmatrix_[j])
+        delete bitmatrix_[j];
+
+    bitmatrix_[j] = new sdsl::sd_vector<>(*vector);
 }
 
-sdsl::bit_vector* ColorCompressed::inflate_column(uint32_t id) const {
-    auto *col = bitmatrix_.at(id);
+template <typename Color, class Encoder>
+sdsl::bit_vector& ColorCompressed<Color, Encoder>::uncompress(size_t j) {
+    assert(j < color_encoder_->size());
 
-    assert(col);
+    try {
+        return *cached_colors_.Get(j);
+    } catch (...) {
+        sdsl::bit_vector *bit_vector = new sdsl::bit_vector(num_rows_, 0);
 
-    sdsl::bit_vector *result = new sdsl::bit_vector(col->size(), 0);
+        if (j < bitmatrix_.size() && bitmatrix_[j]) {
+            // inflate vector
 
-    auto slct = sdsl::select_support_sd<>(col);
-    auto rank = sdsl::rank_support_sd<>(col);
-    auto num_set_bits = rank(col->size());
+            auto slct = sdsl::select_support_sd<>(bitmatrix_[j]);
+            auto rank = sdsl::rank_support_sd<>(bitmatrix_[j]);
+            auto num_set_bits = rank(bitmatrix_[j]->size());
 
-    for (uint64_t i = 1; i <= num_set_bits; ++i) {
-        uint64_t idx = slct(i);
-        if (idx >= col->size())
-            break;
-        (*result)[idx] = 1;
+            for (uint64_t i = 1; i <= num_set_bits; ++i) {
+                assert(slct(i) < bit_vector->size());
+
+                (*bit_vector)[slct(i)] = 1;
+            }
+        }
+
+        cached_colors_.Put(j, bit_vector);
+        return *bit_vector;
     }
-
-    return result;
 }
+
+template class ColorCompressed<std::string, StringEncoder>;
 
 } // namespace annotate

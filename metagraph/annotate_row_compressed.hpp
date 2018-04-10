@@ -7,41 +7,43 @@
 
 namespace annotate {
 
-class RowCompressed : public AnnotationCategory<std::set<std::string>> {
+template <typename Color = std::string, class Encoder = StringEncoder>
+class RowCompressed : public MultiColorAnnotation<uint64_t, Color> {
   public:
-    typedef std::set<std::string> SetStr;
+    using Index = typename MultiColorAnnotation<uint64_t, Color>::Index;
+    using Coloring = typename MultiColorAnnotation<uint64_t, Color>::Coloring;
 
-    RowCompressed(const DBG_succ &graph);
+    RowCompressed(uint64_t num_rows);
 
-    RowCompressed(uint64_t graph_size);
+    void set_coloring(Index i, const Coloring &coloring);
+    Coloring get_coloring(Index i) const;
 
-    SetStr get(Index i) const;
+    void add_color(Index i, const Color &color);
+    void add_colors(Index i, const Coloring &coloring);
+    void add_colors(const std::vector<Index> &indices, const Coloring &coloring);
 
-    std::vector<uint64_t> get_row(Index i) const;
-
-    bool has_label(Index i, const SetStr &label) const;
-    bool has_label(Index i, const std::string &label) const;
-
-    void set_label(Index i, const SetStr &label);
-    void add_label(Index i, const std::string &label);
-    void add_labels(const std::string &sequence, const SetStr &labels);
+    bool has_color(Index i, const Color &color) const;
+    bool has_colors(Index i, const Coloring &coloring) const;
 
     bool load(const std::string &filename);
     void serialize(const std::string &filename) const;
 
-    std::vector<std::string> get_label_names() const { return id_to_label_; }
+    // Get colors that occur at least in |discovery_ratio| colorings.
+    // If |discovery_ratio| = 0, return the union of colorings.
+    Coloring aggregate_colors(const std::vector<Index> &indices,
+                              double discovery_ratio = 1) const;
+
+    // Count all colors collected from extracted colorings
+    // and return top |num_top| with the counts computed.
+    std::vector<std::pair<Color, size_t>>
+    get_most_frequent_colors(const std::vector<Index> &indices,
+                             size_t num_top = static_cast<size_t>(-1)) const;
 
   private:
-    typedef std::list<uint32_t> IndexContainer;
+    typedef std::list<uint32_t> ColoringContainer;
 
-    const DBG_succ *graph_;
-
-    std::vector<IndexContainer> index_to_ids_;
-
-    std::unordered_map<std::string, uint32_t> label_to_id_;
-    std::vector<std::string> id_to_label_;
-
-    std::pair<IndexContainer::const_iterator, bool> find(Index i, uint32_t id) const;
+    std::vector<ColoringContainer> encoded_colorings_;
+    std::unique_ptr<ColorEncoder<Color>> color_encoder_;
 };
 
 } // namespace annotate

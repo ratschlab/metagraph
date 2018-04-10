@@ -77,44 +77,45 @@ class DBGSuccAnnotWrapper : public hash_annotate::DeBruijnGraphWrapper {
 };
 
 
-class AnnotationCategoryHash;
-
-
-class AnnotationCategoryBloom : public AnnotationCategory<std::set<std::string>> {
+class AnnotationCategoryBloom : public MultiColorAnnotation<uint64_t, std::string> {
   public:
-    typedef std::set<std::string> SetStr;
+    using Index = typename MultiColorAnnotation<uint64_t, Color>::Index;
+    using Color = typename MultiColorAnnotation<uint64_t, Color>::Color;
+    using Coloring = typename MultiColorAnnotation<uint64_t, Color>::Coloring;
 
     template <typename... Args>
     AnnotationCategoryBloom(const DBG_succ &graph, Args&& ...args)
           : graph_(graph), annotator_(graph_, args...) {}
 
-    ~AnnotationCategoryBloom() {}
+    void set_coloring(Index i, const Coloring &coloring);
+    Coloring get_coloring(Index i) const;
 
-    SetStr get(Index i) const;
-
-    void set_label(Index i, const SetStr &label);
-
-    void add_label(const std::string &sequence,
-                   const std::string &label,
+    void add_color(Index i, const Color &color);
+    void add_colors(Index i, const Coloring &coloring);
+    void add_colors(const std::vector<Index> &indices, const Coloring &coloring);
+    void add_colors(const std::string &sequence,
+                    const Coloring &colors,
+                    size_t num_elements = 0);
+    void add_color(const std::string &sequence,
+                   const std::string &color,
                    size_t num_elements = 0);
 
-    void add_labels(const std::string &sequence,
-                    const SetStr &labels,
-                    size_t num_elements);
-
-    void add_labels(const std::string &sequence,
-                    const SetStr &labels) {
-        add_labels(sequence, labels, 0);
-    }
-
-    bool has_label(Index i, const SetStr &label) const;
+    bool has_color(Index i, const Color &color) const;
+    bool has_colors(Index i, const Coloring &coloring) const;
 
     bool load(const std::string &filename);
     void serialize(const std::string &filename) const;
 
-    std::vector<std::string> get_label_names() const {
-        return column_to_label_;
-    }
+    // Get colors that occur at least in |discovery_ratio| colorings.
+    // If |discovery_ratio| = 0, return the union of colorings.
+    Coloring aggregate_colors(const std::vector<Index> &indices,
+                              double discovery_ratio = 1) const;
+
+    // Count all colors collected from extracted colorings
+    // and return top |num_top| with the counts computed.
+    std::vector<std::pair<Color, size_t>>
+    get_most_frequent_colors(const std::vector<Index> &indices,
+                             size_t num_top = static_cast<size_t>(-1)) const;
 
   private:
     DBGSuccAnnotWrapper graph_;

@@ -10,52 +10,55 @@
 
 namespace annotate {
 
-class ColorCompressed : public AnnotationCategory<std::set<std::string>> {
+template <typename Color = std::string, class Encoder = StringEncoder>
+class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
   public:
-    typedef std::set<std::string> SetStr;
+    using Index = typename MultiColorAnnotation<uint64_t, Color>::Index;
+    using Coloring = typename MultiColorAnnotation<uint64_t, Color>::Coloring;
 
-    ColorCompressed(const DBG_succ &graph, size_t cache_size = 1);
+    ColorCompressed(uint64_t num_rows, size_t num_columns_cached = 1);
 
-    ColorCompressed(uint64_t graph_size, size_t cache_size = 1);
+    ~ColorCompressed();
 
-    // Merge constructor
-    //ColorCompressed(const DBG_succ &graph,
-    //                const std::vector<ColorCompressed> &categories,
-    //                const std::vector<std::vector<size_t>> &merge_plan);
+    void set_coloring(Index i, const Coloring &coloring);
+    Coloring get_coloring(Index i) const;
 
-    ~ColorCompressed() { release(); }
+    void add_color(Index i, const Color &color);
+    void add_colors(Index i, const Coloring &coloring);
+    void add_colors(const std::vector<Index> &indices, const Coloring &coloring);
 
-    SetStr get(Index i) const;
-
-    std::vector<uint64_t> get_row(Index i) const;
-
-    bool has_label(Index i, const SetStr &label) const;
-    bool has_label(Index i, const std::string &label) const;
-
-    void set_label(Index i, const SetStr &label);
-    void add_label(Index i, const std::string &label);
-    void add_labels(const std::string &sequence, const SetStr &labels);
+    bool has_color(Index i, const Color &color) const;
+    bool has_colors(Index i, const Coloring &coloring) const;
 
     bool load(const std::string &filename);
     void serialize(const std::string &filename) const;
 
-    std::vector<std::string> get_label_names() const { return id_to_label_; }
+    // Get colors that occur at least in |discovery_ratio| colorings.
+    // If |discovery_ratio| = 0, return the union of colorings.
+    Coloring aggregate_colors(const std::vector<Index> &indices,
+                              double discovery_ratio = 1) const;
+
+    // Count all colors collected from extracted colorings
+    // and return top |num_top| with the counts computed.
+    std::vector<std::pair<Color, size_t>>
+    get_most_frequent_colors(const std::vector<Index> &indices,
+                             size_t num_top = static_cast<size_t>(-1)) const;
 
   private:
-    const DBG_succ *graph_;
     void release();
     void flush();
-    void flush(uint32_t curr_id, sdsl::bit_vector *annotation_curr);
-    sdsl::bit_vector* inflate_column(const uint32_t id) const;
+    void flush(size_t j, sdsl::bit_vector *annotation_curr);
+    sdsl::bit_vector& uncompress(size_t j);
 
-    uint64_t graph_size_;
-    std::unordered_map<std::string, uint32_t> label_to_id_;
-    std::vector<std::string> id_to_label_;
+    uint64_t num_rows_;
+
     std::vector<sdsl::sd_vector<>*> bitmatrix_;
 
-    caches::fixed_sized_cache<uint32_t,
+    caches::fixed_sized_cache<size_t,
                               sdsl::bit_vector*,
-                              caches::LRUCachePolicy<uint32_t>> cached_colors_;
+                              caches::LRUCachePolicy<size_t>> cached_colors_;
+
+    std::unique_ptr<ColorEncoder<Color>> color_encoder_;
 };
 
 } // namespace annotate

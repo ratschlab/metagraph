@@ -16,7 +16,7 @@
 #include "kmer.hpp"
 
 using libmaus2::util::NumberSerialisation;
-typedef annotate::AnnotationCategory<std::set<std::string>> Annotator;
+typedef annotate::MultiColorAnnotation<uint64_t, std::string> Annotator;
 
 const size_t kMaxNumParallelReadFiles = 5;
 
@@ -133,6 +133,36 @@ void read_vcf_file_critical(const std::string &filename,
     }
 }
 
+
+template <typename... Args>
+void annotate_sequence(const std::string &sequence,
+                       const std::vector<std::string> &labels,
+                       const DBG_succ &graph,
+                       annotate::AnnotationCategoryBloom *annotator,
+                       Args... args) {
+    if (sequence.size() < graph.get_k())
+        return;
+
+    annotator->add_colors(sequence, labels, args...);
+}
+
+void annotate_sequence(const std::string &sequence,
+                       const std::vector<std::string> &labels,
+                       const DBG_succ &graph,
+                       annotate::MultiColorAnnotation<uint64_t, std::string> *annotator) {
+    if (sequence.size() < graph.get_k())
+        return;
+
+    std::vector<uint64_t> indices;
+    graph.align(sequence, [&](uint64_t i) {
+        if (i > 0)
+            indices.push_back(i);
+    });
+    annotator->add_colors(indices, labels);
+}
+
+
+
 template <class Annotator, typename... Args>
 void annotate_data(const std::vector<std::string> &files,
                    const std::string &ref_sequence_path,
@@ -164,18 +194,10 @@ void annotate_data(const std::vector<std::string> &files,
 
                     variant_labels->push_back(file);
 
-                    annotator->add_labels(seq,
-                        std::set<std::string>(variant_labels->begin(),
-                                              variant_labels->end()),
-                        args...
-                    );
+                    annotate_sequence(seq, *variant_labels, graph, annotator, args...);
                     if (reverse) {
                         reverse_complement(seq.begin(), seq.end());
-                        annotator->add_labels(seq,
-                            std::set<std::string>(variant_labels->begin(),
-                                                  variant_labels->end()),
-                            args...
-                        );
+                        annotate_sequence(seq, *variant_labels, graph, annotator, args...);
                     }
                     variant_labels->clear();
                 }
@@ -183,22 +205,19 @@ void annotate_data(const std::vector<std::string> &files,
         } else if (utils::get_filetype(file) == "FASTA"
                     || utils::get_filetype(file) == "FASTQ") {
             read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-                std::set<std::string> labels;
-                if (filename_anno)
-                    labels.insert(file);
+                std::vector<std::string> labels;
 
                 if (fasta_anno) {
-                    auto header_labels = utils::split_string(read_stream->name.s,
-                                                             fasta_header_delimiter);
-                    labels.insert(header_labels.begin(), header_labels.end());
+                    labels = utils::split_string(read_stream->name.s,
+                                                 fasta_header_delimiter);
                 }
+                if (filename_anno)
+                    labels.push_back(file);
 
-                if (strlen(read_stream->seq.s) >= graph.get_k()) {
-                    annotator->add_labels(read_stream->seq.s, labels, args...);
-                    if (reverse) {
-                        reverse_complement(read_stream->seq);
-                        annotator->add_labels(read_stream->seq.s, labels, args...);
-                    }
+                annotate_sequence(read_stream->seq.s, labels, graph, annotator, args...);
+                if (reverse) {
+                    reverse_complement(read_stream->seq);
+                    annotate_sequence(read_stream->seq.s, labels, graph, annotator, args...);
                 }
 
                 total_seqs += 1;
@@ -219,72 +238,6 @@ void annotate_data(const std::vector<std::string> &files,
             exit(1);
         }
     }
-}
-
-
-template <class Annotator>
-std::vector<std::string> discover_labels(const DBG_succ &graph,
-                                         const Annotator &annotator,
-                                         const std::vector<std::string> labels,
-                                         const std::string &sequence,
-                                         double discovery_fraction) {
-    const size_t max_kmers_missing =
-        (sequence.size() - graph.get_k() + 1)
-            * (1 - discovery_fraction);
-
-    const size_t min_kmers_discovered =
-        (sequence.size() - graph.get_k() + 1)
-            - max_kmers_missing;
-
-    std::map<std::string, size_t> labels_counter;
-    for (const auto &label : labels) {
-        labels_counter[label] = 0;
-    }
-
-    size_t kmers_checked = 0;
-    std::vector<std::string> labels_discovered;
-
-    graph.align(sequence,
-        [&](uint64_t i) {
-            kmers_checked++;
-            for (auto it = labels_counter.begin(); it != labels_counter.end();) {
-                if (i > 0 && annotator.has_label(i, { it->first }))
-                    it->second++;
-
-                if (it->second >= min_kmers_discovered) {
-                    labels_discovered.push_back(it->first);
-                    labels_counter.erase(it++);
-                } else if (kmers_checked - it->second > max_kmers_missing) {
-                    labels_counter.erase(it++);
-                } else {
-                    ++it;
-                }
-            }
-        },
-        [&]() { return labels_counter.size() == 0; }
-    );
-
-    return labels_discovered;
-}
-
-
-std::map<std::string, size_t> count_labels(const DBG_succ &graph,
-                                           const Annotator &annotator,
-                                           const std::string &sequence) {
-    std::map<std::string, size_t> labels_counter;
-
-    graph.align(sequence,
-        [&](uint64_t i) {
-            if (i) {
-                const std::set<std::string> &coloring = annotator.get(i);
-                for (const std::string &label : coloring) {
-                    labels_counter[label]++;
-                }
-            }
-        }
-    );
-
-    return labels_counter;
 }
 
 
@@ -573,9 +526,14 @@ int main(int argc, const char *argv[]) {
             // initialize empty annotation
             std::unique_ptr<Annotator> annotation;
             if (config->use_row_annotator) {
-                annotation.reset(new annotate::RowCompressed(*graph));
+                annotation.reset(
+                    new annotate::RowCompressed<>(graph->num_edges() + 1)
+                );
             } else {
-                annotation.reset(new annotate::ColorCompressed(*graph, kNumCachedColors));
+                annotation.reset(
+                    new annotate::ColorCompressed<>(graph->num_edges() + 1,
+                                                        kNumCachedColors)
+                );
             }
 
             annotate_data(files,
@@ -648,9 +606,10 @@ int main(int argc, const char *argv[]) {
 
             std::unique_ptr<Annotator> annotation;
             if (config->use_row_annotator) {
-                annotation.reset(new annotate::RowCompressed(*graph));
+                annotation.reset(new annotate::RowCompressed<>(graph->num_edges() + 1));
             } else {
-                annotation.reset(new annotate::ColorCompressed(*graph, kNumCachedColors));
+                annotation.reset(new annotate::ColorCompressed<>(graph->num_edges() + 1,
+                                                                     kNumCachedColors));
             }
 
             if (!annotation->load(config->infbase)) {
@@ -673,35 +632,24 @@ int main(int argc, const char *argv[]) {
                         reverse_complement(read_stream->seq);
 
                     if (config->count_labels) {
-                        auto labels_counter = count_labels(*graph, *annotation,
-                                                           read_stream->seq.s);
-
-                        std::vector<std::pair<std::string, size_t>> counts(
-                            labels_counter.begin(), labels_counter.end()
+                        auto top_labels = annotation->get_most_frequent_colors(
+                            graph->index(read_stream->seq.s),
+                            config->num_top_labels
                         );
-                        // sort in decreasing order
-                        std::sort(counts.begin(), counts.end(),
-                                  [](const auto &first, const auto &second) {
-                                      return first.second > second.second;
-                                  });
 
-                        auto num_labels = std::min(
-                            counts.size(),
-                            static_cast<size_t>(config->num_top_labels)
-                        );
-                        if (num_labels) {
-                            std::cout << "<" << counts[0].first << ">: "
-                                      << counts[0].second;
+                        if (top_labels.size()) {
+                            std::cout << "<" << top_labels[0].first << ">: "
+                                      << top_labels[0].second;
                         }
-                        for (size_t i = 1; i < num_labels; ++i) {
-                            std::cout << ", <" << counts[i].first << ">: "
-                                      << counts[i].second;
+                        for (size_t i = 1; i < top_labels.size(); ++i) {
+                            std::cout << ", <" << top_labels[i].first << ">: "
+                                      << top_labels[i].second;
                         }
                         std::cout << "\n";
                     } else {
-                        auto labels_discovered = discover_labels(
-                            *graph, *annotation, annotation->get_label_names(),
-                            read_stream->seq.s, config->discovery_fraction
+                        auto labels_discovered = annotation->aggregate_colors(
+                            graph->index(read_stream->seq.s),
+                            config->discovery_fraction
                         );
 
                         std::cout << utils::join_strings(labels_discovered,
