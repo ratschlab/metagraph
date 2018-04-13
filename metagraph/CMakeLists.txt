@@ -58,6 +58,21 @@ add_subdirectory(
   external-libraries/graph_annotation/annograph/bloom_annotator
 )
 
+set(FOLLY_LIBRARIES FOLLY_LIBRARIES-NOTFOUND)
+find_library(FOLLY_LIBRARIES
+  NAMES folly
+  HINTS
+  ENV LD_LIBRARY_PATH
+  PATHS
+  ~/.linuxbrew/lib/
+)
+if(FOLLY_LIBRARIES)
+  message("Folly has been found and will be used")
+  string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
+else()
+  message("Folly was not found")
+endif()
+
 file(GLOB src_files "*.cpp" "*.h" "*.hpp")
 
 list(FILTER src_files EXCLUDE REGEX ".*\\._.*")

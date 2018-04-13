@@ -5,8 +5,9 @@
 - cmake 3.6.1
 - C++14
 - HTSlib
+- folly (optional)
 
-Can be installed with `brew` or `linuxbrew`.
+All can be installed with `brew` or `linuxbrew`.
 
 ### Install
 1. `git clone --recursive https://github.com/ratschlab/projects2014-metagenome.git`

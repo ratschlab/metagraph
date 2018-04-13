@@ -4,10 +4,20 @@
 #include <algorithm>
 #include <stdexcept>
 
+#if _USE_FOLLY
+#include <folly/small_vector.h>
+#endif
+
 #include "serialization.hpp"
 
 using libmaus2::util::NumberSerialisation;
 using libmaus2::util::StringSerialisation;
+
+#if _USE_FOLLY
+typedef folly::small_vector<uint32_t, 2> SmallVector;
+#else
+typedef std::vector<uint32_t> SmallVector;
+#endif
 
 
 namespace annotate {
@@ -38,7 +48,7 @@ class VectorVectorMatrix : public RowMajorSparseBinaryMatrix {
     }
 
   private:
-    std::vector<std::vector<uint32_t>> vector_;
+    std::vector<SmallVector> vector_;
 };
 
 class EigenSparserMatrix : public RowMajorSparseBinaryMatrix {
