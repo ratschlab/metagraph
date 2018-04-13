@@ -150,19 +150,54 @@ void annotate_sequence(const std::string &sequence,
                        const std::vector<std::string> &labels,
                        const DBG_succ &graph,
                        annotate::AnnotationCategoryBloom *annotator,
-                       Args... args) {
+                       utils::ThreadPool *thread_pool,
+                       std::mutex *annotation_mutex) {
     if (sequence.size() < graph.get_k())
         return;
 
-    annotator->add_colors(sequence, labels, args...);
+    std::ignore = annotation_mutex;
+    std::ignore = thread_pool;
+
+    annotator->add_colors(sequence, labels, graph.num_edges());
 }
+
+
+void annotate_sequence_thread_safe(
+        std::string sequence,
+        std::vector<std::string> labels,
+        const DBG_succ *graph,
+        annotate::MultiColorAnnotation<uint64_t, std::string> *annotator,
+        std::mutex *annotation_mutex) {
+
+    std::vector<uint64_t> indices;
+
+    graph->align(sequence, [&](uint64_t i) {
+        if (i > 0)
+            indices.push_back(i);
+    });
+
+    assert(annotation_mutex);
+
+    std::lock_guard<std::mutex> lock(*annotation_mutex);
+    annotator->add_colors(indices, labels);
+}
+
 
 void annotate_sequence(const std::string &sequence,
                        const std::vector<std::string> &labels,
                        const DBG_succ &graph,
-                       annotate::MultiColorAnnotation<uint64_t, std::string> *annotator) {
+                       annotate::MultiColorAnnotation<uint64_t, std::string> *annotator,
+                       utils::ThreadPool *thread_pool,
+                       std::mutex *annotation_mutex) {
     if (sequence.size() < graph.get_k())
         return;
+
+    if (thread_pool && annotation_mutex) {
+        thread_pool->enqueue(annotate_sequence_thread_safe,
+                             sequence, labels,
+                             &graph, annotator, annotation_mutex);
+        return;
+    }
 
     std::vector<uint64_t> indices;
     graph.align(sequence, [&](uint64_t i) {
@@ -184,7 +219,8 @@ void annotate_data(const std::vector<std::string> &files,
                    bool fasta_anno,
                    const std::string &fasta_header_delimiter,
                    bool verbose,
-                   Args... args) {
+                   utils::ThreadPool *thread_pool = NULL,
+                   std::mutex *annotation_mutex = NULL) {
     size_t total_seqs = 0;
 
     // iterate over input files
@@ -205,10 +241,12 @@ void annotate_data(const std::vector<std::string> &files,
 
                     variant_labels->push_back(file);
 
-                    annotate_sequence(seq, *variant_labels, graph, annotator, args...);
+                    annotate_sequence(seq, *variant_labels, graph, annotator,
+                                      thread_pool, annotation_mutex);
                     if (reverse) {
                         reverse_complement(seq.begin(), seq.end());
-                        annotate_sequence(seq, *variant_labels, graph, annotator, args...);
+                        annotate_sequence(seq, *variant_labels, graph, annotator,
+                                          thread_pool, annotation_mutex);
                     }
                     variant_labels->clear();
                 }
@@ -225,7 +263,8 @@ void annotate_data(const std::vector<std::string> &files,
                 if (filename_anno)
                     labels.push_back(file);
 
-                annotate_sequence(read_stream->seq.s, labels, graph, annotator, args...);
+                annotate_sequence(read_stream->seq.s, labels, graph, annotator,
+                                  thread_pool, annotation_mutex);
 
                 total_seqs += 1;
                 if (verbose && total_seqs % 10000 == 0) {
@@ -536,6 +575,16 @@ int main(int argc, const char *argv[]) {
                 );
             }
 
+            std::unique_ptr<utils::ThreadPool> thread_pool;
+            std::unique_ptr<std::mutex> annotation_mutex;
+
+            if (config->parallel > 1) {
+                thread_pool.reset(
+                    new utils::ThreadPool(config->parallel - 1)
+                );
+                annotation_mutex.reset(new std::mutex());
+            }
+
             annotate_data(files,
                           config->refpath,
                           *graph,
@@ -544,7 +593,12 @@ int main(int argc, const char *argv[]) {
                           config->filename_anno,
                           config->fasta_anno,
                           config->fasta_header_delimiter,
-                          config->verbose);
+                          config->verbose,
+                          thread_pool.get(),
+                          annotation_mutex.get());
+
+            // join threads if any were initialized
+            thread_pool.release();
 
             annotation->serialize(config->infbase);
 
@@ -591,8 +645,7 @@ int main(int argc, const char *argv[]) {
                           config->filename_anno,
                           config->fasta_anno,
                           config->fasta_header_delimiter,
-                          config->verbose,
-                          graph->num_edges());
+                          config->verbose);
 
             annotation->serialize(config->infbase);
 
