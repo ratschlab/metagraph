@@ -287,6 +287,45 @@ void annotate_data(const std::vector<std::string> &files,
 }
 
 
+void execute_query(std::string seq_name,
+                   std::string sequence,
+                   bool count_labels,
+                   size_t num_top_labels,
+                   double discovery_fraction,
+                   std::string anno_labels_delimiter,
+                   const DBG_succ *graph,
+                   const Annotator *annotation,
+                   std::ostream *ostream) {
+    std::ostringstream oss;
+    oss << seq_name << "\t";
+
+    if (count_labels) {
+        auto top_labels = annotation->get_most_frequent_colors(
+            graph->index(sequence),
+            num_top_labels
+        );
+
+        if (top_labels.size()) {
+            oss << "<" << top_labels[0].first << ">:" << top_labels[0].second;
+        }
+        for (size_t i = 1; i < top_labels.size(); ++i) {
+            oss << "\t<" << top_labels[i].first << ">:" << top_labels[i].second;
+        }
+        oss << "\n";
+    } else {
+        auto labels_discovered = annotation->aggregate_colors(
+            graph->index(sequence),
+            discovery_fraction
+        );
+
+        oss << utils::join_strings(labels_discovered,
+                                   anno_labels_delimiter) << "\n";
+    }
+
+    *ostream << oss.str();
+}
+
+
 int main(int argc, const char *argv[]) {
     // parse command line arguments and options
     std::unique_ptr<Config> config { new Config(argc, argv) };
@@ -671,42 +710,44 @@ int main(int argc, const char *argv[]) {
                 exit(1);
             }
 
+            utils::ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
+
+            std::ofstream outstream;
+            if (config->outfbase.size()) {
+                outstream.open(config->outfbase + ".txt");
+                if (!outstream.good()) {
+                    std::cerr << "ERROR: can't write to "
+                              << config->outfbase + ".txt" << std::endl;
+                    std::cerr << "Will print to stdout instead" << std::endl;
+                }
+            }
+
             // iterate over input files
             for (const auto &file : files) {
                 if (config->verbose) {
                     std::cout << std::endl << "Parsing " << file << std::endl;
                 }
 
+                size_t seq_count = 0;
+
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-                    std::cout << read_stream->name.s << ":\t";
 
-                    if (config->count_labels) {
-                        auto top_labels = annotation->get_most_frequent_colors(
-                            graph->index(read_stream->seq.s),
-                            config->num_top_labels
-                        );
+                    thread_pool.enqueue(execute_query,
+                        std::to_string(seq_count++) + "\t" + std::string(read_stream->name.s),
+                        std::string(read_stream->seq.s),
+                        config->count_labels,
+                        config->num_top_labels,
+                        config->discovery_fraction,
+                        config->anno_labels_delimiter,
+                        graph.get(),
+                        annotation.get(),
+                        outstream.good() ? &outstream : &std::cout
+                    );
 
-                        if (top_labels.size()) {
-                            std::cout << "<" << top_labels[0].first << ">: "
-                                      << top_labels[0].second;
-                        }
-                        for (size_t i = 1; i < top_labels.size(); ++i) {
-                            std::cout << ", <" << top_labels[i].first << ">: "
-                                      << top_labels[i].second;
-                        }
-                        std::cout << "\n";
-                    } else {
-                        auto labels_discovered = annotation->aggregate_colors(
-                            graph->index(read_stream->seq.s),
-                            config->discovery_fraction
-                        );
-
-                        std::cout << utils::join_strings(labels_discovered,
-                                                         config->anno_labels_delimiter)
-                                  << "\n";
-                    }
                 }, config->reverse);
             }
+
+            thread_pool.join();
 
             return 0;
         }
