@@ -45,7 +45,9 @@ DBG_succ* load_critical_graph_from_file(const std::string &filename) {
 
 template <class Callback>
 void read_fasta_file_critical(const std::string &filename,
-                              Callback callback, Timer *timer = NULL,
+                              Callback callback,
+                              bool with_reverse = false,
+                              Timer *timer = NULL,
                               const std::string &filter_filename = "") {
     bit_vector_stat filter;
     if (filter_filename.size()) {
@@ -82,6 +84,15 @@ void read_fasta_file_critical(const std::string &filename,
             callback(read_stream);
 
         seq_count++;
+
+        if (with_reverse) {
+            reverse_complement(read_stream->seq);
+
+            if (!filter_filename.size() || filter[seq_count])
+                callback(read_stream);
+
+            seq_count++;
+        }
     }
     if (filter_filename.size() && filter.size() != seq_count) {
         std::cerr << "ERROR: Filter file " << filter_filename
@@ -215,10 +226,6 @@ void annotate_data(const std::vector<std::string> &files,
                     labels.push_back(file);
 
                 annotate_sequence(read_stream->seq.s, labels, graph, annotator, args...);
-                if (reverse) {
-                    reverse_complement(read_stream->seq);
-                    annotate_sequence(read_stream->seq.s, labels, graph, annotator, args...);
-                }
 
                 total_seqs += 1;
                 if (verbose && total_seqs % 10000 == 0) {
@@ -231,7 +238,7 @@ void annotate_data(const std::vector<std::string> &files,
                     }
                     std::cout << std::endl;
                 }
-            });
+            }, reverse);
         } else {
             std::cerr << "ERROR: Filetype unknown for file "
                       << file << std::endl;
@@ -341,6 +348,7 @@ int main(int argc, const char *argv[]) {
                                 std::string filter_filename = config->noise_kmer_frequency > 0
                                     ? file + ".filter_k" + std::to_string(config->k)
                                            + "_s" + std::to_string(config->noise_kmer_frequency)
+                                           + (reverse ? "_rev" : "")
                                     : "";
 
                                 if (filter_filename.size()
@@ -357,21 +365,13 @@ int main(int argc, const char *argv[]) {
                                     read_fasta_file_critical(file, [=](kseq_t *read_stream) {
                                         // add read to the graph constructor as a callback
                                         callback(read_stream->seq.s);
-                                        if (reverse) {
-                                            reverse_complement(read_stream->seq);
-                                            callback(read_stream->seq.s);
-                                        }
-                                    }, timer_ptr, filter_filename);
+                                    }, reverse, timer_ptr, filter_filename);
                                 });
                             } else {
                                 read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
                                     // add read to the graph constructor as a callback
                                     constructor->add_read(read_stream->seq.s);
-                                    if (config->reverse) {
-                                        reverse_complement(read_stream->seq);
-                                        constructor->add_read(read_stream->seq.s);
-                                    }
-                                }, timer_ptr);
+                                }, config->reverse, timer_ptr);
                             }
                         } else {
                             std::cerr << "ERROR: Filetype unknown for file "
@@ -434,11 +434,7 @@ int main(int argc, const char *argv[]) {
                                 || utils::get_filetype(files[f]) == "FASTQ") {
                         read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
                             graph->add_sequence(read_stream->seq.s);
-                            if (config->reverse) {
-                                reverse_complement(read_stream->seq);
-                                graph->add_sequence(read_stream->seq.s);
-                            }
-                        });
+                        }, config->reverse);
                     } else {
                         std::cerr << "ERROR: Filetype unknown for file "
                                   << files[f] << std::endl;
@@ -492,11 +488,7 @@ int main(int argc, const char *argv[]) {
                                 read_fasta_file_critical(file, [=](kseq_t *read_stream) {
                                     // add read to the graph constructor as a callback
                                     callback(read_stream->seq.s);
-                                    if (reverse) {
-                                        reverse_complement(read_stream->seq);
-                                        callback(read_stream->seq.s);
-                                    }
-                                }, timer_ptr);
+                                }, reverse, timer_ptr);
                             },
                             k, noise_kmer_frequency, verbose, thread_pool_ptr
                         ));
@@ -505,6 +497,7 @@ int main(int argc, const char *argv[]) {
                         std::ofstream outstream(
                             file + ".filter_k" + std::to_string(k)
                                  + "_s" + std::to_string(noise_kmer_frequency)
+                                 + (reverse ? "_rev" : "")
                         );
                         filter.serialise(outstream);
                     },
@@ -656,7 +649,7 @@ int main(int argc, const char *argv[]) {
                                                          config->anno_labels_delimiter)
                                   << "\n";
                     }
-                });
+                }, config->reverse);
             }
 
             return 0;
