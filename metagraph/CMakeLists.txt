@@ -69,6 +69,7 @@ find_library(FOLLY_LIBRARIES
 if(FOLLY_LIBRARIES)
   message("Folly has been found and will be used")
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
+  set(METALIBS -ljemalloc)
 else()
   message("Folly was not found")
 endif()
@@ -81,7 +82,7 @@ list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
 add_library(metagraph STATIC ${src_files})
 add_executable(metagengraph "main.cpp")
 
-set(METALIBS
+set(METALIBS ${METALIBS}
   -lhts -lz -lbz2
   -lmaus2 -lmaus2_simd_align_128 -lmaus2_simd_align_256
   -lsdsl -ldivsufsort -ldivsufsort64
