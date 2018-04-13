@@ -14,6 +14,7 @@
 #include "annotate_bloom_filter.hpp"
 #include "unix_tools.hpp"
 #include "kmer.hpp"
+#include "serialization.hpp"
 
 using libmaus2::util::NumberSerialisation;
 typedef annotate::MultiColorAnnotation<uint64_t, std::string> Annotator;
@@ -49,10 +50,12 @@ void read_fasta_file_critical(const std::string &filename,
                               bool with_reverse = false,
                               Timer *timer = NULL,
                               const std::string &filter_filename = "") {
-    bit_vector_stat filter;
+    std::vector<bool> filter;
     if (filter_filename.size()) {
         std::ifstream instream(filter_filename);
-        if (!instream.good() || !filter.deserialise(instream)) {
+        try {
+            filter = load_number_vector<bool>(instream);
+        } catch (...) {
             std::cerr << "ERROR: Filter file " << filter_filename
                       << " is corrupted" << std::endl;
             exit(1);
@@ -80,19 +83,16 @@ void read_fasta_file_critical(const std::string &filename,
                       << " has fewer sequences" << std::endl;
             exit(1);
         }
-        if (!filter_filename.size() || filter[seq_count])
+
+        if (!filter_filename.size() || filter[seq_count]) {
             callback(read_stream);
+            if (with_reverse) {
+                reverse_complement(read_stream->seq);
+                callback(read_stream);
+            }
+        }
 
         seq_count++;
-
-        if (with_reverse) {
-            reverse_complement(read_stream->seq);
-
-            if (!filter_filename.size() || filter[seq_count])
-                callback(read_stream);
-
-            seq_count++;
-        }
     }
     if (filter_filename.size() && filter.size() != seq_count) {
         std::cerr << "ERROR: Filter file " << filter_filename
@@ -348,7 +348,6 @@ int main(int argc, const char *argv[]) {
                                 std::string filter_filename = config->noise_kmer_frequency > 0
                                     ? file + ".filter_k" + std::to_string(config->k)
                                            + "_s" + std::to_string(config->noise_kmer_frequency)
-                                           + (reverse ? "_rev" : "")
                                     : "";
 
                                 if (filter_filename.size()
@@ -483,22 +482,30 @@ int main(int argc, const char *argv[]) {
                                               bool verbose,
                                               bool reverse) {
                         // compute read filter, bit vector indicating filtered reads
-                        bit_vector_stat filter(filter_reads([=](auto callback) {
+                        std::vector<bool> filter = filter_reads([=](auto callback) {
                                 read_fasta_file_critical(file, [=](kseq_t *read_stream) {
                                     // add read to the graph constructor as a callback
                                     callback(read_stream->seq.s);
                                 }, reverse, timer_ptr);
                             },
                             k, noise_kmer_frequency, verbose, thread_pool_ptr
-                        ));
+                        );
+                        if (reverse) {
+                            assert(filter.size() % 2 == 0);
+
+                            std::vector<bool> forward_filter(filter.size() / 2);
+                            for (size_t i = 0; i < forward_filter.size(); ++i) {
+                                forward_filter[i] = filter[i * 2] | filter[i * 2 + 1];
+                            }
+                            filter.swap(forward_filter);
+                        }
 
                         // dump filter
                         std::ofstream outstream(
                             file + ".filter_k" + std::to_string(k)
                                  + "_s" + std::to_string(noise_kmer_frequency)
-                                 + (reverse ? "_rev" : "")
                         );
-                        filter.serialise(outstream);
+                        serialize_number_vector(outstream, filter, 1);
                     },
                     config->k, config->noise_kmer_frequency,
                     config->verbose, config->reverse
