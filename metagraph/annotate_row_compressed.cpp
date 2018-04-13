@@ -33,7 +33,7 @@ class VectorVectorMatrix : public RowMajorSparseBinaryMatrix {
     void clear(size_t i) { vector_[i].clear(); }
 
     void reinitialize(size_t num_rows) {
-        vector_ = std::vector<std::vector<uint32_t>>();
+        vector_ = decltype(vector_)();
         vector_.resize(num_rows);
     }
 
@@ -156,21 +156,31 @@ bool RowCompressed<Color, Encoder>::has_colors(Index i, const Coloring &coloring
 template <typename Color, class Encoder>
 void RowCompressed<Color, Encoder>::serialize(const std::string &filename) const {
     std::ofstream outstream(filename + ".row.annodbg");
+    if (!outstream.good()) {
+        throw std::ofstream::failure("Bad stream");
+    }
 
     NumberSerialisation::serialiseNumber(outstream, matrix_->size());
 
     color_encoder_->serialize(outstream);
 
-    std::vector<uint32_t> full_vector;
+    uint64_t dump_vector_size = 0;
     for (size_t i = 0; i < matrix_->size(); ++i) {
-        for (size_t k = 0; k < matrix_->size(i); ++k) {
-            full_vector.push_back(matrix_->select(i, k) + 1);
-        }
-        full_vector.push_back(0);
+        dump_vector_size += matrix_->size(i) + 1;
     }
-    serialize_number_vector(outstream,
-                            full_vector,
-                            std::log2(color_encoder_->size() + 1) + 1);
+    sdsl::int_vector<> full_vector(dump_vector_size, 0,
+                                   std::log2(color_encoder_->size() + 1) + 1);
+
+    for (uint64_t i = 0, p = 0; i < matrix_->size(); ++i) {
+        for (size_t k = 0; k < matrix_->size(i); ++k) {
+            assert(matrix_->select(i, k) + 1 < color_encoder_->size() + 1);
+
+            full_vector[p++] = matrix_->select(i, k) + 1;
+        }
+        full_vector[p++] = 0;
+    }
+
+    full_vector.serialize(outstream);
 }
 
 template <typename Color, class Encoder>
@@ -186,7 +196,9 @@ bool RowCompressed<Color, Encoder>::load(const std::string &filename) {
         if (!color_encoder_->load(instream))
             return false;
 
-        auto full_vector = load_number_vector<uint32_t>(instream);
+        sdsl::int_vector<> full_vector;
+        full_vector.load(instream);
+
         for (size_t k = 0, i = 0; k < full_vector.size(); ++k) {
             if (full_vector[k]) {
                 matrix_->set_bit(i, full_vector[k] - 1);
