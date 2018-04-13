@@ -483,7 +483,6 @@ int main(int argc, const char *argv[]) {
                                               bool verbose,
                                               bool reverse) {
                         // compute read filter, bit vector indicating filtered reads
-                        // TODO: fix for the case of reverse complement reads
                         bit_vector_stat filter(filter_reads([=](auto callback) {
                                 read_fasta_file_critical(file, [=](kseq_t *read_stream) {
                                     // add read to the graph constructor as a callback
@@ -620,9 +619,6 @@ int main(int argc, const char *argv[]) {
 
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                     std::cout << read_stream->name.s << ":\t";
-
-                    if (config->reverse)
-                        reverse_complement(read_stream->seq);
 
                     if (config->count_labels) {
                         auto top_labels = annotation->get_most_frequent_colors(
