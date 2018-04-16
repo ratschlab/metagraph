@@ -14,6 +14,8 @@ Config::Config(int argc, const char *argv[]) {
     // parse identity from first command line argument
     if (!strcmp(argv[1], "merge")) {
         identity = MERGE;
+    } else if (!strcmp(argv[1], "concatenate")) {
+        identity = CONCATENATE;
     } else if (!strcmp(argv[1], "compare")) {
         identity = COMPARE;
     } else if (!strcmp(argv[1], "align")) {
@@ -135,8 +137,8 @@ Config::Config(int argc, const char *argv[]) {
             }
         } else if (!strcmp(argv[i], "--to-adj-list")) {
             to_adj_list = true;
-        } else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--collect")) {
-            collect = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "-l") || !strcmp(argv[i], "--len-suffix")) {
+            suffix_len = atoi(argv[++i]);
         //} else if (!strcmp(argv[i], "-t") || !strcmp(argv[i], "--threads")) {
         //    num_threads = atoi(argv[++i]);
         //} else if (!strcmp(argv[i], "--debug")) {
@@ -153,7 +155,7 @@ Config::Config(int argc, const char *argv[]) {
         }
     }
 
-    if (!fname.size()) {
+    if (!fname.size() && (identity != CONCATENATE || infbase.empty())) {
         std::string line;
         while (std::getline(std::cin, line)) {
             if (line.size())
@@ -168,8 +170,14 @@ Config::Config(int argc, const char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if (!fname.size())
+    if (identity != CONCATENATE && !fname.size())
         print_usage_and_exit = true;
+
+    if (identity == CONCATENATE && !(fname.empty() ^ infbase.empty())) {
+        std::cerr << "Error: Either set all chunk filenames"
+                  << " or use the -i and -l options" << std::endl;
+        print_usage_and_exit = true;
+    }
 
     if (identity == FILTER && noise_kmer_frequency == 0)
         print_usage_and_exit = true;
@@ -233,6 +241,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\tmerge\t\tintegrate a given set of graph structures\n");
             fprintf(stderr, "\t\t\tand output a new graph structure\n\n");
+
+            fprintf(stderr, "\tconcatenate\tcombine the results of the external merge or\n");
+            fprintf(stderr, "\t\t\tconstruction and output the resulting graph structure\n\n");
 
             fprintf(stderr, "\tcompare\t\tcheck whether two given graphs are identical\n\n");
 
@@ -299,13 +310,23 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for merge:\n");
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
-            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t   --print \t\t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [1]\n");
             fprintf(stderr, "\t   --traversal \t\t\tmerge by traversing [off]\n");
-            fprintf(stderr, "\t   --print \t\t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t   --part-idx [INT] \t\tidx to use when doing external merge []\n");
             fprintf(stderr, "\t   --parts-total [INT] \t\ttotal number of parts in external merge[]\n");
-            fprintf(stderr, "\t-c --collect [INT] \t\tinitiate collection of external merge, provide total number of splits [1]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+        } break;
+        case CONCATENATE: {
+            fprintf(stderr, "Usage: %s concatenate -k <kmer-length> [options] [[[CHUNK1] CHUNK2] ...]\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for merge:\n");
+            fprintf(stderr, "\t-i --infile-base [STR] \t\tload graph chunks from files '<infile-base>.<suffix>.dbgchunk' []\n");
+            fprintf(stderr, "\t-l --len-suffix [INT] \t\titerate all possible suffices of the length given [0]\n");
+            // fprintf(stderr, "\t-k --kmer-length [INT] \t\tlength of the k-mer to use [3]\n");
+            fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
+            fprintf(stderr, "\t   --print \t\t\tprint graph table to the screen [off]\n");
+            // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case STATS: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());

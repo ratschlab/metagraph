@@ -31,7 +31,7 @@ class Config {
     unsigned int num_bins_per_thread = 1;
     unsigned int parts_total = 1;
     unsigned int part_idx = 0;
-    unsigned int collect = 1;
+    unsigned int suffix_len = 0;
     unsigned int frequency = 1;
     unsigned int nsplits = 1;
     unsigned int alignment_length = 0;
@@ -61,6 +61,7 @@ class Config {
         FILTER,
         EXPERIMENT,
         MERGE,
+        CONCATENATE,
         COMPARE,
         ALIGN,
         STATS,
