@@ -218,6 +218,7 @@ void annotate_data(const std::vector<std::string> &files,
                    bool filename_anno,
                    bool fasta_anno,
                    const std::string &fasta_header_delimiter,
+                   const std::vector<std::string> &anno_labels,
                    bool verbose,
                    utils::ThreadPool *thread_pool = NULL,
                    std::mutex *annotation_mutex = NULL) {
@@ -239,7 +240,12 @@ void annotate_data(const std::vector<std::string> &files,
                 [&](std::string &seq, std::vector<std::string> *variant_labels) {
                     assert(variant_labels);
 
-                    variant_labels->push_back(file);
+                    if (filename_anno)
+                        variant_labels->push_back(file);
+
+                    for (const auto &label : anno_labels) {
+                        variant_labels->push_back(label);
+                    }
 
                     annotate_sequence(seq, *variant_labels, graph, annotator,
                                       thread_pool, annotation_mutex);
@@ -262,6 +268,10 @@ void annotate_data(const std::vector<std::string> &files,
                 }
                 if (filename_anno)
                     labels.push_back(file);
+
+                for (const auto &label : anno_labels) {
+                    labels.push_back(label);
+                }
 
                 annotate_sequence(read_stream->seq.s, labels, graph, annotator,
                                   thread_pool, annotation_mutex);
@@ -651,6 +661,7 @@ int main(int argc, const char *argv[]) {
                           config->filename_anno,
                           config->fasta_anno,
                           config->fasta_header_delimiter,
+                          config->anno_labels,
                           config->verbose,
                           thread_pool.get(),
                           annotation_mutex.get());
@@ -703,6 +714,7 @@ int main(int argc, const char *argv[]) {
                           config->filename_anno,
                           config->fasta_anno,
                           config->fasta_header_delimiter,
+                          config->anno_labels,
                           config->verbose);
 
             annotation->serialize(config->infbase);

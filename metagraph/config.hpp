@@ -14,7 +14,7 @@ class Config {
     bool print_graph_succ = false;
     bool reverse = false;
     bool fast = false;
-    bool filename_anno = true;
+    bool filename_anno = false;
     bool fasta_anno = false;
     bool to_adj_list = false;
     bool count_kmers_query = false;
@@ -46,6 +46,7 @@ class Config {
     double discovery_fraction = 1.0;
 
     std::vector<std::string> fname;
+    std::vector<std::string> anno_labels;
     std::string outfbase;
     std::string infbase;
     std::string infbase_annotator;

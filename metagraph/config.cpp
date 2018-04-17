@@ -63,10 +63,12 @@ Config::Config(int argc, const char *argv[]) {
             reverse = true;
         } else if (!strcmp(argv[i], "--fast")) {
             fast = true;
-        } else if (!strcmp(argv[i], "--skip-filename-anno")) {
-            filename_anno = false;
-        } else if (!strcmp(argv[i], "--fasta-anno")) {
+        } else if (!strcmp(argv[i], "--anno-filename")) {
+            filename_anno = true;
+        } else if (!strcmp(argv[i], "--anno-header")) {
             fasta_anno = true;
+        } else if (!strcmp(argv[i], "--anno-label")) {
+            anno_labels.emplace_back(argv[++i]);
         } else if (!strcmp(argv[i], "--row-annotator")) {
             use_row_annotator = true;
         } else if (!strcmp(argv[i], "--sparse")) {
@@ -112,7 +114,7 @@ Config::Config(int argc, const char *argv[]) {
             outfbase = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "--reference")) {
             refpath = std::string(argv[++i]);
-        } else if (!strcmp(argv[i], "--fasta-anno-delimiter")) {
+        } else if (!strcmp(argv[i], "--header-delimiter")) {
             fasta_header_delimiter = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "--labels-delimiter")) {
             anno_labels_delimiter = std::string(argv[++i]);
@@ -192,6 +194,12 @@ Config::Config(int argc, const char *argv[]) {
 
     if (identity == ANNOTATE && infbase.empty())
         print_usage_and_exit = true;
+
+    if ((identity == ANNOTATE || identity == ANNOTATE_BLOOM)
+            && !filename_anno && !fasta_anno && !anno_labels.size()) {
+        std::cerr << "Error: No annotation to add" << std::endl;
+        print_usage_and_exit = true;
+    }
 
     if (identity == ANNOTATE && outfbase.empty())
         outfbase = infbase;
@@ -352,9 +360,10 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator to update []\n");
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file [<graph_basename>]\n");
             fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
-            fprintf(stderr, "\t   --skip-filename-anno \tnot include fasta filenames as annotation labels [off]\n");
-            fprintf(stderr, "\t   --fasta-anno \t\textract annotations from headers of sequences in files [off]\n");
-            fprintf(stderr, "\t   --fasta-anno-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
+            fprintf(stderr, "\t   --anno-filename \t\tinclude filenames as annotation labels [off]\n");
+            fprintf(stderr, "\t   --anno-header \t\textract annotation labels from headers of sequences in files [off]\n");
+            fprintf(stderr, "\t   --header-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
+            fprintf(stderr, "\t   --anno-label [STR]\t\tadd label to annotation for all sequences from the files passed []\n");
             fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column based colors compressor [off]\n");
             fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate colors [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
@@ -366,9 +375,10 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for bloom:\n");
             fprintf(stderr, "\t   --reference [STR] \t\t\tbasename of reference sequence []\n");
             fprintf(stderr, "\t-r --reverse \t\t\t\talso annotate reverse complement reads [off]\n");
-            fprintf(stderr, "\t   --skip-filename-anno \t\tnot include fasta filenames as annotation labels [off]\n");
-            fprintf(stderr, "\t   --fasta-anno \t\t\textract annotations from headers of sequences in files [off]\n");
-            fprintf(stderr, "\t   --fasta-anno-delimiter [STR]\t\tdelimiter for splitting annotation header into multiple labels [off]\n");
+            fprintf(stderr, "\t   --anno-filename \t\t\tinclude filenames as annotation labels [off]\n");
+            fprintf(stderr, "\t   --anno-header \t\t\textract annotation labels from headers of sequences in files [off]\n");
+            fprintf(stderr, "\t   --header-delimiter [STR]\t\tdelimiter for splitting annotation header into multiple labels [off]\n");
+            fprintf(stderr, "\t   --anno-label [STR]\t\t\tadd label to annotation for all sequences from the files passed []\n");
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
             // fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [1]\n");
             // fprintf(stderr, "\t-f --frequency [INT] \t\twhen a, annotate only every a-th kmer [1]\n");
