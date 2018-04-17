@@ -69,6 +69,8 @@ Config::Config(int argc, const char *argv[]) {
             fasta_anno = true;
         } else if (!strcmp(argv[i], "--anno-label")) {
             anno_labels.emplace_back(argv[++i]);
+        } else if (!strcmp(argv[i], "--suppress-unlabeled")) {
+            suppress_unlabeled = true;
         } else if (!strcmp(argv[i], "--row-annotator")) {
             use_row_annotator = true;
         } else if (!strcmp(argv[i], "--sparse")) {
@@ -98,6 +100,8 @@ Config::Config(int argc, const char *argv[]) {
             discovery_fraction = std::stof(argv[++i]);
         } else if (!strcmp(argv[i], "--query-presence")) {
             query_presence = true;
+        } else if (!strcmp(argv[i], "--filter-present")) {
+            filter_present = true;
         } else if (!strcmp(argv[i], "--count-labels")) {
             count_labels = true;
         } else if (!strcmp(argv[i], "--bloom-hash-functions")) {
@@ -312,6 +316,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for align:\n");
             fprintf(stderr, "\t   --query-presence\t\tTest sequences for presence [off]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT]\tFraction of k-mers required to count sequence [1.0]\n");
+            fprintf(stderr, "\t   --filter-present\t\tReport only present input sequences [off]\n");
             fprintf(stderr, "\t   --count-kmers \t\tQuery the number of k-mers discovered [off]\n");
             fprintf(stderr, "\t   --align-length [INT]\t\tLength of subsequences to align [k]\n");
             fprintf(stderr, "\t-d --distance [INT] \t\tMax allowed alignment distance [0]\n");

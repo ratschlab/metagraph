@@ -19,11 +19,13 @@ class Config {
     bool to_adj_list = false;
     bool count_kmers_query = false;
     bool query_presence = false;
+    bool filter_present = false;
     bool traversal_merge = false;
     bool dump_raw_anno = false;
     bool use_row_annotator = false;
     bool sparse = false;
     bool count_labels = false;
+    bool suppress_unlabeled = false;
 
     unsigned int k = 3;
     unsigned int distance = 0;
@@ -56,6 +58,7 @@ class Config {
     std::string suffix;
     std::string fasta_header_delimiter;
     std::string anno_labels_delimiter = ":";
+    std::string annotation_label = "";
 
     enum IdentityType {
         NO_IDENTITY = -1,

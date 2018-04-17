@@ -266,8 +266,11 @@ void annotate_data(const std::vector<std::string> &files,
                     labels = utils::split_string(read_stream->name.s,
                                                  fasta_header_delimiter);
                 }
-                if (filename_anno)
+                if (annotation_label.length() > 0) {
+                    labels.push_back(annotation_label);
+                } else if (filename_anno) {
                     labels.push_back(file);
+                }
 
                 for (const auto &label : anno_labels) {
                     labels.push_back(label);
@@ -317,13 +320,15 @@ void alter_all_colex_prefices(std::string str, size_t length,
 void execute_query(std::string seq_name,
                    std::string sequence,
                    bool count_labels,
+                   bool suppress_unlabeled,
                    size_t num_top_labels,
                    double discovery_fraction,
                    std::string anno_labels_delimiter,
                    const DBG_succ *graph,
                    const Annotator *annotation) {
     std::ostringstream oss;
-    oss << seq_name << "\t";
+    if (!suppress_unlabeled)
+        oss << seq_name << "\t";
 
     if (count_labels) {
         auto top_labels = annotation->get_most_frequent_colors(
@@ -344,8 +349,12 @@ void execute_query(std::string seq_name,
             discovery_fraction
         );
 
-        oss << utils::join_strings(labels_discovered,
-                                   anno_labels_delimiter) << "\n";
+        if (!suppress_unlabeled || (labels_discovered.size() > 0)) {
+            if (suppress_unlabeled)
+                oss << seq_name << "\t";
+            oss << utils::join_strings(labels_discovered,
+                                       anno_labels_delimiter) << "\n";
+        }
     }
 
     std::cout << oss.str();
@@ -757,6 +766,7 @@ int main(int argc, const char *argv[]) {
                         std::to_string(seq_count++) + "\t" + std::string(read_stream->name.s),
                         std::string(read_stream->seq.s),
                         config->count_labels,
+                        config->suppress_unlabeled,
                         config->num_top_labels,
                         config->discovery_fraction,
                         config->anno_labels_delimiter,
@@ -1108,8 +1118,14 @@ int main(int argc, const char *argv[]) {
 
                     if (config->query_presence
                             && config->alignment_length == graph->get_k()) {
-                        std::cout << graph->find(read_stream->seq.s,
-                                                 config->discovery_fraction) << "\n";
+                        if (config->filter_present) {
+                            if (graph->find(read_stream->seq.s,
+                                            config->discovery_fraction))
+                                std::cout << ">" << read_stream->name.s << "\n" << read_stream->seq.s << "\n";
+                        } else {
+                            std::cout << graph->find(read_stream->seq.s,
+                                                     config->discovery_fraction) << "\n";
+                        }
                         return;
                     }
 
@@ -1125,8 +1141,12 @@ int main(int argc, const char *argv[]) {
                         const size_t num_kmers = read_stream->seq.l - graph->get_k() + 1;
                         const size_t min_kmers_discovered =
                             num_kmers - num_kmers * (1 - config->discovery_fraction);
-
-                        std::cout << (num_discovered >= min_kmers_discovered) << "\n";
+                        if (config->filter_present) {
+                            if (num_discovered >= min_kmers_discovered)
+                                std::cout << ">" << read_stream->name.s << "\n" << read_stream->seq.s << "\n";
+                        } else {
+                            std::cout << (num_discovered >= min_kmers_discovered) << "\n";
+                        }
                         return;
                     }
 
