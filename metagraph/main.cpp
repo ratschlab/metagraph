@@ -630,6 +630,9 @@ int main(int argc, const char *argv[]) {
                 );
             }
 
+            if (config->infbase_annotator.size())
+                annotation->load(config->infbase_annotator);
+
             std::unique_ptr<utils::ThreadPool> thread_pool;
             std::unique_ptr<std::mutex> annotation_mutex;
 
@@ -655,7 +658,7 @@ int main(int argc, const char *argv[]) {
             // join threads if any were initialized
             thread_pool.release();
 
-            annotation->serialize(config->infbase);
+            annotation->serialize(config->outfbase);
 
             return 0;
         }
@@ -719,8 +722,8 @@ int main(int argc, const char *argv[]) {
                 annotation.reset(new annotate::ColorCompressed<>(0, kNumCachedColors));
             }
 
-            if (!annotation->load(config->infbase)) {
-                std::cerr << "ERROR: can't load annotations for "
+            if (!annotation->load(config->infbase_annotator)) {
+                std::cerr << "ERROR: can't load annotations for graph "
                           << config->infbase + ".dbg"
                           << ", file corrupted" << std::endl;
                 exit(1);

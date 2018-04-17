@@ -102,7 +102,7 @@ Config::Config(int argc, const char *argv[]) {
             bloom_num_hash_functions = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--bloom-test-num-kmers")) {
             bloom_test_num_kmers = atoi(argv[++i]);
-        } else if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--align-length")) {
+        } else if (!strcmp(argv[i], "--align-length")) {
             alignment_length = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
             frequency = atoi(argv[++i]);
@@ -128,6 +128,8 @@ Config::Config(int argc, const char *argv[]) {
         //    dbpath = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "--sql-base")) {
             sqlfbase = std::string(argv[++i]);
+        } else if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--annotator")) {
+            infbase_annotator = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-i") || !strcmp(argv[i], "--infile-base")) {
             infbase = std::string(argv[++i]);
             if (infbase.substr(std::max(
@@ -190,6 +192,12 @@ Config::Config(int argc, const char *argv[]) {
 
     if (identity == ANNOTATE && infbase.empty())
         print_usage_and_exit = true;
+
+    if (identity == ANNOTATE && outfbase.empty())
+        outfbase = infbase;
+
+    if (identity == CLASSIFY && infbase_annotator.empty())
+        infbase_annotator = infbase;
 
     if (identity == ANNOTATE_BLOOM && infbase.empty())
         print_usage_and_exit = true;
@@ -297,7 +305,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --query-presence\t\tTest sequences for presence [off]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT]\tFraction of k-mers required to count sequence [1.0]\n");
             fprintf(stderr, "\t   --count-kmers \t\tQuery the number of k-mers discovered [off]\n");
-            fprintf(stderr, "\t-a --align-length [INT]\t\tLength of subsequences to align [k]\n");
+            fprintf(stderr, "\t   --align-length [INT]\t\tLength of subsequences to align [k]\n");
             fprintf(stderr, "\t-d --distance [INT] \t\tMax allowed alignment distance [0]\n");
         } break;
         case COMPARE: {
@@ -341,6 +349,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for annotate:\n");
             fprintf(stderr, "\t   --reference [STR] \t\tbasename of reference sequence []\n");
+            fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator to update []\n");
+            fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file [<graph_basename>]\n");
             fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
             fprintf(stderr, "\t   --skip-filename-anno \tnot include fasta filenames as annotation labels [off]\n");
             fprintf(stderr, "\t   --fasta-anno \t\textract annotations from headers of sequences in files [off]\n");
@@ -376,6 +386,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-r --reverse \t\t\tclassify reverse complement sequences [off]\n");
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column based colors compressor [off]\n");
+            fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator [<graph_basename>]\n");
             fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate colors [off]\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
             fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
