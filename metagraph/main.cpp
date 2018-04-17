@@ -266,9 +266,7 @@ void annotate_data(const std::vector<std::string> &files,
                     labels = utils::split_string(read_stream->name.s,
                                                  fasta_header_delimiter);
                 }
-                if (annotation_label.length() > 0) {
-                    labels.push_back(annotation_label);
-                } else if (filename_anno) {
+                if (filename_anno) {
                     labels.push_back(file);
                 }
 
