@@ -14,7 +14,7 @@ using libmaus2::util::NumberSerialisation;
 using libmaus2::util::StringSerialisation;
 
 #if _USE_FOLLY
-typedef folly::small_vector<uint32_t, 2> SmallVector;
+typedef folly::small_vector<uint32_t, 2, uint32_t> SmallVector;
 #else
 typedef std::vector<uint32_t> SmallVector;
 #endif
