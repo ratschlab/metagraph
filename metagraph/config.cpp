@@ -374,7 +374,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for classify:\n");
             fprintf(stderr, "\t-r --reverse \t\t\tclassify reverse complement sequences [off]\n");
-            fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
+            // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column based colors compressor [off]\n");
             fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate colors [off]\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");

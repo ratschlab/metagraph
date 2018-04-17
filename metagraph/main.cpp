@@ -311,8 +311,7 @@ void execute_query(std::string seq_name,
                    double discovery_fraction,
                    std::string anno_labels_delimiter,
                    const DBG_succ *graph,
-                   const Annotator *annotation,
-                   std::ostream *ostream) {
+                   const Annotator *annotation) {
     std::ostringstream oss;
     oss << seq_name << "\t";
 
@@ -339,7 +338,7 @@ void execute_query(std::string seq_name,
                                    anno_labels_delimiter) << "\n";
     }
 
-    *ostream << oss.str();
+    std::cout << oss.str();
 }
 
 
@@ -729,16 +728,6 @@ int main(int argc, const char *argv[]) {
 
             utils::ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
 
-            std::ofstream outstream;
-            if (config->outfbase.size()) {
-                outstream.open(config->outfbase + ".txt");
-                if (!outstream.good()) {
-                    std::cerr << "ERROR: can't write to "
-                              << config->outfbase + ".txt" << std::endl;
-                    std::cerr << "Will print to stdout instead" << std::endl;
-                }
-            }
-
             // iterate over input files
             for (const auto &file : files) {
                 if (config->verbose) {
@@ -757,14 +746,14 @@ int main(int argc, const char *argv[]) {
                         config->discovery_fraction,
                         config->anno_labels_delimiter,
                         graph.get(),
-                        annotation.get(),
-                        outstream.good() ? &outstream : &std::cout
+                        annotation.get()
                     );
 
                 }, config->reverse);
-            }
 
-            thread_pool.join();
+                // wait while all threads finish processing the current file
+                thread_pool.join();
+            }
 
             return 0;
         }
