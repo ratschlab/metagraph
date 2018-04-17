@@ -24,7 +24,8 @@ ColorCompressed<Color, Encoder>::ColorCompressed(uint64_t num_rows,
                 delete col_uncompressed;
             }
         ),
-        color_encoder_(new Encoder()) {}
+        color_encoder_(new Encoder()),
+        color_encoder_load_(new Encoder()) {}
 
 template <typename Color, class Encoder>
 ColorCompressed<Color, Encoder>::~ColorCompressed() {
@@ -134,8 +135,9 @@ void ColorCompressed<Color, Encoder>::serialize(const std::string &filename) con
     }
 }
 
+
 template <typename Color, class Encoder>
-bool ColorCompressed<Color, Encoder>::load(const std::string &filename) {
+bool ColorCompressed<Color, Encoder>::load(const std::vector<std::string> &filenames) {
     // release the columns stored
     cached_colors_.Clear();
 
@@ -144,27 +146,57 @@ bool ColorCompressed<Color, Encoder>::load(const std::string &filename) {
             delete column;
     }
 
-    std::ifstream instream(filename + ".color.annodbg");
-    if (!instream.good())
-        return false;
-
-    // load annotation from file
     try {
-        num_rows_ = NumberSerialisation::deserialiseNumber(instream);
+        bool is_first = true;
+        for (auto filename : filenames) {
+            std::ifstream instream(filename + ".color.annodbg");
+            if (!instream.good())
+                return false;
 
-        if (!color_encoder_->load(instream))
-            return false;
+            if (is_first) {
+                // load annotation from file
+                num_rows_ = NumberSerialisation::deserialiseNumber(instream);
 
-        bitmatrix_.assign(color_encoder_->size(), NULL);
-        for (auto &column : bitmatrix_) {
-            column = new sdsl::sd_vector<>();
-            column->load(instream);
+                if (!color_encoder_->load(instream))
+                    return false;
+
+                bitmatrix_.assign(color_encoder_->size(), NULL);
+                for (auto &column : bitmatrix_) {
+                    column = new sdsl::sd_vector<>();
+                    column->load(instream);
+                }
+                is_first = false;
+            } else {
+                if (num_rows_ != NumberSerialisation::deserialiseNumber(instream))
+                    return false;
+            
+                if (!color_encoder_load_->load(instream))
+                    return false;
+
+                for (size_t c = 0; c < color_encoder_load_->size(); ++c) {
+                    color_encoder_->encode(color_encoder_load_->decode(c), true); 
+                }
+
+                bitmatrix_.resize(color_encoder_->size(), NULL);
+                size_t col = 0;
+                for (size_t c = 0; c < color_encoder_load_->size(); ++c) {
+                    col = color_encoder_->encode(color_encoder_load_->decode(c));
+
+                    // TODO: handle proper merging of columns - for now just overwrite ...
+                    if (bitmatrix_.at(col))
+                        delete bitmatrix_.at(col);
+                    bitmatrix_.at(col) = new sdsl::sd_vector<>();
+                    bitmatrix_.at(col)->load(instream);
+                }
+            }
+            instream.close();
         }
         return true;
     } catch (...) {
         return false;
     }
 }
+
 
 // Get colors that occur at least in |discovery_ratio| colorings.
 // If |discovery_ratio| = 0, return the union of colorings.

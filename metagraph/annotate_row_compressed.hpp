@@ -45,7 +45,7 @@ class RowCompressed : public MultiColorAnnotation<uint64_t, Color> {
     bool has_color(Index i, const Color &color) const;
     bool has_colors(Index i, const Coloring &coloring) const;
 
-    bool load(const std::string &filename);
+    bool load(const std::vector<std::string> &filenames);
     void serialize(const std::string &filename) const;
 
     // Get colors that occur at least in |discovery_ratio| colorings.

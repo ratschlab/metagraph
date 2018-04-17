@@ -35,7 +35,7 @@ class AnnotationCategory {
     virtual void add(Index i, const LabelType &label) = 0;
     virtual void set(Index i, const LabelType &label) = 0;
 
-    virtual bool load(const std::string &filename) = 0;
+    virtual bool load(const std::vector<std::string> &filenames) = 0;
     virtual void serialize(const std::string &filename) const = 0;
 };
 
@@ -85,7 +85,7 @@ class MultiColorAnnotation
     virtual bool has_color(Index i, const Color &color) const = 0;
     virtual bool has_colors(Index i, const Coloring &coloring) const = 0;
 
-    virtual bool load(const std::string &filename) = 0;
+    virtual bool load(const std::vector<std::string> &filenames) = 0;
     virtual void serialize(const std::string &filename) const = 0;
 
     /*********************** Special queries **********************/

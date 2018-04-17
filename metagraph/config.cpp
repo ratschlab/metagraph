@@ -135,7 +135,7 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "--sql-base")) {
             sqlfbase = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--annotator")) {
-            infbase_annotator = std::string(argv[++i]);
+            infbase_annotator.emplace_back(argv[++i]);
         } else if (!strcmp(argv[i], "-i") || !strcmp(argv[i], "--infile-base")) {
             infbase = std::string(argv[++i]);
             if (infbase.substr(std::max(
@@ -209,7 +209,7 @@ Config::Config(int argc, const char *argv[]) {
         outfbase = infbase;
 
     if (identity == CLASSIFY && infbase_annotator.empty())
-        infbase_annotator = infbase;
+        infbase_annotator.push_back(infbase);
 
     if (identity == ANNOTATE_BLOOM && infbase.empty())
         print_usage_and_exit = true;

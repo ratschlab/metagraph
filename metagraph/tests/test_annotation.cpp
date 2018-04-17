@@ -7,6 +7,8 @@
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
+const std::vector<std::string> test_dump_basename_vec_bad = {test_dump_basename + "_bad_filename"};
+const std::vector<std::string> test_dump_basename_vec_good = {test_dump_basename + "_color_compressed"};
 
 
 TEST(ColorCompressed, EmptyConstructor) {
@@ -62,8 +64,8 @@ TEST(ColorCompressed, Serialization) {
     }
     {
         annotate::ColorCompressed<> annotation(5);
-        ASSERT_FALSE(annotation.load(test_dump_basename + "_bad_file"));
-        ASSERT_TRUE(annotation.load(test_dump_basename + "_color_compressed"));
+        ASSERT_FALSE(annotation.load(test_dump_basename_vec_bad));
+        ASSERT_TRUE(annotation.load(test_dump_basename_vec_good));
 
         EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation.get(0)));
         EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(1)));

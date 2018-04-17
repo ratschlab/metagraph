@@ -647,8 +647,7 @@ int main(int argc, const char *argv[]) {
                 );
             }
 
-            if (config->infbase_annotator.size())
-                annotation->load(config->infbase_annotator);
+            annotation->load(config->infbase_annotator);
 
             std::unique_ptr<utils::ThreadPool> thread_pool;
             std::unique_ptr<std::mutex> annotation_mutex;
