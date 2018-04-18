@@ -648,7 +648,8 @@ int main(int argc, const char *argv[]) {
                 );
             }
 
-            annotation->merge_load(config->infbase_annotators);
+            if (config->infbase_annotators.size())
+                annotation->merge_load(config->infbase_annotators);
 
             std::unique_ptr<utils::ThreadPool> thread_pool;
             std::unique_ptr<std::mutex> annotation_mutex;
