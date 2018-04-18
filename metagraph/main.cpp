@@ -347,9 +347,10 @@ void execute_query(std::string seq_name,
             discovery_fraction
         );
 
-        if (!suppress_unlabeled || (labels_discovered.size() > 0)) {
+        if (!suppress_unlabeled || labels_discovered.size()) {
             if (suppress_unlabeled)
                 oss << seq_name << "\t";
+
             oss << utils::join_strings(labels_discovered,
                                        anno_labels_delimiter) << "\n";
         }
@@ -647,7 +648,7 @@ int main(int argc, const char *argv[]) {
                 );
             }
 
-            annotation->load(config->infbase_annotator);
+            annotation->merge_load(config->infbase_annotators);
 
             std::unique_ptr<utils::ThreadPool> thread_pool;
             std::unique_ptr<std::mutex> annotation_mutex;
@@ -740,7 +741,7 @@ int main(int argc, const char *argv[]) {
                 annotation.reset(new annotate::ColorCompressed<>(0, kNumCachedColors));
             }
 
-            if (!annotation->load(config->infbase_annotator)) {
+            if (!annotation->merge_load(config->infbase_annotators)) {
                 std::cerr << "ERROR: can't load annotations for graph "
                           << config->infbase + ".dbg"
                           << ", file corrupted" << std::endl;

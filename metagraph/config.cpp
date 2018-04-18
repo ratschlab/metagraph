@@ -135,7 +135,7 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "--sql-base")) {
             sqlfbase = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--annotator")) {
-            infbase_annotator.emplace_back(argv[++i]);
+            infbase_annotators.emplace_back(argv[++i]);
         } else if (!strcmp(argv[i], "-i") || !strcmp(argv[i], "--infile-base")) {
             infbase = std::string(argv[++i]);
             if (infbase.substr(std::max(
@@ -208,8 +208,8 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == ANNOTATE && outfbase.empty())
         outfbase = infbase;
 
-    if (identity == CLASSIFY && infbase_annotator.empty())
-        infbase_annotator.push_back(infbase);
+    if (identity == CLASSIFY && infbase_annotators.empty())
+        infbase_annotators.push_back(infbase);
 
     if (identity == ANNOTATE_BLOOM && infbase.empty())
         print_usage_and_exit = true;
@@ -296,6 +296,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --mem-cap-gb [INT] \tmaximum memory available, in Gb [inf]\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
             fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
+            fprintf(stderr, "\t   --noise-freq [INT] \tthreshold for filtering reads with rare k-mers [0]\n");
             fprintf(stderr, "\t   --fast \t\tuse fast build method [off]\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t   --suffix \t\tbuild graph chunk only for k-mers with the suffix given [off]\n");
@@ -403,6 +404,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column based colors compressor [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator [<graph_basename>]\n");
             fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate colors [off]\n");
+            fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
             fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
             fprintf(stderr, "\t   --discovery-fraction \tfraction of labeled k-mers required for annotation [1.0]\n");

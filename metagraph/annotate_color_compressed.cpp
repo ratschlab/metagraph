@@ -24,8 +24,7 @@ ColorCompressed<Color, Encoder>::ColorCompressed(uint64_t num_rows,
                 delete col_uncompressed;
             }
         ),
-        color_encoder_(new Encoder()),
-        color_encoder_load_(new Encoder()) {}
+        color_encoder_(new Encoder()) {}
 
 template <typename Color, class Encoder>
 ColorCompressed<Color, Encoder>::~ColorCompressed() {
@@ -137,7 +136,8 @@ void ColorCompressed<Color, Encoder>::serialize(const std::string &filename) con
 
 
 template <typename Color, class Encoder>
-bool ColorCompressed<Color, Encoder>::load(const std::vector<std::string> &filenames) {
+bool ColorCompressed<Color, Encoder>
+::merge_load(const std::vector<std::string> &filenames) {
     // release the columns stored
     cached_colors_.Clear();
 
@@ -146,50 +146,55 @@ bool ColorCompressed<Color, Encoder>::load(const std::vector<std::string> &filen
             delete column;
     }
 
+    color_encoder_.reset(new Encoder());
+
     try {
-        bool is_first = true;
         for (auto filename : filenames) {
+            // load annotation from file
             std::ifstream instream(filename + ".color.annodbg");
             if (!instream.good())
                 return false;
 
-            if (is_first) {
-                // load annotation from file
+            if (filename == filenames.at(0)) {
                 num_rows_ = NumberSerialisation::deserialiseNumber(instream);
+            } else if (num_rows_ != NumberSerialisation::deserialiseNumber(instream)) {
+                return false;
+            }
 
-                if (!color_encoder_->load(instream))
-                    return false;
+            Encoder color_encoder_load;
+            if (!color_encoder_load.load(instream))
+                return false;
 
-                bitmatrix_.assign(color_encoder_->size(), NULL);
-                for (auto &column : bitmatrix_) {
-                    column = new sdsl::sd_vector<>();
-                    column->load(instream);
-                }
-                is_first = false;
-            } else {
-                if (num_rows_ != NumberSerialisation::deserialiseNumber(instream))
-                    return false;
-            
-                if (!color_encoder_load_->load(instream))
-                    return false;
+            // extend the color dictionary
+            for (size_t c = 0; c < color_encoder_load.size(); ++c) {
+                color_encoder_->encode(color_encoder_load.decode(c), true);
+            }
 
-                for (size_t c = 0; c < color_encoder_load_->size(); ++c) {
-                    color_encoder_->encode(color_encoder_load_->decode(c), true); 
-                }
+            // update the existing and add some new columns
+            bitmatrix_.resize(color_encoder_->size(), NULL);
+            for (size_t c = 0; c < color_encoder_load.size(); ++c) {
+                size_t col = color_encoder_->encode(color_encoder_load.decode(c));
 
-                bitmatrix_.resize(color_encoder_->size(), NULL);
-                size_t col = 0;
-                for (size_t c = 0; c < color_encoder_load_->size(); ++c) {
-                    col = color_encoder_->encode(color_encoder_load_->decode(c));
+                auto *new_column = new sdsl::sd_vector<>();
+                new_column->load(instream);
 
-                    // TODO: handle proper merging of columns - for now just overwrite ...
-                    if (bitmatrix_.at(col))
-                        delete bitmatrix_.at(col);
-                    bitmatrix_.at(col) = new sdsl::sd_vector<>();
-                    bitmatrix_.at(col)->load(instream);
+                if (bitmatrix_.at(col)) {
+                    auto &column = uncompress(col);
+
+                    auto slct = sdsl::select_support_sd<>(new_column);
+                    auto rank = sdsl::rank_support_sd<>(new_column);
+                    auto num_set_bits = rank(new_column->size());
+
+                    for (uint64_t i = 1; i <= num_set_bits; ++i) {
+                        assert(slct(i) < column.size());
+
+                        column[slct(i)] = 1;
+                    }
+                    delete new_column;
+                } else {
+                    bitmatrix_.at(col) = new_column;
                 }
             }
-            instream.close();
         }
         return true;
     } catch (...) {

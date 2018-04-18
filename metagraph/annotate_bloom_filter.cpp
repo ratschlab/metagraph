@@ -90,7 +90,7 @@ bool AnnotationCategoryBloom::has_colors(Index i, const Coloring &coloring) cons
                          sorted_annotation.begin(), sorted_annotation.end());
 }
 
-bool AnnotationCategoryBloom::load(const std::vector<std::string> &filenames) {
+bool AnnotationCategoryBloom::merge_load(const std::vector<std::string> &filenames) {
     std::ifstream instream(filenames.at(0) + ".bloom.annodbg");
     if (!instream.good())
         return false;

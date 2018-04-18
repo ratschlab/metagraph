@@ -49,7 +49,7 @@ class Config {
 
     std::vector<std::string> fname;
     std::vector<std::string> anno_labels;
-    std::vector<std::string> infbase_annotator;
+    std::vector<std::string> infbase_annotators;
     std::string outfbase;
     std::string infbase;
     std::string sqlfbase;

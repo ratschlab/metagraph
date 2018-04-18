@@ -7,8 +7,8 @@
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
-const std::vector<std::string> test_dump_basename_vec_bad = {test_dump_basename + "_bad_filename"};
-const std::vector<std::string> test_dump_basename_vec_good = {test_dump_basename + "_color_compressed"};
+const std::string test_dump_basename_vec_bad = test_dump_basename + "_bad_filename";
+const std::string test_dump_basename_vec_good = test_dump_basename + "_color_compressed";
 
 
 TEST(ColorCompressed, EmptyConstructor) {
@@ -60,7 +60,7 @@ TEST(ColorCompressed, Serialization) {
         annotation.set_coloring(2, { "Label1", "Label2" });
         annotation.set_coloring(4, { "Label8" });
 
-        annotation.serialize(test_dump_basename + "_color_compressed");
+        annotation.serialize(test_dump_basename_vec_good);
     }
     {
         annotate::ColorCompressed<> annotation(5);
@@ -71,6 +71,36 @@ TEST(ColorCompressed, Serialization) {
         EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(1)));
         EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(annotation.get(2)));
         EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(3)));
+        EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation.get(4)));
+    }
+}
+
+TEST(ColorCompressed, MergeLoad) {
+    {
+        annotate::ColorCompressed<> annotation(5);
+        annotation.set_coloring(0, { "Label0", "Label2", "Label8" });
+        annotation.set_coloring(2, { "Label1", "Label2" });
+        annotation.set_coloring(4, { "Label8" });
+
+        annotation.serialize(test_dump_basename_vec_good + "_1");
+    }
+    {
+        annotate::ColorCompressed<> annotation(5);
+        annotation.set_coloring(1, { "Label0", "Label2", "Label8" });
+        annotation.set_coloring(2, { "Label1", "Label9", "Label0" });
+        annotation.set_coloring(3, { "Label8" });
+
+        annotation.serialize(test_dump_basename_vec_good + "_2");
+    }
+    {
+        annotate::ColorCompressed<> annotation(0);
+        ASSERT_TRUE(annotation.merge_load({ test_dump_basename_vec_good + "_1",
+                                            test_dump_basename_vec_good + "_2" }));
+
+        EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation.get(0)));
+        EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation.get(1)));
+        EXPECT_EQ(convert_to_set({ "Label1", "Label2", "Label9", "Label0" }), convert_to_set(annotation.get(2)));
+        EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation.get(3)));
         EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation.get(4)));
     }
 }

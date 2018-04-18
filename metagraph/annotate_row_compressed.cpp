@@ -194,7 +194,7 @@ void RowCompressed<Color, Encoder>::serialize(const std::string &filename) const
 }
 
 template <typename Color, class Encoder>
-bool RowCompressed<Color, Encoder>::load(const std::vector<std::string> &filenames) {
+bool RowCompressed<Color, Encoder>::merge_load(const std::vector<std::string> &filenames) {
     std::ifstream instream(filenames.at(0) + ".row.annodbg");
     if (!instream.good())
         return false;

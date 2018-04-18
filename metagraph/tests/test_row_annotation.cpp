@@ -7,8 +7,8 @@
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
-const std::vector<std::string> test_dump_basename_vec_bad = {test_dump_basename + "_bad_filename"};
-const std::vector<std::string> test_dump_basename_vec_good = {test_dump_basename + "_row_compressed"};
+const std::string test_dump_basename_vec_bad = test_dump_basename + "_bad_filename";
+const std::string test_dump_basename_vec_good = test_dump_basename + "_row_compressed";
 
 
 TEST(RowCompressed, EmptyConstructor) {
