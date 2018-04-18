@@ -69,7 +69,7 @@ find_library(FOLLY_LIBRARIES
 if(FOLLY_LIBRARIES)
   message("Folly has been found and will be used")
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
-  set(METALIBS -ljemalloc)
+  set(METALIBS -lfolly)
 else()
   message("Folly was not found")
 endif()
