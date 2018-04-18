@@ -67,11 +67,10 @@ find_library(FOLLY_LIBRARIES
   ~/.linuxbrew/lib/
 )
 if(FOLLY_LIBRARIES)
-  message("Folly has been found and will be used")
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
   set(METALIBS -lfolly)
 else()
-  message("Folly was not found")
+  message("Folly was not found. Install folly to get most out of the row-based annotator.")
 endif()
 
 file(GLOB src_files "*.cpp" "*.h" "*.hpp")
