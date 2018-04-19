@@ -360,6 +360,16 @@ void execute_query(std::string seq_name,
 }
 
 
+std::string get_filter_filename(const std::string &filename,
+                                size_t k,
+                                size_t noise_kmer_frequency) {
+    return noise_kmer_frequency > 0
+            ? filename + ".filter_k" + std::to_string(k)
+                       + "_s" + std::to_string(noise_kmer_frequency)
+            : "";
+}
+
+
 int main(int argc, const char *argv[]) {
     // parse command line arguments and options
     std::unique_ptr<Config> config { new Config(argc, argv) };
@@ -457,10 +467,9 @@ int main(int argc, const char *argv[]) {
                                 auto reverse = config->reverse;
                                 auto file = files[f];
 
-                                std::string filter_filename = config->noise_kmer_frequency > 0
-                                    ? file + ".filter_k" + std::to_string(config->k)
-                                           + "_s" + std::to_string(config->noise_kmer_frequency)
-                                    : "";
+                                std::string filter_filename = get_filter_filename(
+                                    file, config->k, config->noise_kmer_frequency
+                                );
 
                                 if (filter_filename.size()
                                         && !std::ifstream(filter_filename).good()) {
@@ -614,8 +623,7 @@ int main(int argc, const char *argv[]) {
 
                         // dump filter
                         std::ofstream outstream(
-                            file + ".filter_k" + std::to_string(k)
-                                 + "_s" + std::to_string(noise_kmer_frequency)
+                            get_filter_filename(file, k, noise_kmer_frequency)
                         );
                         serialize_number_vector(outstream, filter, 1);
                     },
