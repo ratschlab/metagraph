@@ -208,6 +208,27 @@ void annotate_sequence(const std::string &sequence,
 }
 
 
+std::string get_filter_filename(const std::string &filename,
+                                size_t k,
+                                size_t noise_kmer_frequency,
+                                bool critical = true) {
+    std::string filter_filename = noise_kmer_frequency > 0
+            ? filename + ".filter_k" + std::to_string(k)
+                       + "_s" + std::to_string(noise_kmer_frequency)
+            : "";
+
+    if (critical
+            && filter_filename.size()
+            && !std::ifstream(filter_filename).good()) {
+        std::cerr << "ERROR: read filter "
+                  << filter_filename << " does not exist."
+                  << " Filter reads first." << std::endl;
+        exit(1);
+    }
+
+    return filter_filename;
+}
+
 
 template <class Annotator, typename... Args>
 void annotate_data(const std::vector<std::string> &files,
@@ -215,6 +236,7 @@ void annotate_data(const std::vector<std::string> &files,
                    const DBG_succ &graph,
                    Annotator *annotator,
                    bool reverse,
+                   size_t noise_kmer_frequency,
                    bool filename_anno,
                    bool fasta_anno,
                    const std::string &fasta_header_delimiter,
@@ -223,6 +245,11 @@ void annotate_data(const std::vector<std::string> &files,
                    utils::ThreadPool *thread_pool = NULL,
                    std::mutex *annotation_mutex = NULL) {
     size_t total_seqs = 0;
+
+    std::unique_ptr<Timer> timer;
+    if (verbose) {
+        timer.reset(new Timer());
+    }
 
     // iterate over input files
     for (const auto &file : files) {
@@ -259,36 +286,40 @@ void annotate_data(const std::vector<std::string> &files,
             );
         } else if (utils::get_filetype(file) == "FASTA"
                     || utils::get_filetype(file) == "FASTQ") {
-            read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-                std::vector<std::string> labels;
+            read_fasta_file_critical(file,
+                [&](kseq_t *read_stream) {
+                    std::vector<std::string> labels;
 
-                if (fasta_anno) {
-                    labels = utils::split_string(read_stream->name.s,
-                                                 fasta_header_delimiter);
-                }
-                if (filename_anno) {
-                    labels.push_back(file);
-                }
-
-                for (const auto &label : anno_labels) {
-                    labels.push_back(label);
-                }
-
-                annotate_sequence(read_stream->seq.s, labels, graph, annotator,
-                                  thread_pool, annotation_mutex);
-
-                total_seqs += 1;
-                if (verbose && total_seqs % 10000 == 0) {
-                    std::cout << "added labels for " << total_seqs
-                              << " sequences"
-                              << ", last was " << read_stream->name.s
-                              << ", annotated as ";
-                    for (const auto &label : labels) {
-                        std::cout << "<" << label << ">";
+                    if (fasta_anno) {
+                        labels = utils::split_string(read_stream->name.s,
+                                                     fasta_header_delimiter);
                     }
-                    std::cout << std::endl;
-                }
-            }, reverse);
+                    if (filename_anno) {
+                        labels.push_back(file);
+                    }
+
+                    for (const auto &label : anno_labels) {
+                        labels.push_back(label);
+                    }
+
+                    annotate_sequence(read_stream->seq.s, labels, graph, annotator,
+                                      thread_pool, annotation_mutex);
+
+                    total_seqs += 1;
+                    if (verbose && total_seqs % 10000 == 0) {
+                        std::cout << "added labels for " << total_seqs
+                                  << " sequences"
+                                  << ", last was " << read_stream->name.s
+                                  << ", annotated as ";
+                        for (const auto &label : labels) {
+                            std::cout << "<" << label << ">";
+                        }
+                        std::cout << " in " << timer->elapsed() << "sec" << std::endl;
+                    }
+                },
+                reverse, timer.get(),
+                get_filter_filename(file, graph.get_k(), noise_kmer_frequency)
+            );
         } else {
             std::cerr << "ERROR: Filetype unknown for file "
                       << file << std::endl;
@@ -357,16 +388,6 @@ void execute_query(std::string seq_name,
     }
 
     std::cout << oss.str();
-}
-
-
-std::string get_filter_filename(const std::string &filename,
-                                size_t k,
-                                size_t noise_kmer_frequency) {
-    return noise_kmer_frequency > 0
-            ? filename + ".filter_k" + std::to_string(k)
-                       + "_s" + std::to_string(noise_kmer_frequency)
-            : "";
 }
 
 
@@ -462,22 +483,13 @@ int main(int argc, const char *argv[]) {
                                     || utils::get_filetype(files[f]) == "FASTQ") {
                             Timer *timer_ptr = config->verbose ? &timer : NULL;
 
-                            if (config->noise_kmer_frequency > 0
-                                    || files.size() >= config->parallel) {
+                            std::string filter_filename = get_filter_filename(
+                                files[f], config->k, config->noise_kmer_frequency
+                            );
+
+                            if (files.size() >= config->parallel) {
                                 auto reverse = config->reverse;
                                 auto file = files[f];
-
-                                std::string filter_filename = get_filter_filename(
-                                    file, config->k, config->noise_kmer_frequency
-                                );
-
-                                if (filter_filename.size()
-                                        && !std::ifstream(filter_filename).good()) {
-                                    std::cerr << "ERROR: read filter "
-                                              << filter_filename << " does not exist."
-                                              << " Filter reads first." << std::endl;
-                                    exit(1);
-                                }
 
                                 // capture all required values by copying to be able
                                 // to run task from other threads
@@ -491,7 +503,7 @@ int main(int argc, const char *argv[]) {
                                 read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
                                     // add read to the graph constructor as a callback
                                     constructor->add_read(read_stream->seq.s);
-                                }, config->reverse, timer_ptr);
+                                }, config->reverse, timer_ptr, filter_filename);
                             }
                         } else {
                             std::cerr << "ERROR: Filetype unknown for file "
@@ -552,9 +564,11 @@ int main(int argc, const char *argv[]) {
                         );
                     } else if (utils::get_filetype(files[f]) == "FASTA"
                                 || utils::get_filetype(files[f]) == "FASTQ") {
-                        read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
-                            graph->add_sequence(read_stream->seq.s);
-                        }, config->reverse);
+                        read_fasta_file_critical(files[f],
+                            [&](kseq_t *read_stream) { graph->add_sequence(read_stream->seq.s); },
+                            config->reverse, NULL,
+                            get_filter_filename(files[f], config->k, config->noise_kmer_frequency)
+                        );
                     } else {
                         std::cerr << "ERROR: Filetype unknown for file "
                                   << files[f] << std::endl;
@@ -623,7 +637,7 @@ int main(int argc, const char *argv[]) {
 
                         // dump filter
                         std::ofstream outstream(
-                            get_filter_filename(file, k, noise_kmer_frequency)
+                            get_filter_filename(file, k, noise_kmer_frequency, false)
                         );
                         serialize_number_vector(outstream, filter, 1);
                     },
@@ -674,6 +688,7 @@ int main(int argc, const char *argv[]) {
                           *graph,
                           annotation.get(),
                           config->reverse,
+                          config->noise_kmer_frequency,
                           config->filename_anno,
                           config->fasta_anno,
                           config->fasta_header_delimiter,
@@ -727,6 +742,7 @@ int main(int argc, const char *argv[]) {
                           *graph,
                           annotation.get(),
                           config->reverse,
+                          config->noise_kmer_frequency,
                           config->filename_anno,
                           config->fasta_anno,
                           config->fasta_header_delimiter,
@@ -759,6 +775,11 @@ int main(int argc, const char *argv[]) {
 
             utils::ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
 
+            std::unique_ptr<Timer> timer;
+            if (config->verbose) {
+                timer.reset(new Timer());
+            }
+
             // iterate over input files
             for (const auto &file : files) {
                 if (config->verbose) {
@@ -767,21 +788,23 @@ int main(int argc, const char *argv[]) {
 
                 size_t seq_count = 0;
 
-                read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-
-                    thread_pool.enqueue(execute_query,
-                        std::to_string(seq_count++) + "\t" + std::string(read_stream->name.s),
-                        std::string(read_stream->seq.s),
-                        config->count_labels,
-                        config->suppress_unlabeled,
-                        config->num_top_labels,
-                        config->discovery_fraction,
-                        config->anno_labels_delimiter,
-                        graph.get(),
-                        annotation.get()
-                    );
-
-                }, config->reverse);
+                read_fasta_file_critical(file,
+                    [&](kseq_t *read_stream) {
+                        thread_pool.enqueue(execute_query,
+                            std::to_string(seq_count++) + "\t" + std::string(read_stream->name.s),
+                            std::string(read_stream->seq.s),
+                            config->count_labels,
+                            config->suppress_unlabeled,
+                            config->num_top_labels,
+                            config->discovery_fraction,
+                            config->anno_labels_delimiter,
+                            graph.get(),
+                            annotation.get()
+                        );
+                    },
+                    config->reverse, timer.get(),
+                    get_filter_filename(file, graph->get_k(), config->noise_kmer_frequency)
+                );
 
                 // wait while all threads finish processing the current file
                 thread_pool.join();
@@ -1059,6 +1082,11 @@ int main(int argc, const char *argv[]) {
                 config->alignment_length = graph->get_k();
             }
 
+            std::unique_ptr<Timer> timer;
+            if (config->verbose) {
+                timer.reset(new Timer());
+            }
+
             std::cout << "Align sequences against a de Bruijn graph with ";
             std::cout << "k=" << graph->get_k() << "\n"
                       << "Length of aligning k-mers: " << config->alignment_length << std::endl;
@@ -1085,7 +1113,7 @@ int main(int argc, const char *argv[]) {
 
                         printf("%.*s: ", print_len, read_stream->seq.s + i);
 
-                        for (size_t l = 0;  l < graphindices.at(i).size(); ++l) {
+                        for (size_t l = 0; l < graphindices.at(i).size(); ++l) {
                             HitInfo curr_hit(graphindices.at(i).at(l));
                             for (size_t m = 0; m < curr_hit.path.size(); ++m) {
                                 std::cout << curr_hit.path.at(m) << ':';
@@ -1096,26 +1124,8 @@ int main(int argc, const char *argv[]) {
                             std::cout << "[" << curr_hit.cigar << "] ";
                         }
                         //}
-
-                        // try reverse
-                        if (graphindices.at(i).size() == 0) {
-                            reverse_complement(read_stream->seq);
-                            graphindices = graph->align_fuzzy(
-                                std::string(read_stream->seq.s, read_stream->seq.l),
-                                aln_len, config->distance
-                            );
-                            for (size_t l = 0; l < graphindices.at(i).size(); ++l) {
-                                HitInfo curr_hit(graphindices.at(i).at(l));
-                                for (size_t m = 0; m < curr_hit.path.size(); ++m) {
-                                    std::cout << curr_hit.path.at(m) << ':';
-                                }
-                                for (size_t m = curr_hit.rl; m <= curr_hit.ru; ++m) {
-                                    std::cout << m << " ";
-                                }
-                                std::cout << "[" << curr_hit.cigar << "] ";
-                            }
-                        }
                         std::cout << std::endl;
+
                         return;
                     }
 
@@ -1170,7 +1180,9 @@ int main(int argc, const char *argv[]) {
                         }
                         std::cout << ": " << graphindices[i] << "\n";
                     }
-                });
+                }, config->reverse, timer.get(),
+                   get_filter_filename(file, graph->get_k(), config->noise_kmer_frequency)
+                );
             }
 
             return 0;

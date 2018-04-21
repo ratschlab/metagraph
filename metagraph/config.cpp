@@ -315,6 +315,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s align -i <graph_basename> [options] <FASTQ1> [[FASTQ2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for align:\n");
+            fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
+            fprintf(stderr, "\t   --noise-freq [INT] \t\tthreshold for filtering reads with rare k-mers [0]\n");
             fprintf(stderr, "\t   --query-presence\t\tTest sequences for presence [off]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT]\tFraction of k-mers required to count sequence [1.0]\n");
             fprintf(stderr, "\t   --filter-present\t\tReport only present input sequences [off]\n");
@@ -354,8 +356,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for stats:\n");
-            fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
-            fprintf(stderr, "\t   --print \tprint graph table to the screen [off]\n");
+            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
+            fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
         } break;
         case ANNOTATE: {
             fprintf(stderr, "Usage: %s annotate -i <graph_basename> [options] <PATH1> [[PATH2] ...]\n"
@@ -366,6 +368,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator to update []\n");
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file [<graph_basename>]\n");
             fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
+            fprintf(stderr, "\t   --noise-freq [INT] \t\tthreshold for filtering reads with rare k-mers [0]\n");
             fprintf(stderr, "\t   --anno-filename \t\tinclude filenames as annotation labels [off]\n");
             fprintf(stderr, "\t   --anno-header \t\textract annotation labels from headers of sequences in files [off]\n");
             fprintf(stderr, "\t   --header-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
@@ -381,6 +384,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for bloom:\n");
             fprintf(stderr, "\t   --reference [STR] \t\t\tbasename of reference sequence []\n");
             fprintf(stderr, "\t-r --reverse \t\t\t\talso annotate reverse complement reads [off]\n");
+            fprintf(stderr, "\t   --noise-freq [INT] \t\t\tthreshold for filtering reads with rare k-mers [0]\n");
             fprintf(stderr, "\t   --anno-filename \t\t\tinclude filenames as annotation labels [off]\n");
             fprintf(stderr, "\t   --anno-header \t\t\textract annotation labels from headers of sequences in files [off]\n");
             fprintf(stderr, "\t   --header-delimiter [STR]\t\tdelimiter for splitting annotation header into multiple labels [off]\n");
@@ -400,6 +404,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for classify:\n");
             fprintf(stderr, "\t-r --reverse \t\t\tclassify reverse complement sequences [off]\n");
+            fprintf(stderr, "\t   --noise-freq [INT] \t\tthreshold for filtering reads with rare k-mers [0]\n");
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column based colors compressor [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator [<graph_basename>]\n");
