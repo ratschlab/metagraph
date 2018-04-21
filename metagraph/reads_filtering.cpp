@@ -94,6 +94,10 @@ std::vector<bool> count_kmers_and_filter_reads(std::vector<std::string> *reads,
     for (size_t j = 0; j < reads->size(); ++j) {
         utils::sequence_to_kmers(reads->at(j), k, &read_kmers, {});
 
+        // filter out too short reads
+        if (read_kmers.size() <= 2)
+            frequent[j] = false;
+
         // consider only non-dummy k-mers
         for (size_t i = 1; i + 1 < read_kmers.size(); ++i) {
             if (++counter[read_kmers[i]] <= noise_kmer_frequency)

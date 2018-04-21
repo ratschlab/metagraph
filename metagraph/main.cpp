@@ -307,14 +307,13 @@ void annotate_data(const std::vector<std::string> &files,
 
                     total_seqs += 1;
                     if (verbose && total_seqs % 10000 == 0) {
-                        std::cout << "added labels for " << total_seqs
-                                  << " sequences"
+                        std::cout << "processed " << total_seqs << " sequences"
                                   << ", last was " << read_stream->name.s
-                                  << ", annotated as ";
+                                  << ", trying to annotate as ";
                         for (const auto &label : labels) {
                             std::cout << "<" << label << ">";
                         }
-                        std::cout << " in " << timer->elapsed() << "sec" << std::endl;
+                        std::cout << ", " << timer->elapsed() << "sec" << std::endl;
                     }
                 },
                 reverse, timer.get(),
