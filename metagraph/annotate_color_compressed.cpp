@@ -123,6 +123,9 @@ void ColorCompressed<Color, Encoder>::serialize(const std::string &filename) con
     const_cast<ColorCompressed*>(this)->flush();
 
     std::ofstream outstream(filename + ".color.annodbg");
+    if (!outstream.good()) {
+        throw std::ofstream::failure("Bad stream");
+    }
 
     NumberSerialisation::serialiseNumber(outstream, num_rows_);
 

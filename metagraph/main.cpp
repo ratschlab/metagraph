@@ -3,6 +3,7 @@
 #include "dbg_succinct.hpp"
 #include "dbg_succinct_chunk.hpp"
 #include "dbg_succinct_construct.hpp"
+#include "reads_filtering.hpp"
 #include "config.hpp"
 #include "helpers.hpp"
 #include "utils.hpp"
@@ -697,7 +698,7 @@ int main(int argc, const char *argv[]) {
                           annotation_mutex.get());
 
             // join threads if any were initialized
-            thread_pool.release();
+            thread_pool.reset();
 
             annotation->serialize(config->outfbase);
 
