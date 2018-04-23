@@ -23,6 +23,8 @@ class KMer;
 
 namespace utils {
 
+    std::string remove_suffix(const std::string &str, const std::string &suffix);
+
     std::string join_strings(const std::vector<std::string> &strings,
                              const std::string &delimiter);
 

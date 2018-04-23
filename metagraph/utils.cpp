@@ -10,6 +10,16 @@ const size_t kBitsPerDigit = 17;
 
 namespace utils {
 
+std::string remove_suffix(const std::string &str, const std::string &suffix) {
+    auto actual_suffix = str.substr(
+        std::max(0, static_cast<int>(str.size())
+                    - static_cast<int>(suffix.size()))
+    );
+    return actual_suffix == suffix
+            ? str.substr(0, str.size() - suffix.size())
+            : str;
+}
+
 std::string join_strings(const std::vector<std::string> &strings,
                          const std::string &delimiter) {
     if (!strings.size())

@@ -408,3 +408,18 @@ TEST(Misc, JoinStrings) {
     EXPECT_EQ(std::vector<std::string>({ "23" }),
               utils::split_string("123", "1"));
 }
+
+TEST(Misc, RemoveSuffix) {
+    EXPECT_EQ("", utils::remove_suffix("", ""));
+    EXPECT_EQ("", utils::remove_suffix("", "A"));
+    EXPECT_EQ("", utils::remove_suffix("", "1AC"));
+    EXPECT_EQ("", utils::remove_suffix("1", "1"));
+    EXPECT_EQ("1.", utils::remove_suffix("1.1AC", "1AC"));
+    EXPECT_EQ("1", utils::remove_suffix("1.1AC", ".1AC"));
+    EXPECT_EQ("acb", utils::remove_suffix("acb.cde", ".cde"));
+    EXPECT_EQ("acb.cde", utils::remove_suffix("acb.cde.efg", ".efg"));
+    EXPECT_EQ("acb", utils::remove_suffix("acb.cde.efg", ".cde.efg"));
+    EXPECT_EQ("acb.cde.efg", utils::remove_suffix("acb.cde.efg", ""));
+    EXPECT_EQ("acb.cde.efg", utils::remove_suffix("acb.cde.efg", ".cde"));
+    EXPECT_EQ("acb.cde.efg", utils::remove_suffix("acb.cde.efg", "Aacb.cde.efg"));
+}

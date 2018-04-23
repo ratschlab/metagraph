@@ -855,12 +855,7 @@ int main(int argc, const char *argv[]) {
             }
 
             for (auto &filename : chunk_files) {
-                auto filename_suffix = filename.substr(
-                    std::max(0, static_cast<int>(filename.size()) - 9)
-                );
-                if (filename_suffix == ".dbgchunk") {
-                    filename.resize(filename.size() - 9);
-                }
+                filename = utils::remove_suffix(filename, ".dbgchunk");
             }
 
             // collect results on an external merge or construction

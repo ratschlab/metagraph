@@ -3,6 +3,8 @@
 #include <cstring>
 #include <iostream>
 
+#include "utils.hpp"
+
 
 Config::Config(int argc, const char *argv[]) {
     // provide help overview if no identity was given
@@ -138,11 +140,7 @@ Config::Config(int argc, const char *argv[]) {
             infbase_annotators.emplace_back(argv[++i]);
         } else if (!strcmp(argv[i], "-i") || !strcmp(argv[i], "--infile-base")) {
             infbase = std::string(argv[++i]);
-            if (infbase.substr(std::max(
-                            static_cast<size_t>(infbase.size()),
-                            static_cast<size_t>(4)) - 4) == ".dbg") {
-                infbase.resize(infbase.size() - 4);
-            }
+            infbase = utils::remove_suffix(infbase, ".dbg");
         } else if (!strcmp(argv[i], "--to-adj-list")) {
             to_adj_list = true;
         } else if (!strcmp(argv[i], "-l") || !strcmp(argv[i], "--len-suffix")) {
