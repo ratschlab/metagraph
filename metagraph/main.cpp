@@ -373,10 +373,30 @@ void execute_query(std::string seq_name,
         }
         oss << "\n";
     } else {
-        auto labels_discovered = annotation->aggregate_colors(
-            graph->index(sequence),
-            discovery_fraction
-        );
+        std::vector<uint64_t> indices;
+        size_t num_missing_kmers = 0;
+
+        graph->align(sequence, [&](uint64_t i) {
+            if (i > 0) {
+                indices.push_back(i);
+            } else {
+                num_missing_kmers++;
+            }
+        });
+
+        std::vector<std::string> labels_discovered;
+        // discovery_fraction = discovered / all
+        // new_discovered_fraction = discovered / (all - missing)
+        if (indices.size() > 0
+                && discovery_fraction * (indices.size() + num_missing_kmers)
+                                                            <= indices.size()) {
+            labels_discovered = annotation->aggregate_colors(
+                indices,
+                discovery_fraction
+                    * (indices.size() + num_missing_kmers)
+                    / indices.size()
+            );
+        }
 
         if (!suppress_unlabeled || labels_discovered.size()) {
             if (suppress_unlabeled)
