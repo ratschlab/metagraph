@@ -72,6 +72,7 @@ class Config {
         STATS,
         ANNOTATE,
         ANNOTATE_BLOOM,
+        MERGE_ANNOTATORS,
         TRANSFORM,
         CLASSIFY
     };

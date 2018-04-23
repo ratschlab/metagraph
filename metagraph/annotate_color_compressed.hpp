@@ -16,7 +16,9 @@ class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
     using Index = typename MultiColorAnnotation<uint64_t, Color>::Index;
     using Coloring = typename MultiColorAnnotation<uint64_t, Color>::Coloring;
 
-    ColorCompressed(uint64_t num_rows, size_t num_columns_cached = 1);
+    ColorCompressed(uint64_t num_rows,
+                    size_t num_columns_cached = 1,
+                    bool verbose = false);
 
     ~ColorCompressed();
 
@@ -59,6 +61,10 @@ class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
                               caches::LRUCachePolicy<size_t>> cached_colors_;
 
     std::unique_ptr<ColorEncoder<Color>> color_encoder_;
+
+    bool verbose_;
+
+    static const std::string kExtension;
 };
 
 } // namespace annotate

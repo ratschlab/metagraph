@@ -34,6 +34,8 @@ Config::Config(int argc, const char *argv[]) {
         identity = ANNOTATE;
     } else if (!strcmp(argv[1], "bloom")) {
         identity = ANNOTATE_BLOOM;
+    } else if (!strcmp(argv[1], "merge_anno")) {
+        identity = MERGE_ANNOTATORS;
     } else if (!strcmp(argv[1], "classify")) {
         identity = CLASSIFY;
     } else if (!strcmp(argv[1], "transform")) {
@@ -206,6 +208,9 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == ANNOTATE && outfbase.empty())
         outfbase = infbase;
 
+    if (identity == MERGE_ANNOTATORS && (outfbase.empty() || infbase.empty()))
+        print_usage_and_exit = true;
+
     if (identity == CLASSIFY && infbase_annotators.empty())
         infbase_annotators.push_back(infbase);
 
@@ -275,6 +280,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\tbloom\t\tgiven a graph and a fast[a|q] file, annotate\n");
             fprintf(stderr, "\t\t\tthe respective kmers using Bloom filters\n\n");
+
+            fprintf(stderr, "\tmerge_anno\tmerge annotation columns\n\n");
 
             fprintf(stderr, "\tclassify\tannotate sequences from fast[a|q] files\n\n");
 
@@ -374,6 +381,14 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column based colors compressor [off]\n");
             fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate colors [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+        } break;
+        case MERGE_ANNOTATORS: {
+            fprintf(stderr, "Usage: %s merge_anno -i <graph_basename> -o <annotator_basename> <ANNOT1> [[ANNOT2] ...]\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for annotate:\n");
+            fprintf(stderr, "\t   --row-annotator \tuse row based annotator instead of column based colors compressor [off]\n");
+            fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate colors [off]\n");
+            // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case ANNOTATE_BLOOM: {
             fprintf(stderr, "Usage: %s bloom -i <graph_basename> [options] <PATH1> [[PATH2] ...]\n"

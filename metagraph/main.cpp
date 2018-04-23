@@ -753,6 +753,33 @@ int main(int argc, const char *argv[]) {
 
             return 0;
         }
+        case Config::MERGE_ANNOTATORS: {
+            // load graph
+            std::unique_ptr<DBG_succ> graph {
+                load_critical_graph_from_file(config->infbase)
+            };
+
+            std::unique_ptr<Annotator> annotation;
+            if (config->use_row_annotator) {
+                throw std::runtime_error("To be implemented");
+                annotation.reset(new annotate::RowCompressed<>(0, config->sparse));
+            } else {
+                annotation.reset(
+                    new annotate::ColorCompressed<>(
+                        0, kNumCachedColors, config->verbose
+                    )
+                );
+            }
+
+            if (!annotation->merge_load(files)) {
+                std::cerr << "ERROR: can't load annotations" << std::endl;
+                exit(1);
+            }
+
+            annotation->serialize(config->outfbase);
+
+            return 0;
+        }
         case Config::CLASSIFY: {
             // load graph
             std::unique_ptr<DBG_succ> graph {
@@ -763,7 +790,11 @@ int main(int argc, const char *argv[]) {
             if (config->use_row_annotator) {
                 annotation.reset(new annotate::RowCompressed<>(0, config->sparse));
             } else {
-                annotation.reset(new annotate::ColorCompressed<>(0, kNumCachedColors));
+                annotation.reset(
+                    new annotate::ColorCompressed<>(
+                        0, kNumCachedColors, config->verbose
+                    )
+                );
             }
 
             if (!annotation->merge_load(config->infbase_annotators)) {

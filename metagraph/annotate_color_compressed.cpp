@@ -5,16 +5,22 @@
 #include <stdexcept>
 
 #include "serialization.hpp"
+#include "utils.hpp"
 
 using libmaus2::util::NumberSerialisation;
 using libmaus2::util::StringSerialisation;
+using utils::remove_suffix;
 
 
 namespace annotate {
 
 template <typename Color, class Encoder>
+const std::string ColorCompressed<Color, Encoder>::kExtension = ".color.annodbg";
+
+template <typename Color, class Encoder>
 ColorCompressed<Color, Encoder>::ColorCompressed(uint64_t num_rows,
-                                                 size_t num_columns_cached)
+                                                 size_t num_columns_cached,
+                                                 bool verbose)
       : num_rows_(num_rows),
         cached_colors_(
             num_columns_cached,
@@ -24,7 +30,8 @@ ColorCompressed<Color, Encoder>::ColorCompressed(uint64_t num_rows,
                 delete col_uncompressed;
             }
         ),
-        color_encoder_(new Encoder()) {}
+        color_encoder_(new Encoder()),
+        verbose_(verbose) {}
 
 template <typename Color, class Encoder>
 ColorCompressed<Color, Encoder>::~ColorCompressed() {
@@ -122,7 +129,7 @@ template <typename Color, class Encoder>
 void ColorCompressed<Color, Encoder>::serialize(const std::string &filename) const {
     const_cast<ColorCompressed*>(this)->flush();
 
-    std::ofstream outstream(filename + ".color.annodbg");
+    std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension);
     if (!outstream.good()) {
         throw std::ofstream::failure("Bad stream");
     }
@@ -153,8 +160,13 @@ bool ColorCompressed<Color, Encoder>
 
     try {
         for (auto filename : filenames) {
-            // load annotation from file
-            std::ifstream instream(filename + ".color.annodbg");
+            if (verbose_) {
+                std::cout << "Loading annotations from file "
+                          << remove_suffix(filename, kExtension) + kExtension
+                          << "..." << std::endl;
+            }
+
+            std::ifstream instream(remove_suffix(filename, kExtension) + kExtension);
             if (!instream.good())
                 return false;
 
@@ -199,7 +211,14 @@ bool ColorCompressed<Color, Encoder>
                 }
             }
         }
+
+        if (verbose_) {
+            std::cout << "Annotation loading finished ("
+                      << bitmatrix_.size() << " columns)" << std::endl;
+        }
+
         return true;
+
     } catch (...) {
         return false;
     }
