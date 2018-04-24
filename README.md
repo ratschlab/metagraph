@@ -53,6 +53,8 @@ use `glibtoolize` instead of `libtoolize` on MacOS
 
 ## Usage examples
 
+For real examples, see [scripts](./scripts).
+
 ### Build graph
 
 * #### Simple build
