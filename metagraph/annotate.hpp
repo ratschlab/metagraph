@@ -101,6 +101,11 @@ class MultiColorAnnotation
     virtual std::vector<std::pair<Color, size_t>>
     get_most_frequent_colors(const std::vector<Index> &indices,
                              size_t num_top = static_cast<size_t>(-1)) const = 0;
+
+    /************************* Properties *************************/
+
+    virtual size_t num_colors() const = 0;
+    virtual double sparsity() const = 0;
 };
 
 

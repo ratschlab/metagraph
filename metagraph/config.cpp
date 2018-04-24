@@ -163,7 +163,8 @@ Config::Config(int argc, const char *argv[]) {
         }
     }
 
-    if (!fname.size() && (identity != CONCATENATE || infbase.empty())) {
+    if (!fname.size() && identity != STATS
+                      && (identity != CONCATENATE || infbase.empty())) {
         std::string line;
         while (std::getline(std::cin, line)) {
             if (line.size())
@@ -178,7 +179,7 @@ Config::Config(int argc, const char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if (identity != CONCATENATE && !fname.size())
+    if (identity != CONCATENATE && identity != STATS && !fname.size())
         print_usage_and_exit = true;
 
     if (identity == CONCATENATE && !(fname.empty() ^ infbase.empty())) {
@@ -361,7 +362,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for stats:\n");
-            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
+            // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
+            fprintf(stderr, "\t-a --annotator [STR] \tbasename of annotator to update []\n");
+            // fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column based colors compressor [off]\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
         } break;
         case ANNOTATE: {

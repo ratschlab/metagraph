@@ -293,6 +293,23 @@ RowCompressed<Color, Encoder>::get_most_frequent_colors(const std::vector<Index>
     return top_counts;
 }
 
+template <typename Color, class Encoder>
+size_t RowCompressed<Color, Encoder>::num_colors() const {
+    return color_encoder_->size();
+}
+
+template <typename Color, class Encoder>
+double RowCompressed<Color, Encoder>::sparsity() const {
+    uint64_t num_set_bits = 0;
+
+    for (uint64_t i = 0; i < matrix_->size(); ++i) {
+        num_set_bits += matrix_->size(i);
+    }
+
+    return 1 - static_cast<double>(num_set_bits) / color_encoder_->size()
+                                                 / matrix_->size();
+}
+
 template class RowCompressed<std::string, StringEncoder>;
 
 } // namespace annotate

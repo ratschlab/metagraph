@@ -303,6 +303,25 @@ ColorCompressed<Color, Encoder>
 }
 
 template <typename Color, class Encoder>
+size_t ColorCompressed<Color, Encoder>::num_colors() const {
+    return color_encoder_->size();
+}
+
+template <typename Color, class Encoder>
+double ColorCompressed<Color, Encoder>::sparsity() const {
+    uint64_t num_set_bits = 0;
+
+    const_cast<ColorCompressed*>(this)->flush();
+
+    for (size_t j = 0; j < bitmatrix_.size(); ++j) {
+        auto rank = sdsl::rank_support_sd<>(bitmatrix_[j]);
+        num_set_bits += rank(bitmatrix_[j]->size());
+    }
+
+    return 1 - static_cast<double>(num_set_bits) / num_colors() / num_rows_;
+}
+
+template <typename Color, class Encoder>
 void ColorCompressed<Color, Encoder>::flush() {
     for (const auto &cached_vector : cached_colors_) {
         flush(cached_vector.first, cached_vector.second);

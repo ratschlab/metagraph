@@ -175,4 +175,12 @@ AnnotationCategoryBloom
     return top_counts;
 }
 
+size_t AnnotationCategoryBloom::num_colors() const {
+    return column_to_label_.size();
+}
+
+double AnnotationCategoryBloom::sparsity() const {
+    throw std::runtime_error("Unknown sparsity, method not implemented");
+}
+
 } // namespace annotate

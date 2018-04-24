@@ -1019,40 +1019,44 @@ int main(int argc, const char *argv[]) {
             return 0;
         }
         case Config::STATS: {
-            std::ofstream outstream;
-            if (!config->outfbase.empty()) {
-                outstream.open(config->outfbase + ".dbgstats");
-                outstream << "file\tnodes\tedges\tk" << std::endl;
-            }
             for (const auto &file : files) {
                 std::unique_ptr<DBG_succ> graph {
                     load_critical_graph_from_file(file)
                 };
 
-                if (!config->quiet) {
-                    std::cout << "Statistics for graph " << file << std::endl;
-                    std::cout << "nodes: " << graph->num_nodes() << std::endl;
-                    std::cout << "edges: " << graph->num_edges() << std::endl;
-                    std::cout << "k: " << graph->get_k() << std::endl;
-                    std::cout << "state: " << graph->state << std::endl;
-                }
-                if (outstream.is_open()) {
-                    outstream << file << "\t"
-                              << graph->num_nodes() << "\t"
-                              << graph->num_edges() << "\t"
-                              << graph->get_k() << std::endl;
-                }
+                std::cout << "Statistics for graph " << file << std::endl;
+                std::cout << "nodes: " << graph->num_nodes() << std::endl;
+                std::cout << "edges: " << graph->num_edges() << std::endl;
+                std::cout << "k: " << graph->get_k() << std::endl;
+                std::cout << "state: " << graph->state << std::endl;
+
                 if (config->print_graph_succ)
                     graph->print_state();
+            }
 
-                //TODO: fix this, options for different annotations
-                /*
-                std::ifstream instream(file + ".anno.dbg");
-                if (instream.good()) {
-                    size_t anno_size = NumberSerialisation::deserialiseNumber(instream);
-                    std::cout << "annot: " << anno_size << std::endl;
+            for (const auto &file : config->infbase_annotators) {
+                std::unique_ptr<Annotator> annotation;
+
+                if (config->use_row_annotator) {
+                    annotation.reset(new annotate::RowCompressed<>(0, config->sparse));
+                } else {
+                    annotation.reset(
+                        new annotate::ColorCompressed<>(
+                            0, kNumCachedColors, config->verbose
+                        )
+                    );
                 }
-                */
+
+                if (!annotation->load(file)) {
+                    std::cerr << "ERROR: can't load annotation from file "
+                              << file << std::endl;
+                    exit(1);
+                }
+
+                std::cout << "Statistics for annotation " << file << std::endl;
+                std::cout << "colors: " << annotation->num_colors() << std::endl;
+                std::cout << "sparsity: " << std::scientific
+                                          << annotation->sparsity() << std::endl;
             }
 
             return 0;

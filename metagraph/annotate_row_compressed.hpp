@@ -59,6 +59,9 @@ class RowCompressed : public MultiColorAnnotation<uint64_t, Color> {
     get_most_frequent_colors(const std::vector<Index> &indices,
                              size_t num_top = static_cast<size_t>(-1)) const;
 
+    size_t num_colors() const;
+    double sparsity() const;
+
   private:
     std::unique_ptr<RowMajorSparseBinaryMatrix> matrix_;
     std::unique_ptr<ColorEncoder<Color>> color_encoder_;

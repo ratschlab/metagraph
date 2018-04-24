@@ -117,6 +117,9 @@ class AnnotationCategoryBloom : public MultiColorAnnotation<uint64_t, std::strin
     get_most_frequent_colors(const std::vector<Index> &indices,
                              size_t num_top = static_cast<size_t>(-1)) const;
 
+    size_t num_colors() const;
+    double sparsity() const;
+
   private:
     DBGSuccAnnotWrapper graph_;
     hash_annotate::BloomAnnotator annotator_;

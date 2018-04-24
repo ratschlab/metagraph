@@ -46,6 +46,9 @@ class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
     get_most_frequent_colors(const std::vector<Index> &indices,
                              size_t num_top = static_cast<size_t>(-1)) const;
 
+    size_t num_colors() const;
+    double sparsity() const;
+
   private:
     void release();
     void flush();
