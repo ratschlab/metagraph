@@ -1,8 +1,7 @@
-#ifndef __ANNOTATE_COLOR_COMPRESSED_HPP__
-#define __ANNOTATE_COLOR_COMPRESSED_HPP__
+#ifndef __ANNOTATE_K2_HPP__
+#define __ANNOTATE_K2_HPP__
 
-#include <cache.hpp>
-#include <lru_cache_policy.hpp>
+#include <sdsl/k2_tree.hpp>
 
 #include "annotate.hpp"
 #include "dbg_succinct.hpp"
@@ -11,22 +10,17 @@
 namespace annotate {
 
 template <typename Color, class Encoder>
-class K2Compressed;
+class ColorCompressed;
 
 
 template <typename Color = std::string, class Encoder = StringEncoder>
-class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
-    friend K2Compressed<Color, Encoder>;
-
+class K2Compressed : public MultiColorAnnotation<uint64_t, Color> {
   public:
     using Index = typename MultiColorAnnotation<uint64_t, Color>::Index;
     using Coloring = typename MultiColorAnnotation<uint64_t, Color>::Coloring;
 
-    ColorCompressed(uint64_t num_rows,
-                    size_t num_columns_cached = 1,
-                    bool verbose = false);
-
-    ~ColorCompressed();
+    K2Compressed();
+    K2Compressed(const ColorCompressed<Color, Encoder> &color_compressed);
 
     void set_coloring(Index i, const Coloring &coloring);
     Coloring get_coloring(Index i) const;
@@ -56,26 +50,10 @@ class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
     double sparsity() const;
 
   private:
-    void release();
-    void flush();
-    void flush(size_t j, sdsl::bit_vector *annotation_curr);
-    sdsl::bit_vector& uncompress(size_t j);
-
-    uint64_t num_rows_;
-
-    std::vector<sdsl::sd_vector<>*> bitmatrix_;
-
-    caches::fixed_sized_cache<size_t,
-                              sdsl::bit_vector*,
-                              caches::LRUCachePolicy<size_t>> cached_colors_;
-
+    sdsl::k2_tree<2> k2_tree_;
     std::unique_ptr<ColorEncoder<Color>> color_encoder_;
-
-    bool verbose_;
-
-    static const std::string kExtension;
 };
 
 } // namespace annotate
 
-#endif // __ANNOTATE_COLOR_COMPRESSED_HPP__
+#endif // __ANNOTATE_K2_HPP__
