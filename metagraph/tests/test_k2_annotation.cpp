@@ -39,6 +39,21 @@ TEST(K2Compressed, add_color) {
     EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(4)));
 }
 
+TEST(K2Compressed, add_color_2) {
+    annotate::ColorCompressed<> column_annotator(4, false);
+    column_annotator.add_colors(0, { "0", "1", "2" });
+    column_annotator.add_colors(1, { "1" });
+    column_annotator.add_colors(2, { "2", "3" });
+    column_annotator.add_colors(3, { "2" });
+
+    annotate::K2Compressed<> annotation(column_annotator);
+
+    EXPECT_EQ(convert_to_set({"0", "1", "2"}), convert_to_set(annotation.get(0)));
+    EXPECT_EQ(convert_to_set({"1"}), convert_to_set(annotation.get(1)));
+    EXPECT_EQ(convert_to_set({"2", "3"}), convert_to_set(annotation.get(2)));
+    EXPECT_EQ(convert_to_set({"2"}), convert_to_set(annotation.get(3)));
+}
+
 TEST(K2Compressed, set_coloring) {
     annotate::ColorCompressed<> column_annotator(5, false);
     column_annotator.set_coloring(0, { "Label0", "Label2", "Label8" });
