@@ -56,6 +56,8 @@ class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
     double sparsity() const;
 
   private:
+    std::vector<uint64_t> count_colors(const std::vector<Index> &indices) const;
+
     void release();
     void flush();
     void flush(size_t j, sdsl::bit_vector *annotation_curr);

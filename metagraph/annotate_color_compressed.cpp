@@ -8,7 +8,6 @@
 #include "utils.hpp"
 
 using libmaus2::util::NumberSerialisation;
-using libmaus2::util::StringSerialisation;
 using utils::remove_suffix;
 
 
@@ -38,8 +37,8 @@ ColorCompressed<Color, Encoder>::~ColorCompressed() {
     cached_colors_.Clear();
 
     for (auto *column : bitmatrix_) {
-        if (column)
-            delete column;
+        assert(column);
+        delete column;
     }
 }
 
@@ -193,6 +192,17 @@ bool ColorCompressed<Color, Encoder>
                 auto *new_column = new sdsl::sd_vector<>();
                 new_column->load(instream);
 
+                if (verbose_) {
+                    auto rank = sdsl::rank_support_sd<>(new_column);
+                    auto num_set_bits = rank(new_column->size());
+
+                    std::cout << "Color <" << color_encoder_load.decode(c)
+                                           << ">, "
+                              << "density: "
+                              << static_cast<double>(num_set_bits) / new_column->size()
+                              << ", set bits: " << num_set_bits << std::endl;
+                }
+
                 if (bitmatrix_.at(col)) {
                     auto &column = uncompress(col);
 
@@ -270,18 +280,10 @@ std::vector<std::pair<Color, size_t>>
 ColorCompressed<Color, Encoder>
 ::get_most_frequent_colors(const std::vector<Index> &indices,
                            size_t num_top) const {
-    const_cast<ColorCompressed*>(this)->flush();
-
-    std::vector<uint64_t> counter(bitmatrix_.size(), 0);
-    for (size_t j = 0; j < bitmatrix_.size(); ++j) {
-        for (Index i : indices) {
-            if ((*bitmatrix_[j])[i])
-                counter[j]++;
-        }
-    }
+    auto counter = count_colors(indices);
 
     std::vector<std::pair<size_t, size_t>> counts;
-    for (size_t j = 0; j < bitmatrix_.size(); ++j) {
+    for (size_t j = 0; j < counter.size(); ++j) {
         if (counter[j])
             counts.emplace_back(j, counter[j]);
     }
@@ -322,6 +324,24 @@ double ColorCompressed<Color, Encoder>::sparsity() const {
 }
 
 template <typename Color, class Encoder>
+std::vector<uint64_t>
+ColorCompressed<Color, Encoder>
+::count_colors(const std::vector<Index> &indices) const {
+    const_cast<ColorCompressed*>(this)->flush();
+
+    std::vector<uint64_t> counter(bitmatrix_.size(), 0);
+
+    for (size_t j = 0; j < bitmatrix_.size(); ++j) {
+        for (Index i : indices) {
+            if ((*bitmatrix_[j])[i])
+                counter[j]++;
+        }
+    }
+
+    return counter;
+}
+
+template <typename Color, class Encoder>
 void ColorCompressed<Color, Encoder>::flush() {
     for (const auto &cached_vector : cached_colors_) {
         flush(cached_vector.first, cached_vector.second);
@@ -356,9 +376,9 @@ sdsl::bit_vector& ColorCompressed<Color, Encoder>::uncompress(size_t j) {
         if (j < bitmatrix_.size() && bitmatrix_[j]) {
             // inflate vector
 
-            auto slct = sdsl::select_support_sd<>(bitmatrix_[j]);
-            auto rank = sdsl::rank_support_sd<>(bitmatrix_[j]);
-            auto num_set_bits = rank(bitmatrix_[j]->size());
+            sdsl::select_support_sd<> slct(bitmatrix_[j]);
+            sdsl::rank_support_sd<> rank(bitmatrix_[j]);
+            uint64_t num_set_bits = rank(bitmatrix_[j]->size());
 
             for (uint64_t i = 1; i <= num_set_bits; ++i) {
                 assert(slct(i) < bit_vector->size());
