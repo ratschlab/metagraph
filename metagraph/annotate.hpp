@@ -113,8 +113,8 @@ class MultiColorAnnotation
 template <typename Color = std::string>
 class ColorEncoder {
   public:
-
     virtual ~ColorEncoder() {};
+
     /**
      * If the color passed does not exist, insert
      * that color if insert_if_not_exists is true
@@ -151,6 +151,7 @@ class StringEncoder : public ColorEncoder<std::string> {
     std::unordered_map<Color, uint32_t> encode_color_;
     std::vector<Color> decode_color_;
 };
+
 
 /*
 class WaveletTrie : public MultiColorAnnotation {
