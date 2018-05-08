@@ -1,39 +1,34 @@
-#ifndef __ANNOTATE_COLOR_COMPRESSED_HPP__
-#define __ANNOTATE_COLOR_COMPRESSED_HPP__
+#ifndef __ANNOTATE_COLOR_COMPRESSED_FAST_HPP__
+#define __ANNOTATE_COLOR_COMPRESSED_FAST_HPP__
 
 #include <cache.hpp>
 #include <lru_cache_policy.hpp>
 
-#include "annotate.hpp"
+#include "annotate_color_compressed.hpp"
 #include "dbg_succinct.hpp"
 
 
 namespace annotate {
 
-template <typename Color, class Encoder>
-class K2Compressed;
-
-template <typename Color, class Encoder>
-class FastColorCompressed;
-
-
 template <typename Color = std::string, class Encoder = StringEncoder>
-class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
-    friend K2Compressed<Color, Encoder>;
-    friend FastColorCompressed<Color, Encoder>;
-
+class FastColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
   public:
     using Index = typename MultiColorAnnotation<uint64_t, Color>::Index;
     using Coloring = typename MultiColorAnnotation<uint64_t, Color>::Coloring;
 
-    ColorCompressed(uint64_t num_rows,
-                    size_t num_columns_cached = 1,
-                    bool verbose = false);
+    FastColorCompressed(uint64_t num_rows,
+                        size_t num_columns_cached = 1,
+                        bool verbose = false);
 
-    ColorCompressed(const ColorCompressed&) = delete;
-    ColorCompressed& operator=(const ColorCompressed&) = delete;
+    // Initialize from ColorCompressed annotator
+    FastColorCompressed(ColorCompressed<Color, Encoder>&& annotator,
+                        size_t num_columns_cached = 1,
+                        bool verbose = false);
 
-    ~ColorCompressed();
+    FastColorCompressed(const FastColorCompressed&) = delete;
+    FastColorCompressed& operator=(const FastColorCompressed&) = delete;
+
+    ~FastColorCompressed();
 
     void set_coloring(Index i, const Coloring &coloring);
     Coloring get_coloring(Index i) const;
@@ -62,15 +57,21 @@ class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
     size_t num_colors() const;
     double sparsity() const;
 
+    // chooses an optimal value for |num_aux_cols| by default
+    void update_index(size_t num_aux_cols = -1);
+
   private:
+    std::vector<size_t> get_row(Index i) const;
+    std::vector<size_t> filter_row(Index i, const std::vector<bool> &filter) const;
     std::vector<uint64_t> count_colors(const std::vector<Index> &indices) const;
 
-    void release();
     void flush();
     void flush(size_t j, sdsl::bit_vector *annotation_curr);
     sdsl::bit_vector& uncompress(size_t j);
 
     uint64_t num_rows_;
+
+    std::vector<sdsl::sd_vector<>> index_;
 
     std::vector<sdsl::sd_vector<>*> bitmatrix_;
 
@@ -87,4 +88,4 @@ class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
 
 } // namespace annotate
 
-#endif // __ANNOTATE_COLOR_COMPRESSED_HPP__
+#endif // __ANNOTATE_COLOR_COMPRESSED_FAST_HPP__
