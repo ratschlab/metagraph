@@ -2,7 +2,11 @@
 
 #include "gtest/gtest.h"
 
+#define protected public
+#define private public
+
 #include "annotate_color_compressed_fast.hpp"
+
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
@@ -318,7 +322,7 @@ TEST(FastColorCompressed, aggregate_colors) {
               convert_to_set(annotation.aggregate_colors({ 0, 1, 2, 3, 4 }, 1)));
 }
 
-TEST(FastColorCompressed, get_most_frequent_colors_fast) {
+TEST(FastColorCompressed, build_index) {
     annotate::FastColorCompressed<> annotation(5);
 
     annotation.add_colors(0, {"Label0", "Label2", "Label8"});
@@ -326,8 +330,107 @@ TEST(FastColorCompressed, get_most_frequent_colors_fast) {
     annotation.add_colors(3, {"Label1", "Label2", "Label8"});
     annotation.add_colors(4, {"Label2", "Label8"});
 
-    annotation.update_index();
+    EXPECT_TRUE(annotation.index_.size() == 0);
 
+    annotation.rebuild_index();
+
+    EXPECT_TRUE(annotation.index_.size() > 0);
+}
+
+TEST(FastColorCompressed, serialize_empty_index) {
+    {
+        annotate::FastColorCompressed<> annotation(5);
+
+        annotation.add_colors(0, {"Label0", "Label2", "Label8"});
+        annotation.add_colors(2, {"Label1", "Label2"});
+        annotation.add_colors(3, {"Label1", "Label2", "Label8"});
+        annotation.add_colors(4, {"Label2", "Label8"});
+
+        ASSERT_TRUE(!annotation.index_.size());
+
+        annotation.serialize(test_dump_basename_vec_good);
+    }
+    {
+        annotate::FastColorCompressed<> annotation(5);
+        ASSERT_FALSE(annotation.load(test_dump_basename_vec_bad));
+        ASSERT_TRUE(annotation.load(test_dump_basename_vec_good));
+
+        EXPECT_TRUE(!annotation.index_.size());
+    }
+}
+
+TEST(FastColorCompressed, serialize_index) {
+    size_t index_size;
+
+    {
+        annotate::FastColorCompressed<> annotation(5);
+
+        annotation.add_colors(0, {"Label0", "Label2", "Label8"});
+        annotation.add_colors(2, {"Label1", "Label2"});
+        annotation.add_colors(3, {"Label1", "Label2", "Label8"});
+        annotation.add_colors(4, {"Label2", "Label8"});
+
+        annotation.rebuild_index();
+
+        ASSERT_TRUE(annotation.index_.size() > 0);
+
+        index_size = annotation.index_.size();
+
+        annotation.serialize(test_dump_basename_vec_good);
+    }
+    {
+        annotate::FastColorCompressed<> annotation(5);
+        ASSERT_FALSE(annotation.load(test_dump_basename_vec_bad));
+        ASSERT_TRUE(annotation.load(test_dump_basename_vec_good));
+
+        EXPECT_TRUE(annotation.index_.size() > 0);
+        EXPECT_EQ(index_size, annotation.index_.size());
+    }
+}
+
+TEST(FastColorCompressed, serialize_index_big) {
+    {
+        annotate::FastColorCompressed<> annotation(5);
+
+        annotation.add_colors(0, {"Label0", "Label2", "Label8"});
+        annotation.add_colors(2, {"Label1", "Label2"});
+        annotation.add_colors(3, {"Label1", "Label2", "Label8"});
+        annotation.add_colors(4, {"Label2", "Label8"});
+
+        annotation.rebuild_index(100);
+
+        ASSERT_EQ(100u, annotation.index_.size());
+
+        annotation.serialize(test_dump_basename_vec_good);
+    }
+    {
+        annotate::FastColorCompressed<> annotation(5);
+        ASSERT_FALSE(annotation.load(test_dump_basename_vec_bad));
+        ASSERT_TRUE(annotation.load(test_dump_basename_vec_good));
+
+        EXPECT_TRUE(annotation.index_.size() > 0);
+        EXPECT_EQ(100u, annotation.index_.size());
+    }
+}
+
+annotate::FastColorCompressed<>*
+initialize_fast_color_compressed_annotator(size_t index_size = 0) {
+    auto annotation = new annotate::FastColorCompressed<>(6);
+
+    annotation->rebuild_index(index_size);
+
+    annotation->add_colors(0, {"Label0", "Label2", "Label8"});
+    annotation->add_colors(2, {"Label1", "Label2"});
+    annotation->add_colors(3, {"Label1", "Label2", "Label8"});
+    annotation->add_colors(4, {"Label2", "Label8"});
+    for (size_t i = 0; i < 10000; ++i) {
+        annotation->add_color(5, std::to_string(i));
+    }
+
+    return annotation;
+}
+
+void test_fast_color_compressed_annotator(const annotate::FastColorCompressed<> &annotation) {
     typedef std::vector<std::pair<std::string, size_t>> VectorCounts;
     EXPECT_EQ(VectorCounts({}),
               annotation.get_most_frequent_colors({ 0, 1, 2, 3, 4 }, 0));
@@ -371,17 +474,7 @@ TEST(FastColorCompressed, get_most_frequent_colors_fast) {
                              std::make_pair("Label1", 2),
                              std::make_pair("Label0", 1) }),
               annotation.get_most_frequent_colors({ 0, 1, 2, 3, 4 }, 1000));
-}
 
-TEST(FastColorCompressed, aggregate_colors_fast) {
-    annotate::FastColorCompressed<> annotation(5);
-
-    annotation.add_colors(0, {"Label0", "Label2", "Label8"});
-    annotation.add_colors(2, {"Label1", "Label2"});
-    annotation.add_colors(3, {"Label1", "Label2", "Label8"});
-    annotation.add_colors(4, {"Label2"});
-
-    annotation.update_index();
 
     EXPECT_EQ(std::vector<std::string>({}),
               annotation.aggregate_colors({}));
@@ -404,10 +497,10 @@ TEST(FastColorCompressed, aggregate_colors_fast) {
     EXPECT_EQ(convert_to_set({"Label2"}),
               convert_to_set(annotation.aggregate_colors({ 2, 4 })));
 
-    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
+    EXPECT_EQ(convert_to_set({"Label1", "Label2", "Label8"}),
               convert_to_set(annotation.aggregate_colors({ 2, 4 }, 0)));
 
-    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
+    EXPECT_EQ(convert_to_set({"Label1", "Label2", "Label8"}),
               convert_to_set(annotation.aggregate_colors({ 2, 4 }, 0.5)));
 
     EXPECT_EQ(convert_to_set({"Label2"}),
@@ -431,7 +524,7 @@ TEST(FastColorCompressed, aggregate_colors_fast) {
     EXPECT_EQ(convert_to_set({"Label1", "Label2", "Label8"}),
               convert_to_set(annotation.aggregate_colors({ 0, 1, 2, 3, 4 }, 0.4)));
 
-    EXPECT_EQ(convert_to_set({"Label2"}),
+    EXPECT_EQ(convert_to_set({"Label2", "Label8"}),
               convert_to_set(annotation.aggregate_colors({ 0, 1, 2, 3, 4 }, 0.401)));
 
     EXPECT_EQ(convert_to_set({"Label2"}),
@@ -442,75 +535,56 @@ TEST(FastColorCompressed, aggregate_colors_fast) {
 
     EXPECT_EQ(convert_to_set({}),
               convert_to_set(annotation.aggregate_colors({ 0, 1, 2, 3, 4 }, 1)));
+}
+
+TEST(FastColorCompressed, test_all) {
+    std::unique_ptr<annotate::FastColorCompressed<>> annotator(
+        initialize_fast_color_compressed_annotator()
+    );
+
+    test_fast_color_compressed_annotator(*annotator);
+}
+
+TEST(FastColorCompressed, test_all_index_default) {
+    std::unique_ptr<annotate::FastColorCompressed<>> annotator(
+        initialize_fast_color_compressed_annotator()
+    );
+
+    annotator->rebuild_index();
+
+    test_fast_color_compressed_annotator(*annotator);
+}
+
+TEST(FastColorCompressed, test_all_index_100) {
+    std::unique_ptr<annotate::FastColorCompressed<>> annotator(
+        initialize_fast_color_compressed_annotator()
+    );
+
+    annotator->rebuild_index(100);
+
+    test_fast_color_compressed_annotator(*annotator);
+}
+
+TEST(FastColorCompressed, test_all_index_preinit_100) {
+    std::unique_ptr<annotate::FastColorCompressed<>> annotator(
+        initialize_fast_color_compressed_annotator(100)
+    );
+
+    test_fast_color_compressed_annotator(*annotator);
 }
 
 TEST(FastColorCompressed, initialize_from_ColorCompressed) {
-    annotate::ColorCompressed<> annotation_init(5);
+    std::unique_ptr<annotate::FastColorCompressed<>> annotator(
+        initialize_fast_color_compressed_annotator()
+    );
+    annotator->serialize(test_dump_basename_vec_good);
 
-    annotation_init.add_colors(0, {"Label0", "Label2", "Label8"});
-    annotation_init.add_colors(2, {"Label1", "Label2"});
-    annotation_init.add_colors(3, {"Label1", "Label2", "Label8"});
-    annotation_init.add_colors(4, {"Label2"});
+    annotate::ColorCompressed<> color_compressed(0);
+    ASSERT_TRUE(color_compressed.load(test_dump_basename_vec_good));
 
-    annotate::FastColorCompressed<> annotation(std::move(annotation_init));
+    annotator.reset(
+        new annotate::FastColorCompressed<>(std::move(color_compressed))
+    );
 
-    EXPECT_EQ(std::vector<std::string>({}),
-              annotation.aggregate_colors({}));
-
-    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
-              convert_to_set(annotation.aggregate_colors({ 2 })));
-
-    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
-              convert_to_set(annotation.aggregate_colors({ 2 }, 0)));
-
-    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
-              convert_to_set(annotation.aggregate_colors({ 2 }, 1)));
-
-    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
-              convert_to_set(annotation.aggregate_colors({ 2 }, 1)));
-
-    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
-              convert_to_set(annotation.aggregate_colors({ 2 }, 0.5)));
-
-    EXPECT_EQ(convert_to_set({"Label2"}),
-              convert_to_set(annotation.aggregate_colors({ 2, 4 })));
-
-    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
-              convert_to_set(annotation.aggregate_colors({ 2, 4 }, 0)));
-
-    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
-              convert_to_set(annotation.aggregate_colors({ 2, 4 }, 0.5)));
-
-    EXPECT_EQ(convert_to_set({"Label2"}),
-              convert_to_set(annotation.aggregate_colors({ 2, 4 }, 0.501)));
-
-    EXPECT_EQ(convert_to_set({"Label2"}),
-              convert_to_set(annotation.aggregate_colors({ 2, 4 }, 1)));
-
-    EXPECT_EQ(convert_to_set({}),
-              convert_to_set(annotation.aggregate_colors({ 0, 1, 2, 3, 4 })));
-
-    EXPECT_EQ(convert_to_set({"Label0", "Label1", "Label2", "Label8"}),
-              convert_to_set(annotation.aggregate_colors({ 0, 1, 2, 3, 4 }, 0)));
-
-    EXPECT_EQ(convert_to_set({"Label0", "Label1", "Label2", "Label8"}),
-              convert_to_set(annotation.aggregate_colors({ 0, 1, 2, 3, 4 }, 0.2)));
-
-    EXPECT_EQ(convert_to_set({"Label1", "Label2", "Label8"}),
-              convert_to_set(annotation.aggregate_colors({ 0, 1, 2, 3, 4 }, 0.201)));
-
-    EXPECT_EQ(convert_to_set({"Label1", "Label2", "Label8"}),
-              convert_to_set(annotation.aggregate_colors({ 0, 1, 2, 3, 4 }, 0.4)));
-
-    EXPECT_EQ(convert_to_set({"Label2"}),
-              convert_to_set(annotation.aggregate_colors({ 0, 1, 2, 3, 4 }, 0.401)));
-
-    EXPECT_EQ(convert_to_set({"Label2"}),
-              convert_to_set(annotation.aggregate_colors({ 0, 1, 2, 3, 4 }, 0.8)));
-
-    EXPECT_EQ(convert_to_set({}),
-              convert_to_set(annotation.aggregate_colors({ 0, 1, 2, 3, 4 }, 0.801)));
-
-    EXPECT_EQ(convert_to_set({}),
-              convert_to_set(annotation.aggregate_colors({ 0, 1, 2, 3, 4 }, 1)));
+    test_fast_color_compressed_annotator(*annotator);
 }

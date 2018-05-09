@@ -272,6 +272,10 @@ namespace utils {
                            std::vector<KMer> *kmers,
                            const std::vector<TAlphabet> &suffix);
 
+
+    void decompress_sd_vector(const sdsl::sd_vector<> &vector,
+                              sdsl::bit_vector *out);
+
 } // namespace utils
 
 #endif // __UTILS_HPP__

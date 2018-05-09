@@ -11,6 +11,7 @@
 #include "traverse.hpp"
 #include "dbg_succinct_merge.hpp"
 #include "annotate_color_compressed.hpp"
+#include "annotate_color_compressed_fast.hpp"
 #include "annotate_row_compressed.hpp"
 #include "annotate_bloom_filter.hpp"
 #include "unix_tools.hpp"
@@ -686,7 +687,8 @@ int main(int argc, const char *argv[]) {
             } else {
                 annotation.reset(
                     new annotate::ColorCompressed<>(graph->num_edges() + 1,
-                                                    kNumCachedColors)
+                                                    kNumCachedColors,
+                                                    config->verbose)
                 );
             }
 
@@ -809,6 +811,12 @@ int main(int argc, const char *argv[]) {
             std::unique_ptr<Annotator> annotation;
             if (config->use_row_annotator) {
                 annotation.reset(new annotate::RowCompressed<>(0, config->sparse));
+            } else if (config->fast) {
+                annotation.reset(
+                    new annotate::FastColorCompressed<>(
+                        0, kNumCachedColors, config->verbose
+                    )
+                );
             } else {
                 annotation.reset(
                     new annotate::ColorCompressed<>(

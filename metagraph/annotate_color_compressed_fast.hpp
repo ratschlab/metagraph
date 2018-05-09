@@ -23,7 +23,8 @@ class FastColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
     // Initialize from ColorCompressed annotator
     FastColorCompressed(ColorCompressed<Color, Encoder>&& annotator,
                         size_t num_columns_cached = 1,
-                        bool verbose = false);
+                        bool verbose = false,
+                        bool build_index = true);
 
     FastColorCompressed(const FastColorCompressed&) = delete;
     FastColorCompressed& operator=(const FastColorCompressed&) = delete;
@@ -58,32 +59,51 @@ class FastColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
     double sparsity() const;
 
     // chooses an optimal value for |num_aux_cols| by default
-    void update_index(size_t num_aux_cols = -1);
+    void rebuild_index(size_t num_aux_cols = -1);
 
   private:
+    bool get_entry(Index i, size_t j) const;
+    bool get_index_entry(Index i, size_t t) const;
+
     std::vector<size_t> get_row(Index i) const;
     std::vector<size_t> filter_row(Index i, const std::vector<bool> &filter) const;
     std::vector<uint64_t> count_colors(const std::vector<Index> &indices) const;
 
     void flush();
     void flush(size_t j, sdsl::bit_vector *annotation_curr);
-    sdsl::bit_vector& uncompress(size_t j);
+    void flush_index(size_t t, sdsl::bit_vector *annotation_curr);
+
+    sdsl::bit_vector& decompress(size_t j);
+    sdsl::bit_vector& decompress_index(size_t t);
+
+    void update_index();
 
     uint64_t num_rows_;
 
-    std::vector<sdsl::sd_vector<>> index_;
+    bool to_update_ = false;
+    bool to_update_index_ = false;
 
-    std::vector<sdsl::sd_vector<>*> bitmatrix_;
+    std::vector<std::unique_ptr<sdsl::sd_vector<>>> bitmatrix_;
 
     caches::fixed_sized_cache<size_t,
                               sdsl::bit_vector*,
                               caches::LRUCachePolicy<size_t>> cached_colors_;
+
+    std::vector<size_t> column_to_index_;
+    std::vector<std::vector<size_t>> index_to_columns_;
+
+    std::vector<std::unique_ptr<sdsl::sd_vector<>>> index_;
+
+    caches::fixed_sized_cache<size_t,
+                              sdsl::bit_vector*,
+                              caches::LRUCachePolicy<size_t>> cached_index_;
 
     std::unique_ptr<ColorEncoder<Color>> color_encoder_;
 
     bool verbose_;
 
     static const std::string kExtension;
+    static const std::string kIndexExtension;
 };
 
 } // namespace annotate

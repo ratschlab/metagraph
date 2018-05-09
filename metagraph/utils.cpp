@@ -390,4 +390,21 @@ void sequence_to_kmers(const std::string &sequence,
     sequence_to_kmers(std::move(seq), k, kmers, suffix);
 }
 
+
+void decompress_sd_vector(const sdsl::sd_vector<> &vector,
+                          sdsl::bit_vector *out) {
+    assert(out);
+    assert(vector.size() == out->size());
+
+    sdsl::select_support_sd<> slct(&vector);
+    sdsl::rank_support_sd<> rank(&vector);
+    uint64_t num_set_bits = rank(vector.size());
+
+    for (uint64_t i = 1; i <= num_set_bits; ++i) {
+        assert(slct(i) < out->size());
+
+        (*out)[slct(i)] = 1;
+    }
+}
+
 } // namespace utils

@@ -17,6 +17,9 @@ template <typename Color, class Encoder>
 const std::string FastColorCompressed<Color, Encoder>::kExtension = ".color.annodbg";
 
 template <typename Color, class Encoder>
+const std::string FastColorCompressed<Color, Encoder>::kIndexExtension = ".colindex.annodbg";
+
+template <typename Color, class Encoder>
 FastColorCompressed<Color, Encoder>::FastColorCompressed(uint64_t num_rows,
                                                          size_t num_columns_cached,
                                                          bool verbose)
@@ -27,7 +30,14 @@ FastColorCompressed<Color, Encoder>::FastColorCompressed(uint64_t num_rows,
             [this](size_t j, sdsl::bit_vector *col_uncompressed) {
                 this->flush(j, col_uncompressed);
                 delete col_uncompressed;
-                index_.clear();
+            }
+        ),
+        cached_index_(
+            std::max(static_cast<size_t>(1), num_columns_cached / 2),
+            caches::LRUCachePolicy<size_t>(),
+            [this](size_t t, sdsl::bit_vector *col_uncompressed) {
+                this->flush_index(t, col_uncompressed);
+                delete col_uncompressed;
             }
         ),
         color_encoder_(new Encoder()),
@@ -37,7 +47,8 @@ template <typename Color, class Encoder>
 FastColorCompressed<Color, Encoder>
 ::FastColorCompressed(ColorCompressed<Color, Encoder>&& annotator,
                       size_t num_columns_cached,
-                      bool verbose)
+                      bool verbose,
+                      bool build_index)
       : num_rows_(annotator.num_rows_),
         cached_colors_(
             num_columns_cached,
@@ -45,29 +56,37 @@ FastColorCompressed<Color, Encoder>
             [this](size_t j, sdsl::bit_vector *col_uncompressed) {
                 this->flush(j, col_uncompressed);
                 delete col_uncompressed;
-                index_.clear();
+            }
+        ),
+        cached_index_(
+            std::max(static_cast<size_t>(1), num_columns_cached / 2),
+            caches::LRUCachePolicy<size_t>(),
+            [this](size_t t, sdsl::bit_vector *col_uncompressed) {
+                this->flush_index(t, col_uncompressed);
+                delete col_uncompressed;
             }
         ),
         verbose_(verbose) {
     annotator.cached_colors_.Clear();
-    annotator.flush();
 
-    bitmatrix_ = std::move(annotator.bitmatrix_);
+    bitmatrix_.resize(annotator.bitmatrix_.size());
+    for (size_t i = 0; i < annotator.bitmatrix_.size(); ++i) {
+        bitmatrix_[i].reset(annotator.bitmatrix_[i]);
+    }
+    annotator.bitmatrix_.clear();
+    // bitmatrix_ = std::move(annotator.bitmatrix_);
 
     color_encoder_ = std::move(annotator.color_encoder_);
     annotator.color_encoder_.reset(new Encoder());
 
-    update_index();
+    if (build_index)
+        rebuild_index();
 }
 
 template <typename Color, class Encoder>
 FastColorCompressed<Color, Encoder>::~FastColorCompressed() {
     cached_colors_.Clear();
-
-    for (auto *column : bitmatrix_) {
-        assert(column);
-        delete column;
-    }
+    cached_index_.Clear();
 }
 
 template <typename Color, class Encoder>
@@ -76,11 +95,34 @@ FastColorCompressed<Color, Encoder>
 ::set_coloring(Index i, const Coloring &coloring) {
     assert(i < num_rows_);
 
-    for (size_t j = 0; j < color_encoder_->size(); ++j) {
-        uncompress(j)[i] = 0;
-    }
+    // add new colors
     for (const auto &color : coloring) {
-        uncompress(color_encoder_->encode(color, true))[i] = 1;
+        color_encoder_->encode(color, true);
+    }
+
+    // coloring as a row
+    std::vector<bool> row(num_colors(), 0);
+    for (const auto &color : coloring) {
+        row[color_encoder_->encode(color, true)] = 1;
+    }
+
+    // reset coloring
+    for (size_t j = 0; j < row.size(); ++j) {
+        if (get_entry(i, j) != row[j])
+            decompress(j)[i] = row[j];
+    }
+
+    update_index();
+    for (size_t t = 0; t < index_to_columns_.size(); ++t) {
+        bool non_empty_block = false;
+
+        for (size_t j : index_to_columns_[t]) {
+            if (row[j])
+                non_empty_block = true;
+        }
+
+        if (get_index_entry(i, t) != non_empty_block)
+            decompress_index(t)[i] = non_empty_block;
     }
 }
 
@@ -100,7 +142,18 @@ template <typename Color, class Encoder>
 void FastColorCompressed<Color, Encoder>::add_color(Index i, const Color &color) {
     assert(i < num_rows_);
 
-    uncompress(color_encoder_->encode(color, true))[i] = 1;
+    size_t j = color_encoder_->encode(color, true);
+    if (get_entry(i, j))
+        return;
+
+    decompress(j)[i] = 1;
+
+    update_index();
+    if (index_to_columns_.size()) {
+        size_t t = column_to_index_[j];
+        if (!get_index_entry(i, t))
+            decompress_index(t)[i] = 1;
+    }
 }
 
 template <typename Color, class Encoder>
@@ -112,7 +165,7 @@ void FastColorCompressed<Color, Encoder>::add_colors(Index i, const Coloring &co
 
 template <typename Color, class Encoder>
 void FastColorCompressed<Color, Encoder>::add_colors(const std::vector<Index> &indices,
-                                                 const Coloring &coloring) {
+                                                     const Coloring &coloring) {
     for (const auto &color : coloring) {
         for (Index i : indices) {
             add_color(i, color);
@@ -125,12 +178,7 @@ bool
 FastColorCompressed<Color, Encoder>
 ::has_color(Index i, const Color &color) const {
     try {
-        auto j = color_encoder_->encode(color);
-        if (cached_colors_.Cached(j)) {
-            return (*cached_colors_.Get(j))[i];
-        } else {
-            return (*bitmatrix_[j])[i];
-        }
+        return get_entry(i, color_encoder_->encode(color));
     } catch (...) {
         return false;
     }
@@ -160,17 +208,17 @@ void FastColorCompressed<Color, Encoder>::serialize(const std::string &filename)
 
     color_encoder_->serialize(outstream);
 
-    for (auto *column : bitmatrix_) {
-        assert(column);
+    for (const auto &column : bitmatrix_) {
         column->serialize(outstream);
     }
 
-    if (!index_.size())
-        const_cast<FastColorCompressed*>(this)->update_index();
+    // serialize the column index
+    outstream = std::ofstream(remove_suffix(filename, kExtension) + kIndexExtension);
 
     NumberSerialisation::serialiseNumber(outstream, index_.size());
-    for (auto &aux_column : index_) {
-        aux_column.serialize(outstream);
+    for (size_t t = 0; t < index_.size(); ++t) {
+        index_[t]->serialize(outstream);
+        serialize_number_vector(outstream, index_to_columns_[t]);
     }
 }
 
@@ -180,13 +228,17 @@ bool FastColorCompressed<Color, Encoder>
 ::merge_load(const std::vector<std::string> &filenames) {
     // release the columns stored
     cached_colors_.Clear();
+    cached_index_.Clear();
 
-    for (auto *column : bitmatrix_) {
-        if (column)
-            delete column;
-    }
+    bitmatrix_.clear();
+    index_.clear();
+    column_to_index_.clear();
+    index_to_columns_.clear();
 
     color_encoder_.reset(new Encoder());
+
+    to_update_ = false;
+    to_update_index_ = false;
 
     try {
         for (auto filename : filenames) {
@@ -216,7 +268,7 @@ bool FastColorCompressed<Color, Encoder>
             }
 
             // update the existing and add some new columns
-            bitmatrix_.resize(color_encoder_->size(), NULL);
+            bitmatrix_.resize(color_encoder_->size());
             for (size_t c = 0; c < color_encoder_load.size(); ++c) {
                 size_t col = color_encoder_->encode(color_encoder_load.decode(c));
 
@@ -234,32 +286,12 @@ bool FastColorCompressed<Color, Encoder>
                               << ", set bits: " << num_set_bits << std::endl;
                 }
 
-                if (bitmatrix_.at(col)) {
-                    auto &column = uncompress(col);
-
-                    auto slct = sdsl::select_support_sd<>(new_column);
-                    auto rank = sdsl::rank_support_sd<>(new_column);
-                    auto num_set_bits = rank(new_column->size());
-
-                    for (uint64_t i = 1; i <= num_set_bits; ++i) {
-                        assert(slct(i) < column.size());
-
-                        column[slct(i)] = 1;
-                    }
+                if (bitmatrix_.at(col).get()) {
+                    utils::decompress_sd_vector(*new_column, &decompress(col));
                     delete new_column;
                 } else {
-                    bitmatrix_.at(col) = new_column;
+                    bitmatrix_[col].reset(new_column);
                 }
-            }
-
-            if (filenames.size() == 1) {
-                try {
-                    index_.resize(NumberSerialisation::deserialiseNumber(instream));
-
-                    for (auto &aux_column : index_) {
-                        aux_column.load(instream);
-                    }
-                } catch (...) {}
             }
         }
 
@@ -268,17 +300,54 @@ bool FastColorCompressed<Color, Encoder>
                       << bitmatrix_.size() << " columns)" << std::endl;
         }
 
-        if (!index_.size())
-            update_index();
+        if (filenames.size() == 1) {
+            if (verbose_) {
+                std::cout << "Loading index from file "
+                          << remove_suffix(filenames[0], kExtension) + kIndexExtension
+                          << "..." << std::endl;
+            }
+
+            try {
+                std::ifstream instream(remove_suffix(filenames[0], kExtension) + kIndexExtension);
+
+                size_t index_size = NumberSerialisation::deserialiseNumber(instream);
+
+                column_to_index_.resize(num_colors());
+
+                for (size_t t = 0; t < index_size; ++t) {
+                    index_.emplace_back(new sdsl::sd_vector<>());
+                    index_.back()->load(instream);
+
+                    index_to_columns_.emplace_back(load_number_vector<size_t>(instream));
+
+                    for (size_t j : index_to_columns_.back()) {
+                        column_to_index_[j] = t;
+                    }
+                }
+            } catch (...) {
+                std::cerr << "Warning: Can't load index from disk."
+                          << " Initializing an index using the default strategy..." << std::endl;
+                rebuild_index();
+                std::cerr << "The default index has been initialized." << std::endl;
+            }
+        } else {
+            std::cerr << "Warning: Annotation was loaded from multiple files."
+                      << " Rebuild index using the default strategy..." << std::endl;
+            rebuild_index();
+            std::cerr << "The default index has been initialized." << std::endl;
+        }
 
         if (verbose_) {
-            for (size_t t = 0; t < index_.size(); ++t) {
-                auto rank = sdsl::rank_support_sd<>(&index_[t]);
-                auto num_set_bits = rank(index_[t].size());
+            std::cout << "Column index loading finished ("
+                      << index_.size() << " index columns)" << std::endl;
 
-                std::cout << "Aux column " << t << ", "
+            for (size_t t = 0; t < index_.size(); ++t) {
+                auto rank = sdsl::rank_support_sd<>(index_[t].get());
+                auto num_set_bits = rank(index_[t]->size());
+
+                std::cout << "Index column " << t << ", "
                           << "density: "
-                          << static_cast<double>(num_set_bits) / index_[t].size()
+                          << static_cast<double>(num_set_bits) / index_[t]->size()
                           << ", set bits: " << num_set_bits << std::endl;
             }
         }
@@ -308,14 +377,12 @@ FastColorCompressed<Color, Encoder>
 
     Coloring filtered_colors;
 
-    std::vector<bool> color_filter(bitmatrix_.size(), true);
-    std::vector<size_t> discovered(bitmatrix_.size(), 0);
+    std::vector<bool> color_filter(num_colors(), true);
+    std::vector<size_t> discovered(num_colors(), 0);
     uint64_t iteration = 0;
 
     for (Index i : indices) {
         for (size_t j : filter_row(i, color_filter)) {
-            assert((*bitmatrix_[j])[i]);
-
             if (++discovered[j] >= min_colors_discovered) {
                 filtered_colors.push_back(color_encoder_->decode(j));
                 color_filter[j] = false;
@@ -379,63 +446,70 @@ double FastColorCompressed<Color, Encoder>::sparsity() const {
     const_cast<FastColorCompressed*>(this)->flush();
 
     for (size_t j = 0; j < bitmatrix_.size(); ++j) {
-        auto rank = sdsl::rank_support_sd<>(bitmatrix_[j]);
+        auto rank = sdsl::rank_support_sd<>(bitmatrix_[j].get());
         num_set_bits += rank(bitmatrix_[j]->size());
     }
 
-    return 1 - static_cast<double>(num_set_bits) / num_colors() / num_rows_;
+    double density = static_cast<double>(num_set_bits) / num_colors() / num_rows_;
+    return 1 - density;
 }
 
 template <typename Color, class Encoder>
-void FastColorCompressed<Color, Encoder>::update_index(size_t num_aux_cols) {
+void FastColorCompressed<Color, Encoder>::rebuild_index(size_t num_aux_cols) {
     const_cast<FastColorCompressed*>(this)->flush();
 
     index_.clear();
+    column_to_index_.clear();
+    index_to_columns_.clear();
 
     if (num_aux_cols == static_cast<size_t>(-1)) {
         // In the worst case, on average, we access
         // |num_aux_cols| auxiliary columns, plus
         // (|density| * |num_columns|) * (|num_columns| / |num_aux_cols|)
         // real columns per query.
-        num_aux_cols = std::sqrt((1 - sparsity()) * bitmatrix_.size()
-                                                  * bitmatrix_.size());
+        num_aux_cols = std::sqrt((1 - sparsity()) * num_colors() * num_colors());
     }
+
+    if (!num_aux_cols)
+        return;
+
+    index_.resize(num_aux_cols);
+    column_to_index_.resize(bitmatrix_.size());
+    index_to_columns_.resize(num_aux_cols);
 
     if (verbose_)
         std::cout << "Updating " << num_aux_cols << " index columns" << std::endl;
 
-    size_t block_width = (bitmatrix_.size() + num_aux_cols - 1) / num_aux_cols;
+    size_t block_width = (num_colors() + num_aux_cols - 1) / num_aux_cols;
 
     if (verbose_)
         std::cout << "Processed index columns..." << std::endl;
 
     for (size_t t = 0; t < num_aux_cols; ++t) {
-        sdsl::bit_vector aux_col(num_rows_, 0);
+        sdsl::bit_vector &index_col = decompress_index(t);
 
         if (verbose_)
             std::cout << "Block " << t << ": " << std::flush;
 
         for (size_t j = t * block_width; j < std::min((t + 1) * block_width,
-                                                      bitmatrix_.size()); ++j) {
+                                                      num_colors()); ++j) {
+            column_to_index_[j] = t;
+            index_to_columns_[t].push_back(j);
 
             if (verbose_)
                 std::cout << j << ".." << std::flush;
 
-            sdsl::select_support_sd<> slct(bitmatrix_[j]);
-            sdsl::rank_support_sd<> rank(bitmatrix_[j]);
+            sdsl::select_support_sd<> slct(bitmatrix_[j].get());
+            sdsl::rank_support_sd<> rank(bitmatrix_[j].get());
             uint64_t num_set_bits = rank(bitmatrix_[j]->size());
 
             for (uint64_t i = 1; i <= num_set_bits; ++i) {
-                assert(slct(i) < aux_col.size());
-
-                aux_col[slct(i)] = 1;
+                index_col[slct(i)] = 1;
             }
         }
 
         if (verbose_)
             std::cout << std::endl;
-
-        index_.emplace_back(aux_col);
     }
 }
 
@@ -446,7 +520,7 @@ std::vector<size_t> FastColorCompressed<Color, Encoder>::get_row(Index i) const 
     std::vector<size_t> set_bits;
     set_bits.reserve(bitmatrix_.size());
 
-    if (!index_.size()) {
+    if (!index_to_columns_.size()) {
         // query all columns if auxiliary index is not initialized
         for (size_t j = 0; j < bitmatrix_.size(); ++j) {
             if ((*bitmatrix_[j])[i])
@@ -457,14 +531,11 @@ std::vector<size_t> FastColorCompressed<Color, Encoder>::get_row(Index i) const 
     }
 
     // use the initialized auxiliary index columns
-    size_t block_width = (bitmatrix_.size() + index_.size() - 1) / index_.size();
-
-    for (size_t t = 0; t < index_.size(); ++t) {
-        if (!index_[t][i])
+    for (size_t t = 0; t < index_to_columns_.size(); ++t) {
+        if (!index_to_columns_[t].size() || !(*index_[t])[i])
             continue;
 
-        for (size_t j = t * block_width;
-                    j < (t + 1) * block_width && j < bitmatrix_.size(); ++j) {
+        for (size_t j : index_to_columns_[t]) {
             if ((*bitmatrix_[j])[i])
                 set_bits.push_back(j);
         }
@@ -495,23 +566,18 @@ FastColorCompressed<Color, Encoder>
     }
 
     // use the initialized auxiliary index columns
-    size_t block_width = (bitmatrix_.size() + index_.size() - 1) / index_.size();
-
     std::vector<size_t> bits_to_check;
     bits_to_check.reserve(bitmatrix_.size());
 
     for (size_t t = 0; t < index_.size(); ++t) {
         bits_to_check.clear();
 
-        size_t block_begin = t * block_width;
-        size_t block_end = std::min((t + 1) * block_width, bitmatrix_.size());
-
-        for (size_t j = block_begin; j < block_end; ++j) {
+        for (size_t j : index_to_columns_[t]) {
             if (filter[j])
                 bits_to_check.push_back(j);
         }
 
-        if (bits_to_check.size() > 1 && !index_[t][i])
+        if (bits_to_check.size() > 1 && !(*index_[t])[i])
             continue;
 
         for (size_t j : bits_to_check) {
@@ -539,11 +605,42 @@ FastColorCompressed<Color, Encoder>
 }
 
 template <typename Color, class Encoder>
-void FastColorCompressed<Color, Encoder>::flush() {
-    for (const auto &cached_vector : cached_colors_) {
-        flush(cached_vector.first, cached_vector.second);
+bool FastColorCompressed<Color, Encoder>::get_entry(Index i, size_t j) const {
+    if (cached_colors_.Cached(j)) {
+        return (*cached_colors_.Get(j))[i];
+    } else if (j < bitmatrix_.size()) {
+        assert(bitmatrix_[j].get());
+        return (*bitmatrix_[j])[i];
+    } else {
+        return false;
     }
-    assert(bitmatrix_.size() == color_encoder_->size());
+}
+
+template <typename Color, class Encoder>
+bool FastColorCompressed<Color, Encoder>::get_index_entry(Index i, size_t t) const {
+    if (cached_index_.Cached(t)) {
+        return (*cached_index_.Get(t))[i];
+    } else {
+        assert(t < index_.size() && index_[t].get());
+        return (*index_[t])[i];
+    }
+}
+
+template <typename Color, class Encoder>
+void FastColorCompressed<Color, Encoder>::flush() {
+    if (to_update_) {
+        for (const auto &cached_vector : cached_colors_) {
+            flush(cached_vector.first, cached_vector.second);
+        }
+        to_update_ = false;
+    }
+
+    if (to_update_index_) {
+        for (const auto &cached_index : cached_index_) {
+            flush_index(cached_index.first, cached_index.second);
+        }
+        to_update_index_ = false;
+    }
 }
 
 template <typename Color, class Encoder>
@@ -551,48 +648,82 @@ void FastColorCompressed<Color, Encoder>::flush(size_t j, sdsl::bit_vector *vect
     assert(vector);
     assert(cached_colors_.Cached(j));
 
+    if (!to_update_)
+        return;
+
     while (bitmatrix_.size() <= j) {
-        bitmatrix_.push_back(NULL);
+        bitmatrix_.emplace_back();
     }
 
-    if (bitmatrix_[j])
-        delete bitmatrix_[j];
-
-    bitmatrix_[j] = new sdsl::sd_vector<>(*vector);
-}
-
-void decompress_sd_vector(const sdsl::sd_vector<> &vector,
-                          sdsl::bit_vector *out) {
-    assert(out);
-    assert(vector.size() == out->size());
-
-    sdsl::select_support_sd<> slct(&vector);
-    sdsl::rank_support_sd<> rank(&vector);
-    uint64_t num_set_bits = rank(vector.size());
-
-    for (uint64_t i = 1; i <= num_set_bits; ++i) {
-        assert(slct(i) < out->size());
-
-        (*out)[slct(i)] = 1;
-    }
+    bitmatrix_[j].reset();
+    bitmatrix_[j].reset(new sdsl::sd_vector<>(*vector));
 }
 
 template <typename Color, class Encoder>
-sdsl::bit_vector& FastColorCompressed<Color, Encoder>::uncompress(size_t j) {
-    assert(j < color_encoder_->size());
+void FastColorCompressed<Color, Encoder>::flush_index(size_t t, sdsl::bit_vector *vector) {
+    assert(vector);
+    assert(cached_index_.Cached(t));
+    assert(t < index_.size());
 
-    index_.clear();
+    if (!to_update_index_)
+        return;
+
+    index_[t].reset();
+    index_[t].reset(new sdsl::sd_vector<>(*vector));
+}
+
+template <typename Color, class Encoder>
+sdsl::bit_vector& FastColorCompressed<Color, Encoder>::decompress(size_t j) {
+    assert(j < num_colors());
+
+    to_update_ = true;
 
     try {
         return *cached_colors_.Get(j);
     } catch (...) {
         sdsl::bit_vector *bit_vector = new sdsl::bit_vector(num_rows_, 0);
 
-        if (j < bitmatrix_.size() && bitmatrix_[j])
-            decompress_sd_vector(*bitmatrix_[j], bit_vector);
+        if (j < bitmatrix_.size() && bitmatrix_[j].get()) {
+            utils::decompress_sd_vector(*bitmatrix_[j], bit_vector);
+            bitmatrix_[j].reset();
+        }
 
         cached_colors_.Put(j, bit_vector);
         return *bit_vector;
+    }
+}
+
+template <typename Color, class Encoder>
+sdsl::bit_vector& FastColorCompressed<Color, Encoder>::decompress_index(size_t t) {
+    assert(t < index_.size());
+
+    to_update_index_ = true;
+
+    try {
+        return *cached_index_.Get(t);
+    } catch (...) {
+        sdsl::bit_vector *bit_vector = new sdsl::bit_vector(num_rows_, 0);
+
+        if (t < index_.size() && index_[t].get()) {
+            utils::decompress_sd_vector(*index_[t], bit_vector);
+            index_[t].reset();
+        }
+
+        cached_index_.Put(t, bit_vector);
+        return *bit_vector;
+    }
+}
+
+template <typename Color, class Encoder>
+void FastColorCompressed<Color, Encoder>::update_index() {
+    if (!index_to_columns_.size())
+        return;
+
+    for (size_t j = column_to_index_.size(); j < num_colors(); ++j) {
+        // distribute all new columns uniformly
+        size_t t = j % index_to_columns_.size();
+        column_to_index_.push_back(t);
+        index_to_columns_[t].push_back(j);
     }
 }
 
