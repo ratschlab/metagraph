@@ -561,6 +561,22 @@ void FastColorCompressed<Color, Encoder>::flush(size_t j, sdsl::bit_vector *vect
     bitmatrix_[j] = new sdsl::sd_vector<>(*vector);
 }
 
+void decompress_sd_vector(const sdsl::sd_vector<> &vector,
+                          sdsl::bit_vector *out) {
+    assert(out);
+    assert(vector.size() == out->size());
+
+    sdsl::select_support_sd<> slct(&vector);
+    sdsl::rank_support_sd<> rank(&vector);
+    uint64_t num_set_bits = rank(vector.size());
+
+    for (uint64_t i = 1; i <= num_set_bits; ++i) {
+        assert(slct(i) < out->size());
+
+        (*out)[slct(i)] = 1;
+    }
+}
+
 template <typename Color, class Encoder>
 sdsl::bit_vector& FastColorCompressed<Color, Encoder>::uncompress(size_t j) {
     assert(j < color_encoder_->size());
@@ -572,19 +588,8 @@ sdsl::bit_vector& FastColorCompressed<Color, Encoder>::uncompress(size_t j) {
     } catch (...) {
         sdsl::bit_vector *bit_vector = new sdsl::bit_vector(num_rows_, 0);
 
-        if (j < bitmatrix_.size() && bitmatrix_[j]) {
-            // inflate vector
-
-            sdsl::select_support_sd<> slct(bitmatrix_[j]);
-            sdsl::rank_support_sd<> rank(bitmatrix_[j]);
-            uint64_t num_set_bits = rank(bitmatrix_[j]->size());
-
-            for (uint64_t i = 1; i <= num_set_bits; ++i) {
-                assert(slct(i) < bit_vector->size());
-
-                (*bit_vector)[slct(i)] = 1;
-            }
-        }
+        if (j < bitmatrix_.size() && bitmatrix_[j])
+            decompress_sd_vector(*bitmatrix_[j], bit_vector);
 
         cached_colors_.Put(j, bit_vector);
         return *bit_vector;
