@@ -40,7 +40,11 @@ K2Compressed<Color, Encoder>
         ) {
     const_cast<ColorCompressed<Color, Encoder>&>(annotator).flush();
 
-    k2_tree_ = build_k2_tree(annotator.bitmatrix_);
+    std::vector<sdsl::sd_vector<>*> columns;
+    for (const auto &col : annotator.bitmatrix_) {
+        columns.push_back(col.get());
+    }
+    k2_tree_ = build_k2_tree(columns);
 }
 
 template <typename Color, class Encoder>

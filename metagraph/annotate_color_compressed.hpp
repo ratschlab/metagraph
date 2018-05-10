@@ -72,7 +72,7 @@ class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
 
     uint64_t num_rows_;
 
-    std::vector<sdsl::sd_vector<>*> bitmatrix_;
+    std::vector<std::unique_ptr<sdsl::sd_vector<>>> bitmatrix_;
 
     caches::fixed_sized_cache<size_t,
                               sdsl::bit_vector*,

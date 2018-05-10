@@ -35,11 +35,6 @@ ColorCompressed<Color, Encoder>::ColorCompressed(uint64_t num_rows,
 template <typename Color, class Encoder>
 ColorCompressed<Color, Encoder>::~ColorCompressed() {
     cached_colors_.Clear();
-
-    for (auto *column : bitmatrix_) {
-        assert(column);
-        delete column;
-    }
 }
 
 template <typename Color, class Encoder>
@@ -65,7 +60,7 @@ ColorCompressed<Color, Encoder>::get_coloring(Index i) const {
 
     Coloring coloring;
     for (size_t j = 0; j < bitmatrix_.size(); ++j) {
-        assert(bitmatrix_[j]);
+        assert(bitmatrix_[j].get());
 
         if ((*bitmatrix_[j])[i])
             coloring.push_back(color_encoder_->decode(j));
@@ -137,8 +132,8 @@ void ColorCompressed<Color, Encoder>::serialize(const std::string &filename) con
 
     color_encoder_->serialize(outstream);
 
-    for (auto *column : bitmatrix_) {
-        assert(column);
+    for (const auto &column : bitmatrix_) {
+        assert(column.get());
         column->serialize(outstream);
     }
 }
@@ -149,11 +144,7 @@ bool ColorCompressed<Color, Encoder>
 ::merge_load(const std::vector<std::string> &filenames) {
     // release the columns stored
     cached_colors_.Clear();
-
-    for (auto *column : bitmatrix_) {
-        if (column)
-            delete column;
-    }
+    bitmatrix_.clear();
 
     color_encoder_.reset(new Encoder());
 
@@ -185,7 +176,7 @@ bool ColorCompressed<Color, Encoder>
             }
 
             // update the existing and add some new columns
-            bitmatrix_.resize(color_encoder_->size(), NULL);
+            bitmatrix_.resize(color_encoder_->size());
             for (size_t c = 0; c < color_encoder_load.size(); ++c) {
                 size_t col = color_encoder_->encode(color_encoder_load.decode(c));
 
@@ -203,7 +194,7 @@ bool ColorCompressed<Color, Encoder>
                               << ", set bits: " << num_set_bits << std::endl;
                 }
 
-                if (bitmatrix_.at(col)) {
+                if (bitmatrix_.at(col).get()) {
                     auto &column = uncompress(col);
 
                     auto slct = sdsl::select_support_sd<>(new_column);
@@ -217,7 +208,7 @@ bool ColorCompressed<Color, Encoder>
                     }
                     delete new_column;
                 } else {
-                    bitmatrix_.at(col) = new_column;
+                    bitmatrix_.at(col).reset(new_column);
                 }
             }
         }
@@ -316,7 +307,7 @@ double ColorCompressed<Color, Encoder>::sparsity() const {
     const_cast<ColorCompressed*>(this)->flush();
 
     for (size_t j = 0; j < bitmatrix_.size(); ++j) {
-        auto rank = sdsl::rank_support_sd<>(bitmatrix_[j]);
+        auto rank = sdsl::rank_support_sd<>(bitmatrix_[j].get());
         num_set_bits += rank(bitmatrix_[j]->size());
     }
 
@@ -355,13 +346,11 @@ void ColorCompressed<Color, Encoder>::flush(size_t j, sdsl::bit_vector *vector) 
     assert(cached_colors_.Cached(j));
 
     while (bitmatrix_.size() <= j) {
-        bitmatrix_.push_back(NULL);
+        bitmatrix_.emplace_back();
     }
 
-    if (bitmatrix_[j])
-        delete bitmatrix_[j];
-
-    bitmatrix_[j] = new sdsl::sd_vector<>(*vector);
+    bitmatrix_[j].reset();
+    bitmatrix_[j].reset(new sdsl::sd_vector<>(*vector));
 }
 
 template <typename Color, class Encoder>
@@ -373,18 +362,8 @@ sdsl::bit_vector& ColorCompressed<Color, Encoder>::uncompress(size_t j) {
     } catch (...) {
         sdsl::bit_vector *bit_vector = new sdsl::bit_vector(num_rows_, 0);
 
-        if (j < bitmatrix_.size() && bitmatrix_[j]) {
-            // inflate vector
-
-            sdsl::select_support_sd<> slct(bitmatrix_[j]);
-            sdsl::rank_support_sd<> rank(bitmatrix_[j]);
-            uint64_t num_set_bits = rank(bitmatrix_[j]->size());
-
-            for (uint64_t i = 1; i <= num_set_bits; ++i) {
-                assert(slct(i) < bit_vector->size());
-
-                (*bit_vector)[slct(i)] = 1;
-            }
+        if (j < bitmatrix_.size() && bitmatrix_[j].get()) {
+            utils::decompress_sd_vector(*bitmatrix_[j], bit_vector);
         }
 
         cached_colors_.Put(j, bit_vector);

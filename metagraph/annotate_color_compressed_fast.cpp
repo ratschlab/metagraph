@@ -69,12 +69,7 @@ FastColorCompressed<Color, Encoder>
         verbose_(verbose) {
     annotator.cached_colors_.Clear();
 
-    bitmatrix_.resize(annotator.bitmatrix_.size());
-    for (size_t i = 0; i < annotator.bitmatrix_.size(); ++i) {
-        bitmatrix_[i].reset(annotator.bitmatrix_[i]);
-    }
-    annotator.bitmatrix_.clear();
-    // bitmatrix_ = std::move(annotator.bitmatrix_);
+    bitmatrix_ = std::move(annotator.bitmatrix_);
 
     color_encoder_ = std::move(annotator.color_encoder_);
     annotator.color_encoder_.reset(new Encoder());
