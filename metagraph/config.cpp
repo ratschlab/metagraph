@@ -95,6 +95,8 @@ Config::Config(int argc, const char *argv[]) {
             memory_available = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--dump-raw-anno")) {
             dump_raw_anno = true;
+        } else if (!strcmp(argv[i], "--generate-dataset")) {
+            generate_filtered_dataset = true;
             //TODO: add into some USAGE description
         } else if (!strcmp(argv[i], "--bloom-false-pos-prob")) {
             bloom_fpp = std::stof(argv[++i]);
@@ -315,6 +317,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for filter:\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
             fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
+            fprintf(stderr, "\t   --generate-dataset \twrite filtered reads to disk [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case ALIGN: {

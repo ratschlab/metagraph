@@ -26,6 +26,7 @@ class Config {
     bool sparse = false;
     bool count_labels = false;
     bool suppress_unlabeled = false;
+    bool generate_filtered_dataset = false;
 
     unsigned int k = 3;
     unsigned int distance = 0;

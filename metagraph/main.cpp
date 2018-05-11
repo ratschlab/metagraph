@@ -46,6 +46,30 @@ DBG_succ* load_critical_graph_from_file(const std::string &filename) {
 }
 
 
+bool write_fasta_fastq(gzFile gz_out, const kseq_t &kseq) {
+    std::string fields;
+
+    std::string header = std::string(kseq.name.s, kseq.name.l)
+                           + (kseq.comment.l > 0 ? " " : "")
+                           + std::string(kseq.comment.s, kseq.comment.l);
+
+    if (kseq.qual.l) {
+        // fastq
+        fields += std::string("@") + header + '\n';
+        fields += std::string(kseq.seq.s, kseq.seq.l) + '\n';
+        fields += std::string("+") + header + '\n';
+        fields += std::string(kseq.qual.s, kseq.qual.l) + '\n';
+    } else {
+        // fasta
+        fields += std::string(">") + header + '\n';
+        fields += std::string(kseq.seq.s, kseq.seq.l) + '\n';
+    }
+
+    return gzwrite(gz_out, fields.data(), fields.size())
+            == static_cast<int>(fields.size());
+}
+
+
 template <class Callback>
 void read_fasta_file_critical(const std::string &filename,
                               Callback callback,
@@ -630,6 +654,41 @@ int main(int argc, const char *argv[]) {
                 }
 
                 Timer *timer_ptr = config->verbose ? &timer : NULL;
+
+                if (config->generate_filtered_dataset) {
+                    thread_pool.enqueue([=](size_t k,
+                                            size_t noise_kmer_frequency) {
+
+                        std::string filtered_reads_file = get_filter_filename(
+                            utils::remove_suffix(file, ".gz"), k, noise_kmer_frequency, false
+                        ) + ".gz";
+
+                        gzFile out_gz = gzopen(filtered_reads_file.c_str(), "w");
+                        if (out_gz == Z_NULL) {
+                            std::cerr << "ERROR: Can't write to "
+                                      << filtered_reads_file << std::endl;
+                            exit(1);
+                        }
+
+                        read_fasta_file_critical(file,
+                            [&](kseq_t *read_stream) {
+                                if (!write_fasta_fastq(out_gz, *read_stream)) {
+                                    std::cerr << "ERROR: Can't write filtered reads to "
+                                              << filtered_reads_file << std::endl;
+                                    exit(1);
+                                }
+                            },
+                            false, timer_ptr,
+                            get_filter_filename(file, k, noise_kmer_frequency)
+                        );
+
+                        gzclose(out_gz);
+
+                    }, config->k, config->noise_kmer_frequency);
+
+                    continue;
+                }
+
                 auto *thread_pool_ptr = &thread_pool;
                 // capture all required values by copying to be able
                 // to run task from other threads
