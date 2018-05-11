@@ -25,6 +25,12 @@ namespace utils {
 
     std::string remove_suffix(const std::string &str, const std::string &suffix);
 
+    template <typename... String>
+    std::string remove_suffix(const std::string &str, const std::string &suffix,
+                                                      const String&... other_suffices) {
+        return remove_suffix(remove_suffix(str, suffix), other_suffices...);
+    }
+
     std::string join_strings(const std::vector<std::string> &strings,
                              const std::string &delimiter);
 
