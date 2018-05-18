@@ -588,14 +588,10 @@ int main(int argc, const char *argv[]) {
                         }
                     }
                     std::cout << std::endl;
-                    get_RAM();
-                    std::cout << "Reading data finished\t" << timer.elapsed() << "sec" << std::endl;
 
-                    std::cout << "Sorting kmers and appending succinct"
-                              << " representation from current bin...\t" << std::flush;
-                    timer.reset();
                     auto next_block = constructor->build_chunk();
-                    std::cout << timer.elapsed() << "sec" << std::endl;
+                    std::cout << "Graph chunk with " << next_block->size() << " k-mers was built in "
+                              << timer.elapsed() << "sec" << std::endl;
 
                     if (config->outfbase.size() && config->suffix.size()) {
                         std::cout << "Serialize the graph chunk for suffix '"

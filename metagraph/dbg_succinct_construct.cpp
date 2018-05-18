@@ -5,6 +5,7 @@
 #include "kmer.hpp"
 #include "dbg_succinct_chunk.hpp"
 #include "utils.hpp"
+#include "unix_tools.hpp"
 #include "reads_filtering.hpp"
 
 
@@ -87,15 +88,9 @@ void extend_kmer_storage(const Array &temp_storage,
             std::cerr << "ERROR: Can't reallocate. Not enough memory" << std::endl;
         }
     }
-    // try {
     for (auto &kmer : temp_storage) {
         kmers->push_back(kmer);
     }
-    // } catch (...) {
-    //     std::cerr << "ERROR: Not enough memory."
-    //               << " Try to increase the memory limit." << std::endl;
-    //     exit(1);
-    // }
 }
 
 typedef std::function<void(const std::string&)> CallbackRead;
@@ -282,10 +277,30 @@ void KMerDBGSuccChunkConstructor::release_task_to_pool() {
 DBG_succ::Chunk* KMerDBGSuccChunkConstructor::build_chunk() {
     release_task_to_pool();
     thread_pool_.join();
+
+    if (verbose_) {
+        std::cout << "Reading data has finished" << std::endl;
+        get_RAM();
+        std::cout << "Sorting kmers and appending succinct"
+                  << " representation from current bin...\t" << std::flush;
+    }
+    Timer timer;
+
     sort_and_remove_duplicates(&kmers_, num_threads_, end_sorted_);
 
+    if (verbose_)
+        std::cout << timer.elapsed() << "sec" << std::endl;
+
     if (!filter_suffix_encoded_.size()) {
+        if (verbose_) {
+            std::cout << "Reconstructing all required dummy source k-mers...\t"
+                      << std::flush;
+        }
+
         recover_source_dummy_nodes(k_, &kmers_, num_threads_, verbose_);
+
+        if (verbose_)
+            std::cout << timer.elapsed() << "sec" << std::endl;
     }
 
     DBG_succ::Chunk *result
