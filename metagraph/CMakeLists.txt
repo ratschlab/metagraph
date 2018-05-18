@@ -3,9 +3,11 @@ project(MetaGenGraph)
 
 enable_testing()
 
+
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "DEBUG")
 endif()
+
 
 if(NOT CMAKE_DBG_ALPHABET)
   set(CMAKE_DBG_ALPHABET "DNA")
@@ -17,10 +19,26 @@ else()
   string(APPEND CMAKE_CXX_FLAGS " -D_PROTEIN_GRAPH")
 endif()
 
+
+if(NOT CMAKE_MAX_KMER_SIZE)
+  set(CMAKE_MAX_KMER_SIZE "80")
+  message("Max k-mer size is not provided. Use the default value.")
+endif()
+
+if(NOT ${CMAKE_MAX_KMER_SIZE} GREATER 0)
+  message(FATAL_ERROR "Invalid value for the max k-mer size: ${CMAKE_MAX_KMER_SIZE}. "
+          "Reset CMAKE_MAX_KMER_SIZE\n"
+          "Example: -DCMAKE_MAX_KMER_SIZE=80")
+endif()
+
+add_definitions(-D_MAX_KMER_SIZE=${CMAKE_MAX_KMER_SIZE})
+
+
 string(APPEND CMAKE_CXX_FLAGS " \
   -std=c++14 -Wall -Wextra -Werror \
   -msse4.2 -mavx -mavx2 -mbmi -mbmi2 \
   -fopenmp -D_THREAD_SAFE -pthread") # -DDBGDEBUG -Wconversion -Wsign-conversion
+
 
 # Profile build type
 set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O2 -g")
@@ -80,6 +98,7 @@ list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
 
 add_library(metagraph STATIC ${src_files})
 add_executable(metagengraph "main.cpp")
+set_target_properties(metagengraph PROPERTIES OUTPUT_NAME "metagengraph_${CMAKE_DBG_ALPHABET}_${CMAKE_MAX_KMER_SIZE}")
 
 set(METALIBS ${METALIBS}
   -lhts -lz -lbz2
@@ -100,6 +119,13 @@ target_link_libraries(
 
 target_link_libraries(
   metagengraph metagraph ${METALIBS}
+)
+
+add_custom_target(link_target ALL
+  COMMAND ${CMAKE_COMMAND} -E
+  create_symlink
+    "metagengraph_${CMAKE_DBG_ALPHABET}_${CMAKE_MAX_KMER_SIZE}"
+    "metagengraph"
 )
 
 

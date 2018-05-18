@@ -1,5 +1,7 @@
 #include "kmer.hpp"
 
+#include <sdsl/uint256_t.hpp>
+
 const KMerBaseType kFirstCharMask = (1 << kBitsPerChar) - 1;
 
 
@@ -25,7 +27,7 @@ std::string KMer::to_string(const std::string &alphabet) const {
 }
 
 std::ostream& operator<<(std::ostream &os, const KMer &kmer) {
-    return os << kmer.seq_;
+    return os << sdsl::uint256_t(kmer.seq_);
 }
 
 /**
@@ -38,7 +40,7 @@ void KMer::update_kmer(size_t k,
                        KMerCharType last,
                        KMerBaseType *kmer) {
     *kmer = *kmer >> kBitsPerChar;
-    *kmer += KMerBaseType(last + 1).operator<<(kBitsPerChar * k);
+    *kmer += KMerBaseType(last + 1) << static_cast<int>(kBitsPerChar * k);
     *kmer |= kFirstCharMask;
     *kmer -= kFirstCharMask;
     *kmer += edge_label + 1;

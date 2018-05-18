@@ -21,11 +21,7 @@ const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
 
-#ifdef _PROTEIN_GRAPH
-const int kMaxK = 51;
-#else
-const int kMaxK = 85;
-#endif
+const int kMaxK = sizeof(KMerBaseType) * 8 / kBitsPerChar;
 
 
 void test_graph(DBG_succ *graph, const std::string &last,

@@ -5,10 +5,11 @@
 #include <string>
 #include <algorithm>
 #include <vector>
+#include <cassert>
 
+#include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
-typedef sdsl::uint256_t KMerBaseType;
 typedef uint64_t KMerCharType;
 
 #ifdef _PROTEIN_GRAPH
@@ -16,6 +17,12 @@ const int kBitsPerChar = 5;
 #else
 const int kBitsPerChar = 3;
 #endif
+
+using KMerBaseType = std::conditional<_MAX_KMER_SIZE * kBitsPerChar <= 64,
+                        uint64_t,
+                        std::conditional<_MAX_KMER_SIZE * kBitsPerChar <= 128,
+                            sdsl::uint128_t,
+                            sdsl::uint256_t>::type>::type;
 
 
 class KMer {
@@ -70,7 +77,7 @@ class KMer {
 
 template <typename T>
 KMerBaseType KMer::pack_kmer(const T &arr, size_t k) {
-    if (k * kBitsPerChar >= sizeof(KMerBaseType) * 8 || k < 2) {
+    if (k * kBitsPerChar > sizeof(KMerBaseType) * 8 || k < 2) {
         std::cerr << "ERROR: Too large k-mer size: must be between 2 and "
                   << sizeof(KMerBaseType) * 8 / kBitsPerChar << std::endl;
         exit(1);
