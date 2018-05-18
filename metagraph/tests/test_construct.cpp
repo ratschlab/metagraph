@@ -737,7 +737,7 @@ typedef std::function<void(const std::string&)> CallbackRead;
 
 void extract_kmers(std::function<void(CallbackRead)> generate_reads,
                    size_t k,
-                   std::vector<KMer> *kmers,
+                   KMerVector *kmers,
                    size_t *end_sorted,
                    const std::vector<TAlphabet> &suffix,
                    size_t num_threads,
@@ -747,7 +747,7 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
 
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
-                                        std::vector<KMer> *kmers,
+                                        KMerVector *kmers,
                                         const std::vector<TAlphabet> &suffix,
                                         std::mutex *mutex,
                                         bool remove_redundant) {
@@ -765,7 +765,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
 }
 
 TEST(ExtractKmers, ExtractKmersAppendParallel) {
-    std::vector<KMer> result;
+    KMerVector result;
     std::mutex mu;
     size_t sequence_size = 500;
 
@@ -801,7 +801,7 @@ TEST(ExtractKmers, ExtractKmersAppendParallel) {
 }
 
 TEST(ExtractKmers, ExtractKmersParallelRemoveRedundant) {
-    std::vector<KMer> result;
+    KMerVector result;
     std::mutex mu;
 
     sequence_to_kmers_parallel_wrapper(

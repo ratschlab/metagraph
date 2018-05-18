@@ -6,6 +6,14 @@
 #include "utils.hpp"
 
 
+#if _USE_FOLLY
+#include <folly/FBVector.h>
+using KMerVector = folly::fbvector<KMer>;
+#else
+using KMerVector = std::vector<KMer>;
+#endif
+
+
 class DBGSuccConstructor {
   public:
     virtual void add_read(const std::string &read) = 0;
@@ -61,7 +69,7 @@ class KMerDBGSuccChunkConstructor {
     void release_task_to_pool();
 
     size_t k_;
-    std::vector<KMer> kmers_;
+    KMerVector kmers_;
     size_t end_sorted_;
     std::mutex mutex_;
 

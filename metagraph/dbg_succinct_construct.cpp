@@ -11,7 +11,8 @@
 const size_t kMaxKmersChunkSize = 30'000'000;
 
 
-void sort_and_remove_duplicates(std::vector<KMer> *kmers,
+template <class Vector>
+void sort_and_remove_duplicates(Vector *kmers,
                                 size_t num_threads,
                                 size_t end_sorted = 0) {
     if (num_threads <= 3) {
@@ -44,7 +45,8 @@ void sort_and_remove_duplicates(std::vector<KMer> *kmers,
     kmers->erase(unique_end, kmers->end());
 }
 
-void shrink_kmers(std::vector<KMer> *kmers,
+template <class Vector>
+void shrink_kmers(Vector *kmers,
                   size_t *end_sorted,
                   size_t num_threads,
                   bool verbose) {
@@ -64,9 +66,9 @@ void shrink_kmers(std::vector<KMer> *kmers,
     }
 }
 
-template <class Array>
+template <class Array, class Vector>
 void extend_kmer_storage(const Array &temp_storage,
-                         std::vector<KMer> *kmers,
+                         Vector *kmers,
                          size_t *end_sorted,
                          size_t num_threads,
                          bool verbose,
@@ -100,7 +102,7 @@ typedef std::function<void(const std::string&)> CallbackRead;
 
 void extract_kmers(std::function<void(CallbackRead)> generate_reads,
                    size_t k,
-                   std::vector<KMer> *kmers,
+                   KMerVector *kmers,
                    size_t *end_sorted,
                    const std::vector<TAlphabet> &suffix,
                    size_t num_threads,
@@ -136,8 +138,9 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
     }
 }
 
+template <class Vector>
 void recover_source_dummy_nodes(size_t k,
-                                std::vector<KMer> *kmers,
+                                Vector *kmers,
                                 size_t num_threads,
                                 bool verbose) {
     // remove redundant dummy kmers inplace
