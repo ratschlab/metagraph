@@ -285,13 +285,17 @@ DBG_succ::Chunk* KMerDBGSuccChunkConstructor::build_chunk() {
         recover_source_dummy_nodes(k_, &kmers_, num_threads_, verbose_);
     }
 
-    DBG_succ::Chunk *result = DBG_succ::Chunk::build_from_kmers(k_, &kmers_);
+    DBG_succ::Chunk *result
+        = DBG_succ::Chunk::build_from_kmers(k_, kmers_.data(), kmers_.size());
+
     kmers_.clear();
 
     return result;
 }
 
-void KMerDBGSuccChunkConstructor::add_reads(std::function<void(CallbackRead)> generate_reads) {
+void
+KMerDBGSuccChunkConstructor
+::add_reads(std::function<void(CallbackRead)> generate_reads) {
     thread_pool_.enqueue(extract_kmers, generate_reads,
                          k_, &kmers_, &end_sorted_,
                          filter_suffix_encoded_,

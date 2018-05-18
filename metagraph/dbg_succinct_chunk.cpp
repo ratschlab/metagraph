@@ -166,19 +166,19 @@ void DBG_succ::Chunk::serialize(const std::string &outbase) const {
     outstream.close();
 }
 
-DBG_succ::Chunk* DBG_succ::Chunk::build_from_kmers(size_t k,
-                                                   std::vector<KMer> *kmers) {
-    assert(std::is_sorted(kmers->begin(), kmers->end()));
+DBG_succ::Chunk* DBG_succ::Chunk::build_from_kmers(size_t k, const KMer *kmers,
+                                                             uint64_t num_kmers) {
+    assert(std::is_sorted(kmers, kmers + num_kmers));
 
     DBG_succ::Chunk *result = new DBG_succ::Chunk();
 
     // the bit array indicating the last outgoing edge of a node
-    std::vector<uint8_t> last_stat_safe(1 + kmers->size(), 1);
+    std::vector<uint8_t> last_stat_safe(1 + num_kmers, 1);
     last_stat_safe[0] = 0;
 
     // the array containing the edge labels
     std::vector<TAlphabet> &W_stat = result->W_;
-    W_stat.resize(1 + kmers->size());
+    W_stat.resize(1 + num_kmers);
     W_stat[0] = 0;
 
     result->F_.at(0) = 0;
@@ -186,15 +186,14 @@ DBG_succ::Chunk* DBG_succ::Chunk::build_from_kmers(size_t k,
     size_t curpos = 1;
     TAlphabet lastF = 0;
 
-    for (size_t i = 0; i < kmers->size(); ++i) {
-        TAlphabet curW = kmers->at(i)[0];
-        TAlphabet curF = kmers->at(i)[k];
+    for (size_t i = 0; i < num_kmers; ++i) {
+        TAlphabet curW = kmers[i][0];
+        TAlphabet curF = kmers[i][k];
 
         assert(curW < DBG_succ::alph_size);
 
         // check redundancy and set last
-        if (i + 1 < kmers->size()
-                && KMer::compare_suffix(kmers->at(i), kmers->at(i + 1))) {
+        if (i + 1 < num_kmers && KMer::compare_suffix(kmers[i], kmers[i + 1])) {
             // skip redundant dummy edges
             if (curW == 0 && curF > 0)
                 continue;
@@ -203,9 +202,8 @@ DBG_succ::Chunk* DBG_succ::Chunk::build_from_kmers(size_t k,
         }
         //set W
         if (i > 0) {
-            for (size_t j = i - 1; KMer::compare_suffix(kmers->at(i),
-                                                        kmers->at(j), 1); --j) {
-                if (curW > 0 && kmers->at(j)[0] == curW) {
+            for (size_t j = i - 1; KMer::compare_suffix(kmers[i], kmers[j], 1); --j) {
+                if (curW > 0 && kmers[j][0] == curW) {
                     curW += DBG_succ::alph_size;
                     break;
                 }
@@ -223,8 +221,6 @@ DBG_succ::Chunk* DBG_succ::Chunk::build_from_kmers(size_t k,
     while (++lastF < DBG_succ::alph_size) {
         result->F_.at(lastF) = curpos - 1;
     }
-
-    kmers->clear();
 
     W_stat.resize(curpos);
     last_stat_safe.resize(curpos);

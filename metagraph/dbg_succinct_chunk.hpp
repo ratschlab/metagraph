@@ -36,7 +36,8 @@ class DBG_succ::Chunk {
     /**
      * Initialize graph chunk from a list of sorted kmers.
      */
-    static Chunk* build_from_kmers(size_t k, std::vector<KMer> *kmers);
+    static Chunk* build_from_kmers(size_t k, const KMer *kmers,
+                                             uint64_t num_kmers);
 
   private:
     std::vector<TAlphabet> W_;
