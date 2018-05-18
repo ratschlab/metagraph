@@ -39,7 +39,7 @@ TEST(KmerEncodeTest, Operations) {
         char curchar = DBG_succ::decode(j - 1);
         std::string long_seq = std::string(2, curchar);
         KMer kmer(long_seq, DBG_succ::encode);
-        int shift = 256 / kBitsPerChar;
+        int shift = sizeof(KMerBaseType) * 8 / kBitsPerChar;
         for (int i = 3; i <= shift; ++i) {
             kmer <<= kBitsPerChar;
             kmer |= j;
@@ -57,10 +57,10 @@ TEST(KmerEncodeTest, Operations) {
 
 TEST(KmerEncodeTest, BitShiftBuild) {
     std::string long_seq = "ATGCCTGA";
-    while (long_seq.length() < 256 / kBitsPerChar) {
+    while (long_seq.length() < sizeof(KMerBaseType) * 8 / kBitsPerChar) {
         long_seq += long_seq;
     }
-    long_seq = long_seq.substr(0, 256 / kBitsPerChar);
+    long_seq = long_seq.substr(0, sizeof(KMerBaseType) * 8 / kBitsPerChar);
     assert(long_seq.back() != long_seq.front());
     //test bit shifting
     KMer kmer_builtup(std::string(long_seq.rbegin() + 1,
@@ -92,10 +92,10 @@ TEST(KmerEncodeTest, UpdateKmer) {
 
 TEST(KmerEncodeTest, UpdateKmerLong) {
     std::string long_seq = "ATGCCTGA";
-    while (long_seq.length() < 256 / kBitsPerChar) {
+    while (long_seq.length() < sizeof(KMerBaseType) * 8 / kBitsPerChar) {
         long_seq += long_seq;
     }
-    long_seq = long_seq.substr(0, 256 / kBitsPerChar);
+    long_seq = long_seq.substr(0, sizeof(KMerBaseType) * 8 / kBitsPerChar);
     std::string long_seq_alt(long_seq.substr(1));
     long_seq_alt.push_back('T');
     KMer kmer[2] = {
@@ -122,7 +122,7 @@ TEST(KmerEncodeTest, UpdateKmerVsConstruct) {
             long_seq0.length() - 1,
             DBG_succ::encode('T'),
             DBG_succ::encode('$'),
-            reinterpret_cast<sdsl::uint256_t*>(&kmer0));
+            reinterpret_cast<KMerBaseType*>(&kmer0));
     std::string reconst_seq1 = kmer0.to_string(DBG_succ::alphabet);
     reconst_seq1.push_back(reconst_seq1[0]);
     reconst_seq1 = reconst_seq1.substr(1);
@@ -172,11 +172,11 @@ TEST(KmerEncodeTest, Less) {
 }
 
 TEST(KmerEncodeTest, LessLong) {
-    test_kmer_less(std::string(256 / kBitsPerChar - 1, 'A') +  "C",
-                   std::string(256 / kBitsPerChar - 1, 'A') +  "T", true);
+    test_kmer_less(std::string(sizeof(KMerBaseType) * 8 / kBitsPerChar - 1, 'A') +  "C",
+                   std::string(sizeof(KMerBaseType) * 8 / kBitsPerChar - 1, 'A') +  "T", true);
 
-    test_kmer_less(std::string(256 / kBitsPerChar - 2, 'A') + "CA",
-                   std::string(256 / kBitsPerChar - 2, 'A') + "TA", true);
+    test_kmer_less(std::string(sizeof(KMerBaseType) * 8 / kBitsPerChar - 2, 'A') + "CA",
+                   std::string(sizeof(KMerBaseType) * 8 / kBitsPerChar - 2, 'A') + "TA", true);
 }
 
 void test_kmer_suffix(std::string k1, std::string k2, bool truth) {
@@ -196,7 +196,7 @@ TEST(KmerEncodeTest, CompareSuffixFalse) {
 }
 
 TEST(KmerEncodeTest, CompareSuffixTrueLong) {
-    std::string long_seq(256 / kBitsPerChar, 'A');
+    std::string long_seq(sizeof(KMerBaseType) * 8 / kBitsPerChar, 'A');
 
     *(long_seq.rbegin()) = 'T';
     *(++long_seq.rbegin()) = 'C';
@@ -220,7 +220,7 @@ TEST(KmerEncodeTest, CompareSuffixTrueLong) {
 }
 
 TEST(KmerEncodeTest, CompareSuffixFalseLong) {
-    std::string long_seq(256 / kBitsPerChar, 'A');
+    std::string long_seq(sizeof(KMerBaseType) * 8 / kBitsPerChar, 'A');
 
     *(long_seq.rbegin()) = 'T';
     *(++long_seq.rbegin()) = 'C';
@@ -233,5 +233,5 @@ TEST(KmerEncodeTest, CompareSuffixFalseLong) {
 }
 
 TEST(KmerTest, SizeOfClass) {
-    EXPECT_EQ(32u, sizeof(KMer));
+    EXPECT_EQ(sizeof(KMerBaseType), sizeof(KMer));
 }

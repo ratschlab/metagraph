@@ -8,7 +8,7 @@
 
 #include <sdsl/uint256_t.hpp>
 
-using sdsl::uint256_t;
+typedef sdsl::uint256_t KMerBaseType;
 typedef uint64_t KMerCharType;
 
 #ifdef _PROTEIN_GRAPH
@@ -32,8 +32,8 @@ class KMer {
 
     KMer(KMer &&other) : seq_(other.seq_) {}
     KMer(const KMer &other) : seq_(other.seq_) {}
-    explicit KMer(sdsl::uint256_t &&seq) : seq_(seq) {}
-    explicit KMer(const sdsl::uint256_t &seq) : seq_(seq) {}
+    explicit KMer(KMerBaseType &&seq) : seq_(seq) {}
+    explicit KMer(const KMerBaseType &seq) : seq_(seq) {}
 
     KMer& operator=(KMer &&other) { seq_ = other.seq_; return *this; }
     KMer& operator=(const KMer &other) { seq_ = other.seq_; return *this; }
@@ -53,7 +53,7 @@ class KMer {
     std::string to_string(const std::string &alphabet) const;
 
     template<typename T>
-    static sdsl::uint256_t pack_kmer(const T &arr, size_t k);
+    static KMerBaseType pack_kmer(const T &arr, size_t k);
 
     /**
      * Construct the next k-mer for s[6]s[5]s[4]s[3]s[2]s[1]s[7].
@@ -63,18 +63,23 @@ class KMer {
     static void update_kmer(size_t k,
                             KMerCharType edge_label,
                             KMerCharType last,
-                            sdsl::uint256_t *kmer);
+                            KMerBaseType *kmer);
   private:
-    sdsl::uint256_t seq_; // kmer sequence
+    KMerBaseType seq_; // kmer sequence
 };
 
 template <typename T>
-sdsl::uint256_t KMer::pack_kmer(const T &arr, size_t k) {
-    sdsl::uint256_t result(0);
-    assert(k * kBitsPerChar < 256 && k >= 2
-            && "String must be between lengths 2 and 256 / kBitsPerChar");
+KMerBaseType KMer::pack_kmer(const T &arr, size_t k) {
+    if (k * kBitsPerChar >= sizeof(KMerBaseType) * 8 || k < 2) {
+        std::cerr << "ERROR: Too large k-mer size: must be between 2 and "
+                  << sizeof(KMerBaseType) * 8 / kBitsPerChar << std::endl;
+        exit(1);
+    }
+
+    KMerBaseType result(0);
 
     for (int i = k - 2; i >= 0; --i) {
+
         assert(static_cast<uint64_t>(arr[i] + 1) < (1llu << kBitsPerChar)
                  && "Alphabet size too big for the given number of bits");
 
@@ -95,8 +100,8 @@ KMer::KMer(const String &seq, Map &&to_alphabet) {
 
 template <size_t digit_size>
 uint64_t KMer::get_digit(size_t i) const {
-    static_assert(digit_size <= 64, "too big digit");
-    return static_cast<uint64_t>(seq_ >> (digit_size * i))
+    static_assert(digit_size <= 64, "too large digit");
+    return static_cast<uint64_t>(seq_ >> static_cast<int>(digit_size * i))
              % (1llu << digit_size);
 }
 

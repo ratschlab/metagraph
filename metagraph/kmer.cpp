@@ -1,13 +1,11 @@
 #include "kmer.hpp"
 
-using sdsl::uint256_t;
-
-const uint256_t kFirstCharMask = (1 << kBitsPerChar) - 1;
+const KMerBaseType kFirstCharMask = (1 << kBitsPerChar) - 1;
 
 
 bool KMer::compare_suffix(const KMer &k1, const KMer &k2, size_t minus) {
-    return k1.seq_ >> ((minus + 1) * kBitsPerChar)
-             == k2.seq_ >> ((minus + 1) * kBitsPerChar);
+    return k1.seq_ >> static_cast<int>((minus + 1) * kBitsPerChar)
+             == k2.seq_ >> static_cast<int>((minus + 1) * kBitsPerChar);
 }
 
 KMerCharType KMer::operator[](size_t i) const {
@@ -17,7 +15,7 @@ KMerCharType KMer::operator[](size_t i) const {
 
 std::string KMer::to_string(const std::string &alphabet) const {
     std::string seq;
-    seq.reserve(256 / kBitsPerChar + 1);
+    seq.reserve(sizeof(KMerBaseType) * 8 / kBitsPerChar + 1);
 
     KMerCharType cur;
     for (size_t i = 0; (cur = get_digit<kBitsPerChar>(i)); ++i) {
@@ -38,9 +36,9 @@ std::ostream& operator<<(std::ostream &os, const KMer &kmer) {
 void KMer::update_kmer(size_t k,
                        KMerCharType edge_label,
                        KMerCharType last,
-                       uint256_t *kmer) {
+                       KMerBaseType *kmer) {
     *kmer = *kmer >> kBitsPerChar;
-    *kmer += uint256_t(last + 1).operator<<(kBitsPerChar * k);
+    *kmer += KMerBaseType(last + 1).operator<<(kBitsPerChar * k);
     *kmer |= kFirstCharMask;
     *kmer -= kFirstCharMask;
     *kmer += edge_label + 1;
