@@ -133,6 +133,8 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
     }
 }
 
+// Although this function could be parallelized better,
+// the experiments show it's already fast enough.
 template <class Vector>
 void recover_source_dummy_nodes(size_t k,
                                 Vector *kmers,
@@ -296,6 +298,7 @@ DBG_succ::Chunk* KMerDBGSuccChunkConstructor::build_chunk() {
             std::cout << "Reconstructing all required dummy source k-mers...\t"
                       << std::flush;
         }
+        timer.reset();
 
         recover_source_dummy_nodes(k_, &kmers_, num_threads_, verbose_);
 

@@ -39,7 +39,7 @@ const TAlphabet kCharToNucleotide[128] = {
     26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
     26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26
 };
-const size_t kLogSigma = 6;
+const size_t DBG_succ::kLogSigma = 6;
 #else
 const std::string DBG_succ::alphabet = "$ACGTN$ACGTN";
 const TAlphabet kCharToNucleotide[128] = {
@@ -52,8 +52,11 @@ const TAlphabet kCharToNucleotide[128] = {
     5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 5, 5, 5,  4, 4, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5
 };
-const size_t kLogSigma = 4;
+const size_t DBG_succ::kLogSigma = 4;
 #endif
+
+static_assert(sizeof(TAlphabet) * 8 >= DBG_succ::kLogSigma,
+              "Choose type for TAlphabet properly");
 
 const TAlphabet DBG_succ::alph_size = DBG_succ::alphabet.size() / 2;
 
@@ -1062,9 +1065,9 @@ void DBG_succ::add_sequence(const std::string &seq, bool try_extend) {
 
 /**
  * This function takes a character c and appends it to the end of the graph
- * sequence given that the corresponding note is not part of the graph yet.
+ * sequence given that the corresponding node is not a part of the graph yet.
  */
-uint64_t DBG_succ::append_pos(uint64_t c, uint64_t source_node, TAlphabet *ckmer) {
+uint64_t DBG_succ::append_pos(TAlphabet c, uint64_t source_node, TAlphabet *ckmer) {
     CHECK_INDEX(source_node);
 
     // get range of identical nodes (without W) pos current end position
@@ -1215,7 +1218,7 @@ void DBG_succ::merge(const DBG_succ &Gm) {
 
     uint64_t added_counter = 0;
 
-    // keep traversing until we reach the sink and have worked off all branches from the stack
+    // keep traversing until we have worked off all branches from the stack
     while (true) {
         // verbose output
         if (added_counter > 0 && added_counter % 1000 == 0) {

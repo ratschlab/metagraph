@@ -11,7 +11,6 @@
 class DBGSuccConstructor;
 
 
-// define an extended alphabet for W --> somehow this does not work properly as expected
 typedef uint8_t TAlphabet;
 
 
@@ -261,6 +260,7 @@ class DBG_succ : public SequenceGraph {
 
     static const std::string alphabet;
     static const TAlphabet alph_size;
+    static const size_t kLogSigma;
 
     Config::StateType state = Config::DYN;
 
@@ -287,7 +287,7 @@ class DBG_succ : public SequenceGraph {
      * This function takes a character c and appends it to the end of the graph
      * sequence given that the corresponding note is not part of the graph yet.
      */
-    uint64_t append_pos(uint64_t c, uint64_t source_node, TAlphabet *ckmer = NULL);
+    uint64_t append_pos(TAlphabet c, uint64_t source_node, TAlphabet *ckmer = NULL);
 
     /**
      * Helper function used by the append_pos function

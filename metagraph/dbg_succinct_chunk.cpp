@@ -1,20 +1,7 @@
 #include "dbg_succinct_chunk.hpp"
 
-/**
- * We use libmaus 2 for representing dynamic succint data structures
- * such as the dynamic bit array and the dynamic wavelet tree.
- */
 #include "serialization.hpp"
 #include "kmer.hpp"
-
-#ifdef _PROTEIN_GRAPH
-const size_t kLogSigma = 6;
-#else
-const size_t kLogSigma = 4;
-#endif
-
-static_assert(sizeof(TAlphabet) * 8 >= kLogSigma,
-              "Choose the TAlphabet type accordingly");
 
 
 DBG_succ::Chunk::Chunk()

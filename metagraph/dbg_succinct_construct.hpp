@@ -8,10 +8,14 @@
 
 #if _USE_FOLLY
 #include <folly/FBVector.h>
-using KMerVector = folly::fbvector<KMer>;
+template <typename T>
+using Vector = folly::fbvector<T>;
 #else
-using KMerVector = std::vector<KMer>;
+template <typename T>
+using Vector = std::vector<T>;
 #endif
+
+using KMerVector = Vector<KMer>;
 
 
 class DBGSuccConstructor {
