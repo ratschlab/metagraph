@@ -6,18 +6,6 @@
 #include "utils.hpp"
 
 
-#if _USE_FOLLY
-#include <folly/FBVector.h>
-template <typename T>
-using Vector = folly::fbvector<T>;
-#else
-template <typename T>
-using Vector = std::vector<T>;
-#endif
-
-using KMerVector = Vector<KMer>;
-
-
 class DBGSuccConstructor {
   public:
     virtual void add_read(const std::string &read) = 0;
@@ -53,7 +41,28 @@ class SuffixArrayDBGSuccConstructor : public DBGSuccConstructor {
 typedef std::function<void(const std::string&)> CallbackRead;
 
 
-class KMerDBGSuccChunkConstructor {
+class IChunkConstructor {
+  public:
+    virtual ~IChunkConstructor() {}
+
+    virtual void add_read(const std::string &sequence) = 0;
+
+    virtual void add_reads(std::function<void(CallbackRead)> generate_reads) = 0;
+
+    virtual DBG_succ::Chunk* build_chunk() = 0;
+
+    virtual size_t get_k() const = 0;
+
+    static IChunkConstructor* initialize(size_t k,
+                                         const std::string &filter_suffix,
+                                         size_t num_threads = 1,
+                                         double memory_preallocated = 0,
+                                         bool verbose = false);
+};
+
+
+template <typename KMER>
+class KMerDBGSuccChunkConstructor : public IChunkConstructor {
   public:
     KMerDBGSuccChunkConstructor(size_t k,
                                 const std::string &filter_suffix,
@@ -73,7 +82,7 @@ class KMerDBGSuccChunkConstructor {
     void release_task_to_pool();
 
     size_t k_;
-    KMerVector kmers_;
+    Vector<KMER> kmers_;
     size_t end_sorted_;
     std::mutex mutex_;
 
@@ -92,16 +101,16 @@ class KMerDBGSuccChunkConstructor {
 class KMerDBGSuccConstructor : public DBGSuccConstructor {
   public:
     explicit KMerDBGSuccConstructor(size_t k, size_t num_threads = 1)
-      : constructor_(k, "", num_threads) {}
+      : constructor_(IChunkConstructor::initialize(k, "", num_threads)) {}
 
-    void add_read(const std::string &read) { constructor_.add_read(read); }
+    void add_read(const std::string &read) { constructor_->add_read(read); }
 
     void build_graph(DBG_succ *graph);
 
-    size_t get_k() const { return constructor_.get_k(); }
+    size_t get_k() const { return constructor_->get_k(); }
 
   private:
-    KMerDBGSuccChunkConstructor constructor_;
+    std::unique_ptr<IChunkConstructor> constructor_;
 };
 
 

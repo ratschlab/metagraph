@@ -16,9 +16,16 @@
 #include <atomic>
 #include <bitset>
 
-#include "dbg_succinct.hpp"
+#if _USE_FOLLY
+#include <folly/FBVector.h>
+template <typename T>
+using Vector = folly::fbvector<T>;
+#else
+template <typename T>
+using Vector = std::vector<T>;
+#endif
 
-class KMer;
+#include "dbg_succinct.hpp"
 
 
 namespace utils {
@@ -83,9 +90,6 @@ namespace utils {
 
     std::deque<std::string> generate_strings(const std::string &alphabet,
                                              size_t length);
-
-    void radix_sort(std::vector<KMer> &data, size_t k);
-    void bucket_sort(std::vector<KMer> &data, size_t k);
 
 
     /**
@@ -273,9 +277,10 @@ namespace utils {
     /**
      * Break the sequence to kmers and extend the temporary kmers storage.
      */
+    template <typename KMer>
     void sequence_to_kmers(const std::string &sequence,
                            size_t k,
-                           std::vector<KMer> *kmers,
+                           Vector<KMer> *kmers,
                            const std::vector<TAlphabet> &suffix);
 
 

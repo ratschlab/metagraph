@@ -11,11 +11,14 @@
 
 const size_t kMaxKmersChunkSize = 30'000'000;
 
+template <typename KMER>
+using Counter
+    = typename tsl::hopscotch_sc_map<const KMER, uint32_t, utils::Hash<KMER>>;
 
-typedef tsl::hopscotch_sc_map<const KMer, uint32_t, utils::Hash<KMer>> Counter;
 
+template <typename KMER>
 std::vector<bool> filter_reads(const std::vector<std::string> &reads,
-                               Counter *counter,
+                               Counter<KMER> *counter,
                                size_t k,
                                size_t noise_kmer_frequency,
                                bool verbose) {
@@ -38,7 +41,7 @@ std::vector<bool> filter_reads(const std::vector<std::string> &reads,
     }
     counter->rehash(counter->size());
 
-    std::vector<KMer> read_kmers;
+    Vector<KMER> read_kmers;
 
     for (size_t j = 0; j < reads.size(); ++j) {
         if (reads[j].size() <= k) {
@@ -69,12 +72,15 @@ std::vector<bool> filter_reads(const std::vector<std::string> &reads,
     return filter;
 }
 
+
 // Remove noisy k-mers from |reads| and return
 // vector indicating reads with frequent k-mers
-std::vector<bool> count_kmers_and_filter_reads(std::vector<std::string> *reads,
-                                               size_t k,
-                                               size_t noise_kmer_frequency,
-                                               bool verbose) {
+template <typename KMER>
+std::vector<bool>
+count_kmers_and_filter_reads_templated(std::vector<std::string> *reads,
+                                       size_t k,
+                                       size_t noise_kmer_frequency,
+                                       bool verbose) {
     std::vector<bool> frequent(reads->size(), true);
 
     std::vector<std::string> filtering_reads;
@@ -83,13 +89,13 @@ std::vector<bool> count_kmers_and_filter_reads(std::vector<std::string> *reads,
     std::vector<std::string> frequent_reads;
     frequent_reads.reserve(reads->size());
 
-    Counter counter(std::accumulate(reads->begin(), reads->end(), 0,
+    Counter<KMER> counter(std::accumulate(reads->begin(), reads->end(), 0,
         [&](size_t sum, const std::string &read) {
             return sum + std::max(read.size(), k) - k + 2;
         })
     );
 
-    std::vector<KMer> read_kmers;
+    Vector<KMER> read_kmers;
 
     for (size_t j = 0; j < reads->size(); ++j) {
         utils::sequence_to_kmers(reads->at(j), k, &read_kmers, {});
@@ -130,6 +136,25 @@ std::vector<bool> count_kmers_and_filter_reads(std::vector<std::string> *reads,
 
     reads->swap(frequent_reads);
     return frequent;
+}
+
+std::vector<bool> count_kmers_and_filter_reads(std::vector<std::string> *reads,
+                                               size_t k,
+                                               size_t noise_kmer_frequency,
+                                               bool verbose) {
+    if ((k + 1) * kBitsPerChar <= 64) {
+        return count_kmers_and_filter_reads_templated<KMer<uint64_t>>(
+            reads, k, noise_kmer_frequency, verbose
+        );
+    } else if ((k + 1) * kBitsPerChar <= 128) {
+        return count_kmers_and_filter_reads_templated<KMer<sdsl::uint128_t>>(
+            reads, k, noise_kmer_frequency, verbose
+        );
+    } else {
+        return count_kmers_and_filter_reads_templated<KMer<sdsl::uint256_t>>(
+            reads, k, noise_kmer_frequency, verbose
+        );
+    }
 }
 
 

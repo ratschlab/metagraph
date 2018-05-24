@@ -12,15 +12,15 @@
 const size_t kMaxKmersChunkSize = 30'000'000;
 
 
-template <class Vector>
-void sort_and_remove_duplicates(Vector *kmers,
+template <typename KMER>
+void sort_and_remove_duplicates(Vector<KMER> *kmers,
                                 size_t num_threads,
                                 size_t end_sorted = 0) {
     if (num_threads <= 3) {
         // sort
         ips4o::parallel::sort(kmers->data() + end_sorted,
                               kmers->data() + kmers->size(),
-                              std::less<KMer>(), num_threads);
+                              std::less<KMER>(), num_threads);
         kmers->erase(std::unique(kmers->begin() + end_sorted, kmers->end()),
                      kmers->end());
 
@@ -39,15 +39,15 @@ void sort_and_remove_duplicates(Vector *kmers,
     } else {
         // sort
         ips4o::parallel::sort(kmers->data(), kmers->data() + kmers->size(),
-                              std::less<KMer>(), num_threads);
+                              std::less<KMER>(), num_threads);
     }
     // remove duplicates
     auto unique_end = std::unique(kmers->begin(), kmers->end());
     kmers->erase(unique_end, kmers->end());
 }
 
-template <class Vector>
-void shrink_kmers(Vector *kmers,
+template <typename KMER>
+void shrink_kmers(Vector<KMER> *kmers,
                   size_t *end_sorted,
                   size_t num_threads,
                   bool verbose) {
@@ -63,7 +63,7 @@ void shrink_kmers(Vector *kmers,
     if (verbose) {
         std::cout << " done. Number of kmers reduced from " << prev_num_kmers
                                                   << " to " << *end_sorted << ", "
-                  << (*end_sorted * sizeof(KMer) >> 20) << "Mb" << std::endl;
+                  << (*end_sorted * sizeof(KMER) >> 20) << "Mb" << std::endl;
     }
 }
 
@@ -95,16 +95,17 @@ void extend_kmer_storage(const Array &temp_storage,
 
 typedef std::function<void(const std::string&)> CallbackRead;
 
+template <typename KMER>
 void extract_kmers(std::function<void(CallbackRead)> generate_reads,
                    size_t k,
-                   KMerVector *kmers,
+                   Vector<KMER> *kmers,
                    size_t *end_sorted,
                    const std::vector<TAlphabet> &suffix,
                    size_t num_threads,
                    bool verbose,
                    std::mutex *mutex,
                    bool remove_redundant = true) {
-    std::vector<KMer> temp_storage;
+    Vector<KMER> temp_storage;
     temp_storage.reserve(1.1 * kMaxKmersChunkSize);
 
     generate_reads([&](const std::string &read) {
@@ -135,9 +136,9 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
 
 // Although this function could be parallelized better,
 // the experiments show it's already fast enough.
-template <class Vector>
+template <typename KMER>
 void recover_source_dummy_nodes(size_t k,
-                                Vector *kmers,
+                                Vector<KMER> *kmers,
                                 size_t num_threads,
                                 bool verbose) {
     // remove redundant dummy kmers inplace
@@ -145,7 +146,7 @@ void recover_source_dummy_nodes(size_t k,
     size_t end_sorted = kmers->size();
 
     for (size_t i = 0; i < end_sorted; ++i) {
-        const KMer &kmer = kmers->at(i);
+        const KMER &kmer = kmers->at(i);
         // we never add reads shorter than k
         assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
 
@@ -159,7 +160,7 @@ void recover_source_dummy_nodes(size_t k,
 
         bool redundant = false;
         for (size_t j = i + 1; j < end_sorted
-                                && KMer::compare_suffix(kmer, kmers->at(j), 1); ++j) {
+                                && KMER::compare_suffix(kmer, kmers->at(j), 1); ++j) {
             if (edge_label == kmers->at(j)[0]) {
                 // This source dummy kmer is redundant and has to be erased
                 redundant = true;
@@ -180,7 +181,7 @@ void recover_source_dummy_nodes(size_t k,
 
             ips4o::parallel::sort(kmers->data() + end_sorted,
                                   kmers->data() + kmers->size(),
-                                  std::less<KMer>(),
+                                  std::less<KMER>(),
                                   num_threads);
             kmers->erase(
                 std::unique(kmers->begin() + end_sorted, kmers->end()),
@@ -189,14 +190,14 @@ void recover_source_dummy_nodes(size_t k,
 
             if (verbose) {
                 std::cout << " done. Number of kmers: " << kmers->size() << ", "
-                          << (kmers->size() * sizeof(KMer) >> 20) << "Mb" << std::endl;
+                          << (kmers->size() * sizeof(KMER) >> 20) << "Mb" << std::endl;
             }
         }
 
         // anchor it to the dummy source node
-        auto anchor_kmer = KMer::pack_kmer(std::vector<TAlphabet>(k + 1, 0), k + 1);
+        auto anchor_kmer = KMER::pack_kmer(std::vector<TAlphabet>(k + 1, 0), k + 1);
         for (size_t c = 2; c < k + 1; ++c) {
-            KMer::update_kmer(k, kmers->at(i)[c], kmers->at(i)[c - 1], &anchor_kmer);
+            KMER::update_kmer(k, kmers->at(i)[c], kmers->at(i)[c - 1], &anchor_kmer);
 
             kmers->emplace_back(anchor_kmer);
         }
@@ -208,20 +209,45 @@ void recover_source_dummy_nodes(size_t k,
     sort_and_remove_duplicates(kmers, num_threads, cur_pos);
 }
 
+
 void KMerDBGSuccConstructor::build_graph(DBG_succ *graph) {
-    // build the graph chunk from kmers
-    auto chunk = constructor_.build_chunk();
+    // build a graph chunk from kmers
+    auto chunk = constructor_->build_chunk();
     // initialize graph from the chunk built
     chunk->initialize_graph(graph);
     delete chunk;
 }
 
-KMerDBGSuccChunkConstructor::KMerDBGSuccChunkConstructor(
-                                            size_t k,
-                                            const std::string &filter_suffix,
-                                            size_t num_threads,
-                                            double memory_preallocated,
-                                            bool verbose)
+
+IChunkConstructor*
+IChunkConstructor::initialize(size_t k,
+                              const std::string &filter_suffix,
+                              size_t num_threads,
+                              double memory_preallocated,
+                              bool verbose) {
+    if ((k + 1) * kBitsPerChar <= 64) {
+        return new KMerDBGSuccChunkConstructor<KMer<uint64_t>>(
+            k, filter_suffix, num_threads, memory_preallocated, verbose
+        );
+    } else if ((k + 1) * kBitsPerChar <= 128) {
+        return new KMerDBGSuccChunkConstructor<KMer<sdsl::uint128_t>>(
+            k, filter_suffix, num_threads, memory_preallocated, verbose
+        );
+    } else {
+        return new KMerDBGSuccChunkConstructor<KMer<sdsl::uint256_t>>(
+            k, filter_suffix, num_threads, memory_preallocated, verbose
+        );
+    }
+}
+
+
+template <typename KMER>
+KMerDBGSuccChunkConstructor<KMER>
+::KMerDBGSuccChunkConstructor(size_t k,
+                              const std::string &filter_suffix,
+                              size_t num_threads,
+                              double memory_preallocated,
+                              bool verbose)
       : k_(k),
         end_sorted_(0),
         num_threads_(num_threads),
@@ -235,14 +261,15 @@ KMerDBGSuccChunkConstructor::KMerDBGSuccChunkConstructor(
     std::transform(filter_suffix.begin(), filter_suffix.end(),
                    filter_suffix_encoded_.begin(), DBG_succ::encode);
 
-    kmers_.reserve(memory_preallocated / sizeof(KMer));
+    kmers_.reserve(memory_preallocated / sizeof(KMER));
 
     if (filter_suffix == std::string(filter_suffix.size(), '$')) {
         kmers_.emplace_back(std::vector<TAlphabet>(k + 1, 0), k + 1);
     }
 }
 
-void KMerDBGSuccChunkConstructor::add_read(const std::string &sequence) {
+template <typename KMER>
+void KMerDBGSuccChunkConstructor<KMER>::add_read(const std::string &sequence) {
     if (sequence.size() < k_)
         return;
 
@@ -260,11 +287,12 @@ void KMerDBGSuccChunkConstructor::add_read(const std::string &sequence) {
     assert(!reads_storage_.size());
 }
 
-void KMerDBGSuccChunkConstructor::release_task_to_pool() {
+template <typename KMER>
+void KMerDBGSuccChunkConstructor<KMER>::release_task_to_pool() {
     auto *current_reads_storage = new std::vector<std::string>();
     current_reads_storage->swap(reads_storage_);
 
-    thread_pool_.enqueue(extract_kmers,
+    thread_pool_.enqueue(extract_kmers<KMER>,
                          [current_reads_storage](CallbackRead callback) {
                              for (auto &&read : *current_reads_storage) {
                                  callback(std::move(read));
@@ -276,7 +304,71 @@ void KMerDBGSuccChunkConstructor::release_task_to_pool() {
     stored_reads_size_ = 0;
 }
 
-DBG_succ::Chunk* KMerDBGSuccChunkConstructor::build_chunk() {
+/**
+ * Initialize graph chunk from a list of sorted kmers.
+ */
+template <typename KMER>
+DBG_succ::Chunk* chunk_from_kmers(size_t k, const KMER *kmers,
+                                            uint64_t num_kmers) {
+    assert(std::is_sorted(kmers, kmers + num_kmers));
+
+    // the array containing edge labels
+    std::vector<TAlphabet> W(1 + num_kmers);
+    W[0] = 0;
+    // the bit array indicating last outgoing edges for nodes
+    std::vector<bool> last(1 + num_kmers, 1);
+    last[0] = 0;
+    // offsets
+    std::vector<uint64_t> F(DBG_succ::alph_size, 0);
+    F.at(0) = 0;
+
+    size_t curpos = 1;
+    TAlphabet lastF = 0;
+
+    for (size_t i = 0; i < num_kmers; ++i) {
+        TAlphabet curW = kmers[i][0];
+        TAlphabet curF = kmers[i][k];
+
+        assert(curW < DBG_succ::alph_size);
+
+        // check redundancy and set last
+        if (i + 1 < num_kmers && KMER::compare_suffix(kmers[i], kmers[i + 1])) {
+            // skip redundant dummy edges
+            if (curW == 0 && curF > 0)
+                continue;
+
+            last[curpos] = 0;
+        }
+        //set W
+        if (i > 0) {
+            for (size_t j = i - 1; KMER::compare_suffix(kmers[i], kmers[j], 1); --j) {
+                if (curW > 0 && kmers[j][0] == curW) {
+                    curW += DBG_succ::alph_size;
+                    break;
+                }
+                if (j == 0)
+                    break;
+            }
+        }
+        W[curpos] = curW;
+
+        while (lastF + 1 < DBG_succ::alph_size && curF != lastF) {
+            F.at(++lastF) = curpos - 1;
+        }
+        curpos++;
+    }
+    while (++lastF < DBG_succ::alph_size) {
+        F.at(lastF) = curpos - 1;
+    }
+
+    W.resize(curpos);
+    last.resize(curpos);
+
+    return new DBG_succ::Chunk(std::move(W), std::move(last), std::move(F));
+}
+
+template <typename KMER>
+DBG_succ::Chunk* KMerDBGSuccChunkConstructor<KMER>::build_chunk() {
     release_task_to_pool();
     thread_pool_.join();
 
@@ -306,18 +398,18 @@ DBG_succ::Chunk* KMerDBGSuccChunkConstructor::build_chunk() {
             std::cout << timer.elapsed() << "sec" << std::endl;
     }
 
-    DBG_succ::Chunk *result
-        = DBG_succ::Chunk::build_from_kmers(k_, kmers_.data(), kmers_.size());
+    DBG_succ::Chunk *result = chunk_from_kmers(k_, kmers_.data(), kmers_.size());
 
     kmers_.clear();
 
     return result;
 }
 
+template <typename KMER>
 void
-KMerDBGSuccChunkConstructor
+KMerDBGSuccChunkConstructor<KMER>
 ::add_reads(std::function<void(CallbackRead)> generate_reads) {
-    thread_pool_.enqueue(extract_kmers, generate_reads,
+    thread_pool_.enqueue(extract_kmers<KMER>, generate_reads,
                          k_, &kmers_, &end_sorted_,
                          filter_suffix_encoded_,
                          num_threads_, verbose_, &mutex_, true);

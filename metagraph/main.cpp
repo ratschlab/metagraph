@@ -513,8 +513,8 @@ int main(int argc, const char *argv[]) {
                         std::cout << "\nSuffix: " << suffix << std::endl;
                     }
 
-                    std::unique_ptr<KMerDBGSuccChunkConstructor> constructor(
-                        new KMerDBGSuccChunkConstructor(
+                    std::unique_ptr<IChunkConstructor> constructor(
+                        IChunkConstructor::initialize(
                             graph->get_k(),
                             suffix,
                             config->parallel,

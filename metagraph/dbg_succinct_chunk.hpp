@@ -5,12 +5,17 @@
 
 #include "dbg_succinct.hpp"
 
-class KMer;
-
 
 class DBG_succ::Chunk {
   public:
     Chunk();
+
+    /**
+     * Assumes that |W| and |last| have dummy 0 at the first position
+     */
+    Chunk(std::vector<TAlphabet>&& W,
+          std::vector<bool>&& last,
+          std::vector<uint64_t>&& F);
 
     void push_back(TAlphabet W, TAlphabet F, bool last);
     TAlphabet get_W_back() const;
@@ -32,12 +37,6 @@ class DBG_succ::Chunk {
     static DBG_succ* build_graph_from_chunks(size_t k,
                                 const std::vector<std::string> &chunk_filenames,
                                 bool verbose = false);
-
-    /**
-     * Initialize graph chunk from a list of sorted kmers.
-     */
-    static Chunk* build_from_kmers(size_t k, const KMer *kmers,
-                                             uint64_t num_kmers);
 
   private:
     std::vector<TAlphabet> W_;

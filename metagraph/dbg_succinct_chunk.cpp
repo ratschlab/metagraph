@@ -1,11 +1,15 @@
 #include "dbg_succinct_chunk.hpp"
 
 #include "serialization.hpp"
-#include "kmer.hpp"
 
 
 DBG_succ::Chunk::Chunk()
       : W_(1, 0), last_(1, 0), F_(DBG_succ::alph_size, 0) {}
+
+DBG_succ::Chunk::Chunk(std::vector<TAlphabet>&& W,
+                       std::vector<bool>&& last,
+                       std::vector<uint64_t>&& F)
+      : W_(std::move(W)), last_(std::move(last)), F_(std::move(F)) {}
 
 void DBG_succ::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
     W_.push_back(W);
@@ -151,67 +155,4 @@ void DBG_succ::Chunk::serialize(const std::string &outbase) const {
     serialize_number_vector(outstream, last_, 1);
     serialize_number_vector(outstream, F_);
     outstream.close();
-}
-
-DBG_succ::Chunk* DBG_succ::Chunk::build_from_kmers(size_t k, const KMer *kmers,
-                                                             uint64_t num_kmers) {
-    assert(std::is_sorted(kmers, kmers + num_kmers));
-
-    DBG_succ::Chunk *result = new DBG_succ::Chunk();
-
-    // the bit array indicating the last outgoing edge of a node
-    std::vector<uint8_t> last_stat_safe(1 + num_kmers, 1);
-    last_stat_safe[0] = 0;
-
-    // the array containing the edge labels
-    std::vector<TAlphabet> &W_stat = result->W_;
-    W_stat.resize(1 + num_kmers);
-    W_stat[0] = 0;
-
-    result->F_.at(0) = 0;
-
-    size_t curpos = 1;
-    TAlphabet lastF = 0;
-
-    for (size_t i = 0; i < num_kmers; ++i) {
-        TAlphabet curW = kmers[i][0];
-        TAlphabet curF = kmers[i][k];
-
-        assert(curW < DBG_succ::alph_size);
-
-        // check redundancy and set last
-        if (i + 1 < num_kmers && KMer::compare_suffix(kmers[i], kmers[i + 1])) {
-            // skip redundant dummy edges
-            if (curW == 0 && curF > 0)
-                continue;
-
-            last_stat_safe[curpos] = 0;
-        }
-        //set W
-        if (i > 0) {
-            for (size_t j = i - 1; KMer::compare_suffix(kmers[i], kmers[j], 1); --j) {
-                if (curW > 0 && kmers[j][0] == curW) {
-                    curW += DBG_succ::alph_size;
-                    break;
-                }
-                if (j == 0)
-                    break;
-            }
-        }
-        W_stat[curpos] = curW;
-
-        while (lastF + 1 < DBG_succ::alph_size && curF != lastF) {
-            result->F_.at(++lastF) = curpos - 1;
-        }
-        curpos++;
-    }
-    while (++lastF < DBG_succ::alph_size) {
-        result->F_.at(lastF) = curpos - 1;
-    }
-
-    W_stat.resize(curpos);
-    last_stat_safe.resize(curpos);
-    result->last_.assign(last_stat_safe.begin(), last_stat_safe.end());
-
-    return result;
 }

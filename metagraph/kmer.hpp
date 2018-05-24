@@ -18,17 +18,15 @@ const int kBitsPerChar = 5;
 const int kBitsPerChar = 3;
 #endif
 
-using KMerBaseType = std::conditional<_MAX_KMER_SIZE * kBitsPerChar <= 64,
-                        uint64_t,
-                        std::conditional<_MAX_KMER_SIZE * kBitsPerChar <= 128,
-                            sdsl::uint128_t,
-                            sdsl::uint256_t>::type>::type;
 
-
+template <typename G>
 class KMer {
-    friend std::ostream& operator<<(std::ostream &os, const KMer &kmer);
+    template <typename U>
+    friend std::ostream& operator<<(std::ostream &os, const KMer<U> &kmer);
 
   public:
+    typedef G KMerWordType;
+
     KMer() {}
     template <typename T>
     KMer(const T &arr, size_t k)
@@ -39,8 +37,8 @@ class KMer {
 
     KMer(KMer &&other) : seq_(other.seq_) {}
     KMer(const KMer &other) : seq_(other.seq_) {}
-    explicit KMer(KMerBaseType &&seq) : seq_(seq) {}
-    explicit KMer(const KMerBaseType &seq) : seq_(seq) {}
+    explicit KMer(KMerWordType &&seq) : seq_(seq) {}
+    explicit KMer(const KMerWordType &seq) : seq_(seq) {}
 
     KMer& operator=(KMer &&other) { seq_ = other.seq_; return *this; }
     KMer& operator=(const KMer &other) { seq_ = other.seq_; return *this; }
@@ -60,7 +58,7 @@ class KMer {
     std::string to_string(const std::string &alphabet) const;
 
     template<typename T>
-    static KMerBaseType pack_kmer(const T &arr, size_t k);
+    static KMerWordType pack_kmer(const T &arr, size_t k);
 
     /**
      * Construct the next k-mer for s[6]s[5]s[4]s[3]s[2]s[1]s[7].
@@ -70,20 +68,23 @@ class KMer {
     static void update_kmer(size_t k,
                             KMerCharType edge_label,
                             KMerCharType last,
-                            KMerBaseType *kmer);
+                            KMerWordType *kmer);
   private:
-    KMerBaseType seq_; // kmer sequence
+    static const KMerWordType kFirstCharMask;
+
+    KMerWordType seq_; // kmer sequence
 };
 
+template <typename G>
 template <typename T>
-KMerBaseType KMer::pack_kmer(const T &arr, size_t k) {
-    if (k * kBitsPerChar > sizeof(KMerBaseType) * 8 || k < 2) {
+G KMer<G>::pack_kmer(const T &arr, size_t k) {
+    if (k * kBitsPerChar > sizeof(KMerWordType) * 8 || k < 2) {
         std::cerr << "ERROR: Too large k-mer size: must be between 2 and "
-                  << sizeof(KMerBaseType) * 8 / kBitsPerChar << std::endl;
+                  << sizeof(KMerWordType) * 8 / kBitsPerChar << std::endl;
         exit(1);
     }
 
-    KMerBaseType result(0);
+    KMerWordType result(0);
 
     for (int i = k - 2; i >= 0; --i) {
 
@@ -98,18 +99,21 @@ KMerBaseType KMer::pack_kmer(const T &arr, size_t k) {
     return result;
 }
 
+template <typename G>
 template <class Map, class String>
-KMer::KMer(const String &seq, Map &&to_alphabet) {
+KMer<G>::KMer(const String &seq, Map &&to_alphabet) {
     std::vector<uint8_t> arr(seq.size());
     std::transform(seq.begin(), seq.end(), arr.begin(), to_alphabet);
     *this = KMer(arr.data(), arr.size());
 }
 
+template <typename G>
 template <size_t digit_size>
-uint64_t KMer::get_digit(size_t i) const {
+uint64_t KMer<G>::get_digit(size_t i) const {
     static_assert(digit_size <= 64, "too large digit");
     return static_cast<uint64_t>(seq_ >> static_cast<int>(digit_size * i))
              % (1llu << digit_size);
 }
+
 
 #endif // __KMER_HPP__

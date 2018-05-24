@@ -36,7 +36,6 @@ use `glibtoolize` instead of `libtoolize` on MacOS
 
 ### Build types: `cmake .. <arguments>` where arguments are:
 - `-DCMAKE_BUILD_TYPE=[Debug|Release|Profile]` -- build modes (`Debug` by default)
-- `-DCMAKE_MAX_KMER_SIZE=[1|2|...]` -- maximum k-mer size (80 by default)
 - `-DBUILD_STATIC=ON` -- link statically (OFF by default)
 - `-DPYTHON_INTERFACE=ON` -- compile python interface (requires shared libraries, OFF by default)
 
