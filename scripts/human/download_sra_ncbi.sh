@@ -8,6 +8,9 @@ BUFFER="/cluster/project/grlab/projects/tmp_meta/data"
 
 FINAL_DEST="/cluster/work/grlab/projects/metagenome/benchmark_human_metagenome/nobackup/human_gut_sra"
 
+# max size in bytes, for bigger files lsf jobs will be started
+SCP_MAX_SIZE=300000000
+
 
 if [ $# -ne 1 ]; then
   echo "Usage: $0 <NCBI_URL>"
@@ -43,4 +46,8 @@ fi
 
 # move downloaded file to final destination
 #$LFTP -c "connect -u mikhaika, sftp://leomed; mput -e -E -O $FINAL_DEST $BUFFER/$FILE"
-scp $BUFFER/$FILE leomed:$FINAL_DEST && touch $BUFFER/downloaded/$FILE && rm $BUFFER/$FILE
+if (( $(stat -c%s "$BUFFER/$FILE") < $SCP_MAX_SIZE )); then
+  scp $BUFFER/$FILE leomed:$FINAL_DEST && touch $BUFFER/downloaded/$FILE && rm $BUFFER/$FILE
+else
+  bsub -R light -o /dev/null -J move_$FILE -W 12:00 "scp $BUFFER/$FILE leomed:$FINAL_DEST && touch $BUFFER/downloaded/$FILE && rm $BUFFER/$FILE"
+fi
