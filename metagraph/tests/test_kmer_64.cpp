@@ -63,7 +63,6 @@ TEST(KmerEncodeTest_64, BitShiftBuild) {
         long_seq += long_seq;
     }
     long_seq = long_seq.substr(0, sizeof(KMerBaseType) * 8 / kBitsPerChar);
-    assert(long_seq.back() != long_seq.front());
     //test bit shifting
     KMER kmer_builtup(std::string(long_seq.rbegin() + 1,
                       long_seq.rbegin() + 3), DBG_succ::encode);
@@ -114,10 +113,10 @@ TEST(KmerEncodeTest_64, UpdateKmerLong) {
 }
 
 TEST(KmerEncodeTest_64, UpdateKmerVsConstruct) {
-    std::string long_seq0 = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAA$";
+    std::string long_seq0 = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAN";
     long_seq0.resize(std::min(sizeof(KMerBaseType) * 8 / kBitsPerChar,
                               long_seq0.size()));
-    std::string long_seq1 =  "AGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAA$T";
+    std::string long_seq1 =  "AGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAANT";
     long_seq1.resize(std::min(sizeof(KMerBaseType) * 8 / kBitsPerChar,
                               long_seq0.size()));
     std::deque<TAlphabet> seq0(long_seq0.length());
@@ -133,7 +132,7 @@ TEST(KmerEncodeTest_64, UpdateKmerVsConstruct) {
     reconst_seq1 = reconst_seq1.substr(1);
     EXPECT_EQ(long_seq1, reconst_seq1);
 
-    seq0.emplace_back(DBG_succ::encode('T'));
+    seq0.emplace_back(DBG_succ::encode(long_seq1.back()));
     KMER kmer1(KMER::pack_kmer(seq0.begin() + 1, seq0.size() - 1));
     std::string reconst_seq2 = kmer1.to_string(DBG_succ::alphabet);
     reconst_seq2.push_back(reconst_seq2[0]);
