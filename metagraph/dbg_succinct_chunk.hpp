@@ -8,12 +8,13 @@
 
 class DBG_succ::Chunk {
   public:
-    Chunk();
+    explicit Chunk(size_t k);
 
     /**
      * Assumes that |W| and |last| have dummy 0 at the first position
      */
-    Chunk(std::vector<TAlphabet>&& W,
+    Chunk(size_t k,
+          std::vector<TAlphabet>&& W,
           std::vector<bool>&& last,
           std::vector<uint64_t>&& F);
 
@@ -34,11 +35,12 @@ class DBG_succ::Chunk {
     /**
      * Merge graph chunks loaded from the files passed
      */
-    static DBG_succ* build_graph_from_chunks(size_t k,
-                                const std::vector<std::string> &chunk_filenames,
-                                bool verbose = false);
+    static DBG_succ*
+    build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
+                            bool verbose = false);
 
   private:
+    size_t k_;
     std::vector<TAlphabet> W_;
     std::vector<bool> last_;
     std::vector<uint64_t> F_;

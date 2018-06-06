@@ -18,7 +18,6 @@
 #include "kmer.hpp"
 #include "serialization.hpp"
 
-using libmaus2::util::NumberSerialisation;
 typedef annotate::MultiColorAnnotation<uint64_t, std::string> Annotator;
 
 const size_t kMaxNumParallelReadFiles = 5;
@@ -503,7 +502,7 @@ int main(int argc, const char *argv[]) {
                 if (config->suffix.size())
                     suffices = { config->suffix };
 
-                DBG_succ::Chunk graph_data;
+                DBG_succ::Chunk graph_data(graph->get_k());
 
                 //one pass per suffix
                 for (const std::string &suffix : suffices) {
@@ -1031,7 +1030,7 @@ int main(int argc, const char *argv[]) {
 
             // collect results on an external merge or construction
             DBG_succ *graph = DBG_succ::Chunk::build_graph_from_chunks(
-                config->k, chunk_files, config->verbose
+                chunk_files, config->verbose
             );
             assert(graph);
 

@@ -7,6 +7,10 @@
 #include <unordered_map>
 
 
+void serialize_number(std::ostream &out, uint64_t number);
+
+uint64_t load_number(std::istream &in);
+
 template <typename T>
 void serialize_number_vector(std::ostream &out,
                              const std::vector<T> &vector,

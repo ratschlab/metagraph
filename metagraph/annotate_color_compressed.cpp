@@ -7,7 +7,6 @@
 #include "serialization.hpp"
 #include "utils.hpp"
 
-using libmaus2::util::NumberSerialisation;
 using utils::remove_suffix;
 
 
@@ -128,7 +127,7 @@ void ColorCompressed<Color, Encoder>::serialize(const std::string &filename) con
         throw std::ofstream::failure("Bad stream");
     }
 
-    NumberSerialisation::serialiseNumber(outstream, num_rows_);
+    serialize_number(outstream, num_rows_);
 
     color_encoder_->serialize(outstream);
 
@@ -161,8 +160,8 @@ bool ColorCompressed<Color, Encoder>
                 return false;
 
             if (filename == filenames.at(0)) {
-                num_rows_ = NumberSerialisation::deserialiseNumber(instream);
-            } else if (num_rows_ != NumberSerialisation::deserialiseNumber(instream)) {
+                num_rows_ = load_number(instream);
+            } else if (num_rows_ != load_number(instream)) {
                 return false;
             }
 

@@ -7,7 +7,6 @@
 #include "serialization.hpp"
 #include "utils.hpp"
 
-using libmaus2::util::NumberSerialisation;
 using utils::remove_suffix;
 
 
@@ -199,7 +198,7 @@ void FastColorCompressed<Color, Encoder>::serialize(const std::string &filename)
         throw std::ofstream::failure("Bad stream");
     }
 
-    NumberSerialisation::serialiseNumber(outstream, num_rows_);
+    serialize_number(outstream, num_rows_);
 
     color_encoder_->serialize(outstream);
 
@@ -210,7 +209,7 @@ void FastColorCompressed<Color, Encoder>::serialize(const std::string &filename)
     // serialize the column index
     outstream = std::ofstream(remove_suffix(filename, kExtension) + kIndexExtension);
 
-    NumberSerialisation::serialiseNumber(outstream, index_.size());
+    serialize_number(outstream, index_.size());
     for (size_t t = 0; t < index_.size(); ++t) {
         index_[t]->serialize(outstream);
         serialize_number_vector(outstream, index_to_columns_[t]);
@@ -248,8 +247,8 @@ bool FastColorCompressed<Color, Encoder>
                 return false;
 
             if (filename == filenames.at(0)) {
-                num_rows_ = NumberSerialisation::deserialiseNumber(instream);
-            } else if (num_rows_ != NumberSerialisation::deserialiseNumber(instream)) {
+                num_rows_ = load_number(instream);
+            } else if (num_rows_ != load_number(instream)) {
                 return false;
             }
 
@@ -305,7 +304,7 @@ bool FastColorCompressed<Color, Encoder>
             try {
                 std::ifstream instream(remove_suffix(filenames[0], kExtension) + kIndexExtension);
 
-                size_t index_size = NumberSerialisation::deserialiseNumber(instream);
+                size_t index_size = load_number(instream);
 
                 column_to_index_.resize(num_colors());
 

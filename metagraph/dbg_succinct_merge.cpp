@@ -116,18 +116,10 @@ void print_bin_stats(const std::vector<std::vector<uint64_t>> &bins) {
 }
 
 
-struct ParallelMergeContext {
-    size_t idx = 0;
-
-    std::mutex mu;
-};
-
-
-void merge_blocks(const std::vector<const DBG_succ*> &Gv,
-                  std::vector<uint64_t> kv,
-                  const std::vector<uint64_t> &nv,
-                  DBG_succ::Chunk *chunk,
-                  bool verbose);
+DBG_succ::Chunk* merge_blocks(const std::vector<const DBG_succ*> &Gv,
+                              std::vector<uint64_t> kv,
+                              const std::vector<uint64_t> &nv,
+                              bool verbose);
 
 /**
  * Distribute the merging of a set of graph structures over
@@ -135,25 +127,26 @@ void merge_blocks(const std::vector<const DBG_succ*> &Gv,
  */
 void parallel_merge_wrapper(const std::vector<const DBG_succ*> &graphs,
                             const std::vector<std::vector<uint64_t>> &bins,
-                            ParallelMergeContext *context,
+                            std::mutex *mu,
                             std::vector<DBG_succ::Chunk*> *chunks,
                             bool verbose) {
-    assert(context);
+    assert(mu);
     assert(graphs.size() > 0);
     assert(graphs.size() == bins.size());
-    assert(chunks->size() == bins.front().size() - 1);
+    assert(chunks);
 
     while (true) {
-        context->mu.lock();
+        size_t curr_idx;
 
-        if (context->idx == bins.front().size() - 1) {
-            context->mu.unlock();
-            break;
+        {
+            std::unique_lock<std::mutex> lock(*mu);
+
+            if (chunks->size() == bins.front().size() - 1)
+                break;
+
+            curr_idx = chunks->size();
+            chunks->push_back(NULL);
         }
-
-        size_t curr_idx = context->idx++;
-
-        context->mu.unlock();
 
         std::vector<uint64_t> kv;
         std::vector<uint64_t> nv;
@@ -161,21 +154,23 @@ void parallel_merge_wrapper(const std::vector<const DBG_succ*> &graphs,
             kv.push_back(bins.at(i).at(curr_idx));
             nv.push_back(bins.at(i).at(curr_idx + 1));
         }
-        merge_blocks(graphs, kv, nv, chunks->at(curr_idx), verbose);
+        auto *merged = merge_blocks(graphs, kv, nv, verbose);
+
+        {
+            std::unique_lock<std::mutex> lock(*mu);
+            chunks->at(curr_idx) = merged;
+        }
     }
 }
 
 
-DBG_succ::Chunk* stack_graph_chunks(const std::vector<DBG_succ::Chunk*> &graph_chunks) {
-    DBG_succ::Chunk *merged = new DBG_succ::Chunk();
-
+void stack_graph_chunks(const std::vector<DBG_succ::Chunk*> &graph_chunks,
+                        DBG_succ::Chunk *merged) {
     for (DBG_succ::Chunk *chunk : graph_chunks) {
         assert(chunk);
         merged->extend(*chunk);
         delete chunk;
     }
-
-    return merged;
 }
 
 
@@ -232,17 +227,14 @@ DBG_succ::Chunk* merge_blocks_to_chunk(const std::vector<const DBG_succ*> &graph
 
     // create threads and start the jobs
     std::vector<std::thread> threads;
-    ParallelMergeContext context;
+    std::mutex mu;
 
-    std::vector<DBG_succ::Chunk*> blocks(bins.front().size() - 1);
-    for (size_t i = 0; i < blocks.size(); ++i) {
-        blocks[i] = new DBG_succ::Chunk();
-    }
+    std::vector<DBG_succ::Chunk*> blocks;
 
     for (size_t tid = 0; tid < num_threads; tid++) {
         threads.emplace_back(parallel_merge_wrapper, graphs,
                                                      bins,
-                                                     &context,
+                                                     &mu,
                                                      &blocks,
                                                      verbose);
         if (verbose)
@@ -261,7 +253,9 @@ DBG_succ::Chunk* merge_blocks_to_chunk(const std::vector<const DBG_succ*> &graph
     if (verbose)
         std::cout << "Collecting results" << std::endl;
 
-    return stack_graph_chunks(blocks);
+    DBG_succ::Chunk *result = new DBG_succ::Chunk(graphs.at(0)->get_k());
+    stack_graph_chunks(blocks, result);
+    return result;
 }
 
 
@@ -274,11 +268,10 @@ DBG_succ* merge(const std::vector<const DBG_succ*> &Gv, bool verbose) {
         nv.push_back(Gv[i]->get_W().size());
     }
 
-    DBG_succ::Chunk merged;
-    merge_blocks(Gv, kv, nv, &merged, verbose);
+    std::unique_ptr<DBG_succ::Chunk> merged(merge_blocks(Gv, kv, nv, verbose));
 
     DBG_succ *graph = new DBG_succ(Gv.at(0)->get_k());
-    merged.initialize_graph(graph);
+    merged->initialize_graph(graph);
     return graph;
 }
 
@@ -313,14 +306,14 @@ std::vector<std::deque<TAlphabet>> get_last_added_nodes(const std::vector<const 
     return last_added_nodes;
 }
 
-void merge_blocks(const std::vector<const DBG_succ*> &Gv,
-                  std::vector<uint64_t> kv,
-                  const std::vector<uint64_t> &nv,
-                  DBG_succ::Chunk *chunk,
-                  bool verbose) {
-
+DBG_succ::Chunk* merge_blocks(const std::vector<const DBG_succ*> &Gv,
+                              std::vector<uint64_t> kv,
+                              const std::vector<uint64_t> &nv,
+                              bool verbose) {
     assert(kv.size() == Gv.size());
     assert(nv.size() == Gv.size());
+
+    DBG_succ::Chunk *chunk = new DBG_succ::Chunk(Gv.at(0)->get_k());
 
     auto last_added_nodes = get_last_added_nodes(Gv, kv);
 
@@ -415,6 +408,7 @@ void merge_blocks(const std::vector<const DBG_succ*> &Gv,
             }
         }
     }
+    return chunk;
 }
 
 

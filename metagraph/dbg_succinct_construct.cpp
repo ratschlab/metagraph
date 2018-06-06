@@ -364,7 +364,7 @@ DBG_succ::Chunk* chunk_from_kmers(size_t k, const KMER *kmers,
     W.resize(curpos);
     last.resize(curpos);
 
-    return new DBG_succ::Chunk(std::move(W), std::move(last), std::move(F));
+    return new DBG_succ::Chunk(k, std::move(W), std::move(last), std::move(F));
 }
 
 template <typename KMER>
@@ -426,6 +426,7 @@ void SuffixArrayDBGSuccConstructor::add_read(const std::string &read) {
 
 // Implement SA construction and extract the kmers from the result
 void SuffixArrayDBGSuccConstructor::build_graph(DBG_succ *graph) {
-    DBG_succ::Chunk result;
-    result.initialize_graph(graph);
+    // DBG_succ::Chunk result;
+    // result.initialize_graph(graph);
+    std::ignore = graph;
 }

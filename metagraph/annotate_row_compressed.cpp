@@ -10,7 +10,6 @@
 
 #include "serialization.hpp"
 
-using libmaus2::util::NumberSerialisation;
 using libmaus2::util::StringSerialisation;
 
 #if _USE_FOLLY
@@ -170,7 +169,7 @@ void RowCompressed<Color, Encoder>::serialize(const std::string &filename) const
         throw std::ofstream::failure("Bad stream");
     }
 
-    NumberSerialisation::serialiseNumber(outstream, matrix_->size());
+    serialize_number(outstream, matrix_->size());
 
     color_encoder_->serialize(outstream);
 
@@ -200,7 +199,7 @@ bool RowCompressed<Color, Encoder>::merge_load(const std::vector<std::string> &f
         return false;
 
     try {
-        size_t num_rows = NumberSerialisation::deserialiseNumber(instream);
+        size_t num_rows = load_number(instream);
         matrix_->reinitialize(num_rows);
 
         if (!color_encoder_->load(instream))

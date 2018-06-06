@@ -140,7 +140,6 @@ TEST(DBGSuccinctMerge, ParallelMergeEmptyGraphs) {
         };
         chunk->serialize(test_data_dir + "/1");
         DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
-            k,
             { test_data_dir + "/1" }
         );
 
@@ -169,7 +168,6 @@ TEST(DBGSuccinctMerge, ParallelMergeTwoPaths) {
         };
         chunk->serialize(test_data_dir + "/1");
         DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
-            k,
             { test_data_dir + "/1" }
         );
 
@@ -199,7 +197,6 @@ TEST(DBGSuccinctMerge, ParallelMergeSinglePathWithTwo) {
         };
         chunk->serialize(test_data_dir + "/1");
         DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
-            k,
             { test_data_dir + "/1" }
         );
 
@@ -233,7 +230,6 @@ TEST(DBGSuccinctMerge, ParallelMergeThreeGraphs) {
         };
         chunk->serialize(test_data_dir + "/1");
         DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
-            k,
             { test_data_dir + "/1" }
         );
 
@@ -282,7 +278,6 @@ TEST(DBGSuccinctMerge, ParallelChunkedMergeThreeGraphs) {
             chunk->serialize(test_data_dir + "/3");
         }
         DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
-            k,
             { test_data_dir + "/1",
               test_data_dir + "/2",
               test_data_dir + "/3", }
@@ -327,7 +322,6 @@ TEST(DBGSuccinctMerge, ParallelDumpedChunkedMergeThreeGraphs) {
         }
 
         DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
-            k,
             files
         );
         ASSERT_TRUE(chunked_merged);
@@ -374,7 +368,6 @@ void random_testing_parallel_merge(size_t num_graphs, size_t num_sequences, size
         };
         chunk->serialize(test_data_dir + "/1");
         DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
-            k,
             { test_data_dir + "/1" }
         );
 

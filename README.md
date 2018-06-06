@@ -69,7 +69,7 @@ for F in {\$,A,C,G,T,N}{\$,A,C,G,T,N}; do ./metagengraph build --fast -v --paral
 ```
 2) Concatenate chunks
 ```bash
-./metagengraph concatenate -l 2 -k 20 -i <GRAPH_DIR>/graph -o <GRAPH_DIR>/graph
+./metagengraph concatenate -l 2 -i <GRAPH_DIR>/graph -o <GRAPH_DIR>/graph
 ```
 
 #### Build from filtered reads
@@ -89,7 +89,7 @@ for F in {\\\$,A,C,G,T,N}{\\\$,A,C,G,T,N}{\\\$,A,C,G,T,N}; do bsub -J assemble$F
 ```
 2) Concatenate chunks
 ```bash
-bsub -J StackChunks -W 12:00 -n 30 -R "rusage[mem=15000]" "/usr/bin/time -v ~/metagengraph concatenate -v -l 3 -k 24 -i <GRAPH_DIR>/graph -o <GRAPH_DIR>/graph 2>&1 | tee <LOG_DIR>/log_stack.txt"
+bsub -J StackChunks -W 12:00 -n 30 -R "rusage[mem=15000]" "/usr/bin/time -v ~/metagengraph concatenate -v -l 3 -i <GRAPH_DIR>/graph -o <GRAPH_DIR>/graph 2>&1 | tee <LOG_DIR>/log_stack.txt"
 ```
 
 ### Annotate graph

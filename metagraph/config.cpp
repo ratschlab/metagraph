@@ -354,12 +354,11 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case CONCATENATE: {
-            fprintf(stderr, "Usage: %s concatenate -k <kmer-length> [options] [[[CHUNK1] CHUNK2] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s concatenate [options] [[CHUNK] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for merge:\n");
             fprintf(stderr, "\t-i --infile-base [STR] \t\tload graph chunks from files '<infile-base>.<suffix>.dbgchunk' []\n");
             fprintf(stderr, "\t-l --len-suffix [INT] \t\titerate all possible suffices of the length given [0]\n");
-            // fprintf(stderr, "\t-k --kmer-length [INT] \t\tlength of the k-mer to use [3]\n");
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t   --print \t\t\tprint graph table to the screen [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");

@@ -9,6 +9,17 @@
 using libmaus2::util::NumberSerialisation;
 
 
+void serialize_number(std::ostream &out, uint64_t number) {
+    NumberSerialisation::serialiseNumber(out, number);
+}
+
+uint64_t load_number(std::istream &in) {
+    if (!in.good()) {
+        throw std::ifstream::failure("Bad stream");
+    }
+    return NumberSerialisation::deserialiseNumber(in);
+}
+
 template <typename T>
 void serialize_number_vector(std::ostream &out,
                              const std::vector<T> &vector,
