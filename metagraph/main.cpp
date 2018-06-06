@@ -483,7 +483,7 @@ int main(int argc, const char *argv[]) {
 
             Timer timer;
 
-            if (config->fast) {
+            if (!config->dynamic) {
                 if (config->verbose) {
                     std::cout << "Start reading data and extracting k-mers" << std::endl;
                 }

@@ -13,6 +13,7 @@ class Config {
     bool quiet = false;
     bool print_graph_succ = false;
     bool reverse = false;
+    bool dynamic = false;
     bool fast = false;
     bool filename_anno = false;
     bool fasta_anno = false;

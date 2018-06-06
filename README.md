@@ -59,13 +59,13 @@ For real examples, see [scripts](./scripts).
 
 * #### Simple build
 ```bash
-./metagengraph build --fast -v --parallel 30 -k 20 --mem-cap-gb 10 -o <GRAPH_DIR>/graph <DATA_DIR>/*.fasta.gz 2>&1 | tee <LOG_DIR>/log.txt
+./metagengraph build -v --parallel 30 -k 20 --mem-cap-gb 10 -o <GRAPH_DIR>/graph <DATA_DIR>/*.fasta.gz 2>&1 | tee <LOG_DIR>/log.txt
 ```
 
 * #### Chunking build
 1) Build chunks
 ```bash
-for F in {\$,A,C,G,T,N}{\$,A,C,G,T,N}; do ./metagengraph build --fast -v --parallel 30 -k 20 --mem-cap-gb 100 -o <GRAPH_DIR>/graph --suffix $F <DATA_DIR>/*.fasta.gz 2>&1 | tee <LOG_DIR>/log_$F.txt; done
+for F in {\$,A,C,G,T,N}{\$,A,C,G,T,N}; do ./metagengraph build -v --parallel 30 -k 20 --mem-cap-gb 100 -o <GRAPH_DIR>/graph --suffix $F <DATA_DIR>/*.fasta.gz 2>&1 | tee <LOG_DIR>/log_$F.txt; done
 ```
 2) Concatenate chunks
 ```bash
@@ -79,13 +79,13 @@ for F in {\$,A,C,G,T,N}{\$,A,C,G,T,N}; do ./metagengraph build --fast -v --paral
 ```
 2) Build graph
 ```bash
-./metagengraph build --fast -v --parallel 30 -k 20 --mem-cap-gb 100 --noise-freq 3 -o <GRAPH_DIR>/graph <DATA_DIR>/*.fasta.gz 2>&1 | tee <LOG_DIR>/log_build.txt
+./metagengraph build -v --parallel 30 -k 20 --mem-cap-gb 100 --noise-freq 3 -o <GRAPH_DIR>/graph <DATA_DIR>/*.fasta.gz 2>&1 | tee <LOG_DIR>/log_build.txt
 ```
 
 #### Distributed build
 1) Build chunks
 ```bash
-for F in {\\\$,A,C,G,T,N}{\\\$,A,C,G,T,N}{\\\$,A,C,G,T,N}; do bsub -J assemble$F -W 8:00 -n 30 -R "rusage[mem=15000]" "ls -1a <DATA_DIR>/*.fasta.gz | /usr/bin/time -v ./metagengraph build --fast -v --parallel 30 -k 24 --mem-cap-gb 350 --suffix $F -o <GRAPH_DIR>/graph 2>&1 | tee <LOG_DIR>/log_$F"; done
+for F in {\\\$,A,C,G,T,N}{\\\$,A,C,G,T,N}{\\\$,A,C,G,T,N}; do bsub -J assemble$F -W 8:00 -n 30 -R "rusage[mem=15000]" "ls -1a <DATA_DIR>/*.fasta.gz | /usr/bin/time -v ./metagengraph build -v --parallel 30 -k 24 --mem-cap-gb 350 --suffix $F -o <GRAPH_DIR>/graph 2>&1 | tee <LOG_DIR>/log_$F"; done
 ```
 2) Concatenate chunks
 ```bash

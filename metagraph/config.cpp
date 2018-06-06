@@ -67,6 +67,8 @@ Config::Config(int argc, const char *argv[]) {
             reverse = true;
         } else if (!strcmp(argv[i], "--fast")) {
             fast = true;
+        } else if (!strcmp(argv[i], "--dynamic")) {
+            dynamic = true;
         } else if (!strcmp(argv[i], "--anno-filename")) {
             filename_anno = true;
         } else if (!strcmp(argv[i], "--anno-header")) {
@@ -307,7 +309,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
             fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
             fprintf(stderr, "\t   --noise-freq [INT] \tthreshold for filtering reads with rare k-mers [0]\n");
-            fprintf(stderr, "\t   --fast \t\tuse fast build method [off]\n");
+            fprintf(stderr, "\t   --dynamic \t\tuse dynamic build method [off]\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t   --suffix \t\tbuild graph chunk only for k-mers with the suffix given [off]\n");
             fprintf(stderr, "\t-s --num-splits \tdefine the minimum number of bins to split kmers into [1]\n");
