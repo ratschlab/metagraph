@@ -281,14 +281,11 @@ void sequence_to_kmers(const std::string &sequence,
     // encode sequence
     size_t dummy_prefix_size = suffix.size() > 0 ? k : 1;
 
-    std::vector<TAlphabet> seq(sequence.size() + dummy_prefix_size + 1);
+    std::vector<TAlphabet> seq(sequence.size() + dummy_prefix_size + 1,
+                               DBG_succ::kSentinelCode);
 
-    for (size_t i = 0; i < dummy_prefix_size; ++i) {
-        seq[i] = DBG_succ::encode('$');
-    }
     std::transform(sequence.begin(), sequence.end(),
                    &seq[dummy_prefix_size], DBG_succ::encode);
-    seq.back() = DBG_succ::encode('$');
 
     sequence_to_kmers(std::move(seq), k, kmers, suffix);
 }

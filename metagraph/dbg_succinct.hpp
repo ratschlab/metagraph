@@ -262,6 +262,9 @@ class DBG_succ : public SequenceGraph {
     static const TAlphabet alph_size;
     static const size_t kLogSigma;
 
+    static const size_t kSentinelCode = 0;
+    static const size_t kSentinel = '$';
+
     Config::StateType state = Config::DYN;
 
   private:

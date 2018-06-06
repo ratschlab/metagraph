@@ -258,13 +258,22 @@ KMerDBGSuccChunkConstructor<KMER>
     assert(num_threads_ > 0);
 
     filter_suffix_encoded_.resize(filter_suffix.size());
-    std::transform(filter_suffix.begin(), filter_suffix.end(),
-                   filter_suffix_encoded_.begin(), DBG_succ::encode);
+    std::transform(
+        filter_suffix.begin(), filter_suffix.end(),
+        filter_suffix_encoded_.begin(),
+        [](char c) {
+            return c == DBG_succ::kSentinel
+                            ? DBG_succ::kSentinelCode
+                            : DBG_succ::encode(c);
+        }
+    );
 
     kmers_.reserve(memory_preallocated / sizeof(KMER));
 
-    if (filter_suffix == std::string(filter_suffix.size(), '$')) {
-        kmers_.emplace_back(std::vector<TAlphabet>(k + 1, 0), k + 1);
+    if (filter_suffix == std::string(filter_suffix.size(), DBG_succ::kSentinel)) {
+        kmers_.emplace_back(
+            std::vector<TAlphabet>(k + 1, DBG_succ::kSentinelCode), k + 1
+        );
     }
 }
 

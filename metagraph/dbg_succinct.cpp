@@ -32,20 +32,21 @@ const std::string DBG_succ::alphabet = "$ABCDEFGHIJKLMNOPQRSTUVWYZX"
 const TAlphabet kCharToNucleotide[128] = {
     26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
     26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
-    26, 26, 26, 26,   0, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
+    26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
     26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
     26,  1,  2,  3,   4,  5,  6,  7,   8,  9, 10, 11,  12, 13, 14, 15,
     16, 17, 18, 19,  20, 21, 22, 23,  26, 24, 25, 26,  26, 26, 26, 26,
-    26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
-    26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26
+    26,  1,  2,  3,   4,  5,  6,  7,   8,  9, 10, 11,  12, 13, 14, 15,
+    16, 17, 18, 19,  20, 21, 22, 23,  26, 24, 25, 26,  26, 26, 26, 26
 };
 const size_t DBG_succ::kLogSigma = 6;
 #else
+//for DNA and RNA (U <-> T) alphabets
 const std::string DBG_succ::alphabet = "$ACGTN$ACGTN";
 const TAlphabet kCharToNucleotide[128] = {
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  0, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 5, 5, 5,  4, 4, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
@@ -162,14 +163,14 @@ bool DBG_succ::operator==(const DBG_succ &other) const {
             first_last = get_last(i);
             first_label = DBG_succ::decode(get_W(i));
             i++;
-        } while (first_node.find('$') != std::string::npos && i < W->size());
+        } while (first_node.find(kSentinel) != std::string::npos && i < W->size());
 
         do {
             second_node = other.get_node_str(j);
             second_last = other.get_last(j);
             second_label = DBG_succ::decode(other.get_W(j));
             j++;
-        } while (second_node.find('$') != std::string::npos && j < other.W->size());
+        } while (second_node.find(kSentinel) != std::string::npos && j < other.W->size());
 
         if (i == W->size() || j == other.W->size())
             break;
@@ -740,7 +741,7 @@ bool DBG_succ::compare_node_suffix(TAlphabet *ref, uint64_t i2) const {
 bool DBG_succ::is_terminal_node(uint64_t i) const {
     CHECK_INDEX(i);
 
-    return num_nodes() <= 1 || (i > 1 && get_W(i) == encode('$'));
+    return num_nodes() <= 1 || (i > 1 && get_W(i) == kSentinelCode);
 }
 
 /**
@@ -960,11 +961,15 @@ void DBG_succ::sort_W_locally(uint64_t l, uint64_t u) {
 }
 
 TAlphabet DBG_succ::encode(char s) {
+    assert(kCharToNucleotide[kSentinel] != kSentinelCode);
+    assert(kCharToNucleotide[kSentinel] != kSentinelCode + alph_size);
     assert(static_cast<size_t>(s) < 128);
     return kCharToNucleotide[static_cast<size_t>(s)];
 }
 
 char DBG_succ::decode(TAlphabet c) {
+    assert(alphabet[kSentinelCode] == kSentinel);
+    assert(alphabet[kSentinelCode + alph_size] == kSentinel);
     assert(c < alphabet.size());
     return alphabet[c];
 }
@@ -1045,7 +1050,7 @@ void DBG_succ::add_sequence(const std::string &seq, bool try_extend) {
     uint64_t source;
 
     if (!try_extend || !(source = index(sequence.data(), sequence.data() + k_))) {
-        sequence.insert(sequence.begin(), k_, encode('$'));
+        sequence.insert(sequence.begin(), k_, kSentinelCode);
         source = 1; // the dummy source node
     }
 
@@ -1127,14 +1132,14 @@ uint64_t DBG_succ::append_pos(TAlphabet c, uint64_t source_node, TAlphabet *ckme
     uint64_t sentinel_pos = select_last(rank_last(F[c]) + rank_W(begin - 1, c)) + 1;
 
     update_F(c, +1);
-    W->insert(sentinel_pos, encode('$'));
+    W->insert(sentinel_pos, kSentinelCode);
     last->insertBit(sentinel_pos, true);
     return sentinel_pos;
 }
 
 
 bool DBG_succ::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
-    if (begin > 1 && get_W(begin) == encode('$')) {
+    if (begin > 1 && get_W(begin) == kSentinelCode) {
         // the source node is the dead-end with outgoing sentinel
         // replace this sentinel with proper label
         W->set(begin, c);
@@ -1211,7 +1216,7 @@ void DBG_succ::merge(const DBG_succ &Gm) {
     uint64_t Gt_source_node = 1;
     uint64_t Gm_source_node = 1;
     // keep a running list of the last k characters we have seen
-    std::deque<TAlphabet> k_mer(Gm.get_k(), DBG_succ::encode('$'));
+    std::deque<TAlphabet> k_mer(Gm.get_k(), DBG_succ::kSentinelCode);
 
     // store all branch nodes on the way
     std::stack<BranchInfoMerge> branchnodes;
@@ -1273,8 +1278,8 @@ void DBG_succ::merge(const DBG_succ &Gm) {
 
 bool DBG_succ::is_valid() const {
     assert(W->size() >= 2);
-    assert(get_node_str(1) == std::string(k_, '$') && "First kmer must be dummy");
-    assert(get_W(1) == encode('$') && "First kmer must be dummy");
+    assert(get_node_str(1) == std::string(k_, kSentinel) && "First kmer must be dummy");
+    assert(get_W(1) == kSentinelCode && "First kmer must be dummy");
 
     for (uint64_t i = 1; i < W->size(); i++) {
         auto index_pred = bwd(i);

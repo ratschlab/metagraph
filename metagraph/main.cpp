@@ -375,21 +375,15 @@ void annotate_data(const std::vector<std::string> &files,
     }
 }
 
-
-void alter_all_colex_prefices(std::string str, size_t length,
-                              std::vector<std::string> *result) {
-    assert(result);
-    assert(str.size() >= length);
-
-    if (length == 0) {
-        result->push_back(std::move(str));
-        return;
-    }
-
-    for (size_t i = 0; i < DBG_succ::alph_size; ++i) {
-        str[length - 1] = DBG_succ::decode(i);
-        alter_all_colex_prefices(str, length - 1, result);
-    }
+/**
+ * ACGT, ACG$, ..., $$$$ -- valid
+ * AC$T, A$$T, ..., $AAA -- invalid
+ */
+bool valid_kmer_suffix(std::string suffix) {
+    size_t last = suffix.rfind(DBG_succ::kSentinel);
+    return last == std::string::npos
+            || suffix.substr(0, last + 1)
+                == std::string(last + 1, DBG_succ::kSentinel);
 }
 
 
@@ -495,12 +489,15 @@ int main(int argc, const char *argv[]) {
                                                     / std::log2(DBG_succ::alph_size - 1))),
                     graph->get_k() - 1
                 );
-                std::deque<std::string> suffices = utils::generate_strings(
-                    DBG_succ::alphabet.substr(0, DBG_succ::alph_size),
-                    suffix_len
-                );
-                if (config->suffix.size())
+                std::deque<std::string> suffices;
+                if (config->suffix.size()) {
                     suffices = { config->suffix };
+                } else {
+                    suffices = utils::generate_strings(
+                        DBG_succ::alphabet.substr(0, DBG_succ::alph_size),
+                        suffix_len
+                    );
+                }
 
                 DBG_succ::Chunk graph_data(graph->get_k());
 
@@ -508,8 +505,11 @@ int main(int argc, const char *argv[]) {
                 for (const std::string &suffix : suffices) {
                     timer.reset();
 
-                    if (suffix.size()) {
+                    if (suffix.size() && valid_kmer_suffix(suffix)) {
                         std::cout << "\nSuffix: " << suffix << std::endl;
+                    } else {
+                        std::cout << "\nSkipping suffix: " << suffix << std::endl;
+                        continue;
                     }
 
                     std::unique_ptr<IChunkConstructor> constructor(
@@ -1008,19 +1008,16 @@ int main(int argc, const char *argv[]) {
             if (!files.size()) {
                 assert(config->infbase.size());
 
-                std::vector<std::string> sorted_suffices;
-
-                alter_all_colex_prefices(std::string(config->suffix_len, '\0'),
-                                         config->suffix_len,
-                                         &sorted_suffices);
-
-                assert(sorted_suffices.size()
-                        == std::pow(DBG_succ::alph_size, config->suffix_len));
+                auto sorted_suffices = utils::generate_strings(
+                    DBG_succ::alphabet.substr(0, DBG_succ::alph_size),
+                    config->suffix_len
+                );
 
                 for (const std::string &suffix : sorted_suffices) {
                     assert(suffix.size() == config->suffix_len);
 
-                    chunk_files.push_back(config->infbase + "." + suffix);
+                    if (valid_kmer_suffix(suffix))
+                        chunk_files.push_back(config->infbase + "." + suffix);
                 }
             }
 

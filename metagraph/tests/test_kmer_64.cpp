@@ -12,10 +12,15 @@ typedef uint64_t KMerBaseType;
 typedef KMer<KMerBaseType> KMER;
 
 
-std::string kmer_codec_64(const std::string &test_kmer) {
+template <typename KMER>
+std::string kmer_codec(const std::string &test_kmer) {
     std::string kmer_s = KMER(
         test_kmer,
-        DBG_succ::encode
+        [](char c) {
+            return c == DBG_succ::kSentinel
+                        ? DBG_succ::kSentinelCode
+                        : DBG_succ::encode(c);
+        }
     ).to_string(
         DBG_succ::alphabet
     );
@@ -24,8 +29,16 @@ std::string kmer_codec_64(const std::string &test_kmer) {
     return kmer_s;
 }
 
+template std::string kmer_codec<KMer<uint64_t>>(const std::string &test_kmer);
+template std::string kmer_codec<KMer<sdsl::uint256_t>>(const std::string &test_kmer);
+template std::string kmer_codec<KMer<sdsl::uint128_t>>(const std::string &test_kmer);
+
+std::string kmer_codec_64(const std::string &test_kmer) {
+    return kmer_codec<KMER>(test_kmer);
+}
+
 void test_kmer_codec_64(const std::string &test_kmer,
-                     const std::string &test_compare_kmer) {
+                        const std::string &test_compare_kmer) {
     ASSERT_EQ(test_kmer.length(), test_compare_kmer.length());
     ASSERT_EQ(test_compare_kmer.length(), kmer_codec_64(test_kmer).length());
     EXPECT_EQ(test_compare_kmer, kmer_codec_64(test_kmer));

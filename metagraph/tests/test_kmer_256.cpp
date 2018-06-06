@@ -12,20 +12,15 @@ typedef sdsl::uint256_t KMerBaseType;
 typedef KMer<KMerBaseType> KMER;
 
 
+template <typename KMER>
+std::string kmer_codec(const std::string &test_kmer);
+
 std::string kmer_codec_256(const std::string &test_kmer) {
-    std::string kmer_s = KMER(
-        test_kmer,
-        DBG_succ::encode
-    ).to_string(
-        DBG_succ::alphabet
-    );
-    kmer_s.push_back(kmer_s[0]);
-    kmer_s.erase(kmer_s.begin());
-    return kmer_s;
+    return kmer_codec<KMER>(test_kmer);
 }
 
 void test_kmer_codec_256(const std::string &test_kmer,
-                     const std::string &test_compare_kmer) {
+                         const std::string &test_compare_kmer) {
     ASSERT_EQ(test_kmer.length(), test_compare_kmer.length());
     ASSERT_EQ(test_compare_kmer.length(), kmer_codec_256(test_kmer).length());
     EXPECT_EQ(test_compare_kmer, kmer_codec_256(test_kmer));

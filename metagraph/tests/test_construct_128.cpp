@@ -53,6 +53,38 @@ TEST(Construct_128, ConstructionEQAppendingTwoPaths) {
     }
 }
 
+TEST(Construct_128, ConstructionLowerCase) {
+    for (size_t k = 1; k < kMaxK; ++k) {
+        KMerDBGSuccConstructor constructor_first(k);
+        constructor_first.add_reads({ std::string(100, 'A'),
+                                      std::string(50, 'C') });
+        DBG_succ first(&constructor_first);
+
+        KMerDBGSuccConstructor constructor_second(k);
+        constructor_second.add_reads({ std::string(100, 'a'),
+                                       std::string(50, 'c') });
+        DBG_succ second(&constructor_second);
+
+        EXPECT_TRUE(first.equals_internally(second));
+    }
+}
+
+TEST(Construct_128, ConstructionDummySentinel) {
+    for (size_t k = 1; k < kMaxK; ++k) {
+        KMerDBGSuccConstructor constructor_first(k);
+        constructor_first.add_reads({ std::string(100, 'N'),
+                                      std::string(50, '$') });
+        DBG_succ first(&constructor_first);
+
+        KMerDBGSuccConstructor constructor_second(k);
+        constructor_second.add_reads({ std::string(100, 'N'),
+                                       std::string(50, '.') });
+        DBG_succ second(&constructor_second);
+
+        EXPECT_TRUE(first.equals_internally(second));
+    }
+}
+
 TEST(Construct_128, ConstructionEQAppending) {
     for (size_t k = 1; k < kMaxK; ++k) {
         std::vector<std::string> input_data = {

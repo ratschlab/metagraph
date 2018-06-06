@@ -115,7 +115,7 @@ DBG_succ::Chunk::build_graph_from_chunks(const std::vector<std::string> &chunk_f
         }
 
         if (verbose) {
-            std::cout << "Chunk " << filename << " loaded" << std::endl;
+            std::cout << "Chunk " << filename << " loaded..." << std::flush;
         }
 
         for (size_t i = 1; i < graph_chunk.W_.size(); ++i) {
@@ -130,7 +130,7 @@ DBG_succ::Chunk::build_graph_from_chunks(const std::vector<std::string> &chunk_f
         }
 
         if (verbose) {
-            std::cout << "Chunk " << filename << " concatenated" << std::endl;
+            std::cout << " concatenated" << std::endl;
         }
     }
 

@@ -210,7 +210,7 @@ DBG_succ::Chunk* merge_blocks_to_chunk(const std::vector<const DBG_succ*> &graph
         // Make the kmers from different bins differ
         // by a prefix of length at least 2.
         // So that we don't have to adjust the W array when concatenating.
-        border_kmers.back()[0] = DBG_succ::encode('$');
+        border_kmers.back()[0] = DBG_succ::kSentinelCode;
     }
 
     if (verbose)
@@ -371,7 +371,7 @@ DBG_succ::Chunk* merge_blocks(const std::vector<const DBG_succ*> &Gv,
 
         // check whether we already added a node whose outgoing edge points to the
         // same node as the current one
-        TAlphabet next_in_W = val != DBG_succ::encode('$')
+        TAlphabet next_in_W = val != DBG_succ::kSentinelCode
                                 && utils::seq_equal(seq1, last_added_nodes[val], 1)
                               ? val + DBG_succ::alph_size
                               : val;
@@ -384,8 +384,8 @@ DBG_succ::Chunk* merge_blocks(const std::vector<const DBG_succ*> &Gv,
 
             // compare the last two added nodes
             if (utils::seq_equal(seq1, pred_node)) {
-                if (seq1.back() != DBG_succ::encode('$')
-                        && chunk->get_W_back() == DBG_succ::encode('$')) {
+                if (seq1.back() != DBG_succ::kSentinelCode
+                        && chunk->get_W_back() == DBG_succ::kSentinelCode) {
                     remove_dummy_edge = true;
                     chunk->alter_W_back(next_in_W);
                 } else {

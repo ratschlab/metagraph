@@ -147,11 +147,11 @@ TEST(DBGSuccinct, SmallGraphTraversal) {
                                            8, 0, 10, 21, 11, 11, 13, 0, 22, 16, 17 };
     ASSERT_EQ(outgoing_edges.size(), graph->num_edges() + 1);
 
-    EXPECT_EQ(outgoing_edges[1], graph->outgoing(1, DBG_succ::encode('$')));
+    EXPECT_EQ(outgoing_edges[1], graph->outgoing(1, DBG_succ::kSentinelCode));
 
     for (size_t i = 1; i < graph->get_W().size(); ++i) {
         //test forward traversal given an output edge label
-        if (graph->get_W(i) != DBG_succ::encode('$')) {
+        if (graph->get_W(i) != DBG_succ::kSentinelCode) {
             EXPECT_EQ(outgoing_edges[i], graph->outgoing(i, graph->get_W(i)))
                 << "Edge index: " << i;
 
@@ -323,7 +323,12 @@ void test_pred_kmer(const DBG_succ &graph,
                     const std::string &kmer_s,
                     uint64_t expected_idx) {
     std::deque<TAlphabet> kmer(kmer_s.size());
-    std::transform(kmer_s.begin(), kmer_s.end(), kmer.begin(), DBG_succ::encode);
+    std::transform(kmer_s.begin(), kmer_s.end(), kmer.begin(),
+                   [](char c) {
+                       return c == DBG_succ::kSentinel
+                                   ? DBG_succ::kSentinelCode
+                                   : DBG_succ::encode(c);
+                   });
     EXPECT_EQ(expected_idx, graph.pred_kmer(kmer)) << kmer_s << std::endl << graph;
 }
 
