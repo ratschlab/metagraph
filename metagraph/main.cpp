@@ -379,7 +379,7 @@ void annotate_data(const std::vector<std::string> &files,
  * ACGT, ACG$, ..., $$$$ -- valid
  * AC$T, A$$T, ..., $AAA -- invalid
  */
-bool valid_kmer_suffix(std::string suffix) {
+bool valid_kmer_suffix(const std::string &suffix) {
     size_t last = suffix.rfind(DBG_succ::kSentinel);
     return last == std::string::npos
             || suffix.substr(0, last + 1)
@@ -505,7 +505,7 @@ int main(int argc, const char *argv[]) {
                 for (const std::string &suffix : suffices) {
                     timer.reset();
 
-                    if (suffix.size() && valid_kmer_suffix(suffix)) {
+                    if (valid_kmer_suffix(suffix)) {
                         std::cout << "\nSuffix: " << suffix << std::endl;
                     } else {
                         std::cout << "\nSkipping suffix: " << suffix << std::endl;
