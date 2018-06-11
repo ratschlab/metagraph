@@ -3,6 +3,7 @@
 #include <numeric>
 
 #include <hopscotch_sc_map.h>
+#include <kmc_file.h>
 
 #include "kmer.hpp"
 #include "utils.hpp"
@@ -65,7 +66,7 @@ std::vector<bool> filter_reads(const std::vector<std::string> &reads,
     }
 
     if (verbose) {
-        std::cout << "\nFiltering out the k-mers collected... "
+        std::cout << "Filtering out the k-mers collected... "
                                                 << timer.elapsed() << "sec\n";
         std::cout << "Distinct k-mers:   " << num_distinct_kmers << "\n";
         std::cout << "Total k-mers:      " << counter_sum << "\n";
@@ -132,11 +133,6 @@ count_kmers_and_filter_reads_templated(std::vector<std::string> *reads,
     }
     filtering_reads.clear();
 
-    if (verbose) {
-        std::cout << "Total reads:     " << frequent.size() << "\n";
-        std::cout << "Filtered reads:  " << frequent_reads.size() << std::endl;
-    }
-
     reads->swap(frequent_reads);
     return frequent;
 }
@@ -166,19 +162,84 @@ std::vector<bool>
 count_kmers_and_filter_reads_raii(std::vector<std::string> *reads,
                                   size_t k,
                                   size_t noise_kmer_frequency,
+                                  CKMCFile *kmc_database,
                                   bool verbose) {
-    auto result = count_kmers_and_filter_reads(
-        reads, k, noise_kmer_frequency, verbose
-    );
+    size_t all_reads = reads->size();
+    std::vector<bool> result;
+
+    if (kmc_database) {
+        for (const std::string &read : *reads) {
+            if (read.size() <= k) {
+                result.push_back(0);
+                continue;
+            }
+
+            std::vector<uint32> counters;
+            size_t valid_kmers = 0;
+
+            kmc_database->GetCountersForRead(read, counters);
+
+            for (auto counter : counters) {
+                if (counter)
+                    ++valid_kmers;
+            }
+
+            result.push_back(valid_kmers >= read.size() - k);
+        }
+
+    } else {
+        result = count_kmers_and_filter_reads(
+            reads, k, noise_kmer_frequency, verbose
+        );
+    }
+
     delete reads;
+
+    if (verbose) {
+        std::cout << "All reads:   " << all_reads << "\n";
+        std::cout << "Reads left:  "
+                  << std::accumulate(result.begin(), result.end(), 0llu)
+                  << "\n" << std::endl;
+    }
+
     return result;
 }
+
 
 std::vector<bool> filter_reads(std::function<void(CallbackRead)> generate_reads,
                                size_t k,
                                size_t noise_kmer_frequency,
                                bool verbose,
-                               utils::ThreadPool *thread_pool) {
+                               utils::ThreadPool *thread_pool,
+                               const std::string &kmc_base) {
+    std::unique_ptr<CKMCFile> kmc_database;
+
+    if (kmc_base.size()) {
+        kmc_database.reset(new CKMCFile());
+
+        if (!kmc_database->OpenForRA(kmc_base)) {
+            std::cerr << "Error: Can't open KMC database " << kmc_base << std::endl;
+            exit(1);
+        }
+        if (kmc_database->KmerLength() != k + 1) {
+            std::cerr << "Error: Incompatible KMC database " << kmc_base
+                      << " with k=" << kmc_database->KmerLength()
+                      << " instead of required k=" << k + 1 << std::endl;
+            exit(1);
+        }
+        if (kmc_database->GetMinCount() > noise_kmer_frequency + 1) {
+            std::cerr << "Error: Incompatible KMC database " << kmc_base
+                      << " built with min_count=" << kmc_database->GetMinCount() << std::endl;
+            exit(1);
+        }
+
+        if (verbose) {
+            std::cout << "KMC database loaded" << std::endl;
+        }
+
+        kmc_database->SetMinCount(noise_kmer_frequency + 1);
+    }
+
     std::vector<std::future<std::vector<bool>>> future_filters;
 
     auto *reads = new std::vector<std::string>();
@@ -193,7 +254,7 @@ std::vector<bool> filter_reads(std::function<void(CallbackRead)> generate_reads,
             future_filters.emplace_back(
                 thread_pool->enqueue(
                     count_kmers_and_filter_reads_raii,
-                    reads, k, noise_kmer_frequency, verbose
+                    reads, k, noise_kmer_frequency, kmc_database.get(), verbose
                 )
             );
             reads = new std::vector<std::string>();
@@ -209,7 +270,7 @@ std::vector<bool> filter_reads(std::function<void(CallbackRead)> generate_reads,
             count_kmers_and_filter_reads_raii,
             reads, k,
             noise_kmer_frequency * valid_kmers_collected / kMaxKmersChunkSize,
-            verbose
+            kmc_database.get(), verbose
         )
     );
 

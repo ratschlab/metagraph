@@ -747,7 +747,8 @@ int main(int argc, const char *argv[]) {
                 thread_pool_files.enqueue([=](size_t k,
                                               size_t noise_kmer_frequency,
                                               bool verbose,
-                                              bool reverse) {
+                                              bool reverse,
+                                              bool use_kmc) {
                         // compute read filter, bit vector indicating filtered reads
                         std::vector<bool> filter = filter_reads([=](auto callback) {
                                 read_fasta_file_critical(file, [=](kseq_t *read_stream) {
@@ -755,7 +756,8 @@ int main(int argc, const char *argv[]) {
                                     callback(read_stream->seq.s);
                                 }, reverse, timer_ptr);
                             },
-                            k, noise_kmer_frequency, verbose, thread_pool_ptr
+                            k, noise_kmer_frequency, verbose, thread_pool_ptr,
+                            use_kmc ? file + ".kmc" : ""
                         );
                         if (reverse) {
                             assert(filter.size() % 2 == 0);
@@ -774,7 +776,7 @@ int main(int argc, const char *argv[]) {
                         serialize_number_vector(outstream, filter, 1);
                     },
                     config->k, config->noise_kmer_frequency,
-                    config->verbose, config->reverse
+                    config->verbose, config->reverse, config->use_kmc
                 );
             }
             thread_pool_files.join();

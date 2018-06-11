@@ -29,6 +29,7 @@ class Config {
     bool suppress_unlabeled = false;
     bool generate_filtered_fasta = false;
     bool generate_filtered_fastq = false;
+    bool use_kmc = false;
 
     unsigned int k = 3;
     unsigned int distance = 0;

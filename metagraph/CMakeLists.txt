@@ -22,7 +22,7 @@ endif()
 
 string(APPEND CMAKE_CXX_FLAGS " \
   -std=c++14 -Wall -Wextra -Werror \
-  -msse4.2 -mavx -mavx2 -mbmi -mbmi2 \
+  -msse4.2 -mavx -mavx2 -mfma -mbmi -mbmi2 \
   -fopenmp -D_THREAD_SAFE -pthread") # -DDBGDEBUG -Wconversion -Wsign-conversion
 
 
@@ -42,12 +42,37 @@ set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 set(CMAKE_VERBOSE_MAKEFILE 1)
 cmake_policy(SET CMP0015 NEW)
 
+
+#-------------------
+# KMC k-mer counter
+#-------------------
+set(KMC_MAIN_DIR "${PROJECT_SOURCE_DIR}/external-libraries/KMC/kmer_counter")
+set(BUILD_KMC TRUE)
+configure_file(CMakeListsKMC.txt.in KMC/CMakeLists.txt @ONLY)
+execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
+  RESULT_VARIABLE result
+  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/KMC
+)
+if(result)
+  message(FATAL_ERROR "CMake step for KMC failed: ${result}")
+endif()
+execute_process(COMMAND ${CMAKE_COMMAND} --build . --config Release -- -j
+  RESULT_VARIABLE result
+  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/KMC
+)
+if(result)
+  message(FATAL_ERROR "Build step for KMC failed: ${result}")
+endif()
+
+
 link_directories(
+  ${CMAKE_BINARY_DIR}/KMC
   external-libraries/libmaus2/lib
   external-libraries/sdsl-lite/lib
 )
 
 include_directories(
+  external-libraries/KMC/kmc_api
   external-libraries/libmaus2/include
   external-libraries/sdsl-lite/include
   external-libraries/hopscotch-map/src
@@ -87,6 +112,7 @@ add_executable(metagengraph "main.cpp")
 set_target_properties(metagengraph PROPERTIES OUTPUT_NAME "metagengraph_${CMAKE_DBG_ALPHABET}")
 
 set(METALIBS ${METALIBS}
+  -lKMC
   -lhts -lz -lbz2
   -lmaus2 -lmaus2_simd_align_128 -lmaus2_simd_align_256
   -lsdsl -ldivsufsort -ldivsufsort64

@@ -101,6 +101,8 @@ Config::Config(int argc, const char *argv[]) {
             generate_filtered_fasta = true;
         } else if (!strcmp(argv[i], "--generate-fastq")) {
             generate_filtered_fastq = true;
+        } else if (!strcmp(argv[i], "--kmc")) {
+            use_kmc = true;
             //TODO: add into some USAGE description
         } else if (!strcmp(argv[i], "--bloom-false-pos-prob")) {
             bloom_fpp = std::stof(argv[++i]);
@@ -320,6 +322,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for filter:\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
+            fprintf(stderr, "\t   --kmc \t\tuse precomputed KMC database with k-mer counts\n");
             fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
             fprintf(stderr, "\t   --generate-fasta \twrite filtered reads to disk in fasta format [off]\n");
             fprintf(stderr, "\t   --generate-fastq \twrite filtered reads to disk in fastq format [off]\n");

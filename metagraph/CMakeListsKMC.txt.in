@@ -1,0 +1,67 @@
+cmake_minimum_required(VERSION 2.8.2)
+
+project(KMC)
+
+
+string(APPEND CMAKE_CXX_FLAGS " \
+    -Wall -O3 -m64 -static -Wl,--whole-archive \
+    -lpthread -Wl,--no-whole-archive -std=c++11 \
+")
+
+set(KMC_MAIN_DIR @KMC_MAIN_DIR@)
+
+file(GLOB KMC_files
+#${KMC_MAIN_DIR}/kmer_counter.cpp
+${KMC_MAIN_DIR}/mmer.cpp
+${KMC_MAIN_DIR}/mem_disk_file.cpp
+${KMC_MAIN_DIR}/rev_byte.cpp
+${KMC_MAIN_DIR}/bkb_writer.cpp
+${KMC_MAIN_DIR}/cpu_info.cpp
+${KMC_MAIN_DIR}/bkb_reader.cpp
+${KMC_MAIN_DIR}/fastq_reader.cpp
+${KMC_MAIN_DIR}/timer.cpp
+${KMC_MAIN_DIR}/develop.cpp
+${KMC_MAIN_DIR}/kb_completer.cpp
+${KMC_MAIN_DIR}/kb_storer.cpp
+${KMC_MAIN_DIR}/kmer.cpp
+${KMC_MAIN_DIR}/prob_qual.cpp
+${KMC_MAIN_DIR}/../kmc_api/mmer.cpp
+${KMC_MAIN_DIR}/../kmc_api/kmc_file.cpp
+${KMC_MAIN_DIR}/../kmc_api/kmer_api.cpp
+)
+
+file(GLOB RADULS_files
+${KMC_MAIN_DIR}/raduls_sse2.cpp
+${KMC_MAIN_DIR}/raduls_sse41.cpp
+${KMC_MAIN_DIR}/raduls_avx2.cpp
+${KMC_MAIN_DIR}/raduls_avx.cpp
+)
+
+set_source_files_properties(${KMC_MAIN_DIR}/raduls_sse2.cpp
+    PROPERTIES COMPILE_FLAGS "-msse2")
+set_source_files_properties(${KMC_MAIN_DIR}/raduls_sse41.cpp
+    PROPERTIES COMPILE_FLAGS "-msse4.1")
+set_source_files_properties(${KMC_MAIN_DIR}/raduls_avx.cpp
+    PROPERTIES COMPILE_FLAGS "-mavx -fabi-version=0")
+set_source_files_properties(${KMC_MAIN_DIR}/raduls_avx2.cpp
+    PROPERTIES COMPILE_FLAGS "-mavx2 -mfma -fabi-version=0")
+
+add_library(KMC STATIC
+    ${KMC_files}
+    ${RADULS_files}
+    ${KMC_MAIN_DIR}/libs/vectorclass/instrset_detect.cpp
+)
+
+target_link_libraries(
+  KMC
+)
+
+if(@BUILD_KMC@)
+add_executable(kmc
+    ${KMC_MAIN_DIR}/kmer_counter.cpp
+)
+
+target_link_libraries(
+    kmc KMC -lz -lbz2 -laelf64 -L${KMC_MAIN_DIR}/libs
+)
+endif()
