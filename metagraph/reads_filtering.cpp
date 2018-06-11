@@ -25,6 +25,7 @@ std::vector<bool> filter_reads(const std::vector<std::string> &reads,
     Timer timer;
 
     size_t num_distinct_kmers = counter->size();
+    size_t num_frequent_kmers = 0;
     size_t counter_sum = 0;
     size_t filtered_sum = 0;
 
@@ -37,6 +38,7 @@ std::vector<bool> filter_reads(const std::vector<std::string> &reads,
         } else {
             filtered_sum += it->second;
             ++it;
+            num_frequent_kmers++;
         }
     }
     counter->rehash(counter->size());
@@ -67,7 +69,8 @@ std::vector<bool> filter_reads(const std::vector<std::string> &reads,
                                                 << timer.elapsed() << "sec\n";
         std::cout << "Distinct k-mers:   " << num_distinct_kmers << "\n";
         std::cout << "Total k-mers:      " << counter_sum << "\n";
-        std::cout << "Frequent k-mers:   " << filtered_sum << std::endl;
+        std::cout << "Total k-mers left: " << filtered_sum << std::endl;
+        std::cout << "Frequent k-mers:   " << num_frequent_kmers << "\n";
     }
     return filter;
 }
