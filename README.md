@@ -80,8 +80,8 @@ for F in {\$,A,C,G,T,N}{\$,A,C,G,T,N}; do ./metagengraph build -v --parallel 30 
 ```
   * using KMC
 ```bash
-./KMC/kmc -k21 -m5 -fq -t30 <DATA_DIR>/*.fasta.gz <DATA_DIR>/*.fasta.gz.kmc ./KMC
-./metagengraph filter -v --parallel 30 -k 20 --noise-freq 3 --kmc <DATA_DIR>/*.fasta.gz
+./KMC/kmc -k21 -m5 -fq -t30 <FILE>.fasta.gz <FILE>.fasta.gz.kmc ./KMC
+./metagengraph filter -v --parallel 30 -k 20 --noise-freq 3 --kmc <FILE>.fasta.gz
 ```
 2) Build graph
 ```bash
