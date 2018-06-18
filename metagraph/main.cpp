@@ -651,6 +651,88 @@ int main(int argc, const char *argv[]) {
 
             return 0;
         }
+        case Config::EXTEND: {
+            Timer timer;
+
+            // load graph
+            std::unique_ptr<DBG_succ> graph {
+                load_critical_graph_from_file(config->infbase)
+            };
+
+            if (config->verbose) {
+                std::cout << "Succinct de Bruijn graph with k-mer size k="
+                          << graph->get_k() << " has been loaded in "
+                          << timer.elapsed() << "sec" << std::endl;
+            }
+            timer.reset();
+
+            if (graph->state != Config::DYN) {
+                if (config->verbose)
+                    std::cout << "Switching the graph state to dynamic..." << std::flush;
+                graph->switch_state(Config::DYN);
+                if (config->verbose)
+                    std::cout << "\tdone in " << timer.elapsed() << "sec" << std::endl;
+            }
+            timer.reset();
+
+            if (config->verbose)
+                std::cout << "Start graph extension" << std::endl;
+
+            for (const auto &file : files) {
+                if (config->verbose) {
+                    std::cout << std::endl << "Parsing " << file << std::endl;
+                }
+                // open stream
+                if (utils::get_filetype(file) == "VCF") {
+                    read_vcf_file_critical(file, config->refpath, graph->get_k(), NULL,
+                        [&](std::string &seq, auto *variant_annotations) {
+                            graph->add_sequence(seq);
+                            if (config->reverse) {
+                                reverse_complement(seq.begin(), seq.end());
+                                graph->add_sequence(seq);
+                            }
+                            std::ignore = variant_annotations;
+                        }
+                    );
+                } else if (utils::get_filetype(file) == "FASTA"
+                            || utils::get_filetype(file) == "FASTQ") {
+                    read_fasta_file_critical(file,
+                        [&](kseq_t *read_stream) { graph->add_sequence(read_stream->seq.s); },
+                        config->reverse, NULL,
+                        get_filter_filename(file, config->k, config->noise_kmer_frequency)
+                    );
+                } else {
+                    std::cerr << "ERROR: Filetype unknown for file "
+                              << file << std::endl;
+                    exit(1);
+                }
+            }
+
+            if (config->verbose)
+                std::cout << "Graph extension finished in "
+                          << timer.elapsed() << "sec" << std::endl;
+            timer.reset();
+
+            // graph output
+            if (config->print_graph_succ)
+                graph->print_state();
+
+            assert(config->outfbase.size());
+
+            // serialize graph
+            timer.reset();
+            if (graph->state != config->state) {
+                if (config->verbose)
+                    std::cout << "Switching state before dumping..." << std::flush;
+                graph->switch_state(config->state);
+                if (config->verbose)
+                    std::cout << "\tdone in " << timer.elapsed() << "sec" << std::endl;
+            }
+
+            graph->serialize(config->outfbase);
+
+            return 0;
+        }
         case Config::FILTER: {
             if (config->verbose) {
                 std::cout << "Filter out reads with rare k-mers" << std::endl;

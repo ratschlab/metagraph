@@ -16,6 +16,8 @@ Config::Config(int argc, const char *argv[]) {
     // parse identity from first command line argument
     if (!strcmp(argv[1], "merge")) {
         identity = MERGE;
+    } else if (!strcmp(argv[1], "extend")) {
+        identity = EXTEND;
     } else if (!strcmp(argv[1], "concatenate")) {
         identity = CONCATENATE;
     } else if (!strcmp(argv[1], "compare")) {
@@ -217,6 +219,9 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == ANNOTATE && outfbase.empty())
         outfbase = infbase;
 
+    if (identity == EXTEND && (outfbase.empty() || infbase.empty()))
+        print_usage_and_exit = true;
+
     if (identity == MERGE_ANNOTATORS && (outfbase.empty() || infbase.empty()))
         print_usage_and_exit = true;
 
@@ -271,6 +276,10 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats or integrate sequence\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats into a given graph\n\n");
 
+            fprintf(stderr, "\textend\t\textend an existing graph with new sequences from\n");
+            fprintf(stderr, "\t\t\tfiles in fast[a|q] formats or integrate sequence\n");
+            fprintf(stderr, "\t\t\tfiles in fast[a|q] formats\n\n");
+
             fprintf(stderr, "\tmerge\t\tintegrate a given set of graph structures\n");
             fprintf(stderr, "\t\t\tand output a new graph structure\n\n");
 
@@ -316,6 +325,18 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --suffix \t\tbuild graph chunk only for k-mers with the suffix given [off]\n");
             fprintf(stderr, "\t-s --num-splits \tdefine the minimum number of bins to split kmers into [1]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+        } break;
+        case EXTEND: {
+            fprintf(stderr, "Usage: %s extend -i <graph_basename> -o <extended_graph_basename> [options] <FASTQ1> [[FASTQ2] ...]\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for extend:\n");
+            fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence []\n");
+            fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
+            fprintf(stderr, "\t-t --state [1|2] \tstate of the extended graph [STAT=1]\n");
+            fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
+            fprintf(stderr, "\t   --noise-freq [INT] \tthreshold for filtering reads with rare k-mers [0]\n");
+            fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
+            // fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case FILTER: {
             fprintf(stderr, "Usage: %s filter [options] --noise-freq <cutoff> FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());

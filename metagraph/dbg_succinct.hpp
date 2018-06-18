@@ -421,7 +421,7 @@ class DBG_succ : public SequenceGraph {
 #ifdef DBGDEBUG
     template <typename T, typename... Targs>
     void verbose_cout(const T &arg, Targs ...rest) const {
-        std::cout << arg;
+        std::cout << arg << std::flush;
         verbose_cout(rest...);
     }
 #else

@@ -77,8 +77,7 @@ class wavelet_tree_dyn : public wavelet_tree {
     explicit wavelet_tree_dyn(uint64_t b) : wavelet_tree_(b) {}
 
     template <class Vector>
-    wavelet_tree_dyn(uint64_t b, const Vector &W_stat,
-                     unsigned int parallel = 1);
+    wavelet_tree_dyn(uint64_t b, const Vector &W_stat);
 
     uint64_t size() const { return wavelet_tree_.size(); }
 

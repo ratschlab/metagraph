@@ -154,71 +154,55 @@ void wavelet_tree_stat::init_wt() {
 
 template <class Vector>
 libmaus2::bitbtree::BitBTree<6, 64>* initialize_tree(const Vector &W_stat,
-                                                     const uint64_t b,
-                                                     unsigned int parallel) {
-    // return dynamic_cast<libmaus2::bitbtree::BitBTree<6, 64>*>(
-    //     makeTree(W_stat, b, parallel)), b, W_stat.size()
-    // );
-
+                                                     const uint64_t b) {
     uint64_t const n = W_stat.size();
 
     // compute total offsets for the individual bins
     std::vector<uint64_t> offsets((1ull << (b - 1)) - 1, 0);
-    #pragma omp parallel num_threads(parallel)
-    {
-        uint64_t v, m, o;
-        #pragma omp for
-        for (uint64_t i = 0; i < n; ++i) {
-            m = (1ull << (b - 1));
-            v = static_cast<uint64_t>(W_stat[i]);
-            o = 0;
-            for (uint64_t ib = 1; ib < b; ++ib) {
-                bool const bit = m & v;
-                if (!bit) {
-                    #pragma omp critical
-                    offsets.at(o) += 1;
-                }
-                o = 2 * o + 1 + bit;
-                m >>= 1;
+    uint64_t v, m, o;
+    for (uint64_t i = 0; i < n; ++i) {
+        m = (1ull << (b - 1));
+        v = static_cast<uint64_t>(W_stat[i]);
+        o = 0;
+        for (uint64_t ib = 1; ib < b; ++ib) {
+            bool const bit = m & v;
+            if (!bit) {
+                offsets.at(o) += 1;
             }
+            o = 2 * o + 1 + bit;
+            m >>= 1;
         }
     }
 
     auto *tmp = new libmaus2::bitbtree::BitBTree<6, 64>(n * b, false);
     std::vector<uint64_t> upto_offsets((1ull << (b - 1)) - 1, 0);
 
-    #pragma omp parallel num_threads(parallel)
-    {
-        uint64_t m, v, o, p, co;
-        bool bit;
-        #pragma omp for
-        for (uint64_t i = 0; i < n; ++i) {
-            m = (1ull << (b - 1));
-            v = (uint64_t) W_stat[i];
-            o = 0;
-            p = i;
-            co = 0;
-            for (uint64_t ib = 0; ib < b - 1; ++ib) {
-                bit = m & v;
-                if (bit) {
-                    #pragma omp critical
-                    tmp->setBitQuick(ib * n + p + co, true);
-                    co += offsets.at(o);
-                    p -= upto_offsets.at(o);
-                } else {
-                    p -= (p - upto_offsets.at(o));
-                    upto_offsets.at(o) += 1;
-                }
-                //std::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
-                o = 2 * o + 1 + bit;
-                m >>= 1;
-            }
+    uint64_t p, co;
+    bool bit;
+    for (uint64_t i = 0; i < n; ++i) {
+        m = (1ull << (b - 1));
+        v = (uint64_t) W_stat[i];
+        o = 0;
+        p = i;
+        co = 0;
+        for (uint64_t ib = 0; ib < b - 1; ++ib) {
             bit = m & v;
             if (bit) {
-                //std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
-                #pragma omp critical
-                tmp->setBitQuick((b - 1) * n + p + co, true);
+                tmp->setBitQuick(ib * n + p + co, true);
+                co += offsets.at(o);
+                p -= upto_offsets.at(o);
+            } else {
+                p -= (p - upto_offsets.at(o));
+                upto_offsets.at(o) += 1;
             }
+            //std::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
+            o = 2 * o + 1 + bit;
+            m >>= 1;
+        }
+        bit = m & v;
+        if (bit) {
+            //std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
+            tmp->setBitQuick((b - 1) * n + p + co, true);
         }
     }
 
@@ -228,33 +212,28 @@ libmaus2::bitbtree::BitBTree<6, 64>* initialize_tree(const Vector &W_stat,
 
 template <class Vector>
 wavelet_tree_dyn::wavelet_tree_dyn(uint64_t b,
-                                   const Vector &W_stat,
-                                   unsigned int parallel)
-    : wavelet_tree_(initialize_tree(W_stat, b, parallel), b, W_stat.size()) {}
+                                   const Vector &W_stat)
+    : wavelet_tree_(initialize_tree(W_stat, b), b, W_stat.size()) {}
 
 template
 wavelet_tree_dyn
 ::wavelet_tree_dyn<wavelet_tree>(uint64_t b,
-                                 const wavelet_tree &W_stat,
-                                 unsigned int parallel);
+                                 const wavelet_tree &W_stat);
 
 template
 wavelet_tree_dyn
 ::wavelet_tree_dyn<std::vector<uint8_t>>(uint64_t b,
-                                         const std::vector<uint8_t> &W_stat,
-                                         unsigned int parallel);
+                                         const std::vector<uint8_t> &W_stat);
 
 template
 wavelet_tree_dyn
 ::wavelet_tree_dyn<std::vector<int>>(uint64_t b,
-                                     const std::vector<int> &W_stat,
-                                     unsigned int parallel);
+                                     const std::vector<int> &W_stat);
 
 template
 wavelet_tree_dyn
 ::wavelet_tree_dyn<std::vector<uint64_t>>(uint64_t b,
-                                          const std::vector<uint64_t> &W_stat,
-                                          unsigned int parallel);
+                                          const std::vector<uint64_t> &W_stat);
 
 bool wavelet_tree_dyn::deserialise(std::istream &in) {
     if (!in.good())

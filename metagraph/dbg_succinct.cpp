@@ -1057,7 +1057,7 @@ void DBG_succ::add_sequence(const std::string &seq, bool try_extend) {
     for (size_t i = 0; i < sequence.size() - k_; ++i) {
         // print the process
         if (i > 0 && i % 1'000 == 0) {
-            std::cout << "." << std::flush;
+            verbose_cout(".");
             if (i % 10'000 == 0)
                 verbose_cout(i, " - edges ", num_edges(), " / nodes ", num_nodes(), "\n");
         }
