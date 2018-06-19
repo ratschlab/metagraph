@@ -1040,7 +1040,10 @@ void DBG_succ::print_adj_list(std::ostream &os) const {
 ///////////////
 
 // add a full sequence to the graph
-void DBG_succ::add_sequence(const std::string &seq, bool try_extend) {
+void DBG_succ::add_sequence(const std::string &seq, bool try_extend,
+                            bit_vector_dyn *edges_inserted) {
+    assert(!edges_inserted || edges_inserted->size() == W->size());
+
     if (seq.size() < k_)
         return;
 
@@ -1062,7 +1065,7 @@ void DBG_succ::add_sequence(const std::string &seq, bool try_extend) {
                 verbose_cout(i, " - edges ", num_edges(), " / nodes ", num_nodes(), "\n");
         }
 
-        source = append_pos(sequence[i + k_], source, &sequence[i]);
+        source = append_pos(sequence[i + k_], source, &sequence[i], edges_inserted);
     }
 
     verbose_cout("edges ", num_edges(), " / nodes ", num_nodes(), "\n");
@@ -1072,7 +1075,8 @@ void DBG_succ::add_sequence(const std::string &seq, bool try_extend) {
  * This function takes a character c and appends it to the end of the graph
  * sequence given that the corresponding node is not a part of the graph yet.
  */
-uint64_t DBG_succ::append_pos(TAlphabet c, uint64_t source_node, TAlphabet *ckmer) {
+uint64_t DBG_succ::append_pos(TAlphabet c, uint64_t source_node, TAlphabet *ckmer,
+                              bit_vector_dyn *edges_inserted) {
     CHECK_INDEX(source_node);
 
     // get range of identical nodes (without W) pos current end position
@@ -1101,7 +1105,7 @@ uint64_t DBG_succ::append_pos(TAlphabet c, uint64_t source_node, TAlphabet *ckme
 
     if (!is_first_incoming) {
         // insert the edge
-        insert_edge(c + alph_size, begin, end);
+        insert_edge(c + alph_size, begin, end, edges_inserted);
         return fwd(prev_c_pos);
     }
 
@@ -1123,7 +1127,7 @@ uint64_t DBG_succ::append_pos(TAlphabet c, uint64_t source_node, TAlphabet *ckme
     }
 
     // insert the edge
-    bool shift = insert_edge(c, begin, end);
+    bool shift = insert_edge(c, begin, end, edges_inserted);
 
     // Add sentinel if the target node is the new dead-end
     if (!the_only_incoming)
@@ -1134,11 +1138,14 @@ uint64_t DBG_succ::append_pos(TAlphabet c, uint64_t source_node, TAlphabet *ckme
     update_F(c, +1);
     W->insert(sentinel_pos, kSentinelCode);
     last->insertBit(sentinel_pos, true);
+    if (edges_inserted)
+        edges_inserted->insertBit(sentinel_pos, true);
     return sentinel_pos;
 }
 
 
-bool DBG_succ::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
+bool DBG_succ::insert_edge(TAlphabet c, uint64_t begin, uint64_t end,
+                           bit_vector_dyn *edges_inserted) {
     if (begin > 1 && get_W(begin) == kSentinelCode) {
         // the source node is the dead-end with outgoing sentinel
         // replace this sentinel with proper label
@@ -1149,6 +1156,8 @@ bool DBG_succ::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
         update_F(get_node_last_value(begin), +1);
         W->insert(begin, c);
         last->insertBit(begin, false);
+        if (edges_inserted)
+            edges_inserted->insertBit(begin, true);
         sort_W_locally(begin, end);
         return 1;
     }

@@ -142,6 +142,11 @@ bool K2Compressed<Color, Encoder>::merge_load(const std::vector<std::string> &fi
     }
 }
 
+template <typename Color, class Encoder>
+void K2Compressed<Color, Encoder>::insert_rows(const std::vector<Index>&) {
+    throw std::runtime_error("Error: Not implemented");
+}
+
 // Get colors that occur at least in |discovery_ratio| colorings.
 // If |discovery_ratio| = 0, return the union of colorings.
 template <typename Color, class Encoder>

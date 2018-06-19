@@ -331,6 +331,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for extend:\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence []\n");
+            fprintf(stderr, "\t-a --annotator [STR] \tbasename of annotator to extend []\n");
+            fprintf(stderr, "\t   --row-annotator \tuse row based annotator instead of column based colors compressor [off]\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
             fprintf(stderr, "\t-t --state [1|2] \tstate of the extended graph [STAT=1]\n");
             fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
@@ -453,9 +455,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-r --reverse \t\t\tclassify reverse complement sequences [off]\n");
             fprintf(stderr, "\t   --noise-freq [INT] \t\tthreshold for filtering reads with rare k-mers [0]\n");
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
-            fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column based colors compressor [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator [<graph_basename>]\n");
             fprintf(stderr, "\t   --fast \t\t\tuse fast column based annotator (with auxiliary index) [off]\n");
+            fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column based colors compressor [off]\n");
             fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate colors [off]\n");
             fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");

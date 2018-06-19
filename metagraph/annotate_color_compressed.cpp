@@ -29,7 +29,9 @@ ColorCompressed<Color, Encoder>::ColorCompressed(uint64_t num_rows,
             }
         ),
         color_encoder_(new Encoder()),
-        verbose_(verbose) {}
+        verbose_(verbose) {
+    assert(num_columns_cached > 0);
+}
 
 template <typename Color, class Encoder>
 ColorCompressed<Color, Encoder>::~ColorCompressed() {
@@ -222,6 +224,39 @@ bool ColorCompressed<Color, Encoder>
     } catch (...) {
         return false;
     }
+}
+
+template <typename Color, class Encoder>
+void ColorCompressed<Color, Encoder>::insert_rows(const std::vector<Index> &rows) {
+    assert(std::is_sorted(rows.begin(), rows.end()));
+
+    for (size_t j = 0; j < color_encoder_->size(); ++j) {
+        auto &column = uncompress(j);
+        sdsl::bit_vector old = column;
+        column = sdsl::bit_vector(old.size() + rows.size(), 0);
+
+        uint64_t i = 0;
+        uint64_t num_inserted = 0;
+
+        for (auto next_inserted_row : rows) {
+            while (i + num_inserted < next_inserted_row) {
+                assert(i < old.size() && "Invalid indexes of inserted rows");
+                assert(i + num_inserted < column.size() && "Invalid indexes of inserted rows");
+
+                column[i + num_inserted] = old[i];
+                i++;
+            }
+            // insert 0, not colored edge
+            num_inserted++;
+        }
+        while (i < old.size()) {
+            assert(i + num_inserted < column.size() && "Invalid indexes of inserted rows");
+
+            column[i + num_inserted] = old[i];
+            i++;
+        }
+    }
+    num_rows_ += rows.size();
 }
 
 

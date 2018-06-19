@@ -666,6 +666,10 @@ int main(int argc, const char *argv[]) {
             }
             timer.reset();
 
+            std::unique_ptr<bit_vector_dyn> inserted_edges;
+            if (config->infbase_annotators.size())
+                inserted_edges.reset(new bit_vector_dyn(graph->num_edges() + 1, 0));
+
             if (graph->state != Config::DYN) {
                 if (config->verbose)
                     std::cout << "Switching the graph state to dynamic..." << std::flush;
@@ -686,10 +690,10 @@ int main(int argc, const char *argv[]) {
                 if (utils::get_filetype(file) == "VCF") {
                     read_vcf_file_critical(file, config->refpath, graph->get_k(), NULL,
                         [&](std::string &seq, auto *variant_annotations) {
-                            graph->add_sequence(seq);
+                            graph->add_sequence(seq, true, inserted_edges.get());
                             if (config->reverse) {
                                 reverse_complement(seq.begin(), seq.end());
-                                graph->add_sequence(seq);
+                                graph->add_sequence(seq, true, inserted_edges.get());
                             }
                             std::ignore = variant_annotations;
                         }
@@ -697,7 +701,9 @@ int main(int argc, const char *argv[]) {
                 } else if (utils::get_filetype(file) == "FASTA"
                             || utils::get_filetype(file) == "FASTQ") {
                     read_fasta_file_critical(file,
-                        [&](kseq_t *read_stream) { graph->add_sequence(read_stream->seq.s); },
+                        [&](kseq_t *read_stream) {
+                            graph->add_sequence(read_stream->seq.s, true, inserted_edges.get());
+                        },
                         config->reverse, NULL,
                         get_filter_filename(file, config->k, config->noise_kmer_frequency)
                     );
@@ -711,7 +717,6 @@ int main(int argc, const char *argv[]) {
             if (config->verbose)
                 std::cout << "Graph extension finished in "
                           << timer.elapsed() << "sec" << std::endl;
-            timer.reset();
 
             // graph output
             if (config->print_graph_succ)
@@ -724,12 +729,59 @@ int main(int argc, const char *argv[]) {
             if (graph->state != config->state) {
                 if (config->verbose)
                     std::cout << "Switching state before dumping..." << std::flush;
+
                 graph->switch_state(config->state);
+
                 if (config->verbose)
                     std::cout << "\tdone in " << timer.elapsed() << "sec" << std::endl;
             }
 
             graph->serialize(config->outfbase);
+
+            timer.reset();
+
+            if (config->infbase_annotators.size()) {
+                std::unique_ptr<Annotator> annotation;
+
+                if (config->use_row_annotator) {
+                    annotation.reset(
+                        new annotate::RowCompressed<>(graph->num_edges() + 1,
+                                                      config->sparse)
+                    );
+                } else {
+                    annotation.reset(
+                        new annotate::ColorCompressed<>(graph->num_edges() + 1,
+                                                        kNumCachedColors,
+                                                        config->verbose)
+                    );
+                }
+
+                if (!annotation->merge_load(config->infbase_annotators)) {
+                    std::cerr << "ERROR: can't load annotations" << std::endl;
+                    exit(1);
+                } else if (config->verbose) {
+                    std::cout << "Annotation was loaded in " << timer.elapsed() << "sec" << std::endl;
+                }
+                timer.reset();
+
+                assert(inserted_edges.get());
+
+                std::vector<uint64_t> inserted_edge_idx;
+                for (uint64_t j = 1; j <= inserted_edges->get_num_set_bits(); ++j) {
+                    inserted_edge_idx.push_back(inserted_edges->select1(j));
+                }
+                inserted_edges.reset();
+
+                if (config->verbose)
+                    std::cout << "Insert empty rows to the annotation matrix..." << std::flush;
+
+                annotation->insert_rows(inserted_edge_idx);
+
+                if (config->verbose)
+                    std::cout << "\tdone in " << timer.elapsed() << "sec" << std::endl;
+
+                annotation->serialize(config->outfbase);
+            }
 
             return 0;
         }
@@ -887,8 +939,11 @@ int main(int argc, const char *argv[]) {
                 );
             }
 
-            if (config->infbase_annotators.size())
-                annotation->merge_load(config->infbase_annotators);
+            if (config->infbase_annotators.size()
+                    && !annotation->merge_load(config->infbase_annotators)) {
+                std::cerr << "ERROR: can't load annotations" << std::endl;
+                exit(1);
+            }
 
             std::unique_ptr<utils::ThreadPool> thread_pool;
             std::unique_ptr<std::mutex> annotation_mutex;

@@ -24,7 +24,7 @@ TEST(K2Compressed, EmptyConstructor) {
 std::set<std::string> convert_to_set(const std::vector<std::string> &vector);
 
 TEST(K2Compressed, add_color) {
-    annotate::ColorCompressed<> column_annotator(5, false);
+    annotate::ColorCompressed<> column_annotator(5);
     column_annotator.add_color(0, "0");
     column_annotator.add_color(1, "0");
     column_annotator.add_color(2, "1");
@@ -40,7 +40,7 @@ TEST(K2Compressed, add_color) {
 }
 
 TEST(K2Compressed, add_color_2) {
-    annotate::ColorCompressed<> column_annotator(4, false);
+    annotate::ColorCompressed<> column_annotator(4);
     column_annotator.add_colors(0, { "0", "1", "2" });
     column_annotator.add_colors(1, { "1" });
     column_annotator.add_colors(2, { "2", "3" });
@@ -55,7 +55,7 @@ TEST(K2Compressed, add_color_2) {
 }
 
 TEST(K2Compressed, set_coloring) {
-    annotate::ColorCompressed<> column_annotator(5, false);
+    annotate::ColorCompressed<> column_annotator(5);
     column_annotator.set_coloring(0, { "Label0", "Label2", "Label8" });
     column_annotator.set_coloring(2, { "Label1", "Label2" });
     column_annotator.set_coloring(4, { "Label8" });
@@ -73,7 +73,7 @@ TEST(K2Compressed, set_coloring) {
 
 TEST(K2Compressed, Serialization) {
     {
-        annotate::ColorCompressed<> column_annotator(5, false);
+        annotate::ColorCompressed<> column_annotator(5);
         column_annotator.set_coloring(0, { "Label0", "Label2", "Label8" });
         column_annotator.set_coloring(2, { "Label1", "Label2" });
         column_annotator.set_coloring(4, { "Label8" });
@@ -98,7 +98,7 @@ TEST(K2Compressed, Serialization) {
 }
 
 TEST(K2Compressed, has_colors) {
-    annotate::ColorCompressed<> column_annotator(5, false);
+    annotate::ColorCompressed<> column_annotator(5);
     column_annotator.set_coloring(0, { "Label0", "Label2", "Label8" });
     column_annotator.set_coloring(2, { "Label1", "Label2" });
     column_annotator.set_coloring(4, { "Label8" });
@@ -180,7 +180,7 @@ std::set<std::pair<std::string, size_t>>
 to_set(const std::vector<std::pair<std::string, size_t>> &vector);
 
 TEST(K2Compressed, get_most_frequent_colors) {
-    annotate::ColorCompressed<> column_annotator(5, false);
+    annotate::ColorCompressed<> column_annotator(5);
     column_annotator.add_colors(0, {"Label0", "Label2", "Label8"});
     column_annotator.add_colors(2, {"Label1", "Label2"});
     column_annotator.add_colors(3, {"Label1", "Label2", "Label8"});
@@ -234,7 +234,7 @@ TEST(K2Compressed, get_most_frequent_colors) {
 }
 
 TEST(K2Compressed, aggregate_colors) {
-    annotate::ColorCompressed<> column_annotator(5, false);
+    annotate::ColorCompressed<> column_annotator(5);
     column_annotator.add_colors(0, {"Label0", "Label2", "Label8"});
     column_annotator.add_colors(2, {"Label1", "Label2"});
     column_annotator.add_colors(3, {"Label1", "Label2", "Label8"});

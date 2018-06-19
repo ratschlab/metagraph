@@ -24,6 +24,8 @@ class RowMajorSparseBinaryMatrix {
     virtual void clear(size_t i) = 0;
 
     virtual void reinitialize(size_t num_rows) = 0;
+
+    virtual void insert_rows(const std::vector<uint64_t> &rows) = 0;
 };
 
 
@@ -47,6 +49,8 @@ class RowCompressed : public MultiColorAnnotation<uint64_t, Color> {
 
     void serialize(const std::string &filename) const;
     bool merge_load(const std::vector<std::string> &filenames);
+
+    void insert_rows(const std::vector<Index> &rows);
 
     // Get colors that occur at least in |discovery_ratio| colorings.
     // If |discovery_ratio| = 0, return the union of colorings.

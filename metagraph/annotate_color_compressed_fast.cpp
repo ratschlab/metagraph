@@ -353,6 +353,67 @@ bool FastColorCompressed<Color, Encoder>
     }
 }
 
+template <typename Color, class Encoder>
+void FastColorCompressed<Color, Encoder>::insert_rows(const std::vector<Index> &rows) {
+    assert(std::is_sorted(rows.begin(), rows.end()));
+
+    for (size_t j = 0; j < color_encoder_->size(); ++j) {
+        auto &column = decompress(j);
+        sdsl::bit_vector old = column;
+        column = sdsl::bit_vector(old.size() + rows.size(), 0);
+
+        uint64_t i = 0;
+        uint64_t num_inserted = 0;
+
+        for (auto next_inserted_row : rows) {
+            while (i + num_inserted < next_inserted_row) {
+                assert(i < old.size() && "Invalid indexes of inserted rows");
+                assert(i + num_inserted < column.size() && "Invalid indexes of inserted rows");
+
+                column[i + num_inserted] = old[i];
+                i++;
+            }
+            // insert 0, not colored edge
+            num_inserted++;
+        }
+        while (i < old.size()) {
+            assert(i + num_inserted < column.size() && "Invalid indexes of inserted rows");
+
+            column[i + num_inserted] = old[i];
+            i++;
+        }
+    }
+
+    for (size_t t = 0; t < index_to_columns_.size(); ++t) {
+        auto &column = decompress_index(t);
+        sdsl::bit_vector old = column;
+        column = sdsl::bit_vector(old.size() + rows.size(), 0);
+
+        uint64_t i = 0;
+        uint64_t num_inserted = 0;
+
+        for (auto next_inserted_row : rows) {
+            while (i + num_inserted < next_inserted_row) {
+                assert(i < old.size() && "Invalid indexes of inserted rows");
+                assert(i + num_inserted < column.size() && "Invalid indexes of inserted rows");
+
+                column[i + num_inserted] = old[i];
+                i++;
+            }
+            // insert 0, not colored edge
+            num_inserted++;
+        }
+        while (i < old.size()) {
+            assert(i + num_inserted < column.size() && "Invalid indexes of inserted rows");
+
+            column[i + num_inserted] = old[i];
+            i++;
+        }
+    }
+
+    num_rows_ += rows.size();
+}
+
 
 // Get colors that occur at least in |discovery_ratio| colorings.
 // If |discovery_ratio| = 0, return the union of colorings.

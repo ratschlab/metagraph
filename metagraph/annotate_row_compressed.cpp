@@ -46,6 +46,29 @@ class VectorVectorMatrix : public RowMajorSparseBinaryMatrix {
         vector_.resize(num_rows);
     }
 
+    void insert_rows(const std::vector<uint64_t> &rows) {
+        assert(std::is_sorted(rows.begin(), rows.end()));
+
+        std::vector<SmallVector> old;
+        old.swap(vector_);
+        // vector_.reserve(old.size() + rows.size());
+
+        size_t i = 0;
+        size_t num_inserted = 0;
+
+        for (auto next_inserted_row : rows) {
+            while (i + num_inserted < next_inserted_row) {
+                assert(i < old.size() && "Invalid indexes of inserted rows");
+                vector_.push_back(std::move(old[i++]));
+            }
+            vector_.push_back(SmallVector());
+            num_inserted++;
+        }
+        while (i < old.size()) {
+            vector_.push_back(std::move(old[i++]));
+        }
+    }
+
   private:
     std::vector<SmallVector> vector_;
 };
@@ -76,6 +99,10 @@ class EigenSparserMatrix : public RowMajorSparseBinaryMatrix {
     void reinitialize(size_t num_rows) {
         mat_ = Eigen::SparseMatrix<bool, Eigen::RowMajor>(num_rows, kMaxNumCols);
         mat_.reserve(num_rows);
+    }
+
+    void insert_rows(const std::vector<uint64_t>&) {
+        throw std::runtime_error("Error: Not implemented");
     }
 
   private:
@@ -220,6 +247,11 @@ bool RowCompressed<Color, Encoder>::merge_load(const std::vector<std::string> &f
     } catch (...) {
         return false;
     }
+}
+
+template <typename Color, class Encoder>
+void RowCompressed<Color, Encoder>::insert_rows(const std::vector<Index> &rows) {
+    matrix_->insert_rows(rows);
 }
 
 // Get colors that occur at least in |discovery_ratio| colorings.

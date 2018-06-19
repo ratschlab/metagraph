@@ -89,6 +89,8 @@ class MultiColorAnnotation
     virtual void serialize(const std::string &filename) const = 0;
     virtual bool merge_load(const std::vector<std::string> &filenames) = 0;
 
+    virtual void insert_rows(const std::vector<Index> &rows) = 0;
+
     /*********************** Special queries **********************/
 
     // Get colors that occur at least in |discovery_ratio| colorings.

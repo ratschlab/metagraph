@@ -53,6 +53,144 @@ TEST(ColorCompressed, set_coloring) {
     EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation->get_coloring(4)));
 }
 
+TEST(ColorCompressed, insert_no_empty_rows) {
+    std::unique_ptr<annotate::MultiColorAnnotation<uint64_t, std::string>> annotation(
+        new annotate::ColorCompressed<>(5)
+    );
+    annotation->set_coloring(0, { "Label0", "Label2", "Label8" });
+    annotation->set_coloring(2, { "Label1", "Label2" });
+    annotation->set_coloring(4, { "Label8" });
+
+    ASSERT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation->get_coloring(0)));
+    ASSERT_EQ(convert_to_set({}), convert_to_set(annotation->get_coloring(1)));
+    ASSERT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(annotation->get_coloring(2)));
+    ASSERT_EQ(convert_to_set({}), convert_to_set(annotation->get(3)));
+    ASSERT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation->get_coloring(4)));
+
+    annotation->insert_rows({});
+
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation->get_coloring(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get_coloring(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(annotation->get_coloring(2)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get(3)));
+    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation->get_coloring(4)));
+}
+
+TEST(ColorCompressed, insert_first_column_to_empty_annotation) {
+    std::unique_ptr<annotate::MultiColorAnnotation<uint64_t, std::string>> annotation(
+        new annotate::ColorCompressed<>(0)
+    );
+
+    ASSERT_EQ(0u, annotation->num_colors());
+
+    annotation->insert_rows({ 0, });
+    ASSERT_EQ(0u, annotation->num_colors());
+
+    annotation->set_coloring(0, { "Label0", "Label2", "Label8" });
+
+    ASSERT_EQ(3u, annotation->num_colors());
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation->get_coloring(0)));
+}
+
+TEST(ColorCompressed, insert_one_empty_row) {
+    std::unique_ptr<annotate::MultiColorAnnotation<uint64_t, std::string>> annotation(
+        new annotate::ColorCompressed<>(5)
+    );
+    annotation->set_coloring(0, { "Label0", "Label2", "Label8" });
+    annotation->set_coloring(2, { "Label1", "Label2" });
+    annotation->set_coloring(4, { "Label8" });
+
+    ASSERT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation->get_coloring(0)));
+    ASSERT_EQ(convert_to_set({}), convert_to_set(annotation->get_coloring(1)));
+    ASSERT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(annotation->get_coloring(2)));
+    ASSERT_EQ(convert_to_set({}), convert_to_set(annotation->get(3)));
+    ASSERT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation->get_coloring(4)));
+
+    annotation->insert_rows({ 4, });
+
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation->get_coloring(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get_coloring(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(annotation->get_coloring(2)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get(3)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get(4)));
+    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation->get_coloring(5)));
+}
+
+TEST(ColorCompressed, insert_first_row) {
+    std::unique_ptr<annotate::MultiColorAnnotation<uint64_t, std::string>> annotation(
+        new annotate::ColorCompressed<>(5)
+    );
+    annotation->set_coloring(0, { "Label0", "Label2", "Label8" });
+    annotation->set_coloring(2, { "Label1", "Label2" });
+    annotation->set_coloring(4, { "Label8" });
+
+    ASSERT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation->get_coloring(0)));
+    ASSERT_EQ(convert_to_set({}), convert_to_set(annotation->get_coloring(1)));
+    ASSERT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(annotation->get_coloring(2)));
+    ASSERT_EQ(convert_to_set({}), convert_to_set(annotation->get(3)));
+    ASSERT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation->get_coloring(4)));
+
+    annotation->insert_rows({ 0, });
+
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get_coloring(0)));
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation->get_coloring(1)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get_coloring(2)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(annotation->get_coloring(3)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get(4)));
+    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation->get_coloring(5)));
+}
+
+TEST(ColorCompressed, insert_last_row) {
+    std::unique_ptr<annotate::MultiColorAnnotation<uint64_t, std::string>> annotation(
+        new annotate::ColorCompressed<>(5)
+    );
+    annotation->set_coloring(0, { "Label0", "Label2", "Label8" });
+    annotation->set_coloring(2, { "Label1", "Label2" });
+    annotation->set_coloring(4, { "Label8" });
+
+    ASSERT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation->get_coloring(0)));
+    ASSERT_EQ(convert_to_set({}), convert_to_set(annotation->get_coloring(1)));
+    ASSERT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(annotation->get_coloring(2)));
+    ASSERT_EQ(convert_to_set({}), convert_to_set(annotation->get(3)));
+    ASSERT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation->get_coloring(4)));
+
+    annotation->insert_rows({ 5, });
+
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation->get_coloring(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get_coloring(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(annotation->get_coloring(2)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get(3)));
+    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation->get_coloring(4)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get(5)));
+}
+
+TEST(ColorCompressed, insert_empty_rows) {
+    std::unique_ptr<annotate::MultiColorAnnotation<uint64_t, std::string>> annotation(
+        new annotate::ColorCompressed<>(5)
+    );
+    annotation->set_coloring(0, { "Label0", "Label2", "Label8" });
+    annotation->set_coloring(2, { "Label1", "Label2" });
+    annotation->set_coloring(4, { "Label8" });
+
+    ASSERT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation->get_coloring(0)));
+    ASSERT_EQ(convert_to_set({}), convert_to_set(annotation->get_coloring(1)));
+    ASSERT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(annotation->get_coloring(2)));
+    ASSERT_EQ(convert_to_set({}), convert_to_set(annotation->get(3)));
+    ASSERT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation->get_coloring(4)));
+
+    annotation->insert_rows({ 1, 2, 4, 5 });
+
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation->get_coloring(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get_coloring(1)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get_coloring(2)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get_coloring(3)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get(4)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get(5)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(annotation->get_coloring(6)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get(7)));
+    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation->get_coloring(8)));
+}
+
 TEST(ColorCompressed, Serialization) {
     {
         annotate::ColorCompressed<> annotation(5);

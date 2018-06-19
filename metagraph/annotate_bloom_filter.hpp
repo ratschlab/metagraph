@@ -106,6 +106,8 @@ class AnnotationCategoryBloom : public MultiColorAnnotation<uint64_t, std::strin
     void serialize(const std::string &filename) const;
     bool merge_load(const std::vector<std::string> &filenames);
 
+    void insert_rows(const std::vector<Index>&) {}
+
     // Get colors that occur at least in |discovery_ratio| colorings.
     // If |discovery_ratio| = 0, return the union of colorings.
     Coloring aggregate_colors(const std::vector<Index> &indices,

@@ -21,7 +21,9 @@ class SequenceGraph {
 
     virtual ~SequenceGraph() {};
 
-    virtual void add_sequence(const std::string &sequence, bool try_extend = false) = 0;
+    virtual void add_sequence(const std::string &sequence,
+                              bool try_extend = false,
+                              bit_vector_dyn *edges_inserted = NULL) = 0;
 
     // Traverse graph aligning the sequence
     // and run callback until the termination condition is satisfied
@@ -93,7 +95,9 @@ class DBG_succ : public SequenceGraph {
      * If |try_extend| is true, search for the first k-mer in the graph
      * and extend it from that point. If the search fails, start from the dummy source.
      */
-    void add_sequence(const std::string &seq, bool try_extend = false);
+    void add_sequence(const std::string &seq,
+                      bool try_extend = false,
+                      bit_vector_dyn *edges_inserted = NULL);
 
     void remove_edges(const std::set<uint64_t> &edges);
 
@@ -290,12 +294,14 @@ class DBG_succ : public SequenceGraph {
      * This function takes a character c and appends it to the end of the graph
      * sequence given that the corresponding note is not part of the graph yet.
      */
-    uint64_t append_pos(TAlphabet c, uint64_t source_node, TAlphabet *ckmer = NULL);
+    uint64_t append_pos(TAlphabet c, uint64_t source_node, TAlphabet *ckmer = NULL,
+                        bit_vector_dyn *edges_inserted = NULL);
 
     /**
      * Helper function used by the append_pos function
      */
-    bool insert_edge(TAlphabet c, uint64_t begin, uint64_t end);
+    bool insert_edge(TAlphabet c, uint64_t begin, uint64_t end,
+                     bit_vector_dyn *edges_inserted = NULL);
 
     /**
      * Uses the object's array W, a given position i in W and a character c
