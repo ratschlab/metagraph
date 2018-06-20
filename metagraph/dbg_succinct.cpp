@@ -61,7 +61,7 @@ static_assert(sizeof(TAlphabet) * 8 >= DBG_succ::kLogSigma,
 
 const TAlphabet DBG_succ::alph_size = DBG_succ::alphabet.size() / 2;
 
-const SequenceGraph::node_iterator SequenceGraph::npos = 0;
+const SequenceGraph::node_index SequenceGraph::npos = 0;
 
 
 DBG_succ::DBG_succ(size_t k)
@@ -490,11 +490,11 @@ uint64_t DBG_succ::incoming(uint64_t i, TAlphabet c) const {
     return 0;
 }
 
-DBG_succ::node_iterator DBG_succ::traverse(node_iterator node, char edge_label) const {
+DBG_succ::node_index DBG_succ::traverse(node_index node, char edge_label) const {
     return outgoing(node, encode(edge_label));
 }
 
-DBG_succ::node_iterator DBG_succ::traverse_back(node_iterator node, char edge_label) const {
+DBG_succ::node_index DBG_succ::traverse_back(node_index node, char edge_label) const {
     return incoming(node, encode(edge_label));
 }
 
@@ -780,7 +780,7 @@ std::string DBG_succ::get_node_str(uint64_t k_node) const {
 }
 
 void DBG_succ::align(const std::string &sequence,
-                     const std::function<void(node_iterator)> &callback,
+                     const std::function<void(edge_index)> &callback,
                      const std::function<bool()> &terminate) const {
     std::vector<TAlphabet> seq_encoded(sequence.size());
     std::transform(sequence.begin(), sequence.end(),

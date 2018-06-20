@@ -16,8 +16,10 @@ typedef uint8_t TAlphabet;
 
 class SequenceGraph {
   public:
-    typedef uint64_t node_iterator;
-    static const node_iterator npos;
+    typedef uint64_t node_index;
+    typedef uint64_t edge_index;
+
+    static const node_index npos;
 
     virtual ~SequenceGraph() {};
 
@@ -28,7 +30,7 @@ class SequenceGraph {
     // Traverse graph aligning the sequence
     // and run callback until the termination condition is satisfied
     virtual void align(const std::string &sequence,
-                       const std::function<void(node_iterator)> &callback,
+                       const std::function<void(edge_index)> &callback,
                        const std::function<bool()> &terminate = [](){ return false; }) const = 0;
 
     // Check whether graph contains fraction of nodes from the sequence
@@ -36,9 +38,9 @@ class SequenceGraph {
                       double discovery_fraction = 1) const = 0;
 
     // Traverse the outgoing edge
-    virtual node_iterator traverse(node_iterator node, char edge_label) const = 0;
+    virtual node_index traverse(node_index node, char edge_label) const = 0;
     // Traverse the incoming edge
-    virtual node_iterator traverse_back(node_iterator node, char edge_label) const = 0;
+    virtual node_index traverse_back(node_index node, char edge_label) const = 0;
 
     virtual bool load(const std::string &filename_base) = 0;
     virtual void serialize(const std::string &filename_base) const = 0;
@@ -74,13 +76,13 @@ class DBG_succ : public SequenceGraph {
      */
     bool equals_internally(const DBG_succ &other) const;
 
-    node_iterator traverse(node_iterator node, char edge_label) const;
-    node_iterator traverse_back(node_iterator node, char edge_label) const;
+    node_index traverse(node_index node, char edge_label) const;
+    node_index traverse_back(node_index node, char edge_label) const;
 
     // Traverse graph aligning k-mers to the sequence
     // and run callback until the termination condition is satisfied
     void align(const std::string &sequence,
-               const std::function<void(node_iterator)> &callback,
+               const std::function<void(edge_index)> &callback,
                const std::function<bool()> &terminate = [](){ return false; }) const;
 
     // Check whether graph contains fraction of k-mers from the sequence
