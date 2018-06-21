@@ -153,6 +153,8 @@ Config::Config(int argc, const char *argv[]) {
             infbase = utils::remove_suffix(infbase, ".dbg");
         } else if (!strcmp(argv[i], "--to-adj-list")) {
             to_adj_list = true;
+        } else if (!strcmp(argv[i], "--to-sequences")) {
+            to_sequences = true;
         } else if (!strcmp(argv[i], "-l") || !strcmp(argv[i], "--len-suffix")) {
             suffix_len = atoi(argv[++i]);
         //} else if (!strcmp(argv[i], "-t") || !strcmp(argv[i], "--threads")) {
@@ -472,6 +474,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-t --state [1|2] \t\tchange graph state [STAT=1]\n");
             fprintf(stderr, "\t   --sql-base [STR] \t\tbasename for SQL output file\n");
             fprintf(stderr, "\t   --to-adj-list \t\twrite the adjacency list to file [off]\n");
+            // fprintf(stderr, "\t   --to-sequences \t\twrite contig sequences to file [off]\n");
+            fprintf(stderr, "\t   --to-sequences \t\textract sequences from graph and write to file [off]\n");
         } break;
     }
 

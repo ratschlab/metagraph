@@ -1322,6 +1322,25 @@ int main(int argc, const char *argv[]) {
                 load_critical_graph_from_file(files.at(0))
             };
 
+            if (config->to_sequences) {
+                if (config->verbose) {
+                    std::cout << "Extracting sequences from graph...\t" << std::flush;
+                }
+                timer.reset();
+                if (config->outfbase.size()) {
+                    std::ofstream outstream(config->outfbase + ".adjlist");
+                    graph->call_sequences([&](const auto &sequence) {
+                        outstream << sequence << std::endl;
+                    });
+                } else {
+                    graph->call_sequences([&](const auto &sequence) {
+                        std::cout << sequence << std::endl;
+                    });
+                }
+                if (config->verbose) {
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+                }
+            }
             if (config->to_adj_list) {
                 if (config->verbose) {
                     std::cout << "Converting graph to adjacency list...\t" << std::flush;
