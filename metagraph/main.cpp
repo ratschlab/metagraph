@@ -1204,7 +1204,7 @@ int main(int argc, const char *argv[]) {
             std::cout << "Graphs are loaded\t" << timer.elapsed()
                                                << "sec" << std::endl;
 
-            if (config->traversal_merge) {
+            if (config->dynamic) {
                 std::cout << "Start merging traversal" << std::endl;
                 timer.reset();
 

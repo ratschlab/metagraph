@@ -21,7 +21,6 @@ class Config {
     bool count_kmers_query = false;
     bool query_presence = false;
     bool filter_present = false;
-    bool traversal_merge = false;
     bool dump_raw_anno = false;
     bool use_row_annotator = false;
     bool sparse = false;

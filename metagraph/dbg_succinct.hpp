@@ -147,6 +147,13 @@ class DBG_succ : public SequenceGraph {
                                                   uint64_t max_distance = 0,
                                                   uint64_t alignment_length = 0) const;
 
+    typedef std::function<void(const std::deque<TAlphabet>&)> PathCallback;
+    typedef std::function<void(const std::string&)> SequenceCallback;
+
+    void call_simple_paths(const PathCallback &callback) const;
+
+    void call_sequences(const SequenceCallback &callback) const;
+
     /**
      * This is a debug function that prints the current representation of the graph to
      * the screen.

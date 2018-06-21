@@ -11,6 +11,7 @@
 
 #include "dbg_succinct.hpp"
 #include "dbg_succinct_merge.hpp"
+#include "dbg_succinct_construct.hpp"
 #include "utils.hpp"
 
 const std::string test_data_dir = "../tests/data";
@@ -123,6 +124,33 @@ TEST(DBGSuccinctMerge, TraversalMergeTwoGraphs) {
         merged.merge(first);
         first.merge(second);
         EXPECT_EQ(first, merged);
+    }
+}
+
+TEST(DBGSuccinctMerge, TraversalMergeDisconnectedGraphs) {
+    for (size_t k = 1; k < 10; ++k) {
+        KMerDBGSuccConstructor constructor_first(k);
+        constructor_first.add_reads({ std::string(100, 'A') });
+        DBG_succ first(&constructor_first);
+        ASSERT_EQ(2u, first.num_edges());
+
+        KMerDBGSuccConstructor constructor_second(k);
+        constructor_second.add_reads({ std::string(50, 'C'),
+                                       std::string(60, 'G') });
+        DBG_succ second(&constructor_second);
+        ASSERT_EQ(3u, second.num_edges());
+
+        KMerDBGSuccConstructor constructor_third(k);
+        constructor_third.add_reads({ std::string(100, 'A'),
+                                      std::string(50, 'C'),
+                                      std::string(60, 'G') });
+        DBG_succ result(&constructor_third);
+        ASSERT_EQ(4u, result.num_edges());
+
+        first.switch_state(Config::DYN);
+        first.merge(second);
+
+        EXPECT_EQ(result, first);
     }
 }
 

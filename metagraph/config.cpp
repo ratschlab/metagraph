@@ -63,8 +63,6 @@ Config::Config(int argc, const char *argv[]) {
             print_graph_succ = true;
         } else if (!strcmp(argv[i], "--count-kmers")) {
             count_kmers_query = true;
-        } else if (!strcmp(argv[i], "--traversal")) {
-            traversal_merge = true;
         } else if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--reverse")) {
             reverse = true;
         } else if (!strcmp(argv[i], "--fast")) {
@@ -376,7 +374,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t   --print \t\t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [1]\n");
-            fprintf(stderr, "\t   --traversal \t\t\tmerge by traversing [off]\n");
+            fprintf(stderr, "\t   --dynamic \t\t\tdynamic merge by adding traversed paths [off]\n");
             fprintf(stderr, "\t   --part-idx [INT] \t\tidx to use when doing external merge []\n");
             fprintf(stderr, "\t   --parts-total [INT] \t\ttotal number of parts in external merge[]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
