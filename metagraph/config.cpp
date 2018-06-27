@@ -75,6 +75,8 @@ Config::Config(int argc, const char *argv[]) {
             fasta_anno = true;
         } else if (!strcmp(argv[i], "--anno-label")) {
             anno_labels.emplace_back(argv[++i]);
+        } else if (!strcmp(argv[i], "--anno-binsize")) {
+            genome_binsize_anno = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--suppress-unlabeled")) {
             suppress_unlabeled = true;
         } else if (!strcmp(argv[i], "--row-annotator")) {
@@ -211,7 +213,7 @@ Config::Config(int argc, const char *argv[]) {
         print_usage_and_exit = true;
 
     if ((identity == ANNOTATE || identity == ANNOTATE_BLOOM)
-            && !filename_anno && !fasta_anno && !anno_labels.size()) {
+            && !filename_anno && !fasta_anno && !anno_labels.size() && !genome_binsize_anno) {
         std::cerr << "Error: No annotation to add" << std::endl;
         print_usage_and_exit = true;
     }
@@ -407,6 +409,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for annotate:\n");
             fprintf(stderr, "\t   --reference [STR] \t\tbasename of reference sequence []\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator to update []\n");
+            fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column based colors compressor [off]\n");
+            fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate colors [off]\n");
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file [<graph_basename>]\n");
             fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
             fprintf(stderr, "\t   --noise-freq [INT] \t\tthreshold for filtering reads with rare k-mers [0]\n");
@@ -414,8 +418,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --anno-header \t\textract annotation labels from headers of sequences in files [off]\n");
             fprintf(stderr, "\t   --header-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
             fprintf(stderr, "\t   --anno-label [STR]\t\tadd label to annotation for all sequences from the files passed []\n");
-            fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column based colors compressor [off]\n");
-            fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate colors [off]\n");
+            fprintf(stderr, "\t   --anno-binsize [INT]\t\tstepsize for k-mer coordinates in input sequences from the fasta files [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case MERGE_ANNOTATORS: {

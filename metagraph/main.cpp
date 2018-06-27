@@ -289,6 +289,7 @@ void annotate_data(const std::vector<std::string> &files,
                    bool fasta_anno,
                    const std::string &fasta_header_delimiter,
                    const std::vector<std::string> &anno_labels,
+                   size_t genome_bin_size,
                    bool verbose,
                    utils::ThreadPool *thread_pool = NULL,
                    std::mutex *annotation_mutex = NULL) {
@@ -350,8 +351,22 @@ void annotate_data(const std::vector<std::string> &files,
                         labels.push_back(label);
                     }
 
-                    annotate_sequence(read_stream->seq.s, labels, graph, annotator,
-                                      thread_pool, annotation_mutex);
+                    if (!genome_bin_size) {
+                        annotate_sequence(read_stream->seq.s, labels, graph, annotator,
+                                          thread_pool, annotation_mutex);
+                    } else {
+                        const std::string sequence(read_stream->seq.s);
+                        labels.push_back("");
+
+                        for (size_t i = 0; i < sequence.size(); i += genome_bin_size) {
+                            labels.back() = std::string(read_stream->name.s)
+                                                + "_" + std::to_string(i);
+                            annotate_sequence(
+                                sequence.substr(i, genome_bin_size + graph.get_k() - 1),
+                                labels, graph, annotator, thread_pool, annotation_mutex
+                            );
+                        }
+                    }
 
                     total_seqs += 1;
                     if (verbose && total_seqs % 10000 == 0) {
@@ -965,6 +980,7 @@ int main(int argc, const char *argv[]) {
                           config->fasta_anno,
                           config->fasta_header_delimiter,
                           config->anno_labels,
+                          config->genome_binsize_anno,
                           config->verbose,
                           thread_pool.get(),
                           annotation_mutex.get());
@@ -1019,6 +1035,7 @@ int main(int argc, const char *argv[]) {
                           config->fasta_anno,
                           config->fasta_header_delimiter,
                           config->anno_labels,
+                          config->genome_binsize_anno,
                           config->verbose);
 
             annotation->serialize(config->infbase);
