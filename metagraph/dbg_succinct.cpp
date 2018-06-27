@@ -1346,6 +1346,85 @@ void DBG_succ::call_sequences(const SequenceCallback &callback) const {
     });
 }
 
+struct Node {
+    DBG_succ::node_index id;
+    std::string kmer;
+};
+
+/**
+ * Traverse graph and iterate over all nodes
+ */
+void DBG_succ::call_kmers(const KmerCallback &callback) const {
+    // std::vector<bool> discovered(W->size(), false);
+    std::vector<bool> visited(W->size(), false);
+
+    // store all branch nodes on the way
+    std::queue<Node> branchnodes;
+
+    // start at the source node
+    for (uint64_t i = 1; i < W->size(); ++i) {
+        if (!get_last(i) || visited[i])
+            continue;
+
+        uint64_t node = i;
+
+        // // traverse backwards
+        // size_t num_traversed = 0;
+        // while (!visited[node] && !discovered[node] && num_traversed < 10000) {
+        //     discovered[node] = true;
+        //     node = bwd(node);
+        //     num_traversed++;
+        // }
+
+        branchnodes.push({ node, get_node_str(node) });
+
+        // keep traversing until we have worked off all branches from the queue
+        while (!branchnodes.empty()) {
+            node = branchnodes.front().id;
+            std::string kmer = std::move(branchnodes.front().kmer);
+            branchnodes.pop();
+
+            // traverse forwards until we reach a sink or
+            // the first node that has been already visited
+            while (!visited[node]) {
+                assert(node > 0);
+
+                if (kmer.front() != DBG_succ::kSentinel)
+                    callback(node, kmer);
+
+                visited[node] = true;
+
+                // stop traversing if it's a sink
+                if (!get_W(node))
+                    break;
+
+                std::copy(kmer.begin() + 1, kmer.end(), kmer.begin());
+
+                // traverse if there is only one outgoing edge
+                if (outdegree(node) == 1) {
+                    node = fwd(node);
+                    kmer.back() = DBG_succ::decode(get_node_last_value(node));
+                } else {
+                    // loop over outgoing edges
+                    do {
+                        assert(get_W(node));
+
+                        uint64_t target_node = fwd(node);
+
+                        if (target_node && !visited[target_node]) {
+                            kmer.back() = DBG_succ::decode(get_node_last_value(target_node));
+                            branchnodes.push({ target_node, kmer });
+                        }
+                        node--;
+
+                    } while (node > 1 && !get_last(node));
+                    break;
+                }
+            }
+        }
+    }
+}
+
 bool DBG_succ::is_valid() const {
     assert(W->size() >= 2);
     assert(get_node_str(1) == std::string(k_, kSentinel) && "First kmer must be dummy");

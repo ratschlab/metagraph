@@ -69,7 +69,7 @@ class DBGSuccAnnotWrapper : public hash_annotate::DeBruijnGraphWrapper {
     edge_index prev_edge(edge_index i) const {
         assert(i >= first_edge() && i <= last_edge());
         //assert(has_the_only_incoming_edge(i));
-        return graph_.get_minus_k_value(i, 0).second;
+        return graph_.bwd(i);
     }
 
   private:

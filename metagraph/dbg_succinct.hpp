@@ -151,8 +151,11 @@ class DBG_succ : public SequenceGraph {
     typedef std::function<void(const std::string&)> SequenceCallback;
 
     void call_simple_paths(const PathCallback &callback) const;
-
     void call_sequences(const SequenceCallback &callback) const;
+
+    typedef std::function<void(node_index, const std::string&)> KmerCallback;
+    // traverse all nodes in graph except for the dummy source of sink ones
+    void call_kmers(const KmerCallback &callback) const;
 
     /**
      * This is a debug function that prints the current representation of the graph to
@@ -264,6 +267,12 @@ class DBG_succ : public SequenceGraph {
      * character c in W and returns the position of the r-th occurence of c in last.
      */
     uint64_t fwd(uint64_t i) const;
+
+    /**
+     * This function gets a position i that reflects the i-th node and returns the
+     * position in W that corresponds to the i-th node's last character.
+     */
+    uint64_t bwd(uint64_t i) const;
 
     /**
      * TODO: new function: given a list of edges, remove a minimal superset of that edge
@@ -424,12 +433,6 @@ class DBG_succ : public SequenceGraph {
      * index of the outgoing edge with label c.
      */
     uint64_t outgoing_edge_idx(uint64_t i, TAlphabet c) const;
-
-    /**
-     * This function gets a position i that reflects the i-th node and returns the
-     * position in W that corresponds to the i-th node's last character.
-     */
-    uint64_t bwd(uint64_t i) const;
 
     void verbose_cout() const {}
 

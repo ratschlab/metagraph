@@ -466,6 +466,130 @@ TEST(DBGSuccinct, CallSimplePaths) {
     }
 }
 
+TEST(DBGSuccinct, CallKmersEmptyGraph) {
+    for (size_t k = 1; k < 30; ++k) {
+        DBG_succ empty(k);
+
+        size_t num_kmers = 0;
+        empty.call_kmers([&](auto, const auto &sequence) {
+            EXPECT_FALSE(true) << sequence;
+            num_kmers++;
+        });
+
+        EXPECT_EQ(0u, num_kmers);
+    }
+}
+
+TEST(DBGSuccinct, CallKmersTwoLoops) {
+    for (size_t k = 1; k < 20; ++k) {
+        KMerDBGSuccConstructor constructor(k);
+        constructor.add_reads({ std::string(100, 'A') });
+        DBG_succ graph(&constructor);
+
+        ASSERT_EQ(2u, graph.num_edges());
+
+        size_t num_kmers = 0;
+        graph.call_kmers([&](auto, const auto &sequence) {
+            EXPECT_EQ(std::string(k, 'A'), sequence) << sequence;
+            num_kmers++;
+        });
+        EXPECT_EQ(1u, num_kmers);
+    }
+}
+
+TEST(DBGSuccinct, CallKmersFourLoops) {
+    for (size_t k = 1; k < 20; ++k) {
+        KMerDBGSuccConstructor constructor(k);
+        constructor.add_reads({ std::string(100, 'A'),
+                                std::string(100, 'G'),
+                                std::string(100, 'C') });
+        DBG_succ graph(&constructor);
+
+        ASSERT_EQ(4u, graph.num_edges());
+
+        size_t num_kmers = 0;
+        graph.call_kmers([&](auto, const auto &sequence) {
+            EXPECT_TRUE(std::string(k, 'A') == sequence
+                        || std::string(k, 'G') == sequence
+                        || std::string(k, 'C') == sequence) << sequence;
+            num_kmers++;
+        });
+        EXPECT_EQ(3u, num_kmers);
+    }
+}
+
+TEST(DBGSuccinct, CallKmersFourLoopsDynamic) {
+    for (size_t k = 1; k < 20; ++k) {
+        DBG_succ graph(k);
+        graph.add_sequence(std::string(100, 'A'));
+        graph.add_sequence(std::string(100, 'G'));
+        graph.add_sequence(std::string(100, 'C'));
+
+        size_t num_kmers = 0;
+        graph.call_kmers([&](auto, const auto &sequence) {
+            EXPECT_TRUE(std::string(k, 'A') == sequence
+                        || std::string(k, 'G') == sequence
+                        || std::string(k, 'C') == sequence) << sequence;
+            num_kmers++;
+        });
+        EXPECT_EQ(3u, num_kmers);
+    }
+}
+
+TEST(DBGSuccinct, CallKmersTestPath) {
+    for (size_t k = 1; k < 20; ++k) {
+        DBG_succ graph(k);
+        graph.add_sequence(std::string(100, 'A') + std::string(k, 'C'));
+
+        size_t num_kmers = 0;
+        graph.call_kmers([&](auto, const auto&) { num_kmers++; });
+        EXPECT_EQ(k + 1, num_kmers);
+    }
+}
+
+TEST(DBGSuccinct, CallKmersTestPathACA) {
+    for (size_t k = 1; k < 20; ++k) {
+        DBG_succ graph(k);
+        graph.add_sequence(std::string(100, 'A')
+                            + std::string(k, 'C')
+                            + std::string(100, 'A'));
+
+        size_t num_kmers = 0;
+        graph.call_kmers([&](auto, const auto&) { num_kmers++; });
+        EXPECT_EQ(2 * k, num_kmers);
+    }
+}
+
+TEST(DBGSuccinct, CallKmersTestPathDisconnected) {
+    for (size_t k = 1; k < 20; ++k) {
+        KMerDBGSuccConstructor constructor(k);
+        constructor.add_read(std::string(100, 'A'));
+        DBG_succ graph(&constructor);
+        graph.switch_state(Config::DYN);
+
+        graph.add_sequence(std::string(100, 'T'));
+
+        size_t num_kmers = 0;
+        graph.call_kmers([&](auto, const auto&) { num_kmers++; });
+        EXPECT_EQ(2u, num_kmers) << graph;
+    }
+}
+
+TEST(DBGSuccinct, CallKmersTestPathDisconnected2) {
+    for (size_t k = 1; k < 20; ++k) {
+        KMerDBGSuccConstructor constructor(k);
+        constructor.add_read(std::string(100, 'G'));
+        DBG_succ graph(&constructor);
+        graph.switch_state(Config::DYN);
+
+        graph.add_sequence(std::string(k, 'A') + "T");
+
+        size_t num_kmers = 0;
+        graph.call_kmers([&](auto, const auto&) { num_kmers++; });
+        EXPECT_EQ(3u, num_kmers) << graph;
+    }
+}
+
 void test_pred_kmer(const DBG_succ &graph,
                     const std::string &kmer_s,
                     uint64_t expected_idx) {
