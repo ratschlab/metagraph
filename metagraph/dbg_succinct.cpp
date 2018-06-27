@@ -1156,6 +1156,8 @@ bool DBG_succ::insert_edge(TAlphabet c, uint64_t begin, uint64_t end,
         update_F(get_node_last_value(begin), +1);
         W->insert(begin, c);
         last->insertBit(begin, false);
+        // FYI: this works only for the node based graph colorings
+        // TODO: fix this if we annotate edges
         if (edges_inserted)
             edges_inserted->insertBit(begin, true);
         sort_W_locally(begin, end);
