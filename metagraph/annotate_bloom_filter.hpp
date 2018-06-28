@@ -4,7 +4,7 @@
 #include <vector>
 #include <set>
 #include <string>
-#include <annograph/bloom_annotator/dbg_bloom_annotator.hpp>
+#include <dbg_bloom_annotator.hpp>
 
 #include "annotate.hpp"
 #include "dbg_succinct.hpp"
@@ -21,6 +21,15 @@ class DBGSuccAnnotWrapper : public hash_annotate::DeBruijnGraphWrapper {
 
     edge_index first_edge() const { return 1; }
     edge_index last_edge() const { return graph_.get_W().size() - 1; }
+
+    edge_index map_kmer(const std::string &kmer) const {
+        assert(kmer.size() == graph_.get_k());
+        return graph_.index(kmer)[0];
+    }
+
+    size_t get_num_edges() const {
+        return graph_.num_edges();
+    }
 
     // Transform sequence to the same kind as the de bruijn graph stores
     std::string encode_sequence(const std::string &sequence) const {

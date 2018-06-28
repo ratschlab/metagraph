@@ -80,11 +80,11 @@ include_directories(
   external-libraries/ips4o
   external-libraries/eigen
   external-libraries/caches/include
-  external-libraries/graph_annotation
+  external-libraries/graph_annotation/bloom_annotator
 )
 
 add_subdirectory(
-  external-libraries/graph_annotation/annograph/bloom_annotator
+  external-libraries/graph_annotation/bloom_annotator
 )
 
 set(FOLLY_LIBRARIES FOLLY_LIBRARIES-NOTFOUND)
