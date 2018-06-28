@@ -466,6 +466,141 @@ TEST(DBGSuccinct, CallSimplePaths) {
     }
 }
 
+TEST(DBGSuccinct, CallEdgesEmptyGraph) {
+    for (size_t k = 1; k < 30; ++k) {
+        DBG_succ empty(k);
+
+        size_t num_edges = 0;
+        empty.call_edges([&](auto, const auto &edge) {
+            EXPECT_EQ(empty.get_k() + 1, edge.size()) << empty;
+            num_edges++;
+        });
+
+        EXPECT_EQ(empty.num_edges(), num_edges);
+    }
+}
+
+TEST(DBGSuccinct, CallEdgesTwoLoops) {
+    for (size_t k = 1; k < 20; ++k) {
+        KMerDBGSuccConstructor constructor(k);
+        constructor.add_reads({ std::string(100, 'A') });
+        DBG_succ graph(&constructor);
+
+        ASSERT_EQ(2u, graph.num_edges());
+
+        size_t num_edges = 0;
+        graph.call_edges([&](auto, const auto &edge) {
+            EXPECT_EQ(graph.get_k() + 1, edge.size()) << graph;
+            num_edges++;
+        });
+        EXPECT_EQ(graph.num_edges(), num_edges);
+    }
+}
+
+TEST(DBGSuccinct, CallEdgesFourLoops) {
+    for (size_t k = 1; k < 20; ++k) {
+        KMerDBGSuccConstructor constructor(k);
+        constructor.add_reads({ std::string(100, 'A'),
+                                std::string(100, 'G'),
+                                std::string(100, 'C') });
+        DBG_succ graph(&constructor);
+
+        ASSERT_EQ(4u, graph.num_edges());
+
+        size_t num_edges = 0;
+        graph.call_edges([&](auto, const auto &edge) {
+            EXPECT_EQ(graph.get_k() + 1, edge.size()) << graph;
+            num_edges++;
+        });
+        EXPECT_EQ(graph.num_edges(), num_edges);
+    }
+}
+
+TEST(DBGSuccinct, CallEdgesFourLoopsDynamic) {
+    for (size_t k = 1; k < 20; ++k) {
+        DBG_succ graph(k);
+        graph.add_sequence(std::string(100, 'A'));
+        graph.add_sequence(std::string(100, 'G'));
+        graph.add_sequence(std::string(100, 'C'));
+
+        size_t num_edges = 0;
+        graph.call_edges([&](auto, const auto &edge) {
+            EXPECT_EQ(graph.get_k() + 1, edge.size()) << graph;
+            num_edges++;
+        });
+        EXPECT_EQ(graph.num_edges(), num_edges);
+    }
+}
+
+TEST(DBGSuccinct, CallEdgesTestPath) {
+    for (size_t k = 1; k < 20; ++k) {
+        DBG_succ graph(k);
+        graph.add_sequence(std::string(100, 'A') + std::string(k, 'C'));
+
+        size_t num_edges = 0;
+        graph.call_edges([&](auto, const auto &edge) {
+            EXPECT_EQ(graph.get_k() + 1, edge.size()) << graph;
+            num_edges++;
+        });
+        EXPECT_EQ(graph.num_edges(), num_edges);
+    }
+}
+
+TEST(DBGSuccinct, CallEdgesTestPathACA) {
+    for (size_t k = 1; k < 20; ++k) {
+        DBG_succ graph(k);
+        graph.add_sequence(std::string(100, 'A')
+                            + std::string(k, 'C')
+                            + std::string(100, 'A'));
+
+        size_t num_edges = 0;
+        graph.call_edges([&](auto, const auto &edge) {
+            EXPECT_EQ(graph.get_k() + 1, edge.size()) << graph;
+            num_edges++;
+        });
+        EXPECT_EQ(graph.num_edges(), num_edges);
+    }
+}
+
+TEST(DBGSuccinct, CallEdgesTestPathDisconnected) {
+    for (size_t k = 1; k < 20; ++k) {
+        KMerDBGSuccConstructor constructor(k);
+        constructor.add_read(std::string(100, 'A'));
+        DBG_succ graph(&constructor);
+        graph.switch_state(Config::DYN);
+
+        graph.add_sequence(std::string(100, 'T'));
+
+        size_t num_edges = 0;
+        graph.call_edges([&](auto, const auto &edge) {
+            EXPECT_EQ(graph.get_k() + 1, edge.size()) << graph;
+            num_edges++;
+        });
+        EXPECT_EQ(graph.num_edges(), num_edges) << graph;
+    }
+}
+
+TEST(DBGSuccinct, CallEdgesTestPathDisconnected2) {
+    for (size_t k = 1; k < 20; ++k) {
+        KMerDBGSuccConstructor constructor(k);
+        constructor.add_read(std::string(100, 'G'));
+        DBG_succ graph(&constructor);
+        graph.switch_state(Config::DYN);
+
+        graph.add_sequence(std::string(k, 'A') + "T");
+
+        size_t num_edges = 0;
+        graph.call_edges([&](auto edge_idx, const auto &edge) {
+            EXPECT_EQ(graph.get_k() + 1, edge.size()) << graph;
+            EXPECT_EQ(graph.get_node_seq(edge_idx),
+                      std::deque<TAlphabet>(edge.begin(), edge.end() - 1))
+                << edge_idx << "\n" << graph;
+            num_edges++;
+        });
+        EXPECT_EQ(graph.num_edges(), num_edges) << graph;
+    }
+}
+
 TEST(DBGSuccinct, CallKmersEmptyGraph) {
     for (size_t k = 1; k < 30; ++k) {
         DBG_succ empty(k);

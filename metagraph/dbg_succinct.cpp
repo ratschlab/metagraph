@@ -1308,6 +1308,18 @@ void DBG_succ::call_sequences(const SequenceCallback &callback) const {
     });
 }
 
+void DBG_succ::call_edges(const EdgeCallback &callback) const {
+    call_paths([&](const auto &indices, const auto &path) {
+        assert(path.size() == indices.size() + k_);
+
+        for (size_t i = 0; i < indices.size(); ++i) {
+            callback(indices[i],
+                     std::vector<TAlphabet>(path.begin() + i,
+                                            path.begin() + i + k_ + 1));
+        }
+    });
+}
+
 struct Node {
     DBG_succ::node_index id;
     std::string kmer;

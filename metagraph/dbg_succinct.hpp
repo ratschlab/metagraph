@@ -156,6 +156,10 @@ class DBG_succ : public SequenceGraph {
 
     void call_sequences(const SequenceCallback &callback) const;
 
+    typedef std::function<void(edge_index, const std::vector<TAlphabet>&)> EdgeCallback;
+
+    void call_edges(const EdgeCallback &callback) const;
+
     typedef std::function<void(node_index, const std::string&)> KmerCallback;
     // traverse all nodes in graph except for the dummy source of sink ones
     void call_kmers(const KmerCallback &callback) const;
