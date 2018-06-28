@@ -44,7 +44,7 @@ class DBGSuccAnnotWrapper : public hash_annotate::DeBruijnGraphWrapper {
     // Check if the source k-mer for this edge has the only outgoing edge
     bool has_the_only_outgoing_edge(edge_index i) const {
         assert(i >= first_edge() && i <= last_edge());
-        return graph_.get_last(i) && ((i == 1) || graph_.get_last(i - 1));
+        return graph_.is_single_outgoing(i);
     }
 
     bool has_the_only_incoming_edge(edge_index i) const {

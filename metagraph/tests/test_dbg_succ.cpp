@@ -341,7 +341,7 @@ TEST(DBGSuccinct, CallSimplePathsOneLoop) {
         size_t num_paths = 0;
         size_t num_sequences = 0;
 
-        graph.call_simple_paths([&](const auto &) { num_paths++; });
+        graph.call_paths([&](const auto &, const auto &) { num_paths++; });
         graph.call_sequences([&](const auto &) { num_sequences++; });
 
         EXPECT_EQ(graph.num_edges(), num_paths);
@@ -360,7 +360,7 @@ TEST(DBGSuccinct, CallSimplePathsTwoLoops) {
         size_t num_paths = 0;
         size_t num_sequences = 0;
 
-        graph.call_simple_paths([&](const auto &) { num_paths++; });
+        graph.call_paths([&](const auto &, const auto &) { num_paths++; });
         graph.call_sequences([&](const auto &) { num_sequences++; });
 
         EXPECT_EQ(graph.num_edges(), num_paths);
@@ -381,7 +381,7 @@ TEST(DBGSuccinct, CallSimplePathsFourLoops) {
         size_t num_paths = 0;
         size_t num_sequences = 0;
 
-        graph.call_simple_paths([&](const auto &) { num_paths++; });
+        graph.call_paths([&](const auto &, const auto &) { num_paths++; });
         graph.call_sequences([&](const auto &) { num_sequences++; });
 
         EXPECT_EQ(graph.num_edges(), num_paths);

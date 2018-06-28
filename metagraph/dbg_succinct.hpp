@@ -147,10 +147,13 @@ class DBG_succ : public SequenceGraph {
                                                   uint64_t max_distance = 0,
                                                   uint64_t alignment_length = 0) const;
 
-    typedef std::function<void(const std::deque<TAlphabet>&)> PathCallback;
+    typedef std::function<void(const std::vector<uint64_t>,
+                               const std::deque<TAlphabet>&)> PathCallback;
+
+    void call_paths(const PathCallback &callback) const;
+
     typedef std::function<void(const std::string&)> SequenceCallback;
 
-    void call_simple_paths(const PathCallback &callback) const;
     void call_sequences(const SequenceCallback &callback) const;
 
     typedef std::function<void(node_index, const std::string&)> KmerCallback;
@@ -200,6 +203,12 @@ class DBG_succ : public SequenceGraph {
      * edges from node i.
      */
     uint64_t outdegree(uint64_t i) const;
+
+    /**
+     * Given a node index i, this function returns true if there is
+     * only one outgoing edges from node i.
+     */
+    bool is_single_outgoing(uint64_t i) const;
 
     /**
      * Given a node index i, this function returns the number of incoming

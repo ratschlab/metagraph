@@ -508,6 +508,11 @@ uint64_t DBG_succ::outdegree(uint64_t i) const {
     return (i < W->size()) ? succ_last(i) - pred_last(i - 1) : 0;
 }
 
+bool DBG_succ::is_single_outgoing(uint64_t i) const {
+    CHECK_INDEX(i);
+
+    return get_last(i) && (i == 1 || get_last(i - 1));
+}
 
 /**
  * Given a node index i, this function returns the number of incoming
@@ -1201,15 +1206,6 @@ void DBG_succ::remove_edges(const std::set<uint64_t> &edges) {
 }
 
 /**
- * This object collects information about branches during graph traversal for the
- * purpose of merging, so we know where to jump back to when we reached a dead end.
- */
-struct BranchInfoMerge {
-    uint64_t node_id;
-    std::deque<TAlphabet> source_kmer;
-};
-
-/**
  * Get the nodes of graph |other| merged into the current graph. The graph
  * |other| is fully traversed and all edges are added to to the current graph.
  * This function is well suited to merge small graphs into large ones.
@@ -1220,111 +1216,77 @@ void DBG_succ::merge(const DBG_succ &other) {
     });
 }
 
+struct Edge {
+    DBG_succ::edge_index id;
+    std::deque<TAlphabet> source_kmer;
+};
+
 /**
- * Traverse graph and extract all forward simple paths
- * node -> node, node -> ... -> node, ... (k+1 - mer, k+...+1 - mer, ...)
+ * Traverse graph and extract directed paths covering the graph
+ * edge, edge -> edge, edge -> ... -> edge, ... (k+1 - mer, k+...+1 - mer, ...)
  */
-void DBG_succ::call_simple_paths(const PathCallback &callback) const {
-    // bool vector that keeps track of reached nodes
-    std::vector<bool> discovered(num_nodes() + 1, false);
-    // nodes for which all outgoing edges are discovered
-    std::vector<bool> visited(num_nodes() + 1, false);
+void DBG_succ::call_paths(const PathCallback &callback) const {
+    // keep track of reached edges
+    std::vector<bool> discovered(W->size(), false);
+    // keep track of edges that are already included in covering paths
+    std::vector<bool> visited(W->size(), false);
+    // store all branch nodes on the way
+    std::queue<Edge> edges;
+    std::vector<uint64_t> path;
 
     // start at the source node
-    // TODO: try to make this loop faster by interating
-    // over nodes+select instead of edges+rank
     for (uint64_t i = 1; i < W->size(); ++i) {
-        uint64_t node_idx = rank_last(i - 1) + 1;
-
-        if (discovered[node_idx])
+        if (visited[i])
             continue;
 
-        discovered[node_idx] = true;
+        //TODO: traverse backwards
 
-        // store all branch nodes on the way
-        std::queue<BranchInfoMerge> branchnodes;
-        branchnodes.push({ node_idx, get_node_seq(i) });
+        discovered[i] = true;
+        edges.push({ i, get_node_seq(i) });
 
         // keep traversing until we have worked off all branches from the queue
-        while (!branchnodes.empty()) {
-            node_idx = branchnodes.front().node_id;
-            auto sequence = std::move(branchnodes.front().source_kmer);
-            branchnodes.pop();
-
-            assert(discovered[node_idx]);
-
-            auto source_node = select_last(node_idx);
-
-            // TODO: traverse backwards to extend the current path |sequence|
-
-            // inspect |source_node|
+        while (!edges.empty()) {
+            uint64_t edge = edges.front().id;
+            auto sequence = std::move(edges.front().source_kmer);
+            path.clear();
+            edges.pop();
 
             // traverse simple path until we reach its tail or
-            // the first node that has been already visited
-            while (outdegree(source_node) == 1) {
-                // mark the node as visited since we are
-                // about to inspect its outgoing edge
-                visited[node_idx] = true;
+            // the first edge that has been already visited
+            while (!visited[edge]) {
+                assert(edge > 0 && discovered[edge]);
 
-                if (!get_W(source_node)) {
-                    // the next node is a dummy sink
-                    sequence.push_back(kSentinelCode);
+                sequence.push_back(get_W(edge) % alph_size);
+                path.push_back(edge);
+                visited[edge] = true;
+
+                // stop traversing if the next node is a dummy sink
+                if (!sequence.back())
                     break;
-                }
-                // there is only one outgoing edge
 
                 // make one traversal step
-                source_node = fwd(source_node);
-                sequence.push_back(get_node_last_value(source_node));
-                node_idx = rank_last(source_node);
+                edge = fwd(edge);
 
-                // stop traversal if the next node has been discovered
-                if (discovered[node_idx])
-                    break;
-
-                discovered[node_idx] = true;
-            }
-            // the node is a sink, or a branching node, or it has been already reached
-
-            assert(sequence.size() >= get_k());
-
-            // call the path if it consists of more than a single node
-            if (sequence.size() > get_k())
-                callback(sequence);
-
-            assert(outdegree(source_node) >= 1);
-
-            // finish traversing the path if the current node has
-            // been already visited or it isn't a branching node
-            if (outdegree(source_node) == 1 || visited[node_idx])
-                continue;
-            // now we are ready to traverse the branching
-
-            // cleanup the accumulated path and leave just the source node
-            sequence.erase(sequence.begin(), sequence.end() - get_k());
-
-            assert(sequence.size() == get_k());
-
-            visited[node_idx] = true;
-
-            // loop over outgoing edges
-            for (TAlphabet c = 0; c < alph_size; ++c) {
-
-                uint64_t target_node = outgoing(source_node, c);
-                if (!target_node)
+                // traverse if there is only one outgoing edge
+                if (is_single_outgoing(edge)) {
+                    discovered[edge] = true;
                     continue;
-
-                sequence.push_back(c);
-
-                node_idx = rank_last(target_node);
-                if (discovered[node_idx]) {
-                    callback(sequence);
                 } else {
-                    discovered[node_idx] = true;
-                    branchnodes.push({ node_idx, sequence });
+                    std::deque<TAlphabet> kmer(sequence.end() - k_, sequence.end());
+
+                    // loop over outgoing edges
+                    do {
+                        if (!discovered[edge]) {
+                            discovered[edge] = true;
+                            edges.push({ edge, kmer });
+                        }
+                    } while (--edge > 0 && !get_last(edge));
+                    break;
                 }
-                sequence.resize(sequence.size() - 1);
             }
+
+            if (path.size())
+                callback(path, sequence);
         }
     }
 }
@@ -1332,7 +1294,7 @@ void DBG_succ::call_simple_paths(const PathCallback &callback) const {
 void DBG_succ::call_sequences(const SequenceCallback &callback) const {
     std::string sequence;
 
-    call_simple_paths([&](const auto &path) {
+    call_paths([&](const auto&, const auto &path) {
         sequence.clear();
 
         for (TAlphabet c : path) {
@@ -1366,21 +1328,13 @@ void DBG_succ::call_kmers(const KmerCallback &callback) const {
         if (!get_last(i) || visited[i])
             continue;
 
-        uint64_t node = i;
+        //TODO: traverse backwards
 
-        // // traverse backwards
-        // size_t num_traversed = 0;
-        // while (!visited[node] && !discovered[node] && num_traversed < 10000) {
-        //     discovered[node] = true;
-        //     node = bwd(node);
-        //     num_traversed++;
-        // }
-
-        branchnodes.push({ node, get_node_str(node) });
+        branchnodes.push({ i, get_node_str(i) });
 
         // keep traversing until we have worked off all branches from the queue
         while (!branchnodes.empty()) {
-            node = branchnodes.front().id;
+            uint64_t node = branchnodes.front().id;
             std::string kmer = std::move(branchnodes.front().kmer);
             branchnodes.pop();
 
@@ -1401,7 +1355,7 @@ void DBG_succ::call_kmers(const KmerCallback &callback) const {
                 std::copy(kmer.begin() + 1, kmer.end(), kmer.begin());
 
                 // traverse if there is only one outgoing edge
-                if (outdegree(node) == 1) {
+                if (is_single_outgoing(node)) {
                     node = fwd(node);
                     kmer.back() = DBG_succ::decode(get_node_last_value(node));
                 } else {
@@ -1415,9 +1369,7 @@ void DBG_succ::call_kmers(const KmerCallback &callback) const {
                             kmer.back() = DBG_succ::decode(get_node_last_value(target_node));
                             branchnodes.push({ target_node, kmer });
                         }
-                        node--;
-
-                    } while (node > 1 && !get_last(node));
+                    } while (--node > 1 && !get_last(node));
                     break;
                 }
             }
