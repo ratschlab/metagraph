@@ -258,11 +258,15 @@ void annotate_sequence(const std::string &sequence,
 
 std::string get_filter_filename(const std::string &filename,
                                 size_t k,
-                                size_t noise_kmer_frequency,
+                                size_t max_unreliable_abundance,
+                                size_t unreliable_kmers_threshold,
                                 bool critical = true) {
-    std::string filter_filename = noise_kmer_frequency > 0
+    std::string filter_filename = max_unreliable_abundance > 0
             ? filename + ".filter_k" + std::to_string(k)
-                       + "_s" + std::to_string(noise_kmer_frequency)
+                       + "_s" + std::to_string(max_unreliable_abundance)
+                       + (max_unreliable_abundance
+                            ? std::string("_") + std::to_string(unreliable_kmers_threshold)
+                            : "")
             : "";
 
     if (critical
@@ -284,7 +288,8 @@ void annotate_data(const std::vector<std::string> &files,
                    const DBG_succ &graph,
                    Annotator *annotator,
                    bool reverse,
-                   size_t noise_kmer_frequency,
+                   size_t max_unreliable_abundance,
+                   size_t unreliable_kmers_threshold,
                    bool filename_anno,
                    bool fasta_anno,
                    const std::string &fasta_header_delimiter,
@@ -380,7 +385,8 @@ void annotate_data(const std::vector<std::string> &files,
                     }
                 },
                 reverse, timer.get(),
-                get_filter_filename(file, graph.get_k(), noise_kmer_frequency)
+                get_filter_filename(file, graph.get_k(),
+                                    max_unreliable_abundance, unreliable_kmers_threshold)
             );
         } else {
             std::cerr << "ERROR: Filetype unknown for file "
@@ -551,7 +557,8 @@ int main(int argc, const char *argv[]) {
 
                             Timer *timer_ptr = config->verbose ? &timer : NULL;
                             //assume VCF contains no noise
-                            read_vcf_file_critical(files[f], config->refpath, graph->get_k(), NULL,
+                            read_vcf_file_critical(
+                                files[f], config->refpath, graph->get_k(), NULL,
                                 [&](std::string &seq, auto *variant_annotations) {
                                     constructor->add_read(seq);
                                     if (config->reverse) {
@@ -566,7 +573,9 @@ int main(int argc, const char *argv[]) {
                             Timer *timer_ptr = config->verbose ? &timer : NULL;
 
                             std::string filter_filename = get_filter_filename(
-                                files[f], config->k, config->noise_kmer_frequency
+                                files[f], config->k,
+                                config->max_unreliable_abundance,
+                                config->unreliable_kmers_threshold
                             );
 
                             if (files.size() >= config->parallel) {
@@ -604,7 +613,8 @@ int main(int argc, const char *argv[]) {
                     std::cout << std::endl;
 
                     auto next_block = constructor->build_chunk();
-                    std::cout << "Graph chunk with " << next_block->size() << " k-mers was built in "
+                    std::cout << "Graph chunk with " << next_block->size()
+                              << " k-mers was built in "
                               << timer.elapsed() << "sec" << std::endl;
 
                     if (config->outfbase.size() && config->suffix.size()) {
@@ -630,7 +640,8 @@ int main(int argc, const char *argv[]) {
                     }
                     // open stream
                     if (utils::get_filetype(files[f]) == "VCF") {
-                        read_vcf_file_critical(files[f], config->refpath, graph->get_k(), NULL,
+                        read_vcf_file_critical(
+                            files[f], config->refpath, graph->get_k(), NULL,
                             [&](std::string &seq, auto *variant_annotations) {
                                 graph->add_sequence(seq);
                                 if (config->reverse) {
@@ -643,9 +654,13 @@ int main(int argc, const char *argv[]) {
                     } else if (utils::get_filetype(files[f]) == "FASTA"
                                 || utils::get_filetype(files[f]) == "FASTQ") {
                         read_fasta_file_critical(files[f],
-                            [&](kseq_t *read_stream) { graph->add_sequence(read_stream->seq.s); },
+                            [&](kseq_t *read_stream) {
+                                graph->add_sequence(read_stream->seq.s);
+                            },
                             config->reverse, NULL,
-                            get_filter_filename(files[f], config->k, config->noise_kmer_frequency)
+                            get_filter_filename(files[f], config->k,
+                                                config->max_unreliable_abundance,
+                                                config->unreliable_kmers_threshold)
                         );
                     } else {
                         std::cerr << "ERROR: Filetype unknown for file "
@@ -720,7 +735,9 @@ int main(int argc, const char *argv[]) {
                             graph->add_sequence(read_stream->seq.s, true, inserted_edges.get());
                         },
                         config->reverse, NULL,
-                        get_filter_filename(file, config->k, config->noise_kmer_frequency)
+                        get_filter_filename(file, config->k,
+                                            config->max_unreliable_abundance,
+                                            config->unreliable_kmers_threshold)
                     );
                 } else {
                     std::cerr << "ERROR: Filetype unknown for file "
@@ -775,7 +792,8 @@ int main(int argc, const char *argv[]) {
                     std::cerr << "ERROR: can't load annotations" << std::endl;
                     exit(1);
                 } else if (config->verbose) {
-                    std::cout << "Annotation was loaded in " << timer.elapsed() << "sec" << std::endl;
+                    std::cout << "Annotation was loaded in "
+                              << timer.elapsed() << "sec" << std::endl;
                 }
                 timer.reset();
 
@@ -824,20 +842,23 @@ int main(int argc, const char *argv[]) {
 
                 if (config->generate_filtered_fasta || config->generate_filtered_fastq) {
                     thread_pool.enqueue([=](size_t k,
-                                            size_t noise_kmer_frequency,
+                                            size_t max_unreliable_abundance,
+                                            size_t unreliable_kmers_threshold,
                                             bool out_fasta,
                                             bool out_fastq) {
                         assert(out_fasta || out_fastq);
 
-                        auto filter_filename = get_filter_filename(file, k, noise_kmer_frequency);
+                        auto filter_filename = get_filter_filename(
+                            file, k, max_unreliable_abundance, unreliable_kmers_threshold
+                        );
 
                         std::string filtered_reads_fasta = get_filter_filename(
                             utils::remove_suffix(file, ".gz", ".fasta", ".fastq"),
-                            k, noise_kmer_frequency, false
+                            k, max_unreliable_abundance, unreliable_kmers_threshold, false
                         ) + ".fasta.gz";
                         std::string filtered_reads_fastq = get_filter_filename(
                             utils::remove_suffix(file, ".gz", ".fasta", ".fastq"),
-                            k, noise_kmer_frequency, false
+                            k, max_unreliable_abundance, unreliable_kmers_threshold, false
                         ) + ".fastq.gz";
 
                         gzFile out_fasta_gz = Z_NULL;
@@ -883,7 +904,10 @@ int main(int argc, const char *argv[]) {
                         if (out_fastq_gz != Z_NULL)
                             gzclose(out_fastq_gz);
 
-                    }, config->k, config->noise_kmer_frequency,
+                    },
+                    config->k,
+                    config->max_unreliable_abundance,
+                    config->unreliable_kmers_threshold,
                     config->generate_filtered_fasta,
                     config->generate_filtered_fastq);
 
@@ -894,7 +918,8 @@ int main(int argc, const char *argv[]) {
                 // capture all required values by copying to be able
                 // to run task from other threads
                 thread_pool_files.enqueue([=](size_t k,
-                                              size_t noise_kmer_frequency,
+                                              size_t max_unreliable_abundance,
+                                              size_t unreliable_kmers_threshold,
                                               bool verbose,
                                               bool reverse,
                                               bool use_kmc) {
@@ -905,7 +930,8 @@ int main(int argc, const char *argv[]) {
                                     callback(read_stream->seq.s);
                                 }, reverse, timer_ptr);
                             },
-                            k, noise_kmer_frequency, verbose, thread_pool_ptr,
+                            k, max_unreliable_abundance, unreliable_kmers_threshold,
+                            verbose, thread_pool_ptr,
                             use_kmc ? file + ".kmc" : ""
                         );
                         if (reverse) {
@@ -919,12 +945,14 @@ int main(int argc, const char *argv[]) {
                         }
 
                         // dump filter
-                        std::ofstream outstream(
-                            get_filter_filename(file, k, noise_kmer_frequency, false)
-                        );
+                        std::ofstream outstream(get_filter_filename(
+                            file, k, max_unreliable_abundance, unreliable_kmers_threshold, false
+                        ));
                         serialize_number_vector(outstream, filter, 1);
                     },
-                    config->k, config->noise_kmer_frequency,
+                    config->k,
+                    config->max_unreliable_abundance,
+                    config->unreliable_kmers_threshold,
                     config->verbose, config->reverse, config->use_kmc
                 );
             }
@@ -975,7 +1003,8 @@ int main(int argc, const char *argv[]) {
                           *graph,
                           annotation.get(),
                           config->reverse,
-                          config->noise_kmer_frequency,
+                          config->max_unreliable_abundance,
+                          config->unreliable_kmers_threshold,
                           config->filename_anno,
                           config->fasta_anno,
                           config->fasta_header_delimiter,
@@ -1030,7 +1059,8 @@ int main(int argc, const char *argv[]) {
                           *graph,
                           annotation.get(),
                           config->reverse,
-                          config->noise_kmer_frequency,
+                          config->max_unreliable_abundance,
+                          config->unreliable_kmers_threshold,
                           config->filename_anno,
                           config->fasta_anno,
                           config->fasta_header_delimiter,
@@ -1117,7 +1147,8 @@ int main(int argc, const char *argv[]) {
                 read_fasta_file_critical(file,
                     [&](kseq_t *read_stream) {
                         thread_pool.enqueue(execute_query,
-                            std::to_string(seq_count++) + "\t" + std::string(read_stream->name.s),
+                            std::to_string(seq_count++) + "\t"
+                                + std::string(read_stream->name.s),
                             std::string(read_stream->seq.s),
                             config->count_labels,
                             config->suppress_unlabeled,
@@ -1129,7 +1160,9 @@ int main(int argc, const char *argv[]) {
                         );
                     },
                     config->reverse, timer.get(),
-                    get_filter_filename(file, graph->get_k(), config->noise_kmer_frequency)
+                    get_filter_filename(file, graph->get_k(),
+                                        config->max_unreliable_abundance,
+                                        config->unreliable_kmers_threshold)
                 );
 
                 // wait while all threads finish processing the current file
@@ -1430,7 +1463,8 @@ int main(int argc, const char *argv[]) {
 
             std::cout << "Align sequences against a de Bruijn graph with ";
             std::cout << "k=" << graph->get_k() << "\n"
-                      << "Length of aligning k-mers: " << config->alignment_length << std::endl;
+                      << "Length of aligning k-mers: "
+                      << config->alignment_length << std::endl;
 
             for (const auto &file : files) {
                 std::cout << "Align sequences from file " << file << std::endl;
@@ -1479,7 +1513,8 @@ int main(int argc, const char *argv[]) {
                         if (config->filter_present) {
                             if (graph->find(read_stream->seq.s,
                                             config->discovery_fraction))
-                                std::cout << ">" << read_stream->name.s << "\n" << read_stream->seq.s << "\n";
+                                std::cout << ">" << read_stream->name.s << "\n"
+                                                 << read_stream->seq.s << "\n";
                         } else {
                             std::cout << graph->find(read_stream->seq.s,
                                                      config->discovery_fraction) << "\n";
@@ -1501,7 +1536,8 @@ int main(int argc, const char *argv[]) {
                             num_kmers - num_kmers * (1 - config->discovery_fraction);
                         if (config->filter_present) {
                             if (num_discovered >= min_kmers_discovered)
-                                std::cout << ">" << read_stream->name.s << "\n" << read_stream->seq.s << "\n";
+                                std::cout << ">" << read_stream->name.s << "\n"
+                                                 << read_stream->seq.s << "\n";
                         } else {
                             std::cout << (num_discovered >= min_kmers_discovered) << "\n";
                         }
@@ -1522,7 +1558,9 @@ int main(int argc, const char *argv[]) {
                         std::cout << ": " << graphindices[i] << "\n";
                     }
                 }, config->reverse, timer.get(),
-                   get_filter_filename(file, graph->get_k(), config->noise_kmer_frequency)
+                   get_filter_filename(file, graph->get_k(),
+                                       config->max_unreliable_abundance,
+                                       config->unreliable_kmers_threshold)
                 );
             }
 

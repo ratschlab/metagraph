@@ -44,7 +44,8 @@ class Config {
     unsigned int memory_available = 0;
     unsigned int bloom_num_hash_functions = 0;
     unsigned int bloom_test_num_kmers = 0;
-    unsigned int noise_kmer_frequency = 0;
+    unsigned int max_unreliable_abundance = 0;
+    unsigned int unreliable_kmers_threshold = 0;
     unsigned int num_top_labels = -1;
     unsigned int genome_binsize_anno = 0;
 

@@ -21,7 +21,8 @@ template <typename KMER>
 std::vector<bool> filter_reads(const std::vector<std::string> &reads,
                                Counter<KMER> *counter,
                                size_t k,
-                               size_t noise_kmer_frequency,
+                               size_t max_unreliable_abundance,
+                               size_t unreliable_kmers_threshold,
                                bool verbose) {
     Timer timer;
 
@@ -34,7 +35,7 @@ std::vector<bool> filter_reads(const std::vector<std::string> &reads,
 
     for (auto it = counter->begin(); it != counter->end(); ) {
         counter_sum += it->second;
-        if (it->second <= noise_kmer_frequency) {
+        if (it->second <= max_unreliable_abundance) {
             it = counter->erase(it);
         } else {
             filtered_sum += it->second;
@@ -54,10 +55,13 @@ std::vector<bool> filter_reads(const std::vector<std::string> &reads,
 
         utils::sequence_to_kmers(reads[j], k, &read_kmers, {});
 
+        size_t unreliable_kmers = 0;
+
         // iterate through all non-dummy k-mers
         for (size_t i = 1; i + 1 < read_kmers.size(); ++i) {
             // all frequent k-mers are kept in counter here
-            if (!counter->count(read_kmers[i])) {
+            if (!counter->count(read_kmers[i])
+                    && ++unreliable_kmers > unreliable_kmers_threshold) {
                 filter[j] = false;
                 break;
             }
@@ -69,21 +73,22 @@ std::vector<bool> filter_reads(const std::vector<std::string> &reads,
         std::cout << "Filtering out the k-mers collected... "
                                                 << timer.elapsed() << "sec\n";
         std::cout << "Distinct k-mers:   " << num_distinct_kmers << "\n";
+        std::cout << "Frequent k-mers:   " << num_frequent_kmers << "\n";
         std::cout << "Total k-mers:      " << counter_sum << "\n";
         std::cout << "Total k-mers left: " << filtered_sum << std::endl;
-        std::cout << "Frequent k-mers:   " << num_frequent_kmers << "\n";
     }
     return filter;
 }
 
 
-// Remove noisy k-mers from |reads| and return
-// vector indicating reads with frequent k-mers
+// Identify k-mers from |reads| below the abundance level
+// and return vector indicating reads with reliable k-mers
 template <typename KMER>
 std::vector<bool>
 count_kmers_and_filter_reads_templated(std::vector<std::string> *reads,
                                        size_t k,
-                                       size_t noise_kmer_frequency,
+                                       size_t max_unreliable_abundance,
+                                       size_t unreliable_kmers_threshold,
                                        bool verbose) {
     std::vector<bool> frequent(reads->size(), true);
 
@@ -110,7 +115,7 @@ count_kmers_and_filter_reads_templated(std::vector<std::string> *reads,
 
         // consider only non-dummy k-mers
         for (size_t i = 1; i + 1 < read_kmers.size(); ++i) {
-            if (++counter[read_kmers[i]] <= noise_kmer_frequency)
+            if (++counter[read_kmers[i]] <= max_unreliable_abundance)
                 frequent[j] = false;
         }
         if (frequent[j]) {
@@ -122,8 +127,9 @@ count_kmers_and_filter_reads_templated(std::vector<std::string> *reads,
     }
     reads->clear();
 
-    auto filter = filter_reads(filtering_reads, &counter,
-                               k, noise_kmer_frequency, verbose);
+    auto filter = filter_reads(filtering_reads, &counter, k,
+                               max_unreliable_abundance,
+                               unreliable_kmers_threshold, verbose);
 
     for (size_t i = 0, j = 0; j < frequent.size(); ++j) {
         if (!frequent[j] && filter[i++]) {
@@ -137,21 +143,21 @@ count_kmers_and_filter_reads_templated(std::vector<std::string> *reads,
     return frequent;
 }
 
+template <typename... Args>
 std::vector<bool> count_kmers_and_filter_reads(std::vector<std::string> *reads,
                                                size_t k,
-                                               size_t noise_kmer_frequency,
-                                               bool verbose) {
+                                               Args&... args) {
     if ((k + 1) * kBitsPerChar <= 64) {
         return count_kmers_and_filter_reads_templated<KMer<uint64_t>>(
-            reads, k, noise_kmer_frequency, verbose
+            reads, k, args...
         );
     } else if ((k + 1) * kBitsPerChar <= 128) {
         return count_kmers_and_filter_reads_templated<KMer<sdsl::uint128_t>>(
-            reads, k, noise_kmer_frequency, verbose
+            reads, k, args...
         );
     } else {
         return count_kmers_and_filter_reads_templated<KMer<sdsl::uint256_t>>(
-            reads, k, noise_kmer_frequency, verbose
+            reads, k, args...
         );
     }
 }
@@ -161,7 +167,8 @@ std::vector<bool> count_kmers_and_filter_reads(std::vector<std::string> *reads,
 std::vector<bool>
 count_kmers_and_filter_reads_raii(std::vector<std::string> *reads,
                                   size_t k,
-                                  size_t noise_kmer_frequency,
+                                  size_t max_unreliable_abundance,
+                                  size_t unreliable_kmers_threshold,
                                   CKMCFile *kmc_database,
                                   bool verbose) {
     size_t all_reads = reads->size();
@@ -184,12 +191,12 @@ count_kmers_and_filter_reads_raii(std::vector<std::string> *reads,
                     ++valid_kmers;
             }
 
-            result.push_back(valid_kmers >= read.size() - k);
+            result.push_back(valid_kmers + unreliable_kmers_threshold >= read.size() - k);
         }
 
     } else {
         result = count_kmers_and_filter_reads(
-            reads, k, noise_kmer_frequency, verbose
+            reads, k, max_unreliable_abundance, unreliable_kmers_threshold, verbose
         );
     }
 
@@ -208,7 +215,8 @@ count_kmers_and_filter_reads_raii(std::vector<std::string> *reads,
 
 std::vector<bool> filter_reads(std::function<void(CallbackRead)> generate_reads,
                                size_t k,
-                               size_t noise_kmer_frequency,
+                               size_t max_unreliable_abundance,
+                               size_t unreliable_kmers_threshold,
                                bool verbose,
                                utils::ThreadPool *thread_pool,
                                const std::string &kmc_base) {
@@ -227,7 +235,7 @@ std::vector<bool> filter_reads(std::function<void(CallbackRead)> generate_reads,
                       << " instead of required k=" << k + 1 << std::endl;
             exit(1);
         }
-        if (kmc_database->GetMinCount() > noise_kmer_frequency + 1) {
+        if (kmc_database->GetMinCount() > max_unreliable_abundance + 1) {
             std::cerr << "Error: Incompatible KMC database " << kmc_base
                       << " built with min_count=" << kmc_database->GetMinCount() << std::endl;
             exit(1);
@@ -237,7 +245,7 @@ std::vector<bool> filter_reads(std::function<void(CallbackRead)> generate_reads,
             std::cout << "KMC database loaded" << std::endl;
         }
 
-        kmc_database->SetMinCount(noise_kmer_frequency + 1);
+        kmc_database->SetMinCount(max_unreliable_abundance + 1);
     }
 
     std::vector<std::future<std::vector<bool>>> future_filters;
@@ -254,7 +262,8 @@ std::vector<bool> filter_reads(std::function<void(CallbackRead)> generate_reads,
             future_filters.emplace_back(
                 thread_pool->enqueue(
                     count_kmers_and_filter_reads_raii,
-                    reads, k, noise_kmer_frequency, kmc_database.get(), verbose
+                    reads, k, max_unreliable_abundance, unreliable_kmers_threshold,
+                    kmc_database.get(), verbose
                 )
             );
             reads = new std::vector<std::string>();
@@ -269,7 +278,8 @@ std::vector<bool> filter_reads(std::function<void(CallbackRead)> generate_reads,
         thread_pool->enqueue(
             count_kmers_and_filter_reads_raii,
             reads, k,
-            noise_kmer_frequency * valid_kmers_collected / kMaxKmersChunkSize,
+            max_unreliable_abundance * valid_kmers_collected / kMaxKmersChunkSize,
+            unreliable_kmers_threshold,
             kmc_database.get(), verbose
         )
     );

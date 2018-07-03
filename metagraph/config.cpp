@@ -93,8 +93,10 @@ Config::Config(int argc, const char *argv[]) {
             num_bins_per_thread = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-k") || !strcmp(argv[i], "--kmer-length")) {
             k = atoi(argv[++i]);
-        } else if (!strcmp(argv[i], "--noise-freq")) {
-            noise_kmer_frequency = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--filter-abund")) {
+            max_unreliable_abundance = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--filter-thres")) {
+            unreliable_kmers_threshold = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
             memory_available = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--dump-raw-anno")) {
@@ -200,7 +202,7 @@ Config::Config(int argc, const char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if (identity == FILTER && noise_kmer_frequency == 0)
+    if (identity == FILTER && max_unreliable_abundance == 0)
         print_usage_and_exit = true;
 
     if (identity == ALIGN && infbase.empty())
@@ -321,7 +323,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --mem-cap-gb [INT] \tmaximum memory available, in Gb [inf]\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
             fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
-            fprintf(stderr, "\t   --noise-freq [INT] \tthreshold for filtering reads with rare k-mers [0]\n");
+            fprintf(stderr, "\t   --filter-abund [INT] threshold for the abundance of reliable k-mers [0]\n");
+            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --dynamic \t\tuse dynamic build method [off]\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t   --suffix \t\tbuild graph chunk only for k-mers with the suffix given [off]\n");
@@ -338,17 +341,20 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
             fprintf(stderr, "\t-t --state [1|2] \tstate of the extended graph [STAT=1]\n");
             fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
-            fprintf(stderr, "\t   --noise-freq [INT] \tthreshold for filtering reads with rare k-mers [0]\n");
+            fprintf(stderr, "\t   --filter-abund [INT] threshold for the abundance of reliable k-mers [0]\n");
+            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case FILTER: {
-            fprintf(stderr, "Usage: %s filter [options] --noise-freq <cutoff> FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s filter [options] --filter-abund <cutoff> FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for filter:\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
             fprintf(stderr, "\t   --kmc \t\tuse precomputed KMC database with k-mer counts\n");
             fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
+            fprintf(stderr, "\t   --filter-abund [INT] threshold for the abundance of reliable k-mers [0]\n");
+            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --generate-fasta \twrite filtered reads to disk in fasta format [off]\n");
             fprintf(stderr, "\t   --generate-fastq \twrite filtered reads to disk in fastq format [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
@@ -358,7 +364,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for align:\n");
             fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
-            fprintf(stderr, "\t   --noise-freq [INT] \t\tthreshold for filtering reads with rare k-mers [0]\n");
+            fprintf(stderr, "\t   --filter-abund [INT] \tthreshold for the abundance of reliable k-mers [0]\n");
+            fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --query-presence\t\tTest sequences for presence [off]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT]\tFraction of k-mers required to count sequence [1.0]\n");
             fprintf(stderr, "\t   --filter-present\t\tReport only present input sequences [off]\n");
@@ -413,7 +420,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate colors [off]\n");
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file [<graph_basename>]\n");
             fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
-            fprintf(stderr, "\t   --noise-freq [INT] \t\tthreshold for filtering reads with rare k-mers [0]\n");
+            fprintf(stderr, "\t   --filter-abund [INT] \tthreshold for the abundance of reliable k-mers [0]\n");
+            fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --anno-filename \t\tinclude filenames as annotation labels [off]\n");
             fprintf(stderr, "\t   --anno-header \t\textract annotation labels from headers of sequences in files [off]\n");
             fprintf(stderr, "\t   --header-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
@@ -436,7 +444,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for bloom:\n");
             fprintf(stderr, "\t   --reference [STR] \t\t\tbasename of reference sequence []\n");
             fprintf(stderr, "\t-r --reverse \t\t\t\talso annotate reverse complement reads [off]\n");
-            fprintf(stderr, "\t   --noise-freq [INT] \t\t\tthreshold for filtering reads with rare k-mers [0]\n");
+            fprintf(stderr, "\t   --filter-abund [INT] \t\tthreshold for the abundance of reliable k-mers [0]\n");
+            fprintf(stderr, "\t   --filter-thres [INT] \t\tmax allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --anno-filename \t\t\tinclude filenames as annotation labels [off]\n");
             fprintf(stderr, "\t   --anno-header \t\t\textract annotation labels from headers of sequences in files [off]\n");
             fprintf(stderr, "\t   --header-delimiter [STR]\t\tdelimiter for splitting annotation header into multiple labels [off]\n");
@@ -456,7 +465,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for classify:\n");
             fprintf(stderr, "\t-r --reverse \t\t\tclassify reverse complement sequences [off]\n");
-            fprintf(stderr, "\t   --noise-freq [INT] \t\tthreshold for filtering reads with rare k-mers [0]\n");
+            fprintf(stderr, "\t   --filter-abund [INT] \tthreshold for the abundance of reliable k-mers [0]\n");
+            fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator [<graph_basename>]\n");
             fprintf(stderr, "\t   --fast \t\t\tuse fast column based annotator (with auxiliary index) [off]\n");

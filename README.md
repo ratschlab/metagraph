@@ -77,16 +77,16 @@ for F in {\$,A,C,G,T,N}{\$,A,C,G,T,N}; do ./metagengraph build -v --parallel 30 
 1) Filter reads
   * using filtering in blocks
 ```bash
-./metagengraph filter -v --parallel 30 -k 20 --noise-freq 3 <DATA_DIR>/*.fasta.gz
+./metagengraph filter -v --parallel 30 -k 20 --filter-abund 3 <DATA_DIR>/*.fasta.gz
 ```
   * using KMC
 ```bash
 ./KMC/kmc -k21 -m5 -fq -t30 <FILE>.fasta.gz <FILE>.fasta.gz.kmc ./KMC
-./metagengraph filter -v --parallel 30 -k 20 --noise-freq 3 --kmc <FILE>.fasta.gz
+./metagengraph filter -v --parallel 30 -k 20 --filter-abund 3 --kmc <FILE>.fasta.gz
 ```
 2) Build graph
 ```bash
-./metagengraph build -v --parallel 30 -k 20 --mem-cap-gb 100 --noise-freq 3 -o <GRAPH_DIR>/graph <DATA_DIR>/*.fasta.gz
+./metagengraph build -v --parallel 30 -k 20 --mem-cap-gb 100 --filter-abund 3 -o <GRAPH_DIR>/graph <DATA_DIR>/*.fasta.gz
 ```
 
 #### Distributed build
