@@ -26,7 +26,7 @@ using libmaus2::util::NumberSerialisation;
     assert(idx < W->size()); \
     assert(idx > 0)
 
-#ifdef _PROTEIN_GRAPH
+#if _PROTEIN_GRAPH
 const std::string DBG_succ::alphabet = "$ABCDEFGHIJKLMNOPQRSTUVWYZX"
                                        "$ABCDEFGHIJKLMNOPQRSTUVWYZX";
 const TAlphabet kCharToNucleotide[128] = {
@@ -40,6 +40,20 @@ const TAlphabet kCharToNucleotide[128] = {
     16, 17, 18, 19,  20, 21, 22, 23,  26, 24, 25, 26,  26, 26, 26, 26
 };
 const size_t DBG_succ::kLogSigma = 6;
+#elif _DNA_CASE_SENSITIVE_GRAPH
+//for case-specific DNA and RNA (U <-> T) data
+const std::string DBG_succ::alphabet = "$ACGTNacgt$ACGTNacgt";
+const TAlphabet kCharToNucleotide[128] = {
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  4, 4, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 6, 5, 7,  5, 5, 5, 8,  5, 5, 5, 5,  5, 5, 5, 5,
+    5, 5, 5, 5,  9, 9, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5
+};
+const size_t DBG_succ::kLogSigma = 5;
 #else
 //for DNA and RNA (U <-> T) alphabets
 const std::string DBG_succ::alphabet = "$ACGTN$ACGTN";

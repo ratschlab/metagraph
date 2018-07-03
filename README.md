@@ -40,8 +40,8 @@ use `glibtoolize` instead of `libtoolize` on MacOS
 - `-DBUILD_STATIC=ON` -- link statically (OFF by default)
 - `-DPYTHON_INTERFACE=ON` -- compile python interface (requires shared libraries, OFF by default)
 
-### Compile in the amino acid mode
-- `-DCMAKE_DBG_ALPHABET=Protein` -- use the alphabet of amino acids (`DNA` by default)
+### Compile in other modes
+- `-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA_CASE_SENSITIVE]` -- use the alphabet specified (`DNA` by default)
 
 
 ## Print usage

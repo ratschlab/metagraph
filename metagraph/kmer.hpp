@@ -12,8 +12,10 @@
 
 typedef uint64_t KMerCharType;
 
-#ifdef _PROTEIN_GRAPH
+#if _PROTEIN_GRAPH
 const int kBitsPerChar = 5;
+#elif _DNA_CASE_SENSITIVE_GRAPH
+const int kBitsPerChar = 4;
 #else
 const int kBitsPerChar = 3;
 #endif
