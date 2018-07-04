@@ -12,7 +12,8 @@ All can be installed with `brew` or `linuxbrew`.
 
 ### Compile
 1. `git clone --recursive https://github.com/ratschlab/projects2014-metagenome.git`
-2. install **libmaus2** and **sdsl-lite** in `metagraph/external-libraries/` following the corresponding istructions  
+2. make sure all submodules are downloaded: `git submodule update --init --recursive`
+3. install **libmaus2** and **sdsl-lite** in `metagraph/external-libraries/` following the corresponding istructions  
 or simply run the following script
 ```bash
 git submodule update --init --recursive
@@ -30,9 +31,9 @@ cd ../../../
 ```
 use `glibtoolize` instead of `libtoolize` on MacOS
 
-3. go to the **build** directory `mkdir -p metagraph/build && cd metagraph/build`
-4. compile by `cmake .. && make -j $(($(getconf _NPROCESSORS_ONLN) - 1))`
-5. run unit tests `./unit_tests`
+4. go to the **build** directory `mkdir -p metagraph/build && cd metagraph/build`
+5. compile by `cmake .. && make -j $(($(getconf _NPROCESSORS_ONLN) - 1))`
+6. run unit tests `./unit_tests`
 
 ### Build types: `cmake .. <arguments>` where arguments are:
 - `-DCMAKE_BUILD_TYPE=[Debug|Release|Profile]` -- build modes (`Debug` by default)
