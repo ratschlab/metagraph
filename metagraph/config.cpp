@@ -36,6 +36,8 @@ Config::Config(int argc, const char *argv[]) {
         identity = ANNOTATE;
     } else if (!strcmp(argv[1], "bloom")) {
         identity = ANNOTATE_BLOOM;
+    } else if (!strcmp(argv[1], "coordinate")) {
+        identity = ANNOTATE_COORDINATES;
     } else if (!strcmp(argv[1], "merge_anno")) {
         identity = MERGE_ANNOTATORS;
     } else if (!strcmp(argv[1], "classify")) {
@@ -75,7 +77,7 @@ Config::Config(int argc, const char *argv[]) {
             fasta_anno = true;
         } else if (!strcmp(argv[i], "--anno-label")) {
             anno_labels.emplace_back(argv[++i]);
-        } else if (!strcmp(argv[i], "--anno-binsize")) {
+        } else if (!strcmp(argv[i], "--coord-binsize")) {
             genome_binsize_anno = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--suppress-unlabeled")) {
             suppress_unlabeled = true;
@@ -214,13 +216,18 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == ANNOTATE && infbase.empty())
         print_usage_and_exit = true;
 
+    if (identity == ANNOTATE_COORDINATES && infbase.empty())
+        print_usage_and_exit = true;
+
     if ((identity == ANNOTATE || identity == ANNOTATE_BLOOM)
-            && !filename_anno && !fasta_anno && !anno_labels.size() && !genome_binsize_anno) {
+            && !filename_anno && !fasta_anno && !anno_labels.size()) {
         std::cerr << "Error: No annotation to add" << std::endl;
         print_usage_and_exit = true;
     }
 
-    if (identity == ANNOTATE && outfbase.empty())
+    if ((identity == ANNOTATE || identity == ANNOTATE_BLOOM
+                              || identity == ANNOTATE_COORDINATES)
+            && outfbase.empty())
         outfbase = infbase;
 
     if (identity == EXTEND && (outfbase.empty() || infbase.empty()))
@@ -299,6 +306,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\tannotate\tgiven a graph and a fast[a|q] file, annotate\n");
             fprintf(stderr, "\t\t\tthe respective kmers\n\n");
+
+            fprintf(stderr, "\tcoordinate\tgiven a graph and a fast[a|q] file, annotate\n");
+            fprintf(stderr, "\t\t\tkmers with their respective coordinates in genomes\n\n");
 
             fprintf(stderr, "\tbloom\t\tgiven a graph and a fast[a|q] file, annotate\n");
             fprintf(stderr, "\t\t\tthe respective kmers using Bloom filters\n\n");
@@ -426,7 +436,19 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --anno-header \t\textract annotation labels from headers of sequences in files [off]\n");
             fprintf(stderr, "\t   --header-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
             fprintf(stderr, "\t   --anno-label [STR]\t\tadd label to annotation for all sequences from the files passed []\n");
-            fprintf(stderr, "\t   --anno-binsize [INT]\t\tstepsize for k-mer coordinates in input sequences from the fasta files [off]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+        } break;
+        case ANNOTATE_COORDINATES: {
+            fprintf(stderr, "Usage: %s coordinate -i <graph_basename> [options] <PATH1> [[PATH2] ...]\n"
+                            "\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for annotate:\n");
+            fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator to update []\n");
+            fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file [<graph_basename>]\n");
+            fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
+            fprintf(stderr, "\t   --filter-abund [INT] \tthreshold for the abundance of reliable k-mers [0]\n");
+            fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
+            fprintf(stderr, "\t   --coord-binsize [INT]\tstepsize for k-mer coordinates in input sequences from the fasta files [1000]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case MERGE_ANNOTATORS: {

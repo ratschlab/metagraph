@@ -193,7 +193,6 @@ void read_vcf_file_critical(const std::string &filename,
 }
 
 
-template <typename... Args>
 void annotate_sequence(const std::string &sequence,
                        const std::vector<std::string> &labels,
                        const DBG_succ &graph,
@@ -282,7 +281,7 @@ std::string get_filter_filename(const std::string &filename,
 }
 
 
-template <class Annotator, typename... Args>
+template <class Annotator>
 void annotate_data(const std::vector<std::string> &files,
                    const std::string &ref_sequence_path,
                    const DBG_succ &graph,
@@ -294,7 +293,6 @@ void annotate_data(const std::vector<std::string> &files,
                    bool fasta_anno,
                    const std::string &fasta_header_delimiter,
                    const std::vector<std::string> &anno_labels,
-                   size_t genome_bin_size,
                    bool verbose,
                    utils::ThreadPool *thread_pool = NULL,
                    std::mutex *annotation_mutex = NULL) {
@@ -356,21 +354,78 @@ void annotate_data(const std::vector<std::string> &files,
                         labels.push_back(label);
                     }
 
-                    if (!genome_bin_size) {
-                        annotate_sequence(read_stream->seq.s, labels, graph, annotator,
-                                          thread_pool, annotation_mutex);
-                    } else {
-                        const std::string sequence(read_stream->seq.s);
-                        labels.push_back("");
+                    annotate_sequence(read_stream->seq.s, labels, graph, annotator,
+                                      thread_pool, annotation_mutex);
 
-                        for (size_t i = 0; i < sequence.size(); i += genome_bin_size) {
-                            labels.back() = std::string(read_stream->name.s)
-                                                + "_" + std::to_string(i);
-                            annotate_sequence(
-                                sequence.substr(i, genome_bin_size + graph.get_k() - 1),
-                                labels, graph, annotator, thread_pool, annotation_mutex
-                            );
+                    total_seqs += 1;
+                    if (verbose && total_seqs % 10000 == 0) {
+                        std::cout << "processed " << total_seqs << " sequences"
+                                  << ", last was " << read_stream->name.s
+                                  << ", trying to annotate as ";
+                        for (const auto &label : labels) {
+                            std::cout << "<" << label << ">";
                         }
+                        std::cout << ", " << timer->elapsed() << "sec" << std::endl;
+                    }
+                },
+                reverse, timer.get(),
+                get_filter_filename(
+                    file, graph.get_k(),
+                    max_unreliable_abundance,
+                    unreliable_kmers_threshold
+                )
+            );
+        } else {
+            std::cerr << "ERROR: Filetype unknown for file "
+                      << file << std::endl;
+            exit(1);
+        }
+    }
+}
+
+
+template <class Annotator>
+void annotate_coordinates(const std::vector<std::string> &files,
+                          const DBG_succ &graph,
+                          Annotator *annotator,
+                          bool reverse,
+                          size_t max_unreliable_abundance,
+                          size_t unreliable_kmers_threshold,
+                          size_t genome_bin_size,
+                          bool verbose,
+                          utils::ThreadPool *thread_pool = NULL,
+                          std::mutex *annotation_mutex = NULL) {
+    size_t total_seqs = 0;
+
+    std::unique_ptr<Timer> timer;
+    if (verbose)
+        timer.reset(new Timer());
+
+    // iterate over input files
+    for (const auto &file : files) {
+        if (verbose)
+            std::cout << std::endl << "Parsing " << file << std::endl;
+
+        // open stream
+        if (utils::get_filetype(file) == "FASTA"
+                    || utils::get_filetype(file) == "FASTQ") {
+            read_fasta_file_critical(file,
+                [&](kseq_t *read_stream) {
+                    std::vector<std::string> labels {
+                        file,
+                        read_stream->name.s,
+                        std::to_string(reverse && (total_seqs % 2)), // whether the read is reverse
+                        "",
+                    };
+
+                    const std::string sequence(read_stream->seq.s);
+                    for (size_t i = 0; i < sequence.size(); i += genome_bin_size) {
+                        labels.back() = std::to_string(i);
+                        annotate_sequence(
+                            sequence.substr(i, genome_bin_size + graph.get_k() - 1),
+                            { utils::join_strings(labels, "\1"), },
+                            graph, annotator, thread_pool, annotation_mutex
+                        );
                     }
 
                     total_seqs += 1;
@@ -385,16 +440,20 @@ void annotate_data(const std::vector<std::string> &files,
                     }
                 },
                 reverse, timer.get(),
-                get_filter_filename(file, graph.get_k(),
-                                    max_unreliable_abundance, unreliable_kmers_threshold)
+                get_filter_filename(
+                    file, graph.get_k(),
+                    max_unreliable_abundance,
+                    unreliable_kmers_threshold
+                )
             );
         } else {
-            std::cerr << "ERROR: Filetype unknown for file "
-                      << file << std::endl;
+            std::cerr << "ERROR: the type of file "
+                      << file << " is not supported" << std::endl;
             exit(1);
         }
     }
 }
+
 
 /**
  * ACGT, ACG$, ..., $$$$ -- valid
@@ -1009,10 +1068,55 @@ int main(int argc, const char *argv[]) {
                           config->fasta_anno,
                           config->fasta_header_delimiter,
                           config->anno_labels,
-                          config->genome_binsize_anno,
                           config->verbose,
                           thread_pool.get(),
                           annotation_mutex.get());
+
+            // join threads if any were initialized
+            thread_pool.reset();
+
+            annotation->serialize(config->outfbase);
+
+            return 0;
+        }
+        case Config::ANNOTATE_COORDINATES: {
+            // load graph
+            std::unique_ptr<DBG_succ> graph {
+                load_critical_graph_from_file(config->infbase)
+            };
+
+            // initialize empty annotation
+            std::unique_ptr<Annotator> annotation;
+            annotation.reset(
+                new annotate::RowCompressed<>(graph->num_edges() + 1)
+            );
+
+            if (config->infbase_annotators.size()
+                    && !annotation->merge_load(config->infbase_annotators)) {
+                std::cerr << "ERROR: can't load annotations" << std::endl;
+                exit(1);
+            }
+
+            std::unique_ptr<utils::ThreadPool> thread_pool;
+            std::unique_ptr<std::mutex> annotation_mutex;
+
+            if (config->parallel > 1) {
+                thread_pool.reset(
+                    new utils::ThreadPool(config->parallel - 1)
+                );
+                annotation_mutex.reset(new std::mutex());
+            }
+
+            annotate_coordinates(files,
+                                 *graph,
+                                 annotation.get(),
+                                 config->reverse,
+                                 config->max_unreliable_abundance,
+                                 config->unreliable_kmers_threshold,
+                                 config->genome_binsize_anno,
+                                 config->verbose,
+                                 thread_pool.get(),
+                                 annotation_mutex.get());
 
             // join threads if any were initialized
             thread_pool.reset();
@@ -1065,7 +1169,6 @@ int main(int argc, const char *argv[]) {
                           config->fasta_anno,
                           config->fasta_header_delimiter,
                           config->anno_labels,
-                          config->genome_binsize_anno,
                           config->verbose);
 
             annotation->serialize(config->infbase);

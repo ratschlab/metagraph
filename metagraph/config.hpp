@@ -47,7 +47,7 @@ class Config {
     unsigned int max_unreliable_abundance = 0;
     unsigned int unreliable_kmers_threshold = 0;
     unsigned int num_top_labels = -1;
-    unsigned int genome_binsize_anno = 0;
+    unsigned int genome_binsize_anno = 1000;
 
     double bloom_fpp = -1;
     double bloom_bits_per_edge = -1;
@@ -79,6 +79,7 @@ class Config {
         STATS,
         ANNOTATE,
         ANNOTATE_BLOOM,
+        ANNOTATE_COORDINATES,
         MERGE_ANNOTATORS,
         TRANSFORM,
         CLASSIFY
