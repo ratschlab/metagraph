@@ -3,10 +3,17 @@ cmake_minimum_required(VERSION 2.8.2)
 project(KMC)
 
 
+if(APPLE)
+string(APPEND CMAKE_CXX_FLAGS " \
+    -Wall -O3 -m64 \
+    -lpthread -std=c++11 \
+")
+elseif(UNIX)
 string(APPEND CMAKE_CXX_FLAGS " \
     -Wall -O3 -m64 -Wl,--whole-archive \
     -lpthread -Wl,--no-whole-archive -std=c++11 \
 ")
+endif()
 
 if(@BUILD_STATIC@)
 string(APPEND CMAKE_CXX_FLAGS " -static ")
@@ -50,22 +57,41 @@ set_source_files_properties(${KMC_MAIN_DIR}/raduls_avx.cpp
 set_source_files_properties(${KMC_MAIN_DIR}/raduls_avx2.cpp
     PROPERTIES COMPILE_FLAGS "-mavx2 -mfma -fabi-version=0")
 
-add_library(KMC STATIC
+add_library(KMCcore STATIC
     ${KMC_files}
     ${RADULS_files}
     ${KMC_MAIN_DIR}/libs/vectorclass/instrset_detect.cpp
 )
 
-target_link_libraries(
-  KMC
+target_link_libraries(KMCcore
 )
 
+add_custom_target(link_target ALL
+    COMMAND ${CMAKE_COMMAND} -E
+        create_symlink "libKMCcore.a" "libKMC.a"
+    DEPENDS KMCcore
+)
+
+
 if(@BUILD_KMC@)
+
 add_executable(kmc
     ${KMC_MAIN_DIR}/kmer_counter.cpp
 )
 
-target_link_libraries(
-    kmc KMC -lz -lbz2 -laelf64 -L${KMC_MAIN_DIR}/libs
+if(APPLE)
+target_link_libraries(kmc
+    -lKMCcore
+    -L${KMC_MAIN_DIR}/libs
+    libz.1.2.5.dylib libbz2.1.0.5.dylib
+    libamac64.a libamac64.a
 )
+elseif(UNIX)
+target_link_libraries(kmc
+    -lKMCcore
+    -L${KMC_MAIN_DIR}/libs
+    -lz -lbz2 -laelf64
+)
+endif()
+
 endif()
