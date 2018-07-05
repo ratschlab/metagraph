@@ -14,7 +14,9 @@ sdsl::k2_tree<2> build_k2_tree(const std::vector<sdsl::sd_vector<>*> &bitmatrix)
         return sdsl::k2_tree<2>();
 
     //TODO: optimize this
-    std::vector<std::tuple<size_t, size_t>> result;
+    std::vector<std::tuple<sdsl::k2_tree<2>::idx_type,
+                           sdsl::k2_tree<2>::idx_type>> result;
+
     for (size_t j = 0; j < bitmatrix.size(); ++j) {
         auto slct = sdsl::select_support_sd<>(bitmatrix[j]);
         auto rank = sdsl::rank_support_sd<>(bitmatrix[j]);
@@ -25,8 +27,11 @@ sdsl::k2_tree<2> build_k2_tree(const std::vector<sdsl::sd_vector<>*> &bitmatrix)
         }
     }
 
-    return sdsl::k2_tree<2>(result, std::max(bitmatrix.size(),
-                                             bitmatrix[0]->size()));
+    return sdsl::k2_tree<2>(
+        result,
+        std::max(static_cast<uint64_t>(bitmatrix.size()),
+                 static_cast<uint64_t>(bitmatrix[0]->size()))
+    );
 }
 
 template <typename Color, class Encoder>
