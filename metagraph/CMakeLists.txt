@@ -49,7 +49,9 @@ cmake_policy(SET CMP0015 NEW)
 # KMC k-mer counter
 #-------------------
 set(KMC_MAIN_DIR "${PROJECT_SOURCE_DIR}/external-libraries/KMC/kmer_counter")
+if(NOT DEFINED BUILD_KMC)
 set(BUILD_KMC TRUE)
+endif()
 configure_file(CMakeListsKMC.txt.in KMC/CMakeLists.txt @ONLY)
 execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
   RESULT_VARIABLE result
