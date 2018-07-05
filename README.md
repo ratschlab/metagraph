@@ -35,10 +35,14 @@ use `glibtoolize` instead of `libtoolize` on MacOS
 5. compile by `cmake .. && make -j $(($(getconf _NPROCESSORS_ONLN) - 1))`
 6. run unit tests `./unit_tests`
 
+#### Typical issues
+* Linking against dynamic libraries in Anaconda when compiling libmaus2 (make sure that packages like Anaconda are not listed in the exported environment variables).
+
 ### Build types: `cmake .. <arguments>` where arguments are:
 - `-DCMAKE_BUILD_TYPE=[Debug|Release|Profile]` -- build modes (`Debug` by default)
 - `-DBUILD_STATIC=ON` -- link statically (OFF by default)
 - `-DPYTHON_INTERFACE=ON` -- compile python interface (requires shared libraries, OFF by default)
+- `-DBUILD_KMC=OFF` -- do not compile the KMC executable (ON by default)
 
 ### Compile in other modes
 - `-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA_CASE_SENSITIVE]` -- use the alphabet specified (`DNA` by default)
