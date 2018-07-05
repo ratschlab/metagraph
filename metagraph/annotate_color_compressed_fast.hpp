@@ -92,7 +92,7 @@ class FastColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
                               caches::LRUCachePolicy<size_t>> cached_colors_;
 
     std::vector<size_t> column_to_index_;
-    std::vector<std::vector<size_t>> index_to_columns_;
+    std::vector<std::vector<uint64_t>> index_to_columns_;
 
     std::vector<std::unique_ptr<sdsl::sd_vector<>>> index_;
 

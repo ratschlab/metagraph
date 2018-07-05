@@ -312,7 +312,7 @@ bool FastColorCompressed<Color, Encoder>
                     index_.emplace_back(new sdsl::sd_vector<>());
                     index_.back()->load(instream);
 
-                    index_to_columns_.emplace_back(load_number_vector<size_t>(instream));
+                    index_to_columns_.emplace_back(load_number_vector<uint64_t>(instream));
 
                     for (size_t j : index_to_columns_.back()) {
                         column_to_index_[j] = t;
