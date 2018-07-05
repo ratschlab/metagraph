@@ -82,15 +82,14 @@ add_executable(kmc
 if(APPLE)
 target_link_libraries(kmc
     -lKMCcore
-    -L${KMC_MAIN_DIR}/libs
-    libz.1.2.5.dylib libbz2.1.0.5.dylib
-    libamac64.a libamac64.a
+    ${KMC_MAIN_DIR}/libs/libamac64.a
+    -lz -lbz2
 )
 elseif(UNIX)
 target_link_libraries(kmc
     KMCcore
-    -L${KMC_MAIN_DIR}/libs
-    -lz -lbz2 -laelf64
+    ${KMC_MAIN_DIR}/libs/libaelf64.a
+    -lz -lbz2
 )
 endif()
 
