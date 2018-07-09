@@ -80,7 +80,7 @@ TEST(DBGSuccinct, GraphDefaultConstructor) {
     });
 }
 
-#ifndef _PROTEIN_GRAPH
+#if _DNA_GRAPH
 TEST(DBGSuccinct, EmptyGraph) {
     DBG_succ *graph = new DBG_succ(3);
     test_graph(graph, "01", "00", "0 1 1 1 1 1 ");

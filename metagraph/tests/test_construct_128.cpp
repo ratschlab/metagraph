@@ -65,7 +65,11 @@ TEST(Construct_128, ConstructionLowerCase) {
                                        std::string(50, 'c') });
         DBG_succ second(&constructor_second);
 
+#if _DNA_CASE_SENSITIVE_GRAPH
+        EXPECT_FALSE(first.equals_internally(second));
+#else
         EXPECT_TRUE(first.equals_internally(second));
+#endif
     }
 }
 

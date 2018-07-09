@@ -3,8 +3,16 @@
 #include <sdsl/uint256_t.hpp>
 
 template <typename G>
-const G KMer<G>::kFirstCharMask = (1 << kBitsPerChar) - 1;
+const KMerCharType KMer<G>::kFirstCharMask = (1llu << kBitsPerChar) - 1;
 
+
+template <typename G>
+KMerCharType KMer<G>::get_digit(size_t i) const {
+    static_assert(kBitsPerChar <= 64, "too large digit");
+    assert(kBitsPerChar * (i + 1) <= sizeof(KMerWordType) * 8);
+    return static_cast<uint64_t>(seq_ >> static_cast<int>(kBitsPerChar * i))
+             & kFirstCharMask;
+}
 
 template <typename G>
 bool KMer<G>::compare_suffix(const KMer &k1, const KMer &k2, size_t minus) {
@@ -14,17 +22,19 @@ bool KMer<G>::compare_suffix(const KMer &k1, const KMer &k2, size_t minus) {
 
 template <typename G>
 KMerCharType KMer<G>::operator[](size_t i) const {
-    assert(get_digit<kBitsPerChar>(i) > 0);
-    return get_digit<kBitsPerChar>(i) - 1;
+    assert(get_digit(i) > 0);
+    return get_digit(i) - 1;
 }
 
 template <typename G>
 std::string KMer<G>::to_string(const std::string &alphabet) const {
     std::string seq;
-    seq.reserve(sizeof(KMerWordType) * 8 / kBitsPerChar + 1);
+
+    const size_t max_len = sizeof(KMerWordType) * 8 / kBitsPerChar;
+    seq.reserve(max_len);
 
     KMerCharType cur;
-    for (size_t i = 0; (cur = get_digit<kBitsPerChar>(i)); ++i) {
+    for (size_t i = 0; i < max_len && (cur = get_digit(i)); ++i) {
         seq.push_back(alphabet.at(cur - 1));
     }
     return seq;

@@ -16,8 +16,9 @@ typedef uint64_t KMerCharType;
 const int kBitsPerChar = 5;
 #elif _DNA_CASE_SENSITIVE_GRAPH
 const int kBitsPerChar = 4;
-#else
+#elif _DNA_GRAPH
 const int kBitsPerChar = 3;
+#else
 #endif
 
 
@@ -51,9 +52,6 @@ class KMer {
 
     KMerCharType operator[](size_t i) const;
 
-    template <size_t bits_per_digit>
-    uint64_t get_digit(size_t i) const;
-
     static bool compare_suffix(const KMer &k1,
                                const KMer &k2, size_t minus = 0);
 
@@ -72,7 +70,9 @@ class KMer {
                             KMerCharType last,
                             KMerWordType *kmer);
   private:
-    static const KMerWordType kFirstCharMask;
+    KMerCharType get_digit(size_t i) const;
+
+    static const KMerCharType kFirstCharMask;
 
     KMerWordType seq_; // kmer sequence
 };
@@ -107,14 +107,6 @@ KMer<G>::KMer(const String &seq, Map &&to_alphabet) {
     std::vector<uint8_t> arr(seq.size());
     std::transform(seq.begin(), seq.end(), arr.begin(), to_alphabet);
     *this = KMer(arr.data(), arr.size());
-}
-
-template <typename G>
-template <size_t digit_size>
-uint64_t KMer<G>::get_digit(size_t i) const {
-    static_assert(digit_size <= 64, "too large digit");
-    return static_cast<uint64_t>(seq_ >> static_cast<int>(digit_size * i))
-             % (1llu << digit_size);
 }
 
 

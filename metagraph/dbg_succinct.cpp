@@ -54,7 +54,7 @@ const TAlphabet kCharToNucleotide[128] = {
     5, 5, 5, 5,  9, 9, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5
 };
 const size_t DBG_succ::kLogSigma = 5;
-#else
+#elif _DNA_GRAPH
 //for DNA and RNA (U <-> T) alphabets
 const std::string DBG_succ::alphabet = "$ACGTN$ACGTN";
 const TAlphabet kCharToNucleotide[128] = {
@@ -68,6 +68,11 @@ const TAlphabet kCharToNucleotide[128] = {
     5, 5, 5, 5,  4, 4, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5
 };
 const size_t DBG_succ::kLogSigma = 4;
+#else
+static_assert(false,
+    "Define an alphabet: either "
+    "_DNA_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+);
 #endif
 
 static_assert(sizeof(TAlphabet) * 8 >= DBG_succ::kLogSigma,
