@@ -1328,7 +1328,8 @@ int main(int argc, const char *argv[]) {
                 std::cout << "nodes: " << graph->num_nodes() << std::endl;
                 std::cout << "edges: " << graph->num_edges() << std::endl;
                 std::cout << "k: " << graph->get_k() << std::endl;
-                std::cout << "state: " << graph->state << std::endl;
+                std::cout << "state: " << Config::state_to_string(graph->state)
+                          << std::endl;
             }
 
             // graph output
@@ -1436,7 +1437,8 @@ int main(int argc, const char *argv[]) {
                 std::cout << "nodes: " << graph->num_nodes() << std::endl;
                 std::cout << "edges: " << graph->num_edges() << std::endl;
                 std::cout << "k: " << graph->get_k() << std::endl;
-                std::cout << "state: " << graph->state << std::endl;
+                std::cout << "state: " << Config::state_to_string(graph->state)
+                          << std::endl;
 
                 if (config->print_graph_succ)
                     graph->print_state();
@@ -1521,7 +1523,8 @@ int main(int argc, const char *argv[]) {
             }
             if (graph->state != config->state) {
                 if (config->verbose) {
-                    std::cout << "Converting graph to state " << config->state
+                    std::cout << "Converting graph to state "
+                              << Config::state_to_string(config->state)
                               << "...\t" << std::flush;
                     timer.reset();
                 }

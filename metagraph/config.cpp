@@ -146,8 +146,8 @@ Config::Config(int argc, const char *argv[]) {
             num_top_labels = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--suffix")) {
             suffix = argv[++i];
-        } else if (!strcmp(argv[i], "-t") || !strcmp(argv[i], "--state")) {
-            state = static_cast<StateType>(atoi(argv[++i]));
+        } else if (!strcmp(argv[i], "--state")) {
+            state = string_to_state(argv[++i]);
         //} else if (!strcmp(argv[i], "--db-path")) {
         //    dbpath = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "--sql-base")) {
@@ -268,6 +268,28 @@ Config::Config(int argc, const char *argv[]) {
     }
 }
 
+std::string Config::state_to_string(StateType state) {
+    switch (state) {
+        case STAT:
+            return "fast";
+        case DYN:
+            return "dynamic";
+        default:
+            assert(false);
+            return "Never happens";
+    }
+}
+
+Config::StateType Config::string_to_state(const std::string &string) {
+    if (string == "fast") {
+        return StateType::STAT;
+    } else if (string == "dynamic") {
+        return StateType::DYN;
+    } else {
+        throw std::runtime_error("Error: unknown graph state");
+    }
+}
+
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     fprintf(stderr, "Comprehensive metagenome graph representation -- Version 0.1\n\n");
     //fprintf(stderr, "This program is the first implementation of a\n");
@@ -349,7 +371,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-a --annotator [STR] \tbasename of annotator to extend []\n");
             fprintf(stderr, "\t   --row-annotator \tuse row based annotator instead of column based colors compressor [off]\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
-            fprintf(stderr, "\t-t --state [1|2] \tstate of the extended graph [STAT=1]\n");
+            fprintf(stderr, "\t   --state [STR] \tstate of the extended graph (either 'fast' or 'dynamic') [fast]\n");
             fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
             fprintf(stderr, "\t   --filter-abund [INT] threshold for the abundance of reliable k-mers [0]\n");
             fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
@@ -506,7 +528,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s transform [options] GRAPH\n\n", prog_name.c_str());
 
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
-            fprintf(stderr, "\t-t --state [1|2] \t\tchange graph state [STAT=1]\n");
+            fprintf(stderr, "\t   --state [STR] \t\tchange the graph state (either 'fast' or 'dynamic') [fast]\n");
             fprintf(stderr, "\t   --sql-base [STR] \t\tbasename for SQL output file\n");
             fprintf(stderr, "\t   --to-adj-list \t\twrite the adjacency list to file [off]\n");
             // fprintf(stderr, "\t   --to-sequences \t\twrite contig sequences to file [off]\n");

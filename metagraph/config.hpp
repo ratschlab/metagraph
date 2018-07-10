@@ -89,6 +89,9 @@ class Config {
     enum StateType { STAT = 1, DYN };
     StateType state = STAT;
 
+    static std::string state_to_string(StateType state);
+    static StateType string_to_state(const std::string &string);
+
     void print_usage(const std::string &prog_name,
                      IdentityType identity = NO_IDENTITY);
 };
