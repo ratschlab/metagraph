@@ -90,7 +90,7 @@ class Config {
     };
     IdentityType identity = NO_IDENTITY;
 
-    enum StateType { STAT = 1, DYN };
+    enum StateType { STAT = 1, DYN, SMALL };
     StateType state = STAT;
 
     static std::string state_to_string(StateType state);

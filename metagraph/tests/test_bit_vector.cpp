@@ -93,6 +93,11 @@ TEST(bit_vector_stat, queries) {
 }
 
 
+TEST(bit_vector_small, queries) {
+    test_bit_vector_queries<bit_vector_small>();
+}
+
+
 void test_bit_vector_set(bit_vector *vector, std::vector<bool> *numbers) {
     reference_based_test(*vector, *numbers);
 
@@ -147,6 +152,19 @@ TEST(bit_vector_stat, set) {
 }
 
 
+TEST(bit_vector_small, set) {
+    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+    bit_vector *vector = new bit_vector_small(init_list);
+    std::vector<bool> numbers(init_list);
+    ASSERT_TRUE(vector);
+
+    ASSERT_DEATH(test_bit_vector_set(vector, &numbers), "");
+
+    delete vector;
+}
+
+
 void test_bit_vector_ins_del(bit_vector *vector, std::vector<bool> *numbers) {
     reference_based_test(*vector, *numbers);
 
@@ -187,6 +205,19 @@ TEST(bit_vector_stat, InsertDelete) {
     ASSERT_TRUE(vector);
 
     test_bit_vector_ins_del(vector, &numbers);
+
+    delete vector;
+}
+
+
+TEST(bit_vector_small, InsertDelete) {
+    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+    bit_vector *vector = new bit_vector_small(init_list);
+    std::vector<bool> numbers(init_list);
+    ASSERT_TRUE(vector);
+
+    ASSERT_DEATH(test_bit_vector_ins_del(vector, &numbers), "");
 
     delete vector;
 }
@@ -235,6 +266,29 @@ TEST(bit_vector_stat, Serialization) {
     delete vector;
 }
 
+
+TEST(bit_vector_small, Serialization) {
+    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+    bit_vector *vector = new bit_vector_small(init_list);
+    std::vector<bool> numbers(init_list);
+    ASSERT_TRUE(vector);
+    std::ofstream outstream(test_dump_basename);
+    vector->serialise(outstream);
+    outstream.close();
+    delete vector;
+
+    vector = new bit_vector_small;
+    ASSERT_TRUE(vector);
+    std::ifstream instream(test_dump_basename);
+    ASSERT_TRUE(vector->deserialise(instream));
+
+    reference_based_test(*vector, numbers);
+
+    delete vector;
+}
+
+
 TEST(bit_vector_stat, MoveConstructor) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
@@ -250,6 +304,23 @@ TEST(bit_vector_stat, MoveConstructor) {
     reference_based_test(vector, numbers);
 }
 
+
+TEST(bit_vector_small, MoveConstructor) {
+    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+
+    std::vector<bool> numbers(init_list);
+    sdsl::bit_vector bit_vector(numbers.size());
+    for (size_t i = 0; i < numbers.size(); ++i) {
+        bit_vector[i] = numbers[i];
+    }
+
+    bit_vector_small vector(std::move(bit_vector));
+
+    reference_based_test(vector, numbers);
+}
+
+
 TEST(bit_vector_stat, MoveAssignment) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
@@ -261,6 +332,23 @@ TEST(bit_vector_stat, MoveAssignment) {
     }
 
     bit_vector_stat vector;
+    vector = std::move(bit_vector);
+
+    reference_based_test(vector, numbers);
+}
+
+
+TEST(bit_vector_small, MoveAssignment) {
+    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+
+    std::vector<bool> numbers(init_list);
+    sdsl::bit_vector bit_vector(numbers.size());
+    for (size_t i = 0; i < numbers.size(); ++i) {
+        bit_vector[i] = numbers[i];
+    }
+
+    bit_vector_small vector;
     vector = std::move(bit_vector);
 
     reference_based_test(vector, numbers);

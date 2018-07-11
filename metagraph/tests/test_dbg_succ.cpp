@@ -22,7 +22,7 @@ const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
 
 
 void test_graph(DBG_succ *graph, const std::string &last,
-                                 const std::string &W,
+                                 const std::vector<uint64_t> &W,
                                  const std::string &F,
                                  Config::StateType state) {
     graph->switch_state(state);
@@ -35,8 +35,7 @@ void test_graph(DBG_succ *graph, const std::string &last,
     ostr.clear();
     ostr.str("");
 
-    ostr << *(graph->W);
-    EXPECT_EQ(W, ostr.str()) << "state: " << state;
+    EXPECT_EQ(W, graph->W->to_vector()) << "state: " << state;
 
     ostr.clear();
     ostr.str("");
@@ -49,7 +48,7 @@ void test_graph(DBG_succ *graph, const std::string &last,
 
 
 void test_graph(DBG_succ *graph, const std::string &last,
-                                 const std::string &W,
+                                 const std::vector<uint64_t> &W,
                                  const std::string &F) {
     test_graph(graph, last, W, F, Config::DYN);
     test_graph(graph, last, W, F, Config::STAT);
@@ -83,15 +82,18 @@ TEST(DBGSuccinct, GraphDefaultConstructor) {
 #if _DNA_GRAPH
 TEST(DBGSuccinct, EmptyGraph) {
     DBG_succ *graph = new DBG_succ(3);
-    test_graph(graph, "01", "00", "0 1 1 1 1 1 ");
+    test_graph(graph, "01", { 0, 0 }, "0 1 1 1 1 1 ");
     delete graph;
 }
 
 TEST(DBGSuccinct, SwitchState) {
     DBG_succ *graph = new DBG_succ(3);
-    test_graph(graph, "01", "00", "0 1 1 1 1 1 ", Config::DYN);
-    test_graph(graph, "01", "00", "0 1 1 1 1 1 ", Config::STAT);
-    test_graph(graph, "01", "00", "0 1 1 1 1 1 ", Config::DYN);
+    test_graph(graph, "01", { 0, 0 }, "0 1 1 1 1 1 ", Config::DYN);
+    test_graph(graph, "01", { 0, 0 }, "0 1 1 1 1 1 ", Config::STAT);
+    test_graph(graph, "01", { 0, 0 }, "0 1 1 1 1 1 ", Config::SMALL);
+    test_graph(graph, "01", { 0, 0 }, "0 1 1 1 1 1 ", Config::DYN);
+    test_graph(graph, "01", { 0, 0 }, "0 1 1 1 1 1 ", Config::SMALL);
+    test_graph(graph, "01", { 0, 0 }, "0 1 1 1 1 1 ", Config::STAT);
     delete graph;
 }
 
@@ -121,7 +123,9 @@ TEST(DBGSuccinct, AddSequenceFast) {
 
     //test graph construction
     test_graph(graph, "00011101101111111111111",
-                      "00131124434010141720433",
+                      { 0, 0, 1, 3, 1, 1, 2, 4,
+                        4, 3, 4, 0, 1, 0, 1, 4,
+                        1, 7, 2, 0, 4, 3, 3 },
                       "0 3 11 13 17 22 ");
     delete graph;
 }

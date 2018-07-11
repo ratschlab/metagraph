@@ -3,11 +3,60 @@
 #include <cassert>
 
 
-std::ostream& operator<<(std::ostream &os, const wavelet_tree& wt) {
-    wt.print(os);
-    return os;
+/////////////////////////////////
+// wavelet_tree shared methods //
+/////////////////////////////////
+
+template <class Vector>
+sdsl::int_vector<> dump_int_vector(const Vector &v, uint64_t logsigma) {
+    sdsl::int_vector<> iv(v.size(), 0, logsigma);
+
+    for (uint64_t i = 0; i < v.size(); ++i) {
+        iv[i] = v[i];
+    }
+
+    return iv;
 }
 
+template <class WaveletTree>
+WaveletTree wavelet_tree::convert_to(uint64_t logsigma) {
+    if (dynamic_cast<WaveletTree*>(this)) {
+        return WaveletTree(dynamic_cast<WaveletTree&&>(*this));
+    }
+    return WaveletTree(logsigma, dump_int_vector(*this, logsigma));
+}
+template wavelet_tree_dyn wavelet_tree::convert_to(uint64_t);
+
+template <>
+wavelet_tree_stat wavelet_tree::convert_to(uint64_t logsigma) {
+    if (dynamic_cast<wavelet_tree_stat*>(this)) {
+        return wavelet_tree_stat(dynamic_cast<wavelet_tree_stat&&>(*this));
+    } else if (dynamic_cast<wavelet_tree_small*>(this)) {
+        return wavelet_tree_stat(logsigma, std::move(dynamic_cast<wavelet_tree_small&&>(*this).wwt_));
+    }
+    return wavelet_tree_stat(logsigma, dump_int_vector(*this, logsigma));
+}
+
+template <>
+wavelet_tree_small wavelet_tree::convert_to(uint64_t logsigma){
+    if (dynamic_cast<wavelet_tree_small*>(this)) {
+        return wavelet_tree_small(dynamic_cast<wavelet_tree_small&&>(*this));
+    } else if (dynamic_cast<wavelet_tree_stat*>(this)) {
+        auto&& input = dynamic_cast<wavelet_tree_stat&&>(*this);
+        if (input.requires_update_) {
+            input.wwt_ = decltype(input.wwt_)();
+            input.init_wt();
+        }
+
+        input.int_vector_ = decltype(input.int_vector_)();
+        return wavelet_tree_small(logsigma, std::move(input.wwt_));
+    }
+    return wavelet_tree_small(logsigma, dump_int_vector(*this, logsigma));
+}
+
+///////////////////////////////////////////////////////////
+// wavelet_tree_stat sdsl rank/select, int_vector access //
+///////////////////////////////////////////////////////////
 
 wavelet_tree_stat::wavelet_tree_stat(uint64_t logsigma,
                                      uint64_t size, uint64_t value)
@@ -15,15 +64,7 @@ wavelet_tree_stat::wavelet_tree_stat(uint64_t logsigma,
 
 template <class Vector>
 wavelet_tree_stat::wavelet_tree_stat(uint64_t logsigma, const Vector &vector)
-      : int_vector_(vector.size(), 0, logsigma), n_(vector.size()) {
-    for (uint64_t i = 0; i < n_; ++i) {
-        int_vector_[i] = vector[i];
-    }
-}
-
-template
-wavelet_tree_stat
-::wavelet_tree_stat<wavelet_tree>(uint64_t logsigma, const wavelet_tree &vector);
+      : int_vector_(dump_int_vector(vector, logsigma)), n_(int_vector_.size()) {}
 
 template
 wavelet_tree_stat
@@ -40,10 +81,30 @@ wavelet_tree_stat
 ::wavelet_tree_stat<std::vector<int>>(uint64_t logsigma,
                                       const std::vector<int> &vector);
 
-wavelet_tree_stat::wavelet_tree_stat(sdsl::int_vector<>&& vector)
-      : int_vector_(std::move(vector)), n_(int_vector_.size()) {}
+wavelet_tree_stat::wavelet_tree_stat(const wavelet_tree_stat &other)
+      : int_vector_(other.int_vector_),
+        wwt_(other.wwt_),
+        requires_update_(false),
+        n_(other.n_) {}
+
+wavelet_tree_stat::wavelet_tree_stat(uint64_t logsigma, wt_type&& wwt)
+      : int_vector_(dump_int_vector(wwt, logsigma)),
+        wwt_(std::move(wwt)),
+        requires_update_(false),
+        n_(wwt_.size()) {}
+
+wavelet_tree_stat::wavelet_tree_stat(wavelet_tree_stat&& other)
+      : int_vector_(std::move(other.int_vector_)),
+        wwt_(std::move(other.wwt_)),
+        requires_update_(false),
+        n_(other.n_) {}
+
+wavelet_tree_stat::wavelet_tree_stat(sdsl::int_vector<>&& vector) {
+    *this = std::move(vector);
+}
 
 wavelet_tree_stat& wavelet_tree_stat::operator=(sdsl::int_vector<>&& vector) {
+    wwt_ = decltype(wwt_)();
     int_vector_ = std::move(vector);
     n_ = int_vector_.size();
     requires_update_ = true;
@@ -78,6 +139,7 @@ void wavelet_tree_stat::serialise(std::ostream &out) const {
 }
 
 void wavelet_tree_stat::insert(uint64_t id, uint64_t val) {
+    wwt_ = decltype(wwt_)();
     if (n_ == size()) {
         int_vector_.resize(2 * n_ + 1);
     }
@@ -91,6 +153,7 @@ void wavelet_tree_stat::insert(uint64_t id, uint64_t val) {
 }
 
 void wavelet_tree_stat::remove(uint64_t id) {
+    wwt_ = decltype(wwt_)();
     if (this->size() > 1)
         std::copy(int_vector_.begin() + id + 1,
                   int_vector_.begin() + n_,
@@ -134,12 +197,6 @@ void wavelet_tree_stat::set(uint64_t id, uint64_t val) {
     int_vector_[id] = val;
 }
 
-void wavelet_tree_stat::print(std::ostream &os) const {
-    for (uint64_t i = 0; i < size(); ++i) {
-        os << int_vector_[i];
-    }
-}
-
 void wavelet_tree_stat::init_wt() {
     int_vector_.resize(n_);
 
@@ -150,7 +207,112 @@ void wavelet_tree_stat::init_wt() {
     requires_update_ = false;
 }
 
+////////////////////////////////////////////////////
+// wavelet_tree_small sdsl rank/select, wt access //
+////////////////////////////////////////////////////
 
+wavelet_tree_small::wavelet_tree_small(uint64_t logsigma,
+                                       uint64_t size, uint64_t value) {
+    sdsl::int_vector<> int_vector_(size, value, logsigma);
+    //TODO fix constructor in sdsl
+    wwt_ = decltype(wwt_)(int_vector_);
+}
+
+template <class Vector>
+wavelet_tree_small::wavelet_tree_small(uint64_t logsigma, const Vector &vector) {
+    auto iv = dump_int_vector(vector, logsigma);
+    //TODO fix constructor in sdsl
+    wwt_ = decltype(wwt_)(iv);
+}
+
+template
+wavelet_tree_small
+::wavelet_tree_small<std::vector<uint8_t>>(uint64_t logsigma,
+                                           const std::vector<uint8_t> &vector);
+
+template
+wavelet_tree_small
+::wavelet_tree_small<std::vector<uint64_t>>(uint64_t logsigma,
+                                            const std::vector<uint64_t> &vector);
+
+template
+wavelet_tree_small
+::wavelet_tree_small<std::vector<int>>(uint64_t logsigma,
+                                       const std::vector<int> &vector);
+
+wavelet_tree_small::wavelet_tree_small(const wavelet_tree_small &other)
+      : wwt_(other.wwt_) {}
+
+wavelet_tree_small::wavelet_tree_small(wt_type&& wwt)
+      : wwt_(std::move(wwt)) {}
+
+wavelet_tree_small::wavelet_tree_small(wavelet_tree_small&& other)
+      : wwt_(std::move(other.wwt_)) {}
+
+wavelet_tree_small::wavelet_tree_small(sdsl::int_vector<>&& vector) {
+    *this = std::move(vector);
+}
+
+wavelet_tree_small& wavelet_tree_small::operator=(sdsl::int_vector<>&& vector) {
+    //TODO: this should be std::move, fix line 257 in wt_pc.hpp
+    wwt_ = decltype(wwt_)();
+    wwt_ = decltype(wwt_)(vector);
+    return *this;
+}
+
+bool wavelet_tree_small::deserialise(std::istream &in) {
+    if (!in.good())
+        return false;
+
+    try {
+        wwt_.load(in);
+        return true;
+    } catch (const std::bad_alloc &exception) {
+        std::cerr << "ERROR: Not enough memory to load wavelet_tree_small." << std::endl;
+        return false;
+    } catch (...) {
+        return false;
+    }
+}
+
+void wavelet_tree_small::serialise(std::ostream &out) const {
+    wwt_.serialize(out);
+}
+
+void wavelet_tree_small::insert(uint64_t, uint64_t) {
+    throw std::runtime_error("Not supported\n");
+}
+
+void wavelet_tree_small::remove(uint64_t) {
+    throw std::runtime_error("Not supported\n");
+}
+
+uint64_t wavelet_tree_small::rank(uint64_t c, uint64_t i) const {
+    return wwt_.rank(std::min(i + 1, size()), c);
+}
+
+uint64_t wavelet_tree_small::select(uint64_t c, uint64_t i) const {
+    assert(i > 0 && size() > 0);
+    assert(i <= rank(c, size() - 1));
+    return wwt_.select(i, c);
+}
+
+uint64_t wavelet_tree_small::operator[](uint64_t id) const {
+    assert(id < size());
+    return wwt_[id];
+}
+
+std::vector<uint64_t> wavelet_tree_small::to_vector() const {
+    return std::vector<uint64_t>(wwt_.begin(), wwt_.end());
+}
+
+void wavelet_tree_small::set(uint64_t, uint64_t) {
+    throw std::runtime_error("Not supported\n");
+}
+
+///////////////////////////////////////////
+// wavelet_tree_dyn libmaus2 rank/select //
+///////////////////////////////////////////
 
 template <class Vector>
 libmaus2::bitbtree::BitBTree<6, 64>* initialize_tree(const Vector &W_stat,
@@ -211,70 +373,72 @@ libmaus2::bitbtree::BitBTree<6, 64>* initialize_tree(const Vector &W_stat,
 
 
 template <class Vector>
-wavelet_tree_dyn::wavelet_tree_dyn(uint64_t b,
+wavelet_tree_dyn::wavelet_tree_dyn(uint64_t logsigma,
                                    const Vector &W_stat)
-    : wavelet_tree_(initialize_tree(W_stat, b), b, W_stat.size()) {}
+    : wwt_(initialize_tree(W_stat, logsigma), logsigma, W_stat.size()) {}
 
 template
 wavelet_tree_dyn
-::wavelet_tree_dyn<wavelet_tree>(uint64_t b,
-                                 const wavelet_tree &W_stat);
-
-template
-wavelet_tree_dyn
-::wavelet_tree_dyn<std::vector<uint8_t>>(uint64_t b,
+::wavelet_tree_dyn<std::vector<uint8_t>>(uint64_t logsigma,
                                          const std::vector<uint8_t> &W_stat);
 
 template
 wavelet_tree_dyn
-::wavelet_tree_dyn<std::vector<int>>(uint64_t b,
+::wavelet_tree_dyn<std::vector<int>>(uint64_t logsigma,
                                      const std::vector<int> &W_stat);
 
 template
 wavelet_tree_dyn
-::wavelet_tree_dyn<std::vector<uint64_t>>(uint64_t b,
+::wavelet_tree_dyn<std::vector<uint64_t>>(uint64_t logsigma,
                                           const std::vector<uint64_t> &W_stat);
+
+// TODO: copy constructor not defined in libmaus2
+wavelet_tree_dyn::wavelet_tree_dyn(const wavelet_tree_dyn &other)
+      : wwt_(initialize_tree(other.wwt_, other.wwt_.b), other.wwt_.b, other.size()) {}
+
+wavelet_tree_dyn::wavelet_tree_dyn(wavelet_tree_dyn&& other)
+      : wwt_(std::move(other.wwt_)) {}
 
 bool wavelet_tree_dyn::deserialise(std::istream &in) {
     if (!in.good())
         return false;
 
     //TODO: catch reading errors
-    wavelet_tree_.R =
+    wwt_.R =
         libmaus2::wavelet::DynamicWaveletTree<6, 64>::loadBitBTree(in);
-    const_cast<uint64_t&>(wavelet_tree_.b) =
+    const_cast<uint64_t&>(wwt_.b) =
         libmaus2::util::NumberSerialisation::deserialiseNumber(in);
-    wavelet_tree_.n =
+    wwt_.n =
         libmaus2::util::NumberSerialisation::deserialiseNumber(in);
     return true;
 }
 
 void wavelet_tree_dyn::serialise(std::ostream &out) const {
-    wavelet_tree_.serialise(out);
+    wwt_.serialise(out);
 }
 
 void wavelet_tree_dyn::insert(uint64_t id, uint64_t val) {
-    wavelet_tree_.insert(val, id);
+    wwt_.insert(val, id);
 }
 
 void wavelet_tree_dyn::remove(uint64_t id) {
-    wavelet_tree_.remove(id);
+    wwt_.remove(id);
 }
 
 uint64_t wavelet_tree_dyn::rank(uint64_t c, uint64_t i) const {
     return size() > 0
-            ? wavelet_tree_.rank(c, std::min(i, size() - 1))
+            ? wwt_.rank(c, std::min(i, size() - 1))
             : 0;
 }
 
 uint64_t wavelet_tree_dyn::select(uint64_t c, uint64_t i) const {
     assert(i > 0 && size() > 0 && i <= rank(c, size() - 1));
-    return wavelet_tree_.select(c, i - 1);
+    return wwt_.select(c, i - 1);
 }
 
 uint64_t wavelet_tree_dyn::operator[](uint64_t id) const {
     assert(id < size());
-    return wavelet_tree_[id];
+    return wwt_[id];
 }
 
 void wavelet_tree_dyn::set(uint64_t id, uint64_t val) {
@@ -287,7 +451,7 @@ std::vector<uint64_t> wavelet_tree_dyn::to_vector() const {
 
     size_t n = size();
 
-    const size_t b = wavelet_tree_.b;
+    const size_t b = wwt_.b;
 
     std::vector<uint64_t> offsets(1ull << b, 0);
     std::queue<uint64_t> blocks;
@@ -350,10 +514,6 @@ std::vector<uint64_t> wavelet_tree_dyn::to_vector() const {
     return W_stat;
 }
 
-void wavelet_tree_dyn::print(std::ostream &os) const {
-    os << wavelet_tree_;
-}
-
 bool wavelet_tree_dyn::get_bit_raw(uint64_t id) const {
-    return wavelet_tree_.R->operator[](id);
+    return wwt_.R->operator[](id);
 }
