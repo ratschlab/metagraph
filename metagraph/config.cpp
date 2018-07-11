@@ -288,6 +288,8 @@ std::string Config::state_to_string(StateType state) {
             return "fast";
         case DYN:
             return "dynamic";
+        case SMALL:
+            return "small";
         default:
             assert(false);
             return "Never happens";
@@ -299,6 +301,8 @@ Config::StateType Config::string_to_state(const std::string &string) {
         return StateType::STAT;
     } else if (string == "dynamic") {
         return StateType::DYN;
+    } else if (string == "small") {
+        return StateType::SMALL;
     } else {
         throw std::runtime_error("Error: unknown graph state");
     }

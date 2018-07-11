@@ -248,6 +248,10 @@ bool DBG_succ::load(const std::string &infbase) {
                 W = new wavelet_tree_stat(kLogSigma);
                 last = new bit_vector_stat();
                 break;
+            case Config::SMALL:
+                W = new wavelet_tree_small(kLogSigma);
+                last = new bit_vector_small();
+                break;
         }
         return W->deserialise(instream) && last->deserialise(instream);
     } catch (const std::bad_alloc &exception) {
@@ -1006,22 +1010,33 @@ void DBG_succ::switch_state(Config::StateType new_state) {
 
     switch (new_state) {
         case Config::DYN: {
-            wavelet_tree *W_new = new wavelet_tree_dyn(kLogSigma, *W);
+            wavelet_tree *W_new = new wavelet_tree_dyn(W->convert_to<wavelet_tree_dyn>(kLogSigma));
             delete W;
             W = W_new;
 
-            bit_vector *last_new = new bit_vector_dyn(*last);
+            bit_vector *last_new = new bit_vector_dyn(last->convert_to<bit_vector_dyn>());
             delete last;
             last = last_new;
 
             break;
         }
         case Config::STAT: {
-            wavelet_tree *W_new = new wavelet_tree_stat(kLogSigma, *W);
+            wavelet_tree *W_new = new wavelet_tree_stat(W->convert_to<wavelet_tree_stat>(kLogSigma));
             delete W;
             W = W_new;
 
-            bit_vector *last_new = new bit_vector_stat(*last);
+            bit_vector *last_new = new bit_vector_stat(last->convert_to<bit_vector_stat>());
+            delete last;
+            last = last_new;
+
+            break;
+        }
+        case Config::SMALL: {
+            wavelet_tree *W_new = new wavelet_tree_small(W->convert_to<wavelet_tree_small>(kLogSigma));
+            delete W;
+            W = W_new;
+
+            bit_vector *last_new = new bit_vector_small(last->convert_to<bit_vector_small>());
             delete last;
             last = last_new;
 
@@ -1032,6 +1047,7 @@ void DBG_succ::switch_state(Config::StateType new_state) {
 }
 
 void DBG_succ::print_state(std::ostream &os) const {
+    assert(is_valid());
     auto vertex_header = std::string("Vertex");
     vertex_header.resize(k_, ' ');
 
