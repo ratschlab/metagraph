@@ -16,3 +16,4 @@ database-cli
 build
 .*.swp
 .ipynb_checkpoints
+*lsf.o*
