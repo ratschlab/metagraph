@@ -72,6 +72,7 @@ class Config {
         BUILD = 1,
         EXTEND,
         FILTER,
+        FILTER_STATS,
         EXPERIMENT,
         MERGE,
         CONCATENATE,

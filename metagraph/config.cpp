@@ -28,6 +28,8 @@ Config::Config(int argc, const char *argv[]) {
         identity = BUILD;
     } else if (!strcmp(argv[1], "filter")) {
         identity = FILTER;
+    } else if (!strcmp(argv[1], "filter_stats")) {
+        identity = FILTER_STATS;
     } else if (!strcmp(argv[1], "experiment")) {
         identity = EXPERIMENT;
     } else if (!strcmp(argv[1], "stats")) {
@@ -331,6 +333,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s)\n\n");
 
+            fprintf(stderr, "\tfilter_stats\tget statistics for filters\n\n");
+
             fprintf(stderr, "\tannotate\tgiven a graph and a fast[a|q] file, annotate\n");
             fprintf(stderr, "\t\t\tthe respective kmers\n\n");
 
@@ -362,7 +366,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
             fprintf(stderr, "\t   --filter-abund [INT] threshold for the abundance of reliable k-mers [0]\n");
             fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \tdefine length of k-mers used for counting and filtering [3]\n");
+            fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
             fprintf(stderr, "\t   --dynamic \t\tuse dynamic build method [off]\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t   --suffix \t\tbuild graph chunk only for k-mers with the suffix given [off]\n");
@@ -381,7 +385,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
             fprintf(stderr, "\t   --filter-abund [INT] threshold for the abundance of reliable k-mers [0]\n");
             fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \tdefine length of k-mers used for counting and filtering [3]\n");
+            fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
@@ -398,6 +402,14 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --generate-fastq \twrite filtered reads to disk in fastq format [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
+        case FILTER_STATS: {
+            fprintf(stderr, "Usage: %s filter_stats [options] --filter-abund <cutoff> FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for filter:\n");
+            fprintf(stderr, "\t   --filter-abund [INT] \tthreshold for the abundance of reliable k-mers [0]\n");
+            fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
+            fprintf(stderr, "\t   --filter-k [INT] \t\tlength of k-mers used for counting and filtering [3]\n");
+        } break;
         case ALIGN: {
             fprintf(stderr, "Usage: %s align -i <graph_basename> [options] <FASTQ1> [[FASTQ2] ...]\n\n", prog_name.c_str());
 
@@ -405,7 +417,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
             fprintf(stderr, "\t   --filter-abund [INT] \tthreshold for the abundance of reliable k-mers [0]\n");
             fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \t\tdefine length of k-mers used for counting and filtering [3]\n");
+            fprintf(stderr, "\t   --filter-k [INT] \t\tlength of k-mers used for counting and filtering [3]\n");
             fprintf(stderr, "\t   --query-presence\t\tTest sequences for presence [off]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT]\tFraction of k-mers required to count sequence [1.0]\n");
             fprintf(stderr, "\t   --filter-present\t\tReport only present input sequences [off]\n");
@@ -462,7 +474,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
             fprintf(stderr, "\t   --filter-abund [INT] \tthreshold for the abundance of reliable k-mers [0]\n");
             fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \t\tdefine length of k-mers used for counting and filtering [3]\n");
+            fprintf(stderr, "\t   --filter-k [INT] \t\tlength of k-mers used for counting and filtering [3]\n");
             fprintf(stderr, "\t   --anno-filename \t\tinclude filenames as annotation labels [off]\n");
             fprintf(stderr, "\t   --anno-header \t\textract annotation labels from headers of sequences in files [off]\n");
             fprintf(stderr, "\t   --header-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
@@ -479,7 +491,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
             fprintf(stderr, "\t   --filter-abund [INT] \tthreshold for the abundance of reliable k-mers [0]\n");
             fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \t\tdefine length of k-mers used for counting and filtering [3]\n");
+            fprintf(stderr, "\t   --filter-k [INT] \t\tlength of k-mers used for counting and filtering [3]\n");
             fprintf(stderr, "\t   --coord-binsize [INT]\tstepsize for k-mer coordinates in input sequences from the fasta files [1000]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
@@ -500,7 +512,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-r --reverse \t\t\t\talso annotate reverse complement reads [off]\n");
             fprintf(stderr, "\t   --filter-abund [INT] \t\tthreshold for the abundance of reliable k-mers [0]\n");
             fprintf(stderr, "\t   --filter-thres [INT] \t\tmax allowed number of unreliable kmers in reliable reads [0]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \t\t\tdefine length of k-mers used for counting and filtering [3]\n");
+            fprintf(stderr, "\t   --filter-k [INT] \t\t\tlength of k-mers used for counting and filtering [3]\n");
             fprintf(stderr, "\t   --anno-filename \t\t\tinclude filenames as annotation labels [off]\n");
             fprintf(stderr, "\t   --anno-header \t\t\textract annotation labels from headers of sequences in files [off]\n");
             fprintf(stderr, "\t   --header-delimiter [STR]\t\tdelimiter for splitting annotation header into multiple labels [off]\n");
@@ -522,7 +534,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-r --reverse \t\t\tclassify reverse complement sequences [off]\n");
             fprintf(stderr, "\t   --filter-abund [INT] \tthreshold for the abundance of reliable k-mers [0]\n");
             fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \t\tdefine length of k-mers used for counting and filtering [3]\n");
+            fprintf(stderr, "\t   --filter-k [INT] \t\tlength of k-mers used for counting and filtering [3]\n");
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator [<graph_basename>]\n");
             fprintf(stderr, "\t   --fast \t\t\tuse fast column based annotator (with auxiliary index) [off]\n");

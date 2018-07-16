@@ -1022,6 +1022,48 @@ int main(int argc, const char *argv[]) {
 
             return 0;
         }
+        case Config::FILTER_STATS: {
+            if (!config->verbose) {
+                std::cout << "File\tTotal reads\tRemaining reads\tRemaining ratio" << std::endl;
+            }
+
+            for (const auto &file : files) {
+                auto filter_filename = get_filter_filename(
+                    file,
+                    config->filter_k,
+                    config->max_unreliable_abundance,
+                    config->unreliable_kmers_threshold,
+                    true
+                );
+
+                std::ifstream instream(filter_filename);
+                try {
+                    auto filter = load_number_vector<bool>(instream);
+                    size_t num_remaining = std::count(filter.begin(), filter.end(), true);
+
+                    if (config->verbose) {
+                        std::cout << "Statistics for filter file " << filter_filename << "\n"
+                                  << "Total reads: " << filter.size() << "\n"
+                                  << "Remaining reads: " << num_remaining << "\n"
+                                  << "Remaining ratio: "
+                                  << static_cast<double>(num_remaining) / filter.size()
+                                  << std::endl;
+                    } else {
+                        std::cout << filter_filename << "\t"
+                                  << filter.size() << "\t"
+                                  << num_remaining << "\t"
+                                  << static_cast<double>(num_remaining) / filter.size()
+                                  << std::endl;
+                    }
+                } catch (...) {
+                    std::cerr << "ERROR: Filter file " << filter_filename
+                              << " is corrupted" << std::endl;
+                    exit(1);
+                }
+            }
+
+            return 0;
+        }
         case Config::ANNOTATE: {
             // load graph
             std::unique_ptr<DBG_succ> graph {
