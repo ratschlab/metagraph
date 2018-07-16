@@ -287,6 +287,7 @@ void annotate_data(const std::vector<std::string> &files,
                    const DBG_succ &graph,
                    Annotator *annotator,
                    bool reverse,
+                   size_t filter_k,
                    size_t max_unreliable_abundance,
                    size_t unreliable_kmers_threshold,
                    bool filename_anno,
@@ -370,7 +371,7 @@ void annotate_data(const std::vector<std::string> &files,
                 },
                 reverse, timer.get(),
                 get_filter_filename(
-                    file, graph.get_k(),
+                    file, filter_k,
                     max_unreliable_abundance,
                     unreliable_kmers_threshold
                 )
@@ -389,6 +390,7 @@ void annotate_coordinates(const std::vector<std::string> &files,
                           const DBG_succ &graph,
                           Annotator *annotator,
                           bool reverse,
+                          size_t filter_k,
                           size_t max_unreliable_abundance,
                           size_t unreliable_kmers_threshold,
                           size_t genome_bin_size,
@@ -441,7 +443,7 @@ void annotate_coordinates(const std::vector<std::string> &files,
                 },
                 reverse, timer.get(),
                 get_filter_filename(
-                    file, graph.get_k(),
+                    file, filter_k,
                     max_unreliable_abundance,
                     unreliable_kmers_threshold
                 )
@@ -632,7 +634,7 @@ int main(int argc, const char *argv[]) {
                             Timer *timer_ptr = config->verbose ? &timer : NULL;
 
                             std::string filter_filename = get_filter_filename(
-                                files[f], config->k,
+                                files[f], config->filter_k,
                                 config->max_unreliable_abundance,
                                 config->unreliable_kmers_threshold
                             );
@@ -717,7 +719,7 @@ int main(int argc, const char *argv[]) {
                                 graph->add_sequence(read_stream->seq.s);
                             },
                             config->reverse, NULL,
-                            get_filter_filename(files[f], config->k,
+                            get_filter_filename(files[f], config->filter_k,
                                                 config->max_unreliable_abundance,
                                                 config->unreliable_kmers_threshold)
                         );
@@ -794,7 +796,7 @@ int main(int argc, const char *argv[]) {
                             graph->add_sequence(read_stream->seq.s, true, inserted_edges.get());
                         },
                         config->reverse, NULL,
-                        get_filter_filename(file, config->k,
+                        get_filter_filename(file, config->filter_k,
                                             config->max_unreliable_abundance,
                                             config->unreliable_kmers_threshold)
                     );
@@ -964,7 +966,7 @@ int main(int argc, const char *argv[]) {
                             gzclose(out_fastq_gz);
 
                     },
-                    config->k,
+                    config->filter_k,
                     config->max_unreliable_abundance,
                     config->unreliable_kmers_threshold,
                     config->generate_filtered_fasta,
@@ -1009,7 +1011,7 @@ int main(int argc, const char *argv[]) {
                         ));
                         serialize_number_vector(outstream, filter, 1);
                     },
-                    config->k,
+                    config->filter_k,
                     config->max_unreliable_abundance,
                     config->unreliable_kmers_threshold,
                     config->verbose, config->reverse, config->use_kmc
@@ -1062,6 +1064,7 @@ int main(int argc, const char *argv[]) {
                           *graph,
                           annotation.get(),
                           config->reverse,
+                          config->filter_k,
                           config->max_unreliable_abundance,
                           config->unreliable_kmers_threshold,
                           config->filename_anno,
@@ -1111,6 +1114,7 @@ int main(int argc, const char *argv[]) {
                                  *graph,
                                  annotation.get(),
                                  config->reverse,
+                                 config->filter_k,
                                  config->max_unreliable_abundance,
                                  config->unreliable_kmers_threshold,
                                  config->genome_binsize_anno,
@@ -1163,6 +1167,7 @@ int main(int argc, const char *argv[]) {
                           *graph,
                           annotation.get(),
                           config->reverse,
+                          config->filter_k,
                           config->max_unreliable_abundance,
                           config->unreliable_kmers_threshold,
                           config->filename_anno,
@@ -1263,7 +1268,7 @@ int main(int argc, const char *argv[]) {
                         );
                     },
                     config->reverse, timer.get(),
-                    get_filter_filename(file, graph->get_k(),
+                    get_filter_filename(file, config->filter_k,
                                         config->max_unreliable_abundance,
                                         config->unreliable_kmers_threshold)
                 );
@@ -1664,7 +1669,7 @@ int main(int argc, const char *argv[]) {
                         std::cout << ": " << graphindices[i] << "\n";
                     }
                 }, config->reverse, timer.get(),
-                   get_filter_filename(file, graph->get_k(),
+                   get_filter_filename(file, config->filter_k,
                                        config->max_unreliable_abundance,
                                        config->unreliable_kmers_threshold)
                 );

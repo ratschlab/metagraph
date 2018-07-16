@@ -32,6 +32,7 @@ class Config {
     bool use_kmc = false;
 
     unsigned int k = 3;
+    unsigned int filter_k = 3;
     unsigned int distance = 0;
     unsigned int parallel = 1;
     unsigned int num_bins_per_thread = 1;
