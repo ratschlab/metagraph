@@ -1,6 +1,9 @@
 #ifndef __DBG_SUCCINCT_CONSTRUCT_HPP__
 #define __DBG_SUCCINCT_CONSTRUCT_HPP__
 
+#include <mutex>
+#include <shared_mutex>
+
 #include "dbg_succinct.hpp"
 #include "kmer.hpp"
 #include "utils.hpp"
@@ -84,7 +87,8 @@ class KMerDBGSuccChunkConstructor : public IChunkConstructor {
     size_t k_;
     Vector<KMER> kmers_;
     size_t end_sorted_;
-    std::mutex mutex_;
+    mutable std::mutex mutex_resize_;
+    mutable std::shared_timed_mutex mutex_copy_;
 
     size_t num_threads_;
     utils::ThreadPool thread_pool_;

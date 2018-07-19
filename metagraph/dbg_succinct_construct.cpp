@@ -73,23 +73,35 @@ void extend_kmer_storage(const Array &temp_storage,
                          size_t *end_sorted,
                          size_t num_threads,
                          bool verbose,
-                         std::mutex *mutex) {
-    assert(mutex);
+                         std::mutex *mutex_resize,
+                         std::shared_timed_mutex *mutex_copy) {
+    assert(mutex_resize);
+    assert(mutex_copy);
 
     // acquire the mutex to restrict the number of writing threads
-    std::lock_guard<std::mutex> lock(*mutex);
+    std::unique_lock<std::mutex> resize_lock(*mutex_resize);
 
     // shrink collected k-mers if the memory limit is exceeded
     if (kmers->size() + temp_storage.size() > kmers->capacity()) {
+        std::unique_lock<std::shared_timed_mutex> lock(*mutex_copy);
         shrink_kmers(kmers, end_sorted, num_threads, verbose);
         kmers->reserve(kmers->size()
                         + std::max(temp_storage.size(), kmers->size() / 2));
-        if (kmers->size() + temp_storage.size() > kmers->capacity()) {
-            std::cerr << "ERROR: Can't reallocate. Not enough memory" << std::endl;
-        }
     }
-    for (auto &kmer : temp_storage) {
-        kmers->push_back(kmer);
+
+    std::shared_lock<std::shared_timed_mutex> copy_lock(*mutex_copy);
+    const size_t begin = kmers->size();
+
+    try {
+        kmers->resize(kmers->size() + temp_storage.size());
+    } catch (const std::bad_alloc &exception) {
+        std::cerr << "ERROR: Can't reallocate. Not enough memory" << std::endl;
+        exit(1);
+    }
+    resize_lock.unlock();
+
+    for (size_t i = 0; i < temp_storage.size(); ++i) {
+        kmers->at(begin + i) = temp_storage[i];
     }
 }
 
@@ -103,7 +115,8 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
                    const std::vector<TAlphabet> &suffix,
                    size_t num_threads,
                    bool verbose,
-                   std::mutex *mutex,
+                   std::mutex *mutex_resize,
+                   std::shared_timed_mutex *mutex_copy,
                    bool remove_redundant = true) {
     Vector<KMER> temp_storage;
     temp_storage.reserve(1.1 * kMaxKmersChunkSize);
@@ -120,7 +133,7 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
 
         if (temp_storage.size() > 0.9 * kMaxKmersChunkSize) {
             extend_kmer_storage(temp_storage, kmers, end_sorted,
-                                num_threads, verbose, mutex);
+                                num_threads, verbose, mutex_resize, mutex_copy);
             temp_storage.resize(0);
         }
     });
@@ -130,7 +143,7 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
             sort_and_remove_duplicates(&temp_storage, 1);
         }
         extend_kmer_storage(temp_storage, kmers, end_sorted,
-                            num_threads, verbose, mutex);
+                            num_threads, verbose, mutex_resize, mutex_copy);
     }
 }
 
@@ -309,7 +322,8 @@ void KMerDBGSuccChunkConstructor<KMER>::release_task_to_pool() {
                              delete current_reads_storage;
                          },
                          k_, &kmers_, &end_sorted_, filter_suffix_encoded_,
-                         num_threads_, verbose_, &mutex_, true);
+                         num_threads_, verbose_,
+                         &mutex_resize_, &mutex_copy_, true);
     stored_reads_size_ = 0;
 }
 
@@ -402,6 +416,7 @@ DBG_succ::Chunk* KMerDBGSuccChunkConstructor<KMER>::build_chunk() {
         timer.reset();
 
         recover_source_dummy_nodes(k_, &kmers_, num_threads_, verbose_);
+        // kmers_.shrink_to_fit();
 
         if (verbose_)
             std::cout << timer.elapsed() << "sec" << std::endl;
@@ -421,7 +436,8 @@ KMerDBGSuccChunkConstructor<KMER>
     thread_pool_.enqueue(extract_kmers<KMER>, generate_reads,
                          k_, &kmers_, &end_sorted_,
                          filter_suffix_encoded_,
-                         num_threads_, verbose_, &mutex_, true);
+                         num_threads_, verbose_,
+                         &mutex_resize_, &mutex_copy_, true);
 }
 
 

@@ -292,71 +292,114 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
                    const std::vector<TAlphabet> &suffix,
                    size_t num_threads,
                    bool verbose,
-                   std::mutex *mutex,
+                   std::mutex *mutex_resize,
+                   std::shared_timed_mutex *mutex,
                    bool remove_redundant = true);
 
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
                                         Vector<KMER> *kmers,
                                         const std::vector<TAlphabet> &suffix,
-                                        std::mutex *mutex,
-                                        bool remove_redundant) {
+                                        std::mutex *mutex_resize,
+                                        std::shared_timed_mutex *mutex,
+                                        bool remove_redundant,
+                                        size_t reserved_capacity) {
     size_t end_sorted = 0;
-    kmers->reserve(100'000);
+    kmers->reserve(reserved_capacity);
     extract_kmers([reads](CallbackRead callback) {
             for (auto &&read : *reads) {
                 callback(std::move(read));
             }
         },
         k, kmers, &end_sorted, suffix,
-        1, false, mutex, remove_redundant
+        1, false, mutex_resize, mutex, remove_redundant
     );
     delete reads;
 }
 
-TEST(ExtractKmers_64, ExtractKmersAppendParallel) {
+template <typename KMER>
+void sort_and_remove_duplicates(Vector<KMER> *kmers,
+                                size_t num_threads,
+                                size_t end_sorted = 0);
+
+TEST(ExtractKmers_64, ExtractKmersAppendParallelReserved) {
     Vector<KMER> result;
-    std::mutex mu;
+    std::mutex mu_resize;
+    std::shared_timed_mutex mu;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        1, &result, {}, &mu, false
+        1, &result, {}, &mu_resize, &mu, false, 100'000
     );
     ASSERT_EQ((sequence_size + 1) * 5, result.size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        1, &result, {}, &mu, false
+        1, &result, {}, &mu_resize, &mu, false, 100'000
     );
     ASSERT_EQ((sequence_size + 1) * 10, result.size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        1, &result, {}, &mu, false
+        1, &result, {}, &mu_resize, &mu, false, 100'000
     );
     ASSERT_EQ((sequence_size + 1) * 15, result.size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        1, &result, {}, &mu, false
+        1, &result, {}, &mu_resize, &mu, false, 100'000
     );
     ASSERT_EQ((sequence_size + 1) * 20, result.size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        1, &result, { 1, }, &mu, false
+        1, &result, { 1, }, &mu_resize, &mu, false, 100'000
     );
     ASSERT_EQ((sequence_size + 1) * 20, result.size());
 }
 
-TEST(ExtractKmers_64, ExtractKmersParallelRemoveRedundant) {
+TEST(ExtractKmers_64, ExtractKmersAppendParallel) {
     Vector<KMER> result;
-    std::mutex mu;
+    std::mutex mu_resize;
+    std::shared_timed_mutex mu;
+    size_t sequence_size = 500;
+
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(sequence_size, 'A')),
+        1, &result, {}, &mu_resize, &mu, false, 0
+    );
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(sequence_size, 'A')),
+        1, &result, {}, &mu_resize, &mu, false, 0
+    );
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(sequence_size, 'A')),
+        1, &result, {}, &mu_resize, &mu, false, 0
+    );
+    sort_and_remove_duplicates(&result, 1);
+    ASSERT_EQ(3u, result.size());
+
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
+        1, &result, {}, &mu_resize, &mu, false, 0
+    );
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
+        1, &result, { 1, }, &mu_resize, &mu, false, 0
+    );
+    sort_and_remove_duplicates(&result, 1);
+    ASSERT_EQ(6u, result.size());
+}
+
+TEST(ExtractKmers_64, ExtractKmersParallelRemoveRedundantReserved) {
+    Vector<KMER> result;
+    std::mutex mu_resize;
+    std::shared_timed_mutex mu;
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        1, &result, {}, &mu, true
+        1, &result, {}, &mu_resize, &mu, true, 100'000
     );
     // $A, AA, A$
     ASSERT_EQ(3u, result.size());
@@ -364,7 +407,7 @@ TEST(ExtractKmers_64, ExtractKmersParallelRemoveRedundant) {
     result.clear();
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        2, &result, {}, &mu, true
+        2, &result, {}, &mu_resize, &mu, true, 100'000
     );
     // $AA, AAA, AA$
     ASSERT_EQ(3u, result.size());
@@ -372,11 +415,11 @@ TEST(ExtractKmers_64, ExtractKmersParallelRemoveRedundant) {
     result.clear();
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        2, &result, { 0 }, &mu, true
+        2, &result, { 0 }, &mu_resize, &mu, true, 100'000
     );
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        2, &result, { 1 }, &mu, true
+        2, &result, { 1 }, &mu_resize, &mu, true, 100'000
     );
     // $$A, $AA, AAA, AA$
     ASSERT_EQ(4u, result.size());
@@ -384,7 +427,7 @@ TEST(ExtractKmers_64, ExtractKmersParallelRemoveRedundant) {
     result.clear();
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, {}, &mu, true
+        3, &result, {}, &mu_resize, &mu, true, 100'000
     );
     // $AAA, AAAA, AAA$
     ASSERT_EQ(3u, result.size());
@@ -392,11 +435,64 @@ TEST(ExtractKmers_64, ExtractKmersParallelRemoveRedundant) {
     result.clear();
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, { 0 }, &mu, true
+        3, &result, { 0 }, &mu_resize, &mu, true, 100'000
     );
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, { 1 }, &mu, true
+        3, &result, { 1 }, &mu_resize, &mu, true, 100'000
+    );
+    // $$$A, $$AA, $AAA, AAAA, AAA$
+    ASSERT_EQ(5u, result.size());
+}
+
+TEST(ExtractKmers_64, ExtractKmersParallelRemoveRedundant) {
+    Vector<KMER> result;
+    std::mutex mu_resize;
+    std::shared_timed_mutex mu;
+
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(500, 'A')),
+        1, &result, {}, &mu_resize, &mu, true, 0
+    );
+    // $A, AA, A$
+    ASSERT_EQ(3u, result.size());
+
+    result.clear();
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(500, 'A')),
+        2, &result, {}, &mu_resize, &mu, true, 0
+    );
+    // $AA, AAA, AA$
+    ASSERT_EQ(3u, result.size());
+
+    result.clear();
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(500, 'A')),
+        2, &result, { 0 }, &mu_resize, &mu, true, 0
+    );
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(500, 'A')),
+        2, &result, { 1 }, &mu_resize, &mu, true, 0
+    );
+    // $$A, $AA, AAA, AA$
+    ASSERT_EQ(4u, result.size());
+
+    result.clear();
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(500, 'A')),
+        3, &result, {}, &mu_resize, &mu, true, 0
+    );
+    // $AAA, AAAA, AAA$
+    ASSERT_EQ(3u, result.size());
+
+    result.clear();
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(500, 'A')),
+        3, &result, { 0 }, &mu_resize, &mu, true, 0
+    );
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(500, 'A')),
+        3, &result, { 1 }, &mu_resize, &mu, true, 0
     );
     // $$$A, $$AA, $AAA, AAAA, AAA$
     ASSERT_EQ(5u, result.size());
