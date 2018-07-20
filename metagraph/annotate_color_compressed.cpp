@@ -57,7 +57,7 @@ typename ColorCompressed<Color, Encoder>::Coloring
 ColorCompressed<Color, Encoder>::get_coloring(Index i) const {
     assert(i < num_rows_);
 
-    const_cast<ColorCompressed*>(this)->flush();
+    flush();
 
     Coloring coloring;
     for (size_t j = 0; j < bitmatrix_.size(); ++j) {
@@ -122,7 +122,7 @@ ColorCompressed<Color, Encoder>
 
 template <typename Color, class Encoder>
 void ColorCompressed<Color, Encoder>::serialize(const std::string &filename) const {
-    const_cast<ColorCompressed*>(this)->flush();
+    flush();
 
     std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension);
     if (!outstream.good()) {
@@ -269,7 +269,7 @@ ColorCompressed<Color, Encoder>
                    double discovery_ratio) const {
     assert(discovery_ratio >= 0 && discovery_ratio <= 1);
 
-    const_cast<ColorCompressed*>(this)->flush();
+    flush();
 
     const size_t min_colors_discovered =
                         discovery_ratio == 0
@@ -338,7 +338,7 @@ template <typename Color, class Encoder>
 double ColorCompressed<Color, Encoder>::sparsity() const {
     uint64_t num_set_bits = 0;
 
-    const_cast<ColorCompressed*>(this)->flush();
+    flush();
 
     for (size_t j = 0; j < bitmatrix_.size(); ++j) {
         auto rank = sdsl::rank_support_sd<>(bitmatrix_[j].get());
@@ -352,7 +352,7 @@ template <typename Color, class Encoder>
 std::vector<uint64_t>
 ColorCompressed<Color, Encoder>
 ::count_colors(const std::vector<Index> &indices) const {
-    const_cast<ColorCompressed*>(this)->flush();
+    flush();
 
     std::vector<uint64_t> counter(bitmatrix_.size(), 0);
 
@@ -367,9 +367,11 @@ ColorCompressed<Color, Encoder>
 }
 
 template <typename Color, class Encoder>
-void ColorCompressed<Color, Encoder>::flush() {
+void ColorCompressed<Color, Encoder>::flush() const {
     for (const auto &cached_vector : cached_colors_) {
-        flush(cached_vector.first, cached_vector.second);
+        const_cast<ColorCompressed*>(this)->flush(
+            cached_vector.first, cached_vector.second
+        );
     }
     assert(bitmatrix_.size() == color_encoder_->size());
 }

@@ -1238,12 +1238,7 @@ int main(int argc, const char *argv[]) {
 
             return 0;
         }
-        case Config::MERGE_ANNOTATORS: {
-            // load graph
-            std::unique_ptr<DBG_succ> graph {
-                load_critical_graph_from_file(config->infbase)
-            };
-
+        case Config::MERGE_ANNOTATIONS: {
             std::unique_ptr<Annotator> annotation;
             if (config->use_row_annotator) {
                 throw std::runtime_error("To be implemented");

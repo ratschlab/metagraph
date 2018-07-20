@@ -41,7 +41,7 @@ Config::Config(int argc, const char *argv[]) {
     } else if (!strcmp(argv[1], "coordinate")) {
         identity = ANNOTATE_COORDINATES;
     } else if (!strcmp(argv[1], "merge_anno")) {
-        identity = MERGE_ANNOTATORS;
+        identity = MERGE_ANNOTATIONS;
     } else if (!strcmp(argv[1], "classify")) {
         identity = CLASSIFY;
     } else if (!strcmp(argv[1], "transform")) {
@@ -240,7 +240,7 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == EXTEND && (outfbase.empty() || infbase.empty()))
         print_usage_and_exit = true;
 
-    if (identity == MERGE_ANNOTATORS && (outfbase.empty() || infbase.empty()))
+    if (identity == MERGE_ANNOTATIONS && outfbase.empty())
         print_usage_and_exit = true;
 
     if (identity == CLASSIFY && infbase_annotators.empty())
@@ -495,8 +495,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --coord-binsize [INT]\tstepsize for k-mer coordinates in input sequences from the fasta files [1000]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
-        case MERGE_ANNOTATORS: {
-            fprintf(stderr, "Usage: %s merge_anno -i <graph_basename> -o <annotator_basename> <ANNOT1> [[ANNOT2] ...]\n\n", prog_name.c_str());
+        case MERGE_ANNOTATIONS: {
+            fprintf(stderr, "Usage: %s merge_anno [options] -o <annotator_basename> <ANNOT1> [[ANNOT2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
             fprintf(stderr, "\t   --row-annotator \tuse row based annotator instead of column based colors compressor [off]\n");

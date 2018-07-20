@@ -71,7 +71,7 @@ class FastColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
     std::vector<size_t> filter_row(Index i, const std::vector<bool> &filter) const;
     std::vector<uint64_t> count_colors(const std::vector<Index> &indices) const;
 
-    void flush();
+    void flush() const;
     void flush(size_t j, sdsl::bit_vector *annotation_curr);
     void flush_index(size_t t, sdsl::bit_vector *annotation_curr);
 

@@ -82,7 +82,7 @@ class Config {
         ANNOTATE,
         ANNOTATE_BLOOM,
         ANNOTATE_COORDINATES,
-        MERGE_ANNOTATORS,
+        MERGE_ANNOTATIONS,
         TRANSFORM,
         CLASSIFY
     };

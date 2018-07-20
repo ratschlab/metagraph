@@ -191,7 +191,7 @@ FastColorCompressed<Color, Encoder>
 
 template <typename Color, class Encoder>
 void FastColorCompressed<Color, Encoder>::serialize(const std::string &filename) const {
-    const_cast<FastColorCompressed*>(this)->flush();
+    flush();
 
     std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension);
     if (!outstream.good()) {
@@ -498,7 +498,7 @@ template <typename Color, class Encoder>
 double FastColorCompressed<Color, Encoder>::sparsity() const {
     uint64_t num_set_bits = 0;
 
-    const_cast<FastColorCompressed*>(this)->flush();
+    flush();
 
     for (size_t j = 0; j < bitmatrix_.size(); ++j) {
         auto rank = sdsl::rank_support_sd<>(bitmatrix_[j].get());
@@ -511,7 +511,7 @@ double FastColorCompressed<Color, Encoder>::sparsity() const {
 
 template <typename Color, class Encoder>
 void FastColorCompressed<Color, Encoder>::rebuild_index(size_t num_aux_cols) {
-    const_cast<FastColorCompressed*>(this)->flush();
+    flush();
 
     index_.clear();
     column_to_index_.clear();
@@ -570,7 +570,7 @@ void FastColorCompressed<Color, Encoder>::rebuild_index(size_t num_aux_cols) {
 
 template <typename Color, class Encoder>
 std::vector<size_t> FastColorCompressed<Color, Encoder>::get_row(Index i) const {
-    const_cast<FastColorCompressed*>(this)->flush();
+    flush();
 
     std::vector<size_t> set_bits;
     set_bits.reserve(bitmatrix_.size());
@@ -603,7 +603,7 @@ template <typename Color, class Encoder>
 std::vector<size_t>
 FastColorCompressed<Color, Encoder>
 ::filter_row(Index i, const std::vector<bool> &filter) const {
-    const_cast<FastColorCompressed*>(this)->flush();
+    flush();
 
     assert(filter.size() == bitmatrix_.size());
 
@@ -682,19 +682,23 @@ bool FastColorCompressed<Color, Encoder>::get_index_entry(Index i, size_t t) con
 }
 
 template <typename Color, class Encoder>
-void FastColorCompressed<Color, Encoder>::flush() {
+void FastColorCompressed<Color, Encoder>::flush() const {
     if (to_update_) {
         for (const auto &cached_vector : cached_colors_) {
-            flush(cached_vector.first, cached_vector.second);
+            const_cast<FastColorCompressed*>(this)->flush(
+                cached_vector.first, cached_vector.second
+            );
         }
-        to_update_ = false;
+        const_cast<FastColorCompressed*>(this)->to_update_ = false;
     }
 
     if (to_update_index_) {
         for (const auto &cached_index : cached_index_) {
-            flush_index(cached_index.first, cached_index.second);
+            const_cast<FastColorCompressed*>(this)->flush_index(
+                cached_index.first, cached_index.second
+            );
         }
-        to_update_index_ = false;
+        const_cast<FastColorCompressed*>(this)->to_update_index_ = false;
     }
 }
 
