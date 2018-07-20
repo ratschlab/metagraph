@@ -411,6 +411,9 @@ void annotate_coordinates(const std::vector<std::string> &files,
         // open stream
         if (utils::get_filetype(file) == "FASTA"
                     || utils::get_filetype(file) == "FASTQ") {
+
+            bool forward_strand = true;
+
             read_fasta_file_critical(file,
                 [&](kseq_t *read_stream) {
                     std::vector<std::string> labels {
@@ -423,8 +426,15 @@ void annotate_coordinates(const std::vector<std::string> &files,
                     const std::string sequence(read_stream->seq.s);
                     for (size_t i = 0; i < sequence.size(); i += genome_bin_size) {
                         labels.back() = std::to_string(i);
+
+                        // forward: |0 =>  |6 =>  |12=>  |18=>  |24=>  |30=>|
+                        // reverse: |<=30|  <=24|  <=18|  <=12|  <= 6|  <= 0|
+                        const size_t bin_size = std::min(static_cast<size_t>(sequence.size() - i),
+                                                         static_cast<size_t>(genome_bin_size + graph.get_k() - 1));
                         annotate_sequence(
-                            sequence.substr(i, genome_bin_size + graph.get_k() - 1),
+                            forward_strand
+                                ? sequence.substr(i, bin_size)
+                                : sequence.substr(sequence.size() - i - bin_size, bin_size),
                             { utils::join_strings(labels, "\1"), },
                             graph, annotator, thread_pool, annotation_mutex
                         );
@@ -440,6 +450,12 @@ void annotate_coordinates(const std::vector<std::string> &files,
                         }
                         std::cout << ", " << timer->elapsed() << "sec" << std::endl;
                     }
+
+                    // If we read both strands, the next sequence is
+                    // either reverse (if the current one is forward)
+                    // or new (if the current one is reverse), and therefore forward
+                    if (reverse)
+                        forward_strand = !forward_strand;
                 },
                 reverse, timer.get(),
                 get_filter_filename(
