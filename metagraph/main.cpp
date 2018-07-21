@@ -1533,30 +1533,30 @@ int main(int argc, const char *argv[]) {
             Timer timer;
 
             if (config->to_row_annotator) {
-                annotate::RowCompressed<> row_annotator(0);
-                {
-                    annotate::ColorCompressed<> annotator(
-                        0, kNumCachedColors, config->verbose
-                    );
+                auto annotator = std::make_unique<annotate::ColorCompressed<>>(
+                    0, kNumCachedColors, config->verbose
+                );
 
-                    if (config->verbose) {
-                        std::cout << "Loading annotator...\t" << std::flush;
-                    }
-                    if (!annotator.load(files.at(0))) {
-                        std::cerr << "ERROR: can't load annotation from file "
-                                  << files.at(0) << std::endl;
-                        exit(1);
-                    }
-                    if (config->verbose) {
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-                    }
-
-                    if (config->verbose) {
-                        std::cout << "Converting...\t" << std::flush;
-                    }
-                    annotator.convert_to_row_annotator(&row_annotator,
-                                                       config->parallel);
+                if (config->verbose) {
+                    std::cout << "Loading annotator...\t" << std::flush;
                 }
+                if (!annotator->load(files.at(0))) {
+                    std::cerr << "ERROR: can't load annotation from file "
+                              << files.at(0) << std::endl;
+                    exit(1);
+                }
+                if (config->verbose) {
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+                }
+
+                if (config->verbose) {
+                    std::cout << "Converting...\t" << std::flush;
+                }
+                annotate::RowCompressed<> row_annotator(0);
+                annotator->convert_to_row_annotator(&row_annotator,
+                                                    config->parallel);
+                annotator.reset();
+
                 row_annotator.serialize(config->outfbase);
                 if (config->verbose)
                     std::cout << timer.elapsed() << "sec" << std::endl;
