@@ -1529,6 +1529,40 @@ int main(int argc, const char *argv[]) {
 
             return 0;
         }
+        case Config::TRANSFORM_ANNOTATION: {
+            Timer timer;
+
+            if (config->to_row_annotator) {
+                annotate::RowCompressed<> row_annotator(0);
+                {
+                    annotate::ColorCompressed<> annotator(
+                        0, kNumCachedColors, config->verbose
+                    );
+
+                    if (config->verbose) {
+                        std::cout << "Loading annotator...\t" << std::flush;
+                    }
+                    if (!annotator.load(files.at(0))) {
+                        std::cerr << "ERROR: can't load annotation from file "
+                                  << files.at(0) << std::endl;
+                        exit(1);
+                    }
+                    if (config->verbose) {
+                        std::cout << timer.elapsed() << "sec" << std::endl;
+                    }
+
+                    if (config->verbose) {
+                        std::cout << "Converting...\t" << std::flush;
+                    }
+                    annotator.convert_to_row_annotator(&row_annotator,
+                                                       config->parallel);
+                }
+                row_annotator.serialize(config->outfbase);
+                if (config->verbose)
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+            }
+            return 0;
+        }
         case Config::TRANSFORM: {
             Timer timer;
             std::unique_ptr<DBG_succ> graph {

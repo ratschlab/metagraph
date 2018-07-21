@@ -46,6 +46,8 @@ Config::Config(int argc, const char *argv[]) {
         identity = CLASSIFY;
     } else if (!strcmp(argv[1], "transform")) {
         identity = TRANSFORM;
+    } else if (!strcmp(argv[1], "transform_anno")) {
+        identity = TRANSFORM_ANNOTATION;
     } else {
         print_usage(argv[0]);
         exit(-1);
@@ -165,6 +167,8 @@ Config::Config(int argc, const char *argv[]) {
             to_adj_list = true;
         } else if (!strcmp(argv[i], "--to-sequences")) {
             to_sequences = true;
+        } else if (!strcmp(argv[i], "--to-row-format")) {
+            to_row_annotator = true;
         } else if (!strcmp(argv[i], "-l") || !strcmp(argv[i], "--len-suffix")) {
             suffix_len = atoi(argv[++i]);
         //} else if (!strcmp(argv[i], "-t") || !strcmp(argv[i], "--threads")) {
@@ -259,6 +263,9 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == TRANSFORM && fname.size() != 1)
         print_usage_and_exit = true;
 
+    if (identity == TRANSFORM_ANNOTATION && outfbase.empty())
+        outfbase = fname.at(0);
+
     if (identity == MERGE && fname.size() < 2)
         print_usage_and_exit = true;
 
@@ -349,6 +356,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\tclassify\tannotate sequences from fast[a|q] files\n\n");
 
             fprintf(stderr, "\ttransform\tgiven a graph, transform it to other formats\n\n");
+
+            fprintf(stderr, "\ttransform_anno\tchange representation of the graph annotation\n\n");
 
             return;
         }
@@ -557,6 +566,13 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --to-adj-list \t\twrite the adjacency list to file [off]\n");
             // fprintf(stderr, "\t   --to-sequences \t\twrite contig sequences to file [off]\n");
             fprintf(stderr, "\t   --to-sequences \t\textract sequences from graph and write to file [off]\n");
+        } break;
+        case TRANSFORM_ANNOTATION: {
+            fprintf(stderr, "Usage: %s transform [options] ANNOTATOR\n\n", prog_name.c_str());
+
+            fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
+            fprintf(stderr, "\t   --to-row-format \t\ttransform annotations to the row-wise format [off]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
     }
 

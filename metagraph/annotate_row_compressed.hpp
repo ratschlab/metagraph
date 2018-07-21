@@ -9,6 +9,10 @@
 
 namespace annotate {
 
+template <typename Color, class Encoder>
+class ColorCompressed;
+
+
 class RowMajorSparseBinaryMatrix {
   public:
     virtual ~RowMajorSparseBinaryMatrix() {}
@@ -31,6 +35,8 @@ class RowMajorSparseBinaryMatrix {
 
 template <typename Color = std::string, class Encoder = StringEncoder>
 class RowCompressed : public MultiColorAnnotation<uint64_t, Color> {
+    friend ColorCompressed<Color, Encoder>;
+
   public:
     using Index = typename MultiColorAnnotation<uint64_t, Color>::Index;
     using Coloring = typename MultiColorAnnotation<uint64_t, Color>::Coloring;

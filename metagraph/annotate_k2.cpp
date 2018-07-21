@@ -39,11 +39,12 @@ K2Compressed<Color, Encoder>::K2Compressed() : color_encoder_(new Encoder()) {}
 
 template <typename Color, class Encoder>
 K2Compressed<Color, Encoder>
-::K2Compressed(const ColorCompressed<Color, Encoder> &annotator)
-      : color_encoder_(
-            new Encoder(dynamic_cast<Encoder&>(*annotator.color_encoder_))
-        ) {
-    const_cast<ColorCompressed<Color, Encoder>&>(annotator).flush();
+::K2Compressed(const ColorCompressed<Color, Encoder> &annotator) : K2Compressed() {
+    annotator.flush();
+
+    for (size_t c = 0; c < annotator.color_encoder_->size(); ++c) {
+        color_encoder_->encode(annotator.color_encoder_->decode(c), true);
+    }
 
     std::vector<sdsl::sd_vector<>*> columns;
     for (const auto &col : annotator.bitmatrix_) {

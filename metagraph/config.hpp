@@ -19,6 +19,7 @@ class Config {
     bool fasta_anno = false;
     bool to_adj_list = false;
     bool to_sequences = false;
+    bool to_row_annotator = false;
     bool count_kmers_query = false;
     bool query_presence = false;
     bool filter_present = false;
@@ -84,6 +85,7 @@ class Config {
         ANNOTATE_COORDINATES,
         MERGE_ANNOTATIONS,
         TRANSFORM,
+        TRANSFORM_ANNOTATION,
         CLASSIFY
     };
     IdentityType identity = NO_IDENTITY;

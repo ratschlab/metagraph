@@ -16,6 +16,9 @@ class K2Compressed;
 template <typename Color, class Encoder>
 class FastColorCompressed;
 
+template <typename Color, class Encoder>
+class RowCompressed;
+
 
 template <typename Color = std::string, class Encoder = StringEncoder>
 class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
@@ -64,9 +67,16 @@ class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
     size_t num_colors() const;
     double sparsity() const;
 
+    void convert_to_row_annotator(RowCompressed<Color, Encoder> *annotator,
+                                  size_t num_threads = 1) const;
+
   private:
     std::vector<uint64_t> count_colors(const std::vector<Index> &indices) const;
 
+    static void add_labels(const std::vector<sdsl::select_support_sd<>> *select_columns,
+                           const std::vector<sdsl::rank_support_sd<>> *rank_columns,
+                           uint64_t begin, uint64_t end,
+                           RowCompressed<Color, Encoder> *annotator);
     void release();
     void flush() const;
     void flush(size_t j, sdsl::bit_vector *annotation_curr);

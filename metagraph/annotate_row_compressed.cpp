@@ -26,10 +26,12 @@ class VectorVectorMatrix : public RowMajorSparseBinaryMatrix {
     VectorVectorMatrix(size_t num_rows) : vector_(num_rows) {}
 
     void set_bit(size_t i, size_t j) {
+        assert(i < vector_.size());
         if (!is_set_bit(i, j))
             vector_[i].push_back(j);
     }
     bool is_set_bit(size_t i, size_t j) const {
+        assert(i < vector_.size());
         return std::find(vector_[i].begin(), vector_[i].end(), j)
                     != vector_[i].end();
     }

@@ -6,8 +6,11 @@
 
 #include "serialization.hpp"
 #include "utils.hpp"
+#include "annotate_row_compressed.hpp"
 
 using utils::remove_suffix;
+
+size_t kNumRowsInBlock = 5'000'000;
 
 
 namespace annotate {
@@ -404,6 +407,62 @@ sdsl::bit_vector& ColorCompressed<Color, Encoder>::uncompress(size_t j) {
 
         cached_colors_.Put(j, bit_vector);
         return *bit_vector;
+    }
+}
+
+template <typename Color, class Encoder>
+void ColorCompressed<Color, Encoder>::
+convert_to_row_annotator(RowCompressed<Color, Encoder> *annotator,
+                         size_t num_threads) const {
+    flush();
+
+    annotator->matrix_->reinitialize(num_rows_);
+    annotator->color_encoder_.reset(new Encoder());
+    for (size_t c = 0; c < color_encoder_->size(); ++c) {
+        annotator->color_encoder_->encode(color_encoder_->decode(c), true);
+    }
+
+    std::vector<sdsl::select_support_sd<>> select_columns;
+    std::vector<sdsl::rank_support_sd<>> rank_columns;
+
+    for (const auto &v : bitmatrix_) {
+        select_columns.emplace_back(v.get());
+        rank_columns.emplace_back(v.get());
+    }
+
+    if (num_threads <= 1) {
+        add_labels(&select_columns, &rank_columns, 0, num_rows_, annotator);
+        return;
+    }
+
+    auto thread_pool = std::make_unique<utils::ThreadPool>(num_threads);
+    for (uint64_t i = 0; i < num_rows_; i += kNumRowsInBlock) {
+        thread_pool->enqueue(add_labels,
+            &select_columns, &rank_columns,
+            i, std::min(i + kNumRowsInBlock, num_rows_),
+            annotator
+        );
+    }
+    thread_pool.reset();
+}
+
+template <typename Color, class Encoder>
+void ColorCompressed<Color, Encoder>::
+add_labels(const std::vector<sdsl::select_support_sd<>> *select_columns,
+           const std::vector<sdsl::rank_support_sd<>> *rank_columns,
+           uint64_t begin, uint64_t end,
+           RowCompressed<Color, Encoder> *annotator) {
+    assert(begin <= end);
+    assert(end <= annotator->matrix_->size());
+
+    for (size_t j = 0; j < select_columns->size(); ++j) {
+        // sdsl's rank computes the result excluding the query index
+        uint64_t first = rank_columns->at(j)(begin) + 1;
+        uint64_t last = rank_columns->at(j)(end);
+
+        for (uint64_t r = first; r <= last; ++r) {
+            annotator->matrix_->set_bit(select_columns->at(j)(r), j);
+        }
     }
 }
 

@@ -4,6 +4,7 @@
 
 #include "annotate.hpp"
 #include "annotate_color_compressed.hpp"
+#include "annotate_row_compressed.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
@@ -459,4 +460,100 @@ TEST(ColorCompressed, aggregate_colors) {
 
     EXPECT_EQ(convert_to_set({}),
               convert_to_set(annotation.aggregate_colors({ 0, 1, 2, 3, 4 }, 1)));
+}
+
+TEST(ColorCompressed, ToRowAnnotator) {
+    {
+        annotate::ColorCompressed<> annotation(0);
+
+        annotate::RowCompressed<> row_annotator(0);
+        annotation.convert_to_row_annotator(&row_annotator);
+    }
+    {
+        annotate::ColorCompressed<> annotation(1);
+
+        annotate::RowCompressed<> row_annotator(0);
+        annotation.convert_to_row_annotator(&row_annotator);
+
+        for (size_t i = 0; i < 1; ++i) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+    {
+        annotate::ColorCompressed<> annotation(1);
+        annotation.add_colors(0, {"Label0", "Label2", "Label8"});
+
+        annotate::RowCompressed<> row_annotator(0);
+        annotation.convert_to_row_annotator(&row_annotator);
+
+        for (size_t i = 0; i < 1; ++i) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+    {
+        annotate::ColorCompressed<> annotation(6);
+        annotation.add_colors(0, {"Label0", "Label2", "Label8"});
+        annotation.add_colors(2, {"Label1", "Label2"});
+        annotation.add_colors(3, {});
+        annotation.add_colors(4, {"Label1", "Label2", "Label8"});
+        annotation.add_colors(5, {"Label2"});
+
+        annotate::RowCompressed<> row_annotator(0);
+        annotation.convert_to_row_annotator(&row_annotator);
+
+        for (size_t i = 0; i < 6; ++i) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+}
+
+TEST(ColorCompressed, ToRowAnnotatorParallel) {
+    {
+        annotate::ColorCompressed<> annotation(0);
+
+        annotate::RowCompressed<> row_annotator(0);
+        annotation.convert_to_row_annotator(&row_annotator, 10);
+    }
+    {
+        annotate::ColorCompressed<> annotation(1);
+
+        annotate::RowCompressed<> row_annotator(0);
+        annotation.convert_to_row_annotator(&row_annotator, 10);
+
+        for (size_t i = 0; i < 1; ++i) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+    {
+        annotate::ColorCompressed<> annotation(1);
+        annotation.add_colors(0, {"Label0", "Label2", "Label8"});
+
+        annotate::RowCompressed<> row_annotator(0);
+        annotation.convert_to_row_annotator(&row_annotator, 10);
+
+        for (size_t i = 0; i < 1; ++i) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
+    {
+        annotate::ColorCompressed<> annotation(6);
+        annotation.add_colors(0, {"Label0", "Label2", "Label8"});
+        annotation.add_colors(2, {"Label1", "Label2"});
+        annotation.add_colors(3, {});
+        annotation.add_colors(4, {"Label1", "Label2", "Label8"});
+        annotation.add_colors(5, {"Label2"});
+
+        annotate::RowCompressed<> row_annotator(0);
+        annotation.convert_to_row_annotator(&row_annotator, 10);
+
+        for (size_t i = 0; i < 6; ++i) {
+            EXPECT_EQ(convert_to_set(annotation.get(i)),
+                      convert_to_set(row_annotator.get(i)));
+        }
+    }
 }
