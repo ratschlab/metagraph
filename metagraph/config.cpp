@@ -264,7 +264,7 @@ Config::Config(int argc, const char *argv[]) {
         print_usage_and_exit = true;
 
     if (identity == TRANSFORM_ANNOTATION && outfbase.empty())
-        outfbase = fname.at(0);
+        print_usage_and_exit = true;
 
     if (identity == MERGE && fname.size() < 2)
         print_usage_and_exit = true;
@@ -568,7 +568,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --to-sequences \t\textract sequences from graph and write to file [off]\n");
         } break;
         case TRANSFORM_ANNOTATION: {
-            fprintf(stderr, "Usage: %s transform [options] ANNOTATOR\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s transform_anno [options] -o <annotator_basename> ANNOTATOR\n\n", prog_name.c_str());
 
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t   --to-row-format \t\ttransform annotations to the row-wise format [off]\n");
