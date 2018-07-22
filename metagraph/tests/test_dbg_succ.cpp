@@ -903,18 +903,43 @@ TEST(DBGSuccinct, FindSequence) {
         EXPECT_EQ(k + 2, index);
 
         EXPECT_FALSE(graph->find(std::string(k - 1, 'A'), 1));
+        EXPECT_FALSE(graph->find(std::string(k - 1, 'A'), 0.75));
+        EXPECT_FALSE(graph->find(std::string(k - 1, 'A'), 0.5));
+        EXPECT_FALSE(graph->find(std::string(k - 1, 'A'), 0.25));
         EXPECT_FALSE(graph->find(std::string(k - 1, 'A'), 0));
         EXPECT_TRUE(graph->find(std::string(k, 'A'), 1));
+        EXPECT_TRUE(graph->find(std::string(k, 'A'), 0.75));
+        EXPECT_TRUE(graph->find(std::string(k, 'A'), 0.5));
+        EXPECT_TRUE(graph->find(std::string(k, 'A'), 0.25));
         EXPECT_TRUE(graph->find(std::string(k, 'A'), 0));
         EXPECT_TRUE(graph->find(std::string(k + 1, 'A'), 1));
+        EXPECT_TRUE(graph->find(std::string(k + 1, 'A'), 0.75));
+        EXPECT_TRUE(graph->find(std::string(k + 1, 'A'), 0.5));
+        EXPECT_TRUE(graph->find(std::string(k + 1, 'A'), 0.25));
         EXPECT_TRUE(graph->find(std::string(k + 1, 'A'), 0));
 
         EXPECT_FALSE(graph->find(std::string(k - 1, 'B'), 1));
+        EXPECT_FALSE(graph->find(std::string(k - 1, 'B'), 0.75));
+        EXPECT_FALSE(graph->find(std::string(k - 1, 'B'), 0.5));
+        EXPECT_FALSE(graph->find(std::string(k - 1, 'B'), 0.25));
         EXPECT_FALSE(graph->find(std::string(k - 1, 'B'), 0));
         EXPECT_FALSE(graph->find(std::string(k, 'B'), 1));
+        EXPECT_FALSE(graph->find(std::string(k, 'B'), 0.75));
+        EXPECT_FALSE(graph->find(std::string(k, 'B'), 0.5));
+        EXPECT_FALSE(graph->find(std::string(k, 'B'), 0.25));
         EXPECT_TRUE(graph->find(std::string(k, 'B'), 0));
         EXPECT_FALSE(graph->find(std::string(k + 1, 'B'), 1));
+        EXPECT_FALSE(graph->find(std::string(k + 1, 'B'), 0.75));
+        EXPECT_FALSE(graph->find(std::string(k + 1, 'B'), 0.5));
+        EXPECT_FALSE(graph->find(std::string(k + 1, 'B'), 0.25));
         EXPECT_TRUE(graph->find(std::string(k + 1, 'B'), 0));
+
+        EXPECT_FALSE(graph->find(std::string(k + 1, 'A') + std::string(k + 1, 'B'), 1));
+        EXPECT_FALSE(graph->find(std::string(k + 1, 'A') + std::string(k + 1, 'B'),
+                    3.0f / static_cast<double>(k + 3)));
+        EXPECT_TRUE(graph->find(std::string(k + 1, 'A') + std::string(k + 1, 'B'),
+                    2.0f / static_cast<double>(k + 3)));
+        EXPECT_TRUE(graph->find(std::string(k + 1, 'A') + std::string(k + 1, 'B'), 0));
 
         delete graph;
     }
