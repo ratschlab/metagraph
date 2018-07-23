@@ -218,32 +218,34 @@ TEST(wavelet_tree_dyn, InsertDelete) {
 }
 
 
-TEST(wavelet_tree_stat, ToStdVector) {
+std::vector<uint64_t> to_std_vector(const sdsl::int_vector<> &int_vector) {
+    return std::vector<uint64_t>(int_vector.begin(), int_vector.end());
+}
+
+TEST(wavelet_tree_stat, ToVector) {
     std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
                                       0, 1, 2, 0, 3, 2, 1, 1 };
-    wavelet_tree *vector = new wavelet_tree_stat(4, numbers);
+    wavelet_tree *vector = new wavelet_tree_stat(2, numbers);
     ASSERT_TRUE(vector);
-    EXPECT_EQ(numbers, vector->to_vector());
+    EXPECT_EQ(numbers, to_std_vector(vector->to_vector()));
     delete vector;
 }
 
-
-TEST(wavelet_tree_small, ToStdVector) {
+TEST(wavelet_tree_small, ToVector) {
     std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
                                       0, 1, 2, 0, 3, 2, 1, 1 };
-    wavelet_tree *vector = new wavelet_tree_small(4, numbers);
+    wavelet_tree *vector = new wavelet_tree_small(2, numbers);
     ASSERT_TRUE(vector);
-    EXPECT_EQ(numbers, vector->to_vector());
+    EXPECT_EQ(numbers, to_std_vector(vector->to_vector()));
     delete vector;
 }
 
-
-TEST(wavelet_tree_dyn, ToStdVector) {
+TEST(wavelet_tree_dyn, ToVector) {
     std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
                                       0, 1, 2, 0, 3, 2, 1, 1 };
-    wavelet_tree *vector = new wavelet_tree_dyn(4, numbers);
+    wavelet_tree *vector = new wavelet_tree_dyn(2, numbers);
     ASSERT_TRUE(vector);
-    EXPECT_EQ(numbers, vector->to_vector());
+    EXPECT_EQ(numbers, to_std_vector(vector->to_vector()));
     delete vector;
 }
 
@@ -319,7 +321,7 @@ TEST(wavelet_tree_stat, MoveConstructor) {
         int_vector[i] = numbers[i];
     }
 
-    wavelet_tree_stat vector(std::move(int_vector));
+    wavelet_tree_stat vector(2, std::move(int_vector));
 
     reference_based_test(vector, numbers);
 }
@@ -333,7 +335,7 @@ TEST(wavelet_tree_small, MoveConstructor) {
         int_vector[i] = numbers[i];
     }
 
-    wavelet_tree_small vector(std::move(int_vector));
+    wavelet_tree_small vector(2, std::move(int_vector));
 
     reference_based_test(vector, numbers);
 }
@@ -348,7 +350,7 @@ TEST(wavelet_tree_stat, MoveAssignment) {
     }
 
     wavelet_tree_stat vector(1);
-    vector = std::move(int_vector);
+    vector = wavelet_tree_stat(2, std::move(int_vector));
 
     reference_based_test(vector, numbers);
 }
@@ -363,29 +365,28 @@ TEST(wavelet_tree_small, MoveAssignment) {
     }
 
     wavelet_tree_small vector(1);
-    vector = std::move(int_vector);
+    vector = wavelet_tree_small(2, std::move(int_vector));
 
     reference_based_test(vector, numbers);
 }
 
-
 TEST(wavelet_tree_stat, BeyondTheDNA) {
-    std::vector<uint64_t> numbers = { 0, 57, 0, 1, 100, 1, 1, 0,
-                                      0, 1, 89, 0, 3, 2, 75, 1 };
+    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                      0, 1, 2, 0, 3, 2, 1, 1 };
     wavelet_tree_stat vector(7, numbers);
-    EXPECT_EQ(numbers, vector.to_vector());
+    EXPECT_EQ(numbers, to_std_vector(vector.to_vector()));
 }
 
 TEST(wavelet_tree_small, BeyondTheDNA) {
-    std::vector<uint64_t> numbers = { 0, 57, 0, 1, 100, 1, 1, 0,
-                                      0, 1, 89, 0, 3, 2, 75, 1 };
+    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                      0, 1, 2, 0, 3, 2, 1, 1 };
     wavelet_tree_small vector(7, numbers);
-    EXPECT_EQ(numbers, vector.to_vector());
+    EXPECT_EQ(numbers, to_std_vector(vector.to_vector()));
 }
 
 TEST(wavelet_tree_dyn, BeyondTheDNA) {
-    std::vector<uint64_t> numbers = { 0, 57, 0, 1, 100, 1, 1, 0,
-                                      0, 1, 89, 0, 3, 2, 75, 1 };
+    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                      0, 1, 2, 0, 3, 2, 1, 1 };
     wavelet_tree_dyn vector(7, numbers);
-    EXPECT_EQ(numbers, vector.to_vector());
+    EXPECT_EQ(numbers, to_std_vector(vector.to_vector()));
 }

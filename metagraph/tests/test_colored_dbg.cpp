@@ -20,7 +20,7 @@ TEST(ColoredDBG, ExtendGraphWithSimplePath) {
         ASSERT_EQ(k + 2, graph.num_edges());
 
         std::vector<uint64_t> inserted_edge_idx;
-        for (uint64_t j = 1; j <= inserted_edges.get_num_set_bits(); ++j) {
+        for (uint64_t j = 1; j <= inserted_edges.num_set_bits(); ++j) {
             inserted_edge_idx.push_back(inserted_edges.select1(j));
         }
 
