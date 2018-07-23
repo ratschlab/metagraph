@@ -945,6 +945,44 @@ TEST(DBGSuccinct, FindSequence) {
     }
 }
 
+TEST(DBGSuccinct, MappingHeuristics) {
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ graph(k);
+
+        graph.add_sequence(std::string(100, 'A'));
+
+        // heuristic level
+        for (size_t h = 0; h < 3; ++h) {
+            std::string query(100, 'A');
+
+            for (double a : { 1.0, 0.75, 0.5, 0.25, 0.0 }) {
+                EXPECT_TRUE(graph.find(query, a, h));
+            }
+
+            std::string check(k, 'A');
+            // number of mutations
+            for (size_t n = 1; n <= 100; ++n) {
+                std::string query(100, 'A');
+                for (size_t i = 0; i < query.length(); i += query.length() / n) {
+                    query[i] = 'B';
+                }
+
+                uint64_t num_good_kmers = 0;
+                for (size_t i = 0; i < query.length() - k + 1; ++i) {
+                    if (std::string(query.begin() + i, query.begin() + i + k) == check) {
+                        num_good_kmers++;
+                    }
+                }
+                double good_fraction = static_cast<double>(num_good_kmers) / (query.length() - k + 1);
+
+                for (double a : { 1.0, 0.75, 0.5, 0.25, 0.0 }) {
+                    EXPECT_EQ(a <= good_fraction, graph.find(query, a, h));
+                }
+            }
+        }
+    }
+}
+
 TEST(DBGSuccinct, Traversals) {
     for (size_t k = 1; k < 10; ++k) {
         SequenceGraph *graph = new DBG_succ(k);

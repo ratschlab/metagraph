@@ -90,8 +90,15 @@ class DBG_succ : public SequenceGraph {
                    [](edge_index, uint64_t&){ return false; }) const;
 
     // Check whether graph contains fraction of k-mers from the sequence
+
     bool find(const std::string &sequence,
-              double kmer_discovery_fraction = 1) const;
+              double kmer_discovery_fraction = 1) const {
+        return find(sequence, kmer_discovery_fraction, 0);
+    }
+
+    bool find(const std::string &sequence,
+              double kmer_discovery_fraction,
+              uint64_t mapping_heuristic_level) const;
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
@@ -437,6 +444,23 @@ class DBG_succ : public SequenceGraph {
                 return std::make_pair(0, 0);
 
             // Translate the node indices from the sources to the targets.
+            /*
+            if (rl > W->size()) {
+                rl = 0;
+            } else {
+                rl = fwd(rl);
+                if (rl == W->size())
+                    rl = 0;
+            }
+
+            if (ru > W->size()) {
+                ru = 0;
+            } else {
+                ru = fwd(ru);
+                if (ru == W->size())
+                    ru = 0;
+            }
+            */
             rl = outgoing(rl, s);
             ru = outgoing(ru, s);
         }

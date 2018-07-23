@@ -1715,12 +1715,14 @@ int main(int argc, const char *argv[]) {
                             && config->alignment_length == graph->get_k()) {
                         if (config->filter_present) {
                             if (graph->find(read_stream->seq.s,
-                                            config->discovery_fraction))
+                                            config->discovery_fraction,
+                                            config->mapping_heuristic_level))
                                 std::cout << ">" << read_stream->name.s << "\n"
                                                  << read_stream->seq.s << "\n";
                         } else {
                             std::cout << graph->find(read_stream->seq.s,
-                                                     config->discovery_fraction) << "\n";
+                                                     config->discovery_fraction,
+                                                     config->mapping_heuristic_level) << "\n";
                         }
                         return;
                     }

@@ -148,6 +148,8 @@ Config::Config(int argc, const char *argv[]) {
             anno_labels_delimiter = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-s") || !strcmp(argv[i], "--num-splits")) {
             nsplits = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--mapping-heuristic-level")) {
+            mapping_heuristic_level = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--num-top-labels")) {
             num_top_labels = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--suffix")) {
@@ -434,6 +436,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --filter-k [INT] \t\tlength of k-mers used for counting and filtering [3]\n");
             fprintf(stderr, "\t   --query-presence\t\tTest sequences for presence [off]\n");
+            fprintf(stderr, "\t   --mapping-heuristic-level\t\tLevel of heuristics to use for unmapped k-mers (0, 1, or 2) [0]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT]\tFraction of k-mers required to count sequence [1.0]\n");
             fprintf(stderr, "\t   --filter-present\t\tReport only present input sequences [off]\n");
             fprintf(stderr, "\t   --count-kmers \t\tQuery the number of k-mers discovered [off]\n");

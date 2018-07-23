@@ -868,7 +868,8 @@ void DBG_succ::align(const std::string &sequence,
 }
 
 bool DBG_succ::find(const std::string &sequence,
-                    double kmer_discovery_fraction) const {
+                    double kmer_discovery_fraction,
+                    uint64_t mapping_heuristic_level) const {
     if (sequence.length() < k_)
         return false;
 
@@ -894,7 +895,32 @@ bool DBG_succ::find(const std::string &sequence,
                         || num_kmers_discovered >= min_kmers_discovered;
         };
 
-    align(sequence, callback, terminate);
+    const auto unmapped = [&](uint64_t, uint64_t&) { return false; };
+
+    const auto unmapped_heuristic =
+        [&](uint64_t, uint64_t &i) {
+            i += k_ - 1;
+            return false;
+        };
+
+    const auto unmapped_adaptive =
+        [&](uint64_t e, uint64_t &i) {
+            return k_ * (max_kmers_missing - num_kmers_missing)
+                    > min_kmers_discovered - num_kmers_discovered
+                ? unmapped_heuristic(e, i)
+                : unmapped(e, i);
+        };
+
+    std::function<bool(uint64_t, uint64_t&)> unmap;
+    if (!mapping_heuristic_level || kmer_discovery_fraction == 1) {
+        unmap = unmapped;
+    } else if (mapping_heuristic_level == 1) {
+        unmap = unmapped_adaptive;
+    } else {
+        unmap = unmapped_heuristic;
+    }
+
+    align(sequence, callback, terminate, unmap);
 
     return num_kmers_missing <= max_kmers_missing;
 }
