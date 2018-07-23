@@ -335,7 +335,7 @@ uint64_t DBG_succ::rank_last(uint64_t i) const {
  * returns the position of the i-th set bit in last[1..i].
  */
 uint64_t DBG_succ::select_last(uint64_t i) const {
-    assert(i <= last->get_num_set_bits());
+    assert(i <= last->num_set_bits());
 
     return i == 0 ? 0 : last->select1(i);
 }
@@ -362,7 +362,7 @@ uint64_t DBG_succ::succ_last(uint64_t i) const {
 
     uint64_t next_rank = rank_last(i - 1) + 1;
 
-    if (next_rank > last->get_num_set_bits())
+    if (next_rank > last->num_set_bits())
         return last->size();
 
     return select_last(next_rank);
@@ -935,7 +935,7 @@ std::vector<std::vector<HitInfo>> DBG_succ::align_fuzzy(const std::string &seque
  * Returns the number of nodes on the current graph.
  */
 uint64_t DBG_succ::num_nodes() const {
-    return last->get_num_set_bits();
+    return last->num_set_bits();
 }
 
 /**
@@ -1002,6 +1002,17 @@ char DBG_succ::decode(TAlphabet c) {
     return alphabet[c];
 }
 
+template <class WaveletTree, class BitVector>
+void convert(wavelet_tree **W, bit_vector **last) {
+    wavelet_tree *W_new = new WaveletTree((*W)->convert_to<WaveletTree>());
+    delete *W;
+    *W = W_new;
+
+    bit_vector *last_new = new BitVector((*last)->convert_to<BitVector>());
+    delete *last;
+    *last = last_new;
+}
+
 void DBG_succ::switch_state(Config::StateType new_state) {
 
     //std::cerr << "switching state from " << this->state << " to " << state << std::endl;
@@ -1009,37 +1020,16 @@ void DBG_succ::switch_state(Config::StateType new_state) {
         return;
 
     switch (new_state) {
-        case Config::DYN: {
-            wavelet_tree *W_new = new wavelet_tree_dyn(W->convert_to<wavelet_tree_dyn>(kLogSigma));
-            delete W;
-            W = W_new;
-
-            bit_vector *last_new = new bit_vector_dyn(last->convert_to<bit_vector_dyn>());
-            delete last;
-            last = last_new;
-
-            break;
-        }
         case Config::STAT: {
-            wavelet_tree *W_new = new wavelet_tree_stat(W->convert_to<wavelet_tree_stat>(kLogSigma));
-            delete W;
-            W = W_new;
-
-            bit_vector *last_new = new bit_vector_stat(last->convert_to<bit_vector_stat>());
-            delete last;
-            last = last_new;
-
+            convert<wavelet_tree_stat, bit_vector_stat>(&W, &last);
             break;
         }
         case Config::SMALL: {
-            wavelet_tree *W_new = new wavelet_tree_small(W->convert_to<wavelet_tree_small>(kLogSigma));
-            delete W;
-            W = W_new;
-
-            bit_vector *last_new = new bit_vector_small(last->convert_to<bit_vector_small>());
-            delete last;
-            last = last_new;
-
+            convert<wavelet_tree_small, bit_vector_small>(&W, &last);
+            break;
+        }
+        case Config::DYN: {
+            convert<wavelet_tree_dyn, bit_vector_dyn>(&W, &last);
             break;
         }
     }

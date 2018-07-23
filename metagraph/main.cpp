@@ -877,7 +877,7 @@ int main(int argc, const char *argv[]) {
                 assert(inserted_edges.get());
 
                 std::vector<uint64_t> inserted_edge_idx;
-                for (uint64_t j = 1; j <= inserted_edges->get_num_set_bits(); ++j) {
+                for (uint64_t j = 1; j <= inserted_edges->num_set_bits(); ++j) {
                     inserted_edge_idx.push_back(inserted_edges->select1(j));
                 }
                 inserted_edges.reset();

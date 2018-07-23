@@ -135,7 +135,7 @@ DBG_succ::Chunk::build_graph_from_chunks(const std::vector<std::string> &chunk_f
     }
 
     delete graph->W;
-    graph->W = new wavelet_tree_stat(std::move(W));
+    graph->W = new wavelet_tree_stat(kLogSigma, std::move(W));
 
     delete graph->last;
     graph->last = new bit_vector_stat(std::move(last));

@@ -31,7 +31,9 @@ void reference_based_test(const bit_vector &vector,
     for (size_t i = 1; i < vector.size(); ++i) {
         EXPECT_EQ(vector[i], vector.rank1(i) - vector.rank1(i - 1));
         EXPECT_EQ(vector[i], reference[i]);
-    }    
+    }
+
+    EXPECT_EQ(reference, vector.to_vector());
 }
 
 
@@ -152,7 +154,7 @@ TEST(bit_vector_stat, set) {
 }
 
 
-TEST(bit_vector_small, set) {
+TEST(bit_vector_small, setException) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
     bit_vector *vector = new bit_vector_small(init_list);
@@ -210,7 +212,7 @@ TEST(bit_vector_stat, InsertDelete) {
 }
 
 
-TEST(bit_vector_small, InsertDelete) {
+TEST(bit_vector_small, InsertDeleteException) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
     bit_vector *vector = new bit_vector_small(init_list);
@@ -292,31 +294,24 @@ TEST(bit_vector_small, Serialization) {
 TEST(bit_vector_stat, MoveConstructor) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
-
     std::vector<bool> numbers(init_list);
-    sdsl::bit_vector bit_vector(numbers.size());
-    for (size_t i = 0; i < numbers.size(); ++i) {
-        bit_vector[i] = numbers[i];
-    }
-
-    bit_vector_stat vector(std::move(bit_vector));
-
+    bit_vector_stat vector(numbers);
     reference_based_test(vector, numbers);
 }
 
+TEST(bit_vector_dyn, MoveConstructor) {
+    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+    std::vector<bool> numbers(init_list);
+    bit_vector_dyn vector(numbers);
+    reference_based_test(vector, numbers);
+}
 
 TEST(bit_vector_small, MoveConstructor) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
-
     std::vector<bool> numbers(init_list);
-    sdsl::bit_vector bit_vector(numbers.size());
-    for (size_t i = 0; i < numbers.size(); ++i) {
-        bit_vector[i] = numbers[i];
-    }
-
-    bit_vector_small vector(std::move(bit_vector));
-
+    bit_vector_small vector(numbers);
     reference_based_test(vector, numbers);
 }
 
@@ -324,32 +319,29 @@ TEST(bit_vector_small, MoveConstructor) {
 TEST(bit_vector_stat, MoveAssignment) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
-
     std::vector<bool> numbers(init_list);
-    sdsl::bit_vector bit_vector(numbers.size());
-    for (size_t i = 0; i < numbers.size(); ++i) {
-        bit_vector[i] = numbers[i];
-    }
-
-    bit_vector_stat vector;
-    vector = std::move(bit_vector);
-
-    reference_based_test(vector, numbers);
+    bit_vector_stat first(numbers);
+    bit_vector_stat second;
+    second = std::move(first);
+    reference_based_test(second, numbers);
 }
 
+TEST(bit_vector_dyn, MoveAssignment) {
+    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+    std::vector<bool> numbers(init_list);
+    bit_vector_dyn first(numbers);
+    bit_vector_dyn second;
+    second = std::move(first);
+    reference_based_test(second, numbers);
+}
 
 TEST(bit_vector_small, MoveAssignment) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
-
     std::vector<bool> numbers(init_list);
-    sdsl::bit_vector bit_vector(numbers.size());
-    for (size_t i = 0; i < numbers.size(); ++i) {
-        bit_vector[i] = numbers[i];
-    }
-
-    bit_vector_small vector;
-    vector = std::move(bit_vector);
-
-    reference_based_test(vector, numbers);
+    bit_vector_small first(numbers);
+    bit_vector_small second;
+    second = std::move(first);
+    reference_based_test(second, numbers);
 }

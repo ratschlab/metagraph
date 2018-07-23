@@ -25,17 +25,22 @@ void test_graph(DBG_succ *graph, const std::string &last,
                                  const std::vector<uint64_t> &W,
                                  const std::string &F,
                                  Config::StateType state) {
+    Config::StateType old_state = graph->state;
     graph->switch_state(state);
 
     std::ostringstream ostr;
 
     ostr << *graph->last;
-    EXPECT_EQ(last, ostr.str()) << "state: " << state;
+    EXPECT_EQ(last, ostr.str()) << "state: " << state
+                                << ", old state: " << old_state;
 
     ostr.clear();
     ostr.str("");
 
-    EXPECT_EQ(W, graph->W->to_vector()) << "state: " << state;
+    auto W_vector = graph->W->to_vector();
+    EXPECT_EQ(W, std::vector<uint64_t>(W_vector.begin(), W_vector.end()))
+        << "state: " << state
+        << ", old state: " << old_state;
 
     ostr.clear();
     ostr.str("");
@@ -43,7 +48,8 @@ void test_graph(DBG_succ *graph, const std::string &last,
     for (size_t i = 0; i < graph->F.size(); ++i) {
         ostr << graph->F[i] << " ";
     }
-    EXPECT_EQ(F, ostr.str()) << "state: " << state;
+    EXPECT_EQ(F, ostr.str()) << "state: " << state
+                             << ", old state: " << old_state;
 }
 
 
@@ -51,7 +57,15 @@ void test_graph(DBG_succ *graph, const std::string &last,
                                  const std::vector<uint64_t> &W,
                                  const std::string &F) {
     test_graph(graph, last, W, F, Config::DYN);
+    test_graph(graph, last, W, F, Config::DYN);
     test_graph(graph, last, W, F, Config::STAT);
+    test_graph(graph, last, W, F, Config::STAT);
+    test_graph(graph, last, W, F, Config::SMALL);
+    test_graph(graph, last, W, F, Config::SMALL);
+    test_graph(graph, last, W, F, Config::STAT);
+    test_graph(graph, last, W, F, Config::DYN);
+    test_graph(graph, last, W, F, Config::SMALL);
+    test_graph(graph, last, W, F, Config::DYN);
 }
 
 
@@ -88,12 +102,7 @@ TEST(DBGSuccinct, EmptyGraph) {
 
 TEST(DBGSuccinct, SwitchState) {
     DBG_succ *graph = new DBG_succ(3);
-    test_graph(graph, "01", { 0, 0 }, "0 1 1 1 1 1 ", Config::DYN);
-    test_graph(graph, "01", { 0, 0 }, "0 1 1 1 1 1 ", Config::STAT);
-    test_graph(graph, "01", { 0, 0 }, "0 1 1 1 1 1 ", Config::SMALL);
-    test_graph(graph, "01", { 0, 0 }, "0 1 1 1 1 1 ", Config::DYN);
-    test_graph(graph, "01", { 0, 0 }, "0 1 1 1 1 1 ", Config::SMALL);
-    test_graph(graph, "01", { 0, 0 }, "0 1 1 1 1 1 ", Config::STAT);
+    test_graph(graph, "01", { 0, 0 }, "0 1 1 1 1 1 ");
     delete graph;
 }
 
