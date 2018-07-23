@@ -31,7 +31,9 @@ class SequenceGraph {
     // and run callback until the termination condition is satisfied
     virtual void align(const std::string &sequence,
                        const std::function<void(edge_index)> &callback,
-                       const std::function<bool()> &terminate = [](){ return false; }) const = 0;
+                       const std::function<bool()> &terminate = [](){ return false; },
+                       const std::function<bool(edge_index, uint64_t&)> &unmapped =
+                           [](edge_index, uint64_t&){ return false; }) const = 0;
 
     // Check whether graph contains fraction of nodes from the sequence
     virtual bool find(const std::string &sequence,
@@ -83,7 +85,9 @@ class DBG_succ : public SequenceGraph {
     // and run callback until the termination condition is satisfied
     void align(const std::string &sequence,
                const std::function<void(edge_index)> &callback,
-               const std::function<bool()> &terminate = [](){ return false; }) const;
+               const std::function<bool()> &terminate = [](){ return false; },
+               const std::function<bool(edge_index, uint64_t&)> &unmapped =
+                   [](edge_index, uint64_t&){ return false; }) const;
 
     // Check whether graph contains fraction of k-mers from the sequence
     bool find(const std::string &sequence,

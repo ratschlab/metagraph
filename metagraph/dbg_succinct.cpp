@@ -809,10 +809,13 @@ std::string DBG_succ::get_node_str(uint64_t k_node) const {
 
 void DBG_succ::align(const std::string &sequence,
                      const std::function<void(edge_index)> &callback,
-                     const std::function<bool()> &terminate) const {
+                     const std::function<bool()> &terminate,
+                     const std::function<bool(edge_index, uint64_t&)> &unmapped) const {
     std::vector<TAlphabet> seq_encoded(sequence.size());
     std::transform(sequence.begin(), sequence.end(),
                    seq_encoded.begin(), encode);
+
+    std::vector<std::string> skipped_subsequences;
 
     for (uint64_t i = 0; i < seq_encoded.size() - k_ + 1; ++i) {
         auto range = index_range(&seq_encoded[i],
@@ -824,8 +827,22 @@ void DBG_succ::align(const std::string &sequence,
         if (terminate())
             return;
 
-        if (kmer_index == 0)
+        if (kmer_index == 0) {
+            uint64_t i_old = i;
+            if (unmapped(kmer_index, i))
+                return;
+
+            // Save skipped kmers for the end
+            if (i > i_old) {
+                skipped_subsequences.emplace_back(
+                    sequence.begin() + i_old + 1,
+                    sequence.begin()
+                        + std::min(i + k_, static_cast<uint64_t>(sequence.size()))
+                );
+            }
+
             continue;
+        }
 
         while (i < seq_encoded.size() - k_) {
             auto next = outgoing(kmer_index, seq_encoded[i + k_]);
@@ -842,6 +859,12 @@ void DBG_succ::align(const std::string &sequence,
             i++;
         }
     }
+
+    // Run if the end of sequence has been reached without satisfying the
+    // termination condition
+    for (auto &s : skipped_subsequences) {
+        align(s, callback, terminate);
+    }
 }
 
 bool DBG_succ::find(const std::string &sequence,
@@ -856,17 +879,23 @@ bool DBG_succ::find(const std::string &sequence,
     const size_t max_kmers_missing = num_kmers * (1 - kmer_discovery_fraction);
     const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
 
-    align(sequence,
+    const auto callback =
         [&](uint64_t i) {
             if (i > 0) {
                 num_kmers_discovered++;
             } else {
                 num_kmers_missing++;
             }
-        },
-        [&]() { return num_kmers_missing > max_kmers_missing
-                        || num_kmers_discovered >= min_kmers_discovered; }
-    );
+        };
+
+    const auto terminate =
+        [&]() {
+            return num_kmers_missing > max_kmers_missing
+                        || num_kmers_discovered >= min_kmers_discovered;
+        };
+
+    align(sequence, callback, terminate);
+
     return num_kmers_missing <= max_kmers_missing;
 }
 
