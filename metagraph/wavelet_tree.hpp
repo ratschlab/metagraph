@@ -2,6 +2,8 @@
 #define __WAVELET_TREE_HPP__
 
 #include <cstdint>
+#include <mutex>
+#include <atomic>
 
 #include <sdsl/wavelet_trees.hpp>
 #include <libmaus2/wavelet/DynamicWaveletTree.hpp>
@@ -42,6 +44,11 @@ class wavelet_tree_stat : public wavelet_tree {
     wavelet_tree_stat(uint8_t logsigma, sdsl::int_vector<>&& vector);
     wavelet_tree_stat(uint8_t logsigma, sdsl::wt_huff<>&& wwt);
 
+    wavelet_tree_stat(const wavelet_tree_stat &other);
+    wavelet_tree_stat(wavelet_tree_stat&& other);
+    wavelet_tree_stat& operator=(const wavelet_tree_stat &other);
+    wavelet_tree_stat& operator=(wavelet_tree_stat&& other);
+
     uint64_t rank(uint64_t c, uint64_t i) const;
     uint64_t select(uint64_t c, uint64_t i) const;
     uint64_t operator[](uint64_t id) const;
@@ -65,7 +72,8 @@ class wavelet_tree_stat : public wavelet_tree {
 
     sdsl::int_vector<> int_vector_;
     sdsl::wt_huff<> wwt_;
-    bool requires_update_ = true;
+    std::atomic_bool requires_update_ { true };
+    std::mutex mu_;
     uint64_t n_;
 };
 

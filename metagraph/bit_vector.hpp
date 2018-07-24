@@ -2,6 +2,8 @@
 #define __BIT_VECTOR_HPP__
 
 #include <cstdint>
+#include <mutex>
+#include <atomic>
 
 #include <sdsl/wavelet_trees.hpp>
 #include <libmaus2/bitbtree/bitbtree.hpp>
@@ -95,15 +97,16 @@ class bit_vector_stat : public bit_vector {
     uint64_t num_set_bits() const override { return num_set_bits_; }
 
   private:
+    void init_rs();
+
     sdsl::bit_vector vector_;
     uint64_t num_set_bits_ = 0;
 
     // maintain rank/select operations
     sdsl::rank_support_v5<> rk_;
     sdsl::select_support_mcl<> slct_;
-    bool requires_update_ = true;
-
-    void init_rs();
+    std::atomic_bool requires_update_ { true };
+    std::mutex mu_;
 };
 
 
