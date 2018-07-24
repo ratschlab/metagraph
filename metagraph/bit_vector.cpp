@@ -3,6 +3,8 @@
 #include <cassert>
 #include <libmaus2/bitio/putBit.hpp>
 
+#include "serialization.hpp"
+
 
 std::vector<bool> bit_vector::to_vector() const {
     std::vector<bool> result(size());
@@ -244,22 +246,38 @@ void bit_vector_stat::deleteBit(uint64_t id) {
     requires_update_ = true;
 }
 
+void bit_vector_stat::serialise(std::ostream &out) const {
+    vector_.serialize(out);
+
+    if (requires_update_)
+        const_cast<bit_vector_stat*>(this)->init_rs();
+
+    serialize_number(out, num_set_bits_);
+    rk_.serialize(out);
+    slct_.serialize(out);
+}
+
 bool bit_vector_stat::deserialise(std::istream &in) {
     if (!in.good())
         return false;
 
     try {
         vector_.load(in);
-        /*
-        rk_.load(in);
-        slct_.load(in);
 
-        rk_.set_vector(&vector_);
-        slct_.set_vector(&vector_);
-        */
-        num_set_bits_ = std::count(vector_.begin(), vector_.end(), 1);
-        requires_update_ = true;
-        init_rs();
+        try {
+            num_set_bits_ = load_number(in);
+            rk_.load(in, &vector_);
+            slct_.load(in, &vector_);
+            requires_update_ = false;
+        } catch (...) {
+            std::cerr << "Warning: Loading from file without bit_vector rank"
+                      << " and select support dumped. Reserialize to"
+                      << " make the loading faster." << std::endl;
+
+            num_set_bits_ = std::count(vector_.begin(), vector_.end(), 1);
+            requires_update_ = true;
+            init_rs();
+        }
         return true;
     } catch (const std::bad_alloc &exception) {
         std::cerr << "ERROR: Not enough memory to load bit_vector_stat." << std::endl;
@@ -267,17 +285,6 @@ bool bit_vector_stat::deserialise(std::istream &in) {
     } catch (...) {
         return false;
     }
-}
-
-void bit_vector_stat::serialise(std::ostream &out) const {
-    vector_.serialize(out);
-    /*
-    if (requires_update_)
-        init_rs();
-
-    rk_.serialize(out);
-    slct_.serialize(out);
-    */
 }
 
 void bit_vector_stat::init_rs() {
