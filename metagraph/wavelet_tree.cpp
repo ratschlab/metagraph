@@ -117,6 +117,34 @@ wavelet_tree_stat::wavelet_tree_stat(uint8_t logsigma, sdsl::wt_huff<>&& wwt)
         requires_update_(false),
         n_(wwt_.size()) {}
 
+wavelet_tree_stat::wavelet_tree_stat(const wavelet_tree_stat &other) {
+    *this = other;
+}
+
+wavelet_tree_stat::wavelet_tree_stat(wavelet_tree_stat&& other) {
+    *this = std::move(other);
+}
+
+wavelet_tree_stat& wavelet_tree_stat::operator=(const wavelet_tree_stat &other) {
+    int_vector_ = other.int_vector_;
+    n_ = other.n_;
+    if (!other.requires_update_) {
+        requires_update_ = false;
+        wwt_ = other.wwt_;
+    }
+    return *this;
+}
+
+wavelet_tree_stat& wavelet_tree_stat::operator=(wavelet_tree_stat&& other) {
+    int_vector_ = std::move(other.int_vector_);
+    n_ = other.n_;
+    if (!other.requires_update_) {
+        requires_update_ = false;
+        wwt_ = std::move(other.wwt_);
+    }
+    return *this;
+}
+
 bool wavelet_tree_stat::deserialise(std::istream &in) {
     if (!in.good())
         return false;
@@ -145,13 +173,22 @@ void wavelet_tree_stat::serialise(std::ostream &out) const {
 }
 
 void wavelet_tree_stat::set(uint64_t id, uint64_t val) {
-    wwt_ = decltype(wwt_)();
+    if (int_vector_[id] == val)
+        return;
+
+    if (!requires_update_) {
+        std::unique_lock<std::mutex> lock(mu_);
+        wwt_ = decltype(wwt_)();
+        requires_update_ = true;
+    }
     int_vector_[id] = val;
-    requires_update_ = true;
 }
 
 void wavelet_tree_stat::insert(uint64_t id, uint64_t val) {
-    wwt_ = decltype(wwt_)();
+    if (!requires_update_) {
+        requires_update_ = true;
+        wwt_ = decltype(wwt_)();
+    }
     if (n_ == size()) {
         int_vector_.resize(2 * n_ + 1);
     }
@@ -161,17 +198,18 @@ void wavelet_tree_stat::insert(uint64_t id, uint64_t val) {
                            int_vector_.begin() + n_ - 1,
                            int_vector_.begin() + n_);
     int_vector_[id] = val;
-    requires_update_ = true;
 }
 
 void wavelet_tree_stat::remove(uint64_t id) {
-    wwt_ = decltype(wwt_)();
+    if (!requires_update_) {
+        requires_update_ = true;
+        wwt_ = decltype(wwt_)();
+    }
     if (this->size() > 1)
         std::copy(int_vector_.begin() + id + 1,
                   int_vector_.begin() + n_,
                   int_vector_.begin() + id);
     n_--;
-    requires_update_ = true;
 }
 
 uint64_t wavelet_tree_stat::rank(uint64_t c, uint64_t i) const {
@@ -210,12 +248,14 @@ sdsl::int_vector<> wavelet_tree_stat::to_vector() const {
 }
 
 void wavelet_tree_stat::init_wt() {
-    int_vector_.resize(n_);
+    std::unique_lock<std::mutex> lock(mu_);
 
-    // release obsolete wavelet tree
-    wwt_ = decltype(wwt_)();
-    // initialize new wavelet tree
+    if (!requires_update_)
+        return;
+
+    int_vector_.resize(n_);
     wwt_ = decltype(wwt_)(int_vector_);
+
     requires_update_ = false;
 }
 

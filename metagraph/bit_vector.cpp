@@ -281,8 +281,14 @@ void bit_vector_stat::serialise(std::ostream &out) const {
 }
 
 void bit_vector_stat::init_rs() {
+    std::unique_lock<std::mutex> lock(mu_);
+
+    if (!requires_update_)
+        return;
+
     rk_ = sdsl::rank_support_v5<>(&vector_);
     slct_ = sdsl::select_support_mcl<>(&vector_);
+
     requires_update_ = false;
 }
 

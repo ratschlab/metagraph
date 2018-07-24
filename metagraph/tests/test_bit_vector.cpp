@@ -1,6 +1,7 @@
 #include "gtest/gtest.h"
 
 #include "bit_vector.hpp"
+#include "utils.hpp"
 
 
 const std::string test_data_dir = "../tests/data";
@@ -344,4 +345,35 @@ TEST(bit_vector_small, MoveAssignment) {
     bit_vector_small second;
     second = std::move(first);
     reference_based_test(second, numbers);
+}
+
+TEST(bit_vector_stat, ConcurrentReadingAfterWriting) {
+    utils::ThreadPool thread_pool(3);
+    bit_vector_stat vector;
+
+    std::vector<bool> bits;
+    std::vector<uint64_t> ranks = { 0 };
+
+    for (size_t i = 0; i < 10'000'000; ++i) {
+        bits.push_back((i + (i * i) % 31) % 2);
+        if (bits.back()) {
+            ranks.back()++;
+        }
+        ranks.push_back(ranks.back());
+    }
+
+    for (size_t i = 0; i < bits.size(); ++i) {
+        ASSERT_EQ(0u, vector.rank1(i));
+    }
+    for (size_t i = 0; i < bits.size(); ++i) {
+        vector.insertBit(i, bits[i]);
+    }
+    for (size_t t = 0; t < 5; ++t) {
+        thread_pool.enqueue([&]() {
+            for (size_t i = 0; i < bits.size(); ++i) {
+                ASSERT_EQ(ranks[i], vector.rank1(i));
+            }
+        });
+    }
+    thread_pool.join();
 }

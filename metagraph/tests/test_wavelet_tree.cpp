@@ -1,6 +1,7 @@
 #include "gtest/gtest.h"
 
 #include "wavelet_tree.hpp"
+#include "utils.hpp"
 
 
 const std::string test_data_dir = "../tests/data";
@@ -389,4 +390,38 @@ TEST(wavelet_tree_dyn, BeyondTheDNA) {
                                       0, 1, 2, 0, 3, 2, 1, 1 };
     wavelet_tree_dyn vector(7, numbers);
     EXPECT_EQ(numbers, to_std_vector(vector.to_vector()));
+}
+
+
+TEST(wavelet_tree_stat, ConcurrentReadingAfterWriting) {
+    utils::ThreadPool thread_pool(3);
+    wavelet_tree_stat vector(4);
+
+    size_t tested_number = 15;
+
+    std::vector<uint64_t> numbers;
+    std::vector<uint64_t> ranks = { 0 };
+
+    for (size_t i = 0; i < 10'000'000; ++i) {
+        numbers.push_back((i + (i * i) % 31) % 16);
+        if (numbers.back() == tested_number) {
+            ranks.back()++;
+        }
+        ranks.push_back(ranks.back());
+    }
+
+    for (size_t i = 0; i < numbers.size(); ++i) {
+        ASSERT_EQ(0u, vector.rank(tested_number, i));
+    }
+    for (size_t i = 0; i < numbers.size(); ++i) {
+        vector.insert(i, numbers[i]);
+    }
+    for (size_t t = 0; t < 5; ++t) {
+        thread_pool.enqueue([&]() {
+            for (size_t i = 0; i < numbers.size(); ++i) {
+                ASSERT_EQ(ranks[i], vector.rank(tested_number, i));
+            }
+        });
+    }
+    thread_pool.join();
 }
