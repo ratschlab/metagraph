@@ -423,3 +423,13 @@ TEST(Misc, RemoveSuffix) {
     EXPECT_EQ("acb.cde.efg", utils::remove_suffix("acb.cde.efg", ".cde"));
     EXPECT_EQ("acb.cde.efg", utils::remove_suffix("acb.cde.efg", "Aacb.cde.efg"));
 }
+
+TEST(Vector, ReserveInfinityCheckThrow) {
+    Vector<int> vector;
+    EXPECT_THROW(vector.reserve(2llu << 60), std::bad_alloc);
+}
+
+TEST(Vector, ResizeInfinityCheckThrow) {
+    Vector<int> vector;
+    EXPECT_THROW(vector.resize(2llu << 60), std::bad_alloc);
+}
