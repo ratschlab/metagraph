@@ -603,11 +603,13 @@ int main(int argc, const char *argv[]) {
                 for (const std::string &suffix : suffices) {
                     timer.reset();
 
-                    if (valid_kmer_suffix(suffix)) {
-                        std::cout << "\nSuffix: " << suffix << std::endl;
-                    } else {
-                        std::cout << "\nSkipping suffix: " << suffix << std::endl;
-                        continue;
+                    if (suffix.size() > 0 || suffices.size() > 1) {
+                        if (valid_kmer_suffix(suffix)) {
+                            std::cout << "\nSuffix: " << suffix << std::endl;
+                        } else {
+                            std::cout << "\nSkipping suffix: " << suffix << std::endl;
+                            continue;
+                        }
                     }
 
                     std::unique_ptr<IChunkConstructor> constructor(

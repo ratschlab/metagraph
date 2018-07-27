@@ -73,23 +73,20 @@ void extend_kmer_storage(const Array &temp_storage,
                          size_t *end_sorted,
                          size_t num_threads,
                          bool verbose,
-                         std::mutex *mutex_resize,
-                         std::shared_timed_mutex *mutex_copy) {
-    assert(mutex_resize);
-    assert(mutex_copy);
-
+                         std::mutex &mutex_resize,
+                         std::shared_timed_mutex &mutex_copy) {
     // acquire the mutex to restrict the number of writing threads
-    std::unique_lock<std::mutex> resize_lock(*mutex_resize);
+    std::unique_lock<std::mutex> resize_lock(mutex_resize);
 
     // shrink collected k-mers if the memory limit is exceeded
     if (kmers->size() + temp_storage.size() > kmers->capacity()) {
-        std::unique_lock<std::shared_timed_mutex> lock(*mutex_copy);
+        std::unique_lock<std::shared_timed_mutex> lock(mutex_copy);
         shrink_kmers(kmers, end_sorted, num_threads, verbose);
         kmers->reserve(kmers->size()
                         + std::max(temp_storage.size(), kmers->size() / 2));
     }
 
-    std::shared_lock<std::shared_timed_mutex> copy_lock(*mutex_copy);
+    std::shared_lock<std::shared_timed_mutex> copy_lock(mutex_copy);
     const size_t begin = kmers->size();
 
     try {
@@ -115,8 +112,8 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
                    const std::vector<TAlphabet> &suffix,
                    size_t num_threads,
                    bool verbose,
-                   std::mutex *mutex_resize,
-                   std::shared_timed_mutex *mutex_copy,
+                   std::mutex &mutex_resize,
+                   std::shared_timed_mutex &mutex_copy,
                    bool remove_redundant = true) {
     Vector<KMER> temp_storage;
     temp_storage.reserve(1.1 * kMaxKmersChunkSize);
@@ -323,7 +320,7 @@ void KMerDBGSuccChunkConstructor<KMER>::release_task_to_pool() {
                          },
                          k_, &kmers_, &end_sorted_, filter_suffix_encoded_,
                          num_threads_, verbose_,
-                         &mutex_resize_, &mutex_copy_, true);
+                         std::ref(mutex_resize_), std::ref(mutex_copy_), true);
     stored_reads_size_ = 0;
 }
 
@@ -437,7 +434,7 @@ KMerDBGSuccChunkConstructor<KMER>
                          k_, &kmers_, &end_sorted_,
                          filter_suffix_encoded_,
                          num_threads_, verbose_,
-                         &mutex_resize_, &mutex_copy_, true);
+                         std::ref(mutex_resize_), std::ref(mutex_copy_), true);
 }
 
 
