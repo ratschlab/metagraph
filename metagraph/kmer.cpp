@@ -6,12 +6,6 @@ template <typename G>
 const KMerCharType KMer<G>::kFirstCharMask = (1llu << kBitsPerChar) - 1;
 
 template <typename G>
-bool KMer<G>::compare_suffix(const KMer &k1, const KMer &k2, size_t minus) {
-    return k1.seq_ >> static_cast<int>((minus + 1) * kBitsPerChar)
-             == k2.seq_ >> static_cast<int>((minus + 1) * kBitsPerChar);
-}
-
-template <typename G>
 std::string KMer<G>::to_string(const std::string &alphabet) const {
     std::string seq;
 

@@ -61,7 +61,7 @@ std::vector<uint64_t> subset_bins(const std::vector<uint64_t> &ref_bins,
 }
 
 std::vector<uint64_t> get_chunk(const DBG_succ &graph,
-                                const std::vector<std::deque<TAlphabet>> &border_kmers,
+                                const std::vector<std::vector<TAlphabet>> &border_kmers,
                                 bool with_tail) {
     std::vector<uint64_t> result;
 
@@ -199,7 +199,7 @@ DBG_succ::Chunk* merge_blocks_to_chunk(const std::vector<const DBG_succ*> &graph
         chunk_idx,
         num_chunks
     );
-    std::vector<std::deque<TAlphabet>> border_kmers;
+    std::vector<std::vector<TAlphabet>> border_kmers;
     bool with_tail = false;
     for (size_t i = 0; i < ref_bins.size(); ++i) {
         if (ref_bins[i] == graphs.front()->get_W().size()) {
@@ -276,9 +276,9 @@ DBG_succ* merge(const std::vector<const DBG_succ*> &Gv, bool verbose) {
 }
 
 
-std::vector<std::deque<TAlphabet>> get_last_added_nodes(const std::vector<const DBG_succ*> &Gv,
+std::vector<std::vector<TAlphabet>> get_last_added_nodes(const std::vector<const DBG_succ*> &Gv,
                                                         const std::vector<uint64_t> &kv) {
-    std::vector<std::deque<TAlphabet>> last_added_nodes(DBG_succ::alph_size);
+    std::vector<std::vector<TAlphabet>> last_added_nodes(DBG_succ::alph_size);
     // init last added nodes, if not starting from the beginning
     for (size_t i = 0; i < Gv.size(); i++) {
         // check whether we can merge the given graphs
@@ -328,11 +328,11 @@ DBG_succ::Chunk* merge_blocks(const std::vector<const DBG_succ*> &Gv,
     // graph nodes at the respective positions with each other. Insert the lexicographically
     // smallest one into the common merge graph G (this).
 
-    auto compare_edges = [](const std::deque<TAlphabet> &first,
-                            const std::deque<TAlphabet> &second) {
+    auto compare_edges = [](const std::vector<TAlphabet> &first,
+                            const std::vector<TAlphabet> &second) {
         return utils::colexicographically_greater(second, first);
     };
-    std::map<std::deque<TAlphabet>,
+    std::map<std::vector<TAlphabet>,
              std::vector<size_t>,
              decltype(compare_edges)> min_kmers(compare_edges);
 
@@ -340,7 +340,7 @@ DBG_succ::Chunk* merge_blocks(const std::vector<const DBG_succ*> &Gv,
     for (size_t i = 0; i < Gv.size(); ++i) {
         if (kv[i] < nv[i]) {
             auto seq = Gv[i]->get_node_seq(kv[i]);
-            seq.push_front(Gv[i]->get_W(kv[i]) % DBG_succ::alph_size);
+            seq.insert(seq.begin(), Gv[i]->get_W(kv[i]) % DBG_succ::alph_size);
             min_kmers[seq].push_back(i);
         }
     }
@@ -367,7 +367,7 @@ DBG_succ::Chunk* merge_blocks(const std::vector<const DBG_succ*> &Gv,
         min_kmers.erase(it);
 
         TAlphabet val = seq1.front();
-        seq1.pop_front();
+        seq1.erase(seq1.begin());
 
         // check whether we already added a node whose outgoing edge points to the
         // same node as the current one
@@ -403,7 +403,7 @@ DBG_succ::Chunk* merge_blocks(const std::vector<const DBG_succ*> &Gv,
             kv[i]++;
             if (kv[i] < nv[i]) {
                 auto seq = Gv[i]->get_node_seq(kv[i]);
-                seq.push_front(Gv[i]->get_W(kv[i]) % DBG_succ::alph_size);
+                seq.insert(seq.begin(), Gv[i]->get_W(kv[i]) % DBG_succ::alph_size);
                 min_kmers[seq].push_back(i);
             }
         }

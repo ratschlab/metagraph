@@ -24,7 +24,7 @@ class DBGSuccAnnotWrapper : public hash_annotate::DeBruijnGraphWrapper {
 
     edge_index map_kmer(const std::string &kmer) const {
         assert(kmer.size() == graph_.get_k());
-        return graph_.index(kmer)[0];
+        return graph_.map_kmers(kmer)[0];
     }
 
     size_t get_num_edges() const {

@@ -31,11 +31,10 @@ class KMer {
     typedef G KMerWordType;
 
     KMer() {}
+    template <typename V>
+    KMer(const V &arr, size_t k) : seq_(pack_kmer(arr, k)) {}
     template <typename T>
-    KMer(const T &arr, size_t k) : seq_(pack_kmer(arr, k)) {}
-
-    template <class Map, class String>
-    KMer(const String &seq, Map &&to_alphabet);
+    KMer(const std::vector<T> &arr) : KMer(arr, arr.size()) {}
 
     explicit KMer(KMerWordType &&seq) : seq_(seq) {}
     explicit KMer(const KMerWordType &seq) : seq_(seq) {}
@@ -46,8 +45,8 @@ class KMer {
 
     inline KMerCharType operator[](size_t i) const;
 
-    static bool compare_suffix(const KMer &k1,
-                               const KMer &k2, size_t minus = 0);
+    static inline bool compare_suffix(const KMer &k1,
+                                      const KMer &k2, size_t minus = 0);
 
     std::string to_string(const std::string &alphabet) const;
 
@@ -59,10 +58,10 @@ class KMer {
      * next = s[7]s[6]s[5]s[4]s[3]s[2]s[8]
      *      = s[7] << k + (kmer & mask) >> 1 + s[8].
      */
-    static inline  void update_kmer(size_t k,
-                                    KMerCharType edge_label,
-                                    KMerCharType last,
-                                    KMerWordType *kmer);
+    static inline void update_kmer(size_t k,
+                                   KMerCharType edge_label,
+                                   KMerCharType last,
+                                   KMerWordType *kmer);
   private:
     inline KMerCharType get_digit(size_t i) const;
 
@@ -102,14 +101,6 @@ G KMer<G>::pack_kmer(const T &arr, size_t k) {
     return result;
 }
 
-template <typename G>
-template <class Map, class String>
-KMer<G>::KMer(const String &seq, Map &&to_alphabet) {
-    std::vector<uint8_t> arr(seq.size());
-    std::transform(seq.begin(), seq.end(), arr.begin(), to_alphabet);
-    *this = KMer(arr.data(), arr.size());
-}
-
 /**
  * Construct the next k-mer for s[6]s[5]s[4]s[3]s[2]s[1]s[7].
  * next = s[7]s[6]s[5]s[4]s[3]s[2]s[8]
@@ -133,6 +124,12 @@ KMerCharType KMer<G>::get_digit(size_t i) const {
     assert(kBitsPerChar * (i + 1) <= sizeof(KMerWordType) * 8);
     return static_cast<uint64_t>(seq_ >> static_cast<int>(kBitsPerChar * i))
              & kFirstCharMask;
+}
+
+template <typename G>
+bool KMer<G>::compare_suffix(const KMer &k1, const KMer &k2, size_t minus) {
+    return k1.seq_ >> static_cast<int>((minus + 1) * kBitsPerChar)
+             == k2.seq_ >> static_cast<int>((minus + 1) * kBitsPerChar);
 }
 
 #endif // __KMER_HPP__

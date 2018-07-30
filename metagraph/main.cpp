@@ -500,7 +500,7 @@ void execute_query(std::string seq_name,
 
     if (count_labels) {
         auto top_labels = annotation->get_most_frequent_colors(
-            graph->index(sequence),
+            graph->map_kmers(sequence),
             num_top_labels
         );
 
@@ -779,7 +779,7 @@ int main(int argc, const char *argv[]) {
             if (config->infbase_annotators.size())
                 inserted_edges.reset(new bit_vector_dyn(graph->num_edges() + 1, 0));
 
-            if (graph->state != Config::DYN) {
+            if (graph->get_state() != Config::DYN) {
                 if (config->verbose)
                     std::cout << "Switching the graph state to dynamic..." << std::flush;
                 graph->switch_state(Config::DYN);
@@ -837,7 +837,7 @@ int main(int argc, const char *argv[]) {
 
             // serialize graph
             timer.reset();
-            if (graph->state != config->state) {
+            if (graph->get_state() != config->state) {
                 if (config->verbose)
                     std::cout << "Switching state before dumping..." << std::flush;
 
@@ -1391,7 +1391,7 @@ int main(int argc, const char *argv[]) {
                 std::cout << "nodes: " << graph->num_nodes() << std::endl;
                 std::cout << "edges: " << graph->num_edges() << std::endl;
                 std::cout << "k: " << graph->get_k() << std::endl;
-                std::cout << "state: " << Config::state_to_string(graph->state)
+                std::cout << "state: " << Config::state_to_string(graph->get_state())
                           << std::endl;
             }
 
@@ -1500,7 +1500,7 @@ int main(int argc, const char *argv[]) {
                 std::cout << "nodes: " << graph->num_nodes() << std::endl;
                 std::cout << "edges: " << graph->num_edges() << std::endl;
                 std::cout << "k: " << graph->get_k() << std::endl;
-                std::cout << "state: " << Config::state_to_string(graph->state)
+                std::cout << "state: " << Config::state_to_string(graph->get_state())
                           << std::endl;
 
                 if (config->print_graph_succ)
@@ -1618,7 +1618,7 @@ int main(int argc, const char *argv[]) {
                     std::cout << timer.elapsed() << "sec" << std::endl;
                 }
             }
-            if (graph->state != config->state) {
+            if (graph->get_state() != config->state) {
                 if (config->verbose) {
                     std::cout << "Converting graph to state "
                               << Config::state_to_string(config->state)
@@ -1716,19 +1716,19 @@ int main(int argc, const char *argv[]) {
                         if (config->filter_present) {
                             if (graph->find(read_stream->seq.s,
                                             config->discovery_fraction,
-                                            config->mapping_heuristic_level))
+                                            config->kmer_mapping_mode))
                                 std::cout << ">" << read_stream->name.s << "\n"
                                                  << read_stream->seq.s << "\n";
                         } else {
                             std::cout << graph->find(read_stream->seq.s,
                                                      config->discovery_fraction,
-                                                     config->mapping_heuristic_level) << "\n";
+                                                     config->kmer_mapping_mode) << "\n";
                         }
                         return;
                     }
 
-                    auto graphindices = graph->index(read_stream->seq.s,
-                                                     config->alignment_length);
+                    auto graphindices = graph->map_kmers(read_stream->seq.s,
+                                                         config->alignment_length);
 
                     size_t num_discovered = std::count_if(
                         graphindices.begin(), graphindices.end(),

@@ -31,9 +31,7 @@ class SequenceGraph {
     // and run callback until the termination condition is satisfied
     virtual void align(const std::string &sequence,
                        const std::function<void(edge_index)> &callback,
-                       const std::function<bool()> &terminate = [](){ return false; },
-                       const std::function<bool(edge_index, uint64_t&)> &unmapped =
-                           [](edge_index, uint64_t&){ return false; }) const = 0;
+                       const std::function<bool()> &terminate = [](){ return false; }) const = 0;
 
     // Check whether graph contains fraction of nodes from the sequence
     virtual bool find(const std::string &sequence,
@@ -78,6 +76,11 @@ class DBG_succ : public SequenceGraph {
      */
     bool equals_internally(const DBG_succ &other) const;
 
+    // Return the k-mer length
+    uint64_t get_k() const { return this->k_; }
+    uint64_t num_nodes() const;
+    uint64_t num_edges() const;
+
     node_index traverse(node_index node, char edge_label) const;
     node_index traverse_back(node_index node, char edge_label) const;
 
@@ -85,20 +88,15 @@ class DBG_succ : public SequenceGraph {
     // and run callback until the termination condition is satisfied
     void align(const std::string &sequence,
                const std::function<void(edge_index)> &callback,
-               const std::function<bool()> &terminate = [](){ return false; },
-               const std::function<bool(edge_index, uint64_t&)> &unmapped =
-                   [](edge_index, uint64_t&){ return false; }) const;
+               const std::function<bool()> &terminate = [](){ return false; }) const;
 
     // Check whether graph contains fraction of k-mers from the sequence
-
     bool find(const std::string &sequence,
-              double kmer_discovery_fraction = 1) const {
-        return find(sequence, kmer_discovery_fraction, 0);
-    }
+              double kmer_discovery_fraction = 1) const;
 
     bool find(const std::string &sequence,
               double kmer_discovery_fraction,
-              uint64_t mapping_heuristic_level) const;
+              size_t kmer_mapping_mode) const;
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
@@ -112,7 +110,9 @@ class DBG_succ : public SequenceGraph {
                       bool try_extend = false,
                       bit_vector_dyn *edges_inserted = NULL);
 
-    void remove_edges(const std::set<uint64_t> &edges);
+    // Given an edge list, remove them from the graph.
+    // TODO: fix the implementation
+    void remove_edges(const std::set<edge_index> &edges);
 
     /**
     * Heavily borrowing from the graph sequence traversal, this function gets 
@@ -123,43 +123,54 @@ class DBG_succ : public SequenceGraph {
     void merge(const DBG_succ &other);
 
     /**
-     * Return k-mer length of current graph.
-     */
-    uint64_t get_k() const { return this->k_; }
-
-    uint64_t num_nodes() const;
-
-    uint64_t num_edges() const;
-
-    /**
      * Return value of W at position k.
      */
-    TAlphabet get_W(uint64_t k) const { return (*W)[k]; }
-    const wavelet_tree& get_W() const { return *W; }
+    TAlphabet get_W(uint64_t k) const { return (*W_)[k]; }
+    const wavelet_tree& get_W() const { return *W_; }
 
     /**
      * Return value of last at position k.
      */
-    bool get_last(uint64_t k) const { return (*last)[k]; }
+    bool get_last(uint64_t k) const { return (*last_)[k]; }
 
-    // Given the alphabet index return the corresponding symbol
-    static char decode(TAlphabet s);
-    // Given the alphabet character return its corresponding number
-    static TAlphabet encode(char s);
+    /**
+     * Using the offset structure F this function returns the value of the last
+     * position of node i.
+     */
+    TAlphabet get_node_last_value(uint64_t i) const;
+
+    /**
+     * Given a node index k, this function returns the k-mer sequence of the
+     * node as a string.
+     */
+    std::string get_node_str(uint64_t k) const;
+
+    /**
+     * Given index i of a node and a value k, this function
+     * will return the k-th last character of node i.
+     */
+    std::pair<TAlphabet, uint64_t> get_minus_k_value(uint64_t i, uint64_t k) const;
+
+    /**
+     * Given a node index k_node, this function returns the k-mer sequence of the
+     * node.
+     */
+    std::vector<TAlphabet> get_node_seq(uint64_t k_node) const;
 
     /**
      * Breaks the seq into k-mers and searches for the index of each
      * k-mer in the graph. Returns these indices.
+     * Default: kmer_size = k
      */
-    std::vector<uint64_t> index(const std::string &sequence,
-                                uint64_t alignment_length = 0) const;
+    std::vector<uint64_t> map_kmers(const std::string &sequence,
+                                    size_t kmer_size = 0) const;
 
     std::vector<std::vector<HitInfo>> align_fuzzy(const std::string &sequence,
-                                                  uint64_t max_distance = 0,
-                                                  uint64_t alignment_length = 0) const;
+                                                  size_t max_distance = 0,
+                                                  size_t alignment_length = 0) const;
 
     typedef std::function<void(const std::vector<uint64_t>,
-                               const std::deque<TAlphabet>&)> PathCallback;
+                               const std::vector<TAlphabet>&)> PathCallback;
 
     void call_paths(const PathCallback &callback) const;
 
@@ -181,6 +192,8 @@ class DBG_succ : public SequenceGraph {
      */
     void print_state(std::ostream &os = std::cout) const;
 
+    Config::StateType get_state() const { return state; }
+
     /**
      * Write the adjacency list to file |filename| or
      * print it to stdout of the filename is not provided.
@@ -188,30 +201,6 @@ class DBG_succ : public SequenceGraph {
     void print_adj_list(std::ostream &os = std::cout) const;
 
     void switch_state(Config::StateType state);
-
-    /**
-     * Given index i of a node and a value k, this function
-     * will return the k-th last character of node i.
-     */
-    std::pair<TAlphabet, uint64_t> get_minus_k_value(uint64_t i, uint64_t k) const;
-
-    /**
-     * Using the offset structure F this function returns the value of the last
-     * position of node i.
-     */
-    TAlphabet get_node_last_value(uint64_t i) const;
-
-    /**
-     * Given a node index k_node, this function returns the k-mer sequence of the
-     * node in a deque data structure.
-     */
-    std::deque<TAlphabet> get_node_seq(uint64_t k_node) const;
-
-    /**
-    * Given a node index k, this function returns the k-mer sequence of the
-    * node as a string.
-    */
-    std::string get_node_str(uint64_t k) const;
 
     /**
      * Given a node index i, this function returns the number of outgoing
@@ -248,7 +237,7 @@ class DBG_succ : public SequenceGraph {
      * of the corresponding node or the closest predecessor, if no node
      * with the sequence is not found.
      */
-    uint64_t pred_kmer(const std::deque<TAlphabet> &kmer) const;
+    uint64_t pred_kmer(const std::vector<TAlphabet> &kmer) const;
 
     /**
      * Uses the object's array last and a position and
@@ -298,11 +287,12 @@ class DBG_succ : public SequenceGraph {
      */
     uint64_t bwd(uint64_t i) const;
 
-    /**
-     * TODO: new function: given a list of edges, remove a minimal superset of that edge
-     * set that results in a valid graph.
-     */
-
+    // Given the alphabet index return the corresponding symbol
+    static char decode(TAlphabet s);
+    static std::string decode(const std::vector<TAlphabet> &sequence);
+    // Given the alphabet character return its corresponding number
+    static TAlphabet encode(char s);
+    static std::vector<TAlphabet> encode(const std::string &sequence);
 
     static const std::string alphabet;
     static const TAlphabet alph_size;
@@ -311,20 +301,17 @@ class DBG_succ : public SequenceGraph {
     static const size_t kSentinelCode = 0;
     static const size_t kSentinel = '$';
 
-    Config::StateType state = Config::DYN;
-
   private:
     // k-mer size
     size_t k_;
-
     // the bit array indicating the last outgoing edge of a node
-    bit_vector *last;
-
+    bit_vector *last_;
     // the offset array to mark the offsets for the last column in the implicit node list
-    std::vector<uint64_t> F;
-
+    std::vector<uint64_t> F_;
     // the array containing the edge labels
-    wavelet_tree *W;
+    wavelet_tree *W_;
+
+    Config::StateType state = Config::DYN;
 
     /**
      * This function gets a value of the alphabet c and updates the offset of
@@ -363,25 +350,20 @@ class DBG_succ : public SequenceGraph {
      * to upper bound u and swaps the inserted element to the
      * righ location.
      */
-    void sort_W_locally(uint64_t l, uint64_t u);
+    void fix_order_in_W_local(uint64_t l, uint64_t u);
 
     /**
      * Return value of F vector at index k.
      * The index is over the alphabet!
      */
-    uint64_t get_F(TAlphabet k) const { return F.at(k); }
-
-    /**
-     * This function returns true if node i is a terminal node.
-     */
-    bool is_terminal_node(uint64_t i) const;
+    uint64_t get_F(TAlphabet k) const { return F_.at(k); }
 
     /**
      * This function gets two node indices and returns if the
      * node labels share a k-1 suffix.
      */
-    bool compare_node_suffix(uint64_t i1, uint64_t i2) const;
-    bool compare_node_suffix(TAlphabet *ref, uint64_t i2) const;
+    bool compare_node_suffix(uint64_t first, uint64_t second) const;
+    bool compare_node_suffix(TAlphabet *ref, uint64_t j) const;
 
     /**
      * Given a node label s, this function returns the index
@@ -394,8 +376,7 @@ class DBG_succ : public SequenceGraph {
 
         assert(begin + k_ == end);
 
-        auto range = index_range(begin, end);
-        return std::max(range.first, range.second);
+        return index_range(begin, end).second;
     }
 
     /**
@@ -415,12 +396,12 @@ class DBG_succ : public SequenceGraph {
         TAlphabet s = *begin;
 
         // initial range
-        uint64_t rl = F.at(s) + 1 < W->size()
-                      ? succ_last(F.at(s) + 1)
-                      : W->size();
-        uint64_t ru = s < F.size() - 1
-                      ? F.at(s + 1)
-                      : W->size() - 1; // upper bound
+        uint64_t rl = F_.at(s) + 1 < W_->size()
+                      ? succ_last(F_.at(s) + 1)
+                      : W_->size();
+        uint64_t ru = s < F_.size() - 1
+                      ? F_.at(s + 1)
+                      : W_->size() - 1; // upper bound
         if (rl > ru)
             return std::make_pair(0, 0);
 
@@ -435,7 +416,7 @@ class DBG_succ : public SequenceGraph {
             // the source nodes have the given suffix.
             rl = std::min(succ_W(rl, s),
                           succ_W(rl, s + alph_size));
-            if (rl >= W->size())
+            if (rl >= W_->size())
                 return std::make_pair(0, 0);
 
             ru = std::max(pred_W(ru, s),
@@ -444,26 +425,10 @@ class DBG_succ : public SequenceGraph {
                 return std::make_pair(0, 0);
 
             // Translate the node indices from the sources to the targets.
-            /*
-            if (rl > W->size()) {
-                rl = 0;
-            } else {
-                rl = fwd(rl);
-                if (rl == W->size())
-                    rl = 0;
-            }
-
-            if (ru > W->size()) {
-                ru = 0;
-            } else {
-                ru = fwd(ru);
-                if (ru == W->size())
-                    ru = 0;
-            }
-            */
             rl = outgoing(rl, s);
             ru = outgoing(ru, s);
         }
+        assert(rl <= ru);
         return std::make_pair(rl, ru);
     }
 

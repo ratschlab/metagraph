@@ -45,13 +45,13 @@ void DBG_succ::Chunk::extend(const DBG_succ::Chunk &other) {
 }
 
 void DBG_succ::Chunk::initialize_graph(DBG_succ *graph) const {
-    delete graph->W;
-    graph->W = new wavelet_tree_stat(kLogSigma, W_);
+    delete graph->W_;
+    graph->W_ = new wavelet_tree_stat(kLogSigma, W_);
 
-    delete graph->last;
-    graph->last = new bit_vector_stat(last_);
+    delete graph->last_;
+    graph->last_ = new bit_vector_stat(last_);
 
-    graph->F = F_;
+    graph->F_ = F_;
 
     graph->k_ = k_;
 
@@ -134,13 +134,13 @@ DBG_succ::Chunk::build_graph_from_chunks(const std::vector<std::string> &chunk_f
         }
     }
 
-    delete graph->W;
-    graph->W = new wavelet_tree_stat(kLogSigma, std::move(W));
+    delete graph->W_;
+    graph->W_ = new wavelet_tree_stat(kLogSigma, std::move(W));
 
-    delete graph->last;
-    graph->last = new bit_vector_stat(std::move(last));
+    delete graph->last_;
+    graph->last_ = new bit_vector_stat(std::move(last));
 
-    graph->F = std::move(F);
+    graph->F_ = std::move(F);
 
     graph->state = Config::STAT;
 

@@ -30,14 +30,14 @@ void test_graph(DBG_succ *graph, const std::string &last,
 
     std::ostringstream ostr;
 
-    ostr << *graph->last;
+    ostr << *graph->last_;
     EXPECT_EQ(last, ostr.str()) << "state: " << state
                                 << ", old state: " << old_state;
 
     ostr.clear();
     ostr.str("");
 
-    auto W_vector = graph->W->to_vector();
+    auto W_vector = graph->W_->to_vector();
     EXPECT_EQ(W, std::vector<uint64_t>(W_vector.begin(), W_vector.end()))
         << "state: " << state
         << ", old state: " << old_state;
@@ -45,8 +45,8 @@ void test_graph(DBG_succ *graph, const std::string &last,
     ostr.clear();
     ostr.str("");
 
-    for (size_t i = 0; i < graph->F.size(); ++i) {
-        ostr << graph->F[i] << " ";
+    for (size_t i = 0; i < graph->F_.size(); ++i) {
+        ostr << graph->F_[i] << " ";
     }
     EXPECT_EQ(F, ostr.str()) << "state: " << state
                              << ", old state: " << old_state;
@@ -615,7 +615,7 @@ TEST(DBGSuccinct, CallEdgesTestPathDisconnected2) {
         graph.call_edges([&](auto edge_idx, const auto &edge) {
             EXPECT_EQ(graph.get_k() + 1, edge.size()) << graph;
             EXPECT_EQ(graph.get_node_seq(edge_idx),
-                      std::deque<TAlphabet>(edge.begin(), edge.end() - 1))
+                      std::vector<TAlphabet>(edge.begin(), edge.end() - 1))
                 << edge_idx << "\n" << graph;
             num_edges++;
         });
@@ -750,7 +750,7 @@ TEST(DBGSuccinct, CallKmersTestPathDisconnected2) {
 void test_pred_kmer(const DBG_succ &graph,
                     const std::string &kmer_s,
                     uint64_t expected_idx) {
-    std::deque<TAlphabet> kmer(kmer_s.size());
+    std::vector<TAlphabet> kmer(kmer_s.size());
     std::transform(kmer_s.begin(), kmer_s.end(), kmer.begin(),
                    [](char c) {
                        return c == DBG_succ::kSentinel
@@ -864,9 +864,7 @@ TEST(DBGSuccinct, PredKmerRandomTest) {
         }
 
         for (const auto &kmer_str : all_kmer_str) {
-            std::deque<TAlphabet> kmer(kmer_str.size());
-            std::transform(kmer_str.begin(), kmer_str.end(),
-                           kmer.begin(), DBG_succ::encode);
+            std::vector<TAlphabet> kmer = DBG_succ::encode(kmer_str);
 
             uint64_t lower_bound = graph.pred_kmer(kmer);
 
@@ -935,23 +933,27 @@ TEST(DBGSuccinct, FindSequence) {
         EXPECT_TRUE(graph->find(std::string(k + 1, 'B'), 0));
 
         EXPECT_FALSE(graph->find(std::string(k + 1, 'A') + std::string(k + 1, 'B'), 1));
-        EXPECT_FALSE(graph->find(std::string(k + 1, 'A') + std::string(k + 1, 'B'),
-                    3.0f / static_cast<double>(k + 3)));
-        EXPECT_TRUE(graph->find(std::string(k + 1, 'A') + std::string(k + 1, 'B'),
-                    2.0f / static_cast<double>(k + 3)));
+        EXPECT_FALSE(graph->find(
+            std::string(k + 1, 'A') + std::string(k + 1, 'B'),
+            3.0f / static_cast<double>(k + 3)
+        ));
+        EXPECT_TRUE(graph->find(
+            std::string(k + 1, 'A') + std::string(k + 1, 'B'),
+            2.0f / static_cast<double>(k + 3)
+        ));
         EXPECT_TRUE(graph->find(std::string(k + 1, 'A') + std::string(k + 1, 'B'), 0));
 
         delete graph;
     }
 }
 
-TEST(DBGSuccinct, MappingHeuristics) {
+TEST(DBGSuccinct, KmerMappingMode) {
     for (size_t k = 1; k < 10; ++k) {
         DBG_succ graph(k);
 
         graph.add_sequence(std::string(100, 'A'));
 
-        // heuristic level
+        // kmer mapping modes
         for (size_t h = 0; h < 3; ++h) {
             std::string query(100, 'A');
 
@@ -963,17 +965,17 @@ TEST(DBGSuccinct, MappingHeuristics) {
             // number of mutations
             for (size_t n = 1; n <= 100; ++n) {
                 std::string query(100, 'A');
-                for (size_t i = 0; i < query.length(); i += query.length() / n) {
+                for (size_t i = 0; i < query.size(); i += query.size() / n) {
                     query[i] = 'B';
                 }
 
                 uint64_t num_good_kmers = 0;
-                for (size_t i = 0; i < query.length() - k + 1; ++i) {
-                    if (std::string(query.begin() + i, query.begin() + i + k) == check) {
+                for (size_t i = 0; i < query.size() - k + 1; ++i) {
+                    if (query.substr(i, k) == check)
                         num_good_kmers++;
-                    }
                 }
-                double good_fraction = static_cast<double>(num_good_kmers) / (query.length() - k + 1);
+                double good_fraction = static_cast<double>(num_good_kmers)
+                                            / (query.size() - k + 1);
 
                 for (double a : { 1.0, 0.75, 0.5, 0.25, 0.0 }) {
                     EXPECT_EQ(a <= good_fraction, graph.find(query, a, h));

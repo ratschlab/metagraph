@@ -285,7 +285,8 @@ void sequence_to_kmers(const std::string &sequence,
                                DBG_succ::kSentinelCode);
 
     std::transform(sequence.begin(), sequence.end(),
-                   &seq[dummy_prefix_size], DBG_succ::encode);
+                   &seq[dummy_prefix_size],
+                   [](char c) { return DBG_succ::encode(c); });
 
     sequence_to_kmers(std::move(seq), k, kmers, suffix);
 }
