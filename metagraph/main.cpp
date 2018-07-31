@@ -8,7 +8,6 @@
 #include "helpers.hpp"
 #include "utils.hpp"
 #include "vcf_parser.hpp"
-#include "traverse.hpp"
 #include "dbg_succinct_merge.hpp"
 #include "annotate_color_compressed.hpp"
 #include "annotate_color_compressed_fast.hpp"
@@ -1604,16 +1603,6 @@ int main(int argc, const char *argv[]) {
                 } else {
                     graph->print_adj_list(std::cout);
                 }
-                if (config->verbose) {
-                    std::cout << timer.elapsed() << "sec" << std::endl;
-                }
-            }
-            if (config->sqlfbase.size()) {
-                if (config->verbose) {
-                    std::cout << "Converting graph to SQL DB...\t" << std::flush;
-                }
-                timer.reset();
-                traverse::toSQL(graph.get(), files, config->sqlfbase);
                 if (config->verbose) {
                     std::cout << timer.elapsed() << "sec" << std::endl;
                 }

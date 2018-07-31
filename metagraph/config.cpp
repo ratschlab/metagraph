@@ -158,8 +158,6 @@ Config::Config(int argc, const char *argv[]) {
             state = string_to_state(argv[++i]);
         //} else if (!strcmp(argv[i], "--db-path")) {
         //    dbpath = std::string(argv[++i]);
-        } else if (!strcmp(argv[i], "--sql-base")) {
-            sqlfbase = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--annotator")) {
             infbase_annotators.emplace_back(argv[++i]);
         } else if (!strcmp(argv[i], "-i") || !strcmp(argv[i], "--infile-base")) {
@@ -572,7 +570,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t   --state [STR] \t\tchange the graph state (either 'fast' or 'dynamic') [fast]\n");
-            fprintf(stderr, "\t   --sql-base [STR] \t\tbasename for SQL output file\n");
             fprintf(stderr, "\t   --to-adj-list \t\twrite the adjacency list to file [off]\n");
             // fprintf(stderr, "\t   --to-sequences \t\twrite contig sequences to file [off]\n");
             fprintf(stderr, "\t   --to-sequences \t\textract sequences from graph and write to file [off]\n");
