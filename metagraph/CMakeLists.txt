@@ -37,7 +37,7 @@ set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg -g")
 set(CMAKE_CXX_FLAGS_DEBUG "-O3 -g")
 
 # Thread sanitizer build type
-set(CMAKE_CXX_FLAGS_THREADS "-O3 -g -fsanitize=thread")
+set(CMAKE_CXX_FLAGS_THREADS "-DNDEBUG -O2 -g -fsanitize=thread")
 set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 

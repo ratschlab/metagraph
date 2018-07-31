@@ -1336,15 +1336,18 @@ int main(int argc, const char *argv[]) {
         }
         case Config::COMPARE: {
             assert(files.size());
-            std::cout << "Opening file " << files.at(0) << std::endl;
+
+            std::cout << "Opening file                " << files.at(0) << std::endl;
             std::unique_ptr<DBG_succ> graph {
                 load_critical_graph_from_file(files.at(0))
             };
 
             for (size_t f = 1; f < files.size(); ++f) {
-                std::cout << "Opening file for comparison ..." << files[f] << std::endl;
+                std::cout << "Opening file for comparison " << files[f] << std::endl;
                 DBG_succ *second = load_critical_graph_from_file(files[f]);
-                if (*graph == *second) {
+                if (config->internal
+                        ? graph->equals_internally(*second)
+                        : *graph == *second) {
                     std::cout << "Graphs are identical" << std::endl;
                 } else {
                     std::cout << "Graphs are not identical" << std::endl;
@@ -1758,9 +1761,9 @@ int main(int argc, const char *argv[]) {
                         std::cout << ": " << graphindices[i] << "\n";
                     }
                 }, config->reverse, timer.get(),
-                   get_filter_filename(file, config->filter_k,
-                                       config->max_unreliable_abundance,
-                                       config->unreliable_kmers_threshold)
+                    get_filter_filename(file, config->filter_k,
+                                        config->max_unreliable_abundance,
+                                        config->unreliable_kmers_threshold)
                 );
             }
 

@@ -31,6 +31,7 @@ class Config {
     bool generate_filtered_fasta = false;
     bool generate_filtered_fastq = false;
     bool use_kmc = false;
+    bool internal = false;
 
     unsigned int k = 3;
     unsigned int filter_k = 3;
