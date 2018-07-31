@@ -78,28 +78,42 @@ void extend_kmer_storage(const Array &temp_storage,
     // acquire the mutex to restrict the number of writing threads
     std::unique_lock<std::mutex> resize_lock(mutex_resize);
 
-    // shrink collected k-mers if the memory limit is exceeded
-    if (kmers->size() + temp_storage.size() > kmers->capacity()) {
-        std::unique_lock<std::shared_timed_mutex> lock(mutex_copy);
+    size_t offset;
+
+    if (kmers->size() + temp_storage.size() < kmers->capacity()) {
+        offset = kmers->size();
+        kmers->resize(kmers->size() + temp_storage.size());
+    } else {
+        std::unique_lock<std::shared_timed_mutex> reallocate_lock(mutex_copy);
+
         shrink_kmers(kmers, end_sorted, num_threads, verbose);
-        kmers->reserve(kmers->size()
-                        + std::max(temp_storage.size(), kmers->size() / 2));
+        offset = kmers->size();
+
+        size_t new_space = kmers->size() / 2;
+        while (new_space > temp_storage.size()) {
+            try {
+                kmers->reserve(kmers->size() + new_space);
+                break;
+            } catch (const std::bad_alloc &exception) {
+                new_space = new_space * 2 / 3;
+            }
+        }
+
+        try {
+            kmers->resize(kmers->size() + temp_storage.size());
+        } catch (const std::bad_alloc &exception) {
+            std::cerr << "ERROR: Can't reallocate. Not enough memory" << std::endl;
+            exit(1);
+        }
     }
 
     std::shared_lock<std::shared_timed_mutex> copy_lock(mutex_copy);
-    const size_t begin = kmers->size();
 
-    try {
-        kmers->resize(kmers->size() + temp_storage.size());
-    } catch (const std::bad_alloc &exception) {
-        std::cerr << "ERROR: Can't reallocate. Not enough memory" << std::endl;
-        exit(1);
-    }
     resize_lock.unlock();
 
-    for (size_t i = 0; i < temp_storage.size(); ++i) {
-        kmers->at(begin + i) = temp_storage[i];
-    }
+    std::copy(temp_storage.begin(),
+              temp_storage.end(),
+              kmers->begin() + offset);
 }
 
 typedef std::function<void(const std::string&)> CallbackRead;
@@ -278,7 +292,23 @@ KMerDBGSuccChunkConstructor<KMER>
         }
     );
 
-    kmers_.reserve(memory_preallocated / sizeof(KMER));
+    while (memory_preallocated > 0) {
+        try {
+            kmers_.reserve(memory_preallocated / sizeof(KMER));
+            break;
+        } catch (...) {
+            std::cerr << "Warning: Can't allocate requested memory for k-mers "
+                      << memory_preallocated / (1llu << 30) << " Gb" << std::endl;
+            memory_preallocated /= 1.5;
+        }
+    }
+    if (verbose_) {
+        std::cout << "Preallocated "
+                  << kmers_.capacity() * sizeof(KMER) / (1llu << 30)
+                  << "Gb for the k-mer storage"
+                  << ", capacity: " << kmers_.capacity() << " k-mers"
+                  << std::endl;
+    }
 
     if (filter_suffix == std::string(filter_suffix.size(), DBG_succ::kSentinel)) {
         kmers_.emplace_back(
@@ -413,7 +443,6 @@ DBG_succ::Chunk* KMerDBGSuccChunkConstructor<KMER>::build_chunk() {
         timer.reset();
 
         recover_source_dummy_nodes(k_, &kmers_, num_threads_, verbose_);
-        // kmers_.shrink_to_fit();
 
         if (verbose_)
             std::cout << timer.elapsed() << "sec" << std::endl;
@@ -422,6 +451,7 @@ DBG_succ::Chunk* KMerDBGSuccChunkConstructor<KMER>::build_chunk() {
     DBG_succ::Chunk *result = chunk_from_kmers(k_, kmers_.data(), kmers_.size());
 
     kmers_.clear();
+    kmers_.shrink_to_fit();
 
     return result;
 }

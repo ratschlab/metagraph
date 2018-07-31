@@ -135,5 +135,4 @@ KMerCharType KMer<G>::get_digit(size_t i) const {
              & kFirstCharMask;
 }
 
-
 #endif // __KMER_HPP__
