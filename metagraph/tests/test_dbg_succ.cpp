@@ -234,6 +234,15 @@ TEST(DBGSuccinct, AddSequenceBugRevealingTestcase) {
     graph.add_sequence("CTGAG", false);
 }
 
+TEST(DBGSuccinct, NonASCIIStrings) {
+    KMerDBGSuccConstructor constructor_first(5);
+    constructor_first.add_reads({ "АСАСАСАСАСАСА",
+                                  "плохая строка",
+                                  "АСАСАСАСАСАСА" });
+    DBG_succ graph(&constructor_first);
+    ASSERT_EQ(2u, graph.num_edges()) << graph;
+}
+
 TEST(DBGSuccinct, AddSequence) {
     {
         DBG_succ graph(3);

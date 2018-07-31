@@ -991,8 +991,8 @@ void DBG_succ::sort_W_locally(uint64_t l, uint64_t u) {
 TAlphabet DBG_succ::encode(char s) {
     assert(kCharToNucleotide[kSentinel] != kSentinelCode);
     assert(kCharToNucleotide[kSentinel] != kSentinelCode + alph_size);
-    assert(static_cast<size_t>(s) < 128);
-    return kCharToNucleotide[static_cast<size_t>(s)];
+    return s >= 0 ? kCharToNucleotide[static_cast<size_t>(s)]
+                  : kCharToNucleotide[0];
 }
 
 char DBG_succ::decode(TAlphabet c) {
