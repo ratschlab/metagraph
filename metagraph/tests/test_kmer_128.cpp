@@ -237,3 +237,13 @@ TEST(KmerEncodeTest_128, CompareSuffixFalseLong) {
 TEST(KmerEncodeTest_128, SizeOfClass) {
     EXPECT_EQ(sizeof(KMerBaseType), sizeof(KMER));
 }
+
+TEST(KmerEncodeTest_128, TestPrint) {
+    KMER kmer(std::vector<uint64_t>(sizeof(KMerBaseType) * 8 / kBitsPerChar, 1),
+              sizeof(KMerBaseType) * 8 / kBitsPerChar);
+    std::stringstream ss;
+    ss << kmer;
+    std::string out;
+    ss >> out;
+    EXPECT_EQ("0000000000000000000000000000000012492492492492492492492492492492", out);
+}

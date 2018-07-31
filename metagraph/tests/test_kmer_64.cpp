@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <sstream>
 
 #include "gtest/gtest.h"
 
@@ -254,4 +255,14 @@ TEST(KmerEncodeTest_64, CompareSuffixFalseLong) {
 
 TEST(KmerEncodeTest_64, SizeOfClass) {
     EXPECT_EQ(sizeof(KMerBaseType), sizeof(KMER));
+}
+
+TEST(KmerEncodeTest_64, TestPrint) {
+    KMER kmer(std::vector<uint64_t>(sizeof(KMerBaseType) * 8 / kBitsPerChar, 1),
+              sizeof(KMerBaseType) * 8 / kBitsPerChar);
+    std::stringstream ss;
+    ss << kmer;
+    std::string out;
+    ss >> out;
+    EXPECT_EQ("0000000000000000000000000000000000000000000000002492492492492492", out);
 }
