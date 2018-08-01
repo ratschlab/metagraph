@@ -8,9 +8,6 @@
 #include "wavelet_tree.hpp"
 #include "bit_vector.hpp"
 
-class DBGSuccConstructor;
-
-
 typedef uint8_t TAlphabet;
 
 
@@ -18,8 +15,7 @@ class SequenceGraph {
   public:
     typedef uint64_t node_index;
     typedef uint64_t edge_index;
-
-    static const node_index npos;
+    static const uint64_t npos;
 
     virtual ~SequenceGraph() {};
 
@@ -27,11 +23,17 @@ class SequenceGraph {
                               bool try_extend = false,
                               bit_vector_dyn *edges_inserted = NULL) = 0;
 
-    // Traverse graph aligning the sequence
-    // and run callback until the termination condition is satisfied
-    virtual void align(const std::string &sequence,
-                       const std::function<void(edge_index)> &callback,
-                       const std::function<bool()> &terminate = [](){ return false; }) const = 0;
+    // Traverse graph mapping k-mers from sequence to the graph nodes
+    // and run callback for each node until the termination condition is satisfied
+    virtual void map_to_nodes(const std::string &sequence,
+                              const std::function<void(node_index)> &callback,
+                              const std::function<bool()> &terminate = [](){ return false; }) const = 0;
+
+    // Traverse graph mapping k-mers from sequence to the graph edges
+    // and run callback for each edge until the termination condition is satisfied
+    virtual void map_to_edges(const std::string &sequence,
+                              const std::function<void(edge_index)> &callback,
+                              const std::function<bool()> &terminate = [](){ return false; }) const = 0;
 
     // Check whether graph contains fraction of nodes from the sequence
     virtual bool find(const std::string &sequence,
@@ -54,12 +56,17 @@ class DBGCondensed : public SequenceGraph {
 */
 
 
+class DBGSuccConstructor;
+
 class DBG_succ : public SequenceGraph {
   public:
+    // in [1,...,num_nodes], 0 = npos (invalid index)
+    typedef uint64_t node_index;
+    // in [1,...,num_edges], 0 = npos (invalid index)
+    typedef uint64_t edge_index;
+
     explicit DBG_succ(size_t k = 1);
-
     explicit DBG_succ(DBGSuccConstructor *builder);
-
     ~DBG_succ();
 
     /**
@@ -77,20 +84,40 @@ class DBG_succ : public SequenceGraph {
     bool equals_internally(const DBG_succ &other) const;
 
     // Return the k-mer length
-    uint64_t get_k() const { return this->k_; }
+    size_t get_k() const { return k_; }
     uint64_t num_nodes() const;
     uint64_t num_edges() const;
 
-    node_index traverse(node_index node, char edge_label) const;
-    node_index traverse_back(node_index node, char edge_label) const;
+    bool load(const std::string &filename_base);
+    void serialize(const std::string &filename_base) const;
 
-    // Traverse graph aligning k-mers to the sequence
-    // and run callback until the termination condition is satisfied
-    void align(const std::string &sequence,
-               const std::function<void(edge_index)> &callback,
-               const std::function<bool()> &terminate = [](){ return false; }) const;
+    // Traverse graph mapping k-mers from sequence to the graph nodes
+    // and run callback for each node until the termination condition is satisfied
+    // Call npos if a k-mer can't be mapped to the graph nodes
+    void map_to_nodes(const std::string &sequence,
+                      const std::function<void(node_index)> &callback,
+                      const std::function<bool()> &terminate = [](){ return false; }) const;
 
-    // Check whether graph contains fraction of k-mers from the sequence
+    /**
+     * Breaks the sequence into k-mers and searches for the index of each
+     * k-mer in the graph. Returns these indices.
+     * Default: kmer_size = k
+     */
+    // TODO: remove parameter kmer_size and implement the arbitrary k-mer size
+    // functionality in align_fuzzy()
+    std::vector<node_index> map_to_nodes(const std::string &sequence,
+                                         size_t kmer_size = 0) const;
+
+    // Traverse graph mapping k-mers from sequence to the graph edges
+    // and run callback for each edge until the termination condition is satisfied
+    // Call npos if a k-mer can't be mapped to the graph edges
+    void map_to_edges(const std::string &sequence,
+                      const std::function<void(edge_index)> &callback,
+                      const std::function<bool()> &terminate = [](){ return false; }) const;
+
+    std::vector<edge_index> map_to_edges(const std::string &sequence) const;
+
+    // Check whether the graph contains a fraction of k-mers from the sequence
     bool find(const std::string &sequence,
               double kmer_discovery_fraction = 1) const;
 
@@ -98,8 +125,23 @@ class DBG_succ : public SequenceGraph {
               double kmer_discovery_fraction,
               size_t kmer_mapping_mode) const;
 
-    bool load(const std::string &filename_base);
-    void serialize(const std::string &filename_base) const;
+    // TODO: revise the implementation, write unit tests
+    std::vector<std::vector<HitInfo>> align_fuzzy(const std::string &sequence,
+                                                  size_t max_distance = 0,
+                                                  size_t alignment_length = 0) const;
+
+    template <class... T>
+    using Call = typename std::function<void(T...)>;
+
+    // traverse all nodes in graph except for the dummy source of sink ones
+    void call_kmers(Call<node_index, const std::string&> callback) const;
+    void call_edges(Call<edge_index, const std::vector<TAlphabet>&> callback) const;
+    void call_paths(Call<const std::vector<edge_index>,
+                         const std::vector<TAlphabet>&> callback) const;
+    void call_sequences(Call<const std::string&> callback) const;
+
+    node_index traverse(node_index node, char edge_label) const;
+    node_index traverse_back(node_index node, char edge_label) const;
 
     /**
      * Add a full sequence to the graph.
@@ -123,76 +165,36 @@ class DBG_succ : public SequenceGraph {
     void merge(const DBG_succ &other);
 
     /**
-     * Return value of W at position k.
-     */
-    TAlphabet get_W(uint64_t k) const { return (*W_)[k]; }
-    const wavelet_tree& get_W() const { return *W_; }
-
-    /**
-     * Return value of last at position k.
-     */
-    bool get_last(uint64_t k) const { return (*last_)[k]; }
-
-    /**
      * Using the offset structure F this function returns the value of the last
-     * position of node i.
+     * position of the source node for edge i.
      */
-    TAlphabet get_node_last_value(uint64_t i) const;
+    TAlphabet get_node_last_value(edge_index i) const;
 
     /**
-     * Given a node index k, this function returns the k-mer sequence of the
-     * node as a string.
+     * Given an edge index i, this function returns the k-mer sequence of its
+     * source node as a string.
      */
-    std::string get_node_str(uint64_t k) const;
+    std::string get_node_str(edge_index i) const;
 
     /**
-     * Given index i of a node and a value k, this function
-     * will return the k-th last character of node i.
+     * Given an edge index i, this function returns the k-mer sequence of its
+     * source node.
      */
-    std::pair<TAlphabet, uint64_t> get_minus_k_value(uint64_t i, uint64_t k) const;
+    std::vector<TAlphabet> get_node_seq(edge_index i) const;
 
     /**
-     * Given a node index k_node, this function returns the k-mer sequence of the
-     * node.
+     * Given index i of an edge and a value k, this function
+     * returns the k-th last character of the source node for edge i.
      */
-    std::vector<TAlphabet> get_node_seq(uint64_t k_node) const;
+    std::pair<TAlphabet, edge_index> get_minus_k_value(edge_index i, size_t k) const;
 
     /**
-     * Breaks the seq into k-mers and searches for the index of each
-     * k-mer in the graph. Returns these indices.
-     * Default: kmer_size = k
+     * Print current representation of the graph to stream.
      */
-    std::vector<uint64_t> map_kmers(const std::string &sequence,
-                                    size_t kmer_size = 0) const;
-
-    std::vector<std::vector<HitInfo>> align_fuzzy(const std::string &sequence,
-                                                  size_t max_distance = 0,
-                                                  size_t alignment_length = 0) const;
-
-    typedef std::function<void(const std::vector<uint64_t>,
-                               const std::vector<TAlphabet>&)> PathCallback;
-
-    void call_paths(const PathCallback &callback) const;
-
-    typedef std::function<void(const std::string&)> SequenceCallback;
-
-    void call_sequences(const SequenceCallback &callback) const;
-
-    typedef std::function<void(edge_index, const std::vector<TAlphabet>&)> EdgeCallback;
-
-    void call_edges(const EdgeCallback &callback) const;
-
-    typedef std::function<void(node_index, const std::string&)> KmerCallback;
-    // traverse all nodes in graph except for the dummy source of sink ones
-    void call_kmers(const KmerCallback &callback) const;
-
-    /**
-     * This is a debug function that prints the current representation of the graph to
-     * the screen.
-     */
-    void print_state(std::ostream &os = std::cout) const;
+    void print(std::ostream &os = std::cout) const;
 
     Config::StateType get_state() const { return state; }
+    void switch_state(Config::StateType state);
 
     /**
      * Write the adjacency list to file |filename| or
@@ -200,44 +202,60 @@ class DBG_succ : public SequenceGraph {
      */
     void print_adj_list(std::ostream &os = std::cout) const;
 
-    void switch_state(Config::StateType state);
 
     /**
      * Given a node index i, this function returns the number of outgoing
-     * edges from node i.
+     * edges from the node i.
      */
-    uint64_t outdegree(uint64_t i) const;
+    size_t outdegree(node_index i) const;
 
     /**
-     * Given a node index i, this function returns true if there is
-     * only one outgoing edges from node i.
+     * Given an edge index i, this function returns true if that is
+     * the only outgoing edge from its source node.
      */
-    bool is_single_outgoing(uint64_t i) const;
+    bool is_single_outgoing(edge_index i) const;
 
     /**
      * Given a node index i, this function returns the number of incoming
      * edges to node i.
      */
-    uint64_t indegree(uint64_t i) const;
+    size_t indegree(node_index i) const;
 
     /**
-     * Given a position i in W and an edge label c, this function returns the
+     * Given a node index i and an edge label c, this function returns the
      * index of the node the edge is pointing to.
      */
-    uint64_t outgoing(uint64_t i, TAlphabet c) const;
+    node_index outgoing(node_index i, TAlphabet c) const;
 
     /**
      * Given a node index i and an edge label c, this function returns the
      * index of the node the incoming edge belongs to.
      */
-    uint64_t incoming(uint64_t i, TAlphabet c) const;
+    node_index incoming(node_index i, TAlphabet c) const;
+
+    /**
+     * Given a node index i and an edge label c, this function returns the
+     * index of the outgoing edge with label c if it exists and npos otherwise.
+     */
+    edge_index outgoing_edge_idx(node_index i, TAlphabet c) const;
+
+    /**
+     * Given an edge index i and a character c, get the index of the edge with
+     * label c outgoing from the same source node if such exists and npos otherwise.
+     */
+    edge_index pick_edge(edge_index edge, node_index node, TAlphabet c) const;
 
     /**
      * Given a node label kmer, this function returns the index
      * of the corresponding node or the closest predecessor, if no node
      * with the sequence is not found.
      */
-    uint64_t pred_kmer(const std::vector<TAlphabet> &kmer) const;
+    node_index pred_kmer(const std::vector<TAlphabet> &kmer) const;
+
+    /**
+     * Return value of last at position i.
+     */
+    bool get_last(uint64_t i) const { return (*last_)[i]; }
 
     /**
      * Uses the object's array last and a position and
@@ -264,6 +282,25 @@ class DBG_succ : public SequenceGraph {
     uint64_t succ_last(uint64_t i) const;
 
     /**
+     * Return value of W at position i.
+     */
+    TAlphabet get_W(uint64_t i) const { return (*W_)[i]; }
+    const wavelet_tree& get_W() const { return *W_; }
+
+    /**
+     * Uses the object's array W, a given position i in W and a character c
+     * from the alphabet and returns the number of occurences of c in W up to
+     * position i.
+     */
+    uint64_t rank_W(uint64_t i, TAlphabet c) const;
+
+    /**
+     * Uses the array W and gets a count i and a character c from
+     * the alphabet and returns the positions of the i-th occurence of c in W.
+     */
+    uint64_t select_W(uint64_t i, TAlphabet c) const;
+
+    /**
      * This is a convenience function that returns for array W, a position i and
      * a character c the last index of a character c preceding in W[1..i].
      */
@@ -274,6 +311,12 @@ class DBG_succ : public SequenceGraph {
      * a character c the first index of a character c in W[i..N].
      */
     uint64_t succ_W(uint64_t i, TAlphabet c) const;
+
+    /**
+     * Return value of F vector at index k.
+     * The index is over the alphabet!
+     */
+    uint64_t get_F(TAlphabet k) const { return F_.at(k); }
 
     /**
      * This functions gets a position i reflecting the r-th occurence of the corresponding
@@ -320,11 +363,13 @@ class DBG_succ : public SequenceGraph {
     void update_F(TAlphabet c, int value);
 
     /**
-     * This function takes a character c and appends it to the end of the graph
-     * sequence given that the corresponding note is not part of the graph yet.
+     * Given a character c and an edge index, this function
+     * creates an outgoing edge from the same source node with
+     * label c if it is not a part of the graph yet.
      */
-    uint64_t append_pos(TAlphabet c, uint64_t source_node, TAlphabet *ckmer = NULL,
-                        bit_vector_dyn *edges_inserted = NULL);
+    edge_index append_pos(TAlphabet c, edge_index source_node,
+                          const TAlphabet *source_node_kmer,
+                          bit_vector_dyn *edges_inserted = NULL);
 
     /**
      * Helper function used by the append_pos function
@@ -333,41 +378,41 @@ class DBG_succ : public SequenceGraph {
                      bit_vector_dyn *edges_inserted = NULL);
 
     /**
-     * Uses the object's array W, a given position i in W and a character c
-     * from the alphabet and returns the number of occurences of c in W up to
-     * position i.
-     */
-    uint64_t rank_W(uint64_t i, TAlphabet c) const;
-
-    /**
-     * Uses the array W and gets a count i and a character c from
-     * the alphabet and returns the positions of the i-th occurence of c in W.
-     */
-    uint64_t select_W(uint64_t i, TAlphabet c) const;
-
-    /**
-     * This function gets a local range in W from lower bound l
-     * to upper bound u and swaps the inserted element to the
-     * righ location.
-     */
-    void fix_order_in_W_local(uint64_t l, uint64_t u);
-
-    /**
-     * Return value of F vector at index k.
-     * The index is over the alphabet!
-     */
-    uint64_t get_F(TAlphabet k) const { return F_.at(k); }
-
-    /**
-     * This function gets two node indices and returns if the
+     * This function gets two edge indices and returns if their source
      * node labels share a k-1 suffix.
      */
-    bool compare_node_suffix(uint64_t first, uint64_t second) const;
-    bool compare_node_suffix(TAlphabet *ref, uint64_t j) const;
+    bool compare_node_suffix(edge_index first, edge_index second) const;
+    bool compare_node_suffix(edge_index first, const TAlphabet *second) const;
+
+    inline node_index get_source_node(edge_index i) const;
 
     /**
-     * Given a node label s, this function returns the index
-     * of the corresponding node, if this node exists and 0 otherwise.
+     * Given a k-mer, this function returns the index
+     * of the corresponding node, if such exists and 0 otherwise.
+     */
+    template <typename RandomAccessIt>
+    node_index map_to_node(RandomAccessIt begin, RandomAccessIt end) const {
+        uint64_t edge = index(begin, end);
+        return edge ? get_source_node(edge) : npos;
+    }
+
+    /**
+     * Given a (k+1)-mer, this function returns the index
+     * of the corresponding edge, if such exists and 0 otherwise.
+     */
+    template <typename RandomAccessIt>
+    node_index map_to_edge(RandomAccessIt begin, RandomAccessIt end) const {
+        assert(begin + k_ + 1 == end);
+
+        uint64_t edge = index(begin, end - 1);
+
+        return edge ? pick_edge(edge, get_source_node(edge), *(end - 1))
+                    : npos;
+    }
+
+    /**
+     * Given a k-mer, this function returns the index
+     * of the corresponding node, if such exists and 0 otherwise.
      */
     template <typename RandomAccessIt>
     uint64_t index(RandomAccessIt begin, RandomAccessIt end) const {
@@ -396,12 +441,12 @@ class DBG_succ : public SequenceGraph {
         TAlphabet s = *begin;
 
         // initial range
-        uint64_t rl = F_.at(s) + 1 < W_->size()
-                      ? succ_last(F_.at(s) + 1)
-                      : W_->size();
-        uint64_t ru = s < F_.size() - 1
-                      ? F_.at(s + 1)
-                      : W_->size() - 1; // upper bound
+        edge_index rl = F_.at(s) + 1 < W_->size()
+                        ? succ_last(F_.at(s) + 1)
+                        : W_->size();
+        edge_index ru = s < F_.size() - 1
+                        ? F_.at(s + 1)
+                        : W_->size() - 1; // upper bound
         if (rl > ru)
             return std::make_pair(0, 0);
 
@@ -425,20 +470,16 @@ class DBG_succ : public SequenceGraph {
                 return std::make_pair(0, 0);
 
             // Translate the node indices from the sources to the targets.
-            rl = outgoing(rl, s);
-            ru = outgoing(ru, s);
+            rl = fwd(rl);
+            ru = fwd(ru);
         }
         assert(rl <= ru);
         return std::make_pair(rl, ru);
     }
 
-    std::vector<HitInfo> index_fuzzy(const std::string &str, uint64_t eops) const;
-
-    /**
-     * Given a position i in W and an edge label c, this function returns the
-     * index of the outgoing edge with label c.
-     */
-    uint64_t outgoing_edge_idx(uint64_t i, TAlphabet c) const;
+    // TODO: revise the implementation, write unit tests
+    std::vector<HitInfo> index_fuzzy(const std::string &str,
+                                     size_t max_distance) const;
 
     void verbose_cout() const {}
 

@@ -217,7 +217,7 @@ void annotate_sequence_thread_safe(
 
     std::vector<uint64_t> indices;
 
-    graph->align(sequence, [&](uint64_t i) {
+    graph->map_to_nodes(sequence, [&](uint64_t i) {
         if (i > 0)
             indices.push_back(i);
     });
@@ -246,7 +246,7 @@ void annotate_sequence(const std::string &sequence,
     }
 
     std::vector<uint64_t> indices;
-    graph.align(sequence, [&](uint64_t i) {
+    graph.map_to_nodes(sequence, [&](uint64_t i) {
         if (i > 0)
             indices.push_back(i);
     });
@@ -499,7 +499,7 @@ void execute_query(std::string seq_name,
 
     if (count_labels) {
         auto top_labels = annotation->get_most_frequent_colors(
-            graph->map_kmers(sequence),
+            graph->map_to_nodes(sequence),
             num_top_labels
         );
 
@@ -514,7 +514,7 @@ void execute_query(std::string seq_name,
         std::vector<uint64_t> indices;
         size_t num_missing_kmers = 0;
 
-        graph->align(sequence, [&](uint64_t i) {
+        graph->map_to_nodes(sequence, [&](uint64_t i) {
             if (i > 0) {
                 indices.push_back(i);
             } else {
@@ -582,7 +582,7 @@ int main(int argc, const char *argv[]) {
                 assert(DBG_succ::alph_size > 1);
                 assert(config->nsplits > 0);
                 size_t suffix_len = std::min(
-                    static_cast<uint64_t>(std::ceil(std::log2(config->nsplits)
+                    static_cast<size_t>(std::ceil(std::log2(config->nsplits)
                                                     / std::log2(DBG_succ::alph_size - 1))),
                     graph->get_k() - 1
                 );
@@ -752,7 +752,7 @@ int main(int argc, const char *argv[]) {
 
             // graph output
             if (config->print_graph_succ && !config->suffix.size())
-                graph->print_state();
+                std::cout << *graph;
             if (!config->outfbase.empty() && !config->suffix.size())
                 graph->serialize(config->outfbase);
             delete graph;
@@ -830,7 +830,7 @@ int main(int argc, const char *argv[]) {
 
             // graph output
             if (config->print_graph_succ)
-                graph->print_state();
+                std::cout << *graph;
 
             assert(config->outfbase.size());
 
@@ -1396,7 +1396,7 @@ int main(int argc, const char *argv[]) {
 
             // graph output
             if (graph && config->print_graph_succ)
-                graph->print_state();
+                std::cout << *graph;
             if (graph && !config->outfbase.empty())
                 graph->serialize(config->outfbase);
 
@@ -1483,7 +1483,7 @@ int main(int argc, const char *argv[]) {
 
             // graph output
             if (graph && config->print_graph_succ)
-                graph->print_state();
+                std::cout << *graph;
             if (graph && !config->outfbase.empty())
                 graph->serialize(config->outfbase);
 
@@ -1503,7 +1503,7 @@ int main(int argc, const char *argv[]) {
                           << std::endl;
 
                 if (config->print_graph_succ)
-                    graph->print_state();
+                    std::cout << *graph;
             }
 
             for (const auto &file : config->infbase_annotators) {
@@ -1716,8 +1716,8 @@ int main(int argc, const char *argv[]) {
                         return;
                     }
 
-                    auto graphindices = graph->map_kmers(read_stream->seq.s,
-                                                         config->alignment_length);
+                    auto graphindices = graph->map_to_nodes(read_stream->seq.s,
+                                                            config->alignment_length);
 
                     size_t num_discovered = std::count_if(
                         graphindices.begin(), graphindices.end(),

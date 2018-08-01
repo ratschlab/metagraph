@@ -26,7 +26,7 @@ TEST(ColoredDBG, ExtendGraphWithSimplePath) {
 
         annotation.insert_rows(inserted_edge_idx);
 
-        graph.align(sequence, [&](uint64_t i) {
+        graph.map_to_nodes(sequence, [&](uint64_t i) {
             if (i > 0)
                 annotation.add_color(i, "Label");
         });

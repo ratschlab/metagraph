@@ -18,11 +18,14 @@
 #include <cstdio>
 
 #include "dbg_succinct_construct.hpp"
+#include "serialization.hpp"
 
-using libmaus2::util::NumberSerialisation;
 
 #define CHECK_INDEX(idx) \
     assert(idx < W_->size()); \
+    assert(idx > 0)
+#define CHECK_NODE(idx) \
+    assert(idx <= num_nodes()); \
     assert(idx > 0)
 
 #if _PROTEIN_GRAPH
@@ -80,6 +83,9 @@ static_assert(sizeof(TAlphabet) * 8 >= DBG_succ::kLogSigma,
 const TAlphabet DBG_succ::alph_size = DBG_succ::alphabet.size() / 2;
 
 const SequenceGraph::node_index SequenceGraph::npos = 0;
+
+typedef DBG_succ::node_index node_index;
+typedef DBG_succ::edge_index edge_index;
 
 
 DBG_succ::DBG_succ(size_t k)
@@ -206,9 +212,9 @@ void DBG_succ::serialize(const std::string &outbase) const {
     std::ofstream outstream(outbase + ".dbg");
 
     // write F values, k, and state
-    NumberSerialisation::serialiseNumberVector(outstream, F_);
-    NumberSerialisation::serialiseNumber(outstream, k_);
-    NumberSerialisation::serialiseNumber(outstream, state);
+    libmaus2::util::NumberSerialisation::serialiseNumberVector(outstream, F_);
+    serialize_number(outstream, k_);
+    serialize_number(outstream, state);
     outstream.flush();
 
     // write Wavelet Tree
@@ -228,9 +234,9 @@ bool DBG_succ::load(const std::string &infbase) {
         std::ifstream instream(infbase + ".dbg");
 
         // load F, k, and state
-        F_ = NumberSerialisation::deserialiseNumberVector<uint64_t>(instream);
-        k_ = NumberSerialisation::deserialiseNumber(instream);
-        state = static_cast<Config::StateType>(NumberSerialisation::deserialiseNumber(instream));
+        F_ = libmaus2::util::NumberSerialisation::deserialiseNumberVector<uint64_t>(instream);
+        k_ = load_number(instream);
+        state = static_cast<Config::StateType>(load_number(instream));
 
         if (F_.size() != alph_size)
             return false;
@@ -346,6 +352,9 @@ uint64_t DBG_succ::select_last(uint64_t i) const {
 uint64_t DBG_succ::pred_last(uint64_t i) const {
     assert(i < last_->size());
 
+    if (get_last(i))
+        return i;
+
     return select_last(rank_last(i));
 }
 
@@ -359,7 +368,7 @@ uint64_t DBG_succ::succ_last(uint64_t i) const {
     if (get_last(i))
         return i;
 
-    uint64_t next_rank = rank_last(i - 1) + 1;
+    uint64_t next_rank = get_source_node(i);
 
     assert(next_rank <= last_->num_set_bits());
 
@@ -373,7 +382,7 @@ uint64_t DBG_succ::succ_last(uint64_t i) const {
 uint64_t DBG_succ::bwd(uint64_t i) const {
     CHECK_INDEX(i);
 
-    uint64_t node_rank = rank_last(i - 1) + 1;
+    uint64_t node_rank = get_source_node(i);
 
     // get value of last position in node i
     TAlphabet c = get_node_last_value(i);
@@ -400,12 +409,16 @@ uint64_t DBG_succ::fwd(uint64_t i) const {
     return select_last(rank_last(o) + r);
 }
 
+node_index DBG_succ::get_source_node(edge_index i) const {
+    CHECK_INDEX(i);
+    return rank_last(i - 1) + 1;
+}
 
 /**
  * Using the offset structure F this function returns the value of the last
- * position of node i.
+ * position of the source node for edge i.
  */
-TAlphabet DBG_succ::get_node_last_value(uint64_t i) const {
+TAlphabet DBG_succ::get_node_last_value(edge_index i) const {
     CHECK_INDEX(i);
 
     if (i == 0)
@@ -419,10 +432,11 @@ TAlphabet DBG_succ::get_node_last_value(uint64_t i) const {
 }
 
 /**
- * Given index i of a node and a value k, this function
- * will return the k-th last character of node i.
+ * Given index i of an edge and a value k, this function
+ * returns the k-th last character of the source node for edge i.
  */
-std::pair<TAlphabet, uint64_t> DBG_succ::get_minus_k_value(uint64_t i, uint64_t k) const {
+std::pair<TAlphabet, edge_index>
+DBG_succ::get_minus_k_value(edge_index i, size_t k) const {
     CHECK_INDEX(i);
 
     for (; k > 0; --k) {
@@ -432,81 +446,93 @@ std::pair<TAlphabet, uint64_t> DBG_succ::get_minus_k_value(uint64_t i, uint64_t 
 }
 
 /**
- * Given a position i in W and an edge label c, this function returns the
- * index of the outgoing edge with label c.
+ * Given a node index i and an edge label c, this function returns the
+ * index of the outgoing edge with label c if it exists and npos otherwise.
  */
-uint64_t DBG_succ::outgoing_edge_idx(uint64_t i, TAlphabet c) const {
-    CHECK_INDEX(i);
+edge_index DBG_succ::outgoing_edge_idx(node_index i, TAlphabet c) const {
+    CHECK_NODE(i);
     assert(c < alph_size);
 
-    if (i == 0 || i > W_->size())
-        return 0;
-
-    uint64_t first_pos = pred_last(i - 1) + 1;
-    uint64_t last_pos = succ_last(i);
-
-    uint64_t j = std::max(pred_W(last_pos, c),
-                          pred_W(last_pos, c + alph_size));
-
-    if (j < first_pos || j >= W_->size())
-        return 0;
-
-    return j;
+    return pick_edge(select_last(i), i, c);
 }
 
 /**
- * Given a position i in W and an edge label c, this function returns the
- * index of the node the edge is pointing to.
+ * Given an edge index i and a character c, get the index of the edge with
+ * label c outgoing from the same source node if such exists and npos otherwise.
  */
-uint64_t DBG_succ::outgoing(uint64_t i, TAlphabet c) const {
-    CHECK_INDEX(i);
+edge_index DBG_succ::pick_edge(edge_index edge, node_index node, TAlphabet c) const {
+    CHECK_INDEX(edge);
+    CHECK_NODE(node);
+    assert(c < alph_size);
+    assert(get_source_node(edge) == node);
 
-    c %= alph_size;
+    uint64_t j = std::max(pred_W(edge, c),
+                          pred_W(edge, c + alph_size));
 
-    uint64_t j = outgoing_edge_idx(i, c);
-    if (j == 0)
-        return 0;
-
-    j = fwd(j);
-    if (j == 0 || j == W_->size())
-        return 0;
+    if (!j || get_source_node(j) != node)
+        return npos;
 
     return j;
 }
 
 /**
  * Given a node index i and an edge label c, this function returns the
+ * index of the node the edge is pointing to.
+ */
+node_index DBG_succ::outgoing(node_index i, TAlphabet c) const {
+    CHECK_NODE(i);
+
+    c %= alph_size;
+
+    edge_index j = outgoing_edge_idx(i, c);
+    if (j == npos)
+        return npos;
+
+    uint64_t offset = F_[c];
+    uint64_t rank = rank_W(j, c);
+
+    return rank_last(offset) + rank;
+}
+
+/**
+ * Given a node index i and an edge label c, this function returns the
  * index of the node the incoming edge belongs to.
  */
-uint64_t DBG_succ::incoming(uint64_t i, TAlphabet c) const {
-    CHECK_INDEX(i);
+node_index DBG_succ::incoming(node_index i, TAlphabet c) const {
+    CHECK_NODE(i);
 
-    // no incoming edges for the dummy source
-    if (i == 1)
-        return 0;
+    // only one incoming edge for the dummy source node
+    if (i == 1) {
+        if (c == kSentinelCode) {
+            return 1;
+        } else {
+            return npos;
+        }
+    }
 
     c %= alph_size;
 
     // check if the first incoming edge has label `c`
-    uint64_t x = bwd(i);
+    edge_index edge = select_last(i);
+    uint64_t x = bwd(edge);
 
     if (get_minus_k_value(x, k_ - 1).first == c)
-        return succ_last(x);
+        return x ? get_source_node(x) : npos;
 
-    if (x + 1 == get_W().size())
-        return 0;
+    if (x + 1 == W_->size())
+        return npos;
 
-    TAlphabet d = get_node_last_value(i);
+    TAlphabet d = get_node_last_value(edge);
     uint64_t y = succ_W(x + 1, d);
 
     // iterate over the rest of the incoming edges
     while (x + 1 < y) {
         x = succ_W(x + 1, d + alph_size);
         if (x < y && get_minus_k_value(x, k_ - 1).first == c) {
-            return succ_last(x);
+            return x ? get_source_node(x) : npos;
         }
     }
-    return 0;
+    return npos;
 }
 
 DBG_succ::node_index DBG_succ::traverse(node_index node, char edge_label) const {
@@ -521,13 +547,17 @@ DBG_succ::node_index DBG_succ::traverse_back(node_index node, char edge_label) c
  * Given a node index i, this function returns the number of outgoing
  * edges from node i.
  */
-uint64_t DBG_succ::outdegree(uint64_t i) const {
-    CHECK_INDEX(i);
+size_t DBG_succ::outdegree(node_index i) const {
+    CHECK_NODE(i);
 
-    return (i < W_->size()) ? succ_last(i) - pred_last(i - 1) : 0;
+    return select_last(i) - (i == 1 ? 0 : select_last(i - 1));
 }
 
-bool DBG_succ::is_single_outgoing(uint64_t i) const {
+/**
+ * Given an edge index i, this function returns true if that is
+ * the only outgoing edge from its source node.
+ */
+bool DBG_succ::is_single_outgoing(edge_index i) const {
     CHECK_INDEX(i);
 
     return get_last(i) && (i == 1 || get_last(i - 1));
@@ -535,24 +565,24 @@ bool DBG_succ::is_single_outgoing(uint64_t i) const {
 
 /**
  * Given a node index i, this function returns the number of incoming
- * edges to node i.
+ * edges to the node i.
  */
-uint64_t DBG_succ::indegree(uint64_t i) const {
-    CHECK_INDEX(i);
+size_t DBG_succ::indegree(node_index i) const {
+    CHECK_NODE(i);
 
-    if (i < 2)
-        return 0;
+    if (i == 1)
+        return 1;
 
-    uint64_t x = bwd(i);
+    edge_index edge = select_last(i);
+    uint64_t x = bwd(edge);
     if (x + 1 == W_->size())
         return 1;
 
-    TAlphabet d = get_node_last_value(i);
+    TAlphabet d = get_node_last_value(edge);
 
     uint64_t y = succ_W(x + 1, d);
     return 1 + rank_W(y - 1, d + alph_size) - rank_W(x - 1, d + alph_size);
 }
-
 
 
 /**
@@ -561,8 +591,7 @@ uint64_t DBG_succ::indegree(uint64_t i) const {
  * max_distance many edits away from str.
  */
 std::vector<HitInfo> DBG_succ::index_fuzzy(const std::string &str,
-                                           uint64_t max_distance) const {
-
+                                           size_t max_distance) const {
     std::vector<HitInfo> result;
     std::priority_queue<HitInfo, std::vector<HitInfo>, HitInfoCompare> hits;
     std::priority_queue<HitInfo, std::vector<HitInfo>, HitInfoCompare> hits2;
@@ -646,12 +675,12 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(const std::string &str,
                                       pred_W(curr_hit.ru, b + alph_size));
 
                         // the current range in W does not contain our next symbol
-                        if ((rl >= W_->size()) || (ru >= W_->size()) || (rl > ru))
+                        if (rl >= W_->size() || ru >= W_->size() || rl > ru)
                             continue;
 
                         // update the SA range with the current symbol b
-                        rl = outgoing(rl, b);
-                        ru = outgoing(ru, b);
+                        rl = fwd(rl);
+                        ru = fwd(ru);
 
                         // range is empty
                         if ((rl == 0) && (ru == 0))
@@ -685,11 +714,11 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(const std::string &str,
 
 
 /**
- * Given a node label s, this function returns the index
+ * Given a node label kmer, this function returns the index
  * of the corresponding node or the closest predecessor, if no node
  * with the sequence is not found.
  */
-uint64_t DBG_succ::pred_kmer(const std::vector<TAlphabet> &kmer) const {
+node_index DBG_succ::pred_kmer(const std::vector<TAlphabet> &kmer) const {
     assert(kmer.size() == k_);
 
     // get first
@@ -710,7 +739,7 @@ uint64_t DBG_succ::pred_kmer(const std::vector<TAlphabet> &kmer) const {
         if (last_target > 0) {
             if (rank_last(last_target - 1) < rank_last(last_ - 1))
                 shift = 0;
-            last_ = succ_last(outgoing(last_target, s));
+            last_ = fwd(last_target);
             continue;
         }
         assert(s > 0);
@@ -719,7 +748,7 @@ uint64_t DBG_succ::pred_kmer(const std::vector<TAlphabet> &kmer) const {
                                succ_W(last_, s + alph_size));
 
         if (last_target < W_->size()) {
-            last_ = succ_last(outgoing(last_target, s));
+            last_ = fwd(last_target);
             shift = 1;
         } else {
             last_ = F_[s];
@@ -727,16 +756,16 @@ uint64_t DBG_succ::pred_kmer(const std::vector<TAlphabet> &kmer) const {
         }
     }
 
-    assert(pred_last(last_ - shift) > 0);
-    return pred_last(last_ - shift);
+    CHECK_NODE(rank_last(last_ - shift));
+    return rank_last(last_ - shift);
 }
 
 
 /**
- * This function gets two node indices and returns whether the
+ * This function gets two edge indices and returns if their source
  * node labels share a k-1 suffix.
  */
-bool DBG_succ::compare_node_suffix(uint64_t first, uint64_t second) const {
+bool DBG_succ::compare_node_suffix(edge_index first, edge_index second) const {
     for (size_t i = 0; i < k_ - 1; ++i) {
         if (get_node_last_value(first) != get_node_last_value(second)) {
             return false;
@@ -747,23 +776,21 @@ bool DBG_succ::compare_node_suffix(uint64_t first, uint64_t second) const {
     return true;
 }
 
-bool DBG_succ::compare_node_suffix(TAlphabet *ref, uint64_t i2) const {
-    TAlphabet *i1 = &ref[k_ - 1];
-    for (size_t ii=0; ii < k_ - 1; ii++) {
-        if (*i1 != get_node_last_value(i2)) {
+bool DBG_succ::compare_node_suffix(edge_index first, const TAlphabet *second) const {
+    for (auto it = second + k_ - 1; it > second; --it) {
+        if (get_node_last_value(first) != *it) {
             return false;
         }
-        i1 = &ref[k_ - 2 - ii];
-        i2 = bwd(i2);
+        first = bwd(first);
     }
     return true;
 }
 
 /**
-* Given a node index k_node, this function returns the k-mer sequence of the
-* node in a deque data structure.
-*/
-std::vector<TAlphabet> DBG_succ::get_node_seq(uint64_t k_node) const {
+ * Given an edge index i, this function returns the k-mer sequence of its
+ * source node.
+ */
+std::vector<TAlphabet> DBG_succ::get_node_seq(edge_index k_node) const {
     CHECK_INDEX(k_node);
 
     std::vector<TAlphabet> ret(k_, get_node_last_value(k_node));
@@ -782,33 +809,33 @@ std::vector<TAlphabet> DBG_succ::get_node_seq(uint64_t k_node) const {
  * Given a node index k_node, this function returns the k-mer sequence of the
  * node as a string.
  */
-std::string DBG_succ::get_node_str(uint64_t k_node) const {
+std::string DBG_succ::get_node_str(edge_index k_node) const {
     CHECK_INDEX(k_node);
     return decode(get_node_seq(k_node));
 }
 
-void DBG_succ::align(const std::string &sequence,
-                     const std::function<void(edge_index)> &callback,
-                     const std::function<bool()> &terminate) const {
+void DBG_succ::map_to_nodes(const std::string &sequence,
+                            const std::function<void(node_index)> &callback,
+                            const std::function<bool()> &terminate) const {
     auto seq_encoded = encode(sequence);
 
-    for (uint64_t i = 0; i < seq_encoded.size() - k_ + 1; ++i) {
-        auto kmer_index = index(&seq_encoded[i], &seq_encoded[i + k_]);
+    for (size_t i = 0; i + k_ - 1 < seq_encoded.size(); ++i) {
+        auto node = map_to_node(&seq_encoded[i], &seq_encoded[i + k_]);
 
-        callback(kmer_index);
+        callback(node);
 
         if (terminate())
             return;
 
-        if (kmer_index == 0)
+        if (!node)
             continue;
 
-        while (i < seq_encoded.size() - k_) {
-            kmer_index = outgoing(kmer_index, seq_encoded[i + k_]);
-            if (kmer_index == 0)
+        while (i + k_ < seq_encoded.size()) {
+            node = outgoing(node, seq_encoded[i + k_]);
+            if (!node)
                 break;
 
-            callback(kmer_index);
+            callback(node);
 
             if (terminate())
                 return;
@@ -818,20 +845,96 @@ void DBG_succ::align(const std::string &sequence,
     }
 }
 
+std::vector<node_index> DBG_succ::map_to_nodes(const std::string &sequence,
+                                               size_t kmer_size) const {
+    if (kmer_size == 0 || kmer_size > k_)
+        kmer_size = k_;
+
+    if (sequence.size() < kmer_size)
+        return {};
+
+    auto seq_encoded = encode(sequence);
+
+    std::vector<node_index> indices;
+
+    for (size_t i = 0; i + kmer_size <= seq_encoded.size(); ++i) {
+        edge_index edge = index_range(&seq_encoded[i],
+                                      &seq_encoded[i + kmer_size]).second;
+        node_index node = edge ? get_source_node(edge) : npos;
+        indices.push_back(node);
+
+        if (!edge || kmer_size != k_ || !indices.back())
+            continue;
+
+        // This boost is valid only if alignment length equals k since
+        // otherwise, when alignment length is less than k,
+        // the existence of an edge between node ending with preceeding
+        // aligned substring and node ending with the next aligned substring
+        // is not guaranteed. It may be a suffix of some other k-mer.
+        while (i + kmer_size < seq_encoded.size()) {
+            node = outgoing(node, seq_encoded[i + kmer_size]);
+            if (!node)
+                break;
+
+            indices.push_back(node);
+            i++;
+        }
+    }
+
+    return indices;
+}
+
+void DBG_succ::map_to_edges(const std::string &sequence,
+                            const std::function<void(edge_index)> &callback,
+                            const std::function<bool()> &terminate) const {
+    auto seq_encoded = encode(sequence);
+
+    for (size_t i = 0; i + k_ + 1 <= seq_encoded.size(); ++i) {
+        auto edge = map_to_edge(&seq_encoded[i], &seq_encoded[i + k_ + 1]);
+
+        callback(edge);
+
+        if (terminate())
+            return;
+
+        while (edge && i + k_ + 1 < seq_encoded.size()) {
+            edge = fwd(edge);
+            edge = pick_edge(edge, get_source_node(edge), seq_encoded[i + k_ + 1]);
+
+            callback(edge);
+
+            if (terminate())
+                return;
+
+            i++;
+        }
+    }
+}
+
+std::vector<edge_index> DBG_succ::map_to_edges(const std::string &sequence) const {
+    std::vector<edge_index> indices;
+    indices.reserve(sequence.size());
+    map_to_edges(sequence,
+                 [&indices](edge_index i) { indices.push_back(i); });
+    return indices;
+}
+
 bool DBG_succ::find(const std::string &sequence,
                     double kmer_discovery_fraction) const {
-    if (sequence.length() < k_)
+    size_t kmer_size = k_ + 1;
+
+    if (sequence.length() < kmer_size)
         return false;
 
-    const size_t num_kmers = sequence.length() - k_ + 1;
+    const size_t num_kmers = sequence.length() - kmer_size + 1;
     const size_t max_kmers_missing = num_kmers * (1 - kmer_discovery_fraction);
     const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
     size_t num_kmers_discovered = 0;
     size_t num_kmers_missing = 0;
 
-    align(sequence,
-        [&](uint64_t i) {
-            if (i > 0) {
+    map_to_edges(sequence,
+        [&](edge_index edge) {
+            if (edge) {
                 num_kmers_discovered++;
             } else {
                 num_kmers_missing++;
@@ -849,10 +952,12 @@ bool DBG_succ::find(const std::string &sequence,
     if (!kmer_mapping_mode)
         return find(sequence, kmer_discovery_fraction);
 
-    if (sequence.size() < k_)
+    size_t kmer_size = k_ + 1;
+
+    if (sequence.length() < kmer_size)
         return false;
 
-    const size_t num_kmers = sequence.length() - k_ + 1;
+    const size_t num_kmers = sequence.length() - kmer_size + 1;
     const size_t max_kmers_missing = num_kmers * (1 - kmer_discovery_fraction);
     const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
     size_t num_kmers_discovered = 0;
@@ -863,10 +968,9 @@ bool DBG_succ::find(const std::string &sequence,
     std::vector<size_t> skipped_kmers;
     skipped_kmers.reserve(seq_encoded.size());
 
-    for (uint64_t i = 0; i < seq_encoded.size() - k_ + 1; ++i) {
-        auto kmer_index = index(&seq_encoded[i], &seq_encoded[i + k_]);
-
-        if (kmer_index > 0) {
+    for (size_t i = 0; i < seq_encoded.size() - kmer_size + 1; ++i) {
+        auto edge = map_to_edge(&seq_encoded[i], &seq_encoded[i + kmer_size]);
+        if (edge) {
             num_kmers_discovered++;
         } else {
             num_kmers_missing++;
@@ -876,12 +980,10 @@ bool DBG_succ::find(const std::string &sequence,
                 || num_kmers_discovered >= min_kmers_discovered)
             return num_kmers_discovered >= min_kmers_discovered;
 
-        while (kmer_index && i + k_ < seq_encoded.size()) {
-            kmer_index = outgoing(kmer_index, seq_encoded[i + k_]);
-            if (kmer_index == 0)
-                break;
-
-            if (kmer_index > 0) {
+        while (edge && i + kmer_size < seq_encoded.size()) {
+            edge = fwd(edge);
+            edge = pick_edge(edge, get_source_node(edge), seq_encoded[i + kmer_size]);
+            if (edge) {
                 num_kmers_discovered++;
             } else {
                 num_kmers_missing++;
@@ -896,25 +998,25 @@ bool DBG_succ::find(const std::string &sequence,
 
         if (kmer_discovery_fraction < 1
             && (kmer_mapping_mode == 1
-                || k_ * (max_kmers_missing - num_kmers_missing)
+                || kmer_size * (max_kmers_missing - num_kmers_missing)
                     > min_kmers_discovered - num_kmers_discovered)) {
-            uint64_t i_old = i;
+            size_t i_old = i;
 
             // jump over the missing k-mer
-            i += k_ - 1;
+            i += kmer_size - 1;
 
             // Save skipped kmers for the end
-            while (++i_old <= i) {
+            while (++i_old <= i && i_old < seq_encoded.size() - kmer_size + 1) {
                 skipped_kmers.push_back(i_old);
             }
         }
-
     }
 
     for (size_t j = 0; j < skipped_kmers.size(); ++j) {
-        uint64_t i = skipped_kmers[j];
-        auto kmer_index = index(&seq_encoded[i], &seq_encoded[i + k_]);
-        if (kmer_index > 0) {
+        size_t i = skipped_kmers[j];
+
+        auto edge = map_to_edge(&seq_encoded[i], &seq_encoded[i + kmer_size]);
+        if (edge) {
             num_kmers_discovered++;
         } else {
             num_kmers_missing++;
@@ -924,15 +1026,11 @@ bool DBG_succ::find(const std::string &sequence,
                 || num_kmers_discovered >= min_kmers_discovered)
             return num_kmers_discovered >= min_kmers_discovered;
 
-        while (kmer_index && j + 1 < skipped_kmers.size()
-                          && skipped_kmers[j + 1] == i + 1) {
-            auto next = outgoing(kmer_index, seq_encoded[i + k_]);
-            if (next == 0)
-                break;
-
-            kmer_index = next;
-
-            if (kmer_index > 0) {
+        while (edge && j + 1 < skipped_kmers.size()
+                    && i + 1 == skipped_kmers[j + 1]) {
+            edge = fwd(edge);
+            edge = pick_edge(edge, get_source_node(edge), seq_encoded[i + kmer_size]);
+            if (edge) {
                 num_kmers_discovered++;
             } else {
                 num_kmers_missing++;
@@ -950,46 +1048,6 @@ bool DBG_succ::find(const std::string &sequence,
     return num_kmers_missing <= max_kmers_missing;
 }
 
-std::vector<uint64_t> DBG_succ::map_kmers(const std::string &sequence,
-                                          size_t kmer_size) const {
-    if (kmer_size == 0 || kmer_size > k_)
-        kmer_size = k_;
-
-    if (sequence.size() < kmer_size)
-        return {};
-
-    auto seq_encoded = encode(sequence);
-
-    std::vector<uint64_t> indices;
-
-    for (uint64_t i = 0; i < seq_encoded.size() - kmer_size + 1; ++i) {
-        indices.push_back(
-            index(seq_encoded.data() + i,
-                  seq_encoded.data() + i + kmer_size)
-        );
-
-        if (kmer_size != k_ || !indices.back())
-            continue;
-
-        // This boost is valid only if alignment length equals k since
-        // otherwise, when alignment length is less than k,
-        // the existence of an edge between node ending with preceeding
-        // aligned substring and node ending with the next aligned substring
-        // is not guaranteed. It may be a suffix of some other k-mer.
-        while (i < seq_encoded.size() - kmer_size) {
-            auto next = outgoing(indices.back(),
-                                 seq_encoded[kmer_size + i]);
-            if (next == 0)
-                break;
-
-            indices.push_back(next);
-            i++;
-        }
-    }
-
-    return indices;
-}
-
 std::vector<std::vector<HitInfo>> DBG_succ::align_fuzzy(const std::string &sequence,
                                                         size_t alignment_length,
                                                         size_t max_distance) const {
@@ -1002,7 +1060,7 @@ std::vector<std::vector<HitInfo>> DBG_succ::align_fuzzy(const std::string &seque
         alignment_length = alignment_length < sequence.size()
                                     ? alignment_length
                                     : sequence.size();
-        for (uint64_t i = 0; i < sequence.size() - alignment_length + 1; ++i) {
+        for (size_t i = 0; i < sequence.size() - alignment_length + 1; ++i) {
             std::string kmer(sequence.data() + i, sequence.data() + i + alignment_length);
             hit_list.push_back(index_fuzzy(kmer, max_distance));
         }
@@ -1034,34 +1092,6 @@ void DBG_succ::update_F(TAlphabet c, int value) {
 
     for (TAlphabet i = c + 1; i < alph_size; i++) {
         F_[i] += value;
-    }
-}
-
-/**
- * This function gets a local range in W from lower bound l
- * to upper bound u and swaps the inserted element to the
- * righ location.
- */
-//TODO: this function can be improved
-void DBG_succ::fix_order_in_W_local(uint64_t l, uint64_t u) {
-    assert(l < W_->size());
-    assert(u < W_->size());
-
-    for (uint64_t s = u; s > l; --s) {
-        auto first = get_W(s - 1);
-        auto second = get_W(s);
-        if ((second % alph_size) < (first % alph_size)) {
-            W_->set(s - 1, second);
-            W_->set(s, first);
-        }
-    }
-    for (uint64_t s = l; s < u; ++s) {
-        auto first = get_W(s);
-        auto second = get_W(s + 1);
-        if ((first % alph_size) > (second % alph_size)) {
-            W_->set(s + 1, first);
-            W_->set(s, second);
-        }
     }
 }
 
@@ -1127,7 +1157,7 @@ void DBG_succ::switch_state(Config::StateType new_state) {
     state = new_state;
 }
 
-void DBG_succ::print_state(std::ostream &os) const {
+void DBG_succ::print(std::ostream &os) const {
     assert(is_valid());
     auto vertex_header = std::string("Vertex");
     vertex_header.resize(k_, ' ');
@@ -1192,12 +1222,17 @@ void DBG_succ::add_sequence(const std::string &seq, bool try_extend,
 }
 
 /**
- * This function takes a character c and appends it to the end of the graph
- * sequence given that the corresponding node is not a part of the graph yet.
+ * Given a character c and an edge index, this function
+ * creates an outgoing edge from the same source node with
+ * label c if it is not a part of the graph yet.
  */
-uint64_t DBG_succ::append_pos(TAlphabet c, uint64_t source_node, TAlphabet *ckmer,
-                              bit_vector_dyn *edges_inserted) {
+edge_index DBG_succ::append_pos(TAlphabet c, edge_index source_node,
+                                const TAlphabet *source_node_kmer,
+                                bit_vector_dyn *edges_inserted) {
     CHECK_INDEX(source_node);
+    assert(source_node_kmer);
+    assert(std::vector<TAlphabet>(source_node_kmer, source_node_kmer + k_)
+                                                == get_node_seq(source_node));
 
     // get range of identical nodes (without W) pos current end position
     uint64_t begin = pred_last(source_node - 1) + 1;
@@ -1206,28 +1241,28 @@ uint64_t DBG_succ::append_pos(TAlphabet c, uint64_t source_node, TAlphabet *ckme
     // get position of the first occurence of c or c- in W after p
     uint64_t prev_c_pos = std::max(pred_W(end - 1, c),
                                    pred_W(end - 1, c + alph_size));
-    // if the character already exists return its index
+    // if the edge already exists, traverse it and return the index
     if (prev_c_pos >= begin)
         return fwd(prev_c_pos);
 
     /**
-     * We found that c does not yet exist in the current range and now have to
+     * We found that c does not exist in the current range yet and now have to
      * figure out if we need to add c or c- to the range.
      * To do this, we check if there is a preceding position j1 with W[j1] == c
      * whose node shares a k-1 suffix with the current node.
      * If yes, we add c- instead of c.
      */
 
-    bool is_first_incoming = true;
-    if (prev_c_pos > 0)
-        is_first_incoming = ckmer ? !compare_node_suffix(ckmer, prev_c_pos)
-                                  : !compare_node_suffix(begin, prev_c_pos);
-
-    if (!is_first_incoming) {
+    // Check if the new edge will be the first incoming for its target node
+    if (prev_c_pos > 0 && compare_node_suffix(prev_c_pos, source_node_kmer)) {
+        // the new edge will not be the first incoming for its target node
         // insert the edge
         insert_edge(c + alph_size, begin, end, edges_inserted);
         return fwd(prev_c_pos);
     }
+
+    // The new edge will be the first incoming for its target node,
+    // and therefore the new edge will be marked by c (not c-)
 
     // adding a new node can influence one of the following nodes sharing the k-1 suffix
     // get position of the first occurence of c after p (including p + 1)
@@ -1236,14 +1271,12 @@ uint64_t DBG_succ::append_pos(TAlphabet c, uint64_t source_node, TAlphabet *ckme
                        : W_->size();
 
     bool the_only_incoming = true;
-    if (first_c < W_->size()) {
-        the_only_incoming = ckmer != NULL ? !compare_node_suffix(ckmer, first_c)
-                                          : !compare_node_suffix(begin, first_c);
-        if (!the_only_incoming) {
-            // the inserted edge will not be the first incoming for the target node
-            // need to adapt the respective cc to a cc-
-            W_->set(first_c, c + alph_size);
-        }
+    if (first_c < W_->size()
+            && !(the_only_incoming = !compare_node_suffix(first_c, source_node_kmer))) {
+        // The inserted edge will not be the only incoming for its target node.
+        // Relabel the next incoming edge from c to c- since
+        // the new edge is the first incoming for that target node.
+        W_->set(first_c, c + alph_size);
     }
 
     // insert the edge
@@ -1254,7 +1287,6 @@ uint64_t DBG_succ::append_pos(TAlphabet c, uint64_t source_node, TAlphabet *ckme
         return fwd(first_c + shift);
 
     uint64_t sentinel_pos = select_last(rank_last(F_[c]) + rank_W(begin - 1, c)) + 1;
-
     update_F(c, +1);
     W_->insert(sentinel_pos, kSentinelCode);
     last_->insertBit(sentinel_pos, true);
@@ -1268,19 +1300,26 @@ bool DBG_succ::insert_edge(TAlphabet c, uint64_t begin, uint64_t end,
                            bit_vector_dyn *edges_inserted) {
     if (begin > 1 && get_W(begin) == kSentinelCode) {
         // the source node is the dead-end with outgoing sentinel
-        // replace this sentinel with proper label
+        // replace this sentinel with the proper label
         W_->set(begin, c);
         return 0;
     } else {
         // the source node already has some outgoing edges
+
+        // find the exact position of the new edge
+        uint64_t pos = begin;
+        while (pos < end && get_W(pos) % alph_size < c % alph_size) {
+            pos++;
+        }
+
+        // insert the new edge
         update_F(get_node_last_value(begin), +1);
-        W_->insert(begin, c);
         last_->insertBit(begin, false);
-        // FYI: this works only for the node based graph colorings
-        // TODO: fix this if we annotate edges
+        W_->insert(pos, c);
+
         if (edges_inserted)
-            edges_inserted->insertBit(begin, true);
-        fix_order_in_W_local(begin, end);
+            edges_inserted->insertBit(pos, true);
+
         return 1;
     }
 }
@@ -1341,7 +1380,8 @@ struct Edge {
  * Traverse graph and extract directed paths covering the graph
  * edge, edge -> edge, edge -> ... -> edge, ... (k+1 - mer, k+...+1 - mer, ...)
  */
-void DBG_succ::call_paths(const PathCallback &callback) const {
+void DBG_succ::call_paths(Call<const std::vector<edge_index>,
+                               const std::vector<TAlphabet>&> callback) const {
     // keep track of reached edges
     std::vector<bool> discovered(W_->size(), false);
     // keep track of edges that are already included in covering paths
@@ -1407,7 +1447,7 @@ void DBG_succ::call_paths(const PathCallback &callback) const {
     }
 }
 
-void DBG_succ::call_sequences(const SequenceCallback &callback) const {
+void DBG_succ::call_sequences(Call<const std::string&> callback) const {
     std::string sequence;
 
     call_paths([&](const auto&, const auto &path) {
@@ -1424,7 +1464,8 @@ void DBG_succ::call_sequences(const SequenceCallback &callback) const {
     });
 }
 
-void DBG_succ::call_edges(const EdgeCallback &callback) const {
+void DBG_succ::call_edges(Call<edge_index,
+                               const std::vector<TAlphabet>&> callback) const {
     call_paths([&](const auto &indices, const auto &path) {
         assert(path.size() == indices.size() + k_);
 
@@ -1444,7 +1485,7 @@ struct Node {
 /**
  * Traverse graph and iterate over all nodes
  */
-void DBG_succ::call_kmers(const KmerCallback &callback) const {
+void DBG_succ::call_kmers(Call<node_index, const std::string&> callback) const {
     // std::vector<bool> discovered(W_->size(), false);
     std::vector<bool> visited(W_->size(), false);
 
@@ -1525,6 +1566,6 @@ bool DBG_succ::is_valid() const {
 }
 
 std::ostream& operator<<(std::ostream &os, const DBG_succ &graph) {
-    graph.print_state(os);
+    graph.print(os);
     return os;
 }

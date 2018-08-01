@@ -20,6 +20,8 @@ const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
 
+double kEps = std::numeric_limits<double>::epsilon();
+
 
 void test_graph(DBG_succ *graph, const std::string &last,
                                  const std::vector<uint64_t> &W,
@@ -160,25 +162,28 @@ TEST(DBGSuccinct, SmallGraphTraversal) {
                                            8, 0, 10, 21, 11, 11, 13, 0, 22, 16, 17 };
     ASSERT_EQ(outgoing_edges.size(), graph->num_edges() + 1);
 
-    EXPECT_EQ(outgoing_edges[1], graph->outgoing(1, DBG_succ::kSentinelCode));
+    EXPECT_EQ(1u, graph->outgoing(1, DBG_succ::kSentinelCode));
 
-    for (size_t i = 1; i < graph->get_W().size(); ++i) {
+    for (size_t i = 1; i <= graph->num_edges(); ++i) {
         //test forward traversal given an output edge label
         if (graph->get_W(i) != DBG_succ::kSentinelCode) {
-            EXPECT_EQ(outgoing_edges[i], graph->outgoing(i, graph->get_W(i)))
-                << "Edge index: " << i;
+            uint64_t node_idx = graph->rank_last(i - 1) + 1;
 
-            EXPECT_EQ(
-                graph->succ_last(i),
-                graph->incoming(graph->outgoing(i, graph->get_W(i)),
+            EXPECT_EQ(outgoing_edges[i],
+                graph->select_last(graph->outgoing(node_idx, graph->get_W(i)))
+            ) << "Edge index: " << i << "\n"
+              << "Outgoing: " << graph->outgoing(node_idx, graph->get_W(i)) << "\n"
+              << *graph;
+
+            EXPECT_EQ(node_idx,
+                graph->incoming(graph->outgoing(node_idx, graph->get_W(i)),
                                 graph->get_minus_k_value(i, graph->get_k() - 1).first)
             );
             for (TAlphabet c = 0; c < DBG_succ::alph_size; ++c) {
-                uint64_t node_idx = graph->incoming(i, c);
-                if (node_idx) {
-                    EXPECT_EQ(
-                        graph->succ_last(i),
-                        graph->outgoing(node_idx, graph->get_node_last_value(i))
+                uint64_t prev_node = graph->incoming(node_idx, c);
+                if (prev_node) {
+                    EXPECT_EQ(node_idx,
+                        graph->outgoing(prev_node, graph->get_node_last_value(i))
                     );
                 }
             }
@@ -757,7 +762,7 @@ void test_pred_kmer(const DBG_succ &graph,
                                    ? DBG_succ::kSentinelCode
                                    : DBG_succ::encode(c);
                    });
-    EXPECT_EQ(expected_idx, graph.pred_kmer(kmer)) << kmer_s << std::endl << graph;
+    EXPECT_EQ(expected_idx, graph.select_last(graph.pred_kmer(kmer))) << kmer_s << std::endl << graph;
 }
 
 TEST(DBGSuccinct, PredKmer) {
@@ -866,7 +871,7 @@ TEST(DBGSuccinct, PredKmerRandomTest) {
         for (const auto &kmer_str : all_kmer_str) {
             std::vector<TAlphabet> kmer = DBG_succ::encode(kmer_str);
 
-            uint64_t lower_bound = graph.pred_kmer(kmer);
+            uint64_t lower_bound = graph.select_last(graph.pred_kmer(kmer));
 
             EXPECT_FALSE(
                 utils::colexicographically_greater(
@@ -890,58 +895,107 @@ TEST(DBGSuccinct, PredKmerRandomTest) {
 
 TEST(DBGSuccinct, FindSequence) {
     for (size_t k = 1; k < 10; ++k) {
-        SequenceGraph *graph = new DBG_succ(k);
+        DBG_succ *graph = new DBG_succ(k);
 
         graph->add_sequence(std::string(100, 'A'));
 
-        uint64_t index = 0;
-        graph->align(std::string(k, 'A'), [&](uint64_t i) { index = i; });
-        EXPECT_EQ(k + 2, index);
-        graph->align(std::string(2 * k, 'A'), [&](uint64_t i) { index = i; });
-        EXPECT_EQ(k + 2, index);
+        uint64_t index = 777;
+        graph->map_to_nodes(std::string(k - 1, 'A'), [&](uint64_t i) { index = i; });
+        EXPECT_EQ(777u, index) << *graph;
+        graph->map_to_nodes(std::string(k, 'A'), [&](uint64_t i) { index = i; });
+        EXPECT_EQ(k + 1, index) << *graph;
 
+        index = 777;
+        graph->map_to_nodes(std::string(2 * k, 'A'), [&](uint64_t i) { index = i; });
+        EXPECT_EQ(k + 1, index) << *graph;
+
+        index = 777;
+        graph->map_to_edges(std::string(k - 1, 'A'), [&](uint64_t i) { index = i; });
+        EXPECT_EQ(777u, index);
+        graph->map_to_edges(std::string(k, 'A'), [&](uint64_t i) { index = i; });
+        EXPECT_EQ(777u, index);
+        graph->map_to_edges(std::string(k + 1, 'A'), [&](uint64_t i) { index = i; });
+        EXPECT_EQ(k + 2, index) << *graph;
+
+        index = 777;
+        graph->map_to_edges(std::string(2 * k, 'A'), [&](uint64_t i) { index = i; });
+        EXPECT_EQ(k + 2, index) << *graph;
+
+        EXPECT_FALSE(graph->find(std::string(k - 1, 'A')));
         EXPECT_FALSE(graph->find(std::string(k - 1, 'A'), 1));
         EXPECT_FALSE(graph->find(std::string(k - 1, 'A'), 0.75));
         EXPECT_FALSE(graph->find(std::string(k - 1, 'A'), 0.5));
         EXPECT_FALSE(graph->find(std::string(k - 1, 'A'), 0.25));
         EXPECT_FALSE(graph->find(std::string(k - 1, 'A'), 0));
-        EXPECT_TRUE(graph->find(std::string(k, 'A'), 1));
-        EXPECT_TRUE(graph->find(std::string(k, 'A'), 0.75));
-        EXPECT_TRUE(graph->find(std::string(k, 'A'), 0.5));
-        EXPECT_TRUE(graph->find(std::string(k, 'A'), 0.25));
-        EXPECT_TRUE(graph->find(std::string(k, 'A'), 0));
+        EXPECT_FALSE(graph->find(std::string(k, 'A')));
+        EXPECT_FALSE(graph->find(std::string(k, 'A'), 1));
+        EXPECT_FALSE(graph->find(std::string(k, 'A'), 0.75));
+        EXPECT_FALSE(graph->find(std::string(k, 'A'), 0.5));
+        EXPECT_FALSE(graph->find(std::string(k, 'A'), 0.25));
+        EXPECT_FALSE(graph->find(std::string(k, 'A'), 0));
+        EXPECT_TRUE(graph->find(std::string(k + 1, 'A')));
         EXPECT_TRUE(graph->find(std::string(k + 1, 'A'), 1));
         EXPECT_TRUE(graph->find(std::string(k + 1, 'A'), 0.75));
         EXPECT_TRUE(graph->find(std::string(k + 1, 'A'), 0.5));
         EXPECT_TRUE(graph->find(std::string(k + 1, 'A'), 0.25));
         EXPECT_TRUE(graph->find(std::string(k + 1, 'A'), 0));
+        EXPECT_TRUE(graph->find(std::string(k + 2, 'A')));
+        EXPECT_TRUE(graph->find(std::string(k + 2, 'A'), 1));
+        EXPECT_TRUE(graph->find(std::string(k + 2, 'A'), 0.75));
+        EXPECT_TRUE(graph->find(std::string(k + 2, 'A'), 0.5));
+        EXPECT_TRUE(graph->find(std::string(k + 2, 'A'), 0.25));
+        EXPECT_TRUE(graph->find(std::string(k + 2, 'A'), 0));
 
+        EXPECT_FALSE(graph->find(std::string(k - 1, 'B')));
         EXPECT_FALSE(graph->find(std::string(k - 1, 'B'), 1));
         EXPECT_FALSE(graph->find(std::string(k - 1, 'B'), 0.75));
         EXPECT_FALSE(graph->find(std::string(k - 1, 'B'), 0.5));
         EXPECT_FALSE(graph->find(std::string(k - 1, 'B'), 0.25));
         EXPECT_FALSE(graph->find(std::string(k - 1, 'B'), 0));
+        EXPECT_FALSE(graph->find(std::string(k, 'B')));
         EXPECT_FALSE(graph->find(std::string(k, 'B'), 1));
         EXPECT_FALSE(graph->find(std::string(k, 'B'), 0.75));
         EXPECT_FALSE(graph->find(std::string(k, 'B'), 0.5));
         EXPECT_FALSE(graph->find(std::string(k, 'B'), 0.25));
-        EXPECT_TRUE(graph->find(std::string(k, 'B'), 0));
+        EXPECT_FALSE(graph->find(std::string(k, 'B'), 0));
+        EXPECT_FALSE(graph->find(std::string(k + 1, 'B')));
         EXPECT_FALSE(graph->find(std::string(k + 1, 'B'), 1));
         EXPECT_FALSE(graph->find(std::string(k + 1, 'B'), 0.75));
         EXPECT_FALSE(graph->find(std::string(k + 1, 'B'), 0.5));
         EXPECT_FALSE(graph->find(std::string(k + 1, 'B'), 0.25));
         EXPECT_TRUE(graph->find(std::string(k + 1, 'B'), 0));
+        EXPECT_FALSE(graph->find(std::string(k + 2, 'B')));
+        EXPECT_FALSE(graph->find(std::string(k + 2, 'B'), 1));
+        EXPECT_FALSE(graph->find(std::string(k + 2, 'B'), 0.75));
+        EXPECT_FALSE(graph->find(std::string(k + 2, 'B'), 0.5));
+        EXPECT_FALSE(graph->find(std::string(k + 2, 'B'), 0.25));
+        EXPECT_TRUE(graph->find(std::string(k + 2, 'B'), 0));
 
-        EXPECT_FALSE(graph->find(std::string(k + 1, 'A') + std::string(k + 1, 'B'), 1));
-        EXPECT_FALSE(graph->find(
-            std::string(k + 1, 'A') + std::string(k + 1, 'B'),
-            3.0f / static_cast<double>(k + 3)
-        ));
-        EXPECT_TRUE(graph->find(
-            std::string(k + 1, 'A') + std::string(k + 1, 'B'),
-            2.0f / static_cast<double>(k + 3)
-        ));
-        EXPECT_TRUE(graph->find(std::string(k + 1, 'A') + std::string(k + 1, 'B'), 0));
+        std::string pattern = std::string(k, 'A') + std::string(k, 'B');
+        EXPECT_FALSE(graph->find(pattern));
+        EXPECT_FALSE(graph->find(pattern, 1));
+        EXPECT_FALSE(graph->find(pattern, 1.0 / (k + 3)));
+        EXPECT_FALSE(graph->find(pattern, 0.0 / k + kEps));
+        EXPECT_TRUE(graph->find(pattern, 0.0 / k - kEps));
+        EXPECT_TRUE(graph->find(pattern, 0));
+
+        pattern = std::string(k + 1, 'A') + std::string(k + 1, 'B');
+        EXPECT_FALSE(graph->find(pattern));
+        EXPECT_FALSE(graph->find(pattern, 1));
+        EXPECT_FALSE(graph->find(pattern, 2.0 / (k + 2)));
+        EXPECT_FALSE(graph->find(pattern, 1.0 / (k + 2) + kEps));
+        // we map (k+1)-mers to the graph edges
+        // just 1 out of k+2 (k+1)-mers can be mapped here
+        EXPECT_TRUE(graph->find(pattern, 1.0 / (k + 2)));
+        EXPECT_TRUE(graph->find(pattern, 0));
+
+        pattern = std::string(k + 2, 'A') + std::string(k + 2, 'B');
+        EXPECT_FALSE(graph->find(pattern));
+        EXPECT_FALSE(graph->find(pattern, 1));
+        EXPECT_FALSE(graph->find(pattern, 3.0 / (k + 4)));
+        EXPECT_FALSE(graph->find(pattern, 2.0 / (k + 4) + kEps));
+        EXPECT_TRUE(graph->find(pattern, 2.0 / (k + 4)));
+        EXPECT_TRUE(graph->find(pattern, 0));
 
         delete graph;
     }
@@ -951,17 +1005,19 @@ TEST(DBGSuccinct, KmerMappingMode) {
     for (size_t k = 1; k < 10; ++k) {
         DBG_succ graph(k);
 
+        const std::string check(k + 1, 'A');
         graph.add_sequence(std::string(100, 'A'));
 
         // kmer mapping modes
         for (size_t h = 0; h < 3; ++h) {
+            EXPECT_TRUE(graph.find(check, 1, h));
+
             std::string query(100, 'A');
 
             for (double a : { 1.0, 0.75, 0.5, 0.25, 0.0 }) {
-                EXPECT_TRUE(graph.find(query, a, h));
+                EXPECT_TRUE(graph.find(query, a, h)) << "Mode: " << h;
             }
 
-            std::string check(k, 'A');
             // number of mutations
             for (size_t n = 1; n <= 100; ++n) {
                 std::string query(100, 'A');
@@ -970,15 +1026,16 @@ TEST(DBGSuccinct, KmerMappingMode) {
                 }
 
                 uint64_t num_good_kmers = 0;
-                for (size_t i = 0; i < query.size() - k + 1; ++i) {
-                    if (query.substr(i, k) == check)
+                for (size_t i = 0; i + k + 1 <= query.size(); ++i) {
+                    if (query.substr(i, k + 1) == check)
                         num_good_kmers++;
                 }
                 double good_fraction = static_cast<double>(num_good_kmers)
-                                            / (query.size() - k + 1);
+                                            / (query.size() - k);
 
                 for (double a : { 1.0, 0.75, 0.5, 0.25, 0.0 }) {
-                    EXPECT_EQ(a <= good_fraction, graph.find(query, a, h));
+                    EXPECT_EQ(a <= good_fraction, graph.find(query, a, h))
+                        << "Mode: " << h;
                 }
             }
         }
@@ -992,8 +1049,8 @@ TEST(DBGSuccinct, Traversals) {
         graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
 
         uint64_t it = 0;
-        graph->align(std::string(k, 'A'), [&](uint64_t i) { it = i; });
-        ASSERT_EQ(k + 3, it);
+        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+        ASSERT_EQ(k + 1, it);
         EXPECT_EQ(it, graph->traverse(it, 'A'));
         EXPECT_EQ(it + 1, graph->traverse(it, 'C'));
         EXPECT_EQ(it, graph->traverse_back(it + 1, 'A'));
@@ -1001,5 +1058,63 @@ TEST(DBGSuccinct, Traversals) {
         EXPECT_EQ(DBG_succ::npos, graph->traverse_back(it + 1, 'G'));
 
         delete graph;
+    }
+}
+
+TEST(DBGSuccinct, map_to_nodes) {
+    for (size_t k = 1; k < 10; ++k) {
+        std::unique_ptr<DBG_succ> graph { new DBG_succ(k) };
+
+        graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
+
+        std::vector<uint64_t> expected_result {
+            SequenceGraph::npos, SequenceGraph::npos,
+            k + 1, k + 1, k + 1, k + 1
+        };
+        for (size_t i = 1; i <= k; ++i) {
+            expected_result.push_back(k + 1 + i);
+        }
+        for (size_t i = 0; i < k; ++i) {
+            expected_result.push_back(k + 1 + k);
+        }
+
+        std::string sequence_to_map = std::string(2, 'T')
+                                        + std::string(k + 3, 'A')
+                                        + std::string(2 * k, 'C');
+
+        EXPECT_EQ(expected_result, graph->map_to_nodes(sequence_to_map));
+
+        size_t pos = 0;
+        graph->map_to_nodes(sequence_to_map,
+                            [&](auto i) { EXPECT_EQ(expected_result[pos++], i); });
+    }
+}
+
+TEST(DBGSuccinct, map_to_edges) {
+    for (size_t k = 1; k < 10; ++k) {
+        std::unique_ptr<DBG_succ> graph { new DBG_succ(k) };
+
+        graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
+
+        std::vector<uint64_t> expected_result {
+            SequenceGraph::npos, SequenceGraph::npos,
+            k + 2, k + 2, k + 2
+        };
+        for (size_t i = 1; i <= k; ++i) {
+            expected_result.push_back(k + 2 + i);
+        }
+        for (size_t i = 0; i < k; ++i) {
+            expected_result.push_back(k + 2 + k + 1);
+        }
+
+        std::string sequence_to_map = std::string(2, 'T')
+                                        + std::string(k + 3, 'A')
+                                        + std::string(2 * k, 'C');
+
+        EXPECT_EQ(expected_result, graph->map_to_edges(sequence_to_map));
+
+        size_t pos = 0;
+        graph->map_to_edges(sequence_to_map,
+                            [&](auto i) { EXPECT_EQ(expected_result[pos++], i); });
     }
 }

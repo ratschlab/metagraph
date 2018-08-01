@@ -67,7 +67,8 @@ std::vector<uint64_t> get_chunk(const DBG_succ &graph,
 
     for (size_t i = 0; i < border_kmers.size(); i++) {
 
-        uint64_t last = graph.pred_kmer(border_kmers[i]);
+        auto kmer_index = graph.pred_kmer(border_kmers[i]);
+        uint64_t last = graph.select_last(kmer_index);
 
         if (graph.get_node_seq(last) != border_kmers[i]) {
             result.push_back(last + 1);

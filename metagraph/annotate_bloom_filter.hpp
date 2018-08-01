@@ -20,15 +20,15 @@ class DBGSuccAnnotWrapper : public hash_annotate::DeBruijnGraphWrapper {
     size_t get_k() const { return graph_.get_k(); }
 
     edge_index first_edge() const { return 1; }
-    edge_index last_edge() const { return graph_.get_W().size() - 1; }
+    edge_index last_edge() const { return graph_.num_nodes(); }
 
     edge_index map_kmer(const std::string &kmer) const {
         assert(kmer.size() == graph_.get_k());
-        return graph_.map_kmers(kmer)[0];
+        return graph_.map_to_nodes(kmer)[0];
     }
 
     size_t get_num_edges() const {
-        return graph_.num_edges();
+        return graph_.num_nodes();
     }
 
     // Transform sequence to the same kind as the de bruijn graph stores
