@@ -436,6 +436,7 @@ class DBG_succ : public SequenceGraph {
                       "Only encoded sequences can be queried");
 
         assert(end > begin);
+        assert(end <= begin + k_);
 
         // get first
         TAlphabet s = *begin;
@@ -459,13 +460,13 @@ class DBG_succ : public SequenceGraph {
 
             // Tighten the range including all edges where
             // the source nodes have the given suffix.
-            rl = std::min(succ_W(rl, s),
-                          succ_W(rl, s + alph_size));
+            rl = succ_W(rl, s);
             if (rl >= W_->size())
                 return std::make_pair(0, 0);
 
-            ru = std::max(pred_W(ru, s),
-                          pred_W(ru, s + alph_size));
+            if (get_W(ru) != s + alph_size)
+                ru = pred_W(ru, s);
+
             if (rl > ru)
                 return std::make_pair(0, 0);
 
