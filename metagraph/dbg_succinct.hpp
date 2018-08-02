@@ -411,8 +411,8 @@ class DBG_succ : public SequenceGraph {
     }
 
     /**
-     * Given a k-mer, this function returns the index
-     * of the corresponding node, if such exists and 0 otherwise.
+     * Given a k-mer, this function returns the index of last edge going out
+     * from the k-mer's corresponding node, if such a node exists and 0 otherwise.
      */
     template <typename RandomAccessIt>
     uint64_t index(RandomAccessIt begin, RandomAccessIt end) const {
