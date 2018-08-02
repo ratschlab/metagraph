@@ -52,7 +52,7 @@ void reverse_complement(const Iterator &begin, const Iterator &end) {
         *(begin + ((end - begin) >> 1)) = comp_tab[static_cast<int>(*(begin + ((end - begin) >> 1)))];
 };
 
-void reverse_complement(const kstring_t &seq) {
+inline void reverse_complement(const kstring_t &seq) {
     reverse_complement(&seq.s[0], &seq.s[0] + seq.l);
 }
 

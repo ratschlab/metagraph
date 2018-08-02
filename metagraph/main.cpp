@@ -1,20 +1,16 @@
-#include <zlib.h>
-
 #include "dbg_succinct.hpp"
 #include "dbg_succinct_chunk.hpp"
 #include "dbg_succinct_construct.hpp"
 #include "reads_filtering.hpp"
 #include "config.hpp"
-#include "helpers.hpp"
 #include "utils.hpp"
-#include "vcf_parser.hpp"
+#include "sequence_io.hpp"
 #include "dbg_succinct_merge.hpp"
 #include "annotate_color_compressed.hpp"
 #include "annotate_color_compressed_fast.hpp"
 #include "annotate_row_compressed.hpp"
 #include "annotate_bloom_filter.hpp"
 #include "unix_tools.hpp"
-#include "kmer.hpp"
 #include "serialization.hpp"
 
 typedef annotate::MultiColorAnnotation<uint64_t, std::string> Annotator;
@@ -22,10 +18,6 @@ typedef annotate::MultiColorAnnotation<uint64_t, std::string> Annotator;
 const size_t kMaxNumParallelReadFiles = 5;
 
 const size_t kNumCachedColors = 10;
-
-const char kDefaultFastQualityChar = 'I';
-
-KSEQ_INIT(gzFile, gzread);
 
 
 DBG_succ* load_critical_graph_from_file(const std::string &filename) {
@@ -46,185 +38,35 @@ DBG_succ* load_critical_graph_from_file(const std::string &filename) {
 }
 
 
-bool write_fasta(gzFile gz_out, const kseq_t &kseq) {
-    return gzputc(gz_out, '>') == '>'
-        && gzwrite(gz_out, kseq.name.s, kseq.name.l)
-                        == static_cast<int>(kseq.name.l)
-        && (!kseq.comment.l
-            || (gzputc(gz_out, ' ') == ' '
-                && gzwrite(gz_out, kseq.comment.s, kseq.comment.l)
-                                    == static_cast<int>(kseq.comment.l)))
-        && gzputc(gz_out, '\n') == '\n'
-        && gzwrite(gz_out, kseq.seq.s, kseq.seq.l)
-                        == static_cast<int>(kseq.seq.l)
-        && gzputc(gz_out, '\n') == '\n';
-}
-
-bool write_fastq(gzFile gz_out, const kseq_t &kseq) {
-    std::string qual(kseq.qual.s, kseq.qual.l);
-
-    if (!kseq.qual.l && kseq.seq.l)
-        qual.assign(kseq.seq.l, kDefaultFastQualityChar);
-
-    return gzputc(gz_out, '@') == '@'
-        && gzwrite(gz_out, kseq.name.s, kseq.name.l)
-                        == static_cast<int>(kseq.name.l)
-        && (kseq.comment.l == 0
-            || (gzputc(gz_out, ' ') == ' '
-                && gzwrite(gz_out, kseq.comment.s, kseq.comment.l)
-                                    == static_cast<int>(kseq.comment.l)))
-        && gzputc(gz_out, '\n') == '\n'
-        && gzwrite(gz_out, kseq.seq.s, kseq.seq.l)
-                        == static_cast<int>(kseq.seq.l)
-        && gzputc(gz_out, '\n') == '\n'
-        && gzputc(gz_out, '+') == '+'
-        && gzwrite(gz_out, kseq.name.s, kseq.name.l)
-                        == static_cast<int>(kseq.name.l)
-        && (kseq.comment.l == 0
-            || (gzputc(gz_out, ' ') == ' '
-                && gzwrite(gz_out, kseq.comment.s, kseq.comment.l)
-                                    == static_cast<int>(kseq.comment.l)))
-        && gzputc(gz_out, '\n') == '\n'
-        && gzwrite(gz_out, qual.data(), qual.size())
-                        == static_cast<int>(qual.size())
-        && gzputc(gz_out, '\n') == '\n';
-}
-
-
-template <class Callback>
-void read_fasta_file_critical(const std::string &filename,
-                              Callback callback,
-                              bool with_reverse = false,
-                              Timer *timer = NULL,
-                              const std::string &filter_filename = "") {
-    std::vector<bool> filter;
-    if (filter_filename.size()) {
-        std::ifstream instream(filter_filename);
-        try {
-            filter = load_number_vector<bool>(instream);
-        } catch (...) {
-            std::cerr << "ERROR: Filter file " << filter_filename
-                      << " is corrupted" << std::endl;
-            exit(1);
-        }
-    }
-    size_t seq_count = 0;
-
-    gzFile input_p = gzopen(filename.c_str(), "r");
-    if (input_p == Z_NULL) {
-        std::cerr << "ERROR no such file " << filename << std::endl;
-        exit(1);
-    }
-    //TODO: handle read_stream->qual
-    kseq_t *read_stream = kseq_init(input_p);
-    if (read_stream == NULL) {
-        std::cerr << "ERROR while opening input file " << filename << std::endl;
-        exit(1);
-    }
-    if (timer) {
-        std::cout << "Start extracting sequences from file " << filename << std::endl;
-    }
-    while (kseq_read(read_stream) >= 0) {
-        if (filter_filename.size() && filter.size() <= seq_count) {
-            std::cerr << "ERROR: Filter file " << filter_filename
-                      << " has fewer sequences" << std::endl;
-            exit(1);
-        }
-
-        if (!filter_filename.size() || filter[seq_count]) {
-            callback(read_stream);
-            if (with_reverse) {
-                reverse_complement(read_stream->seq);
-                callback(read_stream);
-            }
-        }
-
-        seq_count++;
-    }
-    if (filter_filename.size() && filter.size() != seq_count) {
-        std::cerr << "ERROR: Filter file " << filter_filename
-                  << " has more sequences" << std::endl;
-        exit(1);
-    }
-    if (timer) {
-        std::cout << "Finished extracting sequences from file " << filename
-                  << " in " << timer->elapsed() << "sec"
-                  << ", sequences extracted: " << seq_count << std::endl;
-    }
-    kseq_destroy(read_stream);
-    gzclose(input_p);
-}
-
-
-template <class Callback>
-void read_vcf_file_critical(const std::string &filename,
-                            const std::string &ref_filename,
-                            size_t k,
-                            std::vector<std::string> *annotation,
-                            Callback callback, Timer *timer = NULL) {
-
-    //TODO: make this a configurable option
-    //default list of tokens to extract as annotations
-    //TODO: extract these guys directly from vcf parsed
-    const std::vector<std::string> annots = {
-      "AC_AFR", "AC_EAS", "AC_AMR", "AC_ASJ",
-      "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"
-    };
-
-    vcf_parser vcf;
-    if (!vcf.init(ref_filename, filename, k)) {
-        std::cerr << "ERROR reading VCF " << filename << std::endl;
-        exit(1);
-    }
-    if (timer) {
-        std::cout << "Extracting sequences from file " << filename << std::endl;
-    }
-    size_t seq_count = 0;
-    while (vcf.get_seq(annots, annotation)) {
-        callback(vcf.seq, annotation);
-        seq_count++;
-    }
-    if (timer) {
-        std::cout << "Finished extracting sequences from file " << filename
-                  << " in " << timer->elapsed() << "sec"
-                  << ", sequences extracted: " << seq_count << std::endl;
-    }
-}
-
-
 void annotate_sequence(const std::string &sequence,
                        const std::vector<std::string> &labels,
                        const DBG_succ &graph,
                        annotate::AnnotationCategoryBloom *annotator,
-                       utils::ThreadPool *thread_pool,
-                       std::mutex *annotation_mutex) {
-    if (sequence.size() < graph.get_k())
-        return;
-
-    std::ignore = annotation_mutex;
-    std::ignore = thread_pool;
-
-    annotator->add_colors(sequence, labels, graph.num_edges());
+                       utils::ThreadPool *,
+                       std::mutex *) {
+    if (sequence.size() > graph.get_k())
+        annotator->add_colors(sequence, labels, graph.num_edges());
 }
 
 
 void annotate_sequence_thread_safe(
         std::string sequence,
         std::vector<std::string> labels,
-        const DBG_succ *graph,
+        const DBG_succ &graph,
         annotate::MultiColorAnnotation<uint64_t, std::string> *annotator,
-        std::mutex *annotation_mutex) {
+        std::mutex &annotation_mutex) {
 
     std::vector<uint64_t> indices;
 
-    graph->map_to_nodes(sequence, [&](uint64_t i) {
+    graph.map_to_edges(sequence, [&](uint64_t i) {
         if (i > 0)
             indices.push_back(i);
     });
 
-    assert(annotation_mutex);
+    if (!indices.size())
+        return;
 
-    std::lock_guard<std::mutex> lock(*annotation_mutex);
+    std::lock_guard<std::mutex> lock(annotation_mutex);
     annotator->add_colors(indices, labels);
 }
 
@@ -241,12 +83,12 @@ void annotate_sequence(const std::string &sequence,
     if (thread_pool && annotation_mutex) {
         thread_pool->enqueue(annotate_sequence_thread_safe,
                              sequence, labels,
-                             &graph, annotator, annotation_mutex);
+                             std::ref(graph), annotator, std::ref(*annotation_mutex));
         return;
     }
 
     std::vector<uint64_t> indices;
-    graph.map_to_nodes(sequence, [&](uint64_t i) {
+    graph.map_to_edges(sequence, [&](uint64_t i) {
         if (i > 0)
             indices.push_back(i);
     });
@@ -428,8 +270,10 @@ void annotate_coordinates(const std::vector<std::string> &files,
 
                         // forward: |0 =>  |6 =>  |12=>  |18=>  |24=>  |30=>|
                         // reverse: |<=30|  <=24|  <=18|  <=12|  <= 6|  <= 0|
-                        const size_t bin_size = std::min(static_cast<size_t>(sequence.size() - i),
-                                                         static_cast<size_t>(genome_bin_size + graph.get_k() - 1));
+                        const size_t bin_size = std::min(
+                            static_cast<size_t>(sequence.size() - i),
+                            static_cast<size_t>(genome_bin_size + graph.get_k())
+                        );
                         annotate_sequence(
                             forward_strand
                                 ? sequence.substr(i, bin_size)
@@ -491,17 +335,20 @@ void execute_query(std::string seq_name,
                    size_t num_top_labels,
                    double discovery_fraction,
                    std::string anno_labels_delimiter,
-                   const DBG_succ *graph,
-                   const Annotator *annotation) {
+                   const DBG_succ &graph,
+                   const Annotator &annotation) {
     std::ostringstream oss;
-    if (!suppress_unlabeled)
-        oss << seq_name << "\t";
 
     if (count_labels) {
-        auto top_labels = annotation->get_most_frequent_colors(
-            graph->map_to_nodes(sequence),
+        auto top_labels = annotation.get_most_frequent_colors(
+            graph.map_to_edges(sequence),
             num_top_labels
         );
+
+        if (!top_labels.size() && suppress_unlabeled)
+            return;
+
+        oss << seq_name << "\t";
 
         if (top_labels.size()) {
             oss << "<" << top_labels[0].first << ">:" << top_labels[0].second;
@@ -514,7 +361,7 @@ void execute_query(std::string seq_name,
         std::vector<uint64_t> indices;
         size_t num_missing_kmers = 0;
 
-        graph->map_to_nodes(sequence, [&](uint64_t i) {
+        graph.map_to_edges(sequence, [&](uint64_t i) {
             if (i > 0) {
                 indices.push_back(i);
             } else {
@@ -526,9 +373,9 @@ void execute_query(std::string seq_name,
         // discovery_fraction = discovered / all
         // new_discovered_fraction = discovered / (all - missing)
         if (indices.size() > 0
-                && discovery_fraction * (indices.size() + num_missing_kmers)
-                                                            <= indices.size()) {
-            labels_discovered = annotation->aggregate_colors(
+            && indices.size()
+                >= discovery_fraction * (indices.size() + num_missing_kmers)) {
+            labels_discovered = annotation.aggregate_colors(
                 indices,
                 discovery_fraction
                     * (indices.size() + num_missing_kmers)
@@ -536,13 +383,12 @@ void execute_query(std::string seq_name,
             );
         }
 
-        if (!suppress_unlabeled || labels_discovered.size()) {
-            if (suppress_unlabeled)
-                oss << seq_name << "\t";
+        if (!labels_discovered.size() && suppress_unlabeled)
+            return;
 
-            oss << utils::join_strings(labels_discovered,
-                                       anno_labels_delimiter) << "\n";
-        }
+        oss << seq_name << "\t"
+            << utils::join_strings(labels_discovered,
+                                   anno_labels_delimiter) << "\n";
     }
 
     std::cout << oss.str();
@@ -637,13 +483,12 @@ int main(int argc, const char *argv[]) {
                             //assume VCF contains no noise
                             read_vcf_file_critical(
                                 files[f], config->refpath, graph->get_k(), NULL,
-                                [&](std::string &seq, auto *variant_annotations) {
+                                [&](std::string &seq, auto *) {
                                     constructor->add_read(seq);
                                     if (config->reverse) {
                                         reverse_complement(seq.begin(), seq.end());
                                         constructor->add_read(seq);
                                     }
-                                    std::ignore = variant_annotations;
                                 }, timer_ptr
                             );
                         } else if (utils::get_filetype(files[f]) == "FASTA"
@@ -720,13 +565,12 @@ int main(int argc, const char *argv[]) {
                     if (utils::get_filetype(files[f]) == "VCF") {
                         read_vcf_file_critical(
                             files[f], config->refpath, graph->get_k(), NULL,
-                            [&](std::string &seq, auto *variant_annotations) {
+                            [&](std::string &seq, auto *) {
                                 graph->add_sequence(seq);
                                 if (config->reverse) {
                                     reverse_complement(seq.begin(), seq.end());
                                     graph->add_sequence(seq);
                                 }
-                                std::ignore = variant_annotations;
                             }
                         );
                     } else if (utils::get_filetype(files[f]) == "FASTA"
@@ -797,13 +641,12 @@ int main(int argc, const char *argv[]) {
                 // open stream
                 if (utils::get_filetype(file) == "VCF") {
                     read_vcf_file_critical(file, config->refpath, graph->get_k(), NULL,
-                        [&](std::string &seq, auto *variant_annotations) {
+                        [&](std::string &seq, auto *) {
                             graph->add_sequence(seq, true, inserted_edges.get());
                             if (config->reverse) {
                                 reverse_complement(seq.begin(), seq.end());
                                 graph->add_sequence(seq, true, inserted_edges.get());
                             }
-                            std::ignore = variant_annotations;
                         }
                     );
                 } else if (utils::get_filetype(file) == "FASTA"
@@ -1317,8 +1160,8 @@ int main(int argc, const char *argv[]) {
                             config->num_top_labels,
                             config->discovery_fraction,
                             config->anno_labels_delimiter,
-                            graph.get(),
-                            annotation.get()
+                            std::ref(*graph),
+                            std::ref(*annotation)
                         );
                     },
                     config->reverse, timer.get(),
@@ -1643,8 +1486,27 @@ int main(int argc, const char *argv[]) {
                 load_critical_graph_from_file(config->infbase)
             };
 
-            if (!config->alignment_length
-                    || config->alignment_length > graph->get_k()) {
+            if (!config->alignment_length) {
+                if (config->distance > 0) {
+                    config->alignment_length = graph->get_k();
+                } else {
+                    config->alignment_length = graph->get_k() + 1;
+                }
+            }
+
+            if (config->alignment_length > graph->get_k() + 1) {
+                // std::cerr << "ERROR: Alignment patterns longer than"
+                //           << " the graph edge size are not supported."
+                //           << " Decrease the alignment length." << std::endl;
+                // exit(1);
+                std::cerr << "Warning: Aligning to k-mers"
+                          << " longer than k+1 is not supported." << std::endl;
+                config->alignment_length = graph->get_k() + 1;
+            }
+            if (config->distance > 0
+                    && config->alignment_length != graph->get_k()) {
+                std::cerr << "Warning: Aligning to k-mers longer or shorter than k"
+                          << " is not supported for fuzzy alignment." << std::endl;
                 config->alignment_length = graph->get_k();
             }
 
@@ -1653,7 +1515,7 @@ int main(int argc, const char *argv[]) {
                 timer.reset(new Timer());
             }
 
-            std::cout << "Align sequences against a de Bruijn graph with ";
+            std::cout << "Align sequences against the de Bruijn graph with ";
             std::cout << "k=" << graph->get_k() << "\n"
                       << "Length of aligning k-mers: "
                       << config->alignment_length << std::endl;
@@ -1696,12 +1558,14 @@ int main(int argc, const char *argv[]) {
                         return;
                     }
 
+                    // Non-fuzzy mode
+
                     if (config->verbose) {
                         std::cout << "Sequence: " << read_stream->seq.s << "\n";
                     }
 
                     if (config->query_presence
-                            && config->alignment_length == graph->get_k()) {
+                            && config->alignment_length == graph->get_k() + 1) {
                         if (config->filter_present) {
                             if (graph->find(read_stream->seq.s,
                                             config->discovery_fraction,
@@ -1716,16 +1580,25 @@ int main(int argc, const char *argv[]) {
                         return;
                     }
 
-                    auto graphindices = graph->map_to_nodes(read_stream->seq.s,
-                                                            config->alignment_length);
+                    assert(config->alignment_length <= graph->get_k() + 1);
+
+                    std::vector<uint64_t> graphindices;
+
+                    if (config->alignment_length == graph->get_k() + 1) {
+                        graphindices = graph->map_to_edges(read_stream->seq.s);
+                    } else {
+                        graphindices = graph->map_to_nodes(read_stream->seq.s,
+                                                           config->alignment_length);
+                    }
 
                     size_t num_discovered = std::count_if(
                         graphindices.begin(), graphindices.end(),
                         [](const auto &x) { return x > 0; }
                     );
 
+                    const size_t num_kmers = graphindices.size();
+
                     if (config->query_presence) {
-                        const size_t num_kmers = read_stream->seq.l - graph->get_k() + 1;
                         const size_t min_kmers_discovered =
                             num_kmers - num_kmers * (1 - config->discovery_fraction);
                         if (config->filter_present) {
@@ -1739,16 +1612,13 @@ int main(int argc, const char *argv[]) {
                     }
 
                     if (config->count_kmers_query) {
-                        std::cout << num_discovered << "/"
-                                  << read_stream->seq.l
-                                        - config->alignment_length + 1 << "\n";
+                        std::cout << num_discovered << "/" << num_kmers << "\n";
                         return;
                     }
 
                     for (size_t i = 0; i < graphindices.size(); ++i) {
-                        for (uint64_t j = 0; j < config->alignment_length; ++j) {
-                            std::cout << read_stream->seq.s[i + j];
-                        }
+                        assert(i + config->alignment_length <= read_stream->seq.l);
+                        std::cout << std::string(read_stream->seq.s + i, config->alignment_length);
                         std::cout << ": " << graphindices[i] << "\n";
                     }
                 }, config->reverse, timer.get(),

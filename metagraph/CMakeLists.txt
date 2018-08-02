@@ -109,10 +109,10 @@ endif()
 file(GLOB src_files "*.cpp" "*.h" "*.hpp")
 
 list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
-list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
+list(FILTER src_files EXCLUDE REGEX ".*main.cpp|.*sequence_io.cpp")
 
 add_library(metagraph STATIC ${src_files})
-add_executable(metagengraph "main.cpp")
+add_executable(metagengraph "main.cpp" "sequence_io.cpp")
 set_target_properties(metagengraph PROPERTIES OUTPUT_NAME "metagengraph_${CMAKE_DBG_ALPHABET}")
 
 set(METALIBS ${METALIBS}
