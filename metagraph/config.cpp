@@ -214,9 +214,6 @@ Config::Config(int argc, const char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if (identity == FILTER && max_unreliable_abundance == 0)
-        print_usage_and_exit = true;
-
     if (identity == FILTER)
         filter_k = k;
 

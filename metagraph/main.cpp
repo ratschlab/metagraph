@@ -96,29 +96,27 @@ void annotate_sequence(const std::string &sequence,
 }
 
 
-std::string get_filter_filename(const std::string &filename,
+std::string get_filter_filename(std::string filename,
                                 size_t k,
                                 size_t max_unreliable_abundance,
                                 size_t unreliable_kmers_threshold,
                                 bool critical = true) {
-    std::string filter_filename = max_unreliable_abundance > 0
-            ? filename + ".filter_k" + std::to_string(k)
-                       + "_s" + std::to_string(max_unreliable_abundance)
-                       + (max_unreliable_abundance
-                            ? std::string("_") + std::to_string(unreliable_kmers_threshold)
-                            : "")
-            : "";
-
-    if (critical
-            && filter_filename.size()
-            && !std::ifstream(filter_filename).good()) {
-        std::cerr << "ERROR: read filter "
-                  << filter_filename << " does not exist."
-                  << " Filter reads first." << std::endl;
-        exit(1);
+    filename = filename + ".filter_k" + std::to_string(k)
+                        + "_s" + std::to_string(max_unreliable_abundance)
+                        + (max_unreliable_abundance
+                             ? std::string("_")
+                                + std::to_string(unreliable_kmers_threshold)
+                             : "");
+    if (!critical || std::ifstream(filename).good()) {
+        return filename;
+    } else if (max_unreliable_abundance == 0) {
+        return "";
     }
 
-    return filter_filename;
+    std::cerr << "ERROR: read filter "
+              << filename << " does not exist."
+              << " Filter reads first." << std::endl;
+    exit(1);
 }
 
 
@@ -853,7 +851,7 @@ int main(int argc, const char *argv[]) {
                             },
                             k, max_unreliable_abundance, unreliable_kmers_threshold,
                             verbose, thread_pool_ptr,
-                            use_kmc ? file + ".kmc" : ""
+                            (use_kmc && max_unreliable_abundance) ? file + ".kmc" : ""
                         );
                         if (reverse) {
                             assert(filter.size() % 2 == 0);
