@@ -466,13 +466,15 @@ edge_index DBG_succ::pick_edge(edge_index edge, node_index node, TAlphabet c) co
     assert(c < alph_size);
     assert(get_source_node(edge) == node);
 
-    uint64_t j = std::max(pred_W(edge, c),
-                          pred_W(edge, c + alph_size));
+    uint64_t j = pred_W(edge, c);
+    if (!j || get_source_node(j) == node)
+        return j;
 
-    if (!j || get_source_node(j) != node)
-        return npos;
+    j = pred_W(edge, c + alph_size);
+    if (!j || get_source_node(j) == node)
+        return j;
 
-    return j;
+    return npos;
 }
 
 /**

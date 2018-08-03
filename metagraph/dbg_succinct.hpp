@@ -444,7 +444,7 @@ class DBG_succ : public SequenceGraph {
         // initial range
         edge_index rl = F_.at(s) + 1 < W_->size()
                         ? succ_last(F_.at(s) + 1)
-                        : W_->size();
+                        : W_->size(); // lower bound
         edge_index ru = s < F_.size() - 1
                         ? F_.at(s + 1)
                         : W_->size() - 1; // upper bound
@@ -460,19 +460,16 @@ class DBG_succ : public SequenceGraph {
 
             // Tighten the range including all edges where
             // the source nodes have the given suffix.
-            rl = succ_W(rl, s);
-            if (rl >= W_->size())
+            uint64_t rk_rl = rank_W(rl - 1, s) + 1;
+            uint64_t rk_ru = rank_W(ru, s);
+            if (rk_rl > rk_ru)
                 return std::make_pair(0, 0);
 
-            if (get_W(ru) != s + alph_size)
-                ru = pred_W(ru, s);
+            uint64_t offset = rank_last(F_[s]);
 
-            if (rl > ru)
-                return std::make_pair(0, 0);
-
-            // Translate the node indices from the sources to the targets.
-            rl = fwd(rl);
-            ru = fwd(ru);
+            // select the index of the position in last that is rank many positions after offset
+            ru = select_last(offset + rk_ru);
+            rl = select_last(offset + rk_rl);
         }
         assert(rl <= ru);
         return std::make_pair(rl, ru);
