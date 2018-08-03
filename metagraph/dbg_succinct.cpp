@@ -302,8 +302,14 @@ uint64_t DBG_succ::select_W(uint64_t i, TAlphabet c) const {
 uint64_t DBG_succ::pred_W(uint64_t i, TAlphabet c) const {
     assert(i < W_->size());
 
-    if (get_W(i) == c)
-        return i;
+    size_t max_iter = 10;
+    if (state == Config::STAT) {
+        max_iter = 1000;
+    }
+    for (size_t t = 0; t < max_iter; ++t, --i) {
+        if (i == 0 || get_W(i) == c)
+            return i;
+    }
 
     return select_W(rank_W(i, c), c);
 }
@@ -315,11 +321,17 @@ uint64_t DBG_succ::pred_W(uint64_t i, TAlphabet c) const {
 uint64_t DBG_succ::succ_W(uint64_t i, TAlphabet c) const {
     assert(i < W_->size());
 
-    if (get_W(i) == c)
-        return i;
+    size_t max_iter = 10;
+    if (state == Config::STAT) {
+        max_iter = 1000;
+    }
+    for (size_t t = 0; t < max_iter; ++t) {
+        if (i + t == W_->size() || get_W(i + t) == c)
+            return i + t;
+    }
 
     uint64_t rk = rank_W(i, c);
-    if (rk == W_->rank(c, W_->size() - 1))
+    if (rk == rank_W(W_->size() - 1, c))
         return W_->size();
 
     return select_W(rk + 1, c);
@@ -352,8 +364,14 @@ uint64_t DBG_succ::select_last(uint64_t i) const {
 uint64_t DBG_succ::pred_last(uint64_t i) const {
     assert(i < last_->size());
 
-    if (get_last(i))
-        return i;
+    size_t max_iter = 10;
+    if (state == Config::STAT) {
+        max_iter = 1000;
+    }
+    for (size_t t = 0; t < max_iter; ++t, --i) {
+        if (i == 0 || get_last(i))
+            return i;
+    }
 
     return select_last(rank_last(i));
 }
@@ -365,8 +383,14 @@ uint64_t DBG_succ::pred_last(uint64_t i) const {
 uint64_t DBG_succ::succ_last(uint64_t i) const {
     CHECK_INDEX(i);
 
-    if (get_last(i))
-        return i;
+    size_t max_iter = 10;
+    if (state == Config::STAT) {
+        max_iter = 1000;
+    }
+    for (size_t t = 0; t < max_iter; ++t) {
+        if (i + t == W_->size() || get_last(i + t))
+            return i + t;
+    }
 
     uint64_t next_rank = get_source_node(i);
 
