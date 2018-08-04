@@ -486,11 +486,7 @@ sdsl::int_vector<> wavelet_tree_dyn::to_vector() const {
 
 template <class Vector>
 wavelet_tree_small::wavelet_tree_small(uint8_t logsigma, const Vector &vector)
-      : logsigma_(logsigma) {
-    auto iv = pack_vector(vector, logsigma);
-    //TODO fix constructor in sdsl
-    wwt_ = decltype(wwt_)(iv);
-}
+      : wwt_(pack_vector(vector, logsigma)), logsigma_(logsigma) {}
 
 template
 wavelet_tree_small
