@@ -287,7 +287,7 @@ typedef std::function<void(const std::string&)> CallbackRead;
 template <typename KMER>
 void extract_kmers(std::function<void(CallbackRead)> generate_reads,
                    size_t k,
-                   Vector<KMER> *kmers,
+                   utils::DequeStorage<KMER> *kmers,
                    const std::vector<TAlphabet> &suffix,
                    size_t num_threads,
                    bool verbose,
@@ -297,7 +297,7 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
 
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
-                                        Vector<KMER> *kmers,
+                                        utils::DequeStorage<KMER> *kmers,
                                         const std::vector<TAlphabet> &suffix,
                                         std::mutex &mutex_resize,
                                         std::shared_timed_mutex &mutex,
@@ -321,7 +321,7 @@ void sort_and_remove_duplicates(V *array,
                                 size_t offset = 0);
 
 TEST(ExtractKmers_256, ExtractKmersAppendParallelReserved) {
-    Vector<KMER> result;
+    utils::DequeStorage<KMER> result;
     std::mutex mu_resize;
     std::shared_timed_mutex mu;
     size_t sequence_size = 500;
@@ -358,7 +358,7 @@ TEST(ExtractKmers_256, ExtractKmersAppendParallelReserved) {
 }
 
 TEST(ExtractKmers_256, ExtractKmersAppendParallel) {
-    Vector<KMER> result;
+    utils::DequeStorage<KMER> result;
     std::mutex mu_resize;
     std::shared_timed_mutex mu;
     size_t sequence_size = 500;
@@ -391,7 +391,7 @@ TEST(ExtractKmers_256, ExtractKmersAppendParallel) {
 }
 
 TEST(ExtractKmers_256, ExtractKmersParallelRemoveRedundantReserved) {
-    Vector<KMER> result;
+    utils::DequeStorage<KMER> result;
     std::mutex mu_resize;
     std::shared_timed_mutex mu;
 
@@ -444,7 +444,7 @@ TEST(ExtractKmers_256, ExtractKmersParallelRemoveRedundantReserved) {
 }
 
 TEST(ExtractKmers_256, ExtractKmersParallelRemoveRedundant) {
-    Vector<KMER> result;
+    utils::DequeStorage<KMER> result;
     std::mutex mu_resize;
     std::shared_timed_mutex mu;
 

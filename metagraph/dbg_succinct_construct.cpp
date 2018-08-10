@@ -13,21 +13,6 @@ const size_t kMaxKmersChunkSize = 30'000'000;
 
 
 template <class V>
-void try_reserve(V *vector, size_t size, size_t min_size = 0) {
-    size = std::max(size, min_size);
-
-    while (size > min_size) {
-        try {
-            vector->reserve(size);
-            return;
-        } catch (const std::bad_alloc &exception) {
-            size = min_size + (size - min_size) * 2 / 3;
-        }
-    }
-    vector->reserve(min_size);
-}
-
-template <class V>
 void sort_and_remove_duplicates(V *array,
                                 size_t num_threads = 1,
                                 size_t offset = 0) {
@@ -40,7 +25,7 @@ void sort_and_remove_duplicates(V *array,
 }
 
 template <typename KMER>
-void shrink_kmers(Vector<KMER> *kmers,
+void shrink_kmers(utils::DequeStorage<KMER> *kmers,
                   size_t num_threads,
                   bool verbose,
                   size_t offset = 0) {
@@ -59,9 +44,9 @@ void shrink_kmers(Vector<KMER> *kmers,
     }
 }
 
-template <class Array, class Vector>
+template <class Array, typename KMER>
 void extend_kmer_storage(const Array &temp_storage,
-                         Vector *kmers,
+                         utils::DequeStorage<KMER> *kmers,
                          size_t num_threads,
                          bool verbose,
                          std::mutex &mutex_resize,
@@ -75,7 +60,7 @@ void extend_kmer_storage(const Array &temp_storage,
         shrink_kmers(kmers, num_threads, verbose);
 
         try {
-            try_reserve(kmers, kmers->size() + kmers->size() / 2,
+            kmers->try_reserve(kmers->size() + kmers->size() / 2,
                                kmers->size() + temp_storage.size());
         } catch (const std::bad_alloc &exception) {
             std::cerr << "ERROR: Can't reallocate. Not enough memory" << std::endl;
@@ -100,7 +85,7 @@ typedef std::function<void(const std::string&)> CallbackRead;
 template <typename KMER>
 void extract_kmers(std::function<void(CallbackRead)> generate_reads,
                    size_t k,
-                   Vector<KMER> *kmers,
+                   utils::DequeStorage<KMER> *kmers,
                    const std::vector<TAlphabet> &suffix,
                    size_t num_threads,
                    bool verbose,
@@ -124,6 +109,8 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
             extend_kmer_storage(temp_storage, kmers,
                                 num_threads, verbose, mutex_resize, mutex_copy);
             temp_storage.resize(0);
+            if (temp_storage.capacity() > 2 * kMaxKmersChunkSize)
+                temp_storage.shrink_to_fit();
         }
     });
 
@@ -140,7 +127,7 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
 // the experiments show it's already fast enough.
 template <typename KMER>
 void recover_source_dummy_nodes(size_t k,
-                                Vector<KMER> *kmers,
+                                utils::DequeStorage<KMER> *kmers,
                                 size_t num_threads,
                                 bool verbose) {
     // remove redundant dummy kmers inplace
@@ -277,7 +264,7 @@ KMerDBGSuccChunkConstructor<KMER>
         }
     );
 
-    try_reserve(&kmers_, memory_preallocated / sizeof(KMER));
+    kmers_.try_reserve(memory_preallocated / sizeof(KMER));
     if (verbose_) {
         std::cout << "Preallocated "
                   << kmers_.capacity() * sizeof(KMER) / (1llu << 30)
@@ -333,10 +320,12 @@ void KMerDBGSuccChunkConstructor<KMER>::release_task_to_pool() {
 /**
  * Initialize graph chunk from a list of sorted kmers.
  */
-template <typename KMER>
-DBG_succ::Chunk* chunk_from_kmers(size_t k, const KMER *kmers,
-                                            uint64_t num_kmers) {
-    assert(std::is_sorted(kmers, kmers + num_kmers));
+template <class Array>
+DBG_succ::Chunk* chunk_from_kmers(size_t k, const Array &kmers) {
+    assert(std::is_sorted(kmers.begin(), kmers.end()));
+
+    uint64_t num_kmers = kmers.size();
+    using KMER = typename Array::value_type;
 
     // the array containing edge labels
     std::vector<TAlphabet> W(1 + num_kmers);
@@ -424,12 +413,13 @@ DBG_succ::Chunk* KMerDBGSuccChunkConstructor<KMER>::build_chunk() {
             std::cout << timer.elapsed() << "sec" << std::endl;
     }
 
-    DBG_succ::Chunk *result = chunk_from_kmers(k_, kmers_.data(), kmers_.size());
+    kmers_.shrink_to_fit();
+    auto *chunk = chunk_from_kmers(k_, kmers_);
 
     kmers_.clear();
     kmers_.shrink_to_fit();
 
-    return result;
+    return chunk;
 }
 
 template <typename KMER>

@@ -69,7 +69,7 @@ class KMerDBGSuccChunkConstructor : public IChunkConstructor {
     void release_task_to_pool();
 
     size_t k_;
-    Vector<KMER> kmers_;
+    utils::DequeStorage<KMER> kmers_;
     mutable std::mutex mutex_resize_;
     mutable std::shared_timed_mutex mutex_copy_;
 

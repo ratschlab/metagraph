@@ -426,10 +426,39 @@ TEST(Misc, RemoveSuffix) {
 
 TEST(Vector, ReserveInfinityCheckThrow) {
     Vector<int> vector;
-    EXPECT_THROW(vector.reserve(2llu << 60), std::bad_alloc);
+    EXPECT_THROW(vector.reserve(1llu << 60), std::bad_alloc);
 }
 
 TEST(Vector, ResizeInfinityCheckThrow) {
     Vector<int> vector;
-    EXPECT_THROW(vector.resize(2llu << 60), std::bad_alloc);
+    EXPECT_THROW(vector.resize(1llu << 60), std::bad_alloc);
+}
+
+TEST(Deque, ResizeInfinityCheckThrow) {
+    std::deque<int> array;
+    EXPECT_THROW(array.resize(1llu << 60), std::bad_alloc);
+}
+
+TEST(DequeStorage, ReserveInfinityCheckThrow) {
+    utils::DequeStorage<int> array;
+    EXPECT_THROW(array.reserve(1llu << 60), std::bad_alloc);
+}
+
+TEST(DequeStorage, ResizeInfinityCheckThrow) {
+    utils::DequeStorage<int> array;
+    EXPECT_THROW(array.resize(1llu << 60), std::bad_alloc);
+}
+
+TEST(DequeStorage, Erase) {
+    utils::DequeStorage<int> storage;
+    storage.push_back(1);
+    storage.push_back(3);
+    storage.push_back(1);
+    storage.push_back(1);
+    storage.push_back(2);
+    storage.push_back(2);
+    ASSERT_EQ(6u, storage.size());
+    std::sort(storage.begin(), storage.end());
+    storage.erase(std::unique(storage.begin(), storage.end()), storage.end());
+    EXPECT_EQ(3u, storage.size());
 }
