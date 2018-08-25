@@ -4,7 +4,7 @@
 
 ### Prerequisites
 - cmake 3.6.1
-- C++14
+- GNU GCC (C++14)
 - HTSlib
 - folly (optional)
 
