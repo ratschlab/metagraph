@@ -1432,6 +1432,7 @@ int main(int argc, const char *argv[]) {
                 if (config->verbose) {
                     std::cout << timer.elapsed() << "sec" << std::endl;
                 }
+                return 0;
             }
             if (config->to_adj_list) {
                 if (config->verbose) {
@@ -1447,30 +1448,30 @@ int main(int argc, const char *argv[]) {
                 if (config->verbose) {
                     std::cout << timer.elapsed() << "sec" << std::endl;
                 }
+                return 0;
             }
-            if (graph->get_state() != config->state) {
+
+            if (config->verbose) {
+                std::cout << "Converting graph to state "
+                          << Config::state_to_string(config->state)
+                          << "...\t" << std::flush;
+                timer.reset();
+            }
+
+            graph->switch_state(config->state);
+
+            if (config->verbose) {
+                std::cout << timer.elapsed() << "sec" << std::endl;
+            }
+
+            if (config->outfbase.size()) {
                 if (config->verbose) {
-                    std::cout << "Converting graph to state "
-                              << Config::state_to_string(config->state)
-                              << "...\t" << std::flush;
+                    std::cout << "Serializing transformed graph...\t" << std::flush;
                     timer.reset();
                 }
-
-                graph->switch_state(config->state);
-
+                graph->serialize(config->outfbase);
                 if (config->verbose) {
                     std::cout << timer.elapsed() << "sec" << std::endl;
-                }
-
-                if (config->outfbase.size()) {
-                    if (config->verbose) {
-                        std::cout << "Serializing transformed graph...\t" << std::flush;
-                        timer.reset();
-                    }
-                    graph->serialize(config->outfbase);
-                    if (config->verbose) {
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-                    }
                 }
             }
 
