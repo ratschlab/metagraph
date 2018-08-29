@@ -18,3 +18,7 @@ for file in $(ls /cluster/work/grlab/projects/metagenome/benchmark_kingsford/dat
   #$job 2>&1 | tee $log_dir/log_annotate_$x
   bsub -J annotate$x -W 12:00 -n 9 -R "rusage[mem=2500]" "$job 2>&1 | tee $log_dir/log_annotate_$x"
 done
+
+
+
+# bsub -J "annotate_kingsford[1-2586]%600" -W 96:00 -n 6 -R "rusage[mem=3000]" -o /dev/null "file=\"\$(sed -n \${LSB_JOBINDEX}p ~/projects2014-metagenome/scripts/kingsford/kingsford_filtered_list.txt)\"; x=\$(basename \${file%.*.*}); gtime -v ~/projects2014-metagenome/metagraph/build/metagengraph_DNA annotate -v --anno-filename -i ~/big_graph/kingsford/graph_k19.dbg -o ~/big_graph/kingsford/annotation/\$x -p 13 \$file 2>&1 | tee ~/big_graph/kingsford/logs/log_annotate_\$x"
