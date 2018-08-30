@@ -288,7 +288,6 @@ template <typename KMER>
 void extract_kmers(std::function<void(CallbackRead)> generate_reads,
                    size_t k,
                    Vector<KMER> *kmers,
-                   size_t *end_sorted,
                    const std::vector<TAlphabet> &suffix,
                    size_t num_threads,
                    bool verbose,
@@ -304,23 +303,22 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         std::shared_timed_mutex &mutex,
                                         bool remove_redundant,
                                         size_t reserved_capacity) {
-    size_t end_sorted = 0;
     kmers->reserve(reserved_capacity);
     extract_kmers([reads](CallbackRead callback) {
             for (auto &&read : *reads) {
                 callback(std::move(read));
             }
         },
-        k, kmers, &end_sorted, suffix,
+        k, kmers, suffix,
         1, false, std::ref(mutex_resize), std::ref(mutex), remove_redundant
     );
     delete reads;
 }
 
-template <typename KMER>
-void sort_and_remove_duplicates(Vector<KMER> *kmers,
-                                size_t num_threads,
-                                size_t end_sorted = 0);
+template <class V>
+void sort_and_remove_duplicates(V *array,
+                                size_t num_threads = 1,
+                                size_t offset = 0);
 
 TEST(ExtractKmers_256, ExtractKmersAppendParallelReserved) {
     Vector<KMER> result;

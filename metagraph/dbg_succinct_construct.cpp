@@ -12,43 +12,35 @@
 const size_t kMaxKmersChunkSize = 30'000'000;
 
 
-template <typename KMER>
-void sort_and_remove_duplicates(Vector<KMER> *kmers,
-                                size_t num_threads,
-                                size_t end_sorted = 0) {
-    if (num_threads <= 3) {
-        // sort
-        ips4o::parallel::sort(kmers->data() + end_sorted,
-                              kmers->data() + kmers->size(),
-                              std::less<KMER>(), num_threads);
-        kmers->erase(std::unique(kmers->begin() + end_sorted, kmers->end()),
-                     kmers->end());
+template <class V>
+void try_reserve(V *vector, size_t size, size_t min_size = 0) {
+    size = std::max(size, min_size);
 
-        // merge two sorted arrays
-#if 0
-        std::__merge_without_buffer(kmers->data(),
-                                    kmers->data() + end_sorted,
-                                    kmers->data() + kmers->size(),
-                                    end_sorted, kmers->size() - end_sorted,
-                                    __gnu_cxx::__ops::__iter_less_iter());
-#else
-        std::inplace_merge(kmers->data(),
-                           kmers->data() + end_sorted,
-                           kmers->data() + kmers->size());
-#endif
-    } else {
-        // sort
-        ips4o::parallel::sort(kmers->data(), kmers->data() + kmers->size(),
-                              std::less<KMER>(), num_threads);
+    while (size > min_size) {
+        try {
+            vector->reserve(size);
+            return;
+        } catch (const std::bad_alloc &exception) {
+            size = min_size + (size - min_size) * 2 / 3;
+        }
     }
+    vector->reserve(min_size);
+}
+
+template <class V>
+void sort_and_remove_duplicates(V *array,
+                                size_t num_threads = 1,
+                                size_t offset = 0) {
+    ips4o::parallel::sort(array->begin() + offset, array->end(),
+                          std::less<typename V::value_type>(),
+                          num_threads);
     // remove duplicates
-    auto unique_end = std::unique(kmers->begin(), kmers->end());
-    kmers->erase(unique_end, kmers->end());
+    auto unique_end = std::unique(array->begin() + offset, array->end());
+    array->erase(unique_end, array->end());
 }
 
 template <typename KMER>
 void shrink_kmers(Vector<KMER> *kmers,
-                  size_t *end_sorted,
                   size_t num_threads,
                   bool verbose) {
     if (verbose) {
@@ -57,20 +49,18 @@ void shrink_kmers(Vector<KMER> *kmers,
     }
 
     size_t prev_num_kmers = kmers->size();
-    sort_and_remove_duplicates(kmers, num_threads, *end_sorted);
-    *end_sorted = kmers->size();
+    sort_and_remove_duplicates(kmers, num_threads);
 
     if (verbose) {
         std::cout << " done. Number of kmers reduced from " << prev_num_kmers
-                                                  << " to " << *end_sorted << ", "
-                  << (*end_sorted * sizeof(KMER) >> 20) << "Mb" << std::endl;
+                                                  << " to " << kmers->size() << ", "
+                  << (kmers->size() * sizeof(KMER) >> 20) << "Mb" << std::endl;
     }
 }
 
 template <class Array, class Vector>
 void extend_kmer_storage(const Array &temp_storage,
                          Vector *kmers,
-                         size_t *end_sorted,
                          size_t num_threads,
                          bool verbose,
                          std::mutex &mutex_resize,
@@ -86,20 +76,12 @@ void extend_kmer_storage(const Array &temp_storage,
     } else {
         std::unique_lock<std::shared_timed_mutex> reallocate_lock(mutex_copy);
 
-        shrink_kmers(kmers, end_sorted, num_threads, verbose);
+        shrink_kmers(kmers, num_threads, verbose);
         offset = kmers->size();
 
-        size_t new_space = kmers->size() / 2;
-        while (new_space > temp_storage.size()) {
-            try {
-                kmers->reserve(kmers->size() + new_space);
-                break;
-            } catch (const std::bad_alloc &exception) {
-                new_space = new_space * 2 / 3;
-            }
-        }
-
         try {
+            try_reserve(kmers, kmers->size() + kmers->size() / 2,
+                               kmers->size() + temp_storage.size());
             kmers->resize(kmers->size() + temp_storage.size());
         } catch (const std::bad_alloc &exception) {
             std::cerr << "ERROR: Can't reallocate. Not enough memory" << std::endl;
@@ -122,7 +104,6 @@ template <typename KMER>
 void extract_kmers(std::function<void(CallbackRead)> generate_reads,
                    size_t k,
                    Vector<KMER> *kmers,
-                   size_t *end_sorted,
                    const std::vector<TAlphabet> &suffix,
                    size_t num_threads,
                    bool verbose,
@@ -139,11 +120,11 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
             return;
 
         if (remove_redundant) {
-            sort_and_remove_duplicates(&temp_storage, 1);
+            sort_and_remove_duplicates(&temp_storage);
         }
 
         if (temp_storage.size() > 0.9 * kMaxKmersChunkSize) {
-            extend_kmer_storage(temp_storage, kmers, end_sorted,
+            extend_kmer_storage(temp_storage, kmers,
                                 num_threads, verbose, mutex_resize, mutex_copy);
             temp_storage.resize(0);
         }
@@ -151,9 +132,9 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
 
     if (temp_storage.size()) {
         if (remove_redundant) {
-            sort_and_remove_duplicates(&temp_storage, 1);
+            sort_and_remove_duplicates(&temp_storage);
         }
-        extend_kmer_storage(temp_storage, kmers, end_sorted,
+        extend_kmer_storage(temp_storage, kmers,
                             num_threads, verbose, mutex_resize, mutex_copy);
     }
 }
@@ -203,14 +184,7 @@ void recover_source_dummy_nodes(size_t k,
                           << " filter out non-unique k-mers..." << std::flush;
             }
 
-            ips4o::parallel::sort(kmers->data() + end_sorted,
-                                  kmers->data() + kmers->size(),
-                                  std::less<KMER>(),
-                                  num_threads);
-            kmers->erase(
-                std::unique(kmers->begin() + end_sorted, kmers->end()),
-                kmers->end()
-            );
+            sort_and_remove_duplicates(kmers, num_threads, end_sorted);
 
             if (verbose) {
                 std::cout << " done. Number of kmers: " << kmers->size() << ", "
@@ -230,7 +204,7 @@ void recover_source_dummy_nodes(size_t k,
               kmers->begin() + cur_pos);
     kmers->resize(kmers->size() - end_sorted + cur_pos);
 
-    sort_and_remove_duplicates(kmers, num_threads, cur_pos);
+    sort_and_remove_duplicates(kmers, num_threads);
 }
 
 
@@ -273,7 +247,6 @@ KMerDBGSuccChunkConstructor<KMER>
                               double memory_preallocated,
                               bool verbose)
       : k_(k),
-        end_sorted_(0),
         num_threads_(num_threads),
         thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1,
                      std::max(static_cast<size_t>(1), num_threads_)),
@@ -292,16 +265,7 @@ KMerDBGSuccChunkConstructor<KMER>
         }
     );
 
-    while (memory_preallocated > 0) {
-        try {
-            kmers_.reserve(memory_preallocated / sizeof(KMER));
-            break;
-        } catch (...) {
-            std::cerr << "Warning: Can't allocate requested memory for k-mers "
-                      << memory_preallocated / (1llu << 30) << " Gb" << std::endl;
-            memory_preallocated /= 1.5;
-        }
-    }
+    try_reserve(&kmers_, memory_preallocated / sizeof(KMER));
     if (verbose_) {
         std::cout << "Preallocated "
                   << kmers_.capacity() * sizeof(KMER) / (1llu << 30)
@@ -348,7 +312,7 @@ void KMerDBGSuccChunkConstructor<KMER>::release_task_to_pool() {
                              }
                              delete current_reads_storage;
                          },
-                         k_, &kmers_, &end_sorted_, filter_suffix_encoded_,
+                         k_, &kmers_, filter_suffix_encoded_,
                          num_threads_, verbose_,
                          std::ref(mutex_resize_), std::ref(mutex_copy_), true);
     stored_reads_size_ = 0;
@@ -430,7 +394,7 @@ DBG_succ::Chunk* KMerDBGSuccChunkConstructor<KMER>::build_chunk() {
     }
     Timer timer;
 
-    sort_and_remove_duplicates(&kmers_, num_threads_, end_sorted_);
+    sort_and_remove_duplicates(&kmers_, num_threads_);
 
     if (verbose_)
         std::cout << timer.elapsed() << "sec" << std::endl;
@@ -461,7 +425,7 @@ void
 KMerDBGSuccChunkConstructor<KMER>
 ::add_reads(std::function<void(CallbackRead)> generate_reads) {
     thread_pool_.enqueue(extract_kmers<KMER>, generate_reads,
-                         k_, &kmers_, &end_sorted_,
+                         k_, &kmers_,
                          filter_suffix_encoded_,
                          num_threads_, verbose_,
                          std::ref(mutex_resize_), std::ref(mutex_copy_), true);

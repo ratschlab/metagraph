@@ -86,7 +86,6 @@ class KMerDBGSuccChunkConstructor : public IChunkConstructor {
 
     size_t k_;
     Vector<KMER> kmers_;
-    size_t end_sorted_;
     mutable std::mutex mutex_resize_;
     mutable std::shared_timed_mutex mutex_copy_;
 
