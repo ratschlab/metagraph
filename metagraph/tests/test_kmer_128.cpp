@@ -84,9 +84,11 @@ TEST(KmerEncodeTest_128, UpdateKmer) {
         KMER(DBG_succ::encode(std::string("ATGC"))),
         KMER(DBG_succ::encode(std::string("TGCT")))
     };
+    KMER updated = kmer[0];
     KMER::update_kmer(3, DBG_succ::encode('T'),
-                   DBG_succ::encode('C'), &kmer[0].seq_);
-    EXPECT_EQ(kmer[1], kmer[0]);
+                         DBG_succ::encode('C'), &updated.seq_);
+    EXPECT_EQ(kmer[1], updated);
+    EXPECT_EQ(kmer[0], kmer[1].prev_kmer(3, DBG_succ::encode('A')));
 }
 
 TEST(KmerEncodeTest_128, UpdateKmerLong) {

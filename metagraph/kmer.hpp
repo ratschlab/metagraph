@@ -62,6 +62,9 @@ class KMer {
                                    KMerCharType edge_label,
                                    KMerCharType last,
                                    KMerWordType *kmer);
+
+    inline KMer<G> prev_kmer(size_t k, KMerCharType first_char) const;
+
   private:
     inline KMerCharType get_digit(size_t i) const;
 
@@ -116,6 +119,23 @@ void KMer<G>::update_kmer(size_t k,
     *kmer |= kFirstCharMask;
     *kmer -= kFirstCharMask;
     *kmer += edge_label + 1;
+}
+
+template <typename G>
+KMer<G> KMer<G>::prev_kmer(size_t k, KMerCharType first_char) const {
+    // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
+    KMerWordType kmer = seq_;
+    kmer |= kFirstCharMask;
+    kmer -= kFirstCharMask - (first_char + 1);
+    // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
+    KMerWordType last_char = seq_ >> static_cast<int>(kBitsPerChar * k);
+    kmer -= last_char << static_cast<int>(kBitsPerChar * k);
+    // 0000s[6]s[5]s[4]s[3]s[2]s[1]
+    kmer = kmer << kBitsPerChar;
+    // s[6]s[5]s[4]s[3]s[2]s[1]0000
+    kmer += last_char;
+    // s[6]s[5]s[4]s[3]s[2]s[1]s[7]
+    return KMer<G>(kmer);
 }
 
 template <typename G>

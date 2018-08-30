@@ -42,14 +42,15 @@ void sort_and_remove_duplicates(V *array,
 template <typename KMER>
 void shrink_kmers(Vector<KMER> *kmers,
                   size_t num_threads,
-                  bool verbose) {
+                  bool verbose,
+                  size_t offset = 0) {
     if (verbose) {
         std::cout << "Allocated capacity exceeded, filter out non-unique k-mers..."
                   << std::flush;
     }
 
     size_t prev_num_kmers = kmers->size();
-    sort_and_remove_duplicates(kmers, num_threads);
+    sort_and_remove_duplicates(kmers, num_threads, offset);
 
     if (verbose) {
         std::cout << " done. Number of kmers reduced from " << prev_num_kmers
@@ -148,9 +149,10 @@ void recover_source_dummy_nodes(size_t k,
                                 bool verbose) {
     // remove redundant dummy kmers inplace
     size_t cur_pos = 0;
-    size_t end_sorted = kmers->size();
+    size_t dummy_begin = kmers->size();
+    size_t num_dummy_parent_kmers = 0;
 
-    for (size_t i = 0; i < end_sorted; ++i) {
+    for (size_t i = 0; i < dummy_begin; ++i) {
         const KMER &kmer = kmers->at(i);
         // we never add reads shorter than k
         assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
@@ -164,7 +166,7 @@ void recover_source_dummy_nodes(size_t k,
         }
 
         bool redundant = false;
-        for (size_t j = i + 1; j < end_sorted
+        for (size_t j = i + 1; j < dummy_begin
                                 && KMER::compare_suffix(kmer, kmers->at(j), 1); ++j) {
             if (edge_label == kmers->at(j)[0]) {
                 // This source dummy kmer is redundant and has to be erased
@@ -175,36 +177,50 @@ void recover_source_dummy_nodes(size_t k,
         if (redundant)
             continue;
 
+        num_dummy_parent_kmers++;
+
         // leave this dummy kmer in the list
         kmers->at(cur_pos++) = kmer;
 
-        if (kmers->size() + k > kmers->capacity()) {
-            if (verbose) {
-                std::cout << "Allocated capacity exceeded,"
-                          << " filter out non-unique k-mers..." << std::flush;
-            }
+        if (kmers->size() + 1 > kmers->capacity())
+            shrink_kmers(kmers, num_threads, verbose, dummy_begin);
 
-            sort_and_remove_duplicates(kmers, num_threads, end_sorted);
+        kmers->push_back(kmers->at(i).prev_kmer(k, DBG_succ::kSentinelCode));
+    }
+    if (verbose) {
+        std::cout << "Number of dummy k-mers with dummy prefix of length 1: "
+                  << num_dummy_parent_kmers << std::endl;
+    }
+    sort_and_remove_duplicates(kmers, num_threads, dummy_begin);
 
-            if (verbose) {
-                std::cout << " done. Number of kmers: " << kmers->size() << ", "
-                          << (kmers->size() * sizeof(KMER) >> 20) << "Mb" << std::endl;
-            }
+    if (verbose) {
+        std::cout << "Number of dummy k-mers with dummy prefix of length 2: "
+                  << kmers->size() - dummy_begin << std::endl;
+    }
+
+    std::copy(kmers->begin() + dummy_begin, kmers->end(),
+              kmers->begin() + cur_pos);
+    kmers->resize(kmers->size() - dummy_begin + cur_pos);
+    dummy_begin = cur_pos;
+
+    for (size_t c = 3; c < k + 1; ++c) {
+        size_t succ_dummy_begin = dummy_begin;
+        dummy_begin = kmers->size();
+
+        for (size_t i = succ_dummy_begin; i < dummy_begin; ++i) {
+            if (kmers->size() + 1 > kmers->capacity())
+                shrink_kmers(kmers, num_threads, verbose, dummy_begin);
+
+            kmers->push_back(kmers->at(i).prev_kmer(k, DBG_succ::kSentinelCode));
         }
+        sort_and_remove_duplicates(kmers, num_threads, dummy_begin);
 
-        // anchor it to the dummy source node
-        auto anchor_kmer = KMER::pack_kmer(std::vector<TAlphabet>(k + 1, 0), k + 1);
-        for (size_t c = 2; c < k + 1; ++c) {
-            KMER::update_kmer(k, kmers->at(i)[c], kmers->at(i)[c - 1], &anchor_kmer);
-
-            kmers->emplace_back(anchor_kmer);
+        if (verbose) {
+            std::cout << "Number of dummy k-mers with dummy prefix of length " << c
+                      << ": " << kmers->size() - dummy_begin << std::endl;
         }
     }
-    std::copy(kmers->begin() + end_sorted, kmers->end(),
-              kmers->begin() + cur_pos);
-    kmers->resize(kmers->size() - end_sorted + cur_pos);
-
-    sort_and_remove_duplicates(kmers, num_threads);
+    ips4o::parallel::sort(kmers->begin(), kmers->end(), std::less<KMER>(), num_threads);
 }
 
 
