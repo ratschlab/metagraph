@@ -25,22 +25,6 @@ class DBGSuccConstructor {
 };
 
 
-class SuffixArrayDBGSuccConstructor : public DBGSuccConstructor {
-  public:
-    explicit SuffixArrayDBGSuccConstructor(size_t k);
-
-    void add_read(const std::string &read);
-
-    void build_graph(DBG_succ *graph);
-
-    size_t get_k() const { return k_; }
-
-  private:
-    size_t k_;
-    std::string data_;
-};
-
-
 typedef std::function<void(const std::string&)> CallbackRead;
 
 

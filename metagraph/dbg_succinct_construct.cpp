@@ -446,19 +446,3 @@ KMerDBGSuccChunkConstructor<KMER>
                          num_threads_, verbose_,
                          std::ref(mutex_resize_), std::ref(mutex_copy_), true);
 }
-
-
-SuffixArrayDBGSuccConstructor::SuffixArrayDBGSuccConstructor(size_t k)
-      : k_(k), data_("$") {}
-
-void SuffixArrayDBGSuccConstructor::add_read(const std::string &read) {
-    data_.append(read);
-    data_.append("$");
-}
-
-// Implement SA construction and extract the kmers from the result
-void SuffixArrayDBGSuccConstructor::build_graph(DBG_succ *graph) {
-    // DBG_succ::Chunk result;
-    // result.initialize_graph(graph);
-    std::ignore = graph;
-}

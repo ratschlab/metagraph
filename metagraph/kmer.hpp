@@ -114,17 +114,21 @@ void KMer<G>::update_kmer(size_t k,
                           KMerCharType edge_label,
                           KMerCharType last,
                           KMerWordType *kmer) {
+    // s[6]s[5]s[4]s[3]s[2]s[1]s[7]
     *kmer = *kmer >> kBitsPerChar;
+    // 0000s[6]s[5]s[4]s[3]s[2]s[1]
     *kmer += KMerWordType(last + 1) << static_cast<int>(kBitsPerChar * k);
+    // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
     *kmer |= kFirstCharMask;
-    *kmer -= kFirstCharMask;
-    *kmer += edge_label + 1;
+    // s[7]s[6]s[5]s[4]s[3]s[2]1111
+    *kmer -= kFirstCharMask - (edge_label + 1);
+    // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
 }
 
 template <typename G>
 KMer<G> KMer<G>::prev_kmer(size_t k, KMerCharType first_char) const {
-    // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
     KMerWordType kmer = seq_;
+    // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
     kmer |= kFirstCharMask;
     kmer -= kFirstCharMask - (first_char + 1);
     // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
