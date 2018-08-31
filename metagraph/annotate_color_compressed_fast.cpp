@@ -13,12 +13,6 @@ using utils::remove_suffix;
 namespace annotate {
 
 template <typename Color, class Encoder>
-const std::string FastColorCompressed<Color, Encoder>::kExtension = ".color.annodbg";
-
-template <typename Color, class Encoder>
-const std::string FastColorCompressed<Color, Encoder>::kIndexExtension = ".colindex.annodbg";
-
-template <typename Color, class Encoder>
 FastColorCompressed<Color, Encoder>::FastColorCompressed(uint64_t num_rows,
                                                          size_t num_columns_cached,
                                                          bool verbose)

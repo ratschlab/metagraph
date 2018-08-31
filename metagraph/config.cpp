@@ -472,7 +472,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for stats:\n");
             // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t-a --annotator [STR] \tbasename of annotator to update []\n");
-            // fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column based colors compressor [off]\n");
+            fprintf(stderr, "\t   --row-annotator \tuse row based annotator instead of column based colors compressor [off]\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
         } break;
         case ANNOTATE: {

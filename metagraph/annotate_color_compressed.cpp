@@ -16,9 +16,6 @@ size_t kNumRowsInBlock = 5'000'000;
 namespace annotate {
 
 template <typename Color, class Encoder>
-const std::string ColorCompressed<Color, Encoder>::kExtension = ".color.annodbg";
-
-template <typename Color, class Encoder>
 ColorCompressed<Color, Encoder>::ColorCompressed(uint64_t num_rows,
                                                  size_t num_columns_cached,
                                                  bool verbose)

@@ -9,8 +9,10 @@
 #endif
 
 #include "serialization.hpp"
+#include "utils.hpp"
 
 using libmaus2::util::StringSerialisation;
+using utils::remove_suffix;
 
 #if _USE_FOLLY
 typedef folly::small_vector<uint32_t, 2, uint32_t> SmallVector;
@@ -193,7 +195,7 @@ bool RowCompressed<Color, Encoder>::has_colors(Index i, const Coloring &coloring
 
 template <typename Color, class Encoder>
 void RowCompressed<Color, Encoder>::serialize(const std::string &filename) const {
-    std::ofstream outstream(filename + ".row.annodbg");
+    std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension);
     if (!outstream.good()) {
         throw std::ofstream::failure("Bad stream");
     }
@@ -223,7 +225,7 @@ void RowCompressed<Color, Encoder>::serialize(const std::string &filename) const
 
 template <typename Color, class Encoder>
 bool RowCompressed<Color, Encoder>::merge_load(const std::vector<std::string> &filenames) {
-    std::ifstream instream(filenames.at(0) + ".row.annodbg");
+    std::ifstream instream(remove_suffix(filenames.at(0), kExtension) + kExtension);
     if (!instream.good())
         return false;
 

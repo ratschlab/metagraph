@@ -75,6 +75,8 @@ class RowCompressed : public MultiColorAnnotation<uint64_t, Color> {
   private:
     std::unique_ptr<RowMajorSparseBinaryMatrix> matrix_;
     std::unique_ptr<ColorEncoder<Color>> color_encoder_;
+
+    static constexpr auto kExtension = ".row.annodbg";
 };
 
 } // namespace annotate

@@ -104,8 +104,8 @@ class FastColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
 
     bool verbose_;
 
-    static const std::string kExtension;
-    static const std::string kIndexExtension;
+    static constexpr auto kExtension = ".color.annodbg";
+    static constexpr auto kIndexExtension = ".colindex.annodbg";
 };
 
 } // namespace annotate

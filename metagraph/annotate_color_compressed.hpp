@@ -94,7 +94,7 @@ class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
 
     bool verbose_;
 
-    static const std::string kExtension;
+    static constexpr auto kExtension = ".color.annodbg";
 };
 
 } // namespace annotate
