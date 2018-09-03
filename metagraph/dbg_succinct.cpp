@@ -1183,6 +1183,19 @@ void DBG_succ::switch_state(Config::StateType new_state) {
     state = new_state;
 }
 
+void DBG_succ::print_internal_representation(std::ostream &os) const {
+    os << "F:";
+    for (auto i : F_) {
+        os << " " << i;
+    }
+    os << "\nL: " << *last_;
+    os << "\nW:";
+    for (uint64_t i = 0; i < W_->size(); ++i) {
+        os << " " << static_cast<uint64_t>(get_W(i));
+    }
+    os << std::endl;
+}
+
 void DBG_succ::print(std::ostream &os) const {
     assert(is_valid());
     auto vertex_header = std::string("Vertex");

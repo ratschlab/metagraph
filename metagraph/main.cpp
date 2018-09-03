@@ -1343,6 +1343,9 @@ int main(int argc, const char *argv[]) {
                 std::cout << "state: " << Config::state_to_string(graph->get_state())
                           << std::endl;
 
+                if (config->print_graph_internal_repr)
+                    graph->print_internal_representation(std::cout);
+
                 if (config->print_graph_succ)
                     std::cout << *graph;
             }

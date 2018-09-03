@@ -67,6 +67,8 @@ Config::Config(int argc, const char *argv[]) {
             quiet = true;
         } else if (!strcmp(argv[i], "--print")) {
             print_graph_succ = true;
+        } else if (!strcmp(argv[i], "--print-internal")) {
+            print_graph_internal_repr = true;
         } else if (!strcmp(argv[i], "--count-kmers")) {
             count_kmers_query = true;
         } else if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--reverse")) {
@@ -474,6 +476,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-a --annotator [STR] \tbasename of annotator to update []\n");
             fprintf(stderr, "\t   --row-annotator \tuse row based annotator instead of column based colors compressor [off]\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
+            fprintf(stderr, "\t   --print-internal \tprint internal graph representation to the screen [off]\n");
         } break;
         case ANNOTATE: {
             fprintf(stderr, "Usage: %s annotate -i <graph_basename> [options] <PATH1> [[PATH2] ...]\n"

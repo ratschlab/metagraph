@@ -193,6 +193,11 @@ class DBG_succ : public SequenceGraph {
      */
     void print(std::ostream &os = std::cout) const;
 
+    /**
+     * Print vectors F, L, and W to stream.
+     */
+    void print_internal_representation(std::ostream &os = std::cout) const;
+
     Config::StateType get_state() const { return state; }
     void switch_state(Config::StateType state);
 
