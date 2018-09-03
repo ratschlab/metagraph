@@ -153,8 +153,14 @@ class DBG_succ : public SequenceGraph {
                       bit_vector_dyn *edges_inserted = NULL);
 
     // Given an edge list, remove them from the graph.
-    // TODO: fix the implementation
-    void remove_edges(const std::set<edge_index> &edges);
+    // TODO: fix the implementation (anchoring the isolated nodes)
+    void erase_edges_dyn(const std::set<edge_index> &edges);
+
+    /**
+     * Traverse the entire dummy subgraph (which is a tree)
+     * and erase all redundant dummy edges.
+     */
+    std::vector<bool> erase_redundant_dummy_edges();
 
     /**
     * Heavily borrowing from the graph sequence traversal, this function gets 
@@ -225,6 +231,12 @@ class DBG_succ : public SequenceGraph {
      * edges to node i.
      */
     size_t indegree(node_index i) const;
+
+    /**
+     * Given an edge index i, this function returns true if that is
+     * the only edge incoming to its target node.
+     */
+    bool is_single_incoming(edge_index i) const;
 
     /**
      * Given a node index i and an edge label c, this function returns the
@@ -381,6 +393,12 @@ class DBG_succ : public SequenceGraph {
      */
     bool insert_edge(TAlphabet c, uint64_t begin, uint64_t end,
                      bit_vector_dyn *edges_inserted = NULL);
+
+    /**
+     * Erase exactly all the masked edges from the graph,
+     * may invalidate the graph (if leaves nodes with no incoming edges).
+     */
+    void erase_edges(const std::vector<bool> &edges_to_remove_mask);
 
     /**
      * This function gets two edge indices and returns if their source

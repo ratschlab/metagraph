@@ -598,6 +598,35 @@ bool DBG_succ::is_single_outgoing(edge_index i) const {
 }
 
 /**
+ * Given an edge index i, this function returns true if that is
+ * the only edge incoming to its target node.
+ */
+bool DBG_succ::is_single_incoming(edge_index i) const {
+    CHECK_INDEX(i);
+
+    TAlphabet c = get_W(i);
+    if (c >= alph_size)
+        return false;
+
+    // start from the next edge
+    i++;
+
+    // trying to avoid calls of succ_W
+    size_t max_iter = 1000;
+    size_t end = std::min(W_->size(), i + max_iter);
+
+    while (i < end) {
+        if (get_W(i) == c + alph_size)
+            return false;
+        if (get_W(i) == c)
+            return true;
+        i++;
+    }
+
+    return i == W_->size() || succ_W(i, c) <= succ_W(i, c + alph_size);
+}
+
+/**
  * Given a node index i, this function returns the number of incoming
  * edges to the node i.
  */
@@ -1373,8 +1402,8 @@ bool DBG_succ::insert_edge(TAlphabet c, uint64_t begin, uint64_t end,
 
 
 // Given an edge list, remove them from the graph.
-// TODO: fix the implementation
-void DBG_succ::remove_edges(const std::set<edge_index> &edges) {
+// TODO: fix the implementation (anchoring the isolated nodes)
+void DBG_succ::erase_edges_dyn(const std::set<edge_index> &edges) {
     uint64_t shift = 0;
 
     for (edge_index edge : edges) {
@@ -1385,7 +1414,9 @@ void DBG_succ::remove_edges(const std::set<edge_index> &edges) {
         if (d < alph_size) {
             //fix W array
             uint64_t next = edge_id + 1;
-            uint64_t j = succ_W(next, d);
+            uint64_t j = next < W_->size()
+                            ? succ_W(next, d)
+                            : W_->size();
             for (uint64_t i = next; i < j; ++i) {
                 if (get_W(i) == d + alph_size) {
                     W_->set(i, d);
@@ -1405,6 +1436,124 @@ void DBG_succ::remove_edges(const std::set<edge_index> &edges) {
         }
         shift++;
     }
+}
+
+/**
+ * Erase exactly all the masked edges from the graph,
+ * may invalidate the graph (if leaves nodes with no incoming edges).
+ */
+void DBG_succ::erase_edges(const std::vector<bool> &edges_to_remove_mask) {
+    size_t num_edges_to_remove = std::count(edges_to_remove_mask.begin(),
+                                            edges_to_remove_mask.end(), true);
+    if (!num_edges_to_remove)
+        return;
+
+    // update last
+    sdsl::bit_vector new_last(last_->size() - num_edges_to_remove, false);
+
+    for (uint64_t i = 0, new_i = 0; i < edges_to_remove_mask.size(); ++i) {
+        if (!edges_to_remove_mask[i]) {
+            new_last[new_i++] = get_last(i);
+        } else {
+            if (get_last(i) && new_i > 1 && !new_last[new_i - 1])
+                new_last[new_i - 1] = 1;
+        }
+    }
+    delete last_;
+    last_ = new bit_vector_stat(std::move(new_last));
+
+    // update W
+    sdsl::int_vector<> new_W(W_->size() - num_edges_to_remove, 0, kLogSigma);
+    std::vector<bool> first_removed(alph_size, false);
+
+    for (size_t i = 0, new_i = 0; i < edges_to_remove_mask.size(); ++i) {
+        TAlphabet c = get_W(i);
+        if (edges_to_remove_mask[i]) {
+            if (c < alph_size)
+                first_removed[c] = true;
+        } else {
+            if (c >= alph_size && first_removed[c % alph_size]) {
+                new_W[new_i++] = c % alph_size;
+            } else {
+                new_W[new_i++] = c;
+            }
+            first_removed[c % alph_size] = false;
+        }
+    }
+    delete W_;
+    W_ = new wavelet_tree_stat(kLogSigma, std::move(new_W));
+
+    // update F
+    TAlphabet c = 0;
+    uint64_t count = 0;
+    for (uint64_t i = 1; i <= F_.back(); ++i) {
+        while (i > F_[c] && c < alph_size) {
+            F_[c++] = count;
+        }
+        if (!edges_to_remove_mask[i])
+            count++;
+    }
+    while (c < alph_size) {
+        F_[c++] = count;
+    }
+
+    state = Config::STAT;
+}
+
+/**
+ * Traverse the entire dummy subgraph (which is a tree)
+ * and erase all redundant dummy edges.
+ */
+std::vector<bool> DBG_succ::erase_redundant_dummy_edges() {
+    std::vector<bool> edges_to_remove_mask(W_->size(), false);
+
+    if (get_last(1))
+        return edges_to_remove_mask;
+
+    switch_state(Config::STAT);
+
+    // start traversal in the main dummy source node
+    std::vector<edge_index> path { 2 };
+    std::vector<bool> redundant { true };
+
+    while (path.size()) {
+        // traverse until the last dummy source edge in a path
+        while (path.size() < k_) {
+            path.push_back(pred_last(fwd(path.back()) - 1) + 1);
+            redundant.push_back(true);
+        }
+
+        assert(get_W(path.back()) < alph_size);
+
+        if (is_single_incoming(path.back())) {
+            // the last dummy edge is not redundant and hence the
+            // entire path has to remain in the graph
+            for (size_t i = 0; i < redundant.size(); ++i) {
+                redundant[i] = false;
+            }
+        } else {
+            // mark the last dummy edge as redundant
+            edges_to_remove_mask[path.back()] = true;
+        }
+
+        // traverse the path backwards to the next branching node
+        while (path.size() && get_last(path.back())) {
+            path.pop_back();
+            redundant.pop_back();
+            if (redundant.size() && redundant.back())
+                edges_to_remove_mask[path.back()] = true;
+        }
+
+        // explore the next edge outgoing from the current branching node
+        if (path.size()) {
+            path.back()++;
+            redundant.back() = true;
+        }
+    }
+
+    erase_edges(edges_to_remove_mask);
+
+    return edges_to_remove_mask;
 }
 
 /**

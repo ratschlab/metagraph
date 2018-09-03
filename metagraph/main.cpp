@@ -1417,6 +1417,9 @@ int main(int argc, const char *argv[]) {
                 load_critical_graph_from_file(files.at(0))
             };
 
+            if (config->clear_dummy)
+                graph->erase_redundant_dummy_edges();
+
             if (config->to_sequences) {
                 if (config->verbose) {
                     std::cout << "Extracting sequences from graph...\t" << std::flush;

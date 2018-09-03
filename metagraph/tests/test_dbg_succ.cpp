@@ -234,6 +234,173 @@ TEST(DBGSuccinct, AddSequenceSimplePath) {
     }
 }
 
+TEST(DBGSuccinct, RemoveDummyEdgesForClearGraph) {
+    for (size_t k = 1; k < 10; ++k) {
+        std::unique_ptr<DBG_succ> first_ptr;
+        std::unique_ptr<DBG_succ> second_ptr;
+
+        {
+            KMerDBGSuccConstructor constructor(k);
+            constructor.add_reads({ std::string(100, 'A'),
+                                    std::string(100, 'C'),
+                                    std::string(100, 'G'),
+                                    "ACATCTAGTAGTCGATCGTACG",
+                                    "ATTAGTAGTAGTAGTGATGTAG", });
+            first_ptr.reset(new DBG_succ(&constructor));
+        }
+
+        {
+            KMerDBGSuccConstructor constructor(k);
+            constructor.add_reads({ std::string(100, 'A'),
+                                    std::string(100, 'C'),
+                                    std::string(100, 'G'),
+                                    "ACATCTAGTAGTCGATCGTACG",
+                                    "ATTAGTAGTAGTAGTGATGTAG", });
+            second_ptr.reset(new DBG_succ(&constructor));
+        }
+
+        auto &first = *first_ptr;
+        auto &second = *second_ptr;
+
+        ASSERT_TRUE(first.equals_internally(second)) << first;
+        auto to_remove = second.erase_redundant_dummy_edges();
+        EXPECT_EQ(0u, std::count(to_remove.begin(), to_remove.end(), true));
+        EXPECT_TRUE(first.equals_internally(second)) << first;
+    }
+}
+
+TEST(DBGSuccinct, RemoveDummyEdgesLinear) {
+    for (size_t k = 1; k < 10; ++k) {
+        KMerDBGSuccConstructor constructor(k);
+        constructor.add_read(std::string(20, 'A'));
+        DBG_succ graph(&constructor);
+
+        DBG_succ dynamic_graph(k);
+        dynamic_graph.add_sequence(std::string(20, 'A'));
+
+        ASSERT_FALSE(graph.equals_internally(dynamic_graph));
+        ASSERT_EQ(graph, dynamic_graph);
+        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges();
+        EXPECT_TRUE(graph.equals_internally(dynamic_graph))
+            << "Clear graph\n" << graph
+            << "Cleaned up graph\n" << dynamic_graph
+            << "Removed edges\n" << bit_vector_stat(redundant_edges);
+        EXPECT_EQ(graph, dynamic_graph);
+    }
+}
+
+TEST(DBGSuccinct, RemoveDummyEdgesThreePaths) {
+    for (size_t k = 1; k < 10; ++k) {
+        KMerDBGSuccConstructor constructor(k);
+        constructor.add_reads({ std::string(20, 'A'),
+                                std::string(20, 'C'),
+                                std::string(20, 'G'), });
+        DBG_succ graph(&constructor);
+
+        DBG_succ dynamic_graph(k);
+        dynamic_graph.add_sequence(std::string(20, 'A'));
+        dynamic_graph.add_sequence(std::string(20, 'C'));
+        dynamic_graph.add_sequence(std::string(20, 'G'));
+
+        ASSERT_FALSE(graph.equals_internally(dynamic_graph));
+        ASSERT_EQ(graph, dynamic_graph);
+
+        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges();
+
+        EXPECT_TRUE(graph.equals_internally(dynamic_graph))
+            << "Clear graph\n" << graph
+            << "Cleaned up graph\n" << dynamic_graph
+            << "Removed edges\n" << bit_vector_stat(redundant_edges);
+        EXPECT_EQ(graph, dynamic_graph);
+    }
+}
+
+TEST(DBGSuccinct, RemoveDummyEdgesFourPaths) {
+    for (size_t k = 1; k < 10; ++k) {
+        KMerDBGSuccConstructor constructor(k);
+        constructor.add_reads({ std::string(20, 'A'),
+                                std::string(20, 'C'),
+                                std::string(20, 'G'),
+                                std::string(20, 'T') + 'A' });
+        DBG_succ graph(&constructor);
+
+        DBG_succ dynamic_graph(k);
+        dynamic_graph.add_sequence(std::string(20, 'A'));
+        dynamic_graph.add_sequence(std::string(20, 'C'));
+        dynamic_graph.add_sequence(std::string(20, 'G'));
+        dynamic_graph.add_sequence(std::string(20, 'T') + 'A');
+
+        ASSERT_FALSE(graph.equals_internally(dynamic_graph));
+        ASSERT_EQ(graph, dynamic_graph);
+
+        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges();
+
+        EXPECT_TRUE(graph.equals_internally(dynamic_graph))
+            << "Clear graph\n" << graph
+            << "Cleaned up graph\n" << dynamic_graph
+            << "Removed edges\n" << bit_vector_stat(redundant_edges);
+        EXPECT_EQ(graph, dynamic_graph);
+    }
+}
+
+TEST(DBGSuccinct, RemoveDummyEdgesFivePaths) {
+    for (size_t k = 1; k < 10; ++k) {
+        KMerDBGSuccConstructor constructor(k);
+        constructor.add_reads({ std::string(20, 'A'),
+                                std::string(20, 'C'),
+                                std::string(20, 'G'),
+                                std::string(20, 'T'),
+                                std::string(20, 'N') + 'A', });
+        DBG_succ graph(&constructor);
+
+        DBG_succ dynamic_graph(k);
+        dynamic_graph.add_sequence(std::string(20, 'A'));
+        dynamic_graph.add_sequence(std::string(20, 'C'));
+        dynamic_graph.add_sequence(std::string(20, 'G'));
+        dynamic_graph.add_sequence(std::string(20, 'T'));
+        dynamic_graph.add_sequence(std::string(20, 'N') + 'A');
+
+        ASSERT_FALSE(graph.equals_internally(dynamic_graph));
+        ASSERT_EQ(graph, dynamic_graph);
+
+        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges();
+
+        EXPECT_TRUE(graph.equals_internally(dynamic_graph))
+            << "Clear graph\n" << graph
+            << "Cleaned up graph\n" << dynamic_graph
+            << "Removed edges\n" << bit_vector_stat(redundant_edges);
+        EXPECT_EQ(graph, dynamic_graph);
+    }
+}
+
+TEST(DBGSuccinct, RemoveDummyEdges) {
+    for (size_t k = 1; k < 10; ++k) {
+        KMerDBGSuccConstructor constructor(k);
+        constructor.add_reads({ std::string(20, 'A'),
+                                std::string(20, 'C'),
+                                std::string(20, 'G'),
+                                "ACATCTAGTAGTCGATCGTACG",
+                                "ATTAGTAGTAGTAGTGATGTAG", });
+        DBG_succ graph(&constructor);
+
+        DBG_succ dynamic_graph(k);
+        dynamic_graph.add_sequence(std::string(20, 'A'));
+        dynamic_graph.add_sequence(std::string(20, 'C'));
+        dynamic_graph.add_sequence(std::string(20, 'G'));
+        dynamic_graph.add_sequence("ACATCTAGTAGTCGATCGTACG");
+        dynamic_graph.add_sequence("ATTAGTAGTAGTAGTGATGTAG");
+
+        ASSERT_FALSE(graph.equals_internally(dynamic_graph));
+        ASSERT_EQ(graph, dynamic_graph);
+        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges();
+        EXPECT_TRUE(graph.equals_internally(dynamic_graph))
+            << "Clear graph\n" << graph
+            << "Cleaned up graph\n" << dynamic_graph
+            << "Removed edges\n" << bit_vector_stat(redundant_edges);
+        EXPECT_EQ(graph, dynamic_graph);
+    }
+}
+
 TEST(DBGSuccinct, AddSequenceBugRevealingTestcase) {
     DBG_succ graph(1);
     graph.add_sequence("CTGAG", false);

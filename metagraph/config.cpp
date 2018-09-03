@@ -171,6 +171,8 @@ Config::Config(int argc, const char *argv[]) {
             to_sequences = true;
         } else if (!strcmp(argv[i], "--to-row-format")) {
             to_row_annotator = true;
+        } else if (!strcmp(argv[i], "--clear-dummy")) {
+            clear_dummy = true;
         } else if (!strcmp(argv[i], "--internal")) {
             internal = true;
         } else if (!strcmp(argv[i], "-l") || !strcmp(argv[i], "--len-suffix")) {
@@ -569,6 +571,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s transform [options] GRAPH\n\n", prog_name.c_str());
 
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
+            fprintf(stderr, "\t   --clear-dummy \t\terase all redundant dummy edges [off]\n");
             fprintf(stderr, "\t   --state [STR] \t\tchange the graph state (either 'fast' or 'dynamic') [fast]\n");
             fprintf(stderr, "\t   --to-adj-list \t\twrite the adjacency list to file [off]\n");
             // fprintf(stderr, "\t   --to-sequences \t\twrite contig sequences to file [off]\n");
