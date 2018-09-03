@@ -1186,7 +1186,7 @@ int main(int argc, const char *argv[]) {
                 std::cout << "Opening file for comparison " << files[f] << std::endl;
                 DBG_succ *second = load_critical_graph_from_file(files[f]);
                 if (config->internal
-                        ? graph->equals_internally(*second)
+                        ? graph->equals_internally(*second, config->verbose)
                         : *graph == *second) {
                     std::cout << "Graphs are identical" << std::endl;
                 } else {

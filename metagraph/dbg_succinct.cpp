@@ -123,12 +123,14 @@ DBG_succ::~DBG_succ() {
  * F and will only check for identity. If any element differs, the function will return
  * false and true otherwise.
  */
-bool DBG_succ::equals_internally(const DBG_succ &other) const {
+bool DBG_succ::equals_internally(const DBG_succ &other, bool verbose) const {
     // compare size
     if (W_->size() != other.W_->size()) {
-        verbose_cout("sizes of graphs differ", "\n",
-                     "1: ", W_->size(), "\n",
-                     "2: ", other.W_->size(), "\n");
+        if (verbose)
+            std::cout << "sizes of graphs differ"
+                      << "\n1: " << W_->size()
+                      << "\n2: " << other.W_->size()
+                      << std::endl;
         return false;
     }
 
@@ -137,9 +139,11 @@ bool DBG_succ::equals_internally(const DBG_succ &other) const {
     // compare last
     for (size_t i = 0; i < W_->size(); ++i) {
         if (get_last(i) != other.get_last(i)) {
-            verbose_cout("last differs at position ", i, "\n",
-                         "1: last[", i, "] = ", get_last(i) , "\n",
-                         "2: last[", i, "] = ", other.get_last(i), "\n");
+            if (verbose)
+                std::cout << "last differs at position " << i
+                          << "\n1: last[" << i << "] = " << get_last(i)
+                          << "\n2: last[" << i << "] = " << other.get_last(i)
+                          << std::endl;
             return false;
         }
     }
@@ -147,9 +151,11 @@ bool DBG_succ::equals_internally(const DBG_succ &other) const {
     // compare W
     for (size_t i = 0; i < W_->size(); ++i) {
         if (get_W(i) != other.get_W(i)) {
-            verbose_cout("W differs at position ", i, "\n",
-                         "1: W[", i, "] = ", get_W(i) , "\n",
-                         "2: W[", i, "] = ", other.get_W(i), "\n");
+            if (verbose)
+                std::cout << "W differs at position " << i
+                          << "\n1: W[" << i << "] = " << get_W(i)
+                          << "\n2: W[" << i << "] = " << other.get_W(i)
+                          << std::endl;
             return false;
         }
     }
@@ -157,9 +163,11 @@ bool DBG_succ::equals_internally(const DBG_succ &other) const {
     // compare F
     for (size_t i = 0; i < F_.size(); ++i) {
         if (get_F(i) != other.get_F(i)) {
-            verbose_cout("F differs at position ", i, "\n",
-                         "1: F[", i, "] = ", get_F(i), "\n",
-                         "2: F[", i, "] = ", other.get_F(i), "\n");
+            if (verbose)
+                std::cout << "F differs at position " << i
+                          << "\n1: F[" << i << "] = " << get_F(i)
+                          << "\n2: F[" << i << "] = " << other.get_F(i)
+                          << std::endl;
             return false;
         }
     }

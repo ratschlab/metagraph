@@ -81,7 +81,7 @@ class DBG_succ : public SequenceGraph {
      * F and will only check for identity. If any element differs, return
      * false and true otherwise.
      */
-    bool equals_internally(const DBG_succ &other) const;
+    bool equals_internally(const DBG_succ &other, bool verbose = false) const;
 
     // Return the k-mer length
     size_t get_k() const { return k_; }
