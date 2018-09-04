@@ -69,26 +69,22 @@ void extend_kmer_storage(const Array &temp_storage,
     // acquire the mutex to restrict the number of writing threads
     std::unique_lock<std::mutex> resize_lock(mutex_resize);
 
-    size_t offset;
-
-    if (kmers->size() + temp_storage.size() < kmers->capacity()) {
-        offset = kmers->size();
-        kmers->resize(kmers->size() + temp_storage.size());
-    } else {
+    if (kmers->size() + temp_storage.size() > kmers->capacity()) {
         std::unique_lock<std::shared_timed_mutex> reallocate_lock(mutex_copy);
 
         shrink_kmers(kmers, num_threads, verbose);
-        offset = kmers->size();
 
         try {
             try_reserve(kmers, kmers->size() + kmers->size() / 2,
                                kmers->size() + temp_storage.size());
-            kmers->resize(kmers->size() + temp_storage.size());
         } catch (const std::bad_alloc &exception) {
             std::cerr << "ERROR: Can't reallocate. Not enough memory" << std::endl;
             exit(1);
         }
     }
+
+    size_t offset = kmers->size();
+    kmers->resize(kmers->size() + temp_storage.size());
 
     std::shared_lock<std::shared_timed_mutex> copy_lock(mutex_copy);
 
