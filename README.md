@@ -139,7 +139,7 @@ bsub -J StackChunks -W 12:00 -n 30 -R "rusage[mem=15000]" "/usr/bin/time -v \
 ### Get stats
 Stats for graph
 ```bash
-./metagengraph stats -a graph.dbg
+./metagengraph stats graph.dbg
 ```
 Stats for annotation
 ```bash
