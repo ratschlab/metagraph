@@ -21,7 +21,7 @@ void sort_and_remove_duplicates(V *array,
                           num_threads);
     // remove duplicates
     auto unique_end = std::unique(array->begin() + offset, array->end());
-    array->erase(unique_end, array->end());
+    array->resize(unique_end - array->begin());
 }
 
 template <typename KMER>
@@ -109,8 +109,8 @@ void extract_kmers(std::function<void(CallbackRead)> generate_reads,
             extend_kmer_storage(temp_storage, kmers,
                                 num_threads, verbose, mutex_resize, mutex_copy);
             temp_storage.resize(0);
-            if (temp_storage.capacity() > 2 * kMaxKmersChunkSize)
-                temp_storage.shrink_to_fit();
+            // if (temp_storage.capacity() > 2 * kMaxKmersChunkSize)
+            //     temp_storage.shrink_to_fit();
         }
     });
 

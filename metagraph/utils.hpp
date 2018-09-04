@@ -322,20 +322,6 @@ namespace utils {
             deque_[size_++] = T(std::forward<Args>(args)...);
         }
 
-        inline iterator erase(iterator first, iterator last) {
-            size_t old_size = deque_.size();
-            auto it = deque_.erase(first, last);
-            size_ -= old_size - deque_.size();
-            return it;
-        }
-
-        inline const_iterator erase(const_iterator first, const_iterator last) {
-            size_t old_size = deque_.size();
-            auto it = deque_.erase(first, last);
-            size_ -= old_size - deque_.size();
-            return it;
-        }
-
         inline void clear() {
             size_ = 0;
             deque_.clear();

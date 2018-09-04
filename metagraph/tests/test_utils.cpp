@@ -459,6 +459,6 @@ TEST(DequeStorage, Erase) {
     storage.push_back(2);
     ASSERT_EQ(6u, storage.size());
     std::sort(storage.begin(), storage.end());
-    storage.erase(std::unique(storage.begin(), storage.end()), storage.end());
+    storage.resize(storage.end() - std::unique(storage.begin(), storage.end()));
     EXPECT_EQ(3u, storage.size());
 }
