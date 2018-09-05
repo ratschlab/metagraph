@@ -6,12 +6,12 @@ project(KMC)
 if(APPLE)
 string(APPEND CMAKE_CXX_FLAGS " \
     -Wall -O3 -m64 \
-    -lpthread -std=c++11 \
+    -pthread -std=c++11 \
 ")
 elseif(UNIX)
 string(APPEND CMAKE_CXX_FLAGS " \
     -Wall -O3 -m64 -Wl,--whole-archive \
-    -lpthread -Wl,--no-whole-archive -std=c++11 \
+    -pthread -Wl,--no-whole-archive -std=c++11 \
 ")
 endif()
 
@@ -83,13 +83,13 @@ if(APPLE)
 target_link_libraries(kmc
     -lKMCcore
     ${KMC_MAIN_DIR}/libs/libamac64.a
-    -lz -lbz2
+    -lz -lbz2 -lpthread
 )
 elseif(UNIX)
 target_link_libraries(kmc
     KMCcore
     ${KMC_MAIN_DIR}/libs/libaelf64.a
-    -lz -lbz2
+    -lz -lbz2 -lpthread
 )
 endif()
 
