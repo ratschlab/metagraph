@@ -259,6 +259,54 @@ void ColorCompressed<Color, Encoder>::insert_rows(const std::vector<Index> &rows
     num_rows_ += rows.size();
 }
 
+// For each pair (first, second) in the dictionary, renames
+// column |first| with |second| and merges the columns with matching names.
+template <typename Color, class Encoder>
+void
+ColorCompressed<Color, Encoder>
+::rename_columns(const std::map<std::string, std::string> &dict) {
+    cached_colors_.Clear();
+
+    std::vector<std::string> old_index_to_label(color_encoder_->size());
+    for (size_t i = 0; i < old_index_to_label.size(); ++i) {
+        old_index_to_label[i] = color_encoder_->decode(i);
+    }
+    for (const auto &pair : dict) {
+        old_index_to_label[color_encoder_->encode(pair.first)] = pair.second;
+    }
+
+    std::vector<std::string> index_to_label;
+    std::unordered_map<std::string, std::set<size_t>> old_columns;
+    for (size_t i = 0; i < old_index_to_label.size(); ++i) {
+        if (!old_columns.count(old_index_to_label[i]))
+            index_to_label.push_back(old_index_to_label[i]);
+
+        old_columns[old_index_to_label[i]].insert(i);
+    }
+
+    std::vector<std::unique_ptr<sdsl::sd_vector<>>> old_bitmatrix;
+    old_bitmatrix.swap(bitmatrix_);
+
+    color_encoder_.reset(new Encoder());
+
+    for (const auto &label : index_to_label) {
+        color_encoder_->encode(label, true);
+
+        const auto &cols = old_columns[label];
+
+        assert(cols.size());
+        if (cols.size() == 1) {
+            bitmatrix_.emplace_back(std::move(old_bitmatrix[*cols.begin()]));
+        } else {
+            std::unique_ptr<sdsl::bit_vector> bit_vector(new sdsl::bit_vector(num_rows_, 0));
+            for (size_t c : cols) {
+                utils::decompress_sd_vector(*old_bitmatrix[c], bit_vector.get());
+                old_bitmatrix[c].reset();
+            }
+            bitmatrix_.emplace_back(new sdsl::sd_vector<>(*bit_vector));
+        }
+    }
+}
 
 // Get colors that occur at least in |discovery_ratio| colorings.
 // If |discovery_ratio| = 0, return the union of colorings.

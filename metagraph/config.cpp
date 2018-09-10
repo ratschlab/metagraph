@@ -158,6 +158,8 @@ Config::Config(int argc, const char *argv[]) {
             suffix = argv[++i];
         } else if (!strcmp(argv[i], "--state")) {
             state = string_to_state(argv[++i]);
+        } else if (!strcmp(argv[i], "--rename-cols")) {
+            rename_instructions_file = std::string(argv[++i]);
         //} else if (!strcmp(argv[i], "--db-path")) {
         //    dbpath = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--annotator")) {
@@ -580,9 +582,14 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         case TRANSFORM_ANNOTATION: {
             fprintf(stderr, "Usage: %s transform_anno [options] -o <annotator_basename> ANNOTATOR\n\n", prog_name.c_str());
 
-            fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
-            fprintf(stderr, "\t   --to-row-format \t\ttransform annotations to the row-wise format [off]\n");
-            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
+            fprintf(stderr, "\t   --rename-cols [STR]\tfile with rules for renaming annotation labels []\n");
+            fprintf(stderr, "\t                      \texample: 'L_1 L_1_renamed\n");
+            fprintf(stderr, "\t                      \t          L_2 L_2_renamed\n");
+            fprintf(stderr, "\t                      \t          L_2 L_2_renamed\n");
+            fprintf(stderr, "\t                      \t          ... ...........'\n");
+            fprintf(stderr, "\t   --to-row-format \ttransform annotations to the row-wise format [off]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
     }
 

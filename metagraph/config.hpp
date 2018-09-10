@@ -64,6 +64,7 @@ class Config {
     std::vector<std::string> infbase_annotators;
     std::string outfbase;
     std::string infbase;
+    std::string rename_instructions_file;
     std::string dbpath;
     std::string refpath;
     std::string suffix;

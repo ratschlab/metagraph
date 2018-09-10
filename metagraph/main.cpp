@@ -1380,26 +1380,54 @@ int main(int argc, const char *argv[]) {
         case Config::TRANSFORM_ANNOTATION: {
             Timer timer;
 
-            if (config->to_row_annotator) {
-                auto annotator = std::make_unique<annotate::ColorCompressed<>>(
-                    0, kNumCachedColors, config->verbose
-                );
+            auto annotator = std::make_unique<annotate::ColorCompressed<>>(
+                0, kNumCachedColors, config->verbose
+            );
 
-                if (config->verbose) {
-                    std::cout << "Loading annotator...\t" << std::flush;
-                }
-                if (!annotator->load(files.at(0))) {
-                    std::cerr << "ERROR: can't load annotation from file "
-                              << files.at(0) << std::endl;
+            if (config->verbose)
+                std::cout << "Loading annotator...\t" << std::flush;
+
+            if (!annotator->merge_load(files)) {
+                std::cerr << "ERROR: can't load annotations" << std::endl;
+                exit(1);
+            }
+            if (config->verbose)
+                std::cout << timer.elapsed() << "sec" << std::endl;
+
+            if (config->rename_instructions_file.size()) {
+                if (config->verbose)
+                    std::cout << "Renaming...\t" << std::flush;
+
+                std::map<std::string, std::string> dict;
+                std::ifstream instream(config->rename_instructions_file);
+                if (!instream.is_open()) {
+                    std::cerr << "ERROR: Can't open file "
+                              << config->rename_instructions_file << std::endl;
                     exit(1);
                 }
-                if (config->verbose) {
-                    std::cout << timer.elapsed() << "sec" << std::endl;
+                std::string old_name;
+                std::string new_name;
+                while (instream.good() && !(instream >> old_name).eof()) {
+                    instream >> new_name;
+                    if (instream.fail() || instream.eof()) {
+                        std::cerr << "ERROR: wrong format of the rules for"
+                                  << " renaming annotation columns passed in file "
+                                  << config->rename_instructions_file << std::endl;
+                        exit(1);
+                    }
+                    dict[old_name] = new_name;
                 }
+                annotator->rename_columns(dict);
 
-                if (config->verbose) {
+                annotator->serialize(config->outfbase);
+                if (config->verbose)
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+            }
+
+            if (config->to_row_annotator) {
+                if (config->verbose)
                     std::cout << "Converting...\t" << std::flush;
-                }
+
                 annotate::RowCompressed<> row_annotator(0);
                 annotator->convert_to_row_annotator(&row_annotator,
                                                     config->parallel);

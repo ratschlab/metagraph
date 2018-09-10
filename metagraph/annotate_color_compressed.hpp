@@ -53,6 +53,10 @@ class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
 
     void insert_rows(const std::vector<Index> &rows);
 
+    // For each pair (first, second) in the dictionary, renames
+    // column |first| with |second| and merges the columns with matching names.
+    void rename_columns(const std::map<std::string, std::string> &dict);
+
     // Get colors that occur at least in |discovery_ratio| colorings.
     // If |discovery_ratio| = 0, return the union of colorings.
     Coloring aggregate_colors(const std::vector<Index> &indices,
