@@ -45,10 +45,10 @@ ColorCompressed<Color, Encoder>
     assert(i < num_rows_);
 
     for (size_t j = 0; j < color_encoder_->size(); ++j) {
-        uncompress(j)[i] = 0;
+        decompress(j)[i] = 0;
     }
     for (const auto &color : coloring) {
-        uncompress(color_encoder_->encode(color, true))[i] = 1;
+        decompress(color_encoder_->encode(color, true))[i] = 1;
     }
 }
 
@@ -73,7 +73,7 @@ template <typename Color, class Encoder>
 void ColorCompressed<Color, Encoder>::add_color(Index i, const Color &color) {
     assert(i < num_rows_);
 
-    uncompress(color_encoder_->encode(color, true))[i] = 1;
+    decompress(color_encoder_->encode(color, true))[i] = 1;
 }
 
 template <typename Color, class Encoder>
@@ -196,7 +196,7 @@ bool ColorCompressed<Color, Encoder>
                 }
 
                 if (bitmatrix_.at(col).get()) {
-                    auto &column = uncompress(col);
+                    auto &column = decompress(col);
 
                     auto slct = sdsl::select_support_sd<>(new_column);
                     auto rank = sdsl::rank_support_sd<>(new_column);
@@ -231,7 +231,7 @@ void ColorCompressed<Color, Encoder>::insert_rows(const std::vector<Index> &rows
     assert(std::is_sorted(rows.begin(), rows.end()));
 
     for (size_t j = 0; j < color_encoder_->size(); ++j) {
-        auto &column = uncompress(j);
+        auto &column = decompress(j);
         sdsl::bit_vector old = column;
         column = sdsl::bit_vector(old.size() + rows.size(), 0);
 
@@ -390,7 +390,7 @@ void ColorCompressed<Color, Encoder>::flush(size_t j, sdsl::bit_vector *vector) 
 }
 
 template <typename Color, class Encoder>
-sdsl::bit_vector& ColorCompressed<Color, Encoder>::uncompress(size_t j) {
+sdsl::bit_vector& ColorCompressed<Color, Encoder>::decompress(size_t j) {
     assert(j < color_encoder_->size());
 
     try {

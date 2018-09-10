@@ -80,7 +80,7 @@ class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
     void release();
     void flush() const;
     void flush(size_t j, sdsl::bit_vector *annotation_curr);
-    sdsl::bit_vector& uncompress(size_t j);
+    sdsl::bit_vector& decompress(size_t j);
 
     uint64_t num_rows_;
 
