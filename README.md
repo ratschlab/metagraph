@@ -43,9 +43,8 @@ use `glibtoolize` instead of `libtoolize` on MacOS
 - `-DBUILD_STATIC=ON` -- link statically (OFF by default)
 - `-DPYTHON_INTERFACE=ON` -- compile python interface (requires shared libraries, OFF by default)
 - `-DBUILD_KMC=OFF` -- do not compile the KMC executable (ON by default)
-
-### Compile in other modes
-- `-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA_CASE_SENSITIVE]` -- use the alphabet specified (`DNA` by default)
+- `-DWITH_AVX=OFF` -- compile without support for the avx instructions (ON by default)
+- `-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA_CASE_SENSITIVE]` -- alphabet to use (`DNA` by default)
 
 
 ## Print usage

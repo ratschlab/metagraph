@@ -24,9 +24,15 @@ endif()
 
 string(APPEND CMAKE_CXX_FLAGS " \
   -std=c++14 -Wall -Wextra -Werror \
-  -msse4.2 -mavx -mavx2 -mfma -mbmi -mbmi2 \
+  -msse4.2 \
   -fopenmp -D_THREAD_SAFE -pthread") # -DDBGDEBUG -Wconversion -Wsign-conversion
 
+if(NOT DEFINED WITH_AVX)
+set(WITH_AVX TRUE)
+endif()
+if(WITH_AVX)
+string(APPEND CMAKE_CXX_FLAGS " -mavx -mavx2 -mfma -mbmi -mbmi2")
+endif()
 
 # Profile build type
 set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O2 -g")
