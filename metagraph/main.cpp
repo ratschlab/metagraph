@@ -882,7 +882,7 @@ int main(int argc, const char *argv[]) {
         }
         case Config::FILTER_STATS: {
             if (!config->verbose) {
-                std::cout << "File\tTotal reads\tRemaining reads\tRemaining ratio" << std::endl;
+                std::cout << "File\tTotalReads\tRemainingReads\tRemainingRatio" << std::endl;
             }
 
             for (const auto &file : files) {
@@ -1342,6 +1342,27 @@ int main(int argc, const char *argv[]) {
                 std::cout << "k: " << graph->get_k() << std::endl;
                 std::cout << "state: " << Config::state_to_string(graph->get_state())
                           << std::endl;
+
+                assert(graph->rank_W(graph->num_edges(), DBG_succ::alph_size) == 0);
+                std::cout << "W stats: {'" << DBG_succ::decode(0) << "': "
+                          << graph->rank_W(graph->num_edges(), 0);
+                for (TAlphabet i = 1; i < DBG_succ::alph_size; ++i) {
+                    std::cout << ", '" << DBG_succ::decode(i) << "': "
+                              << graph->rank_W(graph->num_edges(), i)
+                                    + graph->rank_W(graph->num_edges(), i + DBG_succ::alph_size);
+                }
+                std::cout << "}" << std::endl;
+
+                assert(graph->get_F(0) == 0);
+                std::cout << "F stats: {'";
+                for (TAlphabet i = 1; i < DBG_succ::alph_size; ++i) {
+                    std::cout << DBG_succ::decode(i - 1) << "': "
+                              << graph->get_F(i) - graph->get_F(i - 1)
+                              << ", '";
+                }
+                std::cout << DBG_succ::decode(DBG_succ::alph_size - 1) << "': "
+                          << graph->num_edges() - graph->get_F(DBG_succ::alph_size - 1)
+                          << "}" << std::endl;
 
                 if (config->print_graph_internal_repr)
                     graph->print_internal_representation(std::cout);
