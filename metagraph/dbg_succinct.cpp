@@ -1510,10 +1510,10 @@ void DBG_succ::edge_DFT(edge_index start,
     CHECK_INDEX(start);
 
     // start traversal in the source node of the given edge
-    std::vector<edge_index> path { pred_last(start - 1) + 1 };
+    std::vector<edge_index> path { start };
     pre_visit(path.back());
 
-    while (path.size()) {
+    do {
         // traverse until the last dummy source edge in a path
         while (!end_branch(path.back())) {
             path.push_back(pred_last(fwd(path.back()) - 1) + 1);
@@ -1521,18 +1521,20 @@ void DBG_succ::edge_DFT(edge_index start,
         }
 
         // traverse the path backwards to the next branching node
-        while (path.size() && get_last(path.back())) {
+        while (path.size() > 1 && get_last(path.back())) {
             post_visit(path.back());
             path.pop_back();
         }
 
         // explore the next edge outgoing from the current branching node
-        if (path.size()) {
+        if (path.size() > 1) {
             post_visit(path.back());
             path.back()++;
             pre_visit(path.back());
         }
-    }
+    } while (path.size() > 1);
+
+    post_visit(path.back());
 }
 
 /**
@@ -1555,11 +1557,11 @@ void DBG_succ::find_edges_to_cleanup(edge_index subtree_root,
     edge_DFT(subtree_root,
         [&](edge_index) {
             redundant_path.push_back(true);
-            if (++num_dummy_traversed_increment % 1'000'000 == 0 && verbose) {
+            if (++num_dummy_traversed_increment % 10'000'000 == 0 && verbose) {
                 *num_dummy_traversed += num_dummy_traversed_increment;
                 num_dummy_traversed_increment = 0;
-                std::cout << "Source dummy edges traversed: "
-                          << *num_dummy_traversed << std::endl;
+                std::cout << std::string("Source dummy edges traversed: ")
+                                + std::to_string(*num_dummy_traversed) + "\n" << std::flush;
             }
         },
         [&](edge_index edge) {
@@ -1584,7 +1586,11 @@ void DBG_succ::find_edges_to_cleanup(edge_index subtree_root,
             }
         }
     );
-    *num_dummy_traversed += num_dummy_traversed_increment;
+    if (verbose) {
+        *num_dummy_traversed += num_dummy_traversed_increment;
+        std::cout << std::string("Source dummy edges traversed: ")
+                        + std::to_string(*num_dummy_traversed) + "\n" << std::flush;
+    }
     assert(redundant_path.empty());
 }
 
@@ -1606,31 +1612,39 @@ std::vector<bool> DBG_succ::erase_redundant_dummy_edges(size_t num_threads,
 
     if (num_threads <= 1 || k_ <= 1) {
         // start traversal in the main dummy source node
-        find_edges_to_cleanup(2, k_, &edges_to_remove_mask, &num_dummy_traversed, verbose);
+        uint64_t root = 2;
+        do {
+            find_edges_to_cleanup(root, k_, &edges_to_remove_mask, &num_dummy_traversed, verbose);
+        } while (!get_last(root++));
     } else {
+        std::vector<bool>().swap(edges_to_remove_mask);
         std::vector<char> edges_to_remove_mask_threadsafe(W_->size(), 0);
-        const size_t tree_split_depth = std::min(size_t(10), k_ / 2);
+        const size_t tree_split_depth = std::min(size_t(7), k_ / 2);
         size_t depth = 0;
         utils::ThreadPool pool(num_threads);
         // run traversal for subtree at depth |tree_split_depth| in parallel
-        edge_DFT(2,
-            [&](edge_index) { depth++; },
-            [&](edge_index) { depth--; },
-            [&](edge_index edge) {
-                if (depth == tree_split_depth) {
-                    pool.enqueue([this](const auto& ...args) {
-                                    this->find_edges_to_cleanup(args...);
-                                 },
-                                 fwd(edge), k_ - tree_split_depth,
-                                 &edges_to_remove_mask_threadsafe,
-                                 &num_dummy_traversed, verbose);
-                    return true;
-                } else {
-                    return false;
+        uint64_t root = 2;
+        do {
+            edge_DFT(root,
+                [&](edge_index) { depth++; },
+                [&](edge_index) { depth--; },
+                [&](edge_index edge) {
+                    if (depth == tree_split_depth) {
+                        pool.enqueue([this](const auto& ...args) {
+                                        this->find_edges_to_cleanup(args...);
+                                     },
+                                     edge, 1 + k_ - tree_split_depth,
+                                     &edges_to_remove_mask_threadsafe,
+                                     &num_dummy_traversed, verbose);
+                        num_dummy_traversed--;
+                        return true;
+                    } else {
+                        return false;
+                    }
                 }
-            }
-        );
-        assert(!depth);
+            );
+            assert(!depth);
+        } while (!get_last(root++));
         pool.join();
         if (verbose) {
             std::cout << "All subtrees are done" << std::endl;
@@ -1641,9 +1655,12 @@ std::vector<bool> DBG_succ::erase_redundant_dummy_edges(size_t num_threads,
         std::vector<char>().swap(edges_to_remove_mask_threadsafe);
 
         // propogate the results from the subtrees
-        find_edges_to_cleanup(2, tree_split_depth + 1,
-                              &edges_to_remove_mask,
-                              &num_dummy_traversed, verbose);
+        root = 2;
+        do {
+            find_edges_to_cleanup(root, tree_split_depth,
+                                  &edges_to_remove_mask,
+                                  &num_dummy_traversed, verbose);
+        } while (!get_last(root++));
     }
 
     if (verbose) {
