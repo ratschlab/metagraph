@@ -161,6 +161,15 @@ class DBG_succ : public SequenceGraph {
      * and erase all redundant dummy edges.
      */
     std::vector<bool> erase_redundant_dummy_edges(bool verbose = false);
+    std::vector<bool> erase_redundant_dummy_edges_parallel(size_t num_threads = 0,
+                                                           bool verbose = false);
+
+    template <typename T, typename U>
+    void find_edges_to_cleanup(edge_index subtree_root,
+                               size_t check_depth,
+                               std::vector<T> *edges_to_remove_mask,
+                               U *num_dummy_traversed,
+                               bool verbose) const;
 
     /**
      * Depth first edge traversal.

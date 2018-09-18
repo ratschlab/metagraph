@@ -1536,39 +1536,36 @@ void DBG_succ::edge_DFT(edge_index start,
 }
 
 /**
- * Traverse the entire dummy subgraph (which is a tree)
- * and erase all redundant dummy edges.
+ * Traverse the entire dummy subtree
+ * and find all redundant dummy edges.
  */
-std::vector<bool> DBG_succ::erase_redundant_dummy_edges(bool verbose) {
-    std::vector<bool> edges_to_remove_mask(W_->size(), false);
-
-    if (get_last(1))
-        return edges_to_remove_mask;
-
-    switch_state(Config::STAT);
-
-    // start traversal in the main dummy source node
+template <typename T, typename U>
+void DBG_succ::find_edges_to_cleanup(edge_index subtree_root,
+                                     size_t check_depth,
+                                     std::vector<T> *edges_to_remove_mask,
+                                     U *num_dummy_traversed,
+                                     bool verbose) const {
     std::vector<bool> redundant_path;
-    uint64_t num_dummy_traversed = 1;
 
-    edge_DFT(2,
+    // start traversal in the given node
+    edge_DFT(subtree_root,
         [&](edge_index) {
             redundant_path.push_back(true);
-            if (++num_dummy_traversed % 1'000'000 == 0 && verbose) {
+            if (++(*num_dummy_traversed) % 1'000'000 == 0 && verbose) {
                 std::cout << "Source dummy edges traversed: "
-                          << num_dummy_traversed << std::endl;
+                          << *num_dummy_traversed << std::endl;
             }
         },
         [&](edge_index edge) {
             assert(get_W(edge) < alph_size);
 
             if (redundant_path.back())
-                edges_to_remove_mask[edge] = true;
+                edges_to_remove_mask->at(edge) = 1;
 
             redundant_path.pop_back();
         },
         [&](edge_index edge) {
-            if (redundant_path.size() == k_) {
+            if (redundant_path.size() == check_depth) {
                 if (is_single_incoming(edge)) {
                     // the last dummy edge is not redundant and hence the
                     // entire path has to remain in the graph
@@ -1584,6 +1581,29 @@ std::vector<bool> DBG_succ::erase_redundant_dummy_edges(bool verbose) {
         }
     );
     assert(redundant_path.empty());
+}
+
+template
+void
+DBG_succ
+::find_edges_to_cleanup<bool, uint64_t>(edge_index subtree_root, size_t,
+                                        std::vector<bool> *, uint64_t *, bool) const;
+
+/**
+ * Traverse the entire dummy subgraph (which is a tree)
+ * and erase all redundant dummy edges.
+ */
+std::vector<bool> DBG_succ::erase_redundant_dummy_edges(bool verbose) {
+    std::vector<bool> edges_to_remove_mask(W_->size(), false);
+
+    if (get_last(1))
+        return edges_to_remove_mask;
+
+    switch_state(Config::STAT);
+
+    // start traversal in the main dummy source node
+    uint64_t num_dummy_traversed = 1;
+    find_edges_to_cleanup(2, k_, &edges_to_remove_mask, &num_dummy_traversed, verbose);
 
     if (verbose) {
         std::cout << "Traversal done. Source dummy edges traversed: "
