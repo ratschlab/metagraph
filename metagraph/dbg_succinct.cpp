@@ -1501,6 +1501,41 @@ void DBG_succ::erase_edges(const std::vector<bool> &edges_to_remove_mask) {
 }
 
 /**
+ * Depth first edge traversal.
+ */
+void DBG_succ::edge_DFT(edge_index start,
+                        Call<edge_index> pre_visit,
+                        Call<edge_index> post_visit,
+                        std::function<bool(edge_index)> end_branch) const {
+    CHECK_INDEX(start);
+
+    // start traversal in the source node of the given edge
+    std::vector<edge_index> path { pred_last(start - 1) + 1 };
+    pre_visit(path.back());
+
+    while (path.size()) {
+        // traverse until the last dummy source edge in a path
+        while (!end_branch(path.back())) {
+            path.push_back(pred_last(fwd(path.back()) - 1) + 1);
+            pre_visit(path.back());
+        }
+
+        // traverse the path backwards to the next branching node
+        while (path.size() && get_last(path.back())) {
+            post_visit(path.back());
+            path.pop_back();
+        }
+
+        // explore the next edge outgoing from the current branching node
+        if (path.size()) {
+            post_visit(path.back());
+            path.back()++;
+            pre_visit(path.back());
+        }
+    }
+}
+
+/**
  * Traverse the entire dummy subgraph (which is a tree)
  * and erase all redundant dummy edges.
  */
@@ -1513,52 +1548,42 @@ std::vector<bool> DBG_succ::erase_redundant_dummy_edges(bool verbose) {
     switch_state(Config::STAT);
 
     // start traversal in the main dummy source node
-    std::vector<edge_index> path { 2 };
-    std::vector<bool> redundant { true };
-    uint64_t num_dummy_traversed = 2;
+    std::vector<bool> redundant_path;
+    uint64_t num_dummy_traversed = 1;
 
-    while (path.size()) {
-        // traverse until the last dummy source edge in a path
-        while (path.size() < k_) {
-            path.push_back(pred_last(fwd(path.back()) - 1) + 1);
-            redundant.push_back(true);
+    edge_DFT(2,
+        [&](edge_index) {
+            redundant_path.push_back(true);
             if (++num_dummy_traversed % 1'000'000 == 0 && verbose) {
                 std::cout << "Source dummy edges traversed: "
                           << num_dummy_traversed << std::endl;
             }
-        }
+        },
+        [&](edge_index edge) {
+            assert(get_W(edge) < alph_size);
 
-        assert(get_W(path.back()) < alph_size);
+            if (redundant_path.back())
+                edges_to_remove_mask[edge] = true;
 
-        if (is_single_incoming(path.back())) {
-            // the last dummy edge is not redundant and hence the
-            // entire path has to remain in the graph
-            for (size_t i = 0; i < redundant.size(); ++i) {
-                redundant[i] = false;
-            }
-        } else {
-            // mark the last dummy edge as redundant
-            edges_to_remove_mask[path.back()] = true;
-        }
-
-        // traverse the path backwards to the next branching node
-        while (path.size() && get_last(path.back())) {
-            path.pop_back();
-            redundant.pop_back();
-            if (redundant.size() && redundant.back())
-                edges_to_remove_mask[path.back()] = true;
-        }
-
-        // explore the next edge outgoing from the current branching node
-        if (path.size()) {
-            path.back()++;
-            redundant.back() = true;
-            if (++num_dummy_traversed % 1'000'000 == 0 && verbose) {
-                std::cout << "Source dummy edges traversed: "
-                          << num_dummy_traversed << std::endl;
+            redundant_path.pop_back();
+        },
+        [&](edge_index edge) {
+            if (redundant_path.size() == k_) {
+                if (is_single_incoming(edge)) {
+                    // the last dummy edge is not redundant and hence the
+                    // entire path has to remain in the graph
+                    for (size_t i = 0; i < redundant_path.size(); ++i) {
+                        redundant_path[i] = false;
+                    }
+                }
+                return true;
+            } else {
+                assert(is_single_incoming(edge));
+                return false;
             }
         }
-    }
+    );
+    assert(redundant_path.empty());
 
     if (verbose) {
         std::cout << "Traversal done. Source dummy edges traversed: "

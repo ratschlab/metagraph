@@ -163,6 +163,14 @@ class DBG_succ : public SequenceGraph {
     std::vector<bool> erase_redundant_dummy_edges(bool verbose = false);
 
     /**
+     * Depth first edge traversal.
+     */
+    void edge_DFT(edge_index start,
+                  Call<edge_index> pre_visit,
+                  Call<edge_index> post_visit,
+                  std::function<bool(edge_index)> end_branch) const;
+
+    /**
     * Heavily borrowing from the graph sequence traversal, this function gets 
     * a graph `other` and merges its nodes into the target graph object.
     * The edges of `other` are fully traversed and nodes are added if not existing yet.
