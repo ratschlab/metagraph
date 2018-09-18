@@ -160,9 +160,8 @@ class DBG_succ : public SequenceGraph {
      * Traverse the entire dummy subgraph (which is a tree)
      * and erase all redundant dummy edges.
      */
-    std::vector<bool> erase_redundant_dummy_edges(bool verbose = false);
-    std::vector<bool> erase_redundant_dummy_edges_parallel(size_t num_threads = 0,
-                                                           bool verbose = false);
+    std::vector<bool> erase_redundant_dummy_edges(size_t num_threads = 1,
+                                                  bool verbose = false);
 
     template <typename T, typename U>
     void find_edges_to_cleanup(edge_index subtree_root,
