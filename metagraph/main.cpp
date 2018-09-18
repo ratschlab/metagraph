@@ -1467,7 +1467,7 @@ int main(int argc, const char *argv[]) {
             };
 
             if (config->clear_dummy)
-                graph->erase_redundant_dummy_edges();
+                graph->erase_redundant_dummy_edges(config->verbose);
 
             if (config->to_sequences) {
                 if (config->verbose) {

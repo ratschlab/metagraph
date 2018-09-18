@@ -1504,7 +1504,7 @@ void DBG_succ::erase_edges(const std::vector<bool> &edges_to_remove_mask) {
  * Traverse the entire dummy subgraph (which is a tree)
  * and erase all redundant dummy edges.
  */
-std::vector<bool> DBG_succ::erase_redundant_dummy_edges() {
+std::vector<bool> DBG_succ::erase_redundant_dummy_edges(bool verbose) {
     std::vector<bool> edges_to_remove_mask(W_->size(), false);
 
     if (get_last(1))
@@ -1515,12 +1515,17 @@ std::vector<bool> DBG_succ::erase_redundant_dummy_edges() {
     // start traversal in the main dummy source node
     std::vector<edge_index> path { 2 };
     std::vector<bool> redundant { true };
+    uint64_t num_dummy_traversed = 2;
 
     while (path.size()) {
         // traverse until the last dummy source edge in a path
         while (path.size() < k_) {
             path.push_back(pred_last(fwd(path.back()) - 1) + 1);
             redundant.push_back(true);
+            if (++num_dummy_traversed % 1'000'000 == 0 && verbose) {
+                std::cout << "Source dummy edges traversed: "
+                          << num_dummy_traversed << std::endl;
+            }
         }
 
         assert(get_W(path.back()) < alph_size);
@@ -1548,10 +1553,27 @@ std::vector<bool> DBG_succ::erase_redundant_dummy_edges() {
         if (path.size()) {
             path.back()++;
             redundant.back() = true;
+            if (++num_dummy_traversed % 1'000'000 == 0 && verbose) {
+                std::cout << "Source dummy edges traversed: "
+                          << num_dummy_traversed << std::endl;
+            }
         }
     }
 
+    if (verbose) {
+        std::cout << "Traversal done. Source dummy edges traversed: "
+                  << num_dummy_traversed << std::endl;
+    }
+
     erase_edges(edges_to_remove_mask);
+
+    if (verbose) {
+        std::cout << "Source dummy edges removed: "
+                  << std::accumulate(edges_to_remove_mask.begin(),
+                                     edges_to_remove_mask.end(),
+                                     uint64_t(0))
+                  << std::endl;
+    }
 
     return edges_to_remove_mask;
 }

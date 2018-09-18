@@ -160,7 +160,7 @@ class DBG_succ : public SequenceGraph {
      * Traverse the entire dummy subgraph (which is a tree)
      * and erase all redundant dummy edges.
      */
-    std::vector<bool> erase_redundant_dummy_edges();
+    std::vector<bool> erase_redundant_dummy_edges(bool verbose = false);
 
     /**
     * Heavily borrowing from the graph sequence traversal, this function gets 
