@@ -1462,12 +1462,26 @@ int main(int argc, const char *argv[]) {
         }
         case Config::TRANSFORM: {
             Timer timer;
+            if (config->verbose) {
+                std::cout << "Graph loading...\t" << std::flush;
+            }
             std::unique_ptr<DBG_succ> graph {
                 load_critical_graph_from_file(files.at(0))
             };
+            if (config->verbose) {
+                std::cout << timer.elapsed() << "sec" << std::endl;
+            }
 
-            if (config->clear_dummy)
+            if (config->clear_dummy) {
+                if (config->verbose) {
+                    std::cout << "Traverse source dummy edges and remove redundant ones..." << std::endl;
+                }
+                timer.reset();
                 graph->erase_redundant_dummy_edges(config->parallel, config->verbose);
+                if (config->verbose) {
+                    std::cout << "Done in " << timer.elapsed() << "sec" << std::endl;
+                }
+            }
 
             if (config->to_sequences) {
                 if (config->verbose) {

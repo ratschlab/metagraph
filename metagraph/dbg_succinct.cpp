@@ -1441,12 +1441,13 @@ void DBG_succ::erase_edges_dyn(const std::set<edge_index> &edges) {
 /**
  * Erase exactly all the masked edges from the graph,
  * may invalidate the graph (if leaves nodes with no incoming edges).
+ * Returns the number of edges erased.
  */
-void DBG_succ::erase_edges(const std::vector<bool> &edges_to_remove_mask) {
+uint64_t DBG_succ::erase_edges(const std::vector<bool> &edges_to_remove_mask) {
     size_t num_edges_to_remove = std::count(edges_to_remove_mask.begin(),
                                             edges_to_remove_mask.end(), true);
     if (!num_edges_to_remove)
-        return;
+        return 0;
 
     // update last
     sdsl::bit_vector new_last(last_->size() - num_edges_to_remove, false);
@@ -1498,10 +1499,13 @@ void DBG_succ::erase_edges(const std::vector<bool> &edges_to_remove_mask) {
     }
 
     state = Config::STAT;
+
+    return num_edges_to_remove;
 }
 
 /**
  * Depth first edge traversal.
+ * Traverse all edges reachable from the given one.
  */
 void DBG_succ::edge_DFT(edge_index start,
                         Call<edge_index> pre_visit,
@@ -1542,30 +1546,26 @@ void DBG_succ::edge_DFT(edge_index start,
  * and find all redundant dummy edges.
  */
 template <typename T, typename U>
-void DBG_succ::find_edges_to_cleanup(edge_index subtree_root,
-                                     size_t check_depth,
-                                     std::vector<T> *edges_to_remove_mask,
-                                     U *num_dummy_traversed,
-                                     bool verbose) const {
+void find_edges_to_cleanup(const DBG_succ &graph,
+                           edge_index subtree_root,
+                           size_t check_depth,
+                           std::vector<T> *edges_to_remove_mask,
+                           U *num_dummy_traversed,
+                           bool verbose) {
     if (!check_depth)
         return;
 
     std::vector<bool> redundant_path;
-    uint64_t num_dummy_traversed_increment = 0;
+    uint64_t num_edges_traversed = 0;
 
     // start traversal in the given node
-    edge_DFT(subtree_root,
+    graph.edge_DFT(subtree_root,
         [&](edge_index) {
             redundant_path.push_back(true);
-            if (++num_dummy_traversed_increment % 10'000'000 == 0 && verbose) {
-                *num_dummy_traversed += num_dummy_traversed_increment;
-                num_dummy_traversed_increment = 0;
-                std::cout << std::string("Source dummy edges traversed: ")
-                                + std::to_string(*num_dummy_traversed) + "\n" << std::flush;
-            }
+            num_edges_traversed++;
         },
         [&](edge_index edge) {
-            assert(get_W(edge) < alph_size);
+            assert(graph.get_W(edge) < DBG_succ::alph_size);
 
             if (redundant_path.back())
                 edges_to_remove_mask->at(edge) = 1;
@@ -1574,20 +1574,20 @@ void DBG_succ::find_edges_to_cleanup(edge_index subtree_root,
         },
         [&](edge_index edge) {
             if (redundant_path.size() == check_depth) {
-                if (!edges_to_remove_mask->at(edge) && is_single_incoming(edge)) {
+                if (!edges_to_remove_mask->at(edge) && graph.is_single_incoming(edge)) {
                     // the last dummy edge is not redundant and hence the
                     // entire path has to remain in the graph
                     redundant_path.assign(redundant_path.size(), false);
                 }
                 return true;
             } else {
-                assert(is_single_incoming(edge));
+                assert(graph.is_single_incoming(edge));
                 return false;
             }
         }
     );
+    *num_dummy_traversed += num_edges_traversed;
     if (verbose) {
-        *num_dummy_traversed += num_dummy_traversed_increment;
         std::cout << std::string("Source dummy edges traversed: ")
                         + std::to_string(*num_dummy_traversed) + "\n" << std::flush;
     }
@@ -1614,12 +1614,13 @@ std::vector<bool> DBG_succ::erase_redundant_dummy_edges(size_t num_threads,
         // start traversal in the main dummy source node
         uint64_t root = 2;
         do {
-            find_edges_to_cleanup(root, k_, &edges_to_remove_mask, &num_dummy_traversed, verbose);
+            find_edges_to_cleanup(*this, root, k_,
+                                  &edges_to_remove_mask, &num_dummy_traversed, verbose);
         } while (!get_last(root++));
     } else {
         std::vector<bool>().swap(edges_to_remove_mask);
         std::vector<char> edges_to_remove_mask_threadsafe(W_->size(), 0);
-        const size_t tree_split_depth = std::min(size_t(7), k_ / 2);
+        const size_t tree_split_depth = std::min(size_t(6), k_ / 2);
         size_t depth = 0;
         utils::ThreadPool pool(num_threads);
         // run traversal for subtree at depth |tree_split_depth| in parallel
@@ -1631,7 +1632,7 @@ std::vector<bool> DBG_succ::erase_redundant_dummy_edges(size_t num_threads,
                 [&](edge_index edge) {
                     if (depth == tree_split_depth) {
                         pool.enqueue([this](const auto& ...args) {
-                                        this->find_edges_to_cleanup(args...);
+                                        find_edges_to_cleanup(*this, args...);
                                      },
                                      edge, 1 + k_ - tree_split_depth,
                                      &edges_to_remove_mask_threadsafe,
@@ -1645,6 +1646,7 @@ std::vector<bool> DBG_succ::erase_redundant_dummy_edges(size_t num_threads,
             );
             assert(!depth);
         } while (!get_last(root++));
+
         pool.join();
         if (verbose) {
             std::cout << "All subtrees are done" << std::endl;
@@ -1657,7 +1659,7 @@ std::vector<bool> DBG_succ::erase_redundant_dummy_edges(size_t num_threads,
         // propogate the results from the subtrees
         root = 2;
         do {
-            find_edges_to_cleanup(root, tree_split_depth,
+            find_edges_to_cleanup(*this, root, tree_split_depth,
                                   &edges_to_remove_mask,
                                   &num_dummy_traversed, verbose);
         } while (!get_last(root++));
@@ -1668,14 +1670,10 @@ std::vector<bool> DBG_succ::erase_redundant_dummy_edges(size_t num_threads,
                   << num_dummy_traversed << std::endl;
     }
 
-    erase_edges(edges_to_remove_mask);
+    auto num_edges_erased = erase_edges(edges_to_remove_mask);
 
     if (verbose) {
-        std::cout << "Source dummy edges removed: "
-                  << std::accumulate(edges_to_remove_mask.begin(),
-                                     edges_to_remove_mask.end(),
-                                     uint64_t(0))
-                  << std::endl;
+        std::cout << "Source dummy edges removed: " << num_edges_erased << std::endl;
     }
 
     return edges_to_remove_mask;

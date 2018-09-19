@@ -163,15 +163,9 @@ class DBG_succ : public SequenceGraph {
     std::vector<bool> erase_redundant_dummy_edges(size_t num_threads = 1,
                                                   bool verbose = false);
 
-    template <typename T, typename U>
-    void find_edges_to_cleanup(edge_index subtree_root,
-                               size_t check_depth,
-                               std::vector<T> *edges_to_remove_mask,
-                               U *num_dummy_traversed,
-                               bool verbose) const;
-
     /**
      * Depth first edge traversal.
+     * Traverse all edges reachable from the given one.
      */
     void edge_DFT(edge_index start,
                   Call<edge_index> pre_visit,
@@ -413,8 +407,9 @@ class DBG_succ : public SequenceGraph {
     /**
      * Erase exactly all the masked edges from the graph,
      * may invalidate the graph (if leaves nodes with no incoming edges).
+     * Returns the number of edges erased.
      */
-    void erase_edges(const std::vector<bool> &edges_to_remove_mask);
+    uint64_t erase_edges(const std::vector<bool> &edges_to_remove_mask);
 
     /**
      * This function gets two edge indices and returns if their source
