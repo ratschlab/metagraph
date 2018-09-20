@@ -69,11 +69,11 @@ class FastColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
     std::vector<uint64_t> count_colors(const std::vector<Index> &indices) const;
 
     void flush() const;
-    void flush(size_t j, sdsl::bit_vector *annotation_curr);
-    void flush_index(size_t t, sdsl::bit_vector *annotation_curr);
+    void flush(size_t j, const std::vector<bool> &annotation_curr);
+    void flush_index(size_t t, const std::vector<bool> &annotation_curr);
 
-    sdsl::bit_vector& decompress(size_t j);
-    sdsl::bit_vector& decompress_index(size_t t);
+    std::vector<bool>& decompress(size_t j);
+    std::vector<bool>& decompress_index(size_t t);
 
     void update_index();
 
@@ -82,19 +82,19 @@ class FastColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
     bool to_update_ = false;
     bool to_update_index_ = false;
 
-    std::vector<std::unique_ptr<sdsl::sd_vector<>>> bitmatrix_;
+    std::vector<std::unique_ptr<bit_vector_small>> bitmatrix_;
 
     caches::fixed_sized_cache<size_t,
-                              sdsl::bit_vector*,
+                              std::vector<bool>*,
                               caches::LRUCachePolicy<size_t>> cached_colors_;
 
     std::vector<size_t> column_to_index_;
     std::vector<std::vector<uint64_t>> index_to_columns_;
 
-    std::vector<std::unique_ptr<sdsl::sd_vector<>>> index_;
+    std::vector<std::unique_ptr<bit_vector_small>> index_;
 
     caches::fixed_sized_cache<size_t,
-                              sdsl::bit_vector*,
+                              std::vector<bool>*,
                               caches::LRUCachePolicy<size_t>> cached_index_;
 
     LabelEncoder<Color> color_encoder_;

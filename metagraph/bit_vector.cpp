@@ -451,9 +451,14 @@ void bit_vector_small::serialise(std::ostream &out) const {
 
 std::vector<bool> bit_vector_small::to_vector() const {
     std::vector<bool> vector(size(), 0);
-    uint64_t max_rank = rank1(size());
-    for (uint64_t i = 1; i <= max_rank; ++i) {
-        vector[select1(i)] = 1;
-    }
+    add_to(&vector);
     return vector;
+}
+
+void bit_vector_small::add_to(std::vector<bool> *other) const {
+    assert(other->size() == size());
+    uint64_t max_rank = num_set_bits();
+    for (uint64_t i = 1; i <= max_rank; ++i) {
+        (*other)[select1(i)] = 1;
+    }
 }

@@ -73,21 +73,19 @@ class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
   private:
     std::vector<uint64_t> count_colors(const std::vector<Index> &indices) const;
 
-    static void add_labels(const std::vector<sdsl::select_support_sd<>> *select_columns,
-                           const std::vector<sdsl::rank_support_sd<>> *rank_columns,
-                           uint64_t begin, uint64_t end,
-                           RowCompressed<Color> *annotator);
+    void add_labels(uint64_t begin, uint64_t end,
+                    RowCompressed<Color> *annotator) const;
     void release();
     void flush() const;
-    void flush(size_t j, sdsl::bit_vector *annotation_curr);
-    sdsl::bit_vector& decompress(size_t j);
+    void flush(size_t j, const std::vector<bool> &annotation_curr);
+    std::vector<bool>& decompress(size_t j);
 
     uint64_t num_rows_;
 
-    std::vector<std::unique_ptr<sdsl::sd_vector<>>> bitmatrix_;
+    std::vector<std::unique_ptr<bit_vector_small>> bitmatrix_;
 
     caches::fixed_sized_cache<size_t,
-                              sdsl::bit_vector*,
+                              std::vector<bool>*,
                               caches::LRUCachePolicy<size_t>> cached_colors_;
 
     LabelEncoder<Color> color_encoder_;

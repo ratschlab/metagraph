@@ -137,6 +137,7 @@ class bit_vector_small : public bit_vector {
     uint64_t size() const { return vector_.size(); }
 
     std::vector<bool> to_vector() const override;
+    void add_to(std::vector<bool> *other) const;
 
     bool is_inverted() const { return inverted_; }
 

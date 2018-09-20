@@ -23,8 +23,8 @@ ColorCompressed<Color>::ColorCompressed(uint64_t num_rows,
         cached_colors_(
             num_columns_cached,
             caches::LRUCachePolicy<size_t>(),
-            [this](size_t j, sdsl::bit_vector *col_uncompressed) {
-                this->flush(j, col_uncompressed);
+            [this](size_t j, std::vector<bool> *col_uncompressed) {
+                this->flush(j, *col_uncompressed);
                 delete col_uncompressed;
             }
         ),
@@ -128,7 +128,7 @@ void ColorCompressed<Color>::serialize(const std::string &filename) const {
 
     for (const auto &column : bitmatrix_) {
         assert(column.get());
-        column->serialize(outstream);
+        column->serialise(outstream);
     }
 }
 
@@ -172,12 +172,11 @@ bool ColorCompressed<Color>::merge_load(const std::vector<std::string> &filename
             for (size_t c = 0; c < color_encoder_load.size(); ++c) {
                 size_t col = color_encoder_.encode(color_encoder_load.decode(c));
 
-                auto *new_column = new sdsl::sd_vector<>();
-                new_column->load(instream);
+                auto *new_column = new bit_vector_small();
+                new_column->deserialise(instream);
 
                 if (verbose_) {
-                    auto rank = sdsl::rank_support_sd<>(new_column);
-                    auto num_set_bits = rank(new_column->size());
+                    auto num_set_bits = new_column->num_set_bits();
 
                     std::cout << "Color <" << color_encoder_load.decode(c)
                                            << ">, "
@@ -187,17 +186,7 @@ bool ColorCompressed<Color>::merge_load(const std::vector<std::string> &filename
                 }
 
                 if (bitmatrix_.at(col).get()) {
-                    auto &column = decompress(col);
-
-                    auto slct = sdsl::select_support_sd<>(new_column);
-                    auto rank = sdsl::rank_support_sd<>(new_column);
-                    auto num_set_bits = rank(new_column->size());
-
-                    for (uint64_t i = 1; i <= num_set_bits; ++i) {
-                        assert(slct(i) < column.size());
-
-                        column[slct(i)] = 1;
-                    }
+                    new_column->add_to(&decompress(col));
                     delete new_column;
                 } else {
                     bitmatrix_.at(col).reset(new_column);
@@ -222,9 +211,9 @@ void ColorCompressed<Color>::insert_rows(const std::vector<Index> &rows) {
     assert(std::is_sorted(rows.begin(), rows.end()));
 
     for (size_t j = 0; j < color_encoder_.size(); ++j) {
-        auto &column = decompress(j);
-        sdsl::bit_vector old = column;
-        column = sdsl::bit_vector(old.size() + rows.size(), 0);
+        std::vector<bool> &column = decompress(j);
+        std::vector<bool> old(num_rows_ + rows.size(), 0);
+        old.swap(column);
 
         uint64_t i = 0;
         uint64_t num_inserted = 0;
@@ -273,7 +262,7 @@ void ColorCompressed<Color>::rename_columns(const std::map<std::string, std::str
         old_columns[old_index_to_label[i]].insert(i);
     }
 
-    std::vector<std::unique_ptr<sdsl::sd_vector<>>> old_bitmatrix;
+    std::vector<std::unique_ptr<bit_vector_small>> old_bitmatrix;
     old_bitmatrix.swap(bitmatrix_);
 
     color_encoder_ = decltype(color_encoder_)();
@@ -287,12 +276,12 @@ void ColorCompressed<Color>::rename_columns(const std::map<std::string, std::str
         if (cols.size() == 1) {
             bitmatrix_.emplace_back(std::move(old_bitmatrix[*cols.begin()]));
         } else {
-            std::unique_ptr<sdsl::bit_vector> bit_vector(new sdsl::bit_vector(num_rows_, 0));
+            std::vector<bool> bit_vector(num_rows_, 0);
             for (size_t c : cols) {
-                utils::decompress_sd_vector(*old_bitmatrix[c], bit_vector.get());
+                old_bitmatrix[c]->add_to(&bit_vector);
                 old_bitmatrix[c].reset();
             }
-            bitmatrix_.emplace_back(new sdsl::sd_vector<>(*bit_vector));
+            bitmatrix_.emplace_back(new bit_vector_small(bit_vector));
         }
     }
 }
@@ -376,8 +365,7 @@ double ColorCompressed<Color>::sparsity() const {
     flush();
 
     for (size_t j = 0; j < bitmatrix_.size(); ++j) {
-        auto rank = sdsl::rank_support_sd<>(bitmatrix_[j].get());
-        num_set_bits += rank(bitmatrix_[j]->size());
+        num_set_bits += bitmatrix_[j]->num_set_bits();
     }
 
     return 1 - static_cast<double>(num_set_bits) / num_colors() / num_rows_;
@@ -404,15 +392,14 @@ template <typename Color>
 void ColorCompressed<Color>::flush() const {
     for (const auto &cached_vector : cached_colors_) {
         const_cast<ColorCompressed*>(this)->flush(
-            cached_vector.first, cached_vector.second
+            cached_vector.first, *cached_vector.second
         );
     }
     assert(bitmatrix_.size() == color_encoder_.size());
 }
 
 template <typename Color>
-void ColorCompressed<Color>::flush(size_t j, sdsl::bit_vector *vector) {
-    assert(vector);
+void ColorCompressed<Color>::flush(size_t j, const std::vector<bool> &vector) {
     assert(cached_colors_.Cached(j));
 
     while (bitmatrix_.size() <= j) {
@@ -420,20 +407,20 @@ void ColorCompressed<Color>::flush(size_t j, sdsl::bit_vector *vector) {
     }
 
     bitmatrix_[j].reset();
-    bitmatrix_[j].reset(new sdsl::sd_vector<>(*vector));
+    bitmatrix_[j].reset(new bit_vector_small(vector));
 }
 
 template <typename Color>
-sdsl::bit_vector& ColorCompressed<Color>::decompress(size_t j) {
+std::vector<bool>& ColorCompressed<Color>::decompress(size_t j) {
     assert(j < color_encoder_.size());
 
     try {
         return *cached_colors_.Get(j);
     } catch (...) {
-        sdsl::bit_vector *bit_vector = new sdsl::bit_vector(num_rows_, 0);
+        std::vector<bool> *bit_vector = new std::vector<bool>(num_rows_, 0);
 
         if (j < bitmatrix_.size() && bitmatrix_[j].get()) {
-            utils::decompress_sd_vector(*bitmatrix_[j], bit_vector);
+            bitmatrix_[j]->add_to(bit_vector);
         }
 
         cached_colors_.Put(j, bit_vector);
@@ -449,46 +436,36 @@ void ColorCompressed<Color>::convert_to_row_annotator(RowCompressed<Color> *anno
     annotator->matrix_->reinitialize(num_rows_);
     annotator->color_encoder_ = color_encoder_;
 
-    std::vector<sdsl::select_support_sd<>> select_columns;
-    std::vector<sdsl::rank_support_sd<>> rank_columns;
-
-    for (const auto &v : bitmatrix_) {
-        select_columns.emplace_back(v.get());
-        rank_columns.emplace_back(v.get());
-    }
-
     if (num_threads <= 1) {
-        add_labels(&select_columns, &rank_columns, 0, num_rows_, annotator);
+        add_labels(0, num_rows_, annotator);
         return;
     }
 
-    auto thread_pool = std::make_unique<utils::ThreadPool>(num_threads);
+    utils::ThreadPool thread_pool(num_threads);
     for (uint64_t i = 0; i < num_rows_; i += kNumRowsInBlock) {
-        thread_pool->enqueue(add_labels,
-            &select_columns, &rank_columns,
+        thread_pool.enqueue(
+            [this](const auto&... args) { this->add_labels(args...); },
             i, std::min(i + kNumRowsInBlock, num_rows_),
             annotator
         );
     }
-    thread_pool.reset();
+    thread_pool.join();
 }
 
 template <typename Color>
-void ColorCompressed<Color>
-::add_labels(const std::vector<sdsl::select_support_sd<>> *select_columns,
-             const std::vector<sdsl::rank_support_sd<>> *rank_columns,
-             uint64_t begin, uint64_t end,
-             RowCompressed<Color> *annotator) {
+void ColorCompressed<Color>::add_labels(uint64_t begin, uint64_t end,
+                                        RowCompressed<Color> *annotator) const {
     assert(begin <= end);
     assert(end <= annotator->matrix_->size());
 
-    for (size_t j = 0; j < select_columns->size(); ++j) {
-        // sdsl's rank computes the result excluding the query index
-        uint64_t first = rank_columns->at(j)(begin) + 1;
-        uint64_t last = rank_columns->at(j)(end);
+    for (size_t j = 0; j < bitmatrix_.size(); ++j) {
+        uint64_t first = begin == 0
+                            ? 1
+                            : bitmatrix_[j]->rank1(begin - 1) + 1;
+        uint64_t last = bitmatrix_[j]->rank1(end - 1);
 
         for (uint64_t r = first; r <= last; ++r) {
-            annotator->matrix_->set_bit(select_columns->at(j)(r), j);
+            annotator->matrix_->set_bit(bitmatrix_[j]->select1(r), j);
         }
     }
 }
