@@ -10,16 +10,16 @@
 
 namespace annotate {
 
-template <typename Color, class Encoder>
+template <typename Color>
 class FastColorCompressed;
 
-template <typename Color, class Encoder>
+template <typename Color>
 class RowCompressed;
 
 
-template <typename Color = std::string, class Encoder = StringEncoder>
+template <typename Color = std::string>
 class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
-    friend FastColorCompressed<Color, Encoder>;
+    friend FastColorCompressed<Color>;
 
   public:
     using Index = typename MultiColorAnnotation<uint64_t, Color>::Index;
@@ -67,7 +67,7 @@ class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
     size_t num_colors() const;
     double sparsity() const;
 
-    void convert_to_row_annotator(RowCompressed<Color, Encoder> *annotator,
+    void convert_to_row_annotator(RowCompressed<Color> *annotator,
                                   size_t num_threads = 1) const;
 
   private:
@@ -76,7 +76,7 @@ class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
     static void add_labels(const std::vector<sdsl::select_support_sd<>> *select_columns,
                            const std::vector<sdsl::rank_support_sd<>> *rank_columns,
                            uint64_t begin, uint64_t end,
-                           RowCompressed<Color, Encoder> *annotator);
+                           RowCompressed<Color> *annotator);
     void release();
     void flush() const;
     void flush(size_t j, sdsl::bit_vector *annotation_curr);
@@ -90,7 +90,7 @@ class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
                               sdsl::bit_vector*,
                               caches::LRUCachePolicy<size_t>> cached_colors_;
 
-    std::unique_ptr<ColorEncoder<Color>> color_encoder_;
+    LabelEncoder<Color> color_encoder_;
 
     bool verbose_;
 

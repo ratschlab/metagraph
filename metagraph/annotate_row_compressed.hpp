@@ -9,7 +9,7 @@
 
 namespace annotate {
 
-template <typename Color, class Encoder>
+template <typename Color>
 class ColorCompressed;
 
 
@@ -33,9 +33,9 @@ class RowMajorSparseBinaryMatrix {
 };
 
 
-template <typename Color = std::string, class Encoder = StringEncoder>
+template <typename Color = std::string>
 class RowCompressed : public MultiColorAnnotation<uint64_t, Color> {
-    friend ColorCompressed<Color, Encoder>;
+    friend ColorCompressed<Color>;
 
   public:
     using Index = typename MultiColorAnnotation<uint64_t, Color>::Index;
@@ -74,7 +74,7 @@ class RowCompressed : public MultiColorAnnotation<uint64_t, Color> {
 
   private:
     std::unique_ptr<RowMajorSparseBinaryMatrix> matrix_;
-    std::unique_ptr<ColorEncoder<Color>> color_encoder_;
+    LabelEncoder<Color> color_encoder_;
 
     static constexpr auto kExtension = ".row.annodbg";
 };

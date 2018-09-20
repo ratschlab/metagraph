@@ -1,16 +1,13 @@
 #ifndef __ANNOTATE_COLOR_COMPRESSED_FAST_HPP__
 #define __ANNOTATE_COLOR_COMPRESSED_FAST_HPP__
 
-#include <cache.hpp>
-#include <lru_cache_policy.hpp>
-
 #include "annotate_color_compressed.hpp"
 #include "dbg_succinct.hpp"
 
 
 namespace annotate {
 
-template <typename Color = std::string, class Encoder = StringEncoder>
+template <typename Color = std::string>
 class FastColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
   public:
     using Index = typename MultiColorAnnotation<uint64_t, Color>::Index;
@@ -21,7 +18,7 @@ class FastColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
                         bool verbose = false);
 
     // Initialize from ColorCompressed annotator
-    FastColorCompressed(ColorCompressed<Color, Encoder>&& annotator,
+    FastColorCompressed(ColorCompressed<Color>&& annotator,
                         size_t num_columns_cached = 1,
                         bool verbose = false,
                         bool build_index = true);
@@ -100,7 +97,7 @@ class FastColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
                               sdsl::bit_vector*,
                               caches::LRUCachePolicy<size_t>> cached_index_;
 
-    std::unique_ptr<ColorEncoder<Color>> color_encoder_;
+    LabelEncoder<Color> color_encoder_;
 
     bool verbose_;
 

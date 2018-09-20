@@ -111,62 +111,36 @@ class MultiColorAnnotation
 };
 
 
-// A dictionary to encode color names
-template <typename Color = std::string>
-class ColorEncoder {
+// A dictionary to encode annotation labels
+template <typename Label = std::string>
+class LabelEncoder {
   public:
-    virtual ~ColorEncoder() {};
+    /**
+     * If the label passed does not exist, insert
+     * that label and return its code.
+     */
+    size_t insert_and_encode(const Label &label);
 
     /**
-     * If the color passed does not exist, insert
-     * that color if insert_if_not_exists is true
-     * and throw an exception otherwise
+     * Return the code of the label passed.
+     * Throw exception if it does not exist.
      */
-    virtual size_t encode(const Color &color,
-                          bool insert_if_not_exists = false) = 0;
+    size_t encode(const Label &label) const;
+
     /**
-     * Throws an exception if a bad code is passed
+     * Throws an exception if a bad code is passed.
      */
-    virtual const Color& decode(size_t code) const = 0;
+    const Label& decode(size_t code) const { return decode_label_.at(code); }
 
-    virtual size_t size() const = 0;
-
-    virtual void serialize(std::ostream &outstream) const = 0;
-    virtual bool load(std::istream &instream) = 0;
-};
-
-
-class StringEncoder : public ColorEncoder<std::string> {
-  public:
-    typedef std::string Color;
-
-    size_t encode(const Color &color,
-                  bool insert_if_not_exists = false);
-    const Color& decode(size_t code) const;
-
-    size_t size() const { return decode_color_.size(); }
+    size_t size() const { return decode_label_.size(); }
 
     void serialize(std::ostream &outstream) const;
     bool load(std::istream &instream);
 
   private:
-    std::unordered_map<Color, uint32_t> encode_color_;
-    std::vector<Color> decode_color_;
+    std::unordered_map<Label, uint32_t> encode_label_;
+    std::vector<Label> decode_label_;
 };
-
-
-/*
-class WaveletTrie : public MultiColorAnnotation {
-  public:
-};
-
-
-class EdgeCompressed : public MultiColorAnnotation {
-  public:
-};
-
-*/
-
 
 } // namespace annotate
 

@@ -9,42 +9,48 @@ using libmaus2::util::StringSerialisation;
 
 namespace annotate {
 
-size_t StringEncoder::encode(const Color &color,
-                             bool insert_if_not_exists) {
-    auto it = encode_color_.find(color);
-    if (it != encode_color_.end())
+template <typename Label>
+size_t LabelEncoder<Label>::encode(const Label &label) const {
+    auto it = encode_label_.find(label);
+    if (it != encode_label_.end()) {
         return it->second;
-
-    if (!insert_if_not_exists)
-        throw std::runtime_error("ERROR: No such color");
-
-    encode_color_[color] = decode_color_.size();
-    decode_color_.push_back(color);
-
-    return decode_color_.size() - 1;
+    } else {
+        throw std::runtime_error("ERROR: No such label");
+    }
 }
 
-const StringEncoder::Color& StringEncoder::decode(size_t code) const {
-    return decode_color_.at(code);
+template <typename Label>
+size_t LabelEncoder<Label>::insert_and_encode(const Label &label) {
+    try {
+        return encode(label);
+    } catch (const std::runtime_error &e) {
+        encode_label_[label] = decode_label_.size();
+        decode_label_.push_back(label);
+        return decode_label_.size() - 1;
+    }
 }
 
-void StringEncoder::serialize(std::ostream &outstream) const {
-    serialize_string_number_map(outstream, encode_color_);
-    StringSerialisation::serialiseStringVector(outstream, decode_color_);
+template<>
+void LabelEncoder<std::string>::serialize(std::ostream &outstream) const {
+    serialize_string_number_map(outstream, encode_label_);
+    StringSerialisation::serialiseStringVector(outstream, decode_label_);
 }
 
-bool StringEncoder::load(std::istream &instream) {
+template<>
+bool LabelEncoder<std::string>::load(std::istream &instream) {
     if (!instream.good())
         return false;
 
     try {
-        encode_color_ = load_string_number_map(instream);
-        decode_color_ = StringSerialisation::deserialiseStringVector(instream);
+        encode_label_ = load_string_number_map(instream);
+        decode_label_ = StringSerialisation::deserialiseStringVector(instream);
 
         return true;
     } catch (...) {
         return false;
     }
 }
+
+template class LabelEncoder<std::string>;
 
 } // namespace annotate
