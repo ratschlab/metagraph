@@ -128,7 +128,7 @@ void ColorCompressed<Color>::serialize(const std::string &filename) const {
 
     for (const auto &column : bitmatrix_) {
         assert(column.get());
-        column->serialise(outstream);
+        column->serialize(outstream);
     }
 }
 
@@ -173,7 +173,7 @@ bool ColorCompressed<Color>::merge_load(const std::vector<std::string> &filename
                 size_t col = color_encoder_.encode(color_encoder_load.decode(c));
 
                 auto *new_column = new bit_vector_small();
-                new_column->deserialise(instream);
+                new_column->load(instream);
 
                 if (verbose_) {
                     auto num_set_bits = new_column->num_set_bits();

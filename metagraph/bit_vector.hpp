@@ -23,8 +23,8 @@ class bit_vector {
     virtual bool operator[](uint64_t id) const = 0;
     virtual void insertBit(uint64_t id, bool val) = 0;
     virtual void deleteBit(uint64_t id) = 0;
-    virtual void serialise(std::ostream &out) const = 0;
-    virtual bool deserialise(std::istream &in) = 0;
+    virtual bool load(std::istream &in) = 0;
+    virtual void serialize(std::ostream &out) const = 0;
     virtual uint64_t size() const = 0;
     virtual uint64_t num_set_bits() const { return rank1(size() - 1); }
 
@@ -55,8 +55,8 @@ class bit_vector_dyn : public bit_vector {
     void insertBit(uint64_t id, bool val);
     void deleteBit(uint64_t id);
 
-    bool deserialise(std::istream &in);
-    void serialise(std::ostream &out) const;
+    bool load(std::istream &in);
+    void serialize(std::ostream &out) const;
 
     uint64_t size() const { return vector_.size(); }
 
@@ -90,8 +90,8 @@ class bit_vector_stat : public bit_vector {
     void insertBit(uint64_t id, bool val);
     void deleteBit(uint64_t id);
 
-    bool deserialise(std::istream &in);
-    void serialise(std::ostream &out) const;
+    bool load(std::istream &in);
+    void serialize(std::ostream &out) const;
 
     uint64_t size() const { return vector_.size(); }
     uint64_t num_set_bits() const override { return num_set_bits_; }
@@ -131,8 +131,8 @@ class bit_vector_small : public bit_vector {
     void insertBit(uint64_t id, bool val);
     void deleteBit(uint64_t id);
 
-    bool deserialise(std::istream &in);
-    void serialise(std::ostream &out) const;
+    bool load(std::istream &in);
+    void serialize(std::ostream &out) const;
 
     uint64_t size() const { return vector_.size(); }
 

@@ -170,7 +170,7 @@ void FastColorCompressed<Color>::serialize(const std::string &filename) const {
     color_encoder_.serialize(outstream);
 
     for (const auto &column : bitmatrix_) {
-        column->serialise(outstream);
+        column->serialize(outstream);
     }
 
     // serialize the column index
@@ -178,7 +178,7 @@ void FastColorCompressed<Color>::serialize(const std::string &filename) const {
 
     serialize_number(outstream, index_.size());
     for (size_t t = 0; t < index_.size(); ++t) {
-        index_[t]->serialise(outstream);
+        index_[t]->serialize(outstream);
         serialize_number_vector(outstream, index_to_columns_[t]);
     }
 }
@@ -233,7 +233,7 @@ bool FastColorCompressed<Color>::merge_load(const std::vector<std::string> &file
                 size_t col = color_encoder_.encode(color_encoder_load.decode(c));
 
                 auto *new_column = new bit_vector_small();
-                new_column->deserialise(instream);
+                new_column->load(instream);
 
                 if (verbose_) {
                     auto num_set_bits = new_column->num_set_bits();
@@ -275,7 +275,7 @@ bool FastColorCompressed<Color>::merge_load(const std::vector<std::string> &file
 
                 for (size_t t = 0; t < index_size; ++t) {
                     index_.emplace_back(new bit_vector_small());
-                    index_.back()->deserialise(instream);
+                    index_.back()->load(instream);
 
                     index_to_columns_.emplace_back(load_number_vector<uint64_t>(instream));
 

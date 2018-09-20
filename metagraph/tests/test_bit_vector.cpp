@@ -234,14 +234,14 @@ TEST(bit_vector_dyn, Serialization) {
     std::vector<bool> numbers(init_list);
     ASSERT_TRUE(vector);
     std::ofstream outstream(test_dump_basename);
-    vector->serialise(outstream);
+    vector->serialize(outstream);
     outstream.close();
     delete vector;
 
     vector = new bit_vector_dyn;
     ASSERT_TRUE(vector);
     std::ifstream instream(test_dump_basename);
-    ASSERT_TRUE(vector->deserialise(instream));
+    ASSERT_TRUE(vector->load(instream));
 
     reference_based_test(*vector, numbers);
 
@@ -256,14 +256,14 @@ TEST(bit_vector_stat, Serialization) {
     std::vector<bool> numbers(init_list);
     ASSERT_TRUE(vector);
     std::ofstream outstream(test_dump_basename);
-    vector->serialise(outstream);
+    vector->serialize(outstream);
     outstream.close();
     delete vector;
 
     vector = new bit_vector_stat;
     ASSERT_TRUE(vector);
     std::ifstream instream(test_dump_basename);
-    ASSERT_TRUE(vector->deserialise(instream));
+    ASSERT_TRUE(vector->load(instream));
 
     reference_based_test(*vector, numbers);
 
@@ -285,14 +285,14 @@ TEST(bit_vector_small, Serialization) {
         ASSERT_EQ(16u, numbers.size());
         ASSERT_TRUE(vector);
         std::ofstream outstream(test_dump_basename);
-        vector->serialise(outstream);
+        vector->serialize(outstream);
         outstream.close();
         delete vector;
 
         vector = new bit_vector_small;
         ASSERT_TRUE(vector);
         std::ifstream instream(test_dump_basename);
-        ASSERT_TRUE(vector->deserialise(instream));
+        ASSERT_TRUE(vector->load(instream));
 
         reference_based_test(*vector, numbers);
 

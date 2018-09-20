@@ -226,11 +226,11 @@ void DBG_succ::serialize(const std::string &outbase) const {
     outstream.flush();
 
     // write Wavelet Tree
-    W_->serialise(outstream);
+    W_->serialize(outstream);
     outstream.flush();
 
     // write last array
-    last_->serialise(outstream);
+    last_->serialize(outstream);
     outstream.close();
 }
 
@@ -266,7 +266,7 @@ bool DBG_succ::load(const std::string &infbase) {
                 last_ = new bit_vector_small();
                 break;
         }
-        return W_->deserialise(instream) && last_->deserialise(instream);
+        return W_->load(instream) && last_->load(instream);
     } catch (const std::bad_alloc &exception) {
         std::cerr << "ERROR: Not enough memory to load DBG_succ from "
                   << infbase << "." << std::endl;

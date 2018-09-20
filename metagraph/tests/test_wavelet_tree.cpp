@@ -257,14 +257,14 @@ TEST(wavelet_tree_stat, Serialization) {
     wavelet_tree *vector = new wavelet_tree_stat(4, numbers);
     ASSERT_TRUE(vector);
     std::ofstream outstream(test_dump_basename);
-    vector->serialise(outstream);
+    vector->serialize(outstream);
     outstream.close();
     delete vector;
 
     vector = new wavelet_tree_stat(4);
     ASSERT_TRUE(vector);
     std::ifstream instream(test_dump_basename);
-    ASSERT_TRUE(vector->deserialise(instream));
+    ASSERT_TRUE(vector->load(instream));
 
     reference_based_test(*vector, numbers);
 
@@ -278,14 +278,14 @@ TEST(wavelet_tree_small, Serialization) {
     wavelet_tree *vector = new wavelet_tree_small(4, numbers);
     ASSERT_TRUE(vector);
     std::ofstream outstream(test_dump_basename);
-    vector->serialise(outstream);
+    vector->serialize(outstream);
     outstream.close();
     delete vector;
 
     vector = new wavelet_tree_small(4);
     ASSERT_TRUE(vector);
     std::ifstream instream(test_dump_basename);
-    ASSERT_TRUE(vector->deserialise(instream));
+    ASSERT_TRUE(vector->load(instream));
 
     reference_based_test(*vector, numbers);
 
@@ -299,14 +299,14 @@ TEST(wavelet_tree_dyn, Serialization) {
     wavelet_tree *vector = new wavelet_tree_dyn(4, numbers);
     ASSERT_TRUE(vector);
     std::ofstream outstream(test_dump_basename);
-    vector->serialise(outstream);
+    vector->serialize(outstream);
     outstream.close();
     delete vector;
 
     vector = new wavelet_tree_dyn(4);
     ASSERT_TRUE(vector);
     std::ifstream instream(test_dump_basename);
-    ASSERT_TRUE(vector->deserialise(instream));
+    ASSERT_TRUE(vector->load(instream));
 
     reference_based_test(*vector, numbers);
 

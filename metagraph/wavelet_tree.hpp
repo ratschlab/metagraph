@@ -21,8 +21,8 @@ class wavelet_tree {
     virtual void remove(uint64_t id) = 0;
     virtual uint64_t size() const = 0;
     virtual uint8_t logsigma() const = 0;
-    virtual void serialise(std::ostream &out) const = 0;
-    virtual bool deserialise(std::istream &in) = 0;
+    virtual bool load(std::istream &in) = 0;
+    virtual void serialize(std::ostream &out) const = 0;
     virtual void clear() = 0;
 
     // FYI: This function invalidates the current object
@@ -60,8 +60,8 @@ class wavelet_tree_stat : public wavelet_tree {
     uint64_t size() const { return n_; }
     uint8_t logsigma() const { return int_vector_.width(); }
 
-    void serialise(std::ostream &out) const;
-    bool deserialise(std::istream &in);
+    bool load(std::istream &in);
+    void serialize(std::ostream &out) const;
 
     void clear();
 
@@ -101,8 +101,8 @@ class wavelet_tree_dyn : public wavelet_tree {
     uint64_t size() const { return wwt_->size(); }
     uint8_t logsigma() const { return wwt_->b; }
 
-    void serialise(std::ostream &out) const;
-    bool deserialise(std::istream &in);
+    bool load(std::istream &in);
+    void serialize(std::ostream &out) const;
 
     void clear();
 
@@ -136,8 +136,8 @@ class wavelet_tree_small : public wavelet_tree {
     uint64_t size() const { return wwt_.size(); }
     uint8_t logsigma() const { return logsigma_; }
 
-    void serialise(std::ostream &out) const;
-    bool deserialise(std::istream &in);
+    bool load(std::istream &in);
+    void serialize(std::ostream &out) const;
 
     void clear() { wwt_ = sdsl::wt_huff<>(); }
 

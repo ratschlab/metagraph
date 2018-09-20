@@ -145,7 +145,7 @@ wavelet_tree_stat& wavelet_tree_stat::operator=(wavelet_tree_stat&& other) {
     return *this;
 }
 
-bool wavelet_tree_stat::deserialise(std::istream &in) {
+bool wavelet_tree_stat::load(std::istream &in) {
     if (!in.good())
         return false;
 
@@ -164,7 +164,7 @@ bool wavelet_tree_stat::deserialise(std::istream &in) {
     }
 }
 
-void wavelet_tree_stat::serialise(std::ostream &out) const {
+void wavelet_tree_stat::serialize(std::ostream &out) const {
     if (requires_update_)
         const_cast<wavelet_tree_stat*>(this)->init_wt();
 
@@ -396,11 +396,11 @@ void wavelet_tree_dyn::remove(uint64_t id) {
     wwt_->remove(id);
 }
 
-void wavelet_tree_dyn::serialise(std::ostream &out) const {
+void wavelet_tree_dyn::serialize(std::ostream &out) const {
     wwt_->serialise(out);
 }
 
-bool wavelet_tree_dyn::deserialise(std::istream &in) {
+bool wavelet_tree_dyn::load(std::istream &in) {
     if (!in.good())
         return false;
 
@@ -541,11 +541,11 @@ void wavelet_tree_small::remove(uint64_t) {
     throw std::runtime_error("Not supported");
 }
 
-void wavelet_tree_small::serialise(std::ostream &out) const {
+void wavelet_tree_small::serialize(std::ostream &out) const {
     wwt_.serialize(out);
 }
 
-bool wavelet_tree_small::deserialise(std::istream &in) {
+bool wavelet_tree_small::load(std::istream &in) {
     if (!in.good())
         return false;
 

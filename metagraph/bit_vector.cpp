@@ -108,7 +108,7 @@ void bit_vector_dyn::deleteBit(uint64_t id) {
     vector_.deleteBit(id);
 }
 
-bool bit_vector_dyn::deserialise(std::istream &in) {
+bool bit_vector_dyn::load(std::istream &in) {
     if (!in.good())
         return false;
 
@@ -117,7 +117,7 @@ bool bit_vector_dyn::deserialise(std::istream &in) {
     return true;
 }
 
-void bit_vector_dyn::serialise(std::ostream &out) const {
+void bit_vector_dyn::serialize(std::ostream &out) const {
     vector_.serialise(out);
 }
 
@@ -246,7 +246,7 @@ void bit_vector_stat::deleteBit(uint64_t id) {
     requires_update_ = true;
 }
 
-void bit_vector_stat::serialise(std::ostream &out) const {
+void bit_vector_stat::serialize(std::ostream &out) const {
     vector_.serialize(out);
 
     if (requires_update_)
@@ -257,7 +257,7 @@ void bit_vector_stat::serialise(std::ostream &out) const {
     slct_.serialize(out);
 }
 
-bool bit_vector_stat::deserialise(std::istream &in) {
+bool bit_vector_stat::load(std::istream &in) {
     if (!in.good())
         return false;
 
@@ -422,7 +422,7 @@ void bit_vector_small::deleteBit(uint64_t) {
     throw std::runtime_error("Not supported");
 }
 
-bool bit_vector_small::deserialise(std::istream &in) {
+bool bit_vector_small::load(std::istream &in) {
     if (!in.good())
         return false;
 
@@ -444,7 +444,7 @@ bool bit_vector_small::deserialise(std::istream &in) {
     }
 }
 
-void bit_vector_small::serialise(std::ostream &out) const {
+void bit_vector_small::serialize(std::ostream &out) const {
     vector_.serialize(out);
     out.put(inverted_);
 }
