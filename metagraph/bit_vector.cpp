@@ -304,61 +304,104 @@ void bit_vector_stat::init_rs() {
 ////////////////////////////////////////////////////////////////
 
 template <class BitVector>
-sdsl::bit_vector invert(const BitVector &vector) {
-    sdsl::bit_vector inverted(vector.size());
-    for (uint64_t i = 0; i < vector.size(); ++i) {
-        inverted[i] = !vector[i];
+bool invert_vector_if_dense(const BitVector &vector, sdsl::bit_vector *result) {
+    assert(result);
+    result->resize(vector.size());
+    uint64_t num_set_bits = std::count(vector.begin(), vector.end(), true);
+    if (num_set_bits > vector.size() / 2) {
+        // invert
+        for (uint64_t i = 0; i < vector.size(); ++i) {
+            (*result)[i] = !vector[i];
+        }
+        return true;
     }
-    return inverted;
+    // don't invert
+    std::copy(vector.begin(), vector.end(), result->begin());
+    return false;
 }
 
 bit_vector_small::bit_vector_small(uint64_t size, bool value)
-      : vector_(sdsl::bit_vector(size, !value)),
-        rk0_(&vector_),
-        slct0_(&vector_) {}
+      : inverted_(value),
+        vector_(sdsl::bit_vector(size, 0)),
+        rk1_(&vector_) {
+    if (inverted_) {
+        slct0_ = decltype(slct0_)(&vector_);
+    } else {
+        slct1_ = decltype(slct1_)(&vector_);
+    }
+}
 
 template <class BitVector>
-bit_vector_small::bit_vector_small(const BitVector &vector)
-      : vector_(invert(vector)), rk0_(&vector_), slct0_(&vector_) {}
+bit_vector_small::bit_vector_small(const BitVector &vector) {
+    sdsl::bit_vector inverted_vector;
+    inverted_ = invert_vector_if_dense(vector, &inverted_vector);
+    vector_ = decltype(vector_)(inverted_vector);
+    rk1_ = decltype(rk1_)(&vector_);
+    if (inverted_) {
+        slct0_ = decltype(slct0_)(&vector_);
+    } else {
+        slct1_ = decltype(slct1_)(&vector_);
+    }
+}
 
 template bit_vector_small::bit_vector_small(const std::vector<bool> &);
 template bit_vector_small::bit_vector_small(const sdsl::bit_vector &);
 
-bit_vector_small::bit_vector_small(const bit_vector_small &other)
-      : vector_(other.vector_), rk0_(&vector_), slct0_(&vector_) {}
+bit_vector_small::bit_vector_small(const bit_vector_small &other) {
+    *this = other;
+}
 
-bit_vector_small::bit_vector_small(bit_vector_small&& other)
-      : vector_(std::move(other.vector_)),
-        rk0_(&vector_),
-        slct0_(&vector_) {}
+bit_vector_small::bit_vector_small(bit_vector_small&& other) {
+    *this = std::move(other);
+}
 
 bit_vector_small::bit_vector_small(std::initializer_list<bool> init)
       : bit_vector_small(sdsl::bit_vector(init)) {}
 
 bit_vector_small& bit_vector_small::operator=(const bit_vector_small &other) {
+    inverted_ = other.inverted_;
     vector_ = other.vector_;
-    rk0_ = decltype(rk0_)(&vector_);
-    slct0_ = decltype(slct0_)(&vector_);
+    rk1_ = other.rk1_;
+    rk1_.set_vector(&vector_);
+    if (inverted_) {
+        slct0_ = other.slct0_;
+        slct0_.set_vector(&vector_);
+    } else {
+        slct1_ = other.slct1_;
+        slct1_.set_vector(&vector_);
+    }
     return *this;
 }
 
 bit_vector_small& bit_vector_small::operator=(bit_vector_small&& other) {
+    inverted_ = other.inverted_;
     vector_ = std::move(other.vector_);
-    rk0_ = decltype(rk0_)(&vector_);
-    slct0_ = decltype(slct0_)(&vector_);
+    rk1_ = std::move(other.rk1_);
+    rk1_.set_vector(&vector_);
+    if (inverted_) {
+        slct0_ = std::move(other.slct0_);
+        slct0_.set_vector(&vector_);
+    } else {
+        slct1_ = std::move(other.slct1_);
+        slct1_.set_vector(&vector_);
+    }
     return *this;
 }
 
 uint64_t bit_vector_small::rank1(uint64_t id) const {
     //the rank method in SDSL does not include id in the count
-    return rk0_(id >= this->size() ? this->size() : id + 1);
+    size_t idx = id >= this->size() ? this->size() : id + 1;
+    if (inverted_) {
+        return idx - rk1_(idx);
+    }
+    return rk1_(idx);
 }
 
 uint64_t bit_vector_small::select1(uint64_t id) const {
     assert(id > 0 && size() > 0 && id <= num_set_bits());
     assert(num_set_bits() == rank1(size() - 1));
 
-    return slct0_(id);
+    return inverted_ ? slct0_(id) : slct1_(id);
 }
 
 void bit_vector_small::set(uint64_t, bool) {
@@ -367,7 +410,7 @@ void bit_vector_small::set(uint64_t, bool) {
 
 bool bit_vector_small::operator[](uint64_t id) const {
     assert(id < size());
-    return !vector_[id];
+    return vector_[id] != inverted_;
 }
 
 void bit_vector_small::insertBit(uint64_t, bool) {
@@ -378,14 +421,20 @@ void bit_vector_small::deleteBit(uint64_t) {
     throw std::runtime_error("Not supported");
 }
 
+// TODO: serialize and deserialize support?
 bool bit_vector_small::deserialise(std::istream &in) {
     if (!in.good())
         return false;
 
     try {
         vector_.load(in);
-        rk0_ = decltype(rk0_)(&vector_);
-        slct0_ = decltype(slct0_)(&vector_);
+        inverted_ = in.get();
+        rk1_ = decltype(rk1_)(&vector_);
+        if (inverted_) {
+            slct0_ = decltype(slct0_)(&vector_);
+        } else {
+            slct1_ = decltype(slct1_)(&vector_);
+        }
         return true;
     } catch (const std::bad_alloc &exception) {
         std::cerr << "ERROR: Not enough memory to load bit_vector_small." << std::endl;
@@ -397,13 +446,14 @@ bool bit_vector_small::deserialise(std::istream &in) {
 
 void bit_vector_small::serialise(std::ostream &out) const {
     vector_.serialize(out);
+    out.put(inverted_);
 }
 
 std::vector<bool> bit_vector_small::to_vector() const {
     std::vector<bool> vector(size(), 0);
-    uint64_t max_rank = rk0_(size());
+    uint64_t max_rank = rank1(size());
     for (uint64_t i = 1; i <= max_rank; ++i) {
-        vector[slct0_(i)] = 1;
+        vector[select1(i)] = 1;
     }
     return vector;
 }

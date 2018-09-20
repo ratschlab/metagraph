@@ -113,8 +113,6 @@ class bit_vector_stat : public bit_vector {
 class bit_vector_small : public bit_vector {
   public:
     explicit bit_vector_small(uint64_t size = 0, bool value = false);
-    //TOOD: make the inverting optional
-    //explicit bit_vector_small(uint64_t size = 0, bool value = false, invert = false);
     template <class BitVector>
     explicit bit_vector_small(const BitVector &vector);
     explicit bit_vector_small(const bit_vector_small &other);
@@ -140,9 +138,13 @@ class bit_vector_small : public bit_vector {
 
     std::vector<bool> to_vector() const override;
 
+    bool is_inverted() const { return inverted_; }
+
   private:
+    bool inverted_;
     sdsl::sd_vector<> vector_;
-    sdsl::sd_vector<>::rank_0_type rk0_;
+    sdsl::sd_vector<>::rank_1_type rk1_;
+    sdsl::sd_vector<>::select_1_type slct1_;
     sdsl::sd_vector<>::select_0_type slct0_;
 };
 

@@ -377,3 +377,13 @@ TEST(bit_vector_stat, ConcurrentReadingAfterWriting) {
     }
     thread_pool.join();
 }
+
+TEST(bit_vector_small, CheckIfInverts) {
+    sdsl::bit_vector vector(10);
+    for (uint64_t i = 0; i < 1024; ++i) {
+        vector.set_int(0, i);
+        bit_vector_small bvs(vector);
+        // check if the it inverts when more than half of the bits are set
+        ASSERT_EQ(__builtin_popcountll(i) > 5, bvs.is_inverted());
+    }
+}
