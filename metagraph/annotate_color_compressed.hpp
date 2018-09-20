@@ -11,9 +11,6 @@
 namespace annotate {
 
 template <typename Color, class Encoder>
-class K2Compressed;
-
-template <typename Color, class Encoder>
 class FastColorCompressed;
 
 template <typename Color, class Encoder>
@@ -22,7 +19,6 @@ class RowCompressed;
 
 template <typename Color = std::string, class Encoder = StringEncoder>
 class ColorCompressed : public MultiColorAnnotation<uint64_t, Color> {
-    friend K2Compressed<Color, Encoder>;
     friend FastColorCompressed<Color, Encoder>;
 
   public:
