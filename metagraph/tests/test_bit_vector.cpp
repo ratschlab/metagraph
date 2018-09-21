@@ -16,7 +16,8 @@ void reference_based_test(const bit_vector &vector,
 
     for (size_t i : {1, 2, 10, 100, 1000}) {
         ASSERT_DEATH(vector.select1(max_rank + i), "");
-        EXPECT_EQ(max_rank, vector.rank1(vector.size() + i - 2));
+        EXPECT_EQ(max_rank, vector.rank1(vector.size() + i - 2))
+            << bit_vector_stat(reference);
     }
     ASSERT_DEATH(vector.select1(vector.size() + 1), "");
     ASSERT_DEATH(vector[vector.size()], "");
@@ -271,24 +272,32 @@ TEST(bit_vector_stat, Serialization) {
 
 
 TEST(bit_vector_small, Serialization) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    bit_vector *vector = new bit_vector_small(init_list);
-    std::vector<bool> numbers(init_list);
-    ASSERT_TRUE(vector);
-    std::ofstream outstream(test_dump_basename);
-    vector->serialise(outstream);
-    outstream.close();
-    delete vector;
+    std::vector<std::initializer_list<bool>> init_lists = {
+        { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0 },
+        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1 },
+        { 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1 },
+        { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
+    };
+    for (auto init_list : init_lists) {
+        std::vector<bool> numbers(init_list);
+        bit_vector *vector = new bit_vector_small(numbers);
+        ASSERT_EQ(16u, numbers.size());
+        ASSERT_TRUE(vector);
+        std::ofstream outstream(test_dump_basename);
+        vector->serialise(outstream);
+        outstream.close();
+        delete vector;
 
-    vector = new bit_vector_small;
-    ASSERT_TRUE(vector);
-    std::ifstream instream(test_dump_basename);
-    ASSERT_TRUE(vector->deserialise(instream));
+        vector = new bit_vector_small;
+        ASSERT_TRUE(vector);
+        std::ifstream instream(test_dump_basename);
+        ASSERT_TRUE(vector->deserialise(instream));
 
-    reference_based_test(*vector, numbers);
+        reference_based_test(*vector, numbers);
 
-    delete vector;
+        delete vector;
+    }
 }
 
 
