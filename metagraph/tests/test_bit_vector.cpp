@@ -347,6 +347,28 @@ TEST(bit_vector_small, MoveAssignment) {
     reference_based_test(second, numbers);
 }
 
+TEST(bit_vector_small, MoveAssignmentSparse) {
+    std::initializer_list<bool> init_list = { 0, 0, 0, 1, 0, 0, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+    std::vector<bool> numbers(init_list);
+    bit_vector_small first(numbers);
+    ASSERT_FALSE(first.is_inverted());
+    bit_vector_small second;
+    second = std::move(first);
+    reference_based_test(second, numbers);
+}
+
+TEST(bit_vector_small, MoveAssignmentDense) {
+    std::initializer_list<bool> init_list = { 1, 1, 0, 1, 0, 0, 1, 0,
+                                              1, 1, 0, 1, 1, 1, 1, 1 };
+    std::vector<bool> numbers(init_list);
+    bit_vector_small first(numbers);
+    ASSERT_TRUE(first.is_inverted());
+    bit_vector_small second;
+    second = std::move(first);
+    reference_based_test(second, numbers);
+}
+
 TEST(bit_vector_stat, ConcurrentReadingAfterWriting) {
     utils::ThreadPool thread_pool(3);
     bit_vector_stat vector;
