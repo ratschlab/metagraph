@@ -8,7 +8,7 @@
 
 #include "annotate.hpp"
 #include "dbg_succinct.hpp"
-#include "annotate_color_compressed.hpp"
+#include "annotate_column_compressed.hpp"
 
 
 namespace annotate {
@@ -86,49 +86,49 @@ class DBGSuccAnnotWrapper : public hash_annotate::DeBruijnGraphWrapper {
 };
 
 
-class AnnotationCategoryBloom : public MultiColorAnnotation<uint64_t, std::string> {
+class AnnotationCategoryBloom : public MultiLabelAnnotation<uint64_t, std::string> {
   public:
-    using Index = typename MultiColorAnnotation<uint64_t, Color>::Index;
-    using Color = typename MultiColorAnnotation<uint64_t, Color>::Color;
-    using Coloring = typename MultiColorAnnotation<uint64_t, Color>::Coloring;
+    using Index = typename MultiLabelAnnotation<uint64_t, Label>::Index;
+    using Label = typename MultiLabelAnnotation<uint64_t, Label>::Label;
+    using VLabels = typename MultiLabelAnnotation<uint64_t, Label>::VLabels;
 
     template <typename... Args>
     AnnotationCategoryBloom(const DBG_succ &graph, Args&& ...args)
           : graph_(graph), annotator_(graph_, args...) {}
 
-    void set_coloring(Index i, const Coloring &coloring);
-    Coloring get_coloring(Index i) const;
+    void set_labels(Index i, const VLabels &labels);
+    VLabels get_labels(Index i) const;
 
-    void add_color(Index i, const Color &color);
-    void add_colors(Index i, const Coloring &coloring);
-    void add_colors(const std::vector<Index> &indices, const Coloring &coloring);
-    void add_colors(const std::string &sequence,
-                    const Coloring &colors,
+    void add_label(Index i, const Label &label);
+    void add_labels(Index i, const VLabels &labels);
+    void add_labels(const std::vector<Index> &indices, const VLabels &labels);
+    void add_labels(const std::string &sequence,
+                    const VLabels &labels,
                     size_t num_elements = 0);
-    void add_color(const std::string &sequence,
-                   const std::string &color,
+    void add_label(const std::string &sequence,
+                   const std::string &label,
                    size_t num_elements = 0);
 
-    bool has_color(Index i, const Color &color) const;
-    bool has_colors(Index i, const Coloring &coloring) const;
+    bool has_label(Index i, const Label &label) const;
+    bool has_labels(Index i, const VLabels &labels) const;
 
     void serialize(const std::string &filename) const;
     bool merge_load(const std::vector<std::string> &filenames);
 
     void insert_rows(const std::vector<Index>&) {}
 
-    // Get colors that occur at least in |discovery_ratio| colorings.
-    // If |discovery_ratio| = 0, return the union of colorings.
-    Coloring aggregate_colors(const std::vector<Index> &indices,
-                              double discovery_ratio = 1) const;
+    // Get labels that occur at least in |presence_ratio| rows.
+    // If |presence_ratio| = 0, return all occurring labels.
+    VLabels get_labels(const std::vector<Index> &indices,
+                       double presence_ratio) const;
 
-    // Count all colors collected from extracted colorings
-    // and return top |num_top| with the counts computed.
-    std::vector<std::pair<Color, size_t>>
-    get_most_frequent_colors(const std::vector<Index> &indices,
-                             size_t num_top = static_cast<size_t>(-1)) const;
+    // Count all labels collected from the given rows
+    // and return top |num_top| with the their counts.
+    std::vector<std::pair<Label, size_t>>
+    get_top_labels(const std::vector<Index> &indices,
+                   size_t num_top = static_cast<size_t>(-1)) const;
 
-    size_t num_colors() const;
+    size_t num_labels() const;
     double sparsity() const;
 
   private:

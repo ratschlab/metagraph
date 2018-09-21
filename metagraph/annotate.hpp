@@ -41,50 +41,44 @@ class AnnotationCategory {
 };
 
 
-// Terminology
-//
+// Graph annotation
 // An annotated graph is a graph with labeled edges.
-//
-// A labeled edge is an edge carrying a corresponding label.
-//
-// If the edge labels represent inclusion of the edges into
-// some edge categories, each of these categories is called
-// an edge color, and the edge labels are called the edge colorings.
-template <typename IndexType, typename ColorType>
-class MultiColorAnnotation
-      : public AnnotationCategory<IndexType, std::vector<ColorType>> {
+// A labeled edge is an edge carrying certain labels.
+template <typename IndexType, typename LabelType>
+class MultiLabelAnnotation
+      : public AnnotationCategory<IndexType, std::vector<LabelType>> {
 
   public:
     typedef IndexType Index;
-    typedef ColorType Color;
-    typedef std::vector<ColorType> Coloring;
+    typedef LabelType Label;
+    typedef std::vector<Label> VLabels;
 
-    virtual ~MultiColorAnnotation() {}
+    virtual ~MultiLabelAnnotation() {}
 
     /***************** Inherited member functions ****************/
 
-    virtual std::vector<Color> get(Index i) const override final {
-        return get_coloring(i);
+    virtual VLabels get(Index i) const override final {
+        return get_labels(i);
     }
-    virtual void set(Index i, const std::vector<Color> &label) override final {
-        set_coloring(i, label);
+    virtual void set(Index i, const VLabels &labels) override final {
+        set_labels(i, labels);
     }
-    virtual void add(Index i, const std::vector<Color> &label) override final {
-        add_colors(i, label);
+    virtual void add(Index i, const VLabels &labels) override final {
+        add_labels(i, labels);
     }
 
     /******************* General functionality *******************/
 
-    virtual void set_coloring(Index i, const Coloring &coloring) = 0;
-    virtual Coloring get_coloring(Index i) const = 0;
+    virtual void set_labels(Index i, const VLabels &labels) = 0;
+    virtual VLabels get_labels(Index i) const = 0;
 
-    virtual void add_color(Index i, const Color &color) = 0;
-    virtual void add_colors(Index i, const Coloring &coloring) = 0;
-    virtual void add_colors(const std::vector<Index> &indices,
-                            const Coloring &coloring) = 0;
+    virtual void add_label(Index i, const Label &label) = 0;
+    virtual void add_labels(Index i, const VLabels &labels) = 0;
+    virtual void add_labels(const std::vector<Index> &indices,
+                            const VLabels &labels) = 0;
 
-    virtual bool has_color(Index i, const Color &color) const = 0;
-    virtual bool has_colors(Index i, const Coloring &coloring) const = 0;
+    virtual bool has_label(Index i, const Label &label) const = 0;
+    virtual bool has_labels(Index i, const VLabels &labels) const = 0;
 
     virtual void serialize(const std::string &filename) const = 0;
     virtual bool merge_load(const std::vector<std::string> &filenames) = 0;
@@ -93,20 +87,20 @@ class MultiColorAnnotation
 
     /*********************** Special queries **********************/
 
-    // Get colors that occur at least in |discovery_ratio| colorings.
-    // If |discovery_ratio| = 0, return the union of colorings.
-    virtual Coloring aggregate_colors(const std::vector<Index> &indices,
-                                      double discovery_ratio = 1) const = 0;
+    // Get labels that occur at least in |presence_ratio| rows.
+    // If |presence_ratio| = 0, return all occurring labels.
+    virtual VLabels get_labels(const std::vector<Index> &indices,
+                               double presence_ratio) const = 0;
 
-    // Count all colors collected from extracted colorings
-    // and return top |num_top| with the counts computed.
-    virtual std::vector<std::pair<Color, size_t>>
-    get_most_frequent_colors(const std::vector<Index> &indices,
-                             size_t num_top = static_cast<size_t>(-1)) const = 0;
+    // Count all labels collected from the given rows
+    // and return top |num_top| with the their counts.
+    virtual std::vector<std::pair<Label, size_t>>
+    get_top_labels(const std::vector<Index> &indices,
+                   size_t num_top = static_cast<size_t>(-1)) const = 0;
 
     /************************* Properties *************************/
 
-    virtual size_t num_colors() const = 0;
+    virtual size_t num_labels() const = 0;
     virtual double sparsity() const = 0;
 };
 

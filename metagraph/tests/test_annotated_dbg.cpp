@@ -3,14 +3,14 @@
 #include "gtest/gtest.h"
 
 #include "dbg_succinct.hpp"
-#include "annotate_color_compressed.hpp"
+#include "annotate_column_compressed.hpp"
 #include "config.hpp"
 
 
-TEST(ColoredDBG, ExtendGraphWithSimplePath) {
+TEST(AnnotatedDBG, ExtendGraphWithSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
         DBG_succ graph(k);
-        annotate::ColorCompressed<> annotation(graph.num_edges() + 1);
+        annotate::ColumnCompressed<> annotation(graph.num_edges() + 1);
         bit_vector_dyn inserted_edges(graph.num_edges() + 1, 0);
 
         std::string sequence(100, 'A');
@@ -28,9 +28,9 @@ TEST(ColoredDBG, ExtendGraphWithSimplePath) {
 
         graph.map_to_nodes(sequence, [&](uint64_t i) {
             if (i > 0)
-                annotation.add_color(i, "Label");
+                annotation.add_label(i, "Label");
         });
 
-        EXPECT_EQ(1u, annotation.num_colors());
+        EXPECT_EQ(1u, annotation.num_labels());
     }
 }

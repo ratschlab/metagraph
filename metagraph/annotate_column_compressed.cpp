@@ -1,4 +1,4 @@
-#include "annotate_color_compressed.hpp"
+#include "annotate_column_compressed.hpp"
 
 #include <string>
 #include <algorithm>
@@ -15,12 +15,12 @@ size_t kNumRowsInBlock = 5'000'000;
 
 namespace annotate {
 
-template <typename Color>
-ColorCompressed<Color>::ColorCompressed(uint64_t num_rows,
-                                        size_t num_columns_cached,
-                                        bool verbose)
+template <typename Label>
+ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
+                                          size_t num_columns_cached,
+                                          bool verbose)
       : num_rows_(num_rows),
-        cached_colors_(
+        cached_columns_(
             num_columns_cached,
             caches::LRUCachePolicy<size_t>(),
             [this](size_t j, std::vector<bool> *col_uncompressed) {
@@ -32,70 +32,70 @@ ColorCompressed<Color>::ColorCompressed(uint64_t num_rows,
     assert(num_columns_cached > 0);
 }
 
-template <typename Color>
-ColorCompressed<Color>::~ColorCompressed() {
-    cached_colors_.Clear();
+template <typename Label>
+ColumnCompressed<Label>::~ColumnCompressed() {
+    cached_columns_.Clear();
 }
 
-template <typename Color>
-void ColorCompressed<Color>::set_coloring(Index i, const Coloring &coloring) {
+template <typename Label>
+void ColumnCompressed<Label>::set_labels(Index i, const VLabels &labels) {
     assert(i < num_rows_);
 
-    for (size_t j = 0; j < color_encoder_.size(); ++j) {
+    for (size_t j = 0; j < label_encoder_.size(); ++j) {
         decompress(j)[i] = 0;
     }
-    for (const auto &color : coloring) {
-        decompress(color_encoder_.insert_and_encode(color))[i] = 1;
+    for (const auto &label : labels) {
+        decompress(label_encoder_.insert_and_encode(label))[i] = 1;
     }
 }
 
-template <typename Color>
-typename ColorCompressed<Color>::Coloring
-ColorCompressed<Color>::get_coloring(Index i) const {
+template <typename Label>
+typename ColumnCompressed<Label>::VLabels
+ColumnCompressed<Label>::get_labels(Index i) const {
     assert(i < num_rows_);
 
     flush();
 
-    Coloring coloring;
+    VLabels labels;
     for (size_t j = 0; j < bitmatrix_.size(); ++j) {
         assert(bitmatrix_[j].get());
 
         if ((*bitmatrix_[j])[i])
-            coloring.push_back(color_encoder_.decode(j));
+            labels.push_back(label_encoder_.decode(j));
     }
-    return coloring;
+    return labels;
 }
 
-template <typename Color>
-void ColorCompressed<Color>::add_color(Index i, const Color &color) {
+template <typename Label>
+void ColumnCompressed<Label>::add_label(Index i, const Label &label) {
     assert(i < num_rows_);
 
-    decompress(color_encoder_.insert_and_encode(color))[i] = 1;
+    decompress(label_encoder_.insert_and_encode(label))[i] = 1;
 }
 
-template <typename Color>
-void ColorCompressed<Color>::add_colors(Index i, const Coloring &coloring) {
-    for (const auto &color : coloring) {
-        add_color(i, color);
+template <typename Label>
+void ColumnCompressed<Label>::add_labels(Index i, const VLabels &labels) {
+    for (const auto &label : labels) {
+        add_label(i, label);
     }
 }
 
-template <typename Color>
-void ColorCompressed<Color>::add_colors(const std::vector<Index> &indices,
-                                        const Coloring &coloring) {
-    for (const auto &color : coloring) {
+template <typename Label>
+void ColumnCompressed<Label>::add_labels(const std::vector<Index> &indices,
+                                        const VLabels &labels) {
+    for (const auto &label : labels) {
         for (Index i : indices) {
-            add_color(i, color);
+            add_label(i, label);
         }
     }
 }
 
-template <typename Color>
-bool ColorCompressed<Color>::has_color(Index i, const Color &color) const {
+template <typename Label>
+bool ColumnCompressed<Label>::has_label(Index i, const Label &label) const {
     try {
-        auto j = color_encoder_.encode(color);
-        if (cached_colors_.Cached(j)) {
-            return (*cached_colors_.Get(j))[i];
+        auto j = label_encoder_.encode(label);
+        if (cached_columns_.Cached(j)) {
+            return (*cached_columns_.Get(j))[i];
         } else {
             return (*bitmatrix_[j])[i];
         }
@@ -104,17 +104,17 @@ bool ColorCompressed<Color>::has_color(Index i, const Color &color) const {
     }
 }
 
-template <typename Color>
-bool ColorCompressed<Color>::has_colors(Index i, const Coloring &coloring) const {
-    for (const auto &color : coloring) {
-        if (!has_color(i, color))
+template <typename Label>
+bool ColumnCompressed<Label>::has_labels(Index i, const VLabels &labels) const {
+    for (const auto &label : labels) {
+        if (!has_label(i, label))
             return false;
     }
     return true;
 }
 
-template <typename Color>
-void ColorCompressed<Color>::serialize(const std::string &filename) const {
+template <typename Label>
+void ColumnCompressed<Label>::serialize(const std::string &filename) const {
     flush();
 
     std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension);
@@ -124,7 +124,7 @@ void ColorCompressed<Color>::serialize(const std::string &filename) const {
 
     serialize_number(outstream, num_rows_);
 
-    color_encoder_.serialize(outstream);
+    label_encoder_.serialize(outstream);
 
     for (const auto &column : bitmatrix_) {
         assert(column.get());
@@ -132,13 +132,13 @@ void ColorCompressed<Color>::serialize(const std::string &filename) const {
     }
 }
 
-template <typename Color>
-bool ColorCompressed<Color>::merge_load(const std::vector<std::string> &filenames) {
+template <typename Label>
+bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenames) {
     // release the columns stored
-    cached_colors_.Clear();
+    cached_columns_.Clear();
     bitmatrix_.clear();
 
-    color_encoder_ = decltype(color_encoder_)();
+    label_encoder_ = decltype(label_encoder_)();
 
     try {
         for (auto filename : filenames) {
@@ -158,19 +158,19 @@ bool ColorCompressed<Color>::merge_load(const std::vector<std::string> &filename
                 return false;
             }
 
-            decltype(color_encoder_) color_encoder_load;
-            if (!color_encoder_load.load(instream))
+            decltype(label_encoder_) label_encoder_load;
+            if (!label_encoder_load.load(instream))
                 return false;
 
-            // extend the color dictionary
-            for (size_t c = 0; c < color_encoder_load.size(); ++c) {
-                color_encoder_.insert_and_encode(color_encoder_load.decode(c));
+            // extend the label dictionary
+            for (size_t c = 0; c < label_encoder_load.size(); ++c) {
+                label_encoder_.insert_and_encode(label_encoder_load.decode(c));
             }
 
             // update the existing and add some new columns
-            bitmatrix_.resize(color_encoder_.size());
-            for (size_t c = 0; c < color_encoder_load.size(); ++c) {
-                size_t col = color_encoder_.encode(color_encoder_load.decode(c));
+            bitmatrix_.resize(label_encoder_.size());
+            for (size_t c = 0; c < label_encoder_load.size(); ++c) {
+                size_t col = label_encoder_.encode(label_encoder_load.decode(c));
 
                 auto *new_column = new bit_vector_small();
                 new_column->load(instream);
@@ -178,7 +178,7 @@ bool ColorCompressed<Color>::merge_load(const std::vector<std::string> &filename
                 if (verbose_) {
                     auto num_set_bits = new_column->num_set_bits();
 
-                    std::cout << "Color <" << color_encoder_load.decode(c)
+                    std::cout << "Label <" << label_encoder_load.decode(c)
                                            << ">, "
                               << "density: "
                               << static_cast<double>(num_set_bits) / new_column->size()
@@ -206,11 +206,11 @@ bool ColorCompressed<Color>::merge_load(const std::vector<std::string> &filename
     }
 }
 
-template <typename Color>
-void ColorCompressed<Color>::insert_rows(const std::vector<Index> &rows) {
+template <typename Label>
+void ColumnCompressed<Label>::insert_rows(const std::vector<Index> &rows) {
     assert(std::is_sorted(rows.begin(), rows.end()));
 
-    for (size_t j = 0; j < color_encoder_.size(); ++j) {
+    for (size_t j = 0; j < label_encoder_.size(); ++j) {
         std::vector<bool> &column = decompress(j);
         std::vector<bool> old(num_rows_ + rows.size(), 0);
         old.swap(column);
@@ -226,7 +226,7 @@ void ColorCompressed<Color>::insert_rows(const std::vector<Index> &rows) {
                 column[i + num_inserted] = old[i];
                 i++;
             }
-            // insert 0, not colored edge
+            // insert 0, not labeled edge
             num_inserted++;
         }
         while (i < old.size()) {
@@ -241,16 +241,16 @@ void ColorCompressed<Color>::insert_rows(const std::vector<Index> &rows) {
 
 // For each pair (first, second) in the dictionary, renames
 // column |first| with |second| and merges the columns with matching names.
-template <typename Color>
-void ColorCompressed<Color>::rename_columns(const std::map<std::string, std::string> &dict) {
-    cached_colors_.Clear();
+template <typename Label>
+void ColumnCompressed<Label>::rename_columns(const std::map<std::string, std::string> &dict) {
+    cached_columns_.Clear();
 
-    std::vector<std::string> old_index_to_label(color_encoder_.size());
+    std::vector<std::string> old_index_to_label(label_encoder_.size());
     for (size_t i = 0; i < old_index_to_label.size(); ++i) {
-        old_index_to_label[i] = color_encoder_.decode(i);
+        old_index_to_label[i] = label_encoder_.decode(i);
     }
     for (const auto &pair : dict) {
-        old_index_to_label[color_encoder_.encode(pair.first)] = pair.second;
+        old_index_to_label[label_encoder_.encode(pair.first)] = pair.second;
     }
 
     std::vector<std::string> index_to_label;
@@ -265,10 +265,10 @@ void ColorCompressed<Color>::rename_columns(const std::map<std::string, std::str
     std::vector<std::unique_ptr<bit_vector_small>> old_bitmatrix;
     old_bitmatrix.swap(bitmatrix_);
 
-    color_encoder_ = decltype(color_encoder_)();
+    label_encoder_ = decltype(label_encoder_)();
 
     for (const auto &label : index_to_label) {
-        color_encoder_.insert_and_encode(label);
+        label_encoder_.insert_and_encode(label);
 
         const auto &cols = old_columns[label];
 
@@ -286,23 +286,23 @@ void ColorCompressed<Color>::rename_columns(const std::map<std::string, std::str
     }
 }
 
-// Get colors that occur at least in |discovery_ratio| colorings.
-// If |discovery_ratio| = 0, return the union of colorings.
-template <typename Color>
-typename ColorCompressed<Color>::Coloring
-ColorCompressed<Color>::aggregate_colors(const std::vector<Index> &indices,
-                                         double discovery_ratio) const {
-    assert(discovery_ratio >= 0 && discovery_ratio <= 1);
+// Get labels that occur at least in |presence_ratio| rows.
+// If |presence_ratio| = 0, return all occurring labels.
+template <typename Label>
+typename ColumnCompressed<Label>::VLabels
+ColumnCompressed<Label>::get_labels(const std::vector<Index> &indices,
+                                    double presence_ratio) const {
+    assert(presence_ratio >= 0 && presence_ratio <= 1);
 
     flush();
 
-    const size_t min_colors_discovered =
-                        discovery_ratio == 0
+    const size_t min_labels_discovered =
+                        presence_ratio == 0
                             ? 1
-                            : std::ceil(indices.size() * discovery_ratio);
-    const size_t max_colors_missing = indices.size() - min_colors_discovered;
+                            : std::ceil(indices.size() * presence_ratio);
+    const size_t max_labels_missing = indices.size() - min_labels_discovered;
 
-    Coloring filtered_colors;
+    VLabels filtered_labels;
 
     for (size_t j = 0; j < bitmatrix_.size(); ++j) {
         uint64_t discovered = 0;
@@ -310,26 +310,26 @@ ColorCompressed<Color>::aggregate_colors(const std::vector<Index> &indices,
 
         for (Index i : indices) {
             if ((*bitmatrix_[j])[i]) {
-                if (++discovered >= min_colors_discovered) {
-                    filtered_colors.push_back(color_encoder_.decode(j));
+                if (++discovered >= min_labels_discovered) {
+                    filtered_labels.push_back(label_encoder_.decode(j));
                     break;
                 }
-            } else if (++missing > max_colors_missing) {
+            } else if (++missing > max_labels_missing) {
                 break;
             }
         }
     }
 
-    return filtered_colors;
+    return filtered_labels;
 }
 
-// Count all colors collected from extracted colorings
-// and return top |num_top| with the counts computed.
-template <typename Color>
-std::vector<std::pair<Color, size_t>>
-ColorCompressed<Color>::get_most_frequent_colors(const std::vector<Index> &indices,
-                                                 size_t num_top) const {
-    auto counter = count_colors(indices);
+// Count all labels collected from the given rows
+// and return top |num_top| with the their counts.
+template <typename Label>
+std::vector<std::pair<Label, size_t>>
+ColumnCompressed<Label>::get_top_labels(const std::vector<Index> &indices,
+                                       size_t num_top) const {
+    auto counter = count_labels(indices);
 
     std::vector<std::pair<size_t, size_t>> counts;
     for (size_t j = 0; j < counter.size(); ++j) {
@@ -344,22 +344,22 @@ ColorCompressed<Color>::get_most_frequent_colors(const std::vector<Index> &indic
 
     counts.resize(std::min(counts.size(), num_top));
 
-    std::vector<std::pair<Color, size_t>> top_counts;
+    std::vector<std::pair<Label, size_t>> top_counts;
     for (const auto &encoded_pair : counts) {
-        top_counts.emplace_back(color_encoder_.decode(encoded_pair.first),
+        top_counts.emplace_back(label_encoder_.decode(encoded_pair.first),
                                 encoded_pair.second);
     }
 
     return top_counts;
 }
 
-template <typename Color>
-size_t ColorCompressed<Color>::num_colors() const {
-    return color_encoder_.size();
+template <typename Label>
+size_t ColumnCompressed<Label>::num_labels() const {
+    return label_encoder_.size();
 }
 
-template <typename Color>
-double ColorCompressed<Color>::sparsity() const {
+template <typename Label>
+double ColumnCompressed<Label>::sparsity() const {
     uint64_t num_set_bits = 0;
 
     flush();
@@ -368,12 +368,12 @@ double ColorCompressed<Color>::sparsity() const {
         num_set_bits += bitmatrix_[j]->num_set_bits();
     }
 
-    return 1 - static_cast<double>(num_set_bits) / num_colors() / num_rows_;
+    return 1 - static_cast<double>(num_set_bits) / num_labels() / num_rows_;
 }
 
-template <typename Color>
+template <typename Label>
 std::vector<uint64_t>
-ColorCompressed<Color>::count_colors(const std::vector<Index> &indices) const {
+ColumnCompressed<Label>::count_labels(const std::vector<Index> &indices) const {
     flush();
 
     std::vector<uint64_t> counter(bitmatrix_.size(), 0);
@@ -388,19 +388,19 @@ ColorCompressed<Color>::count_colors(const std::vector<Index> &indices) const {
     return counter;
 }
 
-template <typename Color>
-void ColorCompressed<Color>::flush() const {
-    for (const auto &cached_vector : cached_colors_) {
-        const_cast<ColorCompressed*>(this)->flush(
+template <typename Label>
+void ColumnCompressed<Label>::flush() const {
+    for (const auto &cached_vector : cached_columns_) {
+        const_cast<ColumnCompressed*>(this)->flush(
             cached_vector.first, *cached_vector.second
         );
     }
-    assert(bitmatrix_.size() == color_encoder_.size());
+    assert(bitmatrix_.size() == label_encoder_.size());
 }
 
-template <typename Color>
-void ColorCompressed<Color>::flush(size_t j, const std::vector<bool> &vector) {
-    assert(cached_colors_.Cached(j));
+template <typename Label>
+void ColumnCompressed<Label>::flush(size_t j, const std::vector<bool> &vector) {
+    assert(cached_columns_.Cached(j));
 
     while (bitmatrix_.size() <= j) {
         bitmatrix_.emplace_back();
@@ -410,12 +410,12 @@ void ColorCompressed<Color>::flush(size_t j, const std::vector<bool> &vector) {
     bitmatrix_[j].reset(new bit_vector_small(vector));
 }
 
-template <typename Color>
-std::vector<bool>& ColorCompressed<Color>::decompress(size_t j) {
-    assert(j < color_encoder_.size());
+template <typename Label>
+std::vector<bool>& ColumnCompressed<Label>::decompress(size_t j) {
+    assert(j < label_encoder_.size());
 
     try {
-        return *cached_colors_.Get(j);
+        return *cached_columns_.Get(j);
     } catch (...) {
         std::vector<bool> *bit_vector = new std::vector<bool>(num_rows_, 0);
 
@@ -423,18 +423,18 @@ std::vector<bool>& ColorCompressed<Color>::decompress(size_t j) {
             bitmatrix_[j]->add_to(bit_vector);
         }
 
-        cached_colors_.Put(j, bit_vector);
+        cached_columns_.Put(j, bit_vector);
         return *bit_vector;
     }
 }
 
-template <typename Color>
-void ColorCompressed<Color>::convert_to_row_annotator(RowCompressed<Color> *annotator,
-                                                      size_t num_threads) const {
+template <typename Label>
+void ColumnCompressed<Label>::convert_to_row_annotator(RowCompressed<Label> *annotator,
+                                                       size_t num_threads) const {
     flush();
 
     annotator->matrix_->reinitialize(num_rows_);
-    annotator->color_encoder_ = color_encoder_;
+    annotator->label_encoder_ = label_encoder_;
 
     if (num_threads <= 1) {
         add_labels(0, num_rows_, annotator);
@@ -452,9 +452,9 @@ void ColorCompressed<Color>::convert_to_row_annotator(RowCompressed<Color> *anno
     thread_pool.join();
 }
 
-template <typename Color>
-void ColorCompressed<Color>::add_labels(uint64_t begin, uint64_t end,
-                                        RowCompressed<Color> *annotator) const {
+template <typename Label>
+void ColumnCompressed<Label>::add_labels(uint64_t begin, uint64_t end,
+                                         RowCompressed<Label> *annotator) const {
     assert(begin <= end);
     assert(end <= annotator->matrix_->size());
 
@@ -470,6 +470,6 @@ void ColorCompressed<Color>::add_labels(uint64_t begin, uint64_t end,
     }
 }
 
-template class ColorCompressed<std::string>;
+template class ColumnCompressed<std::string>;
 
 } // namespace annotate

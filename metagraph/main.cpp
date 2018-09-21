@@ -6,18 +6,18 @@
 #include "utils.hpp"
 #include "sequence_io.hpp"
 #include "dbg_succinct_merge.hpp"
-#include "annotate_color_compressed.hpp"
-#include "annotate_color_compressed_fast.hpp"
+#include "annotate_column_compressed.hpp"
+#include "annotate_column_compressed_fast.hpp"
 #include "annotate_row_compressed.hpp"
 #include "annotate_bloom_filter.hpp"
 #include "unix_tools.hpp"
 #include "serialization.hpp"
 
-typedef annotate::MultiColorAnnotation<uint64_t, std::string> Annotator;
+typedef annotate::MultiLabelAnnotation<uint64_t, std::string> Annotator;
 
 const size_t kMaxNumParallelReadFiles = 5;
 
-const size_t kNumCachedColors = 10;
+const size_t kNumCachedColumns = 10;
 
 
 DBG_succ* load_critical_graph_from_file(const std::string &filename) {
@@ -45,7 +45,7 @@ void annotate_sequence(const std::string &sequence,
                        utils::ThreadPool *,
                        std::mutex *) {
     if (sequence.size() > graph.get_k())
-        annotator->add_colors(sequence, labels, graph.num_edges());
+        annotator->add_labels(sequence, labels, graph.num_edges());
 }
 
 
@@ -53,7 +53,7 @@ void annotate_sequence_thread_safe(
         std::string sequence,
         std::vector<std::string> labels,
         const DBG_succ &graph,
-        annotate::MultiColorAnnotation<uint64_t, std::string> *annotator,
+        Annotator *annotator,
         std::mutex &annotation_mutex) {
 
     std::vector<uint64_t> indices;
@@ -67,14 +67,14 @@ void annotate_sequence_thread_safe(
         return;
 
     std::lock_guard<std::mutex> lock(annotation_mutex);
-    annotator->add_colors(indices, labels);
+    annotator->add_labels(indices, labels);
 }
 
 
 void annotate_sequence(const std::string &sequence,
                        const std::vector<std::string> &labels,
                        const DBG_succ &graph,
-                       annotate::MultiColorAnnotation<uint64_t, std::string> *annotator,
+                       Annotator *annotator,
                        utils::ThreadPool *thread_pool,
                        std::mutex *annotation_mutex) {
     if (sequence.size() < graph.get_k())
@@ -92,7 +92,7 @@ void annotate_sequence(const std::string &sequence,
         if (i > 0)
             indices.push_back(i);
     });
-    annotator->add_colors(indices, labels);
+    annotator->add_labels(indices, labels);
 }
 
 
@@ -338,7 +338,7 @@ void execute_query(std::string seq_name,
     std::ostringstream oss;
 
     if (count_labels) {
-        auto top_labels = annotation.get_most_frequent_colors(
+        auto top_labels = annotation.get_top_labels(
             graph.map_to_edges(sequence),
             num_top_labels
         );
@@ -373,7 +373,7 @@ void execute_query(std::string seq_name,
         if (indices.size() > 0
             && indices.size()
                 >= discovery_fraction * (indices.size() + num_missing_kmers)) {
-            labels_discovered = annotation.aggregate_colors(
+            labels_discovered = annotation.get_labels(
                 indices,
                 discovery_fraction
                     * (indices.size() + num_missing_kmers)
@@ -701,9 +701,9 @@ int main(int argc, const char *argv[]) {
                     );
                 } else {
                     annotation.reset(
-                        new annotate::ColorCompressed<>(graph->num_edges() + 1,
-                                                        kNumCachedColors,
-                                                        config->verbose)
+                        new annotate::ColumnCompressed<>(graph->num_edges() + 1,
+                                                         kNumCachedColumns,
+                                                         config->verbose)
                     );
                 }
 
@@ -937,9 +937,9 @@ int main(int argc, const char *argv[]) {
                 );
             } else {
                 annotation.reset(
-                    new annotate::ColorCompressed<>(graph->num_edges() + 1,
-                                                    kNumCachedColors,
-                                                    config->verbose)
+                    new annotate::ColumnCompressed<>(graph->num_edges() + 1,
+                                                     kNumCachedColumns,
+                                                     config->verbose)
                 );
             }
 
@@ -1087,8 +1087,8 @@ int main(int argc, const char *argv[]) {
                 annotation.reset(new annotate::RowCompressed<>(0, config->sparse));
             } else {
                 annotation.reset(
-                    new annotate::ColorCompressed<>(
-                        0, kNumCachedColors, config->verbose
+                    new annotate::ColumnCompressed<>(
+                        0, kNumCachedColumns, config->verbose
                     )
                 );
             }
@@ -1113,14 +1113,14 @@ int main(int argc, const char *argv[]) {
                 annotation.reset(new annotate::RowCompressed<>(0, config->sparse));
             } else if (config->fast) {
                 annotation.reset(
-                    new annotate::FastColorCompressed<>(
-                        0, kNumCachedColors, config->verbose
+                    new annotate::FastColumnCompressed<>(
+                        0, kNumCachedColumns, config->verbose
                     )
                 );
             } else {
                 annotation.reset(
-                    new annotate::ColorCompressed<>(
-                        0, kNumCachedColors, config->verbose
+                    new annotate::ColumnCompressed<>(
+                        0, kNumCachedColumns, config->verbose
                     )
                 );
             }
@@ -1378,8 +1378,8 @@ int main(int argc, const char *argv[]) {
                     annotation.reset(new annotate::RowCompressed<>(0, config->sparse));
                 } else {
                     annotation.reset(
-                        new annotate::ColorCompressed<>(
-                            0, kNumCachedColors, config->verbose
+                        new annotate::ColumnCompressed<>(
+                            0, kNumCachedColumns, config->verbose
                         )
                     );
                 }
@@ -1391,7 +1391,7 @@ int main(int argc, const char *argv[]) {
                 }
 
                 std::cout << "Statistics for annotation " << file << std::endl;
-                std::cout << "colors: " << annotation->num_colors() << std::endl;
+                std::cout << "labels: " << annotation->num_labels() << std::endl;
                 std::cout << "sparsity: " << std::scientific
                                           << annotation->sparsity() << std::endl;
             }
@@ -1401,8 +1401,8 @@ int main(int argc, const char *argv[]) {
         case Config::TRANSFORM_ANNOTATION: {
             Timer timer;
 
-            auto annotator = std::make_unique<annotate::ColorCompressed<>>(
-                0, kNumCachedColors, config->verbose
+            auto annotator = std::make_unique<annotate::ColumnCompressed<>>(
+                0, kNumCachedColumns, config->verbose
             );
 
             if (config->verbose)

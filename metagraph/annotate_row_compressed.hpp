@@ -9,8 +9,8 @@
 
 namespace annotate {
 
-template <typename Color>
-class ColorCompressed;
+template <typename Label>
+class ColumnCompressed;
 
 
 class RowMajorSparseBinaryMatrix {
@@ -33,48 +33,48 @@ class RowMajorSparseBinaryMatrix {
 };
 
 
-template <typename Color = std::string>
-class RowCompressed : public MultiColorAnnotation<uint64_t, Color> {
-    friend ColorCompressed<Color>;
+template <typename Label = std::string>
+class RowCompressed : public MultiLabelAnnotation<uint64_t, Label> {
+    friend ColumnCompressed<Label>;
 
   public:
-    using Index = typename MultiColorAnnotation<uint64_t, Color>::Index;
-    using Coloring = typename MultiColorAnnotation<uint64_t, Color>::Coloring;
+    using Index = typename MultiLabelAnnotation<uint64_t, Label>::Index;
+    using VLabels = typename MultiLabelAnnotation<uint64_t, Label>::VLabels;
 
     RowCompressed(uint64_t num_rows, bool sparse = false);
 
-    void set_coloring(Index i, const Coloring &coloring);
-    Coloring get_coloring(Index i) const;
+    void set_labels(Index i, const VLabels &labels);
+    VLabels get_labels(Index i) const;
 
-    void add_color(Index i, const Color &color);
-    void add_colors(Index i, const Coloring &coloring);
-    void add_colors(const std::vector<Index> &indices, const Coloring &coloring);
+    void add_label(Index i, const Label &label);
+    void add_labels(Index i, const VLabels &labels);
+    void add_labels(const std::vector<Index> &indices, const VLabels &labels);
 
-    bool has_color(Index i, const Color &color) const;
-    bool has_colors(Index i, const Coloring &coloring) const;
+    bool has_label(Index i, const Label &label) const;
+    bool has_labels(Index i, const VLabels &labels) const;
 
     void serialize(const std::string &filename) const;
     bool merge_load(const std::vector<std::string> &filenames);
 
     void insert_rows(const std::vector<Index> &rows);
 
-    // Get colors that occur at least in |discovery_ratio| colorings.
-    // If |discovery_ratio| = 0, return the union of colorings.
-    Coloring aggregate_colors(const std::vector<Index> &indices,
-                              double discovery_ratio = 1) const;
+    // Get labels that occur at least in |presence_ratio| rows.
+    // If |presence_ratio| = 0, return all occurring labels.
+    VLabels get_labels(const std::vector<Index> &indices,
+                       double presence_ratio) const;
 
-    // Count all colors collected from extracted colorings
-    // and return top |num_top| with the counts computed.
-    std::vector<std::pair<Color, size_t>>
-    get_most_frequent_colors(const std::vector<Index> &indices,
-                             size_t num_top = static_cast<size_t>(-1)) const;
+    // Count all labels collected from the given rows
+    // and return top |num_top| with the their counts.
+    std::vector<std::pair<Label, size_t>>
+    get_top_labels(const std::vector<Index> &indices,
+                   size_t num_top = static_cast<size_t>(-1)) const;
 
-    size_t num_colors() const;
+    size_t num_labels() const;
     double sparsity() const;
 
   private:
     std::unique_ptr<RowMajorSparseBinaryMatrix> matrix_;
-    LabelEncoder<Color> color_encoder_;
+    LabelEncoder<Label> label_encoder_;
 
     static constexpr auto kExtension = ".row.annodbg";
 };

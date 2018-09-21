@@ -8,64 +8,62 @@ using hash_annotate::BloomAnnotator;
 
 namespace annotate {
 
-void AnnotationCategoryBloom::set_coloring(Index i, const Coloring &coloring) {
-    std::ignore = i;
-    std::ignore = coloring;
+void AnnotationCategoryBloom::set_labels(Index, const VLabels &) {
     throw std::runtime_error(
-        "ERROR: can't erase from Bloom filter. Use add_colors instead."
+        "ERROR: can't erase from Bloom filter. Use add_labels instead."
     );
 }
 
-AnnotationCategoryBloom::Coloring
-AnnotationCategoryBloom::get_coloring(Index i) const {
+AnnotationCategoryBloom::VLabels
+AnnotationCategoryBloom::get_labels(Index i) const {
     auto annotation = BloomAnnotator::unpack(annotator_.get_annotation(i));
-    Coloring result;
+    VLabels result;
     for (auto value : annotation) {
         result.push_back(column_to_label_[value]);
     }
     return result;
 }
 
-void AnnotationCategoryBloom::add_color(Index i, const Color &color) {
-    add_color(graph_.get_node_kmer(i) + graph_.get_edge_label(i), color);
+void AnnotationCategoryBloom::add_label(Index i, const Label &label) {
+    add_label(graph_.get_node_kmer(i) + graph_.get_edge_label(i), label);
 }
 
-void AnnotationCategoryBloom::add_colors(Index i, const Coloring &colors) {
+void AnnotationCategoryBloom::add_labels(Index i, const VLabels &labels) {
     auto kmer_edge = graph_.get_node_kmer(i) + graph_.get_edge_label(i);
 
-    for (const auto &color : colors) {
-        add_color(kmer_edge, color);
+    for (const auto &label : labels) {
+        add_label(kmer_edge, label);
     }
 }
 
-void AnnotationCategoryBloom::add_colors(const std::vector<Index> &indices,
-                                             const Coloring &colors) {
+void AnnotationCategoryBloom::add_labels(const std::vector<Index> &indices,
+                                         const VLabels &labels) {
     for (Index i : indices) {
-        add_colors(i, colors);
+        add_labels(i, labels);
     }
 }
 
-void AnnotationCategoryBloom::add_colors(const std::string &sequence,
-                                             const Coloring &colors,
-                                             size_t num_elements) {
-    for (const auto &color : colors) {
-        add_color(sequence, color, num_elements);
+void AnnotationCategoryBloom::add_labels(const std::string &sequence,
+                                         const VLabels &labels,
+                                         size_t num_elements) {
+    for (const auto &label : labels) {
+        add_label(sequence, label, num_elements);
     }
 }
 
-void AnnotationCategoryBloom::add_color(const std::string &sequence,
-                                            const std::string &color,
-                                            size_t num_elements) {
+void AnnotationCategoryBloom::add_label(const std::string &sequence,
+                                        const std::string &label,
+                                        size_t num_elements) {
     //TODO: set size of the Bloom filter based on the number of edges in graph
-    if (label_to_column_.find(color) == label_to_column_.end()) {
-        label_to_column_[color] = column_to_label_.size();
-        column_to_label_.push_back(color);
+    if (label_to_column_.find(label) == label_to_column_.end()) {
+        label_to_column_[label] = column_to_label_.size();
+        column_to_label_.push_back(label);
     }
-    annotator_.add_sequence(sequence, label_to_column_[color], num_elements);
+    annotator_.add_sequence(sequence, label_to_column_[label], num_elements);
 }
 
-bool AnnotationCategoryBloom::has_color(Index i, const Color &color) const {
-    auto it = label_to_column_.find(color);
+bool AnnotationCategoryBloom::has_label(Index i, const Label &label) const {
+    auto it = label_to_column_.find(label);
     if (it == label_to_column_.end())
         return false;
 
@@ -74,10 +72,10 @@ bool AnnotationCategoryBloom::has_color(Index i, const Color &color) const {
             != annotation.end();
 }
 
-bool AnnotationCategoryBloom::has_colors(Index i, const Coloring &coloring) const {
+bool AnnotationCategoryBloom::has_labels(Index i, const VLabels &labels) const {
     std::set<size_t> indices;
-    for (const auto &color : coloring) {
-        auto it = label_to_column_.find(color);
+    for (const auto &label : labels) {
+        auto it = label_to_column_.find(label);
         if (it == label_to_column_.end())
             return false;
         indices.insert(it->second);
@@ -108,49 +106,48 @@ void AnnotationCategoryBloom::serialize(const std::string &filename) const {
     annotator_.serialize(outstream);
 }
 
-AnnotationCategoryBloom::Coloring
-AnnotationCategoryBloom::aggregate_colors(const std::vector<Index> &indices,
-                                          double discovery_ratio) const {
-    assert(discovery_ratio >= 0 && discovery_ratio <= 1);
+AnnotationCategoryBloom::VLabels
+AnnotationCategoryBloom::get_labels(const std::vector<Index> &indices,
+                                    double presence_ratio) const {
+    assert(presence_ratio >= 0 && presence_ratio <= 1);
 
-    const size_t min_colors_discovered =
-                        discovery_ratio == 0
+    const size_t min_labels_discovered =
+                        presence_ratio == 0
                             ? 1
-                            : std::ceil(indices.size() * discovery_ratio);
-    // const size_t max_colors_missing = indices.size() - min_colors_discovered;
+                            : std::ceil(indices.size() * presence_ratio);
+    // const size_t max_labels_missing = indices.size() - min_labels_discovered;
 
     std::unordered_map<size_t, size_t> encoded_counter;
 
     for (Index i : indices) {
-        const auto &coloring_encoded =
+        const auto &labels_encoded =
             BloomAnnotator::unpack(annotator_.get_annotation(i));
 
-        for (auto code : coloring_encoded) {
+        for (auto code : labels_encoded) {
             encoded_counter[code]++;
         }
     }
 
-    Coloring filtered_colors;
+    VLabels filtered_labels;
 
     for (auto it = encoded_counter.begin(); it != encoded_counter.end(); ++it) {
-        if (it->second >= min_colors_discovered)
-            filtered_colors.push_back(column_to_label_[it->first]);
+        if (it->second >= min_labels_discovered)
+            filtered_labels.push_back(column_to_label_[it->first]);
     }
 
-    return filtered_colors;
+    return filtered_labels;
 }
 
-std::vector<std::pair<AnnotationCategoryBloom::Color, size_t>>
+std::vector<std::pair<AnnotationCategoryBloom::Label, size_t>>
 AnnotationCategoryBloom
-::get_most_frequent_colors(const std::vector<Index> &indices,
-                           size_t num_top) const {
+::get_top_labels(const std::vector<Index> &indices, size_t num_top) const {
     std::unordered_map<size_t, size_t> encoded_counter;
 
     for (Index i : indices) {
-        const auto &coloring_encoded =
+        const auto &labels_encoded =
             BloomAnnotator::unpack(annotator_.get_annotation(i));
 
-        for (auto code : coloring_encoded) {
+        for (auto code : labels_encoded) {
             encoded_counter[code]++;
         }
     }
@@ -166,7 +163,7 @@ AnnotationCategoryBloom
 
     counts.resize(std::min(counts.size(), num_top));
 
-    std::vector<std::pair<Color, size_t>> top_counts;
+    std::vector<std::pair<Label, size_t>> top_counts;
     for (const auto &encoded_pair : counts) {
         top_counts.emplace_back(column_to_label_[encoded_pair.first],
                                 encoded_pair.second);
@@ -175,7 +172,7 @@ AnnotationCategoryBloom
     return top_counts;
 }
 
-size_t AnnotationCategoryBloom::num_colors() const {
+size_t AnnotationCategoryBloom::num_labels() const {
     return column_to_label_.size();
 }
 
