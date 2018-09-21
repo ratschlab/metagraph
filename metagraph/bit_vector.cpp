@@ -429,6 +429,8 @@ bool bit_vector_small::load(std::istream &in) {
     try {
         vector_.load(in);
         inverted_ = in.get();
+        if (!in.good())
+            return false;
         rk1_ = decltype(rk1_)(&vector_);
         if (!inverted_) {
             slct1_ = decltype(slct1_)(&vector_);
@@ -446,7 +448,8 @@ bool bit_vector_small::load(std::istream &in) {
 
 void bit_vector_small::serialize(std::ostream &out) const {
     vector_.serialize(out);
-    out.put(inverted_);
+    if (!out.put(inverted_).good())
+        throw std::ofstream::failure("Error when dumping bit_vector_small");
 }
 
 std::vector<bool> bit_vector_small::to_vector() const {

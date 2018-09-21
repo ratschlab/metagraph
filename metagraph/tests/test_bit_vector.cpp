@@ -300,6 +300,37 @@ TEST(bit_vector_small, Serialization) {
     }
 }
 
+TEST(bit_vector_small, SerializationCatchErrorWhenLoadingSdVector) {
+    std::vector<std::initializer_list<bool>> init_lists = {
+        { },
+        { 1, },
+        { 0, },
+        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0 },
+        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1 },
+        { 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1 },
+        { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
+    };
+    for (auto init_list : init_lists) {
+        sdsl::bit_vector bv(init_list);
+        {
+            std::ofstream outstream(test_dump_basename);
+            sdsl::sd_vector<>(bv).serialize(outstream);
+            outstream.close();
+            bit_vector_small vector;
+            std::ifstream instream(test_dump_basename);
+            ASSERT_FALSE(vector.load(instream));
+        }
+        {
+            std::ofstream outstream(test_dump_basename);
+            bit_vector_small(bv).serialize(outstream);
+            outstream.close();
+            bit_vector_small vector;
+            std::ifstream instream(test_dump_basename);
+            ASSERT_TRUE(vector.load(instream));
+        }
+    }
+}
+
 
 TEST(bit_vector_stat, MoveConstructor) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
