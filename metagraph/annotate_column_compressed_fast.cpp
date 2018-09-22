@@ -322,57 +322,11 @@ void FastColumnCompressed<Label>::insert_rows(const std::vector<Index> &rows) {
     assert(std::is_sorted(rows.begin(), rows.end()));
 
     for (size_t j = 0; j < label_encoder_.size(); ++j) {
-        auto &column = decompress(j);
-        std::vector<bool> old(num_rows_ + rows.size(), 0);
-        old.swap(column);
-
-        uint64_t i = 0;
-        uint64_t num_inserted = 0;
-
-        for (auto next_inserted_row : rows) {
-            while (i + num_inserted < next_inserted_row) {
-                assert(i < old.size() && "Invalid indexes of inserted rows");
-                assert(i + num_inserted < column.size() && "Invalid indexes of inserted rows");
-
-                column[i + num_inserted] = old[i];
-                i++;
-            }
-            // insert 0, not labeled edge
-            num_inserted++;
-        }
-        while (i < old.size()) {
-            assert(i + num_inserted < column.size() && "Invalid indexes of inserted rows");
-
-            column[i + num_inserted] = old[i];
-            i++;
-        }
+        utils::insert_default_values(rows, &decompress(j));
     }
 
     for (size_t t = 0; t < index_to_columns_.size(); ++t) {
-        auto &column = decompress_index(t);
-        std::vector<bool> old(num_rows_ + rows.size(), 0);
-        old.swap(column);
-
-        uint64_t i = 0;
-        uint64_t num_inserted = 0;
-
-        for (auto next_inserted_row : rows) {
-            while (i + num_inserted < next_inserted_row) {
-                assert(i < old.size() && "Invalid indexes of inserted rows");
-                assert(i + num_inserted < column.size() && "Invalid indexes of inserted rows");
-
-                column[i + num_inserted] = old[i];
-                i++;
-            }
-            // insert 0, not labeled edge
-            num_inserted++;
-        }
-        while (i < old.size()) {
-            assert(i + num_inserted < column.size() && "Invalid indexes of inserted rows");
-
-            column[i + num_inserted] = old[i];
-            i++;
-        }
+        utils::insert_default_values(rows, &decompress_index(t));
     }
 
     num_rows_ += rows.size();

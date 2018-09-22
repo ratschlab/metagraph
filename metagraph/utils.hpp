@@ -16,13 +16,17 @@
 #include <atomic>
 #include <bitset>
 
+
 #if _USE_FOLLY
 #include <folly/FBVector.h>
+#include <folly/small_vector.h>
 template <typename T>
 using Vector = folly::fbvector<T>;
+typedef folly::small_vector<uint32_t, 2, uint32_t> SmallVector;
 #else
 template <typename T>
 using Vector = std::vector<T>;
+typedef std::vector<uint32_t> SmallVector;
 #endif
 
 #include "dbg_succinct.hpp"
@@ -283,9 +287,12 @@ namespace utils {
                            Vector<KMer> *kmers,
                            const std::vector<TAlphabet> &suffix);
 
-
     void decompress_sd_vector(const sdsl::sd_vector<> &vector,
                               sdsl::bit_vector *out);
+
+    // indexes - positions of inserted elements in the final vector
+    template <typename Index, class Vector>
+    void insert_default_values(const std::vector<Index> &indexes, Vector *vector);
 
 } // namespace utils
 

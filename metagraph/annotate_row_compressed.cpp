@@ -4,21 +4,11 @@
 #include <algorithm>
 #include <stdexcept>
 
-#if _USE_FOLLY
-#include <folly/small_vector.h>
-#endif
-
 #include "serialization.hpp"
 #include "utils.hpp"
 
 using libmaus2::util::StringSerialisation;
 using utils::remove_suffix;
-
-#if _USE_FOLLY
-typedef folly::small_vector<uint32_t, 2, uint32_t> SmallVector;
-#else
-typedef std::vector<uint32_t> SmallVector;
-#endif
 
 
 namespace annotate {
@@ -53,24 +43,7 @@ class VectorVectorMatrix : public RowMajorSparseBinaryMatrix {
     void insert_rows(const std::vector<uint64_t> &rows) {
         assert(std::is_sorted(rows.begin(), rows.end()));
 
-        std::vector<SmallVector> old;
-        old.swap(vector_);
-        // vector_.reserve(old.size() + rows.size());
-
-        size_t i = 0;
-        size_t num_inserted = 0;
-
-        for (auto next_inserted_row : rows) {
-            while (i + num_inserted < next_inserted_row) {
-                assert(i < old.size() && "Invalid indexes of inserted rows");
-                vector_.push_back(std::move(old[i++]));
-            }
-            vector_.push_back(SmallVector());
-            num_inserted++;
-        }
-        while (i < old.size()) {
-            vector_.push_back(std::move(old[i++]));
-        }
+        utils::insert_default_values(rows, &vector_);
     }
 
   private:

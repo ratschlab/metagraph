@@ -326,4 +326,54 @@ void decompress_sd_vector(const sdsl::sd_vector<> &vector,
     }
 }
 
+// indexes - positions of inserted elements in the final vector
+template <typename Index, class Vector>
+void insert_default_values(const std::vector<Index> &indexes, Vector *vector) {
+    assert(std::is_sorted(indexes.begin(), indexes.end()));
+    assert(vector);
+    assert(!indexes.size() || indexes.back() < vector->size() + indexes.size());
+
+    Vector old_vector(std::move(*vector));
+    *vector = Vector(old_vector.size() + indexes.size());
+
+    uint64_t i = 0;
+    uint64_t num_inserted = 0;
+
+    for (auto next_inserted : indexes) {
+        while (i + num_inserted < next_inserted) {
+            assert(i < old_vector.size()
+                    && "Invalid indexes for insertion");
+            assert(i + num_inserted < vector->size()
+                    && "Invalid indexes for insertion");
+
+            (*vector)[i + num_inserted] = std::move(old_vector[i]);
+            i++;
+        }
+        // insert 0
+        num_inserted++;
+    }
+    while (i < old_vector.size()) {
+        assert(i + num_inserted < vector->size()
+                && "Invalid indexes for insertion");
+
+        (*vector)[i + num_inserted] = std::move(old_vector[i]);
+        i++;
+    }
+}
+
+template
+void
+insert_default_values<uint64_t, std::vector<bool>>(const std::vector<uint64_t> &,
+                                                   std::vector<bool> *);
+
+template
+void
+insert_default_values<uint64_t, sdsl::bit_vector>(const std::vector<uint64_t> &,
+                                                  sdsl::bit_vector *);
+
+template
+void
+insert_default_values<uint64_t, std::vector<SmallVector>>(const std::vector<uint64_t> &,
+                                                          std::vector<SmallVector> *);
+
 } // namespace utils

@@ -71,6 +71,7 @@ class ColumnCompressed : public MultiLabelAnnotation<uint64_t, Label> {
                                   size_t num_threads = 1) const;
 
   private:
+    bool is_set(Index i, size_t j) const;
     std::vector<uint64_t> count_labels(const std::vector<Index> &indices) const;
 
     void add_labels(uint64_t begin, uint64_t end,

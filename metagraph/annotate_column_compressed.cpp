@@ -44,9 +44,8 @@ void ColumnCompressed<Label>::set_labels(Index i, const VLabels &labels) {
     for (size_t j = 0; j < label_encoder_.size(); ++j) {
         decompress(j)[i] = 0;
     }
-    for (const auto &label : labels) {
-        decompress(label_encoder_.insert_and_encode(label))[i] = 1;
-    }
+
+    add_labels(i, labels);
 }
 
 template <typename Label>
@@ -60,7 +59,7 @@ ColumnCompressed<Label>::get_labels(Index i) const {
     for (size_t j = 0; j < bitmatrix_.size(); ++j) {
         assert(bitmatrix_[j].get());
 
-        if ((*bitmatrix_[j])[i])
+        if (is_set(i, j))
             labels.push_back(label_encoder_.decode(j));
     }
     return labels;
@@ -93,12 +92,7 @@ void ColumnCompressed<Label>::add_labels(const std::vector<Index> &indices,
 template <typename Label>
 bool ColumnCompressed<Label>::has_label(Index i, const Label &label) const {
     try {
-        auto j = label_encoder_.encode(label);
-        if (cached_columns_.Cached(j)) {
-            return (*cached_columns_.Get(j))[i];
-        } else {
-            return (*bitmatrix_[j])[i];
-        }
+        return is_set(i, label_encoder_.encode(label));
     } catch (...) {
         return false;
     }
@@ -173,12 +167,13 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                 size_t col = label_encoder_.encode(label_encoder_load.decode(c));
 
                 auto *new_column = new bit_vector_small();
-                new_column->load(instream);
+                if (!new_column->load(instream) || new_column->size() != num_rows_)
+                    return false;
 
                 if (verbose_) {
                     auto num_set_bits = new_column->num_set_bits();
 
-                    std::cout << "Label <" << label_encoder_load.decode(c)
+                    std::cout << "Column <" << label_encoder_load.decode(c)
                                            << ">, "
                               << "density: "
                               << static_cast<double>(num_set_bits) / new_column->size()
@@ -211,30 +206,7 @@ void ColumnCompressed<Label>::insert_rows(const std::vector<Index> &rows) {
     assert(std::is_sorted(rows.begin(), rows.end()));
 
     for (size_t j = 0; j < label_encoder_.size(); ++j) {
-        std::vector<bool> &column = decompress(j);
-        std::vector<bool> old(num_rows_ + rows.size(), 0);
-        old.swap(column);
-
-        uint64_t i = 0;
-        uint64_t num_inserted = 0;
-
-        for (auto next_inserted_row : rows) {
-            while (i + num_inserted < next_inserted_row) {
-                assert(i < old.size() && "Invalid indexes of inserted rows");
-                assert(i + num_inserted < column.size() && "Invalid indexes of inserted rows");
-
-                column[i + num_inserted] = old[i];
-                i++;
-            }
-            // insert 0, not labeled edge
-            num_inserted++;
-        }
-        while (i < old.size()) {
-            assert(i + num_inserted < column.size() && "Invalid indexes of inserted rows");
-
-            column[i + num_inserted] = old[i];
-            i++;
-        }
+        utils::insert_default_values(rows, &decompress(j));
     }
     num_rows_ += rows.size();
 }
@@ -242,7 +214,8 @@ void ColumnCompressed<Label>::insert_rows(const std::vector<Index> &rows) {
 // For each pair (first, second) in the dictionary, renames
 // column |first| with |second| and merges the columns with matching names.
 template <typename Label>
-void ColumnCompressed<Label>::rename_columns(const std::map<std::string, std::string> &dict) {
+void ColumnCompressed<Label>
+::rename_columns(const std::map<std::string, std::string> &dict) {
     cached_columns_.Clear();
 
     std::vector<std::string> old_index_to_label(label_encoder_.size());
@@ -309,7 +282,7 @@ ColumnCompressed<Label>::get_labels(const std::vector<Index> &indices,
         uint64_t missing = 0;
 
         for (Index i : indices) {
-            if ((*bitmatrix_[j])[i]) {
+            if (is_set(i, j)) {
                 if (++discovered >= min_labels_discovered) {
                     filtered_labels.push_back(label_encoder_.decode(j));
                     break;
@@ -328,7 +301,7 @@ ColumnCompressed<Label>::get_labels(const std::vector<Index> &indices,
 template <typename Label>
 std::vector<std::pair<Label, size_t>>
 ColumnCompressed<Label>::get_top_labels(const std::vector<Index> &indices,
-                                       size_t num_top) const {
+                                        size_t num_top) const {
     auto counter = count_labels(indices);
 
     std::vector<std::pair<size_t, size_t>> counts;
@@ -355,6 +328,7 @@ ColumnCompressed<Label>::get_top_labels(const std::vector<Index> &indices,
 
 template <typename Label>
 size_t ColumnCompressed<Label>::num_labels() const {
+    assert(bitmatrix_.size() == label_encoder_.size());
     return label_encoder_.size();
 }
 
@@ -372,15 +346,24 @@ double ColumnCompressed<Label>::sparsity() const {
 }
 
 template <typename Label>
+bool ColumnCompressed<Label>::is_set(Index i, size_t j) const {
+    if (cached_columns_.Cached(j)) {
+        return (*cached_columns_.Get(j))[i];
+    } else {
+        return (*bitmatrix_[j])[i];
+    }
+}
+
+template <typename Label>
 std::vector<uint64_t>
 ColumnCompressed<Label>::count_labels(const std::vector<Index> &indices) const {
     flush();
 
-    std::vector<uint64_t> counter(bitmatrix_.size(), 0);
+    std::vector<uint64_t> counter(num_labels(), 0);
 
-    for (size_t j = 0; j < bitmatrix_.size(); ++j) {
+    for (size_t j = 0; j < num_labels(); ++j) {
         for (Index i : indices) {
-            if ((*bitmatrix_[j])[i])
+            if (is_set(i, j))
                 counter[j]++;
         }
     }
@@ -400,11 +383,8 @@ void ColumnCompressed<Label>::flush() const {
 
 template <typename Label>
 void ColumnCompressed<Label>::flush(size_t j, const std::vector<bool> &vector) {
+    assert(j < bitmatrix_.size());
     assert(cached_columns_.Cached(j));
-
-    while (bitmatrix_.size() <= j) {
-        bitmatrix_.emplace_back();
-    }
 
     bitmatrix_[j].reset();
     bitmatrix_[j].reset(new bit_vector_small(vector));
@@ -417,11 +397,14 @@ std::vector<bool>& ColumnCompressed<Label>::decompress(size_t j) {
     try {
         return *cached_columns_.Get(j);
     } catch (...) {
-        std::vector<bool> *bit_vector = new std::vector<bool>(num_rows_, 0);
+        assert(j <= bitmatrix_.size());
+        if (j == bitmatrix_.size())
+            bitmatrix_.emplace_back();
 
-        if (j < bitmatrix_.size() && bitmatrix_[j].get()) {
+        auto *bit_vector = new std::vector<bool>(num_rows_, 0);
+
+        if (bitmatrix_[j].get())
             bitmatrix_[j]->add_to(bit_vector);
-        }
 
         cached_columns_.Put(j, bit_vector);
         return *bit_vector;
@@ -429,8 +412,9 @@ std::vector<bool>& ColumnCompressed<Label>::decompress(size_t j) {
 }
 
 template <typename Label>
-void ColumnCompressed<Label>::convert_to_row_annotator(RowCompressed<Label> *annotator,
-                                                       size_t num_threads) const {
+void ColumnCompressed<Label>
+::convert_to_row_annotator(RowCompressed<Label> *annotator,
+                           size_t num_threads) const {
     flush();
 
     annotator->matrix_->reinitialize(num_rows_);
