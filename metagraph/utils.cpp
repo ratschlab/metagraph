@@ -333,31 +333,20 @@ void insert_default_values(const std::vector<Index> &indexes, Vector *vector) {
     assert(vector);
     assert(!indexes.size() || indexes.back() < vector->size() + indexes.size());
 
-    Vector old_vector(std::move(*vector));
-    *vector = Vector(old_vector.size() + indexes.size());
+    vector->resize(vector->size() + indexes.size());
 
-    uint64_t i = 0;
-    uint64_t num_inserted = 0;
+    uint64_t i = vector->size() - 1;
+    uint64_t shift = indexes.size();
 
-    for (auto next_inserted : indexes) {
-        while (i + num_inserted < next_inserted) {
-            assert(i < old_vector.size()
-                    && "Invalid indexes for insertion");
-            assert(i + num_inserted < vector->size()
-                    && "Invalid indexes for insertion");
-
-            (*vector)[i + num_inserted] = std::move(old_vector[i]);
-            i++;
+    for (auto it = indexes.rbegin(); it != indexes.rend(); ++it) {
+        while (i > *it) {
+            assert(i - shift >= 0 && "Invalid indexes for insertion");
+            (*vector)[i] = std::move((*vector)[i - shift]);
+            i--;
         }
-        // insert 0
-        num_inserted++;
-    }
-    while (i < old_vector.size()) {
-        assert(i + num_inserted < vector->size()
-                && "Invalid indexes for insertion");
-
-        (*vector)[i + num_inserted] = std::move(old_vector[i]);
-        i++;
+        // insert default value
+        shift--;
+        (*vector)[i--] = typename Vector::value_type();
     }
 }
 
