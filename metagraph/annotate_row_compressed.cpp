@@ -103,9 +103,7 @@ void RowCompressed<Label>::set_labels(Index i, const VLabels &labels) {
     assert(i < matrix_->size());
 
     matrix_->clear(i);
-    for (const auto &label : labels) {
-        matrix_->set_bit(i, label_encoder_.insert_and_encode(label));
-    }
+    add_labels(i, labels);
 }
 
 template <typename Label>
