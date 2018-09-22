@@ -128,12 +128,69 @@ class LabelEncoder {
 
     size_t size() const { return decode_label_.size(); }
 
-    void serialize(std::ostream &outstream) const;
     bool load(std::istream &instream);
+    void serialize(std::ostream &outstream) const;
+
+    void clear() { encode_label_.clear(); decode_label_.clear(); }
 
   private:
     std::unordered_map<Label, uint32_t> encode_label_;
     std::vector<Label> decode_label_;
+};
+
+
+template <typename IndexType, typename LabelType>
+class MultiLabelEncoded
+      : public MultiLabelAnnotation<IndexType, LabelType> {
+
+  public:
+    using Index = typename MultiLabelAnnotation<IndexType, LabelType>::Index;
+    using Label = typename MultiLabelAnnotation<IndexType, LabelType>::Label;
+    using VLabels = typename MultiLabelAnnotation<IndexType, LabelType>::VLabels;
+
+    virtual ~MultiLabelEncoded() {}
+
+    /******************* General functionality *******************/
+
+    virtual void set_labels(Index i, const VLabels &labels) = 0;
+    virtual VLabels get_labels(Index i) const = 0;
+
+    virtual void add_label(Index i, const Label &label) = 0;
+    virtual void add_labels(Index i, const VLabels &labels) = 0;
+    virtual void add_labels(const std::vector<Index> &indices,
+                            const VLabels &labels) = 0;
+
+    virtual bool has_label(Index i, const Label &label) const = 0;
+    virtual bool has_labels(Index i, const VLabels &labels) const = 0;
+
+    virtual void serialize(const std::string &filename) const = 0;
+    virtual bool merge_load(const std::vector<std::string> &filenames) = 0;
+
+    virtual void insert_rows(const std::vector<Index> &rows) = 0;
+
+    /*********************** Special queries **********************/
+
+    // Get labels that occur at least in |presence_ratio| rows.
+    // If |presence_ratio| = 0, return all occurring labels.
+    virtual VLabels get_labels(const std::vector<Index> &indices,
+                               double presence_ratio) const = 0;
+
+    // Count all labels collected from the given rows
+    // and return top |num_top| with the their counts.
+    virtual std::vector<std::pair<Label, size_t>>
+    get_top_labels(const std::vector<Index> &indices,
+                   size_t num_top = static_cast<size_t>(-1)) const override final;
+
+    /************************* Properties *************************/
+
+    virtual size_t num_labels() const = 0;
+    virtual double sparsity() const = 0;
+
+  protected:
+    virtual std::vector<uint64_t>
+    count_labels(const std::vector<Index> &indices) const = 0;
+
+    LabelEncoder<Label> label_encoder_;
 };
 
 } // namespace annotate

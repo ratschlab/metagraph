@@ -51,6 +51,39 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
     }
 }
 
+
+// Count all labels collected from the given rows
+// and return top |num_top| with the their counts.
+template <typename IndexType, typename LabelType>
+auto MultiLabelEncoded<IndexType, LabelType>
+::get_top_labels(const std::vector<Index> &indices, size_t num_top) const
+-> std::vector<std::pair<Label, size_t>> {
+    auto counter = count_labels(indices);
+
+    std::vector<std::pair<size_t, size_t>> counts;
+    for (size_t j = 0; j < counter.size(); ++j) {
+        if (counter[j])
+            counts.emplace_back(j, counter[j]);
+    }
+    // sort in decreasing order
+    std::sort(counts.begin(), counts.end(),
+              [](const auto &first, const auto &second) {
+                  return first.second > second.second;
+              });
+
+    counts.resize(std::min(counts.size(), num_top));
+
+    std::vector<std::pair<Label, size_t>> top_counts;
+    for (const auto &encoded_pair : counts) {
+        top_counts.emplace_back(label_encoder_.decode(encoded_pair.first),
+                                encoded_pair.second);
+    }
+
+    return top_counts;
+}
+
+template class MultiLabelEncoded<uint64_t, std::string>;
+
 template class LabelEncoder<std::string>;
 
 } // namespace annotate

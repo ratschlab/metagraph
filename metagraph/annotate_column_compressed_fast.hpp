@@ -8,10 +8,10 @@
 namespace annotate {
 
 template <typename Label = std::string>
-class FastColumnCompressed : public MultiLabelAnnotation<uint64_t, Label> {
+class FastColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
   public:
-    using Index = typename MultiLabelAnnotation<uint64_t, Label>::Index;
-    using VLabels = typename MultiLabelAnnotation<uint64_t, Label>::VLabels;
+    using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
+    using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
 
     FastColumnCompressed(uint64_t num_rows,
                          size_t num_columns_cached = 1,
@@ -47,12 +47,6 @@ class FastColumnCompressed : public MultiLabelAnnotation<uint64_t, Label> {
     // If |presence_ratio| = 0, return all occurring labels.
     VLabels get_labels(const std::vector<Index> &indices,
                        double presence_ratio) const;
-
-    // Count all labels collected from the given rows
-    // and return top |num_top| with the their counts.
-    std::vector<std::pair<Label, size_t>>
-    get_top_labels(const std::vector<Index> &indices,
-                   size_t num_top = static_cast<size_t>(-1)) const;
 
     size_t num_labels() const;
     double sparsity() const;
@@ -97,7 +91,8 @@ class FastColumnCompressed : public MultiLabelAnnotation<uint64_t, Label> {
                               std::vector<bool>*,
                               caches::LRUCachePolicy<size_t>> cached_index_;
 
-    LabelEncoder<Label> label_encoder_;
+    LabelEncoder<Label> &label_encoder_
+        = MultiLabelEncoded<uint64_t, Label>::label_encoder_;
 
     bool verbose_;
 

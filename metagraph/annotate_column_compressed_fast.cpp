@@ -195,7 +195,7 @@ bool FastColumnCompressed<Label>::merge_load(const std::vector<std::string> &fil
     column_to_index_.clear();
     index_to_columns_.clear();
 
-    label_encoder_ = decltype(label_encoder_)();
+    label_encoder_.clear();
 
     to_update_ = false;
     to_update_index_ = false;
@@ -218,7 +218,7 @@ bool FastColumnCompressed<Label>::merge_load(const std::vector<std::string> &fil
                 return false;
             }
 
-            decltype(label_encoder_) label_encoder_load;
+            LabelEncoder<Label> label_encoder_load;
             if (!label_encoder_load.load(instream))
                 return false;
 
@@ -373,36 +373,6 @@ FastColumnCompressed<Label>::get_labels(const std::vector<Index> &indices,
     }
 
     return filtered_labels;
-}
-
-// Count all labels collected from the given rows
-// and return top |num_top| with the their counts.
-template <typename Label>
-std::vector<std::pair<Label, size_t>>
-FastColumnCompressed<Label>::get_top_labels(const std::vector<Index> &indices,
-                                            size_t num_top) const {
-    auto counter = count_labels(indices);
-
-    std::vector<std::pair<size_t, size_t>> counts;
-    for (size_t j = 0; j < counter.size(); ++j) {
-        if (counter[j])
-            counts.emplace_back(j, counter[j]);
-    }
-    // sort in decreasing order
-    std::sort(counts.begin(), counts.end(),
-              [](const auto &first, const auto &second) {
-                  return first.second > second.second;
-              });
-
-    counts.resize(std::min(counts.size(), num_top));
-
-    std::vector<std::pair<Label, size_t>> top_counts;
-    for (const auto &encoded_pair : counts) {
-        top_counts.emplace_back(label_encoder_.decode(encoded_pair.first),
-                                encoded_pair.second);
-    }
-
-    return top_counts;
 }
 
 template <typename Label>

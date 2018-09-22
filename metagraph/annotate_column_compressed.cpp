@@ -81,7 +81,7 @@ void ColumnCompressed<Label>::add_labels(Index i, const VLabels &labels) {
 
 template <typename Label>
 void ColumnCompressed<Label>::add_labels(const std::vector<Index> &indices,
-                                        const VLabels &labels) {
+                                         const VLabels &labels) {
     for (const auto &label : labels) {
         for (Index i : indices) {
             add_label(i, label);
@@ -132,7 +132,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     cached_columns_.Clear();
     bitmatrix_.clear();
 
-    label_encoder_ = decltype(label_encoder_)();
+    label_encoder_.clear();
 
     try {
         for (auto filename : filenames) {
@@ -152,7 +152,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                 return false;
             }
 
-            decltype(label_encoder_) label_encoder_load;
+            LabelEncoder<Label> label_encoder_load;
             if (!label_encoder_load.load(instream))
                 return false;
 
@@ -238,7 +238,7 @@ void ColumnCompressed<Label>
     std::vector<std::unique_ptr<bit_vector_small>> old_bitmatrix;
     old_bitmatrix.swap(bitmatrix_);
 
-    label_encoder_ = decltype(label_encoder_)();
+    label_encoder_.clear();
 
     for (const auto &label : index_to_label) {
         label_encoder_.insert_and_encode(label);
@@ -294,36 +294,6 @@ ColumnCompressed<Label>::get_labels(const std::vector<Index> &indices,
     }
 
     return filtered_labels;
-}
-
-// Count all labels collected from the given rows
-// and return top |num_top| with the their counts.
-template <typename Label>
-std::vector<std::pair<Label, size_t>>
-ColumnCompressed<Label>::get_top_labels(const std::vector<Index> &indices,
-                                        size_t num_top) const {
-    auto counter = count_labels(indices);
-
-    std::vector<std::pair<size_t, size_t>> counts;
-    for (size_t j = 0; j < counter.size(); ++j) {
-        if (counter[j])
-            counts.emplace_back(j, counter[j]);
-    }
-    // sort in decreasing order
-    std::sort(counts.begin(), counts.end(),
-              [](const auto &first, const auto &second) {
-                  return first.second > second.second;
-              });
-
-    counts.resize(std::min(counts.size(), num_top));
-
-    std::vector<std::pair<Label, size_t>> top_counts;
-    for (const auto &encoded_pair : counts) {
-        top_counts.emplace_back(label_encoder_.decode(encoded_pair.first),
-                                encoded_pair.second);
-    }
-
-    return top_counts;
 }
 
 template <typename Label>

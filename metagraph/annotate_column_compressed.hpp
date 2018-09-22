@@ -18,12 +18,12 @@ class RowCompressed;
 
 
 template <typename Label = std::string>
-class ColumnCompressed : public MultiLabelAnnotation<uint64_t, Label> {
+class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     friend FastColumnCompressed<Label>;
 
   public:
-    using Index = typename MultiLabelAnnotation<uint64_t, Label>::Index;
-    using VLabels = typename MultiLabelAnnotation<uint64_t, Label>::VLabels;
+    using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
+    using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
 
     ColumnCompressed(uint64_t num_rows,
                      size_t num_columns_cached = 1,
@@ -58,12 +58,6 @@ class ColumnCompressed : public MultiLabelAnnotation<uint64_t, Label> {
     VLabels get_labels(const std::vector<Index> &indices,
                        double presence_ratio) const;
 
-    // Count all labels collected from the given rows
-    // and return top |num_top| with the their counts.
-    std::vector<std::pair<Label, size_t>>
-    get_top_labels(const std::vector<Index> &indices,
-                   size_t num_top = static_cast<size_t>(-1)) const;
-
     size_t num_labels() const;
     double sparsity() const;
 
@@ -89,7 +83,8 @@ class ColumnCompressed : public MultiLabelAnnotation<uint64_t, Label> {
                               std::vector<bool>*,
                               caches::LRUCachePolicy<size_t>> cached_columns_;
 
-    LabelEncoder<Label> label_encoder_;
+    LabelEncoder<Label> &label_encoder_
+        = MultiLabelEncoded<uint64_t, Label>::label_encoder_;
 
     bool verbose_;
 

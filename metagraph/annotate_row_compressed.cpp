@@ -260,42 +260,19 @@ RowCompressed<Label>::get_labels(const std::vector<Index> &indices,
     return filtered_labels;
 }
 
-// Count all labels collected from the given rows
-// and return top |num_top| with the their counts.
+// Count all labels collected from the given rows.
 template <typename Label>
-std::vector<std::pair<Label, size_t>>
-RowCompressed<Label>::get_top_labels(const std::vector<Index> &indices,
-                                     size_t num_top) const {
-    std::vector<size_t> encoded_counter(label_encoder_.size(), 0);
+std::vector<uint64_t>
+RowCompressed<Label>::count_labels(const std::vector<Index> &indices) const {
+    std::vector<uint64_t> counter(num_labels(), 0);
 
     for (Index i : indices) {
         for (size_t k = 0; k < matrix_->size(i); ++k) {
-            encoded_counter[matrix_->select(i, k)]++;
+            counter[matrix_->select(i, k)]++;
         }
     }
 
-    std::vector<std::pair<size_t, size_t>> counts;
-    counts.reserve(encoded_counter.size());
-    for (size_t j = 0; j < encoded_counter.size(); ++j) {
-        if (encoded_counter[j])
-            counts.emplace_back(j, encoded_counter[j]);
-    }
-
-    // sort in decreasing order
-    std::sort(counts.begin(), counts.end(),
-              [](const auto &first, const auto &second) {
-                  return first.second > second.second;
-              });
-
-    counts.resize(std::min(counts.size(), num_top));
-
-    std::vector<std::pair<Label, size_t>> top_counts;
-    for (const auto &encoded_pair : counts) {
-        top_counts.emplace_back(label_encoder_.decode(encoded_pair.first),
-                                encoded_pair.second);
-    }
-
-    return top_counts;
+    return counter;
 }
 
 template <typename Label>

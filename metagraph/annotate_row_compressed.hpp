@@ -34,12 +34,12 @@ class RowMajorSparseBinaryMatrix {
 
 
 template <typename Label = std::string>
-class RowCompressed : public MultiLabelAnnotation<uint64_t, Label> {
+class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     friend ColumnCompressed<Label>;
 
   public:
-    using Index = typename MultiLabelAnnotation<uint64_t, Label>::Index;
-    using VLabels = typename MultiLabelAnnotation<uint64_t, Label>::VLabels;
+    using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
+    using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
 
     RowCompressed(uint64_t num_rows, bool sparse = false);
 
@@ -63,18 +63,16 @@ class RowCompressed : public MultiLabelAnnotation<uint64_t, Label> {
     VLabels get_labels(const std::vector<Index> &indices,
                        double presence_ratio) const;
 
-    // Count all labels collected from the given rows
-    // and return top |num_top| with the their counts.
-    std::vector<std::pair<Label, size_t>>
-    get_top_labels(const std::vector<Index> &indices,
-                   size_t num_top = static_cast<size_t>(-1)) const;
-
     size_t num_labels() const;
     double sparsity() const;
 
   private:
+    std::vector<uint64_t> count_labels(const std::vector<Index> &indices) const;
+
     std::unique_ptr<RowMajorSparseBinaryMatrix> matrix_;
-    LabelEncoder<Label> label_encoder_;
+
+    LabelEncoder<Label> &label_encoder_
+        = MultiLabelEncoded<uint64_t, Label>::label_encoder_;
 
     static constexpr auto kExtension = ".row.annodbg";
 };
