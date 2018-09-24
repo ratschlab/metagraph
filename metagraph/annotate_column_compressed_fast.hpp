@@ -2,7 +2,6 @@
 #define __ANNOTATE_COLUMN_COMPRESSED_FAST_HPP__
 
 #include "annotate_column_compressed.hpp"
-#include "dbg_succinct.hpp"
 
 
 namespace annotate {

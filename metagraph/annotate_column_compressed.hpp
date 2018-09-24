@@ -65,6 +65,7 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
                                   size_t num_threads = 1) const;
 
   private:
+    void set(Index i, size_t j, bool value);
     bool is_set(Index i, size_t j) const;
     std::vector<uint64_t> count_labels(const std::vector<Index> &indices) const;
 
