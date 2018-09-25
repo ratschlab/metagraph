@@ -1,4 +1,4 @@
-#include "dbg_succinct.hpp"
+#include "annotated_dbg.hpp"
 #include "dbg_succinct_chunk.hpp"
 #include "dbg_succinct_construct.hpp"
 #include "reads_filtering.hpp"
@@ -37,65 +37,6 @@ DBG_succ* load_critical_graph_from_file(const std::string &filename) {
     return graph;
 }
 
-
-void annotate_sequence(const std::string &sequence,
-                       const std::vector<std::string> &labels,
-                       const DBG_succ &graph,
-                       annotate::AnnotationCategoryBloom *annotator,
-                       utils::ThreadPool *,
-                       std::mutex *) {
-    if (sequence.size() > graph.get_k())
-        annotator->add_labels(sequence, labels, graph.num_edges());
-}
-
-
-void annotate_sequence_thread_safe(
-        std::string sequence,
-        std::vector<std::string> labels,
-        const DBG_succ &graph,
-        Annotator *annotator,
-        std::mutex &annotation_mutex) {
-
-    std::vector<uint64_t> indices;
-
-    graph.map_to_edges(sequence, [&](uint64_t i) {
-        if (i > 0)
-            indices.push_back(i);
-    });
-
-    if (!indices.size())
-        return;
-
-    std::lock_guard<std::mutex> lock(annotation_mutex);
-    annotator->add_labels(indices, labels);
-}
-
-
-void annotate_sequence(const std::string &sequence,
-                       const std::vector<std::string> &labels,
-                       const DBG_succ &graph,
-                       Annotator *annotator,
-                       utils::ThreadPool *thread_pool,
-                       std::mutex *annotation_mutex) {
-    if (sequence.size() < graph.get_k())
-        return;
-
-    if (thread_pool && annotation_mutex) {
-        thread_pool->enqueue(annotate_sequence_thread_safe,
-                             sequence, labels,
-                             std::ref(graph), annotator, std::ref(*annotation_mutex));
-        return;
-    }
-
-    std::vector<uint64_t> indices;
-    graph.map_to_edges(sequence, [&](uint64_t i) {
-        if (i > 0)
-            indices.push_back(i);
-    });
-    annotator->add_labels(indices, labels);
-}
-
-
 std::string get_filter_filename(std::string filename,
                                 size_t k,
                                 size_t max_unreliable_abundance,
@@ -120,11 +61,9 @@ std::string get_filter_filename(std::string filename,
 }
 
 
-template <class Annotator>
 void annotate_data(const std::vector<std::string> &files,
                    const std::string &ref_sequence_path,
-                   const DBG_succ &graph,
-                   Annotator *annotator,
+                   AnnotatedDBG *anno_graph,
                    bool reverse,
                    size_t filter_k,
                    size_t max_unreliable_abundance,
@@ -133,9 +72,7 @@ void annotate_data(const std::vector<std::string> &files,
                    bool fasta_anno,
                    const std::string &fasta_header_delimiter,
                    const std::vector<std::string> &anno_labels,
-                   bool verbose,
-                   utils::ThreadPool *thread_pool = NULL,
-                   std::mutex *annotation_mutex = NULL) {
+                   bool verbose) {
     size_t total_seqs = 0;
 
     std::unique_ptr<Timer> timer;
@@ -154,7 +91,7 @@ void annotate_data(const std::vector<std::string> &files,
 
             read_vcf_file_critical(file,
                                    ref_sequence_path,
-                                   graph.get_k(),
+                                   anno_graph->get_graph().get_k(),
                                    &variant_labels,
                 [&](std::string &seq, std::vector<std::string> *variant_labels) {
                     assert(variant_labels);
@@ -166,12 +103,10 @@ void annotate_data(const std::vector<std::string> &files,
                         variant_labels->push_back(label);
                     }
 
-                    annotate_sequence(seq, *variant_labels, graph, annotator,
-                                      thread_pool, annotation_mutex);
+                    anno_graph->annotate_sequence(seq, *variant_labels);
                     if (reverse) {
                         reverse_complement(seq.begin(), seq.end());
-                        annotate_sequence(seq, *variant_labels, graph, annotator,
-                                          thread_pool, annotation_mutex);
+                        anno_graph->annotate_sequence(seq, *variant_labels);
                     }
                     variant_labels->clear();
                 }
@@ -194,8 +129,7 @@ void annotate_data(const std::vector<std::string> &files,
                         labels.push_back(label);
                     }
 
-                    annotate_sequence(read_stream->seq.s, labels, graph, annotator,
-                                      thread_pool, annotation_mutex);
+                    anno_graph->annotate_sequence(read_stream->seq.s, labels);
 
                     total_seqs += 1;
                     if (verbose && total_seqs % 10000 == 0) {
@@ -221,21 +155,20 @@ void annotate_data(const std::vector<std::string> &files,
             exit(1);
         }
     }
+
+    // join threads if any were initialized
+    anno_graph->join();
 }
 
 
-template <class Annotator>
 void annotate_coordinates(const std::vector<std::string> &files,
-                          const DBG_succ &graph,
-                          Annotator *annotator,
+                          AnnotatedDBG *anno_graph,
                           bool reverse,
                           size_t filter_k,
                           size_t max_unreliable_abundance,
                           size_t unreliable_kmers_threshold,
                           size_t genome_bin_size,
-                          bool verbose,
-                          utils::ThreadPool *thread_pool = NULL,
-                          std::mutex *annotation_mutex = NULL) {
+                          bool verbose) {
     size_t total_seqs = 0;
 
     std::unique_ptr<Timer> timer;
@@ -270,14 +203,13 @@ void annotate_coordinates(const std::vector<std::string> &files,
                         // reverse: |<=30|  <=24|  <=18|  <=12|  <= 6|  <= 0|
                         const size_t bin_size = std::min(
                             static_cast<size_t>(sequence.size() - i),
-                            static_cast<size_t>(genome_bin_size + graph.get_k())
+                            static_cast<size_t>(genome_bin_size + anno_graph->get_graph().get_k())
                         );
-                        annotate_sequence(
+                        anno_graph->annotate_sequence(
                             forward_strand
                                 ? sequence.substr(i, bin_size)
                                 : sequence.substr(sequence.size() - i - bin_size, bin_size),
-                            { utils::join_strings(labels, "\1"), },
-                            graph, annotator, thread_pool, annotation_mutex
+                            { utils::join_strings(labels, "\1"), }
                         );
                     }
 
@@ -311,6 +243,9 @@ void annotate_coordinates(const std::vector<std::string> &files,
             exit(1);
         }
     }
+
+    // join threads if any were initialized
+    anno_graph->join();
 }
 
 
@@ -333,15 +268,11 @@ void execute_query(std::string seq_name,
                    size_t num_top_labels,
                    double discovery_fraction,
                    std::string anno_labels_delimiter,
-                   const DBG_succ &graph,
-                   const Annotator &annotation) {
+                   const AnnotatedDBG &anno_graph) {
     std::ostringstream oss;
 
     if (count_labels) {
-        auto top_labels = annotation.get_top_labels(
-            graph.map_to_edges(sequence),
-            num_top_labels
-        );
+        auto top_labels = anno_graph.get_top_labels(sequence, num_top_labels);
 
         if (!top_labels.size() && suppress_unlabeled)
             return;
@@ -356,30 +287,8 @@ void execute_query(std::string seq_name,
         }
         oss << "\n";
     } else {
-        std::vector<uint64_t> indices;
-        size_t num_missing_kmers = 0;
-
-        graph.map_to_edges(sequence, [&](uint64_t i) {
-            if (i > 0) {
-                indices.push_back(i);
-            } else {
-                num_missing_kmers++;
-            }
-        });
-
-        std::vector<std::string> labels_discovered;
-        // discovery_fraction = discovered / all
-        // new_discovered_fraction = discovered / (all - missing)
-        if (indices.size() > 0
-            && indices.size()
-                >= discovery_fraction * (indices.size() + num_missing_kmers)) {
-            labels_discovered = annotation.get_labels(
-                indices,
-                discovery_fraction
-                    * (indices.size() + num_missing_kmers)
-                    / indices.size()
-            );
-        }
+        auto labels_discovered
+                = anno_graph.get_labels(sequence, discovery_fraction);
 
         if (!labels_discovered.size() && suppress_unlabeled)
             return;
@@ -688,52 +597,47 @@ int main(int argc, const char *argv[]) {
             }
 
             graph->serialize(config->outfbase);
+            graph.reset();
 
             timer.reset();
 
-            if (config->infbase_annotators.size()) {
-                std::unique_ptr<Annotator> annotation;
+            if (!config->infbase_annotators.size())
+                return 0;
 
-                if (config->use_row_annotator) {
-                    annotation.reset(
-                        new annotate::RowCompressed<>(graph->num_edges() + 1,
-                                                      config->sparse)
-                    );
-                } else {
-                    annotation.reset(
-                        new annotate::ColumnCompressed<>(graph->num_edges() + 1,
-                                                         kNumCachedColumns,
-                                                         config->verbose)
-                    );
-                }
+            std::unique_ptr<Annotator> annotation;
 
-                if (!annotation->merge_load(config->infbase_annotators)) {
-                    std::cerr << "ERROR: can't load annotations" << std::endl;
-                    exit(1);
-                } else if (config->verbose) {
-                    std::cout << "Annotation was loaded in "
-                              << timer.elapsed() << "sec" << std::endl;
-                }
-                timer.reset();
-
-                assert(inserted_edges.get());
-
-                std::vector<uint64_t> inserted_edge_idx;
-                for (uint64_t j = 1; j <= inserted_edges->num_set_bits(); ++j) {
-                    inserted_edge_idx.push_back(inserted_edges->select1(j));
-                }
-                inserted_edges.reset();
-
-                if (config->verbose)
-                    std::cout << "Insert empty rows to the annotation matrix..." << std::flush;
-
-                annotation->insert_rows(inserted_edge_idx);
-
-                if (config->verbose)
-                    std::cout << "\tdone in " << timer.elapsed() << "sec" << std::endl;
-
-                annotation->serialize(config->outfbase);
+            if (config->use_row_annotator) {
+                annotation.reset(
+                    new annotate::RowCompressed<>(1, config->sparse)
+                );
+            } else {
+                annotation.reset(
+                    new annotate::ColumnCompressed<>(1, kNumCachedColumns,
+                                                     config->verbose)
+                );
             }
+
+            if (!annotation->merge_load(config->infbase_annotators)) {
+                std::cerr << "ERROR: can't load annotations" << std::endl;
+                exit(1);
+            } else if (config->verbose) {
+                std::cout << "Annotation was loaded in "
+                          << timer.elapsed() << "sec" << std::endl;
+            }
+            timer.reset();
+
+            AnnotatedDBG anno_dbg(annotation.release());
+
+            assert(inserted_edges.get());
+            if (config->verbose)
+                std::cout << "Insert empty rows to the annotation matrix..." << std::flush;
+
+            anno_dbg.adjust_annotation(*inserted_edges);
+
+            if (config->verbose)
+                std::cout << "\tdone in " << timer.elapsed() << "sec" << std::endl;
+
+            anno_dbg.get_annotation().serialize(config->outfbase);
 
             return 0;
         }
@@ -949,20 +853,13 @@ int main(int argc, const char *argv[]) {
                 exit(1);
             }
 
-            std::unique_ptr<utils::ThreadPool> thread_pool;
-            std::unique_ptr<std::mutex> annotation_mutex;
-
-            if (config->parallel > 1) {
-                thread_pool.reset(
-                    new utils::ThreadPool(config->parallel - 1)
-                );
-                annotation_mutex.reset(new std::mutex());
-            }
+            AnnotatedDBG annotated_dbg(graph.release(),
+                                       annotation.release(),
+                                       config->parallel);
 
             annotate_data(files,
                           config->refpath,
-                          *graph,
-                          annotation.get(),
+                          &annotated_dbg,
                           config->reverse,
                           config->filter_k,
                           config->max_unreliable_abundance,
@@ -971,14 +868,9 @@ int main(int argc, const char *argv[]) {
                           config->fasta_anno,
                           config->fasta_header_delimiter,
                           config->anno_labels,
-                          config->verbose,
-                          thread_pool.get(),
-                          annotation_mutex.get());
+                          config->verbose);
 
-            // join threads if any were initialized
-            thread_pool.reset();
-
-            annotation->serialize(config->outfbase);
+            annotated_dbg.get_annotation().serialize(config->outfbase);
 
             return 0;
         }
@@ -1000,32 +892,20 @@ int main(int argc, const char *argv[]) {
                 exit(1);
             }
 
-            std::unique_ptr<utils::ThreadPool> thread_pool;
-            std::unique_ptr<std::mutex> annotation_mutex;
-
-            if (config->parallel > 1) {
-                thread_pool.reset(
-                    new utils::ThreadPool(config->parallel - 1)
-                );
-                annotation_mutex.reset(new std::mutex());
-            }
+            AnnotatedDBG annotated_dbg(graph.release(),
+                                       annotation.release(),
+                                       config->parallel);
 
             annotate_coordinates(files,
-                                 *graph,
-                                 annotation.get(),
+                                 &annotated_dbg,
                                  config->reverse,
                                  config->filter_k,
                                  config->max_unreliable_abundance,
                                  config->unreliable_kmers_threshold,
                                  config->genome_binsize_anno,
-                                 config->verbose,
-                                 thread_pool.get(),
-                                 annotation_mutex.get());
+                                 config->verbose);
 
-            // join threads if any were initialized
-            thread_pool.reset();
-
-            annotation->serialize(config->outfbase);
+            annotated_dbg.get_annotation().serialize(config->outfbase);
 
             return 0;
         }
@@ -1062,10 +942,13 @@ int main(int argc, const char *argv[]) {
                 );
             }
 
+            AnnotatedDBG annotated_dbg(graph.release(),
+                                       annotation.release(),
+                                       config->parallel);
+
             annotate_data(files,
                           config->refpath,
-                          *graph,
-                          annotation.get(),
+                          &annotated_dbg,
                           config->reverse,
                           config->filter_k,
                           config->max_unreliable_abundance,
@@ -1076,7 +959,7 @@ int main(int argc, const char *argv[]) {
                           config->anno_labels,
                           config->verbose);
 
-            annotation->serialize(config->infbase);
+            annotated_dbg.get_annotation().serialize(config->infbase);
 
             return 0;
         }
@@ -1139,6 +1022,10 @@ int main(int argc, const char *argv[]) {
                 timer.reset(new Timer());
             }
 
+            AnnotatedDBG annotated_dbg(graph.release(),
+                                       annotation.release(),
+                                       config->parallel);
+
             // iterate over input files
             for (const auto &file : files) {
                 if (config->verbose) {
@@ -1158,8 +1045,7 @@ int main(int argc, const char *argv[]) {
                             config->num_top_labels,
                             config->discovery_fraction,
                             config->anno_labels_delimiter,
-                            std::ref(*graph),
-                            std::ref(*annotation)
+                            std::ref(annotated_dbg)
                         );
                     },
                     config->reverse, timer.get(),
