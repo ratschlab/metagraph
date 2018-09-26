@@ -46,6 +46,9 @@ void annotate_sequence_thread_safe(std::string sequence,
 
 void AnnotatedDBG::annotate_sequence(const std::string &sequence,
                                      const std::vector<std::string> &labels) {
+    assert(graph_.get() && annotator_.get());
+    assert(graph_->num_edges() + 1 == annotator_->num_objects());
+
     if (sequence.size() <= graph_->get_k())
         return;
 
@@ -64,6 +67,9 @@ void AnnotatedDBG::annotate_sequence(const std::string &sequence,
 
 std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
                                                   double presence_ratio) const {
+    assert(graph_.get() && annotator_.get());
+    assert(graph_->num_edges() + 1 == annotator_->num_objects());
+
     std::vector<uint64_t> indices;
     size_t num_missing_kmers = 0;
 
@@ -94,6 +100,9 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
 std::vector<std::pair<std::string, size_t>>
 AnnotatedDBG::get_top_labels(const std::string &sequence,
                              size_t num_top_labels) const {
+    assert(graph_.get() && annotator_.get());
+    assert(graph_->num_edges() + 1 == annotator_->num_objects());
+
     return annotator_->get_top_labels(
         graph_->map_to_edges(sequence),
         num_top_labels
