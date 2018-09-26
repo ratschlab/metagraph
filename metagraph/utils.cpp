@@ -377,4 +377,20 @@ void insert_default_values(const std::vector<uint64_t> &, sdsl::bit_vector *);
 template
 void insert_default_values(const std::vector<uint64_t> &, std::vector<SmallVector> *);
 
+template <typename T>
+void erase(std::vector<T> *vector, const std::vector<bool> &erase_mask) {
+    assert(vector);
+    assert(vector->size() == erase_mask.size());
+
+    size_t j = 0;
+    for (size_t i = 0; i < erase_mask.size(); ++i) {
+        if (!erase_mask[i])
+            vector->at(j++) = vector->at(i);
+    }
+    vector->resize(j);
+}
+
+template
+void erase(std::vector<bool> *, const std::vector<bool> &);
+
 } // namespace utils

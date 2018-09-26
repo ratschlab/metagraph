@@ -234,6 +234,98 @@ TEST(DBGSuccinct, AddSequenceSimplePath) {
     }
 }
 
+TEST(DBGSuccinct, MarkDummySinkEdgesSimplePath) {
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ graph(k);
+        graph.add_sequence(std::string(100, 'A') + 'N');
+        std::vector<bool> sink_nodes(graph.num_edges() + 1);
+        sink_nodes[1] = true;
+        sink_nodes.back() = true;
+        std::vector<bool> sink_nodes_result(graph.num_edges() + 1, false);
+        ASSERT_EQ(2u, graph.mark_sink_dummy_edges(&sink_nodes_result));
+        EXPECT_EQ(sink_nodes, sink_nodes_result) << graph;
+    }
+}
+
+TEST(DBGSuccinct, MarkDummySinkEdgesTwoPaths) {
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ graph(k);
+        graph.add_sequence(std::string(100, 'A') + 'N');
+        graph.add_sequence(std::string(100, 'A') + 'G');
+        std::vector<bool> sink_nodes(graph.num_edges() + 1);
+        sink_nodes[1] = true;
+        sink_nodes[sink_nodes.size() - 2] = true;
+        sink_nodes[sink_nodes.size() - 1] = true;
+        std::vector<bool> sink_nodes_result(graph.num_edges() + 1, false);
+        ASSERT_EQ(3u, graph.mark_sink_dummy_edges(&sink_nodes_result));
+        EXPECT_EQ(sink_nodes, sink_nodes_result) << graph;
+    }
+}
+
+TEST(DBGSuccinct, MarkDummySourceEdgesSimplePath) {
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ graph(k);
+        graph.add_sequence(std::string(100, 'A'));
+        std::vector<bool> source_nodes(graph.num_edges() + 1, true);
+        source_nodes.front() = false;
+        source_nodes.back() = false;
+        std::vector<bool> source_nodes_result(graph.num_edges() + 1, false);
+        ASSERT_EQ(int(k + 1), int(std::count(source_nodes.begin(),
+                                             source_nodes.end(), true)));
+        ASSERT_EQ(k + 1, graph.mark_source_dummy_edges(&source_nodes_result));
+        EXPECT_EQ(source_nodes, source_nodes_result) << graph;
+    }
+}
+
+TEST(DBGSuccinct, MarkDummySourceEdgesTwoPaths) {
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ graph(k);
+        graph.add_sequence(std::string(100, 'A'));
+        graph.add_sequence(std::string(100, 'C'));
+        std::vector<bool> source_nodes(graph.num_edges() + 1, true);
+        source_nodes.front() = false;
+        source_nodes[1 + 2 + k] = false;
+        source_nodes[1 + 2 + 2 * k] = false;
+        std::vector<bool> source_nodes_result(graph.num_edges() + 1, false);
+        ASSERT_EQ(int(2 * k + 1), int(std::count(source_nodes.begin(),
+                                                 source_nodes.end(), true)));
+        ASSERT_EQ(2 * k + 1, graph.mark_source_dummy_edges(&source_nodes_result));
+        EXPECT_EQ(source_nodes, source_nodes_result) << graph;
+    }
+}
+
+TEST(DBGSuccinct, MarkDummySourceEdgesSimplePathParallel) {
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ graph(k);
+        graph.add_sequence(std::string(100, 'A'));
+        std::vector<bool> source_nodes(graph.num_edges() + 1, true);
+        source_nodes.front() = false;
+        source_nodes.back() = false;
+        std::vector<bool> source_nodes_result(graph.num_edges() + 1, false);
+        ASSERT_EQ(int(k + 1), int(std::count(source_nodes.begin(),
+                                             source_nodes.end(), true)));
+        ASSERT_EQ(k + 1, graph.mark_source_dummy_edges(&source_nodes_result, 10));
+        EXPECT_EQ(source_nodes, source_nodes_result) << graph;
+    }
+}
+
+TEST(DBGSuccinct, MarkDummySourceEdgesTwoPathsParallel) {
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ graph(k);
+        graph.add_sequence(std::string(100, 'A'));
+        graph.add_sequence(std::string(100, 'C'));
+        std::vector<bool> source_nodes(graph.num_edges() + 1, true);
+        source_nodes.front() = false;
+        source_nodes[1 + 2 + k] = false;
+        source_nodes[1 + 2 + 2 * k] = false;
+        std::vector<bool> source_nodes_result(graph.num_edges() + 1, false);
+        ASSERT_EQ(int(2 * k + 1), int(std::count(source_nodes.begin(),
+                                                 source_nodes.end(), true)));
+        ASSERT_EQ(2 * k + 1, graph.mark_source_dummy_edges(&source_nodes_result, 10));
+        EXPECT_EQ(source_nodes, source_nodes_result) << graph;
+    }
+}
+
 TEST(DBGSuccinct, RemoveDummyEdgesForClearGraph) {
     for (size_t k = 1; k < 10; ++k) {
         std::unique_ptr<DBG_succ> first_ptr;
@@ -263,7 +355,14 @@ TEST(DBGSuccinct, RemoveDummyEdgesForClearGraph) {
         auto &second = *second_ptr;
 
         ASSERT_TRUE(first.equals_internally(second)) << first;
-        auto to_remove = second.erase_redundant_dummy_edges();
+
+        std::vector<bool> source_dummy_edges(second.num_edges() + 1, false);
+        auto to_remove = second.erase_redundant_dummy_edges(&source_dummy_edges);
+
+        std::vector<bool> source_dummy_edges_result(second.num_edges() + 1, false);
+        second.mark_source_dummy_edges(&source_dummy_edges_result, 1);
+        EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
+
         EXPECT_EQ(0u, std::count(to_remove.begin(), to_remove.end(), true));
         EXPECT_TRUE(first.equals_internally(second)) << first;
     }
@@ -280,7 +379,14 @@ TEST(DBGSuccinct, RemoveDummyEdgesLinear) {
 
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
-        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges();
+
+        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges);
+
+        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
+        EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
+
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
@@ -305,7 +411,12 @@ TEST(DBGSuccinct, RemoveDummyEdgesThreePaths) {
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
 
-        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges();
+        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges);
+
+        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
+        EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
@@ -333,7 +444,12 @@ TEST(DBGSuccinct, RemoveDummyEdgesFourPaths) {
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
 
-        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges();
+        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges);
+
+        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
+        EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
@@ -363,7 +479,12 @@ TEST(DBGSuccinct, RemoveDummyEdgesFivePaths) {
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
 
-        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges();
+        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges);
+
+        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
+        EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
@@ -392,7 +513,14 @@ TEST(DBGSuccinct, RemoveDummyEdges) {
 
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
-        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges();
+
+        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges);
+
+        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
+        EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
+
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
@@ -430,7 +558,14 @@ TEST(DBGSuccinct, RemoveDummyEdgesForClearGraphParallel) {
         auto &second = *second_ptr;
 
         ASSERT_TRUE(first.equals_internally(second)) << first;
-        auto to_remove = second.erase_redundant_dummy_edges(10);
+
+        std::vector<bool> source_dummy_edges(second.num_edges() + 1, false);
+        auto to_remove = second.erase_redundant_dummy_edges(&source_dummy_edges, 10);
+
+        std::vector<bool> source_dummy_edges_result(second.num_edges() + 1, false);
+        second.mark_source_dummy_edges(&source_dummy_edges_result, 1);
+        EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
+
         EXPECT_EQ(0u, std::count(to_remove.begin(), to_remove.end(), true));
         EXPECT_TRUE(first.equals_internally(second)) << first;
     }
@@ -447,7 +582,14 @@ TEST(DBGSuccinct, RemoveDummyEdgesLinearParallel) {
 
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
-        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(10);
+
+        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges, 10);
+
+        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
+        EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
+
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
@@ -472,7 +614,12 @@ TEST(DBGSuccinct, RemoveDummyEdgesThreePathsParallel) {
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
 
-        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(10);
+        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges, 10);
+
+        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
+        EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
@@ -500,7 +647,12 @@ TEST(DBGSuccinct, RemoveDummyEdgesFourPathsParallel) {
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
 
-        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(10);
+        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges, 10);
+
+        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
+        EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
@@ -530,7 +682,12 @@ TEST(DBGSuccinct, RemoveDummyEdgesFivePathsParallel) {
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
 
-        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(10);
+        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges, 10);
+
+        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
+        EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
 
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
@@ -559,7 +716,14 @@ TEST(DBGSuccinct, RemoveDummyEdgesParallel) {
 
         ASSERT_FALSE(graph.equals_internally(dynamic_graph));
         ASSERT_EQ(graph, dynamic_graph);
-        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(10);
+
+        std::vector<bool> source_dummy_edges(dynamic_graph.num_edges() + 1, false);
+        auto redundant_edges = dynamic_graph.erase_redundant_dummy_edges(&source_dummy_edges, 10);
+
+        std::vector<bool> source_dummy_edges_result(dynamic_graph.num_edges() + 1, false);
+        dynamic_graph.mark_source_dummy_edges(&source_dummy_edges_result, 1);
+        EXPECT_EQ(source_dummy_edges_result, source_dummy_edges);
+
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph

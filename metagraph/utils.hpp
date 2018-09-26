@@ -295,6 +295,9 @@ namespace utils {
     template <typename Index, class Vector>
     void insert_default_values(const std::vector<Index> &indexes, Vector *vector);
 
+    template <typename T>
+    void erase(std::vector<T> *vector, const std::vector<bool> &erase_mask);
+
 } // namespace utils
 
 #endif // __UTILS_HPP__

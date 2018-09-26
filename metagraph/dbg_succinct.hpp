@@ -163,9 +163,20 @@ class DBG_succ : public SequenceGraph {
     /**
      * Traverse the entire dummy subgraph (which is a tree)
      * and erase all redundant dummy edges.
+     * If passed, mark |source_dummy_edges| with positions
+     * of non-redundant dummy source edges.
+     * Return value: edges removed from the initial graph.
      */
-    std::vector<bool> erase_redundant_dummy_edges(size_t num_threads = 1,
-                                                  bool verbose = false);
+    std::vector<bool>
+    erase_redundant_dummy_edges(std::vector<bool> *source_dummy_edges = NULL,
+                                size_t num_threads = 0,
+                                bool verbose = false);
+
+    uint64_t mark_source_dummy_edges(std::vector<bool> *mask,
+                                     size_t num_threads = 0,
+                                     bool verbose = false) const;
+
+    uint64_t mark_sink_dummy_edges(std::vector<bool> *mask) const;
 
     /**
      * Depth first edge traversal.
@@ -175,8 +186,6 @@ class DBG_succ : public SequenceGraph {
                   Call<edge_index> pre_visit,
                   Call<edge_index> post_visit,
                   std::function<bool(edge_index)> end_branch) const;
-
-    void mark_sink_dummy_edges(std::vector<bool> *mask);
 
     /**
     * Heavily borrowing from the graph sequence traversal, this function gets 

@@ -1363,7 +1363,7 @@ int main(int argc, const char *argv[]) {
                     std::cout << "Traverse source dummy edges and remove redundant ones..." << std::endl;
                 }
                 timer.reset();
-                graph->erase_redundant_dummy_edges(config->parallel, config->verbose);
+                graph->erase_redundant_dummy_edges(NULL, config->parallel, config->verbose);
                 if (config->verbose) {
                     std::cout << "Done in " << timer.elapsed() << "sec" << std::endl;
                 }
