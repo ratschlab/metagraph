@@ -369,18 +369,12 @@ void insert_default_values(const std::vector<Index> &indexes, Vector *vector) {
 }
 
 template
-void
-insert_default_values<uint64_t, std::vector<bool>>(const std::vector<uint64_t> &,
-                                                   std::vector<bool> *);
+void insert_default_values(const std::vector<uint64_t> &, std::vector<bool> *);
 
 template
-void
-insert_default_values<uint64_t, sdsl::bit_vector>(const std::vector<uint64_t> &,
-                                                  sdsl::bit_vector *);
+void insert_default_values(const std::vector<uint64_t> &, sdsl::bit_vector *);
 
 template
-void
-insert_default_values<uint64_t, std::vector<SmallVector>>(const std::vector<uint64_t> &,
-                                                          std::vector<SmallVector> *);
+void insert_default_values(const std::vector<uint64_t> &, std::vector<SmallVector> *);
 
 } // namespace utils

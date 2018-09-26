@@ -176,6 +176,8 @@ class DBG_succ : public SequenceGraph {
                   Call<edge_index> post_visit,
                   std::function<bool(edge_index)> end_branch) const;
 
+    void mark_sink_dummy_edges(std::vector<bool> *mask);
+
     /**
     * Heavily borrowing from the graph sequence traversal, this function gets 
     * a graph `other` and merges its nodes into the target graph object.

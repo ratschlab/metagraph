@@ -1682,6 +1682,16 @@ std::vector<bool> DBG_succ::erase_redundant_dummy_edges(size_t num_threads,
     return edges_to_remove_mask;
 }
 
+void DBG_succ::mark_sink_dummy_edges(std::vector<bool> *mask) {
+    assert(mask);
+    assert(mask->size() == W_->size());
+    for (uint64_t i = 1; i < W_->size(); ++i) {
+        assert(get_W(i) != alph_size);
+        if (!get_W(i))
+            mask->at(i) = true;
+    }
+}
+
 /**
  * Get the nodes of graph |other| merged into the current graph. The graph
  * |other| is fully traversed and all edges are added to to the current graph.
