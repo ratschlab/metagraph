@@ -100,6 +100,7 @@ class MultiLabelAnnotation
 
     /************************* Properties *************************/
 
+    virtual uint64_t num_objects() const = 0;
     virtual size_t num_labels() const = 0;
     virtual double sparsity() const = 0;
 };
@@ -183,6 +184,7 @@ class MultiLabelEncoded
 
     /************************* Properties *************************/
 
+    virtual uint64_t num_objects() const = 0;
     virtual size_t num_labels() const = 0;
     virtual double sparsity() const = 0;
 

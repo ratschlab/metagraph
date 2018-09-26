@@ -11,6 +11,7 @@ TEST(AnnotatedDBG, ExtendGraphWithSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
         DBG_succ graph(k);
         annotate::ColumnCompressed<> annotation(graph.num_edges() + 1);
+        ASSERT_EQ(graph.num_edges() + 1, annotation.num_objects());
         bit_vector_dyn inserted_edges(graph.num_edges() + 1, 0);
 
         std::string sequence(100, 'A');
@@ -25,6 +26,7 @@ TEST(AnnotatedDBG, ExtendGraphWithSimplePath) {
         }
 
         annotation.insert_rows(inserted_edge_idx);
+        EXPECT_EQ(graph.num_edges() + 1, inserted_edges.size());
 
         graph.map_to_nodes(sequence, [&](uint64_t i) {
             if (i > 0)

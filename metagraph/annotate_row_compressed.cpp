@@ -276,6 +276,11 @@ RowCompressed<Label>::count_labels(const std::vector<Index> &indices) const {
 }
 
 template <typename Label>
+uint64_t RowCompressed<Label>::num_objects() const {
+    return matrix_->size();
+}
+
+template <typename Label>
 size_t RowCompressed<Label>::num_labels() const {
     return label_encoder_.size();
 }

@@ -169,6 +169,7 @@ TEST(ColumnCompressed, insert_empty_rows) {
     std::unique_ptr<annotate::MultiLabelAnnotation<uint64_t, std::string>> annotation(
         new annotate::ColumnCompressed<>(5)
     );
+    EXPECT_EQ(5u, annotation->num_objects());
     annotation->set_labels(0, { "Label0", "Label2", "Label8" });
     annotation->set_labels(2, { "Label1", "Label2" });
     annotation->set_labels(4, { "Label8" });
@@ -180,6 +181,7 @@ TEST(ColumnCompressed, insert_empty_rows) {
     ASSERT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation->get_labels(4)));
 
     annotation->insert_rows({ 1, 2, 4, 5 });
+    EXPECT_EQ(9u, annotation->num_objects());
 
     EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation->get_labels(0)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get_labels(1)));

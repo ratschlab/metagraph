@@ -128,6 +128,7 @@ class AnnotationCategoryBloom : public MultiLabelAnnotation<uint64_t, std::strin
     get_top_labels(const std::vector<Index> &indices,
                    size_t num_top = static_cast<size_t>(-1)) const;
 
+    uint64_t num_objects() const;
     size_t num_labels() const;
     double sparsity() const;
 

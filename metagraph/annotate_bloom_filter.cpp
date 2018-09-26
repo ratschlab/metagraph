@@ -172,6 +172,10 @@ AnnotationCategoryBloom
     return top_counts;
 }
 
+uint64_t AnnotationCategoryBloom::num_objects() const {
+    return graph_.get_num_edges() + 1;
+}
+
 size_t AnnotationCategoryBloom::num_labels() const {
     return column_to_label_.size();
 }

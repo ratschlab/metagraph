@@ -47,6 +47,7 @@ class FastColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     VLabels get_labels(const std::vector<Index> &indices,
                        double presence_ratio) const;
 
+    uint64_t num_objects() const;
     size_t num_labels() const;
     double sparsity() const;
 

@@ -294,6 +294,11 @@ ColumnCompressed<Label>::get_labels(const std::vector<Index> &indices,
 }
 
 template <typename Label>
+uint64_t ColumnCompressed<Label>::num_objects() const {
+    return num_rows_;
+}
+
+template <typename Label>
 size_t ColumnCompressed<Label>::num_labels() const {
     assert(bitmatrix_.size() == label_encoder_.size());
     return label_encoder_.size();

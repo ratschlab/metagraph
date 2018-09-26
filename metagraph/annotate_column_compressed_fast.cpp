@@ -376,6 +376,11 @@ FastColumnCompressed<Label>::get_labels(const std::vector<Index> &indices,
 }
 
 template <typename Label>
+uint64_t FastColumnCompressed<Label>::num_objects() const {
+    return num_rows_;
+}
+
+template <typename Label>
 size_t FastColumnCompressed<Label>::num_labels() const {
     return label_encoder_.size();
 }
