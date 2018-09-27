@@ -1706,7 +1706,7 @@ void DBG_succ::call_paths(Call<const std::vector<edge_index>,
     // keep track of edges that are already included in covering paths
     std::vector<bool> visited(W_->size(), false);
     // store all branch nodes on the way
-    std::queue<Edge> edges;
+    std::deque<Edge> edges;
     std::vector<uint64_t> path;
 
     // start at the source node
@@ -1717,14 +1717,14 @@ void DBG_succ::call_paths(Call<const std::vector<edge_index>,
         //TODO: traverse backwards
 
         discovered[i] = true;
-        edges.push({ i, get_node_seq(i) });
+        edges.push_back({ i, get_node_seq(i) });
 
         // keep traversing until we have worked off all branches from the queue
         while (!edges.empty()) {
             uint64_t edge = edges.front().id;
             auto sequence = std::move(edges.front().source_kmer);
             path.clear();
-            edges.pop();
+            edges.pop_front();
 
             // traverse simple path until we reach its tail or
             // the first edge that has been already visited
@@ -1750,13 +1750,26 @@ void DBG_succ::call_paths(Call<const std::vector<edge_index>,
                     std::vector<TAlphabet> kmer(sequence.end() - k_, sequence.end());
 
                     // loop over outgoing edges
+                    bool continue_traversal = false;
                     do {
                         if (!discovered[edge]) {
+                            // mark that there is at least one outgoing
+                            // edge  that has not been discovered
+                            continue_traversal = true;
                             discovered[edge] = true;
-                            edges.push({ edge, kmer });
+                            edges.push_back({ edge, kmer });
                         }
                     } while (--edge > 0 && !get_last(edge));
-                    break;
+
+                    // pick the first outgoing but yet undiscovered
+                    // edge and continue traversing the graph
+                    if (continue_traversal) {
+                        edge = edges.back().id;
+                        edges.pop_back();
+                        continue;
+                    } else {
+                        break;
+                    }
                 }
             }
 
