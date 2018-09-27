@@ -23,6 +23,17 @@ bool write_fasta(gzFile gz_out, const kseq_t &kseq) {
         && gzputc(gz_out, '\n') == '\n';
 }
 
+bool write_fasta(gzFile gz_out, const std::string &header,
+                                const std::string &sequence) {
+    return gzputc(gz_out, '>') == '>'
+        && gzwrite(gz_out, header.data(), header.length())
+                        == static_cast<int>(header.length())
+        && gzputc(gz_out, '\n') == '\n'
+        && gzwrite(gz_out, sequence.data(), sequence.length())
+                        == static_cast<int>(sequence.length())
+        && gzputc(gz_out, '\n') == '\n';
+}
+
 bool write_fastq(gzFile gz_out, const kseq_t &kseq) {
     std::string qual(kseq.qual.s, kseq.qual.l);
 

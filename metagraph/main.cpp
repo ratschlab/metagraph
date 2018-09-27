@@ -1369,21 +1369,40 @@ int main(int argc, const char *argv[]) {
                 }
             }
 
-            if (config->to_sequences) {
+            if (config->to_fasta) {
                 if (config->verbose) {
                     std::cout << "Extracting sequences from graph...\t" << std::flush;
                 }
                 timer.reset();
                 if (config->outfbase.size()) {
-                    std::ofstream outstream(config->outfbase + ".adjlist");
+
+                    auto out_filename
+                        = utils::remove_suffix(config->outfbase, ".gz", ".fasta")
+                            + ".fasta.gz";
+
+                    gzFile out_fasta_gz = gzopen(out_filename.c_str(), "w");
+
+                    if (out_fasta_gz == Z_NULL) {
+                        std::cerr << "ERROR: Can't write to " << out_filename << std::endl;
+                        exit(1);
+                    }
+
                     graph->call_sequences([&](const auto &sequence) {
-                        outstream << sequence << std::endl;
+                        if (!write_fasta(out_fasta_gz, "", sequence)) {
+                            std::cerr << "ERROR: Can't write extracted sequences to "
+                                      << out_filename << std::endl;
+                            exit(1);
+                        }
                     });
+
+                    gzclose(out_fasta_gz);
+
                 } else {
                     graph->call_sequences([&](const auto &sequence) {
                         std::cout << sequence << std::endl;
                     });
                 }
+
                 if (config->verbose) {
                     std::cout << timer.elapsed() << "sec" << std::endl;
                 }

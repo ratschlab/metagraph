@@ -19,7 +19,7 @@ class Config {
     bool filename_anno = false;
     bool fasta_anno = false;
     bool to_adj_list = false;
-    bool to_sequences = false;
+    bool to_fasta = false;
     bool to_row_annotator = false;
     bool count_kmers_query = false;
     bool query_presence = false;

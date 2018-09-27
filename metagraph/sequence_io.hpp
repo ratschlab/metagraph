@@ -16,6 +16,9 @@ KSEQ_INIT(gzFile, gzread);
 // TODO: use BGZF from htslib
 bool write_fasta(gzFile gz_out, const kseq_t &kseq);
 
+bool write_fasta(gzFile gz_out, const std::string &header,
+                                const std::string &sequence);
+
 bool write_fastq(gzFile gz_out, const kseq_t &kseq);
 
 
