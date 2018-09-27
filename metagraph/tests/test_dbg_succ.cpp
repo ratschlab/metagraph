@@ -680,20 +680,33 @@ TEST(DBGSuccinct, AppendSequenceAnyKmerSize) {
     }
 }
 
-TEST(DBGSuccinct, CallSimplePathsEmptyGraph) {
+TEST(DBGSuccinct, CallPathsEmptyGraph) {
     for (size_t k = 1; k < 30; ++k) {
         DBG_succ empty(k);
         DBG_succ reconstructed(k);
 
         empty.call_sequences([&](const auto &sequence) {
             reconstructed.add_sequence(sequence);
-        });
+        }, false);
 
         EXPECT_EQ(empty, reconstructed);
     }
 }
 
-TEST(DBGSuccinct, CallSimplePathsOneLoop) {
+TEST(DBGSuccinct, CallContigsEmptyGraph) {
+    for (size_t k = 1; k < 30; ++k) {
+        DBG_succ empty(k);
+        DBG_succ reconstructed(k);
+
+        empty.call_sequences([&](const auto &sequence) {
+            reconstructed.add_sequence(sequence);
+        }, true);
+
+        EXPECT_EQ(empty, reconstructed);
+    }
+}
+
+TEST(DBGSuccinct, CallPathsOneLoop) {
     for (size_t k = 1; k < 20; ++k) {
         DBG_succ graph(k);
 
@@ -702,15 +715,32 @@ TEST(DBGSuccinct, CallSimplePathsOneLoop) {
         size_t num_paths = 0;
         size_t num_sequences = 0;
 
-        graph.call_paths([&](const auto &, const auto &) { num_paths++; });
-        graph.call_sequences([&](const auto &) { num_sequences++; });
+        graph.call_paths([&](const auto &, const auto &) { num_paths++; }, false);
+        graph.call_sequences([&](const auto &) { num_sequences++; }, false);
 
         EXPECT_EQ(graph.num_edges(), num_paths);
         EXPECT_EQ(graph.num_edges() - 1, num_sequences);
     }
 }
 
-TEST(DBGSuccinct, CallSimplePathsTwoLoops) {
+TEST(DBGSuccinct, CallContigsOneLoop) {
+    for (size_t k = 1; k < 20; ++k) {
+        DBG_succ graph(k);
+
+        ASSERT_EQ(1u, graph.num_edges());
+
+        size_t num_paths = 0;
+        size_t num_sequences = 0;
+
+        graph.call_paths([&](const auto &, const auto &) { num_paths++; }, true);
+        graph.call_sequences([&](const auto &) { num_sequences++; }, true);
+
+        EXPECT_EQ(graph.num_edges(), num_paths);
+        EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+    }
+}
+
+TEST(DBGSuccinct, CallPathsTwoLoops) {
     for (size_t k = 1; k < 20; ++k) {
         KMerDBGSuccConstructor constructor(k);
         constructor.add_reads({ std::string(100, 'A') });
@@ -721,15 +751,34 @@ TEST(DBGSuccinct, CallSimplePathsTwoLoops) {
         size_t num_paths = 0;
         size_t num_sequences = 0;
 
-        graph.call_paths([&](const auto &, const auto &) { num_paths++; });
-        graph.call_sequences([&](const auto &) { num_sequences++; });
+        graph.call_paths([&](const auto &, const auto &) { num_paths++; }, false);
+        graph.call_sequences([&](const auto &) { num_sequences++; }, false);
 
         EXPECT_EQ(graph.num_edges(), num_paths);
         EXPECT_EQ(graph.num_edges() - 1, num_sequences);
     }
 }
 
-TEST(DBGSuccinct, CallSimplePathsFourLoops) {
+TEST(DBGSuccinct, CallContigsTwoLoops) {
+    for (size_t k = 1; k < 20; ++k) {
+        KMerDBGSuccConstructor constructor(k);
+        constructor.add_reads({ std::string(100, 'A') });
+        DBG_succ graph(&constructor);
+
+        ASSERT_EQ(2u, graph.num_edges());
+
+        size_t num_paths = 0;
+        size_t num_sequences = 0;
+
+        graph.call_paths([&](const auto &, const auto &) { num_paths++; }, true);
+        graph.call_sequences([&](const auto &) { num_sequences++; }, true);
+
+        EXPECT_EQ(graph.num_edges(), num_paths);
+        EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+    }
+}
+
+TEST(DBGSuccinct, CallPathsFourLoops) {
     for (size_t k = 1; k < 20; ++k) {
         KMerDBGSuccConstructor constructor(k);
         constructor.add_reads({ std::string(100, 'A'),
@@ -742,15 +791,36 @@ TEST(DBGSuccinct, CallSimplePathsFourLoops) {
         size_t num_paths = 0;
         size_t num_sequences = 0;
 
-        graph.call_paths([&](const auto &, const auto &) { num_paths++; });
-        graph.call_sequences([&](const auto &) { num_sequences++; });
+        graph.call_paths([&](const auto &, const auto &) { num_paths++; }, false);
+        graph.call_sequences([&](const auto &) { num_sequences++; }, false);
 
         EXPECT_EQ(graph.num_edges(), num_paths);
         EXPECT_EQ(graph.num_edges() - 1, num_sequences);
     }
 }
 
-TEST(DBGSuccinct, CallSimplePaths) {
+TEST(DBGSuccinct, CallContigsFourLoops) {
+    for (size_t k = 1; k < 20; ++k) {
+        KMerDBGSuccConstructor constructor(k);
+        constructor.add_reads({ std::string(100, 'A'),
+                                std::string(100, 'G'),
+                                std::string(100, 'C') });
+        DBG_succ graph(&constructor);
+
+        ASSERT_EQ(4u, graph.num_edges());
+
+        size_t num_paths = 0;
+        size_t num_sequences = 0;
+
+        graph.call_paths([&](const auto &, const auto &) { num_paths++; }, true);
+        graph.call_sequences([&](const auto &) { num_sequences++; }, true);
+
+        EXPECT_EQ(graph.num_edges(), num_paths);
+        EXPECT_EQ(graph.num_edges() - 1, num_sequences);
+    }
+}
+
+TEST(DBGSuccinct, CallPaths) {
     for (size_t k = 1; k < 10; ++k) {
         {
             DBG_succ graph(k);
@@ -762,7 +832,7 @@ TEST(DBGSuccinct, CallSimplePaths) {
 
             graph.call_sequences([&](const auto &sequence) {
                 reconstructed.add_sequence(sequence);
-            });
+            }, false);
 
             EXPECT_EQ(graph, reconstructed);
         }
@@ -777,7 +847,7 @@ TEST(DBGSuccinct, CallSimplePaths) {
 
             graph.call_sequences([&](const auto &sequence) {
                 reconstructed.add_sequence(sequence);
-            });
+            }, false);
 
             EXPECT_EQ(graph, reconstructed);
         }
@@ -792,7 +862,7 @@ TEST(DBGSuccinct, CallSimplePaths) {
 
             graph.call_sequences([&](const auto &sequence) {
                 reconstructed.add_sequence(sequence);
-            });
+            }, false);
 
             EXPECT_EQ(graph, reconstructed);
         }
@@ -806,7 +876,7 @@ TEST(DBGSuccinct, CallSimplePaths) {
 
             graph.call_sequences([&](const auto &sequence) {
                 reconstructed.add_sequence(sequence);
-            });
+            }, false);
 
             EXPECT_EQ(graph, reconstructed);
         }
@@ -820,7 +890,84 @@ TEST(DBGSuccinct, CallSimplePaths) {
 
             graph.call_sequences([&](const auto &sequence) {
                 reconstructed.add_sequence(sequence);
-            });
+            }, false);
+
+            EXPECT_EQ(graph, reconstructed);
+        }
+    }
+}
+
+TEST(DBGSuccinct, CallContigs) {
+    for (size_t k = 1; k < 10; ++k) {
+        {
+            DBG_succ graph(k);
+            graph.add_sequence("AAACACTAG", true);
+            graph.add_sequence("AACGACATG", true);
+            graph.switch_state(Config::STAT);
+
+            DBG_succ reconstructed(k);
+
+            graph.call_sequences([&](const auto &sequence) {
+                reconstructed.add_sequence(sequence);
+            }, true);
+
+            EXPECT_EQ(graph, reconstructed);
+        }
+        {
+            DBG_succ graph(k);
+            graph.add_sequence("AGACACTGA", true);
+            graph.add_sequence("GACTACGTA", true);
+            graph.add_sequence("ACTAACGTA", true);
+            graph.switch_state(Config::STAT);
+
+            DBG_succ reconstructed(k);
+
+            graph.call_sequences([&](const auto &sequence) {
+                reconstructed.add_sequence(sequence);
+            }, true);
+
+            EXPECT_EQ(graph, reconstructed);
+        }
+        {
+            DBG_succ graph(k);
+            graph.add_sequence("AGACACAGT", true);
+            graph.add_sequence("GACTTGCAG", true);
+            graph.add_sequence("ACTAGTCAG", true);
+            graph.switch_state(Config::STAT);
+
+            DBG_succ reconstructed(k);
+
+            graph.call_sequences([&](const auto &sequence) {
+                reconstructed.add_sequence(sequence);
+            }, true);
+
+            EXPECT_EQ(graph, reconstructed);
+        }
+        {
+            DBG_succ graph(k);
+            graph.add_sequence("AAACTCGTAGC", true);
+            graph.add_sequence("AAATGCGTAGC", true);
+            graph.switch_state(Config::STAT);
+
+            DBG_succ reconstructed(k);
+
+            graph.call_sequences([&](const auto &sequence) {
+                reconstructed.add_sequence(sequence);
+            }, true);
+
+            EXPECT_EQ(graph, reconstructed);
+        }
+        {
+            DBG_succ graph(k);
+            graph.add_sequence("AAACT", false);
+            graph.add_sequence("AAATG", false);
+            graph.switch_state(Config::STAT);
+
+            DBG_succ reconstructed(k);
+
+            graph.call_sequences([&](const auto &sequence) {
+                reconstructed.add_sequence(sequence);
+            }, true);
 
             EXPECT_EQ(graph, reconstructed);
         }

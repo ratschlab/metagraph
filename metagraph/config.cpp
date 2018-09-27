@@ -171,6 +171,9 @@ Config::Config(int argc, const char *argv[]) {
             to_adj_list = true;
         } else if (!strcmp(argv[i], "--to-fasta")) {
             to_fasta = true;
+        } else if (!strcmp(argv[i], "--contigs")) {
+            to_fasta = true;
+            contigs = true;
         } else if (!strcmp(argv[i], "--to-row-format")) {
             to_row_annotator = true;
         } else if (!strcmp(argv[i], "--clear-dummy")) {
@@ -577,7 +580,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --state [STR] \t\tchange the graph state (either 'fast' or 'dynamic') [fast]\n");
             fprintf(stderr, "\t   --to-adj-list \t\twrite the adjacency list to file [off]\n");
             // fprintf(stderr, "\t   --to-sequences \t\twrite contig sequences to file [off]\n");
-            fprintf(stderr, "\t   --to-fasta \t\t\textract sequences from graph and write to a compressed file [off]\n");
+            fprintf(stderr, "\t   --to-fasta \t\t\textract sequences from graph and write to compressed fasta file [off]\n");
+            fprintf(stderr, "\t   --contigs \t\t\textract all simple paths from graph and write to compressed fasta file [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case TRANSFORM_ANNOTATION: {

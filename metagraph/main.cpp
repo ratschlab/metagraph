@@ -1393,14 +1393,14 @@ int main(int argc, const char *argv[]) {
                                       << out_filename << std::endl;
                             exit(1);
                         }
-                    });
+                    }, config->contigs);
 
                     gzclose(out_fasta_gz);
 
                 } else {
                     graph->call_sequences([&](const auto &sequence) {
                         std::cout << sequence << std::endl;
-                    });
+                    }, config->contigs);
                 }
 
                 if (config->verbose) {

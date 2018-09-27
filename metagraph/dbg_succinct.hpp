@@ -136,9 +136,13 @@ class DBG_succ : public SequenceGraph {
     // traverse all nodes in graph except for the dummy source of sink ones
     void call_kmers(Call<node_index, const std::string&> callback) const;
     void call_edges(Call<edge_index, const std::vector<TAlphabet>&> callback) const;
+    // call paths (or simple paths if |split_to_contigs| is true) that cover
+    // exactly all edges in graph
     void call_paths(Call<const std::vector<edge_index>,
-                         const std::vector<TAlphabet>&> callback) const;
-    void call_sequences(Call<const std::string&> callback) const;
+                         const std::vector<TAlphabet>&> callback,
+                    bool split_to_contigs = false) const;
+    void call_sequences(Call<const std::string&> callback,
+                        bool split_to_contigs = false) const;
 
     node_index traverse(node_index node, char edge_label) const;
     node_index traverse_back(node_index node, char edge_label) const;

@@ -1700,7 +1700,8 @@ struct Edge {
  * edge, edge -> edge, edge -> ... -> edge, ... (k+1 - mer, k+...+1 - mer, ...)
  */
 void DBG_succ::call_paths(Call<const std::vector<edge_index>,
-                               const std::vector<TAlphabet>&> callback) const {
+                               const std::vector<TAlphabet>&> callback,
+                          bool split_to_contigs) const {
     // keep track of reached edges
     std::vector<bool> discovered(W_->size(), false);
     // keep track of edges that are already included in covering paths
@@ -1761,6 +1762,11 @@ void DBG_succ::call_paths(Call<const std::vector<edge_index>,
                         }
                     } while (--edge > 0 && !get_last(edge));
 
+                    // stop traversing this sequence if we call contigs
+                    // in order to call only simple paths
+                    if (split_to_contigs)
+                        break;
+
                     // pick the first outgoing but yet undiscovered
                     // edge and continue traversing the graph
                     if (continue_traversal) {
@@ -1779,7 +1785,8 @@ void DBG_succ::call_paths(Call<const std::vector<edge_index>,
     }
 }
 
-void DBG_succ::call_sequences(Call<const std::string&> callback) const {
+void DBG_succ::call_sequences(Call<const std::string&> callback,
+                              bool split_to_contigs) const {
     std::string sequence;
 
     call_paths([&](const auto&, const auto &path) {
@@ -1793,7 +1800,7 @@ void DBG_succ::call_sequences(Call<const std::string&> callback) const {
 
         if (sequence.size())
             callback(sequence);
-    });
+    }, split_to_contigs);
 }
 
 void DBG_succ::call_edges(Call<edge_index,
