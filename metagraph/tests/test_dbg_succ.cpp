@@ -234,15 +234,56 @@ TEST(DBGSuccinct, AddSequenceSimplePath) {
     }
 }
 
+TEST(DBGSuccinct, CountDummyEdgesSimplePath) {
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ graph(k);
+        graph.add_sequence(std::string(100, 'A') + 'N');
+        EXPECT_EQ(2u, graph.num_edges()
+                        - graph.mark_sink_dummy_edges()
+                        - graph.mark_source_dummy_edges()) << graph;
+    }
+}
+
+TEST(DBGSuccinct, CountDummyEdgesSimplePathParallel) {
+    for (size_t k = 1; k < 10; ++k) {
+        DBG_succ graph(k);
+        graph.add_sequence(std::string(100, 'A') + 'N');
+        EXPECT_EQ(2u, graph.num_edges()
+                        - graph.mark_sink_dummy_edges()
+                        - graph.mark_source_dummy_edges(NULL, 10)) << graph;
+    }
+}
+
+TEST(DBGSuccinct, CountDummyEdgesTwoPaths) {
+    for (size_t k = 1; k < 40; ++k) {
+        DBG_succ graph(k);
+        graph.add_sequence(std::string(100, 'A') + 'N');
+        graph.add_sequence(std::string(100, 'C') + 'T');
+        EXPECT_EQ(4u, graph.num_edges()
+                        - graph.mark_sink_dummy_edges()
+                        - graph.mark_source_dummy_edges()) << graph;
+    }
+}
+
+TEST(DBGSuccinct, CountDummyEdgesTwoPathsParallel) {
+    for (size_t k = 1; k < 40; ++k) {
+        DBG_succ graph(k);
+        graph.add_sequence(std::string(100, 'A') + 'N');
+        graph.add_sequence(std::string(100, 'C') + 'T');
+        EXPECT_EQ(4u, graph.num_edges()
+                        - graph.mark_sink_dummy_edges()
+                        - graph.mark_source_dummy_edges(NULL, 10)) << graph;
+    }
+}
+
 TEST(DBGSuccinct, MarkDummySinkEdgesSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
         DBG_succ graph(k);
         graph.add_sequence(std::string(100, 'A') + 'N');
         std::vector<bool> sink_nodes(graph.num_edges() + 1);
-        sink_nodes[1] = true;
         sink_nodes.back() = true;
         std::vector<bool> sink_nodes_result(graph.num_edges() + 1, false);
-        ASSERT_EQ(2u, graph.mark_sink_dummy_edges(&sink_nodes_result));
+        ASSERT_EQ(1u, graph.mark_sink_dummy_edges(&sink_nodes_result));
         EXPECT_EQ(sink_nodes, sink_nodes_result) << graph;
     }
 }
@@ -253,11 +294,10 @@ TEST(DBGSuccinct, MarkDummySinkEdgesTwoPaths) {
         graph.add_sequence(std::string(100, 'A') + 'N');
         graph.add_sequence(std::string(100, 'A') + 'G');
         std::vector<bool> sink_nodes(graph.num_edges() + 1);
-        sink_nodes[1] = true;
         sink_nodes[sink_nodes.size() - 2] = true;
         sink_nodes[sink_nodes.size() - 1] = true;
         std::vector<bool> sink_nodes_result(graph.num_edges() + 1, false);
-        ASSERT_EQ(3u, graph.mark_sink_dummy_edges(&sink_nodes_result));
+        ASSERT_EQ(2u, graph.mark_sink_dummy_edges(&sink_nodes_result));
         EXPECT_EQ(sink_nodes, sink_nodes_result) << graph;
     }
 }

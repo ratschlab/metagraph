@@ -176,6 +176,8 @@ Config::Config(int argc, const char *argv[]) {
             contigs = true;
         } else if (!strcmp(argv[i], "--to-row-format")) {
             to_row_annotator = true;
+        } else if (!strcmp(argv[i], "--count-dummy")) {
+            count_dummy = true;
         } else if (!strcmp(argv[i], "--clear-dummy")) {
             clear_dummy = true;
         } else if (!strcmp(argv[i], "--internal")) {
@@ -487,9 +489,11 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for stats:\n");
             // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t-a --annotator [STR] \tbasename of annotator to update []\n");
+            fprintf(stderr, "\t   --count-dummy \tshow number of dummy source and sink edges [off]\n");
             fprintf(stderr, "\t   --row-annotator \tuse row based annotator instead of column compressor [off]\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t   --print-internal \tprint internal graph representation to the screen [off]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case ANNOTATE: {
             fprintf(stderr, "Usage: %s annotate -i <graph_basename> [options] <PATH1> [[PATH2] ...]\n"

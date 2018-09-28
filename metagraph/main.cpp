@@ -1250,6 +1250,17 @@ int main(int argc, const char *argv[]) {
                           << graph->num_edges() - graph->get_F(DBG_succ::alph_size - 1)
                           << "}" << std::endl;
 
+                if (config->count_dummy) {
+                    std::cout << "dummy source edges: "
+                              << graph->mark_source_dummy_edges(NULL,
+                                                                config->parallel,
+                                                                config->verbose)
+                              << std::endl;
+                    std::cout << "dummy sink edges: "
+                              << graph->mark_sink_dummy_edges()
+                              << std::endl;
+                }
+
                 if (config->print_graph_internal_repr)
                     graph->print_internal_representation(std::cout);
 
@@ -1408,6 +1419,7 @@ int main(int argc, const char *argv[]) {
                 }
                 return 0;
             }
+
             if (config->to_adj_list) {
                 if (config->verbose) {
                     std::cout << "Converting graph to adjacency list...\t" << std::flush;

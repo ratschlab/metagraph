@@ -35,6 +35,7 @@ class Config {
     bool use_kmc = false;
     bool internal = false;
     bool clear_dummy = false;
+    bool count_dummy = false;
 
     unsigned int k = 3;
     unsigned int filter_k = 3;

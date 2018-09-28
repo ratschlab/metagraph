@@ -1556,6 +1556,9 @@ void traverse_dummy_edges(const DBG_succ &graph,
                           std::vector<T> *traversed_mask,
                           U *num_dummy_traversed,
                           bool verbose) {
+    assert(!redundant_mask || redundant_mask->size() == graph.get_W().size());
+    assert(!traversed_mask || traversed_mask->size() == graph.get_W().size());
+
     if (!check_depth)
         return;
 
@@ -1612,6 +1615,9 @@ uint64_t traverse_dummy_edges(const DBG_succ &graph,
                               std::vector<bool> *traversed_mask,
                               size_t num_threads,
                               bool verbose) {
+    assert(!redundant_mask || redundant_mask->size() == graph.get_W().size());
+    assert(!traversed_mask || traversed_mask->size() == graph.get_W().size());
+
     if (traversed_mask)
         traversed_mask->at(1) = true;
 
@@ -1747,25 +1753,30 @@ DBG_succ::erase_redundant_dummy_edges(std::vector<bool> *source_dummy_edges,
 uint64_t DBG_succ::mark_source_dummy_edges(std::vector<bool> *mask,
                                            size_t num_threads,
                                            bool verbose) const {
-    assert(mask);
-    assert(mask->size() == W_->size());
+    assert(!mask || mask->size() == W_->size());
 
     return traverse_dummy_edges(*this, NULL, mask, num_threads, verbose);
 }
 
 uint64_t DBG_succ::mark_sink_dummy_edges(std::vector<bool> *mask) const {
-    assert(mask);
+    if (!mask)
+        return rank_W(num_edges(), 0) - 1;
+
     assert(mask->size() == W_->size());
 
     uint64_t num_dummy_sink_edges = 0;
 
-    for (uint64_t i = 1; i < W_->size(); ++i) {
+    // skip the main dummy source
+    for (uint64_t i = 2; i < W_->size(); ++i) {
         assert(get_W(i) != alph_size);
         if (!get_W(i)) {
             mask->at(i) = true;
             num_dummy_sink_edges++;
         }
     }
+
+    assert(num_dummy_sink_edges == rank_W(num_edges(), 0) - 1);
+
     return num_dummy_sink_edges;
 }
 

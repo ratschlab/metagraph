@@ -172,11 +172,12 @@ class DBG_succ : public SequenceGraph {
                                 size_t num_threads = 0,
                                 bool verbose = false);
 
-    uint64_t mark_source_dummy_edges(std::vector<bool> *mask,
+    uint64_t mark_source_dummy_edges(std::vector<bool> *mask = NULL,
                                      size_t num_threads = 0,
                                      bool verbose = false) const;
 
-    uint64_t mark_sink_dummy_edges(std::vector<bool> *mask) const;
+    // Do not include the main dummy edge (with edge_index = 1)
+    uint64_t mark_sink_dummy_edges(std::vector<bool> *mask = NULL) const;
 
     /**
      * Depth first edge traversal.
