@@ -16,6 +16,7 @@ class Config {
     bool reverse = false;
     bool dynamic = false;
     bool fast = false;
+    bool shrink_anno = true;
     bool filename_anno = false;
     bool fasta_anno = false;
     bool to_adj_list = false;

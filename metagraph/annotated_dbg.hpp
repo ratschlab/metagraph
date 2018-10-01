@@ -10,13 +10,10 @@ class AnnotatedDBG {
   public:
     typedef annotate::MultiLabelAnnotation<uint64_t, std::string> Annotator;
 
-    AnnotatedDBG(DBG_succ *dbg, Annotator *annotation = NULL, size_t num_threads = 1);
-    AnnotatedDBG(Annotator *annotation, DBG_succ *dbg = NULL, size_t num_threads = 1);
-
-    void adjust_annotation(const bit_vector_dyn &inserted_edges);
-
-    void annotate_sequence(const std::string &sequence,
-                           const std::vector<std::string> &labels);
+    explicit AnnotatedDBG(size_t num_threads = 0);
+    AnnotatedDBG(DBG_succ *dbg, size_t num_threads = 0);
+    AnnotatedDBG(Annotator *annotation, size_t num_threads = 0);
+    AnnotatedDBG(DBG_succ *dbg, Annotator *annotation, size_t num_threads = 0);
 
     // return labels that occur at least in |presence_ratio| k-mers
     std::vector<std::string>
@@ -26,20 +23,47 @@ class AnnotatedDBG {
     std::vector<std::pair<std::string, size_t>>
     get_top_labels(const std::string &sequence, size_t num_top_labels) const;
 
-    Annotator& get_annotation() { return *annotator_; }
-    const Annotator& get_annotation() const { return *annotator_; }
+    void adjust_annotation(const bit_vector_dyn &inserted_edges);
 
-    DBG_succ& get_graph() { return *graph_; }
-    const DBG_succ& get_graph() const { return *graph_; }
+    void annotate_sequence(const std::string &sequence,
+                           const std::vector<std::string> &labels);
+
+    // prune redundant dummy edges in graph if |prune_redundant_dummy| is true
+    // and mark all dummy edges that cannot be annotated
+    void initialize_annotation_mask(size_t num_threads = 0,
+                                    bool prune_redundant_dummy = false);
+
+    bool load_annotation_mask(const std::string &filename_base);
+    void serialize_annotation_mask(const std::string &filename_base) const;
 
     void join() { thread_pool_.join(); }
 
+    void set_annotation(Annotator *annotator) { annotator_.reset(annotator); }
+    Annotator& get_annotation() { return *annotator_; }
+    const Annotator& get_annotation() const { return *annotator_; }
+    uint64_t num_anno_rows() const;
+
+    DBG_succ* release_graph() { return graph_.release(); }
+    DBG_succ& get_graph() { return *graph_; }
+    const DBG_succ& get_graph() const { return *graph_; }
+
+    bool check_compatibility(bool verbose = false) const;
+
   private:
+    uint64_t graph_to_anno_index(uint64_t kmer_index) const;
+
+    void annotate_sequence_thread_safe(std::string sequence,
+                                       std::vector<std::string> labels);
+
     std::unique_ptr<DBG_succ> graph_;
     std::unique_ptr<Annotator> annotator_;
+    // marks graph edges that can be annotated
+    std::unique_ptr<bit_vector_stat> annotation_mask_;
 
     utils::ThreadPool thread_pool_;
     std::mutex mutex_;
+
+    static constexpr auto kAnnotationMaskExtension = ".edgemask";
 };
 
 #endif // __ANNOTATED_DBG_HPP__

@@ -319,7 +319,7 @@ int main(int argc, const char *argv[]) {
             break;
         }
         case Config::BUILD: {
-            DBG_succ *graph = new DBG_succ(config->k);
+            std::unique_ptr<DBG_succ> graph { new DBG_succ(config->k) };
 
             if (config->verbose)
                 std::cout << "Build Succinct De Bruijn Graph with k-mer size k="
@@ -460,7 +460,7 @@ int main(int argc, const char *argv[]) {
                 }
 
                 if (!config->suffix.size())
-                    graph_data.initialize_graph(graph);
+                    graph_data.initialize_graph(graph.get());
 
             } else {
                 //slower method
@@ -504,9 +504,22 @@ int main(int argc, const char *argv[]) {
             // graph output
             if (config->print_graph_succ && !config->suffix.size())
                 std::cout << *graph;
-            if (!config->outfbase.empty() && !config->suffix.size())
+            if (!config->outfbase.empty() && !config->suffix.size()) {
                 graph->serialize(config->outfbase);
-            delete graph;
+
+                if (config->shrink_anno) {
+                    AnnotatedDBG anno_graph(graph.release(), config->parallel);
+                    if (config->verbose) {
+                        std::cout << "Detecting all dummy k-mers..." << std::flush;
+                    }
+                    timer.reset();
+                    anno_graph.initialize_annotation_mask(config->parallel);
+                    if (config->verbose) {
+                        std::cout << timer.elapsed() << "sec" << std::endl;
+                    }
+                    anno_graph.serialize_annotation_mask(config->outfbase);
+                }
+            }
 
             return 0;
         }
@@ -601,23 +614,34 @@ int main(int argc, const char *argv[]) {
 
             timer.reset();
 
-            if (!config->infbase_annotators.size())
-                return 0;
+            AnnotatedDBG anno_dbg(config->parallel);
+            if (config->shrink_anno
+                    && !anno_dbg.load_annotation_mask(config->infbase)) {
+                std::cerr << "Error: Can't load coordinate mask."
+                          << " Continue with all coordinates." << std::endl;
+            }
 
-            std::unique_ptr<Annotator> annotation;
+            if (!config->infbase_annotators.size()) {
+                anno_dbg.adjust_annotation(*inserted_edges);
+                try {
+                    anno_dbg.serialize_annotation_mask(config->outfbase);
+                } catch (...) {
+                }
+                return 0;
+            }
 
             if (config->use_row_annotator) {
-                annotation.reset(
+                anno_dbg.set_annotation(
                     new annotate::RowCompressed<>(1, config->sparse)
                 );
             } else {
-                annotation.reset(
+                anno_dbg.set_annotation(
                     new annotate::ColumnCompressed<>(1, kNumCachedColumns,
                                                      config->verbose)
                 );
             }
 
-            if (!annotation->merge_load(config->infbase_annotators)) {
+            if (!anno_dbg.get_annotation().merge_load(config->infbase_annotators)) {
                 std::cerr << "ERROR: can't load annotations" << std::endl;
                 exit(1);
             } else if (config->verbose) {
@@ -626,11 +650,14 @@ int main(int argc, const char *argv[]) {
             }
             timer.reset();
 
-            AnnotatedDBG anno_dbg(annotation.release());
-
             assert(inserted_edges.get());
             if (config->verbose)
                 std::cout << "Insert empty rows to the annotation matrix..." << std::flush;
+
+            if (!anno_dbg.check_compatibility(true)) {
+                std::cerr << "ERROR: graph cannot be annotated" << std::endl;
+                exit(1);
+            }
 
             anno_dbg.adjust_annotation(*inserted_edges);
 
@@ -638,6 +665,7 @@ int main(int argc, const char *argv[]) {
                 std::cout << "\tdone in " << timer.elapsed() << "sec" << std::endl;
 
             anno_dbg.get_annotation().serialize(config->outfbase);
+            anno_dbg.serialize_annotation_mask(config->outfbase);
 
             return 0;
         }
@@ -828,38 +856,46 @@ int main(int argc, const char *argv[]) {
         }
         case Config::ANNOTATE: {
             // load graph
-            std::unique_ptr<DBG_succ> graph {
-                load_critical_graph_from_file(config->infbase)
-            };
+            AnnotatedDBG anno_dbg(
+                load_critical_graph_from_file(config->infbase),
+                config->parallel
+            );
+
+            // load masked edges
+            if (config->shrink_anno
+                    && !anno_dbg.load_annotation_mask(config->infbase)) {
+                std::cerr << "Error: Can't load coordinate mask."
+                          << " Continue with all coordinates." << std::endl;
+            }
 
             // initialize empty annotation
-            std::unique_ptr<Annotator> annotation;
             if (config->use_row_annotator) {
-                annotation.reset(
-                    new annotate::RowCompressed<>(graph->num_edges() + 1,
+                anno_dbg.set_annotation(
+                    new annotate::RowCompressed<>(anno_dbg.num_anno_rows(),
                                                   config->sparse)
                 );
             } else {
-                annotation.reset(
-                    new annotate::ColumnCompressed<>(graph->num_edges() + 1,
+                anno_dbg.set_annotation(
+                    new annotate::ColumnCompressed<>(anno_dbg.num_anno_rows(),
                                                      kNumCachedColumns,
                                                      config->verbose)
                 );
             }
 
             if (config->infbase_annotators.size()
-                    && !annotation->merge_load(config->infbase_annotators)) {
+                    && !anno_dbg.get_annotation().merge_load(config->infbase_annotators)) {
                 std::cerr << "ERROR: can't load annotations" << std::endl;
                 exit(1);
             }
 
-            AnnotatedDBG annotated_dbg(graph.release(),
-                                       annotation.release(),
-                                       config->parallel);
+            if (!anno_dbg.check_compatibility(true)) {
+                std::cerr << "ERROR: graph cannot be annotated" << std::endl;
+                exit(1);
+            }
 
             annotate_data(files,
                           config->refpath,
-                          &annotated_dbg,
+                          &anno_dbg,
                           config->reverse,
                           config->filter_k,
                           config->max_unreliable_abundance,
@@ -870,34 +906,42 @@ int main(int argc, const char *argv[]) {
                           config->anno_labels,
                           config->verbose);
 
-            annotated_dbg.get_annotation().serialize(config->outfbase);
+            anno_dbg.get_annotation().serialize(config->outfbase);
 
             return 0;
         }
         case Config::ANNOTATE_COORDINATES: {
             // load graph
-            std::unique_ptr<DBG_succ> graph {
-                load_critical_graph_from_file(config->infbase)
-            };
+            AnnotatedDBG anno_dbg(
+                load_critical_graph_from_file(config->infbase),
+                config->parallel
+            );
+
+            // load masked edges
+            if (config->shrink_anno
+                    && !anno_dbg.load_annotation_mask(config->infbase)) {
+                std::cerr << "Error: Can't load coordinate mask."
+                          << " Continue with all coordinates." << std::endl;
+            }
 
             // initialize empty annotation
-            std::unique_ptr<Annotator> annotation;
-            annotation.reset(
-                new annotate::RowCompressed<>(graph->num_edges() + 1)
+            anno_dbg.set_annotation(
+                new annotate::RowCompressed<>(anno_dbg.num_anno_rows())
             );
 
             if (config->infbase_annotators.size()
-                    && !annotation->merge_load(config->infbase_annotators)) {
+                    && !anno_dbg.get_annotation().merge_load(config->infbase_annotators)) {
                 std::cerr << "ERROR: can't load annotations" << std::endl;
                 exit(1);
             }
 
-            AnnotatedDBG annotated_dbg(graph.release(),
-                                       annotation.release(),
-                                       config->parallel);
+            if (!anno_dbg.check_compatibility(true)) {
+                std::cerr << "ERROR: graph cannot be annotated" << std::endl;
+                exit(1);
+            }
 
             annotate_coordinates(files,
-                                 &annotated_dbg,
+                                 &anno_dbg,
                                  config->reverse,
                                  config->filter_k,
                                  config->max_unreliable_abundance,
@@ -905,24 +949,23 @@ int main(int argc, const char *argv[]) {
                                  config->genome_binsize_anno,
                                  config->verbose);
 
-            annotated_dbg.get_annotation().serialize(config->outfbase);
+            anno_dbg.get_annotation().serialize(config->outfbase);
 
             return 0;
         }
         case Config::ANNOTATE_BLOOM: {
             // load graph
-            std::unique_ptr<DBG_succ> graph {
-                load_critical_graph_from_file(config->infbase)
-            };
+            AnnotatedDBG anno_dbg(
+                load_critical_graph_from_file(config->infbase),
+                config->parallel
+            );
 
             // initialize empty Bloom filter annotation
-            std::unique_ptr<annotate::AnnotationCategoryBloom> annotation;
-
             if (config->bloom_fpp > -0.5) {
                 // Expected FPP is set, optimize other parameters automatically
-                annotation.reset(
+                anno_dbg.set_annotation(
                     new annotate::AnnotationCategoryBloom(
-                        *graph,
+                        anno_dbg.get_graph(),
                         config->bloom_fpp,
                         config->verbose
                     )
@@ -932,9 +975,9 @@ int main(int argc, const char *argv[]) {
 
                 // Experiment mode, estimate FPP given other parameters,
                 // optimize the number of hash functions if it's set to zero
-                annotation.reset(
+                anno_dbg.set_annotation(
                     new annotate::AnnotationCategoryBloom(
-                        *graph,
+                        anno_dbg.get_graph(),
                         config->bloom_bits_per_edge,
                         config->bloom_num_hash_functions,
                         config->verbose
@@ -942,13 +985,14 @@ int main(int argc, const char *argv[]) {
                 );
             }
 
-            AnnotatedDBG annotated_dbg(graph.release(),
-                                       annotation.release(),
-                                       config->parallel);
+            if (!anno_dbg.check_compatibility(true)) {
+                std::cerr << "ERROR: graph cannot be annotated" << std::endl;
+                exit(1);
+            }
 
             annotate_data(files,
                           config->refpath,
-                          &annotated_dbg,
+                          &anno_dbg,
                           config->reverse,
                           config->filter_k,
                           config->max_unreliable_abundance,
@@ -959,7 +1003,7 @@ int main(int argc, const char *argv[]) {
                           config->anno_labels,
                           config->verbose);
 
-            annotated_dbg.get_annotation().serialize(config->infbase);
+            anno_dbg.get_annotation().serialize(config->infbase);
 
             return 0;
         }
@@ -987,28 +1031,37 @@ int main(int argc, const char *argv[]) {
         }
         case Config::CLASSIFY: {
             // load graph
-            std::unique_ptr<DBG_succ> graph {
-                load_critical_graph_from_file(config->infbase)
-            };
+            AnnotatedDBG anno_dbg(
+                load_critical_graph_from_file(config->infbase),
+                config->parallel
+            );
 
-            std::unique_ptr<Annotator> annotation;
+            // load masked edges
+            if (config->shrink_anno
+                    && !anno_dbg.load_annotation_mask(config->infbase)) {
+                std::cerr << "Error: Can't load coordinate mask."
+                          << " Continue with all coordinates." << std::endl;
+            }
+
             if (config->use_row_annotator) {
-                annotation.reset(new annotate::RowCompressed<>(0, config->sparse));
+                anno_dbg.set_annotation(
+                    new annotate::RowCompressed<>(0, config->sparse)
+                );
             } else if (config->fast) {
-                annotation.reset(
+                anno_dbg.set_annotation(
                     new annotate::FastColumnCompressed<>(
                         0, kNumCachedColumns, config->verbose
                     )
                 );
             } else {
-                annotation.reset(
+                anno_dbg.set_annotation(
                     new annotate::ColumnCompressed<>(
                         0, kNumCachedColumns, config->verbose
                     )
                 );
             }
 
-            if (!annotation->merge_load(config->infbase_annotators)) {
+            if (!anno_dbg.get_annotation().merge_load(config->infbase_annotators)) {
                 std::cerr << "ERROR: can't load annotations for graph "
                           << config->infbase + ".dbg"
                           << ", file corrupted" << std::endl;
@@ -1017,14 +1070,12 @@ int main(int argc, const char *argv[]) {
 
             utils::ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
 
-            std::unique_ptr<Timer> timer;
-            if (config->verbose) {
-                timer.reset(new Timer());
-            }
+            std::unique_ptr<Timer> timer { config->verbose ? new Timer() : NULL };
 
-            AnnotatedDBG annotated_dbg(graph.release(),
-                                       annotation.release(),
-                                       config->parallel);
+            if (!anno_dbg.check_compatibility(true)) {
+                std::cerr << "ERROR: graph cannot be annotated" << std::endl;
+                exit(1);
+            }
 
             // iterate over input files
             for (const auto &file : files) {
@@ -1045,7 +1096,7 @@ int main(int argc, const char *argv[]) {
                             config->num_top_labels,
                             config->discovery_fraction,
                             config->anno_labels_delimiter,
-                            std::ref(annotated_dbg)
+                            std::ref(anno_dbg)
                         );
                     },
                     config->reverse, timer.get(),
@@ -1374,10 +1425,20 @@ int main(int argc, const char *argv[]) {
                     std::cout << "Traverse source dummy edges and remove redundant ones..." << std::endl;
                 }
                 timer.reset();
-                graph->erase_redundant_dummy_edges(NULL, config->parallel, config->verbose);
+
+                AnnotatedDBG anno_dbg(graph.release(), config->parallel);
+                // remove redundant dummy edges and mark all other dummy edges
+                anno_dbg.initialize_annotation_mask(config->parallel, true);
+                if (config->outfbase.size()) {
+                    // serialize vector with marked dummy edges
+                    anno_dbg.serialize_annotation_mask(config->outfbase);
+                }
+                graph.reset(anno_dbg.release_graph());
+
                 if (config->verbose) {
                     std::cout << "Done in " << timer.elapsed() << "sec" << std::endl;
                 }
+                timer.reset();
             }
 
             if (config->to_fasta) {

@@ -46,6 +46,7 @@ Vector bit_vector::convert_to() {
 template bit_vector_dyn bit_vector::convert_to<bit_vector_dyn>();
 template bit_vector_stat bit_vector::convert_to<bit_vector_stat>();
 template bit_vector_small bit_vector::convert_to<bit_vector_small>();
+template sdsl::bit_vector bit_vector::convert_to<sdsl::bit_vector>();
 
 /////////////////////////////
 // bit_vector_dyn, libmaus //

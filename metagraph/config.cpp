@@ -77,6 +77,8 @@ Config::Config(int argc, const char *argv[]) {
             fast = true;
         } else if (!strcmp(argv[i], "--dynamic")) {
             dynamic = true;
+        } else if (!strcmp(argv[i], "--no-shrink")) {
+            shrink_anno = false;
         } else if (!strcmp(argv[i], "--anno-filename")) {
             filename_anno = true;
         } else if (!strcmp(argv[i], "--anno-header")) {
@@ -389,6 +391,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for build:\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence []\n");
+            fprintf(stderr, "\t   --no-shrink \t\tdo not build mask for dummy k-mers [off]\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
             fprintf(stderr, "\t   --mem-cap-gb [INT] \tmaximum memory available, in Gb [inf]\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
@@ -407,6 +410,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for extend:\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence []\n");
+            fprintf(stderr, "\t   --no-shrink \t\tuse all coordinates in graph including dummy k-mers [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \tbasename of annotator to extend []\n");
             fprintf(stderr, "\t   --row-annotator \tuse row based annotator instead of column compressor [off]\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
@@ -501,6 +505,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for annotate:\n");
             fprintf(stderr, "\t   --reference [STR] \t\tbasename of reference sequence []\n");
+            fprintf(stderr, "\t   --no-shrink \t\t\tuse all coordinates in graph including dummy k-mers [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator to update []\n");
             fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column compressor [off]\n");
             fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate graph [off]\n");
@@ -520,6 +525,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                             "\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
+            fprintf(stderr, "\t   --no-shrink \t\t\tuse all coordinates in graph including dummy k-mers [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator to update []\n");
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file [<graph_basename>]\n");
             fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
@@ -570,6 +576,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --filter-k [INT] \t\tlength of k-mers used for counting and filtering [3]\n");
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
+            fprintf(stderr, "\t   --no-shrink \t\t\tuse all coordinates in graph including dummy k-mers [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator [<graph_basename>]\n");
             fprintf(stderr, "\t   --fast \t\t\tuse fast column based annotator (with auxiliary index) [off]\n");
             fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column compressor [off]\n");

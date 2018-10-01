@@ -173,7 +173,7 @@ AnnotationCategoryBloom
 }
 
 uint64_t AnnotationCategoryBloom::num_objects() const {
-    return graph_.get_num_edges() + 1;
+    return graph_.get_num_edges();
 }
 
 size_t AnnotationCategoryBloom::num_labels() const {
