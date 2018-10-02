@@ -130,7 +130,7 @@ bsub -J StackChunks -W 12:00 -n 30 -R "rusage[mem=15000]" "/usr/bin/time -v \
 ### Query graph
 ```bash
 ./metagengraph classify -v -i <GRAPH_DIR>/graph.dbg \
-                           -a <GRAPH_DIR>/annotation.color.annodbg \
+                           -a <GRAPH_DIR>/annotation.column.annodbg \
                            --discovery-fraction 0.8 --labels-delimiter ", " \
                            query_seq.fa
 ```
@@ -142,9 +142,9 @@ Stats for graph
 ```
 Stats for annotation
 ```bash
-./metagengraph stats -a annotation.color.annodbg
+./metagengraph stats -a annotation.column.annodbg
 ```
 Stats for both
 ```bash
-./metagengraph stats -a annotation.color.annodbg graph.dbg
+./metagengraph stats -a annotation.column.annodbg graph.dbg
 ```
