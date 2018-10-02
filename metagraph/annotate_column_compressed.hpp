@@ -85,8 +85,9 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
                               std::vector<bool>*,
                               caches::LRUCachePolicy<size_t>> cached_columns_;
 
-    LabelEncoder<Label> &label_encoder_
-        = MultiLabelEncoded<uint64_t, Label>::label_encoder_;
+    LabelEncoder<Label> &label_encoder_ {
+        MultiLabelEncoded<uint64_t, Label>::label_encoder_
+    };
 
     bool verbose_;
 

@@ -72,8 +72,9 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     std::unique_ptr<RowMajorSparseBinaryMatrix> matrix_;
 
-    LabelEncoder<Label> &label_encoder_
-        = MultiLabelEncoded<uint64_t, Label>::label_encoder_;
+    LabelEncoder<Label> &label_encoder_ {
+        MultiLabelEncoded<uint64_t, Label>::label_encoder_
+    };
 
     static constexpr auto kExtension = ".row.annodbg";
 };

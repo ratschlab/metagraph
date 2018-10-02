@@ -3,6 +3,8 @@ project(MetaGenGraph)
 
 enable_testing()
 
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "DEBUG")
@@ -23,7 +25,7 @@ endif()
 
 
 string(APPEND CMAKE_CXX_FLAGS " \
-  -std=c++14 -Wall -Wextra -Werror \
+  -Wall -Wextra -Werror \
   -msse4.2 \
   -fopenmp -D_THREAD_SAFE -pthread") # -DDBGDEBUG -Wconversion -Wsign-conversion
 
