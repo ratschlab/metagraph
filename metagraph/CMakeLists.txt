@@ -27,7 +27,7 @@ endif()
 string(APPEND CMAKE_CXX_FLAGS " \
   -Wall -Wextra -Werror \
   -msse4.2 \
-  -fopenmp -D_THREAD_SAFE -pthread") # -DDBGDEBUG -Wconversion -Wsign-conversion
+  -fopenmp -D_THREAD_SAFE -pthread") # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
 
 if(NOT DEFINED WITH_AVX)
 set(WITH_AVX TRUE)
