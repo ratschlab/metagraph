@@ -388,6 +388,9 @@ class DBG_succ : public SequenceGraph {
     static const size_t kSentinel = '$';
 
   private:
+    // file dump extension
+    static constexpr auto kExtension = ".dbg";
+
     // k-mer size
     size_t k_;
     // the bit array indicating the last outgoing edge of a node

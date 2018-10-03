@@ -1,10 +1,11 @@
 #ifndef __ANNOTATE_ROW_COMPRESSED_HPP__
 #define __ANNOTATE_ROW_COMPRESSED_HPP__
 
+#include <memory>
+
 #include <Eigen/Sparse>
 
 #include "annotate.hpp"
-#include "dbg_succinct.hpp"
 
 
 namespace annotate {

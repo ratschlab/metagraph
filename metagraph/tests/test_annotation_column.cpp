@@ -2,9 +2,9 @@
 
 #include "gtest/gtest.h"
 
-#include "annotate.hpp"
 #include "annotate_column_compressed.hpp"
 #include "annotate_row_compressed.hpp"
+#include "utils.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
@@ -19,10 +19,6 @@ TEST(ColumnCompressed, EmptyConstructor) {
     EXPECT_EQ(0u, annotation.get(2).size());
     EXPECT_EQ(0u, annotation.get(3).size());
     EXPECT_EQ(0u, annotation.get(4).size());
-}
-
-std::set<std::string> convert_to_set(const std::vector<std::string> &vector) {
-    return std::set<std::string>(vector.begin(), vector.end());
 }
 
 TEST(ColumnCompressed, add_label) {
@@ -335,11 +331,6 @@ TEST(ColumnCompressed, add_label_random_with_caching) {
     for (size_t i = 0; i < 2 * graph_half_size; i+= 100) {
         ASSERT_EQ(1u, annotation.get_labels(i).size());
     }
-}
-
-std::set<std::pair<std::string, size_t>>
-to_set(const std::vector<std::pair<std::string, size_t>> &vector) {
-    return std::set<std::pair<std::string, size_t>>(vector.begin(), vector.end());
 }
 
 TEST(ColumnCompressed, get_top_labels) {

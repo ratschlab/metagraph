@@ -16,6 +16,7 @@
 #include <atomic>
 #include <bitset>
 
+#include <sdsl/wavelet_trees.hpp>
 
 #if _USE_FOLLY
 #include <folly/FBVector.h>
@@ -299,5 +300,11 @@ namespace utils {
     void erase(std::vector<T> *vector, const std::vector<bool> &erase_mask);
 
 } // namespace utils
+
+
+std::set<std::string> convert_to_set(const std::vector<std::string> &vector);
+
+std::set<std::pair<std::string, size_t>>
+to_set(const std::vector<std::pair<std::string, size_t>> &vector);
 
 #endif // __UTILS_HPP__

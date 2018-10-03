@@ -1,11 +1,13 @@
 #ifndef __ANNOTATE_COLUMN_COMPRESSED_HPP__
 #define __ANNOTATE_COLUMN_COMPRESSED_HPP__
 
+#include <map>
+
 #include <cache.hpp>
 #include <lru_cache_policy.hpp>
 
 #include "annotate.hpp"
-#include "dbg_succinct.hpp"
+#include "bit_vector.hpp"
 
 
 namespace annotate {

@@ -20,6 +20,8 @@
 #include "dbg_succinct_construct.hpp"
 #include "serialization.hpp"
 
+using utils::remove_suffix;
+
 
 #define CHECK_INDEX(idx) \
     assert(idx < W_->size()); \
@@ -215,12 +217,16 @@ bool DBG_succ::operator==(const DBG_succ &other) const {
     return i == W_->size() && j == other.W_->size();
 }
 
-void DBG_succ::serialize(const std::string &outbase) const {
+void DBG_succ::serialize(const std::string &filename) const {
 
-    std::ofstream outstream(outbase + ".dbg");
-    if (!outstream.good())
-        throw std::ofstream::failure(std::string("Error: Can't write to file ")
-                                                            + outbase + ".dbg");
+    const auto out_filename = remove_suffix(filename, kExtension) + kExtension;
+
+    std::ofstream outstream(out_filename);
+    if (!outstream.good()) {
+        throw std::ofstream::failure(
+            std::string("Error: Can't write to file ") + out_filename
+        );
+    }
 
     // write F values, k, and state
     libmaus2::util::NumberSerialisation::serialiseNumberVector(outstream, F_);
@@ -237,12 +243,14 @@ void DBG_succ::serialize(const std::string &outbase) const {
     outstream.close();
 }
 
-bool DBG_succ::load(const std::string &infbase) {
+bool DBG_succ::load(const std::string &filename) {
     // if not specified in the file, the default for loading is dynamic
     state = Config::DYN;
 
+    auto file = remove_suffix(filename, kExtension) + kExtension;
+
     try {
-        std::ifstream instream(infbase + ".dbg");
+        std::ifstream instream(file);
 
         // load F, k, and state
         F_ = libmaus2::util::NumberSerialisation::deserialiseNumberVector<uint64_t>(instream);
@@ -272,7 +280,7 @@ bool DBG_succ::load(const std::string &infbase) {
         return W_->load(instream) && last_->load(instream);
     } catch (const std::bad_alloc &exception) {
         std::cerr << "ERROR: Not enough memory to load DBG_succ from "
-                  << infbase << "." << std::endl;
+                  << file << "." << std::endl;
         return false;
     } catch (...) {
         return false;

@@ -27,7 +27,8 @@ endif()
 string(APPEND CMAKE_CXX_FLAGS " \
   -Wall -Wextra -Werror \
   -msse4.2 \
-  -fopenmp -D_THREAD_SAFE -pthread") # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
+  -fopenmp -D_THREAD_SAFE -pthread \
+") # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
 
 if(NOT DEFINED WITH_AVX)
 set(WITH_AVX TRUE)
@@ -156,6 +157,7 @@ add_custom_target(link_target ALL
 #-------------------
 # Unit Tests
 #-------------------
+if(FALSE) # There is one gtest version attached with sdsl
 # Download and unpack googletest at configure time
 if(NOT EXISTS ${CMAKE_BINARY_DIR}/googletest-download)
   configure_file(CMakeLists.txt.in googletest-download/CMakeLists.txt)
@@ -181,6 +183,7 @@ add_subdirectory(
   ${CMAKE_BINARY_DIR}/googletest-build
   EXCLUDE_FROM_ALL
 )
+endif()
 
 file(GLOB unit_tests_files "tests/*.cpp")
 list(FILTER unit_tests_files EXCLUDE REGEX ".*\\._.*")
@@ -199,7 +202,10 @@ link_directories(
 
 add_executable(unit_tests ${unit_tests_files})
 
-target_link_libraries(unit_tests -lgtest_main -lgtest metagraph ${METALIBS})
+target_link_libraries(unit_tests gtest_main gtest
+  metagraph
+  ${METALIBS}
+)
 
 add_test(NAME unit_tests COMMAND unit_tests)
 

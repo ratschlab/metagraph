@@ -2,8 +2,8 @@
 
 #include "gtest/gtest.h"
 
-#include "annotate.hpp"
 #include "annotate_row_compressed.hpp"
+#include "utils.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";

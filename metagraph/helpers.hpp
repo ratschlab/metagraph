@@ -56,4 +56,4 @@ inline void reverse_complement(const kstring_t &seq) {
     reverse_complement(&seq.s[0], &seq.s[0] + seq.l);
 }
 
-#endif
+#endif // __HELPERS_HPP__

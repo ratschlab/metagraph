@@ -394,3 +394,13 @@ template
 void erase(std::vector<bool> *, const std::vector<bool> &);
 
 } // namespace utils
+
+
+std::set<std::string> convert_to_set(const std::vector<std::string> &vector) {
+    return std::set<std::string>(vector.begin(), vector.end());
+}
+
+std::set<std::pair<std::string, size_t>>
+to_set(const std::vector<std::pair<std::string, size_t>> &vector) {
+    return std::set<std::pair<std::string, size_t>>(vector.begin(), vector.end());
+}

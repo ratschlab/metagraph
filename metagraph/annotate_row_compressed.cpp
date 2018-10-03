@@ -7,7 +7,6 @@
 #include "serialization.hpp"
 #include "utils.hpp"
 
-using libmaus2::util::StringSerialisation;
 using utils::remove_suffix;
 
 

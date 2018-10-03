@@ -1,17 +1,17 @@
-#include "annotated_dbg.hpp"
+#include "unix_tools.hpp"
+#include "config.hpp"
+#include "sequence_io.hpp"
+#include "reads_filtering.hpp"
 #include "dbg_succinct_chunk.hpp"
 #include "dbg_succinct_construct.hpp"
-#include "reads_filtering.hpp"
-#include "config.hpp"
-#include "utils.hpp"
-#include "sequence_io.hpp"
 #include "dbg_succinct_merge.hpp"
+#include "annotated_dbg.hpp"
+#include "annotate_row_compressed.hpp"
 #include "annotate_column_compressed.hpp"
 #include "annotate_column_compressed_fast.hpp"
-#include "annotate_row_compressed.hpp"
 #include "annotate_bloom_filter.hpp"
-#include "unix_tools.hpp"
 #include "serialization.hpp"
+#include "utils.hpp"
 
 typedef annotate::MultiLabelAnnotation<uint64_t, std::string> Annotator;
 
@@ -20,21 +20,15 @@ const size_t kMaxNumParallelReadFiles = 5;
 const size_t kNumCachedColumns = 10;
 
 
-DBG_succ* load_critical_graph_from_file(const std::string &filename) {
-    std::string filetype = ".dbg";
-    std::string filebase =
-        std::equal(filetype.rbegin(), filetype.rend(), filename.rbegin())
-        ? filename.substr(0, filename.size() - filetype.size())
-        : filename;
-
-    DBG_succ *graph = new DBG_succ();
-    if (!graph->load(filebase)) {
-        std::cerr << "ERROR: input file "
-                  << filename << " corrupted" << std::endl;
+template <class Graph = DBG_succ>
+std::unique_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
+    auto *graph = new Graph();
+    if (!graph->load(filename)) {
+        std::cerr << "ERROR: can't load graph from file " << filename << std::endl;
         delete graph;
         exit(1);
     }
-    return graph;
+    return std::unique_ptr<Graph> { graph };
 }
 
 std::string get_filter_filename(std::string filename,
@@ -527,9 +521,7 @@ int main(int argc, const char *argv[]) {
             Timer timer;
 
             // load graph
-            std::unique_ptr<DBG_succ> graph {
-                load_critical_graph_from_file(config->infbase)
-            };
+            auto graph = load_critical_graph_from_file(config->infbase);
 
             if (config->verbose) {
                 std::cout << "Succinct de Bruijn graph with k-mer size k="
@@ -857,7 +849,7 @@ int main(int argc, const char *argv[]) {
         case Config::ANNOTATE: {
             // load graph
             AnnotatedDBG anno_dbg(
-                load_critical_graph_from_file(config->infbase),
+                load_critical_graph_from_file(config->infbase).release(),
                 config->parallel
             );
 
@@ -913,7 +905,7 @@ int main(int argc, const char *argv[]) {
         case Config::ANNOTATE_COORDINATES: {
             // load graph
             AnnotatedDBG anno_dbg(
-                load_critical_graph_from_file(config->infbase),
+                load_critical_graph_from_file(config->infbase).release(),
                 config->parallel
             );
 
@@ -956,7 +948,7 @@ int main(int argc, const char *argv[]) {
         case Config::ANNOTATE_BLOOM: {
             // load graph
             AnnotatedDBG anno_dbg(
-                load_critical_graph_from_file(config->infbase),
+                load_critical_graph_from_file(config->infbase).release(),
                 config->parallel
             );
 
@@ -1032,7 +1024,7 @@ int main(int argc, const char *argv[]) {
         case Config::CLASSIFY: {
             // load graph
             AnnotatedDBG anno_dbg(
-                load_critical_graph_from_file(config->infbase),
+                load_critical_graph_from_file(config->infbase).release(),
                 config->parallel
             );
 
@@ -1115,13 +1107,11 @@ int main(int argc, const char *argv[]) {
             assert(files.size());
 
             std::cout << "Opening file                " << files.at(0) << std::endl;
-            std::unique_ptr<DBG_succ> graph {
-                load_critical_graph_from_file(files.at(0))
-            };
+            auto graph = load_critical_graph_from_file(files.at(0));
 
             for (size_t f = 1; f < files.size(); ++f) {
                 std::cout << "Opening file for comparison " << files[f] << std::endl;
-                DBG_succ *second = load_critical_graph_from_file(files[f]);
+                auto second = load_critical_graph_from_file(files[f]);
                 if (config->internal
                         ? graph->equals_internally(*second, config->verbose)
                         : *graph == *second) {
@@ -1129,7 +1119,6 @@ int main(int argc, const char *argv[]) {
                 } else {
                     std::cout << "Graphs are not identical" << std::endl;
                 }
-                delete second;
             }
 
             return 0;
@@ -1188,7 +1177,7 @@ int main(int argc, const char *argv[]) {
             std::vector<const DBG_succ*> graphs;
             for (const auto &file : files) {
                 std::cout << "Opening file " << file << std::endl;
-                graphs.push_back(load_critical_graph_from_file(file));
+                graphs.push_back(load_critical_graph_from_file(file).release());
                 if (config->verbose) {
                     std::cout << "nodes: " << graphs.back()->num_nodes() << "\n";
                     std::cout << "edges: " << graphs.back()->num_edges() << "\n";
@@ -1269,9 +1258,7 @@ int main(int argc, const char *argv[]) {
         }
         case Config::STATS: {
             for (const auto &file : files) {
-                std::unique_ptr<DBG_succ> graph {
-                    load_critical_graph_from_file(file)
-                };
+                auto graph = load_critical_graph_from_file(file);
 
                 std::cout << "Statistics for graph " << file << std::endl;
                 std::cout << "nodes: " << graph->num_nodes() << std::endl;
@@ -1413,9 +1400,8 @@ int main(int argc, const char *argv[]) {
             if (config->verbose) {
                 std::cout << "Graph loading...\t" << std::flush;
             }
-            std::unique_ptr<DBG_succ> graph {
-                load_critical_graph_from_file(files.at(0))
-            };
+            auto graph = load_critical_graph_from_file(files.at(0));
+
             if (config->verbose) {
                 std::cout << timer.elapsed() << "sec" << std::endl;
             }
@@ -1528,9 +1514,7 @@ int main(int argc, const char *argv[]) {
             assert(config->infbase.size());
 
             // load graph
-            std::unique_ptr<DBG_succ> graph {
-                load_critical_graph_from_file(config->infbase)
-            };
+            auto graph = load_critical_graph_from_file(config->infbase);
 
             if (!config->alignment_length) {
                 if (config->distance > 0) {
