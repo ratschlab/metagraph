@@ -4,7 +4,7 @@
 
 ### Prerequisites
 - cmake 3.6.1
-- GNU GCC (C++14)
+- GNU GCC with C++14 (gcc-5 or higher)
 - HTSlib
 - folly (optional)
 
@@ -17,43 +17,41 @@ All can be installed with `brew` or `linuxbrew`.
 or simply run the following script
 ```bash
 git submodule update --init --recursive
-cd metagraph/external-libraries/sdsl-lite
-./install.sh $(pwd)
 
-cd ../libmaus2
-libtoolize
+pushd metagraph/external-libraries/sdsl-lite
+./install.sh $(pwd)
+popd
+
+pushd metagraph/external-libraries/libmaus2
+[[ "$OSTYPE" == "darwin"* ]] && glibtoolize || libtoolize # glibtoolize on MacOS
 aclocal
 autoreconf -i -f
 ./configure --prefix=$(pwd)
 make -j $(($(getconf _NPROCESSORS_ONLN) - 1))
 make install
-cd ../../../
+popd
 ```
-use `glibtoolize` instead of `libtoolize` on MacOS
 
 4. go to the **build** directory `mkdir -p metagraph/build && cd metagraph/build`
 5. compile by `cmake .. && make -j $(($(getconf _NPROCESSORS_ONLN) - 1))`
 6. run unit tests `./unit_tests`
 
 #### Typical issues
-* Linking against dynamic libraries in Anaconda when compiling libmaus2 (make sure that packages like Anaconda are not listed in the exported environment variables).
+* Linking against dynamic libraries in Anaconda when compiling libmaus2
+  * make sure that packages like Anaconda are not listed in the exported environment variables
 
 ### Build types: `cmake .. <arguments>` where arguments are:
 - `-DCMAKE_BUILD_TYPE=[Debug|Release|Profile]` -- build modes (`Debug` by default)
-- `-DBUILD_STATIC=ON` -- link statically (OFF by default)
-- `-DPYTHON_INTERFACE=ON` -- compile python interface (requires shared libraries, OFF by default)
-- `-DBUILD_KMC=OFF` -- do not compile the KMC executable (ON by default)
-- `-DWITH_AVX=OFF` -- compile without support for the avx instructions (ON by default)
+- `-DBUILD_STATIC=[ON|OFF]` -- link statically (`OFF` by default)
+- `-DPYTHON_INTERFACE=[ON|OFF]` -- compile python interface (requires shared libraries, `OFF` by default)
+- `-DBUILD_KMC=[ON|OFF]` -- compile the KMC executable (`ON` by default)
+- `-DWITH_AVX=[ON|OFF]` -- compile with support for the avx instructions (`ON` by default)
 - `-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA_CASE_SENSITIVE]` -- alphabet to use (`DNA` by default)
 
 
 ## Print usage
-```bash
-./metagengraph
-```
-```bash
-./metagengraph build
-```
+`./metagengraph`\
+`./metagengraph build`
 
 ## Usage examples
 
