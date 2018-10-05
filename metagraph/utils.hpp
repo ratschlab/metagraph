@@ -48,6 +48,7 @@ namespace utils {
     std::vector<std::string> split_string(const std::string &string,
                                           const std::string &delimiter);
 
+    bool check_if_writable(const std::string &filename);
 
     uint64_t kFromFile(const std::string &infbase);
 

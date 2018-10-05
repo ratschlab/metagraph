@@ -218,6 +218,9 @@ bool DBG_succ::operator==(const DBG_succ &other) const {
 void DBG_succ::serialize(const std::string &outbase) const {
 
     std::ofstream outstream(outbase + ".dbg");
+    if (!outstream.good())
+        throw std::ofstream::failure(std::string("Error: Can't write to file ")
+                                                            + outbase + ".dbg");
 
     // write F values, k, and state
     libmaus2::util::NumberSerialisation::serialiseNumberVector(outstream, F_);

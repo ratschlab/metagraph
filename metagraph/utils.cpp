@@ -1,5 +1,6 @@
 #include "utils.hpp"
 
+#include <cstdio>
 #include <fstream>
 #include <algorithm>
 
@@ -60,6 +61,23 @@ std::vector<std::string> split_string(const std::string &string,
     return result;
 }
 
+bool check_if_writable(const std::string &filename) {
+    std::ifstream ifstream(filename);
+    bool existed = ifstream.good();
+    ifstream.close();
+
+    std::ofstream ofstream(filename, std::ofstream::ios_base::app);
+    bool can_write = ofstream.good();
+    ofstream.close();
+
+    if (!can_write)
+        return false;
+
+    if (!existed)
+        std::remove(filename.c_str());
+
+    return true;
+}
 
 uint64_t kFromFile(const std::string &infbase) {
     uint64_t k = 0;

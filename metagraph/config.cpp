@@ -209,6 +209,12 @@ Config::Config(int argc, const char *argv[]) {
 
     bool print_usage_and_exit = false;
 
+    if (outfbase.size() && !utils::check_if_writable(outfbase)) {
+        std::cerr << "Error: Can't write to " << outfbase << std::endl
+                  << "Check if the path is correct" << std::endl;
+        exit(1);
+    }
+
     if (nsplits == 0) {
         std::cerr << "Error: Invalid number of splits" << std::endl;
         print_usage_and_exit = true;
