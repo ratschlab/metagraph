@@ -609,7 +609,7 @@ int main(int argc, const char *argv[]) {
             AnnotatedDBG anno_dbg(config->parallel);
             if (config->shrink_anno
                     && !anno_dbg.load_annotation_mask(config->infbase)) {
-                std::cerr << "Error: Can't load coordinate mask."
+                std::cerr << "Warning: Can't load coordinate mask."
                           << " Continue with all coordinates." << std::endl;
             }
 
@@ -856,7 +856,7 @@ int main(int argc, const char *argv[]) {
             // load masked edges
             if (config->shrink_anno
                     && !anno_dbg.load_annotation_mask(config->infbase)) {
-                std::cerr << "Error: Can't load coordinate mask."
+                std::cerr << "Warning: Can't load coordinate mask."
                           << " Continue with all coordinates." << std::endl;
             }
 
@@ -912,7 +912,7 @@ int main(int argc, const char *argv[]) {
             // load masked edges
             if (config->shrink_anno
                     && !anno_dbg.load_annotation_mask(config->infbase)) {
-                std::cerr << "Error: Can't load coordinate mask."
+                std::cerr << "Warning: Can't load coordinate mask."
                           << " Continue with all coordinates." << std::endl;
             }
 
@@ -1031,7 +1031,7 @@ int main(int argc, const char *argv[]) {
             // load masked edges
             if (config->shrink_anno
                     && !anno_dbg.load_annotation_mask(config->infbase)) {
-                std::cerr << "Error: Can't load coordinate mask."
+                std::cerr << "Warning: Can't load coordinate mask."
                           << " Continue with all coordinates." << std::endl;
             }
 
