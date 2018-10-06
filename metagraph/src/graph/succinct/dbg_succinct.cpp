@@ -364,6 +364,10 @@ bool DBGSuccinct::load(const std::string &filename) {
             valid_edges_.reset(new bit_vector_stat());
             break;
         }
+        case Config::FAST: {
+            valid_edges_.reset(new bit_vector_stat());
+            break;
+        }
         case Config::DYN: {
             valid_edges_.reset(new bit_vector_dyn());
             break;
@@ -404,6 +408,8 @@ void DBGSuccinct::serialize(const std::string &filename) const {
 
     assert((boss_graph_->get_state() == Config::StateType::STAT
                 && dynamic_cast<const bit_vector_stat*>(valid_edges_.get()))
+        || (boss_graph_->get_state() == Config::StateType::FAST
+                && dynamic_cast<const bit_vector_stat*>(valid_edges_.get()))
         || (boss_graph_->get_state() == Config::StateType::DYN
                 && dynamic_cast<const bit_vector_dyn*>(valid_edges_.get()))
         || (boss_graph_->get_state() == Config::StateType::SMALL
@@ -424,6 +430,12 @@ void DBGSuccinct::switch_state(Config::StateType new_state) {
     if (valid_edges_.get()) {
         switch (new_state) {
             case Config::STAT: {
+                valid_edges_ = std::make_unique<bit_vector_stat>(
+                    valid_edges_->convert_to<bit_vector_stat>()
+                );
+                break;
+            }
+            case Config::FAST: {
                 valid_edges_ = std::make_unique<bit_vector_stat>(
                     valid_edges_->convert_to<bit_vector_stat>()
                 );
@@ -452,6 +464,9 @@ Config::StateType DBGSuccinct::get_state() const {
                 || boss_graph_->get_state() != Config::StateType::STAT
                 || dynamic_cast<const bit_vector_stat*>(valid_edges_.get()));
     assert(!valid_edges_.get()
+                || boss_graph_->get_state() != Config::StateType::FAST
+                || dynamic_cast<const bit_vector_stat*>(valid_edges_.get()));
+    assert(!valid_edges_.get()
                 || boss_graph_->get_state() != Config::StateType::DYN
                 || dynamic_cast<const bit_vector_dyn*>(valid_edges_.get()));
     assert(!valid_edges_.get()
@@ -474,6 +489,10 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
 
     switch (get_state()) {
         case Config::STAT: {
+            valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector));
+            break;
+        }
+        case Config::FAST: {
             valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector));
             break;
         }

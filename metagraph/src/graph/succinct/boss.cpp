@@ -233,6 +233,10 @@ bool BOSS::load(std::ifstream &instream) {
                 W_ = new wavelet_tree_stat(bits_per_char_W_);
                 last_ = new bit_vector_stat();
                 break;
+            case Config::FAST:
+                W_ = new wavelet_tree_fast(bits_per_char_W_);
+                last_ = new bit_vector_stat();
+                break;
             case Config::SMALL:
                 W_ = new wavelet_tree_small(bits_per_char_W_);
                 last_ = new bit_vector_small();
@@ -1171,6 +1175,10 @@ void BOSS::switch_state(Config::StateType new_state) {
         }
         case Config::SMALL: {
             convert<wavelet_tree_small, bit_vector_small>(&W_, &last_);
+            break;
+        }
+        case Config::FAST: {
+            convert<wavelet_tree_fast, bit_vector_stat>(&W_, &last_);
             break;
         }
         case Config::DYN: {
