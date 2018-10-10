@@ -1,6 +1,7 @@
 #include "dbg_succinct_construct.hpp"
 
-#include <ips4o.hpp>
+// #include <ips4o.hpp>
+#include <parallel/algorithm>
 
 #include "kmer.hpp"
 #include "dbg_succinct_chunk.hpp"
@@ -31,9 +32,11 @@ template <class V>
 void sort_and_remove_duplicates(V *array,
                                 size_t num_threads = 1,
                                 size_t offset = 0) {
-    ips4o::parallel::sort(array->begin() + offset, array->end(),
-                          std::less<typename V::value_type>(),
-                          num_threads);
+    // ips4o::parallel::sort(array->begin() + offset, array->end(),
+    //                       std::less<typename V::value_type>(),
+    //                       num_threads);
+    omp_set_num_threads(num_threads);
+    __gnu_parallel::sort(array->begin() + offset, array->end());
     // remove duplicates
     auto unique_end = std::unique(array->begin() + offset, array->end());
     array->erase(unique_end, array->end());
@@ -216,7 +219,9 @@ void recover_source_dummy_nodes(size_t k,
                       << ": " << kmers->size() - dummy_begin << std::endl;
         }
     }
-    ips4o::parallel::sort(kmers->begin(), kmers->end(), std::less<KMER>(), num_threads);
+    // ips4o::parallel::sort(kmers->begin(), kmers->end(), std::less<KMER>(), num_threads);
+    omp_set_num_threads(num_threads);
+    __gnu_parallel::sort(kmers->begin(), kmers->end());
 }
 
 
