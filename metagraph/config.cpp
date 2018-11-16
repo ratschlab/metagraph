@@ -525,7 +525,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                             "\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
-            fprintf(stderr, "\t   --no-shrink \t\t\tuse all coordinates in graph including dummy k-mers [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator to update []\n");
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file [<graph_basename>]\n");
             fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");

@@ -49,9 +49,9 @@ class AnnotatedDBG {
 
     bool check_compatibility(bool verbose = false) const;
 
-  private:
     uint64_t graph_to_anno_index(uint64_t kmer_index) const;
 
+  private:
     void annotate_sequence_thread_safe(std::string sequence,
                                        std::vector<std::string> labels);
 

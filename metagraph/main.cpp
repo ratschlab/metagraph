@@ -909,13 +909,6 @@ int main(int argc, const char *argv[]) {
                 config->parallel
             );
 
-            // load masked edges
-            if (config->shrink_anno
-                    && !anno_dbg.load_annotation_mask(config->infbase)) {
-                std::cerr << "Warning: Can't load coordinate mask."
-                          << " Continue with all coordinates." << std::endl;
-            }
-
             // initialize empty annotation
             anno_dbg.set_annotation(
                 new annotate::RowCompressed<>(anno_dbg.num_anno_rows())
