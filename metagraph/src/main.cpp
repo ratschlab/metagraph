@@ -8,9 +8,10 @@
 #include "annotated_dbg.hpp"
 #include "annotate_row_compressed.hpp"
 #include "annotate_column_compressed.hpp"
-#include "annotate_column_compressed_fast.hpp"
 #include "serialization.hpp"
 #include "utils.hpp"
+#include "static_annotators_def.hpp"
+#include "annotation_converters.hpp"
 
 typedef annotate::MultiLabelAnnotation<uint64_t, std::string> Annotator;
 
@@ -68,17 +69,16 @@ void annotate_data(const std::vector<std::string> &files,
                    bool verbose) {
     size_t total_seqs = 0;
 
-    std::unique_ptr<Timer> timer;
-    if (verbose) {
-        timer.reset(new Timer());
-    }
+    Timer timer;
 
     // iterate over input files
     for (const auto &file : files) {
+        Timer data_reading_timer;
+
         if (verbose) {
             std::cout << std::endl << "Parsing " << file << std::endl;
         }
-        // open stream
+        // read files
         if (utils::get_filetype(file) == "VCF") {
             std::vector<std::string> variant_labels;
 
@@ -132,10 +132,10 @@ void annotate_data(const std::vector<std::string> &files,
                         for (const auto &label : labels) {
                             std::cout << "<" << label << ">";
                         }
-                        std::cout << ", " << timer->elapsed() << "sec" << std::endl;
+                        std::cout << ", " << timer.elapsed() << "sec" << std::endl;
                     }
                 },
-                reverse, timer.get(),
+                reverse,
                 get_filter_filename(
                     file, filter_k,
                     max_unreliable_abundance,
@@ -146,6 +146,15 @@ void annotate_data(const std::vector<std::string> &files,
             std::cerr << "ERROR: Filetype unknown for file "
                       << file << std::endl;
             exit(1);
+        }
+
+        if (verbose) {
+            std::cout << "File processed in "
+                      << data_reading_timer.elapsed()
+                      << "sec, current mem usage: "
+                      << get_curr_mem2() / (1 << 20) << " MiB"
+                      << ", total time: " << timer.elapsed()
+                      << "sec" << std::endl;
         }
     }
 
@@ -164,12 +173,12 @@ void annotate_coordinates(const std::vector<std::string> &files,
                           bool verbose) {
     size_t total_seqs = 0;
 
-    std::unique_ptr<Timer> timer;
-    if (verbose)
-        timer.reset(new Timer());
+    Timer timer;
 
     // iterate over input files
     for (const auto &file : files) {
+        Timer data_reading_timer;
+
         if (verbose)
             std::cout << std::endl << "Parsing " << file << std::endl;
 
@@ -214,7 +223,7 @@ void annotate_coordinates(const std::vector<std::string> &files,
                         for (const auto &label : labels) {
                             std::cout << "<" << label << ">";
                         }
-                        std::cout << ", " << timer->elapsed() << "sec" << std::endl;
+                        std::cout << ", " << timer.elapsed() << "sec" << std::endl;
                     }
 
                     // If we read both strands, the next sequence is
@@ -223,7 +232,7 @@ void annotate_coordinates(const std::vector<std::string> &files,
                     if (reverse)
                         forward_strand = !forward_strand;
                 },
-                reverse, timer.get(),
+                reverse,
                 get_filter_filename(
                     file, filter_k,
                     max_unreliable_abundance,
@@ -234,6 +243,15 @@ void annotate_coordinates(const std::vector<std::string> &files,
             std::cerr << "ERROR: the type of file "
                       << file << " is not supported" << std::endl;
             exit(1);
+        }
+
+        if (verbose) {
+            std::cout << "File processed in "
+                      << data_reading_timer.elapsed()
+                      << "sec, current mem usage: "
+                      << get_curr_mem2() / (1 << 20) << " MiB"
+                      << ", total time: " << timer.elapsed()
+                      << "sec" << std::endl;
         }
     }
 
@@ -295,8 +313,47 @@ void execute_query(std::string seq_name,
 }
 
 
+std::unique_ptr<Annotator> initialize_annotation(const Config &config) {
+    std::unique_ptr<Annotator> annotation;
+    switch (config.anno_type) {
+        case Config::ColumnCompressed: {
+            annotation.reset(
+                new annotate::ColumnCompressed<>(
+                    0, kNumCachedColumns, config.verbose
+                )
+            );
+            break;
+        }
+        case Config::RowCompressed: {
+            annotation.reset(new annotate::RowCompressed<>(0, config.sparse));
+            break;
+        }
+        case Config::BRWT: {
+            annotation.reset(new annotate::BRWTCompressed<>());
+            break;
+        }
+        case Config::BinRelWT_sdsl: {
+            annotation.reset(new annotate::BinRelWT_sdslAnnotator());
+            break;
+        }
+        case Config::BinRelWT: {
+            annotation.reset(new annotate::BinRelWTAnnotator());
+            break;
+        }
+        case Config::RowFlat: {
+            annotation.reset(new annotate::RowFlatAnnotator());
+            break;
+        }
+        case Config::RBFish: {
+            annotation.reset(new annotate::RainbowfishAnnotator());
+            break;
+        }
+    }
+    return annotation;
+}
+
+
 int main(int argc, const char *argv[]) {
-    // parse command line arguments and options
     std::unique_ptr<Config> config { new Config(argc, argv) };
 
     if (config->verbose) {
@@ -379,7 +436,6 @@ int main(int argc, const char *argv[]) {
                             if (suffix.find('$') != std::string::npos)
                                 continue;
 
-                            Timer *timer_ptr = config->verbose ? &timer : NULL;
                             //assume VCF contains no noise
                             read_vcf_file_critical(
                                 files[f], config->refpath, graph->get_k(), NULL,
@@ -389,12 +445,10 @@ int main(int argc, const char *argv[]) {
                                         reverse_complement(seq.begin(), seq.end());
                                         constructor->add_read(seq);
                                     }
-                                }, timer_ptr
+                                }
                             );
                         } else if (utils::get_filetype(files[f]) == "FASTA"
                                     || utils::get_filetype(files[f]) == "FASTQ") {
-                            Timer *timer_ptr = config->verbose ? &timer : NULL;
-
                             std::string filter_filename = get_filter_filename(
                                 files[f], config->filter_k,
                                 config->max_unreliable_abundance,
@@ -411,24 +465,29 @@ int main(int argc, const char *argv[]) {
                                     read_fasta_file_critical(file, [=](kseq_t *read_stream) {
                                         // add read to the graph constructor as a callback
                                         callback(read_stream->seq.s);
-                                    }, reverse, timer_ptr, filter_filename);
+                                    }, reverse, filter_filename);
                                 });
                             } else {
                                 read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
                                     // add read to the graph constructor as a callback
                                     constructor->add_read(read_stream->seq.s);
-                                }, config->reverse, timer_ptr, filter_filename);
+                                }, config->reverse, filter_filename);
                             }
                         } else {
                             std::cerr << "ERROR: Filetype unknown for file "
                                       << files[f] << std::endl;
                             exit(1);
                         }
+
+                        if (config->verbose) {
+                            std::cout << "Finished extracting sequences from file " << files[f]
+                                      << " in " << timer.elapsed() << "sec" << std::endl;
+                        }
                         if (config->verbose) {
                             std::cout << "File processed in "
                                       << data_reading_timer.elapsed()
                                       << "sec, current mem usage: "
-                                      << get_curr_mem2() / (1<<20) << " MB"
+                                      << get_curr_mem2() / (1 << 20) << " MiB"
                                       << ", total time: " << timer.elapsed()
                                       << "sec" << std::endl;
                         }
@@ -457,14 +516,17 @@ int main(int argc, const char *argv[]) {
 
             } else {
                 //slower method
-                for (unsigned int f = 0; f < files.size(); ++f) {
+                for (const auto &file : files) {
                     if (config->verbose) {
-                        std::cout << std::endl << "Parsing " << files[f] << std::endl;
+                        std::cout << std::endl << "Parsing " << file << std::endl;
                     }
+
+                    Timer data_reading_timer;
+
                     // open stream
-                    if (utils::get_filetype(files[f]) == "VCF") {
+                    if (utils::get_filetype(file) == "VCF") {
                         read_vcf_file_critical(
-                            files[f], config->refpath, graph->get_k(), NULL,
+                            file, config->refpath, graph->get_k(), NULL,
                             [&](std::string &seq, auto *) {
                                 graph->add_sequence(seq);
                                 if (config->reverse) {
@@ -473,24 +535,41 @@ int main(int argc, const char *argv[]) {
                                 }
                             }
                         );
-                    } else if (utils::get_filetype(files[f]) == "FASTA"
-                                || utils::get_filetype(files[f]) == "FASTQ") {
-                        read_fasta_file_critical(files[f],
+                    } else if (utils::get_filetype(file) == "FASTA"
+                                || utils::get_filetype(file) == "FASTQ") {
+                        read_fasta_file_critical(file,
                             [&](kseq_t *read_stream) {
                                 graph->add_sequence(read_stream->seq.s);
                             },
-                            config->reverse, NULL,
-                            get_filter_filename(files[f], config->filter_k,
+                            config->reverse,
+                            get_filter_filename(file, config->filter_k,
                                                 config->max_unreliable_abundance,
                                                 config->unreliable_kmers_threshold)
                         );
                     } else {
                         std::cerr << "ERROR: Filetype unknown for file "
-                                  << files[f] << std::endl;
+                                  << file << std::endl;
                         exit(1);
+                    }
+                    if (config->verbose) {
+                        std::cout << "Finished extracting sequences from file " << file
+                                  << " in " << timer.elapsed() << "sec"
+                                  << ", number of k-mers in graph: " << graph->num_nodes() << std::endl;
+                    }
+                    if (config->verbose) {
+                        std::cout << "File processed in "
+                                  << data_reading_timer.elapsed()
+                                  << "sec, current mem usage: "
+                                  << get_curr_mem2() / (1 << 20) << " MiB"
+                                  << ", total time: " << timer.elapsed()
+                                  << "sec" << std::endl;
                     }
                 }
             }
+
+            if (config->verbose)
+                std::cout << "Graph construction finished in "
+                          << timer.elapsed() << "sec" << std::endl;
 
             graph->switch_state(config->state);
 
@@ -517,6 +596,8 @@ int main(int argc, const char *argv[]) {
             return 0;
         }
         case Config::EXTEND: {
+            assert(config->infbase_annotators.size() <= 1);
+
             Timer timer;
 
             // load graph
@@ -549,7 +630,9 @@ int main(int argc, const char *argv[]) {
                 if (config->verbose) {
                     std::cout << std::endl << "Parsing " << file << std::endl;
                 }
-                // open stream
+
+                Timer data_reading_timer;
+
                 if (utils::get_filetype(file) == "VCF") {
                     read_vcf_file_critical(file, config->refpath, graph->get_k(), NULL,
                         [&](std::string &seq, auto *) {
@@ -566,7 +649,7 @@ int main(int argc, const char *argv[]) {
                         [&](kseq_t *read_stream) {
                             graph->add_sequence(read_stream->seq.s, true, inserted_edges.get());
                         },
-                        config->reverse, NULL,
+                        config->reverse,
                         get_filter_filename(file, config->filter_k,
                                             config->max_unreliable_abundance,
                                             config->unreliable_kmers_threshold)
@@ -575,6 +658,19 @@ int main(int argc, const char *argv[]) {
                     std::cerr << "ERROR: Filetype unknown for file "
                               << file << std::endl;
                     exit(1);
+                }
+                if (config->verbose) {
+                    std::cout << "Finished extracting sequences from file " << file
+                              << " in " << timer.elapsed() << "sec"
+                              << ", number of k-mers in graph: " << graph->num_nodes() << std::endl;
+                }
+                if (config->verbose) {
+                    std::cout << "File processed in "
+                              << data_reading_timer.elapsed()
+                              << "sec, current mem usage: "
+                              << get_curr_mem2() / (1 << 20) << " MiB"
+                              << ", total time: " << timer.elapsed()
+                              << "sec" << std::endl;
                 }
             }
 
@@ -621,7 +717,7 @@ int main(int argc, const char *argv[]) {
                 return 0;
             }
 
-            if (config->use_row_annotator) {
+            if (config->anno_type == Config::RowCompressed) {
                 anno_dbg.set_annotation(
                     new annotate::RowCompressed<>(1, config->sparse)
                 );
@@ -632,7 +728,7 @@ int main(int argc, const char *argv[]) {
                 );
             }
 
-            if (!anno_dbg.get_annotation().merge_load(config->infbase_annotators)) {
+            if (!anno_dbg.get_annotation().load(config->infbase_annotators.at(0))) {
                 std::cerr << "ERROR: can't load annotations" << std::endl;
                 exit(1);
             } else if (config->verbose) {
@@ -680,7 +776,7 @@ int main(int argc, const char *argv[]) {
                     exit(1);
                 }
 
-                Timer *timer_ptr = config->verbose ? &timer : NULL;
+                Timer data_reading_timer;
 
                 if (config->generate_filtered_fasta || config->generate_filtered_fastq) {
                     thread_pool.enqueue([=](size_t k,
@@ -738,7 +834,7 @@ int main(int argc, const char *argv[]) {
                                     exit(1);
                                 }
                             },
-                            false, timer_ptr, filter_filename
+                            false, filter_filename
                         );
 
                         if (out_fasta_gz != Z_NULL)
@@ -752,6 +848,15 @@ int main(int argc, const char *argv[]) {
                     config->unreliable_kmers_threshold,
                     config->generate_filtered_fasta,
                     config->generate_filtered_fastq);
+
+                    if (config->verbose) {
+                        std::cout << "File processed in "
+                                  << data_reading_timer.elapsed()
+                                  << "sec, current mem usage: "
+                                  << get_curr_mem2() / (1 << 20) << " MiB"
+                                  << ", total time: " << timer.elapsed()
+                                  << "sec" << std::endl;
+                    }
 
                     continue;
                 }
@@ -770,7 +875,7 @@ int main(int argc, const char *argv[]) {
                                 read_fasta_file_critical(file, [=](kseq_t *read_stream) {
                                     // add read to the graph constructor as a callback
                                     callback(read_stream->seq.s);
-                                }, reverse, timer_ptr);
+                                }, reverse);
                             },
                             k, max_unreliable_abundance, unreliable_kmers_threshold,
                             verbose, thread_pool_ptr,
@@ -787,9 +892,12 @@ int main(int argc, const char *argv[]) {
                         }
 
                         // dump filter
-                        std::ofstream outstream(get_filter_filename(
-                            file, k, max_unreliable_abundance, unreliable_kmers_threshold, false
-                        ));
+                        std::ofstream outstream(
+                            get_filter_filename(
+                                file, k, max_unreliable_abundance, unreliable_kmers_threshold, false
+                            ),
+                            std::ios::binary
+                        );
                         serialize_number_vector(outstream, filter, 1);
                     },
                     config->filter_k,
@@ -797,6 +905,15 @@ int main(int argc, const char *argv[]) {
                     config->unreliable_kmers_threshold,
                     config->verbose, config->reverse, config->use_kmc
                 );
+
+                if (config->verbose) {
+                    std::cout << "File processed in "
+                              << data_reading_timer.elapsed()
+                              << "sec, current mem usage: "
+                              << get_curr_mem2() / (1 << 20) << " MiB"
+                              << ", total time: " << timer.elapsed()
+                              << "sec" << std::endl;
+                }
             }
             thread_pool_files.join();
             thread_pool.join();
@@ -817,7 +934,7 @@ int main(int argc, const char *argv[]) {
                     true
                 );
 
-                std::ifstream instream(filter_filename);
+                std::ifstream instream(filter_filename, std::ios::binary);
                 try {
                     auto filter = load_number_vector<bool>(instream);
                     size_t num_remaining = std::count(filter.begin(), filter.end(), true);
@@ -846,6 +963,8 @@ int main(int argc, const char *argv[]) {
             return 0;
         }
         case Config::ANNOTATE: {
+            assert(config->infbase_annotators.size() <= 1);
+
             // load graph
             AnnotatedDBG anno_dbg(
                 load_critical_graph_from_file(config->infbase).release(),
@@ -860,12 +979,12 @@ int main(int argc, const char *argv[]) {
             }
 
             // initialize empty annotation
-            if (config->use_row_annotator) {
+            if (config->anno_type == Config::RowCompressed) {
                 anno_dbg.set_annotation(
                     new annotate::RowCompressed<>(anno_dbg.num_anno_rows(),
                                                   config->sparse)
                 );
-            } else {
+            } else if (config->anno_type == Config::ColumnCompressed) {
                 anno_dbg.set_annotation(
                     new annotate::ColumnCompressed<>(anno_dbg.num_anno_rows(),
                                                      kNumCachedColumns,
@@ -874,7 +993,7 @@ int main(int argc, const char *argv[]) {
             }
 
             if (config->infbase_annotators.size()
-                    && !anno_dbg.get_annotation().merge_load(config->infbase_annotators)) {
+                    && !anno_dbg.get_annotation().load(config->infbase_annotators.at(0))) {
                 std::cerr << "ERROR: can't load annotations" << std::endl;
                 exit(1);
             }
@@ -902,19 +1021,17 @@ int main(int argc, const char *argv[]) {
             return 0;
         }
         case Config::ANNOTATE_COORDINATES: {
+            assert(config->infbase_annotators.size() <= 1);
+
             // load graph
             AnnotatedDBG anno_dbg(
                 load_critical_graph_from_file(config->infbase).release(),
+                new annotate::RowCompressed<>(anno_dbg.num_anno_rows()),
                 config->parallel
             );
 
-            // initialize empty annotation
-            anno_dbg.set_annotation(
-                new annotate::RowCompressed<>(anno_dbg.num_anno_rows())
-            );
-
             if (config->infbase_annotators.size()
-                    && !anno_dbg.get_annotation().merge_load(config->infbase_annotators)) {
+                    && !anno_dbg.get_annotation().load(config->infbase_annotators.at(0))) {
                 std::cerr << "ERROR: can't load annotations" << std::endl;
                 exit(1);
             }
@@ -939,15 +1056,14 @@ int main(int argc, const char *argv[]) {
         }
         case Config::MERGE_ANNOTATIONS: {
             std::unique_ptr<Annotator> annotation;
-            if (config->use_row_annotator) {
-                throw std::runtime_error("To be implemented");
-                annotation.reset(new annotate::RowCompressed<>(0, config->sparse));
-            } else {
+            if (config->anno_type == Config::ColumnCompressed) {
                 annotation.reset(
                     new annotate::ColumnCompressed<>(
                         0, kNumCachedColumns, config->verbose
                     )
                 );
+            } else {
+                throw std::runtime_error("To be implemented");
             }
 
             if (!annotation->merge_load(files)) {
@@ -960,6 +1076,8 @@ int main(int argc, const char *argv[]) {
             return 0;
         }
         case Config::CLASSIFY: {
+            assert(config->infbase_annotators.size() == 1);
+
             // load graph
             AnnotatedDBG anno_dbg(
                 load_critical_graph_from_file(config->infbase).release(),
@@ -973,25 +1091,9 @@ int main(int argc, const char *argv[]) {
                           << " Continue with all coordinates." << std::endl;
             }
 
-            if (config->use_row_annotator) {
-                anno_dbg.set_annotation(
-                    new annotate::RowCompressed<>(0, config->sparse)
-                );
-            } else if (config->fast) {
-                anno_dbg.set_annotation(
-                    new annotate::FastColumnCompressed<>(
-                        0, kNumCachedColumns, config->verbose
-                    )
-                );
-            } else {
-                anno_dbg.set_annotation(
-                    new annotate::ColumnCompressed<>(
-                        0, kNumCachedColumns, config->verbose
-                    )
-                );
-            }
+            anno_dbg.set_annotation(initialize_annotation(*config).release());
 
-            if (!anno_dbg.get_annotation().merge_load(config->infbase_annotators)) {
+            if (!anno_dbg.get_annotation().load(config->infbase_annotators.at(0))) {
                 std::cerr << "ERROR: can't load annotations for graph "
                           << config->infbase + ".dbg"
                           << ", file corrupted" << std::endl;
@@ -1000,7 +1102,7 @@ int main(int argc, const char *argv[]) {
 
             utils::ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
 
-            std::unique_ptr<Timer> timer { config->verbose ? new Timer() : NULL };
+            Timer timer;
 
             if (!anno_dbg.check_compatibility(true)) {
                 std::cerr << "ERROR: graph cannot be annotated" << std::endl;
@@ -1012,6 +1114,8 @@ int main(int argc, const char *argv[]) {
                 if (config->verbose) {
                     std::cout << std::endl << "Parsing " << file << std::endl;
                 }
+
+                Timer data_reading_timer;
 
                 size_t seq_count = 0;
 
@@ -1029,11 +1133,23 @@ int main(int argc, const char *argv[]) {
                             std::ref(anno_dbg)
                         );
                     },
-                    config->reverse, timer.get(),
+                    config->reverse,
                     get_filter_filename(file, config->filter_k,
                                         config->max_unreliable_abundance,
                                         config->unreliable_kmers_threshold)
                 );
+                if (config->verbose) {
+                    std::cout << "Finished extracting sequences from file " << file
+                              << " in " << timer.elapsed() << "sec" << std::endl;
+                }
+                if (config->verbose) {
+                    std::cout << "File processed in "
+                              << data_reading_timer.elapsed()
+                              << "sec, current mem usage: "
+                              << get_curr_mem2() / (1 << 20) << " MiB"
+                              << ", total time: " << timer.elapsed()
+                              << "sec" << std::endl;
+                }
 
                 // wait while all threads finish processing the current file
                 thread_pool.join();
@@ -1245,18 +1361,7 @@ int main(int argc, const char *argv[]) {
             }
 
             for (const auto &file : config->infbase_annotators) {
-                std::unique_ptr<Annotator> annotation;
-
-                if (config->use_row_annotator) {
-                    annotation.reset(new annotate::RowCompressed<>(0, config->sparse));
-                } else {
-                    annotation.reset(
-                        new annotate::ColumnCompressed<>(
-                            0, kNumCachedColumns, config->verbose
-                        )
-                    );
-                }
-
+                auto annotation = initialize_annotation(*config);
                 if (!annotation->load(file)) {
                     std::cerr << "ERROR: can't load annotation from file "
                               << file << std::endl;
@@ -1265,13 +1370,20 @@ int main(int argc, const char *argv[]) {
 
                 std::cout << "Statistics for annotation " << file << std::endl;
                 std::cout << "labels: " << annotation->num_labels() << std::endl;
-                std::cout << "sparsity: " << std::scientific
-                                          << annotation->sparsity() << std::endl;
+                std::cout << "objects: " << annotation->num_objects() << std::endl;
+                std::cout << "density: " << std::scientific
+                                          << static_cast<double>(annotation->num_relations())
+                                                / annotation->num_objects()
+                                                / annotation->num_labels() << std::endl;
+                std::cout << "representation: "
+                          << config->annotype_to_string(config->anno_type) << std::endl;
             }
 
             return 0;
         }
         case Config::TRANSFORM_ANNOTATION: {
+            assert(files.size() == 1);
+
             Timer timer;
 
             auto annotator = std::make_unique<annotate::ColumnCompressed<>>(
@@ -1281,7 +1393,7 @@ int main(int argc, const char *argv[]) {
             if (config->verbose)
                 std::cout << "Loading annotator...\t" << std::flush;
 
-            if (!annotator->merge_load(files)) {
+            if (!annotator->load(files.at(0))) {
                 std::cerr << "ERROR: can't load annotations" << std::endl;
                 exit(1);
             }
@@ -1318,22 +1430,127 @@ int main(int argc, const char *argv[]) {
                     std::cout << timer.elapsed() << "sec" << std::endl;
             }
 
-            if (config->to_row_annotator) {
-                if (config->verbose)
-                    std::cout << "Converting...\t" << std::flush;
+            switch (config->anno_type) {
+                case Config::ColumnCompressed:
+                    break;
+                case Config::RowCompressed: {
+                    if (config->verbose)
+                        std::cout << "Converting...\t" << std::flush;
 
-                annotate::RowCompressed<> row_annotator(0);
-                annotator->convert_to_row_annotator(&row_annotator,
-                                                    config->parallel);
-                annotator.reset();
+                    annotate::RowCompressed<> row_annotator(0);
+                    annotator->convert_to_row_annotator(&row_annotator,
+                                                        config->parallel);
+                    annotator.reset();
 
-                row_annotator.serialize(config->outfbase);
-                if (config->verbose)
-                    std::cout << timer.elapsed() << "sec" << std::endl;
+                    row_annotator.serialize(config->outfbase);
+                    if (config->verbose)
+                        std::cout << timer.elapsed() << "sec" << std::endl;
+                    break;
+                }
+                case Config::BRWT: {
+                    if (config->verbose)
+                        std::cout << "Converting...\t" << std::flush;
+
+                    auto brwt_annotator = config->greedy_brwt
+                        ? annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
+                            std::move(*annotator),
+                            config->parallel)
+                        : annotate::convert_to_simple_BRWT<annotate::BRWTCompressed<>>(
+                            std::move(*annotator),
+                            config->arity_brwt,
+                            config->parallel);
+
+                    annotator.reset();
+
+                    brwt_annotator->serialize(config->outfbase);
+                    if (config->verbose)
+                        std::cout << timer.elapsed() << "sec" << std::endl;
+                    break;
+                }
+                case Config::BinRelWT_sdsl: {
+                    if (config->verbose)
+                        std::cout << "Converting...\t" << std::flush;
+
+                    auto binrelwt_sdsl_annotator
+                            = annotate::convert<annotate::BinRelWT_sdslAnnotator>(
+                        std::move(*annotator)
+                    );
+                    annotator.reset();
+                    if (config->verbose)
+                        std::cout << timer.elapsed() << "sec" << std::endl;
+
+                    if (config->verbose)
+                        std::cout << "Serializing to " << config->outfbase
+                                  << "...\t" << std::flush;
+                    binrelwt_sdsl_annotator->serialize(config->outfbase);
+                    if (config->verbose)
+                        std::cout << timer.elapsed() << "sec" << std::endl;
+                    break;
+                }
+                case Config::BinRelWT: {
+                    if (config->verbose)
+                        std::cout << "Converting...\t" << std::flush;
+
+                    auto binrelwt_annotator = annotate::convert<annotate::BinRelWTAnnotator>(
+                        std::move(*annotator)
+                    );
+                    annotator.reset();
+                    if (config->verbose)
+                       std::cout << timer.elapsed() << "sec" << std::endl;
+
+                    if (config->verbose)
+                        std::cout << "Serializing to " << config->outfbase
+                                  << "...\t" << std::flush;
+                    binrelwt_annotator->serialize(config->outfbase);
+                    if (config->verbose)
+                        std::cout << timer.elapsed() << "sec" << std::endl;
+                    break;
+                }
+                case Config::RowFlat: {
+                    if (config->verbose)
+                        std::cout << "Converting to flat annotator...\t" << std::flush;
+
+                    auto flat_annotator = annotate::convert<annotate::RowFlatAnnotator>(
+                        std::move(*annotator)
+                    );
+                    annotator.reset();
+                    if (config->verbose)
+                        std::cout << timer.elapsed() << "sec" << std::endl;
+
+                    if (config->verbose)
+                        std::cout << "Serializing to " << config->outfbase
+                                  << "...\t" << std::flush;
+                    flat_annotator->serialize(config->outfbase);
+                    if (config->verbose)
+                        std::cout << timer.elapsed() << "sec" << std::endl;
+                    break;
+                }
+                case Config::RBFish: {
+                    if (config->verbose)
+                        std::cout << "Converting to rainbowfish annotator...\t" << std::flush;
+
+                    auto flat_annotator = annotate::convert<annotate::RainbowfishAnnotator>(
+                        std::move(*annotator)
+                    );
+                    annotator.reset();
+
+                    if (config->verbose)
+                        std::cout << timer.elapsed() << "sec" << std::endl;
+
+                    if (config->verbose)
+                        std::cout << "Serializing to " << config->outfbase
+                                  << "...\t" << std::flush;
+                    flat_annotator->serialize(config->outfbase);
+                    if (config->verbose)
+                        std::cout << timer.elapsed() << "sec" << std::endl;
+                    break;
+                }
             }
             return 0;
         }
         case Config::TRANSFORM: {
+            assert(files.size() == 1);
+
             Timer timer;
             if (config->verbose) {
                 std::cout << "Graph loading...\t" << std::flush;
@@ -1448,6 +1665,37 @@ int main(int argc, const char *argv[]) {
 
             return 0;
         }
+        case Config::RELAX_BRWT: {
+            assert(files.size() == 1);
+
+            Timer timer;
+
+            auto annotator = std::make_unique<annotate::BRWTCompressed<>>();
+
+            if (config->verbose)
+                std::cout << "Loading annotator...\t" << std::flush;
+
+            if (!annotator->load(files.at(0))) {
+                std::cerr << "ERROR: can't load annotations from file "
+                          << files.at(0) << std::endl;
+                exit(1);
+            }
+            if (config->verbose)
+                std::cout << timer.elapsed() << "sec" << std::endl;
+
+            if (config->verbose)
+                std::cout << "Relaxing BRWT tree...\t" << std::flush;
+
+            annotate::relax_BRWT<annotate::BRWTCompressed<>>(annotator.get(),
+                                                             config->relax_arity_brwt,
+                                                             config->parallel);
+
+            annotator->serialize(config->outfbase);
+            if (config->verbose)
+                std::cout << timer.elapsed() << "sec" << std::endl;
+
+            return 0;
+        }
         case Config::ALIGN: {
             assert(config->infbase.size());
 
@@ -1478,10 +1726,7 @@ int main(int argc, const char *argv[]) {
                 config->alignment_length = graph->get_k();
             }
 
-            std::unique_ptr<Timer> timer;
-            if (config->verbose) {
-                timer.reset(new Timer());
-            }
+            Timer timer;
 
             std::cout << "Align sequences against the de Bruijn graph with ";
             std::cout << "k=" << graph->get_k() << "\n"
@@ -1490,6 +1735,8 @@ int main(int argc, const char *argv[]) {
 
             for (const auto &file : files) {
                 std::cout << "Align sequences from file " << file << std::endl;
+
+                Timer data_reading_timer;
 
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                     if (config->distance > 0) {
@@ -1589,11 +1836,20 @@ int main(int argc, const char *argv[]) {
                         std::cout << std::string(read_stream->seq.s + i, config->alignment_length);
                         std::cout << ": " << graphindices[i] << "\n";
                     }
-                }, config->reverse, timer.get(),
+                }, config->reverse,
                     get_filter_filename(file, config->filter_k,
                                         config->max_unreliable_abundance,
                                         config->unreliable_kmers_threshold)
                 );
+
+                if (config->verbose) {
+                    std::cout << "File processed in "
+                              << data_reading_timer.elapsed()
+                              << "sec, current mem usage: "
+                              << get_curr_mem2() / (1 << 20) << " MiB"
+                              << ", total time: " << timer.elapsed()
+                              << "sec" << std::endl;
+                }
             }
 
             return 0;

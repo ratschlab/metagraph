@@ -68,11 +68,10 @@ bool write_fastq(gzFile gz_out, const kseq_t &kseq) {
 void read_fasta_file_critical(const std::string &filename,
                               std::function<void(kseq_t*)> callback,
                               bool with_reverse,
-                              Timer *timer,
                               const std::string &filter_filename) {
     std::vector<bool> filter;
     if (filter_filename.size()) {
-        std::ifstream instream(filter_filename);
+        std::ifstream instream(filter_filename, std::ios::binary);
         try {
             filter = load_number_vector<bool>(instream);
         } catch (...) {
@@ -94,9 +93,7 @@ void read_fasta_file_critical(const std::string &filename,
         std::cerr << "ERROR while opening input file " << filename << std::endl;
         exit(1);
     }
-    if (timer) {
-        std::cout << "Start extracting sequences from file " << filename << std::endl;
-    }
+
     while (kseq_read(read_stream) >= 0) {
         if (filter_filename.size() && filter.size() <= seq_count) {
             std::cerr << "ERROR: Filter file " << filter_filename
@@ -119,11 +116,7 @@ void read_fasta_file_critical(const std::string &filename,
                   << " has more sequences" << std::endl;
         exit(1);
     }
-    if (timer) {
-        std::cout << "Finished extracting sequences from file " << filename
-                  << " in " << timer->elapsed() << "sec"
-                  << ", sequences extracted: " << seq_count << std::endl;
-    }
+
     kseq_destroy(read_stream);
     gzclose(input_p);
 }
@@ -133,8 +126,7 @@ void read_vcf_file_critical(const std::string &filename,
                             size_t k,
                             std::vector<std::string> *annotation,
                             std::function<void(std::string &,
-                                               std::vector<std::string> *)> callback,
-                            Timer *timer) {
+                                               std::vector<std::string> *)> callback) {
     //TODO: make this a configurable option
     //default list of tokens to extract as annotations
     //TODO: extract these guys directly from vcf parsed
@@ -148,17 +140,9 @@ void read_vcf_file_critical(const std::string &filename,
         std::cerr << "ERROR reading VCF " << filename << std::endl;
         exit(1);
     }
-    if (timer) {
-        std::cout << "Extracting sequences from file " << filename << std::endl;
-    }
     size_t seq_count = 0;
     while (vcf.get_seq(annots, annotation)) {
         callback(vcf.seq, annotation);
         seq_count++;
-    }
-    if (timer) {
-        std::cout << "Finished extracting sequences from file " << filename
-                  << " in " << timer->elapsed() << "sec"
-                  << ", sequences extracted: " << seq_count << std::endl;
     }
 }

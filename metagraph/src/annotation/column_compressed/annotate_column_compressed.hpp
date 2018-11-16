@@ -13,15 +13,19 @@
 namespace annotate {
 
 template <typename Label>
-class FastColumnCompressed;
-
-template <typename Label>
 class RowCompressed;
 
 
 template <typename Label = std::string>
 class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
-    friend FastColumnCompressed<Label>;
+    template <typename L>
+    friend class FastColumnCompressed;
+
+    template <class A, typename L>
+    friend std::unique_ptr<A> convert(ColumnCompressed<L>&&);
+
+    template <class A, typename L, class P>
+    friend std::unique_ptr<A> convert_to_BRWT(ColumnCompressed<L>&&, P, size_t);
 
   public:
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
@@ -36,6 +40,7 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     ~ColumnCompressed();
 
+    using MultiLabelEncoded<uint64_t, Label>::set;
     void set_labels(Index i, const VLabels &labels);
     VLabels get_labels(Index i) const;
 
@@ -62,10 +67,14 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     uint64_t num_objects() const;
     size_t num_labels() const;
-    double sparsity() const;
+    uint64_t num_relations() const;
 
     void convert_to_row_annotator(RowCompressed<Label> *annotator,
                                   size_t num_threads = 1) const;
+
+    void dump_columns(const std::string &prefix) const;
+
+    const std::vector<std::unique_ptr<bit_vector>>& data() const;
 
   private:
     void set(Index i, size_t j, bool value);
@@ -81,7 +90,7 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     uint64_t num_rows_;
 
-    std::vector<std::unique_ptr<bit_vector_small>> bitmatrix_;
+    std::vector<std::unique_ptr<bit_vector>> bitmatrix_;
 
     caches::fixed_sized_cache<size_t,
                               std::vector<bool>*,

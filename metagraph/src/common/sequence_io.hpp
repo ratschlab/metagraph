@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <vector>
+#include <string>
 
 #include <zlib.h>
 #include <htslib/kseq.h>
@@ -13,7 +14,6 @@
 KSEQ_INIT(gzFile, gzread);
 
 
-// TODO: use BGZF from htslib
 bool write_fasta(gzFile gz_out, const kseq_t &kseq);
 
 bool write_fasta(gzFile gz_out, const std::string &header,
@@ -25,7 +25,6 @@ bool write_fastq(gzFile gz_out, const kseq_t &kseq);
 void read_fasta_file_critical(const std::string &filename,
                               std::function<void(kseq_t*)> callback,
                               bool with_reverse = false,
-                              Timer *timer = NULL,
                               const std::string &filter_filename = "");
 
 void read_vcf_file_critical(const std::string &filename,
@@ -33,7 +32,6 @@ void read_vcf_file_critical(const std::string &filename,
                             size_t k,
                             std::vector<std::string> *annotation,
                             std::function<void(std::string&,
-                                               std::vector<std::string>*)> callback,
-                            Timer *timer = NULL);
+                                               std::vector<std::string>*)> callback);
 
 #endif // __SEQUENCE_IO__

@@ -72,13 +72,13 @@ DBG_succ::Chunk::build_graph_from_chunks(const std::vector<std::string> &chunk_f
     for (auto file : chunk_filenames) {
         file = utils::remove_suffix(file, ".dbgchunk") + ".dbgchunk";
 
-        std::ifstream chunk_in(file);
+        std::ifstream chunk_in(file, std::ios::binary);
 
         if (!chunk_in.good()) {
             std::cerr << "ERROR: input file " << file << " corrupted" << std::endl;
             exit(1);
         }
-        cumulative_size += load_number_vector_size(chunk_in) - 1;
+        cumulative_size += get_number_vector_size(chunk_in) - 1;
     }
 
     if (verbose)
@@ -152,7 +152,8 @@ DBG_succ::Chunk::build_graph_from_chunks(const std::vector<std::string> &chunk_f
 bool DBG_succ::Chunk::load(const std::string &infbase) {
     try {
         std::ifstream instream(utils::remove_suffix(infbase, ".dbgchunk")
-                                                                + ".dbgchunk");
+                                                                + ".dbgchunk",
+                               std::ios::binary);
         W_ = load_number_vector<TAlphabet>(instream);
         last_ = load_number_vector<bool>(instream);
         F_ = load_number_vector<uint64_t>(instream);
@@ -172,7 +173,8 @@ bool DBG_succ::Chunk::load(const std::string &infbase) {
 
 void DBG_succ::Chunk::serialize(const std::string &outbase) const {
     std::ofstream outstream(utils::remove_suffix(outbase, ".dbgchunk")
-                                                                + ".dbgchunk");
+                                                                + ".dbgchunk",
+                            std::ios::binary);
     serialize_number_vector(outstream, W_, kLogSigma);
     serialize_number_vector(outstream, last_, 1);
     serialize_number_vector(outstream, F_);

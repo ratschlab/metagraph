@@ -80,8 +80,8 @@ class MultiLabelAnnotation
     virtual bool has_label(Index i, const Label &label) const = 0;
     virtual bool has_labels(Index i, const VLabels &labels) const = 0;
 
-    virtual void serialize(const std::string &filename) const = 0;
-    virtual bool merge_load(const std::vector<std::string> &filenames) = 0;
+    virtual void serialize(const std::string &filename) const override = 0;
+    virtual bool merge_load(const std::vector<std::string> &filenames) override = 0;
 
     virtual void insert_rows(const std::vector<Index> &rows) = 0;
 
@@ -102,7 +102,7 @@ class MultiLabelAnnotation
 
     virtual uint64_t num_objects() const = 0;
     virtual size_t num_labels() const = 0;
-    virtual double sparsity() const = 0;
+    virtual uint64_t num_relations() const = 0;
 };
 
 
@@ -135,7 +135,7 @@ class LabelEncoder {
     void clear() { encode_label_.clear(); decode_label_.clear(); }
 
   private:
-    std::unordered_map<Label, uint32_t> encode_label_;
+    std::unordered_map<Label, uint64_t> encode_label_;
     std::vector<Label> decode_label_;
 };
 
@@ -153,28 +153,28 @@ class MultiLabelEncoded
 
     /******************* General functionality *******************/
 
-    virtual void set_labels(Index i, const VLabels &labels) = 0;
-    virtual VLabels get_labels(Index i) const = 0;
+    virtual void set_labels(Index i, const VLabels &labels) override = 0;
+    virtual VLabels get_labels(Index i) const override = 0;
 
-    virtual void add_label(Index i, const Label &label) = 0;
-    virtual void add_labels(Index i, const VLabels &labels) = 0;
+    virtual void add_label(Index i, const Label &label) override = 0;
+    virtual void add_labels(Index i, const VLabels &labels) override = 0;
     virtual void add_labels(const std::vector<Index> &indices,
-                            const VLabels &labels) = 0;
+                            const VLabels &labels) override = 0;
 
-    virtual bool has_label(Index i, const Label &label) const = 0;
-    virtual bool has_labels(Index i, const VLabels &labels) const = 0;
+    virtual bool has_label(Index i, const Label &label) const override = 0;
+    virtual bool has_labels(Index i, const VLabels &labels) const override = 0;
 
-    virtual void serialize(const std::string &filename) const = 0;
-    virtual bool merge_load(const std::vector<std::string> &filenames) = 0;
+    virtual void serialize(const std::string &filename) const override = 0;
+    virtual bool merge_load(const std::vector<std::string> &filenames) override = 0;
 
-    virtual void insert_rows(const std::vector<Index> &rows) = 0;
+    virtual void insert_rows(const std::vector<Index> &rows) override = 0;
 
     /*********************** Special queries **********************/
 
     // Get labels that occur at least in |presence_ratio| rows.
     // If |presence_ratio| = 0, return all occurring labels.
     virtual VLabels get_labels(const std::vector<Index> &indices,
-                               double presence_ratio) const = 0;
+                               double presence_ratio) const override = 0;
 
     // Count all labels collected from the given rows
     // and return top |num_top| with the their counts.
@@ -184,9 +184,9 @@ class MultiLabelEncoded
 
     /************************* Properties *************************/
 
-    virtual uint64_t num_objects() const = 0;
-    virtual size_t num_labels() const = 0;
-    virtual double sparsity() const = 0;
+    virtual uint64_t num_objects() const override = 0;
+    virtual size_t num_labels() const override = 0;
+    virtual uint64_t num_relations() const override = 0;
 
   protected:
     virtual std::vector<uint64_t>

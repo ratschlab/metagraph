@@ -20,8 +20,6 @@ TEST(RowCompressed, EmptyConstructor) {
     EXPECT_EQ(0u, annotation.get(4).size());
 }
 
-std::set<std::string> convert_to_set(const std::vector<std::string> &vector);
-
 TEST(RowCompressed, add_label) {
     annotate::RowCompressed<> annotation(5, false);
     annotation.add_label(0, "0");

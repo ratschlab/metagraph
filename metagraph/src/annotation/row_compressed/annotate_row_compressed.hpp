@@ -6,32 +6,13 @@
 #include <Eigen/Sparse>
 
 #include "annotate.hpp"
+#include "binary_matrix.hpp"
 
 
 namespace annotate {
 
 template <typename Label>
 class ColumnCompressed;
-
-
-class RowMajorSparseBinaryMatrix {
-  public:
-    virtual ~RowMajorSparseBinaryMatrix() {}
-
-    virtual void set_bit(size_t i, size_t j) = 0;
-    virtual bool is_set_bit(size_t i, size_t j) const = 0;
-
-    virtual size_t select(size_t i, size_t k) const = 0;
-
-    virtual size_t size() const = 0;
-    virtual size_t size(size_t i) const = 0;
-
-    virtual void clear(size_t i) = 0;
-
-    virtual void reinitialize(size_t num_rows) = 0;
-
-    virtual void insert_rows(const std::vector<uint64_t> &rows) = 0;
-};
 
 
 template <typename Label = std::string>
@@ -66,12 +47,14 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     uint64_t num_objects() const;
     size_t num_labels() const;
-    double sparsity() const;
+    uint64_t num_relations() const;
 
   private:
+    void reinitialize(uint64_t num_rows);
+
     std::vector<uint64_t> count_labels(const std::vector<Index> &indices) const;
 
-    std::unique_ptr<RowMajorSparseBinaryMatrix> matrix_;
+    std::unique_ptr<BinaryMatrixRowDynamic> matrix_;
 
     LabelEncoder<Label> &label_encoder_ {
         MultiLabelEncoded<uint64_t, Label>::label_encoder_

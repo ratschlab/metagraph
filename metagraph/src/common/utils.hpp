@@ -16,6 +16,7 @@
 #include <atomic>
 #include <bitset>
 
+#include <sdsl/sd_vector.hpp>
 #include <sdsl/wavelet_trees.hpp>
 
 #if _USE_FOLLY
@@ -31,7 +32,13 @@ typedef std::vector<uint32_t> SmallVector;
 #endif
 
 #include "dbg_succinct.hpp"
+#include "serialization.hpp"
+#include "kmer.hpp"
 
+
+struct SmallVectorHash {
+    std::size_t operator()(const SmallVector &vector) const;
+};
 
 namespace utils {
 
@@ -50,8 +57,6 @@ namespace utils {
                                           const std::string &delimiter);
 
     bool check_if_writable(const std::string &filename);
-
-    uint64_t kFromFile(const std::string &infbase);
 
     /**
     * This function takes a pointer to a graph structure G1 and a corresponding node index k1_node
@@ -96,6 +101,8 @@ namespace utils {
 
     std::deque<std::string> generate_strings(const std::string &alphabet,
                                              size_t length);
+
+    uint32_t code_length(uint64_t a);
 
 
     /**
@@ -299,8 +306,150 @@ namespace utils {
     template <typename T>
     void erase(std::vector<T> *vector, const std::vector<bool> &erase_mask);
 
+
+    // Read indices of set bits from a vector of VectorStreams
+    class RowsFromColumnsTransformer {
+      public:
+        // Files store serialized vectors as plain indexes of the set bits
+        RowsFromColumnsTransformer(uint64_t num_rows,
+                                   const std::vector<std::string> &files);
+
+        template <typename BitVectorPtr>
+        RowsFromColumnsTransformer(const std::vector<BitVectorPtr> &columns);
+
+        RowsFromColumnsTransformer(const bit_vector_small &columns_concatenated,
+                                   uint64_t column_size);
+
+        using ValueCallback = std::function<void(uint64_t /*row*/,
+                                                 uint64_t /*column*/)>;
+        void call_next(ValueCallback callback);
+
+        uint64_t rows() const { return num_rows_; }
+        uint64_t columns() const { return streams_.size(); }
+
+        // get the number of set bits in the vectors left
+        uint64_t values_left() const { return num_set_bits_left_; }
+
+      private:
+        void init_heap();
+
+        std::vector<std::unique_ptr<VectorStream>> streams_;
+        uint64_t num_set_bits_left_ = 0;
+        uint64_t num_rows_;
+
+        // store pair of kmer index and label index
+        struct kmer_label_pair {
+            uint64_t row_id;
+            uint64_t col_id;
+
+            bool operator<(const kmer_label_pair &other) const {
+                return row_id > other.row_id || (row_id == other.row_id
+                                                    && col_id > other.col_id);
+            }
+        };
+
+        std::priority_queue<kmer_label_pair,
+                            std::vector<kmer_label_pair>> index_heap_;
+    };
+
+    using SetBitPositions = std::vector<uint64_t>;
+    void call_rows(const std::function<void(const SetBitPositions &)> &callback,
+                   RowsFromColumnsTransformer&& transformer);
+
+    template <typename... Args>
+    void call_rows(const std::function<void(const SetBitPositions &)> &callback,
+                   Args&&... args) {
+        call_rows(callback,
+                  RowsFromColumnsTransformer(std::forward<Args>(args)...));
+    }
+
+    template <class BitVectorType = bit_vector_stat>
+    std::vector<std::unique_ptr<bit_vector>>
+    transpose(const std::vector<std::unique_ptr<bit_vector>> &matrix);
+
+
+    class TempFile {
+      public:
+        // The state flow:
+        //    init -> APPEND -> READ -> deinit
+        enum State { APPEND, READ };
+
+        TempFile(const std::string &tmp_dir = "");
+        ~TempFile();
+
+        std::ofstream& ofstream();
+        std::ifstream& ifstream();
+
+      private:
+        std::string tmp_file_name_;
+        State state_;
+        std::unique_ptr<std::ofstream> tmp_ostream_;
+        std::unique_ptr<std::ifstream> tmp_istream_;
+    };
+
+    // Partitions a range of numbers in [0,n) into groups.
+    // The groups must not be empty.
+    class RangePartition {
+      public:
+        typedef uint32_t T;
+        typedef uint32_t G;
+        typedef uint32_t R;
+
+        RangePartition() {}
+        RangePartition(const std::vector<uint64_t> &arrangement,
+                       const std::vector<size_t> &group_sizes);
+        explicit RangePartition(std::vector<std::vector<uint64_t>>&& partition);
+
+        explicit RangePartition(const RangePartition &) = default;
+        RangePartition& operator=(const RangePartition &) = default;
+        RangePartition(RangePartition&&) = default;
+        RangePartition& operator=(RangePartition&&) = default;
+
+        // get group that contains value
+        G group(T value) const;
+
+        // get index of value in its group
+        R rank(T value) const;
+
+        // get value given its group and the rank
+        T get(G group, R rank) const;
+
+        uint64_t num_groups() const;
+        uint64_t size() const;
+
+        bool load(std::istream &in);
+        void serialize(std::ostream &out) const;
+
+      private:
+        // Based on |partition_|, initializes groups and ranks.
+        // Returns false if partition is invalid.
+        bool initialize_groups_and_ranks();
+
+        std::vector<std::vector<T>> partition_;
+        std::vector<G> groups_;
+        std::vector<R> ranks_;
+    };
+
+    template <typename T>
+    std::vector<T> arange(T first, size_t size) {
+        std::vector<T> result(size);
+        std::iota(result.begin(), result.end(), first);
+        return result;
+    }
+
+
+    // indexes are distinct and sorted
+    std::vector<bool> subvector(const bit_vector &col,
+                                const std::vector<uint64_t> &indexes);
+
+    std::vector<uint64_t> sample_indexes(uint64_t universe_size,
+                                         uint64_t sample_size,
+                                         std::mt19937 &gen);
+
 } // namespace utils
 
+template <typename T>
+std::set<T> convert_to_set(const std::vector<T> &vector);
 
 std::set<std::string> convert_to_set(const std::vector<std::string> &vector);
 

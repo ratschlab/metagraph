@@ -1,7 +1,6 @@
 #include "annotated_dbg.hpp"
 
 #include "annotate_column_compressed.hpp"
-#include "annotate_column_compressed_fast.hpp"
 #include "annotate_row_compressed.hpp"
 
 
@@ -214,7 +213,8 @@ void AnnotatedDBG::initialize_annotation_mask(size_t num_threads,
 }
 
 bool AnnotatedDBG::load_annotation_mask(const std::string &filename_base) {
-    std::ifstream instream(filename_base + kAnnotationMaskExtension);
+    std::ifstream instream(filename_base + kAnnotationMaskExtension,
+                           std::ios::binary);
 
     if (!instream.good())
         return false;
@@ -241,7 +241,8 @@ void AnnotatedDBG::serialize_annotation_mask(const std::string &filename_base) c
     if (!annotation_mask_.get())
         throw std::runtime_error("Trying to serialize uninitialized annotation mask");
 
-    std::ofstream outstream(filename_base + kAnnotationMaskExtension);
+    std::ofstream outstream(filename_base + kAnnotationMaskExtension,
+                            std::ios::binary);
     if (!outstream.good())
         throw std::ios_base::failure("Can't write to file "
                                         + filename_base + kAnnotationMaskExtension);

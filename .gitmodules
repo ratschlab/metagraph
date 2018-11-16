@@ -21,3 +21,15 @@
 [submodule "metagraph/external-libraries/KMC"]
 	path = metagraph/external-libraries/KMC
 	url = https://github.com/karasikov/KMC.git
+[submodule "metagraph/external-libraries/binrel_wt"]
+	path = metagraph/external-libraries/binrel_wt
+	url = https://github.com/sara-jvz/binrel_wt.git
+[submodule "metagraph/external-libraries/ordered-map"]
+	path = metagraph/external-libraries/ordered-map
+	url = https://github.com/Tessil/ordered-map.git
+[submodule "metagraph/external-libraries/sparsepp"]
+	path = metagraph/external-libraries/sparsepp
+	url = https://github.com/greg7mdp/sparsepp.git
+[submodule "metagraph/external-libraries/tclap"]
+	path = metagraph/external-libraries/tclap
+	url = https://github.com/eile/tclap.git

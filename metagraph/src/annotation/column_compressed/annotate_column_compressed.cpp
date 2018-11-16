@@ -114,7 +114,8 @@ template <typename Label>
 void ColumnCompressed<Label>::serialize(const std::string &filename) const {
     flush();
 
-    std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension);
+    std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension,
+                            std::ios::binary);
     if (!outstream.good())
         throw std::ofstream::failure("Bad stream");
 
@@ -141,10 +142,11 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
             if (verbose_) {
                 std::cout << "Loading annotations from file "
                           << remove_suffix(filename, kExtension) + kExtension
-                          << "..." << std::endl;
+                          << std::endl;
             }
 
-            std::ifstream instream(remove_suffix(filename, kExtension) + kExtension);
+            std::ifstream instream(remove_suffix(filename, kExtension) + kExtension,
+                                   std::ios::binary);
             if (!instream.good())
                 return false;
 
@@ -162,7 +164,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
             for (size_t c = 0; c < label_encoder_load.size(); ++c) {
                 size_t col = label_encoder_.insert_and_encode(label_encoder_load.decode(c));
 
-                auto *new_column = new bit_vector_small();
+                auto *new_column = new bit_vector_sd();
                 if (!new_column->load(instream) || new_column->size() != num_rows_)
                     return false;
 
@@ -234,7 +236,7 @@ void ColumnCompressed<Label>
         old_columns[old_index_to_label[i]].insert(i);
     }
 
-    std::vector<std::unique_ptr<bit_vector_small>> old_bitmatrix;
+    std::vector<std::unique_ptr<bit_vector>> old_bitmatrix;
     old_bitmatrix.swap(bitmatrix_);
 
     label_encoder_.clear();
@@ -253,7 +255,7 @@ void ColumnCompressed<Label>
                 old_bitmatrix[c]->add_to(&bit_vector);
                 old_bitmatrix[c].reset();
             }
-            bitmatrix_.emplace_back(new bit_vector_small(bit_vector));
+            bitmatrix_.emplace_back(new bit_vector_sd(bit_vector));
         }
     }
 }
@@ -305,15 +307,13 @@ size_t ColumnCompressed<Label>::num_labels() const {
 }
 
 template <typename Label>
-double ColumnCompressed<Label>::sparsity() const {
+uint64_t ColumnCompressed<Label>::num_relations() const {
     flush();
 
-    uint64_t num_set_bits = std::accumulate(
+    return std::accumulate(
         bitmatrix_.begin(), bitmatrix_.end(), uint64_t(0),
         [](uint64_t v, const auto &c) { return v + c->num_set_bits(); }
     );
-
-    return 1 - static_cast<double>(num_set_bits) / num_labels() / num_rows_;
 }
 
 template <typename Label>
@@ -364,7 +364,7 @@ void ColumnCompressed<Label>::flush(size_t j, const std::vector<bool> &vector) {
     assert(cached_columns_.Cached(j));
 
     bitmatrix_[j].reset();
-    bitmatrix_[j].reset(new bit_vector_small(vector));
+    bitmatrix_[j].reset(new bit_vector_sd(vector));
 }
 
 template <typename Label>
@@ -392,9 +392,11 @@ template <typename Label>
 void ColumnCompressed<Label>
 ::convert_to_row_annotator(RowCompressed<Label> *annotator,
                            size_t num_threads) const {
+    assert(annotator);
+
     flush();
 
-    annotator->matrix_->reinitialize(num_rows_);
+    annotator->reinitialize(num_rows_);
     annotator->label_encoder_ = label_encoder_;
 
     if (num_threads <= 1) {
@@ -417,7 +419,7 @@ template <typename Label>
 void ColumnCompressed<Label>::add_labels(uint64_t begin, uint64_t end,
                                          RowCompressed<Label> *annotator) const {
     assert(begin <= end);
-    assert(end <= annotator->matrix_->size());
+    assert(end <= annotator->matrix_->num_rows());
 
     for (size_t j = 0; j < bitmatrix_.size(); ++j) {
         uint64_t first = begin == 0
@@ -426,9 +428,39 @@ void ColumnCompressed<Label>::add_labels(uint64_t begin, uint64_t end,
         uint64_t last = bitmatrix_[j]->rank1(end - 1);
 
         for (uint64_t r = first; r <= last; ++r) {
-            annotator->matrix_->set_bit(bitmatrix_[j]->select1(r), j);
+            annotator->matrix_->set(bitmatrix_[j]->select1(r), j);
         }
     }
+}
+
+template <typename Label>
+void ColumnCompressed<Label>
+::dump_columns(const std::string &prefix) const {
+    flush();
+
+    for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
+        std::ofstream outstream(remove_suffix(prefix, kExtension)
+                + "." + std::to_string(i)
+                + ".raw" + kExtension);
+
+        if (!outstream.good())
+            throw std::ofstream::failure("Bad stream");
+
+        auto& color = *bitmatrix_[i];
+
+        uint64_t set_bits = color.rank1(color.size());
+        serialize_number(outstream, set_bits);
+
+        for (uint64_t j = 1; j <= set_bits; ++j) {
+            serialize_number(outstream, color.select1(j));
+        }
+    }
+}
+
+template <typename Label>
+const std::vector<std::unique_ptr<bit_vector>>&
+ColumnCompressed<Label>::data() const {
+    return bitmatrix_;
 }
 
 template class ColumnCompressed<std::string>;

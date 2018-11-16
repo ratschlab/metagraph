@@ -1,13 +1,13 @@
 cmake_minimum_required (VERSION 3.6.1)
-project(MetaGenGraph)
+project(Metagraph)
 
 enable_testing()
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE "DEBUG")
+  set(CMAKE_BUILD_TYPE "RELEASE")
 endif()
 
 
@@ -27,8 +27,26 @@ endif()
 string(APPEND CMAKE_CXX_FLAGS " \
   -Wall -Wextra -Werror \
   -msse4.2 \
-  -fopenmp -D_THREAD_SAFE -pthread \
+  -D_THREAD_SAFE -pthread \
 ") # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
+
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  string(APPEND CMAKE_CXX_FLAGS " \
+    -Wno-exit-time-destructors \
+    -Wno-unused-function \
+    -Wno-old-style-cast \
+  ")
+endif()
+
+find_package(OpenMP REQUIRED)
+if(NOT TARGET OpenMP::OpenMP_CXX)
+    add_library(OpenMP_TARGET INTERFACE)
+    add_library(OpenMP::OpenMP_CXX ALIAS OpenMP_TARGET)
+    target_compile_options(OpenMP_TARGET INTERFACE ${OpenMP_CXX_FLAGS})
+    find_package(Threads REQUIRED)
+    target_link_libraries(OpenMP_TARGET INTERFACE Threads::Threads)
+    target_link_libraries(OpenMP_TARGET INTERFACE ${OpenMP_CXX_FLAGS})
+endif()
 
 if(NOT DEFINED WITH_AVX)
 set(WITH_AVX TRUE)
@@ -37,22 +55,16 @@ if(WITH_AVX)
 string(APPEND CMAKE_CXX_FLAGS " -mavx -mavx2 -mfma -mbmi -mbmi2")
 endif()
 
-# Profile build type
-set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O2 -g")
-set(CMAKE_EXE_LINKER_FLAGS_PROFILE "-pg -g")
-set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg -g")
+if(WITH_MMAP)
+message(STATUS "Enabling boost iostreams for mmapped reader")
+string(APPEND CMAKE_CXX_FLAGS " -D_USE_MMAP")
+set(METALIBS ${METALIBS} -lboost_iostreams)
+endif()
 
-# Debug build type
-set(CMAKE_CXX_FLAGS_DEBUG "-O3 -g")
-
-# Thread sanitizer build type
-set(CMAKE_CXX_FLAGS_THREADS "-DNDEBUG -O2 -g -fsanitize=thread")
-set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
-set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
-
-set(CMAKE_VERBOSE_MAKEFILE 1)
-cmake_policy(SET CMP0015 NEW)
-
+if(WITH_DEATH_TESTS)
+message(STATUS "Enabling death tests in gtest")
+string(APPEND CMAKE_CXX_FLAGS " -D_DEATH_TEST")
+endif()
 
 #-------------------
 # KMC k-mer counter
@@ -78,26 +90,61 @@ if(result)
 endif()
 
 
+# Profile build type
+set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O3 -g")
+set(CMAKE_EXE_LINKER_FLAGS_PROFILE "-pg -g")
+set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg -g")
+
+# Debug build type
+set(CMAKE_CXX_FLAGS_DEBUG "-O3 -g")
+
+# Thread sanitizer build type
+set(CMAKE_CXX_FLAGS_THREADS "-DNDEBUG -O2 -g -fsanitize=thread")
+set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
+set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
+
+
+set(CMAKE_VERBOSE_MAKEFILE 1)
+cmake_policy(SET CMP0015 NEW)
+
 link_directories(
   ${CMAKE_BINARY_DIR}/KMC
+  ${CMAKE_BINARY_DIR}/lib
   external-libraries/libmaus2/lib
   external-libraries/sdsl-lite/lib
 )
 
+MACRO(SUBDIRLIST result curdir)
+  FILE(GLOB children RELATIVE ${curdir} ${curdir}/* ${curdir}/*/*)
+  SET(dirlist "${curdir}")
+  FOREACH(child ${children})
+    IF(IS_DIRECTORY ${curdir}/${child})
+      LIST(APPEND dirlist ${curdir}/${child})
+    ENDIF()
+  ENDFOREACH()
+  SET(${result} ${dirlist})
+ENDMACRO()
+
+SUBDIRLIST(INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src")
+
 include_directories(
-  src
-  src/graph
-  src/annotation
-  src/common
-  src/common/bit_vectors
   external-libraries/KMC/kmc_api
   external-libraries/libmaus2/include
   external-libraries/sdsl-lite/include
-  external-libraries/hopscotch-map/src
   external-libraries/rollinghashcpp
   external-libraries/ips4o
   external-libraries/eigen
   external-libraries/caches/include
+  external-libraries/sparsepp
+  external-libraries/hopscotch-map/include
+  external-libraries/ordered-map/include
+  external-libraries/binrel_wt/include
+  ${INCLUDE_DIRS}
+)
+
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules")
+add_subdirectory(
+  external-libraries/binrel_wt
 )
 
 set(FOLLY_LIBRARIES FOLLY_LIBRARIES-NOTFOUND)
@@ -110,24 +157,27 @@ find_library(FOLLY_LIBRARIES
 )
 if(FOLLY_LIBRARIES)
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
-  set(METALIBS -lfolly)
+  set(METALIBS -lfolly -lglog)
 else()
-  message("Folly was not found. Install folly to get most out of the row-based annotator.")
+  message(WARNING "Folly was not found.\n"
+  "Install folly to reduce RAM required by the row-compressed annotator.")
 endif()
 
 file(GLOB src_files
   "src/*.cpp"
   "src/graph/*.cpp"
   "src/annotation/*.cpp"
+  "src/annotation/*/*.cpp"
   "src/common/*.cpp"
   "src/common/bit_vectors/*.cpp"
+  "src/common/kmc_counter/*.cpp"
 )
 
 list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
-list(FILTER src_files EXCLUDE REGEX ".*main.cpp|.*sequence_io.cpp")
+list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
 
 add_library(metagraph STATIC ${src_files})
-add_executable(metagengraph "src/main.cpp" "src/common/sequence_io.cpp")
+add_executable(metagengraph "src/main.cpp")
 set_target_properties(metagengraph PROPERTIES OUTPUT_NAME "metagengraph_${CMAKE_DBG_ALPHABET}")
 
 set(METALIBS ${METALIBS}
@@ -136,12 +186,20 @@ set(METALIBS ${METALIBS}
   -lmaus2 -lmaus2_simd_align_128 -lmaus2_simd_align_256
   -lsdsl -ldivsufsort -ldivsufsort64
   -lssl -lcrypto -llzma
+  -lbrwt
   -latomic
+  OpenMP::OpenMP_CXX
 )
 
 if(BUILD_STATIC)
   set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} -static)
   set(METALIBS ${METALIBS} -lcurl -lssl)
+endif()
+
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+  set(METALIBS ${METALIBS} -lstdc++fs)
+else()
+  set(METALIBS ${METALIBS} -lc++fs)
 endif()
 
 target_link_libraries(
@@ -199,7 +257,7 @@ if (CMAKE_VERSION VERSION_LESS 2.8.11)
 endif()
 
 include_directories(
-  .
+  ${INCLUDE_DIRS}
 )
 
 link_directories(

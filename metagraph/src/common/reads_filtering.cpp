@@ -2,7 +2,7 @@
 
 #include <numeric>
 
-#include <hopscotch_sc_map.h>
+#include <tsl/hopscotch_map.h>
 #include <kmc_file.h>
 
 #include "kmer.hpp"
@@ -14,7 +14,7 @@ const size_t kMaxKmersChunkSize = 30'000'000;
 
 template <typename KMER>
 using Counter
-    = typename tsl::hopscotch_sc_map<const KMER, uint32_t, utils::Hash<KMER>>;
+    = typename tsl::hopscotch_pg_map<const KMER, uint32_t, utils::Hash<KMER>>;
 
 
 template <typename KMER>

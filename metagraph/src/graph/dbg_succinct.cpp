@@ -221,7 +221,7 @@ void DBG_succ::serialize(const std::string &filename) const {
 
     const auto out_filename = remove_suffix(filename, kExtension) + kExtension;
 
-    std::ofstream outstream(out_filename);
+    std::ofstream outstream(out_filename, std::ios::binary);
     if (!outstream.good()) {
         throw std::ofstream::failure(
             std::string("Error: Can't write to file ") + out_filename
@@ -250,7 +250,7 @@ bool DBG_succ::load(const std::string &filename) {
     auto file = remove_suffix(filename, kExtension) + kExtension;
 
     try {
-        std::ifstream instream(file);
+        std::ifstream instream(file, std::ios::binary);
 
         // load F, k, and state
         F_ = libmaus2::util::NumberSerialisation::deserialiseNumberVector<uint64_t>(instream);

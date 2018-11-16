@@ -14,19 +14,16 @@ class Config {
     bool print_graph_internal_repr = false;
     bool reverse = false;
     bool dynamic = false;
-    bool fast = false;
     bool shrink_anno = true;
     bool filename_anno = false;
     bool fasta_anno = false;
     bool to_adj_list = false;
     bool to_fasta = false;
     bool contigs = false;
-    bool to_row_annotator = false;
     bool count_kmers_query = false;
     bool query_presence = false;
     bool filter_present = false;
     bool dump_raw_anno = false;
-    bool use_row_annotator = false;
     bool sparse = false;
     bool count_labels = false;
     bool suppress_unlabeled = false;
@@ -36,6 +33,8 @@ class Config {
     bool internal = false;
     bool clear_dummy = false;
     bool count_dummy = false;
+    bool canonical_mode = false;
+    bool greedy_brwt = false;
 
     unsigned int k = 3;
     unsigned int filter_k = 3;
@@ -54,6 +53,8 @@ class Config {
     unsigned int num_top_labels = -1;
     unsigned int genome_binsize_anno = 1000;
     unsigned int kmer_mapping_mode = 0;
+    unsigned int arity_brwt = 2;
+    unsigned int relax_arity_brwt = 10;
 
     double discovery_fraction = 1.0;
 
@@ -87,6 +88,7 @@ class Config {
         MERGE_ANNOTATIONS,
         TRANSFORM,
         TRANSFORM_ANNOTATION,
+        RELAX_BRWT,
         CLASSIFY
     };
     IdentityType identity = NO_IDENTITY;
@@ -96,6 +98,21 @@ class Config {
 
     static std::string state_to_string(StateType state);
     static StateType string_to_state(const std::string &string);
+
+    enum AnnotationType {
+        ColumnCompressed = 1,
+        RowCompressed,
+        BRWT,
+        BinRelWT_sdsl,
+        BinRelWT,
+        RowFlat,
+        RBFish,
+    };
+
+    AnnotationType anno_type = ColumnCompressed;
+
+    static std::string annotype_to_string(AnnotationType state);
+    static AnnotationType string_to_annotype(const std::string &string);
 
     void print_usage(const std::string &prog_name,
                      IdentityType identity = NO_IDENTITY);

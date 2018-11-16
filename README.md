@@ -4,11 +4,51 @@
 
 ### Prerequisites
 - cmake 3.6.1
-- GNU GCC with C++14 (gcc-5 or higher)
+- GNU GCC with C++17 (gcc-8 or higher) or LLVM Clang (clang-7 or higher)
 - HTSlib
+- boost
 - folly (optional)
 
-All can be installed with `brew` or `linuxbrew`.
+All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbrew.sh)
+
+#### For compiling with GNU GCC:
+```
+brew install gcc autoconf automake libtool cmake make htslib
+brew install --build-from-source boost
+(optional) brew install --build-from-source double-conversion gflags glog lz4 snappy zstd folly
+brew install gcc@8
+```
+Then set the environment variables accordingly:
+```
+echo "\
+# Use gcc-8 with cmake
+export CC=\"\$(which gcc-8)\"
+export CXX=\"\$(which g++-8)\"
+" >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
+```
+
+#### For compiling with LLVM Clang:
+```
+brew install llvm libomp autoconf automake libtool cmake make htslib boost folly
+```
+Then set the environment variables accordingly:
+```
+echo "\
+# OpenMP
+export LDFLAGS=\"\$LDFLAGS -L$(brew --prefix libomp)/lib\"
+export CPPFLAGS=\"\$CPPFLAGS -I$(brew --prefix libomp)/include\"
+# Clang C++ flags
+export LDFLAGS=\"\$LDFLAGS -L$(brew --prefix llvm)/lib -Wl,-rpath,$(brew --prefix llvm)/lib\"
+export CPPFLAGS=\"\$CPPFLAGS -I$(brew --prefix llvm)/include\"
+export CXXFLAGS=\"\$CXXFLAGS -stdlib=libc++\"
+# Path to Clang
+export PATH=\"$(brew --prefix llvm)/bin:\$PATH\"
+# Use Clang with cmake
+export CC=\"\$(which clang)\"
+export CXX=\"\$(which clang++)\"
+" >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
+```
+
 
 ### Compile
 1. `git clone --recursive https://github.com/ratschlab/projects2014-metagenome.git`
@@ -41,21 +81,42 @@ popd
   * make sure that packages like Anaconda are not listed in the exported environment variables
 
 ### Build types: `cmake .. <arguments>` where arguments are:
-- `-DCMAKE_BUILD_TYPE=[Debug|Release|Profile]` -- build modes (`Debug` by default)
+- `-DCMAKE_BUILD_TYPE=[Debug|Release|Profile]` -- build modes (`Release` by default)
 - `-DBUILD_STATIC=[ON|OFF]` -- link statically (`OFF` by default)
 - `-DPYTHON_INTERFACE=[ON|OFF]` -- compile python interface (requires shared libraries, `OFF` by default)
 - `-DBUILD_KMC=[ON|OFF]` -- compile the KMC executable (`ON` by default)
 - `-DWITH_AVX=[ON|OFF]` -- compile with support for the avx instructions (`ON` by default)
 - `-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA_CASE_SENSITIVE]` -- alphabet to use (`DNA` by default)
 
-
-## Print usage
-`./metagengraph`\
+## Typical workflow
+1. Build de Bruijn graph from Fasta files, FastQ files, or [KMC k-mer counters](https://github.com/refresh-bio/KMC/):\
 `./metagengraph build`
+2. Annotate graph using the column compressed annotation:\
+`./metagengraph annotate`
+3. Transform the built annotation to a different annotation scheme:\
+`./metagengraph transform_anno`
+4. Merge annotations (optional):\
+`./metagengraph merge_anno`
+5. Query annotated graph\
+`./metagengraph classify`
 
-## Usage examples
+### Example
+```
+DATA="../tests/data/transcripts_1000.fa"
+
+./metagengraph build -k 12 -o transcripts_1000 $DATA
+
+./metagengraph annotate -i transcripts_1000 --anno-filename -o transcripts_1000 $DATA
+
+./metagengraph classify -i transcripts_1000 -a transcripts_1000.column.annodbg $DATA
+
+./metagengraph stats -a transcripts_1000 transcripts_1000
+```
 
 For real examples, see [scripts](./scripts).
+
+### Print usage
+`./metagengraph`
 
 ### Build graph
 

@@ -14,7 +14,9 @@ Config::Config(int argc, const char *argv[]) {
     }
 
     // parse identity from first command line argument
-    if (!strcmp(argv[1], "merge")) {
+    if (!strcmp(argv[1], "build")) {
+        identity = BUILD;
+    } else if (!strcmp(argv[1], "merge")) {
         identity = MERGE;
     } else if (!strcmp(argv[1], "extend")) {
         identity = EXTEND;
@@ -24,8 +26,6 @@ Config::Config(int argc, const char *argv[]) {
         identity = COMPARE;
     } else if (!strcmp(argv[1], "align")) {
         identity = ALIGN;
-    } else if (!strcmp(argv[1], "build")) {
-        identity = BUILD;
     } else if (!strcmp(argv[1], "filter")) {
         identity = FILTER;
     } else if (!strcmp(argv[1], "filter_stats")) {
@@ -46,6 +46,8 @@ Config::Config(int argc, const char *argv[]) {
         identity = TRANSFORM;
     } else if (!strcmp(argv[1], "transform_anno")) {
         identity = TRANSFORM_ANNOTATION;
+    } else if (!strcmp(argv[1], "relax_brwt")) {
+        identity = RELAX_BRWT;
     } else {
         print_usage(argv[0]);
         exit(-1);
@@ -69,8 +71,6 @@ Config::Config(int argc, const char *argv[]) {
             count_kmers_query = true;
         } else if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--reverse")) {
             reverse = true;
-        } else if (!strcmp(argv[i], "--fast")) {
-            fast = true;
         } else if (!strcmp(argv[i], "--dynamic")) {
             dynamic = true;
         } else if (!strcmp(argv[i], "--no-shrink")) {
@@ -85,8 +85,6 @@ Config::Config(int argc, const char *argv[]) {
             genome_binsize_anno = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--suppress-unlabeled")) {
             suppress_unlabeled = true;
-        } else if (!strcmp(argv[i], "--row-annotator")) {
-            use_row_annotator = true;
         } else if (!strcmp(argv[i], "--sparse")) {
             sparse = true;
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
@@ -114,8 +112,8 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "--generate-fastq")) {
             generate_filtered_fastq = true;
         } else if (!strcmp(argv[i], "--kmc")) {
-            use_kmc = true;
             //TODO: add into some USAGE description
+            use_kmc = true;
         } else if (!strcmp(argv[i], "--discovery-fraction")) {
             discovery_fraction = std::stof(argv[++i]);
         } else if (!strcmp(argv[i], "--query-presence")) {
@@ -148,6 +146,9 @@ Config::Config(int argc, const char *argv[]) {
             suffix = argv[++i];
         } else if (!strcmp(argv[i], "--state")) {
             state = string_to_state(argv[++i]);
+
+        } else if (!strcmp(argv[i], "--anno-type")) {
+            anno_type = string_to_annotype(argv[++i]);
         } else if (!strcmp(argv[i], "--rename-cols")) {
             rename_instructions_file = std::string(argv[++i]);
         //} else if (!strcmp(argv[i], "--db-path")) {
@@ -164,8 +165,6 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "--contigs")) {
             to_fasta = true;
             contigs = true;
-        } else if (!strcmp(argv[i], "--to-row-format")) {
-            to_row_annotator = true;
         } else if (!strcmp(argv[i], "--count-dummy")) {
             count_dummy = true;
         } else if (!strcmp(argv[i], "--clear-dummy")) {
@@ -178,6 +177,12 @@ Config::Config(int argc, const char *argv[]) {
         //    num_threads = atoi(argv[++i]);
         //} else if (!strcmp(argv[i], "--debug")) {
         //    debug = true;
+        } else if (!strcmp(argv[i], "--greedy")) {
+            greedy_brwt = true;
+        } else if (!strcmp(argv[i], "--arity")) {
+            arity_brwt = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--relax-arity")) {
+            relax_arity_brwt = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             print_usage(argv[0], identity);
             exit(0);
@@ -236,6 +241,13 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == ANNOTATE_COORDINATES && infbase.empty())
         print_usage_and_exit = true;
 
+    if ((identity == ANNOTATE_COORDINATES
+            || identity == ANNOTATE
+            || identity == EXTEND) && infbase_annotators.size() > 1) {
+        std::cerr << "Error: one annotator at most is allowed for extension." << std::endl;
+        print_usage_and_exit = true;
+    }
+
     if (identity == ANNOTATE
             && !filename_anno && !fasta_anno && !anno_labels.size()) {
         std::cerr << "Error: No annotation to add" << std::endl;
@@ -252,10 +264,16 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == MERGE_ANNOTATIONS && outfbase.empty())
         print_usage_and_exit = true;
 
-    if (identity == CLASSIFY && infbase_annotators.empty())
+    if (identity == CLASSIFY && infbase_annotators.empty() && infbase.size())
         infbase_annotators.push_back(infbase);
 
-    if (identity == TRANSFORM && fname.size() != 1)
+    if (identity == CLASSIFY && infbase_annotators.size() != 1)
+        print_usage_and_exit = true;
+
+    if ((identity == TRANSFORM
+            || identity == TRANSFORM_ANNOTATION
+            || identity == RELAX_BRWT)
+                    && fname.size() != 1)
         print_usage_and_exit = true;
 
     if (identity == TRANSFORM_ANNOTATION && outfbase.empty())
@@ -303,11 +321,53 @@ Config::StateType Config::string_to_state(const std::string &string) {
     }
 }
 
+std::string Config::annotype_to_string(AnnotationType state) {
+    switch (state) {
+        case ColumnCompressed:
+            return "column";
+        case RowCompressed:
+            return "row";
+        case BRWT:
+            return "brwt";
+        case BinRelWT_sdsl:
+            return "bin_rel_wt_sdsl";
+        case BinRelWT:
+            return "bin_rel_wt";
+        case RowFlat:
+            return "flat";
+        case RBFish:
+            return "rbfish";
+        default:
+            assert(false);
+            return "Never happens";
+    }
+}
+
+Config::AnnotationType Config::string_to_annotype(const std::string &string) {
+    if (string == "column") {
+        return AnnotationType::ColumnCompressed;
+    } else if (string == "row") {
+        return AnnotationType::RowCompressed;
+    } else if (string == "brwt") {
+        return AnnotationType::BRWT;
+    } else if (string == "bin_rel_wt_sdsl") {
+        return AnnotationType::BinRelWT_sdsl;
+    } else if (string == "bin_rel_wt") {
+        return AnnotationType::BinRelWT;
+    } else if (string == "flat") {
+        return AnnotationType::RowFlat;
+    } else if (string == "rbfish") {
+        return AnnotationType::RBFish;
+    } else {
+        std::cerr << "Error: unknown annotation representation" << std::endl;
+        exit(1);
+    }
+}
+
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
-    fprintf(stderr, "Comprehensive metagenome graph representation -- Version 0.1\n\n");
-    //fprintf(stderr, "This program is the first implementation of a\n");
-    //fprintf(stderr, "meta-metagenome graph for identification and annotation\n");
-    //fprintf(stderr, "purposes.\n\n");
+    fprintf(stderr, "Metagraph: comprehensive metagenome graph representation -- Version 0.1\n\n");
+
+    const char annotation_list[] = "('column', 'row', 'bin_rel_wt_sdsl', 'bin_rel_wt', 'flat', 'rbfish', 'brwt')";
 
     switch (identity) {
         case NO_IDENTITY: {
@@ -349,11 +409,13 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\tmerge_anno\tmerge annotation columns\n\n");
 
-            fprintf(stderr, "\tclassify\tannotate sequences from fast[a|q] files\n\n");
-
             fprintf(stderr, "\ttransform\tgiven a graph, transform it to other formats\n\n");
 
             fprintf(stderr, "\ttransform_anno\tchange representation of the graph annotation\n\n");
+
+            fprintf(stderr, "\trelax_brwt\toptimize the tree structure in brwt annotator\n\n");
+
+            fprintf(stderr, "\tclassify\tannotate sequences from fast[a|q] files\n\n");
 
             return;
         }
@@ -386,7 +448,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence []\n");
             fprintf(stderr, "\t   --no-shrink \t\tuse all coordinates in graph including dummy k-mers [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \tbasename of annotator to extend []\n");
-            fprintf(stderr, "\t   --row-annotator \tuse row based annotator instead of column compressor [off]\n");
+            fprintf(stderr, "\t   --anno-type [STR] \tinternal annotation representation [column]\n");
+            fprintf(stderr, "\t                     \t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
             fprintf(stderr, "\t   --state [STR] \tstate of the extended graph (either 'fast' or 'dynamic') [fast]\n");
             fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
@@ -465,10 +528,10 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for stats:\n");
-            // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t-a --annotator [STR] \tbasename of annotator to update []\n");
+            fprintf(stderr, "\t   --anno-type [STR] \tinternal annotation representation [column]\n");
+            fprintf(stderr, "\t                     \t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-dummy \tshow number of dummy source and sink edges [off]\n");
-            fprintf(stderr, "\t   --row-annotator \tuse row based annotator instead of column compressor [off]\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t   --print-internal \tprint internal graph representation to the screen [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
@@ -481,7 +544,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --reference [STR] \t\tbasename of reference sequence []\n");
             fprintf(stderr, "\t   --no-shrink \t\t\tuse all coordinates in graph including dummy k-mers [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator to update []\n");
-            fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column compressor [off]\n");
+            fprintf(stderr, "\t   --anno-type [STR] \t\tinternal annotation representation [column]\n");
+            fprintf(stderr, "\t                     \t\t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
             fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate graph [off]\n");
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file [<graph_basename>]\n");
             fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
@@ -512,12 +576,13 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s merge_anno [options] -o <annotator_basename> <ANNOT1> [[ANNOT2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
-            fprintf(stderr, "\t   --row-annotator \tuse row based annotator instead of column compressor [off]\n");
+            fprintf(stderr, "\t   --anno-type [STR] \tinternal annotation representation [column]\n");
+            fprintf(stderr, "\t                     \t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case CLASSIFY: {
-            fprintf(stderr, "Usage: %s classify -i <graph_basename> [options] <FILE1> [[FILE2] ...]\n"
+            fprintf(stderr, "Usage: %s classify -i <graph_basename> -a <annotator> [options] <FILE1> [[FILE2] ...]\n"
                             "\tEach file is given in fasta or fastq format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for classify:\n");
@@ -528,8 +593,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t   --no-shrink \t\t\tuse all coordinates in graph including dummy k-mers [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator [<graph_basename>]\n");
-            fprintf(stderr, "\t   --fast \t\t\tuse fast column based annotator (with auxiliary index) [off]\n");
-            fprintf(stderr, "\t   --row-annotator \t\tuse row based annotator instead of column compressor [off]\n");
+            fprintf(stderr, "\t   --anno-type [STR] \t\tinternal annotation representation [column]\n");
+            fprintf(stderr, "\t                     \t\t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
             fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate graph [off]\n");
             fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
@@ -546,7 +611,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --clear-dummy \t\terase all redundant dummy edges [off]\n");
             fprintf(stderr, "\t   --state [STR] \t\tchange the graph state (either 'fast' or 'dynamic') [fast]\n");
             fprintf(stderr, "\t   --to-adj-list \t\twrite the adjacency list to file [off]\n");
-            // fprintf(stderr, "\t   --to-sequences \t\twrite contig sequences to file [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\t\textract sequences from graph and write to compressed fasta file [off]\n");
             fprintf(stderr, "\t   --contigs \t\t\textract all simple paths from graph and write to compressed fasta file [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
@@ -560,7 +624,17 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t                      \t          L_2 L_2_renamed\n");
             fprintf(stderr, "\t                      \t          L_2 L_2_renamed\n");
             fprintf(stderr, "\t                      \t          ... ...........'\n");
-            fprintf(stderr, "\t   --to-row-format \ttransform annotations to the row-wise format [off]\n");
+            fprintf(stderr, "\t   --anno-type [STR] \ttransform annotations to specified format [column]\n");
+            fprintf(stderr, "\t                     \t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --arity  \t\tarity in the brwt tree [2]\n");
+            fprintf(stderr, "\t   --greedy  \t\tuse greedy column partitioning in brwt construction [off]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+        } break;
+        case RELAX_BRWT: {
+            fprintf(stderr, "Usage: %s relax_brwt [options] -o <annotator_basename> ANNOTATOR\n\n", prog_name.c_str());
+
+            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
+            fprintf(stderr, "\t   --relax-arity [INT] \trelax brwt tree to optimize arity limited to this number [10]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
     }

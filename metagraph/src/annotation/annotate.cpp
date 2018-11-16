@@ -42,7 +42,7 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
         return false;
 
     try {
-        encode_label_ = load_string_number_map(instream);
+        load_string_number_map(instream, &encode_label_);
         decode_label_ = StringSerialisation::deserialiseStringVector(instream);
 
         return true;

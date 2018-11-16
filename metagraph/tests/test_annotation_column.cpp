@@ -632,3 +632,35 @@ TEST(ColumnCompressed, RenameColumnsMergeAll) {
     EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(3)));
     EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get(4)));
 }
+
+TEST(ColumnCompressed, DumpColumns) {
+    annotate::ColumnCompressed<> annotation(6);
+
+    annotation.set_labels(1, { "Label0", "Label1" });
+    annotation.set_labels(2, { "Label0", "Label1" });
+    annotation.set_labels(3, { "Label1" });
+    annotation.set_labels(4, { "Label1" });
+    annotation.set_labels(5, { "Label0", "Label1" });
+
+    annotation.dump_columns(test_dump_basename);
+
+    std::vector<std::vector<uint64_t>> matrix {
+        { 3, 1, 2, 5 },
+        { 5, 1, 2, 3, 4, 5 }
+    };
+
+    for (uint64_t i = 0; i < 2; ++i) {
+        std::ifstream in(test_dump_basename + "." + std::to_string(i)
+                                            + ".raw.column.annodbg",
+                         std::ios::binary);
+        ASSERT_TRUE(in.good());
+
+        std::vector<uint64_t> vect;
+        vect.push_back(load_number(in));
+        for (uint64_t j = 0; j < vect[0]; ++j) {
+            vect.push_back(load_number(in));
+        }
+
+        EXPECT_EQ(matrix[i], vect);
+    }
+}

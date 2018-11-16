@@ -3,6 +3,14 @@
 #include "wavelet_tree.hpp"
 #include "utils.hpp"
 
+// Disable death tests
+#ifndef _DEATH_TEST
+#ifdef ASSERT_DEATH
+#undef ASSERT_DEATH
+#define ASSERT_DEATH(a, b) (void)0
+#endif
+#endif
+
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/bit_vector_dump_test";
