@@ -10,7 +10,6 @@ class Config {
     Config(int argc, const char *argv[]);
 
     bool verbose = false;
-    bool quiet = false;
     bool print_graph_succ = false;
     bool print_graph_internal_repr = false;
     bool reverse = false;
@@ -50,16 +49,12 @@ class Config {
     unsigned int nsplits = 1;
     unsigned int alignment_length = 0;
     unsigned int memory_available = 0;
-    unsigned int bloom_num_hash_functions = 0;
-    unsigned int bloom_test_num_kmers = 0;
     unsigned int max_unreliable_abundance = 0;
     unsigned int unreliable_kmers_threshold = 0;
     unsigned int num_top_labels = -1;
     unsigned int genome_binsize_anno = 1000;
     unsigned int kmer_mapping_mode = 0;
 
-    double bloom_fpp = -1;
-    double bloom_bits_per_edge = -1;
     double discovery_fraction = 1.0;
 
     std::vector<std::string> fname;
@@ -88,7 +83,6 @@ class Config {
         ALIGN,
         STATS,
         ANNOTATE,
-        ANNOTATE_BLOOM,
         ANNOTATE_COORDINATES,
         MERGE_ANNOTATIONS,
         TRANSFORM,

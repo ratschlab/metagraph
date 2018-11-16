@@ -36,8 +36,6 @@ Config::Config(int argc, const char *argv[]) {
         identity = STATS;
     } else if (!strcmp(argv[1], "annotate")) {
         identity = ANNOTATE;
-    } else if (!strcmp(argv[1], "bloom")) {
-        identity = ANNOTATE_BLOOM;
     } else if (!strcmp(argv[1], "coordinate")) {
         identity = ANNOTATE_COORDINATES;
     } else if (!strcmp(argv[1], "merge_anno")) {
@@ -63,8 +61,6 @@ Config::Config(int argc, const char *argv[]) {
     for (int i = 2; i < argc; ++i) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
             verbose = true;
-        } else if (!strcmp(argv[i], "-q") || !strcmp(argv[i], "--quiet")) {
-            quiet = true;
         } else if (!strcmp(argv[i], "--print")) {
             print_graph_succ = true;
         } else if (!strcmp(argv[i], "--print-internal")) {
@@ -120,10 +116,6 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "--kmc")) {
             use_kmc = true;
             //TODO: add into some USAGE description
-        } else if (!strcmp(argv[i], "--bloom-false-pos-prob")) {
-            bloom_fpp = std::stof(argv[++i]);
-        } else if (!strcmp(argv[i], "--bloom-bits-per-edge")) {
-            bloom_bits_per_edge = std::stof(argv[++i]);
         } else if (!strcmp(argv[i], "--discovery-fraction")) {
             discovery_fraction = std::stof(argv[++i]);
         } else if (!strcmp(argv[i], "--query-presence")) {
@@ -132,10 +124,6 @@ Config::Config(int argc, const char *argv[]) {
             filter_present = true;
         } else if (!strcmp(argv[i], "--count-labels")) {
             count_labels = true;
-        } else if (!strcmp(argv[i], "--bloom-hash-functions")) {
-            bloom_num_hash_functions = atoi(argv[++i]);
-        } else if (!strcmp(argv[i], "--bloom-test-num-kmers")) {
-            bloom_test_num_kmers = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--align-length")) {
             alignment_length = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
@@ -248,14 +236,13 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == ANNOTATE_COORDINATES && infbase.empty())
         print_usage_and_exit = true;
 
-    if ((identity == ANNOTATE || identity == ANNOTATE_BLOOM)
+    if (identity == ANNOTATE
             && !filename_anno && !fasta_anno && !anno_labels.size()) {
         std::cerr << "Error: No annotation to add" << std::endl;
         print_usage_and_exit = true;
     }
 
-    if ((identity == ANNOTATE || identity == ANNOTATE_BLOOM
-                              || identity == ANNOTATE_COORDINATES)
+    if ((identity == ANNOTATE || identity == ANNOTATE_COORDINATES)
             && outfbase.empty())
         outfbase = infbase;
 
@@ -267,16 +254,6 @@ Config::Config(int argc, const char *argv[]) {
 
     if (identity == CLASSIFY && infbase_annotators.empty())
         infbase_annotators.push_back(infbase);
-
-    if (identity == ANNOTATE_BLOOM && infbase.empty())
-        print_usage_and_exit = true;
-
-    if (identity == ANNOTATE_BLOOM && bloom_fpp < 0
-                                   && bloom_bits_per_edge < 0) {
-        std::cerr << "ERROR: please specify either a false positive probability"
-                  << " or the number of bits per edge." << std::endl;
-        print_usage_and_exit = true;
-    }
 
     if (identity == TRANSFORM && fname.size() != 1)
         print_usage_and_exit = true;
@@ -369,9 +346,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\tcoordinate\tgiven a graph and a fast[a|q] file, annotate\n");
             fprintf(stderr, "\t\t\tkmers with their respective coordinates in genomes\n\n");
-
-            fprintf(stderr, "\tbloom\t\tgiven a graph and a fast[a|q] file, annotate\n");
-            fprintf(stderr, "\t\t\tthe respective kmers using Bloom filters\n\n");
 
             fprintf(stderr, "\tmerge_anno\tmerge annotation columns\n\n");
 
@@ -542,29 +516,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
-        case ANNOTATE_BLOOM: {
-            fprintf(stderr, "Usage: %s bloom -i <graph_basename> [options] <PATH1> [[PATH2] ...]\n"
-                            "\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for bloom:\n");
-            fprintf(stderr, "\t   --reference [STR] \t\t\tbasename of reference sequence []\n");
-            fprintf(stderr, "\t-r --reverse \t\t\t\talso annotate reverse complement reads [off]\n");
-            fprintf(stderr, "\t   --filter-abund [INT] \t\tthreshold for the abundance of reliable k-mers [0]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] \t\tmax allowed number of unreliable kmers in reliable reads [0]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \t\t\tlength of k-mers used for counting and filtering [3]\n");
-            fprintf(stderr, "\t   --anno-filename \t\t\tinclude filenames as annotation labels [off]\n");
-            fprintf(stderr, "\t   --anno-header \t\t\textract annotation labels from headers of sequences in files [off]\n");
-            fprintf(stderr, "\t   --header-delimiter [STR]\t\tdelimiter for splitting annotation header into multiple labels [off]\n");
-            fprintf(stderr, "\t   --anno-label [STR]\t\t\tadd label to annotation for all sequences from the files passed []\n");
-            // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
-            // fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [1]\n");
-            // fprintf(stderr, "\t-f --frequency [INT] \t\twhen a, annotate only every a-th kmer [1]\n");
-            // fprintf(stderr, "\t   --db-path \tpath that is used to store the annotations database []\n");
-            fprintf(stderr, "\t   --bloom-false-pos-prob [FLOAT]\tFalse positive probability in bloom filter [-1]\n");
-            fprintf(stderr, "\t   --bloom-bits-per-edge [FLOAT] \tBits per edge used in bloom filter annotator [0.4]\n");
-            fprintf(stderr, "\t   --bloom-hash-functions [INT] \tNumber of hash functions used in bloom filter [off]\n");
-            fprintf(stderr, "\t   --bloom-test-num-kmers \t\tEstimate false positive rate for every n k-mers [0]\n");
-        } break;
         case CLASSIFY: {
             fprintf(stderr, "Usage: %s classify -i <graph_basename> [options] <FILE1> [[FILE2] ...]\n"
                             "\tEach file is given in fasta or fastq format.\n\n", prog_name.c_str());
@@ -616,7 +567,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
     fprintf(stderr, "\n\tGeneral options:\n");
     fprintf(stderr, "\t-v --verbose \t\tswitch on verbose output [off]\n");
-    fprintf(stderr, "\t-q --quiet \t\tproduce as little log output as posible [off]\n");
     fprintf(stderr, "\t-h --help \t\tprint usage info\n");
     fprintf(stderr, "\n");
 }

@@ -9,7 +9,6 @@
 #include "annotate_row_compressed.hpp"
 #include "annotate_column_compressed.hpp"
 #include "annotate_column_compressed_fast.hpp"
-#include "annotate_bloom_filter.hpp"
 #include "serialization.hpp"
 #include "utils.hpp"
 
@@ -935,60 +934,6 @@ int main(int argc, const char *argv[]) {
                                  config->verbose);
 
             anno_dbg.get_annotation().serialize(config->outfbase);
-
-            return 0;
-        }
-        case Config::ANNOTATE_BLOOM: {
-            // load graph
-            AnnotatedDBG anno_dbg(
-                load_critical_graph_from_file(config->infbase).release(),
-                config->parallel
-            );
-
-            // initialize empty Bloom filter annotation
-            if (config->bloom_fpp > -0.5) {
-                // Expected FPP is set, optimize other parameters automatically
-                anno_dbg.set_annotation(
-                    new annotate::AnnotationCategoryBloom(
-                        anno_dbg.get_graph(),
-                        config->bloom_fpp,
-                        config->verbose
-                    )
-                );
-            } else {
-                assert(config->bloom_bits_per_edge >= 0);
-
-                // Experiment mode, estimate FPP given other parameters,
-                // optimize the number of hash functions if it's set to zero
-                anno_dbg.set_annotation(
-                    new annotate::AnnotationCategoryBloom(
-                        anno_dbg.get_graph(),
-                        config->bloom_bits_per_edge,
-                        config->bloom_num_hash_functions,
-                        config->verbose
-                    )
-                );
-            }
-
-            if (!anno_dbg.check_compatibility(true)) {
-                std::cerr << "ERROR: graph cannot be annotated" << std::endl;
-                exit(1);
-            }
-
-            annotate_data(files,
-                          config->refpath,
-                          &anno_dbg,
-                          config->reverse,
-                          config->filter_k,
-                          config->max_unreliable_abundance,
-                          config->unreliable_kmers_threshold,
-                          config->filename_anno,
-                          config->fasta_anno,
-                          config->fasta_header_delimiter,
-                          config->anno_labels,
-                          config->verbose);
-
-            anno_dbg.get_annotation().serialize(config->infbase);
 
             return 0;
         }

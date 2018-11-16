@@ -93,11 +93,6 @@ include_directories(
   external-libraries/ips4o
   external-libraries/eigen
   external-libraries/caches/include
-  external-libraries/graph_annotation/bloom_annotator
-)
-
-add_subdirectory(
-  external-libraries/graph_annotation/bloom_annotator
 )
 
 set(FOLLY_LIBRARIES FOLLY_LIBRARIES-NOTFOUND)
@@ -139,7 +134,7 @@ if(BUILD_STATIC)
 endif()
 
 target_link_libraries(
-  metagraph bloom_annotator ${METALIBS}
+  metagraph ${METALIBS}
 )
 
 target_link_libraries(

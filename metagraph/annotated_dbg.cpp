@@ -3,9 +3,6 @@
 #include "annotate_column_compressed.hpp"
 #include "annotate_column_compressed_fast.hpp"
 #include "annotate_row_compressed.hpp"
-#include "annotate_bloom_filter.hpp"
-
-using annotate::AnnotationCategoryBloom;
 
 
 AnnotatedDBG::AnnotatedDBG(DBG_succ *dbg, Annotator *annotation, size_t num_threads)
@@ -83,18 +80,12 @@ void AnnotatedDBG::annotate_sequence(const std::string &sequence,
     if (sequence.size() <= graph_->get_k())
         return;
 
-    try {
-        dynamic_cast<AnnotationCategoryBloom&>(*annotator_).add_labels(
-            sequence, labels, graph_->num_edges()
-        );
-    } catch (const std::bad_cast &) {
-        thread_pool_.enqueue(
-            [this](auto... args) {
-                this->annotate_sequence_thread_safe(args...);
-            },
-            sequence, labels
-        );
-    }
+    thread_pool_.enqueue(
+        [this](auto... args) {
+            this->annotate_sequence_thread_safe(args...);
+        },
+        sequence, labels
+    );
 }
 
 std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
