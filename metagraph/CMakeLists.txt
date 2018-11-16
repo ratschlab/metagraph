@@ -85,6 +85,11 @@ link_directories(
 )
 
 include_directories(
+  src
+  src/graph
+  src/annotation
+  src/common
+  src/common/bit_vectors
   external-libraries/KMC/kmc_api
   external-libraries/libmaus2/include
   external-libraries/sdsl-lite/include
@@ -110,13 +115,19 @@ else()
   message("Folly was not found. Install folly to get most out of the row-based annotator.")
 endif()
 
-file(GLOB src_files "*.cpp" "*.h" "*.hpp")
+file(GLOB src_files
+  "src/*.cpp"
+  "src/graph/*.cpp"
+  "src/annotation/*.cpp"
+  "src/common/*.cpp"
+  "src/common/bit_vectors/*.cpp"
+)
 
 list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER src_files EXCLUDE REGEX ".*main.cpp|.*sequence_io.cpp")
 
 add_library(metagraph STATIC ${src_files})
-add_executable(metagengraph "main.cpp" "sequence_io.cpp")
+add_executable(metagengraph "src/main.cpp" "src/common/sequence_io.cpp")
 set_target_properties(metagengraph PROPERTIES OUTPUT_NAME "metagengraph_${CMAKE_DBG_ALPHABET}")
 
 set(METALIBS ${METALIBS}
