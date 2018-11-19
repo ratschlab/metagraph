@@ -426,7 +426,10 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s build [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for build:\n");
+            fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC database\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence []\n");
+            // fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
+            // fprintf(stderr, "\t   --complete \t\tconstruct a complete graph [off]\n");
             fprintf(stderr, "\t   --no-shrink \t\tdo not build mask for dummy k-mers [off]\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
             fprintf(stderr, "\t   --mem-cap-gb [INT] \tmaximum memory available, in Gb [inf]\n");
@@ -541,6 +544,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                             "\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
+            fprintf(stderr, "\t   --kmc \t\t\tparse k-mers from precomputed KMC database\n");
+            //fprintf(stderr, "\t   --complete \t\tconstruct a complete graph [off]\n");
             fprintf(stderr, "\t   --reference [STR] \t\tbasename of reference sequence []\n");
             fprintf(stderr, "\t   --no-shrink \t\t\tuse all coordinates in graph including dummy k-mers [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator to update []\n");

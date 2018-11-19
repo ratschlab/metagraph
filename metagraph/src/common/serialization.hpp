@@ -19,6 +19,7 @@ void serialize_number(std::ostream &out, uint64_t number);
 
 uint64_t load_number(std::istream &in);
 
+
 template <typename T>
 void serialize_number_vector(std::ostream &out,
                              const std::vector<T> &vector,
@@ -29,11 +30,13 @@ uint64_t get_number_vector_size(std::istream &in);
 template <typename T>
 std::vector<T> load_number_vector(std::istream &in);
 
+
 template <class Map>
 void serialize_number_number_map(std::ostream &out, const Map &map);
 
 template <class Map>
 void load_number_number_map(std::istream &in, Map *map);
+
 
 template <class Map>
 void serialize_string_number_map(std::ostream &out, const Map &M);

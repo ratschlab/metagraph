@@ -12,6 +12,7 @@
 #include "utils.hpp"
 #include "static_annotators_def.hpp"
 #include "annotation_converters.hpp"
+#include "kmc_parser.hpp"
 
 typedef annotate::MultiLabelAnnotation<uint64_t, std::string> Annotator;
 
@@ -59,6 +60,7 @@ void annotate_data(const std::vector<std::string> &files,
                    const std::string &ref_sequence_path,
                    AnnotatedDBG *anno_graph,
                    bool reverse,
+                   bool use_kmc,
                    size_t filter_k,
                    size_t max_unreliable_abundance,
                    size_t unreliable_kmers_threshold,
@@ -103,6 +105,34 @@ void annotate_data(const std::vector<std::string> &files,
                     }
                     variant_labels->clear();
                 }
+            );
+        } else if (use_kmc) {
+            std::vector<std::string> labels;
+
+            if (filename_anno) {
+                labels.push_back(file);
+            }
+
+            for (const auto &label : anno_labels) {
+                labels.push_back(label);
+            }
+
+            kmc::read_kmers(
+                file,
+                [&](std::string&& sequence) {
+                    anno_graph->annotate_sequence(std::move(sequence), labels);
+
+                    total_seqs += 1;
+                    if (verbose && total_seqs % 10000 == 0) {
+                        std::cout << "processed " << total_seqs << " sequences"
+                                  << ", trying to annotate as ";
+                        for (const auto &label : labels) {
+                            std::cout << "<" << label << ">";
+                        }
+                        std::cout << ", " << timer.elapsed() << "sec" << std::endl;
+                    }
+                },
+                max_unreliable_abundance + 1
             );
         } else if (utils::get_filetype(file) == "FASTA"
                     || utils::get_filetype(file) == "FASTQ") {
@@ -447,6 +477,22 @@ int main(int argc, const char *argv[]) {
                                     }
                                 }
                             );
+                        } else if (config->use_kmc) {
+                            bool warning_different_k = false;
+                            kmc::read_kmers(
+                                files[f],
+                                [&](std::string&& sequence) {
+                                    if (!warning_different_k && sequence.size() != graph->get_k()) {
+                                        std::cerr << "Warning: k-mers parsed from KMC database "
+                                                  << files[f] << " have length " << sequence.size()
+                                                  << " but graph is constructed for k=" << graph->get_k()
+                                                  << std::endl;
+                                        warning_different_k = true;
+                                    }
+                                    constructor->add_read(sequence);
+                                },
+                                config->max_unreliable_abundance + 1
+                            );
                         } else if (utils::get_filetype(files[f]) == "FASTA"
                                     || utils::get_filetype(files[f]) == "FASTQ") {
                             std::string filter_filename = get_filter_filename(
@@ -534,6 +580,22 @@ int main(int argc, const char *argv[]) {
                                     graph->add_sequence(seq);
                                 }
                             }
+                        );
+                    } else if (config->use_kmc) {
+                        bool warning_different_k = false;
+                        kmc::read_kmers(
+                            file,
+                            [&](std::string&& sequence) {
+                                if (!warning_different_k && sequence.size() != graph->get_k()) {
+                                    std::cerr << "Warning: k-mers parsed from KMC database "
+                                              << file << " have length " << sequence.size()
+                                              << " but graph is constructed for k=" << graph->get_k()
+                                              << std::endl;
+                                    warning_different_k = true;
+                                }
+                                graph->add_sequence(sequence);
+                            },
+                            config->max_unreliable_abundance + 1
                         );
                     } else if (utils::get_filetype(file) == "FASTA"
                                 || utils::get_filetype(file) == "FASTQ") {
@@ -642,6 +704,22 @@ int main(int argc, const char *argv[]) {
                                 graph->add_sequence(seq, true, inserted_edges.get());
                             }
                         }
+                    );
+                } else if (config->use_kmc) {
+                    bool warning_different_k = false;
+                    kmc::read_kmers(
+                        file,
+                        [&](std::string&& sequence) {
+                            if (!warning_different_k && sequence.size() != graph->get_k()) {
+                                std::cerr << "Warning: k-mers parsed from KMC database "
+                                          << file << " have length " << sequence.size()
+                                          << " but graph is constructed for k=" << graph->get_k()
+                                          << std::endl;
+                                warning_different_k = true;
+                            }
+                            graph->add_sequence(sequence);
+                        },
+                        config->max_unreliable_abundance + 1
                     );
                 } else if (utils::get_filetype(file) == "FASTA"
                             || utils::get_filetype(file) == "FASTQ") {
@@ -1007,6 +1085,7 @@ int main(int argc, const char *argv[]) {
                           config->refpath,
                           &anno_dbg,
                           config->reverse,
+                          config->use_kmc,
                           config->filter_k,
                           config->max_unreliable_abundance,
                           config->unreliable_kmers_threshold,
@@ -1369,7 +1448,7 @@ int main(int argc, const char *argv[]) {
                 }
 
                 std::cout << "Statistics for annotation " << file << std::endl;
-                std::cout << "labels: " << annotation->num_labels() << std::endl;
+                std::cout << "labels:  " << annotation->num_labels() << std::endl;
                 std::cout << "objects: " << annotation->num_objects() << std::endl;
                 std::cout << "density: " << std::scientific
                                           << static_cast<double>(annotation->num_relations())

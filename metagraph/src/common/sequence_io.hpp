@@ -21,7 +21,6 @@ bool write_fasta(gzFile gz_out, const std::string &header,
 
 bool write_fastq(gzFile gz_out, const kseq_t &kseq);
 
-
 void read_fasta_file_critical(const std::string &filename,
                               std::function<void(kseq_t*)> callback,
                               bool with_reverse = false,

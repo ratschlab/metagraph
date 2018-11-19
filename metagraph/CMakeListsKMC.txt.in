@@ -53,9 +53,9 @@ set_source_files_properties(${KMC_MAIN_DIR}/raduls_sse2.cpp
 set_source_files_properties(${KMC_MAIN_DIR}/raduls_sse41.cpp
     PROPERTIES COMPILE_FLAGS "-msse4.1")
 set_source_files_properties(${KMC_MAIN_DIR}/raduls_avx.cpp
-    PROPERTIES COMPILE_FLAGS "-mavx -fabi-version=0")
+    PROPERTIES COMPILE_FLAGS "-mavx")
 set_source_files_properties(${KMC_MAIN_DIR}/raduls_avx2.cpp
-    PROPERTIES COMPILE_FLAGS "-mavx2 -mfma -fabi-version=0")
+    PROPERTIES COMPILE_FLAGS "-mavx2 -mfma")
 
 add_library(KMCcore STATIC
     ${KMC_files}
