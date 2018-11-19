@@ -219,9 +219,34 @@ add_custom_target(link_target ALL
 
 
 #-------------------
+# Experiments
+#-------------------
+file(GLOB experiment_files "experiments/*.cpp")
+list(FILTER experiment_files EXCLUDE REGEX ".*\\._.*")
+
+include_directories(
+  .
+  ${INCLUDE_DIRS}
+  experiments
+  external-libraries/tclap/include
+)
+
+link_directories(
+  external-libraries/libmaus2/lib
+  external-libraries/sdsl-lite/lib
+  external-libraries/binrel_wt/lib
+)
+add_executable(run_experiments ${experiment_files})
+
+target_link_libraries(
+  run_experiments metagraph ${METALIBS}
+)
+
+
+#-------------------
 # Unit Tests
 #-------------------
-if(FALSE) # There is one gtest version attached with sdsl
+if(FALSE) # there is one gtest version attached with sdsl
 # Download and unpack googletest at configure time
 if(NOT EXISTS ${CMAKE_BINARY_DIR}/googletest-download)
   configure_file(CMakeLists.txt.in googletest-download/CMakeLists.txt)
