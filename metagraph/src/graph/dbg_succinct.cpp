@@ -17,10 +17,14 @@
 #include <string>
 #include <cstdio>
 
+#include <boost/multiprecision/integer.hpp>
+
 #include "dbg_succinct_construct.hpp"
 #include "serialization.hpp"
 
 using utils::remove_suffix;
+using utils::KmerExtractor;
+using TAlphabet = DBG_succ::TAlphabet;
 
 
 #define CHECK_INDEX(idx) \
@@ -30,60 +34,6 @@ using utils::remove_suffix;
     assert(idx <= num_nodes()); \
     assert(idx > 0)
 
-#if _PROTEIN_GRAPH
-const std::string DBG_succ::alphabet = "$ABCDEFGHIJKLMNOPQRSTUVWYZX"
-                                       "$ABCDEFGHIJKLMNOPQRSTUVWYZX";
-const TAlphabet kCharToNucleotide[128] = {
-    26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
-    26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
-    26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
-    26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
-    26,  1,  2,  3,   4,  5,  6,  7,   8,  9, 10, 11,  12, 13, 14, 15,
-    16, 17, 18, 19,  20, 21, 22, 23,  26, 24, 25, 26,  26, 26, 26, 26,
-    26,  1,  2,  3,   4,  5,  6,  7,   8,  9, 10, 11,  12, 13, 14, 15,
-    16, 17, 18, 19,  20, 21, 22, 23,  26, 24, 25, 26,  26, 26, 26, 26
-};
-const size_t DBG_succ::kLogSigma = 6;
-#elif _DNA_CASE_SENSITIVE_GRAPH
-//for case-specific DNA and RNA (U <-> T) data
-const std::string DBG_succ::alphabet = "$ACGTNacgt$ACGTNacgt";
-const TAlphabet kCharToNucleotide[128] = {
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  4, 4, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 6, 5, 7,  5, 5, 5, 8,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  9, 9, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5
-};
-const size_t DBG_succ::kLogSigma = 5;
-#elif _DNA_GRAPH
-//for DNA and RNA (U <-> T) alphabets
-const std::string DBG_succ::alphabet = "$ACGTN$ACGTN";
-const TAlphabet kCharToNucleotide[128] = {
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  4, 4, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  4, 4, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5
-};
-const size_t DBG_succ::kLogSigma = 4;
-#else
-static_assert(false,
-    "Define an alphabet: either "
-    "_DNA_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
-);
-#endif
-
-static_assert(sizeof(TAlphabet) * 8 >= DBG_succ::kLogSigma,
-              "Choose type for TAlphabet properly");
-
-const TAlphabet DBG_succ::alph_size = DBG_succ::alphabet.size() / 2;
-
 const SequenceGraph::node_index SequenceGraph::npos = 0;
 
 typedef DBG_succ::node_index node_index;
@@ -91,9 +41,17 @@ typedef DBG_succ::edge_index edge_index;
 
 
 DBG_succ::DBG_succ(size_t k)
-      : k_(k), last_(new bit_vector_dyn()),
-               F_(alph_size, 0),
-               W_(new wavelet_tree_dyn(kLogSigma)) {
+      : alph_size(kmer_extractor_.alphabet.size()),
+        alphabet(kmer_extractor_.alphabet),
+        bits_per_char_W_(boost::multiprecision::msb(alph_size - 1) + 2),
+        k_(k),
+        last_(new bit_vector_dyn()),
+        F_(alph_size, 0),
+        W_(new wavelet_tree_dyn(bits_per_char_W_)) {
+
+    assert(bits_per_char_W_ <= sizeof(TAlphabet) * 8
+            && "Choose type for TAlphabet properly");
+
     last_->insertBit(0, false);
     W_->insert(0, 0);
 
@@ -195,14 +153,14 @@ bool DBG_succ::operator==(const DBG_succ &other) const {
         do {
             first_node = get_node_str(i);
             first_last = get_last(i);
-            first_label = DBG_succ::decode(get_W(i));
+            first_label = decode(get_W(i));
             i++;
         } while (first_node.find(kSentinel) != std::string::npos && i < W_->size());
 
         do {
             second_node = other.get_node_str(j);
             second_last = other.get_last(j);
-            second_label = DBG_succ::decode(other.get_W(j));
+            second_label = decode(other.get_W(j));
             j++;
         } while (second_node.find(kSentinel) != std::string::npos && j < other.W_->size());
 
@@ -265,15 +223,15 @@ bool DBG_succ::load(const std::string &filename) {
         delete last_;
         switch (state) {
             case Config::DYN:
-                W_ = new wavelet_tree_dyn(kLogSigma);
+                W_ = new wavelet_tree_dyn(bits_per_char_W_);
                 last_ = new bit_vector_dyn();
                 break;
             case Config::STAT:
-                W_ = new wavelet_tree_stat(kLogSigma);
+                W_ = new wavelet_tree_stat(bits_per_char_W_);
                 last_ = new bit_vector_stat();
                 break;
             case Config::SMALL:
-                W_ = new wavelet_tree_small(kLogSigma);
+                W_ = new wavelet_tree_small(bits_per_char_W_);
                 last_ = new bit_vector_small();
                 break;
         }
@@ -1169,31 +1127,29 @@ void DBG_succ::update_F(TAlphabet c, int value) {
     }
 }
 
-TAlphabet DBG_succ::encode(char s) {
-    assert(kCharToNucleotide[kSentinel] != kSentinelCode);
-    assert(kCharToNucleotide[kSentinel] != kSentinelCode + alph_size);
-    return s >= 0 ? kCharToNucleotide[static_cast<size_t>(s)]
-                  : kCharToNucleotide[0];
+TAlphabet DBG_succ::encode(char s) const {
+    assert(kmer_extractor_.kCharToNucleotide[kSentinel] != kSentinelCode);
+    assert(kmer_extractor_.kCharToNucleotide[kSentinel] != kSentinelCode + alph_size);
+    return kmer_extractor_.encode(s);
 }
 
-std::vector<TAlphabet> DBG_succ::encode(const std::string &sequence) {
+std::vector<TAlphabet> DBG_succ::encode(const std::string &sequence) const {
     std::vector<TAlphabet> seq_encoded(sequence.size());
     std::transform(sequence.begin(), sequence.end(),
-                   seq_encoded.begin(), [](char c) { return encode(c); });
+                   seq_encoded.begin(), [this](char c) { return this->encode(c); });
     return seq_encoded;
 }
 
-char DBG_succ::decode(TAlphabet c) {
-    assert(alphabet[kSentinelCode] == kSentinel);
-    assert(alphabet[kSentinelCode + alph_size] == kSentinel);
-    assert(c < alphabet.size());
-    return alphabet[c];
+char DBG_succ::decode(TAlphabet c) const {
+    assert(kmer_extractor_.alphabet[kSentinelCode] == kSentinel);
+    assert(c < 2 * alph_size);
+    return kmer_extractor_.decode(c % alph_size);
 }
 
-std::string DBG_succ::decode(const std::vector<TAlphabet> &sequence) {
+std::string DBG_succ::decode(const std::vector<TAlphabet> &sequence) const {
     std::string str(sequence.size(), 0);
     std::transform(sequence.begin(), sequence.end(),
-                   str.begin(), [](TAlphabet x) { return decode(x); });
+                   str.begin(), [this](TAlphabet x) { return this->decode(x); });
     return str;
 }
 
@@ -1282,7 +1238,7 @@ void DBG_succ::add_sequence(const std::string &seq, bool try_extend,
                             bit_vector_dyn *edges_inserted) {
     assert(!edges_inserted || edges_inserted->size() == W_->size());
 
-    if (seq.size() < k_)
+    if (seq.size() < k_ + 1)
         return;
 
     auto sequence = encode(seq);
@@ -1475,7 +1431,7 @@ uint64_t DBG_succ::erase_edges(const std::vector<bool> &edges_to_remove_mask) {
     last_ = new bit_vector_stat(std::move(new_last));
 
     // update W
-    sdsl::int_vector<> new_W(W_->size() - num_edges_to_remove, 0, kLogSigma);
+    sdsl::int_vector<> new_W(W_->size() - num_edges_to_remove, 0, bits_per_char_W_);
     std::vector<bool> first_removed(alph_size, false);
 
     for (size_t i = 0, new_i = 0; i < edges_to_remove_mask.size(); ++i) {
@@ -1493,7 +1449,7 @@ uint64_t DBG_succ::erase_edges(const std::vector<bool> &edges_to_remove_mask) {
         }
     }
     delete W_;
-    W_ = new wavelet_tree_stat(kLogSigma, std::move(new_W));
+    W_ = new wavelet_tree_stat(bits_per_char_W_, std::move(new_W));
 
     // update F
     TAlphabet c = 0;
@@ -1580,7 +1536,7 @@ void traverse_dummy_edges(const DBG_succ &graph,
             num_edges_traversed++;
         },
         [&](edge_index edge) {
-            assert(graph.get_W(edge) < DBG_succ::alph_size);
+            assert(graph.get_W(edge) < graph.alph_size);
 
             if (traversed_mask)
                 traversed_mask->at(edge) = 1;
@@ -2000,14 +1956,14 @@ bool DBG_succ::is_valid() const {
     assert(get_W(1) == kSentinelCode && "First kmer must be dummy");
 
     for (uint64_t i = 1; i < W_->size(); i++) {
-        if (get_node_last_value(i) >= alph_size || get_W(i) >= alphabet.size())
+        if (get_node_last_value(i) >= alph_size || get_W(i) >= 2 * alph_size)
             return false;
 
         auto index_pred = bwd(i);
         if (index_pred < 1
                 || index_pred >= W_->size()
                 || get_node_last_value(index_pred) >= alph_size
-                || get_W(index_pred) >= alphabet.size())
+                || get_W(index_pred) >= 2 * alph_size)
             return false;
     }
     return true;

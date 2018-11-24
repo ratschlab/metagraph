@@ -5,6 +5,7 @@
 
 #include "utils.hpp"
 
+using TAlphabet = DBG_succ::TAlphabet;
 
 namespace merge {
 
@@ -278,8 +279,12 @@ DBG_succ* merge(const std::vector<const DBG_succ*> &Gv, bool verbose) {
 
 
 std::vector<std::vector<TAlphabet>> get_last_added_nodes(const std::vector<const DBG_succ*> &Gv,
-                                                        const std::vector<uint64_t> &kv) {
-    std::vector<std::vector<TAlphabet>> last_added_nodes(DBG_succ::alph_size);
+                                                         const std::vector<uint64_t> &kv) {
+    assert(Gv.size());
+
+    const size_t alph_size = Gv.at(0)->alph_size;
+
+    std::vector<std::vector<TAlphabet>> last_added_nodes(alph_size);
     // init last added nodes, if not starting from the beginning
     for (size_t i = 0; i < Gv.size(); i++) {
         // check whether we can merge the given graphs
@@ -289,10 +294,10 @@ std::vector<std::vector<TAlphabet>> get_last_added_nodes(const std::vector<const
         if (kv.at(i) < 2)
             continue;
 
-        for (TAlphabet a = 0; a < DBG_succ::alph_size; a++) {
+        for (TAlphabet a = 0; a < alph_size; a++) {
             uint64_t pred_pos = std::max(
                 Gv.at(i)->pred_W(kv.at(i) - 1, a),
-                Gv.at(i)->pred_W(kv.at(i) - 1, a + DBG_succ::alph_size)
+                Gv.at(i)->pred_W(kv.at(i) - 1, a + alph_size)
             );
             if (pred_pos == 0)
                 continue;
@@ -315,6 +320,8 @@ DBG_succ::Chunk* merge_blocks(const std::vector<const DBG_succ*> &Gv,
     assert(nv.size() == Gv.size());
 
     DBG_succ::Chunk *chunk = new DBG_succ::Chunk(Gv.at(0)->get_k());
+
+    const size_t alph_size = Gv.at(0)->alph_size;
 
     auto last_added_nodes = get_last_added_nodes(Gv, kv);
 
@@ -341,7 +348,7 @@ DBG_succ::Chunk* merge_blocks(const std::vector<const DBG_succ*> &Gv,
     for (size_t i = 0; i < Gv.size(); ++i) {
         if (kv[i] < nv[i]) {
             auto seq = Gv[i]->get_node_seq(kv[i]);
-            seq.insert(seq.begin(), Gv[i]->get_W(kv[i]) % DBG_succ::alph_size);
+            seq.insert(seq.begin(), Gv[i]->get_W(kv[i]) % alph_size);
             min_kmers[seq].push_back(i);
         }
     }
@@ -374,14 +381,14 @@ DBG_succ::Chunk* merge_blocks(const std::vector<const DBG_succ*> &Gv,
         // same node as the current one
         TAlphabet next_in_W = val != DBG_succ::kSentinelCode
                                 && utils::seq_equal(seq1, last_added_nodes[val], 1)
-                              ? val + DBG_succ::alph_size
+                              ? val + alph_size
                               : val;
 
         bool remove_dummy_edge = false;
 
         // handle multiple outgoing edges
-        if (chunk->size() > 0 && val != chunk->get_W_back() % DBG_succ::alph_size) {
-            auto pred_node = last_added_nodes[chunk->get_W_back() % DBG_succ::alph_size];
+        if (chunk->size() > 0 && val != chunk->get_W_back() % alph_size) {
+            auto pred_node = last_added_nodes[chunk->get_W_back() % alph_size];
 
             // compare the last two added nodes
             if (utils::seq_equal(seq1, pred_node)) {
@@ -404,7 +411,7 @@ DBG_succ::Chunk* merge_blocks(const std::vector<const DBG_succ*> &Gv,
             kv[i]++;
             if (kv[i] < nv[i]) {
                 auto seq = Gv[i]->get_node_seq(kv[i]);
-                seq.insert(seq.begin(), Gv[i]->get_W(kv[i]) % DBG_succ::alph_size);
+                seq.insert(seq.begin(), Gv[i]->get_W(kv[i]) % alph_size);
                 min_kmers[seq].push_back(i);
             }
         }

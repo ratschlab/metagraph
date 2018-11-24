@@ -81,7 +81,8 @@ class KMerDBGSuccChunkConstructor : public IChunkConstructor {
 
     bool verbose_;
 
-    std::vector<TAlphabet> filter_suffix_encoded_;
+    utils::KmerExtractor kmer_extractor_;
+    std::vector<utils::KmerExtractor::TAlphabet> filter_suffix_encoded_;
 };
 
 

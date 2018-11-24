@@ -11,8 +11,6 @@
 
 #include "kmer.hpp"
 
-const size_t kBitsPerDigit = 17;
-
 std::size_t SmallVectorHash::operator()(const SmallVector &vector) const {
     return boost::hash_range(vector.begin(), vector.end());
 }
@@ -88,33 +86,6 @@ bool check_if_writable(const std::string &filename) {
 
     return true;
 }
-
-/**
-* This function takes a pointer to a graph structure G1 and a corresponding node index k1_node
-* as well as a pointer to a second graph structure G2 and a corresponding node index k2_node. It
-* returns a pair of bool with the first value set to true if G1(k1_node) < G2(k2_node) and the
-* second value set to true if G2(k2_node) < G1(k1_node).
-*/
-std::pair<bool, bool> compare_nodes(const DBG_succ *G1, uint64_t k1_node,
-                                    const DBG_succ *G2, uint64_t k2_node) {
-    assert(G1->get_k() == G2->get_k());
-
-    std::pair<TAlphabet, uint64_t> k1_val;
-    std::pair<TAlphabet, uint64_t> k2_val;
-
-    for (uint64_t curr_k = 0; curr_k < G1->get_k(); ++curr_k) {
-        k1_val = G1->get_minus_k_value(k1_node, 0);
-        k2_val = G2->get_minus_k_value(k2_node, 0);
-        if (k1_val.first != k2_val.first) {
-            break;
-        }
-        k1_node = k1_val.second;
-        k2_node = k2_val.second;
-    }
-
-    return std::make_pair(k1_val.first < k2_val.first, k2_val.first < k1_val.first);
-}
-
 
 /**
  *  Returns the input file type, given a filename
@@ -229,94 +200,195 @@ void ThreadPool::initialize(size_t num_workers) {
     }
 }
 
+
+#if _PROTEIN_GRAPH
+    const std::string KmerExtractor::alphabet = "$ABCDEFGHIJKLMNOPQRSTUVWYZX";
+    const KmerExtractor::TAlphabet KmerExtractor::kCharToNucleotide[128] = {
+        26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
+        26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
+        26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
+        26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
+        26,  1,  2,  3,   4,  5,  6,  7,   8,  9, 10, 11,  12, 13, 14, 15,
+        16, 17, 18, 19,  20, 21, 22, 23,  26, 24, 25, 26,  26, 26, 26, 26,
+        26,  1,  2,  3,   4,  5,  6,  7,   8,  9, 10, 11,  12, 13, 14, 15,
+        16, 17, 18, 19,  20, 21, 22, 23,  26, 24, 25, 26,  26, 26, 26, 26
+    };
+#elif _DNA_CASE_SENSITIVE_GRAPH
+    //for case-specific DNA and RNA (U <-> T) data
+    const std::string KmerExtractor::alphabet = "$ACGTNacgt";
+    const KmerExtractor::TAlphabet KmerExtractor::kCharToNucleotide[128] = {
+        5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+        5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+        5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+        5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+        5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
+        5, 5, 5, 5,  4, 4, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+        5, 6, 5, 7,  5, 5, 5, 8,  5, 5, 5, 5,  5, 5, 5, 5,
+        5, 5, 5, 5,  9, 9, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5
+    };
+#elif _DNA_GRAPH
+    //for DNA and RNA (U <-> T) alphabets
+    const std::string KmerExtractor::alphabet = "$ACGTN";
+    const KmerExtractor::TAlphabet KmerExtractor::kCharToNucleotide[128] = {
+        5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+        5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+        5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+        5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+        5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
+        5, 5, 5, 5,  4, 4, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
+        5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
+        5, 5, 5, 5,  4, 4, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5
+    };
+#else
+    static_assert(false,
+        "Define an alphabet: either "
+        "_DNA_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+    );
+#endif
+
+static_assert(KmerExtractor::kLogSigma <= sizeof(KmerExtractor::TAlphabet) * 8,
+              "Choose type for TAlphabet properly");
+
+
+KmerExtractor::KmerExtractor() {
+    assert(alphabet.size() <= (1llu << kLogSigma));
+}
+
+KmerExtractor::TAlphabet KmerExtractor::encode(char s) {
+    assert((s >= 0 ? kCharToNucleotide[static_cast<size_t>(s)]
+                   : kCharToNucleotide[0]) < alphabet.size());
+
+    return s >= 0 ? kCharToNucleotide[static_cast<size_t>(s)]
+                  : kCharToNucleotide[0];
+}
+
+char KmerExtractor::decode(TAlphabet c) {
+    assert(c < alphabet.size());
+    return alphabet[c];
+}
+
+std::vector<KmerExtractor::TAlphabet>
+KmerExtractor::encode(const std::string &sequence) {
+    std::vector<TAlphabet> seq_encoded(sequence.size());
+    std::transform(sequence.begin(), sequence.end(),
+                   seq_encoded.begin(), [](char c) { return encode(c); });
+    return seq_encoded;
+}
+
+std::string KmerExtractor::decode(const std::vector<TAlphabet> &sequence) {
+    std::string str(sequence.size(), 0);
+    std::transform(sequence.begin(), sequence.end(),
+                   str.begin(), [](TAlphabet x) { return decode(x); });
+    return str;
+}
+
 /**
  * Break the sequence to kmers and extend the temporary kmers storage.
+ * suffix does not take into account the last character.
  */
-template <typename KMER>
-void sequence_to_kmers(std::vector<TAlphabet>&& seq,
-                       size_t k,
-                       Vector<KMER> *kmers,
-                       const std::vector<TAlphabet> &suffix) {
+template <class KMER>
+void KmerExtractor::sequence_to_kmers(const std::vector<TAlphabet> &seq,
+                                      size_t k,
+                                      const std::vector<TAlphabet> &suffix,
+                                      Vector<KMER> *kmers) {
     assert(k);
-    assert(suffix.size() <= k);
+    assert(suffix.size() < k);
+    assert(kmers);
 
-    if (seq.size() < k + 1)
+    if (seq.size() < k)
         return;
 
     // based on performance comparison
     // for KMer::pack_kmer and KMer::update_kmer
     if (suffix.size() > 1) {
-        for (size_t i = 0; i < seq.size() - k; ++i) {
+        for (size_t i = 0; i < seq.size() - k + 1; ++i) {
             if (std::equal(suffix.begin(), suffix.end(),
-                           &seq[i + k] - suffix.size())) {
-                kmers->emplace_back(&seq[i], k + 1);
+                           &seq[i + k - 1] - suffix.size())) {
+                kmers->emplace_back(&seq[i], k);
             }
         }
     } else {
         // initialize and add the first kmer from sequence
-        auto kmer = KMER::pack_kmer(seq.data(), k + 1);
+        auto kmer = KMER::pack_kmer(seq.data(), k);
 
         if (std::equal(suffix.begin(), suffix.end(),
-                       &seq[k] - suffix.size())) {
+                       &seq[k - 1] - suffix.size())) {
             kmers->emplace_back(kmer);
         }
 
         // add all other kmers
-        for (size_t i = 1; i < seq.size() - k; ++i) {
-            KMER::update_kmer(k, seq[i + k], seq[i + k - 1], &kmer);
+        for (size_t i = 1; i < seq.size() - k + 1; ++i) {
+            KMER::update_kmer(k, seq[i + k - 1], seq[i + k - 2], &kmer);
 
             if (std::equal(suffix.begin(), suffix.end(),
-                           &seq[i + k] - suffix.size())) {
+                           &seq[i + k - 1] - suffix.size())) {
                 kmers->emplace_back(kmer);
             }
         }
     }
 }
 
+template void KmerExtractor::sequence_to_kmers(const std::vector<TAlphabet> &seq,
+                                               size_t k,
+                                               const std::vector<TAlphabet> &suffix,
+                                               Vector<Kmer64> *kmers);
+template void KmerExtractor::sequence_to_kmers(const std::vector<TAlphabet> &seq,
+                                               size_t k,
+                                               const std::vector<TAlphabet> &suffix,
+                                               Vector<Kmer128> *kmers);
+template void KmerExtractor::sequence_to_kmers(const std::vector<TAlphabet> &seq,
+                                               size_t k,
+                                               const std::vector<TAlphabet> &suffix,
+                                               Vector<Kmer256> *kmers);
+
+template <class KMER>
+std::string KmerExtractor::kmer_to_sequence(const KMER &kmer) {
+    return kmer.to_string(alphabet);
+}
+
+template std::string KmerExtractor::kmer_to_sequence(const Kmer64 &kmer);
+template std::string KmerExtractor::kmer_to_sequence(const Kmer128 &kmer);
+template std::string KmerExtractor::kmer_to_sequence(const Kmer256 &kmer);
+
 /**
  * Break the sequence to kmers and extend the temporary kmers storage.
  */
 template <typename KMER>
-void sequence_to_kmers(const std::string &sequence,
-                       size_t k,
-                       Vector<KMER> *kmers,
-                       const std::vector<TAlphabet> &suffix) {
+void KmerExtractor::sequence_to_kmers(const std::string &sequence,
+                                      size_t k,
+                                      const std::vector<TAlphabet> &suffix,
+                                      Vector<KMER> *kmers) {
     assert(k);
-    assert(suffix.size() <= k);
+    // suffix does not include the last character
+    assert(suffix.size() < k);
 
     if (sequence.size() < k)
         return;
 
     // encode sequence
-    size_t dummy_prefix_size = suffix.size() > 0 ? k : 1;
+    size_t dummy_prefix_size = suffix.size() > 0 ? k - 1 : 1;
 
-    std::vector<TAlphabet> seq(sequence.size() + dummy_prefix_size + 1,
-                               DBG_succ::kSentinelCode);
+    std::vector<TAlphabet> seq(sequence.size() + dummy_prefix_size + 1, 0);
 
     std::transform(sequence.begin(), sequence.end(),
                    &seq[dummy_prefix_size],
-                   [](char c) { return DBG_succ::encode(c); });
+                   [](char c) { return encode(c); });
 
-    sequence_to_kmers(std::move(seq), k, kmers, suffix);
+    KmerExtractor::sequence_to_kmers(seq, k, suffix, kmers);
 }
 
-template void
-sequence_to_kmers<KMer<uint64_t>>(const std::string &sequence,
-                                  size_t k,
-                                  Vector<KMer<uint64_t>> *kmers,
-                                  const std::vector<TAlphabet> &suffix);
-
-template void
-sequence_to_kmers<KMer<sdsl::uint128_t>>(const std::string &sequence,
-                                         size_t k,
-                                         Vector<KMer<sdsl::uint128_t>> *kmers,
-                                         const std::vector<TAlphabet> &suffix);
-
-template void
-sequence_to_kmers<KMer<sdsl::uint256_t>>(const std::string &sequence,
-                                         size_t k,
-                                         Vector<KMer<sdsl::uint256_t>> *kmers,
-                                         const std::vector<TAlphabet> &suffix);
+template void KmerExtractor::sequence_to_kmers(const std::string &sequence,
+                                               size_t k,
+                                               const std::vector<TAlphabet> &suffix,
+                                               Vector<Kmer64> *kmers);
+template void KmerExtractor::sequence_to_kmers(const std::string &sequence,
+                                               size_t k,
+                                               const std::vector<TAlphabet> &suffix,
+                                               Vector<Kmer128> *kmers);
+template void KmerExtractor::sequence_to_kmers(const std::string &sequence,
+                                               size_t k,
+                                               const std::vector<TAlphabet> &suffix,
+                                               Vector<Kmer256> *kmers);
 
 
 void decompress_sd_vector(const sdsl::sd_vector<> &vector,

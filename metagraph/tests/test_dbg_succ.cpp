@@ -179,7 +179,7 @@ TEST(DBGSuccinct, SmallGraphTraversal) {
                 graph->incoming(graph->outgoing(node_idx, graph->get_W(i)),
                                 graph->get_minus_k_value(i, graph->get_k() - 1).first)
             );
-            for (TAlphabet c = 0; c < DBG_succ::alph_size; ++c) {
+            for (int c = 0; c < graph->alph_size; ++c) {
                 uint64_t prev_node = graph->incoming(node_idx, c);
                 if (prev_node) {
                     EXPECT_EQ(node_idx,
@@ -811,11 +811,11 @@ TEST(DBGSuccinct, AddSequence) {
     }
     {
         DBG_succ graph(4);
-        graph.add_sequence("AGAC");
-        graph.add_sequence("GACT");
-        graph.add_sequence("ACTA");
-        EXPECT_EQ(12u, graph.num_nodes());
-        EXPECT_EQ(15u, graph.num_edges());
+        graph.add_sequence("AGACN");
+        graph.add_sequence("GACTN");
+        graph.add_sequence("ACTAN");
+        EXPECT_EQ(15u, graph.num_nodes());
+        EXPECT_EQ(18u, graph.num_edges());
     }
 }
 
@@ -837,11 +837,11 @@ TEST(DBGSuccinct, AppendSequence) {
     }
     {
         DBG_succ graph(4);
-        graph.add_sequence("AGAC", true);
-        graph.add_sequence("GACT", true);
-        graph.add_sequence("ACTA", true);
-        EXPECT_EQ(12u, graph.num_nodes());
-        EXPECT_EQ(15u, graph.num_edges());
+        graph.add_sequence("AGACN", true);
+        graph.add_sequence("GACTN", true);
+        graph.add_sequence("ACTAN", true);
+        EXPECT_EQ(15u, graph.num_nodes());
+        EXPECT_EQ(18u, graph.num_edges());
     }
     {
         DBG_succ graph(3);
@@ -1305,7 +1305,7 @@ TEST(DBGSuccinct, CallEdgesTestPathDisconnected2) {
         graph.call_edges([&](auto edge_idx, const auto &edge) {
             EXPECT_EQ(graph.get_k() + 1, edge.size()) << graph;
             EXPECT_EQ(graph.get_node_seq(edge_idx),
-                      std::vector<TAlphabet>(edge.begin(), edge.end() - 1))
+                      std::vector<DBG_succ::TAlphabet>(edge.begin(), edge.end() - 1))
                 << edge_idx << "\n" << graph;
             num_edges++;
         });
@@ -1440,14 +1440,16 @@ TEST(DBGSuccinct, CallKmersTestPathDisconnected2) {
 void test_pred_kmer(const DBG_succ &graph,
                     const std::string &kmer_s,
                     uint64_t expected_idx) {
-    std::vector<TAlphabet> kmer(kmer_s.size());
+    std::vector<DBG_succ::TAlphabet> kmer(kmer_s.size());
     std::transform(kmer_s.begin(), kmer_s.end(), kmer.begin(),
-                   [](char c) {
+                   [&graph](char c) {
                        return c == DBG_succ::kSentinel
                                    ? DBG_succ::kSentinelCode
-                                   : DBG_succ::encode(c);
+                                   : graph.encode(c);
                    });
-    EXPECT_EQ(expected_idx, graph.select_last(graph.pred_kmer(kmer))) << kmer_s << std::endl << graph;
+    EXPECT_EQ(expected_idx, graph.select_last(graph.pred_kmer(kmer)))
+        << kmer_s << std::endl
+        << graph;
 }
 
 TEST(DBGSuccinct, PredKmer) {
@@ -1462,7 +1464,7 @@ TEST(DBGSuccinct, PredKmer) {
     }
     {
         DBG_succ graph(5);
-        graph.add_sequence("AAAAA");
+        graph.add_sequence("AAAAAA");
 
         test_pred_kmer(graph, "ACGCG", 7);
         test_pred_kmer(graph, "$$$$A", 3);
@@ -1472,12 +1474,12 @@ TEST(DBGSuccinct, PredKmer) {
     }
     {
         DBG_succ graph(5);
-        graph.add_sequence("ACACA");
+        graph.add_sequence("ACACAA");
 
-        test_pred_kmer(graph, "ACGCG", 7);
+        test_pred_kmer(graph, "ACGCG", 8);
         test_pred_kmer(graph, "$$$$A", 3);
-        test_pred_kmer(graph, "TTTTT", 7);
-        test_pred_kmer(graph, "NNNNN", 7);
+        test_pred_kmer(graph, "TTTTT", 8);
+        test_pred_kmer(graph, "NNNNN", 8);
         test_pred_kmer(graph, "$$$$$", 2);
     }
 #ifndef _PROTEIN_GRAPH
@@ -1534,12 +1536,12 @@ TEST(DBGSuccinct, PredKmerRandomTest) {
             std::string sequence(length, 'A');
 
             for (size_t s = 0; s < sequence.size(); ++s) {
-                sequence[s] = DBG_succ::alphabet[1 + rand() % 4];
+                sequence[s] = graph.alphabet[1 + rand() % 4];
             }
             graph.add_sequence(sequence, false);
 
             for (size_t s = 0; s < sequence.size(); ++s) {
-                sequence[s] = DBG_succ::alphabet[1 + rand() % 4];
+                sequence[s] = graph.alphabet[1 + rand() % 4];
             }
             graph.add_sequence(sequence, true);
         }
@@ -1554,7 +1556,7 @@ TEST(DBGSuccinct, PredKmerRandomTest) {
         }
 
         for (const auto &kmer_str : all_kmer_str) {
-            std::vector<TAlphabet> kmer = DBG_succ::encode(kmer_str);
+            std::vector<DBG_succ::TAlphabet> kmer = graph.encode(kmer_str);
 
             uint64_t lower_bound = graph.select_last(graph.pred_kmer(kmer));
 

@@ -8,6 +8,8 @@
 
 class DBG_succ::Chunk {
   public:
+    typedef uint8_t TAlphabet;
+
     explicit Chunk(size_t k);
 
     /**
@@ -40,6 +42,8 @@ class DBG_succ::Chunk {
                             bool verbose = false);
 
   private:
+    const size_t alph_size_;
+    const size_t bits_per_char_W_;
     size_t k_;
     std::vector<TAlphabet> W_;
     std::vector<bool> last_;

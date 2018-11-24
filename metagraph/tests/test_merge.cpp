@@ -48,12 +48,12 @@ TEST(DBGSuccinctMerge, TraversalMergeEmptyRandomTest) {
             std::string sequence(length, 'A');
 
             for (size_t s = 0; s < sequence.size(); ++s) {
-                sequence[s] = DBG_succ::alphabet[1 + rand() % 4];
+                sequence[s] = random.alphabet[1 + rand() % 4];
             }
             random.add_sequence(sequence, false);
 
             for (size_t s = 0; s < sequence.size(); ++s) {
-                sequence[s] = DBG_succ::alphabet[1 + rand() % 4];
+                sequence[s] = random.alphabet[1 + rand() % 4];
             }
             random.add_sequence(sequence, true);
         }
@@ -377,12 +377,12 @@ void random_testing_parallel_merge(size_t num_graphs, size_t num_sequences, size
                 std::string sequence(length, 'A');
 
                 for (size_t s = 0; s < sequence.size(); ++s) {
-                    sequence[s] = DBG_succ::alphabet[1 + rand() % 4];
+                    sequence[s] = component->alphabet[1 + rand() % 4];
                 }
                 component->add_sequence(sequence, false);
 
                 for (size_t s = 0; s < sequence.size(); ++s) {
-                    sequence[s] = DBG_succ::alphabet[1 + rand() % 4];
+                    sequence[s] = component->alphabet[1 + rand() % 4];
                 }
                 component->add_sequence(sequence, true);
             }

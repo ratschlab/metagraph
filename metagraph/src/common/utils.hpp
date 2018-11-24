@@ -31,16 +31,78 @@ using Vector = std::vector<T>;
 typedef std::vector<uint32_t> SmallVector;
 #endif
 
-#include "dbg_succinct.hpp"
 #include "serialization.hpp"
 #include "kmer.hpp"
+
+class DBG_succ;
 
 
 struct SmallVectorHash {
     std::size_t operator()(const SmallVector &vector) const;
 };
 
+
 namespace utils {
+
+    class KmerExtractor {
+        friend class ::DBG_succ;
+
+      public:
+
+        #if _PROTEIN_GRAPH
+        static constexpr size_t kLogSigma = 5;
+        #elif _DNA_CASE_SENSITIVE_GRAPH
+        static constexpr size_t kLogSigma = 4;
+        #elif _DNA_GRAPH
+        static constexpr size_t kLogSigma = 3;
+        #else
+        static_assert(false,
+            "Define an alphabet: either "
+            "_DNA_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+        );
+        #endif
+
+        typedef KMer<uint64_t, kLogSigma> Kmer64;
+        typedef KMer<sdsl::uint128_t, kLogSigma> Kmer128;
+        typedef KMer<sdsl::uint256_t, kLogSigma> Kmer256;
+
+        // alphabet for k-mer representation
+        typedef uint8_t TAlphabet;
+
+        KmerExtractor();
+
+        /**
+         * Break the sequence to kmers and extend the temporary kmers storage.
+         */
+        template <class KMER>
+        static void sequence_to_kmers(const std::string &sequence,
+                                      size_t k,
+                                      const std::vector<TAlphabet> &suffix,
+                                      Vector<KMER> *kmers);
+
+        // extract k-mers from sequence
+        template <class KMER>
+        static void sequence_to_kmers(const std::vector<TAlphabet> &sequence,
+                                      size_t k,
+                                      const std::vector<TAlphabet> &suffix,
+                                      Vector<KMER> *kmers);
+
+        template <class KMER>
+        static std::string kmer_to_sequence(const KMER &kmer);
+
+        // map input character to k-mer character
+        static TAlphabet encode(char s);
+        // map k-mer character to input character
+        static char decode(TAlphabet c);
+
+        static const std::string alphabet;
+
+      private:
+        static std::vector<TAlphabet> encode(const std::string &sequence);
+        static std::string decode(const std::vector<TAlphabet> &sequence);
+
+        static const TAlphabet kCharToNucleotide[128];
+    };
 
     std::string remove_suffix(const std::string &str, const std::string &suffix);
 
@@ -57,15 +119,6 @@ namespace utils {
                                           const std::string &delimiter);
 
     bool check_if_writable(const std::string &filename);
-
-    /**
-    * This function takes a pointer to a graph structure G1 and a corresponding node index k1_node
-    * as well as a pointer to a second graph structure G2 and a corresponding node index k2_node. It
-    * returns a pair of bool with the first value set to true if G1(k1_node) < G2(k2_node) and the
-    * second value set to true if G2(k2_node) < G1(k1_node).
-    */
-    std::pair<bool, bool> compare_nodes(const DBG_succ *G1, uint64_t k1_node,
-                                        const DBG_succ *G2, uint64_t k2_node);
 
     /**
      *  This function checks whether two given strings are identical.
@@ -286,15 +339,6 @@ namespace utils {
 
         std::hash<std::bitset<sizeof(T) * 8>> hasher;
     };
-
-    /**
-     * Break the sequence to kmers and extend the temporary kmers storage.
-     */
-    template <typename KMer>
-    void sequence_to_kmers(const std::string &sequence,
-                           size_t k,
-                           Vector<KMer> *kmers,
-                           const std::vector<TAlphabet> &suffix);
 
     void decompress_sd_vector(const sdsl::sd_vector<> &vector,
                               sdsl::bit_vector *out);

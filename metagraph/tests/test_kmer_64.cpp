@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <sstream>
 
 #include "gtest/gtest.h"
 
@@ -8,9 +7,11 @@
 
 #include "dbg_succinct.hpp"
 #include "kmer.hpp"
+#include "utils.hpp"
 
 typedef uint64_t KMerBaseType;
-typedef KMer<KMerBaseType> KMER;
+const size_t kBitsPerChar = utils::KmerExtractor::kLogSigma;
+typedef KMer<KMerBaseType, kBitsPerChar> KMER;
 const size_t kSizeOfKmer = sizeof(KMerBaseType);
 
 
@@ -21,18 +22,15 @@ std::string kmer_codec(const std::string &test_kmer) {
         [](char c) {
             return c == DBG_succ::kSentinel
                         ? DBG_succ::kSentinelCode
-                        : DBG_succ::encode(c);
+                        : utils::KmerExtractor::encode(c);
         }
     );
-    std::string kmer_s = KMER(kmer).to_string(DBG_succ::alphabet);
-    kmer_s.push_back(kmer_s[0]);
-    kmer_s.erase(kmer_s.begin());
-    return kmer_s;
+    return KMER(kmer).to_string(utils::KmerExtractor::alphabet);
 }
 
-template std::string kmer_codec<KMer<uint64_t>>(const std::string &test_kmer);
-template std::string kmer_codec<KMer<sdsl::uint256_t>>(const std::string &test_kmer);
-template std::string kmer_codec<KMer<sdsl::uint128_t>>(const std::string &test_kmer);
+template std::string kmer_codec<KMer<uint64_t, utils::KmerExtractor::kLogSigma>>(const std::string &test_kmer);
+template std::string kmer_codec<KMer<sdsl::uint256_t, utils::KmerExtractor::kLogSigma>>(const std::string &test_kmer);
+template std::string kmer_codec<KMer<sdsl::uint128_t, utils::KmerExtractor::kLogSigma>>(const std::string &test_kmer);
 
 std::string kmer_codec_64(const std::string &test_kmer) {
     return kmer_codec<KMER>(test_kmer);
@@ -52,19 +50,19 @@ TEST(KmerEncodeTest_64, Invertible) {
 /*
 TEST(KmerEncodeTest_64, Operations) {
     for (uint8_t j = 1; j <= kMax; ++j) {
-        char curchar = DBG_succ::decode(j - 1);
+        char curchar = utils::KmerExtractor::decode(j - 1);
         std::string long_seq = std::string(2, curchar);
-        KMER kmer(long_seq, DBG_succ::encode);
+        KMER kmer(long_seq, utils::KmerExtractor::encode);
         int shift = kSizeOfKmer * 8 / kBitsPerChar;
         for (int i = 3; i <= shift; ++i) {
             kmer <<= kBitsPerChar;
             kmer |= j;
-            ASSERT_EQ(kmer.to_string(DBG_succ::alphabet),
+            ASSERT_EQ(kmer.to_string(utils::KmerExtractor::alphabet),
                       long_seq + std::string(i - 2, curchar));
         }
         while (shift--) {
             kmer >>= kBitsPerChar;
-            ASSERT_EQ(kmer.to_string(DBG_succ::alphabet),
+            ASSERT_EQ(kmer.to_string(utils::KmerExtractor::alphabet),
                       long_seq + std::string(shift - 2, curchar));
         }
     }
@@ -78,19 +76,17 @@ TEST(KmerEncodeTest_64, BitShiftBuild) {
     }
     long_seq = long_seq.substr(0, kSizeOfKmer * 8 / kBitsPerChar);
     //test bit shifting
-    KMER kmer_builtup(DBG_succ::encode(
+    KMER kmer_builtup(utils::KmerExtractor::encode(
         std::string(long_seq.rbegin() + 1,
                     long_seq.rbegin() + 3)
     ));
     for (int i = long_seq.length() - 4; i >= 0; --i) {
         kmer_builtup.seq_ = kmer_builtup.seq_ << kBitsPerChar;
-        kmer_builtup.seq_ |= DBG_succ::encode(long_seq[i]) + 1;
+        kmer_builtup.seq_ |= utils::KmerExtractor::encode(long_seq[i]) + 1;
     }
     kmer_builtup.seq_ = kmer_builtup.seq_ << kBitsPerChar;
-    kmer_builtup.seq_ |= DBG_succ::encode(long_seq[long_seq.length() - 1]) + 1;
-    std::string dec = kmer_builtup.to_string(DBG_succ::alphabet);
-    dec.push_back(dec.front());
-    dec.erase(dec.begin());
+    kmer_builtup.seq_ |= utils::KmerExtractor::encode(long_seq[long_seq.length() - 1]) + 1;
+    std::string dec = kmer_builtup.to_string(utils::KmerExtractor::alphabet);
     ASSERT_EQ(long_seq, dec);
 
     test_kmer_codec_64(long_seq, long_seq);
@@ -98,14 +94,14 @@ TEST(KmerEncodeTest_64, BitShiftBuild) {
 
 TEST(KmerEncodeTest_64, UpdateKmer) {
     KMER kmer[2] = {
-        KMER(DBG_succ::encode(std::string("ATGC"))),
-        KMER(DBG_succ::encode(std::string("TGCT")))
+        KMER(utils::KmerExtractor::encode("ATGC")),
+        KMER(utils::KmerExtractor::encode("TGCT"))
     };
     KMER updated = kmer[0];
-    KMER::update_kmer(3, DBG_succ::encode('T'),
-                         DBG_succ::encode('C'), &updated.seq_);
+    KMER::update_kmer(4, utils::KmerExtractor::encode('T'),
+                         utils::KmerExtractor::encode('C'), &updated.seq_);
     EXPECT_EQ(kmer[1], updated);
-    EXPECT_EQ(kmer[0], kmer[1].prev_kmer(3, DBG_succ::encode('A')));
+    EXPECT_EQ(kmer[0], kmer[1].prev_kmer(4, utils::KmerExtractor::encode('A')));
 }
 
 TEST(KmerEncodeTest_64, UpdateKmerLong) {
@@ -117,16 +113,16 @@ TEST(KmerEncodeTest_64, UpdateKmerLong) {
     std::string long_seq_alt(long_seq.substr(1));
     long_seq_alt.push_back('T');
     KMER kmer[2] = {
-        KMER(DBG_succ::encode(long_seq)),
-        KMER(DBG_succ::encode(long_seq_alt))
+        KMER(utils::KmerExtractor::encode(long_seq)),
+        KMER(utils::KmerExtractor::encode(long_seq_alt))
     };
-    KMER::update_kmer(long_seq.length() - 1,
-                DBG_succ::encode('T'),
-                DBG_succ::encode(long_seq.back()),
+    KMER::update_kmer(long_seq.length(),
+                utils::KmerExtractor::encode('T'),
+                utils::KmerExtractor::encode(long_seq.back()),
                 &kmer[0].seq_);
     EXPECT_EQ(kmer[1], kmer[0]);
-    EXPECT_EQ(kmer[1].to_string(DBG_succ::alphabet),
-              kmer[0].to_string(DBG_succ::alphabet));
+    EXPECT_EQ(kmer[1].to_string(utils::KmerExtractor::alphabet),
+              kmer[0].to_string(utils::KmerExtractor::alphabet));
 }
 
 TEST(KmerEncodeTest_64, UpdateKmerVsConstruct) {
@@ -136,23 +132,19 @@ TEST(KmerEncodeTest_64, UpdateKmerVsConstruct) {
     std::string long_seq1 =  "AGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAANT";
     long_seq1.resize(std::min(kSizeOfKmer * 8 / kBitsPerChar,
                               long_seq0.size()));
-    auto seq0 = DBG_succ::encode(long_seq0);
+    auto seq0 = utils::KmerExtractor::encode(long_seq0);
     KMER kmer0(KMER::pack_kmer(seq0.begin(), seq0.size()));
     KMER::update_kmer(
-            long_seq0.length() - 1,
-            DBG_succ::encode(long_seq1.back()),
-            DBG_succ::encode(long_seq0.back()),
+            long_seq0.length(),
+            utils::KmerExtractor::encode(long_seq1.back()),
+            utils::KmerExtractor::encode(long_seq0.back()),
             reinterpret_cast<KMerBaseType*>(&kmer0));
-    std::string reconst_seq1 = kmer0.to_string(DBG_succ::alphabet);
-    reconst_seq1.push_back(reconst_seq1[0]);
-    reconst_seq1 = reconst_seq1.substr(1);
+    std::string reconst_seq1 = kmer0.to_string(utils::KmerExtractor::alphabet);
     EXPECT_EQ(long_seq1, reconst_seq1);
 
-    seq0.emplace_back(DBG_succ::encode(long_seq1.back()));
+    seq0.emplace_back(utils::KmerExtractor::encode(long_seq1.back()));
     KMER kmer1(KMER::pack_kmer(seq0.begin() + 1, seq0.size() - 1));
-    std::string reconst_seq2 = kmer1.to_string(DBG_succ::alphabet);
-    reconst_seq2.push_back(reconst_seq2[0]);
-    reconst_seq2 = reconst_seq2.substr(1);
+    std::string reconst_seq2 = kmer1.to_string(utils::KmerExtractor::alphabet);
     EXPECT_EQ(long_seq1, reconst_seq2);
 }
 
@@ -177,8 +169,8 @@ TEST(KmerEncodeTest_64, InvalidChars) {
 void test_kmer_less_64(const std::string &k1,
                        const std::string &k2, bool truth) {
     KMER kmer[2] = {
-        KMER(DBG_succ::encode(k1)),
-        KMER(DBG_succ::encode(k2))
+        KMER(utils::KmerExtractor::encode(k1)),
+        KMER(utils::KmerExtractor::encode(k2))
     };
     ASSERT_EQ(truth, kmer[0] < kmer[1]);
 }
@@ -207,8 +199,8 @@ TEST(KmerEncodeTest_64, LessLong) {
 
 void test_kmer_suffix_64(std::string k1, std::string k2, bool truth) {
     KMER kmer[2] = {
-        KMER(DBG_succ::encode(k1)),
-        KMER(DBG_succ::encode(k2))
+        KMER(utils::KmerExtractor::encode(k1)),
+        KMER(utils::KmerExtractor::encode(k2))
     };
     ASSERT_EQ(truth, KMER::compare_suffix(kmer[0], kmer[1], 1));
 }
@@ -231,8 +223,8 @@ TEST(KmerEncodeTest_64, CompareSuffixTrueLong) {
 
     long_seq_alt[0] = 'T';
     KMER kmer[2] = {
-        KMER(DBG_succ::encode(long_seq)),
-        KMER(DBG_succ::encode(long_seq_alt))
+        KMER(utils::KmerExtractor::encode(long_seq)),
+        KMER(utils::KmerExtractor::encode(long_seq_alt))
     };
     ASSERT_TRUE(KMER::compare_suffix(kmer[0], kmer[1], 1));
 
@@ -243,7 +235,7 @@ TEST(KmerEncodeTest_64, CompareSuffixTrueLong) {
         = kmer[0].seq_ >> static_cast<int>((kSizeOfKmer * 8 / kBitsPerChar - 2)
                                                 * kBitsPerChar);
 
-    kmer[1] = KMER(DBG_succ::encode(
+    kmer[1] = KMER(utils::KmerExtractor::encode(
         long_seq_alt.substr(kSizeOfKmer * 8 / kBitsPerChar - 2)
     ));
 
@@ -267,6 +259,7 @@ TEST(KmerEncodeTest_64, SizeOfClass) {
     EXPECT_EQ(kSizeOfKmer, sizeof(KMER));
 }
 
+#if _DNA_GRAPH
 TEST(KmerEncodeTest_64, TestPrint) {
     KMER kmer(std::vector<uint64_t>(sizeof(KMerBaseType) * 8 / kBitsPerChar, 1),
               sizeof(KMerBaseType) * 8 / kBitsPerChar);
@@ -276,3 +269,4 @@ TEST(KmerEncodeTest_64, TestPrint) {
     ss >> out;
     EXPECT_EQ("0000000000000000000000000000000000000000000000002492492492492492", out);
 }
+#endif

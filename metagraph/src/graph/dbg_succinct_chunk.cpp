@@ -1,17 +1,29 @@
 #include "dbg_succinct_chunk.hpp"
 
+#include <boost/multiprecision/integer.hpp>
+
 #include "serialization.hpp"
 #include "utils.hpp"
 
 
 DBG_succ::Chunk::Chunk(size_t k)
-      : k_(k), W_(1, 0), last_(1, 0), F_(DBG_succ::alph_size, 0) {}
+      : alph_size_(utils::KmerExtractor::alphabet.size()),
+        bits_per_char_W_(boost::multiprecision::msb(alph_size_ - 1) + 2),
+        k_(k), W_(1, 0), last_(1, 0), F_(alph_size_, 0) {
+    assert(sizeof(TAlphabet) * 8 >= bits_per_char_W_);
+    assert(alph_size_ * 2 < 1llu << bits_per_char_W_);
+}
 
 DBG_succ::Chunk::Chunk(size_t k,
                        std::vector<TAlphabet>&& W,
                        std::vector<bool>&& last,
                        std::vector<uint64_t>&& F)
-      : k_(k), W_(std::move(W)), last_(std::move(last)), F_(std::move(F)) {}
+      : alph_size_(utils::KmerExtractor::alphabet.size()),
+        bits_per_char_W_(boost::multiprecision::msb(alph_size_ - 1) + 2),
+        k_(k), W_(std::move(W)), last_(std::move(last)), F_(std::move(F)) {
+    assert(sizeof(TAlphabet) * 8 >= bits_per_char_W_);
+    assert(alph_size_ * 2 < 1llu << bits_per_char_W_);
+}
 
 void DBG_succ::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
     W_.push_back(W);
@@ -21,7 +33,8 @@ void DBG_succ::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
     last_.push_back(last);
 }
 
-TAlphabet DBG_succ::Chunk::get_W_back() const { return W_.back(); }
+DBG_succ::Chunk::TAlphabet
+DBG_succ::Chunk::get_W_back() const { return W_.back(); }
 
 void DBG_succ::Chunk::alter_W_back(TAlphabet W) { W_.back() = W; }
 
@@ -46,7 +59,7 @@ void DBG_succ::Chunk::extend(const DBG_succ::Chunk &other) {
 
 void DBG_succ::Chunk::initialize_graph(DBG_succ *graph) const {
     delete graph->W_;
-    graph->W_ = new wavelet_tree_stat(kLogSigma, W_);
+    graph->W_ = new wavelet_tree_stat(bits_per_char_W_, W_);
 
     delete graph->last_;
     graph->last_ = new bit_vector_stat(last_);
@@ -85,9 +98,10 @@ DBG_succ::Chunk::build_graph_from_chunks(const std::vector<std::string> &chunk_f
         std::cout << "Cumulative size of chunks: "
                   << cumulative_size << std::endl;
 
-    sdsl::int_vector<> W(cumulative_size, 0, kLogSigma);
-    sdsl::bit_vector last(cumulative_size, 0);
-    std::vector<uint64_t> F(DBG_succ::alph_size, 0);
+    std::unique_ptr<sdsl::int_vector<>> W;
+    std::unique_ptr<sdsl::bit_vector> last;
+    std::unique_ptr<std::vector<uint64_t>> F;
+
     uint64_t pos = 1;
 
     if (verbose)
@@ -106,6 +120,10 @@ DBG_succ::Chunk::build_graph_from_chunks(const std::vector<std::string> &chunk_f
                       << filename << std::endl;
             exit(1);
         } else if (i == 0) {
+            W = std::make_unique<sdsl::int_vector<>>(cumulative_size, 0, graph_chunk.bits_per_char_W_);
+            last = std::make_unique<sdsl::bit_vector>(cumulative_size, 0);
+            F = std::make_unique<std::vector<uint64_t>>(graph_chunk.alph_size_, 0);
+
             graph->k_ = graph_chunk.k_;
         } else if (graph->k_ != graph_chunk.k_) {
             std::cerr << "ERROR: trying to build a graph with k=" << graph->k_
@@ -119,14 +137,14 @@ DBG_succ::Chunk::build_graph_from_chunks(const std::vector<std::string> &chunk_f
         }
 
         for (size_t i = 1; i < graph_chunk.W_.size(); ++i) {
-            W[pos] = graph_chunk.W_[i];
-            last[pos] = graph_chunk.last_[i];
+            (*W)[pos] = graph_chunk.W_[i];
+            (*last)[pos] = graph_chunk.last_[i];
             pos++;
         }
 
-        assert(graph_chunk.F_.size() == F.size());
-        for (size_t p = 0; p < F.size(); ++p) {
-            F[p] += graph_chunk.F_[p];
+        assert(graph_chunk.F_.size() == F->size());
+        for (size_t p = 0; p < F->size(); ++p) {
+            (*F)[p] += graph_chunk.F_[p];
         }
 
         if (verbose) {
@@ -134,13 +152,20 @@ DBG_succ::Chunk::build_graph_from_chunks(const std::vector<std::string> &chunk_f
         }
     }
 
+    assert(W.get());
+    assert(last.get());
+    assert(F.get());
+
     delete graph->W_;
-    graph->W_ = new wavelet_tree_stat(kLogSigma, std::move(W));
+    graph->W_ = new wavelet_tree_stat(W->width(), std::move(*W));
+    W.reset();
 
     delete graph->last_;
-    graph->last_ = new bit_vector_stat(std::move(last));
+    graph->last_ = new bit_vector_stat(std::move(*last));
+    last.reset();
 
-    graph->F_ = std::move(F);
+    graph->F_ = std::move(*F);
+    F.reset();
 
     graph->state = Config::STAT;
 
@@ -161,7 +186,7 @@ bool DBG_succ::Chunk::load(const std::string &infbase) {
 
         instream.close();
 
-        return F_.size() == DBG_succ::alph_size;
+        return F_.size() == alph_size_;
     } catch (const std::bad_alloc &exception) {
         std::cerr << "ERROR: Not enough memory to load graph chunk from "
                   << infbase << "." << std::endl;
@@ -175,7 +200,7 @@ void DBG_succ::Chunk::serialize(const std::string &outbase) const {
     std::ofstream outstream(utils::remove_suffix(outbase, ".dbgchunk")
                                                                 + ".dbgchunk",
                             std::ios::binary);
-    serialize_number_vector(outstream, W_, kLogSigma);
+    serialize_number_vector(outstream, W_, bits_per_char_W_);
     serialize_number_vector(outstream, last_, 1);
     serialize_number_vector(outstream, F_);
     serialize_number(outstream, k_);

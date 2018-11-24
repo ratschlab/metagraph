@@ -412,11 +412,11 @@ int main(int argc, const char *argv[]) {
                     std::cout << "Start reading data and extracting k-mers" << std::endl;
                 }
                 //enumerate all suffices
-                assert(DBG_succ::alph_size > 1);
+                assert(graph->alph_size > 1);
                 assert(config->nsplits > 0);
                 size_t suffix_len = std::min(
                     static_cast<size_t>(std::ceil(std::log2(config->nsplits)
-                                                    / std::log2(DBG_succ::alph_size - 1))),
+                                                    / std::log2(graph->alph_size - 1))),
                     graph->get_k() - 1
                 );
                 std::deque<std::string> suffices;
@@ -424,7 +424,7 @@ int main(int argc, const char *argv[]) {
                     suffices = { config->suffix };
                 } else {
                     suffices = utils::generate_strings(
-                        DBG_succ::alphabet.substr(0, DBG_succ::alph_size),
+                        graph->alphabet,
                         suffix_len
                     );
                 }
@@ -1263,7 +1263,7 @@ int main(int argc, const char *argv[]) {
                 assert(config->infbase.size());
 
                 auto sorted_suffices = utils::generate_strings(
-                    DBG_succ::alphabet.substr(0, DBG_succ::alph_size),
+                    utils::KmerExtractor().alphabet,
                     config->suffix_len
                 );
 
@@ -1400,25 +1400,25 @@ int main(int argc, const char *argv[]) {
                 std::cout << "state: " << Config::state_to_string(graph->get_state())
                           << std::endl;
 
-                assert(graph->rank_W(graph->num_edges(), DBG_succ::alph_size) == 0);
-                std::cout << "W stats: {'" << DBG_succ::decode(0) << "': "
+                assert(graph->rank_W(graph->num_edges(), graph->alph_size) == 0);
+                std::cout << "W stats: {'" << graph->decode(0) << "': "
                           << graph->rank_W(graph->num_edges(), 0);
-                for (TAlphabet i = 1; i < DBG_succ::alph_size; ++i) {
-                    std::cout << ", '" << DBG_succ::decode(i) << "': "
+                for (int i = 1; i < graph->alph_size; ++i) {
+                    std::cout << ", '" << graph->decode(i) << "': "
                               << graph->rank_W(graph->num_edges(), i)
-                                    + graph->rank_W(graph->num_edges(), i + DBG_succ::alph_size);
+                                    + graph->rank_W(graph->num_edges(), i + graph->alph_size);
                 }
                 std::cout << "}" << std::endl;
 
                 assert(graph->get_F(0) == 0);
                 std::cout << "F stats: {'";
-                for (TAlphabet i = 1; i < DBG_succ::alph_size; ++i) {
-                    std::cout << DBG_succ::decode(i - 1) << "': "
+                for (int i = 1; i < graph->alph_size; ++i) {
+                    std::cout << graph->decode(i - 1) << "': "
                               << graph->get_F(i) - graph->get_F(i - 1)
                               << ", '";
                 }
-                std::cout << DBG_succ::decode(DBG_succ::alph_size - 1) << "': "
-                          << graph->num_edges() - graph->get_F(DBG_succ::alph_size - 1)
+                std::cout << graph->decode(graph->alph_size - 1) << "': "
+                          << graph->num_edges() - graph->get_F(graph->alph_size - 1)
                           << "}" << std::endl;
 
                 if (config->count_dummy) {

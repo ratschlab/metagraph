@@ -9,6 +9,7 @@
 #include "utils.hpp"
 #include "unix_tools.hpp"
 
+using utils::KmerExtractor;
 
 const size_t kMaxKmersChunkSize = 30'000'000;
 
@@ -53,7 +54,7 @@ std::vector<bool> filter_reads(const std::vector<std::string> &reads,
             continue;
         }
 
-        utils::sequence_to_kmers(reads[j], k, &read_kmers, {});
+        KmerExtractor::sequence_to_kmers(reads[j], k + 1, {}, &read_kmers);
 
         size_t unreliable_kmers = 0;
 
@@ -107,7 +108,7 @@ count_kmers_and_filter_reads_templated(std::vector<std::string> *reads,
     Vector<KMER> read_kmers;
 
     for (size_t j = 0; j < reads->size(); ++j) {
-        utils::sequence_to_kmers(reads->at(j), k, &read_kmers, {});
+        KmerExtractor::sequence_to_kmers(reads->at(j), k + 1, {}, &read_kmers);
 
         // filter out too short reads
         if (read_kmers.size() <= 2)
@@ -147,16 +148,16 @@ template <typename... Args>
 std::vector<bool> count_kmers_and_filter_reads(std::vector<std::string> *reads,
                                                size_t k,
                                                Args&... args) {
-    if ((k + 1) * kBitsPerChar <= 64) {
-        return count_kmers_and_filter_reads_templated<KMer<uint64_t>>(
+    if ((k + 1) * KmerExtractor::kLogSigma <= 64) {
+        return count_kmers_and_filter_reads_templated<KmerExtractor::Kmer64>(
             reads, k, args...
         );
-    } else if ((k + 1) * kBitsPerChar <= 128) {
-        return count_kmers_and_filter_reads_templated<KMer<sdsl::uint128_t>>(
+    } else if ((k + 1) * KmerExtractor::kLogSigma <= 128) {
+        return count_kmers_and_filter_reads_templated<KmerExtractor::Kmer128>(
             reads, k, args...
         );
     } else {
-        return count_kmers_and_filter_reads_templated<KMer<sdsl::uint256_t>>(
+        return count_kmers_and_filter_reads_templated<KmerExtractor::Kmer256>(
             reads, k, args...
         );
     }

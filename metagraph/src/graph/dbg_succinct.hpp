@@ -7,8 +7,7 @@
 #include "config.hpp"
 #include "wavelet_tree.hpp"
 #include "bit_vector.hpp"
-
-typedef uint8_t TAlphabet;
+#include "utils.hpp"
 
 
 class SequenceGraph {
@@ -64,6 +63,8 @@ class DBG_succ : public SequenceGraph {
     typedef uint64_t node_index;
     // in [1,...,num_edges], 0 = npos (invalid index)
     typedef uint64_t edge_index;
+
+    typedef uint8_t TAlphabet;
 
     explicit DBG_succ(size_t k = 1);
     explicit DBG_succ(DBGSuccConstructor *builder);
@@ -374,15 +375,14 @@ class DBG_succ : public SequenceGraph {
     uint64_t bwd(uint64_t i) const;
 
     // Given the alphabet index return the corresponding symbol
-    static char decode(TAlphabet s);
-    static std::string decode(const std::vector<TAlphabet> &sequence);
+    char decode(TAlphabet s) const;
+    std::string decode(const std::vector<TAlphabet> &sequence) const;
     // Given the alphabet character return its corresponding number
-    static TAlphabet encode(char s);
-    static std::vector<TAlphabet> encode(const std::string &sequence);
+    TAlphabet encode(char s) const;
+    std::vector<TAlphabet> encode(const std::string &sequence) const;
 
-    static const std::string alphabet;
-    static const TAlphabet alph_size;
-    static const size_t kLogSigma;
+    const TAlphabet alph_size;
+    const std::string &alphabet;
 
     static const size_t kSentinelCode = 0;
     static const size_t kSentinel = '$';
@@ -390,6 +390,9 @@ class DBG_succ : public SequenceGraph {
   private:
     // file dump extension
     static constexpr auto kExtension = ".dbg";
+
+    const utils::KmerExtractor kmer_extractor_;
+    const size_t bits_per_char_W_;
 
     // k-mer size
     size_t k_;
