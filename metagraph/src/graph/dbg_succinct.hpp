@@ -3,62 +3,19 @@
 
 #include <type_traits>
 
+#include "sequence_graph.hpp"
 #include "datatypes.hpp"
 #include "config.hpp"
 #include "wavelet_tree.hpp"
 #include "bit_vector.hpp"
 #include "utils.hpp"
 
-
-class SequenceGraph {
-  public:
-    typedef uint64_t node_index;
-    typedef uint64_t edge_index;
-    static const uint64_t npos;
-
-    virtual ~SequenceGraph() {};
-
-    virtual void add_sequence(const std::string &sequence,
-                              bool try_extend = false,
-                              bit_vector_dyn *edges_inserted = NULL) = 0;
-
-    // Traverse graph mapping k-mers from sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied
-    virtual void map_to_nodes(const std::string &sequence,
-                              const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate = [](){ return false; }) const = 0;
-
-    // Traverse graph mapping k-mers from sequence to the graph edges
-    // and run callback for each edge until the termination condition is satisfied
-    virtual void map_to_edges(const std::string &sequence,
-                              const std::function<void(edge_index)> &callback,
-                              const std::function<bool()> &terminate = [](){ return false; }) const = 0;
-
-    // Check whether graph contains fraction of nodes from the sequence
-    virtual bool find(const std::string &sequence,
-                      double discovery_fraction = 1) const = 0;
-
-    // Traverse the outgoing edge
-    virtual node_index traverse(node_index node, char edge_label) const = 0;
-    // Traverse the incoming edge
-    virtual node_index traverse_back(node_index node, char edge_label) const = 0;
-
-    virtual bool load(const std::string &filename_base) = 0;
-    virtual void serialize(const std::string &filename_base) const = 0;
-};
-
-
-/*
-class DBGCondensed : public SequenceGraph {
-
-};
-*/
-
-
 class DBGSuccConstructor;
 
-class DBG_succ : public SequenceGraph {
+
+class DBG_succ {
   public:
+    static const uint64_t npos;
     // in [1,...,num_nodes], 0 = npos (invalid index)
     typedef uint64_t node_index;
     // in [1,...,num_edges], 0 = npos (invalid index)
@@ -118,7 +75,7 @@ class DBG_succ : public SequenceGraph {
 
     std::vector<edge_index> map_to_edges(const std::string &sequence) const;
 
-    // Check whether the graph contains a fraction of k-mers from the sequence
+    // Check whether the graph contains a fraction of (k+1)-mers from the sequence
     bool find(const std::string &sequence,
               double kmer_discovery_fraction = 1) const;
 
@@ -179,6 +136,16 @@ class DBG_succ : public SequenceGraph {
 
     // Do not include the main dummy edge (with edge_index = 1)
     uint64_t mark_sink_dummy_edges(std::vector<bool> *mask = NULL) const;
+
+    // Mark npos, i.e. 0, as well as all the source
+    // and all the sink dummy edges in graph.
+    std::vector<bool>
+    mark_all_dummy_edges(size_t num_threads) const;
+
+    // Prune redundant dummy edges in graph
+    // and mark all dummy edges that cannot be removed
+    std::vector<bool>
+    prune_and_mark_all_dummy_edges(size_t num_threads);
 
     /**
      * Depth first edge traversal.
@@ -374,6 +341,8 @@ class DBG_succ : public SequenceGraph {
      */
     uint64_t bwd(uint64_t i) const;
 
+    inline node_index get_source_node(edge_index i) const;
+
     // Given the alphabet index return the corresponding symbol
     char decode(TAlphabet s) const;
     std::string decode(const std::vector<TAlphabet> &sequence) const;
@@ -439,8 +408,6 @@ class DBG_succ : public SequenceGraph {
      */
     bool compare_node_suffix(edge_index first, edge_index second) const;
     bool compare_node_suffix(edge_index first, const TAlphabet *second) const;
-
-    inline node_index get_source_node(edge_index i) const;
 
     /**
      * Given a k-mer, this function returns the index
@@ -555,5 +522,43 @@ class DBG_succ : public SequenceGraph {
 };
 
 std::ostream& operator<<(std::ostream &os, const DBG_succ &graph);
+
+
+class DBGSuccinct : public DeBruijnGraph {
+  public:
+    DBGSuccinct(DBG_succ *boss_graph) : boss_graph_(boss_graph) {}
+
+    virtual size_t get_k() const override final;
+
+    // Check whether graph contains fraction of nodes from the sequence
+    virtual bool find(const std::string &sequence,
+                      double discovery_fraction = 1) const override final;
+
+    // Traverse the outgoing edge
+    virtual node_index traverse(node_index node, char next_char) const override final;
+    // Traverse the incoming edge
+    virtual node_index traverse_back(node_index node, char prev_char) const override final;
+
+    // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
+    // is passed. If passed, |nodes_inserted| must have length equal
+    // to the number of nodes in graph.
+    virtual void add_sequence(const std::string &sequence,
+                              bit_vector_dyn *nodes_inserted = NULL) override final;
+
+    // Traverse graph mapping sequence to the graph nodes
+    // and run callback for each node until the termination condition is satisfied
+    virtual void map_to_nodes(const std::string &sequence,
+                              const std::function<void(node_index)> &callback,
+                              const std::function<bool()> &terminate = [](){ return false; }) const override;
+
+    virtual uint64_t num_nodes() const override final;
+
+    virtual bool load(const std::string &filename_base) override final;
+    virtual void serialize(const std::string &filename_base) const override final;
+
+  private:
+    std::unique_ptr<DBG_succ> boss_graph_;
+};
+
 
 #endif // __DBG_SUCCINCT_HPP__

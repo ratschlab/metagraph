@@ -191,17 +191,10 @@ void AnnotatedDBG::initialize_annotation_mask(size_t num_threads,
 
     annotation_mask_.reset();
 
-    std::vector<bool> edge_mask(graph_->num_edges() + 1, 0);
-
-    if (prune_redundant_dummy) {
-        graph_->erase_redundant_dummy_edges(&edge_mask, num_threads);
-    } else {
-        graph_->mark_source_dummy_edges(&edge_mask, num_threads);
-    }
-    // exclude 0 as the dummy index that denotes not existing k-mers
-    edge_mask[0] = true;
-
-    graph_->mark_sink_dummy_edges(&edge_mask);
+    std::vector<bool> edge_mask
+        = prune_redundant_dummy
+            ? graph_->prune_and_mark_all_dummy_edges(num_threads)
+            : graph_->mark_all_dummy_edges(num_threads);
 
     for (size_t i = 0; i < edge_mask.size(); ++i) {
         edge_mask[i] = !edge_mask[i];

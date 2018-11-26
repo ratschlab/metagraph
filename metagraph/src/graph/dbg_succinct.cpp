@@ -34,7 +34,7 @@ using TAlphabet = DBG_succ::TAlphabet;
     assert(idx <= num_nodes()); \
     assert(idx > 0)
 
-const SequenceGraph::node_index SequenceGraph::npos = 0;
+const DBG_succ::node_index DBG_succ::npos = 0;
 
 typedef DBG_succ::node_index node_index;
 typedef DBG_succ::edge_index edge_index;
@@ -1744,6 +1744,30 @@ uint64_t DBG_succ::mark_sink_dummy_edges(std::vector<bool> *mask) const {
     return num_dummy_sink_edges;
 }
 
+std::vector<bool> DBG_succ::mark_all_dummy_edges(size_t num_threads) const {
+    std::vector<bool> edge_mask(num_edges() + 1, 0);
+
+    mark_source_dummy_edges(&edge_mask, num_threads);
+    mark_sink_dummy_edges(&edge_mask);
+
+    // exclude 0 as the dummy index that denotes not existing k-mers
+    edge_mask[0] = true;
+
+    return edge_mask;
+}
+
+std::vector<bool> DBG_succ::prune_and_mark_all_dummy_edges(size_t num_threads) {
+    std::vector<bool> edge_mask(num_edges() + 1, 0);
+
+    erase_redundant_dummy_edges(&edge_mask, num_threads);
+    mark_sink_dummy_edges(&edge_mask);
+
+    // exclude 0 as the dummy index that denotes not existing k-mers
+    edge_mask[0] = true;
+
+    return edge_mask;
+}
+
 /**
  * Get the nodes of graph |other| merged into the current graph. The graph
  * |other| is fully traversed and all edges are added to to the current graph.
@@ -1972,4 +1996,63 @@ bool DBG_succ::is_valid() const {
 std::ostream& operator<<(std::ostream &os, const DBG_succ &graph) {
     graph.print(os);
     return os;
+}
+
+
+size_t DBGSuccinct::get_k() const {
+    return boss_graph_->get_k() + 1;
+}
+
+// Check whether graph contains fraction of nodes from the sequence
+bool DBGSuccinct::find(const std::string &sequence,
+                       double discovery_fraction) const {
+    return boss_graph_->find(sequence, discovery_fraction);
+}
+
+// Traverse the outgoing edge
+node_index DBGSuccinct::traverse(node_index node, char next_char) const {
+    // dbg node is a boss edge
+    DBG_succ::edge_index edge = boss_graph_->fwd(node);
+    return boss_graph_->pick_edge(edge,
+                                  boss_graph_->get_source_node(edge),
+                                  boss_graph_->encode(next_char));
+}
+
+// Traverse the incoming edge
+node_index DBGSuccinct::traverse_back(node_index node, char prev_char) const {
+    // map dbg node, i.e. a boss edge, to a boss node
+    auto boss_node = boss_graph_->get_source_node(node);
+    auto source_node = boss_graph_->traverse_back(boss_node, prev_char);
+    return source_node == npos
+            ? npos
+            : boss_graph_->outgoing_edge_idx(source_node,
+                                             boss_graph_->get_node_last_value(node));
+}
+
+// Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
+// is passed. If passed, |nodes_inserted| must have length equal
+// to the number of nodes in graph.
+void DBGSuccinct::add_sequence(const std::string &sequence,
+                               bit_vector_dyn *nodes_inserted) {
+    boss_graph_->add_sequence(sequence, true, nodes_inserted);
+}
+
+// Traverse graph mapping sequence to the graph nodes
+// and run callback for each node until the termination condition is satisfied
+void DBGSuccinct::map_to_nodes(const std::string &sequence,
+                               const std::function<void(node_index)> &callback,
+                               const std::function<bool()> &terminate) const {
+    boss_graph_->map_to_edges(sequence, callback, terminate);
+}
+
+uint64_t DBGSuccinct::num_nodes() const {
+    return boss_graph_->num_edges();
+}
+
+bool DBGSuccinct::load(const std::string &filename_base) {
+    return boss_graph_->load(filename_base);
+}
+
+void DBGSuccinct::serialize(const std::string &filename_base) const {
+    boss_graph_->serialize(filename_base);
 }

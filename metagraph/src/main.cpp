@@ -383,6 +383,14 @@ std::unique_ptr<Annotator> initialize_annotation(const Config &config) {
 }
 
 
+void print_stats(const DBG_succ &graph) {
+    std::cout << "k: " << graph.get_k() + 1 << std::endl;
+    std::cout << "nodes (k-1): " << graph.num_nodes() << std::endl;
+    std::cout << "edges ( k ): " << graph.num_edges() << std::endl;
+    std::cout << "state: " << Config::state_to_string(graph.get_state()) << std::endl;
+}
+
+
 int main(int argc, const char *argv[]) {
     std::unique_ptr<Config> config { new Config(argc, argv) };
 
@@ -399,7 +407,7 @@ int main(int argc, const char *argv[]) {
             break;
         }
         case Config::BUILD: {
-            std::unique_ptr<DBG_succ> graph { new DBG_succ(config->k) };
+            std::unique_ptr<DBG_succ> graph { new DBG_succ(config->k - 1) };
 
             if (config->verbose)
                 std::cout << "Build Succinct De Bruijn Graph with k-mer size k="
@@ -1049,7 +1057,7 @@ int main(int argc, const char *argv[]) {
                 config->parallel
             );
 
-            // load masked edges
+            // load masked k-mers
             if (config->shrink_anno
                     && !anno_dbg.load_annotation_mask(config->infbase)) {
                 std::cerr << "Warning: Can't load coordinate mask."
@@ -1163,7 +1171,7 @@ int main(int argc, const char *argv[]) {
                 config->parallel
             );
 
-            // load masked edges
+            // load masked k-mers
             if (config->shrink_anno
                     && !anno_dbg.load_annotation_mask(config->infbase)) {
                 std::cerr << "Warning: Can't load coordinate mask."
@@ -1287,11 +1295,7 @@ int main(int argc, const char *argv[]) {
 
             if (config->verbose) {
                 std::cout << "Succinct graph has been assembled" << std::endl;
-                std::cout << "nodes: " << graph->num_nodes() << std::endl;
-                std::cout << "edges: " << graph->num_edges() << std::endl;
-                std::cout << "k: " << graph->get_k() << std::endl;
-                std::cout << "state: " << Config::state_to_string(graph->get_state())
-                          << std::endl;
+                print_stats(*graph);
             }
 
             // graph output
@@ -1311,11 +1315,8 @@ int main(int argc, const char *argv[]) {
             for (const auto &file : files) {
                 std::cout << "Opening file " << file << std::endl;
                 graphs.push_back(load_critical_graph_from_file(file).release());
-                if (config->verbose) {
-                    std::cout << "nodes: " << graphs.back()->num_nodes() << "\n";
-                    std::cout << "edges: " << graphs.back()->num_edges() << "\n";
-                    std::cout << "k: " << graphs.back()->get_k() << std::endl;
-                }
+                if (config->verbose)
+                    print_stats(*graph);
             }
             std::cout << "Graphs are loaded\t" << timer.elapsed()
                                                << "sec" << std::endl;
@@ -1394,11 +1395,7 @@ int main(int argc, const char *argv[]) {
                 auto graph = load_critical_graph_from_file(file);
 
                 std::cout << "Statistics for graph " << file << std::endl;
-                std::cout << "nodes: " << graph->num_nodes() << std::endl;
-                std::cout << "edges: " << graph->num_edges() << std::endl;
-                std::cout << "k: " << graph->get_k() << std::endl;
-                std::cout << "state: " << Config::state_to_string(graph->get_state())
-                          << std::endl;
+                print_stats(*graph);
 
                 assert(graph->rank_W(graph->num_edges(), graph->alph_size) == 0);
                 std::cout << "W stats: {'" << graph->decode(0) << "': "
