@@ -82,24 +82,17 @@ wavelet_tree_stat::wavelet_tree_stat(uint8_t logsigma, const Vector &vector)
       : int_vector_(pack_vector(vector, logsigma)), n_(int_vector_.size()) {}
 
 template
-wavelet_tree_stat
-::wavelet_tree_stat<sdsl::int_vector<>>(uint8_t logsigma,
-                                        const sdsl::int_vector<> &vector);
-
+wavelet_tree_stat::wavelet_tree_stat(uint8_t logsigma,
+                                     const sdsl::int_vector<> &vector);
 template
-wavelet_tree_stat
-::wavelet_tree_stat<std::vector<uint8_t>>(uint8_t logsigma,
-                                          const std::vector<uint8_t> &vector);
-
+wavelet_tree_stat::wavelet_tree_stat(uint8_t logsigma,
+                                     const std::vector<uint8_t> &vector);
 template
-wavelet_tree_stat
-::wavelet_tree_stat<std::vector<uint64_t>>(uint8_t logsigma,
-                                           const std::vector<uint64_t> &vector);
-
+wavelet_tree_stat::wavelet_tree_stat(uint8_t logsigma,
+                                     const std::vector<uint64_t> &vector);
 template
-wavelet_tree_stat
-::wavelet_tree_stat<std::vector<int>>(uint8_t logsigma,
-                                      const std::vector<int> &vector);
+wavelet_tree_stat::wavelet_tree_stat(uint8_t logsigma,
+                                     const std::vector<int> &vector);
 
 wavelet_tree_stat::wavelet_tree_stat(uint8_t logsigma,
                                      sdsl::int_vector<>&& vector) {
@@ -335,20 +328,16 @@ wavelet_tree_dyn::wavelet_tree_dyn(uint8_t logsigma, const Vector &vector) {
 }
 
 template
-wavelet_tree_dyn
-::wavelet_tree_dyn<sdsl::int_vector<>>(uint8_t, const sdsl::int_vector<> &);
+wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const sdsl::int_vector<> &);
 
 template
-wavelet_tree_dyn
-::wavelet_tree_dyn<std::vector<uint8_t>>(uint8_t, const std::vector<uint8_t> &);
+wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const std::vector<uint8_t> &);
 
 template
-wavelet_tree_dyn
-::wavelet_tree_dyn<std::vector<int>>(uint8_t, const std::vector<int> &);
+wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const std::vector<int> &);
 
 template
-wavelet_tree_dyn
-::wavelet_tree_dyn<std::vector<uint64_t>>(uint8_t, const std::vector<uint64_t> &);
+wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const std::vector<uint64_t> &);
 
 wavelet_tree_dyn::wavelet_tree_dyn(const wavelet_tree_dyn &other) {
     *this = other;
@@ -495,23 +484,16 @@ wavelet_tree_small::wavelet_tree_small(uint8_t logsigma, const Vector &vector)
       : wwt_(pack_vector(vector, logsigma)), logsigma_(logsigma) {}
 
 template
-wavelet_tree_small
-::wavelet_tree_small<sdsl::int_vector<>>(uint8_t logsigma,
-                                         const sdsl::int_vector<> &vector);
-
+wavelet_tree_small::wavelet_tree_small(uint8_t logsigma,
+                                       const sdsl::int_vector<> &vector);
 template
-wavelet_tree_small
-::wavelet_tree_small<std::vector<uint8_t>>(uint8_t logsigma,
-                                           const std::vector<uint8_t> &vector);
-
+wavelet_tree_small::wavelet_tree_small(uint8_t logsigma,
+                                       const std::vector<uint8_t> &vector);
 template
-wavelet_tree_small
-::wavelet_tree_small<std::vector<uint64_t>>(uint8_t logsigma,
-                                            const std::vector<uint64_t> &vector);
-
+wavelet_tree_small::wavelet_tree_small(uint8_t logsigma,
+                                       const std::vector<uint64_t> &vector);
 template
-wavelet_tree_small
-::wavelet_tree_small<std::vector<int>>(uint8_t logsigma,
+wavelet_tree_small::wavelet_tree_small(uint8_t logsigma,
                                        const std::vector<int> &vector);
 
 wavelet_tree_small::wavelet_tree_small(uint8_t logsigma, const sdsl::wt_huff<> &wwt)

@@ -1118,9 +1118,9 @@ int main(int argc, const char *argv[]) {
             // load graph
             AnnotatedDBG anno_graph(
                 new DBGSuccinct(load_critical_graph_from_file(config->infbase).release()),
-                new annotate::RowCompressed<>(anno_graph.num_anno_rows()),
                 config->parallel
             );
+            anno_graph.set_annotation(new annotate::RowCompressed<>(anno_graph.num_anno_rows()));
 
             if (config->infbase_annotators.size()
                     && !anno_graph.get_annotation().load(config->infbase_annotators.at(0))) {

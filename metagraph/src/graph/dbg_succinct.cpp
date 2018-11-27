@@ -1330,11 +1330,16 @@ edge_index DBG_succ::append_pos(TAlphabet c, edge_index source_node,
         return fwd(first_c + shift);
 
     uint64_t sentinel_pos = select_last(rank_last(F_[c]) + rank_W(begin - 1, c)) + 1;
+
     update_F(c, +1);
     W_->insert(sentinel_pos, kSentinelCode);
     last_->insertBit(sentinel_pos, true);
+
     if (edges_inserted)
         edges_inserted->insertBit(sentinel_pos, true);
+
+    assert((*W_)[0] == 0);
+
     return sentinel_pos;
 }
 
@@ -1975,6 +1980,7 @@ void DBG_succ::call_kmers(Call<node_index, const std::string&> callback) const {
 }
 
 bool DBG_succ::is_valid() const {
+    assert((*W_)[0] == 0);
     assert(W_->size() >= 2);
     assert(get_node_str(1) == std::string(k_, kSentinel) && "First kmer must be dummy");
     assert(get_W(1) == kSentinelCode && "First kmer must be dummy");

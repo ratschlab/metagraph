@@ -227,6 +227,23 @@ TEST(wavelet_tree_dyn, InsertDelete) {
 }
 
 
+TEST(wavelet_tree_dyn, Insert) {
+    std::vector<uint64_t> numbers(1024, 0);
+    auto vector = std::make_unique<wavelet_tree_dyn>(4, numbers);
+    ASSERT_EQ(1024u, vector->size());
+    ASSERT_EQ(0u, vector->operator[](0));
+    EXPECT_EQ(vector->size(), vector->rank(0, vector->size() - 1));
+    EXPECT_EQ(0u, vector->rank(3u, vector->size() - 1));
+
+    vector->insert(965, 0);
+
+    EXPECT_EQ(1025u, vector->size());
+    EXPECT_EQ(0u, vector->operator[](0));
+    EXPECT_EQ(vector->size(), vector->rank(0, vector->size() - 1));
+    EXPECT_EQ(0u, vector->rank(3u, vector->size() - 1));
+}
+
+
 std::vector<uint64_t> to_std_vector(const sdsl::int_vector<> &int_vector) {
     return std::vector<uint64_t>(int_vector.begin(), int_vector.end());
 }

@@ -35,6 +35,7 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     -Wno-exit-time-destructors \
     -Wno-unused-function \
     -Wno-old-style-cast \
+    -Wno-atomic-alignment \
   ")
 endif()
 
@@ -96,7 +97,7 @@ set(CMAKE_EXE_LINKER_FLAGS_PROFILE "-pg -g")
 set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg -g")
 
 # Debug build type
-set(CMAKE_CXX_FLAGS_DEBUG "-O3 -g")
+set(CMAKE_CXX_FLAGS_DEBUG "-O2 -g")
 
 # Thread sanitizer build type
 set(CMAKE_CXX_FLAGS_THREADS "-DNDEBUG -O2 -g -fsanitize=thread")
@@ -196,10 +197,40 @@ if(BUILD_STATIC)
   set(METALIBS ${METALIBS} -lcurl -lssl)
 endif()
 
-if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-  set(METALIBS ${METALIBS} -lstdc++fs)
-else()
+# check for std::filesystem::temp_directory_path
+include(CheckCXXSourceRuns)
+set(CMAKE_REQUIRED_FLAGS " -std=c++17")
+set(CMAKE_REQUIRED_LIBRARIES "c++fs")
+check_cxx_source_runs("
+    #include <iostream>
+    #include <filesystem>
+    int main() {
+        std::cout << std::filesystem::temp_directory_path();
+        return 0;
+    }
+" CPPFS)
+unset(CMAKE_REQUIRED_FLAGS)
+unset(CMAKE_REQUIRED_LIBRARIES)
+if(CPPFS)
   set(METALIBS ${METALIBS} -lc++fs)
+else()
+  set(CMAKE_REQUIRED_FLAGS " -std=c++17")
+  set(CMAKE_REQUIRED_LIBRARIES "stdc++fs")
+  check_cxx_source_runs("
+      #include <iostream>
+      #include <filesystem>
+      int main() {
+          std::cout << std::filesystem::temp_directory_path();
+          return 0;
+      }
+  " STDCPPFS)
+  unset(CMAKE_REQUIRED_FLAGS)
+  unset(CMAKE_REQUIRED_LIBRARIES)
+  if(STDCPPFS)
+    set(METALIBS ${METALIBS} -lstdc++fs)
+  else()
+    message(FATAL_ERROR "std::filesystem not found")
+  endif()
 endif()
 
 target_link_libraries(

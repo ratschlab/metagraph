@@ -89,10 +89,6 @@ TEST(DBGSuccinct, GraphDefaultConstructor) {
     ASSERT_NO_THROW({
         DBG_succ graph;
     });
-
-    ASSERT_NO_THROW({
-        DBG_succ graph();
-    });
 }
 
 #if _DNA_GRAPH
@@ -1528,6 +1524,8 @@ TEST(DBGSuccinct, PredKmer) {
 }
 
 TEST(DBGSuccinct, PredKmerRandomTest) {
+    srand(1);
+
     for (size_t k = 1; k < 8; ++k) {
         DBG_succ graph(k);
 
