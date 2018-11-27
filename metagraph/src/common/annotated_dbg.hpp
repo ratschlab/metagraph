@@ -1,7 +1,7 @@
 #ifndef __ANNOTATED_DBG_HPP__
 #define __ANNOTATED_DBG_HPP__
 
-#include "dbg_succinct.hpp"
+#include "sequence_graph.hpp"
 #include "annotate.hpp"
 #include "utils.hpp"
 
@@ -11,9 +11,9 @@ class AnnotatedDBG {
     typedef annotate::MultiLabelAnnotation<uint64_t, std::string> Annotator;
 
     explicit AnnotatedDBG(size_t num_threads = 0);
-    AnnotatedDBG(DBG_succ *dbg, size_t num_threads = 0);
+    AnnotatedDBG(SequenceGraph *dbg, size_t num_threads = 0);
     AnnotatedDBG(Annotator *annotation, size_t num_threads = 0);
-    AnnotatedDBG(DBG_succ *dbg, Annotator *annotation, size_t num_threads = 0);
+    AnnotatedDBG(SequenceGraph *dbg, Annotator *annotation, size_t num_threads = 0);
 
     // return labels that occur at least in |presence_ratio| k-mers
     std::vector<std::string>
@@ -28,11 +28,7 @@ class AnnotatedDBG {
     void annotate_sequence(const std::string &sequence,
                            const std::vector<std::string> &labels);
 
-    // prune redundant dummy edges in graph if |prune_redundant_dummy| is true
-    // and mark all dummy edges that cannot be annotated
-    void initialize_annotation_mask(size_t num_threads = 0,
-                                    bool prune_redundant_dummy = false);
-
+    void initialize_annotation_mask(std::vector<bool>&& skipped_nodes);
     bool load_annotation_mask(const std::string &filename_base);
     void serialize_annotation_mask(const std::string &filename_base) const;
 
@@ -43,9 +39,9 @@ class AnnotatedDBG {
     const Annotator& get_annotation() const { return *annotator_; }
     uint64_t num_anno_rows() const;
 
-    DBG_succ* release_graph() { return graph_.release(); }
-    DBG_succ& get_graph() { return *graph_; }
-    const DBG_succ& get_graph() const { return *graph_; }
+    SequenceGraph* release_graph() { return graph_.release(); }
+    SequenceGraph& get_graph() { return *graph_; }
+    const SequenceGraph& get_graph() const { return *graph_; }
 
     bool check_compatibility(bool verbose = false) const;
 
@@ -55,7 +51,7 @@ class AnnotatedDBG {
     void annotate_sequence_thread_safe(std::string sequence,
                                        std::vector<std::string> labels);
 
-    std::unique_ptr<DBG_succ> graph_;
+    std::unique_ptr<SequenceGraph> graph_;
     std::unique_ptr<Annotator> annotator_;
     // marks graph edges that can be annotated
     std::unique_ptr<bit_vector_stat> annotation_mask_;

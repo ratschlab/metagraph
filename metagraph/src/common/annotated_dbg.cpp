@@ -1,14 +1,13 @@
 #include "annotated_dbg.hpp"
 
-#include "annotate_column_compressed.hpp"
-#include "annotate_row_compressed.hpp"
 
-
-AnnotatedDBG::AnnotatedDBG(DBG_succ *dbg, Annotator *annotation, size_t num_threads)
+AnnotatedDBG::AnnotatedDBG(SequenceGraph *dbg,
+                           Annotator *annotation,
+                           size_t num_threads)
       : graph_(dbg), annotator_(annotation),
         thread_pool_(num_threads > 1 ? num_threads : 0) {}
 
-AnnotatedDBG::AnnotatedDBG(DBG_succ *dbg, size_t num_threads)
+AnnotatedDBG::AnnotatedDBG(SequenceGraph *dbg, size_t num_threads)
       : AnnotatedDBG(dbg, NULL, num_threads) {}
 
 AnnotatedDBG::AnnotatedDBG(Annotator *annotation, size_t num_threads)
@@ -59,7 +58,7 @@ void AnnotatedDBG::annotate_sequence_thread_safe(std::string sequence,
                                                  std::vector<std::string> labels) {
     std::vector<uint64_t> indices;
 
-    graph_->map_to_edges(sequence, [&](uint64_t i) {
+    graph_->map_to_nodes(sequence, [&](uint64_t i) {
         if (i > 0)
             indices.push_back(graph_to_anno_index(i));
     });
@@ -75,9 +74,6 @@ void AnnotatedDBG::annotate_sequence(const std::string &sequence,
                                      const std::vector<std::string> &labels) {
     assert(graph_.get() && annotator_.get());
     assert(check_compatibility(true));
-
-    if (sequence.size() <= graph_->get_k())
-        return;
 
     thread_pool_.enqueue(
         [this](auto... args) {
@@ -95,7 +91,7 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
     std::vector<uint64_t> indices;
     size_t num_missing_kmers = 0;
 
-    graph_->map_to_edges(sequence, [&](uint64_t i) {
+    graph_->map_to_nodes(sequence, [&](uint64_t i) {
         if (i > 0) {
             indices.push_back(graph_to_anno_index(i));
         } else {
@@ -127,7 +123,7 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
 
     std::vector<uint64_t> indices;
 
-    graph_->map_to_edges(sequence, [&](uint64_t i) {
+    graph_->map_to_nodes(sequence, [&](uint64_t i) {
         if (i > 0)
             indices.push_back(graph_to_anno_index(i));
     });
@@ -138,7 +134,7 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
 uint64_t AnnotatedDBG::num_anno_rows() const {
     return annotation_mask_.get()
             ? annotation_mask_->num_set_bits()
-            : graph_->num_edges();
+            : graph_->num_nodes();
 }
 
 uint64_t AnnotatedDBG::graph_to_anno_index(uint64_t kmer_index) const {
@@ -160,7 +156,7 @@ uint64_t AnnotatedDBG::graph_to_anno_index(uint64_t kmer_index) const {
 bool AnnotatedDBG::check_compatibility(bool verbose) const {
     if (annotation_mask_.get()) {
         if (graph_.get() && annotation_mask_->size()
-                            != graph_->num_edges() + 1) {
+                            != graph_->num_nodes() + 1) {
             if (verbose)
                 std::cerr << "Error: edge mask is not compatible with graph."
                           << std::endl;
@@ -174,7 +170,7 @@ bool AnnotatedDBG::check_compatibility(bool verbose) const {
             return false;
         }
     } else if (graph_.get() && annotator_.get()
-                            && graph_->num_edges()
+                            && graph_->num_nodes()
                                 != annotator_->num_objects()) {
         if (verbose)
             std::cerr << "Error: graph and annotation are not compatible."
@@ -185,22 +181,14 @@ bool AnnotatedDBG::check_compatibility(bool verbose) const {
     return true;
 }
 
-void AnnotatedDBG::initialize_annotation_mask(size_t num_threads,
-                                              bool prune_redundant_dummy) {
-    assert(graph_.get());
-
+void AnnotatedDBG::initialize_annotation_mask(std::vector<bool>&& skipped_nodes) {
     annotation_mask_.reset();
 
-    std::vector<bool> edge_mask
-        = prune_redundant_dummy
-            ? graph_->prune_and_mark_all_dummy_edges(num_threads)
-            : graph_->mark_all_dummy_edges(num_threads);
-
-    for (size_t i = 0; i < edge_mask.size(); ++i) {
-        edge_mask[i] = !edge_mask[i];
+    for (size_t i = 0; i < skipped_nodes.size(); ++i) {
+        skipped_nodes[i] = !skipped_nodes[i];
     }
 
-    annotation_mask_.reset(new bit_vector_stat(std::move(edge_mask)));
+    annotation_mask_.reset(new bit_vector_stat(std::move(skipped_nodes)));
 
     assert(check_compatibility(true));
 }
