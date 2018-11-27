@@ -11,6 +11,7 @@
 
 #include "kmer.hpp"
 
+
 std::size_t SmallVectorHash::operator()(const SmallVector &vector) const {
     return boost::hash_range(vector.begin(), vector.end());
 }
@@ -389,6 +390,84 @@ template void KmerExtractor::sequence_to_kmers(const std::string &sequence,
                                                size_t k,
                                                const std::vector<TAlphabet> &suffix,
                                                Vector<Kmer256> *kmers);
+
+
+const std::string KmerExtractor2Bit::alphabet = "ACGT";
+const KmerExtractor2Bit::TAlphabet KmerExtractor2Bit::kCharToNucleotide[128] = {
+    0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
+    0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
+    0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
+    0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
+    0, 0, 0, 1,  0, 0, 0, 2,  0, 0, 0, 0,  0, 0, 0, 0,
+    0, 0, 0, 0,  3, 3, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
+    0, 0, 0, 1,  0, 0, 0, 2,  0, 0, 0, 0,  0, 0, 0, 0,
+    0, 0, 0, 0,  3, 3, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0
+};
+
+KmerExtractor2Bit::KmerExtractor2Bit() {
+    assert(alphabet.size() <= (1llu << kLogSigma));
+}
+
+KmerExtractor2Bit::TAlphabet KmerExtractor2Bit::encode(char s) const {
+    assert((s >= 0 ? kCharToNucleotide[static_cast<size_t>(s)]
+                   : kCharToNucleotide[0]) < alphabet.size());
+
+    return s >= 0 ? kCharToNucleotide[static_cast<size_t>(s)]
+                  : kCharToNucleotide[0];
+}
+
+char KmerExtractor2Bit::decode(TAlphabet c) const {
+    assert(c < alphabet.size());
+    return alphabet[c];
+}
+
+std::vector<KmerExtractor2Bit::TAlphabet>
+KmerExtractor2Bit::encode(const std::string &sequence) const {
+    std::vector<TAlphabet> seq_encoded(sequence.size());
+    std::transform(sequence.begin(), sequence.end(),
+                   seq_encoded.begin(), [this](char c) { return encode(c); });
+    return seq_encoded;
+}
+
+std::string KmerExtractor2Bit::decode(const std::vector<TAlphabet> &sequence) const {
+    std::string str(sequence.size(), 0);
+    std::transform(sequence.begin(), sequence.end(),
+                   str.begin(), [this](TAlphabet x) { return decode(x); });
+    return str;
+}
+
+Vector<KmerExtractor2Bit::Kmer>
+KmerExtractor2Bit
+::sequence_to_kmers(std::vector<TAlphabet>&& seq, size_t k) const {
+    assert(k);
+
+    if (seq.size() < k)
+        return {};
+
+    Vector<Kmer> kmers;
+    kmers.reserve(seq.size() - k + 1);
+
+    // initialize and add the first kmer from sequence
+    auto kmer = Kmer::pack_kmer(seq.data(), k);
+    kmers.emplace_back(kmer);
+
+    // add all other kmers
+    for (size_t i = 1; i < seq.size() - k + 1; ++i) {
+        Kmer::update_kmer(k, seq[i + k - 1], seq[i + k - 2], &kmer);
+        kmers.emplace_back(kmer);
+    }
+    return kmers;
+}
+
+Vector<KmerExtractor2Bit::Kmer>
+KmerExtractor2Bit::sequence_to_kmers(const std::string &sequence, size_t k) const {
+    assert(k);
+    return sequence_to_kmers(encode(sequence), k);
+}
+
+std::string KmerExtractor2Bit::kmer_to_sequence(const Kmer &kmer) const {
+    return kmer.to_string(alphabet);
+}
 
 
 void decompress_sd_vector(const sdsl::sd_vector<> &vector,

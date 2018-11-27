@@ -33,6 +33,7 @@ typedef std::vector<uint32_t> SmallVector;
 
 #include "serialization.hpp"
 #include "kmer.hpp"
+#include "kmer_packed.hpp"
 
 class DBG_succ;
 
@@ -92,15 +93,47 @@ namespace utils {
 
         // map input character to k-mer character
         static TAlphabet encode(char s);
+        static std::vector<TAlphabet> encode(const std::string &sequence);
         // map k-mer character to input character
         static char decode(TAlphabet c);
+        static std::string decode(const std::vector<TAlphabet> &sequence);
 
         static const std::string alphabet;
 
       private:
-        static std::vector<TAlphabet> encode(const std::string &sequence);
-        static std::string decode(const std::vector<TAlphabet> &sequence);
+        static const TAlphabet kCharToNucleotide[128];
+    };
 
+    class KmerExtractor2Bit {
+        static constexpr size_t kLogSigma = 2;
+
+      public:
+        // alphabet for k-mer representation
+        typedef uint8_t TAlphabet;
+        // kmer type
+        typedef KMerPacked<uint64_t, kLogSigma> Kmer;
+
+        KmerExtractor2Bit();
+
+        // extract k-mers from sequence
+        Vector<Kmer> sequence_to_kmers(const std::string &sequence,
+                                       size_t k) const;
+
+        std::string kmer_to_sequence(const Kmer &kmer) const;
+
+        // map input character to k-mer character
+        TAlphabet encode(char s) const;
+        // map k-mer character to input character
+        char decode(TAlphabet c) const;
+
+      private:
+        std::vector<TAlphabet> encode(const std::string &sequence) const;
+        std::string decode(const std::vector<TAlphabet> &sequence) const;
+
+        Vector<Kmer>
+        sequence_to_kmers(std::vector<TAlphabet>&& seq, size_t k) const;
+
+        static const std::string alphabet;
         static const TAlphabet kCharToNucleotide[128];
     };
 
