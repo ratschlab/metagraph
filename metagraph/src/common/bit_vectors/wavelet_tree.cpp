@@ -185,6 +185,8 @@ void wavelet_tree_stat::set(uint64_t id, uint64_t val) {
 }
 
 void wavelet_tree_stat::insert(uint64_t id, uint64_t val) {
+    assert(id <= size());
+
     if (!requires_update_) {
         requires_update_ = true;
         wwt_ = decltype(wwt_)();
@@ -201,6 +203,8 @@ void wavelet_tree_stat::insert(uint64_t id, uint64_t val) {
 }
 
 void wavelet_tree_stat::remove(uint64_t id) {
+    assert(id < size());
+
     if (!requires_update_) {
         requires_update_ = true;
         wwt_ = decltype(wwt_)();
@@ -389,10 +393,12 @@ void wavelet_tree_dyn::set(uint64_t id, uint64_t val) {
 }
 
 void wavelet_tree_dyn::insert(uint64_t id, uint64_t val) {
+    assert(id <= size());
     wwt_->insert(val, id);
 }
 
 void wavelet_tree_dyn::remove(uint64_t id) {
+    assert(id < size());
     wwt_->remove(id);
 }
 

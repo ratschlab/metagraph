@@ -143,11 +143,12 @@ uint64_t bit_vector_dyn::get_int(uint64_t id, uint32_t width) const {
 }
 
 void bit_vector_dyn::insertBit(uint64_t id, bool val) {
+    assert(id <= size());
     vector_.insertBit(id, val);
 }
 
 void bit_vector_dyn::deleteBit(uint64_t id) {
-    assert(size() > 0);
+    assert(id < size());
     vector_.deleteBit(id);
 }
 
@@ -494,10 +495,12 @@ uint64_t bit_vector_small::get_int(uint64_t id, uint32_t width) const {
 }
 
 void bit_vector_small::insertBit(uint64_t id, bool val) {
+    assert(id <= size());
     vector_->insertBit(id, val);
 }
 
 void bit_vector_small::deleteBit(uint64_t id) {
+    assert(id < size());
     vector_->deleteBit(id);
 }
 
