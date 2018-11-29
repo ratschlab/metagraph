@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <tclap/CmdLine.h>
 #include <sdsl/rrr_vector.hpp>
 
@@ -29,14 +30,16 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     auto other = generator.generate_random_column(n, d)->convert_to<BitVector>();
 
-    std::ofstream out(std::string("test.")
+    std::string outname = std::string("test.")
                         + prefix
                         + "." + std::to_string(n) + "_" + std::to_string(d)
-                        + ".bv",
-                      std::ios::binary);
+                        + ".bv";
+    std::filesystem::path path(outname);
+    std::ofstream out(path, std::ios::binary);
 
     other.serialize(out);
-    const auto serialized_size = out.tellp();
+    out.close();
+    const auto serialized_size = std::filesystem::file_size(path);
 
     std::cout << prefix << "\t"
               << n << " " << d << "\t"
@@ -137,6 +140,10 @@ int main(int argc, char *argv[]) {
             std::vector<std::string> vector_types {
                 "small",
                 "stat",
+                "sd",
+                "rrr63",
+                "rrr127",
+                "rrr255",
                 "dyn",
             };
             ValuesConstraint<std::string> vector_type_constraint(vector_types);
@@ -159,6 +166,22 @@ int main(int argc, char *argv[]) {
                 test_vector_points<bit_vector_stat>(length_arg.getValue(),
                                                     density_arg.getValue(),
                                                     "stat");
+            } else if (vector_type == "sd") {
+                test_vector_points<bit_vector_sd>(length_arg.getValue(),
+                                                  density_arg.getValue(),
+                                                  "sd");
+            } else if (vector_type == "rrr63") {
+                test_vector_points<bit_vector_rrr<>>(length_arg.getValue(),
+                                                     density_arg.getValue(),
+                                                     "rrr");
+            } else if (vector_type == "rrr127") {
+                test_vector_points<bit_vector_rrr<127>>(length_arg.getValue(),
+                                                     density_arg.getValue(),
+                                                     "rrr127");
+            } else if (vector_type == "rrr255") {
+                test_vector_points<bit_vector_rrr<255>>(length_arg.getValue(),
+                                                     density_arg.getValue(),
+                                                     "rrr255");
             } else if (vector_type == "dyn") {
                 test_vector_points<bit_vector_dyn>(length_arg.getValue(),
                                                    density_arg.getValue(),
