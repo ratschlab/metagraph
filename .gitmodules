@@ -1,11 +1,12 @@
 [submodule "metagraph/external-libraries/libmaus2"]
 	path = metagraph/external-libraries/libmaus2
 	url = https://github.com/akahles/libmaus2.git
-  ignore = untracked
+	ignore = untracked
+	branch = shrunk
 [submodule "metagraph/external-libraries/sdsl-lite"]
 	path = metagraph/external-libraries/sdsl-lite
 	url = https://github.com/hmusta/sdsl-lite.git
-  ignore = untracked
+	ignore = untracked
 [submodule "metagraph/external-libraries/hopscotch-map"]
 	path = metagraph/external-libraries/hopscotch-map
 	url = https://github.com/Tessil/hopscotch-map.git

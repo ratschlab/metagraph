@@ -184,7 +184,7 @@ set_target_properties(metagengraph PROPERTIES OUTPUT_NAME "metagengraph_${CMAKE_
 set(METALIBS ${METALIBS}
   -lKMC
   -lhts -lz -lbz2
-  -lmaus2 -lmaus2_simd_align_128 -lmaus2_simd_align_256
+  -lmaus2
   -lsdsl -ldivsufsort -ldivsufsort64
   -lssl -lcrypto -llzma
   -lbrwt
