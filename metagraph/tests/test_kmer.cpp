@@ -43,6 +43,7 @@ std::string decode(const std::vector<T> &encoded, const std::string &alphabet) {
 }
 
 typedef uint8_t TAlphabet;
+template std::vector<TAlphabet> encode(const std::string &sequence, const TAlphabet *char_map);
 
 
  // Nucleotide
