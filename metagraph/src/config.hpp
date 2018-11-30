@@ -10,7 +10,7 @@ class Config {
     Config(int argc, const char *argv[]);
 
     bool verbose = false;
-    bool print_graph_succ = false;
+    bool print_graph = false;
     bool print_graph_internal_repr = false;
     bool reverse = false;
     bool dynamic = false;

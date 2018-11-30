@@ -470,22 +470,6 @@ std::string KmerExtractor2Bit::kmer_to_sequence(const Kmer &kmer) const {
 }
 
 
-void decompress_sd_vector(const sdsl::sd_vector<> &vector,
-                          sdsl::bit_vector *out) {
-    assert(out);
-    assert(vector.size() == out->size());
-
-    sdsl::select_support_sd<> slct(&vector);
-    sdsl::rank_support_sd<> rank(&vector);
-    uint64_t num_set_bits = rank(vector.size());
-
-    for (uint64_t i = 1; i <= num_set_bits; ++i) {
-        assert(slct(i) < out->size());
-
-        (*out)[slct(i)] = 1;
-    }
-}
-
 // indexes - positions of inserted elements in the final vector
 template <typename Index, class Vector>
 void insert_default_values(const std::vector<Index> &indexes, Vector *vector) {

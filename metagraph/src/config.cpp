@@ -64,7 +64,7 @@ Config::Config(int argc, const char *argv[]) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
             verbose = true;
         } else if (!strcmp(argv[i], "--print")) {
-            print_graph_succ = true;
+            print_graph = true;
         } else if (!strcmp(argv[i], "--print-internal")) {
             print_graph_internal_repr = true;
         } else if (!strcmp(argv[i], "--count-kmers")) {
@@ -439,7 +439,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
             fprintf(stderr, "\t   --dynamic \t\tuse dynamic build method [off]\n");
-            fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t   --suffix \t\tbuild graph chunk only for k-mers with the suffix given [off]\n");
             fprintf(stderr, "\t-s --num-splits \tdefine the minimum number of bins to split kmers into [1]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
@@ -459,7 +458,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --filter-abund [INT] threshold for the abundance of reliable k-mers [0]\n");
             fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
-            fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case FILTER: {

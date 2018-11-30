@@ -394,6 +394,100 @@ void print_stats(const DBG_succ &graph) {
 }
 
 
+template <class Callback, class Loop>
+void parse_sequences(const std::vector<std::string> &files,
+                     const Config &config,
+                     const Timer &timer,
+                     Callback call_read,
+                     Loop call_reads) {
+    // iterate over input files
+    for (unsigned int f = 0; f < files.size(); ++f) {
+        if (config.verbose) {
+            std::cout << std::endl << "Parsing " << files[f] << std::endl;
+        }
+
+        Timer data_reading_timer;
+
+        if (utils::get_filetype(files[f]) == "VCF") {
+            //assume VCF contains no noise
+            read_vcf_file_critical(
+                files[f], config.refpath, config.k, NULL,
+                [&](std::string &seq, auto *) {
+                    call_read(seq);
+                    if (config.reverse) {
+                        reverse_complement(seq.begin(), seq.end());
+                        call_read(seq);
+                    }
+                }
+            );
+        } else if (config.use_kmc) {
+            bool warning_different_k = false;
+            kmc::read_kmers(
+                files[f],
+                [&](std::string&& sequence) {
+                    if (!warning_different_k && sequence.size() != config.k) {
+                        std::cerr << "Warning: k-mers parsed from KMC database "
+                                  << files[f] << " have length " << sequence.size()
+                                  << " but graph is constructed for k=" << config.k
+                                  << std::endl;
+                        warning_different_k = true;
+                    }
+                    call_read(sequence);
+                },
+                config.max_unreliable_abundance + 1
+            );
+        } else if (utils::get_filetype(files[f]) == "FASTA"
+                    || utils::get_filetype(files[f]) == "FASTQ") {
+            std::string filter_filename = get_filter_filename(
+                files[f], config.filter_k,
+                config.max_unreliable_abundance,
+                config.unreliable_kmers_threshold
+            );
+
+            if (files.size() >= config.parallel) {
+                auto reverse = config.reverse;
+                auto file = files[f];
+
+                // capture all required values by copying to be able
+                // to run task from other threads
+                call_reads([=](auto callback) {
+                    read_fasta_file_critical(file, [=](kseq_t *read_stream) {
+                        // add read to the graph constructor as a callback
+                        callback(read_stream->seq.s);
+                    }, reverse, filter_filename);
+                });
+            } else {
+                read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
+                    // add read to the graph constructor as a callback
+                    call_read(read_stream->seq.s);
+                }, config.reverse, filter_filename);
+            }
+        } else {
+            std::cerr << "ERROR: Filetype unknown for file "
+                      << files[f] << std::endl;
+            exit(1);
+        }
+
+        if (config.verbose) {
+            std::cout << "Finished extracting sequences from file " << files[f]
+                      << " in " << timer.elapsed() << "sec" << std::endl;
+        }
+        if (config.verbose) {
+            std::cout << "File processed in "
+                      << data_reading_timer.elapsed()
+                      << "sec, current mem usage: "
+                      << get_curr_mem2() / (1 << 20) << " MiB"
+                      << ", total time: " << timer.elapsed()
+                      << "sec" << std::endl;
+        }
+    }
+
+    if (config.verbose) {
+        std::cout << std::endl;
+    }
+}
+
+
 int main(int argc, const char *argv[]) {
     std::unique_ptr<Config> config { new Config(argc, argv) };
 
@@ -410,37 +504,39 @@ int main(int argc, const char *argv[]) {
             break;
         }
         case Config::BUILD: {
-            std::unique_ptr<DBG_succ> graph { new DBG_succ(config->k - 1) };
+            std::unique_ptr<DeBruijnGraph> graph;
 
             if (config->verbose)
-                std::cout << "Build Succinct De Bruijn Graph with k-mer size k="
-                          << graph->get_k() << std::endl;
+                std::cout << "Build De Bruijn Graph with k-mer size k="
+                          << config->k << std::endl;
 
             Timer timer;
 
             if (!config->dynamic) {
+                std::unique_ptr<DBG_succ> boss_graph { new DBG_succ(config->k - 1) };
+
                 if (config->verbose) {
                     std::cout << "Start reading data and extracting k-mers" << std::endl;
                 }
                 //enumerate all suffices
-                assert(graph->alph_size > 1);
+                assert(boss_graph->alph_size > 1);
                 assert(config->nsplits > 0);
                 size_t suffix_len = std::min(
                     static_cast<size_t>(std::ceil(std::log2(config->nsplits)
-                                                    / std::log2(graph->alph_size - 1))),
-                    graph->get_k() - 1
+                                                    / std::log2(boss_graph->alph_size - 1))),
+                    boss_graph->get_k() - 1
                 );
                 std::deque<std::string> suffices;
                 if (config->suffix.size()) {
                     suffices = { config->suffix };
                 } else {
                     suffices = utils::generate_strings(
-                        graph->alphabet,
+                        boss_graph->alphabet,
                         suffix_len
                     );
                 }
 
-                DBG_succ::Chunk graph_data(graph->get_k());
+                DBG_succ::Chunk graph_data(boss_graph->get_k());
 
                 //one pass per suffix
                 for (const std::string &suffix : suffices) {
@@ -457,7 +553,7 @@ int main(int argc, const char *argv[]) {
 
                     std::unique_ptr<IChunkConstructor> constructor(
                         IChunkConstructor::initialize(
-                            graph->get_k(),
+                            boss_graph->get_k(),
                             suffix,
                             config->parallel,
                             static_cast<uint64_t>(config->memory_available) << 30,
@@ -465,91 +561,10 @@ int main(int argc, const char *argv[]) {
                         )
                     );
 
-                    // iterate over input files
-                    for (unsigned int f = 0; f < files.size(); ++f) {
-                        if (config->verbose) {
-                            std::cout << std::endl << "Parsing " << files[f] << std::endl;
-                        }
-
-                        Timer data_reading_timer;
-
-                        if (utils::get_filetype(files[f]) == "VCF") {
-                            if (suffix.find('$') != std::string::npos)
-                                continue;
-
-                            //assume VCF contains no noise
-                            read_vcf_file_critical(
-                                files[f], config->refpath, graph->get_k(), NULL,
-                                [&](std::string &seq, auto *) {
-                                    constructor->add_read(seq);
-                                    if (config->reverse) {
-                                        reverse_complement(seq.begin(), seq.end());
-                                        constructor->add_read(seq);
-                                    }
-                                }
-                            );
-                        } else if (config->use_kmc) {
-                            bool warning_different_k = false;
-                            kmc::read_kmers(
-                                files[f],
-                                [&](std::string&& sequence) {
-                                    if (!warning_different_k && sequence.size() != graph->get_k()) {
-                                        std::cerr << "Warning: k-mers parsed from KMC database "
-                                                  << files[f] << " have length " << sequence.size()
-                                                  << " but graph is constructed for k=" << graph->get_k()
-                                                  << std::endl;
-                                        warning_different_k = true;
-                                    }
-                                    constructor->add_read(sequence);
-                                },
-                                config->max_unreliable_abundance + 1
-                            );
-                        } else if (utils::get_filetype(files[f]) == "FASTA"
-                                    || utils::get_filetype(files[f]) == "FASTQ") {
-                            std::string filter_filename = get_filter_filename(
-                                files[f], config->filter_k,
-                                config->max_unreliable_abundance,
-                                config->unreliable_kmers_threshold
-                            );
-
-                            if (files.size() >= config->parallel) {
-                                auto reverse = config->reverse;
-                                auto file = files[f];
-
-                                // capture all required values by copying to be able
-                                // to run task from other threads
-                                constructor->add_reads([=](auto callback) {
-                                    read_fasta_file_critical(file, [=](kseq_t *read_stream) {
-                                        // add read to the graph constructor as a callback
-                                        callback(read_stream->seq.s);
-                                    }, reverse, filter_filename);
-                                });
-                            } else {
-                                read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
-                                    // add read to the graph constructor as a callback
-                                    constructor->add_read(read_stream->seq.s);
-                                }, config->reverse, filter_filename);
-                            }
-                        } else {
-                            std::cerr << "ERROR: Filetype unknown for file "
-                                      << files[f] << std::endl;
-                            exit(1);
-                        }
-
-                        if (config->verbose) {
-                            std::cout << "Finished extracting sequences from file " << files[f]
-                                      << " in " << timer.elapsed() << "sec" << std::endl;
-                        }
-                        if (config->verbose) {
-                            std::cout << "File processed in "
-                                      << data_reading_timer.elapsed()
-                                      << "sec, current mem usage: "
-                                      << get_curr_mem2() / (1 << 20) << " MiB"
-                                      << ", total time: " << timer.elapsed()
-                                      << "sec" << std::endl;
-                        }
-                    }
-                    std::cout << std::endl;
+                    parse_sequences(files, *config, timer,
+                        [&](const auto &read) { constructor->add_read(read); },
+                        [&](const auto &loop) { constructor->add_reads(loop); }
+                    );
 
                     auto next_block = constructor->build_chunk();
                     std::cout << "Graph chunk with " << next_block->size()
@@ -566,101 +581,43 @@ int main(int argc, const char *argv[]) {
 
                     graph_data.extend(*next_block);
                     delete next_block;
+
+                    if (config->suffix.size())
+                        return 0;
                 }
 
-                if (!config->suffix.size())
-                    graph_data.initialize_graph(graph.get());
+                graph_data.initialize_graph(boss_graph.get());
+                graph.reset(new DBGSuccinct(boss_graph.release()));
 
             } else {
                 //slower method
-                for (const auto &file : files) {
-                    if (config->verbose) {
-                        std::cout << std::endl << "Parsing " << file << std::endl;
-                    }
 
-                    Timer data_reading_timer;
+                graph.reset(new DBGSuccinct(config->k));
 
-                    // open stream
-                    if (utils::get_filetype(file) == "VCF") {
-                        read_vcf_file_critical(
-                            file, config->refpath, graph->get_k(), NULL,
-                            [&](std::string &seq, auto *) {
-                                graph->add_sequence(seq);
-                                if (config->reverse) {
-                                    reverse_complement(seq.begin(), seq.end());
-                                    graph->add_sequence(seq);
-                                }
-                            }
-                        );
-                    } else if (config->use_kmc) {
-                        bool warning_different_k = false;
-                        kmc::read_kmers(
-                            file,
-                            [&](std::string&& sequence) {
-                                if (!warning_different_k && sequence.size() != graph->get_k()) {
-                                    std::cerr << "Warning: k-mers parsed from KMC database "
-                                              << file << " have length " << sequence.size()
-                                              << " but graph is constructed for k=" << graph->get_k()
-                                              << std::endl;
-                                    warning_different_k = true;
-                                }
-                                graph->add_sequence(sequence);
-                            },
-                            config->max_unreliable_abundance + 1
-                        );
-                    } else if (utils::get_filetype(file) == "FASTA"
-                                || utils::get_filetype(file) == "FASTQ") {
-                        read_fasta_file_critical(file,
-                            [&](kseq_t *read_stream) {
-                                graph->add_sequence(read_stream->seq.s);
-                            },
-                            config->reverse,
-                            get_filter_filename(file, config->filter_k,
-                                                config->max_unreliable_abundance,
-                                                config->unreliable_kmers_threshold)
-                        );
-                    } else {
-                        std::cerr << "ERROR: Filetype unknown for file "
-                                  << file << std::endl;
-                        exit(1);
+                parse_sequences(files, *config, timer,
+                    [&graph](const auto &seq) { graph->add_sequence(seq); },
+                    [&graph](const auto &loop) {
+                        loop([&graph](const auto &seq) { graph->add_sequence(seq); });
                     }
-                    if (config->verbose) {
-                        std::cout << "Finished extracting sequences from file " << file
-                                  << " in " << timer.elapsed() << "sec"
-                                  << ", number of k-mers in graph: " << graph->num_nodes() << std::endl;
-                    }
-                    if (config->verbose) {
-                        std::cout << "File processed in "
-                                  << data_reading_timer.elapsed()
-                                  << "sec, current mem usage: "
-                                  << get_curr_mem2() / (1 << 20) << " MiB"
-                                  << ", total time: " << timer.elapsed()
-                                  << "sec" << std::endl;
-                    }
-                }
+                );
             }
 
             if (config->verbose)
                 std::cout << "Graph construction finished in "
                           << timer.elapsed() << "sec" << std::endl;
 
-            graph->switch_state(config->state);
-
-            // graph output
-            if (config->print_graph_succ && !config->suffix.size())
-                std::cout << *graph;
-            if (!config->outfbase.empty() && !config->suffix.size()) {
+            if (!config->outfbase.empty()) {
                 graph->serialize(config->outfbase);
 
-                if (config->shrink_anno) {
-                    auto boss_graph = graph.release();
-                    AnnotatedDBG anno_graph(new DBGSuccinct(boss_graph),
-                                            config->parallel);
+                if (config->shrink_anno && dynamic_cast<DBGSuccinct*>(graph.get())) {
+                    AnnotatedDBG anno_graph(graph.release(), config->parallel);
                     if (config->verbose) {
                         std::cout << "Detecting all dummy k-mers..." << std::flush;
                     }
                     timer.reset();
-                    anno_graph.initialize_annotation_mask(boss_graph->mark_all_dummy_edges(config->parallel));
+                    anno_graph.initialize_annotation_mask(
+                        dynamic_cast<DBGSuccinct&>(anno_graph.get_graph()).get_boss().mark_all_dummy_edges(config->parallel)
+                    );
                     if (config->verbose) {
                         std::cout << timer.elapsed() << "sec" << std::endl;
                     }
@@ -701,77 +658,24 @@ int main(int argc, const char *argv[]) {
             if (config->verbose)
                 std::cout << "Start graph extension" << std::endl;
 
-            for (const auto &file : files) {
-                if (config->verbose) {
-                    std::cout << std::endl << "Parsing " << file << std::endl;
+            // Insert new k-mers
+            parse_sequences(files, *config, timer,
+                [&graph,&inserted_edges](const auto &seq) {
+                    graph->add_sequence(seq, true, inserted_edges.get());
+                },
+                [&graph,&inserted_edges](const auto &loop) {
+                    loop([&graph,&inserted_edges](const auto &seq) {
+                        graph->add_sequence(seq, true, inserted_edges.get());
+                    });
                 }
-
-                Timer data_reading_timer;
-
-                if (utils::get_filetype(file) == "VCF") {
-                    read_vcf_file_critical(file, config->refpath, graph->get_k(), NULL,
-                        [&](std::string &seq, auto *) {
-                            graph->add_sequence(seq, true, inserted_edges.get());
-                            if (config->reverse) {
-                                reverse_complement(seq.begin(), seq.end());
-                                graph->add_sequence(seq, true, inserted_edges.get());
-                            }
-                        }
-                    );
-                } else if (config->use_kmc) {
-                    bool warning_different_k = false;
-                    kmc::read_kmers(
-                        file,
-                        [&](std::string&& sequence) {
-                            if (!warning_different_k && sequence.size() != graph->get_k()) {
-                                std::cerr << "Warning: k-mers parsed from KMC database "
-                                          << file << " have length " << sequence.size()
-                                          << " but graph is constructed for k=" << graph->get_k()
-                                          << std::endl;
-                                warning_different_k = true;
-                            }
-                            graph->add_sequence(sequence);
-                        },
-                        config->max_unreliable_abundance + 1
-                    );
-                } else if (utils::get_filetype(file) == "FASTA"
-                            || utils::get_filetype(file) == "FASTQ") {
-                    read_fasta_file_critical(file,
-                        [&](kseq_t *read_stream) {
-                            graph->add_sequence(read_stream->seq.s, true, inserted_edges.get());
-                        },
-                        config->reverse,
-                        get_filter_filename(file, config->filter_k,
-                                            config->max_unreliable_abundance,
-                                            config->unreliable_kmers_threshold)
-                    );
-                } else {
-                    std::cerr << "ERROR: Filetype unknown for file "
-                              << file << std::endl;
-                    exit(1);
-                }
-                if (config->verbose) {
-                    std::cout << "Finished extracting sequences from file " << file
-                              << " in " << timer.elapsed() << "sec"
-                              << ", number of k-mers in graph: " << graph->num_nodes() << std::endl;
-                }
-                if (config->verbose) {
-                    std::cout << "File processed in "
-                              << data_reading_timer.elapsed()
-                              << "sec, current mem usage: "
-                              << get_curr_mem2() / (1 << 20) << " MiB"
-                              << ", total time: " << timer.elapsed()
-                              << "sec" << std::endl;
-                }
-            }
+            );
+            // if (config->verbose) {
+            //     std::cout << "Number of k-mers in graph: " << graph->num_nodes() << std::endl;
+            // }
 
             if (config->verbose)
                 std::cout << "Graph extension finished in "
                           << timer.elapsed() << "sec" << std::endl;
-
-            // graph output
-            if (config->print_graph_succ)
-                std::cout << *graph;
 
             assert(config->outfbase.size());
 
@@ -1304,7 +1208,7 @@ int main(int argc, const char *argv[]) {
             }
 
             // graph output
-            if (graph && config->print_graph_succ)
+            if (graph && config->print_graph)
                 std::cout << *graph;
             if (graph && !config->outfbase.empty())
                 graph->serialize(config->outfbase);
@@ -1388,7 +1292,7 @@ int main(int argc, const char *argv[]) {
             std::cout << "... done merging." << std::endl;
 
             // graph output
-            if (graph && config->print_graph_succ)
+            if (graph && config->print_graph)
                 std::cout << *graph;
             if (graph && !config->outfbase.empty())
                 graph->serialize(config->outfbase);
@@ -1437,7 +1341,7 @@ int main(int argc, const char *argv[]) {
                 if (config->print_graph_internal_repr)
                     graph->print_internal_representation(std::cout);
 
-                if (config->print_graph_succ)
+                if (config->print_graph)
                     std::cout << *graph;
             }
 

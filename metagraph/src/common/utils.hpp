@@ -16,8 +16,8 @@
 #include <atomic>
 #include <bitset>
 
-#include <sdsl/sd_vector.hpp>
-#include <sdsl/wavelet_trees.hpp>
+#include <sdsl/uint128_t.hpp>
+#include <sdsl/uint256_t.hpp>
 
 #if _USE_FOLLY
 #include <folly/FBVector.h>
@@ -372,9 +372,6 @@ namespace utils {
 
         std::hash<std::bitset<sizeof(T) * 8>> hasher;
     };
-
-    void decompress_sd_vector(const sdsl::sd_vector<> &vector,
-                              sdsl::bit_vector *out);
 
     // indexes - positions of inserted elements in the final vector
     template <typename Index, class Vector>

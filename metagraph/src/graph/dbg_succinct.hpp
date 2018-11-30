@@ -557,6 +557,9 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual bool load(const std::string &filename_base) override final;
     virtual void serialize(const std::string &filename_base) const override final;
 
+    virtual const DBG_succ& get_boss() const final { return *boss_graph_; }
+    virtual DBG_succ& get_boss() final { return *boss_graph_; }
+
   private:
     std::unique_ptr<DBG_succ> boss_graph_;
 };
