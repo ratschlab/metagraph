@@ -8,6 +8,7 @@
 #include "config.hpp"
 #include "wavelet_tree.hpp"
 #include "bit_vector.hpp"
+#include "kmer_extractor.hpp"
 #include "utils.hpp"
 
 class DBGSuccConstructor;
@@ -360,7 +361,7 @@ class DBG_succ {
     // file dump extension
     static constexpr auto kExtension = ".dbg";
 
-    const utils::KmerExtractor kmer_extractor_;
+    const KmerExtractor kmer_extractor_;
     const size_t bits_per_char_W_;
 
     // k-mer size

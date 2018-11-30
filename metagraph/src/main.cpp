@@ -1180,7 +1180,7 @@ int main(int argc, const char *argv[]) {
                 assert(config->infbase.size());
 
                 auto sorted_suffices = utils::generate_strings(
-                    utils::KmerExtractor().alphabet,
+                    KmerExtractor().alphabet,
                     config->suffix_len
                 );
 

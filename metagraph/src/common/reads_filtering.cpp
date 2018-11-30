@@ -5,11 +5,9 @@
 #include <tsl/hopscotch_map.h>
 #include <kmc_file.h>
 
-#include "kmer.hpp"
+#include "kmer_extractor.hpp"
 #include "utils.hpp"
 #include "unix_tools.hpp"
-
-using utils::KmerExtractor;
 
 const size_t kMaxKmersChunkSize = 30'000'000;
 

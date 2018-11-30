@@ -7,7 +7,7 @@
 
 
 DBG_succ::Chunk::Chunk(size_t k)
-      : alph_size_(utils::KmerExtractor::alphabet.size()),
+      : alph_size_(KmerExtractor::alphabet.size()),
         bits_per_char_W_(boost::multiprecision::msb(alph_size_ - 1) + 2),
         k_(k), W_(1, 0), last_(1, 0), F_(alph_size_, 0) {
     assert(sizeof(TAlphabet) * 8 >= bits_per_char_W_);
@@ -18,7 +18,7 @@ DBG_succ::Chunk::Chunk(size_t k,
                        std::vector<TAlphabet>&& W,
                        std::vector<bool>&& last,
                        std::vector<uint64_t>&& F)
-      : alph_size_(utils::KmerExtractor::alphabet.size()),
+      : alph_size_(KmerExtractor::alphabet.size()),
         bits_per_char_W_(boost::multiprecision::msb(alph_size_ - 1) + 2),
         k_(k), W_(std::move(W)), last_(std::move(last)), F_(std::move(F)) {
     assert(sizeof(TAlphabet) * 8 >= bits_per_char_W_);

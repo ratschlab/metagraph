@@ -23,7 +23,6 @@
 #include "serialization.hpp"
 
 using utils::remove_suffix;
-using utils::KmerExtractor;
 using TAlphabet = DBG_succ::TAlphabet;
 
 

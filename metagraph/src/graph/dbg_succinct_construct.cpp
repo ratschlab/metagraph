@@ -8,7 +8,6 @@
 #include "unix_tools.hpp"
 #include "reads_filtering.hpp"
 
-using utils::KmerExtractor;
 using TAlphabet = KmerExtractor::TAlphabet;
 
 const size_t kMaxKmersChunkSize = 30'000'000;
@@ -238,11 +237,11 @@ IChunkConstructor::initialize(size_t k,
                               size_t num_threads,
                               double memory_preallocated,
                               bool verbose) {
-    if ((k + 1) * utils::KmerExtractor::kLogSigma <= 64) {
+    if ((k + 1) * KmerExtractor::kLogSigma <= 64) {
         return new KMerDBGSuccChunkConstructor<KmerExtractor::Kmer64>(
             k, filter_suffix, num_threads, memory_preallocated, verbose
         );
-    } else if ((k + 1) * utils::KmerExtractor::kLogSigma <= 128) {
+    } else if ((k + 1) * KmerExtractor::kLogSigma <= 128) {
         return new KMerDBGSuccChunkConstructor<KmerExtractor::Kmer128>(
             k, filter_suffix, num_threads, memory_preallocated, verbose
         );

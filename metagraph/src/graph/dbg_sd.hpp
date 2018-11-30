@@ -5,11 +5,12 @@
 
 #include "sequence_graph.hpp"
 #include "utils.hpp"
+#include "kmer_extractor.hpp"
 #include "bit_vector.hpp"
 
 
 class DBGSD : public DeBruijnGraph {
-    using KmerExtractor = utils::KmerExtractor2Bit;
+    using KmerExtractor = KmerExtractor2Bit;
     using Kmer = KmerExtractor::Kmer;
     using KmerIndex = bit_vector_sd;
   public:

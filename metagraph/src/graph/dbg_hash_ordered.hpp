@@ -5,11 +5,11 @@
 #include <tsl/ordered_set.h>
 
 #include "sequence_graph.hpp"
+#include "kmer_extractor.hpp"
 #include "utils.hpp"
 
 
 class DBGHashOrdered : public DeBruijnGraph {
-    using KmerExtractor = utils::KmerExtractor;
     using Kmer = KmerExtractor::Kmer64;
     using KmerIndex = tsl::ordered_set<Kmer,
                                        utils::Hash<Kmer>,

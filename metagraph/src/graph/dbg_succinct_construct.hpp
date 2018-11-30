@@ -5,7 +5,7 @@
 #include <shared_mutex>
 
 #include "dbg_succinct.hpp"
-#include "kmer.hpp"
+#include "kmer_extractor.hpp"
 #include "utils.hpp"
 
 
@@ -81,8 +81,8 @@ class KMerDBGSuccChunkConstructor : public IChunkConstructor {
 
     bool verbose_;
 
-    utils::KmerExtractor kmer_extractor_;
-    std::vector<utils::KmerExtractor::TAlphabet> filter_suffix_encoded_;
+    KmerExtractor kmer_extractor_;
+    std::vector<KmerExtractor::TAlphabet> filter_suffix_encoded_;
 };
 
 
