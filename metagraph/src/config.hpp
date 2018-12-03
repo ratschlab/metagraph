@@ -109,10 +109,18 @@ class Config {
         RBFish,
     };
 
+    enum GraphType {
+        INVALID = -1,
+        SUCCINCT = 1,
+        HASH,
+    };
+
     AnnotationType anno_type = ColumnCompressed;
+    GraphType graph_type = SUCCINCT;
 
     static std::string annotype_to_string(AnnotationType state);
     static AnnotationType string_to_annotype(const std::string &string);
+    static GraphType string_to_graphtype(const std::string &string);
 
     void print_usage(const std::string &prog_name,
                      IdentityType identity = NO_IDENTITY);

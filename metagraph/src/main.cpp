@@ -13,6 +13,7 @@
 #include "static_annotators_def.hpp"
 #include "annotation_converters.hpp"
 #include "kmc_parser.hpp"
+#include "dbg_hash_ordered.hpp"
 
 typedef annotate::MultiLabelAnnotation<uint64_t, std::string> Annotator;
 
@@ -21,15 +22,48 @@ const size_t kMaxNumParallelReadFiles = 5;
 const size_t kNumCachedColumns = 10;
 
 
+Config::GraphType parse_graph_extension(const std::string &filename) {
+    if (utils::ends_with(filename, ".dbg")) {
+        return Config::GraphType::SUCCINCT;
+
+    } else if (utils::ends_with(filename, ".orhashdbg")) {
+        return Config::GraphType::HASH;
+
+    } else {
+        return Config::GraphType::INVALID;
+    }
+}
+
+std::string remove_graph_extension(const std::string &filename) {
+    return utils::remove_suffix(filename, ".dbg", ".orhashdbg");
+}
+
 template <class Graph = DBG_succ>
 std::unique_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
-    auto *graph = new Graph();
+    auto *graph = new Graph(2);
     if (!graph->load(filename)) {
         std::cerr << "ERROR: can't load graph from file " << filename << std::endl;
         delete graph;
         exit(1);
     }
     return std::unique_ptr<Graph> { graph };
+}
+
+template <class DefaultGraphType = DBGSuccinct>
+std::unique_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
+    auto graph_type = parse_graph_extension(filename);
+    switch (graph_type) {
+        case Config::GraphType::SUCCINCT:
+            return load_critical_graph_from_file<DBGSuccinct>(filename);
+
+        case Config::GraphType::HASH:
+            return load_critical_graph_from_file<DBGHashOrdered>(filename);
+
+        case Config::GraphType::INVALID:
+            return load_critical_graph_from_file<DefaultGraphType>(filename);
+    }
+    assert(false);
+    exit(1);
 }
 
 std::string get_filter_filename(std::string filename,
@@ -393,6 +427,11 @@ void print_stats(const DBG_succ &graph) {
     std::cout << "state: " << Config::state_to_string(graph.get_state()) << std::endl;
 }
 
+void print_stats(const DeBruijnGraph &graph) {
+    std::cout << "k: " << graph.get_k() << std::endl;
+    std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
+}
+
 
 template <class Callback, class Loop>
 void parse_sequences(const std::vector<std::string> &files,
@@ -512,7 +551,7 @@ int main(int argc, const char *argv[]) {
 
             Timer timer;
 
-            if (!config->dynamic) {
+            if (config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic) {
                 std::unique_ptr<DBG_succ> boss_graph { new DBG_succ(config->k - 1) };
 
                 if (config->verbose) {
@@ -592,7 +631,17 @@ int main(int argc, const char *argv[]) {
             } else {
                 //slower method
 
-                graph.reset(new DBGSuccinct(config->k));
+                switch (config->graph_type) {
+                    case Config::GraphType::SUCCINCT:
+                        graph.reset(new DBGSuccinct(config->k));
+                        break;
+                    case Config::GraphType::HASH:
+                        graph.reset(new DBGHashOrdered(config->k));
+                        break;
+                    case Config::GraphType::INVALID:
+                        assert(false);
+                }
+                assert(graph.get());
 
                 parse_sequences(files, *config, timer,
                     [&graph](const auto &seq) { graph->add_sequence(seq); },
@@ -633,26 +682,30 @@ int main(int argc, const char *argv[]) {
             Timer timer;
 
             // load graph
-            auto graph = load_critical_graph_from_file(config->infbase);
+            auto graph = load_critical_dbg(config->infbase);
 
             if (config->verbose) {
-                std::cout << "Succinct de Bruijn graph with k-mer size k="
+                std::cout << "De Bruijn graph with k-mer size k="
                           << graph->get_k() << " has been loaded in "
                           << timer.elapsed() << "sec" << std::endl;
             }
             timer.reset();
 
+            if (dynamic_cast<DBGSuccinct*>(graph.get())) {
+                auto &boss_graph = dynamic_cast<DBGSuccinct&>(*graph).get_boss();
+                if (boss_graph.get_state() != Config::DYN) {
+                    if (config->verbose)
+                        std::cout << "Switching state of succinct graph to dynamic..." << std::flush;
+                    boss_graph.switch_state(Config::DYN);
+                    if (config->verbose)
+                        std::cout << "\tdone in " << timer.elapsed() << "sec" << std::endl;
+                }
+            }
+
             std::unique_ptr<bit_vector_dyn> inserted_edges;
             if (config->infbase_annotators.size())
-                inserted_edges.reset(new bit_vector_dyn(graph->num_edges() + 1, 0));
+                inserted_edges.reset(new bit_vector_dyn(graph->num_nodes() + 1, 0));
 
-            if (graph->get_state() != Config::DYN) {
-                if (config->verbose)
-                    std::cout << "Switching the graph state to dynamic..." << std::flush;
-                graph->switch_state(Config::DYN);
-                if (config->verbose)
-                    std::cout << "\tdone in " << timer.elapsed() << "sec" << std::endl;
-            }
             timer.reset();
 
             if (config->verbose)
@@ -661,11 +714,11 @@ int main(int argc, const char *argv[]) {
             // Insert new k-mers
             parse_sequences(files, *config, timer,
                 [&graph,&inserted_edges](const auto &seq) {
-                    graph->add_sequence(seq, true, inserted_edges.get());
+                    graph->add_sequence(seq, inserted_edges.get());
                 },
                 [&graph,&inserted_edges](const auto &loop) {
                     loop([&graph,&inserted_edges](const auto &seq) {
-                        graph->add_sequence(seq, true, inserted_edges.get());
+                        graph->add_sequence(seq, inserted_edges.get());
                     });
                 }
             );
@@ -681,24 +734,18 @@ int main(int argc, const char *argv[]) {
 
             // serialize graph
             timer.reset();
-            if (graph->get_state() != config->state) {
-                if (config->verbose)
-                    std::cout << "Switching state before dumping..." << std::flush;
-
-                graph->switch_state(config->state);
-
-                if (config->verbose)
-                    std::cout << "\tdone in " << timer.elapsed() << "sec" << std::endl;
-            }
 
             graph->serialize(config->outfbase);
             graph.reset();
+
+            if (config->verbose)
+                std::cout << "Serialized in " << timer.elapsed() << "sec" << std::endl;
 
             timer.reset();
 
             AnnotatedDBG anno_graph(config->parallel);
             if (config->shrink_anno
-                    && !anno_graph.load_annotation_mask(config->infbase)) {
+                    && !anno_graph.load_annotation_mask(remove_graph_extension(config->infbase))) {
                 std::cerr << "Warning: Can't load coordinate mask."
                           << " Continue with all coordinates." << std::endl;
             }
@@ -962,13 +1009,13 @@ int main(int argc, const char *argv[]) {
 
             // load graph
             AnnotatedDBG anno_graph(
-                new DBGSuccinct(load_critical_graph_from_file(config->infbase).release()),
+                load_critical_dbg(config->infbase).release(),
                 config->parallel
             );
 
             // load masked k-mers
             if (config->shrink_anno
-                    && !anno_graph.load_annotation_mask(config->infbase)) {
+                    && !anno_graph.load_annotation_mask(remove_graph_extension(config->infbase))) {
                 std::cerr << "Warning: Can't load coordinate mask."
                           << " Continue with all coordinates." << std::endl;
             }
@@ -1021,7 +1068,7 @@ int main(int argc, const char *argv[]) {
 
             // load graph
             AnnotatedDBG anno_graph(
-                new DBGSuccinct(load_critical_graph_from_file(config->infbase).release()),
+                load_critical_dbg(config->infbase).release(),
                 config->parallel
             );
             anno_graph.set_annotation(new annotate::RowCompressed<>(anno_graph.num_anno_rows()));
@@ -1076,13 +1123,13 @@ int main(int argc, const char *argv[]) {
 
             // load graph
             AnnotatedDBG anno_graph(
-                new DBGSuccinct(load_critical_graph_from_file(config->infbase).release()),
+                load_critical_dbg(config->infbase).release(),
                 config->parallel
             );
 
             // load masked k-mers
             if (config->shrink_anno
-                    && !anno_graph.load_annotation_mask(config->infbase)) {
+                    && !anno_graph.load_annotation_mask(remove_graph_extension(config->infbase))) {
                 std::cerr << "Warning: Can't load coordinate mask."
                           << " Continue with all coordinates." << std::endl;
             }
@@ -1091,7 +1138,7 @@ int main(int argc, const char *argv[]) {
 
             if (!anno_graph.get_annotation().load(config->infbase_annotators.at(0))) {
                 std::cerr << "ERROR: can't load annotations for graph "
-                          << config->infbase + ".dbg"
+                          << config->infbase
                           << ", file corrupted" << std::endl;
                 exit(1);
             }
@@ -1101,7 +1148,6 @@ int main(int argc, const char *argv[]) {
             Timer timer;
 
             if (!anno_graph.check_compatibility(true)) {
-                std::cerr << "ERROR: graph cannot be annotated" << std::endl;
                 exit(1);
             }
 
@@ -1301,48 +1347,56 @@ int main(int argc, const char *argv[]) {
         }
         case Config::STATS: {
             for (const auto &file : files) {
-                auto graph = load_critical_graph_from_file(file);
+                auto graph = load_critical_dbg(file);
 
                 std::cout << "Statistics for graph " << file << std::endl;
-                print_stats(*graph);
 
-                assert(graph->rank_W(graph->num_edges(), graph->alph_size) == 0);
-                std::cout << "W stats: {'" << graph->decode(0) << "': "
-                          << graph->rank_W(graph->num_edges(), 0);
-                for (int i = 1; i < graph->alph_size; ++i) {
-                    std::cout << ", '" << graph->decode(i) << "': "
-                              << graph->rank_W(graph->num_edges(), i)
-                                    + graph->rank_W(graph->num_edges(), i + graph->alph_size);
+                if (!dynamic_cast<DBGSuccinct*>(graph.get())) {
+                    print_stats(*graph);
+                    continue;
+                }
+
+                const auto &boss_graph = dynamic_cast<DBGSuccinct&>(*graph).get_boss();
+
+                print_stats(boss_graph);
+
+                assert(boss_graph.rank_W(boss_graph.num_edges(), boss_graph.alph_size) == 0);
+                std::cout << "W stats: {'" << boss_graph.decode(0) << "': "
+                          << boss_graph.rank_W(boss_graph.num_edges(), 0);
+                for (int i = 1; i < boss_graph.alph_size; ++i) {
+                    std::cout << ", '" << boss_graph.decode(i) << "': "
+                              << boss_graph.rank_W(boss_graph.num_edges(), i)
+                                    + boss_graph.rank_W(boss_graph.num_edges(), i + boss_graph.alph_size);
                 }
                 std::cout << "}" << std::endl;
 
-                assert(graph->get_F(0) == 0);
+                assert(boss_graph.get_F(0) == 0);
                 std::cout << "F stats: {'";
-                for (int i = 1; i < graph->alph_size; ++i) {
-                    std::cout << graph->decode(i - 1) << "': "
-                              << graph->get_F(i) - graph->get_F(i - 1)
+                for (int i = 1; i < boss_graph.alph_size; ++i) {
+                    std::cout << boss_graph.decode(i - 1) << "': "
+                              << boss_graph.get_F(i) - boss_graph.get_F(i - 1)
                               << ", '";
                 }
-                std::cout << graph->decode(graph->alph_size - 1) << "': "
-                          << graph->num_edges() - graph->get_F(graph->alph_size - 1)
+                std::cout << boss_graph.decode(boss_graph.alph_size - 1) << "': "
+                          << boss_graph.num_edges() - boss_graph.get_F(boss_graph.alph_size - 1)
                           << "}" << std::endl;
 
                 if (config->count_dummy) {
                     std::cout << "dummy source edges: "
-                              << graph->mark_source_dummy_edges(NULL,
+                              << boss_graph.mark_source_dummy_edges(NULL,
                                                                 config->parallel,
                                                                 config->verbose)
                               << std::endl;
                     std::cout << "dummy sink edges: "
-                              << graph->mark_sink_dummy_edges()
+                              << boss_graph.mark_sink_dummy_edges()
                               << std::endl;
                 }
 
                 if (config->print_graph_internal_repr)
-                    graph->print_internal_representation(std::cout);
+                    boss_graph.print_internal_representation(std::cout);
 
                 if (config->print_graph)
-                    std::cout << *graph;
+                    std::cout << boss_graph;
             }
 
             for (const auto &file : config->infbase_annotators) {

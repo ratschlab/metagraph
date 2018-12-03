@@ -527,8 +527,8 @@ std::ostream& operator<<(std::ostream &os, const DBG_succ &graph);
 
 class DBGSuccinct : public DeBruijnGraph {
   public:
-    DBGSuccinct(size_t k) : boss_graph_(std::make_unique<DBG_succ>(k - 1)) {}
-    DBGSuccinct(DBG_succ *boss_graph) : boss_graph_(boss_graph) {}
+    explicit DBGSuccinct(size_t k) : boss_graph_(std::make_unique<DBG_succ>(k - 1)) {}
+    explicit DBGSuccinct(DBG_succ *boss_graph) : boss_graph_(boss_graph) {}
 
     virtual size_t get_k() const override final;
 

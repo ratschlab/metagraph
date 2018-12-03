@@ -149,6 +149,8 @@ Config::Config(int argc, const char *argv[]) {
 
         } else if (!strcmp(argv[i], "--anno-type")) {
             anno_type = string_to_annotype(argv[++i]);
+        } else if (!strcmp(argv[i], "--graph")) {
+            graph_type = string_to_graphtype(argv[++i]);
         } else if (!strcmp(argv[i], "--rename-cols")) {
             rename_instructions_file = std::string(argv[++i]);
         //} else if (!strcmp(argv[i], "--db-path")) {
@@ -157,7 +159,6 @@ Config::Config(int argc, const char *argv[]) {
             infbase_annotators.emplace_back(argv[++i]);
         } else if (!strcmp(argv[i], "-i") || !strcmp(argv[i], "--infile-base")) {
             infbase = std::string(argv[++i]);
-            infbase = utils::remove_suffix(infbase, ".dbg");
         } else if (!strcmp(argv[i], "--to-adj-list")) {
             to_adj_list = true;
         } else if (!strcmp(argv[i], "--to-fasta")) {
@@ -256,16 +257,13 @@ Config::Config(int argc, const char *argv[]) {
 
     if ((identity == ANNOTATE || identity == ANNOTATE_COORDINATES)
             && outfbase.empty())
-        outfbase = infbase;
+        outfbase = utils::remove_suffix(infbase, ".orhashdbg", ".dbg");
 
     if (identity == EXTEND && (outfbase.empty() || infbase.empty()))
         print_usage_and_exit = true;
 
     if (identity == MERGE_ANNOTATIONS && outfbase.empty())
         print_usage_and_exit = true;
-
-    if (identity == CLASSIFY && infbase_annotators.empty() && infbase.size())
-        infbase_annotators.push_back(infbase);
 
     if (identity == CLASSIFY && infbase_annotators.size() != 1)
         print_usage_and_exit = true;
@@ -364,10 +362,22 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
     }
 }
 
+Config::GraphType Config::string_to_graphtype(const std::string &string) {
+    if (string == "succinct") {
+        return GraphType::SUCCINCT;
+    } else if (string == "hash") {
+        return GraphType::HASH;
+    } else {
+        std::cerr << "Error: unknown graph representation" << std::endl;
+        exit(1);
+    }
+}
+
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     fprintf(stderr, "Metagraph: comprehensive metagenome graph representation -- Version 0.1\n\n");
 
     const char annotation_list[] = "('column', 'row', 'bin_rel_wt_sdsl', 'bin_rel_wt', 'flat', 'rbfish', 'brwt')";
+    const char graph_list[] = "('succinct', 'hash')";
 
     switch (identity) {
         case NO_IDENTITY: {
@@ -428,8 +438,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for build:\n");
             fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC database\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence []\n");
+            fprintf(stderr, "\t   --graph [STR] \tgraph representation [succinct]\n");
+            fprintf(stderr, "\t                     \t  "); fprintf(stderr, graph_list); fprintf(stderr, "\n");
             // fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
-            // fprintf(stderr, "\t   --complete \t\tconstruct a complete graph [off]\n");
             fprintf(stderr, "\t   --no-shrink \t\tdo not build mask for dummy k-mers [off]\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
             fprintf(stderr, "\t   --mem-cap-gb [INT] \tmaximum memory available, in Gb [inf]\n");
@@ -444,7 +455,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case EXTEND: {
-            fprintf(stderr, "Usage: %s extend -i <graph_basename> -o <extended_graph_basename> [options] <FASTQ1> [[FASTQ2] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s extend -i <graph> -o <extended_graph_basename> [options] <FASTQ1> [[FASTQ2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for extend:\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence []\n");
@@ -453,7 +464,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --anno-type [STR] \tinternal annotation representation [column]\n");
             fprintf(stderr, "\t                     \t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
-            fprintf(stderr, "\t   --state [STR] \tstate of the extended graph (either 'fast' or 'dynamic') [fast]\n");
             fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
             fprintf(stderr, "\t   --filter-abund [INT] threshold for the abundance of reliable k-mers [0]\n");
             fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
@@ -538,7 +548,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case ANNOTATE: {
-            fprintf(stderr, "Usage: %s annotate -i <graph_basename> [options] <PATH1> [[PATH2] ...]\n"
+            fprintf(stderr, "Usage: %s annotate -i <graph> [options] <PATH1> [[PATH2] ...]\n"
                             "\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
@@ -562,7 +572,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case ANNOTATE_COORDINATES: {
-            fprintf(stderr, "Usage: %s coordinate -i <graph_basename> [options] <PATH1> [[PATH2] ...]\n"
+            fprintf(stderr, "Usage: %s coordinate -i <graph> [options] <PATH1> [[PATH2] ...]\n"
                             "\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
@@ -585,7 +595,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case CLASSIFY: {
-            fprintf(stderr, "Usage: %s classify -i <graph_basename> -a <annotator> [options] <FILE1> [[FILE2] ...]\n"
+            fprintf(stderr, "Usage: %s classify -i <graph> -a <annotator> [options] <FILE1> [[FILE2] ...]\n"
                             "\tEach file is given in fasta or fastq format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for classify:\n");

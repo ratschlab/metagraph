@@ -17,12 +17,16 @@ std::size_t SmallVectorHash::operator()(const SmallVector &vector) const {
 
 namespace utils {
 
-std::string remove_suffix(const std::string &str, const std::string &suffix) {
+bool ends_with(const std::string &str, const std::string &suffix) {
     auto actual_suffix = str.substr(
         std::max(0, static_cast<int>(str.size())
                     - static_cast<int>(suffix.size()))
     );
-    return actual_suffix == suffix
+    return actual_suffix == suffix;
+}
+
+std::string remove_suffix(const std::string &str, const std::string &suffix) {
+    return ends_with(str, suffix)
             ? str.substr(0, str.size() - suffix.size())
             : str;
 }

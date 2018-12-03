@@ -37,6 +37,8 @@ struct SmallVectorHash {
 
 namespace utils {
 
+    bool ends_with(const std::string &str, const std::string &suffix);
+
     std::string remove_suffix(const std::string &str, const std::string &suffix);
 
     template <typename... String>
