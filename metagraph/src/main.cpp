@@ -380,19 +380,46 @@ void execute_query(std::string seq_name,
 }
 
 
-std::unique_ptr<Annotator> initialize_annotation(const Config &config) {
+std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
+                                                 const Config &config,
+                                                 uint64_t num_rows = 0) {
     std::unique_ptr<Annotator> annotation;
-    switch (config.anno_type) {
+
+    Config::AnnotationType anno_type = config.anno_type;
+
+    if (utils::ends_with(filename, annotate::kColumnAnnotatorExtension)) {
+        anno_type = Config::AnnotationType::ColumnCompressed;
+
+    } else if (utils::ends_with(filename, annotate::kRowAnnotatorExtension)) {
+        anno_type = Config::AnnotationType::RowCompressed;
+
+    } else if (utils::ends_with(filename, annotate::kBRWTExtension)) {
+        anno_type = Config::AnnotationType::BRWT;
+
+    } else if (utils::ends_with(filename, annotate::kBinRelWT_sdslExtension)) {
+        anno_type = Config::AnnotationType::BinRelWT_sdsl;
+
+    } else if (utils::ends_with(filename, annotate::kBinRelWTExtension)) {
+        anno_type = Config::AnnotationType::BinRelWT;
+
+    } else if (utils::ends_with(filename, annotate::kRowPackedExtension)) {
+        anno_type = Config::AnnotationType::RowFlat;
+
+    } else if (utils::ends_with(filename, annotate::kRainbowfishExtension)) {
+        anno_type = Config::AnnotationType::RBFish;
+    }
+
+    switch (anno_type) {
         case Config::ColumnCompressed: {
             annotation.reset(
                 new annotate::ColumnCompressed<>(
-                    0, kNumCachedColumns, config.verbose
+                    num_rows, kNumCachedColumns, config.verbose
                 )
             );
             break;
         }
         case Config::RowCompressed: {
-            annotation.reset(new annotate::RowCompressed<>(0, config.sparse));
+            annotation.reset(new annotate::RowCompressed<>(num_rows, config.sparse));
             break;
         }
         case Config::BRWT: {
@@ -416,6 +443,7 @@ std::unique_ptr<Annotator> initialize_annotation(const Config &config) {
             break;
         }
     }
+
     return annotation;
 }
 
@@ -430,6 +458,42 @@ void print_stats(const DBG_succ &graph) {
 void print_stats(const DeBruijnGraph &graph) {
     std::cout << "k: " << graph.get_k() << std::endl;
     std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
+}
+
+void print_stats(const Annotator &annotation) {
+    std::cout << "labels:  " << annotation.num_labels() << std::endl;
+    std::cout << "objects: " << annotation.num_objects() << std::endl;
+    std::cout << "density: " << std::scientific
+                              << static_cast<double>(annotation.num_relations())
+                                    / annotation.num_objects()
+                                    / annotation.num_labels() << std::endl;
+    std::cout << "representation: ";
+
+    if (dynamic_cast<const annotate::ColumnCompressed<std::string> *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::ColumnCompressed) << std::endl;
+
+    } else if (dynamic_cast<const annotate::RowCompressed<std::string> *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::RowCompressed) << std::endl;
+
+    } else if (dynamic_cast<const annotate::BRWTCompressed<std::string> *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::BRWT) << std::endl;
+
+    } else if (dynamic_cast<const annotate::BinRelWT_sdslAnnotator *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::BinRelWT_sdsl) << std::endl;
+
+    } else if (dynamic_cast<const annotate::BinRelWTAnnotator *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::BinRelWT) << std::endl;
+
+    } else if (dynamic_cast<const annotate::RowFlatAnnotator *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::RowFlat) << std::endl;
+
+    } else if (dynamic_cast<const annotate::RainbowfishAnnotator *>(&annotation)) {
+        std::cout << Config::annotype_to_string(Config::RBFish) << std::endl;
+
+    } else {
+        assert(false);
+        throw std::runtime_error("Unknown annotator");
+    }
 }
 
 
@@ -759,16 +823,12 @@ int main(int argc, const char *argv[]) {
                 return 0;
             }
 
-            if (config->anno_type == Config::RowCompressed) {
-                anno_graph.set_annotation(
-                    new annotate::RowCompressed<>(1, config->sparse)
-                );
-            } else {
-                anno_graph.set_annotation(
-                    new annotate::ColumnCompressed<>(1, kNumCachedColumns,
-                                                     config->verbose)
-                );
-            }
+            anno_graph.set_annotation(initialize_annotation(
+                config->infbase_annotators.size()
+                    ? config->infbase_annotators.at(0)
+                    : "",
+                *config
+            ).release());
 
             if (!anno_graph.get_annotation().load(config->infbase_annotators.at(0))) {
                 std::cerr << "ERROR: can't load annotations" << std::endl;
@@ -1021,18 +1081,13 @@ int main(int argc, const char *argv[]) {
             }
 
             // initialize empty annotation
-            if (config->anno_type == Config::RowCompressed) {
-                anno_graph.set_annotation(
-                    new annotate::RowCompressed<>(anno_graph.num_anno_rows(),
-                                                  config->sparse)
-                );
-            } else if (config->anno_type == Config::ColumnCompressed) {
-                anno_graph.set_annotation(
-                    new annotate::ColumnCompressed<>(anno_graph.num_anno_rows(),
-                                                     kNumCachedColumns,
-                                                     config->verbose)
-                );
-            }
+            anno_graph.set_annotation(initialize_annotation(
+                config->infbase_annotators.size()
+                    ? config->infbase_annotators.at(0)
+                    : "",
+                *config,
+                anno_graph.num_anno_rows()
+            ).release());
 
             if (config->infbase_annotators.size()
                     && !anno_graph.get_annotation().load(config->infbase_annotators.at(0))) {
@@ -1134,7 +1189,9 @@ int main(int argc, const char *argv[]) {
                           << " Continue with all coordinates." << std::endl;
             }
 
-            anno_graph.set_annotation(initialize_annotation(*config).release());
+            anno_graph.set_annotation(
+                initialize_annotation(config->infbase_annotators.at(0), *config).release()
+            );
 
             if (!anno_graph.get_annotation().load(config->infbase_annotators.at(0))) {
                 std::cerr << "ERROR: can't load annotations for graph "
@@ -1400,7 +1457,7 @@ int main(int argc, const char *argv[]) {
             }
 
             for (const auto &file : config->infbase_annotators) {
-                auto annotation = initialize_annotation(*config);
+                auto annotation = initialize_annotation(file, *config);
                 if (!annotation->load(file)) {
                     std::cerr << "ERROR: can't load annotation from file "
                               << file << std::endl;
@@ -1408,14 +1465,7 @@ int main(int argc, const char *argv[]) {
                 }
 
                 std::cout << "Statistics for annotation " << file << std::endl;
-                std::cout << "labels:  " << annotation->num_labels() << std::endl;
-                std::cout << "objects: " << annotation->num_objects() << std::endl;
-                std::cout << "density: " << std::scientific
-                                          << static_cast<double>(annotation->num_relations())
-                                                / annotation->num_objects()
-                                                / annotation->num_labels() << std::endl;
-                std::cout << "representation: "
-                          << config->annotype_to_string(config->anno_type) << std::endl;
+                print_stats(*annotation);
             }
 
             return 0;

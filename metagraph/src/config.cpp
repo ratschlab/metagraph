@@ -460,9 +460,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for extend:\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence []\n");
             fprintf(stderr, "\t   --no-shrink \t\tuse all coordinates in graph including dummy k-mers [off]\n");
-            fprintf(stderr, "\t-a --annotator [STR] \tbasename of annotator to extend []\n");
-            fprintf(stderr, "\t   --anno-type [STR] \tinternal annotation representation [column]\n");
-            fprintf(stderr, "\t                     \t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
+            fprintf(stderr, "\t-a --annotator [STR] \tannotator to extend []\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
             fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
             fprintf(stderr, "\t   --filter-abund [INT] threshold for the abundance of reliable k-mers [0]\n");
@@ -539,9 +537,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for stats:\n");
-            fprintf(stderr, "\t-a --annotator [STR] \tbasename of annotator to update []\n");
-            fprintf(stderr, "\t   --anno-type [STR] \tinternal annotation representation [column]\n");
-            fprintf(stderr, "\t                     \t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
+            fprintf(stderr, "\t-a --annotator [STR] \tannotator []\n");
             fprintf(stderr, "\t   --count-dummy \tshow number of dummy source and sink edges [off]\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t   --print-internal \tprint internal graph representation to the screen [off]\n");
@@ -556,7 +552,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             //fprintf(stderr, "\t   --complete \t\tconstruct a complete graph [off]\n");
             fprintf(stderr, "\t   --reference [STR] \t\tbasename of reference sequence []\n");
             fprintf(stderr, "\t   --no-shrink \t\t\tuse all coordinates in graph including dummy k-mers [off]\n");
-            fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator to update []\n");
+            fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to update []\n");
             fprintf(stderr, "\t   --anno-type [STR] \t\tinternal annotation representation [column]\n");
             fprintf(stderr, "\t                     \t\t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
             fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate graph [off]\n");
@@ -576,7 +572,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                             "\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
-            fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator to update []\n");
+            fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to update []\n");
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file [<graph_basename>]\n");
             fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
             fprintf(stderr, "\t   --filter-abund [INT] \tthreshold for the abundance of reliable k-mers [0]\n");
@@ -589,8 +585,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s merge_anno [options] -o <annotator_basename> <ANNOT1> [[ANNOT2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
-            fprintf(stderr, "\t   --anno-type [STR] \tinternal annotation representation [column]\n");
-            fprintf(stderr, "\t                     \t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
@@ -605,9 +599,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --filter-k [INT] \t\tlength of k-mers used for counting and filtering [3]\n");
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             fprintf(stderr, "\t   --no-shrink \t\t\tuse all coordinates in graph including dummy k-mers [off]\n");
-            fprintf(stderr, "\t-a --annotator [STR] \t\tbasename of annotator [<graph_basename>]\n");
-            fprintf(stderr, "\t   --anno-type [STR] \t\tinternal annotation representation [column]\n");
-            fprintf(stderr, "\t                     \t\t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
+            fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to extend []\n");
             fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate graph [off]\n");
             fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
@@ -637,7 +629,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t                      \t          L_2 L_2_renamed\n");
             fprintf(stderr, "\t                      \t          L_2 L_2_renamed\n");
             fprintf(stderr, "\t                      \t          ... ...........'\n");
-            fprintf(stderr, "\t   --anno-type [STR] \ttransform annotations to specified format [column]\n");
+            fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation format [column]\n");
             fprintf(stderr, "\t                     \t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
             fprintf(stderr, "\t   --arity  \t\tarity in the brwt tree [2]\n");
             fprintf(stderr, "\t   --greedy  \t\tuse greedy column partitioning in brwt construction [off]\n");

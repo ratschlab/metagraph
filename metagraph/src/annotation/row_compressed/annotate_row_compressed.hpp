@@ -11,6 +11,8 @@
 
 namespace annotate {
 
+const char kRowAnnotatorExtension[] = ".row.annodbg";
+
 template <typename Label>
 class ColumnCompressed;
 
@@ -60,7 +62,7 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
         MultiLabelEncoded<uint64_t, Label>::label_encoder_
     };
 
-    static constexpr auto kExtension = ".row.annodbg";
+    static constexpr auto kExtension = kRowAnnotatorExtension;
 };
 
 } // namespace annotate
