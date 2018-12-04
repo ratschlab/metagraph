@@ -1234,9 +1234,7 @@ void DBG_succ::print_adj_list(std::ostream &os) const {
 
 // add a full sequence to the graph
 void DBG_succ::add_sequence(const std::string &seq, bool try_extend,
-                            bit_vector_dyn *edges_inserted) {
-    assert(!edges_inserted || edges_inserted->size() == W_->size());
-
+                            std::vector<uint64_t> *edges_inserted) {
     if (seq.size() < k_ + 1)
         return;
 
@@ -1270,7 +1268,7 @@ void DBG_succ::add_sequence(const std::string &seq, bool try_extend,
  */
 edge_index DBG_succ::append_pos(TAlphabet c, edge_index source_node,
                                 const TAlphabet *source_node_kmer,
-                                bit_vector_dyn *edges_inserted) {
+                                std::vector<uint64_t> *edges_inserted) {
     CHECK_INDEX(source_node);
     assert(source_node_kmer);
     assert(std::vector<TAlphabet>(source_node_kmer, source_node_kmer + k_)
@@ -1299,7 +1297,10 @@ edge_index DBG_succ::append_pos(TAlphabet c, edge_index source_node,
     if (prev_c_pos > 0 && compare_node_suffix(prev_c_pos, source_node_kmer)) {
         // the new edge will not be the first incoming for its target node
         // insert the edge
-        insert_edge(c + alph_size, begin, end, edges_inserted);
+        uint64_t inserted = insert_edge(c + alph_size, begin, end);
+        if (edges_inserted && inserted)
+            edges_inserted->push_back(inserted);
+
         return fwd(prev_c_pos);
     }
 
@@ -1322,11 +1323,13 @@ edge_index DBG_succ::append_pos(TAlphabet c, edge_index source_node,
     }
 
     // insert the edge
-    bool shift = insert_edge(c, begin, end, edges_inserted);
+    uint64_t inserted = insert_edge(c, begin, end);
+    if (edges_inserted && inserted)
+        edges_inserted->push_back(inserted);
 
     // Add sentinel if the target node is the new dead-end
     if (!the_only_incoming)
-        return fwd(first_c + shift);
+        return fwd(first_c + (inserted > 0));
 
     uint64_t sentinel_pos = select_last(rank_last(F_[c]) + rank_W(begin - 1, c)) + 1;
 
@@ -1335,7 +1338,7 @@ edge_index DBG_succ::append_pos(TAlphabet c, edge_index source_node,
     last_->insertBit(sentinel_pos, true);
 
     if (edges_inserted)
-        edges_inserted->insertBit(sentinel_pos, true);
+        edges_inserted->push_back(sentinel_pos);
 
     assert((*W_)[0] == 0);
 
@@ -1343,8 +1346,7 @@ edge_index DBG_succ::append_pos(TAlphabet c, edge_index source_node,
 }
 
 
-bool DBG_succ::insert_edge(TAlphabet c, uint64_t begin, uint64_t end,
-                           bit_vector_dyn *edges_inserted) {
+uint64_t DBG_succ::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
     if (begin > 1 && get_W(begin) == kSentinelCode) {
         // the source node is the dead-end with outgoing sentinel
         // replace this sentinel with the proper label
@@ -1364,10 +1366,8 @@ bool DBG_succ::insert_edge(TAlphabet c, uint64_t begin, uint64_t end,
         last_->insertBit(begin, false);
         W_->insert(pos, c);
 
-        if (edges_inserted)
-            edges_inserted->insertBit(pos, true);
-
-        return 1;
+        assert(pos);
+        return pos;
     }
 }
 
@@ -2039,7 +2039,20 @@ node_index DBGSuccinct::traverse_back(node_index node, char prev_char) const {
 // to the number of nodes in graph.
 void DBGSuccinct::add_sequence(const std::string &sequence,
                                bit_vector_dyn *nodes_inserted) {
-    boss_graph_->add_sequence(sequence, true, nodes_inserted);
+    assert(!nodes_inserted || nodes_inserted->size() == num_nodes() + 1);
+
+    if (nodes_inserted) {
+        std::vector<uint64_t> inserted_indexes;
+        inserted_indexes.reserve(sequence.size());
+
+        boss_graph_->add_sequence(sequence, true, &inserted_indexes);
+
+        for (auto i : inserted_indexes) {
+            nodes_inserted->insertBit(i, true);
+        }
+    } else {
+        boss_graph_->add_sequence(sequence, true);
+    }
 }
 
 // Traverse graph mapping sequence to the graph nodes

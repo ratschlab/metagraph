@@ -113,7 +113,7 @@ class DBG_succ {
      */
     void add_sequence(const std::string &seq,
                       bool try_extend = false,
-                      bit_vector_dyn *edges_inserted = NULL);
+                      std::vector<uint64_t> *edges_inserted = NULL);
 
     // Given an edge list, remove them from the graph.
     // TODO: fix the implementation (anchoring the isolated nodes)
@@ -388,13 +388,12 @@ class DBG_succ {
      */
     edge_index append_pos(TAlphabet c, edge_index source_node,
                           const TAlphabet *source_node_kmer,
-                          bit_vector_dyn *edges_inserted = NULL);
+                          std::vector<uint64_t> *edges_inserted = NULL);
 
     /**
      * Helper function used by the append_pos function
      */
-    bool insert_edge(TAlphabet c, uint64_t begin, uint64_t end,
-                     bit_vector_dyn *edges_inserted = NULL);
+    uint64_t insert_edge(TAlphabet c, uint64_t begin, uint64_t end);
 
     /**
      * Erase exactly all the masked edges from the graph,
