@@ -88,7 +88,7 @@ class bit_vector_stat : public bit_vector {
     explicit bit_vector_stat(const bit_vector_stat &other);
     bit_vector_stat(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
                     uint64_t size,
-                    uint64_t num_set_bits = 0);
+                    uint64_t num_set_bits);
     bit_vector_stat(sdsl::bit_vector&& vector) noexcept;
     bit_vector_stat(bit_vector_stat&& other) noexcept;
     bit_vector_stat(std::initializer_list<bool> init);
@@ -234,10 +234,10 @@ class bit_vector_small : public bit_vector {
     template <class BitVector>
     explicit bit_vector_small(const BitVector &vector);
     explicit bit_vector_small(const sdsl::bit_vector &vector);
-    bit_vector_small(const bit_vector_small &other);
+    explicit bit_vector_small(const bit_vector_small &other);
     bit_vector_small(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
                      uint64_t size,
-                     uint64_t num_set_bits = 0);
+                     uint64_t num_set_bits);
 
     bit_vector_small(bit_vector_small&& other) = default;
     bit_vector_small(std::initializer_list<bool> init);
@@ -263,8 +263,6 @@ class bit_vector_small : public bit_vector {
     std::vector<bool> to_vector() const override;
 
     void call_ones(const std::function<void(uint64_t)> &callback) const override;
-
-    bool is_inverted() const;
 
   private:
     std::unique_ptr<bit_vector> vector_;

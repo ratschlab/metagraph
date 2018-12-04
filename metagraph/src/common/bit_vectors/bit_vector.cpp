@@ -439,24 +439,38 @@ void bit_vector_stat::init_rs() {
 // bit_vector_small, sdsl hybrid method                       //
 ////////////////////////////////////////////////////////////////
 
-constexpr double DENSITY_CUTOFF = 0.035;
+const double SD_RRR_VECTOR_DENSITY_CUTOFF = 0.035;
+
 enum VectorCode {
     RRR_VECTOR = 0,
     SD_VECTOR,
     STAT_VECTOR
 };
 
-bool use_sd(uint64_t size, uint64_t num_set_bits) {
-    return num_set_bits < DENSITY_CUTOFF * size
-        || num_set_bits > (1 - DENSITY_CUTOFF) * size;
+VectorCode smallest_vector_representation(uint64_t size, uint64_t num_set_bits) {
+    // TODO: entropy estimate
+    if (num_set_bits < SD_RRR_VECTOR_DENSITY_CUTOFF * size
+            || num_set_bits > (1 - SD_RRR_VECTOR_DENSITY_CUTOFF) * size) {
+        return VectorCode::SD_VECTOR;
+    } else {
+        return VectorCode::RRR_VECTOR;
+    }
 }
 
-// TODO: entropy estimate
-bool use_rrr(uint64_t size, uint64_t num_set_bits) {
-    return !use_sd(size, num_set_bits);
+VectorCode representation(const bit_vector &vector) {
+    if (dynamic_cast<const bit_vector_sd*>(&vector)) {
+        return VectorCode::SD_VECTOR;
+
+    } else if (dynamic_cast<const bit_vector_rrr<>*>(&vector)) {
+        return VectorCode::RRR_VECTOR;
+
+    } else if (dynamic_cast<const bit_vector_stat*>(&vector)) {
+        return VectorCode::STAT_VECTOR;
+
+    } else {
+        throw std::runtime_error("Unsupported type");
+    }
 }
-
-
 
 bit_vector_small::bit_vector_small(uint64_t size, bool value)
       : vector_(new bit_vector_sd(size, value)) {}
@@ -469,12 +483,17 @@ template bit_vector_small::bit_vector_small(const std::vector<bool> &);
 
 bit_vector_small::bit_vector_small(const sdsl::bit_vector &vector) {
     uint64_t num_set_bits = sdsl::util::cnt_one_bits(vector);
-    if (use_sd(vector.size(), num_set_bits)) {
-        vector_.reset(new bit_vector_sd(vector));
-    } else if (use_rrr(vector.size(), num_set_bits)) {
-        vector_.reset(new bit_vector_rrr<>(vector));
-    } else {
-        vector_.reset(new bit_vector_stat(sdsl::bit_vector(vector)));
+
+    switch (smallest_vector_representation(vector.size(), num_set_bits)) {
+        case SD_VECTOR:
+            vector_.reset(new bit_vector_sd(vector));
+            break;
+        case RRR_VECTOR:
+            vector_.reset(new bit_vector_rrr<>(vector));
+            break;
+        case STAT_VECTOR:
+            vector_.reset(new bit_vector_stat(sdsl::bit_vector(vector)));
+            break;
     }
 }
 
@@ -484,29 +503,36 @@ bit_vector_small::bit_vector_small(const bit_vector_small &other) {
 
 bit_vector_small
 ::bit_vector_small(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
-                 uint64_t size,
-                 uint64_t num_set_bits) {
-    if (use_sd(size, num_set_bits)) {
-        vector_.reset(new bit_vector_sd(call_ones, size, num_set_bits));
-    } else if (use_rrr(size, num_set_bits)) {
-        vector_.reset(new bit_vector_rrr<>(
-            bit_vector_stat(call_ones, size, num_set_bits).convert_to<sdsl::bit_vector>())
-        );
-    } else {
-        vector_.reset(new bit_vector_stat(call_ones, size, num_set_bits));
+                   uint64_t size,
+                   uint64_t num_set_bits) {
+    switch (smallest_vector_representation(size, num_set_bits)) {
+        case SD_VECTOR:
+            vector_.reset(new bit_vector_sd(call_ones, size, num_set_bits));
+            break;
+        case RRR_VECTOR:
+            vector_.reset(new bit_vector_rrr<>(
+                bit_vector_stat(call_ones, size, num_set_bits).convert_to<bit_vector_rrr<>>()
+            ));
+            break;
+        case STAT_VECTOR:
+            vector_.reset(new bit_vector_stat(call_ones, size, num_set_bits));
+            break;
     }
 }
 
 bit_vector_small& bit_vector_small::operator=(const bit_vector_small &other) {
-    if (dynamic_cast<const bit_vector_sd*>(vector_.get())) {
-        vector_.reset(new bit_vector_sd(*dynamic_cast<const bit_vector_sd*>(other.vector_.get())));
-    } else if (dynamic_cast<const bit_vector_rrr<>*>(vector_.get())) {
-        vector_.reset(new bit_vector_rrr<>(*dynamic_cast<const bit_vector_rrr<>*>(other.vector_.get())));
-    } else if (dynamic_cast<const bit_vector_stat*>(vector_.get())) {
-        vector_.reset(new bit_vector_stat(*dynamic_cast<const bit_vector_stat*>(other.vector_.get())));
-    } else {
-        throw std::runtime_error("Unsupported type");
+    switch (representation(*other.vector_)) {
+        case SD_VECTOR:
+            vector_.reset(new bit_vector_sd(other.vector_->copy_to<bit_vector_sd>()));
+            break;
+        case RRR_VECTOR:
+            vector_.reset(new bit_vector_rrr<>(other.vector_->copy_to<bit_vector_rrr<>>()));
+            break;
+        case STAT_VECTOR:
+            vector_.reset(new bit_vector_stat(other.vector_->copy_to<bit_vector_stat>()));
+            break;
     }
+
     return *this;
 }
 
@@ -555,21 +581,13 @@ bool bit_vector_small::load(std::istream &in) {
             vector_.reset(new bit_vector_stat());
             break;
         default:
-            throw std::runtime_error("Unsupported code");
+            return false;
     }
     return vector_->load(in);
 }
 
 void bit_vector_small::serialize(std::ostream &out) const {
-    if (dynamic_cast<bit_vector_sd*>(vector_.get())) {
-        serialize_number(out, VectorCode::SD_VECTOR);
-    } else if (dynamic_cast<bit_vector_rrr<>*>(vector_.get())) {
-        serialize_number(out, VectorCode::RRR_VECTOR);
-    } else if (dynamic_cast<bit_vector_stat*>(vector_.get())) {
-        serialize_number(out, VectorCode::STAT_VECTOR);
-    } else {
-        throw std::runtime_error("Unsupported code");
-    }
+    serialize_number(out, representation(*vector_));
     vector_->serialize(out);
 }
 
@@ -585,12 +603,6 @@ void bit_vector_small::call_ones(const std::function<void(uint64_t)> &callback) 
     vector_->call_ones(callback);
 }
 
-bool bit_vector_small::is_inverted() const {
-    if (dynamic_cast<bit_vector_sd*>(vector_.get()))
-        return dynamic_cast<bit_vector_sd*>(vector_.get())->is_inverted();
-
-    return false;
-}
 
 ////////////////////////////////////////////////////////////////
 // bit_vector_sd, sdsl compressed with rank-select support    //
