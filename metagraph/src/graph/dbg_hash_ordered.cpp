@@ -16,7 +16,7 @@ DBGHashOrdered::DBGHashOrdered(size_t k, bool canonical_only)
 
 void DBGHashOrdered::add_sequence(const std::string &sequence,
                                   bit_vector_dyn *nodes_inserted) {
-    assert(!nodes_inserted || nodes_inserted->size() == num_nodes());
+    assert(!nodes_inserted || nodes_inserted->size() == num_nodes() + 1);
 
     for (const auto &kmer : sequence_to_kmers(sequence)) {
         auto index_insert = kmers_.insert(kmer);

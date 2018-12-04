@@ -529,6 +529,8 @@ class DBGSuccinct : public DeBruijnGraph {
     explicit DBGSuccinct(size_t k) : boss_graph_(std::make_unique<DBG_succ>(k - 1)) {}
     explicit DBGSuccinct(DBG_succ *boss_graph) : boss_graph_(boss_graph) {}
 
+    virtual ~DBGSuccinct() {}
+
     virtual size_t get_k() const override final;
 
     // Check whether graph contains fraction of nodes from the sequence
@@ -554,14 +556,26 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual uint64_t num_nodes() const override final;
 
+    virtual void mask_dummy_kmers(size_t num_threads, bool with_pruning) final;
+
     virtual bool load(const std::string &filename_base) override final;
     virtual void serialize(const std::string &filename_base) const override final;
+
+    virtual void switch_state(Config::StateType new_state) final;
+    virtual Config::StateType get_state() const final;
 
     virtual const DBG_succ& get_boss() const final { return *boss_graph_; }
     virtual DBG_succ& get_boss() final { return *boss_graph_; }
 
   private:
+    uint64_t kmer_to_boss_index(node_index kmer_index) const;
+    node_index boss_to_kmer_index(uint64_t boss_index) const;
+
     std::unique_ptr<DBG_succ> boss_graph_;
+    // all edges in boss except dummy
+    std::unique_ptr<bit_vector> valid_edges_;
+
+    static constexpr auto kDummyMaskExtension = ".edgemask";
 };
 
 

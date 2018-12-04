@@ -2017,21 +2017,29 @@ bool DBGSuccinct::find(const std::string &sequence,
 // Traverse the outgoing edge
 node_index DBGSuccinct::traverse(node_index node, char next_char) const {
     // dbg node is a boss edge
-    DBG_succ::edge_index edge = boss_graph_->fwd(node);
-    return boss_graph_->pick_edge(edge,
-                                  boss_graph_->get_source_node(edge),
-                                  boss_graph_->encode(next_char));
+    DBG_succ::edge_index edge = boss_graph_->fwd(kmer_to_boss_index(node));
+    return boss_to_kmer_index(
+        boss_graph_->pick_edge(edge,
+                               boss_graph_->get_source_node(edge),
+                               boss_graph_->encode(next_char))
+    );
 }
 
 // Traverse the incoming edge
 node_index DBGSuccinct::traverse_back(node_index node, char prev_char) const {
     // map dbg node, i.e. a boss edge, to a boss node
-    auto boss_node = boss_graph_->get_source_node(node);
+    auto boss_edge = kmer_to_boss_index(node);
+
+    auto boss_node = boss_graph_->get_source_node(boss_edge);
     auto source_node = boss_graph_->traverse_back(boss_node, prev_char);
-    return source_node == npos
-            ? npos
-            : boss_graph_->outgoing_edge_idx(source_node,
-                                             boss_graph_->get_node_last_value(node));
+
+    if (!source_node)
+        return npos;
+
+    return boss_to_kmer_index(
+        boss_graph_->outgoing_edge_idx(source_node,
+                                       boss_graph_->get_node_last_value(boss_edge))
+    );
 }
 
 // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
@@ -2048,11 +2056,15 @@ void DBGSuccinct::add_sequence(const std::string &sequence,
         boss_graph_->add_sequence(sequence, true, &inserted_indexes);
 
         for (auto i : inserted_indexes) {
-            nodes_inserted->insertBit(i, true);
+            if (valid_edges_.get())
+                valid_edges_->insertBit(i, true);
+            nodes_inserted->insertBit(boss_to_kmer_index(i), true);
         }
     } else {
         boss_graph_->add_sequence(sequence, true);
     }
+
+    assert(!valid_edges_.get() || !(*valid_edges_)[0]);
 }
 
 // Traverse graph mapping sequence to the graph nodes
@@ -2060,17 +2072,179 @@ void DBGSuccinct::add_sequence(const std::string &sequence,
 void DBGSuccinct::map_to_nodes(const std::string &sequence,
                                const std::function<void(node_index)> &callback,
                                const std::function<bool()> &terminate) const {
-    boss_graph_->map_to_edges(sequence, callback, terminate);
+    boss_graph_->map_to_edges(
+        sequence,
+        [&](DBG_succ::edge_index i) { callback(boss_to_kmer_index(i)); },
+        terminate
+    );
 }
 
 uint64_t DBGSuccinct::num_nodes() const {
-    return boss_graph_->num_edges();
+    return valid_edges_.get()
+                ? valid_edges_->num_set_bits()
+                : boss_graph_->num_edges();
 }
 
 bool DBGSuccinct::load(const std::string &filename_base) {
-    return boss_graph_->load(filename_base);
+    if (!boss_graph_->load(filename_base))
+        return false;
+
+    // release the old mask
+    valid_edges_.reset();
+
+    std::ifstream instream(remove_suffix(filename_base, ".dbg")
+                                                + kDummyMaskExtension,
+                           std::ios::binary);
+    if (!instream.good())
+        return true;
+
+    // initialize a new vector
+    switch (get_state()) {
+        case Config::STAT: {
+            valid_edges_.reset(new bit_vector_stat());
+            break;
+        }
+        case Config::DYN: {
+            valid_edges_.reset(new bit_vector_dyn());
+            break;
+        }
+        case Config::SMALL: {
+            valid_edges_.reset(new bit_vector_small());
+            break;
+        }
+    }
+
+    // load the mask of valid edges (all non-dummy including npos 0)
+    if (!valid_edges_->load(instream)) {
+        std::cerr << "Error: Can't load dummy edge mask." << std::endl;
+        return false;
+    }
+
+    if (valid_edges_->size() != boss_graph_->num_edges() + 1 || (*valid_edges_)[0]) {
+        std::cerr << "Error: Edge mask is not compatible with graph." << std::endl;
+        return false;
+    }
+
+    return true;
 }
 
 void DBGSuccinct::serialize(const std::string &filename_base) const {
     boss_graph_->serialize(filename_base);
+
+    if (!valid_edges_.get())
+        return;
+
+    assert((boss_graph_->get_state() == Config::StateType::STAT
+                && dynamic_cast<const bit_vector_stat*>(valid_edges_.get()))
+        || (boss_graph_->get_state() == Config::StateType::DYN
+                && dynamic_cast<const bit_vector_dyn*>(valid_edges_.get()))
+        || (boss_graph_->get_state() == Config::StateType::SMALL
+                && dynamic_cast<const bit_vector_small*>(valid_edges_.get())));
+
+    std::ofstream outstream(remove_suffix(filename_base, ".dbg")
+                                                + kDummyMaskExtension,
+                            std::ios::binary);
+    if (!outstream.good())
+        throw std::ios_base::failure("Can't write to file "
+                                        + filename_base + kDummyMaskExtension);
+
+    valid_edges_->serialize(outstream);
+}
+
+void DBGSuccinct::switch_state(Config::StateType new_state) {
+    if (get_state() == new_state)
+        return;
+
+    if (valid_edges_.get()) {
+        switch (new_state) {
+            case Config::STAT: {
+                valid_edges_ = std::make_unique<bit_vector_stat>(
+                    valid_edges_->convert_to<bit_vector_stat>()
+                );
+                break;
+            }
+            case Config::DYN: {
+                valid_edges_ = std::make_unique<bit_vector_dyn>(
+                    valid_edges_->convert_to<bit_vector_dyn>()
+                );
+                break;
+            }
+            case Config::SMALL: {
+                valid_edges_ = std::make_unique<bit_vector_small>(
+                    valid_edges_->convert_to<bit_vector_small>()
+                );
+                break;
+            }
+        }
+    }
+
+    boss_graph_->switch_state(new_state);
+}
+
+Config::StateType DBGSuccinct::get_state() const {
+    assert(!valid_edges_.get()
+                || boss_graph_->get_state() != Config::StateType::STAT
+                || dynamic_cast<const bit_vector_stat*>(valid_edges_.get()));
+    assert(!valid_edges_.get()
+                || boss_graph_->get_state() != Config::StateType::DYN
+                || dynamic_cast<const bit_vector_dyn*>(valid_edges_.get()));
+    assert(!valid_edges_.get()
+                || boss_graph_->get_state() != Config::StateType::SMALL
+                || dynamic_cast<const bit_vector_small*>(valid_edges_.get()));
+
+    return boss_graph_->get_state();
+}
+
+
+void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
+    valid_edges_.reset();
+
+    std::vector<bool> vector = with_pruning
+        ? boss_graph_->prune_and_mark_all_dummy_edges(num_threads)
+        : boss_graph_->mark_all_dummy_edges(num_threads);
+
+    for (uint64_t i = 0; i < vector.size(); ++i) {
+        vector[i] = !vector[i];
+    }
+
+    switch (get_state()) {
+        case Config::STAT: {
+            valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector));
+            break;
+        }
+        case Config::DYN: {
+            valid_edges_ = std::make_unique<bit_vector_dyn>(std::move(vector));
+            break;
+        }
+        case Config::SMALL: {
+            valid_edges_ = std::make_unique<bit_vector_small>(std::move(vector));
+            break;
+        }
+    }
+
+    assert(valid_edges_.get());
+    assert(valid_edges_->size() == boss_graph_->num_edges() + 1);
+    assert(!(*valid_edges_)[0]);
+}
+
+uint64_t DBGSuccinct::kmer_to_boss_index(node_index kmer_index) const {
+    assert(kmer_index <= num_nodes());
+
+    if (!valid_edges_.get() || !kmer_index)
+        return kmer_index;
+
+    return valid_edges_->select1(kmer_index);
+}
+
+DBGSuccinct::node_index DBGSuccinct::boss_to_kmer_index(uint64_t boss_index) const {
+    assert(boss_index <= boss_graph_->num_edges());
+    assert(!valid_edges_.get() || boss_index < valid_edges_->size());
+
+    if (!valid_edges_.get() || !boss_index)
+        return boss_index;
+
+    if (!(*valid_edges_)[boss_index])
+        return npos;
+
+    return valid_edges_->rank1(boss_index);
 }

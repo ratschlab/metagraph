@@ -2,6 +2,9 @@
 
 #include "gtest/gtest.h"
 
+#define protected public
+#define private public
+
 #include "dbg_succinct.hpp"
 #include "annotated_dbg.hpp"
 #include "annotate_column_compressed.hpp"
@@ -18,11 +21,11 @@ TEST(AnnotatedDBG, ExtendGraphWithSimplePath) {
         std::string sequence(100, 'A');
 
         bit_vector_dyn inserted_edges(anno_graph.get_graph().num_nodes() + 1, 0);
-        anno_graph.get_graph().add_sequence(sequence, &inserted_edges);
+        anno_graph.graph_->add_sequence(sequence, &inserted_edges);
 
         ASSERT_EQ(k + 2, anno_graph.get_graph().num_nodes());
 
-        anno_graph.adjust_annotation(inserted_edges);
+        AnnotatedDBG::insert_zero_rows(anno_graph.annotator_.get(), inserted_edges);
         EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_edges.size());
 
         anno_graph.annotate_sequence(sequence, { "Label" });
@@ -42,12 +45,12 @@ TEST(AnnotatedDBG, ExtendGraphAddPath) {
                                     + std::string(2, 'G')
                                     + std::string(2, 'N');
 
-        DBG_succ *boss_graph = new DBG_succ(k);
-        AnnotatedDBG anno_graph(new DBGSuccinct(boss_graph));
-        anno_graph.get_graph().add_sequence(seq_first);
+        auto graph = std::make_unique<DBGSuccinct>(k + 1);
+        graph->add_sequence(seq_first);
 
-        anno_graph.set_annotation(
-            new annotate::ColumnCompressed<>(anno_graph.get_graph().num_nodes())
+        AnnotatedDBG anno_graph(
+            graph.release(),
+            new annotate::ColumnCompressed<>(graph->num_nodes())
         );
 
         anno_graph.annotate_sequence(seq_first, { "First" });
@@ -57,8 +60,8 @@ TEST(AnnotatedDBG, ExtendGraphAddPath) {
 
         bit_vector_dyn inserted_edges(anno_graph.get_graph().num_nodes() + 1, 0);
 
-        anno_graph.get_graph().add_sequence(seq_second, &inserted_edges);
-        anno_graph.adjust_annotation(inserted_edges);
+        anno_graph.graph_->add_sequence(seq_second, &inserted_edges);
+        AnnotatedDBG::insert_zero_rows(anno_graph.annotator_.get(), inserted_edges);
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -84,12 +87,12 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
                                     + std::string(2, 'N')
                                     + std::string(100, 'A');
 
-        DBG_succ *boss_graph = new DBG_succ(k);
-        AnnotatedDBG anno_graph(new DBGSuccinct(boss_graph));
-        anno_graph.get_graph().add_sequence(seq_first);
+        auto graph = std::make_unique<DBGSuccinct>(k + 1);
+        graph->add_sequence(seq_first);
 
-        anno_graph.set_annotation(
-            new annotate::ColumnCompressed<>(anno_graph.get_graph().num_nodes())
+        AnnotatedDBG anno_graph(
+            graph.release(),
+            new annotate::ColumnCompressed<>(graph->num_nodes())
         );
 
         anno_graph.annotate_sequence(seq_first, { "First" });
@@ -99,9 +102,9 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
 
         bit_vector_dyn inserted_edges(anno_graph.get_graph().num_nodes() + 1, 0);
 
-        anno_graph.get_graph().add_sequence(seq_second, &inserted_edges);
-        anno_graph.get_graph().add_sequence(seq_third, &inserted_edges);
-        anno_graph.adjust_annotation(inserted_edges);
+        anno_graph.graph_->add_sequence(seq_second, &inserted_edges);
+        anno_graph.graph_->add_sequence(seq_third, &inserted_edges);
+        AnnotatedDBG::insert_zero_rows(anno_graph.annotator_.get(), inserted_edges);
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -132,12 +135,12 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
                                     + std::string(2, 'N')
                                     + std::string(100, 'A');
 
-        DBG_succ *boss_graph = new DBG_succ(k);
-        AnnotatedDBG anno_graph(new DBGSuccinct(boss_graph), 10);
-        anno_graph.get_graph().add_sequence(seq_first);
+        auto graph = std::make_unique<DBGSuccinct>(k + 1);
+        graph->add_sequence(seq_first);
 
-        anno_graph.set_annotation(
-            new annotate::ColumnCompressed<>(anno_graph.get_graph().num_nodes())
+        AnnotatedDBG anno_graph(
+            graph.release(),
+            new annotate::ColumnCompressed<>(graph->num_nodes())
         );
 
         anno_graph.annotate_sequence(seq_first, { "First" });
@@ -148,9 +151,9 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
 
         bit_vector_dyn inserted_edges(anno_graph.get_graph().num_nodes() + 1, 0);
 
-        anno_graph.get_graph().add_sequence(seq_second, &inserted_edges);
-        anno_graph.get_graph().add_sequence(seq_third, &inserted_edges);
-        anno_graph.adjust_annotation(inserted_edges);
+        anno_graph.graph_->add_sequence(seq_second, &inserted_edges);
+        anno_graph.graph_->add_sequence(seq_third, &inserted_edges);
+        AnnotatedDBG::insert_zero_rows(anno_graph.annotator_.get(), inserted_edges);
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -182,17 +185,18 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
                                     + std::string(2, 'N')
                                     + std::string(100, 'A');
 
-        DBG_succ *boss_graph = new DBG_succ(k);
-        AnnotatedDBG anno_graph(new DBGSuccinct(boss_graph));
-        anno_graph.get_graph().add_sequence(seq_first);
-        anno_graph.initialize_annotation_mask(boss_graph->mark_all_dummy_edges(0));
+        auto graph = std::make_unique<DBGSuccinct>(k + 1);
+        graph->add_sequence(seq_first);
+        graph->mask_dummy_kmers(0, false);
 
-        anno_graph.set_annotation(
-            new annotate::ColumnCompressed<>(anno_graph.num_anno_rows())
+        AnnotatedDBG anno_graph(
+            graph.release(),
+            new annotate::ColumnCompressed<>(graph->num_nodes())
         );
 
         EXPECT_TRUE(anno_graph.get_annotation().num_objects() + k
-                        < anno_graph.get_graph().num_nodes()) << *boss_graph;
+                        < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
+            << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
         anno_graph.annotate_sequence(seq_first, { "First" });
 
@@ -201,9 +205,9 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
 
         bit_vector_dyn inserted_edges(anno_graph.get_graph().num_nodes() + 1, 0);
 
-        anno_graph.get_graph().add_sequence(seq_second, &inserted_edges);
-        anno_graph.get_graph().add_sequence(seq_third, &inserted_edges);
-        anno_graph.adjust_annotation(inserted_edges);
+        anno_graph.graph_->add_sequence(seq_second, &inserted_edges);
+        anno_graph.graph_->add_sequence(seq_third, &inserted_edges);
+        AnnotatedDBG::insert_zero_rows(anno_graph.annotator_.get(), inserted_edges);
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -212,7 +216,8 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
         anno_graph.annotate_sequence(seq_third, { "Third" });
 
         EXPECT_TRUE(anno_graph.get_annotation().num_objects() + k
-                        < anno_graph.get_graph().num_nodes()) << *boss_graph;
+                        < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
+            << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
         EXPECT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -237,17 +242,19 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
                                     + std::string(2, 'N')
                                     + std::string(100, 'A');
 
-        DBG_succ *boss_graph = new DBG_succ(k);
-        AnnotatedDBG anno_graph(new DBGSuccinct(boss_graph), 10);
-        anno_graph.get_graph().add_sequence(seq_first);
-        anno_graph.initialize_annotation_mask(boss_graph->mark_all_dummy_edges(10));
+        auto graph = std::make_unique<DBGSuccinct>(k + 1);
+        graph->add_sequence(seq_first);
+        graph->mask_dummy_kmers(10, false);
 
-        anno_graph.set_annotation(
-            new annotate::ColumnCompressed<>(anno_graph.num_anno_rows())
+        AnnotatedDBG anno_graph(
+            graph.release(),
+            new annotate::ColumnCompressed<>(graph->num_nodes()),
+            10
         );
 
         EXPECT_TRUE(anno_graph.get_annotation().num_objects() + k
-                        < anno_graph.get_graph().num_nodes()) << *boss_graph;
+                        < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
+            << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
         anno_graph.annotate_sequence(seq_first, { "First" });
         anno_graph.join();
@@ -257,9 +264,9 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
 
         bit_vector_dyn inserted_edges(anno_graph.get_graph().num_nodes() + 1, 0);
 
-        anno_graph.get_graph().add_sequence(seq_second, &inserted_edges);
-        anno_graph.get_graph().add_sequence(seq_third, &inserted_edges);
-        anno_graph.adjust_annotation(inserted_edges);
+        anno_graph.graph_->add_sequence(seq_second, &inserted_edges);
+        anno_graph.graph_->add_sequence(seq_third, &inserted_edges);
+        AnnotatedDBG::insert_zero_rows(anno_graph.annotator_.get(), inserted_edges);
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -269,7 +276,8 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
         anno_graph.join();
 
         EXPECT_TRUE(anno_graph.get_annotation().num_objects() + k
-                        < anno_graph.get_graph().num_nodes()) << *boss_graph;
+                        < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
+            << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
         EXPECT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -294,28 +302,29 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
                                     + std::string(2, 'N')
                                     + std::string(100, 'A');
 
-        DBG_succ *boss_graph = new DBG_succ(k);
-        AnnotatedDBG anno_graph(new DBGSuccinct(boss_graph));
-        anno_graph.get_graph().add_sequence(seq_first);
-        anno_graph.initialize_annotation_mask(boss_graph->prune_and_mark_all_dummy_edges(0));
+        auto graph = std::make_unique<DBGSuccinct>(k + 1);
+        graph->add_sequence(seq_first);
+        graph->mask_dummy_kmers(0, true);
 
-        anno_graph.set_annotation(
-            new annotate::ColumnCompressed<>(anno_graph.num_anno_rows())
+        AnnotatedDBG anno_graph(
+            graph.release(),
+            new annotate::ColumnCompressed<>(graph->num_nodes())
         );
 
         anno_graph.annotate_sequence(seq_first, { "First" });
 
         EXPECT_TRUE(anno_graph.get_annotation().num_objects() + 1
-                        < anno_graph.get_graph().num_nodes()) << *boss_graph;
+                        < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
+            << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
         bit_vector_dyn inserted_edges(anno_graph.get_graph().num_nodes() + 1, 0);
 
-        anno_graph.get_graph().add_sequence(seq_second, &inserted_edges);
-        anno_graph.get_graph().add_sequence(seq_third, &inserted_edges);
-        anno_graph.adjust_annotation(inserted_edges);
+        anno_graph.graph_->add_sequence(seq_second, &inserted_edges);
+        anno_graph.graph_->add_sequence(seq_third, &inserted_edges);
+        AnnotatedDBG::insert_zero_rows(anno_graph.annotator_.get(), inserted_edges);
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -324,7 +333,8 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
         anno_graph.annotate_sequence(seq_third, { "Third" });
 
         EXPECT_TRUE(anno_graph.get_annotation().num_objects() + 1
-                        < anno_graph.get_graph().num_nodes()) << *boss_graph;
+                        < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
+            << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
         EXPECT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -349,29 +359,31 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
                                     + std::string(2, 'N')
                                     + std::string(100, 'A');
 
-        DBG_succ *boss_graph = new DBG_succ(k);
-        AnnotatedDBG anno_graph(new DBGSuccinct(boss_graph), 10);
-        anno_graph.get_graph().add_sequence(seq_first);
-        anno_graph.initialize_annotation_mask(boss_graph->prune_and_mark_all_dummy_edges(10));
+        auto graph = std::make_unique<DBGSuccinct>(k + 1);
+        graph->add_sequence(seq_first);
+        graph->mask_dummy_kmers(10, true);
 
-        anno_graph.set_annotation(
-            new annotate::ColumnCompressed<>(anno_graph.num_anno_rows())
+        AnnotatedDBG anno_graph(
+            graph.release(),
+            new annotate::ColumnCompressed<>(graph->num_nodes()),
+            10
         );
 
         anno_graph.annotate_sequence(seq_first, { "First" });
         anno_graph.join();
 
         EXPECT_TRUE(anno_graph.get_annotation().num_objects() + 1
-                        < anno_graph.get_graph().num_nodes()) << *boss_graph;
+                        < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
+            << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
 
         bit_vector_dyn inserted_edges(anno_graph.get_graph().num_nodes() + 1, 0);
 
-        anno_graph.get_graph().add_sequence(seq_second, &inserted_edges);
-        anno_graph.get_graph().add_sequence(seq_third, &inserted_edges);
-        anno_graph.adjust_annotation(inserted_edges);
+        anno_graph.graph_->add_sequence(seq_second, &inserted_edges);
+        anno_graph.graph_->add_sequence(seq_third, &inserted_edges);
+        AnnotatedDBG::insert_zero_rows(anno_graph.annotator_.get(), inserted_edges);
 
         ASSERT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
@@ -381,7 +393,8 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
         anno_graph.join();
 
         EXPECT_TRUE(anno_graph.get_annotation().num_objects() + 1
-                        < anno_graph.get_graph().num_nodes()) << *boss_graph;
+                        < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
+            << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
         EXPECT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));

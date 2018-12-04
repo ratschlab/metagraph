@@ -74,7 +74,7 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "--dynamic")) {
             dynamic = true;
         } else if (!strcmp(argv[i], "--no-shrink")) {
-            shrink_anno = false;
+            mark_dummy_kmers = false;
         } else if (!strcmp(argv[i], "--anno-filename")) {
             filename_anno = true;
         } else if (!strcmp(argv[i], "--anno-header")) {
@@ -459,7 +459,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for extend:\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence []\n");
-            fprintf(stderr, "\t   --no-shrink \t\tuse all coordinates in graph including dummy k-mers [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \tannotator to extend []\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
             fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
@@ -551,7 +550,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --kmc \t\t\tparse k-mers from precomputed KMC database\n");
             //fprintf(stderr, "\t   --complete \t\tconstruct a complete graph [off]\n");
             fprintf(stderr, "\t   --reference [STR] \t\tbasename of reference sequence []\n");
-            fprintf(stderr, "\t   --no-shrink \t\t\tuse all coordinates in graph including dummy k-mers [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to update []\n");
             fprintf(stderr, "\t   --anno-type [STR] \t\tinternal annotation representation [column]\n");
             fprintf(stderr, "\t                     \t\t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
@@ -598,7 +596,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --filter-k [INT] \t\tlength of k-mers used for counting and filtering [3]\n");
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
-            fprintf(stderr, "\t   --no-shrink \t\t\tuse all coordinates in graph including dummy k-mers [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to extend []\n");
             fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate graph [off]\n");
             fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");

@@ -156,9 +156,16 @@ bool bit_vector_dyn::load(std::istream &in) {
     if (!in.good())
         return false;
 
-    //TODO: catch reading errors
-    vector_.deserialise(in);
-    return true;
+    try {
+        //TODO: catch reading errors
+        vector_.deserialise(in);
+        return true;
+    } catch (const std::bad_alloc &exception) {
+        std::cerr << "ERROR: Not enough memory to load bit_vector_sd." << std::endl;
+        return false;
+    } catch (...) {
+        return false;
+    }
 }
 
 void bit_vector_dyn::serialize(std::ostream &out) const {

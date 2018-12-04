@@ -720,22 +720,18 @@ int main(int argc, const char *argv[]) {
                           << timer.elapsed() << "sec" << std::endl;
 
             if (!config->outfbase.empty()) {
-                graph->serialize(config->outfbase);
-
-                if (config->shrink_anno && dynamic_cast<DBGSuccinct*>(graph.get())) {
-                    AnnotatedDBG anno_graph(graph.release(), config->parallel);
-                    if (config->verbose) {
+                if (dynamic_cast<DBGSuccinct*>(graph.get()) && config->mark_dummy_kmers) {
+                    if (config->verbose)
                         std::cout << "Detecting all dummy k-mers..." << std::flush;
-                    }
+
                     timer.reset();
-                    anno_graph.initialize_annotation_mask(
-                        dynamic_cast<DBGSuccinct&>(anno_graph.get_graph()).get_boss().mark_all_dummy_edges(config->parallel)
-                    );
-                    if (config->verbose) {
+                    dynamic_cast<DBGSuccinct&>(*graph).mask_dummy_kmers(config->parallel, false);
+
+                    if (config->verbose)
                         std::cout << timer.elapsed() << "sec" << std::endl;
-                    }
-                    anno_graph.serialize_annotation_mask(config->outfbase);
                 }
+
+                graph->serialize(config->outfbase);
             }
 
             return 0;
@@ -756,11 +752,14 @@ int main(int argc, const char *argv[]) {
             timer.reset();
 
             if (dynamic_cast<DBGSuccinct*>(graph.get())) {
-                auto &boss_graph = dynamic_cast<DBGSuccinct&>(*graph).get_boss();
-                if (boss_graph.get_state() != Config::DYN) {
+                auto &succinct_graph = dynamic_cast<DBGSuccinct&>(*graph);
+
+                if (succinct_graph.get_state() != Config::DYN) {
                     if (config->verbose)
                         std::cout << "Switching state of succinct graph to dynamic..." << std::flush;
-                    boss_graph.switch_state(Config::DYN);
+
+                    succinct_graph.switch_state(Config::DYN);
+
                     if (config->verbose)
                         std::cout << "\tdone in " << timer.elapsed() << "sec" << std::endl;
                 }
@@ -807,54 +806,38 @@ int main(int argc, const char *argv[]) {
 
             timer.reset();
 
-            AnnotatedDBG anno_graph(config->parallel);
-            if (config->shrink_anno
-                    && !anno_graph.load_annotation_mask(remove_graph_extension(config->infbase))) {
-                std::cerr << "Warning: Can't load coordinate mask."
-                          << " Continue with all coordinates." << std::endl;
-            }
+            auto annotation = initialize_annotation(config->infbase_annotators.size()
+                                                        ? config->infbase_annotators.at(0)
+                                                        : "",
+                                                    *config);
 
-            if (!config->infbase_annotators.size()) {
-                anno_graph.adjust_annotation(*inserted_edges);
-                try {
-                    anno_graph.serialize_annotation_mask(config->outfbase);
-                } catch (...) {
-                }
-                return 0;
-            }
-
-            anno_graph.set_annotation(initialize_annotation(
-                config->infbase_annotators.size()
-                    ? config->infbase_annotators.at(0)
-                    : "",
-                *config
-            ).release());
-
-            if (!anno_graph.get_annotation().load(config->infbase_annotators.at(0))) {
+            if (!annotation->load(config->infbase_annotators.at(0))) {
                 std::cerr << "ERROR: can't load annotations" << std::endl;
                 exit(1);
             } else if (config->verbose) {
                 std::cout << "Annotation was loaded in "
                           << timer.elapsed() << "sec" << std::endl;
             }
+
             timer.reset();
 
             assert(inserted_edges.get());
-            if (config->verbose)
-                std::cout << "Insert empty rows to the annotation matrix..." << std::flush;
 
-            if (!anno_graph.check_compatibility(true)) {
-                std::cerr << "ERROR: graph cannot be annotated" << std::endl;
+            if (annotation->num_objects() + 1 != inserted_edges->size()
+                                                - inserted_edges->num_set_bits()) {
+                std::cerr << "ERROR: incompatible graph and annotation." << std::endl;
                 exit(1);
             }
 
-            anno_graph.adjust_annotation(*inserted_edges);
+            if (config->verbose)
+                std::cout << "Insert empty rows to the annotation matrix..." << std::flush;
+
+            AnnotatedDBG::insert_zero_rows(annotation.get(), *inserted_edges);
 
             if (config->verbose)
                 std::cout << "\tdone in " << timer.elapsed() << "sec" << std::endl;
 
-            anno_graph.get_annotation().serialize(config->outfbase);
-            anno_graph.serialize_annotation_mask(config->outfbase);
+            annotation->serialize(config->outfbase);
 
             return 0;
         }
@@ -1067,36 +1050,31 @@ int main(int argc, const char *argv[]) {
         case Config::ANNOTATE: {
             assert(config->infbase_annotators.size() <= 1);
 
-            // load graph
-            AnnotatedDBG anno_graph(
-                load_critical_dbg(config->infbase).release(),
-                config->parallel
-            );
+            auto graph_temp = load_critical_dbg(config->infbase);
 
-            // load masked k-mers
-            if (config->shrink_anno
-                    && !anno_graph.load_annotation_mask(remove_graph_extension(config->infbase))) {
-                std::cerr << "Warning: Can't load coordinate mask."
-                          << " Continue with all coordinates." << std::endl;
-            }
-
-            // initialize empty annotation
-            anno_graph.set_annotation(initialize_annotation(
+            auto annotation_temp = initialize_annotation(
                 config->infbase_annotators.size()
                     ? config->infbase_annotators.at(0)
                     : "",
                 *config,
-                anno_graph.num_anno_rows()
-            ).release());
-
+                graph_temp->num_nodes()
+            );
             if (config->infbase_annotators.size()
-                    && !anno_graph.get_annotation().load(config->infbase_annotators.at(0))) {
+                    && !annotation_temp->load(config->infbase_annotators.at(0))) {
                 std::cerr << "ERROR: can't load annotations" << std::endl;
                 exit(1);
             }
 
-            if (!anno_graph.check_compatibility(true)) {
-                std::cerr << "ERROR: graph cannot be annotated" << std::endl;
+            // load graph
+            AnnotatedDBG anno_graph(
+                graph_temp.release(),
+                annotation_temp.release(),
+                config->parallel
+            );
+
+            if (!anno_graph.check_compatibility()) {
+                std::cerr << "Error: graph and annotation are not compatible."
+                          << std::endl;
                 exit(1);
             }
 
@@ -1121,21 +1099,27 @@ int main(int argc, const char *argv[]) {
         case Config::ANNOTATE_COORDINATES: {
             assert(config->infbase_annotators.size() <= 1);
 
-            // load graph
-            AnnotatedDBG anno_graph(
-                load_critical_dbg(config->infbase).release(),
-                config->parallel
-            );
-            anno_graph.set_annotation(new annotate::RowCompressed<>(anno_graph.num_anno_rows()));
+            auto graph_temp = load_critical_dbg(config->infbase);
+
+            auto annotation_temp
+                = std::make_unique<annotate::RowCompressed<>>(graph_temp->num_nodes());
 
             if (config->infbase_annotators.size()
-                    && !anno_graph.get_annotation().load(config->infbase_annotators.at(0))) {
+                    && !annotation_temp->load(config->infbase_annotators.at(0))) {
                 std::cerr << "ERROR: can't load annotations" << std::endl;
                 exit(1);
             }
 
-            if (!anno_graph.check_compatibility(true)) {
-                std::cerr << "ERROR: graph cannot be annotated" << std::endl;
+            // load graph
+            AnnotatedDBG anno_graph(
+                graph_temp.release(),
+                annotation_temp.release(),
+                config->parallel
+            );
+
+            if (!anno_graph.check_compatibility()) {
+                std::cerr << "Error: graph and annotation are not compatible."
+                          << std::endl;
                 exit(1);
             }
 
@@ -1176,37 +1160,30 @@ int main(int argc, const char *argv[]) {
         case Config::CLASSIFY: {
             assert(config->infbase_annotators.size() == 1);
 
-            // load graph
-            AnnotatedDBG anno_graph(
-                load_critical_dbg(config->infbase).release(),
-                config->parallel
-            );
+            auto graph_temp = load_critical_dbg(config->infbase);
 
-            // load masked k-mers
-            if (config->shrink_anno
-                    && !anno_graph.load_annotation_mask(remove_graph_extension(config->infbase))) {
-                std::cerr << "Warning: Can't load coordinate mask."
-                          << " Continue with all coordinates." << std::endl;
-            }
-
-            anno_graph.set_annotation(
-                initialize_annotation(config->infbase_annotators.at(0), *config).release()
-            );
-
-            if (!anno_graph.get_annotation().load(config->infbase_annotators.at(0))) {
+            auto annotation_temp = initialize_annotation(config->infbase_annotators.at(0), *config);
+            if (!annotation_temp->load(config->infbase_annotators.at(0))) {
                 std::cerr << "ERROR: can't load annotations for graph "
                           << config->infbase
                           << ", file corrupted" << std::endl;
                 exit(1);
             }
 
+            // load graph
+            AnnotatedDBG anno_graph(graph_temp.release(),
+                                    annotation_temp.release(),
+                                    config->parallel);
+
+            if (!anno_graph.check_compatibility()) {
+                std::cerr << "Error: graph and annotation are not compatible."
+                          << std::endl;
+                exit(1);
+            }
+
             utils::ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
 
             Timer timer;
-
-            if (!anno_graph.check_compatibility(true)) {
-                exit(1);
-            }
 
             // iterate over input files
             for (const auto &file : files) {
@@ -1644,7 +1621,8 @@ int main(int argc, const char *argv[]) {
             if (config->verbose) {
                 std::cout << "Graph loading...\t" << std::flush;
             }
-            auto graph = load_critical_graph_from_file(files.at(0));
+            auto dbg = load_critical_graph_from_file<DBGSuccinct>(files.at(0));
+            auto *graph = &dbg->get_boss();
 
             if (config->verbose) {
                 std::cout << timer.elapsed() << "sec" << std::endl;
@@ -1656,19 +1634,8 @@ int main(int argc, const char *argv[]) {
                 }
                 timer.reset();
 
-                auto boss_graph = graph.release();
-
-                AnnotatedDBG anno_graph(new DBGSuccinct(boss_graph), config->parallel);
                 // remove redundant dummy edges and mark all other dummy edges
-                anno_graph.initialize_annotation_mask(
-                    boss_graph->prune_and_mark_all_dummy_edges(config->parallel)
-                );
-                if (config->outfbase.size()) {
-                    // serialize vector with marked dummy edges
-                    anno_graph.serialize_annotation_mask(config->outfbase);
-                }
-                anno_graph.release_graph();
-                graph.reset(boss_graph);
+                dbg->mask_dummy_kmers(config->parallel, true);
 
                 if (config->verbose) {
                     std::cout << "Done in " << timer.elapsed() << "sec" << std::endl;
@@ -1740,7 +1707,7 @@ int main(int argc, const char *argv[]) {
                 timer.reset();
             }
 
-            graph->switch_state(config->state);
+            dbg->switch_state(config->state);
 
             if (config->verbose) {
                 std::cout << timer.elapsed() << "sec" << std::endl;
@@ -1751,7 +1718,7 @@ int main(int argc, const char *argv[]) {
                     std::cout << "Serializing transformed graph...\t" << std::flush;
                     timer.reset();
                 }
-                graph->serialize(config->outfbase);
+                dbg->serialize(config->outfbase);
                 if (config->verbose) {
                     std::cout << timer.elapsed() << "sec" << std::endl;
                 }

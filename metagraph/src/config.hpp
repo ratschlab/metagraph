@@ -14,7 +14,7 @@ class Config {
     bool print_graph_internal_repr = false;
     bool reverse = false;
     bool dynamic = false;
-    bool shrink_anno = true;
+    bool mark_dummy_kmers = true;
     bool filename_anno = false;
     bool fasta_anno = false;
     bool to_adj_list = false;

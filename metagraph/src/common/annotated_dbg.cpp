@@ -7,51 +7,18 @@ AnnotatedDBG::AnnotatedDBG(SequenceGraph *dbg,
       : graph_(dbg), annotator_(annotation),
         thread_pool_(num_threads > 1 ? num_threads : 0) {}
 
-AnnotatedDBG::AnnotatedDBG(SequenceGraph *dbg, size_t num_threads)
-      : AnnotatedDBG(dbg, NULL, num_threads) {}
+void AnnotatedDBG::insert_zero_rows(Annotator *annotator,
+                                    const bit_vector_dyn &inserted_edges) {
+    assert(annotator);
 
-AnnotatedDBG::AnnotatedDBG(Annotator *annotation, size_t num_threads)
-      : AnnotatedDBG(NULL, annotation, num_threads) {}
-
-AnnotatedDBG::AnnotatedDBG(size_t num_threads)
-      : AnnotatedDBG(NULL, NULL, num_threads) {}
-
-void AnnotatedDBG::adjust_annotation(const bit_vector_dyn &inserted_edges) {
     std::vector<uint64_t> inserted_edge_idx;
 
-    for (uint64_t j = 1; j <= inserted_edges.num_set_bits(); ++j) {
-        inserted_edge_idx.push_back(inserted_edges.select1(j));
-    }
+    // transform indexes of the inserved k-mers to the annotation format
+    inserted_edges.call_ones([&](auto i) {
+        inserted_edge_idx.push_back(graph_to_anno_index(i));
+    });
 
-    // update the list of edges that can be annotated
-    if (annotation_mask_.get()) {
-        assert(!annotator_.get()
-                || annotator_->num_objects() == annotation_mask_->num_set_bits());
-
-        auto edge_mask = annotation_mask_->convert_to<sdsl::bit_vector>();
-
-        utils::insert_default_values(inserted_edge_idx, &edge_mask);
-
-        for (auto index : inserted_edge_idx) {
-            assert(!edge_mask[index]);
-            edge_mask[index] = true;
-        }
-        annotation_mask_.reset(new bit_vector_stat(std::move(edge_mask)));
-    }
-
-    if (annotator_) {
-        // pretend that we don't have annotator to pass the compatibility check
-        std::unique_ptr<Annotator> annotator { annotator_.release() };
-        // transform indexes of the inserved k-mers to the annotation format
-        for (auto &value : inserted_edge_idx) {
-            value = graph_to_anno_index(value);
-        }
-        annotator->insert_rows(inserted_edge_idx);
-        // move the annotation back
-        annotator_.swap(annotator);
-    }
-
-    assert(check_compatibility());
+    annotator->insert_rows(inserted_edge_idx);
 }
 
 void AnnotatedDBG::annotate_sequence_thread_safe(std::string sequence,
@@ -73,7 +40,7 @@ void AnnotatedDBG::annotate_sequence_thread_safe(std::string sequence,
 void AnnotatedDBG::annotate_sequence(const std::string &sequence,
                                      const std::vector<std::string> &labels) {
     assert(graph_.get() && annotator_.get());
-    assert(check_compatibility(true));
+    assert(check_compatibility());
 
     thread_pool_.enqueue(
         [this](auto... args) {
@@ -86,7 +53,7 @@ void AnnotatedDBG::annotate_sequence(const std::string &sequence,
 std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
                                                   double presence_ratio) const {
     assert(graph_.get() && annotator_.get());
-    assert(check_compatibility(true));
+    assert(check_compatibility());
 
     std::vector<uint64_t> indices;
     size_t num_missing_kmers = 0;
@@ -119,7 +86,7 @@ std::vector<std::pair<std::string, size_t>>
 AnnotatedDBG::get_top_labels(const std::string &sequence,
                              size_t num_top_labels) const {
     assert(graph_.get() && annotator_.get());
-    assert(check_compatibility(true));
+    assert(check_compatibility());
 
     std::vector<uint64_t> indices;
 
@@ -132,101 +99,20 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
 }
 
 uint64_t AnnotatedDBG::num_anno_rows() const {
-    return annotation_mask_.get()
-            ? annotation_mask_->num_set_bits()
+    assert(graph_.get() || annotator_.get());
+
+    return annotator_.get()
+            ? annotator_->num_objects()
             : graph_->num_nodes();
 }
 
-uint64_t AnnotatedDBG::graph_to_anno_index(uint64_t kmer_index) const {
+AnnotatedDBG::Annotator::Index
+AnnotatedDBG::graph_to_anno_index(SequenceGraph::node_index kmer_index) {
     assert(kmer_index);
-    assert(check_compatibility(true));
-
-    if (!annotation_mask_.get())
-        return kmer_index - 1;
-
-    assert(kmer_index < annotation_mask_->size());
-
-    if (!(*annotation_mask_)[kmer_index])
-        throw std::runtime_error("Error: trying to annotate k-mer"
-                                 " that cannot be annotated");
-
-    return annotation_mask_->rank1(kmer_index) - 1;
+    return kmer_index - 1;
 }
 
-bool AnnotatedDBG::check_compatibility(bool verbose) const {
-    if (annotation_mask_.get()) {
-        if (graph_.get() && annotation_mask_->size()
-                            != graph_->num_nodes() + 1) {
-            if (verbose)
-                std::cerr << "Error: edge mask is not compatible with graph."
-                          << std::endl;
-            return false;
-        }
-        if (annotator_.get() && annotation_mask_->num_set_bits()
-                                != annotator_->num_objects()) {
-            if (verbose)
-                std::cerr << "Error: edge mask is not compatible with annotation."
-                          << std::endl;
-            return false;
-        }
-    } else if (graph_.get() && annotator_.get()
-                            && graph_->num_nodes()
-                                != annotator_->num_objects()) {
-        if (verbose)
-            std::cerr << "Error: graph and annotation are not compatible."
-                      << std::endl;
-        return false;
-    }
-
-    return true;
-}
-
-void AnnotatedDBG::initialize_annotation_mask(std::vector<bool>&& skipped_nodes) {
-    annotation_mask_.reset();
-
-    for (size_t i = 0; i < skipped_nodes.size(); ++i) {
-        skipped_nodes[i] = !skipped_nodes[i];
-    }
-
-    annotation_mask_.reset(new bit_vector_stat(std::move(skipped_nodes)));
-
-    assert(check_compatibility(true));
-}
-
-bool AnnotatedDBG::load_annotation_mask(const std::string &filename_base) {
-    std::ifstream instream(filename_base + kAnnotationMaskExtension,
-                           std::ios::binary);
-
-    if (!instream.good())
-        return false;
-
-    // release the old vector
-    annotation_mask_.reset();
-
-    // load a new vector
-    std::unique_ptr<bit_vector_stat> vector { new bit_vector_stat() };
-    if (!vector->load(instream))
-        return false;
-
-    annotation_mask_.swap(vector);
-
-    if (check_compatibility(true))
-        return true;
-
-    // clear the loaded mask if it's incompatible with graph or annotation
-    annotation_mask_.reset();
-    return false;
-}
-
-void AnnotatedDBG::serialize_annotation_mask(const std::string &filename_base) const {
-    if (!annotation_mask_.get())
-        throw std::runtime_error("Trying to serialize uninitialized annotation mask");
-
-    std::ofstream outstream(filename_base + kAnnotationMaskExtension,
-                            std::ios::binary);
-    if (!outstream.good())
-        throw std::ios_base::failure("Can't write to file "
-                                        + filename_base + kAnnotationMaskExtension);
-
-    annotation_mask_->serialize(outstream);
+bool AnnotatedDBG::check_compatibility() const {
+    assert(graph_.get() && annotator_.get());
+    return graph_->num_nodes() == annotator_->num_objects();
 }
