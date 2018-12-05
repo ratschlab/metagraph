@@ -175,7 +175,6 @@ bool DBG_succ::operator==(const DBG_succ &other) const {
 }
 
 void DBG_succ::serialize(const std::string &filename) const {
-
     const auto out_filename = remove_suffix(filename, kExtension) + kExtension;
 
     std::ofstream outstream(out_filename, std::ios::binary);
@@ -184,6 +183,15 @@ void DBG_succ::serialize(const std::string &filename) const {
             std::string("Error: Can't write to file ") + out_filename
         );
     }
+
+    serialize(outstream);
+
+    outstream.close();
+}
+
+void DBG_succ::serialize(std::ofstream &outstream) const {
+    if (!outstream.good())
+        throw std::ofstream::failure("Error: Can't write to file");
 
     // write F values, k, and state
     libmaus2::util::NumberSerialisation::serialiseNumberVector(outstream, F_);
@@ -197,18 +205,22 @@ void DBG_succ::serialize(const std::string &filename) const {
 
     // write last array
     last_->serialize(outstream);
-    outstream.close();
+    outstream.flush();
 }
 
 bool DBG_succ::load(const std::string &filename) {
+    auto file = remove_suffix(filename, kExtension) + kExtension;
+
+    std::ifstream instream(file, std::ios::binary);
+
+    return load(instream);
+}
+
+bool DBG_succ::load(std::ifstream &instream) {
     // if not specified in the file, the default for loading is dynamic
     state = Config::DYN;
 
-    auto file = remove_suffix(filename, kExtension) + kExtension;
-
     try {
-        std::ifstream instream(file, std::ios::binary);
-
         // load F, k, and state
         F_ = libmaus2::util::NumberSerialisation::deserialiseNumberVector<uint64_t>(instream);
         k_ = load_number(instream);
@@ -236,8 +248,7 @@ bool DBG_succ::load(const std::string &filename) {
         }
         return W_->load(instream) && last_->load(instream);
     } catch (const std::bad_alloc &exception) {
-        std::cerr << "ERROR: Not enough memory to load DBG_succ from "
-                  << file << "." << std::endl;
+        std::cerr << "ERROR: Not enough memory to load DBG_succ." << std::endl;
         return false;
     } catch (...) {
         return false;
@@ -2016,6 +2027,8 @@ bool DBGSuccinct::find(const std::string &sequence,
 
 // Traverse the outgoing edge
 node_index DBGSuccinct::traverse(node_index node, char next_char) const {
+    assert(node);
+
     // dbg node is a boss edge
     DBG_succ::edge_index edge = boss_graph_->fwd(kmer_to_boss_index(node));
     return boss_to_kmer_index(
@@ -2027,6 +2040,8 @@ node_index DBGSuccinct::traverse(node_index node, char next_char) const {
 
 // Traverse the incoming edge
 node_index DBGSuccinct::traverse_back(node_index node, char prev_char) const {
+    assert(node);
+
     // map dbg node, i.e. a boss edge, to a boss node
     auto boss_edge = kmer_to_boss_index(node);
 

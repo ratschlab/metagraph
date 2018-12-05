@@ -448,19 +448,57 @@ std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
 }
 
 
-void print_stats(const DBG_succ &graph) {
-    std::cout << "k: " << graph.get_k() + 1 << std::endl;
-    std::cout << "nodes (k-1): " << graph.num_nodes() << std::endl;
-    std::cout << "edges ( k ): " << graph.num_edges() << std::endl;
-    std::cout << "state: " << Config::state_to_string(graph.get_state()) << std::endl;
+void print_boss_stats(const DBG_succ &boss_graph,
+                      bool count_dummy = false,
+                      size_t num_threads = 0,
+                      bool verbose = false) {
+    std::cout << "====================== BOSS STATS ======================" << std::endl;
+    std::cout << "k: " << boss_graph.get_k() + 1 << std::endl;
+    std::cout << "nodes (k-1): " << boss_graph.num_nodes() << std::endl;
+    std::cout << "edges ( k ): " << boss_graph.num_edges() << std::endl;
+    std::cout << "state: " << Config::state_to_string(boss_graph.get_state()) << std::endl;
+
+    assert(boss_graph.rank_W(boss_graph.num_edges(), boss_graph.alph_size) == 0);
+    std::cout << "W stats: {'" << boss_graph.decode(0) << "': "
+              << boss_graph.rank_W(boss_graph.num_edges(), 0);
+    for (int i = 1; i < boss_graph.alph_size; ++i) {
+        std::cout << ", '" << boss_graph.decode(i) << "': "
+                  << boss_graph.rank_W(boss_graph.num_edges(), i)
+                        + boss_graph.rank_W(boss_graph.num_edges(), i + boss_graph.alph_size);
+    }
+    std::cout << "}" << std::endl;
+
+    assert(boss_graph.get_F(0) == 0);
+    std::cout << "F stats: {'";
+    for (int i = 1; i < boss_graph.alph_size; ++i) {
+        std::cout << boss_graph.decode(i - 1) << "': "
+                  << boss_graph.get_F(i) - boss_graph.get_F(i - 1)
+                  << ", '";
+    }
+    std::cout << boss_graph.decode(boss_graph.alph_size - 1) << "': "
+              << boss_graph.num_edges() - boss_graph.get_F(boss_graph.alph_size - 1)
+              << "}" << std::endl;
+
+    if (count_dummy) {
+        std::cout << "dummy source edges: "
+                  << boss_graph.mark_source_dummy_edges(NULL, num_threads, verbose)
+                  << std::endl;
+        std::cout << "dummy sink edges: "
+                  << boss_graph.mark_sink_dummy_edges()
+                  << std::endl;
+    }
+    std::cout << "========================================================" << std::endl;
 }
 
 void print_stats(const DeBruijnGraph &graph) {
+    std::cout << "====================== GRAPH STATS =====================" << std::endl;
     std::cout << "k: " << graph.get_k() << std::endl;
     std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
+    std::cout << "========================================================" << std::endl;
 }
 
 void print_stats(const Annotator &annotation) {
+    std::cout << "=================== ANNOTATION STATS ===================" << std::endl;
     std::cout << "labels:  " << annotation.num_labels() << std::endl;
     std::cout << "objects: " << annotation.num_objects() << std::endl;
     std::cout << "density: " << std::scientific
@@ -494,6 +532,7 @@ void print_stats(const Annotator &annotation) {
         assert(false);
         throw std::runtime_error("Unknown annotator");
     }
+    std::cout << "========================================================" << std::endl;
 }
 
 
@@ -1284,7 +1323,7 @@ int main(int argc, const char *argv[]) {
 
             if (config->verbose) {
                 std::cout << "Succinct graph has been assembled" << std::endl;
-                print_stats(*graph);
+                print_boss_stats(*graph);
             }
 
             // graph output
@@ -1305,7 +1344,7 @@ int main(int argc, const char *argv[]) {
                 std::cout << "Opening file " << file << std::endl;
                 graphs.push_back(load_critical_graph_from_file(file).release());
                 if (config->verbose)
-                    print_stats(*graph);
+                    print_boss_stats(*graph);
             }
             std::cout << "Graphs are loaded\t" << timer.elapsed()
                                                << "sec" << std::endl;
@@ -1385,46 +1424,17 @@ int main(int argc, const char *argv[]) {
 
                 std::cout << "Statistics for graph " << file << std::endl;
 
-                if (!dynamic_cast<DBGSuccinct*>(graph.get())) {
-                    print_stats(*graph);
+                print_stats(*graph);
+
+                if (!dynamic_cast<DBGSuccinct*>(graph.get()))
                     continue;
-                }
 
                 const auto &boss_graph = dynamic_cast<DBGSuccinct&>(*graph).get_boss();
 
-                print_stats(boss_graph);
-
-                assert(boss_graph.rank_W(boss_graph.num_edges(), boss_graph.alph_size) == 0);
-                std::cout << "W stats: {'" << boss_graph.decode(0) << "': "
-                          << boss_graph.rank_W(boss_graph.num_edges(), 0);
-                for (int i = 1; i < boss_graph.alph_size; ++i) {
-                    std::cout << ", '" << boss_graph.decode(i) << "': "
-                              << boss_graph.rank_W(boss_graph.num_edges(), i)
-                                    + boss_graph.rank_W(boss_graph.num_edges(), i + boss_graph.alph_size);
-                }
-                std::cout << "}" << std::endl;
-
-                assert(boss_graph.get_F(0) == 0);
-                std::cout << "F stats: {'";
-                for (int i = 1; i < boss_graph.alph_size; ++i) {
-                    std::cout << boss_graph.decode(i - 1) << "': "
-                              << boss_graph.get_F(i) - boss_graph.get_F(i - 1)
-                              << ", '";
-                }
-                std::cout << boss_graph.decode(boss_graph.alph_size - 1) << "': "
-                          << boss_graph.num_edges() - boss_graph.get_F(boss_graph.alph_size - 1)
-                          << "}" << std::endl;
-
-                if (config->count_dummy) {
-                    std::cout << "dummy source edges: "
-                              << boss_graph.mark_source_dummy_edges(NULL,
-                                                                config->parallel,
-                                                                config->verbose)
-                              << std::endl;
-                    std::cout << "dummy sink edges: "
-                              << boss_graph.mark_sink_dummy_edges()
-                              << std::endl;
-                }
+                print_boss_stats(boss_graph,
+                                 config->count_dummy,
+                                 config->parallel,
+                                 config->verbose);
 
                 if (config->print_graph_internal_repr)
                     boss_graph.print_internal_representation(std::cout);

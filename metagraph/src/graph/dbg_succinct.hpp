@@ -50,6 +50,9 @@ class DBG_succ {
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
 
+    bool load(std::ifstream &instream);
+    void serialize(std::ofstream &outstream) const;
+
     // Traverse graph mapping k-mers from sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
     // Call npos if a k-mer can't be mapped to the graph nodes
