@@ -9,19 +9,13 @@ KMer<G, L>::kFirstCharMask = (1llu << kBitsPerChar) - 1;
 
 template <typename G, int L>
 std::string
-KMer<G, L>::to_string(const std::string &alphabet) const {
-    const size_t max_len = sizeof(KMerWordType) * 8 / kBitsPerChar;
-    std::string seq(max_len, '\0');
+KMer<G, L>::to_string(size_t k, const std::string &alphabet) const {
+    std::string seq(k, '\0');
 
-    seq.reserve(max_len);
-
-    KMerCharType cur;
-    size_t i = 0;
-    while (i + 1 < max_len && (cur = get_digit(i + 1))) {
-        seq[i++] = alphabet.at(cur - 1);
+    for (size_t i = 0; i + 1 < k; ++i) {
+        seq[i] = alphabet.at(get_digit(i + 1) - 1);
     }
-    seq[i++] = alphabet.at(get_digit(0) - 1);
-    seq.resize(i);
+    seq[k - 1] = alphabet.at(get_digit(0) - 1);
 
     return seq;
 }

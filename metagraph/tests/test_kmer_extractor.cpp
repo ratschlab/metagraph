@@ -43,17 +43,17 @@ TEST(KmerExtractor, encode_decode_kmer) {
     std::string kmer;
 
     kmer = "ACGT";
-    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer))) << kmer;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
     kmer = "AAAAAAAAA";
-    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer))) << kmer;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
     kmer = "TTTTTTTTT";
-    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer))) << kmer;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
     kmer = "ANANANANANA";
-    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer))) << kmer;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
     kmer = "ANANATANANA";
-    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer))) << kmer;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
     kmer = "ANANANANGNT";
-    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer))) << kmer;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
 }
 
 TEST(KmerExtractor, encode_decode_string) {
@@ -65,9 +65,9 @@ TEST(KmerExtractor, encode_decode_string) {
         encoder.sequence_to_kmers(encoder.encode(sequence), k, {}, &kmers);
         ASSERT_LT(0u, kmers.size());
 
-        std::string reconstructed = encoder.kmer_to_sequence(kmers[0]);
+        std::string reconstructed = encoder.kmer_to_sequence(kmers[0], k);
         for (uint64_t i = 1; i < kmers.size(); ++i) {
-            reconstructed.push_back(encoder.kmer_to_sequence(kmers[i])[k - 1]);
+            reconstructed.push_back(encoder.kmer_to_sequence(kmers[i], k)[k - 1]);
         }
 
         EXPECT_EQ(sequence, reconstructed);
@@ -82,7 +82,13 @@ TEST(KmerExtractor2Bit, encode_decode) {
     EXPECT_EQ('G', encoder.decode(encoder.encode('G')));
     EXPECT_EQ('T', encoder.decode(encoder.encode('T')));
     EXPECT_EQ('A', encoder.decode(encoder.encode('N')));
-    EXPECT_EQ('A', encoder.decode(encoder.encode('X')));
+}
+
+KmerExtractor2Bit::Kmer64 to_kmer(const KmerExtractor2Bit &encoder,
+                              const std::string &kmer) {
+    Vector<KmerExtractor2Bit::Kmer64> kmers;
+    encoder.sequence_to_kmers(encoder.encode(kmer), kmer.size(), {}, &kmers);
+    return kmers[0];
 }
 
 TEST(KmerExtractor2Bit, encode_decode_kmer) {
@@ -90,37 +96,33 @@ TEST(KmerExtractor2Bit, encode_decode_kmer) {
     std::string kmer;
 
     kmer = "ACGT";
-    EXPECT_EQ(kmer, encoder.kmer_to_sequence(
-                        encoder.sequence_to_kmers(kmer, kmer.size())[0])) << kmer;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
     kmer = "AAAAAAAAA";
-    EXPECT_EQ(kmer, encoder.kmer_to_sequence(
-                        encoder.sequence_to_kmers(kmer, kmer.size())[0])) << kmer;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
     kmer = "TTTTTTTTT";
-    EXPECT_EQ(kmer, encoder.kmer_to_sequence(
-                        encoder.sequence_to_kmers(kmer, kmer.size())[0])) << kmer;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
     kmer = "ANANANANANA";
-    EXPECT_EQ(std::string("AAAAAAAAAAA"), encoder.kmer_to_sequence(
-                        encoder.sequence_to_kmers(kmer, kmer.size())[0])) << kmer;
+    EXPECT_EQ(std::string("AAAAAAAAAAA"), encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
     kmer = "ANANATANANA";
-    EXPECT_EQ(std::string("AAAAATAAAAA"), encoder.kmer_to_sequence(
-                        encoder.sequence_to_kmers(kmer, kmer.size())[0])) << kmer;
+    EXPECT_EQ(std::string("AAAAATAAAAA"), encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
     kmer = "ANANANANGNT";
-    EXPECT_EQ(std::string("AAAAAAAAGAT"), encoder.kmer_to_sequence(
-                        encoder.sequence_to_kmers(kmer, kmer.size())[0])) << kmer;
+    EXPECT_EQ(std::string("AAAAAAAAGAT"), encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
 }
 
 TEST(KmerExtractor2Bit, encode_decode_string) {
     KmerExtractor2Bit encoder;
-    std::string sequence = "AAGGCAGCCTACCCCTCTGTAN";
+    std::string sequence = "AAGGCAGCCTACCCCTCTGN";
     for (uint64_t k = 2; k <= sequence.length(); ++k) {
-        auto kmers = encoder.sequence_to_kmers(sequence, k);
+        Vector<KmerExtractor2Bit::Kmer256> kmers;
+
+        encoder.sequence_to_kmers(encoder.encode(sequence), k, {}, &kmers);
         ASSERT_LT(0u, kmers.size());
 
-        std::string reconstructed = encoder.kmer_to_sequence(kmers[0]);
+        std::string reconstructed = encoder.kmer_to_sequence(kmers[0], k);
         for (uint64_t i = 1; i < kmers.size(); ++i) {
-            reconstructed.push_back(encoder.kmer_to_sequence(kmers[i])[k - 1]);
+            reconstructed.push_back(encoder.kmer_to_sequence(kmers[i], k)[k - 1]);
         }
 
-        EXPECT_EQ(std::string("AAGGCAGCCTACCCCTCTGTAA"), reconstructed);
+        EXPECT_EQ(std::string("AAGGCAGCCTACCCCTCTGA"), reconstructed);
     }
 }

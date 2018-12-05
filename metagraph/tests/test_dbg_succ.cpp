@@ -11,7 +11,7 @@
 #define private public
 
 #include "dbg_succinct.hpp"
-#include "dbg_succinct_construct.hpp"
+#include "dbg_construct.hpp"
 #include "utils.hpp"
 
 KSEQ_INIT(gzFile, gzread);
@@ -20,7 +20,7 @@ const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
 
-double kEps = std::numeric_limits<double>::epsilon();
+constexpr double kEps = std::numeric_limits<double>::epsilon();
 
 
 void test_graph(DBG_succ *graph, const std::string &last,
@@ -109,12 +109,12 @@ TEST(DBGSuccinct, AddSequenceFast) {
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
 
-    KMerDBGSuccConstructor constructor(3);
+    DBGSuccConstructor constructor(3);
 
     std::vector<std::string> names;
 
     for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
-        constructor.add_reads({ read_stream->seq.s });
+        constructor.add_sequences({ read_stream->seq.s });
         names.emplace_back(read_stream->name.s);
     }
     kseq_destroy(read_stream);
@@ -143,10 +143,10 @@ TEST(DBGSuccinct, SmallGraphTraversal) {
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
 
-    KMerDBGSuccConstructor constructor(3);
+    DBGSuccConstructor constructor(3);
 
     for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
-        constructor.add_reads({ read_stream->seq.s });
+        constructor.add_sequences({ read_stream->seq.s });
     }
     kseq_destroy(read_stream);
     gzclose(input_p);
@@ -201,10 +201,10 @@ TEST(DBGSuccinct, Serialization) {
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
 
-    KMerDBGSuccConstructor constructor(3);
+    DBGSuccConstructor constructor(3);
 
     for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
-        constructor.add_reads({ read_stream->seq.s });
+        constructor.add_sequences({ read_stream->seq.s });
     }
     kseq_destroy(read_stream);
     gzclose(input_p);
@@ -368,22 +368,22 @@ TEST(DBGSuccinct, RemoveDummyEdgesForClearGraph) {
         std::unique_ptr<DBG_succ> second_ptr;
 
         {
-            KMerDBGSuccConstructor constructor(k);
-            constructor.add_reads({ std::string(100, 'A'),
-                                    std::string(100, 'C'),
-                                    std::string(100, 'G'),
-                                    "ACATCTAGTAGTCGATCGTACG",
-                                    "ATTAGTAGTAGTAGTGATGTAG", });
+            DBGSuccConstructor constructor(k);
+            constructor.add_sequences({ std::string(100, 'A'),
+                                        std::string(100, 'C'),
+                                        std::string(100, 'G'),
+                                        "ACATCTAGTAGTCGATCGTACG",
+                                        "ATTAGTAGTAGTAGTGATGTAG", });
             first_ptr.reset(new DBG_succ(&constructor));
         }
 
         {
-            KMerDBGSuccConstructor constructor(k);
-            constructor.add_reads({ std::string(100, 'A'),
-                                    std::string(100, 'C'),
-                                    std::string(100, 'G'),
-                                    "ACATCTAGTAGTCGATCGTACG",
-                                    "ATTAGTAGTAGTAGTGATGTAG", });
+            DBGSuccConstructor constructor(k);
+            constructor.add_sequences({ std::string(100, 'A'),
+                                        std::string(100, 'C'),
+                                        std::string(100, 'G'),
+                                        "ACATCTAGTAGTCGATCGTACG",
+                                        "ATTAGTAGTAGTAGTGATGTAG", });
             second_ptr.reset(new DBG_succ(&constructor));
         }
 
@@ -406,8 +406,8 @@ TEST(DBGSuccinct, RemoveDummyEdgesForClearGraph) {
 
 TEST(DBGSuccinct, RemoveDummyEdgesLinear) {
     for (size_t k = 1; k < 10; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_read(std::string(20, 'A'));
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequence(std::string(20, 'A'));
         DBG_succ graph(&constructor);
 
         DBG_succ dynamic_graph(k);
@@ -433,10 +433,10 @@ TEST(DBGSuccinct, RemoveDummyEdgesLinear) {
 
 TEST(DBGSuccinct, RemoveDummyEdgesThreePaths) {
     for (size_t k = 1; k < 10; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(20, 'A'),
-                                std::string(20, 'C'),
-                                std::string(20, 'G'), });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(20, 'A'),
+                                    std::string(20, 'C'),
+                                    std::string(20, 'G'), });
         DBG_succ graph(&constructor);
 
         DBG_succ dynamic_graph(k);
@@ -464,11 +464,11 @@ TEST(DBGSuccinct, RemoveDummyEdgesThreePaths) {
 
 TEST(DBGSuccinct, RemoveDummyEdgesFourPaths) {
     for (size_t k = 1; k < 10; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(20, 'A'),
-                                std::string(20, 'C'),
-                                std::string(20, 'G'),
-                                std::string(20, 'T') + 'A' });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(20, 'A'),
+                                    std::string(20, 'C'),
+                                    std::string(20, 'G'),
+                                    std::string(20, 'T') + 'A' });
         DBG_succ graph(&constructor);
 
         DBG_succ dynamic_graph(k);
@@ -497,12 +497,12 @@ TEST(DBGSuccinct, RemoveDummyEdgesFourPaths) {
 
 TEST(DBGSuccinct, RemoveDummyEdgesFivePaths) {
     for (size_t k = 1; k < 10; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(20, 'A'),
-                                std::string(20, 'C'),
-                                std::string(20, 'G'),
-                                std::string(20, 'T'),
-                                std::string(20, 'N') + 'A', });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(20, 'A'),
+                                    std::string(20, 'C'),
+                                    std::string(20, 'G'),
+                                    std::string(20, 'T'),
+                                    std::string(20, 'N') + 'A', });
         DBG_succ graph(&constructor);
 
         DBG_succ dynamic_graph(k);
@@ -532,12 +532,12 @@ TEST(DBGSuccinct, RemoveDummyEdgesFivePaths) {
 
 TEST(DBGSuccinct, RemoveDummyEdges) {
     for (size_t k = 1; k < 10; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(20, 'A'),
-                                std::string(20, 'C'),
-                                std::string(20, 'G'),
-                                "ACATCTAGTAGTCGATCGTACG",
-                                "ATTAGTAGTAGTAGTGATGTAG", });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(20, 'A'),
+                                    std::string(20, 'C'),
+                                    std::string(20, 'G'),
+                                    "ACATCTAGTAGTCGATCGTACG",
+                                    "ATTAGTAGTAGTAGTGATGTAG", });
         DBG_succ graph(&constructor);
 
         DBG_succ dynamic_graph(k);
@@ -571,22 +571,22 @@ TEST(DBGSuccinct, RemoveDummyEdgesForClearGraphParallel) {
         std::unique_ptr<DBG_succ> second_ptr;
 
         {
-            KMerDBGSuccConstructor constructor(k);
-            constructor.add_reads({ std::string(100, 'A'),
-                                    std::string(100, 'C'),
-                                    std::string(100, 'G'),
-                                    "ACATCTAGTAGTCGATCGTACG",
-                                    "ATTAGTAGTAGTAGTGATGTAG", });
+            DBGSuccConstructor constructor(k);
+            constructor.add_sequences({ std::string(100, 'A'),
+                                        std::string(100, 'C'),
+                                        std::string(100, 'G'),
+                                        "ACATCTAGTAGTCGATCGTACG",
+                                        "ATTAGTAGTAGTAGTGATGTAG", });
             first_ptr.reset(new DBG_succ(&constructor));
         }
 
         {
-            KMerDBGSuccConstructor constructor(k);
-            constructor.add_reads({ std::string(100, 'A'),
-                                    std::string(100, 'C'),
-                                    std::string(100, 'G'),
-                                    "ACATCTAGTAGTCGATCGTACG",
-                                    "ATTAGTAGTAGTAGTGATGTAG", });
+            DBGSuccConstructor constructor(k);
+            constructor.add_sequences({ std::string(100, 'A'),
+                                        std::string(100, 'C'),
+                                        std::string(100, 'G'),
+                                        "ACATCTAGTAGTCGATCGTACG",
+                                        "ATTAGTAGTAGTAGTGATGTAG", });
             second_ptr.reset(new DBG_succ(&constructor));
         }
 
@@ -609,8 +609,8 @@ TEST(DBGSuccinct, RemoveDummyEdgesForClearGraphParallel) {
 
 TEST(DBGSuccinct, RemoveDummyEdgesLinearParallel) {
     for (size_t k = 1; k < 10; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_read(std::string(20, 'A'));
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequence(std::string(20, 'A'));
         DBG_succ graph(&constructor);
 
         DBG_succ dynamic_graph(k);
@@ -636,10 +636,10 @@ TEST(DBGSuccinct, RemoveDummyEdgesLinearParallel) {
 
 TEST(DBGSuccinct, RemoveDummyEdgesThreePathsParallel) {
     for (size_t k = 1; k < 10; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(20, 'A'),
-                                std::string(20, 'C'),
-                                std::string(20, 'G'), });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(20, 'A'),
+                                    std::string(20, 'C'),
+                                    std::string(20, 'G'), });
         DBG_succ graph(&constructor);
 
         DBG_succ dynamic_graph(k);
@@ -667,11 +667,11 @@ TEST(DBGSuccinct, RemoveDummyEdgesThreePathsParallel) {
 
 TEST(DBGSuccinct, RemoveDummyEdgesFourPathsParallel) {
     for (size_t k = 1; k < 10; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(20, 'A'),
-                                std::string(20, 'C'),
-                                std::string(20, 'G'),
-                                std::string(20, 'T') + 'A' });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(20, 'A'),
+                                    std::string(20, 'C'),
+                                    std::string(20, 'G'),
+                                    std::string(20, 'T') + 'A' });
         DBG_succ graph(&constructor);
 
         DBG_succ dynamic_graph(k);
@@ -700,12 +700,12 @@ TEST(DBGSuccinct, RemoveDummyEdgesFourPathsParallel) {
 
 TEST(DBGSuccinct, RemoveDummyEdgesFivePathsParallel) {
     for (size_t k = 1; k < 10; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(20, 'A'),
-                                std::string(20, 'C'),
-                                std::string(20, 'G'),
-                                std::string(20, 'T'),
-                                std::string(20, 'N') + 'A', });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(20, 'A'),
+                                    std::string(20, 'C'),
+                                    std::string(20, 'G'),
+                                    std::string(20, 'T'),
+                                    std::string(20, 'N') + 'A', });
         DBG_succ graph(&constructor);
 
         DBG_succ dynamic_graph(k);
@@ -735,12 +735,12 @@ TEST(DBGSuccinct, RemoveDummyEdgesFivePathsParallel) {
 
 TEST(DBGSuccinct, RemoveDummyEdgesParallel) {
     for (size_t k = 1; k < 10; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(20, 'A'),
-                                std::string(20, 'C'),
-                                std::string(20, 'G'),
-                                "ACATCTAGTAGTCGATCGTACG",
-                                "ATTAGTAGTAGTAGTGATGTAG", });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(20, 'A'),
+                                    std::string(20, 'C'),
+                                    std::string(20, 'G'),
+                                    "ACATCTAGTAGTCGATCGTACG",
+                                    "ATTAGTAGTAGTAGTGATGTAG", });
         DBG_succ graph(&constructor);
 
         DBG_succ dynamic_graph(k);
@@ -774,10 +774,13 @@ TEST(DBGSuccinct, AddSequenceBugRevealingTestcase) {
 }
 
 TEST(DBGSuccinct, NonASCIIStrings) {
-    KMerDBGSuccConstructor constructor_first(5);
-    constructor_first.add_reads({ "АСАСАСАСАСАСА",
-                                  "плохая строка",
-                                  "АСАСАСАСАСАСА" });
+    DBGSuccConstructor constructor_first(5);
+    constructor_first.add_sequences({
+        // cyrillic A and C
+        "АСАСАСАСАСАСА",
+        "плохая строка",
+        "АСАСАСАСАСАСА"
+    });
     DBG_succ graph(&constructor_first);
     ASSERT_EQ(2u, graph.num_edges()) << graph;
 }
@@ -942,8 +945,8 @@ TEST(DBGSuccinct, CallContigsOneLoop) {
 
 TEST(DBGSuccinct, CallPathsTwoLoops) {
     for (size_t k = 1; k < 20; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(100, 'A') });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(100, 'A') });
         DBG_succ graph(&constructor);
 
         ASSERT_EQ(2u, graph.num_edges());
@@ -961,8 +964,8 @@ TEST(DBGSuccinct, CallPathsTwoLoops) {
 
 TEST(DBGSuccinct, CallContigsTwoLoops) {
     for (size_t k = 1; k < 20; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(100, 'A') });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(100, 'A') });
         DBG_succ graph(&constructor);
 
         ASSERT_EQ(2u, graph.num_edges());
@@ -980,10 +983,10 @@ TEST(DBGSuccinct, CallContigsTwoLoops) {
 
 TEST(DBGSuccinct, CallPathsFourLoops) {
     for (size_t k = 1; k < 20; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(100, 'A'),
-                                std::string(100, 'G'),
-                                std::string(100, 'C') });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(100, 'A'),
+                                    std::string(100, 'G'),
+                                    std::string(100, 'C') });
         DBG_succ graph(&constructor);
 
         ASSERT_EQ(4u, graph.num_edges());
@@ -1001,10 +1004,10 @@ TEST(DBGSuccinct, CallPathsFourLoops) {
 
 TEST(DBGSuccinct, CallContigsFourLoops) {
     for (size_t k = 1; k < 20; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(100, 'A'),
-                                std::string(100, 'G'),
-                                std::string(100, 'C') });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(100, 'A'),
+                                    std::string(100, 'G'),
+                                    std::string(100, 'C') });
         DBG_succ graph(&constructor);
 
         ASSERT_EQ(4u, graph.num_edges());
@@ -1175,9 +1178,9 @@ TEST(DBGSuccinct, CallContigs) {
 }
 
 TEST(DBGSuccinct, CallContigs1) {
-    KMerDBGSuccConstructor constructor(3);
-    constructor.add_reads({ "ACTAGCTAGCTAGCTAGCTAGC",
-                            "ACTCT" });
+    DBGSuccConstructor constructor(3);
+    constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
+                                "ACTCT" });
     DBG_succ graph(&constructor);
 
     size_t num_contigs = 0;
@@ -1203,10 +1206,10 @@ TEST(DBGSuccinct, CallContigs1) {
 }
 
 TEST(DBGSuccinct, CallContigsDisconnected1) {
-    KMerDBGSuccConstructor constructor(3);
-    constructor.add_reads({ "ACTAGCTAGCTAGCTAGCTAGC",
-                            "ACTCT",
-                            "ATCATCATCATCATCATCAT" });
+    DBGSuccConstructor constructor(3);
+    constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
+                                "ACTCT",
+                                "ATCATCATCATCATCATCAT" });
     DBG_succ graph(&constructor);
 
     size_t num_contigs = 0;
@@ -1233,11 +1236,11 @@ TEST(DBGSuccinct, CallContigsDisconnected1) {
 }
 
 TEST(DBGSuccinct, CallContigsDisconnected2) {
-    KMerDBGSuccConstructor constructor(3);
-    constructor.add_reads({ "ACTAGCTAGCTAGCTAGCTAGC",
-                            "ACTCT",
-                            "ATCATCATCATCATCATCAT",
-                            "ATNATNATNATNATNATNAT" });
+    DBGSuccConstructor constructor(3);
+    constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
+                                "ACTCT",
+                                "ATCATCATCATCATCATCAT",
+                                "ATNATNATNATNATNATNAT" });
     DBG_succ graph(&constructor);
 
     size_t num_contigs = 0;
@@ -1265,12 +1268,12 @@ TEST(DBGSuccinct, CallContigsDisconnected2) {
 }
 
 TEST(DBGSuccinct, CallContigsTwoComponents) {
-    KMerDBGSuccConstructor constructor(3);
-    constructor.add_reads({ "ACTAGCTAGCTAGCTAGCTAGC",
-                            "ACTCT",
-                            "ATCATCATCATCATCATCAT",
-                            "ATNATNATNATNATNATNAT",
-                            "ATCNATCNATCNATCNATCNATCNAT" });
+    DBGSuccConstructor constructor(3);
+    constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
+                                "ACTCT",
+                                "ATCATCATCATCATCATCAT",
+                                "ATNATNATNATNATNATNAT",
+                                "ATCNATCNATCNATCNATCNATCNAT" });
     DBG_succ graph(&constructor);
 
     size_t num_contigs = 0;
@@ -1300,8 +1303,8 @@ TEST(DBGSuccinct, CallContigsTwoComponents) {
 }
 
 TEST(DBGSuccinct, CallContigsWithPruning) {
-    KMerDBGSuccConstructor constructor(4);
-    constructor.add_reads({
+    DBGSuccConstructor constructor(4);
+    constructor.add_sequences({
         "ACTATAGCTAGTCTATGCGA",
         "ACTATAGCTAGTCTAG",
         "ACTATAGCTAN",
@@ -1444,8 +1447,8 @@ TEST(DBGSuccinct, CallEdgesEmptyGraph) {
 
 TEST(DBGSuccinct, CallEdgesTwoLoops) {
     for (size_t k = 1; k < 20; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(100, 'A') });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(100, 'A') });
         DBG_succ graph(&constructor);
 
         ASSERT_EQ(2u, graph.num_edges());
@@ -1461,10 +1464,10 @@ TEST(DBGSuccinct, CallEdgesTwoLoops) {
 
 TEST(DBGSuccinct, CallEdgesFourLoops) {
     for (size_t k = 1; k < 20; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(100, 'A'),
-                                std::string(100, 'G'),
-                                std::string(100, 'C') });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(100, 'A'),
+                                    std::string(100, 'G'),
+                                    std::string(100, 'C') });
         DBG_succ graph(&constructor);
 
         ASSERT_EQ(4u, graph.num_edges());
@@ -1526,8 +1529,8 @@ TEST(DBGSuccinct, CallEdgesTestPathACA) {
 
 TEST(DBGSuccinct, CallEdgesTestPathDisconnected) {
     for (size_t k = 1; k < 20; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_read(std::string(100, 'A'));
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequence(std::string(100, 'A'));
         DBG_succ graph(&constructor);
         graph.switch_state(Config::DYN);
 
@@ -1544,8 +1547,8 @@ TEST(DBGSuccinct, CallEdgesTestPathDisconnected) {
 
 TEST(DBGSuccinct, CallEdgesTestPathDisconnected2) {
     for (size_t k = 1; k < 20; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_read(std::string(100, 'G'));
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequence(std::string(100, 'G'));
         DBG_succ graph(&constructor);
         graph.switch_state(Config::DYN);
 
@@ -1579,8 +1582,8 @@ TEST(DBGSuccinct, CallKmersEmptyGraph) {
 
 TEST(DBGSuccinct, CallKmersTwoLoops) {
     for (size_t k = 1; k < 20; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(100, 'A') });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(100, 'A') });
         DBG_succ graph(&constructor);
 
         ASSERT_EQ(2u, graph.num_edges());
@@ -1596,10 +1599,10 @@ TEST(DBGSuccinct, CallKmersTwoLoops) {
 
 TEST(DBGSuccinct, CallKmersFourLoops) {
     for (size_t k = 1; k < 20; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(100, 'A'),
-                                std::string(100, 'G'),
-                                std::string(100, 'C') });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(100, 'A'),
+                                    std::string(100, 'G'),
+                                    std::string(100, 'C') });
         DBG_succ graph(&constructor);
 
         ASSERT_EQ(4u, graph.num_edges());
@@ -1659,8 +1662,8 @@ TEST(DBGSuccinct, CallKmersTestPathACA) {
 
 TEST(DBGSuccinct, CallKmersTestPathDisconnected) {
     for (size_t k = 1; k < 20; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_read(std::string(100, 'A'));
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequence(std::string(100, 'A'));
         DBG_succ graph(&constructor);
         graph.switch_state(Config::DYN);
 
@@ -1674,8 +1677,8 @@ TEST(DBGSuccinct, CallKmersTestPathDisconnected) {
 
 TEST(DBGSuccinct, CallKmersTestPathDisconnected2) {
     for (size_t k = 1; k < 20; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_read(std::string(100, 'G'));
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequence(std::string(100, 'G'));
         DBG_succ graph(&constructor);
         graph.switch_state(Config::DYN);
 

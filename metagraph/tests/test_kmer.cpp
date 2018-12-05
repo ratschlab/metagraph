@@ -9,41 +9,41 @@
 
 
 template <typename T>
-T encode(char c, const T *char_map) {
+T encode_c(char c, const T *char_map) {
     assert(static_cast<size_t>(c) < 128);
     return char_map[static_cast<size_t>(c)];
 }
 
 template <typename T>
-char decode(T a, const std::string &alphabet) {
+char decode_c(T a, const std::string &alphabet) {
     assert(a < alphabet.size());
     return alphabet[a];
 }
 
 template <typename T>
-std::vector<T> encode(const std::string &sequence, const T *char_map) {
+std::vector<T> encode_c(const std::string &sequence, const T *char_map) {
     std::vector<T> encoded;
     std::transform(sequence.begin(), sequence.end(),
                    std::back_inserter(encoded),
-                   [&](char c) { return encode(c, char_map); });
+                   [&](char c) { return encode_c(c, char_map); });
     assert(encoded.size() == sequence.size());
 
     return encoded;
 }
 
 template <typename T>
-std::string decode(const std::vector<T> &encoded, const std::string &alphabet) {
+std::string decode_c(const std::vector<T> &encoded, const std::string &alphabet) {
     std::string decoded;
     std::transform(encoded.begin(), encoded.end(),
                    std::back_inserter(decoded),
-                   [&](T a) { return decode(a, alphabet); });
+                   [&](T a) { return decode_c(a, alphabet); });
     assert(decoded.size() == encoded.size());
 
     return decoded;
 }
 
 typedef uint8_t TAlphabet;
-template std::vector<TAlphabet> encode(const std::string &sequence, const TAlphabet *char_map);
+template std::vector<TAlphabet> encode_c(const std::string &sequence, const TAlphabet *char_map);
 
 
  // Nucleotide
@@ -59,21 +59,21 @@ std::vector<TAlphabet> encode_nucleotide(const std::string &sequence) {
         4, 4, 4, 4,  3, 3, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4
     };
 
-    return encode(sequence, kCharToNucleotide);
+    return encode_c(sequence, kCharToNucleotide);
 }
 
 template <typename G, int L>
-std::string decode_nucleotide(const KMer<G, L> &kmer) {
-    return kmer.to_string("ACGTN");
+std::string decode_nucleotide(const KMer<G, L> &kmer, size_t k) {
+    return kmer.to_string(k, "ACGTN");
 }
 
 
 
 template <typename G, int L>
 void test_kmer_codec(const std::string &sequence,
-                     const std::function<std::vector<TAlphabet>(const std::string&)> &encode,
-                     const std::function<std::string(const KMer<G, L>&)> &decode) {
-    const auto encoded = encode(sequence);
+                     const std::function<std::vector<TAlphabet>(const std::string&)> &encoder,
+                     const std::function<std::string(const KMer<G, L>&, size_t)> &decoder) {
+    const auto encoded = encoder(sequence);
 
     for (uint64_t k = 2; k < sizeof(G) * 8 / L; ++k) {
         if (k > encoded.size())
@@ -85,7 +85,7 @@ void test_kmer_codec(const std::string &sequence,
         for (uint64_t i = 0; i + k <= encoded.size(); ++i) {
             kmers.emplace_back(std::vector<TAlphabet>(encoded.begin() + i,
                                                       encoded.begin() + i + k));
-            ASSERT_EQ(sequence.substr(i, k), decode(kmers.back()))
+            ASSERT_EQ(sequence.substr(i, k), decoder(kmers.back(), k))
                  << k << " " << i;
 
             KMer<G, L> kmer_alt(encoded.data() + i, k);

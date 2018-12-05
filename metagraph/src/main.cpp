@@ -2,8 +2,8 @@
 #include "config.hpp"
 #include "sequence_io.hpp"
 #include "reads_filtering.hpp"
+#include "dbg_construct.hpp"
 #include "dbg_succinct_chunk.hpp"
-#include "dbg_succinct_construct.hpp"
 #include "dbg_succinct_merge.hpp"
 #include "annotated_dbg.hpp"
 #include "annotate_row_compressed.hpp"
@@ -14,6 +14,7 @@
 #include "annotation_converters.hpp"
 #include "kmc_parser.hpp"
 #include "dbg_hash_ordered.hpp"
+#include "dbg_sd.hpp"
 
 typedef annotate::MultiLabelAnnotation<uint64_t, std::string> Annotator;
 
@@ -28,6 +29,9 @@ Config::GraphType parse_graph_extension(const std::string &filename) {
 
     } else if (utils::ends_with(filename, ".orhashdbg")) {
         return Config::GraphType::HASH;
+
+    } else if (utils::ends_with(filename, ".sddbg")) {
+        return Config::GraphType::SD;
 
     } else {
         return Config::GraphType::INVALID;
@@ -58,6 +62,9 @@ std::unique_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
 
         case Config::GraphType::HASH:
             return load_critical_graph_from_file<DBGHashOrdered>(filename);
+
+        case Config::GraphType::SD:
+            return load_critical_graph_from_file<DBGSD>(filename);
 
         case Config::GraphType::INVALID:
             return load_critical_graph_from_file<DefaultGraphType>(filename);
@@ -697,8 +704,8 @@ int main(int argc, const char *argv[]) {
                         }
                     }
 
-                    std::unique_ptr<IChunkConstructor> constructor(
-                        IChunkConstructor::initialize(
+                    std::unique_ptr<IDBGBOSSChunkConstructor> constructor(
+                        IDBGBOSSChunkConstructor::initialize(
                             boss_graph->get_k(),
                             suffix,
                             config->parallel,
@@ -708,8 +715,8 @@ int main(int argc, const char *argv[]) {
                     );
 
                     parse_sequences(files, *config, timer,
-                        [&](const auto &read) { constructor->add_read(read); },
-                        [&](const auto &loop) { constructor->add_reads(loop); }
+                        [&](const auto &read) { constructor->add_sequence(read); },
+                        [&](const auto &loop) { constructor->add_sequences(loop); }
                     );
 
                     auto next_block = constructor->build_chunk();
@@ -735,6 +742,84 @@ int main(int argc, const char *argv[]) {
                 graph_data.initialize_graph(boss_graph.get());
                 graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
 
+            } else if (config->graph_type == Config::GraphType::SD && !config->dynamic) {
+                std::unique_ptr<DBGSD> sd_graph { new DBGSD(config->k) };
+
+                if (config->verbose) {
+                    std::cout << "Start reading data and extracting k-mers" << std::endl;
+                }
+                //enumerate all suffices
+                assert(sd_graph->alph_size > 1);
+                assert(config->nsplits > 0);
+                size_t suffix_len = std::min(
+                    static_cast<size_t>(std::ceil(std::log2(config->nsplits)
+                                                    / std::log2(sd_graph->alph_size - 1))),
+                    sd_graph->get_k() - 2
+                );
+                std::deque<std::string> suffices;
+                if (config->suffix.size()) {
+                    suffices = { config->suffix };
+                } else {
+                    suffices = utils::generate_strings(
+                        sd_graph->alphabet,
+                        suffix_len
+                    );
+                }
+
+                std::unique_ptr<DBGSDConstructor> constructor;
+
+                //one pass per suffix
+                for (const std::string &suffix : suffices) {
+                    timer.reset();
+
+                    if (suffix.size() > 0 || suffices.size() > 1) {
+                        if (valid_kmer_suffix(suffix)) {
+                            std::cout << "\nSuffix: " << suffix << std::endl;
+                        } else {
+                            std::cout << "\nSkipping suffix: " << suffix << std::endl;
+                            continue;
+                        }
+                    }
+
+                    constructor.reset(
+                        new DBGSDConstructor(
+                            sd_graph->get_k(),
+                            config->canonical,
+                            suffix,
+                            config->parallel,
+                            static_cast<uint64_t>(config->memory_available) << 30,
+                            config->verbose
+                        )
+                    );
+
+                    parse_sequences(files, *config, timer,
+                        [&](const auto &read) { constructor->add_sequence(read); },
+                        [&](const auto &loop) { constructor->add_sequences(loop); }
+                    );
+
+                    if (config->outfbase.size() && config->suffix.size()) {
+                        const DBGSD::Chunk* next_block = constructor->build_chunk();
+                        std::cout << "Graph chunk with " << next_block->num_set_bits()
+                                  << " k-mers was built in "
+                                  << timer.elapsed() << "sec" << std::endl;
+
+                        std::cout << "Serialize the graph chunk for suffix '"
+                                  << suffix << "'...\t" << std::flush;
+                        timer.reset();
+                        std::ofstream out(config->outfbase + "." + suffix + ".dbgsdchunk");
+                        next_block->serialize(out);
+                        std::cout << timer.elapsed() << "sec" << std::endl;
+                        sd_graph.reset(new DBGSD(config->k));
+                    }
+
+                    if (config->suffix.size())
+                        return 0;
+
+                    constructor->build_graph(sd_graph.get());
+                }
+
+                graph.reset(sd_graph.release());
+
             } else {
                 if (config->canonical)
                     config->reverse = false;
@@ -748,6 +833,8 @@ int main(int argc, const char *argv[]) {
                     case Config::GraphType::HASH:
                         graph.reset(new DBGHashOrdered(config->k, config->canonical));
                         break;
+                    case Config::GraphType::SD:
+                        assert(false);
                     case Config::GraphType::INVALID:
                         assert(false);
                 }
@@ -1308,7 +1395,9 @@ int main(int argc, const char *argv[]) {
                 assert(config->infbase.size());
 
                 auto sorted_suffices = utils::generate_strings(
-                    KmerExtractor().alphabet,
+                    config->graph_type == Config::GraphType::SUCCINCT
+                        ? KmerExtractor().alphabet
+                        : KmerExtractor2Bit().alphabet,
                     config->suffix_len
                 );
 
@@ -1321,22 +1410,34 @@ int main(int argc, const char *argv[]) {
             }
 
             for (auto &filename : chunk_files) {
-                filename = utils::remove_suffix(filename, ".dbgchunk");
+                filename = utils::remove_suffix(filename, ".dbgchunk", ".dbgsdchunk");
             }
 
             // collect results on an external merge or construction
-            auto graph = std::make_unique<DBGSuccinct>(
-                DBG_succ::Chunk::build_graph_from_chunks(
-                    chunk_files, config->verbose
-                ),
-                config->canonical
-            );
+            std::unique_ptr<DeBruijnGraph> graph;
+            if (config->graph_type == Config::GraphType::SUCCINCT) {
+                graph.reset(
+                    new DBGSuccinct(DBG_succ::Chunk::build_graph_from_chunks(
+                        chunk_files, config->verbose
+                    ), config->canonical)
+                );
+            } else if (config->graph_type == Config::GraphType::SD) {
+                graph.reset(
+                    DBGSDConstructor::build_graph_from_chunks(
+                        chunk_files, config->canonical, config->verbose
+                    )
+                );
+            }
             assert(graph.get());
 
             if (config->verbose) {
-                std::cout << "Succinct graph has been assembled" << std::endl;
+                std::cout << "Graph has been assembled" << std::endl;
                 print_stats(*graph);
-                print_boss_stats(graph->get_boss());
+                if (config->graph_type == Config::GraphType::SUCCINCT) {
+                    print_boss_stats(
+                        dynamic_cast<DBGSuccinct*>(graph.get())->get_boss()
+                    );
+                }
             }
 
             // graph output

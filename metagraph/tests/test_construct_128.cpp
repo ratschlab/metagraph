@@ -12,7 +12,7 @@
 
 #include "dbg_succinct.hpp"
 #include "dbg_succinct_merge.hpp"
-#include "dbg_succinct_construct.hpp"
+#include "dbg_construct.hpp"
 #include "utils.hpp"
 
 KSEQ_INIT(gzFile, gzread);
@@ -27,8 +27,8 @@ const int kMaxK = sizeof(KMER) * 8 / KmerExtractor::kLogSigma;
 
 TEST(Construct_128, ConstructionEQAppendingSimplePath) {
     for (size_t k = 1; k < kMaxK; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(100, 'A') });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(100, 'A') });
         DBG_succ constructed(&constructor);
 
         DBG_succ appended(k);
@@ -40,9 +40,9 @@ TEST(Construct_128, ConstructionEQAppendingSimplePath) {
 
 TEST(Construct_128, ConstructionEQAppendingTwoPaths) {
     for (size_t k = 1; k < kMaxK; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(100, 'A'),
-                                std::string(50, 'B') });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(100, 'A'),
+                                    std::string(50, 'B') });
         DBG_succ constructed(&constructor);
 
         DBG_succ appended(k);
@@ -55,14 +55,14 @@ TEST(Construct_128, ConstructionEQAppendingTwoPaths) {
 
 TEST(Construct_128, ConstructionLowerCase) {
     for (size_t k = 1; k < kMaxK; ++k) {
-        KMerDBGSuccConstructor constructor_first(k);
-        constructor_first.add_reads({ std::string(100, 'A'),
-                                      std::string(50, 'C') });
+        DBGSuccConstructor constructor_first(k);
+        constructor_first.add_sequences({ std::string(100, 'A'),
+                                          std::string(50, 'C') });
         DBG_succ first(&constructor_first);
 
-        KMerDBGSuccConstructor constructor_second(k);
-        constructor_second.add_reads({ std::string(100, 'a'),
-                                       std::string(50, 'c') });
+        DBGSuccConstructor constructor_second(k);
+        constructor_second.add_sequences({ std::string(100, 'a'),
+                                           std::string(50, 'c') });
         DBG_succ second(&constructor_second);
 
 #if _DNA_CASE_SENSITIVE_GRAPH
@@ -75,14 +75,14 @@ TEST(Construct_128, ConstructionLowerCase) {
 
 TEST(Construct_128, ConstructionDummySentinel) {
     for (size_t k = 1; k < kMaxK; ++k) {
-        KMerDBGSuccConstructor constructor_first(k);
-        constructor_first.add_reads({ std::string(100, 'N'),
-                                      std::string(50, '$') });
+        DBGSuccConstructor constructor_first(k);
+        constructor_first.add_sequences({ std::string(100, 'N'),
+                                          std::string(50, '$') });
         DBG_succ first(&constructor_first);
 
-        KMerDBGSuccConstructor constructor_second(k);
-        constructor_second.add_reads({ std::string(100, 'N'),
-                                       std::string(50, '.') });
+        DBGSuccConstructor constructor_second(k);
+        constructor_second.add_sequences({ std::string(100, 'N'),
+                                           std::string(50, '.') });
         DBG_succ second(&constructor_second);
 
         EXPECT_TRUE(first.equals_internally(second));
@@ -97,8 +97,8 @@ TEST(Construct_128, ConstructionEQAppending) {
             "ATATATTCTCTCTCTCTCATA",
             "GTGTGTGTGGGGGGCCCTTTTTTCATA",
         };
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads(input_data);
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences(input_data);
         DBG_succ constructed(&constructor);
 
         DBG_succ appended(k);
@@ -112,8 +112,8 @@ TEST(Construct_128, ConstructionEQAppending) {
 
 TEST(Construct_128, ConstructionLong) {
     for (size_t k = 1; k < kMaxK; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(k + 1, 'A') });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(k + 1, 'A') });
         DBG_succ constructed(&constructor);
 
         DBG_succ appended(k);
@@ -126,8 +126,8 @@ TEST(Construct_128, ConstructionLong) {
 
 TEST(Construct_128, ConstructionShort) {
     for (size_t k = 1; k < kMaxK; ++k) {
-        KMerDBGSuccConstructor constructor(k);
-        constructor.add_reads({ std::string(k, 'A') });
+        DBGSuccConstructor constructor(k);
+        constructor.add_sequences({ std::string(k, 'A') });
         DBG_succ constructed(&constructor);
 
         DBG_succ appended(k);
@@ -141,12 +141,12 @@ TEST(Construct_128, ConstructionShort) {
 using TAlphabet = KmerExtractor::TAlphabet;
 
 TEST(ExtractKmers_128, ExtractKmersEmptySuffix) {
-    for (size_t k = 1; k < kMaxK; ++k) {
+    for (size_t k = 2; k <= kMaxK; ++k) {
         Vector<KMER> result;
 
         for (size_t length = 0; length < k; ++length) {
             KmerExtractor::sequence_to_kmers(
-                std::vector<TAlphabet>(length, 6), k + 1, {}, &result
+                std::vector<TAlphabet>(length, 6), k, {}, &result
             );
             ASSERT_TRUE(result.empty());
         }
@@ -154,10 +154,10 @@ TEST(ExtractKmers_128, ExtractKmersEmptySuffix) {
         for (size_t length = k; length < 700; ++length) {
             result.clear();
             KmerExtractor::sequence_to_kmers(
-                std::vector<TAlphabet>(length, 6), k + 1, {}, &result
+                std::vector<TAlphabet>(length, 6), k, {}, &result
             );
-            ASSERT_EQ(length - k, result.size()) << "k: " << k
-                                                 << ", length: " << length;
+            ASSERT_EQ(length - k + 1, result.size()) << "k: " << k
+                                                     << ", length: " << length;
         }
     }
 }
@@ -165,24 +165,24 @@ TEST(ExtractKmers_128, ExtractKmersEmptySuffix) {
 TEST(ExtractKmers_128, ExtractKmersWithFilteringOne) {
     std::vector<TAlphabet> suffix = { 0 };
 
-    for (size_t k = 1; k < kMaxK; ++k) {
+    for (size_t k = 2; k <= kMaxK; ++k) {
         Vector<KMER> result;
 
         for (size_t length = 0; length < 500; ++length) {
             KmerExtractor::sequence_to_kmers(
-                std::vector<TAlphabet>(length, 6), k + 1, suffix, &result
+                std::vector<TAlphabet>(length, 6), k, suffix, &result
             );
             ASSERT_TRUE(result.empty());
         }
     }
 
     suffix.assign({ 6 });
-    for (size_t k = 1; k < kMaxK; ++k) {
+    for (size_t k = 2; k <= kMaxK; ++k) {
         Vector<KMER> result;
 
         for (size_t length = 0; length < k; ++length) {
             KmerExtractor::sequence_to_kmers(
-                std::vector<TAlphabet>(length, 6), k + 1, suffix, &result
+                std::vector<TAlphabet>(length, 6), k, suffix, &result
             );
             ASSERT_TRUE(result.empty());
         }
@@ -190,34 +190,34 @@ TEST(ExtractKmers_128, ExtractKmersWithFilteringOne) {
         for (size_t length = k; length < 500; ++length) {
             result.clear();
             KmerExtractor::sequence_to_kmers(
-                std::vector<TAlphabet>(length, 6), k + 1, suffix, &result
+                std::vector<TAlphabet>(length, 6), k, suffix, &result
             );
-            ASSERT_EQ(length - k, result.size()) << "k: " << k
-                                                 << ", length: " << length;
+            ASSERT_EQ(length - k + 1, result.size()) << "k: " << k
+                                                     << ", length: " << length;
         }
     }
 }
 
 TEST(ExtractKmers_128, ExtractKmersWithFilteringTwo) {
     std::vector<TAlphabet> suffix = { 6, 1 };
-    for (size_t k = 2; k < kMaxK; ++k) {
+    for (size_t k = 3; k <= kMaxK; ++k) {
         Vector<KMER> result;
 
-        for (size_t length = 0; length <= k; ++length) {
+        for (size_t length = 0; length < k; ++length) {
             KmerExtractor::sequence_to_kmers(
-                std::vector<TAlphabet>(length, 6), k + 1, suffix, &result
+                std::vector<TAlphabet>(length, 6), k, suffix, &result
             );
             ASSERT_TRUE(result.empty());
         }
 
-        for (size_t length = k + 1; length < 500; ++length) {
+        for (size_t length = k; length < 500; ++length) {
             result.clear();
 
             std::vector<TAlphabet> sequence(length, 6);
             sequence[k - 1] = 1;
 
             KmerExtractor::sequence_to_kmers(
-                sequence, k + 1, suffix, &result
+                sequence, k, suffix, &result
             );
             ASSERT_EQ(1u, result.size()) << "k: " << k
                                          << ", length: " << length;
@@ -240,79 +240,132 @@ TEST(ExtractKmers_128, ExtractKmersAppend) {
 }
 
 TEST(ExtractKmers_128, ExtractKmersFromStringWithoutFiltering) {
-    for (size_t k = 1; k < kMaxK; ++k) {
+    for (size_t k = 2; k <= kMaxK; ++k) {
         Vector<KMER> result;
 
-        for (size_t length = 0; length <= k; ++length) {
+        // NNN -> $NNN$
+        for (size_t length = 0; length < k; ++length) {
             KmerExtractor::sequence_to_kmers(
-                std::string(length, 'N'), k + 1, {}, &result
+                std::string(length, 'N'), k, {}, &result
             );
             ASSERT_TRUE(result.empty()) << "k: " << k
                                         << ", length: " << length;
         }
 
-        for (size_t length = k + 1; length < 500; ++length) {
+        for (size_t length = k; length < 500; ++length) {
             result.clear();
             KmerExtractor::sequence_to_kmers(
-                std::string(length, 'N'), k + 1, {}, &result
+                std::string(length, 'N'), k, {}, &result
             );
-            // NNN -> $NNN$
-            ASSERT_EQ(length - k + 2, result.size()) << "k: " << k
+            ASSERT_EQ(length - k + 3, result.size()) << "k: " << k
                                                      << ", length: " << length;
         }
     }
 }
 
-TEST(ExtractKmers_128, ExtractKmersFromStringWithFilteringTwo) {
-    for (size_t k = 2; k < kMaxK; ++k) {
+TEST(ExtractKmers_128, ExtractKmersFromStringWithFilteringOne) {
+    std::vector<TAlphabet> suffix = { 0 };
+
+    for (size_t k = 2; k <= kMaxK; ++k) {
         Vector<KMER> result;
 
-        for (size_t length = 0; length <= k; ++length) {
+        for (size_t length = 0; length < k; ++length) {
             KmerExtractor::sequence_to_kmers(
-                std::string(length, 'N'), k + 1, KmerExtractor::encode("NN"), &result
+                std::string(length, 'N'), k, suffix, &result
+            );
+            ASSERT_TRUE(result.empty());
+        }
+
+        for (size_t length = k; length < 500; ++length) {
+            result.clear();
+            KmerExtractor::sequence_to_kmers(
+                std::string(length, 'N'), k, suffix, &result
+            );
+            ASSERT_EQ(1u, result.size()) << "k: " << k
+                                         << ", length: " << length;
+        }
+    }
+
+    suffix.assign({ KmerExtractor::encode('N') });
+    for (size_t k = 2; k <= kMaxK; ++k) {
+        Vector<KMER> result;
+
+        for (size_t length = 0; length < k; ++length) {
+            KmerExtractor::sequence_to_kmers(
+                std::string(length, 'N'), k, suffix, &result
+            );
+            ASSERT_TRUE(result.empty());
+        }
+
+        // NN   -> $NN$
+        // NNN  -> $$NNN$
+        // NNNN -> $$$NNNN$
+        for (size_t length = k; length < 500; ++length) {
+            result.clear();
+            KmerExtractor::sequence_to_kmers(
+                std::string(length, 'N'), k, suffix, &result
+            );
+            ASSERT_EQ(length, result.size()) << "k: " << k
+                                             << ", length: " << length;
+        }
+    }
+}
+
+
+TEST(ExtractKmers_128, ExtractKmersFromStringWithFilteringTwo) {
+    for (size_t k = 3; k <= kMaxK; ++k) {
+        Vector<KMER> result;
+
+        for (size_t length = 0; length < k; ++length) {
+            KmerExtractor::sequence_to_kmers(
+                std::string(length, 'N'), k, KmerExtractor::encode("NN"), &result
             );
             ASSERT_TRUE(result.empty()) << "k: " << k
                                         << ", length: " << length;
         }
 
-        for (size_t length = k + 1; length < 200; ++length) {
+        // NNN -> $NNN$
+        for (size_t length = k; length < 200; ++length) {
             result.clear();
             KmerExtractor::sequence_to_kmers(
-                std::string(length, 'N'), k + 1, { 0, 0 }, &result
+                std::string(length, 'N'), k, { 0, 0 }, &result
+            );
+            ASSERT_EQ(0u, result.size()) << "k: " << k
+                                         << ", length: " << length;
+            result.clear();
+            KmerExtractor::sequence_to_kmers(
+                std::string(length, 'N'), k, { 0, KmerExtractor::encode('N') }, &result
             );
             ASSERT_EQ(1u, result.size()) << "k: " << k
                                          << ", length: " << length;
             result.clear();
             KmerExtractor::sequence_to_kmers(
-                std::string(length, 'N'), k + 1, { 0, KmerExtractor::encode('N') }, &result
+                std::string(length, 'N'), k, KmerExtractor::encode("NN"), &result
             );
-            ASSERT_EQ(1u, result.size()) << "k: " << k
-                                         << ", length: " << length;
-            result.clear();
-            KmerExtractor::sequence_to_kmers(
-                std::string(length, 'N'), k + 1, KmerExtractor::encode("NN"), &result
-            );
+
+            // NNN  -> $$NNN$
+            // NNNN -> $$$NNNN$
             ASSERT_EQ(length - 1, result.size()) << "k: " << k
                                                  << ", length: " << length;
         }
 
         result.clear();
 
-        for (size_t length = 0; length <= k; ++length) {
+        for (size_t length = 0; length < k; ++length) {
             KmerExtractor::sequence_to_kmers(
-                std::string(length, 'N'), k + 1, KmerExtractor::encode("NA"), &result
+                std::string(length, 'N'), k, KmerExtractor::encode("NA"), &result
             );
             ASSERT_TRUE(result.empty());
         }
 
-        for (size_t length = k + 1; length < 200; ++length) {
+        for (size_t length = k; length < 200; ++length) {
             result.clear();
 
             std::string sequence(length, 'N');
             sequence[k - 1] = 'A';
 
             KmerExtractor::sequence_to_kmers(
-                sequence, k + 1, KmerExtractor::encode("NA"), &result
+                sequence, k, KmerExtractor::encode("NA"), &result
             );
             ASSERT_EQ(1u, result.size()) << "k: " << k
                                          << ", length: " << length;
@@ -336,20 +389,21 @@ TEST(ExtractKmers_128, ExtractKmersFromStringAppend) {
 }
 
 
-typedef std::function<void(const std::string&)> CallbackRead;
+typedef std::function<void(const std::string&)> CallbackString;
 
-template <typename KMER>
-void extract_kmers(std::function<void(CallbackRead)> generate_reads,
+template <typename KMER, class KmerExtractor>
+void extract_kmers(std::function<void(CallbackString)> generate_reads,
                    size_t k,
+                   bool canonical_mode,
                    Vector<KMER> *kmers,
                    const std::vector<TAlphabet> &suffix,
-                   const KmerExtractor &kmer_extractor,
                    size_t num_threads,
                    bool verbose,
                    std::mutex &mutex_resize,
                    std::shared_timed_mutex &mutex_copy,
                    bool remove_redundant = true);
 
+// TODO: k is node length
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
                                         Vector<KMER> *kmers,
@@ -359,13 +413,13 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         bool remove_redundant,
                                         size_t reserved_capacity) {
     kmers->reserve(reserved_capacity);
-    KmerExtractor kmer_extractor;
-    extract_kmers([reads](CallbackRead callback) {
+    extract_kmers<KMER, KmerExtractor>(
+        [reads](CallbackString callback) {
             for (auto &&read : *reads) {
                 callback(std::move(read));
             }
         },
-        k, kmers, suffix, kmer_extractor,
+        k, false, kmers, suffix,
         1, false, std::ref(mutex_resize), std::ref(mutex), remove_redundant
     );
     delete reads;
@@ -384,31 +438,31 @@ TEST(ExtractKmers_128, ExtractKmersAppendParallelReserved) {
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        1, &result, {}, mu_resize, mu, false, 100'000
+        2, &result, {}, mu_resize, mu, false, 100'000
     );
     ASSERT_EQ((sequence_size + 1) * 5, result.size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        1, &result, {}, mu_resize, mu, false, 100'000
+        2, &result, {}, mu_resize, mu, false, 100'000
     );
     ASSERT_EQ((sequence_size + 1) * 10, result.size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        1, &result, {}, mu_resize, mu, false, 100'000
+        2, &result, {}, mu_resize, mu, false, 100'000
     );
     ASSERT_EQ((sequence_size + 1) * 15, result.size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        1, &result, {}, mu_resize, mu, false, 100'000
+        2, &result, {}, mu_resize, mu, false, 100'000
     );
     ASSERT_EQ((sequence_size + 1) * 20, result.size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        1, &result, { 1, }, mu_resize, mu, false, 100'000
+        2, &result, { 1, }, mu_resize, mu, false, 100'000
     );
     ASSERT_EQ((sequence_size + 1) * 20, result.size());
 }
@@ -421,26 +475,26 @@ TEST(ExtractKmers_128, ExtractKmersAppendParallel) {
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        1, &result, {}, mu_resize, mu, false, 0
+        2, &result, {}, mu_resize, mu, false, 0
     );
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        1, &result, {}, mu_resize, mu, false, 0
+        2, &result, {}, mu_resize, mu, false, 0
     );
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        1, &result, {}, mu_resize, mu, false, 0
+        2, &result, {}, mu_resize, mu, false, 0
     );
     sort_and_remove_duplicates(&result, 1);
     ASSERT_EQ(3u, result.size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        1, &result, {}, mu_resize, mu, false, 0
+        2, &result, {}, mu_resize, mu, false, 0
     );
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        1, &result, { 1, }, mu_resize, mu, false, 0
+        2, &result, { 1, }, mu_resize, mu, false, 0
     );
     sort_and_remove_duplicates(&result, 1);
     ASSERT_EQ(6u, result.size());
@@ -453,7 +507,7 @@ TEST(ExtractKmers_128, ExtractKmersParallelRemoveRedundantReserved) {
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        1, &result, {}, mu_resize, mu, true, 100'000
+        2, &result, {}, mu_resize, mu, true, 100'000
     );
     // $A, AA, A$
     ASSERT_EQ(3u, result.size());
@@ -461,29 +515,9 @@ TEST(ExtractKmers_128, ExtractKmersParallelRemoveRedundantReserved) {
     result.clear();
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        2, &result, {}, mu_resize, mu, true, 100'000
-    );
-    // $AA, AAA, AA$
-    ASSERT_EQ(3u, result.size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        2, &result, { 0 }, mu_resize, mu, true, 100'000
-    );
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        2, &result, { 1 }, mu_resize, mu, true, 100'000
-    );
-    // $$A, $AA, AAA, AA$
-    ASSERT_EQ(4u, result.size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
         3, &result, {}, mu_resize, mu, true, 100'000
     );
-    // $AAA, AAAA, AAA$
+    // $AA, AAA, AA$
     ASSERT_EQ(3u, result.size());
 
     result.clear();
@@ -494,6 +528,26 @@ TEST(ExtractKmers_128, ExtractKmersParallelRemoveRedundantReserved) {
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
         3, &result, { 1 }, mu_resize, mu, true, 100'000
+    );
+    // $$A, $AA, AAA, AA$
+    ASSERT_EQ(4u, result.size());
+
+    result.clear();
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(500, 'A')),
+        4, &result, {}, mu_resize, mu, true, 100'000
+    );
+    // $AAA, AAAA, AAA$
+    ASSERT_EQ(3u, result.size());
+
+    result.clear();
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(500, 'A')),
+        4, &result, { 0 }, mu_resize, mu, true, 100'000
+    );
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(500, 'A')),
+        4, &result, { 1 }, mu_resize, mu, true, 100'000
     );
     // $$$A, $$AA, $AAA, AAAA, AAA$
     ASSERT_EQ(5u, result.size());
@@ -506,7 +560,7 @@ TEST(ExtractKmers_128, ExtractKmersParallelRemoveRedundant) {
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        1, &result, {}, mu_resize, mu, true, 0
+        2, &result, {}, mu_resize, mu, true, 0
     );
     // $A, AA, A$
     ASSERT_EQ(3u, result.size());
@@ -514,29 +568,9 @@ TEST(ExtractKmers_128, ExtractKmersParallelRemoveRedundant) {
     result.clear();
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        2, &result, {}, mu_resize, mu, true, 0
-    );
-    // $AA, AAA, AA$
-    ASSERT_EQ(3u, result.size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        2, &result, { 0 }, mu_resize, mu, true, 0
-    );
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
-        2, &result, { 1 }, mu_resize, mu, true, 0
-    );
-    // $$A, $AA, AAA, AA$
-    ASSERT_EQ(4u, result.size());
-
-    result.clear();
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(500, 'A')),
         3, &result, {}, mu_resize, mu, true, 0
     );
-    // $AAA, AAAA, AAA$
+    // $AA, AAA, AA$
     ASSERT_EQ(3u, result.size());
 
     result.clear();
@@ -547,6 +581,26 @@ TEST(ExtractKmers_128, ExtractKmersParallelRemoveRedundant) {
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
         3, &result, { 1 }, mu_resize, mu, true, 0
+    );
+    // $$A, $AA, AAA, AA$
+    ASSERT_EQ(4u, result.size());
+
+    result.clear();
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(500, 'A')),
+        4, &result, {}, mu_resize, mu, true, 0
+    );
+    // $AAA, AAAA, AAA$
+    ASSERT_EQ(3u, result.size());
+
+    result.clear();
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(500, 'A')),
+        4, &result, { 0 }, mu_resize, mu, true, 0
+    );
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(500, 'A')),
+        4, &result, { 1 }, mu_resize, mu, true, 0
     );
     // $$$A, $$AA, $AAA, AAAA, AAA$
     ASSERT_EQ(5u, result.size());

@@ -12,12 +12,8 @@
 #include "kmer.hpp"
 #include "kmer_packed.hpp"
 
-class DBG_succ;
-
 
 class KmerExtractor {
-    friend class ::DBG_succ;
-
   public:
 
     #if _PROTEIN_GRAPH
@@ -49,17 +45,22 @@ class KmerExtractor {
     static void sequence_to_kmers(const std::string &sequence,
                                   size_t k,
                                   const std::vector<TAlphabet> &suffix,
-                                  Vector<KMER> *kmers);
+                                  Vector<KMER> *kmers,
+                                  bool canonical_mode = false);
 
     // extract k-mers from sequence
     template <class KMER>
     static void sequence_to_kmers(const std::vector<TAlphabet> &sequence,
                                   size_t k,
                                   const std::vector<TAlphabet> &suffix,
-                                  Vector<KMER> *kmers);
+                                  Vector<KMER> *kmers,
+                                  const std::vector<uint64_t> &canonical_map = {});
 
     template <class KMER>
-    static std::string kmer_to_sequence(const KMER &kmer);
+    static std::string kmer_to_sequence(const KMER &kmer, size_t k);
+
+    template <class KMER>
+    static KMER reverse_complement(const KMER &kmer, size_t k);
 
     // map input character to k-mer character
     static TAlphabet encode(char s);
@@ -74,39 +75,51 @@ class KmerExtractor {
     static const TAlphabet kCharToNucleotide[128];
 };
 
-
 class KmerExtractor2Bit {
+  public:
     static constexpr size_t kLogSigma = 2;
 
-  public:
+    typedef KMerPacked<uint64_t, kLogSigma> Kmer64;
+    typedef KMerPacked<sdsl::uint128_t, kLogSigma> Kmer128;
+    typedef KMerPacked<sdsl::uint256_t, kLogSigma> Kmer256;
+
     // alphabet for k-mer representation
     typedef uint8_t TAlphabet;
-    // kmer type
-    typedef KMerPacked<uint64_t, kLogSigma> Kmer;
 
     KmerExtractor2Bit();
 
-    // extract k-mers from sequence
-    Vector<Kmer> sequence_to_kmers(const std::string &sequence,
-                                   size_t k) const;
+    template <class KMER>
+    static void sequence_to_kmers(const std::string &sequence,
+                                  size_t k,
+                                  const std::vector<TAlphabet> &suffix,
+                                  Vector<KMER> *kmers,
+                                  bool canonical_mode = false);
 
-    std::string kmer_to_sequence(const Kmer &kmer) const;
+    // extract k-mers from sequence
+    template <class KMER>
+    static void sequence_to_kmers(const std::vector<TAlphabet> &sequence,
+                                  size_t k,
+                                  const std::vector<TAlphabet> &suffix,
+                                  Vector<KMER> *kmers,
+                                  const std::vector<uint64_t> &canonical_map = {});
+
+    template <class KMER>
+    static std::string kmer_to_sequence(const KMER &kmer, size_t k);
+
+    template <class KMER>
+    static KMER reverse_complement(const KMER &kmer, size_t k);
 
     // map input character to k-mer character
-    TAlphabet encode(char s) const;
+    static TAlphabet encode(char s);
+    static std::vector<TAlphabet> encode(const std::string &sequence);
     // map k-mer character to input character
-    char decode(TAlphabet c) const;
-
-  private:
-    std::vector<TAlphabet> encode(const std::string &sequence) const;
-    std::string decode(const std::vector<TAlphabet> &sequence) const;
-
-    Vector<Kmer>
-    sequence_to_kmers(std::vector<TAlphabet>&& seq, size_t k) const;
+    static char decode(TAlphabet c);
+    static std::string decode(const std::vector<TAlphabet> &sequence);
 
     static const std::string alphabet;
+
+  private:
     static const TAlphabet kCharToNucleotide[128];
 };
-
 
 #endif // __KMER_EXTRACTOR_HPP__

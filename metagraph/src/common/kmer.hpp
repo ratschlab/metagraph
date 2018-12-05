@@ -16,7 +16,7 @@ class KMer {
   public:
     typedef G KMerWordType;
     typedef uint64_t KMerCharType;
-    static const int kBitsPerChar = L;
+    static constexpr int kBitsPerChar = L;
 
     KMer() {}
     template <typename V>
@@ -36,7 +36,10 @@ class KMer {
     static inline bool compare_suffix(const KMer &k1,
                                       const KMer &k2, size_t minus = 0);
 
-    std::string to_string(const std::string &alphabet) const;
+    std::string to_string(size_t k, const std::string &alphabet) const;
+
+    KMer<G, L> reverse_complement(size_t k,
+                                  const std::vector<KMerCharType> &complement_map) const;
 
     template <typename T>
     static inline KMerWordType pack_kmer(const T &arr, size_t k);
@@ -54,6 +57,9 @@ class KMer {
     inline KMer<G, L> prev_kmer(size_t k, KMerCharType first_char) const;
     inline void next_kmer(size_t k, KMerCharType edge_label);
 
+    inline KMerWordType& data() { return seq_; }
+    inline KMerWordType data() const { return seq_; }
+
   private:
     inline KMerCharType get_digit(size_t i) const;
 
@@ -70,11 +76,25 @@ typename KMer<G, L>::KMerCharType KMer<G, L>::operator[](size_t i) const {
 }
 
 template <typename G, int L>
+KMer<G, L>
+KMer<G, L>::reverse_complement(size_t k,
+                               const std::vector<KMerCharType> &complement_map) const {
+    std::vector<KMerCharType> vec;
+    vec.reserve(k);
+    for (ssize_t i = k - 1; i >= 0; --i) {
+        vec.push_back(complement_map.at(operator[](i)));
+    }
+    return KMer<G, L>(pack_kmer(vec, k));
+}
+
+template <typename G, int L>
 template <typename T>
 G KMer<G, L>::pack_kmer(const T &arr, size_t k) {
     if (k * kBitsPerChar > sizeof(KMerWordType) * 8 || k < 2) {
-        std::cerr << "ERROR: Too large k-mer size: must be between 2 and "
-                  << sizeof(KMerWordType) * 8 / kBitsPerChar << std::endl;
+        std::cerr << "Invalid k-mer size "
+                  << k
+                  << ": must be between 2 and "
+                  << (sizeof(KMerWordType) * 8 / kBitsPerChar) << std::endl;
         exit(1);
     }
 

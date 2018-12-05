@@ -26,7 +26,7 @@ std::string kmer_codec(const std::string &test_kmer) {
                         : KmerExtractor::encode(c);
         }
     );
-    return KMER(kmer).to_string(KmerExtractor::alphabet);
+    return KMER(kmer).to_string(test_kmer.length(), KmerExtractor::alphabet);
 }
 
 template std::string kmer_codec<KMer<uint64_t, KmerExtractor::kLogSigma>>(const std::string &test_kmer);
@@ -58,12 +58,12 @@ TEST(KmerEncodeTest_64, Operations) {
         for (int i = 3; i <= shift; ++i) {
             kmer <<= kBitsPerChar;
             kmer |= j;
-            ASSERT_EQ(kmer.to_string(KmerExtractor::alphabet),
+            ASSERT_EQ(kmer.to_string(long_seq.length(), KmerExtractor::alphabet),
                       long_seq + std::string(i - 2, curchar));
         }
         while (shift--) {
             kmer >>= kBitsPerChar;
-            ASSERT_EQ(kmer.to_string(KmerExtractor::alphabet),
+            ASSERT_EQ(kmer.to_string(long_seq.length(), KmerExtractor::alphabet),
                       long_seq + std::string(shift - 2, curchar));
         }
     }
@@ -87,7 +87,7 @@ TEST(KmerEncodeTest_64, BitShiftBuild) {
     }
     kmer_builtup.seq_ = kmer_builtup.seq_ << kBitsPerChar;
     kmer_builtup.seq_ |= KmerExtractor::encode(long_seq[long_seq.length() - 1]) + 1;
-    std::string dec = kmer_builtup.to_string(KmerExtractor::alphabet);
+    std::string dec = kmer_builtup.to_string(long_seq.length(), KmerExtractor::alphabet);
     ASSERT_EQ(long_seq, dec);
 
     test_kmer_codec_64(long_seq, long_seq);
@@ -122,8 +122,8 @@ TEST(KmerEncodeTest_64, UpdateKmerLong) {
                 KmerExtractor::encode(long_seq.back()),
                 &kmer[0].seq_);
     EXPECT_EQ(kmer[1], kmer[0]);
-    EXPECT_EQ(kmer[1].to_string(KmerExtractor::alphabet),
-              kmer[0].to_string(KmerExtractor::alphabet));
+    EXPECT_EQ(kmer[1].to_string(long_seq.length(), KmerExtractor::alphabet),
+              kmer[0].to_string(long_seq.length(), KmerExtractor::alphabet));
 }
 
 TEST(KmerEncodeTest_64, UpdateKmerVsConstruct) {
@@ -140,12 +140,14 @@ TEST(KmerEncodeTest_64, UpdateKmerVsConstruct) {
             KmerExtractor::encode(long_seq1.back()),
             KmerExtractor::encode(long_seq0.back()),
             reinterpret_cast<KMerBaseType*>(&kmer0));
-    std::string reconst_seq1 = kmer0.to_string(KmerExtractor::alphabet);
+    std::string reconst_seq1 = kmer0.to_string(long_seq0.length(),
+                                               KmerExtractor::alphabet);
     EXPECT_EQ(long_seq1, reconst_seq1);
 
     seq0.emplace_back(KmerExtractor::encode(long_seq1.back()));
     KMER kmer1(KMER::pack_kmer(seq0.begin() + 1, seq0.size() - 1));
-    std::string reconst_seq2 = kmer1.to_string(KmerExtractor::alphabet);
+    std::string reconst_seq2 = kmer1.to_string(long_seq1.length(),
+                                               KmerExtractor::alphabet);
     EXPECT_EQ(long_seq1, reconst_seq2);
 }
 

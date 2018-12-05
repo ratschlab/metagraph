@@ -19,7 +19,7 @@
 
 #include <boost/multiprecision/integer.hpp>
 
-#include "dbg_succinct_construct.hpp"
+#include "dbg_construct.hpp"
 #include "serialization.hpp"
 #include "helpers.hpp"
 
@@ -67,7 +67,6 @@ DBG_succ::DBG_succ(size_t k)
 DBG_succ::DBG_succ(DBGSuccConstructor *builder) : DBG_succ::DBG_succ() {
     assert(builder);
 
-    k_ = builder->get_k();
     builder->build_graph(this);
     assert(is_valid());
 }
@@ -1139,8 +1138,8 @@ void DBG_succ::update_F(TAlphabet c, int value) {
 }
 
 TAlphabet DBG_succ::encode(char s) const {
-    assert(kmer_extractor_.kCharToNucleotide[kSentinel] != kSentinelCode);
-    assert(kmer_extractor_.kCharToNucleotide[kSentinel] != kSentinelCode + alph_size);
+    assert(kmer_extractor_.encode(kSentinel) != kSentinelCode);
+    assert(kmer_extractor_.encode(kSentinel) != kSentinelCode + alph_size);
     return kmer_extractor_.encode(s);
 }
 

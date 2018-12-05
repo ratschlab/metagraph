@@ -9,16 +9,16 @@
 
 
 template <typename T>
-T encode(char c, const T *char_map);
+T encode_c(char c, const T *char_map);
 
 template <typename T>
-char decode(T a, const std::string &alphabet);
+char decode_c(T a, const std::string &alphabet);
 
 template <typename T>
-std::vector<T> encode(const std::string &sequence, const T *char_map);
+std::vector<T> encode_c(const std::string &sequence, const T *char_map);
 
 template <typename T>
-std::string decode(const std::vector<T> &encoded, const std::string &alphabet);
+std::string decode_c(const std::vector<T> &encoded, const std::string &alphabet);
 
 typedef uint8_t TAlphabet;
 
@@ -35,19 +35,19 @@ std::vector<TAlphabet> encode_nucleotide_2bit(const std::string &sequence) {
         0, 0, 0, 0,  3, 3, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0
     };
 
-    return encode(sequence, kCharToNucleotide);
+    return encode_c(sequence, kCharToNucleotide);
 }
 
 template <typename G, int L>
-std::string decode_nucleotide_2bit(const KMerPacked<G, L> &kmer) {
-    return kmer.to_string("ACGT");
+std::string decode_nucleotide_2bit(const KMerPacked<G, L> &kmer, size_t k) {
+    return kmer.to_string(k, "ACGT");
 }
 
 
 template <typename G, int L>
 void test_kmer_codec(const std::string &sequence,
                      const std::function<std::vector<TAlphabet>(const std::string&)> &encoder,
-                     const std::function<std::string(const KMerPacked<G, L>&)> &decoder) {
+                     const std::function<std::string(const KMerPacked<G, L>&, size_t)> &decoder) {
     const auto encoded = encoder(sequence);
 
     for (uint64_t k = 2; k < sizeof(G) * 8 / L; ++k) {
@@ -61,16 +61,16 @@ void test_kmer_codec(const std::string &sequence,
             kmers.emplace_back(std::vector<TAlphabet>(encoded.begin() + i,
                                                       encoded.begin() + i + k));
             assert(i + k <= sequence.size());
-            ASSERT_EQ(k, kmers.back().get_k()) << sequence.substr(i, k) << " " << k << " " << i;
-            ASSERT_EQ(sequence.substr(i, k), decoder(kmers.back()))
+            //ASSERT_EQ(k, kmers.back().get_k()) << sequence.substr(i, k) << " " << k << " " << i;
+            ASSERT_EQ(sequence.substr(i, k), decoder(kmers.back(), k))
                  << sequence.substr(i, k) << " " << k << " " << i;
 
             KMerPacked<G, L> kmer_alt(encoded.data() + i, k);
-            ASSERT_EQ(k, kmer_alt.get_k()) << sequence.substr(i, k) << " " << k << " " << i;
+            //ASSERT_EQ(k, kmer_alt.get_k()) << sequence.substr(i, k) << " " << k << " " << i;
             ASSERT_EQ(kmers.back(), kmer_alt) << sequence.substr(i, k) << " " << k << " " << i;
 
             KMerPacked<G, L> kmer_packed(packed);
-            ASSERT_EQ(k, kmer_packed.get_k()) << sequence.substr(i, k) << " " << k << " " << i;
+            //ASSERT_EQ(k, kmer_packed.get_k()) << sequence.substr(i, k) << " " << k << " " << i;
             ASSERT_EQ(kmers.back(), kmer_packed) << sequence.substr(i, k) << " " << k << " " << i;
             if (i + k < encoded.size())
                 KMerPacked<G, L>::update_kmer(

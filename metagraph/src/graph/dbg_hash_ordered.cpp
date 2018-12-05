@@ -66,7 +66,7 @@ DBGHashOrdered::kmer_to_node(const std::string &kmer) const {
 std::string DBGHashOrdered::node_to_kmer(node_index i) const {
     assert(i > 0);
     assert(i <= kmers_.size());
-    return seq_encoder_.kmer_to_sequence(get_kmer(i));
+    return seq_encoder_.kmer_to_sequence(get_kmer(i), k_);
 }
 
 void DBGHashOrdered::serialize(std::ostream &out) const {

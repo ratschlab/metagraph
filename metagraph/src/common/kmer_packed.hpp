@@ -16,7 +16,7 @@ class KMerPacked {
   public:
     typedef G KMerWordType;
     typedef uint64_t KMerCharType;
-    static const int kBitsPerChar = L;
+    static constexpr int kBitsPerChar = L;
 
     KMerPacked() {}
     template <typename V>
@@ -36,16 +36,14 @@ class KMerPacked {
     static inline bool compare_suffix(const KMerPacked &k1,
                                       const KMerPacked &k2, size_t minus = 0);
 
-    std::string to_string(const std::string &alphabet) const;
+    std::string to_string(size_t k, const std::string &alphabet) const;
+
+    KMerPacked<G, L>
+    reverse_complement(size_t k, const std::vector<KMerCharType> &complement_map) const;
 
     template <typename T>
     static inline KMerWordType pack_kmer(const T &arr, size_t k);
 
-    /**
-     * Construct the next k-mer for s[6]s[5]s[4]s[3]s[2]s[1]s[7].
-     * next = s[7]s[6]s[5]s[4]s[3]s[2]s[8]
-     *      = s[7] << k + (kmer & mask) >> 1 + s[8].
-     */
     static inline void update_kmer(size_t k,
                                    KMerCharType edge_label,
                                    KMerCharType last,
@@ -57,12 +55,7 @@ class KMerPacked {
     inline KMerWordType& data() { return seq_; }
     inline KMerWordType data() const { return seq_; }
 
-    inline uint32_t get_k() const { return get_k(seq_); }
-
   private:
-    static void set_length_bit(KMerWordType *kmer, uint64_t k);
-    static void unset_length_bit(KMerWordType *kmer, uint64_t k);
-    static uint32_t get_k(const KMerWordType &kmer);
     inline KMerCharType get_digit(size_t i) const;
 
     static const KMerCharType kFirstCharMask;
@@ -77,97 +70,69 @@ typename KMerPacked<G, L>::KMerCharType KMerPacked<G, L>::operator[](size_t i) c
 }
 
 template <typename G, int L>
+KMerPacked<G, L>
+KMerPacked<G, L>
+::reverse_complement(size_t k,
+                     const std::vector<KMerCharType> &complement_map) const {
+    KMerWordType pack(0);
+    KMerWordType storage = seq_;
+    KMerWordType mask = kFirstCharMask;
+    for (size_t i = 0; i < k; ++i) {
+        pack = pack << kBitsPerChar;
+        pack |= complement_map.at(storage & mask);
+        storage = storage >> kBitsPerChar;
+    }
+    assert(storage == static_cast<KMerWordType>(0));
+    return KMerPacked<G, L>(pack);
+}
+
+template <typename G, int L>
 template <typename T>
 G KMerPacked<G, L>::pack_kmer(const T &arr, size_t k) {
-    if (k + 1 > sizeof(KMerWordType) * 8 / kBitsPerChar || k < 2) {
-        std::cerr << "ERROR: Too large k-mer size: must be between 2 and "
-                  << (sizeof(KMerWordType) * 8 / kBitsPerChar - 1) << std::endl;
+    if (k > sizeof(KMerWordType) * 8 / kBitsPerChar || k < 2) {
+        std::cerr << "Invalid k-mer size "
+                  << k
+                  << ": must be between 2 and "
+                  << (sizeof(KMerWordType) * 8 / kBitsPerChar) << std::endl;
         exit(1);
     }
 
-    KMerWordType result(1);
+    KMerWordType result(0);
 
-    for (int i = k - 2; i >= 0; --i) {
+    for (int i = k - 1; i >= 0; --i) {
 
-        assert(static_cast<uint64_t>(arr[i]) < (1llu << kBitsPerChar)
-                 && "Alphabet size too big for the given number of bits");
+        if (static_cast<uint64_t>(arr[i]) >= (1llu << kBitsPerChar)) {
+            std::cerr << "Alphabet size too big for the given number of bits" << std::endl;
+            exit(1);
+        }
 
         result = result << kBitsPerChar;
         result |= arr[i];
     }
-    result = result << kBitsPerChar;
-    result |= arr[k - 1];
-    assert(get_k(result) == k);
     return result;
 }
 
-/**
- * Construct the next k-mer for s[6]s[5]s[4]s[3]s[2]s[1]s[7].
- * next = s[7]s[6]s[5]s[4]s[3]s[2]s[8]
- *      = s[7] << k + (kmer & mask) >> 1 + s[8].
- */
 template <typename G, int L>
 void KMerPacked<G, L>::update_kmer(size_t k,
-                             KMerCharType edge_label,
-                             KMerCharType last,
-                             KMerWordType *kmer) {
-    assert(k == get_k(*kmer));
-    assert(KMerWordType(last) == (*kmer & KMerWordType(kFirstCharMask)));
-    // s[6]s[5]s[4]s[3]s[2]s[1]s[7]
-    unset_length_bit(kmer, k);
+                                   KMerCharType edge_label,
+                                   KMerCharType,
+                                   KMerWordType *kmer) {
     *kmer = *kmer >> kBitsPerChar;
-    // 0000s[6]s[5]s[4]s[3]s[2]s[1]
-    *kmer += KMerWordType(last) << static_cast<int>(kBitsPerChar * (k - 1));
-    // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
-    *kmer |= kFirstCharMask;
-    // s[7]s[6]s[5]s[4]s[3]s[2]1111
-    *kmer -= kFirstCharMask - edge_label;
-    // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
-    set_length_bit(kmer, k);
-    assert(k == get_k(*kmer));
+    *kmer |= KMerWordType(edge_label) << static_cast<int>(kBitsPerChar * (k - 1));
 }
 
-/**
- * Construct the next k-mer for s[6]s[5]s[4]s[3]s[2]s[1]s[7].
- * next = s[7]s[6]s[5]s[4]s[3]s[2]s[8]
- *      = s[7] << k + (kmer & mask) >> 1 + s[8].
- */
 template <typename G, int L>
 void KMerPacked<G, L>::next_kmer(size_t k, KMerCharType edge_label) {
-    assert(k == get_k(seq_));
-    unset_length_bit(&seq_, k);
-    // s[6]s[5]s[4]s[3]s[2]s[1]s[7]
-    KMerWordType last = seq_ & KMerWordType((1llu << kBitsPerChar) - 1);
-    seq_ = seq_ >> kBitsPerChar;
-    // 0000s[6]s[5]s[4]s[3]s[2]s[1]
-    seq_ += last << static_cast<int>(kBitsPerChar * k);
-    // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
-    seq_ |= kFirstCharMask;
-    // s[7]s[6]s[5]s[4]s[3]s[2]1111
-    seq_ -= kFirstCharMask - edge_label;
-    // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
-    set_length_bit(&seq_, k);
-    assert(k == get_k(seq_));
+    update_kmer(k, edge_label, 0, &seq_);
 }
 
 template <typename G, int L>
 KMerPacked<G, L> KMerPacked<G, L>::prev_kmer(size_t k, KMerCharType first_char) const {
-    assert(k == get_k(seq_));
     KMerWordType kmer = seq_;
-    unset_length_bit(&kmer, k);
-    // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
-    kmer |= kFirstCharMask;
-    kmer -= kFirstCharMask - first_char;
-    // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
-    KMerWordType last_char = seq_ >> static_cast<int>(kBitsPerChar * k);
-    kmer -= last_char << static_cast<int>(kBitsPerChar * k);
-    // 0000s[6]s[5]s[4]s[3]s[2]s[1]
     kmer = kmer << kBitsPerChar;
-    // s[6]s[5]s[4]s[3]s[2]s[1]0000
-    kmer += last_char;
-    // s[6]s[5]s[4]s[3]s[2]s[1]s[7]
-    set_length_bit(&kmer, k);
-    assert(k == get_k(kmer));
+    kmer = kmer
+        & ((KMerWordType(1llu) << static_cast<int>(kBitsPerChar * k)) - KMerWordType(1));
+    kmer |= first_char;
     return KMerPacked<G, L>(kmer);
 }
 
@@ -181,8 +146,8 @@ typename KMerPacked<G, L>::KMerCharType KMerPacked<G, L>::get_digit(size_t i) co
 
 template <typename G, int L>
 bool KMerPacked<G, L>::compare_suffix(const KMerPacked &k1, const KMerPacked &k2, size_t minus) {
-    return k1.seq_ >> static_cast<int>((minus + 1) * kBitsPerChar)
-             == k2.seq_ >> static_cast<int>((minus + 1) * kBitsPerChar);
+    return k1.seq_ >> static_cast<int>(minus * kBitsPerChar)
+             == k2.seq_ >> static_cast<int>(minus * kBitsPerChar);
 }
 
 #endif // __KMER_PACKED_HPP__

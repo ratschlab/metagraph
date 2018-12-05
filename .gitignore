@@ -8,6 +8,7 @@ metagraph/tests/data/*dump_test*
 testrun*
 *.dbg
 *.dbgchunk
+*.dbgsdchunk
 *.fna
 *.gch
 database-cli

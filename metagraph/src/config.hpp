@@ -115,6 +115,7 @@ class Config {
         INVALID = -1,
         SUCCINCT = 1,
         HASH,
+        SD
     };
 
     AnnotationType anno_type = ColumnCompressed;
