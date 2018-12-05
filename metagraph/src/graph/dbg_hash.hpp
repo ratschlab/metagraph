@@ -23,10 +23,6 @@ class DBGHash : public DeBruijnGraph {
                       const std::function<void(node_index)> &callback,
                       const std::function<bool()> &terminate = [](){ return false; }) const;
 
-    // Check whether graph contains fraction of nodes from the sequence
-    bool find(const std::string &sequence,
-              double kmer_discovery_fraction = 1) const;
-
     // Traverse the outgoing edge
     node_index traverse(node_index node, char next_char) const;
     // Traverse the incoming edge

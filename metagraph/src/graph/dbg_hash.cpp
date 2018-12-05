@@ -43,31 +43,6 @@ void DBGHash::map_to_nodes(const std::string &sequence,
     }
 }
 
-bool DBGHash::find(const std::string &sequence,
-                   double kmer_discovery_fraction) const {
-    if (sequence.length() < k_)
-        return false;
-
-    const size_t num_kmers = sequence.length() - k_ + 1;
-    const size_t max_kmers_missing = num_kmers * (1 - kmer_discovery_fraction);
-    const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
-    size_t num_kmers_discovered = 0;
-    size_t num_kmers_missing = 0;
-
-    map_to_nodes(sequence,
-        [&](node_index node) {
-            if (node) {
-                num_kmers_discovered++;
-            } else {
-                num_kmers_missing++;
-            }
-        },
-        [&]() { return num_kmers_missing > max_kmers_missing
-                        || num_kmers_discovered >= min_kmers_discovered; }
-    );
-    return num_kmers_missing <= max_kmers_missing;
-}
-
 DBGHash::node_index DBGHash::traverse(node_index node, char next_char) const {
     auto kmer = node_to_kmer(node).substr(1) + next_char;
     return kmer_to_node(kmer);

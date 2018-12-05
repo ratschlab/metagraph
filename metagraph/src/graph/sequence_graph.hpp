@@ -41,14 +41,37 @@ class DeBruijnGraph : public SequenceGraph {
 
     virtual size_t get_k() const = 0;
 
-    // Check whether graph contains fraction of nodes from the sequence
-    virtual bool find(const std::string &sequence,
-                      double discovery_fraction = 1) const = 0;
-
     // Traverse the outgoing edge
     virtual node_index traverse(node_index node, char next_char) const = 0;
     // Traverse the incoming edge
     virtual node_index traverse_back(node_index node, char prev_char) const = 0;
+
+    // Check whether graph contains fraction of nodes from the sequence
+    virtual bool find(const std::string &sequence,
+                      double discovery_fraction = 1) const {
+        if (sequence.length() < get_k())
+            return false;
+
+        const size_t num_kmers = sequence.length() - get_k() + 1;
+        const size_t max_kmers_missing = num_kmers * (1 - discovery_fraction);
+        const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
+        size_t num_kmers_discovered = 0;
+        size_t num_kmers_missing = 0;
+
+        map_to_nodes(sequence,
+            [&](node_index node) {
+                if (node) {
+                    num_kmers_discovered++;
+                } else {
+                    num_kmers_missing++;
+                }
+            },
+            [&]() { return num_kmers_missing > max_kmers_missing
+                            || num_kmers_discovered >= min_kmers_discovered; }
+        );
+
+        return num_kmers_missing <= max_kmers_missing;
+    }
 };
 
 
