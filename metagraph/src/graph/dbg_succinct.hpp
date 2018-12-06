@@ -529,8 +529,8 @@ std::ostream& operator<<(std::ostream &os, const DBG_succ &graph);
 
 class DBGSuccinct : public DeBruijnGraph {
   public:
-    explicit DBGSuccinct(size_t k) : boss_graph_(std::make_unique<DBG_succ>(k - 1)) {}
-    explicit DBGSuccinct(DBG_succ *boss_graph) : boss_graph_(boss_graph) {}
+    explicit DBGSuccinct(size_t k, bool canonical_mode = false);
+    explicit DBGSuccinct(DBG_succ *boss_graph, bool canonical_mode = false);
 
     virtual ~DBGSuccinct() {}
 
@@ -567,10 +567,14 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual void switch_state(Config::StateType new_state) final;
     virtual Config::StateType get_state() const final;
 
+    virtual bool is_canonical_mode() const override final { return canonical_mode_; }
+
     virtual const DBG_succ& get_boss() const final { return *boss_graph_; }
     virtual DBG_succ& get_boss() final { return *boss_graph_; }
+    virtual DBG_succ* release_boss() final { return boss_graph_.release(); }
 
   private:
+    void add_seq(const std::string &sequence, bit_vector_dyn *nodes_inserted);
     uint64_t kmer_to_boss_index(node_index kmer_index) const;
     node_index boss_to_kmer_index(uint64_t boss_index) const;
 
@@ -578,6 +582,9 @@ class DBGSuccinct : public DeBruijnGraph {
     // all edges in boss except dummy
     std::unique_ptr<bit_vector> valid_edges_;
 
+    bool canonical_mode_;
+
+    static constexpr auto kExtension = ".dbg";
     static constexpr auto kDummyMaskExtension = ".edgemask";
 };
 

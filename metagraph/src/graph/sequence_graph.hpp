@@ -41,6 +41,8 @@ class DeBruijnGraph : public SequenceGraph {
 
     virtual size_t get_k() const = 0;
 
+    virtual bool is_canonical_mode() const { return false; }
+
     // Traverse the outgoing edge
     virtual node_index traverse(node_index node, char next_char) const = 0;
     // Traverse the incoming edge

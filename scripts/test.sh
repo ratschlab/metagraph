@@ -12,8 +12,49 @@ fi
 $exe build -k 12 -o test_graph $file_small
 $exe stats test_graph --count-dummy
 echo ""
+
+$exe annotate -i test_graph.dbg -o test_annotation --anno-header --header-delimiter '|' $file_small
+$exe stats -a test_annotation
+$exe classify -i test_graph -a test_annotation <(cat $file_small | tail -n 200) | tee test_annotation_out.tsv
+[[ $(awk '{print $1}' test_annotation_out.tsv | wc -w) \
+        == $(awk '{print $3}' test_annotation_out.tsv | wc -w) ]] \
+    && echo Passed: OK
+echo ""
+
+$exe build -k 12 --canonical -o test_graph_canonical $file_small
+$exe stats test_graph_canonical --count-dummy
+echo ""
+
+$exe annotate -i test_graph_canonical.dbg -o test_annotation --anno-header --header-delimiter '|' $file_small
+$exe stats -a test_annotation
+$exe classify -i test_graph_canonical -a test_annotation <(cat $file_small | tail -n 200) | tee test_annotation_out.tsv
+[[ $(awk '{print $1}' test_annotation_out.tsv | wc -w) \
+        == $(awk '{print $3}' test_annotation_out.tsv | wc -w) ]] \
+    && echo Passed: OK
+echo ""
+
 $exe build -k 12 --graph hash -o test_graph $file_small
 $exe stats test_graph.orhashdbg
+echo ""
+
+$exe annotate -i test_graph.orhashdbg -o test_annotation --anno-header --header-delimiter '|' $file_small
+$exe stats -a test_annotation
+$exe classify -i test_graph.orhashdbg -a test_annotation <(cat $file_small | tail -n 200) | tee test_annotation_out.tsv
+[[ $(awk '{print $1}' test_annotation_out.tsv | wc -w) \
+        == $(awk '{print $3}' test_annotation_out.tsv | wc -w) ]] \
+    && echo Passed: OK
+echo ""
+
+$exe build -k 12 --canonical --graph hash -o test_graph_canonical $file_small
+$exe stats test_graph_canonical.orhashdbg
+echo ""
+
+$exe annotate -i test_graph_canonical.orhashdbg -o test_annotation --anno-header --header-delimiter '|' $file_small
+$exe stats -a test_annotation
+$exe classify -i test_graph_canonical.orhashdbg -a test_annotation <(cat $file_small | tail -n 200) | tee test_annotation_out.tsv
+[[ $(awk '{print $1}' test_annotation_out.tsv | wc -w) \
+        == $(awk '{print $3}' test_annotation_out.tsv | wc -w) ]] \
+    && echo Passed: OK
 echo ""
 
 $exe annotate -i test_graph.dbg -o test_annotation --anno-header --header-delimiter '|' $file_small

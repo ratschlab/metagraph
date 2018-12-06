@@ -21,6 +21,7 @@
 
 #include "dbg_succinct_construct.hpp"
 #include "serialization.hpp"
+#include "helpers.hpp"
 
 using utils::remove_suffix;
 using TAlphabet = DBG_succ::TAlphabet;
@@ -2015,6 +2016,14 @@ std::ostream& operator<<(std::ostream &os, const DBG_succ &graph) {
 }
 
 
+DBGSuccinct::DBGSuccinct(size_t k, bool canonical_mode)
+      : boss_graph_(std::make_unique<DBG_succ>(k - 1)),
+        canonical_mode_(canonical_mode) {}
+
+DBGSuccinct::DBGSuccinct(DBG_succ *boss_graph, bool canonical_mode)
+      : boss_graph_(boss_graph),
+        canonical_mode_(canonical_mode) {}
+
 size_t DBGSuccinct::get_k() const {
     return boss_graph_->get_k() + 1;
 }
@@ -2062,6 +2071,18 @@ node_index DBGSuccinct::traverse_back(node_index node, char prev_char) const {
 // to the number of nodes in graph.
 void DBGSuccinct::add_sequence(const std::string &sequence,
                                bit_vector_dyn *nodes_inserted) {
+    add_seq(sequence, nodes_inserted);
+    if (canonical_mode_) {
+        // insert reverse complement sequence as well,
+        // to have all canonical k-mers in graph
+        std::string sequence_copy = sequence;
+        reverse_complement(sequence_copy.begin(), sequence_copy.end());
+        add_seq(sequence_copy, nodes_inserted);
+    }
+}
+
+void DBGSuccinct::add_seq(const std::string &sequence,
+                          bit_vector_dyn *nodes_inserted) {
     assert(!nodes_inserted || nodes_inserted->size() == num_nodes() + 1);
 
     if (nodes_inserted) {
@@ -2087,11 +2108,36 @@ void DBGSuccinct::add_sequence(const std::string &sequence,
 void DBGSuccinct::map_to_nodes(const std::string &sequence,
                                const std::function<void(node_index)> &callback,
                                const std::function<bool()> &terminate) const {
-    boss_graph_->map_to_edges(
-        sequence,
-        [&](DBG_succ::edge_index i) { callback(boss_to_kmer_index(i)); },
-        terminate
-    );
+    if (sequence.size() < get_k())
+        return;
+
+    if (canonical_mode_) {
+        auto forward = boss_graph_->map_to_edges(sequence);
+
+        std::string sequence_rev_compl = sequence;
+        reverse_complement(sequence_rev_compl.begin(), sequence_rev_compl.end());
+
+        auto rev_compl = boss_graph_->map_to_edges(sequence_rev_compl);
+
+        assert(forward.size() == sequence.size() - get_k() + 1);
+        assert(forward.size() == rev_compl.size());
+
+        for (size_t i = 0; i < forward.size() && !terminate(); ++i) {
+            if (sequence.substr(i, get_k())
+                    < sequence_rev_compl.substr(i, get_k())) {
+                callback(boss_to_kmer_index(forward[i]));
+            } else {
+                callback(boss_to_kmer_index(rev_compl[i]));
+            }
+        }
+
+    } else {
+        boss_graph_->map_to_edges(
+            sequence,
+            [&](DBG_succ::edge_index i) { callback(boss_to_kmer_index(i)); },
+            terminate
+        );
+    }
 }
 
 uint64_t DBGSuccinct::num_nodes() const {
@@ -2100,15 +2146,25 @@ uint64_t DBGSuccinct::num_nodes() const {
                 : boss_graph_->num_edges();
 }
 
-bool DBGSuccinct::load(const std::string &filename_base) {
-    if (!boss_graph_->load(filename_base))
-        return false;
+bool DBGSuccinct::load(const std::string &filename) {
+    {
+        std::ifstream instream(remove_suffix(filename, kExtension) + kExtension,
+                               std::ios::binary);
+
+        if (!boss_graph_->load(instream))
+            return false;
+
+        try {
+            canonical_mode_ = load_number(instream);
+        } catch (...) {
+            canonical_mode_ = false;
+        }
+    }
 
     // release the old mask
     valid_edges_.reset();
 
-    std::ifstream instream(remove_suffix(filename_base, ".dbg")
-                                                + kDummyMaskExtension,
+    std::ifstream instream(remove_suffix(filename, kExtension) + kDummyMaskExtension,
                            std::ios::binary);
     if (!instream.good())
         return true;
@@ -2143,8 +2199,16 @@ bool DBGSuccinct::load(const std::string &filename_base) {
     return true;
 }
 
-void DBGSuccinct::serialize(const std::string &filename_base) const {
-    boss_graph_->serialize(filename_base);
+void DBGSuccinct::serialize(const std::string &filename) const {
+    {
+        const auto out_filename = remove_suffix(filename, kExtension) + kExtension;
+        std::ofstream outstream(out_filename, std::ios::binary);
+        boss_graph_->serialize(outstream);
+        serialize_number(outstream, canonical_mode_);
+
+        if (!outstream.good())
+            throw std::ios_base::failure("Can't write to file " + out_filename);
+    }
 
     if (!valid_edges_.get())
         return;
@@ -2156,12 +2220,10 @@ void DBGSuccinct::serialize(const std::string &filename_base) const {
         || (boss_graph_->get_state() == Config::StateType::SMALL
                 && dynamic_cast<const bit_vector_small*>(valid_edges_.get())));
 
-    std::ofstream outstream(remove_suffix(filename_base, ".dbg")
-                                                + kDummyMaskExtension,
-                            std::ios::binary);
+    const auto out_filename = remove_suffix(filename, kExtension) + kDummyMaskExtension;
+    std::ofstream outstream(out_filename, std::ios::binary);
     if (!outstream.good())
-        throw std::ios_base::failure("Can't write to file "
-                                        + filename_base + kDummyMaskExtension);
+        throw std::ios_base::failure("Can't write to file " + out_filename);
 
     valid_edges_->serialize(outstream);
 }
@@ -2209,7 +2271,6 @@ Config::StateType DBGSuccinct::get_state() const {
 
     return boss_graph_->get_state();
 }
-
 
 void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
     valid_edges_.reset();

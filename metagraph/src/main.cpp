@@ -494,6 +494,7 @@ void print_stats(const DeBruijnGraph &graph) {
     std::cout << "====================== GRAPH STATS =====================" << std::endl;
     std::cout << "k: " << graph.get_k() << std::endl;
     std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
+    std::cout << "canonical mode: " << (graph.is_canonical_mode() ? "yes" : "no") << std::endl;
     std::cout << "========================================================" << std::endl;
 }
 
@@ -655,6 +656,9 @@ int main(int argc, const char *argv[]) {
             Timer timer;
 
             if (config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic) {
+                if (config->canonical)
+                    config->reverse = true;
+
                 std::unique_ptr<DBG_succ> boss_graph { new DBG_succ(config->k - 1) };
 
                 if (config->verbose) {
@@ -729,17 +733,20 @@ int main(int argc, const char *argv[]) {
                 }
 
                 graph_data.initialize_graph(boss_graph.get());
-                graph.reset(new DBGSuccinct(boss_graph.release()));
+                graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
 
             } else {
+                if (config->canonical)
+                    config->reverse = false;
+
                 //slower method
 
                 switch (config->graph_type) {
                     case Config::GraphType::SUCCINCT:
-                        graph.reset(new DBGSuccinct(config->k));
+                        graph.reset(new DBGSuccinct(config->k, config->canonical));
                         break;
                     case Config::GraphType::HASH:
-                        graph.reset(new DBGHashOrdered(config->k));
+                        graph.reset(new DBGHashOrdered(config->k, config->canonical));
                         break;
                     case Config::GraphType::INVALID:
                         assert(false);
@@ -1293,6 +1300,8 @@ int main(int argc, const char *argv[]) {
             return 0;
         }
         case Config::CONCATENATE: {
+            assert(config->outfbase.size());
+
             auto chunk_files = files;
 
             if (!files.size()) {
@@ -1316,21 +1325,22 @@ int main(int argc, const char *argv[]) {
             }
 
             // collect results on an external merge or construction
-            DBG_succ *graph = DBG_succ::Chunk::build_graph_from_chunks(
-                chunk_files, config->verbose
+            auto graph = std::make_unique<DBGSuccinct>(
+                DBG_succ::Chunk::build_graph_from_chunks(
+                    chunk_files, config->verbose
+                ),
+                config->canonical
             );
-            assert(graph);
+            assert(graph.get());
 
             if (config->verbose) {
                 std::cout << "Succinct graph has been assembled" << std::endl;
-                print_boss_stats(*graph);
+                print_stats(*graph);
+                print_boss_stats(graph->get_boss());
             }
 
             // graph output
-            if (graph && config->print_graph)
-                std::cout << *graph;
-            if (graph && !config->outfbase.empty())
-                graph->serialize(config->outfbase);
+            graph->serialize(config->outfbase);
 
             return 0;
         }
@@ -1339,30 +1349,51 @@ int main(int argc, const char *argv[]) {
 
             Timer timer;
 
+            std::vector<std::unique_ptr<DBGSuccinct>> dbg_graphs;
             std::vector<const DBG_succ*> graphs;
+
+            config->canonical = true;
+
             for (const auto &file : files) {
                 std::cout << "Opening file " << file << std::endl;
-                graphs.push_back(load_critical_graph_from_file(file).release());
+
+                dbg_graphs.emplace_back(load_critical_graph_from_file<DBGSuccinct>(file));
+
+                graphs.push_back(&dbg_graphs.back()->get_boss());
+
                 if (config->verbose)
-                    print_boss_stats(*graph);
+                    print_boss_stats(*graphs.back());
+
+                config->canonical &= dbg_graphs.back()->is_canonical_mode();
             }
-            std::cout << "Graphs are loaded\t" << timer.elapsed()
-                                               << "sec" << std::endl;
+
+            std::cout << "Graphs are loaded in " << timer.elapsed()
+                                                 << "sec" << std::endl;
 
             if (config->dynamic) {
                 std::cout << "Start merging traversal" << std::endl;
                 timer.reset();
 
-                graph = const_cast<DBG_succ*>(graphs.at(0));
-                graphs.erase(graphs.begin());
+                graph = dbg_graphs.at(0)->release_boss();
 
-                for (size_t i = 0; i < graphs.size(); ++i) {
-                    graph->merge(*graphs[i]);
-                    std::cout << "traversal " << files[i + 1] << " done\t"
-                              << timer.elapsed() << "sec" << std::endl;
+                if (graph->get_state() != Config::DYN) {
+                    if (config->verbose)
+                        std::cout << "Switching state of succinct graph to dynamic..." << std::flush;
+
+                    graph->switch_state(Config::DYN);
+
+                    if (config->verbose)
+                        std::cout << "\tdone in " << timer.elapsed() << "sec" << std::endl;
                 }
-                std::cout << "Graphs merged\t" << timer.elapsed()
-                                               << "sec" << std::endl;
+
+                for (size_t i = 1; i < graphs.size(); ++i) {
+                    graph->merge(dbg_graphs.at(i)->get_boss());
+
+                    std::cout << "traversal " << files[i] << " done\t"
+                              << timer.elapsed() << "sec" << std::endl;
+
+                    dbg_graphs.at(i).reset();
+                }
             } else if (config->parallel > 1 || config->parts_total > 1) {
                 std::cout << "Start merging blocks" << std::endl;
                 timer.reset();
@@ -1390,8 +1421,6 @@ int main(int argc, const char *argv[]) {
                 } else {
                     graph = new DBG_succ(graphs[0]->get_k());
                     chunk->initialize_graph(graph);
-                    std::cout << "Graphs merged\t" << timer.elapsed()
-                              << "sec" << std::endl;
                 }
                 delete chunk;
             } else {
@@ -1399,22 +1428,15 @@ int main(int argc, const char *argv[]) {
                 timer.reset();
 
                 graph = merge::merge(graphs, config->verbose);
-
-                std::cout << "Graphs merged\t" << timer.elapsed()
-                          << "sec" << std::endl;
             }
+            dbg_graphs.clear();
 
-            for (auto *graph_ : graphs) {
-                delete graph_;
-            }
+            assert(graph);
 
-            std::cout << "... done merging." << std::endl;
+            std::cout << "Graphs merged in " << timer.elapsed() << "sec" << std::endl;
 
             // graph output
-            if (graph && config->print_graph)
-                std::cout << *graph;
-            if (graph && !config->outfbase.empty())
-                graph->serialize(config->outfbase);
+            DBGSuccinct(graph, config->canonical).serialize(config->outfbase);
 
             return 0;
         }

@@ -71,6 +71,8 @@ Config::Config(int argc, const char *argv[]) {
             count_kmers_query = true;
         } else if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--reverse")) {
             reverse = true;
+        } else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--canonical")) {
+            canonical = true;
         } else if (!strcmp(argv[i], "--dynamic")) {
             dynamic = true;
         } else if (!strcmp(argv[i], "--no-shrink")) {
@@ -207,12 +209,6 @@ Config::Config(int argc, const char *argv[]) {
 
     bool print_usage_and_exit = false;
 
-    if (outfbase.size() && !utils::check_if_writable(outfbase)) {
-        std::cerr << "Error: Can't write to " << outfbase << std::endl
-                  << "Check if the path is correct" << std::endl;
-        exit(1);
-    }
-
     if (nsplits == 0) {
         std::cerr << "Error: Invalid number of splits" << std::endl;
         print_usage_and_exit = true;
@@ -226,6 +222,9 @@ Config::Config(int argc, const char *argv[]) {
                   << " or use the -i and -l options" << std::endl;
         print_usage_and_exit = true;
     }
+
+    if (identity == CONCATENATE && outfbase.empty())
+        print_usage_and_exit = true;
 
     if (identity == FILTER)
         filter_k = k;
@@ -280,11 +279,20 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == MERGE && fname.size() < 2)
         print_usage_and_exit = true;
 
+    if (identity == MERGE && outfbase.empty())
+        print_usage_and_exit = true;
+
     if (identity == COMPARE && fname.size() != 2)
         print_usage_and_exit = true;
 
     if (discovery_fraction < 0 || discovery_fraction > 1)
         print_usage_and_exit = true;
+
+    if (outfbase.size() && !utils::check_if_writable(outfbase)) {
+        std::cerr << "Error: Can't write to " << outfbase << std::endl
+                  << "Check if the path is correct" << std::endl;
+        exit(1);
+    }
 
     // if misused, provide help screen for chosen identity and exit
     if (print_usage_and_exit) {
@@ -440,7 +448,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence []\n");
             fprintf(stderr, "\t   --graph [STR] \tgraph representation [succinct]\n");
             fprintf(stderr, "\t                     \t  "); fprintf(stderr, graph_list); fprintf(stderr, "\n");
-            // fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
+            fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
             fprintf(stderr, "\t   --no-shrink \t\tdo not build mask for dummy k-mers [off]\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
             fprintf(stderr, "\t   --mem-cap-gb [INT] \tmaximum memory available, in Gb [inf]\n");
@@ -511,11 +519,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --internal \t\tcompare internal graph representations\n");
         } break;
         case MERGE: {
-            fprintf(stderr, "Usage: %s merge [options] GRAPH1 GRAPH2 [[GRAPH3] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s merge -o <graph_basename> [options] GRAPH1 GRAPH2 [[GRAPH3] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for merge:\n");
-            fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
-            fprintf(stderr, "\t   --print \t\t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t-b --bins-per-thread [INT] \tnumber of bins each thread computes on average [1]\n");
             fprintf(stderr, "\t   --dynamic \t\t\tdynamic merge by adding traversed paths [off]\n");
             fprintf(stderr, "\t   --part-idx [INT] \t\tidx to use when doing external merge []\n");
@@ -523,13 +529,12 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case CONCATENATE: {
-            fprintf(stderr, "Usage: %s concatenate [options] [[CHUNK] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s concatenate -o <graph_basename> [options] [[CHUNK] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for merge:\n");
-            fprintf(stderr, "\t-i --infile-base [STR] \t\tload graph chunks from files '<infile-base>.<suffix>.dbgchunk' []\n");
-            fprintf(stderr, "\t-l --len-suffix [INT] \t\titerate all possible suffices of the length given [0]\n");
-            fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
-            fprintf(stderr, "\t   --print \t\t\tprint graph table to the screen [off]\n");
+            fprintf(stderr, "\t-i --infile-base [STR] \tload graph chunks from files '<infile-base>.<suffix>.dbgchunk' []\n");
+            fprintf(stderr, "\t-l --len-suffix [INT] \titerate all possible suffices of the length given [0]\n");
+            fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case STATS: {
