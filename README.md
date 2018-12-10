@@ -110,7 +110,7 @@ DATA="../tests/data/transcripts_1000.fa"
 ./metagengraph stats -a transcripts_1000 transcripts_1000
 ```
 
-For real examples, see [scripts](./scripts).
+For real examples, see [scripts](./metagraph/scripts).
 
 ### Print usage
 `./metagengraph`

@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 
 if [ "$#" -ne 1 ] || ! [ -f "$1" ]; then
-  echo "Usage: $0 <logfile>" >&2
+  echo -e "Usage:\n$0 <logfile>" >&2
   exit 1
 fi
 

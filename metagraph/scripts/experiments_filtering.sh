@@ -1,11 +1,11 @@
 #!/bin/env bash
 
 
-KMC="/cluster/home/mikhaika/projects2014-metagenome/metagraph/build/KMC/kmc"
-Metagraph="/cluster/home/mikhaika/projects2014-metagenome/metagraph/build/metagengraph"
+KMC="$(dirname ${BASH_SOURCE[0]})/../build/KMC/kmc"
+Metagraph="$(dirname ${BASH_SOURCE[0]})/../build/metagengraph"
 
 if [ $# -ne 4 ]; then
-    echo "Usage $0 <fastq.gz> <trim_param> <abundance> <threshold>"
+    echo -e "Usage:\n$0 <fastq.gz> <trim_param> <abundance> <threshold>" >&2
     exit 1
 fi
 

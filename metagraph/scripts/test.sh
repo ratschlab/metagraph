@@ -1,12 +1,12 @@
 #/usr/bin/env bash
 
-file="$(dirname ${BASH_SOURCE[0]})/../metagraph/tests/data/transcripts_1000.fa"
-file_small="$(dirname ${BASH_SOURCE[0]})/../metagraph/tests/data/transcripts_100.fa"
+file="$(dirname ${BASH_SOURCE[0]})/../tests/data/transcripts_1000.fa"
+file_small="$(dirname ${BASH_SOURCE[0]})/../tests/data/transcripts_100.fa"
 
 if [ -f metagengraph ]; then
   exe="./metagengraph"
 else
-  exe="$(dirname ${BASH_SOURCE[0]})/../metagraph/build/metagengraph"
+  exe="$(dirname ${BASH_SOURCE[0]})/../build/metagengraph"
 fi
 
 $exe build -k 12 -o test_graph $file_small

@@ -2,7 +2,7 @@
 
 
 if [ $# -ne 2 ]; then
-    echo "Usage $0 <fastq.gz> <trim_param>"
+    echo -e "Usage:\n$0 <fastq.gz> <trim_param>" >&2
     exit 1
 fi
 

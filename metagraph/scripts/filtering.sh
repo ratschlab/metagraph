@@ -1,13 +1,11 @@
 #!/usr/bin/bash
 
-home="/cluster/home/mikhaika"
-
-KMC="$home/projects2014-metagenome/metagraph/build/KMC/kmc"
-exe="$home/metagengraph_DNA"
+KMC="$(dirname ${BASH_SOURCE[0]})/../build/KMC/kmc"
+exe="$(dirname ${BASH_SOURCE[0]})/../build/metagengraph"
 
 
 if [ $# -ne 3 ]; then
-    echo "Usage $0 <fastq.gz> <cutoff> <threshold>"
+    echo -e "Usage:\n$0 <fastq.gz> <cutoff> <threshold>" >&2
     exit 1
 fi
 
