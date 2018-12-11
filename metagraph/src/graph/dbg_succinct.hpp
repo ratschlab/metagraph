@@ -97,12 +97,15 @@ class DBG_succ {
 
     // traverse all nodes in graph except for the dummy source of sink ones
     void call_kmers(Call<node_index, const std::string&> callback) const;
+
     void call_edges(Call<edge_index, const std::vector<TAlphabet>&> callback) const;
+
     // call paths (or simple paths if |split_to_contigs| is true) that cover
     // exactly all edges in graph
     void call_paths(Call<const std::vector<edge_index>,
                          const std::vector<TAlphabet>&> callback,
                     bool split_to_contigs = false) const;
+
     void call_sequences(Call<const std::string&> callback,
                         bool split_to_contigs = false) const;
 
@@ -404,6 +407,15 @@ class DBG_succ {
      * Returns the number of edges erased.
      */
     uint64_t erase_edges(const std::vector<bool> &edges_to_remove_mask);
+
+    // traverse graph from the specified (k+1)-mer/edge and call
+    // all paths reachable from it
+    void call_paths(edge_index starting_kmer,
+                    Call<const std::vector<edge_index>,
+                         const std::vector<TAlphabet>&> callback,
+                    bool split_to_contigs,
+                    std::vector<bool> *discovered_ptr,
+                    std::vector<bool> *visited_ptr) const;
 
     /**
      * This function gets two edge indices and returns if their source

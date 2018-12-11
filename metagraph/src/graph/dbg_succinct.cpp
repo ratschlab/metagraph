@@ -1811,82 +1811,97 @@ void DBG_succ::call_paths(Call<const std::vector<edge_index>,
     std::vector<bool> discovered(W_->size(), false);
     // keep track of edges that are already included in covering paths
     std::vector<bool> visited(W_->size(), false);
+
+    // start at all nodes with more than one outgoing edges
+    for (uint64_t i = 1; i < W_->size(); ++i) {
+        if (!visited[i] && !is_single_outgoing(i))
+            call_paths(i, callback, split_to_contigs, &discovered, &visited);
+    }
+
+    // process all the cycles left that have not beed traversed
+    for (uint64_t i = 1; i < W_->size(); ++i) {
+        if (!visited[i])
+            call_paths(i, callback, split_to_contigs, &discovered, &visited);
+    }
+}
+
+void DBG_succ::call_paths(edge_index starting_kmer,
+                          Call<const std::vector<edge_index>,
+                               const std::vector<TAlphabet>&> callback,
+                          bool split_to_contigs,
+                          std::vector<bool> *discovered_ptr,
+                          std::vector<bool> *visited_ptr) const {
+    assert(discovered_ptr && visited_ptr);
+
+    auto &discovered = *discovered_ptr;
+    auto &visited = *visited_ptr;
     // store all branch nodes on the way
-    std::deque<Edge> edges;
     std::vector<uint64_t> path;
 
-    // start at the source node
-    for (uint64_t i = 1; i < W_->size(); ++i) {
-        if (visited[i])
-            continue;
+    discovered[starting_kmer] = true;
+    std::deque<Edge> edges { { starting_kmer, get_node_seq(starting_kmer) } };
 
-        //TODO: traverse backwards
+    // keep traversing until we have worked off all branches from the queue
+    while (!edges.empty()) {
+        uint64_t edge = edges.front().id;
+        auto sequence = std::move(edges.front().source_kmer);
+        path.clear();
+        edges.pop_front();
 
-        discovered[i] = true;
-        edges.push_back({ i, get_node_seq(i) });
+        // traverse simple path until we reach its tail or
+        // the first edge that has been already visited
+        while (!visited[edge]) {
+            assert(edge > 0 && discovered[edge]);
 
-        // keep traversing until we have worked off all branches from the queue
-        while (!edges.empty()) {
-            uint64_t edge = edges.front().id;
-            auto sequence = std::move(edges.front().source_kmer);
-            path.clear();
-            edges.pop_front();
+            sequence.push_back(get_W(edge) % alph_size);
+            path.push_back(edge);
+            visited[edge] = true;
 
-            // traverse simple path until we reach its tail or
-            // the first edge that has been already visited
-            while (!visited[edge]) {
-                assert(edge > 0 && discovered[edge]);
+            // stop traversing if the next node is a dummy sink
+            if (!sequence.back())
+                break;
 
-                sequence.push_back(get_W(edge) % alph_size);
-                path.push_back(edge);
-                visited[edge] = true;
+            // make one traversal step
+            edge = fwd(edge);
 
-                // stop traversing if the next node is a dummy sink
-                if (!sequence.back())
+            // traverse if there is only one outgoing edge
+            if (is_single_outgoing(edge)) {
+                discovered[edge] = true;
+                continue;
+            } else {
+                std::vector<TAlphabet> kmer(sequence.end() - k_, sequence.end());
+
+                // loop over outgoing edges
+                bool continue_traversal = false;
+                do {
+                    if (!discovered[edge]) {
+                        // mark that there is at least one outgoing
+                        // edge  that has not been discovered
+                        continue_traversal = true;
+                        discovered[edge] = true;
+                        edges.push_back({ edge, kmer });
+                    }
+                } while (--edge > 0 && !get_last(edge));
+
+                // stop traversing this sequence if we call contigs
+                // in order to call only simple paths
+                if (split_to_contigs)
                     break;
 
-                // make one traversal step
-                edge = fwd(edge);
-
-                // traverse if there is only one outgoing edge
-                if (is_single_outgoing(edge)) {
-                    discovered[edge] = true;
+                // pick the first outgoing but yet undiscovered
+                // edge and continue traversing the graph
+                if (continue_traversal) {
+                    edge = edges.back().id;
+                    edges.pop_back();
                     continue;
                 } else {
-                    std::vector<TAlphabet> kmer(sequence.end() - k_, sequence.end());
-
-                    // loop over outgoing edges
-                    bool continue_traversal = false;
-                    do {
-                        if (!discovered[edge]) {
-                            // mark that there is at least one outgoing
-                            // edge  that has not been discovered
-                            continue_traversal = true;
-                            discovered[edge] = true;
-                            edges.push_back({ edge, kmer });
-                        }
-                    } while (--edge > 0 && !get_last(edge));
-
-                    // stop traversing this sequence if we call contigs
-                    // in order to call only simple paths
-                    if (split_to_contigs)
-                        break;
-
-                    // pick the first outgoing but yet undiscovered
-                    // edge and continue traversing the graph
-                    if (continue_traversal) {
-                        edge = edges.back().id;
-                        edges.pop_back();
-                        continue;
-                    } else {
-                        break;
-                    }
+                    break;
                 }
             }
-
-            if (path.size())
-                callback(path, sequence);
         }
+
+        if (path.size())
+            callback(path, sequence);
     }
 }
 
