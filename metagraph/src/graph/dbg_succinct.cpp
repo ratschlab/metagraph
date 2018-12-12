@@ -1913,8 +1913,7 @@ void DBG_succ::call_paths(edge_index starting_kmer,
     }
 }
 
-void DBG_succ::call_sequences(Call<const std::string&> callback,
-                              bool split_to_contigs) const {
+void DBG_succ::call_sequences(Call<const std::string&> callback) const {
     std::string sequence;
 
     call_paths([&](const auto&, const auto &path) {
@@ -1928,7 +1927,32 @@ void DBG_succ::call_sequences(Call<const std::string&> callback,
 
         if (sequence.size())
             callback(sequence);
-    }, split_to_contigs);
+    }, false);
+}
+
+void DBG_succ::call_contigs(Call<const std::string&> callback,
+                            size_t max_pruned_dead_end_size) const {
+    std::string sequence;
+
+    call_paths([&](const auto&, const auto &path) {
+        sequence.clear();
+
+        assert(path.size());
+
+        for (TAlphabet c : path) {
+            if (c != kSentinelCode) {
+                sequence.push_back(DBG_succ::decode(c));
+            }
+        }
+
+        if (!sequence.size())
+            return;
+
+        if ((path.front() != kSentinelCode && path.back() != kSentinelCode)
+                || sequence.size() > k_ + max_pruned_dead_end_size)
+            callback(sequence);
+
+    }, true);
 }
 
 void DBG_succ::call_edges(Call<edge_index,

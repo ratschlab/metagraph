@@ -56,6 +56,7 @@ class Config {
     unsigned int kmer_mapping_mode = 0;
     unsigned int arity_brwt = 2;
     unsigned int relax_arity_brwt = 10;
+    unsigned int pruned_dead_end_size = 0;
 
     double discovery_fraction = 1.0;
 

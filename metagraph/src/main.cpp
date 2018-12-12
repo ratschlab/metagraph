@@ -1680,34 +1680,41 @@ int main(int argc, const char *argv[]) {
                     std::cout << "Extracting sequences from graph...\t" << std::flush;
                 }
                 timer.reset();
-                if (config->outfbase.size()) {
+                if (!config->outfbase.size()) {
+                    std::cerr << "Error: no output file provided" << std::endl;
+                    exit(1);
+                }
 
-                    auto out_filename
-                        = utils::remove_suffix(config->outfbase, ".gz", ".fasta")
-                            + ".fasta.gz";
+                auto out_filename
+                    = utils::remove_suffix(config->outfbase, ".gz", ".fasta")
+                        + ".fasta.gz";
 
-                    gzFile out_fasta_gz = gzopen(out_filename.c_str(), "w");
+                gzFile out_fasta_gz = gzopen(out_filename.c_str(), "w");
 
-                    if (out_fasta_gz == Z_NULL) {
-                        std::cerr << "ERROR: Can't write to " << out_filename << std::endl;
-                        exit(1);
-                    }
+                if (out_fasta_gz == Z_NULL) {
+                    std::cerr << "ERROR: Can't write to " << out_filename << std::endl;
+                    exit(1);
+                }
 
+                if (config->contigs || config->pruned_dead_end_size > 0) {
+                    graph->call_contigs([&](const auto &sequence) {
+                        if (!write_fasta(out_fasta_gz, "", sequence)) {
+                            std::cerr << "ERROR: Can't write extracted sequences to "
+                                      << out_filename << std::endl;
+                            exit(1);
+                        }
+                    }, config->pruned_dead_end_size);
+                } else {
                     graph->call_sequences([&](const auto &sequence) {
                         if (!write_fasta(out_fasta_gz, "", sequence)) {
                             std::cerr << "ERROR: Can't write extracted sequences to "
                                       << out_filename << std::endl;
                             exit(1);
                         }
-                    }, config->contigs);
-
-                    gzclose(out_fasta_gz);
-
-                } else {
-                    graph->call_sequences([&](const auto &sequence) {
-                        std::cout << sequence << std::endl;
-                    }, config->contigs);
+                    });
                 }
+
+                gzclose(out_fasta_gz);
 
                 if (config->verbose) {
                     std::cout << timer.elapsed() << "sec" << std::endl;

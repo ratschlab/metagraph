@@ -106,8 +106,10 @@ class DBG_succ {
                          const std::vector<TAlphabet>&> callback,
                     bool split_to_contigs = false) const;
 
-    void call_sequences(Call<const std::string&> callback,
-                        bool split_to_contigs = false) const;
+    void call_sequences(Call<const std::string&> callback) const;
+
+    void call_contigs(Call<const std::string&> callback,
+                      size_t max_pruned_dead_end_size = 0) const;
 
     node_index traverse(node_index node, char edge_label) const;
     node_index traverse_back(node_index node, char edge_label) const;
