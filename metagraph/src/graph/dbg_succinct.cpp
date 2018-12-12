@@ -1837,6 +1837,7 @@ void DBG_succ::call_paths(edge_index starting_kmer,
     auto &visited = *visited_ptr;
     // store all branch nodes on the way
     std::vector<uint64_t> path;
+    std::vector<TAlphabet> kmer;
 
     discovered[starting_kmer] = true;
     std::deque<Edge> edges { { starting_kmer, get_node_seq(starting_kmer) } };
@@ -1861,18 +1862,25 @@ void DBG_succ::call_paths(edge_index starting_kmer,
             if (!sequence.back())
                 break;
 
+            bool continue_traversal = true;
+
+            // stop traversing if we call contigs and this
+            // is not the only incoming edge
+            if (split_to_contigs)
+                continue_traversal = is_single_incoming(edge);
+
             // make one traversal step
             edge = fwd(edge);
 
             // traverse if there is only one outgoing edge
-            if (is_single_outgoing(edge)) {
+            if (continue_traversal && is_single_outgoing(edge)) {
                 discovered[edge] = true;
                 continue;
             } else {
-                std::vector<TAlphabet> kmer(sequence.end() - k_, sequence.end());
+                kmer.assign(sequence.end() - k_, sequence.end());
 
                 // loop over outgoing edges
-                bool continue_traversal = false;
+                continue_traversal = false;
                 do {
                     if (!discovered[edge]) {
                         // mark that there is at least one outgoing

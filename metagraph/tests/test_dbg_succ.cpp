@@ -1174,6 +1174,131 @@ TEST(DBGSuccinct, CallContigs) {
     }
 }
 
+TEST(DBGSuccinct, CallContigs1) {
+    KMerDBGSuccConstructor constructor(3);
+    constructor.add_reads({ "ACTAGCTAGCTAGCTAGCTAGC",
+                            "ACTCT" });
+    DBG_succ graph(&constructor);
+
+    size_t num_contigs = 0;
+
+    std::set<std::string> contigs {
+        "$$$$",
+        "$$$ACT",
+        "ACTCT$",
+        "ACTA",
+        "CTAGCTA",
+    };
+
+    graph.call_paths(
+        [&](const auto &, const auto &seq) {
+            auto str = graph.decode(seq);
+            EXPECT_TRUE(contigs.count(str)) << str;
+            num_contigs++;
+        },
+        true
+    );
+
+    EXPECT_EQ(contigs.size(), num_contigs);
+}
+
+TEST(DBGSuccinct, CallContigsDisconnected1) {
+    KMerDBGSuccConstructor constructor(3);
+    constructor.add_reads({ "ACTAGCTAGCTAGCTAGCTAGC",
+                            "ACTCT",
+                            "ATCATCATCATCATCATCAT" });
+    DBG_succ graph(&constructor);
+
+    size_t num_contigs = 0;
+
+    std::set<std::string> contigs {
+        "$$$$",
+        "$$$ACT",
+        "ACTCT$",
+        "ACTA",
+        "CTAGCTA",
+        "TCATCA",
+    };
+
+    graph.call_paths(
+        [&](const auto &, const auto &seq) {
+            auto str = graph.decode(seq);
+            EXPECT_TRUE(contigs.count(str)) << str;
+            num_contigs++;
+        },
+        true
+    );
+
+    EXPECT_EQ(contigs.size(), num_contigs);
+}
+
+TEST(DBGSuccinct, CallContigsDisconnected2) {
+    KMerDBGSuccConstructor constructor(3);
+    constructor.add_reads({ "ACTAGCTAGCTAGCTAGCTAGC",
+                            "ACTCT",
+                            "ATCATCATCATCATCATCAT",
+                            "ATNATNATNATNATNATNAT" });
+    DBG_succ graph(&constructor);
+
+    size_t num_contigs = 0;
+
+    std::set<std::string> contigs {
+        "$$$$",
+        "$$$ACT",
+        "ACTCT$",
+        "ACTA",
+        "CTAGCTA",
+        "TCATCA",
+        "TNATNA",
+    };
+
+    graph.call_paths(
+        [&](const auto &, const auto &seq) {
+            auto str = graph.decode(seq);
+            EXPECT_TRUE(contigs.count(str)) << str;
+            num_contigs++;
+        },
+        true
+    );
+
+    EXPECT_EQ(contigs.size(), num_contigs);
+}
+
+TEST(DBGSuccinct, CallContigsTwoComponents) {
+    KMerDBGSuccConstructor constructor(3);
+    constructor.add_reads({ "ACTAGCTAGCTAGCTAGCTAGC",
+                            "ACTCT",
+                            "ATCATCATCATCATCATCAT",
+                            "ATNATNATNATNATNATNAT",
+                            "ATCNATCNATCNATCNATCNATCNAT" });
+    DBG_succ graph(&constructor);
+
+    size_t num_contigs = 0;
+
+    std::set<std::string> contigs {
+        "$$$$",
+        "$$$ACT",
+        "ACTCT$",
+        "ACTA",
+        "CTAGCTA",
+        "NATC",
+        "ATCNAT",
+        "NATNAT",
+        "ATCATC",
+    };
+
+    graph.call_paths(
+        [&](const auto &, const auto &seq) {
+            auto str = graph.decode(seq);
+            EXPECT_TRUE(contigs.count(str)) << str;
+            num_contigs++;
+        },
+        true
+    );
+
+    EXPECT_EQ(contigs.size(), num_contigs);
+}
+
 TEST(DBGSuccinct, CallEdgesEmptyGraph) {
     for (size_t k = 1; k < 30; ++k) {
         DBG_succ empty(k);
