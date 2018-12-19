@@ -36,10 +36,10 @@ class AnnotatedDBG {
 
     static void insert_zero_rows(Annotator *annotator,
                                  const bit_vector_dyn &inserted_edges);
-  private:
     static Annotator::Index
     graph_to_anno_index(SequenceGraph::node_index kmer_index);
 
+  private:
     void annotate_sequence_thread_safe(std::string sequence,
                                        std::vector<std::string> labels);
 
