@@ -35,7 +35,8 @@ ${KMC_MAIN_DIR}/develop.cpp
 ${KMC_MAIN_DIR}/kb_completer.cpp
 ${KMC_MAIN_DIR}/kb_storer.cpp
 ${KMC_MAIN_DIR}/kmer.cpp
-${KMC_MAIN_DIR}/prob_qual.cpp
+${KMC_MAIN_DIR}/splitter.cpp
+${KMC_MAIN_DIR}/kb_collector.cpp
 ${KMC_MAIN_DIR}/../kmc_api/mmer.cpp
 ${KMC_MAIN_DIR}/../kmc_api/kmc_file.cpp
 ${KMC_MAIN_DIR}/../kmc_api/kmer_api.cpp
@@ -60,7 +61,6 @@ set_source_files_properties(${KMC_MAIN_DIR}/raduls_avx2.cpp
 add_library(KMCcore STATIC
     ${KMC_files}
     ${RADULS_files}
-    ${KMC_MAIN_DIR}/libs/vectorclass/instrset_detect.cpp
 )
 
 target_link_libraries(KMCcore
@@ -82,13 +82,11 @@ add_executable(kmc
 if(APPLE)
 target_link_libraries(kmc
     -lKMCcore
-    ${KMC_MAIN_DIR}/libs/libamac64.a
     -lz -lbz2 -lpthread
 )
 elseif(UNIX)
 target_link_libraries(kmc
     KMCcore
-    ${KMC_MAIN_DIR}/libs/libaelf64.a
     -lz -lbz2 -lpthread
 )
 endif()
