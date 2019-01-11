@@ -142,7 +142,6 @@ void annotate_data(const std::vector<std::string> &files,
                    const std::string &ref_sequence_path,
                    AnnotatedDBG *anno_graph,
                    bool reverse,
-                   bool use_kmc,
                    size_t filter_k,
                    size_t min_count,
                    size_t max_count,
@@ -190,11 +189,12 @@ void annotate_data(const std::vector<std::string> &files,
                     variant_labels->clear();
                 }
             );
-        } else if (use_kmc) {
+        } else if (utils::get_filetype(file) == "KMC") {
+            const auto file_trim = utils::remove_suffix(file, ".kmc");
             std::vector<std::string> labels;
 
             if (filename_anno) {
-                labels.push_back(file);
+                labels.push_back(file_trim);
             }
 
             for (const auto &label : anno_labels) {
@@ -202,7 +202,7 @@ void annotate_data(const std::vector<std::string> &files,
             }
 
             kmc::read_kmers(
-                file,
+                file_trim,
                 [&](std::string&& sequence) {
                     anno_graph->annotate_sequence(std::move(sequence), labels);
 
@@ -643,17 +643,17 @@ void parse_sequences(const std::vector<std::string> &files,
                      Callback call_read,
                      Loop call_reads) {
     // iterate over input files
-    for (unsigned int f = 0; f < files.size(); ++f) {
+    for (const auto &file : files) {
         if (config.verbose) {
-            std::cout << std::endl << "Parsing " << files[f] << std::endl;
+            std::cout << std::endl << "Parsing " << file << std::endl;
         }
 
         Timer data_reading_timer;
 
-        if (utils::get_filetype(files[f]) == "VCF") {
+        if (utils::get_filetype(file) == "VCF") {
             //assume VCF contains no noise
             read_vcf_file_critical(
-                files[f], config.refpath, config.k, NULL,
+                file, config.refpath, config.k, NULL,
                 [&](std::string &seq, auto *) {
                     call_read(std::string(seq));
                     if (config.reverse) {
@@ -662,14 +662,15 @@ void parse_sequences(const std::vector<std::string> &files,
                     }
                 }
             );
-        } else if (config.use_kmc) {
+        } else if (utils::get_filetype(file) == "KMC") {
+            auto file_trim = utils::remove_suffix(file, ".kmc");
             bool warning_different_k = false;
             kmc::read_kmers(
-                files[f],
+                file_trim,
                 [&](std::string&& sequence) {
                     if (!warning_different_k && sequence.size() != config.k) {
                         std::cerr << "Warning: k-mers parsed from KMC database "
-                                  << files[f] << " have length " << sequence.size()
+                                  << file << " have length " << sequence.size()
                                   << " but graph is constructed for k=" << config.k
                                   << std::endl;
                         warning_different_k = true;
@@ -679,40 +680,40 @@ void parse_sequences(const std::vector<std::string> &files,
                 config.min_count,
                 config.max_count
             );
-        } else if (utils::get_filetype(files[f]) == "FASTA"
-                    || utils::get_filetype(files[f]) == "FASTQ") {
+        } else if (utils::get_filetype(file) == "FASTA"
+                    || utils::get_filetype(file) == "FASTQ") {
             std::string filter_filename = get_filter_filename(
-                files[f], config.filter_k,
+                file, config.filter_k,
                 config.min_count - 1,
                 config.unreliable_kmers_threshold
             );
 
             if (files.size() >= config.parallel) {
                 auto reverse = config.reverse;
-                auto file = files[f];
+                auto file_copy = file;
 
                 // capture all required values by copying to be able
                 // to run task from other threads
                 call_reads([=](auto callback) {
-                    read_fasta_file_critical(file, [=](kseq_t *read_stream) {
+                    read_fasta_file_critical(file_copy, [=](kseq_t *read_stream) {
                         // add read to the graph constructor as a callback
                         callback(read_stream->seq.s);
                     }, reverse, filter_filename);
                 });
             } else {
-                read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
+                read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                     // add read to the graph constructor as a callback
                     call_read(read_stream->seq.s);
                 }, config.reverse, filter_filename);
             }
         } else {
             std::cerr << "ERROR: Filetype unknown for file "
-                      << files[f] << std::endl;
+                      << file << std::endl;
             exit(1);
         }
 
         if (config.verbose) {
-            std::cout << "Finished extracting sequences from file " << files[f]
+            std::cout << "Finished extracting sequences from file " << file
                       << " in " << timer.elapsed() << "sec" << std::endl;
         }
         if (config.verbose) {
@@ -1280,8 +1281,7 @@ int main(int argc, const char *argv[]) {
                                               size_t max_unreliable_abundance,
                                               size_t unreliable_kmers_threshold,
                                               bool verbose,
-                                              bool reverse,
-                                              bool use_kmc) {
+                                              bool reverse) {
                         // compute read filter, bit vector indicating filtered reads
                         std::vector<bool> filter = filter_reads([=](auto callback) {
                                 read_fasta_file_critical(file, [=](kseq_t *read_stream) {
@@ -1291,7 +1291,8 @@ int main(int argc, const char *argv[]) {
                             },
                             k, max_unreliable_abundance, unreliable_kmers_threshold,
                             verbose, thread_pool_ptr,
-                            (use_kmc && max_unreliable_abundance) ? file + ".kmc" : ""
+                            (utils::get_filetype(file) == "KMC"
+                                && max_unreliable_abundance) ? file : ""
                         );
                         if (reverse) {
                             assert(filter.size() % 2 == 0);
@@ -1315,7 +1316,7 @@ int main(int argc, const char *argv[]) {
                     config->filter_k,
                     config->min_count - 1,
                     config->unreliable_kmers_threshold,
-                    config->verbose, config->reverse, config->use_kmc
+                    config->verbose, config->reverse
                 );
 
                 if (config->verbose) {
@@ -1384,7 +1385,6 @@ int main(int argc, const char *argv[]) {
                               config->refpath,
                               anno_graph.get(),
                               config->reverse,
-                              config->use_kmc,
                               config->filter_k,
                               config->min_count,
                               config->max_count,
@@ -1413,7 +1413,6 @@ int main(int argc, const char *argv[]) {
                                           config->refpath,
                                           anno_graph.get(),
                                           config->reverse,
-                                          config->use_kmc,
                                           config->filter_k,
                                           config->min_count,
                                           config->max_count,

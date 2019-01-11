@@ -33,7 +33,6 @@ class Config {
     bool suppress_unlabeled = false;
     bool generate_filtered_fasta = false;
     bool generate_filtered_fastq = false;
-    bool use_kmc = false;
     bool internal = false;
     bool clear_dummy = false;
     bool count_dummy = false;

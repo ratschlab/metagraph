@@ -125,9 +125,6 @@ Config::Config(int argc, const char *argv[]) {
             generate_filtered_fasta = true;
         } else if (!strcmp(argv[i], "--generate-fastq")) {
             generate_filtered_fastq = true;
-        } else if (!strcmp(argv[i], "--kmc")) {
-            //TODO: add into some USAGE description
-            use_kmc = true;
         } else if (!strcmp(argv[i], "--discovery-fraction")) {
             discovery_fraction = std::stof(argv[++i]);
         } else if (!strcmp(argv[i], "--query-presence")) {
@@ -213,6 +210,23 @@ Config::Config(int argc, const char *argv[]) {
             exit(-1);
         } else {
             fname.push_back(argv[i]);
+        }
+    }
+
+    // given kmc_pre and kmc_suf pair, only include one
+    // this still allows for the same file to be included multiple times
+    std::sort(fname.begin(), fname.end());
+    for (auto it = fname.begin(); it != fname.end(); ++it) {
+        if (utils::get_filetype(*it) == "KMC_PRE") {
+            *it = utils::remove_suffix(*it, "_pre");
+            assert(utils::get_filetype(*it) == "KMC");
+        } else if (utils::get_filetype(*it) == "KMC_SUF") {
+            *it = utils::remove_suffix(*it, "_suf");
+            assert(utils::get_filetype(*it) == "KMC");
+            if (it != fname.begin()
+                  && *it == *std::prev(it)) {
+                fname.erase(it--);
+            }
         }
     }
 
@@ -478,7 +492,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s filter [options] --min-count <cutoff> FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for filter:\n");
-            fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC counters\n");
             fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
             fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
@@ -500,7 +513,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                             "\tEach input file is given in FASTA, FASTQ, or VCF format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for build:\n");
-            fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC counters\n");
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
             fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
@@ -526,7 +538,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                             "\tEach input file is given in FASTA, FASTQ, or VCF format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for extend:\n");
-            fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC counters\n");
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
             fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
@@ -606,7 +617,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                             "\tEach file is given in FASTA, FASTQ, or VCF format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
-            fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC counters\n");
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
             fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
