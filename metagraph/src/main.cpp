@@ -141,7 +141,7 @@ void annotate_data(const std::vector<std::string> &files,
                    const std::string &ref_sequence_path,
                    AnnotatedDBG *anno_graph,
                    bool reverse,
-                   bool use_kmc,
+                   const std::vector<bool> &use_kmc_vector,
                    size_t filter_k,
                    size_t min_count,
                    size_t max_count,
@@ -156,7 +156,11 @@ void annotate_data(const std::vector<std::string> &files,
     Timer timer;
 
     // iterate over input files
-    for (const auto &file : files) {
+    assert(files.size() == use_kmc_vector.size());
+    for (size_t f = 0; f < files.size(); ++f) {
+        const auto& file = files[f];
+        bool use_kmc = use_kmc_vector[f];
+
         Timer data_reading_timer;
 
         if (verbose) {
@@ -646,7 +650,7 @@ void parse_sequences(const std::vector<std::string> &files,
                     }
                 }
             );
-        } else if (config.use_kmc) {
+        } else if (config.use_kmc[f]) {
             bool warning_different_k = false;
             kmc::read_kmers(
                 files[f],
@@ -1156,7 +1160,10 @@ int main(int argc, const char *argv[]) {
             Timer timer;
 
             // iterate over input files
-            for (const auto &file : files) {
+            for (size_t f = 0; f < files.size(); ++f) {
+                const auto& file = files[f];
+                bool use_kmc = config->use_kmc[f];
+
                 if (utils::get_filetype(file) != "FASTA"
                         && utils::get_filetype(file) != "FASTQ") {
                     std::cerr << "ERROR: Filetype unknown for file "
@@ -1291,7 +1298,7 @@ int main(int argc, const char *argv[]) {
                     config->filter_k,
                     config->min_count - 1,
                     config->unreliable_kmers_threshold,
-                    config->verbose, config->reverse, config->use_kmc
+                    config->verbose, config->reverse, use_kmc
                 );
 
                 if (config->verbose) {

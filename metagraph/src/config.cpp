@@ -127,7 +127,7 @@ Config::Config(int argc, const char *argv[]) {
             generate_filtered_fastq = true;
         } else if (!strcmp(argv[i], "--kmc")) {
             //TODO: add into some USAGE description
-            use_kmc = true;
+            use_kmc_rest = true;
         } else if (!strcmp(argv[i], "--discovery-fraction")) {
             discovery_fraction = std::stof(argv[++i]);
         } else if (!strcmp(argv[i], "--query-presence")) {
@@ -213,6 +213,7 @@ Config::Config(int argc, const char *argv[]) {
             exit(-1);
         } else {
             fname.push_back(argv[i]);
+            use_kmc.push_back(use_kmc_rest);
         }
     }
 
