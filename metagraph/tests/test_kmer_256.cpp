@@ -137,6 +137,17 @@ TEST(KmerEncodeTest_256, UpdateKmerVsConstruct) {
     EXPECT_EQ(long_seq1, reconst_seq2);
 }
 
+TEST(KmerEncodeTest_256, NextPrevKmer) {
+    KMER kmer[2] = {
+        KMER(KmerExtractor2Bit::encode("ATGC")),
+        KMER(KmerExtractor2Bit::encode("TGCT"))
+    };
+
+    EXPECT_EQ(kmer[0], kmer[1].prev_kmer(4, KmerExtractor2Bit::encode('A')));
+    kmer[0].next_kmer(4, KmerExtractor2Bit::encode('T'));
+    EXPECT_EQ(kmer[1], kmer[0]);
+}
+
 TEST(KmerEncodeTest_256, InvertibleEndDol) {
     test_kmer_codec_256("ATG$", "ATG$");
 }

@@ -42,14 +42,14 @@ void DBGHashOrdered::map_to_nodes(const std::string &sequence,
 DBGHashOrdered::node_index
 DBGHashOrdered::traverse(node_index node, char next_char) const {
     auto kmer = get_kmer(node);
-    kmer.next_kmer(k_ - 1, seq_encoder_.encode(next_char));
+    kmer.next_kmer(k_, seq_encoder_.encode(next_char));
     return get_index(kmer);
 }
 
 DBGHashOrdered::node_index
 DBGHashOrdered::traverse_back(node_index node, char prev_char) const {
     auto kmer = get_kmer(node);
-    kmer = kmer.prev_kmer(k_ - 1, seq_encoder_.encode(prev_char));
+    kmer = kmer.prev_kmer(k_, seq_encoder_.encode(prev_char));
     return get_index(kmer);
 }
 

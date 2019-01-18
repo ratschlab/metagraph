@@ -130,7 +130,7 @@ void KMer<G, L>::next_kmer(size_t k, KMerCharType edge_label) {
     KMerWordType last = seq_ & KMerWordType((1llu << kBitsPerChar) - 1);
     seq_ = seq_ >> kBitsPerChar;
     // 0000s[6]s[5]s[4]s[3]s[2]s[1]
-    seq_ += last << static_cast<int>(kBitsPerChar * k);
+    seq_ += last << static_cast<int>(kBitsPerChar * (k - 1));
     // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
     seq_ |= kFirstCharMask;
     // s[7]s[6]s[5]s[4]s[3]s[2]1111

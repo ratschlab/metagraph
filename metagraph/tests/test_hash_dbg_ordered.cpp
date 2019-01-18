@@ -188,6 +188,26 @@ TEST(DBGHashOrdered, CheckGraph) {
     }
 }
 
+TEST(DBGHashOrdered, Traversals) {
+    for (size_t k = 2; k <= 20; ++k) {
+        DBGHashOrdered graph(k);
+
+        graph.add_sequence(std::string(100, 'A') + std::string(100, 'C')
+                                                 + std::string(100, 'G'));
+
+        uint64_t it = 0;
+        graph.map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+
+        uint64_t it2 = graph.kmer_to_node(std::string(k - 1, 'A') + "C");
+        ASSERT_EQ(graph.kmer_to_node(std::string(k, 'A')), it);
+        EXPECT_EQ(it, graph.traverse(it, 'A'));
+        EXPECT_EQ(it2, graph.traverse(it, 'C'));
+        EXPECT_EQ(it, graph.traverse_back(it2, 'A'));
+        EXPECT_EQ(DBGHashOrdered::npos, graph.traverse(it, 'G'));
+        EXPECT_EQ(DBGHashOrdered::npos, graph.traverse_back(it2, 'G'));
+    }
+}
+
 TEST(DBGHashOrdered, Serialize) {
     {
         DBGHashOrdered graph(20, false);

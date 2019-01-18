@@ -335,12 +335,11 @@ DBGSD::sequence_to_kmers(const std::string &sequence) const {
 
 DBGSD::node_index DBGSD::get_index(const Kmer &kmer, const Kmer *kmer_rev) const {
     assert(static_cast<bool>(kmer_rev) == canonical_mode_);
-    auto shifted = kmer.data() + static_cast<decltype(kmer.data())>(1u);
+    auto shifted = Kmer::KMerWordType(1u) + kmer.data();
 
     if (kmers_[kmer_rev
-            ? std::min(shifted, kmer_rev->data() + static_cast<decltype(kmer.data())>(1u))
-            : shifted
-        ])
+                ? std::min(shifted, Kmer::KMerWordType(1u) + kmer_rev->data())
+                : shifted])
         return shifted;
 
     return npos;
@@ -349,7 +348,7 @@ DBGSD::node_index DBGSD::get_index(const Kmer &kmer, const Kmer *kmer_rev) const
 template <typename KMER>
 typename KMER::KMerWordType
 DBGSD::kmer_to_index(const KMER &kmer) {
-    return kmer.data() + typename KMER::KMerWordType(1u);
+    return typename KMER::KMerWordType(1u) + kmer.data();
 }
 
 template
