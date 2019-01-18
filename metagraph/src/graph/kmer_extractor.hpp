@@ -59,9 +59,6 @@ class KmerExtractor {
     template <class KMER>
     static std::string kmer_to_sequence(const KMER &kmer, size_t k);
 
-    template <class KMER>
-    static KMER reverse_complement(const KMER &kmer, size_t k);
-
     // map input character to k-mer character
     static TAlphabet encode(char s);
     static std::vector<TAlphabet> encode(const std::string &sequence);
@@ -105,9 +102,6 @@ class KmerExtractor2Bit {
 
     template <class KMER>
     static std::string kmer_to_sequence(const KMER &kmer, size_t k);
-
-    template <class KMER>
-    static KMER reverse_complement(const KMER &kmer, size_t k);
 
     // map input character to k-mer character
     static TAlphabet encode(char s);

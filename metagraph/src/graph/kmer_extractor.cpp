@@ -279,16 +279,6 @@ template std::string KmerExtractor::kmer_to_sequence(const Kmer128&, size_t);
 template std::string KmerExtractor::kmer_to_sequence(const Kmer256&, size_t);
 
 
-template <class KMER>
-inline KMER KmerExtractor::reverse_complement(const KMER &kmer, size_t k) {
-    return kmer.reverse_complement(k, canonical_map);
-}
-
-template KmerExtractor::Kmer64 KmerExtractor::reverse_complement(const Kmer64&, size_t);
-template KmerExtractor::Kmer128 KmerExtractor::reverse_complement(const Kmer128&, size_t);
-template KmerExtractor::Kmer256 KmerExtractor::reverse_complement(const Kmer256&, size_t);
-
-
 /**
  * Break the sequence to kmers and extend the temporary kmers storage.
  */
@@ -420,17 +410,6 @@ std::string KmerExtractor2Bit::kmer_to_sequence(const KMER &kmer, size_t k) {
 template std::string KmerExtractor2Bit::kmer_to_sequence(const Kmer64&, size_t);
 template std::string KmerExtractor2Bit::kmer_to_sequence(const Kmer128&, size_t);
 template std::string KmerExtractor2Bit::kmer_to_sequence(const Kmer256&, size_t);
-
-
-template <class KMER>
-inline KMER KmerExtractor2Bit::reverse_complement(const KMER &kmer, size_t k) {
-    return kmer.reverse_complement(k, canonical_map_2bit);
-}
-
-template KmerExtractor2Bit::Kmer64 KmerExtractor2Bit::reverse_complement(const Kmer64&, size_t);
-template KmerExtractor2Bit::Kmer128 KmerExtractor2Bit::reverse_complement(const Kmer128&, size_t);
-template KmerExtractor2Bit::Kmer256 KmerExtractor2Bit::reverse_complement(const Kmer256&, size_t);
-
 
 
 /**

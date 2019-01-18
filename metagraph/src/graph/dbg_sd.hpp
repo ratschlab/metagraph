@@ -101,7 +101,7 @@ class DBGSD : public DeBruijnGraph {
 
     Vector<Kmer> sequence_to_kmers(const std::string &sequence) const;
 
-    node_index get_index(const Kmer &kmer) const;
+    node_index get_index(const Kmer &kmer, const Kmer *kmer_rev = nullptr) const;
     Kmer get_kmer(node_index node) const;
 
     static size_t infer_k(size_t kmer_index_size, size_t kLogSigma);

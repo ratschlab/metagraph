@@ -38,9 +38,6 @@ class KMer {
 
     std::string to_string(size_t k, const std::string &alphabet) const;
 
-    KMer<G, L> reverse_complement(size_t k,
-                                  const std::vector<KMerCharType> &complement_map) const;
-
     template <typename T>
     static inline KMerWordType pack_kmer(const T &arr, size_t k);
 
@@ -73,18 +70,6 @@ template <typename G, int L>
 typename KMer<G, L>::KMerCharType KMer<G, L>::operator[](size_t i) const {
     assert(get_digit(i) > 0);
     return get_digit(i) - 1;
-}
-
-template <typename G, int L>
-KMer<G, L>
-KMer<G, L>::reverse_complement(size_t k,
-                               const std::vector<KMerCharType> &complement_map) const {
-    std::vector<KMerCharType> vec;
-    vec.reserve(k);
-    for (ssize_t i = k - 1; i >= 0; --i) {
-        vec.push_back(complement_map.at(operator[](i)));
-    }
-    return KMer<G, L>(pack_kmer(vec, k));
 }
 
 template <typename G, int L>
