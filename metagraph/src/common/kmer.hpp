@@ -51,15 +51,12 @@ class KMer {
                                    KMerCharType last,
                                    KMerWordType *kmer);
 
-    inline KMer<G, L> prev_kmer(size_t k, KMerCharType first_char) const;
+    inline KMer<G, L> prev_kmer(size_t k, KMerCharType new_first) const;
     inline void next_kmer(size_t k, KMerCharType edge_label);
 
-    inline KMerWordType& data() { return seq_; }
-    inline KMerWordType data() const { return seq_; }
+    inline const KMerWordType& data() const { return seq_; }
 
   private:
-    inline KMerCharType get_digit(size_t i) const;
-
     static const KMerCharType kFirstCharMask;
 
     KMerWordType seq_; // kmer sequence
@@ -67,34 +64,26 @@ class KMer {
 
 
 template <typename G, int L>
-typename KMer<G, L>::KMerCharType KMer<G, L>::operator[](size_t i) const {
-    assert(get_digit(i) > 0);
-    return get_digit(i) - 1;
-}
-
-template <typename G, int L>
 template <typename T>
 G KMer<G, L>::pack_kmer(const T &arr, size_t k) {
     if (k * kBitsPerChar > sizeof(KMerWordType) * 8 || k < 2) {
-        std::cerr << "Invalid k-mer size "
-                  << k
-                  << ": must be between 2 and "
-                  << (sizeof(KMerWordType) * 8 / kBitsPerChar) << std::endl;
+        std::cerr << "ERROR: Invalid k-mer size "
+                  << k << ": must be between 2 and "
+                  << sizeof(KMerWordType) * 8 / kBitsPerChar << std::endl;
         exit(1);
     }
 
     KMerWordType result(0);
 
     for (int i = k - 2; i >= 0; --i) {
-
-        assert(static_cast<uint64_t>(arr[i] + 1) < (1llu << kBitsPerChar)
-                 && "Alphabet size too big for the given number of bits");
+        assert(static_cast<uint64_t>(arr[i]) <= kFirstCharMask
+                 && "Too small Digit size for representing the character");
 
         result = result << kBitsPerChar;
-        result += arr[i] + 1;
+        result += arr[i];
     }
     result = result << kBitsPerChar;
-    result += arr[k - 1] + 1;
+    result += arr[k - 1];
     return result;
 }
 
@@ -111,11 +100,11 @@ void KMer<G, L>::update_kmer(size_t k,
     // s[6]s[5]s[4]s[3]s[2]s[1]s[7]
     *kmer = *kmer >> kBitsPerChar;
     // 0000s[6]s[5]s[4]s[3]s[2]s[1]
-    *kmer += KMerWordType(last + 1) << static_cast<int>(kBitsPerChar * (k - 1));
+    *kmer += KMerWordType(last) << static_cast<int>(kBitsPerChar * (k - 1));
     // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
     *kmer |= kFirstCharMask;
     // s[7]s[6]s[5]s[4]s[3]s[2]1111
-    *kmer -= kFirstCharMask - (edge_label + 1);
+    *kmer -= kFirstCharMask - edge_label;
     // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
 }
 
@@ -127,23 +116,23 @@ void KMer<G, L>::update_kmer(size_t k,
 template <typename G, int L>
 void KMer<G, L>::next_kmer(size_t k, KMerCharType edge_label) {
     // s[6]s[5]s[4]s[3]s[2]s[1]s[7]
-    KMerWordType last = seq_ & KMerWordType((1llu << kBitsPerChar) - 1);
+    KMerWordType last = seq_ & KMerWordType(kFirstCharMask);
     seq_ = seq_ >> kBitsPerChar;
     // 0000s[6]s[5]s[4]s[3]s[2]s[1]
     seq_ += last << static_cast<int>(kBitsPerChar * (k - 1));
     // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
     seq_ |= kFirstCharMask;
     // s[7]s[6]s[5]s[4]s[3]s[2]1111
-    seq_ -= kFirstCharMask - (edge_label + 1);
+    seq_ -= kFirstCharMask - edge_label;
     // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
 }
 
 template <typename G, int L>
-KMer<G, L> KMer<G, L>::prev_kmer(size_t k, KMerCharType first_char) const {
+KMer<G, L> KMer<G, L>::prev_kmer(size_t k, KMerCharType new_first) const {
     KMerWordType kmer = seq_;
     // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
     kmer |= kFirstCharMask;
-    kmer -= kFirstCharMask - (first_char + 1);
+    kmer -= kFirstCharMask - new_first;
     // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
     int shift = kBitsPerChar * (k - 1);
     KMerWordType last_char = seq_ >> shift;
@@ -157,8 +146,8 @@ KMer<G, L> KMer<G, L>::prev_kmer(size_t k, KMerCharType first_char) const {
 }
 
 template <typename G, int L>
-typename KMer<G, L>::KMerCharType KMer<G, L>::get_digit(size_t i) const {
-    static_assert(kBitsPerChar <= 64, "too large digit");
+typename KMer<G, L>::KMerCharType KMer<G, L>::operator[](size_t i) const {
+    static_assert(kBitsPerChar <= 64, "Too large digit!");
     assert(kBitsPerChar * (i + 1) <= sizeof(KMerWordType) * 8);
     return static_cast<uint64_t>(seq_ >> static_cast<int>(kBitsPerChar * i))
              & kFirstCharMask;

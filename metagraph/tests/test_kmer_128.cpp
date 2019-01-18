@@ -69,10 +69,10 @@ TEST(KmerEncodeTest_128, BitShiftBuild) {
     ));
     for (int i = long_seq.length() - 4; i >= 0; --i) {
         kmer_builtup.seq_ = kmer_builtup.seq_.operator<<(kBitsPerChar);
-        kmer_builtup.seq_ |= KmerExtractor::encode(long_seq[i]) + 1;
+        kmer_builtup.seq_ |= KmerExtractor::encode(long_seq[i]);
     }
     kmer_builtup.seq_ = kmer_builtup.seq_.operator<<(kBitsPerChar);
-    kmer_builtup.seq_ |= KmerExtractor::encode(long_seq[long_seq.length() - 1]) + 1;
+    kmer_builtup.seq_ |= KmerExtractor::encode(long_seq[long_seq.length() - 1]);
     std::string dec = kmer_builtup.to_string(long_seq.length(),
                                              KmerExtractor::alphabet);
     ASSERT_EQ(long_seq, dec);
@@ -262,12 +262,12 @@ TEST(KmerEncodeTest_128, SizeOfClass) {
 
 #if _DNA_GRAPH
 TEST(KmerEncodeTest_128, TestPrint) {
-    KMER kmer(std::vector<uint64_t>(sizeof(KMerBaseType) * 8 / kBitsPerChar, 1),
-              sizeof(KMerBaseType) * 8 / kBitsPerChar);
+    size_t size = sizeof(KMerBaseType) * 8 / kBitsPerChar;
+    KMER kmer(std::vector<uint64_t>(size, 1), size);
     std::stringstream ss;
     ss << kmer;
     std::string out;
     ss >> out;
-    EXPECT_EQ("0000000000000000000000000000000012492492492492492492492492492492", out);
+    EXPECT_EQ("0000000000000000000000000000000009249249249249249249249249249249", out);
 }
 #endif

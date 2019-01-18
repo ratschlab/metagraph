@@ -8,14 +8,13 @@ const typename KMer<G, L>::KMerCharType
 KMer<G, L>::kFirstCharMask = (1llu << kBitsPerChar) - 1;
 
 template <typename G, int L>
-std::string
-KMer<G, L>::to_string(size_t k, const std::string &alphabet) const {
+std::string KMer<G, L>::to_string(size_t k, const std::string &alphabet) const {
     std::string seq(k, '\0');
 
     for (size_t i = 0; i + 1 < k; ++i) {
-        seq[i] = alphabet.at(get_digit(i + 1) - 1);
+        seq[i] = alphabet.at(operator[](i + 1));
     }
-    seq[k - 1] = alphabet.at(get_digit(0) - 1);
+    seq[k - 1] = alphabet.at(operator[](0));
 
     return seq;
 }
