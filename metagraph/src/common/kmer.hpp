@@ -20,52 +20,54 @@ class KMer {
 
     KMer() {}
     template <typename V>
-    KMer(const V &arr, size_t k) : seq_(pack_kmer(arr, k)) {}
+    KMer(const V &arr, size_t k);
     template <typename T>
     KMer(const std::vector<T> &arr) : KMer(arr, arr.size()) {}
 
     explicit KMer(KMerWordType &&seq) : seq_(seq) {}
     explicit KMer(const KMerWordType &seq) : seq_(seq) {}
 
+    // corresponds to the BOSS (co-lex, one-swapped) order of k-mers
     bool operator<(const KMer &other) const { return seq_ < other.seq_; }
+    bool operator<=(const KMer &other) const { return seq_ <= other.seq_; }
+    bool operator>(const KMer &other) const { return seq_ > other.seq_; }
+    bool operator>=(const KMer &other) const { return seq_ >= other.seq_; }
     bool operator==(const KMer &other) const { return seq_ == other.seq_; }
     bool operator!=(const KMer &other) const { return seq_ != other.seq_; }
 
     inline KMerCharType operator[](size_t i) const;
 
+    /**
+     * Compares k-mers without one last and |minus| first characters.
+     * Examples: For s[6]s[5]s[4]s[3]s[2]s[1]s[7],
+     *                  compares s[6]s[5]s[4]s[3]s[2]s[1] if minus = 0.
+     * In general, checks if s[minus+1]...s[k-1] are the same for both kmers.
+     */
     static inline bool compare_suffix(const KMer &k1,
                                       const KMer &k2, size_t minus = 0);
 
     std::string to_string(size_t k, const std::string &alphabet) const;
-
-    template <typename T>
-    static inline KMerWordType pack_kmer(const T &arr, size_t k);
 
     /**
      * Construct the next k-mer for s[6]s[5]s[4]s[3]s[2]s[1]s[7].
      * next = s[7]s[6]s[5]s[4]s[3]s[2]s[8]
      *      = s[7] << k + (kmer & mask) >> 1 + s[8].
      */
-    static inline void update_kmer(size_t k,
-                                   KMerCharType edge_label,
-                                   KMerCharType last,
-                                   KMerWordType *kmer);
-
-    inline KMer<G, L> prev_kmer(size_t k, KMerCharType new_first) const;
-    inline void next_kmer(size_t k, KMerCharType edge_label);
+    inline void to_next(size_t k, KMerCharType new_last, KMerCharType old_last);
+    inline void to_next(size_t k, KMerCharType new_last);
+    inline void to_prev(size_t k, KMerCharType new_first);
 
     inline const KMerWordType& data() const { return seq_; }
 
   private:
     static const KMerCharType kFirstCharMask;
-
     KMerWordType seq_; // kmer sequence
 };
 
 
 template <typename G, int L>
-template <typename T>
-G KMer<G, L>::pack_kmer(const T &arr, size_t k) {
+template <typename V>
+KMer<G, L>::KMer(const V &arr, size_t k) : seq_(0) {
     if (k * kBitsPerChar > sizeof(KMerWordType) * 8 || k < 2) {
         std::cerr << "ERROR: Invalid k-mer size "
                   << k << ": must be between 2 and "
@@ -73,18 +75,14 @@ G KMer<G, L>::pack_kmer(const T &arr, size_t k) {
         exit(1);
     }
 
-    KMerWordType result(0);
-
     for (int i = k - 2; i >= 0; --i) {
         assert(static_cast<uint64_t>(arr[i]) <= kFirstCharMask
                  && "Too small Digit size for representing the character");
 
-        result = result << kBitsPerChar;
-        result += arr[i];
+        seq_ |= arr[i];
+        seq_ = seq_ << kBitsPerChar;
     }
-    result = result << kBitsPerChar;
-    result += arr[k - 1];
-    return result;
+    seq_ |= arr[k - 1];
 }
 
 /**
@@ -93,56 +91,52 @@ G KMer<G, L>::pack_kmer(const T &arr, size_t k) {
  *      = s[7] << k + (kmer & mask) >> 1 + s[8].
  */
 template <typename G, int L>
-void KMer<G, L>::update_kmer(size_t k,
-                             KMerCharType edge_label,
-                             KMerCharType last,
-                             KMerWordType *kmer) {
+void KMer<G, L>::to_next(size_t k, KMerCharType new_last, KMerCharType old_last) {
+    assert(old_last == (seq_ & KMerWordType(kFirstCharMask)));
     // s[6]s[5]s[4]s[3]s[2]s[1]s[7]
-    *kmer = *kmer >> kBitsPerChar;
-    // 0000s[6]s[5]s[4]s[3]s[2]s[1]
-    *kmer += KMerWordType(last) << static_cast<int>(kBitsPerChar * (k - 1));
-    // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
-    *kmer |= kFirstCharMask;
-    // s[7]s[6]s[5]s[4]s[3]s[2]1111
-    *kmer -= kFirstCharMask - edge_label;
-    // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
-}
-
-/**
- * Construct the next k-mer for s[6]s[5]s[4]s[3]s[2]s[1]s[7].
- * next = s[7]s[6]s[5]s[4]s[3]s[2]s[8]
- *      = s[7] << k + (kmer & mask) >> 1 + s[8].
- */
-template <typename G, int L>
-void KMer<G, L>::next_kmer(size_t k, KMerCharType edge_label) {
-    // s[6]s[5]s[4]s[3]s[2]s[1]s[7]
-    KMerWordType last = seq_ & KMerWordType(kFirstCharMask);
     seq_ = seq_ >> kBitsPerChar;
     // 0000s[6]s[5]s[4]s[3]s[2]s[1]
-    seq_ += last << static_cast<int>(kBitsPerChar * (k - 1));
+    seq_ += KMerWordType(old_last) << static_cast<int>(kBitsPerChar * (k - 1));
     // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
     seq_ |= kFirstCharMask;
     // s[7]s[6]s[5]s[4]s[3]s[2]1111
-    seq_ -= kFirstCharMask - edge_label;
+    seq_ -= kFirstCharMask - new_last;
+    // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
+}
+
+/**
+ * Construct the next k-mer for s[6]s[5]s[4]s[3]s[2]s[1]s[7].
+ * next = s[7]s[6]s[5]s[4]s[3]s[2]s[8]
+ *      = s[7] << k + (kmer & mask) >> 1 + s[8].
+ */
+template <typename G, int L>
+void KMer<G, L>::to_next(size_t k, KMerCharType new_last) {
+    KMerWordType old_last = seq_ & KMerWordType(kFirstCharMask);
+    // s[6]s[5]s[4]s[3]s[2]s[1]s[7]
+    seq_ = seq_ >> kBitsPerChar;
+    // 0000s[6]s[5]s[4]s[3]s[2]s[1]
+    seq_ += old_last << static_cast<int>(kBitsPerChar * (k - 1));
+    // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
+    seq_ |= kFirstCharMask;
+    // s[7]s[6]s[5]s[4]s[3]s[2]1111
+    seq_ -= kFirstCharMask - new_last;
     // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
 }
 
 template <typename G, int L>
-KMer<G, L> KMer<G, L>::prev_kmer(size_t k, KMerCharType new_first) const {
-    KMerWordType kmer = seq_;
-    // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
-    kmer |= kFirstCharMask;
-    kmer -= kFirstCharMask - new_first;
-    // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
-    int shift = kBitsPerChar * (k - 1);
+void KMer<G, L>::to_prev(size_t k, KMerCharType new_first) {
+    const int shift = kBitsPerChar * (k - 1);
     KMerWordType last_char = seq_ >> shift;
-    kmer -= last_char << shift;
+    // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
+    seq_ |= kFirstCharMask;
+    seq_ -= kFirstCharMask - new_first;
+    // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
+    seq_ -= last_char << shift;
     // 0000s[6]s[5]s[4]s[3]s[2]s[1]
-    kmer = kmer << kBitsPerChar;
+    seq_ = seq_ << kBitsPerChar;
     // s[6]s[5]s[4]s[3]s[2]s[1]0000
-    kmer += last_char;
+    seq_ += last_char;
     // s[6]s[5]s[4]s[3]s[2]s[1]s[7]
-    return KMer<G, L>(kmer);
 }
 
 template <typename G, int L>
@@ -153,6 +147,12 @@ typename KMer<G, L>::KMerCharType KMer<G, L>::operator[](size_t i) const {
              & kFirstCharMask;
 }
 
+/**
+ * Compares k-mers without one last and |minus| first characters.
+ * Examples: For s[6]s[5]s[4]s[3]s[2]s[1]s[7],
+ *                  compares s[6]s[5]s[4]s[3]s[2]s[1] if minus = 0.
+ * In general, checks if s[minus+1]...s[k-1] are the same for both kmers.
+ */
 template <typename G, int L>
 bool KMer<G, L>::compare_suffix(const KMer &k1, const KMer &k2, size_t minus) {
     return k1.seq_ >> static_cast<int>((minus + 1) * kBitsPerChar)

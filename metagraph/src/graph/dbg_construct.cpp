@@ -188,7 +188,8 @@ void recover_source_dummy_nodes(size_t k,
         if (kmers->size() + 1 > kmers->capacity())
             shrink_kmers(kmers, num_threads, verbose, dummy_begin);
 
-        kmers->push_back(kmers->at(i).prev_kmer(k + 1, DBG_succ::kSentinelCode));
+        kmers->push_back(kmers->at(i));
+        kmers->back().to_prev(k + 1, DBG_succ::kSentinelCode);
     }
     if (verbose) {
         std::cout << "Number of dummy k-mers with dummy prefix of length 1: "
@@ -214,7 +215,8 @@ void recover_source_dummy_nodes(size_t k,
             if (kmers->size() + 1 > kmers->capacity())
                 shrink_kmers(kmers, num_threads, verbose, dummy_begin);
 
-            kmers->push_back(kmers->at(i).prev_kmer(k + 1, DBG_succ::kSentinelCode));
+            kmers->push_back(kmers->at(i));
+            kmers->back().to_prev(k + 1, DBG_succ::kSentinelCode);
         }
         sort_and_remove_duplicates(kmers, num_threads, dummy_begin);
 

@@ -12,9 +12,11 @@ std::string KMer<G, L>::to_string(size_t k, const std::string &alphabet) const {
     std::string seq(k, '\0');
 
     for (size_t i = 0; i + 1 < k; ++i) {
-        seq[i] = alphabet.at(operator[](i + 1));
+        assert(operator[](i + 1) < alphabet.size());
+        seq[i] = alphabet[operator[](i + 1)];
     }
-    seq[k - 1] = alphabet.at(operator[](0));
+    assert(operator[](0) < alphabet.size());
+    seq[k - 1] = alphabet[operator[](0)];
 
     return seq;
 }

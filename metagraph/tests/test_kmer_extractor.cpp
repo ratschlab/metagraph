@@ -34,8 +34,8 @@ TEST(KmerExtractor, encode_decode) {
 KmerExtractor::Kmer64 to_kmer(const KmerExtractor &encoder,
                               const std::string &kmer) {
     Vector<KmerExtractor::Kmer64> kmers;
-    encoder.sequence_to_kmers(encoder.encode(kmer), kmer.size(), {}, &kmers);
-    return kmers[0];
+    encoder.sequence_to_kmers(kmer, kmer.size(), {}, &kmers);
+    return kmers.at(1);
 }
 
 TEST(KmerExtractor, encode_decode_kmer) {
@@ -62,8 +62,10 @@ TEST(KmerExtractor, encode_decode_string) {
     for (uint64_t k = 2; k <= sequence.length(); ++k) {
         Vector<KmerExtractor::Kmer256> kmers;
 
-        encoder.sequence_to_kmers(encoder.encode(sequence), k, {}, &kmers);
-        ASSERT_LT(0u, kmers.size());
+        encoder.sequence_to_kmers(sequence, k, {}, &kmers);
+        ASSERT_LT(2u, kmers.size());
+        kmers.erase(kmers.begin());
+        kmers.erase(kmers.end() - 1);
 
         std::string reconstructed = encoder.kmer_to_sequence(kmers[0], k);
         for (uint64_t i = 1; i < kmers.size(); ++i) {
@@ -87,8 +89,8 @@ TEST(KmerExtractor2Bit, encode_decode) {
 KmerExtractor2Bit::Kmer64 to_kmer(const KmerExtractor2Bit &encoder,
                               const std::string &kmer) {
     Vector<KmerExtractor2Bit::Kmer64> kmers;
-    encoder.sequence_to_kmers(encoder.encode(kmer), kmer.size(), {}, &kmers);
-    return kmers[0];
+    encoder.sequence_to_kmers(kmer, kmer.size(), {}, &kmers);
+    return kmers.at(0);
 }
 
 TEST(KmerExtractor2Bit, encode_decode_kmer) {
@@ -115,7 +117,7 @@ TEST(KmerExtractor2Bit, encode_decode_string) {
     for (uint64_t k = 2; k <= sequence.length(); ++k) {
         Vector<KmerExtractor2Bit::Kmer256> kmers;
 
-        encoder.sequence_to_kmers(encoder.encode(sequence), k, {}, &kmers);
+        encoder.sequence_to_kmers(sequence, k, {}, &kmers);
         ASSERT_LT(0u, kmers.size());
 
         std::string reconstructed = encoder.kmer_to_sequence(kmers[0], k);

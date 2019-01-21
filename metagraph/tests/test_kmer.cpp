@@ -81,7 +81,7 @@ void test_kmer_codec(const std::string &sequence,
 
         ASSERT_LE(k, encoded.size());
         std::vector<KMer<G, L>> kmers;
-        auto packed = KMer<G, L>::pack_kmer(encoded.data(), k);
+        KMer<G, L> kmer_packed(encoded.data(), k);
         for (uint64_t i = 0; i + k <= encoded.size(); ++i) {
             kmers.emplace_back(std::vector<TAlphabet>(encoded.begin() + i,
                                                       encoded.begin() + i + k));
@@ -91,14 +91,10 @@ void test_kmer_codec(const std::string &sequence,
             KMer<G, L> kmer_alt(encoded.data() + i, k);
             ASSERT_EQ(kmers.back(), kmer_alt) << k << " " << i;
 
-            KMer<G, L> kmer_packed(packed);
             ASSERT_EQ(kmers.back(), kmer_packed) << k << " " << i;
+
             if (i + k < encoded.size())
-                KMer<G, L>::update_kmer(
-                    k,
-                    encoded[i + k],
-                    encoded[i + k - 1],
-                    &packed);
+                kmer_packed.to_next(k, encoded[i + k], encoded[i + k - 1]);
         }
     }
 }

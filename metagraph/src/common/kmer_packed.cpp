@@ -12,8 +12,10 @@ template <typename G, int L>
 std::string
 KMerPacked<G, L>::to_string(size_t k, const std::string &alphabet) const {
     std::string seq(k, '\0');
+
     for (size_t i = 0; i < seq.length(); ++i) {
-        seq[i] = alphabet.at(get_digit(i));
+        assert(operator[](i) < alphabet.size());
+        seq[i] = alphabet[operator[](i)];
     }
 
     return seq;

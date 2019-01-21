@@ -42,14 +42,14 @@ void DBGHashOrdered::map_to_nodes(const std::string &sequence,
 DBGHashOrdered::node_index
 DBGHashOrdered::traverse(node_index node, char next_char) const {
     auto kmer = get_kmer(node);
-    kmer.next_kmer(k_, seq_encoder_.encode(next_char));
+    kmer.to_next(k_, seq_encoder_.encode(next_char));
     return get_index(kmer);
 }
 
 DBGHashOrdered::node_index
 DBGHashOrdered::traverse_back(node_index node, char prev_char) const {
     auto kmer = get_kmer(node);
-    kmer = kmer.prev_kmer(k_, seq_encoder_.encode(prev_char));
+    kmer.to_prev(k_, seq_encoder_.encode(prev_char));
     return get_index(kmer);
 }
 
@@ -126,25 +126,7 @@ DBGHashOrdered::sequence_to_kmers(const std::string &sequence) const {
     Vector<Kmer> kmers;
     kmers.reserve(sequence.size() - k_ + 1);
 
-    seq_encoder_.sequence_to_kmers(seq_encoder_.encode(sequence), k_, {}, &kmers);
-    if (!canonical_only_)
-        return kmers;
-
-    std::string rev_compl = sequence;
-    reverse_complement(rev_compl.begin(), rev_compl.end());
-
-    Vector<Kmer> rev_kmers;
-    kmers.reserve(sequence.size() - k_ + 1);
-
-    seq_encoder_.sequence_to_kmers(
-        seq_encoder_.encode(rev_compl), k_, {}, &rev_kmers
-    );
-
-    assert(kmers.size() == rev_kmers.size());
-
-    for (size_t i = 0; i < kmers.size(); ++i) {
-        kmers[i] = std::min(kmers[i], rev_kmers[rev_kmers.size() - 1 - i]);
-    }
+    seq_encoder_.sequence_to_kmers(sequence, k_, {}, &kmers, canonical_only_);
 
     return kmers;
 }

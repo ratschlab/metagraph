@@ -75,7 +75,7 @@ DBGSD::traverse_back(node_index node, char prev_char) const {
 DBGSD::node_index
 DBGSD::outgoing(node_index node, TAlphabet next_char) const {
     auto kmer = get_kmer(node);
-    kmer.next_kmer(k_, next_char);
+    kmer.to_next(k_, next_char);
     if (!canonical_mode_)
         return get_index(kmer);
 
@@ -101,7 +101,7 @@ DBGSD::outgoing(node_index node) const {
 DBGSD::node_index
 DBGSD::incoming(node_index node, TAlphabet prev_char) const {
     auto kmer = get_kmer(node);
-    kmer = kmer.prev_kmer(k_, prev_char);
+    kmer.to_prev(k_, prev_char);
     if (!canonical_mode_)
         return get_index(kmer);
 

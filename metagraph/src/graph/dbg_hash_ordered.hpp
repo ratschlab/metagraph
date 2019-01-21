@@ -10,7 +10,7 @@
 
 
 class DBGHashOrdered : public DeBruijnGraph {
-    using Kmer = KmerExtractor::Kmer64;
+    using Kmer = KmerExtractor2Bit::Kmer64;
     using KmerIndex = tsl::ordered_set<Kmer,
                                        utils::Hash<Kmer>,
                                        std::equal_to<Kmer>,
@@ -60,7 +60,7 @@ class DBGHashOrdered : public DeBruijnGraph {
     bool canonical_only_;
 
     KmerIndex kmers_;
-    KmerExtractor seq_encoder_;
+    KmerExtractor2Bit seq_encoder_;
 
     static constexpr auto kExtension = ".orhashdbg";
 };

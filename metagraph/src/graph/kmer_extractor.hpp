@@ -48,14 +48,6 @@ class KmerExtractor {
                                   Vector<KMER> *kmers,
                                   bool canonical_mode = false);
 
-    // extract k-mers from sequence
-    template <class KMER>
-    static void sequence_to_kmers(const std::vector<TAlphabet> &sequence,
-                                  size_t k,
-                                  const std::vector<TAlphabet> &suffix,
-                                  Vector<KMER> *kmers,
-                                  const std::vector<uint64_t> &canonical_map = {});
-
     template <class KMER>
     static std::string kmer_to_sequence(const KMER &kmer, size_t k);
 
@@ -71,6 +63,7 @@ class KmerExtractor {
   private:
     static const TAlphabet kCharToNucleotide[128];
 };
+
 
 class KmerExtractor2Bit {
   public:
@@ -91,14 +84,6 @@ class KmerExtractor2Bit {
                                   const std::vector<TAlphabet> &suffix,
                                   Vector<KMER> *kmers,
                                   bool canonical_mode = false);
-
-    // extract k-mers from sequence
-    template <class KMER>
-    static void sequence_to_kmers(const std::vector<TAlphabet> &sequence,
-                                  size_t k,
-                                  const std::vector<TAlphabet> &suffix,
-                                  Vector<KMER> *kmers,
-                                  const std::vector<uint64_t> &canonical_map = {});
 
     template <class KMER>
     static std::string kmer_to_sequence(const KMER &kmer, size_t k);

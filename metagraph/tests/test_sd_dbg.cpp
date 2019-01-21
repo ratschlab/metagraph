@@ -430,7 +430,7 @@ TEST(DBGSD, NonASCIIStrings) {
         "АСАСАСАСАСАСА"
     });
     DBGSD graph(&constructor_first);
-    ASSERT_EQ(0u, graph.num_nodes());
+    ASSERT_EQ(1u, graph.num_nodes());
 }
 
 TEST(DBGSD, AddSequence) {
