@@ -7,6 +7,14 @@
 #include <htslib/kseq.h>
 #include "gtest/gtest.h"
 
+// Disable death tests
+#ifndef _DEATH_TEST
+#ifdef ASSERT_DEATH
+#undef ASSERT_DEATH
+#define ASSERT_DEATH(a, b) (void)0
+#endif
+#endif
+
 #define protected public
 #define private public
 
@@ -23,6 +31,8 @@ const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
 typedef KMerPacked<uint64_t, KmerExtractor2Bit::kLogSigma> KMER;
 const int kMaxK = sizeof(KMER) * 8 / KmerExtractor2Bit::kLogSigma - 1;
 
+const KmerExtractor2Bit kmer_extractor;
+
 
 TEST(Construct_SD_64, ConstructionNEAppendingSimplePath) {
     for (size_t k = 2; k <= kMaxK; ++k) {
@@ -33,7 +43,7 @@ TEST(Construct_SD_64, ConstructionNEAppendingSimplePath) {
 
         DBGSD appended(k);
         ASSERT_EQ(appended.capacity(), appended.num_nodes()) << k;
-        appended.add_sequence(std::string(100, 'A'));
+        ASSERT_DEATH(appended.add_sequence(std::string(100, 'A')), "");
         ASSERT_EQ(appended.capacity(), appended.num_nodes()) << k;
 
         ASSERT_NE(constructed, appended);
@@ -49,9 +59,9 @@ TEST(Construct_SD_64, ConstructionNEAppendingTwoPaths) {
         EXPECT_EQ(2u, constructed.num_nodes());
 
         DBGSD appended(k);
-        appended.add_sequence(std::string(100, 'A'));
+        ASSERT_DEATH(appended.add_sequence(std::string(100, 'A')), "");
         ASSERT_EQ(appended.capacity(), appended.num_nodes()) << k;
-        appended.add_sequence(std::string(50, 'C'));
+        ASSERT_DEATH(appended.add_sequence(std::string(50, 'C')), "");
         ASSERT_EQ(appended.capacity(), appended.num_nodes()) << k;
 
         ASSERT_NE(constructed, appended);
@@ -95,7 +105,7 @@ TEST(Construct_SD_64, ConstructionEQAppending) {
 
         Vector<KmerExtractor2Bit::Kmer64> kmers;
         for (const auto &str : input_data) {
-            KmerExtractor2Bit::sequence_to_kmers<KmerExtractor2Bit::Kmer64>(
+            kmer_extractor.sequence_to_kmers(
                 str, k, {}, &kmers
             );
         }
@@ -104,10 +114,10 @@ TEST(Construct_SD_64, ConstructionEQAppending) {
         EXPECT_EQ(kmers.size(), constructed.num_nodes());
 
         DBGSD appended(k);
-        for (const auto &sequence : input_data) {
+        // for (const auto &sequence : input_data) {
             ASSERT_EQ(appended.capacity(), appended.num_nodes()) << k;
-            appended.add_sequence(sequence);
-        }
+            // ASSERT_DEATH(appended.add_sequence(sequence), "");
+        // }
 
         EXPECT_NE(constructed, appended);
     }
@@ -121,7 +131,7 @@ TEST(ExtractKmersPacked_64, ExtractKmersFromStringWithoutFiltering) {
 
         // NNN -> $NNN$
         for (size_t length = 0; length < k; ++length) {
-            KmerExtractor2Bit::sequence_to_kmers(
+            kmer_extractor.sequence_to_kmers(
                 std::string(length, 'T'), k, {}, &result
             );
             ASSERT_TRUE(result.empty()) << "k: " << k
@@ -130,7 +140,7 @@ TEST(ExtractKmersPacked_64, ExtractKmersFromStringWithoutFiltering) {
 
         for (size_t length = k; length < 500; ++length) {
             result.clear();
-            KmerExtractor2Bit::sequence_to_kmers(
+            kmer_extractor.sequence_to_kmers(
                 std::string(length, 'T'), k, {}, &result
             );
             ASSERT_EQ(length - k + 1, result.size()) << "k: " << k
@@ -146,7 +156,7 @@ TEST(ExtractKmersPacked_64, ExtractKmersFromStringWithFilteringOne) {
         Vector<KMER> result;
 
         for (size_t length = 0; length < k; ++length) {
-            KmerExtractor2Bit::sequence_to_kmers(
+            kmer_extractor.sequence_to_kmers(
                 std::string(length, 'T'), k, suffix, &result
             );
             ASSERT_TRUE(result.empty());
@@ -154,19 +164,19 @@ TEST(ExtractKmersPacked_64, ExtractKmersFromStringWithFilteringOne) {
 
         for (size_t length = k; length < 500; ++length) {
             result.clear();
-            KmerExtractor2Bit::sequence_to_kmers(
+            kmer_extractor.sequence_to_kmers(
                 std::string(length, 'T'), k, suffix, &result
             );
             ASSERT_TRUE(result.empty());
         }
     }
 
-    suffix.assign({ KmerExtractor2Bit::encode('T') });
+    suffix.assign({ kmer_extractor.encode('T') });
     for (size_t k = 2; k <= kMaxK; ++k) {
         Vector<KMER> result;
 
         for (size_t length = 0; length < k; ++length) {
-            KmerExtractor2Bit::sequence_to_kmers(
+            kmer_extractor.sequence_to_kmers(
                 std::string(length, 'T'), k, suffix, &result
             );
             ASSERT_TRUE(result.empty());
@@ -174,7 +184,7 @@ TEST(ExtractKmersPacked_64, ExtractKmersFromStringWithFilteringOne) {
 
         for (size_t length = k; length < 500; ++length) {
             result.clear();
-            KmerExtractor2Bit::sequence_to_kmers(
+            kmer_extractor.sequence_to_kmers(
                 std::string(length, 'T'), k, suffix, &result
             );
             ASSERT_EQ(length - k + 1, result.size()) << "k: " << k
@@ -189,8 +199,8 @@ TEST(ExtractKmersPacked_64, ExtractKmersFromStringWithFilteringTwo) {
         Vector<KMER> result;
 
         for (size_t length = 0; length < k; ++length) {
-            KmerExtractor2Bit::sequence_to_kmers(
-                std::string(length, 'T'), k, KmerExtractor2Bit::encode("TT"), &result
+            kmer_extractor.sequence_to_kmers(
+                std::string(length, 'T'), k, kmer_extractor.encode("TT"), &result
             );
             ASSERT_TRUE(result.empty()) << "k: " << k
                                         << ", length: " << length;
@@ -198,20 +208,20 @@ TEST(ExtractKmersPacked_64, ExtractKmersFromStringWithFilteringTwo) {
 
         for (size_t length = k; length < 200; ++length) {
             result.clear();
-            KmerExtractor2Bit::sequence_to_kmers(
+            kmer_extractor.sequence_to_kmers(
                 std::string(length, 'T'), k, { 0, 0 }, &result
             );
             ASSERT_EQ(0u, result.size()) << "k: " << k
                                          << ", length: " << length;
             result.clear();
-            KmerExtractor2Bit::sequence_to_kmers(
-                std::string(length, 'T'), k, { 0, KmerExtractor2Bit::encode('T') }, &result
+            kmer_extractor.sequence_to_kmers(
+                std::string(length, 'T'), k, { 0, kmer_extractor.encode('T') }, &result
             );
             ASSERT_EQ(0u, result.size()) << "k: " << k
                                          << ", length: " << length;
             result.clear();
-            KmerExtractor2Bit::sequence_to_kmers(
-                std::string(length, 'T'), k, KmerExtractor2Bit::encode("TT"), &result
+            kmer_extractor.sequence_to_kmers(
+                std::string(length, 'T'), k, kmer_extractor.encode("TT"), &result
             );
 
             ASSERT_EQ(length - k + 1, result.size()) << "k: " << k
@@ -221,8 +231,8 @@ TEST(ExtractKmersPacked_64, ExtractKmersFromStringWithFilteringTwo) {
         result.clear();
 
         for (size_t length = 0; length < k; ++length) {
-            KmerExtractor2Bit::sequence_to_kmers(
-                std::string(length, 'T'), k, KmerExtractor2Bit::encode("TA"), &result
+            kmer_extractor.sequence_to_kmers(
+                std::string(length, 'T'), k, kmer_extractor.encode("TA"), &result
             );
             ASSERT_TRUE(result.empty());
         }
@@ -233,8 +243,8 @@ TEST(ExtractKmersPacked_64, ExtractKmersFromStringWithFilteringTwo) {
             std::string sequence(length, 'T');
             sequence[k - 1] = 'A';
 
-            KmerExtractor2Bit::sequence_to_kmers(
-                sequence, k, KmerExtractor2Bit::encode("TA"), &result
+            kmer_extractor.sequence_to_kmers(
+                sequence, k, kmer_extractor.encode("TA"), &result
             );
             ASSERT_EQ(1u, result.size()) << "k: " << k
                                          << ", length: " << length;
@@ -245,12 +255,12 @@ TEST(ExtractKmersPacked_64, ExtractKmersFromStringWithFilteringTwo) {
 TEST(ExtractKmersPacked_64, ExtractKmersFromStringAppend) {
     Vector<KMER> result;
 
-    KmerExtractor2Bit::sequence_to_kmers(
+    kmer_extractor.sequence_to_kmers(
         std::string(500, 'A'), 2, {}, &result
     );
     ASSERT_EQ(499u, result.size());
 
-    KmerExtractor2Bit::sequence_to_kmers(
+    kmer_extractor.sequence_to_kmers(
         std::string(500, 'A'), 2, {}, &result
     );
     ASSERT_EQ(499u * 2, result.size());
@@ -357,18 +367,6 @@ TEST(ExtractKmersPacked_64, ExtractKmersAppendParallel) {
     ASSERT_EQ(1u, result.size());
 
     sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, {}, mu_resize, mu, false, 0
-    );
-    sequence_to_kmers_parallel_wrapper(
-        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, { 1, }, mu_resize, mu, false, 0
-    );
-    sort_and_remove_duplicates(&result, 1);
-    // B->A in 2Bit mode
-    ASSERT_EQ(1u, result.size());
-
-    sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'C')),
         2, &result, {}, mu_resize, mu, false, 0
     );
@@ -378,6 +376,22 @@ TEST(ExtractKmersPacked_64, ExtractKmersAppendParallel) {
     );
     sort_and_remove_duplicates(&result, 1);
     ASSERT_EQ(2u, result.size());
+
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
+        2, &result, {}, mu_resize, mu, false, 0
+    );
+    sequence_to_kmers_parallel_wrapper(
+        new std::vector<std::string>(5, std::string(sequence_size, 'B')),
+        2, &result, { 1, }, mu_resize, mu, false, 0
+    );
+    sort_and_remove_duplicates(&result, 1);
+    // #if _DNA4_GRAPH
+        // B->A in 2Bit mode
+        ASSERT_EQ(2u, result.size());
+    // #else
+    //     ASSERT_EQ(3u, result.size());
+    // #endif
 }
 
 TEST(ExtractKmersPacked_64, ExtractKmersParallelRemoveRedundantReserved) {

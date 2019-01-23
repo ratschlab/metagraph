@@ -749,11 +749,11 @@ int main(int argc, const char *argv[]) {
                     std::cout << "Start reading data and extracting k-mers" << std::endl;
                 }
                 //enumerate all suffices
-                assert(sd_graph->alph_size > 1);
+                assert(sd_graph->alphabet.size() > 1);
                 assert(config->nsplits > 0);
                 size_t suffix_len = std::min(
                     static_cast<size_t>(std::ceil(std::log2(config->nsplits)
-                                                    / std::log2(sd_graph->alph_size - 1))),
+                                                    / std::log2(sd_graph->alphabet.size() - 1))),
                     sd_graph->get_k() - 2
                 );
                 std::deque<std::string> suffices;

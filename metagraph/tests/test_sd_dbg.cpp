@@ -5,6 +5,14 @@
 #include <htslib/kseq.h>
 #include "gtest/gtest.h"
 
+// Disable death tests
+#ifndef _DEATH_TEST
+#ifdef ASSERT_DEATH
+#undef ASSERT_DEATH
+#define ASSERT_DEATH(a, b) (void)0
+#endif
+#endif
+
 KSEQ_INIT(gzFile, gzread);
 
 #define protected public
@@ -17,13 +25,25 @@ const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 
+const KmerExtractor2Bit kmer_extractor;
 
-TEST(DBGSDConstructedFull, InitializeEmpty) {
+
+TEST(DBGSDConstructedFull, InitializeComplete) {
     {
         DBGSD graph(20, false);
         EXPECT_EQ(std::string("AAAAAAAAAAAAAAAAAAAA"), graph.node_to_kmer(1));
         EXPECT_EQ(1u, graph.kmer_to_node("AAAAAAAAAAAAAAAAAAAA"));
+
+    // #if _DNA4_GRAPH
         EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("TTTTTTTTTTTTTTTTTTTT"));
+    // #elif _DNA_GRAPH
+    //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("NNNNNNNNNNNNNNNNNNNN"));
+    // #elif _DNA_CASE_SENSITIVE_GRAPH
+    //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("tttttttttttttttttttt"));
+    // #elif _PROTEIN_GRAPH
+    //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("XXXXXXXXXXXXXXXXXXXX"));
+    // #endif
+
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
         EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
         EXPECT_TRUE(graph.find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
@@ -34,7 +54,17 @@ TEST(DBGSDConstructedFull, InitializeEmpty) {
         DBGSD graph(20, true);
         EXPECT_EQ(std::string("AAAAAAAAAAAAAAAAAAAA"), graph.node_to_kmer(1));
         EXPECT_EQ(1u, graph.kmer_to_node("AAAAAAAAAAAAAAAAAAAA"));
+
+    // #if _DNA4_GRAPH
         EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("TTTTTTTTTTTTTTTTTTTT"));
+    // #elif _DNA_GRAPH
+    //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("NNNNNNNNNNNNNNNNNNNN"));
+    // #elif _DNA_CASE_SENSITIVE_GRAPH
+    //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("tttttttttttttttttttt"));
+    // #elif _PROTEIN_GRAPH
+    //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("XXXXXXXXXXXXXXXXXXXX"));
+    // #endif
+
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
         EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
         EXPECT_TRUE(graph.find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
@@ -42,7 +72,7 @@ TEST(DBGSDConstructedFull, InitializeEmpty) {
     }
 }
 
-TEST(DBGSDConstructedFull, SerializeEmpty) {
+TEST(DBGSDConstructedFull, SerializeComplete) {
     {
         DBGSD graph(20, false);
 
@@ -84,8 +114,8 @@ TEST(DBGSDConstructedFull, InsertSequence) {
     {
         DBGSD graph(20, false);
 
-        graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
-        graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC");
+        ASSERT_DEATH(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "");
+        ASSERT_DEATH(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), "");
 
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
         EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
@@ -98,8 +128,8 @@ TEST(DBGSDConstructedFull, InsertSequence) {
     {
         DBGSD graph(20, true);
 
-        graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
-        graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC");
+        ASSERT_DEATH(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "");
+        ASSERT_DEATH(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), "");
 
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
         EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
@@ -114,12 +144,12 @@ TEST(DBGSDConstructedFull, ReverseComplement) {
     {
         DBGSD graph(20, false);
 
-        graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+        ASSERT_DEATH(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "");
 
         //uint64_t num_nodes = graph.num_nodes();
-        graph.add_sequence("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT");
+        ASSERT_DEATH(graph.add_sequence("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"), "");
 
-        graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC");
+        ASSERT_DEATH(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), "");
 
 
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
@@ -133,12 +163,12 @@ TEST(DBGSDConstructedFull, ReverseComplement) {
     {
         DBGSD graph(20, true);
 
-        graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+        ASSERT_DEATH(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "");
 
         //uint64_t num_nodes = graph.num_nodes();
-        graph.add_sequence("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT");
+        ASSERT_DEATH(graph.add_sequence("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"), "");
 
-        graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC");
+        ASSERT_DEATH(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), "");
 
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
         EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
@@ -160,7 +190,7 @@ TEST(DBGSDConstructedFull, CheckGraph) {
             for (size_t j = 0; j < seq.size(); ++j) {
                 seq[j] = alphabet[(i * i + j + 17 * j * j) % 5];
             }
-            graph.add_sequence(seq);
+            ASSERT_DEATH(graph.add_sequence(seq), "");
         }
 
         for (uint64_t i = 1; i <= 1000; ++i) {
@@ -181,7 +211,7 @@ TEST(DBGSDConstructedFull, CheckGraph) {
             for (size_t j = 0; j < seq.size(); ++j) {
                 seq[j] = alphabet[(i * i + j + 17 * j * j) % 5];
             }
-            graph.add_sequence(seq);
+            ASSERT_DEATH(graph.add_sequence(seq), "");
         }
 
         for (uint64_t i = 1; i <= 1000; ++i) {
@@ -197,8 +227,8 @@ TEST(DBGSDConstructedFull, Serialize) {
     {
         DBGSD graph(20, false);
 
-        graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
-        graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC");
+        ASSERT_DEATH(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "");
+        ASSERT_DEATH(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), "");
 
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
         EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
@@ -228,8 +258,8 @@ TEST(DBGSDConstructedFull, Serialize) {
     {
         DBGSD graph(20, true);
 
-        graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
-        graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC");
+        ASSERT_DEATH(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "");
+        ASSERT_DEATH(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), "");
 
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
         EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
@@ -775,143 +805,6 @@ TEST(DBGSD, CallContigs) {
 
             ASSERT_EQ(graph, reconstructed);
         }
-    }
-}
-
-TEST(DBGSD, CallEdgesEmptyGraph) {
-    for (size_t k = 2; k <= 30; ++k) {
-        DBGSDConstructor constructor(k);
-        DBGSD empty(&constructor);
-
-        size_t num_nodes = 0;
-        empty.call_edges([&](auto, const auto &node) {
-            EXPECT_EQ(empty.get_k(), node.size());
-            num_nodes++;
-        });
-
-        EXPECT_EQ(empty.num_nodes(), num_nodes);
-    }
-}
-
-TEST(DBGSD, CallEdgesTwoLoops) {
-    for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
-        constructor.add_sequences({ std::string(100, 'A') });
-        DBGSD graph(&constructor);
-
-        ASSERT_EQ(1u, graph.num_nodes());
-
-        size_t num_nodes = 0;
-        graph.call_edges([&](auto, const auto &node) {
-            EXPECT_EQ(graph.get_k(), node.size());
-            num_nodes++;
-        });
-        EXPECT_EQ(graph.num_nodes(), num_nodes);
-    }
-}
-
-TEST(DBGSD, CallEdgesFourLoops) {
-    for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
-        constructor.add_sequences({ std::string(100, 'A'),
-                                    std::string(100, 'G'),
-                                    std::string(100, 'C') });
-        DBGSD graph(&constructor);
-
-        ASSERT_EQ(3u, graph.num_nodes());
-
-        size_t num_nodes = 0;
-        graph.call_edges([&](auto, const auto &node) {
-            EXPECT_EQ(graph.get_k(), node.size());
-            num_nodes++;
-        });
-        EXPECT_EQ(graph.num_nodes(), num_nodes);
-    }
-}
-
-TEST(DBGSD, CallEdgesFourLoopsDynamic) {
-    for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
-        constructor.add_sequence(std::string(100, 'A'));
-        constructor.add_sequence(std::string(100, 'G'));
-        constructor.add_sequence(std::string(100, 'C'));
-        DBGSD graph(&constructor);
-
-        ASSERT_EQ(3u, graph.num_nodes());
-
-        size_t num_nodes = 0;
-        graph.call_edges([&](auto, const auto &node) {
-            EXPECT_EQ(graph.get_k(), node.size());
-            num_nodes++;
-        });
-        EXPECT_EQ(graph.num_nodes(), num_nodes);
-    }
-}
-
-TEST(DBGSD, CallEdgesTestPath) {
-    for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
-        constructor.add_sequence(std::string(100, 'A') + std::string(k, 'C'));
-        DBGSD graph(&constructor);
-
-        size_t num_nodes = 0;
-        graph.call_edges([&](auto, const auto &node) {
-            EXPECT_EQ(graph.get_k(), node.size());
-            num_nodes++;
-        });
-        EXPECT_EQ(graph.num_nodes(), num_nodes);
-    }
-}
-
-TEST(DBGSD, CallEdgesTestPathACA) {
-    for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
-        constructor.add_sequence(std::string(100, 'A')
-                                  + std::string(k, 'C')
-                                  + std::string(100, 'A'));
-        DBGSD graph(&constructor);
-
-        size_t num_nodes = 0;
-        graph.call_edges([&](auto, const auto &node) {
-            EXPECT_EQ(graph.get_k(), node.size());
-            num_nodes++;
-        });
-        EXPECT_EQ(graph.num_nodes(), num_nodes);
-    }
-}
-
-TEST(DBGSD, CallEdgesTestPathDisconnected) {
-    for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
-        constructor.add_sequence(std::string(100, 'A'));
-        constructor.add_sequence(std::string(100, 'T'));
-        DBGSD graph(&constructor);
-
-        size_t num_nodes = 0;
-        graph.call_edges([&](auto, const auto &node) {
-            EXPECT_EQ(graph.get_k(), node.size());
-            num_nodes++;
-        });
-        ASSERT_EQ(graph.num_nodes(), num_nodes);
-    }
-}
-
-TEST(DBGSD, CallEdgesTestPathDisconnected2) {
-    for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
-        constructor.add_sequence(std::string(100, 'G'));
-        constructor.add_sequence(std::string(k - 1, 'A') + "T");
-        DBGSD graph(&constructor);
-
-        size_t num_nodes = 0;
-        graph.call_edges([&](auto node_idx, const auto &node) {
-            EXPECT_EQ(graph.get_k(), node.size());
-            EXPECT_EQ(KmerExtractor2Bit::encode(graph.node_to_kmer(node_idx)),
-                      node)
-                << node_idx << "\n";
-            num_nodes++;
-        });
-        EXPECT_EQ(graph.num_nodes(), num_nodes);
     }
 }
 

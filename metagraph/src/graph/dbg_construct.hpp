@@ -18,6 +18,7 @@ template <typename KMER, class KmerExtractor>
 class KmerCollector {
     using Extractor = KmerExtractor;
     using Sequence = std::vector<typename Extractor::TAlphabet>;
+    Extractor kmer_extractor_;
   public:
     explicit KmerCollector(size_t k,
                            bool canonical_mode = false,
@@ -61,7 +62,7 @@ class KmerCollector {
     inline bool verbose() const { return verbose_; }
     inline bool is_canonical_mode() const { return canonical_mode_; }
     inline size_t num_threads() const { return num_threads_; }
-    inline size_t alphabet_size() const { return Extractor::alphabet.size(); }
+    inline size_t alphabet_size() const { return kmer_extractor_.alphabet.size(); }
 
   private:
     void release_task_to_pool();

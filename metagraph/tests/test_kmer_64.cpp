@@ -151,10 +151,20 @@ TEST(KmerEncodeTest_64, InvertibleBothDol) {
 }
 
 TEST(KmerEncodeTest_64, InvalidChars) {
-#ifndef _PROTEIN_GRAPH
+#if _DNA_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
     test_kmer_codec_64("ATGH", "ATGN");
-#endif
     test_kmer_codec_64("ATGЯ", "ATGNN");
+#elif _PROTEIN_GRAPH
+    test_kmer_codec_64("ATGH", "ATGH");
+    test_kmer_codec_64("ATGЯ", "ATGXX");
+#elif _DNA4_GRAPH
+    test_kmer_codec_64("ATGH", "ATGA");
+    test_kmer_codec_64("ATGЯ", "ATGAA");
+#else
+    static_assert(false,
+        "Add a unit test for checking behavior with invalid characters"
+    );
+#endif
 }
 
 void test_kmer_less_64(const std::string &k1,
@@ -250,7 +260,6 @@ TEST(KmerEncodeTest_64, SizeOfClass) {
     EXPECT_EQ(kSizeOfKmer, sizeof(KMER));
 }
 
-#if _DNA_GRAPH
 TEST(KmerEncodeTest_64, TestPrint) {
     size_t size = sizeof(KMerBaseType) * 8 / kBitsPerChar;
     KMER kmer(std::vector<uint64_t>(size, 1), size);
@@ -258,6 +267,9 @@ TEST(KmerEncodeTest_64, TestPrint) {
     ss << kmer;
     std::string out;
     ss >> out;
+#if _DNA4_GRAPH
     EXPECT_EQ("0000000000000000000000000000000000000000000000001249249249249249", out);
-}
+#elif _DNA_GRAPH
+    EXPECT_EQ("0000000000000000000000000000000000000000000000001249249249249249", out);
 #endif
+}

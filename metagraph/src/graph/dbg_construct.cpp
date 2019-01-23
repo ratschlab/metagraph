@@ -116,8 +116,10 @@ void extract_kmers(std::function<void(CallbackString)> generate_reads,
     Vector<KMER> temp_storage;
     temp_storage.reserve(1.1 * kMaxKmersChunkSize);
 
+    KmerExtractor kmer_extractor;
+
     generate_reads([&](const std::string &read) {
-        KmerExtractor::sequence_to_kmers(read, k, suffix, &temp_storage, canonical_mode);
+        kmer_extractor.sequence_to_kmers(read, k, suffix, &temp_storage, canonical_mode);
 
         if (temp_storage.size() < kMaxKmersChunkSize)
             return;
@@ -340,13 +342,14 @@ template class KmerCollector<KmerExtractor2Bit::Kmer256, KmerExtractor2Bit>;
 template <class KmerExtractor>
 inline std::vector<typename KmerExtractor::TAlphabet>
 encode_filter_suffix(const std::string &filter_suffix) {
+    KmerExtractor kmer_extractor;
     std::vector<typename KmerExtractor::TAlphabet> filter_suffix_encoded;
     // TODO: cleanup
     std::transform(
         filter_suffix.begin(), filter_suffix.end(),
         std::back_inserter(filter_suffix_encoded),
-        [](char c) {
-            return KmerExtractor::encode(c);
+        [&kmer_extractor](char c) {
+            return kmer_extractor.encode(c);
         }
     );
     return filter_suffix_encoded;
@@ -355,14 +358,15 @@ encode_filter_suffix(const std::string &filter_suffix) {
 template <class KmerExtractor>
 inline std::vector<typename KmerExtractor::TAlphabet>
 encode_filter_suffix_boss(const std::string &filter_suffix) {
+    KmerExtractor kmer_extractor;
     std::vector<typename KmerExtractor::TAlphabet> filter_suffix_encoded;
     std::transform(
         filter_suffix.begin(), filter_suffix.end(),
         std::back_inserter(filter_suffix_encoded),
-        [](char c) {
+        [&kmer_extractor](char c) {
             return c == DBG_succ::kSentinel
                             ? DBG_succ::kSentinelCode
-                            : KmerExtractor::encode(c);
+                            : kmer_extractor.encode(c);
         }
     );
     return filter_suffix_encoded;
@@ -412,11 +416,11 @@ DBGSD::Chunk* SDChunkConstructor<KMER>
             [&](const auto &index_callback) {
                 kmer_collector_.call_kmers(
                     [&](const auto &kmer) {
-                        index_callback(DBGSD::kmer_to_index(kmer));
+                        index_callback(typename KMER::KMerWordType(1u) + kmer.data());
                     }
                 );
             },
-            DBGSD::capacity(get_k(), KMER::kBitsPerChar),
+            (1llu << (get_k() * KMER::kBitsPerChar)) + 1,
             kmer_collector_.size()
         )
     };
@@ -590,7 +594,9 @@ DBGSD* DBGSDConstructor
 
     graph->canonical_mode_ = canonical_mode;
 
-    graph->k_ = graph->infer_k(graph->kmers_.size(), DBGSD::KmerExtractor::kLogSigma);
+    assert(!(sdsl::bits::hi(graph->kmers_.size()) % KmerExtractor2Bit::kLogSigma));
+
+    graph->k_ = sdsl::bits::hi(graph->kmers_.size()) / KmerExtractor2Bit::kLogSigma;
 
     return graph.release();
 }

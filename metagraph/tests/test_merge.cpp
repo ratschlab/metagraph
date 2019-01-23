@@ -417,7 +417,7 @@ TEST(DBGSDMerge, DumpedChunked) {
         full_constructor.build_graph(&full);
         ASSERT_EQ(full_constructor.constructor_->get_k(), full.get_k());
 
-        ASSERT_TRUE(full.equals_internally(*chunked, true)) << k;
+        ASSERT_TRUE(full.equals(*chunked, true)) << k;
     }
 }
 
@@ -474,7 +474,7 @@ TEST(DBGSDMerge, DumpedChunkedCanonical) {
         full_constructor.build_graph(&full);
         ASSERT_EQ(full_constructor.constructor_->get_k(), full.get_k());
 
-        ASSERT_TRUE(full.equals_internally(*chunked, true)) << k;
+        ASSERT_TRUE(full.equals(*chunked, true)) << k;
     }
 }
 
@@ -536,7 +536,7 @@ TEST(DBGSDMerge, ParallelDumpedChunked) {
         ASSERT_EQ(full.num_nodes(), chunk_size);
         ASSERT_EQ(full_constructor.constructor_->get_k(), full.get_k());
 
-        ASSERT_TRUE(full.equals_internally(*chunked, true)) << k;
+        ASSERT_TRUE(full.equals(*chunked, true)) << k;
     }
 }
 
@@ -598,7 +598,7 @@ TEST(DBGSDMerge, ParallelDumpedChunkedCanonical) {
         ASSERT_EQ(full.num_nodes(), chunk_size);
         ASSERT_EQ(full_constructor.constructor_->get_k(), full.get_k());
 
-        ASSERT_TRUE(full.equals_internally(*chunked, true)) << k;
+        ASSERT_TRUE(full.equals(*chunked, true)) << k;
     }
 }
 

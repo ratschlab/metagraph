@@ -1,6 +1,7 @@
 #include "dbg_sd.hpp"
 
 #include <cassert>
+#include <cmath>
 
 #include "serialization.hpp"
 #include "utils.hpp"
@@ -8,38 +9,32 @@
 #include "dbg_construct.hpp"
 
 
-const std::string kAlphabet = "ACGT";
-
-size_t DBGSD::capacity(size_t k, size_t kLogSigma) {
-    assert(k > 1);
-    return (1llu << (k * kLogSigma)) + 1;
-}
-
-size_t DBGSD::infer_k(size_t kmer_index_size, size_t kLogSigma) {
-    assert(!(sdsl::bits::hi(kmer_index_size) % kLogSigma));
-    return sdsl::bits::hi(kmer_index_size) / kLogSigma;
-}
-
 // Assume all k-mers present
 DBGSD::DBGSD(size_t k, bool canonical_mode)
-      : alph_size(KmerExtractor::alphabet.size()),
-        alphabet(KmerExtractor::alphabet),
+      : alphabet(seq_encoder_.alphabet),
         k_(k),
         canonical_mode_(canonical_mode),
-        kmers_(capacity(k_, KmerExtractor::kLogSigma), true) {
+        kmers_(std::pow(static_cast<long double>(alphabet.size()), k_) + 1, true) {
     assert(k > 1);
     assert(kmers_.num_set_bits() == kmers_.size());
+    if (k * std::log2(alphabet.size()) >= 64) {
+        std::cerr << "ERROR: Too large k!"
+                  << " Maximum allowed k with this alphabet is "
+                  << static_cast<int>(64. / std::log2(alphabet.size())) - 1 << std::endl;
+        exit(1);
+    }
 }
 
-DBGSD::DBGSD(DBGSDConstructor *builder) : DBGSD::DBGSD(2) {
+DBGSD::DBGSD(DBGSDConstructor *builder) : DBGSD(2) {
     assert(builder);
 
     builder->build_graph(this);
     assert(kmers_[0]);
 }
 
-void DBGSD::add_sequence(const std::string &,
-                         bit_vector_dyn *) {}
+void DBGSD::add_sequence(const std::string &, bit_vector_dyn *) {
+    assert(false);
+}
 
 void DBGSD::map_to_nodes(const std::string &sequence,
                          const std::function<void(node_index)> &callback,
@@ -64,22 +59,29 @@ void DBGSD::map_to_nodes(const std::string &sequence,
 
 DBGSD::node_index
 DBGSD::traverse(node_index node, char next_char) const {
-    return outgoing(node, KmerExtractor::encode(next_char));
+    auto kmer = get_kmer(node);
+
+    kmer.to_next(k_, seq_encoder_.encode(next_char));
+    if (!canonical_mode_)
+        return get_index(kmer);
+
+    auto kmer_rev_string = seq_encoder_.kmer_to_sequence(kmer, k_);
+    reverse_complement(kmer_rev_string.begin(), kmer_rev_string.end());
+    auto rev_kmers = sequence_to_kmers(kmer_rev_string);
+    assert(rev_kmers.size() == 1);
+
+    return get_index(kmer, &rev_kmers[0]);
 }
 
 DBGSD::node_index
 DBGSD::traverse_back(node_index node, char prev_char) const {
-    return incoming(node, KmerExtractor::encode(prev_char));
-}
-
-DBGSD::node_index
-DBGSD::outgoing(node_index node, TAlphabet next_char) const {
     auto kmer = get_kmer(node);
-    kmer.to_next(k_, next_char);
+
+    kmer.to_prev(k_, seq_encoder_.encode(prev_char));
     if (!canonical_mode_)
         return get_index(kmer);
 
-    auto kmer_rev_string = KmerExtractor::kmer_to_sequence(kmer, k_);
+    auto kmer_rev_string = seq_encoder_.kmer_to_sequence(kmer, k_);
     reverse_complement(kmer_rev_string.begin(), kmer_rev_string.end());
     auto rev_kmers = sequence_to_kmers(kmer_rev_string);
     assert(rev_kmers.size() == 1);
@@ -90,27 +92,12 @@ DBGSD::outgoing(node_index node, TAlphabet next_char) const {
 std::vector<DBGSD::node_index>
 DBGSD::outgoing(node_index node) const {
     std::vector<node_index> indices;
-    for (size_t i = 0; i < kAlphabet.size(); ++i) {
-        auto next_index = outgoing(node, i);
+    for (char c : alphabet) {
+        auto next_index = traverse(node, c);
         if (next_index != npos)
             indices.emplace_back(std::move(next_index));
     }
     return indices;
-}
-
-DBGSD::node_index
-DBGSD::incoming(node_index node, TAlphabet prev_char) const {
-    auto kmer = get_kmer(node);
-    kmer.to_prev(k_, prev_char);
-    if (!canonical_mode_)
-        return get_index(kmer);
-
-    auto kmer_rev_string = KmerExtractor::kmer_to_sequence(kmer, k_);
-    reverse_complement(kmer_rev_string.begin(), kmer_rev_string.end());
-    auto rev_kmers = sequence_to_kmers(kmer_rev_string);
-    assert(rev_kmers.size() == 1);
-
-    return get_index(kmer, &rev_kmers[0]);
 }
 
 DBGSD::node_index
@@ -134,7 +121,7 @@ DBGSD::kmer_to_node(const std::string &kmer) const {
 
 std::string DBGSD::node_to_kmer(node_index i) const {
     assert(i != npos);
-    return KmerExtractor::kmer_to_sequence(get_kmer(i), k_);
+    return seq_encoder_.kmer_to_sequence(get_kmer(i), k_);
 }
 
 void DBGSD::serialize(std::ostream &out) const {
@@ -225,7 +212,7 @@ void DBGSD::call_paths(Call<const std::vector<node_index>,
         //TODO: traverse backwards
 
         discovered[j] = true;
-        nodes.push_back({ j, KmerExtractor::encode(node_to_kmer(i)) });
+        nodes.push_back({ j, seq_encoder_.encode(node_to_kmer(i)) });
         nodes.back().source_kmer.pop_back();
 
         // keep traversing until we have worked off all branches from the queue
@@ -240,11 +227,7 @@ void DBGSD::call_paths(Call<const std::vector<node_index>,
             while (!visited[node]) {
                 assert(node < nnodes);
                 assert(discovered[node]);
-                sequence.push_back(
-                    KmerExtractor::encode(
-                        node_to_kmer(index_to_node(node)).back()
-                    )
-                );
+                sequence.push_back(seq_encoder_.encode(node_to_kmer(index_to_node(node)).back()));
                 path.push_back(index_to_node(node));
                 visited[node] = true;
 
@@ -295,24 +278,11 @@ void DBGSD::call_sequences(Call<const std::string&> callback,
             std::transform(path.begin(), path.end(),
                            std::back_inserter(sequence),
                            [&](char c) {
-                               return KmerExtractor::decode(c);
+                               return seq_encoder_.decode(c);
                            });
             callback(sequence);
         }
     }, split_to_contigs);
-}
-
-void DBGSD::call_edges(Call<node_index,
-                            const std::vector<TAlphabet>&> callback) const {
-    call_paths([&](const auto &indices, const auto &path) {
-        assert(path.size() == indices.size() + k_ - 1);
-
-        for (size_t i = 0; i < indices.size(); ++i) {
-            callback(indices[i],
-                     std::vector<TAlphabet>(path.begin() + i,
-                                            path.begin() + i + k_));
-        }
-    });
 }
 
 /**
@@ -325,11 +295,9 @@ void DBGSD::call_kmers(Call<node_index, const std::string&> callback) const {
     }
 }
 
-
-Vector<DBGSD::Kmer>
-DBGSD::sequence_to_kmers(const std::string &sequence) const {
+Vector<DBGSD::Kmer> DBGSD::sequence_to_kmers(const std::string &sequence) const {
     Vector<Kmer> kmers;
-    KmerExtractor::sequence_to_kmers<Kmer>(sequence, k_, {}, &kmers);
+    seq_encoder_.sequence_to_kmers<uint64_t>(sequence, k_, {}, &kmers);
     return kmers;
 }
 
@@ -345,44 +313,13 @@ DBGSD::node_index DBGSD::get_index(const Kmer &kmer, const Kmer *kmer_rev) const
     return npos;
 }
 
-template <typename KMER>
-typename KMER::KMerWordType
-DBGSD::kmer_to_index(const KMER &kmer) {
-    return typename KMER::KMerWordType(1u) + kmer.data();
-}
-
-template
-typename ::KmerExtractor::Kmer64::KMerWordType
-DBGSD::kmer_to_index(const ::KmerExtractor::Kmer64&);
-
-template
-typename ::KmerExtractor2Bit::Kmer64::KMerWordType
-DBGSD::kmer_to_index(const ::KmerExtractor2Bit::Kmer64&);
-
-template
-typename ::KmerExtractor::Kmer128::KMerWordType
-DBGSD::kmer_to_index(const ::KmerExtractor::Kmer128&);
-
-template
-typename ::KmerExtractor2Bit::Kmer128::KMerWordType
-DBGSD::kmer_to_index(const ::KmerExtractor2Bit::Kmer128&);
-
-template
-typename ::KmerExtractor::Kmer256::KMerWordType
-DBGSD::kmer_to_index(const ::KmerExtractor::Kmer256&);
-
-template
-typename ::KmerExtractor2Bit::Kmer256::KMerWordType
-DBGSD::kmer_to_index(const ::KmerExtractor2Bit::Kmer256&);
-
-
 DBGSD::Kmer DBGSD::get_kmer(node_index node) const {
     assert(node != npos);
     assert(node < kmers_.size());
     return Kmer(node - static_cast<Kmer::KMerWordType>(1u));
 }
 
-bool DBGSD::equals_internally(const DBGSD &other, bool verbose) const {
+bool DBGSD::equals(const DBGSD &other, bool verbose) const {
     if (verbose) {
         if (k_ != other.k_) {
             std::cerr << "k: " << k_ << " != " << other.k_ << std::endl;
@@ -412,8 +349,8 @@ bool DBGSD::equals_internally(const DBGSD &other, bool verbose) const {
     }
 
     if (k_ == other.k_
-        && canonical_mode_ == other.canonical_mode_
-        && kmers_.num_set_bits() == other.kmers_.num_set_bits()) {
+            && canonical_mode_ == other.canonical_mode_
+            && kmers_.num_set_bits() == other.kmers_.num_set_bits()) {
         uint64_t cur_one = 1;
         uint64_t mismatch = 0;
         kmers_.call_ones(
