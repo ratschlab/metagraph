@@ -1,10 +1,9 @@
-#ifndef __DBG_SD_HPP__
-#define __DBG_SD_HPP__
+#ifndef __DBG_BITMAP_HPP__
+#define __DBG_BITMAP_HPP__
 
 #include <fstream>
 
 #include "sequence_graph.hpp"
-#include "utils.hpp"
 #include "kmer_extractor.hpp"
 #include "bit_vector.hpp"
 
@@ -97,4 +96,4 @@ class DBGSD : public DeBruijnGraph {
     static constexpr auto kExtension = ".sddbg";
 };
 
-#endif // __DBG_SD_HPP__
+#endif // __DBG_BITMAP_HPP__

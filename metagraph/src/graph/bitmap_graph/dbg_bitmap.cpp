@@ -1,4 +1,4 @@
-#include "dbg_sd.hpp"
+#include "dbg_bitmap.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -6,7 +6,7 @@
 #include "serialization.hpp"
 #include "utils.hpp"
 #include "helpers.hpp"
-#include "dbg_construct.hpp"
+#include "dbg_bitmap_construct.hpp"
 
 
 // Assume all k-mers present

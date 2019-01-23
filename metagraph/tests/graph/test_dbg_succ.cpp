@@ -11,7 +11,7 @@
 #define private public
 
 #include "dbg_succinct.hpp"
-#include "dbg_construct.hpp"
+#include "dbg_succinct_construct.hpp"
 #include "utils.hpp"
 
 KSEQ_INIT(gzFile, gzread);

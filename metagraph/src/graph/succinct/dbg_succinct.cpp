@@ -19,7 +19,7 @@
 
 #include <boost/multiprecision/integer.hpp>
 
-#include "dbg_construct.hpp"
+#include "dbg_succinct_construct.hpp"
 #include "serialization.hpp"
 #include "helpers.hpp"
 

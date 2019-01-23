@@ -168,12 +168,8 @@ endif()
 
 file(GLOB src_files
   "src/*.cpp"
-  "src/graph/*.cpp"
-  "src/annotation/*.cpp"
-  "src/annotation/*/*.cpp"
-  "src/common/*.cpp"
-  "src/common/bit_vectors/*.cpp"
-  "src/common/kmc_counter/*.cpp"
+  "src/*/*.cpp"
+  "src/*/*/*.cpp"
 )
 
 list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
@@ -254,7 +250,9 @@ add_custom_target(link_target ALL
 #-------------------
 # Experiments
 #-------------------
-file(GLOB experiment_files "experiments/*.cpp")
+file(GLOB experiment_files
+  "experiments/*.cpp"
+)
 list(FILTER experiment_files EXCLUDE REGEX ".*\\._.*")
 
 include_directories(
@@ -307,7 +305,11 @@ add_subdirectory(
 )
 endif()
 
-file(GLOB unit_tests_files "tests/*.cpp")
+file(GLOB unit_tests_files
+  "tests/*.cpp"
+  "tests/*/*.cpp"
+  "tests/*/*/*.cpp"
+)
 list(FILTER unit_tests_files EXCLUDE REGEX ".*\\._.*")
 
 if (CMAKE_VERSION VERSION_LESS 2.8.11)

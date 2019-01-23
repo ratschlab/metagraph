@@ -18,8 +18,8 @@
 #define protected public
 #define private public
 
-#include "dbg_sd.hpp"
-#include "dbg_construct.hpp"
+#include "dbg_bitmap.hpp"
+#include "dbg_bitmap_construct.hpp"
 #include "utils.hpp"
 
 KSEQ_INIT(gzFile, gzread);
@@ -303,11 +303,6 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
     delete reads;
 }
 
-template <class V>
-void sort_and_remove_duplicates(V *array,
-                                size_t num_threads = 1,
-                                size_t offset = 0);
-
 TEST(ExtractKmersPacked_64, ExtractKmersAppendParallelReserved) {
     Vector<KMER> result;
     std::mutex mu_resize;
@@ -488,4 +483,242 @@ TEST(ExtractKmersPacked_64, ExtractKmersParallelRemoveRedundant) {
         4, &result, { 1 }, mu_resize, mu, true, 0
     );
     ASSERT_EQ(1u, result.size());
+}
+
+TEST(DBGSDMergeChunks, DumpedChunked) {
+    for (size_t k = 2; k < 11; ++k) {
+        std::vector<std::unique_ptr<ISDChunkConstructor>> constructors;
+        constructors.emplace_back(ISDChunkConstructor::initialize(k, false, "A"));
+        constructors.emplace_back(ISDChunkConstructor::initialize(k, false, "C"));
+        constructors.emplace_back(ISDChunkConstructor::initialize(k, false, "G"));
+        constructors.emplace_back(ISDChunkConstructor::initialize(k, false, "T"));
+
+        for (auto &constructor : constructors) {
+            constructor->add_sequence("AAACT");
+            constructor->add_sequence("ACTATG");
+            constructor->add_sequence(std::string(50, 'C'));
+            constructor->add_sequence(std::string(60, 'G'));
+            constructor->add_sequence(std::string(60, 'A'));
+            constructor->add_sequence(std::string(60, 'T'));
+            constructor->add_sequence(std::string(60, 'G'));
+            constructor->add_sequence(std::string(60, 'C'));
+        }
+
+        std::vector<std::string> files;
+
+        for (size_t i = 0; i < constructors.size(); ++i) {
+            auto chunk = constructors[i]->build_chunk();
+            ASSERT_TRUE(chunk);
+            files.push_back(test_data_dir + "/chunks_to_merge"
+                              + "." + std::to_string(i)
+                              + "_" + std::to_string(4)
+                              + ".dbgsdchunk");
+            std::ofstream file(files.back(), std::ios::binary);
+            chunk->serialize(file);
+            delete chunk;
+        }
+
+        std::unique_ptr<DBGSD> chunked{
+            DBGSDConstructor::build_graph_from_chunks(files)
+        };
+
+        ASSERT_TRUE(chunked.get());
+
+        DBGSDConstructor full_constructor(k);
+        full_constructor.add_sequence("AAACT");
+        full_constructor.add_sequence("ACTATG");
+        full_constructor.add_sequence(std::string(50, 'C'));
+        full_constructor.add_sequence(std::string(60, 'G'));
+        full_constructor.add_sequence(std::string(60, 'A'));
+        full_constructor.add_sequence(std::string(60, 'T'));
+        full_constructor.add_sequence(std::string(60, 'G'));
+        full_constructor.add_sequence(std::string(60, 'C'));
+
+        DBGSD full(2);
+        full_constructor.build_graph(&full);
+        ASSERT_EQ(full_constructor.constructor_->get_k(), full.get_k());
+
+        ASSERT_TRUE(full.equals(*chunked, true)) << k;
+    }
+}
+
+TEST(DBGSDMergeChunks, DumpedChunkedCanonical) {
+    for (size_t k = 2; k < 11; ++k) {
+        std::vector<std::unique_ptr<ISDChunkConstructor>> constructors;
+        constructors.emplace_back(ISDChunkConstructor::initialize(k, true, "A"));
+        constructors.emplace_back(ISDChunkConstructor::initialize(k, true, "C"));
+        constructors.emplace_back(ISDChunkConstructor::initialize(k, true, "G"));
+        constructors.emplace_back(ISDChunkConstructor::initialize(k, true, "T"));
+
+        for (auto &constructor : constructors) {
+            constructor->add_sequence("AAACT");
+            constructor->add_sequence("ACTATG");
+            constructor->add_sequence(std::string(50, 'C'));
+            constructor->add_sequence(std::string(60, 'G'));
+            constructor->add_sequence(std::string(60, 'A'));
+            constructor->add_sequence(std::string(60, 'T'));
+            constructor->add_sequence(std::string(60, 'G'));
+            constructor->add_sequence(std::string(60, 'C'));
+        }
+
+        std::vector<std::string> files;
+
+        for (size_t i = 0; i < constructors.size(); ++i) {
+            auto chunk = constructors[i]->build_chunk();
+            ASSERT_TRUE(chunk);
+            files.push_back(test_data_dir + "/chunks_to_merge"
+                              + "." + std::to_string(i)
+                              + "_" + std::to_string(4)
+                              + ".dbgsdchunk");
+            std::ofstream file(files.back(), std::ios::binary);
+            chunk->serialize(file);
+            delete chunk;
+        }
+
+        std::unique_ptr<DBGSD> chunked{
+            DBGSDConstructor::build_graph_from_chunks(files, true)
+        };
+
+        ASSERT_TRUE(chunked.get());
+
+        DBGSDConstructor full_constructor(k, true);
+        full_constructor.add_sequence("AAACT");
+        full_constructor.add_sequence("ACTATG");
+        full_constructor.add_sequence(std::string(50, 'C'));
+        full_constructor.add_sequence(std::string(60, 'G'));
+        full_constructor.add_sequence(std::string(60, 'A'));
+        full_constructor.add_sequence(std::string(60, 'T'));
+        full_constructor.add_sequence(std::string(60, 'G'));
+        full_constructor.add_sequence(std::string(60, 'C'));
+
+        DBGSD full(2);
+        full_constructor.build_graph(&full);
+        ASSERT_EQ(full_constructor.constructor_->get_k(), full.get_k());
+
+        ASSERT_TRUE(full.equals(*chunked, true)) << k;
+    }
+}
+
+TEST(DBGSDMergeChunks, ParallelDumpedChunked) {
+    const size_t num_threads = 4;
+
+    for (size_t k = 2; k < 11; ++k) {
+        std::vector<std::unique_ptr<ISDChunkConstructor>> constructors;
+        constructors.emplace_back(ISDChunkConstructor::initialize(k, false, "A", num_threads));
+        constructors.emplace_back(ISDChunkConstructor::initialize(k, false, "C", num_threads));
+        constructors.emplace_back(ISDChunkConstructor::initialize(k, false, "G", num_threads));
+        constructors.emplace_back(ISDChunkConstructor::initialize(k, false, "T", num_threads));
+
+        for (auto &constructor : constructors) {
+            constructor->add_sequence("AAACT");
+            constructor->add_sequence("ACTATG");
+            constructor->add_sequence(std::string(50, 'C'));
+            constructor->add_sequence(std::string(60, 'G'));
+            constructor->add_sequence(std::string(60, 'A'));
+            constructor->add_sequence(std::string(60, 'T'));
+            constructor->add_sequence(std::string(60, 'G'));
+            constructor->add_sequence(std::string(60, 'C'));
+        }
+
+        std::vector<std::string> files;
+        uint64_t chunk_size = 0;
+
+        for (size_t i = 0; i < constructors.size(); ++i) {
+            auto chunk = constructors[i]->build_chunk();
+            ASSERT_TRUE(chunk);
+            chunk_size += chunk->num_set_bits();
+            files.push_back(test_data_dir + "/chunks_to_merge"
+                              + "." + std::to_string(i)
+                              + "_" + std::to_string(4)
+                              + ".dbgsdchunk");
+            std::ofstream file(files.back(), std::ios::binary);
+            chunk->serialize(file);
+            delete chunk;
+        }
+
+        std::unique_ptr<DBGSD> chunked{
+            DBGSDConstructor::build_graph_from_chunks(files)
+        };
+
+        ASSERT_TRUE(chunked.get());
+
+        DBGSDConstructor full_constructor(k);
+        full_constructor.add_sequence("AAACT");
+        full_constructor.add_sequence("ACTATG");
+        full_constructor.add_sequence(std::string(50, 'C'));
+        full_constructor.add_sequence(std::string(60, 'G'));
+        full_constructor.add_sequence(std::string(60, 'A'));
+        full_constructor.add_sequence(std::string(60, 'T'));
+        full_constructor.add_sequence(std::string(60, 'G'));
+        full_constructor.add_sequence(std::string(60, 'C'));
+
+        DBGSD full(2);
+        full_constructor.build_graph(&full);
+        ASSERT_EQ(full.num_nodes(), chunk_size);
+        ASSERT_EQ(full_constructor.constructor_->get_k(), full.get_k());
+
+        ASSERT_TRUE(full.equals(*chunked, true)) << k;
+    }
+}
+
+TEST(DBGSDMergeChunks, ParallelDumpedChunkedCanonical) {
+    const size_t num_threads = 4;
+
+    for (size_t k = 2; k < 11; ++k) {
+        std::vector<std::unique_ptr<ISDChunkConstructor>> constructors;
+        constructors.emplace_back(ISDChunkConstructor::initialize(k, true, "A", num_threads));
+        constructors.emplace_back(ISDChunkConstructor::initialize(k, true, "C", num_threads));
+        constructors.emplace_back(ISDChunkConstructor::initialize(k, true, "G", num_threads));
+        constructors.emplace_back(ISDChunkConstructor::initialize(k, true, "T", num_threads));
+
+        for (auto &constructor : constructors) {
+            constructor->add_sequence("AAACT");
+            constructor->add_sequence("ACTATG");
+            constructor->add_sequence(std::string(50, 'C'));
+            constructor->add_sequence(std::string(60, 'G'));
+            constructor->add_sequence(std::string(60, 'A'));
+            constructor->add_sequence(std::string(60, 'T'));
+            constructor->add_sequence(std::string(60, 'G'));
+            constructor->add_sequence(std::string(60, 'C'));
+        }
+
+        std::vector<std::string> files;
+        uint64_t chunk_size = 0;
+
+        for (size_t i = 0; i < constructors.size(); ++i) {
+            auto chunk = constructors[i]->build_chunk();
+            ASSERT_TRUE(chunk);
+            chunk_size += chunk->num_set_bits();
+            files.push_back(test_data_dir + "/chunks_to_merge"
+                              + "." + std::to_string(i)
+                              + "_" + std::to_string(4)
+                              + ".dbgsdchunk");
+            std::ofstream file(files.back(), std::ios::binary);
+            chunk->serialize(file);
+            delete chunk;
+        }
+
+        std::unique_ptr<DBGSD> chunked{
+            DBGSDConstructor::build_graph_from_chunks(files, true)
+        };
+
+        ASSERT_TRUE(chunked.get());
+
+        DBGSDConstructor full_constructor(k, true);
+        full_constructor.add_sequence("AAACT");
+        full_constructor.add_sequence("ACTATG");
+        full_constructor.add_sequence(std::string(50, 'C'));
+        full_constructor.add_sequence(std::string(60, 'G'));
+        full_constructor.add_sequence(std::string(60, 'A'));
+        full_constructor.add_sequence(std::string(60, 'T'));
+        full_constructor.add_sequence(std::string(60, 'G'));
+        full_constructor.add_sequence(std::string(60, 'C'));
+
+        DBGSD full(2);
+        full_constructor.build_graph(&full);
+        ASSERT_EQ(full.num_nodes(), chunk_size);
+        ASSERT_EQ(full_constructor.constructor_->get_k(), full.get_k());
+
+        ASSERT_TRUE(full.equals(*chunked, true)) << k;
+    }
 }

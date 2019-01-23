@@ -12,7 +12,7 @@
 
 #include "dbg_succinct.hpp"
 #include "dbg_succinct_merge.hpp"
-#include "dbg_construct.hpp"
+#include "dbg_succinct_construct.hpp"
 #include "utils.hpp"
 
 KSEQ_INIT(gzFile, gzread);
@@ -325,11 +325,6 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
     );
     delete reads;
 }
-
-template <class V>
-void sort_and_remove_duplicates(V *array,
-                                size_t num_threads = 1,
-                                size_t offset = 0);
 
 TEST(ExtractKmers_64, ExtractKmersAppendParallelReserved) {
     Vector<KMER> result;

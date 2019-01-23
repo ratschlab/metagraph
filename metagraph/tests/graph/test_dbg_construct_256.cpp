@@ -12,7 +12,7 @@
 
 #include "dbg_succinct.hpp"
 #include "dbg_succinct_merge.hpp"
-#include "dbg_construct.hpp"
+#include "dbg_succinct_construct.hpp"
 #include "utils.hpp"
 
 KSEQ_INIT(gzFile, gzread);
@@ -21,11 +21,11 @@ const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
 
-typedef KMer<sdsl::uint128_t, KmerExtractor::kLogSigma> KMER;
+typedef KMer<sdsl::uint256_t, KmerExtractor::kLogSigma> KMER;
 const int kMaxK = sizeof(KMER) * 8 / KmerExtractor::kLogSigma;
 
 
-TEST(Construct_128, ConstructionEQAppendingSimplePath) {
+TEST(Construct_256, ConstructionEQAppendingSimplePath) {
     for (size_t k = 1; k < kMaxK; ++k) {
         DBGSuccConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A') });
@@ -38,7 +38,7 @@ TEST(Construct_128, ConstructionEQAppendingSimplePath) {
     }
 }
 
-TEST(Construct_128, ConstructionEQAppendingTwoPaths) {
+TEST(Construct_256, ConstructionEQAppendingTwoPaths) {
     for (size_t k = 1; k < kMaxK; ++k) {
         DBGSuccConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A'),
@@ -53,7 +53,7 @@ TEST(Construct_128, ConstructionEQAppendingTwoPaths) {
     }
 }
 
-TEST(Construct_128, ConstructionLowerCase) {
+TEST(Construct_256, ConstructionLowerCase) {
     for (size_t k = 1; k < kMaxK; ++k) {
         DBGSuccConstructor constructor_first(k);
         constructor_first.add_sequences({ std::string(100, 'A'),
@@ -73,7 +73,7 @@ TEST(Construct_128, ConstructionLowerCase) {
     }
 }
 
-TEST(Construct_128, ConstructionDummySentinel) {
+TEST(Construct_256, ConstructionDummySentinel) {
     for (size_t k = 1; k < kMaxK; ++k) {
         DBGSuccConstructor constructor_first(k);
         constructor_first.add_sequences({ std::string(100, 'N'),
@@ -89,7 +89,7 @@ TEST(Construct_128, ConstructionDummySentinel) {
     }
 }
 
-TEST(Construct_128, ConstructionEQAppending) {
+TEST(Construct_256, ConstructionEQAppending) {
     for (size_t k = 1; k < kMaxK; ++k) {
         std::vector<std::string> input_data = {
             "ACAGCTAGCTAGCTAGCTAGCTG",
@@ -110,7 +110,7 @@ TEST(Construct_128, ConstructionEQAppending) {
     }
 }
 
-TEST(Construct_128, ConstructionLong) {
+TEST(Construct_256, ConstructionLong) {
     for (size_t k = 1; k < kMaxK; ++k) {
         DBGSuccConstructor constructor(k);
         constructor.add_sequences({ std::string(k + 1, 'A') });
@@ -124,7 +124,7 @@ TEST(Construct_128, ConstructionLong) {
     }
 }
 
-TEST(Construct_128, ConstructionShort) {
+TEST(Construct_256, ConstructionShort) {
     for (size_t k = 1; k < kMaxK; ++k) {
         DBGSuccConstructor constructor(k);
         constructor.add_sequences({ std::string(k, 'A') });
@@ -140,7 +140,7 @@ TEST(Construct_128, ConstructionShort) {
 
 using TAlphabet = KmerExtractor::TAlphabet;
 
-TEST(ExtractKmers_128, ExtractKmersFromStringWithoutFiltering) {
+TEST(ExtractKmers_256, ExtractKmersFromStringWithoutFiltering) {
     for (size_t k = 2; k <= kMaxK; ++k) {
         Vector<KMER> result;
 
@@ -164,7 +164,7 @@ TEST(ExtractKmers_128, ExtractKmersFromStringWithoutFiltering) {
     }
 }
 
-TEST(ExtractKmers_128, ExtractKmersFromStringWithFilteringOne) {
+TEST(ExtractKmers_256, ExtractKmersFromStringWithFilteringOne) {
     std::vector<TAlphabet> suffix = { 0 };
 
     for (size_t k = 2; k <= kMaxK; ++k) {
@@ -213,7 +213,7 @@ TEST(ExtractKmers_128, ExtractKmersFromStringWithFilteringOne) {
 }
 
 
-TEST(ExtractKmers_128, ExtractKmersFromStringWithFilteringTwo) {
+TEST(ExtractKmers_256, ExtractKmersFromStringWithFilteringTwo) {
     for (size_t k = 3; k <= kMaxK; ++k) {
         Vector<KMER> result;
 
@@ -274,7 +274,7 @@ TEST(ExtractKmers_128, ExtractKmersFromStringWithFilteringTwo) {
     }
 }
 
-TEST(ExtractKmers_128, ExtractKmersFromStringAppend) {
+TEST(ExtractKmers_256, ExtractKmersFromStringAppend) {
     Vector<KMER> result;
 
     // A...A -> $A...A$
@@ -326,12 +326,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
     delete reads;
 }
 
-template <class V>
-void sort_and_remove_duplicates(V *array,
-                                size_t num_threads = 1,
-                                size_t offset = 0);
-
-TEST(ExtractKmers_128, ExtractKmersAppendParallelReserved) {
+TEST(ExtractKmers_256, ExtractKmersAppendParallelReserved) {
     Vector<KMER> result;
     std::mutex mu_resize;
     std::shared_timed_mutex mu;
@@ -368,7 +363,7 @@ TEST(ExtractKmers_128, ExtractKmersAppendParallelReserved) {
     ASSERT_EQ((sequence_size + 1) * 20, result.size());
 }
 
-TEST(ExtractKmers_128, ExtractKmersAppendParallel) {
+TEST(ExtractKmers_256, ExtractKmersAppendParallel) {
     Vector<KMER> result;
     std::mutex mu_resize;
     std::shared_timed_mutex mu;
@@ -401,7 +396,7 @@ TEST(ExtractKmers_128, ExtractKmersAppendParallel) {
     ASSERT_EQ(6u, result.size());
 }
 
-TEST(ExtractKmers_128, ExtractKmersParallelRemoveRedundantReserved) {
+TEST(ExtractKmers_256, ExtractKmersParallelRemoveRedundantReserved) {
     Vector<KMER> result;
     std::mutex mu_resize;
     std::shared_timed_mutex mu;
@@ -454,7 +449,7 @@ TEST(ExtractKmers_128, ExtractKmersParallelRemoveRedundantReserved) {
     ASSERT_EQ(5u, result.size());
 }
 
-TEST(ExtractKmers_128, ExtractKmersParallelRemoveRedundant) {
+TEST(ExtractKmers_256, ExtractKmersParallelRemoveRedundant) {
     Vector<KMER> result;
     std::mutex mu_resize;
     std::shared_timed_mutex mu;

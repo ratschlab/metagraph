@@ -18,8 +18,8 @@ KSEQ_INIT(gzFile, gzread);
 #define protected public
 #define private public
 
-#include "dbg_sd.hpp"
-#include "dbg_construct.hpp"
+#include "dbg_bitmap.hpp"
+#include "dbg_bitmap_construct.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";

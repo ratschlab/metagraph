@@ -2,7 +2,7 @@
 #include "config.hpp"
 #include "sequence_io.hpp"
 #include "reads_filtering.hpp"
-#include "dbg_construct.hpp"
+#include "dbg_succinct_construct.hpp"
 #include "dbg_succinct_chunk.hpp"
 #include "dbg_succinct_merge.hpp"
 #include "annotated_dbg.hpp"
@@ -14,7 +14,8 @@
 #include "annotation_converters.hpp"
 #include "kmc_parser.hpp"
 #include "dbg_hash_ordered.hpp"
-#include "dbg_sd.hpp"
+#include "dbg_bitmap.hpp"
+#include "dbg_bitmap_construct.hpp"
 
 typedef annotate::MultiLabelAnnotation<uint64_t, std::string> Annotator;
 
