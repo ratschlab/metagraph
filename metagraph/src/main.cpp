@@ -31,8 +31,8 @@ Config::GraphType parse_graph_extension(const std::string &filename) {
     } else if (utils::ends_with(filename, ".orhashdbg")) {
         return Config::GraphType::HASH;
 
-    } else if (utils::ends_with(filename, ".sddbg")) {
-        return Config::GraphType::SD;
+    } else if (utils::ends_with(filename, ".bitmapdbg")) {
+        return Config::GraphType::BITMAP;
 
     } else {
         return Config::GraphType::INVALID;
@@ -40,7 +40,7 @@ Config::GraphType parse_graph_extension(const std::string &filename) {
 }
 
 std::string remove_graph_extension(const std::string &filename) {
-    return utils::remove_suffix(filename, ".dbg", ".orhashdbg");
+    return utils::remove_suffix(filename, ".dbg", ".orhashdbg", ".bitmapdbg");
 }
 
 template <class Graph = DBG_succ>
@@ -64,7 +64,7 @@ std::unique_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
         case Config::GraphType::HASH:
             return load_critical_graph_from_file<DBGHashOrdered>(filename);
 
-        case Config::GraphType::SD:
+        case Config::GraphType::BITMAP:
             return load_critical_graph_from_file<DBGSD>(filename);
 
         case Config::GraphType::INVALID:
@@ -743,7 +743,7 @@ int main(int argc, const char *argv[]) {
                 graph_data.initialize_graph(boss_graph.get());
                 graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
 
-            } else if (config->graph_type == Config::GraphType::SD && !config->dynamic) {
+            } else if (config->graph_type == Config::GraphType::BITMAP && !config->dynamic) {
                 std::unique_ptr<DBGSD> sd_graph { new DBGSD(config->k) };
 
                 if (config->verbose) {
@@ -834,7 +834,7 @@ int main(int argc, const char *argv[]) {
                     case Config::GraphType::HASH:
                         graph.reset(new DBGHashOrdered(config->k, config->canonical));
                         break;
-                    case Config::GraphType::SD:
+                    case Config::GraphType::BITMAP:
                         assert(false);
                     case Config::GraphType::INVALID:
                         assert(false);
@@ -1422,7 +1422,7 @@ int main(int argc, const char *argv[]) {
                         chunk_files, config->verbose
                     ), config->canonical)
                 );
-            } else if (config->graph_type == Config::GraphType::SD) {
+            } else if (config->graph_type == Config::GraphType::BITMAP) {
                 graph.reset(
                     DBGSDConstructor::build_graph_from_chunks(
                         chunk_files, config->canonical, config->verbose

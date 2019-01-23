@@ -258,7 +258,7 @@ Config::Config(int argc, const char *argv[]) {
 
     if ((identity == ANNOTATE || identity == ANNOTATE_COORDINATES)
             && outfbase.empty())
-        outfbase = utils::remove_suffix(infbase, ".orhashdbg", ".sddbg", ".dbg");
+        outfbase = utils::remove_suffix(infbase, ".orhashdbg", ".bitmapdbg", ".dbg");
 
     if (identity == EXTEND && (outfbase.empty() || infbase.empty()))
         print_usage_and_exit = true;
@@ -377,8 +377,8 @@ Config::GraphType Config::string_to_graphtype(const std::string &string) {
         return GraphType::SUCCINCT;
     } else if (string == "hash") {
         return GraphType::HASH;
-    } else if (string == "sd") {
-        return GraphType::SD;
+    } else if (string == "bitmap") {
+        return GraphType::BITMAP;
     } else {
         std::cerr << "Error: unknown graph representation" << std::endl;
         exit(1);
@@ -389,7 +389,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     fprintf(stderr, "Metagraph: comprehensive metagenome graph representation -- Version 0.1\n\n");
 
     const char annotation_list[] = "('column', 'row', 'bin_rel_wt_sdsl', 'bin_rel_wt', 'flat', 'rbfish', 'brwt')";
-    const char graph_list[] = "('succinct', 'hash', 'sd')";
+    const char graph_list[] = "('succinct', 'hash', 'bitmap')";
 
     switch (identity) {
         case NO_IDENTITY: {

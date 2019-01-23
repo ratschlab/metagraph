@@ -93,7 +93,7 @@ class DBGSD : public DeBruijnGraph {
 
     bit_vector_sd kmers_;
 
-    static constexpr auto kExtension = ".sddbg";
+    static constexpr auto kExtension = ".bitmapdbg";
 };
 
 #endif // __DBG_BITMAP_HPP__
