@@ -35,6 +35,25 @@ TEST(ColumnCompressed, add_label) {
     EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(4)));
 }
 
+TEST(ColumnCompressed, add_label_long_sparse) {
+    annotate::ColumnCompressed<> annotation(200'000'000);
+    std::vector<uint64_t> indices(5'000);
+    std::iota(indices.begin(), indices.end(), 0);
+    annotation.add_labels(indices, { "0" });
+
+    std::iota(indices.begin(), indices.end(), 4'999);
+    annotation.add_labels(indices, { "1" });
+
+    std::iota(indices.begin(), indices.end(), 1'000'000);
+    annotation.add_labels(indices, { "2" });
+
+    EXPECT_EQ(convert_to_set({"0"}), convert_to_set(annotation.get(0)));
+    EXPECT_EQ(convert_to_set({"0", "1"}), convert_to_set(annotation.get(4'999)));
+    EXPECT_EQ(convert_to_set({"2"}), convert_to_set(annotation.get(1'000'001)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(1'500'000)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(1'900'000)));
+}
+
 TEST(ColumnCompressed, set_labels) {
     std::unique_ptr<annotate::MultiLabelAnnotation<uint64_t, std::string>> annotation(
         new annotate::ColumnCompressed<>(5)
@@ -188,6 +207,42 @@ TEST(ColumnCompressed, insert_empty_rows) {
     EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(annotation->get_labels(6)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get(7)));
     EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation->get_labels(8)));
+}
+
+TEST(ColumnCompressed, insert_empty_rows_many) {
+    std::unique_ptr<annotate::MultiLabelAnnotation<uint64_t, std::string>> annotation(
+        new annotate::ColumnCompressed<>(2'000'000)
+    );
+    EXPECT_EQ(2'000'000u, annotation->num_objects());
+    annotation->set_labels(0, { "Label0", "Label2", "Label8" });
+    annotation->set_labels(2, { "Label1", "Label2" });
+    annotation->set_labels(4, { "Label8" });
+    std::vector<uint64_t> indices(1'000'000);
+    std::iota(indices.begin(), indices.end(), 5);
+    annotation->add_labels(indices, { "Label9" });
+
+    ASSERT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation->get_labels(0)));
+    ASSERT_EQ(convert_to_set({}), convert_to_set(annotation->get_labels(1)));
+    ASSERT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(annotation->get_labels(2)));
+    ASSERT_EQ(convert_to_set({}), convert_to_set(annotation->get(3)));
+    ASSERT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation->get_labels(4)));
+
+    annotation->insert_rows({ 1, 2, 4, 5 });
+    EXPECT_EQ(2'000'004u, annotation->num_objects());
+
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation->get_labels(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get_labels(1)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get_labels(2)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get_labels(3)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get(4)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get(5)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(annotation->get_labels(6)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation->get(7)));
+    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation->get_labels(8)));
+
+
+    EXPECT_EQ(convert_to_set({ "Label9" }), convert_to_set(annotation->get_labels(9)));
+    EXPECT_EQ(convert_to_set({ "Label9" }), convert_to_set(annotation->get_labels(1'000'000)));
 }
 
 TEST(ColumnCompressed, Serialization) {

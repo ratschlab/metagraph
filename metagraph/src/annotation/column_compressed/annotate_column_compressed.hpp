@@ -1,6 +1,7 @@
 #ifndef __ANNOTATE_COLUMN_COMPRESSED_HPP__
 #define __ANNOTATE_COLUMN_COMPRESSED_HPP__
 
+
 #include <cache.hpp>
 #include <lru_cache_policy.hpp>
 
@@ -75,7 +76,7 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     void dump_columns(const std::string &prefix) const;
 
-    const std::vector<std::unique_ptr<bit_vector>>& data() const;
+    const auto& data() const { return bitmatrix_; };
 
   private:
     void set(Index i, size_t j, bool value);
@@ -87,15 +88,15 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
                     RowCompressed<Label> *annotator) const;
     void release();
     void flush() const;
-    void flush(size_t j, const std::vector<bool> &annotation_curr);
-    std::vector<bool>& decompress(size_t j);
+    void flush(size_t j, const bitmap_adaptive &annotation_curr);
+    bitmap_adaptive& decompress(size_t j);
 
     uint64_t num_rows_;
 
     std::vector<std::unique_ptr<bit_vector>> bitmatrix_;
 
     caches::fixed_sized_cache<size_t,
-                              std::vector<bool>*,
+                              bitmap_adaptive*,
                               caches::LRUCachePolicy<size_t>> cached_columns_;
 
     LabelEncoder<Label> &label_encoder_ {

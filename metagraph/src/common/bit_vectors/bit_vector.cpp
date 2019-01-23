@@ -20,11 +20,23 @@ std::vector<bool> bit_vector::to_vector() const {
     return result;
 }
 
-void bit_vector::add_to(std::vector<bool> *other) const {
+template <class Vector>
+void bit_vector::add_to(Vector *other) const {
     assert(other);
     assert(other->size() == size());
     call_ones([other](auto i) { (*other)[i] = true; });
 }
+
+template void bit_vector::add_to(sdsl::bit_vector*) const;
+template void bit_vector::add_to(std::vector<bool>*) const;
+
+template <>
+void bit_vector::add_to(bitmap *other) const {
+    assert(other);
+    assert(other->size() == size());
+    call_ones([other](auto i) { other->set(i, true); });
+}
+
 
 std::ostream& operator<<(std::ostream &os, const bit_vector &bv) {
     for (bool a : bv.to_vector()) {
@@ -118,6 +130,7 @@ template bit_vector_rrr<255> bit_vector::copy_to<bit_vector_rrr<255>>() const;
 template bit_vector_small bit_vector::copy_to<bit_vector_small>() const;
 template bit_vector_smart bit_vector::copy_to<bit_vector_smart>() const;
 template sdsl::bit_vector bit_vector::copy_to<sdsl::bit_vector>() const;
+
 
 /////////////////////////////
 // bit_vector_dyn, libmaus //
@@ -222,6 +235,7 @@ void bit_vector_dyn::call_ones(const std::function<void(uint64_t)> &callback) co
     }
 }
 
+
 ///////////////////////////////////////////////
 // bit_vector_stat, sdsl rank-select support //
 ///////////////////////////////////////////////
@@ -244,19 +258,6 @@ bit_vector_stat::bit_vector_stat(const std::vector<bool> &v)
 
 bit_vector_stat::bit_vector_stat(const bit_vector_stat &other) {
     *this = other;
-}
-
-uint64_t count_num_set_bits(const sdsl::bit_vector &vector) {
-    uint64_t count = 0;
-    uint64_t i = 0;
-    for (; i + 64 <= vector.size(); i += 64) {
-        count += sdsl::bits::cnt(vector.get_int(i));
-    }
-    for (; i < vector.size(); ++i) {
-        if (vector[i])
-            count++;
-    }
-    return count;
 }
 
 bit_vector_stat
@@ -413,58 +414,6 @@ bool bit_vector_stat::load(std::istream &in) {
         return false;
     } catch (...) {
         return false;
-    }
-}
-
-void call_ones(const sdsl::bit_vector &vector,
-               const std::function<void(uint64_t)> &callback) {
-    uint64_t j = 64;
-    uint64_t i = 0;
-    uint64_t word;
-    for (; j <= vector.size(); j += 64) {
-        word = vector.get_int(i);
-        if (!word) {
-            i += 64;
-            continue;
-        }
-
-        i += sdsl::bits::lo(word);
-        callback(i++);
-
-        for (; i < j; ++i) {
-            if (vector[i])
-                callback(i);
-        }
-    }
-    for (; i < vector.size(); ++i) {
-        if (vector[i])
-            callback(i);
-    }
-}
-
-void call_zeros(const sdsl::bit_vector &vector,
-                const std::function<void(uint64_t)> &callback) {
-    uint64_t j = 64;
-    uint64_t i = 0;
-    uint64_t word;
-    for (; j <= vector.size(); j += 64) {
-        word = ~vector.get_int(i);
-        if (!word) {
-            i += 64;
-            continue;
-        }
-
-        i += sdsl::bits::lo(word);
-        callback(i++);
-
-        for (; i < j; ++i) {
-            if (!vector[i])
-                callback(i);
-        }
-    }
-    for (; i < vector.size(); ++i) {
-        if (!vector[i])
-            callback(i);
     }
 }
 
