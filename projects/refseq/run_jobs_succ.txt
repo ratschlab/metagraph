@@ -1,0 +1,49 @@
+for i in {15,17}; do   x="refseq_subsets/subset_$i";   bsub -J build_29_$i        -oo ${x}.k29.log -W 20:00 -n 20 -R "rusage[mem=70000] span[hosts=1]"        "for line in \$(cat $x); do echo /cluster/home/mikhaika/metagenome/data/refseq_k29/\${line}; done | gtime -v ~/projects/projects2014-metagenome/metagraph/build/metagengraph build -v --mem-cap-gb 1200 --kmc -k 29 -p 40 -o ~/big_graph/refseq/refseq_kmc_k29/subset_${i} 2>&1 | tee ~/big_graph/refseq/refseq_kmc_k29/subset_${i}.log"; done
+
+
+bsub -J contigs_k29[1-2789]%100     -o /dev/null -W 20:00 -n 12 -R "rusage[mem=10000] span[hosts=1]"        "x=\"\$(sed -n \${LSB_JOBINDEX}p refseq.txt | xargs -n 1 basename)\"; ../../metagraph/scripts/kmc_to_contigs.sh ~/metagenome/data/refseq_k29/\$x.kmc_suf 29"
+
+
+for i in {20..21}; do   x="refseq_subsets/subset_$i";   bsub -J build_29_$i        -oo ${x}.k29.log -W 20:00 -n 20 -R "rusage[mem=35500] span[hosts=1]"        "for line in \$(cat $x); do echo ~/metagenome/data/refseq_k29/\${line}.contigs.fasta.gz; done | gtime -v ../../metagraph/build/metagengraph build -v --mem-cap-gb 600 -k 29 -p 40 -o ~/big_graph/refseq/refseq_kmc_k29/subset_${i} 2>&1 | tee ~/big_graph/refseq/refseq_kmc_k29/subset_${i}.log"; done
+
+for i in {22..24}; do   x="refseq_subsets/subset_$i";   bsub -J build_29_$i        -oo ${x}.k29.log -W 20:00 -n 20 -R "rusage[mem=45000] span[hosts=1]"        "for line in \$(cat $x); do echo ~/metagenome/data/refseq_k29/\${line}.contigs.fasta.gz; done | gtime -v ../../metagraph/build/metagengraph build -v --mem-cap-gb 850 -k 29 -p 40 -o ~/big_graph/refseq/refseq_kmc_k29/subset_${i} 2>&1 | tee ~/big_graph/refseq/refseq_kmc_k29/subset_${i}.log"; done
+
+for i in {25..28}; do   x="refseq_subsets/subset_$i";   bsub -J build_29_$i        -oo ${x}.k29.log -W 20:00 -n 20 -R "rusage[mem=67500] span[hosts=1]"        "for line in \$(cat $x); do echo ~/metagenome/data/refseq_k29/\${line}.contigs.fasta.gz; done | gtime -v ../../metagraph/build/metagengraph build -v --mem-cap-gb 1300 -k 29 -p 40 -o ~/big_graph/refseq/refseq_kmc_k29/subset_${i} 2>&1 | tee ~/big_graph/refseq/refseq_kmc_k29/subset_${i}.log"; done
+
+for i in {29..55}; do   x="refseq_subsets/subset_$i";   bsub -J build_29_$i        -oo ${x}.k29.log -W 20:00 -n 60 -R "rusage[mem=45000] span[hosts=1]"        "for line in \$(cat $x); do echo ~/metagenome/data/refseq_k29/\${line}.contigs.fasta.gz; done | gtime -v ../../metagraph/build/metagengraph build -v --mem-cap-gb 2500 -k 29 -p 120 -o ~/big_graph/refseq/refseq_kmc_k29/subset_${i} 2>&1 | tee ~/big_graph/refseq/refseq_kmc_k29/subset_${i}.log"; done
+
+for i in {56..90}; do   x="refseq_subsets/subset_$i";   bsub -J build_29_$i        -oo ${x}.k29.log -W 20:00 -n 18 -R "rusage[mem=19500] span[hosts=1]"        "for line in \$(cat $x); do echo ~/metagenome/data/refseq_k29/\${line}.contigs.fasta.gz; done | gtime -v ../../metagraph/build/metagengraph build -v --mem-cap-gb 300 -k 29 -p 36 -s 40 -o ~/big_graph/refseq/refseq_kmc_k29/subset_${i} 2>&1 | tee ~/big_graph/refseq/refseq_kmc_k29/subset_${i}.log"; done
+
+
+
+
+for i in {1..30}; do   x="refseq_subsets/subset_$i";   bsub -J build_17_$i        -oo ${x}.k17.log -W 20:00 -n 10 -R "rusage[mem=20000] span[hosts=1]"        "for line in \$(cat $x); do echo /cluster/home/mikhaika/metagenome/data/refseq_k17/\${line}; done | gtime -v ~/projects/projects2014-metagenome/metagraph/build/metagengraph build -v --kmc -k 17 -p 20 -o ~/big_graph/refseq/refseq_kmc_k17/subset_${i} 2>&1 | tee ~/big_graph/refseq/refseq_kmc_k17/subset_${i}.log"; done
+
+
+bsub -J contigs_k17[1-2789]%100     -o /dev/null -W 20:00 -n 12 -R "rusage[mem=10000] span[hosts=1]"        "x=\"\$(sed -n \${LSB_JOBINDEX}p refseq.txt | xargs -n 1 basename)\"; ../../metagraph/scripts/kmc_to_contigs.sh ~/metagenome/data/refseq_k17/\$x.kmc_suf 17"
+
+
+for i in {31..90}; do   x="refseq_subsets/subset_$i";   bsub -J build_17_$i        -oo ${x}.k17.log -W 20:00 -n 20 -R "rusage[mem=35500] span[hosts=1]"        "for line in \$(cat $x); do echo ~/metagenome/data/refseq_k17/\${line}.contigs.fasta.gz; done | gtime -v ../../metagraph/build/metagengraph build -v --mem-cap-gb 600 -k 17 -p 40 -o ~/big_graph/refseq/refseq_kmc_k17/subset_${i} 2>&1 | tee ~/big_graph/refseq/refseq_kmc_k17/subset_${i}.log"; done
+
+
+
+
+bsub -J contigs_k35[1-2789]%100     -oo kmc_to_contigs_35.lsf -W 20:00 -n 12 -R "rusage[mem=12000] span[hosts=1]"        "x=\"\$(sed -n \${LSB_JOBINDEX}p refseq.txt | xargs -n 1 basename)\"; ../../metagraph/scripts/kmc_to_contigs.sh ~/metagenome/data/refseq_k35/\$x.kmc_suf 35"
+
+for i in {1..25}; do   x="refseq_subsets/subset_$i";   bsub -J build_35_$i        -oo ${x}.k35.log -W 20:00 -n 18 -R "rusage[mem=19500] span[hosts=1]"        "for line in \$(cat $x); do echo ~/metagenome/data/refseq_k35/\${line}.contigs.fasta.gz; done | gtime -v ../../metagraph/build/metagengraph build -v --mem-cap-gb 300 -k 35 -p 36 -s 4 -o ~/big_graph/refseq/refseq_kmc_k35/subset_${i} 2>&1 | tee ~/big_graph/refseq/refseq_kmc_k35/subset_${i}.log"; done
+
+for i in {26..45}; do   x="refseq_subsets/subset_$i";   bsub -J build_35_$i        -oo ${x}.k35.log -W 20:00 -n 18 -R "rusage[mem=19500] span[hosts=1]"        "for line in \$(cat $x); do echo ~/metagenome/data/refseq_k35/\${line}.contigs.fasta.gz; done | gtime -v ../../metagraph/build/metagengraph build -v --mem-cap-gb 300 -k 35 -p 36 -s 8 -o ~/big_graph/refseq/refseq_kmc_k35/subset_${i} 2>&1 | tee ~/big_graph/refseq/refseq_kmc_k35/subset_${i}.log"; done
+
+for i in {46..90}; do   x="refseq_subsets/subset_$i";   bsub -J build_35_$i        -oo ${x}.k35.log -W 20:00 -n 18 -R "rusage[mem=19500] span[hosts=1]"        "for line in \$(cat $x); do echo ~/metagenome/data/refseq_k35/\${line}.contigs.fasta.gz; done | gtime -v ../../metagraph/build/metagengraph build -v --mem-cap-gb 300 -k 35 -p 36 -s 40 -o ~/big_graph/refseq/refseq_kmc_k35/subset_${i} 2>&1 | tee ~/big_graph/refseq/refseq_kmc_k35/subset_${i}.log"; done
+
+
+bsub -J contigs_k71[1-2789]%100     -oo kmc_to_contigs_71.lsf -W 20:00 -n 18 -R "rusage[mem=15000] span[hosts=1]"        "x=\"\$(sed -n \${LSB_JOBINDEX}p refseq.txt | xargs -n 1 basename)\"; ../../metagraph/scripts/kmc_to_contigs.sh ~/metagenome/data/refseq_k71/\$x.kmc_suf 71"
+
+bsub -J contigs_k71[600-2789]%100     -oo kmc_to_contigs_71.lsf -W 20:00 -n 3 -R "rusage[mem=50000] span[hosts=1]"        "x=\"\$(sed -n \${LSB_JOBINDEX}p refseq.txt | xargs -n 1 basename)\"; ../../metagraph/scripts/kmc_to_contigs.sh ~/metagenome/data/refseq_k71/\$x.kmc_suf 71"
+
+for i in {1..20}; do   x="refseq_subsets/subset_$i";   bsub -J build_71_$i        -oo ${x}.k71.log -W 20:00 -n 18 -R "rusage[mem=19500] span[hosts=1]"        "for line in \$(cat $x); do echo ~/metagenome/data/refseq_k71/\${line}.contigs.fasta.gz; done | gtime -v ../../metagraph/build/metagengraph build -v --mem-cap-gb 300 -k 71 -p 36 -s 4 -o ~/big_graph/refseq/refseq_kmc_k71/subset_${i} 2>&1 | tee ~/big_graph/refseq/refseq_kmc_k71/subset_${i}.log"; done
+
+for i in {21..30}; do   x="refseq_subsets/subset_$i";   bsub -J build_71_$i        -oo ${x}.k71.log -W 20:00 -n 18 -R "rusage[mem=19500] span[hosts=1]"        "for line in \$(cat $x); do echo ~/metagenome/data/refseq_k71/\${line}.contigs.fasta.gz; done | gtime -v ../../metagraph/build/metagengraph build -v --mem-cap-gb 300 -k 71 -p 36 -s 8 -o ~/big_graph/refseq/refseq_kmc_k71/subset_${i} 2>&1 | tee ~/big_graph/refseq/refseq_kmc_k71/subset_${i}.log"; done
+
+for i in {31..50}; do   x="refseq_subsets/subset_$i";   bsub -J build_71_$i        -oo ${x}.k71.log -W 20:00 -n 18 -R "rusage[mem=19500] span[hosts=1]"        "for line in \$(cat $x); do echo ~/metagenome/data/refseq_k71/\${line}.contigs.fasta.gz; done | gtime -v ../../metagraph/build/metagengraph build -v --mem-cap-gb 300 -k 71 -p 36 -s 40 -o ~/big_graph/refseq/refseq_kmc_k71/subset_${i} 2>&1 | tee ~/big_graph/refseq/refseq_kmc_k71/subset_${i}.log"; done
+

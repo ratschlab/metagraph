@@ -1,0 +1,12 @@
+bsub -J "count_kmers[1-2789]%500"   -W 72:00 -n 10 -R "rusage[mem=3400]"   "./count_kmers.sh 17 \"\$(sed -n \${LSB_JOBINDEX}p refseq.txt)\" /cluster/work/grlab/projects/metagenome/data/refseq_k17"
+
+
+for x in {10..85}; do mkdir ~/metagenome/data/refseq_var_k/complete.1161.1.genomic.fna.gz.k$x; bsub -J "count_kmers" -oo logs/lsf.kmers_in_complete.1161.1.k$x  -W 72:00 -n 2 -R "rusage[mem=8000]"   "./count_kmers.sh $x ~/metagenome/raw_data/refseq/fna/complete.1161.1.genomic.fna.gz ~/metagenome/data/refseq_var_k/complete.1161.1.genomic.fna.gz.k$x"; done
+
+for x in {10..85}; do ./count_kmers.sh $x ~/metagenome/raw_data/refseq/fna/complete.1161.1.genomic.fna.gz ~/metagenome/data/refseq_var_k/complete.1161.1.genomic.fna.gz.k$x 2>&1 > logs/lsf.kmers_in_complete.1161.1.k$x; done
+
+
+
+for x in {10..42}; do bsub -J "contigs" -oo logs/kmc_to_contigs_from_complete.1161.1.k$x.lsf  -W 72:00 -n 1 -R "rusage[mem=85000]"   "../../metagraph/scripts/kmc_to_contigs.sh ~/metagenome/data/refseq_var_k/complete.1161.1.genomic.fna.gz.k$x/complete.1161.1.genomic.fna.gz.kmc_suf $x"; done
+
+for x in {43..85}; do bsub -J "contigs" -oo logs/kmc_to_contigs_from_complete.1161.1.k$x.lsf  -W 72:00 -n 5 -R "rusage[mem=50000]"   "../../metagraph/scripts/kmc_to_contigs.sh ~/metagenome/data/refseq_var_k/complete.1161.1.genomic.fna.gz.k$x/complete.1161.1.genomic.fna.gz.kmc_suf $x"; done
