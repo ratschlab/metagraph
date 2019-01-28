@@ -16,6 +16,7 @@
 #include "dbg_hash_ordered.hpp"
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
+#include "server.hpp"
 
 typedef annotate::MultiLabelAnnotation<uint64_t, std::string> Annotator;
 
@@ -354,7 +355,8 @@ void execute_query(std::string seq_name,
                    size_t num_top_labels,
                    double discovery_fraction,
                    std::string anno_labels_delimiter,
-                   const AnnotatedDBG &anno_graph) {
+                   const AnnotatedDBG &anno_graph,
+                   std::ostream &output_stream) {
     std::ostringstream oss;
 
     if (count_labels) {
@@ -384,7 +386,7 @@ void execute_query(std::string seq_name,
                                    anno_labels_delimiter) << "\n";
     }
 
-    std::cout << oss.str();
+    output_stream << oss.str();
 }
 
 
@@ -453,6 +455,39 @@ std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
     }
 
     return annotation;
+}
+
+
+std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
+    auto graph_temp = load_critical_dbg(config.infbase);
+
+    auto annotation_temp = initialize_annotation(
+        config.infbase_annotators.size()
+            ? config.infbase_annotators.at(0)
+            : "",
+        config,
+        graph_temp->num_nodes()
+    );
+    if (config.infbase_annotators.size()
+            && !annotation_temp->load(config.infbase_annotators.at(0))) {
+        std::cerr << "ERROR: can't load annotations for graph "
+                  << config.infbase
+                  << ", file corrupted" << std::endl;
+        exit(1);
+    }
+
+    // load graph
+    auto anno_graph = std::make_unique<AnnotatedDBG>(graph_temp.release(),
+                                                     annotation_temp.release(),
+                                                     config.parallel);
+
+    if (!anno_graph->check_compatibility()) {
+        std::cerr << "Error: graph and annotation are not compatible."
+                  << std::endl;
+        exit(1);
+    }
+
+    return anno_graph;
 }
 
 
@@ -1184,37 +1219,11 @@ int main(int argc, const char *argv[]) {
         case Config::ANNOTATE: {
             assert(config->infbase_annotators.size() <= 1);
 
-            auto graph_temp = load_critical_dbg(config->infbase);
-
-            auto annotation_temp = initialize_annotation(
-                config->infbase_annotators.size()
-                    ? config->infbase_annotators.at(0)
-                    : "",
-                *config,
-                graph_temp->num_nodes()
-            );
-            if (config->infbase_annotators.size()
-                    && !annotation_temp->load(config->infbase_annotators.at(0))) {
-                std::cerr << "ERROR: can't load annotations" << std::endl;
-                exit(1);
-            }
-
-            // load graph
-            AnnotatedDBG anno_graph(
-                graph_temp.release(),
-                annotation_temp.release(),
-                config->parallel
-            );
-
-            if (!anno_graph.check_compatibility()) {
-                std::cerr << "Error: graph and annotation are not compatible."
-                          << std::endl;
-                exit(1);
-            }
+            auto anno_graph = initialize_annotated_dbg(*config);
 
             annotate_data(files,
                           config->refpath,
-                          &anno_graph,
+                          anno_graph.get(),
                           config->reverse,
                           config->use_kmc,
                           config->filter_k,
@@ -1226,7 +1235,7 @@ int main(int argc, const char *argv[]) {
                           config->anno_labels,
                           config->verbose);
 
-            anno_graph.get_annotation().serialize(config->outfbase);
+            anno_graph->get_annotation().serialize(config->outfbase);
 
             return 0;
         }
@@ -1294,26 +1303,7 @@ int main(int argc, const char *argv[]) {
         case Config::CLASSIFY: {
             assert(config->infbase_annotators.size() == 1);
 
-            auto graph_temp = load_critical_dbg(config->infbase);
-
-            auto annotation_temp = initialize_annotation(config->infbase_annotators.at(0), *config);
-            if (!annotation_temp->load(config->infbase_annotators.at(0))) {
-                std::cerr << "ERROR: can't load annotations for graph "
-                          << config->infbase
-                          << ", file corrupted" << std::endl;
-                exit(1);
-            }
-
-            // load graph
-            AnnotatedDBG anno_graph(graph_temp.release(),
-                                    annotation_temp.release(),
-                                    config->parallel);
-
-            if (!anno_graph.check_compatibility()) {
-                std::cerr << "Error: graph and annotation are not compatible."
-                          << std::endl;
-                exit(1);
-            }
+            auto anno_graph = initialize_annotated_dbg(*config);
 
             utils::ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
 
@@ -1340,7 +1330,8 @@ int main(int argc, const char *argv[]) {
                             config->num_top_labels,
                             config->discovery_fraction,
                             config->anno_labels_delimiter,
-                            std::ref(anno_graph)
+                            std::ref(*anno_graph),
+                            std::ref(std::cout)
                         );
                     },
                     config->reverse,
@@ -1363,6 +1354,56 @@ int main(int argc, const char *argv[]) {
 
                 // wait while all threads finish processing the current file
                 thread_pool.join();
+            }
+
+            return 0;
+        }
+        case Config::SERVER_CLASSIFY: {
+            assert(config->infbase_annotators.size() == 1);
+
+            Timer timer;
+
+            std::cout << "Loading graph..." << std::endl;
+
+            auto anno_graph = initialize_annotated_dbg(*config);
+
+            std::cout << "Graph loaded in "
+                      << timer.elapsed() << "sec, current mem usage: "
+                      << get_curr_mem2() / (1 << 20) << " MiB" << std::endl;
+
+            const size_t num_threads = std::max(1u, config->parallel);
+
+            std::cout << "Initializing tcp service with "
+                      << num_threads << " threads, listening port "
+                      << config->port << std::endl;
+
+            try {
+                asio::io_context io_context(num_threads);
+
+                asio::signal_set signals(io_context, SIGINT, SIGTERM);
+                signals.async_wait([&](auto, auto) { io_context.stop(); });
+
+                Server server(io_context, config->port,
+                    [&](const std::string &input_sequence) {
+                        std::ostringstream oss;
+                        execute_query(input_sequence,
+                                      input_sequence,
+                                      config->count_labels,
+                                      config->suppress_unlabeled,
+                                      config->num_top_labels,
+                                      config->discovery_fraction,
+                                      config->anno_labels_delimiter,
+                                      *anno_graph,
+                                      oss);
+                        return oss.str();
+                    }
+                );
+
+                io_context.run();
+            } catch (const std::exception &e) {
+                std::cerr << "Exception: " << e.what() << std::endl;
+            } catch (...) {
+                std::cerr << "Error: Unknown exception" << std::endl;
             }
 
             return 0;

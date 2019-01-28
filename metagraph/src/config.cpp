@@ -42,6 +42,8 @@ Config::Config(int argc, const char *argv[]) {
         identity = MERGE_ANNOTATIONS;
     } else if (!strcmp(argv[1], "classify")) {
         identity = CLASSIFY;
+    } else if (!strcmp(argv[1], "server_classify")) {
+        identity = SERVER_CLASSIFY;
     } else if (!strcmp(argv[1], "transform")) {
         identity = TRANSFORM;
     } else if (!strcmp(argv[1], "transform_anno")) {
@@ -144,6 +146,8 @@ Config::Config(int argc, const char *argv[]) {
             kmer_mapping_mode = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--num-top-labels")) {
             num_top_labels = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--port")) {
+            port = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--suffix")) {
             suffix = argv[++i];
         } else if (!strcmp(argv[i], "--state")) {
@@ -201,6 +205,7 @@ Config::Config(int argc, const char *argv[]) {
     }
 
     if (!fname.size() && identity != STATS
+                      && identity != SERVER_CLASSIFY
                       && (identity != CONCATENATE || infbase.empty())) {
         std::string line;
         while (std::getline(std::cin, line)) {
@@ -216,7 +221,10 @@ Config::Config(int argc, const char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if (identity != CONCATENATE && identity != STATS && !fname.size())
+    if (identity != CONCATENATE
+            && identity != STATS
+            && identity != SERVER_CLASSIFY
+            && !fname.size())
         print_usage_and_exit = true;
 
     if (identity == CONCATENATE && !(fname.empty() ^ infbase.empty())) {
@@ -234,7 +242,7 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == ALIGN && infbase.empty())
         print_usage_and_exit = true;
 
-    if (identity == CLASSIFY && infbase.empty())
+    if ((identity == CLASSIFY || identity == SERVER_CLASSIFY) && infbase.empty())
         print_usage_and_exit = true;
 
     if (identity == ANNOTATE && infbase.empty())
@@ -266,7 +274,7 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == MERGE_ANNOTATIONS && outfbase.empty())
         print_usage_and_exit = true;
 
-    if (identity == CLASSIFY && infbase_annotators.size() != 1)
+    if ((identity == CLASSIFY || identity == SERVER_CLASSIFY) && infbase_annotators.size() != 1)
         print_usage_and_exit = true;
 
     if ((identity == TRANSFORM
@@ -438,6 +446,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\trelax_brwt\toptimize the tree structure in brwt annotator\n\n");
 
             fprintf(stderr, "\tclassify\tannotate sequences from fast[a|q] files\n\n");
+            fprintf(stderr, "\tserver_classify\tannotate received sequences and send annotations back\n\n");
 
             return;
         }
@@ -615,6 +624,22 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --discovery-fraction \tfraction of labeled k-mers required for annotation [1.0]\n");
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+            // fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
+        } break;
+        case SERVER_CLASSIFY: {
+            fprintf(stderr, "Usage: %s server_classify -i <graph> -a <annotator> [options]\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for classify:\n");
+            // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
+            fprintf(stderr, "\t   --port [INT] \t\tTCP port for incoming connections [5555]\n");
+            fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to extend []\n");
+            fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate graph [off]\n");
+            fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
+            fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
+            fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
+            fprintf(stderr, "\t   --discovery-fraction \tfraction of labeled k-mers required for annotation [1.0]\n");
+            fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \t\tmaximum number of parallel connections [1]\n");
             // fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
         } break;
         case TRANSFORM: {

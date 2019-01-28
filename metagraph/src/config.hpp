@@ -57,6 +57,7 @@ class Config {
     unsigned int arity_brwt = 2;
     unsigned int relax_arity_brwt = 10;
     unsigned int pruned_dead_end_size = 0;
+    unsigned int port = 5555;
 
     double discovery_fraction = 1.0;
 
@@ -91,7 +92,8 @@ class Config {
         TRANSFORM,
         TRANSFORM_ANNOTATION,
         RELAX_BRWT,
-        CLASSIFY
+        CLASSIFY,
+        SERVER_CLASSIFY,
     };
     IdentityType identity = NO_IDENTITY;
 
