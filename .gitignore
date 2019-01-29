@@ -3,10 +3,13 @@
 !metagraph/tests/data/*.fa
 !metagraph/tests/data/*.fai
 metagraph/tests/data/*dump_test*
+visualization/geolocation/data/*
 .history
 */metagraph
 testrun*
 *.dbg
+*.annodbg
+*.edgemask
 *.dbgchunk
 *.dbgsdchunk
 *.fna
@@ -18,3 +21,5 @@ build
 .*.swp
 .ipynb_checkpoints
 *lsf.o*
+*.pyc
+

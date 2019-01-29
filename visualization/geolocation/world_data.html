@@ -5,7 +5,7 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>GeoDNA Search</title>
-    <meta name="description" content="Search Geo Locations by DNA Sequences">
+    <meta name="description" content="Search Geo Locations for DNA Sequences">
     <meta name="author" content="Mikhail Karasikov">
 
     <link rel="icon" type="image/gif" href="static/deBruijnDNA.gif"/>
@@ -32,10 +32,10 @@ body {
   <nav class="navbar navbar-default">
     <div class="container-fluid">
       <div class="navbar-header">
-        <a class="navbar-brand" href="http://karasikov.com">Home</a>
+        <a class="navbar-brand" href="http://www.karasikov.com">Home</a>
       </div>
       <ul class="nav navbar-nav">
-        <li><a href="./world_data.html">GeoDNA</a></li>
+        <li><a href="./geodna">GeoDNA</a></li>
         <li><a href="./">Visualize</a></li>
 <!--         <li><a href="https://drive.google.com/drive/folders/0B3zcrZZIqs3fTGx6RVI3ZnVtNUU?usp=sharing">Download</a></li>
         <li><a href="./static/manuals.html">Manual</a></li>
@@ -46,19 +46,19 @@ body {
 
   <div class="col-md-10 col-md-offset-1">
       <div class="text-center">
-          <h3>GeoDNA: Search Geo Locations by DNA Sequences</h3>
+          <h3>GeoDNA: Search Geo Locations for DNA</h3>
       </div>
   </div>
   <div class="col-md-10 col-md-offset-1">
       <div class="text-center col-md-12">
-          <form action="{{ url_for('index_page') }}" method=post>
+          <form action="{{ url_for('geomap_page') }}" method=post>
               <textarea class="form-control"
                         name=input_data rows=3
                         style="resize: vertical; min-height: 48px; font-family: monospace; font-size: 12px"
                         id=load-from-text
-                        placeholder="Input k and sequences, each in a new line">{{ input_data }}</textarea>
+                        placeholder="Input DNA sequence to search">{{ input_data }}</textarea>
               <br>
-              <input type=submit class="btn btn-default" value="Build">
+              <input type=submit class="btn btn-default" value="Search">
           </form>
           <br>
           {% if output %}
@@ -100,13 +100,14 @@ body {
     <script src="https://www.amcharts.com/lib/4/maps.js"></script>
     <script src="https://www.amcharts.com/lib/4/geodata/worldLow.js"></script>
     <script src="https://www.amcharts.com/lib/4/themes/animated.js"></script>
-    <script src="./map.js"></script>
-    <script src="./sample_list.js"></script>
-<!--     <script>
+    <script src="./static/map.js"></script>
+    <script src="./data/sample_list.js"></script>
+    <script src="./data/random_locations.js"></script>
+    <script>
       {% if js_sample_list %}
         {{ js_sample_list|safe }}
       {% endif %}
-    </script> -->
+    </script>
     <script>
         imageSeries.data = samples;
 
@@ -122,45 +123,7 @@ body {
             imageSeriesTemplate.tooltipText = "{" + columns.join("}\n{") + "}";
         }
     </script>
-    <script>
-        var list = imageSeries.data;
-
-        if (list.length > 0) {
-            list = imageSeries.data;
-
-            var columns = []
-
-            for (var column_name in list[0]) {
-                columns.push(column_name);
-            }
-
-            var tbl = document.getElementById('matched_samples');
-
-            var tr = tbl.insertRow();
-
-            tr.appendChild(document.createElement('th'))
-              .appendChild(document.createTextNode("#"));
-
-            for (var j = 0; j < columns.length; j++) {
-                tr.appendChild(document.createElement('th'))
-                  .appendChild(document.createTextNode(columns[j]));
-            }
-
-            for (var i = 0; i < list.length; i++) {
-                tr = tbl.insertRow();
-
-                var dict = list[i];
-
-                tr.appendChild(document.createElement('th'))
-                  .appendChild(document.createTextNode(i + 1));
-
-                for (var j = 0; j < columns.length; j++) {
-                    tr.appendChild(document.createElement('td'))
-                      .appendChild(document.createTextNode(dict[columns[j]]));
-                }
-            }
-        }
-    </script>
+    <script src="./static/initialize_table.js"></script>
 
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
   <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js"
