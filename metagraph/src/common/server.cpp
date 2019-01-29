@@ -20,19 +20,17 @@ class Connection : public std::enable_shared_from_this<Connection> {
                std::function<std::string(const std::string &input)> generate_response)
           : socket_(std::move(socket)),
             generate_response_(generate_response) {
-        std::cout << "New connection with "
-                  << socket_.remote_endpoint().address()
-                  << ":"
-                  << socket_.remote_endpoint().port()
-                  << std::endl;
+        try {
+            address_ = socket_.remote_endpoint().address();
+            port_ = socket_.remote_endpoint().port();
+        } catch (...) {
+            std::cerr << "Error in remote endpoint" << std::endl;
+        }
+        std::cout << "New connection with " << address_ << ":" << port_ << std::endl;
     }
 
     ~Connection() {
-        std::cout << "Closing connection with "
-                  << socket_.remote_endpoint().address()
-                  << ":"
-                  << socket_.remote_endpoint().port()
-                  << std::endl;
+        std::cout << "Closing connection with " << address_ << ":" << port_ << std::endl;
     }
 
     void start() { do_read(); }
@@ -42,8 +40,12 @@ class Connection : public std::enable_shared_from_this<Connection> {
         auto self(shared_from_this());
         socket_.async_read_some(asio::buffer(data_, MAX_MESSAGE_SIZE),
             [this, self](std::error_code ec, size_t length) {
-                if (!ec)
+                if (!ec) {
                     do_write(length);
+                } else if (ec != asio::error::eof) {
+                    std::cerr << "Error: can't receive data from "
+                              << address_ << ":" << port_ << std::endl;
+                }
             }
         );
     }
@@ -55,15 +57,23 @@ class Connection : public std::enable_shared_from_this<Connection> {
 
         asio::async_write(socket_, asio::buffer(response_),
             [this, self](std::error_code ec, size_t /*length*/) {
-                if (!ec)
+                if (!ec) {
                     do_read();
+                } else if (ec != asio::error::eof) {
+                    std::cerr << "Error: can't send data to "
+                              << address_ << ":" << port_ << std::endl;
+                }
             }
         );
     }
 
     tcp::socket socket_;
-    char data_[MAX_MESSAGE_SIZE];
+    asio::ip::address address_;
+    unsigned short port_;
+
     std::function<std::string(const std::string &input)> generate_response_;
+
+    char data_[MAX_MESSAGE_SIZE];
     std::string response_;
 };
 
