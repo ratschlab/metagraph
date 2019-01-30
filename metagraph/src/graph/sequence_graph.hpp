@@ -50,9 +50,9 @@ class SequenceGraph {
     virtual bool load(const std::string &filename_base) = 0;
     virtual void serialize(const std::string &filename_base) const = 0;
 
-    // Get string corresponding to |node_index|.
+    // Get string corresponding to |node|.
     // Note: Not efficient if sequences in nodes overlap. Use sparingly.
-    virtual std::string get_node_sequence(node_index node_index) const = 0;
+    virtual std::string get_node_sequence(node_index node) const = 0;
 };
 
 

@@ -10,7 +10,7 @@ class AnnotatedDBG {
   public:
     typedef annotate::MultiLabelAnnotation<uint64_t, std::string> Annotator;
 
-    AnnotatedDBG(SequenceGraph *dbg,
+    AnnotatedDBG(DeBruijnGraph *dbg,
                  Annotator *annotation,
                  size_t num_threads = 0,
                  bool force_fast = false);
@@ -34,19 +34,19 @@ class AnnotatedDBG {
 
     bool check_compatibility() const;
 
-    const SequenceGraph& get_graph() const { return *graph_; }
+    const DeBruijnGraph& get_graph() const { return *graph_; }
     const Annotator& get_annotation() const { return *annotator_; }
 
     static void insert_zero_rows(Annotator *annotator,
                                  const bit_vector_dyn &inserted_edges);
     static Annotator::Index
-    graph_to_anno_index(SequenceGraph::node_index kmer_index);
+    graph_to_anno_index(DeBruijnGraph::node_index kmer_index);
 
-  private:
+  protected:
     void annotate_sequence_thread_safe(std::string sequence,
                                        std::vector<std::string> labels);
 
-    std::unique_ptr<SequenceGraph> graph_;
+    std::unique_ptr<DeBruijnGraph> graph_;
     std::unique_ptr<Annotator> annotator_;
 
     ThreadPool thread_pool_;

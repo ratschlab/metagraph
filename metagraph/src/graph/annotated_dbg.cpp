@@ -3,7 +3,7 @@
 #include "annotate_row_compressed.hpp"
 
 
-AnnotatedDBG::AnnotatedDBG(SequenceGraph *dbg,
+AnnotatedDBG::AnnotatedDBG(DeBruijnGraph *dbg,
                            Annotator *annotation,
                            size_t num_threads,
                            bool force_fast)
@@ -138,7 +138,7 @@ uint64_t AnnotatedDBG::num_anno_rows() const {
 }
 
 AnnotatedDBG::Annotator::Index
-AnnotatedDBG::graph_to_anno_index(SequenceGraph::node_index kmer_index) {
+AnnotatedDBG::graph_to_anno_index(DeBruijnGraph::node_index kmer_index) {
     assert(kmer_index);
     return kmer_index - 1;
 }
