@@ -54,9 +54,9 @@ class SequenceGraph {
     virtual void serialize(const std::string &filename_base) const = 0;
     virtual std::string file_extension() const = 0;
 
-    // Get string corresponding to |node_index|.
+    // Get string corresponding to |node|.
     // Note: Not efficient if sequences in nodes overlap. Use sparingly.
-    virtual std::string get_node_sequence(node_index node_index) const = 0;
+    virtual std::string get_node_sequence(node_index node) const = 0;
 };
 
 
@@ -80,8 +80,18 @@ class DeBruijnGraph : public SequenceGraph {
     virtual void map_to_nodes_sequentially(std::string::const_iterator begin,
                                            std::string::const_iterator end,
                                            const std::function<void(node_index)> &callback,
+                                           const std::function<bool()> &terminate = [](){ return false; }) const = 0;
+
+    // Perform extension on a provided seed based on the string iterator.
+    // If seed is npos, perform seeding automatically.
+    // Extend until the termination condition is satisfied or reached the end of the query.
+    // In canonical mode, non-canonical k-mers are not mapped to canonical ones
+    virtual void extend_from_seed(std::string::const_iterator begin,
+                                           std::string::const_iterator end,
+                                           const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate
-                                                        = [](){ return false; }) const = 0;
+                                                        = [](){ return false; },
+                                           node_index seed = npos) const = 0;
 
     // TODO: move to graph_algorithm.hpp
     virtual void call_sequences(const std::function<void(const std::string&)> &callback) const;

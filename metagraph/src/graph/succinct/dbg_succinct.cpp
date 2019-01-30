@@ -187,6 +187,16 @@ void DBGSuccinct::map_to_nodes_sequentially(std::string::const_iterator begin,
     );
 }
 
+void DBGSuccinct::extend_from_seed(std::string::const_iterator begin,
+                                       std::string::const_iterator end,
+                                       const std::function<void(node_index)> &callback,
+                                       const std::function<bool()> &terminate,
+                                       node_index seed) const {
+    boss_graph_->extend_from_seed(
+                    begin, end, [&] (BOSS::edge_index i) {
+                    callback(boss_to_kmer_index(i)); }, terminate, kmer_to_boss_index(seed));
+}
+
 // Map sequence k-mers to the canonical graph nodes
 // and run callback for each node until the termination condition is satisfied
 void DBGSuccinct::map_to_nodes(const std::string &sequence,

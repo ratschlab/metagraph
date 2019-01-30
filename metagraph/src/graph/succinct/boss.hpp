@@ -89,6 +89,16 @@ class BOSS {
 
     std::vector<edge_index> map_to_edges(const std::string &sequence) const;
 
+    // Perform extension on a provided seed based on the string iterator.
+    // If seed is npos, perform seeding automatically.
+    // Extend until the termination condition is satisfied or reached the end of the query.
+    // In canonical mode, non-canonical k-mers are not mapped to canonical ones.
+    void extend_from_seed(std::string::const_iterator begin,
+                                std::string::const_iterator end,
+                                const std::function<void(edge_index)> &callback,
+                                const std::function<bool()> &terminate,
+                                edge_index seed = npos) const;
+
     // Check whether the graph contains a fraction of (k+1)-mers from the sequence
     bool find(const std::string &sequence,
               double kmer_discovery_fraction = 1) const;
