@@ -1,3 +1,5 @@
+#include <nlohmann/json.hpp>
+
 #include "unix_tools.hpp"
 #include "config.hpp"
 #include "sequence_io.hpp"
@@ -671,6 +673,60 @@ void parse_sequences(const std::vector<std::string> &files,
     if (config.verbose) {
         std::cout << std::endl;
     }
+}
+
+std::string parse_json_message(const std::string &received_message,
+                               const AnnotatedDBG &anno_graph,
+                               const Config &config) {
+    auto json = nlohmann::json::parse(received_message);
+
+    if (json.empty())
+        return "";
+
+    auto fasta = json.find("FASTA");
+    auto seq = json.find("SEQ");
+
+    // discovery_fraction a proxy of 1 - %similarity
+    auto discovery_fraction = json.value("perc_similarity",
+                                         config.discovery_fraction);
+
+    auto num_top_labels = json.value("num_labels", config.num_top_labels);
+
+    // query callback shared by FASTA and sequence modes
+    std::ostringstream oss;
+    auto execute_server_query =
+        [&](const std::string &name, const std::string &seq) {
+            execute_query(
+                name,
+                seq,
+                config.count_labels,
+                config.suppress_unlabeled,
+                num_top_labels,
+                discovery_fraction,
+                config.anno_labels_delimiter,
+                anno_graph,
+                oss
+            );
+        };
+
+    // input is a FASTA sequence
+    if (fasta != json.end()) {
+        read_fasta_string_critical(
+            *fasta,
+            [&](kseq_t *read_stream) {
+                execute_server_query(
+                    std::string(read_stream->name.s),
+                    std::string(read_stream->seq.s)
+                );
+            }
+        );
+    }
+
+    // input is plain sequence
+    if (seq != json.end())
+        execute_server_query(*seq, *seq);
+
+    return oss.str();
 }
 
 
@@ -1401,19 +1457,15 @@ int main(int argc, const char *argv[]) {
                 asio::signal_set signals(io_context, SIGINT, SIGTERM);
                 signals.async_wait([&](auto, auto) { io_context.stop(); });
 
+                using namespace std::placeholders;
+
                 Server server(io_context, config->port,
-                    [&](const std::string &input_sequence) {
-                        std::ostringstream oss;
-                        execute_query(input_sequence,
-                                      input_sequence,
-                                      config->count_labels,
-                                      config->suppress_unlabeled,
-                                      config->num_top_labels,
-                                      config->discovery_fraction,
-                                      config->anno_labels_delimiter,
-                                      *anno_graph,
-                                      oss);
-                        return oss.str();
+                    [&](const auto &received_message) {
+                        return parse_json_message(
+                            received_message,
+                            *anno_graph,
+                            *config
+                        );
                     }
                 );
 

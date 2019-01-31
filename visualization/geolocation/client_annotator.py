@@ -15,6 +15,7 @@ import sys
 import struct
 from helpers import get_js_sample_list
 from connection import Connection
+import json
 
 
 __author__ = 'Mikhail Karasikov'
@@ -25,14 +26,15 @@ class ClientAnnotator():
         self.host = host
         self.port = port
 
-    def annotate(self, sequence):
+    def annotate(self, json_message):
+        # send message
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
         try:
             sock.connect((self.host, self.port))
 
             connection = Connection(sock)
-            connection.send_string(sequence)
+            connection.send_string(json_message)
             received = connection.receive_string()
             return received, ''
 
@@ -54,7 +56,13 @@ if __name__ == '__main__':
 
     annotated_dbg = ClientAnnotator(host, int(port))
 
-    result, output = annotated_dbg.annotate(sequence)
+    message = json.dumps({
+        "FASTA": "\n".join([">test", sequence[:len(sequence) / 2 + 1], sequence[len(sequence) / 2 + 1:]]),
+        "perc_similarity": 0.75,
+        "num_labels": 10
+    })
+
+    result, output = annotated_dbg.annotate(message)
     if result is not None:
         js_sample_list = get_js_sample_list(result)
         print(js_sample_list.encode('utf-8'))
