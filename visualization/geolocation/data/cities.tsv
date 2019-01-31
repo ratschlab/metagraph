@@ -1,0 +1,951 @@
+City	Province/State	Country	North-South	East-West	Coordinates	Near Latitude	Near Longitude
+Adak	Alaska	United States	Northern	Western	51°53′N 176°39′W	50	-175
+Honolulu	Hawaii	United States	Northern	Western	21°19′N 157°50′W	20	-160
+Barrow	Alaska	United States	Northern	Western	71°18′N 156°46′W	70	-155
+Hilo	Hawaii	United States	Northern	Western	19°42′N 155°05′W	20	-155
+Anchorage	Alaska	United States	Northern	Western	61°13′N 149°54′W	60	-150
+Deadhorse	Alaska	United States	Northern	Western	70°12′N 148°31′W	70	-150
+Fairbanks	Alaska	United States	Northern	Western	64°51′N 147°43′W	65	-150
+Sitka	Alaska	United States	Northern	Western	57°03′N 135°20′W	55	-135
+Whitehorse	Yukon	Canada	Northern	Western	60°43′N 135°03′W	60	-135
+Juneau	Alaska	United States	Northern	Western	58°18′N 134°25′W	60	-135
+Tuktoyaktuk	Northwest Territories	Canada	Northern	Western	69°27′N 133°02′W	70	-135
+Victoria	British Columbia	Canada	Northern	Western	48°26′N 123°22′W	50	-125
+Vancouver	British Columbia	Canada	Northern	Western	49°15′N 123°06′W	50	-125
+Portland	Oregon	United States	Northern	Western	45°31′N 122°41′W	45	-125
+San Francisco	California	United States	Northern	Western	37°47′N 122°25′W	40	-120
+Seattle	Washington	United States	Northern	Western	47°37′N 122°20′W	50	-120
+Sacramento	California	United States	Northern	Western	38°33′N 121°28′W	40	-120
+Kamloops	British Columbia	Canada	Northern	Western	50°41′N 120°20′W	50	-120
+Reno	Nevada	United States	Northern	Western	39°32′N 119°49′W	40	-120
+Santa Barbara	California	United States	Northern	Western	34°26′N 119°43′W	35	-120
+Kelowna	British Columbia	Canada	Northern	Western	49°53′N 119°30′W	50	-120
+Grande Prairie	Alberta	Canada	Northern	Western	55°10′N 118°48′W	55	-120
+Los Angeles	California	United States	Northern	Western	34°03′N 118°15′W	35	-120
+Riverside	California	United States	Northern	Western	33°57′N 117°24′W	35	-115
+San Diego	California	United States	Northern	Western	32°43′N 117°10′W	35	-115
+Tijuana	Baja California	Mexico	Northern	Western	32°32′N 117°02′W	35	-115
+Ensenada	Baja California	Mexico	Northern	Western	31°51′N 116°36′W	30	-115
+Boise	Idaho	United States	Northern	Western	43°37′N 116°12′W	45	-115
+Mexicali	Baja California	Mexico	Northern	Western	32°40′N 115°28′W	35	-115
+Las Vegas	Nevada	United States	Northern	Western	36°11′N 115°08′W	35	-115
+Yellowknife	Northwest Territories	Canada	Northern	Western	62°27′N 114°24′W	60	-115
+Calgary	Alberta	Canada	Northern	Western	51°03′N 114°04′W	50	-115
+Edmonton	Alberta	Canada	Northern	Western	53°32′N 113°30′W	55	-115
+Phoenix	Arizona	United States	Northern	Western	33°27′N 112°04′W	35	-110
+Helena	Montana	United States	Northern	Western	46°36′N 112°02′W	45	-110
+Salt Lake City	Utah	United States	Northern	Western	40°45′N 111°53′W	40	-110
+Fort McMurray	Alberta	Canada	Northern	Western	56°44′N 111°23′W	55	-110
+Hermosillo	Sonora	Mexico	Northern	Western	29°06′N 110°57′W	30	-110
+Tucson	Arizona	United States	Northern	Western	32°13′N 110°56′W	30	-110
+Cabo San Lucas	Baja California Sur	Mexico	Northern	Western	22°53′N 109°55′W	25	-110
+Culiacán	Sinaloa	Mexico	Northern	Western	24°48′N 107°23′W	25	-105
+Saskatoon	Saskatchewan	Canada	Northern	Western	52°08′N 106°41′W	50	-105
+Albuquerque	New Mexico	United States	Northern	Western	35°07′N 106°37′W	35	-105
+Ciudad Juárez	Chihuahua	Mexico	Northern	Western	31°44′N 106°29′W	30	-105
+El Paso	Texas	United States	Northern	Western	31°47′N 106°25′W	30	-105
+Los Alamos	New Mexico	United States	Northern	Western	35°53′N 106°18′W	35	-105
+Chihuahua	Chihuahua	Mexico	Northern	Western	28°38′N 106°05′W	30	-105
+Santa Fe	New Mexico	United States	Northern	Western	35°40′N 105°58′W	35	-105
+Boulder	Colorado	United States	Northern	Western	40°01′N 105°17′W	40	-105
+Puerto Vallarta	Jalisco	Mexico	Northern	Western	20°40′N 105°16′W	20	-105
+Denver	Colorado	United States	Northern	Western	39°44′N 104°59′W	40	-105
+Cheyenne	Wyoming	United States	Northern	Western	41°09′N 104°48′W	40	-105
+Durango	Durango	Mexico	Northern	Western	24°01′N 104°40′W	25	-105
+Regina	Saskatchewan	Canada	Northern	Western	50°27′N 104°36′W	50	-105
+Torreón	Coahuila	Mexico	Northern	Western	25°32′N 103°27′W	25	-105
+Zapopan	Jalisco	Mexico	Northern	Western	20°43′N 103°24′W	20	-105
+Guadalajara	Jalisco	Mexico	Northern	Western	20°40′N 103°21′W	20	-105
+Aguascalientes	Aguascalientes	Mexico	Northern	Western	21°53′N 102°18′W	20	-100
+León	Guanajuato	Mexico	Northern	Western	21°07′N 101°41′W	20	-100
+San Luis Potosí	San Luis Potosí	Mexico	Northern	Western	22°09′N 100°51′W	20	-100
+Bismarck	North Dakota	United States	Northern	Western	46°49′N 100°47′W	45	-100
+Querétaro	Querétaro	Mexico	Northern	Western	20°35′N 100°24′W	20	-100
+Pierre	South Dakota	United States	Northern	Western	44°22′N 100°20′W	45	-100
+Monterrey	Nuevo León	Mexico	Northern	Western	25°40′N 100°18′W	25	-100
+Acapulco	Guerrero	Mexico	Northern	Western	16°52′N 99°53′W	15	-100
+Mexico City Mexico City		Mexico	Northern	Western	19°26′N 99°08′W	20	-100
+San Antonio	Texas	United States	Northern	Western	29°25′N 98°30′W	30	-100
+Puebla	Puebla	Mexico	Northern	Western	19°03′N 98°13′W	20	-100
+Tampico	Tamaulipas	Mexico	Northern	Western	22°15′N 97°52′W	20	-100
+Austin	Texas	United States	Northern	Western	30°15′N 97°45′W	30	-100
+Oklahoma City	Oklahoma	United States	Northern	Western	35°29′N 97°32′W	35	-100
+Wichita	Kansas	United States	Northern	Western	37°41′N 97°20′W	40	-95
+Winnipeg	Manitoba	Canada	Northern	Western	49°54′N 97°08′W	50	-95
+Dallas	Texas	United States	Northern	Western	32°47′N 96°48′W	35	-95
+Lincoln	Nebraska	United States	Northern	Western	40°49′N 96°41′W	40	-95
+Veracruz	Veracruz	Mexico	Northern	Western	19°11′N 96°09′W	20	-95
+Tulsa	Oklahoma	United States	Northern	Western	36°08′N 95°56′W	35	-95
+Houston	Texas	United States	Northern	Western	29°46′N 95°23′W	30	-95
+Kansas City	Missouri	United States	Northern	Western	39°06′N 94°35′W	40	-95
+Des Moines	Iowa	United States	Northern	Western	41°35′N 93°37′W	40	-95
+Springfield	Missouri	United States	Northern	Western	37°12′N 93°17′W	35	-95
+Minneapolis	Minnesota	United States	Northern	Western	44°59′N 93°16′W	45	-95
+Little Rock	Arkansas	United States	Northern	Western	34°44′N 92°20′W	35	-90
+Tapachula	Chiapas	Mexico	Northern	Western	14°54′N 92°16′W	15	-90
+Quetzaltenango		Guatemala	Northern	Western	14°50′N 91°31′W	15	-90
+Guatemala City		Guatemala	Northern	Western	14°37′N 90°32′W	15	-90
+St. Louis	Missouri	United States	Northern	Western	38°38′N 90°12′W	40	-90
+Jackson	Mississippi	United States	Northern	Western	32°18′N 90°11′W	30	-90
+New Orleans	Louisiana	United States	Northern	Western	29°58′N 90°03′W	30	-90
+Memphis	Tennessee	United States	Northern	Western	35°07′N 89°58′W	35	-90
+Mérida	Yucatán	Mexico	Northern	Western	20°58′N 89°37′W	20	-90
+Thunder Bay	Ontario	Canada	Northern	Western	48°23′N 89°15′W	50	-90
+San Salvador		El Salvador	Northern	Western	13°41′N 89°11′W	15	-90
+Belmopan		Belize	Northern	Western	17°15′N 88°46′W	15	-90
+Belize City		Belize	Northern	Western	17°30′N 88°11′W	20	-90
+Mobile	Alabama	United States	Northern	Western	30°42′N 88°03′W	30	-90
+Milwaukee	Wisconsin	United States	Northern	Western	43°03′N 87°57′W	45	-90
+Chicago	Illinois	United States	Northern	Western	41°53′N 87°38′W	40	-90
+Tegucigalpa		Honduras	Northern	Western	14°06′N 87°13′W	15	-85
+Chinandega		Nicaragua	Northern	Western	12°37′N 87°09′W	15	-85
+Cancún	Quintana Roo	Mexico	Northern	Western	21°10′N 86°51′W	20	-85
+Birmingham	Alabama	United States	Northern	Western	33°39′N 86°49′W	35	-85
+Nashville	Tennessee	United States	Northern	Western	36°10′N 86°47′W	35	-85
+Managua		Nicaragua	Northern	Western	12°08′N 86°15′W	10	-85
+Indianapolis	Indiana	United States	Northern	Western	39°46′N 86°09′W	40	-85
+Eureka	Nunavut	Canada	Northern	Western	79°59′N 85°56′W	80	-85
+Louisville	Kentucky	United States	Northern	Western	38°15′N 85°46′W	40	-85
+Liberia		Costa Rica	Northern	Western	10°38′N 85°26′W	10	-85
+Fort Wayne	Indiana	United States	Northern	Western	41°05′N 85°08′W	40	-85
+Puntarenas		Costa Rica	Northern	Western	9°58′N 84°50′W	10	-85
+Cincinnati	Ohio	United States	Northern	Western	39°06′N 84°31′W	40	-85
+Atlanta	Georgia	United States	Northern	Western	33°45′N 84°23′W	35	-85
+Sault Ste. Marie	Ontario	Canada	Northern	Western	46°32′N 84°21′W	45	-85
+Alajuela		Costa Rica	Northern	Western	10°01′N 84°13′W	10	-85
+San José		Costa Rica	Northern	Western	9°56′N 84°05′W	10	-85
+Knoxville	Tennessee	United States	Northern	Western	35°58′N 83°57′W	35	-85
+Detroit	Michigan	United States	Northern	Western	42°20′N 83°03′W	40	-85
+Limón		Costa Rica	Northern	Western	9°59′N 83°02′W	10	-85
+Windsor	Ontario	Canada	Northern	Western	42°17′N 83°00′W	40	-85
+Columbus	Ohio	United States	Northern	Western	39°59′N 82°59′W	40	-85
+Grise Fiord	Nunavut	Canada	Northern	Western	76°25′N 82°54′W	75	-85
+Tampa	Florida	United States	Northern	Western	27°57′N 82°28′W	30	-80
+Havana		Cuba	Northern	Western	23°08′N 82°23′W	25	-80
+Key West	Florida	United States	Northern	Western	24°34′N 81°47′W	25	-80
+Cleveland	Ohio	United States	Northern	Western	41°29′N 81°40′W	40	-80
+Jacksonville	Florida	United States	Northern	Western	30°20′N 81°40′W	30	-80
+Charleston	West Virginia	United States	Northern	Western	38°21′N 81°38′W	40	-80
+George Town	Cayman Islands	United Kingdom	Northern	Western	19°18′N 81°23′W	20	-80
+Orlando	Florida	United States	Northern	Western	28°25′N 81°18′W	30	-80
+Columbia	South Carolina	United States	Northern	Western	34°00′N 81°03′W	35	-80
+Sudbury	Ontario	Canada	Northern	Western	46°29′N 81°01′W	45	-80
+Charlotte	North Carolina	United States	Northern	Western	35°14′N 80°51′W	35	-80
+Miami	Florida	United States	Northern	Western	25°47′N 80°13′W	25	-80
+Pittsburgh	Pennsylvania	United States	Northern	Western	40°27′N 80°00′W	40	-80
+Panama City		Panama	Northern	Western	8°59′N 79°31′W	10	-80
+North Bay	Ontario	Canada	Northern	Western	46°18′N 79°27′W	45	-80
+Toronto	Ontario	Canada	Northern	Western	43°42′N 79°24′W	45	-80
+Buffalo	New York	United States	Northern	Western	42°54′N 78°51′W	45	-80
+Raleigh	North Carolina	United States	Northern	Western	35°49′N 78°39′W	35	-80
+Wilmington	North Carolina	United States	Northern	Western	34°13′N 77°55′W	35	-80
+Rochester	New York	United States	Northern	Western	43°10′N 77°37′W	45	-80
+Nassau		Bahamas	Northern	Western	25°04′N 77°20′W	25	-75
+Washington	District of Columbia	United States	Northern	Western	38°54′N 77°02′W	40	-75
+Kingston		Jamaica	Northern	Western	17°59′N 76°48′W	20	-75
+Baltimore	Maryland	United States	Northern	Western	39°17′N 76°37′W	40	-75
+Santiago de Cali		Colombia	Northern	Western	3°25′N 76°31′W	5	-75
+Virginia Beach	Virginia	United States	Northern	Western	36°51′N 75°59′W	35	-75
+Santiago de Cuba		Cuba	Northern	Western	20°01′N 75°49′W	20	-75
+Ottawa	Ontario	Canada	Northern	Western	45°25′N 75°41′W	45	-75
+Medellín		Colombia	Northern	Western	6°14′N 75°35′W	5	-75
+Dover	Delaware	United States	Northern	Western	39°10′N 75°32′W	40	-75
+Cartagena		Colombia	Northern	Western	10°24′N 75°30′W	10	-75
+Philadelphia	Pennsylvania	United States	Northern	Western	39°57′N 75°10′W	40	-75
+Barranquilla		Colombia	Northern	Western	10°58′N 74°48′W	10	-75
+Trenton	New Jersey	United States	Northern	Western	40°13′N 74°46′W	40	-75
+Forked River	New Jersey	United States	Northern	Western	39°48′N 74°06′W	40	-75
+Bogotá		Colombia	Northern	Western	4°36′N 74°05′W	5	-75
+Jersey City	New Jersey	United States	Northern	Western	40°43′N 74°04′W	40	-75
+New York City	New York	United States	Northern	Western	40°40′N 73°56′W	40	-75
+Montreal	Quebec	Canada	Northern	Western	45°30′N 73°34′W	45	-75
+Hartford	Connecticut	United States	Northern	Western	41°46′N 72°40′W	40	-75
+Montpelier	Vermont	United States	Northern	Western	44°15′N 72°34′W	45	-75
+Cúcuta		Colombia	Northern	Western	7°54′N 72°30′W	10	-75
+Port-au-Prince		Haiti	Northern	Western	18°32′N 72°20′W	20	-70
+Maracaibo		Venezuela	Northern	Western	10°39′N 71°38′W	10	-70
+Concord	New Hampshire	United States	Northern	Western	43°12′N 71°32′W	45	-70
+Providence	Rhode Island	United States	Northern	Western	41°49′N 71°25′W	40	-70
+Quebec City	Quebec	Canada	Northern	Western	46°49′N 71°13′W	45	-70
+Cockburn Town	Turks and Caicos Islands	United Kingdom	Northern	Western	21°28′N 71°08′W	20	-70
+Boston	Massachusetts	United States	Northern	Western	42°21′N 71°04′W	40	-70
+Oranjestad	Aruba	Netherlands	Northern	Western	12°31′N 70°02′W	15	-70
+Santo Domingo		Dominican Republic	Northern	Western	18°28′N 69°57′W	20	-70
+Augusta	Maine	United States	Northern	Western	44°19′N 69°47′W	45	-70
+Qaanaaq	Greenland	Denmark	Northern	Western	77°28′N 69°14′W	75	-70
+Willemstad	Curaçao	Netherlands	Northern	Western	12°07′N 68°56′W	10	-70
+Iqaluit	Nunavut	Canada	Northern	Western	63°45′N 68°31′W	65	-70
+Puerto Ayacucho		Venezuela	Northern	Western	5°40′N 67°38′W	5	-70
+Maracay		Venezuela	Northern	Western	10°15′N 67°36′W	10	-70
+Caracas		Venezuela	Northern	Western	10°30′N 66°55′W	10	-65
+Fredericton	New Brunswick	Canada	Northern	Western	45°57′N 66°40′W	45	-65
+Yarmouth	Nova Scotia	Canada	Northern	Western	43°50′N 66°07′W	45	-65
+Saint John	New Brunswick	Canada	Northern	Western	45°17′N 66°05′W	45	-65
+San Juan	Puerto Rico	United States	Northern	Western	18°27′N 66°04′W	20	-65
+Charlotte Amalie	United States Virgin Islands	United States	Northern	Western	18°21′N 64°57′W	20	-65
+Hamilton	Bermuda	United Kingdom	Northern	Western	32°18′N 64°47′W	30	-65
+Moncton	New Brunswick	Canada	Northern	Western	46°08′N 64°46′W	45	-65
+Road Town	British Virgin Islands	United Kingdom	Northern	Western	18°26′N 64°37′W	20	-65
+Ciudad Bolívar		Venezuela	Northern	Western	8°07′N 63°33′W	10	-65
+Halifax	Nova Scotia	Canada	Northern	Western	44°51′N 63°12′W	45	-65
+Charlottetown	Prince Edward Island	Canada	Northern	Western	46°14′N 63°09′W	45	-65
+The Valley	Anguilla	United Kingdom	Northern	Western	18°13′N 63°03′W	20	-65
+Basseterre		Saint Kitts and Nevis	Northern	Western	17°18′N 62°44′W	15	-65
+Alert	Nunavut	Canada	Northern	Western	82°30′N 62°20′W	85	-60
+St. John's		Antigua and Barbuda	Northern	Western	17°07′N 61°51′W	15	-60
+St. George's		Grenada	Northern	Western	12°03′N 61°45′W	10	-60
+Basse-Terre	Guadeloupe	France	Northern	Western	16°00′N 61°44′W	15	-60
+Port of Spain		Trinidad and Tobago	Northern	Western	10°40′N 61°31′W	10	-60
+San Fernando		Trinidad and Tobago	Northern	Western	10°17′N 61°28′W	10	-60
+Roseau		Dominica	Northern	Western	15°18′N 61°23′W	15	-60
+Chaguanas		Trinidad and Tobago	Northern	Western	10°30′N 61°23′W	10	-60
+Kingstown		Saint Vincent and the Grenadines	Northern	Western	13°09′N 61°14′W	15	-60
+Fort-de-France	Martinique	France	Northern	Western	14°36′N 61°05′W	15	-60
+Castries		Saint Lucia	Northern	Western	14°01′N 60°59′W	15	-60
+Boa Vista	Roraima	Brazil	Northern	Western	2°49′N 60°40′W	5	-60
+Bridgetown		Barbados	Northern	Western	13°06′N 59°37′W	15	-60
+Georgetown		Guyana	Northern	Western	6°48′N 58°10′W	5	-60
+Saint-Pierre	Saint Pierre and Miquelon	France	Northern	Western	46°47′N 56°11′W	45	-55
+Upernavik	Greenland	Denmark	Northern	Western	72°47′N 56°09′W	75	-55
+Paramaribo		Suriname	Northern	Western	5°52′N 55°10′W	5	-55
+St. John's	Newfoundland and Labrador	Canada	Northern	Western	47°34′N 52°42′W	50	-55
+Cayenne	French Guiana	France	Northern	Western	4°55′N 52°20′W	5	-50
+Nuuk (Godthåb)	Greenland	Denmark	Northern	Western	64°11′N 51°44′W	65	-50
+Macapá	Amapá	Brazil	Northern	Western	0°02′N 51°04′W	0	-50
+Qaqortoq	Greenland	Denmark	Northern	Western	60°43′N 46°02′W	60	-45
+Flores Island	Azores	Portugal	Northern	Western	39°28′N 31°14′W	40	-30
+Horta	Azores	Portugal	Northern	Western	38°35′N 28°43′W	40	-30
+Angra do Heroísmo	Azores	Portugal	Northern	Western	38°29′N 27°13′W	40	-25
+Ponta Delgada	Azores	Portugal	Northern	Western	37°49′N 25°45′W	40	-25
+Praia		Cape Verde	Northern	Western	14°55′N 23°31′W	15	-25
+Ísafjörður		Iceland	Northern	Western	66°05′N 23°08′W	65	-25
+Reykjavík		Iceland	Northern	Western	64°08′N 21°56′W	65	-20
+Akureyri		Iceland	Northern	Western	65°41′N 18°06′W	65	-20
+Dakar		Senegal	Northern	Western	14°42′N 17°27′W	15	-15
+Thiès		Senegal	Northern	Western	14°47′N 16°55′W	15	-15
+Funchal	Madeira	Portugal	Northern	Western	32°39′N 16°55′W	35	-15
+Nord	Greenland	Denmark	Northern	Western	81°36′N 16°40′W	80	-15
+Serekunda		Gambia	Northern	Western	13°26′N 16°40′W	15	-15
+Brikama		Gambia	Northern	Western	13°16′N 16°39′W	15	-15
+Banjul		Gambia	Northern	Western	13°27′N 16°35′W	15	-15
+Santa Cruz de Tenerife	Canary Islands	Spain	Northern	Western	28°28′N 16°15′W	30	-15
+Nouakchott		Mauritania	Northern	Western	18°06′N 15°57′W	20	-15
+Bissau		Guinea-Bissau	Northern	Western	11°51′N 15°34′W	10	-15
+Las Palmas de Gran Canaria	Canary Islands	Spain	Northern	Western	28°09′N 15°25′W	30	-15
+Conakry		Guinea	Northern	Western	9°31′N 13°43′W	10	-15
+Freetown		Sierra Leone	Northern	Western	8°29′N 13°14′W	10	-15
+El Aaiún	Western Sahara	Morocco	Northern	Western	27°09′N 13°12′W	25	-15
+Monrovia		Liberia	Northern	Western	6°19′N 10°48′W	5	-10
+Lisbon		Portugal	Northern	Western	38°43′N 9°08′W	40	-10
+Nzérékoré		Guinea	Northern	Western	7°45′N 8°49′W	10	-10
+Porto		Portugal	Northern	Western	41°10′N 8°37′W	40	-10
+Cork		Ireland	Northern	Western	51°54′N 8°28′W	50	-10
+Marrakech		Morocco	Northern	Western	31°38′N 8°01′W	30	-10
+Bamako		Mali	Northern	Western	12°39′N 8°00′W	15	-10
+Casablanca		Morocco	Northern	Western	33°32′N 7°35′W	35	-10
+Koulikoro		Mali	Northern	Western	12°52′N 7°34′W	15	-10
+Rabat		Morocco	Northern	Western	34°02′N 6°50′W	35	-5
+Tórshavn	Faroe Islands	Denmark	Northern	Western	62°01′N 6°46′W	60	-5
+Dublin		Ireland	Northern	Western	53°21′N 6°16′W	55	-5
+Sevilla	Andalusia	Spain	Northern	Western	37°23′N 5°59′W	35	-5
+Belfast	Northern Ireland	United Kingdom	Northern	Western	54°36′N 5°56′W	55	-5
+Gibraltar	Gibraltar	United Kingdom	Northern	Western	36°08′N 5°21′W	35	-5
+Yamoussoukro		Ivory Coast	Northern	Western	6°49′N 5°17′W	5	-5
+Douglas	Isle of Man	United Kingdom	Northern	Western	54°09′N 4°29′W	55	-5
+Brest	Brittany	France	Northern	Western	48°23′N 4°29′W	50	-5
+Málaga	Andalusia	Spain	Northern	Western	36°43′N 4°25′W	35	-5
+Bobo-Dioulasso		Burkina Faso	Northern	Western	11°11′N 4°17′W	10	-5
+Glasgow	Scotland	United Kingdom	Northern	Western	55°51′N 4°16′W	55	-5
+Inverness	Scotland	United Kingdom	Northern	Western	57°28′N 4°14′W	55	-5
+Plymouth	England	United Kingdom	Northern	Western	50°22′N 4°09′W	50	-5
+Abidjan		Ivory Coast	Northern	Western	5°19′N 4°02′W	5	-5
+Swansea	Wales	United Kingdom	Northern	Western	51°37′N 3°57′W	50	-5
+Madrid	Madrid	Spain	Northern	Western	40°23′N 3°43′W	40	-5
+Exeter	England	United Kingdom	Northern	Western	50°43′N 3°32′W	50	-5
+Edinburgh	Scotland	United Kingdom	Northern	Western	55°57′N 3°11′W	55	-5
+Cardiff	Wales	United Kingdom	Northern	Western	51°29′N 3°11′W	50	-5
+Timbuktu		Mali	Northern	Western	16°47′N 3°01′W	15	-5
+Liverpool	England	United Kingdom	Northern	Western	53°24′N 2°59′W	55	-5
+Dundee	Scotland	United Kingdom	Northern	Western	56°28′N 2°58′W	55	-5
+Bilbao	Basque Country	Spain	Northern	Western	43°15′N 2°55′W	45	-5
+Bristol	England	United Kingdom	Northern	Western	51°27′N 2°35′W	50	-5
+Bath	England	United Kingdom	Northern	Western	51°23′N 2°22′W	50	0
+Gloucester	England	United Kingdom	Northern	Western	51°52′N 2°14′W	50	0
+Manchester	England	United Kingdom	Northern	Western	53°28′N 2°14′W	55	0
+Aberdeen	Scotland	United Kingdom	Northern	Western	57°09′N 2°07′W	55	0
+Birmingham	England	United Kingdom	Northern	Western	52°29′N 1°54′W	50	0
+Sekondi-Takoradi		Ghana	Northern	Western	4°55′N 1°46′W	5	0
+Bradford	England	United Kingdom	Northern	Western	53°48′N 1°45′W	55	0
+Kumasi		Ghana	Northern	Western	6°40′N 1°37′W	5	0
+Newcastle upon Tyne	England	United Kingdom	Northern	Western	54°58′N 1°37′W	55	0
+Nantes		France	Northern	Western	47°13′N 1°33′W	45	0
+Leeds	England	United Kingdom	Northern	Western	53°48′N 1°33′W	55	0
+Ouagadougou		Burkina Faso	Northern	Western	12°21′N 1°32′W	10	0
+Coventry	England	United Kingdom	Northern	Western	52°24′N 1°31′W	50	0
+Sheffield	England	United Kingdom	Northern	Western	53°23′N 1°28′W	55	0
+Southampton	England	United Kingdom	Northern	Western	50°54′N 1°24′W	50	0
+Oxford	England	United Kingdom	Northern	Western	51°45′N 1°15′W	50	0
+Nottingham	England	United Kingdom	Northern	Western	52°57′N 1°08′W	55	0
+Leicester	England	United Kingdom	Northern	Western	52°38′N 1°08′W	55	0
+Portsmouth	England	United Kingdom	Northern	Western	50°49′N 1°05′W	50	0
+Zaragoza	Aragon	Spain	Northern	Western	41°39′N 0°53′W	40	0
+Tamale		Ghana	Northern	Western	9°24′N 0°51′W	10	0
+Bordeaux		France	Northern	Western	44°50′N 0°35′W	45	0
+Valencia	Valencian Community	Spain	Northern	Western	39°28′N 0°23′W	40	0
+Peterborough	England	United Kingdom	Northern	Western	52°35′N 0°15′W	55	0
+Accra		Ghana	Northern	Western	5°33′N 0°12′W	5	0
+Brighton and Hove	England	United Kingdom	Northern	Western	50°50′N 0°09′W	50	0
+London	England	United Kingdom	Northern	Western	51°30′N 0°08′W	50	0
+Greenwich	England	United Kingdom	Northern	Western	51°29′N 0°00′E/W	50	0
+Le Havre	Normandy	France	Northern	Eastern	49°29′N 0°06′E	50	0
+Cambridge	England	United Kingdom	Northern	Eastern	52°12′N 0°07′E	50	0
+Lleida	Catalonia	Spain	Northern	Eastern	41°37′N 0°38′E	40	0
+Rouen	Normandy	France	Northern	Eastern	49°26′N 1°06′E	50	0
+Lomé		Togo	Northern	Eastern	6°08′N 1°13′E	5	0
+Norwich	England	United Kingdom	Northern	Eastern	52°38′N 1°18′E	55	0
+Tiaret		Algeria	Northern	Eastern	35°22′N 1°19′E	35	0
+Ibiza	Balearic Islands	Spain	Northern	Eastern	38°59′N 1°26′E	40	0
+Toulouse		France	Northern	Eastern	43°36′N 1°27′E	45	0
+Andorra la Vella		Andorra	Northern	Eastern	42°30′N 1°30′E	45	0
+Calais		France	Northern	Eastern	50°57′N 1°51′E	50	0
+Orléans		France	Northern	Eastern	47°54′N 1°55′E	50	0
+Niamey		Niger	Northern	Eastern	13°31′N 2°06′E	15	0
+Barcelona	Catalonia	Spain	Northern	Eastern	41°23′N 2°11′E	40	0
+Paris		France	Northern	Eastern	48°51′N 2°21′E	50	0
+Cotonou		Benin	Northern	Eastern	6°22′N 2°26′E	5	0
+Porto-Novo		Benin	Northern	Eastern	6°30′N 2°36′E	5	5
+Palma	Balearic Islands	Spain	Northern	Eastern	39°34′N 2°39′E	40	5
+Algiers		Algeria	Northern	Eastern	36°46′N 3°13′E	35	5
+Lagos		Nigeria	Northern	Eastern	6°27′N 3°24′E	5	5
+Ghent		Belgium	Northern	Eastern	51°03′N 3°44′E	50	5
+Ibadan		Nigeria	Northern	Eastern	7°24′N 3°55′E	5	5
+The Hague	South Holland	Netherlands	Northern	Eastern	52°05′N 4°19′E	50	5
+Brussels		Belgium	Northern	Eastern	50°51′N 4°21′E	50	5
+Antwerp		Belgium	Northern	Eastern	51°13′N 4°24′E	50	5
+Charleroi		Belgium	Northern	Eastern	50°24′N 4°26′E	50	5
+Rotterdam	South Holland	Netherlands	Northern	Eastern	51°56′N 4°29′E	50	5
+Leiden	South Holland	Netherlands	Northern	Eastern	52°10′N 4°29′E	50	5
+Haarlem	North Holland	Netherlands	Northern	Eastern	52°23′N 4°38′E	50	5
+Lyon		France	Northern	Eastern	45°46′N 4°51′E	45	5
+Amsterdam	North Holland	Netherlands	Northern	Eastern	52°22′N 4°54′E	50	5
+Utrecht	Utrecht	Netherlands	Northern	Eastern	52°06′N 5°07′E	50	5
+Bergen		Norway	Northern	Eastern	60°23′N 5°20′E	60	5
+Marseille		France	Northern	Eastern	43°18′N 5°22′E	45	5
+Benin City		Nigeria	Northern	Eastern	6°19′N 5°36′E	5	5
+Maastricht	Limburg	Netherlands	Northern	Eastern	50°51′N 5°41′E	50	5
+Luxembourg		Luxembourg	Northern	Eastern	49°37′N 6°07′E	50	5
+Geneva		Switzerland	Northern	Eastern	46°12′N 6°09′E	45	5
+Groningen	Groningen	Netherlands	Northern	Eastern	53°13′N 6°33′E	55	5
+Lausanne		Switzerland	Northern	Eastern	46°31′N 6°38′E	45	5
+São Tomé		São Tomé and Príncipe	Northern	Eastern	0°20′N 6°41′E	0	5
+Düsseldorf	North Rhine-Westphalia	Germany	Northern	Eastern	51°14′N 6°47′E	50	5
+Enschede	Overijssel	Netherlands	Northern	Eastern	52°13′N 6°54′E	50	5
+Cologne	North Rhine-Westphalia	Germany	Northern	Eastern	50°56′N 6°58′E	50	5
+Port Harcourt		Nigeria	Northern	Eastern	4°45′N 7°00′E	5	5
+Cannes		France	Northern	Eastern	43°33′N 7°01′E	45	5
+Nice		France	Northern	Eastern	43°42′N 7°16′E	45	5
+Monaco		Monaco	Northern	Eastern	43°44′N 7°25′E	45	5
+Bern		Switzerland	Northern	Eastern	46°57′N 7°27′E	45	5
+Abuja		Nigeria	Northern	Eastern	9°04′N 7°29′E	10	5
+Enugu		Nigeria	Northern	Eastern	6°27′N 7°31′E	5	10
+Basel		Switzerland	Northern	Eastern	47°34′N 7°36′E	50	10
+Turin	Piedmont	Italy	Northern	Eastern	45°04′N 7°42′E	45	10
+Strasbourg		France	Northern	Eastern	48°35′N 7°45′E	50	10
+Kristiansand		Norway	Northern	Eastern	58°10′N 8°00′E	60	10
+Esbjerg		Denmark	Northern	Eastern	55°29′N 8°27′E	55	10
+Kano		Nigeria	Northern	Eastern	12°00′N 8°31′E	10	10
+Zürich		Switzerland	Northern	Eastern	47°22′N 8°33′E	45	10
+Frankfurt am Main	Hesse	Germany	Northern	Eastern	50°07′N 8°41′E	50	10
+Malabo		Equatorial Guinea	Northern	Eastern	3°45′N 8°47′E	5	10
+Bremen	Bremen	Germany	Northern	Eastern	53°05′N 8°48′E	55	10
+Cagliari	Sardinia	Italy	Northern	Eastern	39°15′N 9°03′E	40	10
+Stuttgart	Baden-Württemberg	Germany	Northern	Eastern	48°47′N 9°11′E	50	10
+Milan	Lombardy	Italy	Northern	Eastern	45°28′N 9°11′E	45	10
+Libreville		Gabon	Northern	Eastern	0°23′N 9°27′E	0	10
+Vaduz		Liechtenstein	Northern	Eastern	47°08′N 9°31′E	45	10
+Douala		Cameroon	Northern	Eastern	4°03′N 9°42′E	5	10
+Hannover	Lower Saxony	Germany	Northern	Eastern	52°22′N 9°43′E	50	10
+Hamburg	Hamburg	Germany	Northern	Eastern	53°34′N 10°00′E	55	10
+Kiel	Schleswig-Holstein	Germany	Northern	Eastern	54°20′N 10°08′E	55	10
+Tunis		Tunisia	Northern	Eastern	36°48′N 10°11′E	35	10
+Aarhus		Denmark	Northern	Eastern	56°09′N 10°13′E	55	10
+Odense		Denmark	Northern	Eastern	55°24′N 10°23′E	55	10
+Trondheim		Norway	Northern	Eastern	63°26′N 10°24′E	65	10
+Lillehammer		Norway	Northern	Eastern	61°08′N 10°26′E	60	10
+Oslo		Norway	Northern	Eastern	59°57′N 10°45′E	60	10
+Sfax		Tunisia	Northern	Eastern	34°44′N 10°46′E	35	10
+Stjørdal		Norway	Northern	Eastern	63°29′N 11°10′E	65	10
+Sarpsborg		Norway	Northern	Eastern	59°17′N 11°12′E	60	10
+Florence	Tuscany	Italy	Northern	Eastern	43°47′N 11°15′E	45	10
+Bologna	Emilia-Romagna	Italy	Northern	Eastern	44°30′N 11°21′E	45	10
+Innsbruck		Austria	Northern	Eastern	47°16′N 11°23′E	45	10
+Yaoundé		Cameroon	Northern	Eastern	3°52′N 11°31′E	5	10
+Munich	Bavaria	Germany	Northern	Eastern	48°08′N 11°34′E	50	10
+Ny-Ålesund	Svalbard	Norway	Northern	Eastern	78°55′N 11°56′E	80	10
+Gothenburg		Sweden	Northern	Eastern	57°42′N 11°58′E	60	10
+Venice	Veneto	Italy	Northern	Eastern	45°26′N 12°20′E	45	10
+Leipzig	Saxony	Germany	Northern	Eastern	51°20′N 12°23′E	50	10
+San Marino		San Marino	Northern	Eastern	43°56′N 12°27′E	45	10
+Vatican City		Vatican City	Northern	Eastern	41°54′N 12°27′E	40	10
+Rome	Lazio	Italy	Northern	Eastern	41°54′N 12°30′E	40	15
+Copenhagen		Denmark	Northern	Eastern	55°41′N 12°34′E	55	15
+Malmö		Sweden	Northern	Eastern	55°35′N 13°02′E	55	15
+Salzburg		Austria	Northern	Eastern	47°48′N 13°02′E	50	15
+Tripoli		Libya	Northern	Eastern	32°54′N 13°11′E	35	15
+Palermo	Sicily	Italy	Northern	Eastern	38°07′N 13°22′E	40	15
+Berlin	Berlin	Germany	Northern	Eastern	52°31′N 13°23′E	55	15
+Dresden	Saxony	Germany	Northern	Eastern	51°02′N 13°44′E	50	15
+Naples	Campania	Italy	Northern	Eastern	40°51′N 14°16′E	40	15
+Linz		Austria	Northern	Eastern	48°18′N 14°17′E	50	15
+Prague		Czech Republic	Northern	Eastern	50°05′N 14°25′E	50	15
+Sabha		Libya	Northern	Eastern	27°02′N 14°26′E	25	15
+Birkirkara		Malta	Northern	Eastern	35°54′N 14°28′E	35	15
+Ljubljana		Slovenia	Northern	Eastern	46°03′N 14°31′E	45	15
+Valletta		Malta	Northern	Eastern	35°54′N 14°31′E	35	15
+Bodø		Norway	Northern	Eastern	67°18′N 14°33′E	65	15
+Östersund		Sweden	Northern	Eastern	63°11′N 14°40′E	65	15
+N'Djamena		Chad	Northern	Eastern	12°07′N 15°03′E	10	15
+Catania	Sicily	Italy	Northern	Eastern	37°30′N 15°05′E	40	15
+Graz		Austria	Northern	Eastern	47°04′N 15°26′E	45	15
+Messina	Sicily	Italy	Northern	Eastern	38°11′N 15°33′E	40	15
+Longyearbyen	Svalbard	Norway	Northern	Eastern	78°13′N 15°39′E	80	15
+Zagreb		Croatia	Northern	Eastern	45°49′N 15°59′E	45	15
+Moundou		Chad	Northern	Eastern	8°34′N 16°05′E	10	15
+Norrköping		Sweden	Northern	Eastern	58°36′N 16°12′E	60	15
+Vienna		Austria	Northern	Eastern	48°13′N 16°22′E	50	15
+Split		Croatia	Northern	Eastern	43°30′N 16°26′E	45	15
+Bratislava		Slovakia	Northern	Eastern	48°09′N 17°07′E	50	15
+Sundsvall		Sweden	Northern	Eastern	62°24′N 17°19′E	60	15
+Narvik		Norway	Northern	Eastern	68°25′N 17°34′E	70	20
+Uppsala		Sweden	Northern	Eastern	59°51′N 17°39′E	60	20
+Stockholm		Sweden	Northern	Eastern	59°20′N 18°04′E	60	20
+Sarajevo		Bosnia and Herzegovina	Northern	Eastern	43°51′N 18°21′E	45	20
+Gdynia		Poland	Northern	Eastern	54°30′N 18°33′E	55	20
+Bangui		Central African Republic	Northern	Eastern	4°22′N 18°35′E	5	20
+Gdańsk		Poland	Northern	Eastern	54°22′N 18°38′E	55	20
+Örnsköldsvik		Sweden	Northern	Eastern	63°17′N 18°44′E	65	20
+Tromsø		Norway	Northern	Eastern	69°41′N 18°57′E	70	20
+Budapest		Hungary	Northern	Eastern	47°28′N 19°03′E	45	20
+Podgorica		Montenegro	Northern	Eastern	42°26′N 19°16′E	40	20
+Tirana		Albania	Northern	Eastern	41°20′N 19°49′E	40	20
+Novi Sad	Vojvodina	Serbia	Northern	Eastern	45°15′N 19°51′E	45	20
+Kraków		Poland	Northern	Eastern	50°04′N 19°56′E	50	20
+Benghazi		Libya	Northern	Eastern	32°07′N 20°04′E	30	20
+Kiruna		Sweden	Northern	Eastern	67°51′N 20°13′E	70	20
+Umeå		Sweden	Northern	Eastern	63°50′N 20°16′E	65	20
+Belgrade		Serbia	Northern	Eastern	44°49′N 20°28′E	45	20
+Kaliningrad	Kaliningrad Oblast	Russia	Northern	Eastern	54°43′N 20°31′E	55	20
+Skellefteå		Sweden	Northern	Eastern	64°45′N 20°57′E	65	20
+Warsaw		Poland	Northern	Eastern	52°14′N 21°01′E	50	20
+Pristina	Kosovo	Serbia	Northern	Eastern	42°40′N 21°10′E	45	20
+Skopje		Macedonia	Northern	Eastern	42°00′N 21°26′E	40	20
+Piteå		Sweden	Northern	Eastern	65°20′N 21°30′E	65	20
+Vaasa		Finland	Northern	Eastern	63°06′N 21°37′E	65	20
+Boden		Sweden	Northern	Eastern	65°50′N 21°43′E	65	20
+Luleå		Sweden	Northern	Eastern	65°35′N 22°09′E	65	20
+Turku		Finland	Northern	Eastern	60°27′N 22°16′E	60	20
+Thessaloniki		Greece	Northern	Eastern	40°39′N 22°54′E	40	25
+Sofia		Bulgaria	Northern	Eastern	42°42′N 23°20′E	45	25
+Cluj-Napoca		Romania	Northern	Eastern	46°46′N 23°35′E	45	25
+Halkida		Greece	Northern	Eastern	38°28′N 23°36′E	40	25
+Hammerfest		Norway	Northern	Eastern	70°40′N 23°41′E	70	25
+Athena		Greece	Northern	Eastern	37°58′N 23°43′E	40	25
+Tampere		Finland	Northern	Eastern	61°30′N 23°46′E	60	25
+Craiova		Romania	Northern	Eastern	44°20′N 23°49′E	45	25
+Lviv		Ukraine	Northern	Eastern	49°51′N 24°01′E	50	25
+Riga		Latvia	Northern	Eastern	56°57′N 24°06′E	55	25
+Haparanda		Sweden	Northern	Eastern	65°50′N 24°08′E	65	25
+Tornio		Finland	Northern	Eastern	65°51′N 24°09′E	65	25
+Kemi		Finland	Northern	Eastern	65°44′N 24°34′E	65	25
+Espoo		Finland	Northern	Eastern	60°12′N 24°39′E	60	25
+Tallinn		Estonia	Northern	Eastern	59°26′N 24°45′E	60	25
+Helsinki		Finland	Northern	Eastern	60°10′N 24°56′E	60	25
+Vantaa		Finland	Northern	Eastern	60°18′N 25°02′E	60	25
+Heraklion		Greece	Northern	Eastern	35°20′N 25°08′E	35	25
+Vilnius		Lithuania	Northern	Eastern	54°41′N 25°17′E	55	25
+Oulu		Finland	Northern	Eastern	65°01′N 25°28′E	65	25
+Lahti		Finland	Northern	Eastern	60°59′N 25°39′E	60	25
+Rovaniemi		Finland	Northern	Eastern	66°30′N 25°44′E	65	25
+Jyväskylä		Finland	Northern	Eastern	62°15′N 25°45′E	60	25
+Bucharest		Romania	Northern	Eastern	44°26′N 26°06′E	45	25
+Tartu		Estonia	Northern	Eastern	58°23′N 26°43′E	60	25
+Pudasjärvi		Finland	Northern	Eastern	65°22′N 27°00′E	65	25
+Utsjoki		Finland	Northern	Eastern	69°54′N 27°01′E	70	25
+İzmir		Turkey	Northern	Eastern	38°26′N 27°09′E	40	25
+Kemijärvi		Finland	Northern	Eastern	66°43′N 27°26′E	65	25
+Minsk		Belarus	Northern	Eastern	53°54′N 27°34′E	55	30
+Kuopio		Finland	Northern	Eastern	62°54′N 27°41′E	65	30
+Nuorgam	Lapland	Finland	Northern	Eastern	70°05′N 27°53′E	70	30
+Chişinău		Moldova	Northern	Eastern	47°00′N 28°55′E	45	30
+Istanbul		Turkey	Northern	Eastern	41°01′N 28°57′E	40	30
+Bursa		Turkey	Northern	Eastern	40°11′N 29°03′E	40	30
+Kuusamo		Finland	Northern	Eastern	65°58′N 29°11′E	65	30
+Tiraspol	Transnistria	Moldova	Northern	Eastern	46°51′N 29°38′E	45	30
+Vadsø		Norway	Northern	Eastern	70°05′N 29°44′E	70	30
+Alexandria		Egypt	Northern	Eastern	31°12′N 29°55′E	30	30
+Saint Petersburg		Russia	Northern	Eastern	59°57′N 30°18′E	60	30
+Eskisehir		Turkey	Northern	Eastern	39°47′N 30°31′E	40	30
+Kiev		Ukraine	Northern	Eastern	50°27′N 30°31′E	50	30
+Odessa		Ukraine	Northern	Eastern	46°28′N 30°44′E	45	30
+Cairo		Egypt	Northern	Eastern	30°03′N 31°14′E	30	30
+Juba		South Sudan	Northern	Eastern	4°51′N 31°36′E	5	30
+Port Said		Egypt	Northern	Eastern	31°15′N 32°17′E	30	30
+Entebbe		Uganda	Northern	Eastern	0°03′N 32°28′E	0	30
+Konya		Turkey	Northern	Eastern	37°52′N 32°29′E	40	30
+Omdurman		Sudan	Northern	Eastern	15°39′N 32°29′E	15	30
+Khartoum		Sudan	Northern	Eastern	15°38′N 32°32′E	15	35
+Suez		Egypt	Northern	Eastern	29°58′N 32°33′E	30	35
+Kampala		Uganda	Northern	Eastern	0°19′N 32°35′E	0	35
+Luxor		Egypt	Northern	Eastern	25°41′N 32°39′E	25	35
+Ankara		Turkey	Northern	Eastern	39°56′N 32°52′E	40	35
+Murmansk	Murmansk Oblast	Russia	Northern	Eastern	68°58′N 33°05′E	70	35
+Nicosia		Cyprus	Northern	Eastern	35°10′N 33°22′E	35	35
+Simferopol	Crimea	Russia	Northern	Eastern	44°57′N 34°06′E	45	35
+Gaza	Gaza Strip	Palestine	Northern	Eastern	31°31′N 34°27′E	30	35
+Mersin		Turkey	Northern	Eastern	36°48′N 34°38′E	35	35
+Tel Aviv		Israel	Northern	Eastern	32°04′N 34°47′E	30	35
+Eilat		Israel	Northern	Eastern	29°33′N 34°57′E	30	35
+Jerusalem		Israel	Northern	Eastern	31°47′N 35°13′E	30	35
+Adana		Turkey	Northern	Eastern	37°00′N 35°19′E	35	35
+Beirut		Lebanon	Northern	Eastern	33°53′N 35°31′E	35	35
+Latakia		Syria	Northern	Eastern	35°31′N 35°47′E	35	35
+Amman		Jordan	Northern	Eastern	31°56′N 35°56′E	30	35
+Kharkiv		Ukraine	Northern	Eastern	50°00′N 36°14′E	50	35
+Damascus		Syria	Northern	Eastern	33°31′N 36°18′E	35	35
+Gaziantep		Turkey	Northern	Eastern	37°04′N 37°23′E	35	35
+Moscow		Russia	Northern	Eastern	55°45′N 37°37′E	55	40
+Addis Ababa		Ethiopia	Northern	Eastern	9°02′N 38°44′E	10	40
+Asmara		Eritrea	Northern	Eastern	15°20′N 38°56′E	15	40
+Krasnodar	Krasnodar Krai	Russia	Northern	Eastern	45°02′N 38°58′E	45	40
+Jeddah		Saudi Arabia	Northern	Eastern	21°33′N 39°10′E	20	40
+Voronezh	Voronezh Oblast	Russia	Northern	Eastern	51°40′N 39°13′E	50	40
+Medina		Saudi Arabia	Northern	Eastern	24°28′N 39°36′E	25	40
+Rostov-on-Don	Rostov Oblast	Russia	Northern	Eastern	47°14′N 39°42′E	45	40
+Sochi	Krasnodar Krai	Russia	Northern	Eastern	43°35′N 39°43′E	45	40
+Mecca		Saudi Arabia	Northern	Eastern	21°25′N 39°49′E	20	40
+Yaroslavl	Yaroslavl Oblast	Russia	Northern	Eastern	57°37′N 39°51′E	60	40
+Arkhangelsk	Arkhangelsk Oblast	Russia	Northern	Eastern	64°32′N 40°32′E	65	40
+Sukhumi	Abkhazia	Georgia	Northern	Eastern	43°00′N 41°01′E	45	40
+Mosul		Iraq	Northern	Eastern	36°20′N 43°08′E	35	45
+Djibouti		Djibouti	Northern	Eastern	11°35′N 43°09′E	10	45
+Tskhinvali	South Ossetia	Georgia	Northern	Eastern	42°14′N 43°58′E	40	45
+Nizhny Novgorod	Nizhny Novgorod Oblast	Russia	Northern	Eastern	56°20′N 44°00′E	55	45
+Arbil	Iraqi Kurdistan	Iraq	Northern	Eastern	36°11′N 44°01′E	35	45
+Hargeisa	Somaliland	Somalia	Northern	Eastern	9°34′N 44°04′E	10	45
+Sana'a		Yemen	Northern	Eastern	15°21′N 44°12′E	15	45
+Kirkuk		Iraq	Northern	Eastern	35°28′N 44°19′E	35	45
+Baghdad		Iraq	Northern	Eastern	33°20′N 44°26′E	35	45
+Volgograd	Volgograd Oblast	Russia	Northern	Eastern	48°42′N 44°31′E	50	45
+Yerevan		Armenia	Northern	Eastern	40°11′N 44°31′E	40	45
+Tbilisi		Georgia	Northern	Eastern	41°43′N 44°47′E	40	45
+Mogadishu		Somalia	Northern	Eastern	2°02′N 45°21′E	0	45
+Saratov	Saratov Oblast	Russia	Northern	Eastern	51°32′N 46°01′E	50	45
+Tabriz		Iran	Northern	Eastern	38°04′N 46°18′E	40	45
+Riyadh		Saudi Arabia	Northern	Eastern	24°38′N 46°43′E	25	45
+Stepanakert	Artsakh	Azerbaijan	Northern	Eastern	39°49′N 46°45′E	40	45
+Basra		Iraq	Northern	Eastern	30°30′N 47°49′E	30	50
+Kuwait City		Kuwait	Northern	Eastern	29°22′N 47°59′E	30	50
+Kazan	Republic of Tatarstan	Russia	Northern	Eastern	55°47′N 49°08′E	55	50
+Tolyatti	Samara Oblast	Russia	Northern	Eastern	53°31′N 49°25′E	55	50
+Baku		Azerbaijan	Northern	Eastern	40°24′N 49°53′E	40	50
+Samara	Samara Oblast	Russia	Northern	Eastern	53°12′N 50°08′E	55	50
+Dammam		Saudi Arabia	Northern	Eastern	26°17′N 50°12′E	25	50
+Manama		Bahrain	Northern	Eastern	26°13′N 50°35′E	25	50
+Tehran		Iran	Northern	Eastern	35°42′N 51°25′E	35	50
+Doha		Qatar	Northern	Eastern	25°17′N 51°32′E	25	50
+Isfahan		Iran	Northern	Eastern	32°38′N 51°39′E	35	50
+Izhevsk	Udmurt Republic	Russia	Northern	Eastern	56°50′N 53°11′E	55	55
+Salalah		Oman	Northern	Eastern	17°01′N 54°05′E	15	55
+Abu Dhabi		United Arab Emirates	Northern	Eastern	24°28′N 54°22′E	25	55
+Dubai		United Arab Emirates	Northern	Eastern	25°15′N 55°18′E	25	55
+Ufa	Republic of Bashkortostan	Russia	Northern	Eastern	54°45′N 55°58′E	55	55
+Perm	Perm Krai	Russia	Northern	Eastern	58°00′N 56°19′E	60	55
+Ashgabat		Turkmenistan	Northern	Eastern	37°56′N 58°22′E	40	60
+Muscat		Oman	Northern	Eastern	23°37′N 58°36′E	25	60
+Nukus	Karakalpakstan	Uzbekistan	Northern	Eastern	42°28′N 59°36′E	40	60
+Mashhad		Iran	Northern	Eastern	36°18′N 59°36′E	35	60
+Yekaterinburg	Sverdlovsk Oblast	Russia	Northern	Eastern	56°50′N 60°35′E	55	60
+Chelyabinsk	Chelyabinsk Oblast	Russia	Northern	Eastern	55°09′N 61°23′E	55	60
+Kandahar		Afghanistan	Northern	Eastern	31°37′N 65°43′E	30	65
+Karachi	Sindh	Pakistan	Northern	Eastern	24°52′N 67°01′E	25	65
+Hyderabad	Sindh	Pakistan	Northern	Eastern	25°23′N 68°22′E	25	70
+Dushanbe		Tajikistan	Northern	Eastern	38°32′N 68°47′E	40	70
+Kabul		Afghanistan	Northern	Eastern	34°32′N 69°10′E	35	70
+Tashkent		Uzbekistan	Northern	Eastern	41°16′N 69°13′E	40	70
+Astana		Kazakhstan	Northern	Eastern	51°10′N 71°26′E	50	70
+Multan	Punjab	Pakistan	Northern	Eastern	30°12′N 71°28′E	30	70
+Peshawar	Khyber Pakhtunkhwa	Pakistan	Northern	Eastern	34°01′N 71°35′E	35	70
+Namangan		Uzbekistan	Northern	Eastern	41°00′N 71°40′E	40	70
+Ahmedabad	Gujarat	India	Northern	Eastern	23°02′N 72°35′E	25	75
+Mumbai (Bombay)	Maharashtra	India	Northern	Eastern	18°59′N 72°50′E	20	75
+Surat	Gujarat	India	Northern	Eastern	21°10′N 72°50′E	20	75
+Rawalpindi	Punjab	Pakistan	Northern	Eastern	33°36′N 73°02′E	35	75
+Islamabad	Islamabad Capital Territory	Pakistan	Northern	Eastern	33°43′N 73°04′E	35	75
+Faisalabad	Punjab	Pakistan	Northern	Eastern	31°25′N 73°05′E	30	75
+Omsk	Omsk Oblast	Russia	Northern	Eastern	54°59′N 73°22′E	55	75
+Malé		Maldives	Northern	Eastern	4°11′N 73°31′E	5	75
+Pune	Maharashtra	India	Northern	Eastern	18°31′N 73°51′E	20	75
+Lahore	Punjab	Pakistan	Northern	Eastern	31°33′N 74°21′E	30	75
+Bishkek		Kyrgyzstan	Northern	Eastern	42°52′N 74°37′E	45	75
+Srinagar	Jammu and Kashmir	India	Northern	Eastern	34°05′N 74°47′E	35	75
+Amritsar	Punjab	India	Northern	Eastern	31°38′N 74°52′E	30	75
+Jaipur	Rajasthan	India	Northern	Eastern	26°56′N 75°49′E	25	75
+Ludhiana	Punjab	India	Northern	Eastern	30°55′N 75°51′E	30	75
+Kochi	Kerala	India	Northern	Eastern	9°58′N 76°17′E	10	75
+Chandigarh		India	Northern	Eastern	30°45′N 76°47′E	30	75
+Almaty		Kazakhstan	Northern	Eastern	43°17′N 76°54′E	45	75
+Trivandrum	Kerala	India	Northern	Eastern	8°29′N 76°57′E	10	75
+Shimla	Himachal Pradesh	India	Northern	Eastern	31°06′N 77°10′E	30	75
+New Delhi	Delhi	India	Northern	Eastern	28°37′N 77°13′E	30	75
+Bangalore	Karnataka	India	Northern	Eastern	12°58′N 77°34′E	15	80
+Agra	Uttar Pradesh	India	Northern	Eastern	27°11′N 78°01′E	25	80
+Hyderabad	Andhra Pradesh	India	Northern	Eastern	17°22′N 78°29′E	15	80
+Nagpur	Maharashtra	India	Northern	Eastern	21°08′N 79°05′E	20	80
+Kulpahar	Uttar Pradesh	India	Northern	Eastern	25°19′N 79°38′E	25	80
+Colombo		Sri Lanka	Northern	Eastern	6°56′N 79°51′E	5	80
+Sri Jayawardenapura-Kotte		Sri Lanka	Northern	Eastern	6°55′N 79°53′E	5	80
+Chennai (Madras)	Tamil Nadu	India	Northern	Eastern	13°05′N 80°16′E	15	80
+Kanpur	Uttar Pradesh	India	Northern	Eastern	26°28′N 80°20′E	25	80
+Kandy		Sri Lanka	Northern	Eastern	7°18′N 80°38′E	5	80
+Lucknow	Uttar Pradesh	India	Northern	Eastern	26°51′N 80°57′E	25	80
+Batticaloa		Sri Lanka	Northern	Eastern	7°43′N 81°42′E	10	80
+Novosibirsk	Novosibirsk Oblast	Russia	Northern	Eastern	55°01′N 82°56′E	55	85
+Visakhapatnam	Andhra Pradesh	India	Northern	Eastern	17°41′N 83°13′E	20	85
+Patna	Bihar	India	Northern	Eastern	25°37′N 85°09′E	25	85
+Kathmandu		Nepal	Northern	Eastern	27°42′N 85°20′E	30	85
+Ürümqi	Xinjiang	People's Republic of China	Northern	Eastern	43°50′N 87°36′E	45	90
+Norilsk	Krasnoyarsk Krai	Russia	Northern	Eastern	69°20′N 88°13′E	70	90
+Kolkata (Calcutta)	West Bengal	India	Northern	Eastern	22°34′N 88°22′E	25	90
+Siliguri	West Bengal	India	Northern	Eastern	26°43′N 88°26′E	25	90
+Gangtok	Sikkim	India	Northern	Eastern	27°20′N 88°37′E	25	90
+Shigatse	Tibet	People's Republic of China	Northern	Eastern	29°16′N 88°53′E	30	90
+Thimphu		Bhutan	Northern	Eastern	27°28′N 89°39′E	25	90
+Dhaka		Bangladesh	Northern	Eastern	23°42′N 90°23′E	25	90
+Lhasa	Tibet	People's Republic of China	Northern	Eastern	29°39′N 91°06′E	30	90
+Agartala	Tripura	India	Northern	Eastern	23°50′N 91°16′E	25	90
+Guwahati	Assam	India	Northern	Eastern	26°11′N 91°44′E	25	90
+Chittagong		Bangladesh	Northern	Eastern	22°22′N 91°48′E	20	90
+Shillong	Meghalaya	India	Northern	Eastern	25°34′N 91°53′E	25	90
+Port Blair	Andaman and Nicobar Islands	India	Northern	Eastern	11°40′N 92°46′E	10	95
+Tezpur	Assam	India	Northern	Eastern	26°38′N 92°48′E	25	95
+Krasnoyarsk	Krasnoyarsk Krai	Russia	Northern	Eastern	56°01′N 93°04′E	55	95
+Dibrugarh	Assam	India	Northern	Eastern	27°29′N 95°00′E	25	95
+Banda Aceh	Aceh	Indonesia	Northern	Eastern	5°33′N 95°19′E	5	95
+Naypyidaw		Myanmar	Northern	Eastern	19°45′N 96°06′E	20	95
+Yangon		Myanmar	Northern	Eastern	16°48′N 96°09′E	15	95
+Phuket		Thailand	Northern	Eastern	7°53′N 98°24′E	10	100
+Medan	North Sumatera	Indonesia	Northern	Eastern	3°35′N 98°40′E	5	100
+Chiang Mai		Thailand	Northern	Eastern	18°48′N 99°00′E	20	100
+Surat Thani		Thailand	Northern	Eastern	9°08′N 99°20′E	10	100
+Chiang Rai		Thailand	Northern	Eastern	19°55′N 99°50′E	20	100
+George Town	Penang	Malaysia	Northern	Eastern	5°25′N 100°19′E	5	100
+Alor Setar	Kedah	Malaysia	Northern	Eastern	6°07′N 100°22′E	5	100
+Bangkok		Thailand	Northern	Eastern	13°45′N 100°28′E	15	100
+Hat Yai		Thailand	Northern	Eastern	7°01′N 100°28′E	5	100
+Ayutthaya		Thailand	Northern	Eastern	14°21′N 100°34′E	15	100
+Pattaya		Thailand	Northern	Eastern	12°56′N 100°53′E	15	100
+Ipoh	Perak	Malaysia	Northern	Eastern	4°36′N 101°04′E	5	100
+Pekanbaru	Riau	Indonesia	Northern	Eastern	0°32′N 101°27′E	0	100
+Bratsk	Irkutsk Oblast	Russia	Northern	Eastern	56°07′N 101°36′E	55	100
+Kuala Lumpur	Federal Territory (Malaysia) Federal Territory	Malaysia	Northern	Eastern	3°09′N 101°42′E	5	100
+Xining	Qinghai	People's Republic of China	Northern	Eastern	36°38′N 101°46′E	35	100
+Nakhon Ratchasima		Thailand	Northern	Eastern	14°59′N 102°06′E	15	100
+Kota Bharu	Kelantan	Malaysia	Northern	Eastern	6°08′N 102°15′E	5	100
+Malacca Town	Malacca	Malaysia	Northern	Eastern	2°12′N 102°15′E	0	100
+Vientiane		Laos	Northern	Eastern	17°58′N 102°36′E	20	105
+Kunming	Yunnan	People's Republic of China	Northern	Eastern	25°04′N 102°41′E	25	105
+Udon Thani		Thailand	Northern	Eastern	17°25′N 102°45′E	15	105
+Khon Kaen		Thailand	Northern	Eastern	16°26′N 102°50′E	15	105
+Johor Bahru	Johor	Malaysia	Northern	Eastern	1°29′N 103°44′E	0	105
+Lanzhou	Gansu	People's Republic of China	Northern	Eastern	36°02′N 103°48′E	35	105
+Singapore		Singapore	Northern	Eastern	1°17′N 103°50′E	0	105
+Siem Reap		Cambodia	Northern	Eastern	13°22′N 103°52′E	15	105
+Chengdu	Sichuan	People's Republic of China	Northern	Eastern	30°40′N 104°04′E	30	105
+Irkutsk	Irkutsk Oblast	Russia	Northern	Eastern	52°19′N 104°18′E	50	105
+Phnom Penh		Cambodia	Northern	Eastern	11°33′N 104°55′E	10	105
+Hanoi		Vietnam	Northern	Eastern	21°02′N 105°51′E	20	105
+Chongqing		People's Republic of China	Northern	Eastern	29°34′N 106°34′E	30	105
+Ho Chi Minh City		Vietnam	Northern	Eastern	10°46′N 106°41′E	10	105
+Hai Phong		Vietnam	Northern	Eastern	20°51′N 106°41′E	20	105
+Ulaanbaatar		Mongolia	Northern	Eastern	47°55′N 106°55′E	50	105
+Huế		Vietnam	Northern	Eastern	16°28′N 107°35′E	15	110
+Da Nang		Vietnam	Northern	Eastern	16°04′N 108°14′E	15	110
+Nanning	Guangxi	People's Republic of China	Northern	Eastern	22°49′N 108°19′E	25	110
+Xi'an	Shaanxi	People's Republic of China	Northern	Eastern	34°16′N 108°54′E	35	110
+Kuching	Sarawak	Malaysia	Northern	Eastern	1°34′N 110°21′E	0	110
+Taiyuan	Shanxi	People's Republic of China	Northern	Eastern	37°52′N 112°34′E	40	115
+Guangzhou	Guangdong	People's Republic of China	Northern	Eastern	23°08′N 113°16′E	25	115
+Macau		People's Republic of China	Northern	Eastern	22°10′N 113°33′E	20	115
+Zhengzhou	Henan	People's Republic of China	Northern	Eastern	34°46′N 113°39′E	35	115
+Dongguan	Guangdong	People's Republic of China	Northern	Eastern	23°02′N 113°43′E	25	115
+Miri	Sarawak	Malaysia	Northern	Eastern	4°24′N 114°00′E	5	115
+Shenzhen	Guangdong	People's Republic of China	Northern	Eastern	22°33′N 114°06′E	25	115
+Hong Kong		People's Republic of China	Northern	Eastern	22°17′N 114°10′E	20	115
+Wuhan	Hubei	People's Republic of China	Northern	Eastern	30°35′N 114°17′E	30	115
+Handan	Hebei	People's Republic of China	Northern	Eastern	36°36′N 114°29′E	35	115
+Shijiazhuang	Hebei	People's Republic of China	Northern	Eastern	38°03′N 114°30′E	40	115
+Bandar Seri Begawan		Brunei	Northern	Eastern	4°53′N 114°57′E	5	115
+Kota Kinabalu	Sabah	Malaysia	Northern	Eastern	5°58′N 116°06′E	5	115
+Beijing		People's Republic of China	Northern	Eastern	39°55′N 116°23′E	40	115
+Jinan	Shandong	People's Republic of China	Northern	Eastern	36°40′N 116°59′E	35	115
+Tianjin		People's Republic of China	Northern	Eastern	39°08′N 117°11′E	40	115
+Nanjing	Jiangsu	People's Republic of China	Northern	Eastern	32°03′N 118°46′E	30	120
+Hangzhou	Zhejiang	People's Republic of China	Northern	Eastern	30°15′N 120°10′E	30	120
+Tainan		Republic of China (Taiwan)	Northern	Eastern	22°59′N 120°11′E	25	120
+Kaohsiung		Republic of China (Taiwan)	Northern	Eastern	22°38′N 120°16′E	25	120
+Qingdao	Shandong	People's Republic of China	Northern	Eastern	36°04′N 120°23′E	35	120
+Taichung		Republic of China (Taiwan)	Northern	Eastern	24°09′N 120°40′E	25	120
+Manila		Philippines	Northern	Eastern	14°35′N 120°58′E	15	120
+Quezon City		Philippines	Northern	Eastern	14°38′N 121°02′E	15	120
+Makati		Philippines	Northern	Eastern	14°33′N 121°02′E	15	120
+Shanghai		People's Republic of China	Northern	Eastern	31°12′N 121°30′E	30	120
+Taipei		Republic of China (Taiwan)	Northern	Eastern	25°02′N 121°38′E	25	120
+Dalian	Liaoning	People's Republic of China	Northern	Eastern	38°55′N 121°38′E	40	120
+Zamboanga City		Philippines	Northern	Eastern	6°54′N 122°04′E	5	120
+Iloilo City	Iloilo	Philippines	Northern	Eastern	10°43′N 122°34′E	10	125
+Shenyang	Liaoning	People's Republic of China	Northern	Eastern	41°48′N 123°24′E	40	125
+Tagbilaran	Bohol	Philippines	Northern	Eastern	9°39′N 123°51′E	10	125
+Cebu City	Cebu	Philippines	Northern	Eastern	10°17′N 123°54′E	10	125
+Changchun	Jilin	People's Republic of China	Northern	Eastern	43°54′N 125°12′E	45	125
+Davao City	Davao del Sur	Philippines	Northern	Eastern	7°04′N 125°36′E	5	125
+Pyongyang		North Korea	Northern	Eastern	39°01′N 125°44′E	40	125
+Kaesong	North Hwanghae	North Korea	Northern	Eastern	37°58′N 126°33′E	40	125
+Harbin	Heilongjiang	People's Republic of China	Northern	Eastern	45°45′N 126°38′E	45	125
+Incheon		South Korea	Northern	Eastern	37°29′N 126°38′E	35	125
+Seoul		South Korea	Northern	Eastern	37°34′N 126°59′E	40	125
+Wonsan	Kangwon	North Korea	Northern	Eastern	39°09′N 127°27′E	40	125
+Naha	Okinawa	Japan	Northern	Eastern	26°13′N 127°41′E	25	130
+Daegu		South Korea	Northern	Eastern	35°52′N 128°36′E	35	130
+Busan		South Korea	Northern	Eastern	35°11′N 129°05′E	35	130
+Yakutsk	Sakha Republic	Russia	Northern	Eastern	62°02′N 129°44′E	60	130
+Chongjin	North Hamgyong	North Korea	Northern	Eastern	41°48′N 129°47′E	40	130
+Fukuoka	Fukuoka	Japan	Northern	Eastern	33°35′N 130°24′E	35	130
+Vladivostok	Primorsky Krai	Russia	Northern	Eastern	43°08′N 131°54′E	45	130
+Hiroshima	Hiroshima	Japan	Northern	Eastern	34°23′N 132°27′E	35	130
+Verkhoyansk	Sakha Republic	Russia	Northern	Eastern	67°33′N 133°23′E	70	135
+Koror		Palau	Northern	Eastern	7°22′N 134°29′E	5	135
+Melekeok		Palau	Northern	Eastern	7°29′N 134°36′E	5	135
+Kōbe	Hyogo	Japan	Northern	Eastern	34°41′N 135°12′E	35	135
+Osaka	Osaka	Japan	Northern	Eastern	34°42′N 135°30′E	35	135
+Kyoto	Kyoto	Japan	Northern	Eastern	35°01′N 135°46′E	35	135
+Nagoya	Aichi	Japan	Northern	Eastern	35°11′N 136°54′E	35	135
+Yokohama	Kanagawa	Japan	Northern	Eastern	35°27′N 139°38′E	35	140
+Tokyo		Japan	Northern	Eastern	35°41′N 139°42′E	35	140
+Kawasaki	Kanagawa	Japan	Northern	Eastern	35°31′N 139°42′E	35	140
+Sendai	Miyagi	Japan	Northern	Eastern	38°16′N 140°52′E	40	140
+Sapporo	Hokkaido	Japan	Northern	Eastern	43°04′N 141°21′E	45	140
+Hagåtña	Guam	United States	Northern	Eastern	13°29′N 144°45′E	15	145
+Dededo	Guam	United States	Northern	Eastern	13°31′N 144°50′E	15	145
+Nemuro	Hokkaido	Japan	Northern	Eastern	43°20′N 145°35′E	45	145
+Saipan	Northern Mariana Islands	United States	Northern	Eastern	15°11′N 145°45′E	15	145
+Magadan	Magadan Oblast	Russia	Northern	Eastern	59°34′N 150°48′E	60	150
+Weno		Federated States of Micronesia	Northern	Eastern	7°27′N 151°51′E	5	150
+Palikir		Federated States of Micronesia	Northern	Eastern	6°55′N 158°10′E	5	160
+Petropavlovsk-Kamchatsky	Kamchatka Krai	Russia	Northern	Eastern	53°01′N 158°39′E	55	160
+Majuro		Marshall Islands	Northern	Eastern	7°04′N 171°16′E	5	170
+South Tarawa		Kiribati	Northern	Eastern	1°26′N 173°00′E	0	175
+Anadyr	Chukotka Autonomous Okrug	Russia	Northern	Eastern	64°44′N 177°31′E	65	180
+Rabi Island		Fiji	Southern	Western	16°30′S 180°00′W	-15	-180
+Mata-Utu	Wallis and Futuna	France	Southern	Western	13°17′S 176°11′W	-15	-175
+Nukuʻalofa		Tonga	Southern	Western	21°08′S 175°12′W	-20	-175
+Apia		Samoa	Southern	Western	13°50′S 171°45′W	-15	-170
+Pago Pago	American Samoa	United States	Southern	Western	14°17′S 170°42′W	-15	-170
+Alofi	Niue	New Zealand	Southern	Western	19°03′S 169°55′W	-20	-170
+Avarua	Cook Islands	New Zealand	Southern	Western	21°12′S 159°46′W	-20	-160
+Papeete	French Polynesia	France	Southern	Western	17°32′S 149°34′W	-20	-150
+Adamstown	Pitcairn Islands	United Kingdom	Southern	Western	25°04′S 130°06′W	-25	-130
+Hanga Roa	Easter Island	Chile	Southern	Western	27°09′S 109°26′W	-25	-110
+Guayaquil		Ecuador	Southern	Western	2°11′S 79°53′W	0	-80
+Trujillo		Peru	Southern	Western	8°07′S 79°02′W	-10	-80
+Quito		Ecuador	Southern	Western	0°15′S 78°35′W	0	-80
+Lima		Peru	Southern	Western	12°03′S 77°02′W	-10	-75
+Ayacucho		Peru	Southern	Western	13°10′S 74°13′W	-15	-75
+Iquitos		Peru	Southern	Western	3°44′S 73°15′W	-5	-75
+Valdivia		Chile	Southern	Western	39°49′S 73°15′W	-40	-75
+Concepción		Chile	Southern	Western	36°50′S 73°03′W	-35	-75
+Puerto Montt		Chile	Southern	Western	41°28′S 72°56′W	-40	-75
+Puerto Aisén		Chile	Southern	Western	45°24′S 72°41′W	-45	-75
+Temuco		Chile	Southern	Western	38°45′S 72°40′W	-40	-75
+Coihaique		Chile	Southern	Western	45°34′S 72°04′W	-45	-70
+Cusco		Peru	Southern	Western	13°32′S 71°58′W	-15	-70
+Valparaíso		Chile	Southern	Western	33°03′S 71°37′W	-35	-70
+Arequipa		Peru	Southern	Western	16°24′S 71°32′W	-15	-70
+San Carlos de Bariloche	Río Negro Province Río Negro	Argentina	Southern	Western	41°09′S 71°18′W	-40	-70
+La Serena		Chile	Southern	Western	29°54′S 71°15′W	-30	-70
+Punta Arenas		Chile	Southern	Western	53°10′S 70°56′W	-55	-70
+Santiago		Chile	Southern	Western	33°27′S 70°40′W	-35	-70
+Antofagasta		Chile	Southern	Western	23°39′S 70°24′W	-25	-70
+Arica		Chile	Southern	Western	18°29′S 70°20′W	-20	-70
+Copiapó		Chile	Southern	Western	27°22′S 70°20′W	-25	-70
+Iquique		Chile	Southern	Western	20°13′S 70°09′W	-20	-70
+Río Gallegos	Santa Cruz	Argentina	Southern	Western	51°38′S 69°13′W	-50	-70
+Calama		Chile	Southern	Western	22°28′S 68°56′W	-20	-70
+Mendoza	Mendoza	Argentina	Southern	Western	32°53′S 68°49′W	-35	-70
+Ushuaia	Tierra del Fuego	Argentina	Southern	Western	54°48′S 68°18′W	-55	-70
+La Paz		Bolivia	Southern	Western	16°30′S 68°09′W	-15	-70
+Rio Branco	Acre	Brazil	Southern	Western	9°58′S 67°49′W	-10	-70
+Puerto Williams		Chile	Southern	Western	54°56′S 67°37′W	-55	-70
+Comodoro Rivadavia	Chubut	Argentina	Southern	Western	45°52′S 67°29′W	-45	-65
+Puerto Toro		Chile	Southern	Western	55°05′S 67°05′W	-55	-65
+Salta	Salta	Argentina	Southern	Western	24°47′S 65°25′W	-25	-65
+Trelew	Chubut	Argentina	Southern	Western	43°15′S 65°18′W	-45	-65
+Sucre		Bolivia	Southern	Western	19°03′S 65°15′W	-20	-65
+San Miguel de Tucumán	Tucumán	Argentina	Southern	Western	26°49′S 65°13′W	-25	-65
+Córdoba	Córdoba	Argentina	Southern	Western	31°25′S 64°11′W	-30	-65
+Porto Velho	Rondônia	Brazil	Southern	Western	8°46′S 63°54′W	-10	-65
+Santa Cruz de la Sierra		Bolivia	Southern	Western	17°48′S 63°10′W	-20	-65
+Bahía Blanca	Buenos Aires Province	Argentina	Southern	Western	38°43′S 62°16′W	-40	-60
+Rosario	Santa Fe	Argentina	Southern	Western	32°57′S 60°40′W	-35	-60
+Manaus	Amazonas	Brazil	Southern	Western	3°06′S 60°01′W	-5	-60
+Buenos Aires		Argentina	Southern	Western	34°36′S 58°23′W	-35	-60
+Stanley	Falkland Islands	United Kingdom	Southern	Western	51°42′S 57°52′W	-50	-60
+Asunción		Paraguay	Southern	Western	25°17′S 57°38′W	-25	-60
+Montevideo		Uruguay	Southern	Western	34°53′S 56°11′W	-35	-55
+Cuiabá	Mato Grosso	Brazil	Southern	Western	15°36′S 56°06′W	-15	-55
+Sinop	Mato Grosso	Brazil	Southern	Western	11°51′S 55°39′W	-10	-55
+Ciudad del Este		Paraguay	Southern	Western	25°31′S 54°37′W	-25	-55
+Campo Grande	Mato Grosso do Sul	Brazil	Southern	Western	20°28′S 54°37′W	-20	-55
+Chuí	Rio Grande do Sul	Brazil	Southern	Western	33°41′S 53°27′W	-35	-55
+Pelotas	Rio Grande do Sul	Brazil	Southern	Western	31°46′S 52°21′W	-30	-50
+Porto Alegre	Rio Grande do Sul	Brazil	Southern	Western	30°02′S 51°14′W	-30	-50
+Assis	São Paulo	Brazil	Southern	Western	22°40′S 50°25′W	-25	-50
+São José do Rio Preto	São Paulo	Brazil	Southern	Western	20°48′S 49°23′W	-20	-50
+Goiânia	Goiás	Brazil	Southern	Western	16°40′S 49°15′W	-15	-50
+Curitiba	Paraná	Brazil	Southern	Western	25°25′S 49°15′W	-25	-50
+Bauru	São Paulo	Brazil	Southern	Western	22°19′S 49°04′W	-20	-50
+Belém	Pará	Brazil	Southern	Western	1°27′S 48°30′W	0	-50
+Florianópolis	Santa Catarina	Brazil	Southern	Western	27°50′S 48°25′W	-30	-50
+Palmas	Tocantins	Brazil	Southern	Western	10°11′S 48°20′W	-10	-50
+Uberlândia	Minas Gerais	Brazil	Southern	Western	18°55′S 48°17′W	-20	-50
+Araraquara	São Paulo	Brazil	Southern	Western	21°48′S 48°11′W	-20	-50
+Brasília	Federal District (Brazil) Distrito Federal	Brazil	Southern	Western	15°48′S 47°52′W	-15	-50
+Ribeirão Preto	São Paulo	Brazil	Southern	Western	21°11′S 47°48′W	-20	-50
+Imperatriz	Maranhão	Brazil	Southern	Western	5°32′S 47°29′W	-5	-45
+Campinas	São Paulo	Brazil	Southern	Western	22°54′S 47°03′W	-25	-45
+São Paulo	São Paulo	Brazil	Southern	Western	23°33′S 46°38′W	-25	-45
+Poços de Caldas	Minas Gerais	Brazil	Southern	Western	21°47′S 46°34′W	-20	-45
+São José dos Campos	São Paulo	Brazil	Southern	Western	23°11′S 45°53′W	-25	-45
+São Luís	Maranhão	Brazil	Southern	Western	2°32′S 44°18′W	-5	-45
+Belo Horizonte	Minas Gerais	Brazil	Southern	Western	19°55′S 43°56′W	-20	-45
+Juiz de Fora	Minas Gerais	Brazil	Southern	Western	21°46′S 43°21′W	-20	-45
+Rio de Janeiro	Rio de Janeiro	Brazil	Southern	Western	22°55′S 43°12′W	-25	-45
+Teresina	Piauí	Brazil	Southern	Western	5°06′S 42°48′W	-5	-45
+Governador Valadares	Minas Gerais	Brazil	Southern	Western	18°51′S 41°56′W	-20	-40
+Petrolina	Pernambuco	Brazil	Southern	Western	9°24′S 40°30′W	-10	-40
+Vitória	Espírito Santo	Brazil	Southern	Western	20°19′S 40°20′W	-20	-40
+Sobral	Ceará	Brazil	Southern	Western	3°40′S 40°14′W	-5	-40
+Juazeiro do Norte	Ceará	Brazil	Southern	Western	7°12′S 39°20′W	-5	-40
+Ilhéus	Bahia	Brazil	Southern	Western	14°47′S 39°03′W	-15	-40
+Fortaleza	Ceará	Brazil	Southern	Western	3°43′S 38°33′W	-5	-40
+Salvador	Bahia	Brazil	Southern	Western	12°58′S 38°29′W	-15	-40
+Aracaju	Sergipe	Brazil	Southern	Western	10°55′S 37°03′W	-10	-35
+Grytviken	South Georgia and the South Sandwich Islands	United Kingdom	Southern	Western	54°17′S 36°30′W	-55	-35
+Garanhuns	Pernambuco	Brazil	Southern	Western	8°53′S 36°30′W	-10	-35
+Caruaru	Pernambuco	Brazil	Southern	Western	8°17′S 35°59′W	-10	-35
+Campina Grande	Paraíba	Brazil	Southern	Western	7°14′S 35°53′W	-5	-35
+Maceió	Alagoas	Brazil	Southern	Western	9°40′S 35°44′W	-10	-35
+Natal	Rio Grande do Norte	Brazil	Southern	Western	5°47′S 35°12′W	-5	-35
+Recife	Pernambuco	Brazil	Southern	Western	8°03′S 34°54′W	-10	-35
+João Pessoa	Paraíba	Brazil	Southern	Western	7°05′S 34°50′W	-5	-35
+Fernando de Noronha	Pernambuco	Brazil	Southern	Western	3°51′S 32°25′W	-5	-30
+Jamestown	Saint Helena	United Kingdom	Southern	Western	15°55′S 5°43′W	-15	-5
+Luanda		Angola	Southern	Eastern	8°50′S 13°14′E	-10	15
+Brazzaville		Republic of the Congo	Southern	Eastern	4°16′S 15°18′E	-5	15
+Kinshasa		Democratic Republic of the Congo	Southern	Eastern	4°20′S 15°19′E	-5	15
+Huambo		Angola	Southern	Eastern	12°46′S 15°44′E	-15	15
+Windhoek		Namibia	Southern	Eastern	22°34′S 17°05′E	-25	15
+Cape Town	Western Cape	South Africa	Southern	Eastern	33°56′S 18°25′E	-35	20
+Kimberley	Northern Cape	South Africa	Southern	Eastern	28°45′S 24°46′E	-30	25
+Port Elizabeth	Eastern Cape	South Africa	Southern	Eastern	33°57′S 25°36′E	-35	25
+Mafikeng	North West	South Africa	Southern	Eastern	25°51′S 25°38′E	-25	25
+Livingstone		Zambia	Southern	Eastern	17°51′S 25°52′E	-20	25
+Gaborone		Botswana	Southern	Eastern	24°39′S 25°55′E	-25	25
+Bloemfontein	Free State	South Africa	Southern	Eastern	29°07′S 26°13′E	-30	25
+Bhisho	Eastern Cape	South Africa	Southern	Eastern	32°51′S 27°26′E	-35	25
+Lubumbashi		Democratic Republic of the Congo	Southern	Eastern	11°40′S 27°28′E	-10	25
+Maseru		Lesotho	Southern	Eastern	29°19′S 27°29′E	-30	25
+Francistown		Botswana	Southern	Eastern	21°10′S 27°31′E	-20	30
+Johannesburg	Gauteng	South Africa	Southern	Eastern	26°12′S 28°03′E	-25	30
+Pretoria	Gauteng	South Africa	Southern	Eastern	25°45′S 28°11′E	-25	30
+Lusaka		Zambia	Southern	Eastern	15°25′S 28°17′E	-15	30
+Bulawayo	Bulawayo	Zimbabwe	Southern	Eastern	20°10′S 28°35′E	-20	30
+Ndola		Zambia	Southern	Eastern	12°58′S 28°38′E	-15	30
+Bujumbura		Burundi	Southern	Eastern	3°23′S 29°22′E	-5	30
+Polokwane	Limpopo	South Africa	Southern	Eastern	23°54′S 29°27′E	-25	30
+Gweru	Midlands	Zimbabwe	Southern	Eastern	19°27′S 29°48′E	-20	30
+Kigali		Rwanda	Southern	Eastern	1°57′S 30°04′E	0	30
+Pietermaritzburg	KwaZulu-Natal	South Africa	Southern	Eastern	29°37′S 30°23′E	-30	30
+Nelspruit	Mpumalanga	South Africa	Southern	Eastern	25°28′S 30°59′E	-25	30
+Harare	Harare	Zimbabwe	Southern	Eastern	17°52′S 31°02′E	-20	30
+Durban	KwaZulu-Natal	South Africa	Southern	Eastern	29°53′S 31°03′E	-30	30
+Mbabane		Swaziland	Southern	Eastern	26°19′S 31°08′E	-25	30
+Lobamba		Swaziland	Southern	Eastern	26°25′S 31°10′E	-25	30
+Manzini		Swaziland	Southern	Eastern	26°29′S 31°22′E	-25	30
+Mutare	Manicaland	Zimbabwe	Southern	Eastern	18°58′S 32°38′E	-20	35
+Maputo		Mozambique	Southern	Eastern	25°58′S 32°35′E	-25	35
+Mwanza		Tanzania	Southern	Eastern	2°31′S 32°54′E	-5	35
+Lilongwe		Malawi	Southern	Eastern	13°59′S 33°47′E	-15	35
+Blantyre		Malawi	Southern	Eastern	15°47′S 35°00′E	-15	35
+Dodoma		Tanzania	Southern	Eastern	6°10′S 35°45′E	-5	35
+Nairobi		Kenya	Southern	Eastern	1°17′S 36°49′E	0	35
+Zanzibar City		Tanzania	Southern	Eastern	6°10′S 39°12′E	-5	40
+Dar es Salaam		Tanzania	Southern	Eastern	6°48′S 39°17′E	-5	40
+Mombasa		Kenya	Southern	Eastern	4°03′S 39°40′E	-5	40
+Kismayo		Somalia	Southern	Eastern	0°21′S 42°33′E	0	45
+Moroni		Comoros	Southern	Eastern	11°45′S 43°12′E	-10	45
+Mamoudzou	Mayotte	France	Southern	Eastern	12°47′S 45°14′E	-15	45
+Antananarivo		Madagascar	Southern	Eastern	18°56′S 47°31′E	-20	50
+Saint-Denis	Réunion	France	Southern	Eastern	20°53′S 55°27′E	-20	55
+Victoria		Seychelles	Southern	Eastern	4°37′S 55°27′E	-5	55
+Port Louis		Mauritius	Southern	Eastern	20°10′S 57°30′E	-20	60
+Padang	West Sumatera	Indonesia	Southern	Eastern	0°57′S 100°21′E	0	100
+Palembang	South Sumatera	Indonesia	Southern	Eastern	2°59′S 104°45′E	-5	105
+Jakarta	Jakarta	Indonesia	Southern	Eastern	6°12′S 106°48′E	-5	105
+Bogor	West Java	Indonesia	Southern	Eastern	6°36′S 106°48′E	-5	105
+Bandung	West Java	Indonesia	Southern	Eastern	6°55′S 107°37′E	-5	110
+Pontianak	West Kalimantan	Indonesia	Southern	Eastern	0°01′S 109°20′E	0	110
+Yogyakarta	Special Region of Yogyakarta	Indonesia	Southern	Eastern	7°48′S 110°22′E	-10	110
+Semarang	Central Java	Indonesia	Southern	Eastern	6°58′S 110°25′E	-5	110
+Malang	East Java	Indonesia	Southern	Eastern	7°59′S 112°37′E	-10	115
+Surabaya	East Java	Indonesia	Southern	Eastern	7°16′S 112°45′E	-5	115
+Denpasar	Bali	Indonesia	Southern	Eastern	8°39′S 115°13′E	-10	115
+Mandurah	Western Australia	Australia	Southern	Eastern	32°32′S 115°43′E	-35	115
+Perth	Western Australia	Australia	Southern	Eastern	31°57′S 115°52′E	-30	115
+Balikpapan	East Kalimantan	Indonesia	Southern	Eastern	1°16′S 116°50′E	0	115
+Port Hedland	Western Australia	Australia	Southern	Eastern	20°19′S 118°36′E	-20	120
+Makassar	South Sulawesi	Indonesia	Southern	Eastern	5°08′S 119°25′E	-5	120
+Dili		Timor-Leste	Southern	Eastern	8°33′S 125°35′E	-10	125
+Ambon	Maluku	Indonesia	Southern	Eastern	3°42′S 128°10′E	-5	130
+Darwin	Northern Territory	Australia	Southern	Eastern	12°27′S 130°50′E	-10	130
+Adelaide	South Australia	Australia	Southern	Eastern	34°56′S 138°36′E	-35	140
+Jayapura	Papua	Indonesia	Southern	Eastern	2°32′S 140°43′E	-5	140
+Geelong	Victoria	Australia	Southern	Eastern	38°09′S 144°21′E	-40	145
+Melbourne	Victoria (Australia) Victoria	Australia	Southern	Eastern	37°49′S 144°58′E	-40	145
+Cairns	Queensland	Australia	Southern	Eastern	16°56′S 145°47′E	-15	145
+Townsville	Queensland	Australia	Southern	Eastern	19°15′S 146°49′E	-20	145
+Port Moresby		Papua New Guinea	Southern	Eastern	9°31′S 147°13′E	-10	145
+Hobart	Tasmania	Australia	Southern	Eastern	42°53′S 147°20′E	-45	145
+Canberra	Australian Capital Territory	Australia	Southern	Eastern	35°18′S 149°07′E	-35	150
+Rockhampton	Queensland	Australia	Southern	Eastern	23°23′S 150°31′E	-25	150
+Wollongong	New South Wales	Australia	Southern	Eastern	34°26′S 150°53′E	-35	150
+Sydney	New South Wales	Australia	Southern	Eastern	33°52′S 151°13′E	-35	150
+Newcastle	New South Wales	Australia	Southern	Eastern	32°55′S 151°45′E	-35	150
+Brisbane	Queensland	Australia	Southern	Eastern	27°28′S 153°02′E	-25	155
+Gold Coast	Queensland	Australia	Southern	Eastern	28°01′S 153°24′E	-30	155
+Honiara		Solomon Islands	Southern	Eastern	9°28′S 159°49′E	-10	160
+Nouméa	New Caledonia	France	Southern	Eastern	22°17′S 166°27′E	-20	165
+Yaren District		Nauru	Southern	Eastern	0°33′S 166°55′E	0	165
+Kingston	Norfolk Island	Australia	Southern	Eastern	29°04′S 167°58′E	-30	170
+Port Vila		Vanuatu	Southern	Eastern	17°45′S 168°18′E	-20	170
+Invercargill		New Zealand	Southern	Eastern	46°25′S 168°21′E	-45	170
+Dunedin		New Zealand	Southern	Eastern	45°52′S 170°30′E	-45	170
+Christchurch		New Zealand	Southern	Eastern	43°32′S 172°37′E	-45	175
+Nelson		New Zealand	Southern	Eastern	41°16′S 173°17′E	-40	175
+Auckland		New Zealand	Southern	Eastern	36°50′S 174°44′E	-35	175
+Wellington		New Zealand	Southern	Eastern	41°17′S 174°47′E	-40	175
+Hamilton		New Zealand	Southern	Eastern	37°47′S 175°17′E	-40	175
+Hastings		New Zealand	Southern	Eastern	39°39′S 176°50′E	-40	175
+Suva		Fiji	Southern	Eastern	18°08′S 178°27′E	-20	180
+Funafuti		Tuvalu	Southern	Eastern	8°31′S 179°13′E	-10	180
+Labasa		Fiji	Southern	Eastern	16°26′S 179°22′E	-15	180
+Nukulaelae		Tuvalu	Southern	Eastern	9°23′S 179°51′E	-10	180
