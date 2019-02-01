@@ -1378,7 +1378,7 @@ int main(int argc, const char *argv[]) {
                       << config->port << std::endl;
 
             try {
-                asio::io_context io_context(num_threads);
+                asio::io_context io_context;
 
                 asio::signal_set signals(io_context, SIGINT, SIGTERM);
                 signals.async_wait([&](auto, auto) { io_context.stop(); });
@@ -1399,7 +1399,13 @@ int main(int argc, const char *argv[]) {
                     }
                 );
 
-                io_context.run();
+                std::vector<std::thread> workers;
+                for (size_t i = 0; i < std::max(1u, config->parallel); ++i) {
+                    workers.emplace_back([&io_context]() { io_context.run(); });
+                }
+                for (auto &thread : workers) {
+                    thread.join();
+                }
             } catch (const std::exception &e) {
                 std::cerr << "Exception: " << e.what() << std::endl;
             } catch (...) {

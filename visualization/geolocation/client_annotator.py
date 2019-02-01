@@ -14,43 +14,10 @@ import socket
 import sys
 import struct
 from helpers import get_js_sample_list
+from connection import Connection
 
 
 __author__ = 'Mikhail Karasikov'
-
-
-BUFF_SIZE = 4096
-MAX_STRING_SIZE = 10**8
-
-
-class Connection:
-    """ Class for communication through socket
-    It guarantees correct transmission for TCP socket
-    """
-
-    def __init__(self, socket):
-        self.socket = socket
-
-    def send_string(self, string):
-        self.socket.sendall(string.encode('utf-8'))
-
-    def receive_string(self):
-        received = []
-        string_length = 0
-
-        # Receive data by small chunks and reconstruct the string
-        while True:
-            received.append(self.socket.recv(BUFF_SIZE))
-            string_length += len(received[-1])
-
-            if string_length > MAX_STRING_SIZE:
-                raise IOError("Received string length longer than maximum allowed" +
-                                " (" + str(string_length) + " > " + str(MAX_STRING_SIZE) + ")")
-
-            if len(received[-1]) < BUFF_SIZE:
-                break
-
-        return b"".join(received).decode("utf-8")
 
 
 class ClientAnnotator():
