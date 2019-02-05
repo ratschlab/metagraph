@@ -1845,22 +1845,18 @@ int main(int argc, const char *argv[]) {
                     exit(1);
                 }
 
+                const auto &dump_sequence = [&](const auto &sequence) {
+                    if (!write_fasta(out_fasta_gz, "", sequence)) {
+                        std::cerr << "ERROR: Can't write extracted sequences to "
+                                  << out_filename << std::endl;
+                        exit(1);
+                    }
+                };
+
                 if (config->contigs || config->pruned_dead_end_size > 0) {
-                    graph->call_contigs([&](const auto &sequence) {
-                        if (!write_fasta(out_fasta_gz, "", sequence)) {
-                            std::cerr << "ERROR: Can't write extracted sequences to "
-                                      << out_filename << std::endl;
-                            exit(1);
-                        }
-                    }, config->pruned_dead_end_size);
+                    graph->call_contigs(dump_sequence, config->pruned_dead_end_size);
                 } else {
-                    graph->call_sequences([&](const auto &sequence) {
-                        if (!write_fasta(out_fasta_gz, "", sequence)) {
-                            std::cerr << "ERROR: Can't write extracted sequences to "
-                                      << out_filename << std::endl;
-                            exit(1);
-                        }
-                    });
+                    graph->call_sequences(dump_sequence);
                 }
 
                 gzclose(out_fasta_gz);

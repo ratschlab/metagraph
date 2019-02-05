@@ -1794,11 +1794,6 @@ void DBG_succ::merge(const DBG_succ &other) {
     });
 }
 
-struct Edge {
-    DBG_succ::edge_index id;
-    std::vector<TAlphabet> source_kmer;
-};
-
 /**
  * Traverse graph and extract directed paths covering the graph
  * edge, edge -> edge, edge -> ... -> edge, ... (k+1 - mer, k+...+1 - mer, ...)
@@ -1823,6 +1818,11 @@ void DBG_succ::call_paths(Call<const std::vector<edge_index>,
             call_paths(i, callback, split_to_contigs, &discovered, &visited);
     }
 }
+
+struct Edge {
+    DBG_succ::edge_index id;
+    std::vector<TAlphabet> source_kmer;
+};
 
 void DBG_succ::call_paths(edge_index starting_kmer,
                           Call<const std::vector<edge_index>,
@@ -1853,6 +1853,7 @@ void DBG_succ::call_paths(edge_index starting_kmer,
         while (!visited[edge]) {
             assert(edge > 0 && discovered[edge]);
 
+            // visit the edge
             sequence.push_back(get_W(edge) % alph_size);
             path.push_back(edge);
             visited[edge] = true;
@@ -1861,12 +1862,9 @@ void DBG_succ::call_paths(edge_index starting_kmer,
             if (!sequence.back())
                 break;
 
-            bool continue_traversal = true;
-
             // stop traversing if we call contigs and this
             // is not the only incoming edge
-            if (split_to_contigs)
-                continue_traversal = is_single_incoming(edge);
+            bool continue_traversal = !split_to_contigs || is_single_incoming(edge);
 
             // make one traversal step
             edge = fwd(edge);
@@ -1875,36 +1873,31 @@ void DBG_succ::call_paths(edge_index starting_kmer,
             if (continue_traversal && is_single_outgoing(edge)) {
                 discovered[edge] = true;
                 continue;
-            } else {
-                kmer.assign(sequence.end() - k_, sequence.end());
-
-                // loop over outgoing edges
-                continue_traversal = false;
-                do {
-                    if (!discovered[edge]) {
-                        // mark that there is at least one outgoing
-                        // edge  that has not been discovered
-                        continue_traversal = true;
-                        discovered[edge] = true;
-                        edges.push_back({ edge, kmer });
-                    }
-                } while (--edge > 0 && !get_last(edge));
-
-                // stop traversing this sequence if we call contigs
-                // in order to call only simple paths
-                if (split_to_contigs)
-                    break;
-
-                // pick the first outgoing but yet undiscovered
-                // edge and continue traversing the graph
-                if (continue_traversal) {
-                    edge = edges.back().id;
-                    edges.pop_back();
-                    continue;
-                } else {
-                    break;
-                }
             }
+
+            kmer.assign(sequence.end() - k_, sequence.end());
+            edge_index next_edge = 0;
+
+            // loop over outgoing edges
+            do {
+                if (!next_edge && !split_to_contigs && !visited[edge]) {
+                    // save the edge for visiting if we extract arbitrary paths
+                    discovered[edge] = true;
+                    next_edge = edge;
+                } else if (!discovered[edge]) {
+                    // discover other edges
+                    discovered[edge] = true;
+                    edges.push_back({ edge, kmer });
+                }
+            } while (--edge > 0 && !get_last(edge));
+
+            // stop traversing this sequence if the next edge was not selected
+            if (!next_edge)
+                break;
+
+            // pick the last outgoing but not yet visited
+            // edge and continue traversing the graph
+            edge = next_edge;
         }
 
         if (path.size())
