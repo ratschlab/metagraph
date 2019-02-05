@@ -15,7 +15,7 @@ fi
 
 FILE="${1%.kmc_suf}"
 K=$2
-num_threads=10
+num_threads=4
 
 /usr/bin/time -v $exe build -v -p $num_threads -k $K -o $FILE --kmc $FILE
-/usr/bin/time -v $exe transform -v --to-fasta --contigs -p $num_threads -o ${FILE}.contigs $FILE
+/usr/bin/time -v $exe transform -v --to-fasta --contigs -p $num_threads -o ${FILE}.k$K.contigs $FILE
