@@ -208,7 +208,8 @@ Config::Config(int argc, const char *argv[]) {
 
     if (!fname.size() && identity != STATS
                       && identity != SERVER_CLASSIFY
-                      && (identity != CONCATENATE || infbase.empty())) {
+                      && !(identity == BUILD && complete)
+                      && !(identity == CONCATENATE && !infbase.empty())) {
         std::string line;
         while (std::getline(std::cin, line)) {
             if (line.size())
@@ -226,6 +227,7 @@ Config::Config(int argc, const char *argv[]) {
     if (identity != CONCATENATE
             && identity != STATS
             && identity != SERVER_CLASSIFY
+            && !(identity == BUILD && complete)
             && !fname.size())
         print_usage_and_exit = true;
 
