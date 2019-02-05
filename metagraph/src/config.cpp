@@ -75,6 +75,8 @@ Config::Config(int argc, const char *argv[]) {
             reverse = true;
         } else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--canonical")) {
             canonical = true;
+        } else if (!strcmp(argv[i], "--complete")) {
+            complete = true;
         } else if (!strcmp(argv[i], "--dynamic")) {
             dynamic = true;
         } else if (!strcmp(argv[i], "--no-shrink")) {
@@ -462,6 +464,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --graph [STR] \tgraph representation [succinct]\n");
             fprintf(stderr, "\t                     \t  "); fprintf(stderr, graph_list); fprintf(stderr, "\n");
             fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
+            fprintf(stderr, "\t   --complete \t\tconstruct a complete graph (only for Bitmap-graph) [off]\n");
             fprintf(stderr, "\t   --no-shrink \t\tdo not build mask for dummy k-mers [off]\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
             fprintf(stderr, "\t   --mem-cap-gb [INT] \tmaximum memory available, in Gb [inf]\n");
@@ -568,7 +571,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for annotate:\n");
             fprintf(stderr, "\t   --kmc \t\t\tparse k-mers from precomputed KMC database\n");
-            //fprintf(stderr, "\t   --complete \t\tconstruct a complete graph [off]\n");
             fprintf(stderr, "\t   --reference [STR] \t\tbasename of reference sequence []\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to update []\n");
             fprintf(stderr, "\t   --anno-type [STR] \t\tinternal annotation representation [column]\n");

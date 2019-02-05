@@ -14,6 +14,7 @@ class Config {
     bool print_graph_internal_repr = false;
     bool reverse = false;
     bool canonical = false;
+    bool complete = false;
     bool dynamic = false;
     bool mark_dummy_kmers = true;
     bool filename_anno = false;

@@ -698,7 +698,16 @@ int main(int argc, const char *argv[]) {
 
             Timer timer;
 
-            if (config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic) {
+            if (config->complete) {
+                if (config->graph_type != Config::GraphType::BITMAP) {
+                    std::cerr << "Error: Only bitmap-graph can be built"
+                              << " in complete mode" << std::endl;
+                    exit(1);
+                }
+
+                graph.reset(new DBGSD(config->k, config->canonical));
+
+            } else if (config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic) {
                 if (config->canonical)
                     config->reverse = true;
 
@@ -870,7 +879,9 @@ int main(int argc, const char *argv[]) {
                         graph.reset(new DBGHashOrdered(config->k, config->canonical));
                         break;
                     case Config::GraphType::BITMAP:
-                        assert(false);
+                        std::cerr << "Error: Bitmap-graph construction"
+                                  << " in dynamic regime is not supported" << std::endl;
+                        exit(1);
                     case Config::GraphType::INVALID:
                         assert(false);
                 }
