@@ -1249,9 +1249,13 @@ TEST(DBGSD, TraversalsCanonical) {
         EXPECT_EQ(DBGSD::npos, graph->traverse_back(it2, 'G'));
 
         graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
-        ASSERT_EQ(graph->kmer_to_node(std::string(k, 'G')), it);
-        ASSERT_NE(graph->kmer_to_node(std::string(k, 'C')), it);
+        // GGG..G is added as a reverse complement to CCC..C, and mapped to CCC..C
         ASSERT_NE(DBGSD::npos, it);
+        ASSERT_EQ(graph->kmer_to_node(std::string(k, 'C')), it);
+        ASSERT_NE(graph->kmer_to_node(std::string(k, 'G')), it);
+        ASSERT_NE(graph->kmer_to_node(std::string(k, 'G')), DBGSD::npos);
+
+        it = graph->kmer_to_node(std::string(k, 'G'));
         it2 = graph->kmer_to_node(std::string(k - 1, 'G') + "T");
         ASSERT_NE(DBGSD::npos, it2);
         EXPECT_EQ(DBGSD::npos, graph->traverse(it, 'A'));
@@ -1319,11 +1323,10 @@ TEST(DBGSD, TraversalsDBGCanonical) {
         EXPECT_EQ(npos, graph->traverse_back(it + 1, 'G'));
 
         // reverse complement
-        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        it = dynamic_cast<DBGSD&>(*graph).kmer_to_node(std::string(k, 'G'));
         ASSERT_NE(npos, it);
 
-        EXPECT_EQ(it, graph->traverse(it, 'G'))
-            << *dynamic_cast<DBGSD*>(graph.get());
+        EXPECT_EQ(it, graph->traverse(it, 'G')) << dynamic_cast<DBGSD&>(*graph);
         EXPECT_NE(npos, graph->traverse(it, 'T'));
         EXPECT_EQ(it, graph->traverse_back(graph->traverse(it, 'T'), 'G'));
     }

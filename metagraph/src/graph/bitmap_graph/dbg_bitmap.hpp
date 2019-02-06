@@ -10,13 +10,20 @@
 
 class DBGSDConstructor;
 
-
+/**
+ * Node-centric de Bruijn graph
+ *
+ * In canonical mode, for each k-mer in the graph, its
+ * reverse complement is stored in the graph as well.
+ */
 class DBGSD : public DeBruijnGraph {
     friend DBGSDConstructor;
 
   public:
+    // Initialize complete graph
     explicit DBGSD(size_t k, bool canonical_mode = false);
 
+    // Initialize graph from builder
     explicit DBGSD(DBGSDConstructor *builder);
 
     // Traverse graph mapping sequence to the graph nodes
@@ -75,10 +82,16 @@ class DBGSD : public DeBruijnGraph {
     void add_sequence(const std::string &sequence,
                       bit_vector_dyn *nodes_inserted = NULL);
 
-    Vector<Kmer> sequence_to_kmers(const std::string &sequence) const;
+    Vector<Kmer> sequence_to_kmers(const std::string &sequence,
+                                   bool to_canonical = false) const;
 
-    node_index get_index(const Kmer &kmer, const Kmer *kmer_rev = nullptr) const;
-    Kmer get_kmer(node_index node) const;
+    // get the node index if |kmer| is in the graph and npos otherwise
+    node_index get_node(const Kmer &kmer) const;
+
+    // translate index |node| from [1...1+|A|^k] to a Kmer in A^k
+    Kmer to_kmer(node_index node) const;
+    // translate |kmer| from A^k to a node index in [1...1+|A|^k]
+    node_index to_index(const Kmer &kmer) const;
 
     std::vector<node_index> outgoing(node_index node) const;
 
