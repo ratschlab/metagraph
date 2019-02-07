@@ -67,10 +67,21 @@ DBGSD::traverse_back(node_index node, char prev_char) const {
 }
 
 std::vector<DBGSD::node_index>
-DBGSD::outgoing(node_index node) const {
+DBGSD::adjacent_outgoing_nodes(node_index node) const {
     std::vector<node_index> indices;
     for (char c : alphabet) {
         auto next_index = traverse(node, c);
+        if (next_index != npos)
+            indices.emplace_back(std::move(next_index));
+    }
+    return indices;
+}
+
+std::vector<DBGSD::node_index>
+DBGSD::adjacent_incoming_nodes(node_index node) const {
+    std::vector<node_index> indices;
+    for (char c : alphabet) {
+        auto next_index = traverse_back(node, c);
         if (next_index != npos)
             indices.emplace_back(std::move(next_index));
     }
@@ -196,7 +207,7 @@ void DBGSD::call_paths(Call<const std::vector<node_index>,
                 path.push_back(index_to_node(node));
                 visited[node] = true;
 
-                auto out_kmers = outgoing(index_to_node(node));
+                auto out_kmers = adjacent_outgoing_nodes(index_to_node(node));
                 std::vector<TAlphabet> kmer(sequence.end() - k_ + 1, sequence.end());
 
                 if (out_kmers.size() == 1) {

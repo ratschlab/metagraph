@@ -37,6 +37,9 @@ class DBGSD : public DeBruijnGraph {
     // Traverse the incoming edge
     node_index traverse_back(node_index node, char prev_char) const;
 
+    std::vector<node_index> adjacent_outgoing_nodes(node_index node) const;
+    std::vector<node_index> adjacent_incoming_nodes(node_index node) const;
+
     node_index kmer_to_node(const std::string &kmer) const;
     std::string node_to_kmer(node_index i) const;
 
@@ -92,8 +95,6 @@ class DBGSD : public DeBruijnGraph {
     Kmer to_kmer(node_index node) const;
     // translate |kmer| from A^k to a node index in [1...1+|A|^k]
     node_index to_index(const Kmer &kmer) const;
-
-    std::vector<node_index> outgoing(node_index node) const;
 
     typedef uint8_t TAlphabet;
 
