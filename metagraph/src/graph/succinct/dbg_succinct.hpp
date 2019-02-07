@@ -114,6 +114,9 @@ class DBG_succ {
     node_index traverse(node_index node, char edge_label) const;
     node_index traverse_back(node_index node, char edge_label) const;
 
+    std::pair<edge_index, edge_index> get_outgoing_edge_range(node_index node) const;
+    std::vector<edge_index> get_incoming_edges(node_index node) const;
+
     /**
      * Add a full sequence to the graph.
      * If |try_extend| is true, search for the first k-mer in the graph
@@ -446,6 +449,8 @@ class DBG_succ {
 
         uint64_t edge = index(begin, end - 1);
 
+        assert(edge ? pick_edge(edge, get_source_node(edge), *(end - 1))
+                    : npos < W_->size());
         return edge ? pick_edge(edge, get_source_node(edge), *(end - 1))
                     : npos;
     }
@@ -558,6 +563,9 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual node_index traverse(node_index node, char next_char) const override final;
     // Traverse the incoming edge
     virtual node_index traverse_back(node_index node, char prev_char) const override final;
+
+    virtual std::vector<node_index> adjacent_outgoing_nodes(node_index node) const override final;
+    virtual std::vector<node_index> adjacent_incoming_nodes(node_index node) const override final;
 
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal

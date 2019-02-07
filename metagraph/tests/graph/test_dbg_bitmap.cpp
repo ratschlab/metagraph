@@ -1296,6 +1296,114 @@ TEST(DBGSD, TraversalsDBG) {
     }
 }
 
+TEST(DBGSD, OutgoingAdjacent) {
+    for (size_t k = 2; k <= 20; ++k) {
+        DBGSDConstructor constructor(k);
+        constructor.add_sequence(std::string(100, 'A') + std::string(100, 'C')
+                                                       + std::string(100, 'G'));
+        std::unique_ptr<DeBruijnGraph> graph { new DBGSD(&constructor) };
+
+        uint64_t it = 0;
+
+        // AA, AAAAA
+        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ it, graph->traverse(it, 'C') }),
+            convert_to_set(graph->adjacent_outgoing_nodes(it))
+        );
+
+        // AC, AAAAC
+        it = graph->traverse(it, 'C');
+        auto outset = convert_to_set(std::vector<uint64_t>{ graph->traverse(it, 'C') });
+        if (k == 2)
+            outset.insert(graph->traverse(it, 'G'));
+
+        EXPECT_EQ(
+            outset,
+            convert_to_set(graph->adjacent_outgoing_nodes(it))
+        );
+
+        // CC, CCCCC
+        graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{
+                it,
+                graph->traverse(it, 'G')
+            }),
+            convert_to_set(graph->adjacent_outgoing_nodes(it))
+        );
+
+        // CG, CCCCG
+        it = graph->traverse(it, 'G');
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ graph->traverse(it, 'G') }),
+            convert_to_set(graph->adjacent_outgoing_nodes(it))
+        );
+
+        // GGGGG
+        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ it, graph->traverse(it, 'G') }),
+            convert_to_set(graph->adjacent_outgoing_nodes(it))
+        );
+    }
+}
+
+TEST(DBGSD, IncomingAdjacent) {
+    for (size_t k = 2; k <= 20; ++k) {
+        DBGSDConstructor constructor(k);
+        constructor.add_sequence(std::string(100, 'A') + std::string(100, 'C')
+                                                       + std::string(100, 'G'));
+        std::unique_ptr<DeBruijnGraph> graph { new DBGSD(&constructor) };
+
+        uint64_t it = 0;
+
+        // AA, AAAAA
+        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ it }),
+            convert_to_set(graph->adjacent_incoming_nodes(it))
+        );
+
+        // AC, AAAAC
+        it = graph->traverse(it, 'C');
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ graph->traverse_back(it, 'A') }),
+            convert_to_set(graph->adjacent_incoming_nodes(it))
+        );
+
+        // CC, CCCCC
+        graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{
+                it,
+                graph->traverse_back(it, 'A')
+            }),
+            convert_to_set(graph->adjacent_incoming_nodes(it))
+        );
+
+        // CG, CCCCG
+        it = graph->traverse(it, 'G');
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{
+                graph->traverse_back(it, 'A'),
+                graph->traverse_back(it, 'C')
+            }),
+            convert_to_set(graph->adjacent_incoming_nodes(it))
+        );
+
+        // GG, GGGGG
+        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{
+                it,
+                graph->traverse_back(it, 'C')
+            }),
+            convert_to_set(graph->adjacent_incoming_nodes(it))
+        );
+    }
+}
+
 TEST(DBGSD, TraversalsDBGCanonical) {
     const auto npos = DeBruijnGraph::npos;
 

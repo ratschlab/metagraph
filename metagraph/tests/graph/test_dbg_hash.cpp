@@ -6,6 +6,7 @@
 #include "gtest/gtest.h"
 
 #include "dbg_hash.hpp"
+#include "utils.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
@@ -22,9 +23,9 @@ TEST(DBGHash, InitializeEmpty) {
 TEST(DBGHash, SerializeEmpty) {
     {
         DBGHash graph(20);
-    
+
         ASSERT_EQ(0u, graph.num_nodes());
-    
+
         graph.serialize(test_dump_basename);
     }
 
@@ -85,6 +86,114 @@ TEST(DBGHash, Traversals) {
         EXPECT_EQ(it, graph.traverse_back(it2, 'A'));
         EXPECT_EQ(DBGHash::npos, graph.traverse(it, 'G'));
         EXPECT_EQ(DBGHash::npos, graph.traverse_back(it2, 'G'));
+    }
+}
+
+TEST(DBGHash, OutgoingAdjacent) {
+    for (size_t k = 2; k <= 20; ++k) {
+        DBGHash graph(k);
+
+        graph.add_sequence(std::string(100, 'A') + std::string(100, 'C')
+                                                 + std::string(100, 'G'));
+
+        uint64_t it = 0;
+
+        // AA, AAAAA
+        graph.map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ it, graph.traverse(it, 'C') }),
+            convert_to_set(graph.adjacent_outgoing_nodes(it))
+        );
+
+        // AC, AAAAC
+        it = graph.traverse(it, 'C');
+        auto outset = convert_to_set(std::vector<uint64_t>{ graph.traverse(it, 'C') });
+        if (k == 2)
+            outset.insert(graph.traverse(it, 'G'));
+
+        EXPECT_EQ(
+            outset,
+            convert_to_set(graph.adjacent_outgoing_nodes(it))
+        );
+
+        // CC, CCCCC
+        graph.map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{
+                it,
+                graph.traverse(it, 'G')
+            }),
+            convert_to_set(graph.adjacent_outgoing_nodes(it))
+        );
+
+        // CG, CCCCG
+        it = graph.traverse(it, 'G');
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ graph.traverse(it, 'G') }),
+            convert_to_set(graph.adjacent_outgoing_nodes(it))
+        );
+
+        // GG, GGGGG
+        graph.map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ it, graph.traverse(it, 'G') }),
+            convert_to_set(graph.adjacent_outgoing_nodes(it))
+        );
+    }
+}
+
+TEST(DBGHash, IncomingAdjacent) {
+    for (size_t k = 2; k <= 20; ++k) {
+        DBGHash graph(k);
+
+        graph.add_sequence(std::string(100, 'A') + std::string(100, 'C')
+                                                 + std::string(100, 'G'));
+
+        uint64_t it = 0;
+
+        // AA, AAAAA
+        graph.map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ it }),
+            convert_to_set(graph.adjacent_incoming_nodes(it))
+        );
+
+        // AC, AAAAC
+        it = graph.traverse(it, 'C');
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ graph.traverse_back(it, 'A') }),
+            convert_to_set(graph.adjacent_incoming_nodes(it))
+        );
+
+        // CC, CCCCC
+        graph.map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{
+                it,
+                graph.traverse_back(it, 'A')
+            }),
+            convert_to_set(graph.adjacent_incoming_nodes(it))
+        );
+
+        // CG, CCCCG
+        it = graph.traverse(it, 'C');
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{
+                graph.traverse_back(it, 'A'),
+                graph.traverse_back(it, 'C')
+            }),
+            convert_to_set(graph.adjacent_incoming_nodes(it))
+        );
+
+        // GG, GGGGG
+        graph.map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{
+                it,
+                graph.traverse_back(it, 'C')
+            }),
+            convert_to_set(graph.adjacent_incoming_nodes(it))
+        );
     }
 }
 

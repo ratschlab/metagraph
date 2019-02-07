@@ -36,6 +36,23 @@ void test_graph(DBG_succ *graph, const std::string &last,
     EXPECT_EQ(last, ostr.str()) << "state: " << state
                                 << ", old state: " << old_state;
 
+    size_t prev_first = 1;
+    for (size_t i = 1; i < graph->last_->size(); ++i) {
+        ASSERT_EQ((*graph->last_)[i], graph->get_last(i));
+        ASSERT_EQ((*graph->W_)[i], graph->get_W(i));
+
+        auto [first, last] = graph->get_outgoing_edge_range(i);
+        ASSERT_EQ(prev_first, first);
+        ASSERT_EQ(graph->succ_last(prev_first), last);
+        if (graph->get_last(i))
+            prev_first = i + 1;
+
+        auto last_outgoing = graph->succ_last(i);
+        for (auto i : graph->get_incoming_edges(i)) {
+            ASSERT_EQ(last_outgoing, graph->fwd(i));
+        }
+    }
+
     ostr.clear();
     ostr.str("");
 
@@ -2113,6 +2130,116 @@ TEST(DBGSuccinct, TraversalsDBG) {
 
         EXPECT_EQ(npos, graph->traverse(it, 'G'));
         EXPECT_EQ(npos, graph->traverse_back(it + 1, 'G'));
+    }
+}
+
+TEST(DBGSuccinct, OutgoingAdjacent) {
+    for (size_t k = 2; k < 11; ++k) {
+        std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new DBG_succ(k - 1)) };
+
+        graph->add_sequence(std::string(100, 'A') + std::string(100, 'C')
+                                                  + std::string(100, 'G'));
+
+        uint64_t it = 0;
+
+        // AA, AAAAA
+        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ it, graph->traverse(it, 'C') }),
+            convert_to_set(graph->adjacent_outgoing_nodes(it))
+        );
+
+        // AC, AAAAC
+        it = graph->traverse(it, 'C');
+        auto outset = convert_to_set(std::vector<uint64_t>{ graph->traverse(it, 'C') });
+        if (k == 2)
+            outset.insert(graph->traverse(it, 'G'));
+
+        EXPECT_EQ(
+            outset,
+            convert_to_set(graph->adjacent_outgoing_nodes(it))
+        );
+
+        // CC, CCCCC
+        graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{
+                it,
+                graph->traverse(it, 'G')
+            }),
+            convert_to_set(graph->adjacent_outgoing_nodes(it))
+        );
+
+        // CG, CCCCG
+        it = graph->traverse(it, 'G');
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ graph->traverse(it, 'G') }),
+            convert_to_set(graph->adjacent_outgoing_nodes(it))
+        );
+
+        // GGGGG
+        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ it, graph->traverse(it, 'G') }),
+            convert_to_set(graph->adjacent_outgoing_nodes(it))
+        );
+    }
+}
+
+TEST(DBGSuccinct, IncomingAdjacent) {
+    for (size_t k = 2; k < 11; ++k) {
+        std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new DBG_succ(k - 1)) };
+
+        graph->add_sequence(std::string(100, 'A') + std::string(100, 'C')
+                                                  + std::string(100, 'G'));
+
+        dynamic_cast<DBGSuccinct&>(*graph).mask_dummy_kmers(1, false);
+
+        uint64_t it = 0;
+
+        // AA, AAAAA
+        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ it }),
+            convert_to_set(graph->adjacent_incoming_nodes(it))
+        );
+
+        // AC, AAAAC
+        it = graph->traverse(it, 'C');
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ graph->traverse_back(it, 'A') }),
+            convert_to_set(graph->adjacent_incoming_nodes(it))
+        );
+
+        // CC, CCCCC
+        graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{
+                it,
+                graph->traverse_back(it, 'A')
+            }),
+            convert_to_set(graph->adjacent_incoming_nodes(it))
+        );
+
+        // CG, CCCCG
+        it = graph->traverse(it, 'G');
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{
+                graph->traverse_back(it, 'A'),
+                graph->traverse_back(it, 'C')
+            }),
+            convert_to_set(graph->adjacent_incoming_nodes(it))
+        );
+
+        // GG, GGGGG
+        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{
+                it,
+                graph->traverse_back(it, 'C')
+            }),
+            convert_to_set(graph->adjacent_incoming_nodes(it))
+        );
     }
 }
 
