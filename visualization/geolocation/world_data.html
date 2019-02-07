@@ -56,7 +56,6 @@ body {
 }
 </style>
 
-
 </head>
 <body>
 
@@ -80,53 +79,41 @@ body {
           <h3>GeoDNA: Search Geo Locations for DNA</h3>
       </div>
   </div>
-
   <div class="col-md-10 col-md-offset-1">
-    <form action="{{ url_for('geomap_page') }}" method=post class="form-horizontal">
-      <div class="form-group">
-        <div class="col-sm-4">
-          <label>FASTA</label>
-          <textarea class="form-control"
-                    name=input_data rows=8
-                    style="resize: vertical; min-height: 48px; font-family: monospace; font-size: 12px"
-                    id=load-from-text
-                    placeholder="Input DNA sequence to search">{{ input_data }}</textarea>
-        </div>
-
-        <div class="col-sm-8">
-          <label>Parameters</label>
-          <div class="form-horizontal">
-
-            <div class="form-group">
-              <div class="col-sm-3">
-                <label>% similarity: <span id="f">1.0</span></label>
-                <div class="form-group" style="padding-left:13px">
-                  <input type="range" class="slider" min="0.0" max="1.0" value="1.0" step="0.05" id="perc_similarity">
-                </div>
+      <div class="text-center col-md-12">
+          <form action="{{ url_for('geomap_page') }}" method=post class="form-horizontal">
+              <div class="form-group">
+                  <div class="col-sm-8">
+                      <textarea class="form-control"
+                                name=input_data rows=8
+                                style="resize: vertical; min-height: 48px; font-family: monospace; font-size: 12px"
+                                id=load-from-text
+                                placeholder="Input DNA sequence or FASTA to search">{{ input_data }}</textarea>
+                  </div>
+                  <div class="col-sm-4" style="padding-left:40px; padding-right:40px; padding-top:15px">
+                      <div class="form-group">
+                          <label>Similarity cutoff: <span id="similarity_cutoff">{{ cutoff }}</span>%</label>
+                          <input type="range" class="slider" min="5" max="100" value="80" step="5" id="perc_similarity">
+                      </div>
+                      <!-- <div class="form-group row">
+                          <div class="col-sm-7">
+                              <label for="num_labels" class="col-form-label">Max results</label>
+                          </div>
+                          <div class="col-sm-5">
+                              <input class="form-control" placeholder="# results" type="text" id="num_labels">
+                          </div>
+                      </div> -->
+                  </div>
               </div>
-            </div>
-
-            <div class="form-group col-sm-3">
-              <label>Max # labels</label>
-              <div class="form-group" style="padding-left:13px">
-                <input class="form-control" placeholder="# labels" type="text" id="num_labels">
-              </div>
-            </div>
-
-          </div>
-        </div>
+              <input type=submit class="btn btn-default" value="Search">
+          </form>
+          <br>
+          {% if output %}
+            <div class="bg-danger">{{ output }}</div>
+            <br>
+          {% endif %}
       </div>
-
-      <input type=submit class="btn btn-default" value="Search">
-    </form>
-
-    <br>
-    {% if output %}
-      <div class="bg-danger">{{ output }}</div>
-      <br>
-    {% endif %}
   </div>
-
   <div class="col-md-12 col-md-offset-0">
       <div class="text-center col-md-5">
           <div id="viewerWrapper" style="border: 1px solid rgb(221, 221, 221); border-radius: 10px; padding: 1vh; margin-bottom: 4px; height: 50vh; width: 100%;">
@@ -155,6 +142,20 @@ body {
       var width = document.getElementById('viewer').offsetWidth;
       var height = document.getElementById('viewer').offsetHeight;
     </script>
+
+  <script>
+    var slider = document.getElementById("perc_similarity");
+    var output = document.getElementById("similarity_cutoff");
+    output.innerHTML = slider.value; // Display the default slider value
+
+    // Update the current slider value (each time you drag the slider handle)
+    slider.oninput = function() {
+      output.innerHTML = this.value;
+    }
+    slider.onload = function() {
+      output.innerHTML = this.value;
+    }
+  </script>
 
     <script src="https://www.amcharts.com/lib/4/core.js"></script>
     <script src="https://www.amcharts.com/lib/4/maps.js"></script>
@@ -190,17 +191,6 @@ body {
             integrity="sha384-0mSbJDEHialfmuBBQP6A4Qrprq5OVfW37PRR3j5ELqxss1yVqOtnepnHVP9aJ7xS"
             crossorigin="anonymous">
   </script>
-  <script>
-    var slider = document.getElementById("perc_similarity");
-    var output = document.getElementById("f");
-    output.innerHTML = slider.value; // Display the default slider value
-
-    // Update the current slider value (each time you drag the slider handle)
-    slider.oninput = function() {
-      output.innerHTML = this.value;
-    }
-  </script>
-
 
 </body>
 </html>
