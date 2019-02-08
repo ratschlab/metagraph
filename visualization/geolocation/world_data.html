@@ -13,46 +13,10 @@
           href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css"
           integrity="sha384-1q8mTJOASx8j1Au+a5WDVnPi2lkFfwwEAa8hDDdjZlpLegxhjVME1fgjWPGmkzs7"
           crossorigin="anonymous">
-
-    <link rel="stylesheet" href="https://bootswatch.com/readable/bootstrap.min.css">
+    <link href="./static/styles.css" rel="stylesheet">
 <style>
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
-}
-
-#mapdiv {
-  width: 100%;
-  height: 100%;
-}
-
-.slider {
-  -webkit-appearance: none;
-  width: 100%;
-  height: 15px;
-  border-radius: 5px;
-  background: #d3d3d3;
-  outline: none;
-  opacity: 0.7;
-  -webkit-transition: .2s;
-  transition: opacity .2s;
-}
-
-.slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 25px;
-  height: 25px;
-  border-radius: 50%;
-  background: #bd0d38;
-  cursor: pointer;
-}
-
-.slider::-moz-range-thumb {
-  width: 25px;
-  height: 25px;
-  border-radius: 50%;
-  background: #bd0d38;
-  cursor: pointer;
 }
 </style>
 
@@ -74,23 +38,26 @@ body {
     </div>
   </nav>
 
-  <div class="col-md-10 col-md-offset-1">
-      <div class="text-center">
-          <h3>GeoDNA: Search Geo Locations for DNA</h3>
-      </div>
+  <div class="text-center col-md-10 col-md-offset-1">
+      <h3>GeoDNA: Search Geo Locations for DNA</h3>
   </div>
   <div class="col-md-10 col-md-offset-1">
       <div class="text-center col-md-12">
           <form action="{{ url_for('geomap_page') }}" method=post class="form-horizontal">
               <div class="form-group">
-                  <div class="col-sm-8">
+                  <div class="col-sm-8 col-md-offset-2">
                       <textarea class="form-control"
-                                name=input_data rows=8
-                                style="resize: vertical; min-height: 48px; font-family: monospace; font-size: 12px"
+                                name=input_data
+                                style="resize: vertical;
+                                       height: 50px;
+                                       min-height: 50px;
+                                       max-height: 500px;
+                                       font-family: monospace;
+                                       font-size: 12px;"
                                 id=load-from-text
                                 placeholder="Input DNA sequence or FASTA to search">{{ input_data }}</textarea>
                   </div>
-                  <div class="col-sm-4" style="padding-left:40px; padding-right:40px; padding-top:15px">
+                  <div class="col-sm-4 col-md-offset-4" style="padding-left:40px; padding-right:40px; padding-top:15px">
                       <div class="form-group">
                           <label>Similarity cutoff: <span id="similarity_cutoff">{{ cutoff }}</span>%</label>
                           <input type="range" class="slider" min="5" max="100" value="80" step="5" id="perc_similarity">
@@ -118,7 +85,7 @@ body {
       <div class="text-center col-md-5">
           <div id="viewerWrapper" style="border: 1px solid rgb(221, 221, 221); border-radius: 10px; padding: 1vh; margin-bottom: 4px; height: 50vh; width: 100%;">
               <div id="viewer" style="height: 48vh; width: 100%; position: relative;">
-                  <div id="mapdiv"></div>
+                  <div id="mapdiv" style="width: 100%; height: 100%;"></div>
                   <canvas style="display: none;"></canvas>
               </div>
           </div>
@@ -128,7 +95,11 @@ body {
               <h3>Graph representation</h3>
           </div>
           <br> -->
+          <input type='checkbox' id='show_results'></input>
           <table id="matched_samples" class="table table-striped table-bordered centered-table" style="width:auto; font: 12px monospace;" align="center"></table>
+          <label id='showMoreBtn' class="btn btn-default" for='show_results'>Show more</label>
+          <label id='showLessBtn' class="btn btn-default" for='show_results'>Show less</label>
+          <div style="margin-bottom: 25px;"></div>
 <!--           {% if tbl_matched_samples %}
             {{ tbl_matched_samples|safe }}
             <br>
@@ -185,6 +156,17 @@ body {
         }
     </script>
     <script src="./static/initialize_table.js"></script>
+    <script>
+      function expandTextarea(id) {
+          ['input', 'keydown', 'keyup'].forEach(function(e) {
+              document.getElementById(id).addEventListener(e, function() {
+                  this.style.height = 0;
+                  this.style.height = this.scrollHeight + 'px';
+              }, false);
+          });
+      }
+      expandTextarea('load-from-text');
+    </script>
 
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
   <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js"
