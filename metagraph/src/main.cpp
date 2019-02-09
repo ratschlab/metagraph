@@ -675,58 +675,80 @@ void parse_sequences(const std::vector<std::string> &files,
     }
 }
 
-std::string parse_json_message(const std::string &received_message,
-                               const AnnotatedDBG &anno_graph,
-                               const Config &config) {
-    auto json = nlohmann::json::parse(received_message);
+std::string form_client_reply(const std::string &received_message,
+                              const AnnotatedDBG &anno_graph,
+                              const Config &config) {
+    try {
+        auto json = nlohmann::json::parse(received_message);
 
-    if (json.empty())
-        return "";
+        // empty json is not a valid input
+        // TODO: send error messages properly
+        if (json.empty())
+            return "";
 
-    auto fasta = json.find("FASTA");
-    auto seq = json.find("SEQ");
+        auto fasta = json.find("FASTA");
 
-    // discovery_fraction a proxy of 1 - %similarity
-    auto discovery_fraction = json.value("perc_similarity",
-                                         config.discovery_fraction);
+        // TODO: remove this and accept only fasta files
+        auto seq = json.find("SEQ");
 
-    auto num_top_labels = json.value("num_labels", config.num_top_labels);
+        // discovery_fraction a proxy of 1 - %similarity
+        auto discovery_fraction = json.value("discovery_fraction",
+                                             config.discovery_fraction);
 
-    // query callback shared by FASTA and sequence modes
-    std::ostringstream oss;
-    auto execute_server_query =
-        [&](const std::string &name, const std::string &seq) {
-            execute_query(
-                name,
-                seq,
-                config.count_labels,
-                config.suppress_unlabeled,
-                num_top_labels,
-                discovery_fraction,
-                config.anno_labels_delimiter,
-                anno_graph,
-                oss
-            );
+        auto count_labels = json.value("count_labels", config.count_labels);
+        auto num_top_labels = json.value("num_labels", config.num_top_labels);
+
+        std::ostringstream oss;
+
+        // query callback shared by FASTA and sequence modes
+        auto execute_server_query = [&](const std::string &seq_name,
+                                        const std::string &seq) {
+            execute_query(seq_name,
+                          seq,
+                          count_labels,
+                          config.suppress_unlabeled,
+                          num_top_labels,
+                          discovery_fraction,
+                          config.anno_labels_delimiter,
+                          anno_graph,
+                          oss);
         };
 
-    // input is a FASTA sequence
-    if (fasta != json.end()) {
-        read_fasta_string_critical(
-            *fasta,
-            [&](kseq_t *read_stream) {
-                execute_server_query(
-                    std::string(read_stream->name.s),
-                    std::string(read_stream->seq.s)
-                );
-            }
-        );
+        if (seq != json.end()) {
+            // input is plain sequence
+            execute_server_query(*seq, *seq);
+        } else if (fasta != json.end()) {
+            // input is a FASTA sequence
+            read_fasta_from_string(
+                *fasta,
+                [&](kseq_t *read_stream) {
+                    execute_server_query(
+                        std::string(read_stream->name.s),
+                        std::string(read_stream->seq.s)
+                    );
+                }
+            );
+        } else {
+            std::cerr << "Error: no input sequences received from client" << std::endl;
+            // TODO: no input sequences -> form an error message for the client 
+            throw std::domain_error("No input sequences");
+        }
+
+        return oss.str();
+
+    } catch (const nlohmann::json::parse_error &e) {
+        std::cerr << "Error: bad json file: " << e.what() << std::endl;
+        //TODO: send errors in a json file
+        throw;
+    } catch (const std::exception &e) {
+        std::cerr << "Error: processing request error: " << e.what() << std::endl;
+        //TODO: send errors in a json file
+        throw;
+    } catch (...) {
+        std::cerr << "Error: processing request error" << std::endl;
+        //TODO: send errors in a json file
+        throw;
     }
-
-    // input is plain sequence
-    if (seq != json.end())
-        execute_server_query(*seq, *seq);
-
-    return oss.str();
 }
 
 
@@ -1457,11 +1479,9 @@ int main(int argc, const char *argv[]) {
                 asio::signal_set signals(io_context, SIGINT, SIGTERM);
                 signals.async_wait([&](auto, auto) { io_context.stop(); });
 
-                using namespace std::placeholders;
-
                 Server server(io_context, config->port,
-                    [&](const auto &received_message) {
-                        return parse_json_message(
+                    [&](const std::string &received_message) {
+                        return form_client_reply(
                             received_message,
                             *anno_graph,
                             *config

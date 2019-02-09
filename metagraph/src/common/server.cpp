@@ -63,11 +63,19 @@ class Connection : public std::enable_shared_from_this<Connection> {
         auto self(shared_from_this());
         asio::async_read(socket_, asio::buffer(&data_[0], message_size),
             [this, self](std::error_code ec, size_t /*length*/) {
-                if (!ec) {
+                if (ec) {
+                    print_reading_error();
+                    return;
+                }
+
+                try {
                     data_ = generate_response_(data_);
                     do_write();
-                } else {
-                    print_reading_error();
+                } catch (...) {
+                    std::cerr << "Error: Exception thrown when trying to "
+                              << "generate a response for client "
+                              << address_ << ":" << port_ << std::endl;
+                    return;
                 }
             }
         );

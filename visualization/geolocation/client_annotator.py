@@ -49,7 +49,8 @@ if __name__ == '__main__':
         "FASTA": "\n".join([ ">test",
                                 sequence[:len(sequence) // 2 + 1],
                                 sequence[len(sequence) // 2 + 1:] ]),
-        "perc_similarity": 0.75,
+        "count_labels": True,
+        "discovery_fraction": 0.75,
         "num_labels": 15
     })
 

@@ -2,11 +2,9 @@
 
 #include <iostream>
 #include <fstream>
-#include <sstream>
 
 #include "vcf_parser.hpp"
 #include "serialization.hpp"
-#include "utils.hpp"
 
 const char kDefaultFastQualityChar = 'I';
 
@@ -67,10 +65,10 @@ bool write_fastq(gzFile gz_out, const kseq_t &kseq) {
 }
 
 
-void read_fasta_fd_critical(gzFile input_p,
-                            std::function<void(kseq_t*)> callback,
-                            bool with_reverse,
-                            const std::string &filter_filename) {
+void read_fasta_file_critical(gzFile input_p,
+                              std::function<void(kseq_t*)> callback,
+                              bool with_reverse,
+                              const std::string &filter_filename) {
     std::vector<bool> filter;
     if (filter_filename.size()) {
         std::ifstream instream(filter_filename, std::ios::binary);
@@ -82,13 +80,16 @@ void read_fasta_fd_critical(gzFile input_p,
             exit(1);
         }
     }
-
     size_t seq_count = 0;
 
+    if (input_p == Z_NULL) {
+        std::cerr << "ERROR: Null file descriptor" << std::endl;
+        exit(1);
+    }
     //TODO: handle read_stream->qual
     kseq_t *read_stream = kseq_init(input_p);
     if (read_stream == NULL) {
-        std::cerr << "ERROR while opening file descriptor" << std::endl;
+        std::cerr << "ERROR: failed to initialize kseq file descriptor" << std::endl;
         exit(1);
     }
 
@@ -124,33 +125,36 @@ void read_fasta_file_critical(const std::string &filename,
                               const std::string &filter_filename) {
     gzFile input_p = gzopen(filename.c_str(), "r");
     if (input_p == Z_NULL) {
-        std::cerr << "ERROR no such file " << filename << std::endl;
+        std::cerr << "ERROR: Cannot read file " << filename << std::endl;
         exit(1);
     }
 
-    read_fasta_fd_critical(input_p, callback, with_reverse, filter_filename);
+    read_fasta_file_critical(input_p, callback, with_reverse, filter_filename);
 
     gzclose(input_p);
 }
 
-void read_fasta_string_critical(const std::string &fasta_flat,
-                                std::function<void(kseq_t*)> callback,
-                                bool with_reverse,
-                                const std::string &filter_filename) {
+void read_fasta_from_string(const std::string &fasta_flat,
+                            std::function<void(kseq_t*)> callback,
+                            bool with_reverse) {
     // create pipe
     int p[2];
-    pipe(p);
+    if (pipe(p) != 0) {
+        std::cerr << "ERROR: opening for writing to pipe failed" << std::endl;
+        exit(1);
+    }
     write(p[1], fasta_flat.c_str(), fasta_flat.length());
     close(p[1]);
 
     // gzFile from pipe
     gzFile input_p = gzdopen(p[0], "r");
     if (input_p == Z_NULL) {
-        std::cerr << "ERROR failed to initialize file descriptor" << std::endl;
+        std::cerr << "ERROR: opening for reading from pipe failed" << std::endl;
+        close(p[0]);
         exit(1);
     }
 
-    read_fasta_fd_critical(input_p, callback, with_reverse, filter_filename);
+    read_fasta_file_critical(input_p, callback, with_reverse, "");
 
     gzclose(input_p);
     close(p[0]);
