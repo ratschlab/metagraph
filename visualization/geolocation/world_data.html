@@ -108,30 +108,8 @@ body {
 
     <!-- Resources -->
     <script src="https://d3js.org/d3.v3.min.js"></script>
-    <script>
-      var width = document.getElementById('viewer').offsetWidth;
-      var height = document.getElementById('viewer').offsetHeight;
-    </script>
 
-  <script>
-    var slider = document.getElementById("perc_similarity");
-    var output = document.getElementById("similarity_cutoff");
-    output.innerHTML = slider.value; // Display the default slider value
-
-    // Update the current slider value (each time you drag the slider handle)
-    slider.oninput = function() {
-      output.innerHTML = this.value;
-    }
-    slider.onload = function() {
-      output.innerHTML = this.value;
-    }
-  </script>
-
-    <script src="https://www.amcharts.com/lib/4/core.js"></script>
-    <script src="https://www.amcharts.com/lib/4/maps.js"></script>
-    <script src="https://www.amcharts.com/lib/4/geodata/worldLow.js"></script>
-    <script src="https://www.amcharts.com/lib/4/themes/animated.js"></script>
-    <script src="./static/map.js"></script>
+    <!-- Load custom scripts -->
     <script src="./data/sample_list.js"></script>
     <script src="./data/random_locations.js"></script>
     <script>
@@ -139,6 +117,16 @@ body {
         {{ js_sample_list|safe }}
       {% endif %}
     </script>
+    <script src="./static/initialize_table.js"></script>
+    <script src="./static/scripts.js"></script>
+
+    <!-- Load scripts for interactive map -->
+    <script src="https://www.amcharts.com/lib/4/core.js"></script>
+    <script src="https://www.amcharts.com/lib/4/maps.js"></script>
+    <script src="https://www.amcharts.com/lib/4/geodata/worldLow.js"></script>
+    <script src="https://www.amcharts.com/lib/4/themes/animated.js"></script>
+
+    <script src="./static/map.js"></script>
     <script>
         imageSeries.data = samples;
 
@@ -153,36 +141,6 @@ body {
 
             imageSeriesTemplate.tooltipText = "{" + columns.join("}\n{") + "}";
         }
-    </script>
-    <script src="./static/initialize_table.js"></script>
-    <script>
-      function expandTextarea(id) {
-          ['input', 'keydown', 'keyup'].forEach(function(e) {
-              document.getElementById(id).addEventListener(e, function() {
-                  this.style.height = 0;
-                  this.style.height = this.scrollHeight + 'px';
-              }, false);
-          });
-      }
-      expandTextarea('load-from-text');
-
-      var num_rows = document.getElementById('matched_samples').rows.length;
-      var expand_button = document.getElementById('table_toggler');
-
-      if (num_rows >= 14) {
-          expand_button.style.display = 'inline';
-
-          var show_message = "Show more";
-          var hide_message = "Show less";
-
-          expand_button.addEventListener('click', function() {
-              if (expand_button.innerHTML == hide_message) {
-                  expand_button.innerHTML = show_message;
-              } else {
-                  expand_button.innerHTML = hide_message;
-              }
-          }, false);
-      }
     </script>
 
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
