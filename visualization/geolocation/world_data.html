@@ -97,8 +97,7 @@ body {
           <br> -->
           <input type='checkbox' id='show_results'></input>
           <table id="matched_samples" class="table table-striped table-bordered centered-table" style="width:auto; font: 12px monospace;" align="center"></table>
-          <label id='showMoreBtn' class="btn btn-default" for='show_results'>Show more</label>
-          <label id='showLessBtn' class="btn btn-default" for='show_results'>Show less</label>
+          <label id='table_toggler' style="display: none;" class="btn btn-default" for='show_results'>Show more</label>
           <div style="margin-bottom: 25px;"></div>
 <!--           {% if tbl_matched_samples %}
             {{ tbl_matched_samples|safe }}
@@ -166,6 +165,24 @@ body {
           });
       }
       expandTextarea('load-from-text');
+
+      var num_rows = document.getElementById('matched_samples').rows.length;
+      var expand_button = document.getElementById('table_toggler');
+
+      if (num_rows >= 14) {
+          expand_button.style.display = 'inline';
+
+          var show_message = "Show more";
+          var hide_message = "Show less";
+
+          expand_button.addEventListener('click', function() {
+              if (expand_button.innerHTML == hide_message) {
+                  expand_button.innerHTML = show_message;
+              } else {
+                  expand_button.innerHTML = hide_message;
+              }
+          }, false);
+      }
     </script>
 
   <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>

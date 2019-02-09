@@ -29,24 +29,15 @@
 }
 
 
-table#matched_samples tr:nth-child(n+14) {
-  display: none;
-}
 /* hide the checkbox that manipulates last table rows */
 #show_results {
   display: none;
 }
-/* hide "hide" button */
-#show_results ~ #showLessBtn {
+/* hide last rows */
+table#matched_samples tr:nth-child(n+14) {
   display: none;
 }
-/* show all */
+/* show last rows if the box is checked */
 #show_results:checked ~ table#matched_samples tr:nth-child(n+14) {
   display: table-row;
-}
-#show_results:checked ~ label#showMoreBtn {
-  display: none;
-}
-#show_results:checked ~ label#showLessBtn {
-  display: inline;
 }
