@@ -913,3 +913,59 @@ TEST(bit_vector, copy) {
     test_deep_copy<bit_vector_rrr<>>();
     test_deep_copy<bit_vector_small>();
 }
+
+template <class BitVectorFrom, class BitVectorTo>
+void test_copy_convert_to() {
+    std::unique_ptr<bit_vector> bv_ptr
+        = std::make_unique<BitVectorFrom>(sdsl::bit_vector(10, 1));
+
+    ASSERT_TRUE(dynamic_cast<BitVectorFrom*>(bv_ptr.get()));
+
+    {
+        auto bv_copy = bv_ptr->copy_to<BitVectorTo>();
+
+        ASSERT_EQ(10u, bv_copy.rank1(9));
+        ASSERT_EQ(0u, bv_copy.rank0(9));
+    }
+
+    {
+        auto bv_copy = bv_ptr->convert_to<BitVectorTo>();
+
+        ASSERT_EQ(10u, bv_copy.rank1(9));
+        ASSERT_EQ(0u, bv_copy.rank0(9));
+    }
+}
+
+TEST(bit_vector, copy_to) {
+    std::unique_ptr<bit_vector> bv_copy;
+
+    test_copy_convert_to< bit_vector_stat, bit_vector_stat >();
+    test_copy_convert_to< bit_vector_stat, bit_vector_dyn >();
+    test_copy_convert_to< bit_vector_stat, bit_vector_sd >();
+    test_copy_convert_to< bit_vector_stat, bit_vector_rrr<> >();
+    test_copy_convert_to< bit_vector_stat, bit_vector_small >();
+
+    test_copy_convert_to< bit_vector_dyn, bit_vector_stat >();
+    test_copy_convert_to< bit_vector_dyn, bit_vector_dyn >();
+    test_copy_convert_to< bit_vector_dyn, bit_vector_sd >();
+    test_copy_convert_to< bit_vector_dyn, bit_vector_rrr<> >();
+    test_copy_convert_to< bit_vector_dyn, bit_vector_small >();
+
+    test_copy_convert_to< bit_vector_sd, bit_vector_stat >();
+    test_copy_convert_to< bit_vector_sd, bit_vector_dyn >();
+    test_copy_convert_to< bit_vector_sd, bit_vector_sd >();
+    test_copy_convert_to< bit_vector_sd, bit_vector_rrr<> >();
+    test_copy_convert_to< bit_vector_sd, bit_vector_small >();
+
+    test_copy_convert_to< bit_vector_rrr<>, bit_vector_stat >();
+    test_copy_convert_to< bit_vector_rrr<>, bit_vector_dyn >();
+    test_copy_convert_to< bit_vector_rrr<>, bit_vector_sd >();
+    test_copy_convert_to< bit_vector_rrr<>, bit_vector_rrr<> >();
+    test_copy_convert_to< bit_vector_rrr<>, bit_vector_small >();
+
+    test_copy_convert_to< bit_vector_small, bit_vector_stat >();
+    test_copy_convert_to< bit_vector_small, bit_vector_dyn >();
+    test_copy_convert_to< bit_vector_small, bit_vector_sd >();
+    test_copy_convert_to< bit_vector_small, bit_vector_rrr<> >();
+    test_copy_convert_to< bit_vector_small, bit_vector_small >();
+}

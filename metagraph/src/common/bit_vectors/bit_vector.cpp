@@ -32,10 +32,23 @@ std::ostream& operator<<(std::ostream &os, const bit_vector &bv) {
 template <class Vector>
 Vector bit_vector::convert_to() {
     if (dynamic_cast<Vector*>(this)) {
-        return Vector(dynamic_cast<Vector&&>(*this));
+        // to the same type, no conversion
+        return dynamic_cast<Vector&&>(*this);
+
     } else if (dynamic_cast<bit_vector_stat*>(this)) {
+        // stat -> anything else
         return Vector(std::move(dynamic_cast<bit_vector_stat*>(this)->vector_));
+
+    } else if (dynamic_cast<bit_vector_adaptive*>(this)
+                && dynamic_cast<Vector*>(dynamic_cast<bit_vector_adaptive*>(this)->vector_.get())) {
+        // adaptive(x) -> x
+        return dynamic_cast<Vector&&>(*dynamic_cast<bit_vector_adaptive*>(this)->vector_);
+
+    // TODO: sd -> small if sparse enough
+    // TODO: rrr -> small if dense enough
+
     } else {
+        // anything -> anything (slower: with full reconstruction)
         sdsl::bit_vector bv(size(), 0);
         call_ones([&bv](auto i) { bv[i] = true; });
         return Vector(std::move(bv));
@@ -57,10 +70,24 @@ template sdsl::bit_vector bit_vector::convert_to<sdsl::bit_vector>();
 template <class Vector>
 Vector bit_vector::copy_to() const {
     if (dynamic_cast<const Vector*>(this)) {
+        // copy to the same type, no conversion
         return Vector(dynamic_cast<const Vector&>(*this));
+
     } else if (dynamic_cast<const bit_vector_stat*>(this)) {
+        // copy stat -> anything else
         auto bv = dynamic_cast<const bit_vector_stat*>(this)->vector_;
         return Vector(std::move(bv));
+
+    } else if (dynamic_cast<const bit_vector_adaptive*>(this)
+                && dynamic_cast<Vector*>(dynamic_cast<const bit_vector_adaptive*>(this)->vector_.get())) {
+        // copy adaptive(x) -> x
+        return Vector(dynamic_cast<const Vector&>(
+                *dynamic_cast<const bit_vector_adaptive*>(this)->vector_
+        ));
+
+    // TODO: copy sd -> small if sparse enough
+    // TODO: copy rrr -> small if dense enough
+
     } else {
         sdsl::bit_vector bv(size(), 0);
         call_ones([&bv](auto i) { bv[i] = true; });

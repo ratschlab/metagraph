@@ -236,6 +236,8 @@ class bit_vector_rrr : public bit_vector {
 
 
 class bit_vector_adaptive : public bit_vector {
+    friend bit_vector;
+
   public:
     virtual ~bit_vector_adaptive() {};
 
