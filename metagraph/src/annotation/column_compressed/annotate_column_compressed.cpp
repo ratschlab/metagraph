@@ -113,6 +113,17 @@ bool ColumnCompressed<Label>::has_labels(Index i, const VLabels &labels) const {
 }
 
 template <typename Label>
+uint64_t ColumnCompressed<Label>
+::count_labels(Index i, const VLabels &labels_to_match) const {
+    uint64_t count = 0;
+    for (const auto &label : labels_to_match) {
+        if (has_label(i, label))
+            ++count;
+    }
+    return count;
+}
+
+template <typename Label>
 void ColumnCompressed<Label>::serialize(const std::string &filename) const {
     flush();
 

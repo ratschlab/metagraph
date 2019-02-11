@@ -22,6 +22,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
 
     bool has_label(Index i, const Label &label) const override;
     bool has_labels(Index i, const VLabels &labels) const override;
+    uint64_t count_labels(Index i, const VLabels &labels_to_match) const override;
 
     VLabels get_labels(Index i) const override;
     // Get labels that occur at least in |presence_ratio| rows.

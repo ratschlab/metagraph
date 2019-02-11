@@ -49,6 +49,7 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     virtual bool has_label(Index i, const Label &label) const override;
     virtual bool has_labels(Index i, const VLabels &labels) const override;
+    virtual uint64_t count_labels(Index i, const VLabels &labels_to_match) const override;
 
     virtual void serialize(const std::string &filename) const override;
     virtual bool merge_load(const std::vector<std::string> &filenames) override;

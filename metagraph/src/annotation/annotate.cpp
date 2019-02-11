@@ -103,7 +103,7 @@ auto MultiLabelEncoded<IndexType, LabelType>
 -> std::vector<std::pair<Label, size_t>> {
     // TODO: use |min_label_frequency|
     // auto counter = count_labels(indices, min_label_frequency);
-    auto counter = count_labels(indices);
+    auto counter = this->count_labels(indices);
 
     const uint64_t min_count = min_label_frequency * indices.size();
 

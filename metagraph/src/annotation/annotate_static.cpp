@@ -55,6 +55,28 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
 }
 
 template <class BinaryMatrixType, typename Label>
+uint64_t
+StaticBinRelAnnotator<BinaryMatrixType, Label>
+::count_labels(Index i, const VLabels &labels_to_match) const {
+    assert(i < num_objects());
+
+    std::set<size_t> querying_codes;
+    for (const auto &label : labels_to_match) {
+        try {
+            querying_codes.insert(label_encoder_.encode(label));
+        } catch (...) { }
+    }
+
+    std::set<size_t> encoded_labels;
+    for (auto col : matrix_->get_row(i)) {
+        encoded_labels.insert(col);
+    }
+
+    return utils::count_intersection(encoded_labels.begin(), encoded_labels.end(),
+                                     querying_codes.begin(), querying_codes.end());
+}
+
+template <class BinaryMatrixType, typename Label>
 auto StaticBinRelAnnotator<BinaryMatrixType, Label>::get_labels(Index i) const
 -> VLabels {
     assert(i < num_objects());

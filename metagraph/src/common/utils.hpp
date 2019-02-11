@@ -94,6 +94,34 @@ namespace utils {
 
     uint32_t code_length(uint64_t a);
 
+    template <class AIt, class BIt>
+    uint64_t count_intersection(AIt abegin, AIt aend, BIt bbegin, BIt bend) {
+        uint64_t count = 0;
+        while (abegin != aend && bbegin != bend) {
+            while (*abegin < *bbegin && abegin != aend) {
+                ++abegin;
+            }
+
+            if (abegin == aend)
+                break;
+
+            while (*bbegin < *abegin && bbegin != bend) {
+                ++bbegin;
+            }
+
+            if (bbegin == bend)
+                break;
+
+            if (*abegin == *bbegin) {
+                ++count;
+                ++abegin;
+                ++bbegin;
+            }
+        }
+
+        return count;
+    }
+
     /** A faster alternative to std::allocator<T>
      *
      * The code was copied and has been modified from:

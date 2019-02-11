@@ -402,6 +402,92 @@ TYPED_TEST(AnnotatorPresetTest, get_labels) {
               convert_to_set(this->annotation->get_labels({ 0, 1, 2, 3, 4 }, 1)));
 }
 
+TYPED_TEST(AnnotatorPresetTest, CountLabels) {
+    EXPECT_EQ(3u, this->annotation->count_labels(0, { "Label0", "Label2", "Label8", "Label1" }));
+    EXPECT_EQ(3u, this->annotation->count_labels(0, { "Label0", "Label2", "Label8" }));
+    EXPECT_EQ(2u, this->annotation->count_labels(0, { "Label0", "Label2", "Label1" }));
+    EXPECT_EQ(2u, this->annotation->count_labels(0, { "Label0", "Label2" }));
+    EXPECT_EQ(1u, this->annotation->count_labels(0, { "Label0", "Label1" }));
+    EXPECT_EQ(1u, this->annotation->count_labels(0, { "Label0" }));
+    EXPECT_EQ(0u, this->annotation->count_labels(0, { "Label1" }));
+    EXPECT_EQ(0u, this->annotation->count_labels(0, { }));
+
+    EXPECT_EQ(0u, this->annotation->count_labels(1, { "Label0" }));
+    EXPECT_EQ(0u, this->annotation->count_labels(1, { }));
+
+    EXPECT_EQ(2u, this->annotation->count_labels(2, { "Label1", "Label2", "Label0" }));
+    EXPECT_EQ(2u, this->annotation->count_labels(2, { "Label1", "Label2" }));
+    EXPECT_EQ(1u, this->annotation->count_labels(2, { "Label1", "Label0" }));
+    EXPECT_EQ(1u, this->annotation->count_labels(2, { "Label1" }));
+    EXPECT_EQ(0u, this->annotation->count_labels(2, { "Label0" }));
+    EXPECT_EQ(0u, this->annotation->count_labels(2, { }));
+
+    EXPECT_EQ(3u, this->annotation->count_labels(3, { "Label1", "Label2", "Label8", "Label0" }));
+    EXPECT_EQ(3u, this->annotation->count_labels(3, { "Label1", "Label2", "Label8" }));
+    EXPECT_EQ(2u, this->annotation->count_labels(3, { "Label1", "Label2", "Label0" }));
+    EXPECT_EQ(2u, this->annotation->count_labels(3, { "Label1", "Label2" }));
+    EXPECT_EQ(1u, this->annotation->count_labels(3, { "Label1", "Label0" }));
+    EXPECT_EQ(1u, this->annotation->count_labels(3, { "Label1" }));
+    EXPECT_EQ(0u, this->annotation->count_labels(3, { "Label0" }));
+    EXPECT_EQ(0u, this->annotation->count_labels(3, { }));
+
+    EXPECT_EQ(1u, this->annotation->count_labels(4, { "Label2", "Label0", "Label1", "Label8" }));
+    EXPECT_EQ(1u, this->annotation->count_labels(4, { "Label2", "Label0", "Label1" }));
+    EXPECT_EQ(1u, this->annotation->count_labels(4, { "Label2", "Label0" }));
+    EXPECT_EQ(1u, this->annotation->count_labels(4, { "Label2" }));
+    EXPECT_EQ(0u, this->annotation->count_labels(4, { "Label0", "Label1", "Label8" }));
+    EXPECT_EQ(0u, this->annotation->count_labels(4, { "Label0", "Label1" }));
+    EXPECT_EQ(0u, this->annotation->count_labels(4, { "Label0" }));
+    EXPECT_EQ(0u, this->annotation->count_labels(4, { "Label1" }));
+}
+
+TYPED_TEST(AnnotatorPreset2Test, CountLabels) {
+    EXPECT_EQ(3u, this->annotation->count_labels(0, { "Label0", "Label1",
+                                                               "Label2", "Label4",
+                                                               "Label5", "Label8" }));
+    EXPECT_EQ(2u, this->annotation->count_labels(0, { "Label1",
+                                                               "Label2", "Label4",
+                                                               "Label5", "Label8" }));
+    EXPECT_EQ(2u, this->annotation->count_labels(0, { "Label0", "Label1",
+                                                               "Label4",
+                                                               "Label5", "Label8" }));
+    EXPECT_EQ(2u, this->annotation->count_labels(0, { "Label0", "Label1",
+                                                               "Label2", "Label4",
+                                                               "Label5" }));
+    EXPECT_EQ(1u, this->annotation->count_labels(0, { "Label1",
+                                                               "Label4",
+                                                               "Label5", "Label8" }));
+    EXPECT_EQ(1u, this->annotation->count_labels(0, { "Label1",
+                                                               "Label2", "Label4",
+                                                               "Label5" }));
+    EXPECT_EQ(1u, this->annotation->count_labels(0, { "Label0", "Label1",
+                                                               "Label4",
+                                                               "Label5" }));
+
+    EXPECT_EQ(0u, this->annotation->count_labels(1, { "Label0", "Label1",
+                                                               "Label2", "Label4",
+                                                               "Label5", "Label8" }));
+    EXPECT_EQ(0u, this->annotation->count_labels(1, { "Label0",
+                                                               "Label2", "Label4",
+                                                               "Label5", "Label8" }));
+    EXPECT_EQ(0u, this->annotation->count_labels(1, { "Label0", "Label2", "Label8" }));
+    EXPECT_EQ(0u, this->annotation->count_labels(1, { "Label0", "Label8" }));
+    EXPECT_EQ(0u, this->annotation->count_labels(1, { "Label2" }));
+    EXPECT_EQ(0u, this->annotation->count_labels(1, { }));
+
+    EXPECT_EQ(2u, this->annotation->count_labels(2, { "Label0", "Label1",
+                                                               "Label2", "Label4",
+                                                               "Label5", "Label8" }));
+    EXPECT_EQ(1u, this->annotation->count_labels(2, { "Label0",
+                                                               "Label2", "Label4",
+                                                               "Label5", "Label8" }));
+    EXPECT_EQ(2u, this->annotation->count_labels(2, { "Label1", "Label2", "Label8" }));
+    EXPECT_EQ(1u, this->annotation->count_labels(2, { "Label1", "Label8" }));
+    EXPECT_EQ(2u, this->annotation->count_labels(2, { "Label1", "Label2" }));
+    EXPECT_EQ(1u, this->annotation->count_labels(2, { "Label2" }));
+    EXPECT_EQ(0u, this->annotation->count_labels(2, { }));
+}
+
 TYPED_TEST(AnnotatorPreset3Test, get_top_labels) {
     typedef std::vector<std::pair<std::string, size_t>> VectorCounts;
     EXPECT_EQ(VectorCounts({}),

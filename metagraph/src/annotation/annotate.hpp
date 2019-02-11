@@ -80,6 +80,7 @@ class MultiLabelAnnotation
 
     virtual bool has_label(Index i, const Label &label) const = 0;
     virtual bool has_labels(Index i, const VLabels &labels) const = 0;
+    virtual uint64_t count_labels(Index i, const VLabels &labels_to_match) const = 0;
 
     virtual void insert_rows(const std::vector<Index> &rows) = 0;
 
@@ -107,6 +108,11 @@ class MultiLabelAnnotation
     virtual uint64_t num_objects() const = 0;
     virtual size_t num_labels() const = 0;
     virtual uint64_t num_relations() const = 0;
+
+  protected:
+    // TODO: add |min_label_frequency| parameter: return only frequent labels
+    virtual std::vector<uint64_t>
+    count_labels(const std::vector<Index> &indices) const = 0;
 };
 
 
@@ -185,10 +191,6 @@ class MultiLabelEncoded
                    double min_label_frequency = 0.0) const override final;
 
   protected:
-    // TODO: add |min_label_frequency| parameter: return only frequent labels
-    virtual std::vector<uint64_t>
-    count_labels(const std::vector<Index> &indices) const = 0;
-
     LabelEncoder<Label> label_encoder_;
 };
 
