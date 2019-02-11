@@ -892,3 +892,24 @@ TEST(bit_vector_stat, call_ones_sparse) {
         ASSERT_EQ(copy, vector);
     }
 }
+
+template <class BitVector>
+void test_deep_copy() {
+    auto bv_ptr = std::make_unique<BitVector>(sdsl::bit_vector(10, 1));
+
+    auto bv_copy = bv_ptr->copy();
+
+    ASSERT_TRUE(dynamic_cast<BitVector*>(bv_copy.get()));
+    ASSERT_EQ(10u, bv_copy->rank1(9));
+    ASSERT_EQ(0u, bv_copy->rank0(9));
+}
+
+TEST(bit_vector, copy) {
+    std::unique_ptr<bit_vector> bv_copy;
+
+    test_deep_copy<bit_vector_stat>();
+    test_deep_copy<bit_vector_dyn>();
+    test_deep_copy<bit_vector_sd>();
+    test_deep_copy<bit_vector_rrr<>>();
+    test_deep_copy<bit_vector_small>();
+}

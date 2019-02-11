@@ -110,6 +110,10 @@ template bit_vector_dyn::bit_vector_dyn(const sdsl::bit_vector &);
 bit_vector_dyn::bit_vector_dyn(std::initializer_list<bool> init)
       : bit_vector_dyn(pack_bits(std::vector<bool>(init)), init.size()) {}
 
+std::unique_ptr<bit_vector> bit_vector_dyn::copy() const {
+    return std::make_unique<bit_vector_dyn>(*this);
+}
+
 uint64_t bit_vector_dyn::rank1(uint64_t id) const {
     return vector_.rank1(id);
 }
@@ -259,6 +263,10 @@ bit_vector_stat& bit_vector_stat::operator=(bit_vector_stat&& other) noexcept {
         requires_update_ = false;
     }
     return *this;
+}
+
+std::unique_ptr<bit_vector> bit_vector_stat::copy() const {
+    return std::make_unique<bit_vector_stat>(*this);
 }
 
 uint64_t bit_vector_stat::rank1(uint64_t id) const {
@@ -442,9 +450,70 @@ void bit_vector_stat::init_rs() {
     requires_update_ = false;
 }
 
-////////////////////////////////////////////////////////////////
-// bit_vector_small, sdsl hybrid method                       //
-////////////////////////////////////////////////////////////////
+////////////////////////////////////////////
+// bit_vector_adaptive abstract interface //
+////////////////////////////////////////////
+
+bit_vector_adaptive::bit_vector_adaptive(std::unique_ptr<bit_vector>&& vector)
+      : vector_(std::move(vector)) {}
+
+bit_vector_adaptive::bit_vector_adaptive(const bit_vector_adaptive &other)
+      : vector_(other.vector_->copy()) {}
+
+bit_vector_adaptive&
+bit_vector_adaptive::operator=(const bit_vector_adaptive &other) {
+    vector_ = other.vector_->copy();
+    return *this;
+}
+
+uint64_t bit_vector_adaptive::rank1(uint64_t id) const {
+    return vector_->rank1(id);
+}
+
+uint64_t bit_vector_adaptive::select1(uint64_t id) const {
+    return vector_->select1(id);
+}
+
+void bit_vector_adaptive::set(uint64_t id, bool val) {
+    vector_->set(id, val);
+}
+
+bool bit_vector_adaptive::operator[](uint64_t id) const {
+    return vector_->operator[](id);
+}
+
+uint64_t bit_vector_adaptive::get_int(uint64_t id, uint32_t width) const {
+    return vector_->get_int(id, width);
+}
+
+void bit_vector_adaptive::insertBit(uint64_t id, bool val) {
+    assert(id <= size());
+    vector_->insertBit(id, val);
+}
+
+void bit_vector_adaptive::deleteBit(uint64_t id) {
+    assert(id < size());
+    vector_->deleteBit(id);
+}
+
+uint64_t bit_vector_adaptive::size() const {
+    return vector_->size();
+}
+
+std::vector<bool> bit_vector_adaptive::to_vector() const {
+    return vector_->to_vector();
+}
+
+void
+bit_vector_adaptive
+::call_ones(const std::function<void(uint64_t)> &callback) const {
+    vector_->call_ones(callback);
+}
+
+
+//////////////////////////////////////////
+// bit_vector_small, sdsl hybrid method //
+//////////////////////////////////////////
 
 const double SD_RRR_VECTOR_DENSITY_CUTOFF = 0.035;
 
@@ -479,8 +548,9 @@ VectorCode representation(const bit_vector &vector) {
     }
 }
 
-bit_vector_small::bit_vector_small(uint64_t size, bool value)
-      : vector_(new bit_vector_sd(size, value)) {}
+bit_vector_small::bit_vector_small(uint64_t size, bool value) {
+    vector_.reset(new bit_vector_sd(size, value));
+}
 
 template <class BitVector>
 bit_vector_small::bit_vector_small(const BitVector &vector)
@@ -504,10 +574,6 @@ bit_vector_small::bit_vector_small(const sdsl::bit_vector &vector) {
     }
 }
 
-bit_vector_small::bit_vector_small(const bit_vector_small &other) {
-    *this = other;
-}
-
 bit_vector_small
 ::bit_vector_small(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
                    uint64_t size,
@@ -527,53 +593,13 @@ bit_vector_small
     }
 }
 
-bit_vector_small& bit_vector_small::operator=(const bit_vector_small &other) {
-    switch (representation(*other.vector_)) {
-        case SD_VECTOR:
-            vector_.reset(new bit_vector_sd(other.vector_->copy_to<bit_vector_sd>()));
-            break;
-        case RRR_VECTOR:
-            vector_.reset(new bit_vector_rrr<>(other.vector_->copy_to<bit_vector_rrr<>>()));
-            break;
-        case STAT_VECTOR:
-            vector_.reset(new bit_vector_stat(other.vector_->copy_to<bit_vector_stat>()));
-            break;
-    }
-
-    return *this;
-}
-
 bit_vector_small::bit_vector_small(std::initializer_list<bool> init)
       : bit_vector_small(sdsl::bit_vector(init)) {}
 
-uint64_t bit_vector_small::rank1(uint64_t id) const {
-    return vector_->rank1(id);
-}
-
-uint64_t bit_vector_small::select1(uint64_t id) const {
-    return vector_->select1(id);
-}
-
-void bit_vector_small::set(uint64_t id, bool val) {
-    vector_->set(id, val);
-}
-
-bool bit_vector_small::operator[](uint64_t id) const {
-    return vector_->operator[](id);
-}
-
-uint64_t bit_vector_small::get_int(uint64_t id, uint32_t width) const {
-    return vector_->get_int(id, width);
-}
-
-void bit_vector_small::insertBit(uint64_t id, bool val) {
-    assert(id <= size());
-    vector_->insertBit(id, val);
-}
-
-void bit_vector_small::deleteBit(uint64_t id) {
-    assert(id < size());
-    vector_->deleteBit(id);
+std::unique_ptr<bit_vector> bit_vector_small::copy() const {
+    auto copy = std::make_unique<bit_vector_small>();
+    copy->vector_ = vector_->copy();
+    return copy;
 }
 
 bool bit_vector_small::load(std::istream &in) {
@@ -596,18 +622,6 @@ bool bit_vector_small::load(std::istream &in) {
 void bit_vector_small::serialize(std::ostream &out) const {
     serialize_number(out, representation(*vector_));
     vector_->serialize(out);
-}
-
-uint64_t bit_vector_small::size() const {
-    return vector_->size();
-}
-
-std::vector<bool> bit_vector_small::to_vector() const {
-    return vector_->to_vector();
-}
-
-void bit_vector_small::call_ones(const std::function<void(uint64_t)> &callback) const {
-    vector_->call_ones(callback);
 }
 
 
@@ -740,6 +754,10 @@ bit_vector_sd& bit_vector_sd::operator=(bit_vector_sd&& other) noexcept {
     slct0_ = std::move(other.slct0_);
     slct0_.set_vector(&vector_);
     return *this;
+}
+
+std::unique_ptr<bit_vector> bit_vector_sd::copy() const {
+    return std::make_unique<bit_vector_sd>(*this);
 }
 
 uint64_t bit_vector_sd::rank1(uint64_t id) const {
@@ -904,6 +922,11 @@ bit_vector_rrr<log_block_size>::operator=(bit_vector_rrr<log_block_size>&& other
     slct0_ = std::move(other.slct0_);
     slct0_.set_vector(&vector_);
     return *this;
+}
+
+template <size_t log_block_size>
+std::unique_ptr<bit_vector> bit_vector_rrr<log_block_size>::copy() const {
+    return std::make_unique<bit_vector_rrr<log_block_size>>(*this);
 }
 
 template <size_t log_block_size>
