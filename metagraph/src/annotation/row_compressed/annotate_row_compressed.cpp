@@ -135,6 +135,23 @@ bool RowCompressed<Label>::has_labels(Index i, const VLabels &labels) const {
 }
 
 template <typename Label>
+uint64_t RowCompressed<Label>::count_labels(Index i, const VLabels &labels_to_match) const {
+    std::set<size_t> querying_codes;
+    for (const auto &label : labels_to_match) {
+        try {
+            querying_codes.insert(label_encoder_.encode(label));
+        } catch (...) { }
+    }
+
+    std::set<size_t> encoded_labels;
+    for (auto col : matrix_->get_row(i)) {
+        encoded_labels.insert(col);
+    }
+    return utils::count_intersection(encoded_labels.begin(), encoded_labels.end(),
+                                     querying_codes.begin(), querying_codes.end());
+}
+
+template <typename Label>
 void RowCompressed<Label>::serialize(const std::string &filename) const {
     std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension,
                             std::ios::binary);
