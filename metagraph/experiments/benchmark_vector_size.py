@@ -2,6 +2,9 @@
 
 import sys
 import numpy as np
+import matplotlib as mpl
+from scipy.special import xlogy
+mpl.use('agg')
 from matplotlib import pyplot as plt
 
 plot_ratio = (1 + np.sqrt(5)) / 2
@@ -13,7 +16,7 @@ if len(sys.argv) != 2:
     print(
 """\n\n#First, run this script to generate vectors and measure their size
 
-for type in small stat sd rrr63 rrr127; do
+for type in small smart stat sd rrr63 rrr127; do
     for d in $(seq 0 0.02 1); do
         ./run_experiments vectors $type -d $d -l 100000000 >> results.txt
     done
@@ -30,6 +33,7 @@ method = lines[:, 0]
 vector_size = lines[:, 1].astype(int)
 density = lines[:, 3].astype(float)
 bits_per_entry = lines[:, 4].astype(float)
+RAM_per_entry = lines[:, 5].astype(float) / vector_size * 8
 
 plt.rcParams.update({ 'font.size': 22 })
 
@@ -42,19 +46,25 @@ for vs in np.unique(vector_size):
 
     for i, m in enumerate(np.unique(method)):
         dens = density[(method == m) & (vector_size == vs)]
-        sizes = bits_per_entry[(method == m) & (vector_size == vs)]
+        sizes = RAM_per_entry[(method == m) & (vector_size == vs)]
         idx = dens.argsort()
         plt.plot(dens[idx], sizes[idx],
                  label=m,
                  marker=markers[i],
                  ms=ms[i])
 
+    sizes = -xlogy(dens, dens) + 2 * dens
+    plt.plot(dens[idx], sizes[idx],
+             label='SD_Theory',
+             marker=markers[i],
+             ms=ms[i])
+
     plt.title('Vector size: {:.1e}'.format(vs))
     plt.xlabel('Density')
     plt.ylabel('Bits per entry')
 
     plt.grid(True)
-    plt.legend(fontsize=20)
+    plt.legend(fontsize=18)
     plt.tight_layout()
     plt.savefig('vectors_size_{}.pdf'.format(vs), fmt='pdf')
     plt.show()

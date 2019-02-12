@@ -6,7 +6,7 @@
 #include "serialization.hpp"
 
 const double SD_SMALLER_THAN_RRR_MAX_DENSITY = 0.035;
-const double SD_SMALLER_THAN_STAT_MAX_DENSITY = 0.22;
+const double SD_SMALLER_THAN_STAT_MAX_DENSITY = 0.20;
 const double STAT_SMALLER_THAN_SD_MAX_DENSITY = 0.74;
 
 
