@@ -25,6 +25,8 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
     std::vector<Row> get_column(Column column) const;
 
     void set(Row row, Column column);
+    // do not check for existance before adding the label
+    void force_set(Row row, Column column);
     void clear_row(Row row);
 
     void insert_rows(const std::vector<Row> &rows);

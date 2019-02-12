@@ -1298,8 +1298,15 @@ int main(int argc, const char *argv[]) {
                         0, kNumCachedColumns, config->verbose
                     )
                 );
+            } else if (config->anno_type == Config::RowCompressed) {
+                annotation.reset(
+                    new annotate::RowCompressed<>(0)
+                );
             } else {
-                throw std::runtime_error("To be implemented");
+                std::cerr << "ERROR: Merging of annotations '"
+                          << config->annotype_to_string(config->anno_type)
+                          << "' is not implemented." << std::endl;
+                exit(1);
             }
 
             if (!annotation->merge_load(files)) {

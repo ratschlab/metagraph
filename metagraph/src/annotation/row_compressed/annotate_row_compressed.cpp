@@ -119,10 +119,67 @@ bool RowCompressed<Label>::merge_load(const std::vector<std::string> &filenames)
         return false;
 
     try {
-        return label_encoder_.load(instream) && matrix_->load(instream);
+        bool is_successfully_loaded = label_encoder_.load(instream)
+                                            && matrix_->load(instream);
+        if (filenames.size() == 1 || !is_successfully_loaded)
+            return is_successfully_loaded;
+
+        assert(filenames.size() > 1);
+
+        if (!dynamic_cast<VectorRowBinMat*>(matrix_.get())) {
+            std::cerr << "Error: loading from multiple row annotators is supported"
+                      << " only for the VectorRowBinMat representation" << std::endl;
+            exit(1);
+        }
+
+        auto &matrix = dynamic_cast<VectorRowBinMat&>(*matrix_);
+        auto next_block = std::make_unique<VectorRowBinMat>(matrix_->num_rows());
+
+        for (auto filename : filenames) {
+            if (filename == filenames[0])
+                continue;
+
+            std::ifstream instream(remove_suffix(filename, kExtension) + kExtension,
+                                   std::ios::binary);
+            if (!instream.good())
+                return false;
+
+            LabelEncoder<Label> label_encoder_load;
+            if (!label_encoder_load.load(instream)
+                    || !next_block->load(instream)
+                    || next_block->num_rows() != matrix_->num_rows())
+                return false;
+
+            // add new columns
+            std::vector<uint64_t> new_column_positions(label_encoder_load.size());
+
+            for (size_t c = 0; c < label_encoder_load.size(); ++c) {
+                try {
+                    new_column_positions[c]
+                        = label_encoder_.encode(label_encoder_load.decode(c));
+                    std::cerr << "Warning: the merged annotations have common"
+                              << " labels. The merged result will include"
+                              << " duplicates and be bigger than expected."
+                              << " Detected label: "
+                              << label_encoder_load.decode(c) << std::endl;
+                } catch (...) {
+                    // the label is new
+                    new_column_positions[c]
+                        = label_encoder_.insert_and_encode(label_encoder_load.decode(c));
+                }
+            }
+
+            // set all bits from the next block
+            for (uint64_t i = 0; i < next_block->num_rows(); ++i) {
+                for (auto j : next_block->get_row(i)) {
+                    matrix.force_set(i, new_column_positions[j]);
+                }
+            }
+        }
     } catch (...) {
         return false;
     }
+    return true;
 }
 
 template <typename Label>

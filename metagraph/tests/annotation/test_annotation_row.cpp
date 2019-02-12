@@ -211,6 +211,69 @@ TEST(RowCompressed, Serialization) {
     }
 }
 
+TEST(RowCompressed, MergeLoadDisjoint) {
+    {
+        annotate::RowCompressed<> annotation(5);
+        annotation.set_labels(0, { "Label0", "Label2", "Label8" });
+        annotation.set_labels(2, { "Label1", "Label2" });
+        annotation.set_labels(4, { "Label8" });
+
+        annotation.serialize(test_dump_basename_vec_good + "_1");
+    }
+    {
+        annotate::RowCompressed<> annotation(5);
+        annotation.set_labels(1, { "2_Label0", "2_Label2", "2_Label8" });
+        annotation.set_labels(2, { "2_Label1", "2_Label9", "2_Label0" });
+        annotation.set_labels(3, { "2_Label8" });
+
+        annotation.serialize(test_dump_basename_vec_good + "_2");
+    }
+    {
+        annotate::RowCompressed<> annotation(0);
+        ASSERT_TRUE(annotation.merge_load({ test_dump_basename_vec_good + "_1",
+                                            test_dump_basename_vec_good + "_2" }));
+
+        EXPECT_EQ(5u, annotation.num_objects());
+        EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation.get(0)));
+        EXPECT_EQ(convert_to_set({ "2_Label0", "2_Label2", "2_Label8" }), convert_to_set(annotation.get(1)));
+        EXPECT_EQ(convert_to_set({ "Label1", "2_Label1", "Label2", "2_Label9", "2_Label0" }),
+                    convert_to_set(annotation.get(2)));
+        EXPECT_EQ(convert_to_set({ "2_Label8" }), convert_to_set(annotation.get(3)));
+        EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation.get(4)));
+    }
+}
+
+TEST(RowCompressed, MergeLoad) {
+    {
+        annotate::RowCompressed<> annotation(5);
+        annotation.set_labels(0, { "Label0", "Label2", "Label8" });
+        annotation.set_labels(2, { "Label1", "Label2" });
+        annotation.set_labels(4, { "Label8" });
+
+        annotation.serialize(test_dump_basename_vec_good + "_1");
+    }
+    {
+        annotate::RowCompressed<> annotation(5);
+        annotation.set_labels(1, { "Label0", "Label2", "Label8" });
+        annotation.set_labels(2, { "Label1", "Label9", "Label0" });
+        annotation.set_labels(3, { "Label8" });
+
+        annotation.serialize(test_dump_basename_vec_good + "_2");
+    }
+    {
+        annotate::RowCompressed<> annotation(0);
+        ASSERT_TRUE(annotation.merge_load({ test_dump_basename_vec_good + "_1",
+                                            test_dump_basename_vec_good + "_2" }));
+
+        EXPECT_EQ(5u, annotation.num_objects());
+        EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation.get(0)));
+        EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation.get(1)));
+        EXPECT_EQ(convert_to_set({ "Label1", "Label2", "Label9", "Label0" }), convert_to_set(annotation.get(2)));
+        EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation.get(3)));
+        EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation.get(4)));
+    }
+}
+
 TEST(RowCompressed, has_labels) {
     std::unique_ptr<annotate::MultiLabelAnnotation<uint64_t, std::string>> annotation(
         new annotate::RowCompressed<>(5, false)

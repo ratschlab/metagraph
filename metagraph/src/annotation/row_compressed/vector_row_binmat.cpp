@@ -17,6 +17,15 @@ void VectorRowBinMat::set(Row row, Column column) {
         num_columns_ = column + 1;
 }
 
+void VectorRowBinMat::force_set(Row row, Column column) {
+    assert(row < vector_.size());
+
+    vector_[row].push_back(column);
+
+    if (column >= num_columns_)
+        num_columns_ = column + 1;
+}
+
 std::vector<VectorRowBinMat::Column>
 VectorRowBinMat::get_row(Row row) const {
     assert(row < vector_.size());
