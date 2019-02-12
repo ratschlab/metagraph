@@ -54,33 +54,31 @@ DBGHash::node_index DBGHash::traverse_back(node_index node, char prev_char) cons
     return kmer_to_node(std::string(1, prev_char) + kmer);
 }
 
-std::vector<DBGHash::node_index> DBGHash::adjacent_outgoing_nodes(node_index node) const {
+void DBGHash::adjacent_outgoing_nodes(node_index node,
+                                      std::vector<DBGHash::node_index> *nodes) const {
+    assert(nodes);
+
     auto prefix = node_to_kmer(node).substr(1);
-    std::vector<node_index> nodes;
-    nodes.reserve(kAlphabet.size());
 
     for (char c : kAlphabet) {
         auto next = kmer_to_node(prefix + c);
         if (next != npos)
-            nodes.emplace_back(next);
+            nodes->emplace_back(next);
     }
-
-    return nodes;
 }
 
-std::vector<DBGHash::node_index> DBGHash::adjacent_incoming_nodes(node_index node) const {
+void DBGHash::adjacent_incoming_nodes(node_index node,
+                                      std::vector<DBGHash::node_index> *nodes) const {
+    assert(nodes);
+
     auto suffix = node_to_kmer(node);
     suffix.pop_back();
-    std::vector<node_index> nodes;
-    nodes.reserve(kAlphabet.size());
 
     for (char c : kAlphabet) {
         auto next = kmer_to_node(std::string(1, c) + suffix);
         if (next != npos)
-            nodes.emplace_back(next);
+            nodes->emplace_back(next);
     }
-
-    return nodes;
 }
 
 DBGHash::node_index DBGHash::kmer_to_node(const std::string &kmer) const {

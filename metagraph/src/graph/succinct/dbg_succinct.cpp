@@ -2135,16 +2135,15 @@ node_index DBGSuccinct::traverse_back(node_index node, char prev_char) const {
     );
 }
 
-std::vector<node_index> DBGSuccinct::adjacent_outgoing_nodes(node_index node) const {
+void DBGSuccinct::adjacent_outgoing_nodes(node_index node,
+                                          std::vector<node_index> *nodes) const {
     assert(node);
+    assert(nodes);
 
     auto boss_edge = kmer_to_boss_index(node);
 
     auto last = boss_graph_->fwd(boss_edge);
     auto first = boss_graph_->pred_last(last - 1) + 1;
-
-    std::vector<node_index> nodes;
-    nodes.reserve(last - first + 1);
 
     for (auto i = first; i <= last; ++i) {
         assert(boss_graph_->get_W(boss_edge) % boss_graph_->alph_size
@@ -2152,19 +2151,17 @@ std::vector<node_index> DBGSuccinct::adjacent_outgoing_nodes(node_index node) co
 
         auto next = boss_to_kmer_index(i);
         if (next != npos)
-            nodes.emplace_back(next);
+            nodes->emplace_back(next);
     }
-    return nodes;
 }
 
-std::vector<node_index> DBGSuccinct::adjacent_incoming_nodes(node_index node) const {
+void DBGSuccinct::adjacent_incoming_nodes(node_index node,
+                                          std::vector<node_index> *nodes) const {
     assert(node);
+    assert(nodes);
 
     auto edge = kmer_to_boss_index(node);
     auto edges = boss_graph_->get_incoming_edges(edge);
-
-    std::vector<node_index> nodes;
-    nodes.reserve(edges.size());
 
     for (auto i : edges) {
         assert(boss_graph_->get_W(i) % boss_graph_->alph_size
@@ -2172,9 +2169,8 @@ std::vector<node_index> DBGSuccinct::adjacent_incoming_nodes(node_index node) co
 
         auto prev = boss_to_kmer_index(i);
         if (prev != npos)
-            nodes.emplace_back(prev);
+            nodes->emplace_back(prev);
     }
-    return nodes;
 }
 
 // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|

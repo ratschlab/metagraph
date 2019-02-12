@@ -2134,13 +2134,16 @@ TEST(DBGSuccinct, OutgoingAdjacent) {
                                                   + std::string(100, 'G'));
 
         uint64_t it = 0;
+        std::vector<DBGSuccinct::node_index> adjacent_nodes;
 
         // AA, AAAAA
         graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{ it, graph->traverse(it, 'C') }),
-            convert_to_set(graph->adjacent_outgoing_nodes(it))
+            convert_to_set(adjacent_nodes)
         );
+        adjacent_nodes.clear();
 
         // AC, AAAAC
         it = graph->traverse(it, 'C');
@@ -2148,34 +2151,39 @@ TEST(DBGSuccinct, OutgoingAdjacent) {
         if (k == 2)
             outset.insert(graph->traverse(it, 'G'));
 
-        EXPECT_EQ(
-            outset,
-            convert_to_set(graph->adjacent_outgoing_nodes(it))
-        );
+        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        EXPECT_EQ(outset, convert_to_set(adjacent_nodes));
+        adjacent_nodes.clear();
 
         // CC, CCCCC
         graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
+        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{
                 it,
                 graph->traverse(it, 'G')
             }),
-            convert_to_set(graph->adjacent_outgoing_nodes(it))
+            convert_to_set(adjacent_nodes)
         );
+        adjacent_nodes.clear();
 
         // CG, CCCCG
         it = graph->traverse(it, 'G');
+        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{ graph->traverse(it, 'G') }),
-            convert_to_set(graph->adjacent_outgoing_nodes(it))
+            convert_to_set(adjacent_nodes)
         );
+        adjacent_nodes.clear();
 
         // GGGGG
         graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{ it, graph->traverse(it, 'G') }),
-            convert_to_set(graph->adjacent_outgoing_nodes(it))
+            convert_to_set(adjacent_nodes)
         );
+        adjacent_nodes.clear();
     }
 }
 
@@ -2189,50 +2197,61 @@ TEST(DBGSuccinct, IncomingAdjacent) {
         dynamic_cast<DBGSuccinct&>(*graph).mask_dummy_kmers(1, false);
 
         uint64_t it = 0;
+        std::vector<DBGSuccinct::node_index> adjacent_nodes;
 
         // AA, AAAAA
         graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{ it }),
-            convert_to_set(graph->adjacent_incoming_nodes(it))
+            convert_to_set(adjacent_nodes)
         );
+        adjacent_nodes.clear();
 
         // AC, AAAAC
         it = graph->traverse(it, 'C');
+        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{ graph->traverse_back(it, 'A') }),
-            convert_to_set(graph->adjacent_incoming_nodes(it))
+            convert_to_set(adjacent_nodes)
         );
+        adjacent_nodes.clear();
 
         // CC, CCCCC
         graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
+        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{
                 it,
                 graph->traverse_back(it, 'A')
             }),
-            convert_to_set(graph->adjacent_incoming_nodes(it))
+            convert_to_set(adjacent_nodes)
         );
+        adjacent_nodes.clear();
 
         // CG, CCCCG
         it = graph->traverse(it, 'G');
+        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{
                 graph->traverse_back(it, 'A'),
                 graph->traverse_back(it, 'C')
             }),
-            convert_to_set(graph->adjacent_incoming_nodes(it))
+            convert_to_set(adjacent_nodes)
         );
+        adjacent_nodes.clear();
 
         // GG, GGGGG
         graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{
                 it,
                 graph->traverse_back(it, 'C')
             }),
-            convert_to_set(graph->adjacent_incoming_nodes(it))
+            convert_to_set(adjacent_nodes)
         );
+        adjacent_nodes.clear();
     }
 }
 
