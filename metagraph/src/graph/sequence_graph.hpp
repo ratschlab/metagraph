@@ -48,8 +48,12 @@ class DeBruijnGraph : public SequenceGraph {
     // Traverse the incoming edge
     virtual node_index traverse_back(node_index node, char prev_char) const = 0;
 
-    virtual std::vector<node_index> adjacent_outgoing_nodes(node_index node) const = 0;
-    virtual std::vector<node_index> adjacent_incoming_nodes(node_index node) const = 0;
+    // Given a node index and a ptr to a vector of indices, pushes back indices
+    // of adjacent outgoing nodes
+    virtual void adjacent_outgoing_nodes(node_index node, std::vector<node_index> *nodes) const = 0;
+    // Given a node index and a ptr to a vector of indices, pushes back indices
+    // of adjacent incoming nodes
+    virtual void adjacent_incoming_nodes(node_index node, std::vector<node_index> *nodes) const = 0;
 
     // Check whether graph contains fraction of nodes from the sequence
     virtual bool find(const std::string &sequence,

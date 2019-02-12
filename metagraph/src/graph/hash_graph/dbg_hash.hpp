@@ -28,8 +28,12 @@ class DBGHash : public DeBruijnGraph {
     // Traverse the incoming edge
     node_index traverse_back(node_index node, char prev_char) const;
 
-    std::vector<node_index> adjacent_outgoing_nodes(node_index node) const;
-    std::vector<node_index> adjacent_incoming_nodes(node_index node) const;
+    // Given a node index and a ptr to a vector of indices, pushes back indices
+    // of adjacent outgoing nodes
+    void adjacent_outgoing_nodes(node_index node, std::vector<node_index> *nodes) const;
+    // Given a node index and a ptr to a vector of indices, pushes back indices
+    // of adjacent incoming nodes
+    void adjacent_incoming_nodes(node_index node, std::vector<node_index> *nodes) const;
 
     node_index kmer_to_node(const std::string &kmer) const;
     std::string node_to_kmer(node_index i) const;

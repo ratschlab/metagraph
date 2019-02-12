@@ -53,38 +53,38 @@ DBGHashOrdered::traverse_back(node_index node, char prev_char) const {
     return get_index(kmer);
 }
 
-std::vector<DBGHashOrdered::node_index>
-DBGHashOrdered::adjacent_outgoing_nodes(node_index node) const {
+void
+DBGHashOrdered
+::adjacent_outgoing_nodes(node_index node,
+                          std::vector<DBGHashOrdered::node_index> *nodes) const {
+    assert(nodes);
+
     const auto kmer = get_kmer(node);
-    std::vector<node_index> nodes;
-    nodes.reserve(kAlphabet.size());
 
     for (char c : kAlphabet) {
         auto next_kmer = kmer;
         next_kmer.to_next(k_, seq_encoder_.encode(c));
         auto next = get_index(next_kmer);
         if (next != npos)
-            nodes.emplace_back(next);
+            nodes->emplace_back(next);
     }
-
-    return nodes;
 }
 
-std::vector<DBGHashOrdered::node_index>
-DBGHashOrdered::adjacent_incoming_nodes(node_index node) const {
+void
+DBGHashOrdered
+::adjacent_incoming_nodes(node_index node,
+                          std::vector<DBGHashOrdered::node_index> *nodes) const {
+    assert(nodes);
+
     const auto kmer = get_kmer(node);
-    std::vector<node_index> nodes;
-    nodes.reserve(kAlphabet.size());
 
     for (char c : kAlphabet) {
         auto next_kmer = kmer;
         next_kmer.to_prev(k_, seq_encoder_.encode(c));
         auto next = get_index(next_kmer);
         if (next != npos)
-            nodes.emplace_back(next);
+            nodes->emplace_back(next);
     }
-
-    return nodes;
 }
 
 DBGHashOrdered::node_index

@@ -561,8 +561,12 @@ class DBGSuccinct : public DeBruijnGraph {
     // Traverse the incoming edge
     virtual node_index traverse_back(node_index node, char prev_char) const override final;
 
-    virtual std::vector<node_index> adjacent_outgoing_nodes(node_index node) const override final;
-    virtual std::vector<node_index> adjacent_incoming_nodes(node_index node) const override final;
+    // Given a node index and a ptr to a vector of indices, pushes back indices
+    // of adjacent outgoing nodes
+    virtual void adjacent_outgoing_nodes(node_index node, std::vector<node_index> *nodes) const override final;
+    // Given a node index and a ptr to a vector of indices, pushes back indices
+    // of adjacent incoming nodes
+    virtual void adjacent_incoming_nodes(node_index node, std::vector<node_index> *nodes) const override final;
 
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal
