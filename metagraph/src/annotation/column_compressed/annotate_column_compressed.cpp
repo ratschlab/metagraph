@@ -164,8 +164,19 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
             for (size_t c = 0; c < label_encoder_load.size(); ++c) {
                 size_t col = label_encoder_.insert_and_encode(label_encoder_load.decode(c));
 
-                auto *new_column = new bit_vector_sd();
-                if (!new_column->load(instream) || new_column->size() != num_rows_)
+                std::unique_ptr<bit_vector> new_column { new bit_vector_smart() };
+
+                auto pos = instream.tellg();
+
+                if (!new_column->load(instream)) {
+                    instream.seekg(pos, instream.beg);
+
+                    new_column = std::make_unique<bit_vector_sd>();
+                    if (!new_column->load(instream))
+                        return false;
+                }
+
+                if (new_column->size() != num_rows_)
                     return false;
 
                 if (verbose_) {
@@ -180,12 +191,11 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 
                 assert(col <= bitmatrix_.size());
                 if (col == bitmatrix_.size()) {
-                    bitmatrix_.emplace_back(new_column);
+                    bitmatrix_.emplace_back(std::move(new_column));
                 } else if (!bitmatrix_.at(col).get()) {
-                    bitmatrix_.at(col).reset(new_column);
+                    bitmatrix_.at(col) = std::move(new_column);
                 } else {
                     new_column->add_to(&decompress(col));
-                    delete new_column;
                 }
             }
         }
@@ -255,7 +265,7 @@ void ColumnCompressed<Label>
                 old_bitmatrix[c]->add_to(&bit_vector);
                 old_bitmatrix[c].reset();
             }
-            bitmatrix_.emplace_back(new bit_vector_sd(bit_vector));
+            bitmatrix_.emplace_back(new bit_vector_smart(bit_vector));
         }
     }
 }
@@ -364,7 +374,7 @@ void ColumnCompressed<Label>::flush(size_t j, const std::vector<bool> &vector) {
     assert(cached_columns_.Cached(j));
 
     bitmatrix_[j].reset();
-    bitmatrix_[j].reset(new bit_vector_sd(vector));
+    bitmatrix_[j].reset(new bit_vector_smart(vector));
 }
 
 template <typename Label>
