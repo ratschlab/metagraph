@@ -72,7 +72,7 @@ DBGSD::adjacent_outgoing_nodes(node_index node) const {
     for (char c : alphabet) {
         auto next_index = traverse(node, c);
         if (next_index != npos)
-            indices.emplace_back(std::move(next_index));
+            indices.emplace_back(next_index);
     }
     return indices;
 }
@@ -83,7 +83,7 @@ DBGSD::adjacent_incoming_nodes(node_index node) const {
     for (char c : alphabet) {
         auto next_index = traverse_back(node, c);
         if (next_index != npos)
-            indices.emplace_back(std::move(next_index));
+            indices.emplace_back(next_index);
     }
     return indices;
 }

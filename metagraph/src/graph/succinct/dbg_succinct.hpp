@@ -114,8 +114,7 @@ class DBG_succ {
     node_index traverse(node_index node, char edge_label) const;
     node_index traverse_back(node_index node, char edge_label) const;
 
-    std::pair<edge_index, edge_index> get_outgoing_edge_range(node_index node) const;
-    std::vector<edge_index> get_incoming_edges(node_index node) const;
+    std::vector<edge_index> get_incoming_edges(edge_index edge) const;
 
     /**
      * Add a full sequence to the graph.
@@ -449,8 +448,6 @@ class DBG_succ {
 
         uint64_t edge = index(begin, end - 1);
 
-        assert(edge ? pick_edge(edge, get_source_node(edge), *(end - 1))
-                    : npos < W_->size());
         return edge ? pick_edge(edge, get_source_node(edge), *(end - 1))
                     : npos;
     }

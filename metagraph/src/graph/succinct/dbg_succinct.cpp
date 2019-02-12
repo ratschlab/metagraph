@@ -556,23 +556,14 @@ DBG_succ::node_index DBG_succ::traverse_back(node_index node, char edge_label) c
     return incoming(node, encode(edge_label));
 }
 
-std::pair<DBG_succ::edge_index, DBG_succ::edge_index>
-DBG_succ::get_outgoing_edge_range(node_index node) const {
-    CHECK_NODE(node);
-
-    assert(select_last(node) - select_last(node - 1) == outdegree(node));
-    return { select_last(node - 1) + 1, select_last(node) };
-}
-
 std::vector<DBG_succ::edge_index>
-DBG_succ::get_incoming_edges(node_index node) const {
-    CHECK_NODE(node);
+DBG_succ::get_incoming_edges(edge_index edge) const {
+    CHECK_INDEX(edge);
 
-    auto edge = select_last(node);
-    std::vector<DBG_succ::edge_index> edges{ bwd(edge) };
+    std::vector<DBG_succ::edge_index> edges { bwd(edge) };
 
     if (edges.back() + 1 == W_->size()) {
-        assert(indegree(node) == 1);
+        assert(indegree(get_source_node(edge)) == 1);
         return edges;
     }
 
@@ -581,22 +572,17 @@ DBG_succ::get_incoming_edges(node_index node) const {
 
     // iterate through all indices with edge label d + alph_size
     // which are less than the next index with edge label d
-    auto start = rank_W(edges.back(), d + alph_size) + 1;
-    auto max = rank_W(W_->size() - 1, d + alph_size);
-    if (start <= max) {
-        auto ubound = succ_W(edges.back() + 1, d);
-        auto i = select_W(start, d + alph_size);
-        while (i < ubound) {
-            edges.push_back(i);
-            if (start < max) {
-                i = select_W(++start, d + alph_size);
-            } else {
-                break;
-            }
-        }
+    auto next = succ_W(edges.back(), d + alph_size);
+    auto ubound = succ_W(edges.back() + 1, d);
+    while (next < ubound) {
+        edges.push_back(next);
+        if (++next >= ubound)
+            break;
+
+        next = succ_W(next, d + alph_size);
     }
 
-    assert(indegree(node) == edges.size());
+    assert(indegree(get_source_node(edge)) == edges.size());
     return edges;
 }
 
@@ -2152,23 +2138,22 @@ node_index DBGSuccinct::traverse_back(node_index node, char prev_char) const {
 std::vector<node_index> DBGSuccinct::adjacent_outgoing_nodes(node_index node) const {
     assert(node);
 
-    auto edge = kmer_to_boss_index(node);
+    auto boss_edge = kmer_to_boss_index(node);
 
-    auto [first, last] = boss_graph_->get_outgoing_edge_range(
-        boss_graph_->get_source_node(boss_graph_->fwd(edge))
-    );
+    auto last = boss_graph_->fwd(boss_edge);
+    auto first = boss_graph_->pred_last(last - 1) + 1;
 
     std::vector<node_index> nodes;
     nodes.reserve(last - first + 1);
 
     for (auto i = first; i <= last; ++i) {
-        assert(boss_graph_->get_W(edge) % boss_graph_->alph_size
-            == boss_graph_->get_node_last_value(i));
+        assert(boss_graph_->get_W(boss_edge) % boss_graph_->alph_size
+                == boss_graph_->get_node_last_value(i));
+
         auto next = boss_to_kmer_index(i);
         if (next != npos)
             nodes.emplace_back(next);
     }
-
     return nodes;
 }
 
@@ -2176,21 +2161,19 @@ std::vector<node_index> DBGSuccinct::adjacent_incoming_nodes(node_index node) co
     assert(node);
 
     auto edge = kmer_to_boss_index(node);
-    auto edges = boss_graph_->get_incoming_edges(
-        boss_graph_->get_source_node(edge)
-    );
+    auto edges = boss_graph_->get_incoming_edges(edge);
 
     std::vector<node_index> nodes;
     nodes.reserve(edges.size());
 
     for (auto i : edges) {
         assert(boss_graph_->get_W(i) % boss_graph_->alph_size
-            == boss_graph_->get_node_last_value(edge));
+                == boss_graph_->get_node_last_value(edge));
+
         auto prev = boss_to_kmer_index(i);
         if (prev != npos)
             nodes.emplace_back(prev);
     }
-
     return nodes;
 }
 

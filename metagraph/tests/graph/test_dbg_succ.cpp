@@ -36,20 +36,13 @@ void test_graph(DBG_succ *graph, const std::string &last,
     EXPECT_EQ(last, ostr.str()) << "state: " << state
                                 << ", old state: " << old_state;
 
-    size_t prev_first = 1;
     for (size_t i = 1; i < graph->last_->size(); ++i) {
-        ASSERT_EQ((*graph->last_)[i], graph->get_last(i));
-        ASSERT_EQ((*graph->W_)[i], graph->get_W(i));
-
-        auto [first, last] = graph->get_outgoing_edge_range(i);
-        ASSERT_EQ(prev_first, first);
-        ASSERT_EQ(graph->succ_last(prev_first), last);
-        if (graph->get_last(i))
-            prev_first = i + 1;
+        EXPECT_EQ((*graph->last_)[i], graph->get_last(i));
+        EXPECT_EQ((*graph->W_)[i], graph->get_W(i));
 
         auto last_outgoing = graph->succ_last(i);
         for (auto i : graph->get_incoming_edges(i)) {
-            ASSERT_EQ(last_outgoing, graph->fwd(i));
+            EXPECT_EQ(last_outgoing, graph->fwd(i));
         }
     }
 
