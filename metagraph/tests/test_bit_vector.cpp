@@ -114,6 +114,10 @@ TEST(bit_vector_small, queries) {
     test_bit_vector_queries<bit_vector_small>();
 }
 
+TEST(bit_vector_smart, queries) {
+    test_bit_vector_queries<bit_vector_smart>();
+}
+
 TEST(bit_vector_rrr, nonCommonQueries) {
     // Mainly test select0.
     auto vector = std::make_unique<bit_vector_rrr<>>(10, 1);
@@ -427,6 +431,34 @@ TEST(bit_vector_small, Serialization) {
     }
 }
 
+TEST(bit_vector_smart, Serialization) {
+    std::vector<std::initializer_list<bool>> init_lists = {
+        { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0 },
+        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1 },
+        { 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1 },
+        { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
+    };
+    for (auto init_list : init_lists) {
+        std::vector<bool> numbers(init_list);
+        bit_vector *vector = new bit_vector_smart(numbers);
+        ASSERT_EQ(16u, numbers.size());
+        ASSERT_TRUE(vector);
+        std::ofstream outstream(test_dump_basename, std::ios::binary);
+        vector->serialize(outstream);
+        outstream.close();
+        delete vector;
+
+        vector = new bit_vector_smart;
+        ASSERT_TRUE(vector);
+        std::ifstream instream(test_dump_basename, std::ios::binary);
+        ASSERT_TRUE(vector->load(instream));
+
+        reference_based_test(*vector, numbers);
+
+        delete vector;
+    }
+}
 
 
 TEST(bit_vector_sd, SerializationCatchErrorWhenLoadingSdVector) {
@@ -501,6 +533,14 @@ TEST(bit_vector_small, MoveConstructor) {
     reference_based_test(vector, numbers);
 }
 
+TEST(bit_vector_smart, MoveConstructor) {
+    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+    std::vector<bool> numbers(init_list);
+    bit_vector_smart vector(numbers);
+    reference_based_test(vector, numbers);
+}
+
 
 TEST(bit_vector_stat, MoveAssignment) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
@@ -548,6 +588,16 @@ TEST(bit_vector_small, MoveAssignment) {
     std::vector<bool> numbers(init_list);
     bit_vector_small first(numbers);
     bit_vector_small second;
+    second = std::move(first);
+    reference_based_test(second, numbers);
+}
+
+TEST(bit_vector_smart, MoveAssignment) {
+    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+    std::vector<bool> numbers(init_list);
+    bit_vector_smart first(numbers);
+    bit_vector_smart second;
     second = std::move(first);
     reference_based_test(second, numbers);
 }
@@ -703,6 +753,28 @@ TEST(bit_vector_small, to_vector_sparse) {
     }
 }
 
+TEST(bit_vector_smart, to_vector_dense) {
+    std::vector<bool> vector(10, true);
+    for (uint64_t i = 0; i < 10; ++i) {
+        vector[i] = i % 3;
+        bit_vector_smart bvs(vector);
+        auto copy = bvs.to_vector();
+        // check if the it inverts when more than half of the bits are set
+        ASSERT_EQ(copy, vector);
+    }
+}
+
+TEST(bit_vector_smart, to_vector_sparse) {
+    std::vector<bool> vector(10);
+    for (uint64_t i = 0; i < 10; ++i) {
+        vector[i] = (i % 3) == 0;
+        bit_vector_smart bvs(vector);
+        auto copy = bvs.to_vector();
+        // check if the it inverts when more than half of the bits are set
+        ASSERT_EQ(copy, vector);
+    }
+}
+
 
 TEST(bit_vector_rrr, to_vector_dense) {
     sdsl::bit_vector vector(10, true);
@@ -788,6 +860,30 @@ TEST(bit_vector_small, call_ones_sparse) {
     for (uint64_t i = 0; i < 10; ++i) {
         vector[i] = i % 3 == 0;
         bit_vector_small bvs(vector);
+        std::vector<bool> copy(vector.size(), false);
+        bvs.call_ones([&copy](auto i) { copy[i] = true; });
+        // check if the it inverts when more than half of the bits are set
+        ASSERT_EQ(copy, vector);
+    }
+}
+
+TEST(bit_vector_smart, call_ones_dense) {
+    std::vector<bool> vector(50, true);
+    for (uint64_t i = 0; i < 10; ++i) {
+        vector[i] = i % 3;
+        bit_vector_smart bvs(vector);
+        std::vector<bool> copy(vector.size(), false);
+        bvs.call_ones([&copy](auto i) { copy[i] = true; });
+        // check if the it inverts when more than half of the bits are set
+        ASSERT_EQ(copy, vector);
+    }
+}
+
+TEST(bit_vector_smart, call_ones_sparse) {
+    std::vector<bool> vector(50);
+    for (uint64_t i = 0; i < 10; ++i) {
+        vector[i] = i % 3 == 0;
+        bit_vector_smart bvs(vector);
         std::vector<bool> copy(vector.size(), false);
         bvs.call_ones([&copy](auto i) { copy[i] = true; });
         // check if the it inverts when more than half of the bits are set
