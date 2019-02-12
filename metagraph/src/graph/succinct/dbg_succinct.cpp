@@ -556,34 +556,30 @@ DBG_succ::node_index DBG_succ::traverse_back(node_index node, char edge_label) c
     return incoming(node, encode(edge_label));
 }
 
-std::vector<DBG_succ::edge_index>
-DBG_succ::get_incoming_edges(edge_index edge) const {
+void DBG_succ::call_adjacent_incoming_edges(edge_index edge,
+                                            std::function<void(edge_index)> callback) const {
     CHECK_INDEX(edge);
 
-    std::vector<DBG_succ::edge_index> edges { bwd(edge) };
+    edge_index next_incoming = bwd(edge);
 
-    if (edges.back() + 1 == W_->size()) {
+    callback(next_incoming);
+
+    if (next_incoming + 1 == W_->size()) {
         assert(indegree(get_source_node(edge)) == 1);
-        return edges;
+        return;
     }
 
     TAlphabet d = get_node_last_value(edge);
-    assert(d == get_W(edges.back()));
+    assert(d == get_W(next_incoming));
 
     // iterate through all indices with edge label d + alph_size
     // which are less than the next index with edge label d
-    auto next = succ_W(edges.back(), d + alph_size);
-    auto ubound = succ_W(edges.back() + 1, d);
-    while (next < ubound) {
-        edges.push_back(next);
-        if (++next >= ubound)
-            break;
+    const auto ubound = succ_W(next_incoming + 1, d);
 
-        next = succ_W(next, d + alph_size);
+    while (++next_incoming < ubound
+            && (next_incoming = succ_W(next_incoming, d + alph_size)) < ubound) {
+        callback(next_incoming);
     }
-
-    assert(indegree(get_source_node(edge)) == edges.size());
-    return edges;
 }
 
 /**
@@ -2136,9 +2132,9 @@ node_index DBGSuccinct::traverse_back(node_index node, char prev_char) const {
 }
 
 void DBGSuccinct::adjacent_outgoing_nodes(node_index node,
-                                          std::vector<node_index> *nodes) const {
+                                          std::vector<node_index> *target_nodes) const {
     assert(node);
-    assert(nodes);
+    assert(target_nodes);
 
     auto boss_edge = kmer_to_boss_index(node);
 
@@ -2151,26 +2147,27 @@ void DBGSuccinct::adjacent_outgoing_nodes(node_index node,
 
         auto next = boss_to_kmer_index(i);
         if (next != npos)
-            nodes->emplace_back(next);
+            target_nodes->emplace_back(next);
     }
 }
 
 void DBGSuccinct::adjacent_incoming_nodes(node_index node,
-                                          std::vector<node_index> *nodes) const {
+                                          std::vector<node_index> *source_nodes) const {
     assert(node);
-    assert(nodes);
+    assert(source_nodes);
 
     auto edge = kmer_to_boss_index(node);
-    auto edges = boss_graph_->get_incoming_edges(edge);
 
-    for (auto i : edges) {
-        assert(boss_graph_->get_W(i) % boss_graph_->alph_size
-                == boss_graph_->get_node_last_value(edge));
+    boss_graph_->call_adjacent_incoming_edges(edge,
+        [&](DBG_succ::edge_index incoming_boss_edge) {
+            assert(boss_graph_->get_W(incoming_boss_edge) % boss_graph_->alph_size
+                    == boss_graph_->get_node_last_value(edge));
 
-        auto prev = boss_to_kmer_index(i);
-        if (prev != npos)
-            nodes->emplace_back(prev);
-    }
+            auto prev = boss_to_kmer_index(incoming_boss_edge);
+            if (prev != npos)
+                source_nodes->emplace_back(prev);
+        }
+    );
 }
 
 // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|

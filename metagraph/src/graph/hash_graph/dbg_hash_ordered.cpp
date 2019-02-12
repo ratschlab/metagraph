@@ -53,11 +53,9 @@ DBGHashOrdered::traverse_back(node_index node, char prev_char) const {
     return get_index(kmer);
 }
 
-void
-DBGHashOrdered
-::adjacent_outgoing_nodes(node_index node,
-                          std::vector<DBGHashOrdered::node_index> *nodes) const {
-    assert(nodes);
+void DBGHashOrdered::adjacent_outgoing_nodes(node_index node,
+                                             std::vector<node_index> *target_nodes) const {
+    assert(target_nodes);
 
     const auto kmer = get_kmer(node);
 
@@ -66,15 +64,13 @@ DBGHashOrdered
         next_kmer.to_next(k_, seq_encoder_.encode(c));
         auto next = get_index(next_kmer);
         if (next != npos)
-            nodes->emplace_back(next);
+            target_nodes->push_back(next);
     }
 }
 
-void
-DBGHashOrdered
-::adjacent_incoming_nodes(node_index node,
-                          std::vector<DBGHashOrdered::node_index> *nodes) const {
-    assert(nodes);
+void DBGHashOrdered::adjacent_incoming_nodes(node_index node,
+                                             std::vector<node_index> *source_nodes) const {
+    assert(source_nodes);
 
     const auto kmer = get_kmer(node);
 
@@ -83,7 +79,7 @@ DBGHashOrdered
         next_kmer.to_prev(k_, seq_encoder_.encode(c));
         auto next = get_index(next_kmer);
         if (next != npos)
-            nodes->emplace_back(next);
+            source_nodes->push_back(next);
     }
 }
 

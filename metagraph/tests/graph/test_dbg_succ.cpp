@@ -41,9 +41,9 @@ void test_graph(DBG_succ *graph, const std::string &last,
         EXPECT_EQ((*graph->W_)[i], graph->get_W(i));
 
         auto last_outgoing = graph->succ_last(i);
-        for (auto i : graph->get_incoming_edges(i)) {
-            EXPECT_EQ(last_outgoing, graph->fwd(i));
-        }
+        graph->call_adjacent_incoming_edges(i, [&](auto incoming) {
+            EXPECT_EQ(last_outgoing, graph->fwd(incoming));
+        });
     }
 
     ostr.clear();

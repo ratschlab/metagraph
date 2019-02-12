@@ -66,28 +66,26 @@ DBGSD::traverse_back(node_index node, char prev_char) const {
     return get_node(kmer);
 }
 
-void
-DBGSD::adjacent_outgoing_nodes(node_index node,
-                               std::vector<DBGSD::node_index> *nodes) const {
-    assert(nodes);
+void DBGSD::adjacent_outgoing_nodes(node_index node,
+                                    std::vector<node_index> *target_nodes) const {
+    assert(target_nodes);
 
     for (char c : alphabet) {
         auto next_index = traverse(node, c);
         if (next_index != npos)
-            nodes->emplace_back(next_index);
+            target_nodes->push_back(next_index);
     }
 }
 
-void
-DBGSD::adjacent_incoming_nodes(node_index node,
-                               std::vector<DBGSD::node_index> *nodes) const {
-    assert(nodes);
+void DBGSD::adjacent_incoming_nodes(node_index node,
+                                    std::vector<node_index> *source_nodes) const {
+    assert(source_nodes);
 
     std::vector<node_index> indices;
     for (char c : alphabet) {
         auto next_index = traverse_back(node, c);
         if (next_index != npos)
-            nodes->emplace_back(next_index);
+            source_nodes->push_back(next_index);
     }
 }
 
@@ -169,6 +167,7 @@ void DBGSD::call_paths(Call<const std::vector<node_index>,
     // store all branch nodes on the way
     std::deque<Edge> nodes;
     std::vector<uint64_t> path;
+    std::vector<node_index> target_kmers;
 
     auto node_to_index = [&](const node_index &id) -> uint64_t {
         assert(id > 0);
@@ -210,36 +209,40 @@ void DBGSD::call_paths(Call<const std::vector<node_index>,
                 path.push_back(index_to_node(node));
                 visited[node] = true;
 
-                std::vector<node_index> out_kmers;
-                out_kmers.reserve(alphabet.size());
-                adjacent_outgoing_nodes(index_to_node(node), &out_kmers);
-                std::vector<TAlphabet> kmer(sequence.end() - k_ + 1, sequence.end());
+                target_kmers.clear();
 
-                if (out_kmers.size() == 1) {
-                    node = node_to_index(out_kmers[0]);
+                adjacent_outgoing_nodes(index_to_node(node), &target_kmers);
+
+                if (!target_kmers.size())
+                    continue;
+
+                if (target_kmers.size() == 1) {
+                    node = node_to_index(target_kmers[0]);
                     discovered[node] = true;
                     continue;
-                } else if (out_kmers.size() > 1) {
-                    bool continue_traversal = false;
-                    for (const auto &next : out_kmers) {
-                        auto next_index = node_to_index(next);
-                        if (!discovered[next_index]) {
-                            continue_traversal = true;
-                            discovered[next_index] = true;
-                            nodes.push_back({ next_index, kmer });
-                        }
-                    }
+                }
 
-                    if (split_to_contigs)
-                        break;
+                std::vector<TAlphabet> kmer(sequence.end() - k_ + 1, sequence.end());
 
-                    if (continue_traversal) {
-                        node = nodes.back().id;
-                        nodes.pop_back();
-                        continue;
-                    } else {
-                        break;
+                bool continue_traversal = false;
+                for (const auto &next : target_kmers) {
+                    auto next_index = node_to_index(next);
+                    if (!discovered[next_index]) {
+                        continue_traversal = true;
+                        discovered[next_index] = true;
+                        nodes.push_back({ next_index, kmer });
                     }
+                }
+
+                if (split_to_contigs)
+                    break;
+
+                if (continue_traversal) {
+                    node = nodes.back().id;
+                    nodes.pop_back();
+                    continue;
+                } else {
+                    break;
                 }
             }
 
