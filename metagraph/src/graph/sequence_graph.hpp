@@ -28,6 +28,15 @@ class SequenceGraph {
                               const std::function<void(node_index)> &callback,
                               const std::function<bool()> &terminate = [](){ return false; }) const = 0;
 
+    // Given a node index and a pointer to a vector of node indices, iterates
+    // over all the outgoing edges and pushes back indices of their target nodes.
+    virtual void adjacent_outgoing_nodes(node_index node,
+                                         std::vector<node_index> *target_nodes) const = 0;
+    // Given a node index and a pointer to a vector of node indices, iterates
+    // over all the incoming edges and pushes back indices of their source nodes.
+    virtual void adjacent_incoming_nodes(node_index node,
+                                         std::vector<node_index> *source_nodes) const = 0;
+
     virtual uint64_t num_nodes() const = 0;
 
     virtual bool load(const std::string &filename_base) = 0;
@@ -47,13 +56,6 @@ class DeBruijnGraph : public SequenceGraph {
     virtual node_index traverse(node_index node, char next_char) const = 0;
     // Traverse the incoming edge
     virtual node_index traverse_back(node_index node, char prev_char) const = 0;
-
-    // Given a node index and a ptr to a vector of indices, pushes back indices
-    // of adjacent outgoing nodes
-    virtual void adjacent_outgoing_nodes(node_index node, std::vector<node_index> *nodes) const = 0;
-    // Given a node index and a ptr to a vector of indices, pushes back indices
-    // of adjacent incoming nodes
-    virtual void adjacent_incoming_nodes(node_index node, std::vector<node_index> *nodes) const = 0;
 
     // Check whether graph contains fraction of nodes from the sequence
     virtual bool find(const std::string &sequence,

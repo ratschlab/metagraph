@@ -55,21 +55,21 @@ DBGHash::node_index DBGHash::traverse_back(node_index node, char prev_char) cons
 }
 
 void DBGHash::adjacent_outgoing_nodes(node_index node,
-                                      std::vector<DBGHash::node_index> *nodes) const {
-    assert(nodes);
+                                      std::vector<node_index> *target_nodes) const {
+    assert(target_nodes);
 
     auto prefix = node_to_kmer(node).substr(1);
 
     for (char c : kAlphabet) {
         auto next = kmer_to_node(prefix + c);
         if (next != npos)
-            nodes->emplace_back(next);
+            target_nodes->push_back(next);
     }
 }
 
 void DBGHash::adjacent_incoming_nodes(node_index node,
-                                      std::vector<DBGHash::node_index> *nodes) const {
-    assert(nodes);
+                                      std::vector<node_index> *source_nodes) const {
+    assert(source_nodes);
 
     auto suffix = node_to_kmer(node);
     suffix.pop_back();
@@ -77,7 +77,7 @@ void DBGHash::adjacent_incoming_nodes(node_index node,
     for (char c : kAlphabet) {
         auto next = kmer_to_node(std::string(1, c) + suffix);
         if (next != npos)
-            nodes->emplace_back(next);
+            source_nodes->push_back(next);
     }
 }
 

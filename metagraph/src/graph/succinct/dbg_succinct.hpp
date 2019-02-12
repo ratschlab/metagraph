@@ -114,7 +114,8 @@ class DBG_succ {
     node_index traverse(node_index node, char edge_label) const;
     node_index traverse_back(node_index node, char edge_label) const;
 
-    std::vector<edge_index> get_incoming_edges(edge_index edge) const;
+    void call_adjacent_incoming_edges(edge_index edge,
+                                      std::function<void(edge_index)> callback) const;
 
     /**
      * Add a full sequence to the graph.
@@ -561,12 +562,14 @@ class DBGSuccinct : public DeBruijnGraph {
     // Traverse the incoming edge
     virtual node_index traverse_back(node_index node, char prev_char) const override final;
 
-    // Given a node index and a ptr to a vector of indices, pushes back indices
-    // of adjacent outgoing nodes
-    virtual void adjacent_outgoing_nodes(node_index node, std::vector<node_index> *nodes) const override final;
-    // Given a node index and a ptr to a vector of indices, pushes back indices
-    // of adjacent incoming nodes
-    virtual void adjacent_incoming_nodes(node_index node, std::vector<node_index> *nodes) const override final;
+    // Given a node index and a pointer to a vector of node indices, iterates
+    // over all the outgoing edges and pushes back indices of their target nodes.
+    virtual void adjacent_outgoing_nodes(node_index node,
+                                         std::vector<node_index> *target_nodes) const override final;
+    // Given a node index and a pointer to a vector of node indices, iterates
+    // over all the incoming edges and pushes back indices of their source nodes.
+    virtual void adjacent_incoming_nodes(node_index node,
+                                         std::vector<node_index> *source_nodes) const override final;
 
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal
