@@ -912,6 +912,7 @@ TEST(bit_vector, copy) {
     test_deep_copy<bit_vector_sd>();
     test_deep_copy<bit_vector_rrr<>>();
     test_deep_copy<bit_vector_small>();
+    test_deep_copy<bit_vector_smart>();
 }
 
 template <class BitVectorFrom, class BitVectorTo>
@@ -944,28 +945,40 @@ TEST(bit_vector, copy_to) {
     test_copy_convert_to< bit_vector_stat, bit_vector_sd >();
     test_copy_convert_to< bit_vector_stat, bit_vector_rrr<> >();
     test_copy_convert_to< bit_vector_stat, bit_vector_small >();
+    test_copy_convert_to< bit_vector_stat, bit_vector_smart >();
 
     test_copy_convert_to< bit_vector_dyn, bit_vector_stat >();
     test_copy_convert_to< bit_vector_dyn, bit_vector_dyn >();
     test_copy_convert_to< bit_vector_dyn, bit_vector_sd >();
     test_copy_convert_to< bit_vector_dyn, bit_vector_rrr<> >();
     test_copy_convert_to< bit_vector_dyn, bit_vector_small >();
+    test_copy_convert_to< bit_vector_dyn, bit_vector_smart >();
 
     test_copy_convert_to< bit_vector_sd, bit_vector_stat >();
     test_copy_convert_to< bit_vector_sd, bit_vector_dyn >();
     test_copy_convert_to< bit_vector_sd, bit_vector_sd >();
     test_copy_convert_to< bit_vector_sd, bit_vector_rrr<> >();
     test_copy_convert_to< bit_vector_sd, bit_vector_small >();
+    test_copy_convert_to< bit_vector_sd, bit_vector_smart >();
 
     test_copy_convert_to< bit_vector_rrr<>, bit_vector_stat >();
     test_copy_convert_to< bit_vector_rrr<>, bit_vector_dyn >();
     test_copy_convert_to< bit_vector_rrr<>, bit_vector_sd >();
     test_copy_convert_to< bit_vector_rrr<>, bit_vector_rrr<> >();
     test_copy_convert_to< bit_vector_rrr<>, bit_vector_small >();
+    test_copy_convert_to< bit_vector_rrr<>, bit_vector_smart >();
 
     test_copy_convert_to< bit_vector_small, bit_vector_stat >();
     test_copy_convert_to< bit_vector_small, bit_vector_dyn >();
     test_copy_convert_to< bit_vector_small, bit_vector_sd >();
     test_copy_convert_to< bit_vector_small, bit_vector_rrr<> >();
     test_copy_convert_to< bit_vector_small, bit_vector_small >();
+    test_copy_convert_to< bit_vector_small, bit_vector_smart >();
+
+    test_copy_convert_to< bit_vector_smart, bit_vector_stat >();
+    test_copy_convert_to< bit_vector_smart, bit_vector_dyn >();
+    test_copy_convert_to< bit_vector_smart, bit_vector_sd >();
+    test_copy_convert_to< bit_vector_smart, bit_vector_rrr<> >();
+    test_copy_convert_to< bit_vector_smart, bit_vector_small >();
+    test_copy_convert_to< bit_vector_smart, bit_vector_smart >();
 }

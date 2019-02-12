@@ -241,8 +241,6 @@ class bit_vector_adaptive : public bit_vector {
   public:
     virtual ~bit_vector_adaptive() {};
 
-    virtual std::unique_ptr<bit_vector> copy() const override = 0;
-
     virtual uint64_t rank1(uint64_t id) const override final;
     virtual uint64_t select1(uint64_t id) const override final;
 
@@ -253,17 +251,34 @@ class bit_vector_adaptive : public bit_vector {
     virtual void insertBit(uint64_t id, bool val) override final;
     virtual void deleteBit(uint64_t id) override final;
 
-    virtual bool load(std::istream &in) override = 0;
-    virtual void serialize(std::ostream &out) const override = 0;
+    virtual bool load(std::istream &in) override final;
+    virtual void serialize(std::ostream &out) const override final;
 
     virtual uint64_t size() const override final;
 
     virtual std::vector<bool> to_vector() const override final;
 
-    virtual void call_ones(const std::function<void(uint64_t)> &callback) const override final;
+    template <class T>
+    using VoidCall = std::function<void(T)>;
+
+    virtual void call_ones(const VoidCall<uint64_t> &callback) const override final;
+
+    enum VectorCode {
+    // FUI: don't change order of the variables!
+    // Add new ones to the end, if any.
+    // Otherwise, serialized vectors will be not loadable
+        RRR_VECTOR = 0,
+        SD_VECTOR,
+        STAT_VECTOR
+    };
+
+    typedef VectorCode (*DefineRepresentation)(uint64_t /* size */,
+                                               uint64_t /* num_set_bits */);
+
+    static VectorCode representation_tag(const bit_vector &vector);
 
   protected:
-    explicit bit_vector_adaptive(std::unique_ptr<bit_vector>&& vector = {});
+    bit_vector_adaptive() {}
 
     explicit bit_vector_adaptive(const bit_vector_adaptive &other);
     bit_vector_adaptive(bit_vector_adaptive&& other) = default;
@@ -275,27 +290,50 @@ class bit_vector_adaptive : public bit_vector {
 
 
 /**
+ * static hybrid vector:
+ *      the internal representation is defined in constructor.
+ */
+template <bit_vector_adaptive::DefineRepresentation optimal_representation>
+class bit_vector_adaptive_stat : public bit_vector_adaptive {
+  public:
+    explicit bit_vector_adaptive_stat(uint64_t size = 0, bool value = false);
+
+    template <class BitVector>
+    explicit bit_vector_adaptive_stat(const BitVector &vector)
+      : bit_vector_adaptive_stat(bit_vector_stat(vector).convert_to<sdsl::bit_vector>()) {}
+
+    explicit bit_vector_adaptive_stat(const sdsl::bit_vector &vector);
+
+    bit_vector_adaptive_stat(const VoidCall<const VoidCall<uint64_t>&> &call_ones,
+                             uint64_t size,
+                             uint64_t num_set_bits);
+
+    bit_vector_adaptive_stat(std::initializer_list<bool> init)
+      : bit_vector_adaptive_stat(sdsl::bit_vector(init)) {}
+
+    virtual std::unique_ptr<bit_vector> copy() const override final;
+};
+
+/**
  * hybrid vector: the smallest representation
  * combines:
  *    - bit_vector_sd
  *    - bit_vector_rrr
  */
-class bit_vector_small : public bit_vector_adaptive {
-  public:
-    explicit bit_vector_small(uint64_t size = 0, bool value = false);
-    template <class BitVector>
-    explicit bit_vector_small(const BitVector &vector);
-    explicit bit_vector_small(const sdsl::bit_vector &vector);
-    bit_vector_small(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
-                     uint64_t size,
-                     uint64_t num_set_bits);
+bit_vector_adaptive::VectorCode
+smallest_representation(uint64_t size, uint64_t num_set_bits);
 
-    bit_vector_small(std::initializer_list<bool> init);
+typedef bit_vector_adaptive_stat<smallest_representation> bit_vector_small;
 
-    std::unique_ptr<bit_vector> copy() const override;
+/**
+ * hybrid vector: a good tradeoff between the speed and size
+ * combines:
+ *    - bit_vector_sd
+ *    - bit_vector_stat
+ */
+bit_vector_adaptive::VectorCode
+smart_representation(uint64_t size, uint64_t num_set_bits);
 
-    bool load(std::istream &in) override;
-    void serialize(std::ostream &out) const override;
-};
+typedef bit_vector_adaptive_stat<smart_representation> bit_vector_smart;
 
 #endif // __BIT_VECTOR_HPP__
