@@ -52,6 +52,40 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
 }
 
 
+// For each pair (first, second) in the dictionary, renames column |first|
+// to |second| and merges columns with matching names, if supported.
+template <typename IndexType, typename LabelType>
+void MultiLabelEncoded<IndexType, LabelType>
+::rename_columns(const std::unordered_map<Label, Label> &dict) {
+    std::vector<Label> index_to_label(label_encoder_.size());
+    for (size_t i = 0; i < index_to_label.size(); ++i) {
+        index_to_label[i] = label_encoder_.decode(i);
+    }
+    for (const auto &pair : dict) {
+        index_to_label[label_encoder_.encode(pair.first)] = pair.second;
+    }
+
+    label_encoder_.clear();
+
+    // insert new column labels
+    for (const auto &label : index_to_label) {
+        try {
+            label_encoder_.encode(label);
+            // no exception -> there already exists a column with this name
+            std::cerr << "Error: detected more than one column with"
+                      << " target name " << label
+                      << ". Merging columns is not implemented"
+                      << " for this annotation type."
+                      << std::endl;
+            exit(1);
+        } catch (...) {
+            // this is the first column with this name
+            label_encoder_.insert_and_encode(label);
+        }
+    }
+}
+
+
 // Count all labels collected from the given rows
 // and return top |num_top| with the their counts.
 template <typename IndexType, typename LabelType>

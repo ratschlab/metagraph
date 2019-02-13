@@ -226,7 +226,7 @@ void ColumnCompressed<Label>::insert_rows(const std::vector<Index> &rows) {
 // column |first| with |second| and merges the columns with matching names.
 template <typename Label>
 void ColumnCompressed<Label>
-::rename_columns(const std::map<std::string, std::string> &dict) {
+::rename_columns(const std::unordered_map<std::string, std::string> &dict) {
     cached_columns_.Clear();
 
     std::vector<std::string> old_index_to_label(label_encoder_.size());

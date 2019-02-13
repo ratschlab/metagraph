@@ -1,8 +1,6 @@
 #ifndef __ANNOTATE_COLUMN_COMPRESSED_HPP__
 #define __ANNOTATE_COLUMN_COMPRESSED_HPP__
 
-#include <map>
-
 #include <cache.hpp>
 #include <lru_cache_policy.hpp>
 
@@ -60,7 +58,7 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     // For each pair (first, second) in the dictionary, renames
     // column |first| with |second| and merges the columns with matching names.
-    void rename_columns(const std::map<std::string, std::string> &dict);
+    void rename_columns(const std::unordered_map<std::string, std::string> &dict);
 
     // Get labels that occur at least in |presence_ratio| rows.
     // If |presence_ratio| = 0, return all occurring labels.

@@ -85,6 +85,10 @@ class MultiLabelAnnotation
 
     virtual void insert_rows(const std::vector<Index> &rows) = 0;
 
+    // For each pair (first, second) in the dictionary, renames column |first|
+    // to |second| and merges columns with matching names, if supported.
+    virtual void rename_columns(const std::unordered_map<Label, Label> &dict) = 0;
+
     /*********************** Special queries **********************/
 
     // Get labels that occur at least in |presence_ratio| rows.
@@ -168,6 +172,10 @@ class MultiLabelEncoded
     virtual bool merge_load(const std::vector<std::string> &filenames) override = 0;
 
     virtual void insert_rows(const std::vector<Index> &rows) override = 0;
+
+    // For each pair (first, second) in the dictionary, renames column |first|
+    // to |second| and merges columns with matching names, if supported.
+    virtual void rename_columns(const std::unordered_map<Label, Label> &dict) override;
 
     /*********************** Special queries **********************/
 

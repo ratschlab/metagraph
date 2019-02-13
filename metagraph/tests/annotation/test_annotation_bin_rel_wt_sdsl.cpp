@@ -110,6 +110,108 @@ TEST_F(BinRelWT_sdslTest, SerializationAndLoad) {
     }
 }
 
+TEST(BinRelWT_sdsl, NoRenameColumns) {
+    annotate::ColumnCompressed<> annotation(5);
+    annotation.set_labels(0, { "Label0", "Label2", "Label8" });
+    annotation.set_labels(2, { "Label1", "Label2" });
+    annotation.set_labels(4, { "Label8" });
+
+    auto bin_rel_wt_anno = annotate::convert<annotate::BinRelWT_sdslAnnotator>(
+        std::move(annotation)
+    );
+    bin_rel_wt_anno->rename_columns({});
+
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(bin_rel_wt_anno->get(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(bin_rel_wt_anno->get(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(bin_rel_wt_anno->get(2)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(bin_rel_wt_anno->get(3)));
+    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(bin_rel_wt_anno->get(4)));
+}
+
+TEST(BinRelWT_sdsl, RenameColumns) {
+    annotate::ColumnCompressed<> annotation(5);
+    annotation.set_labels(0, { "Label0", "Label2", "Label8" });
+    annotation.set_labels(2, { "Label1", "Label2" });
+    annotation.set_labels(4, { "Label8" });
+
+    auto bin_rel_wt_anno = annotate::convert<annotate::BinRelWT_sdslAnnotator>(
+        std::move(annotation)
+    );
+    bin_rel_wt_anno->rename_columns({ { "Label2", "Label2Renamed" },
+                                      { "Label8", "Label8Renamed" } });
+
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2Renamed", "Label8Renamed" }), convert_to_set(bin_rel_wt_anno->get(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(bin_rel_wt_anno->get(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2Renamed" }), convert_to_set(bin_rel_wt_anno->get(2)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(bin_rel_wt_anno->get(3)));
+    EXPECT_EQ(convert_to_set({ "Label8Renamed" }), convert_to_set(bin_rel_wt_anno->get(4)));
+}
+
+TEST(BinRelWT_sdsl, SwapColumns) {
+    annotate::ColumnCompressed<> annotation(5);
+    annotation.set_labels(0, { "Label0", "Label2", "Label8" });
+    annotation.set_labels(2, { "Label1", "Label2" });
+    annotation.set_labels(4, { "Label8" });
+
+    auto bin_rel_wt_anno = annotate::convert<annotate::BinRelWT_sdslAnnotator>(
+        std::move(annotation)
+    );
+    bin_rel_wt_anno->rename_columns({ { "Label2", "Label8" },
+                                      { "Label8", "Label2" } });
+
+    EXPECT_EQ(convert_to_set({ "Label0", "Label8", "Label2" }), convert_to_set(bin_rel_wt_anno->get(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(bin_rel_wt_anno->get(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label8" }), convert_to_set(bin_rel_wt_anno->get(2)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(bin_rel_wt_anno->get(3)));
+    EXPECT_EQ(convert_to_set({ "Label2" }), convert_to_set(bin_rel_wt_anno->get(4)));
+}
+
+TEST(BinRelWT_sdsl, RenameColumnsMerge) {
+    annotate::ColumnCompressed<> annotation(5);
+    annotation.set_labels(0, { "Label0", "Label2", "Label8" });
+    annotation.set_labels(2, { "Label1", "Label2" });
+    annotation.set_labels(4, { "Label8" });
+
+    auto bin_rel_wt_anno = annotate::convert<annotate::BinRelWT_sdslAnnotator>(
+        std::move(annotation)
+    );
+    ASSERT_DEATH(
+        bin_rel_wt_anno->rename_columns({ { "Label2", "Merged" },
+                                          { "Label8", "Merged" } }),
+        ""
+    );
+
+    // EXPECT_EQ(convert_to_set({ "Label0", "Merged" }), convert_to_set(bin_rel_wt_anno->get(0)));
+    // EXPECT_EQ(convert_to_set({}), convert_to_set(bin_rel_wt_anno->get(1)));
+    // EXPECT_EQ(convert_to_set({ "Label1", "Merged" }), convert_to_set(bin_rel_wt_anno->get(2)));
+    // EXPECT_EQ(convert_to_set({}), convert_to_set(bin_rel_wt_anno->get(3)));
+    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(bin_rel_wt_anno->get(4)));
+}
+
+TEST(BinRelWT_sdsl, RenameColumnsMergeAll) {
+    annotate::ColumnCompressed<> annotation(5);
+    annotation.set_labels(0, { "Label0", "Label2", "Label8" });
+    annotation.set_labels(2, { "Label1", "Label2" });
+    annotation.set_labels(4, { "Label8" });
+
+    auto bin_rel_wt_anno = annotate::convert<annotate::BinRelWT_sdslAnnotator>(
+        std::move(annotation)
+    );
+    ASSERT_DEATH(
+        bin_rel_wt_anno->rename_columns({ { "Label0", "Merged" },
+                                        { "Label1", "Merged" },
+                                        { "Label2", "Merged" },
+                                        { "Label8", "Merged" }, }),
+        ""
+    );
+
+    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(bin_rel_wt_anno->get(0)));
+    // EXPECT_EQ(convert_to_set({}), convert_to_set(bin_rel_wt_anno->get(1)));
+    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(bin_rel_wt_anno->get(2)));
+    // EXPECT_EQ(convert_to_set({}), convert_to_set(bin_rel_wt_anno->get(3)));
+    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(bin_rel_wt_anno->get(4)));
+}
+
 TEST_F(BinRelWT_sdslTest, Sparsity){
     EXPECT_EQ(1 - static_cast<double>(annotation->num_relations())
                                           / annotation->num_objects()

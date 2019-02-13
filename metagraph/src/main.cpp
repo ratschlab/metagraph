@@ -1651,15 +1651,14 @@ int main(int argc, const char *argv[]) {
 
             Timer timer;
 
-            auto annotator = std::make_unique<annotate::ColumnCompressed<>>(
-                0, kNumCachedColumns, config->verbose
-            );
+            auto annotation = initialize_annotation(files.at(0), *config);
 
             if (config->verbose)
                 std::cout << "Loading annotator...\t" << std::flush;
 
-            if (!annotator->load(files.at(0))) {
-                std::cerr << "ERROR: can't load annotations" << std::endl;
+            if (!annotation->load(files.at(0))) {
+                std::cerr << "ERROR: can't load annotation from file "
+                          << files.at(0) << std::endl;
                 exit(1);
             }
             if (config->verbose)
@@ -1669,7 +1668,7 @@ int main(int argc, const char *argv[]) {
                 if (config->verbose)
                     std::cout << "Renaming...\t" << std::flush;
 
-                std::map<std::string, std::string> dict;
+                std::unordered_map<std::string, std::string> dict;
                 std::ifstream instream(config->rename_instructions_file);
                 if (!instream.is_open()) {
                     std::cerr << "ERROR: Can't open file "
@@ -1688,11 +1687,26 @@ int main(int argc, const char *argv[]) {
                     }
                     dict[old_name] = new_name;
                 }
-                annotator->rename_columns(dict);
 
-                annotator->serialize(config->outfbase);
+                annotation->rename_columns(dict);
+
+                annotation->serialize(config->outfbase);
                 if (config->verbose)
                     std::cout << timer.elapsed() << "sec" << std::endl;
+
+                return 0;
+            }
+
+            std::unique_ptr<annotate::ColumnCompressed<>> annotator;
+
+            if (dynamic_cast<const annotate::ColumnCompressed<> *>(annotation.get())) {
+                annotator.reset(dynamic_cast<annotate::ColumnCompressed<> *>(annotation.release()));
+                assert(annotator.get());
+            } else {
+                std::cerr << "Error: Conversion to other representation"
+                          << " is implemented only for ColumnCompressed annotation."
+                          << std::endl;
+                exit(1);
             }
 
             switch (config->anno_type) {

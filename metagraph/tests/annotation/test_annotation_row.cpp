@@ -274,6 +274,94 @@ TEST(RowCompressed, MergeLoad) {
     }
 }
 
+TEST(RowCompressed, NoRenameColumns) {
+    annotate::RowCompressed<> annotation(5);
+    annotation.set_labels(0, { "Label0", "Label2", "Label8" });
+    annotation.set_labels(2, { "Label1", "Label2" });
+    annotation.set_labels(4, { "Label8" });
+
+    annotation.rename_columns({});
+
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation.get(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(annotation.get(2)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(3)));
+    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation.get(4)));
+}
+
+TEST(RowCompressed, RenameColumns) {
+    annotate::RowCompressed<> annotation(5);
+    annotation.set_labels(0, { "Label0", "Label2", "Label8" });
+    annotation.set_labels(2, { "Label1", "Label2" });
+    annotation.set_labels(4, { "Label8" });
+
+    annotation.rename_columns({ { "Label2", "Label2Renamed" },
+                                { "Label8", "Label8Renamed" } });
+
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2Renamed", "Label8Renamed" }), convert_to_set(annotation.get(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2Renamed" }), convert_to_set(annotation.get(2)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(3)));
+    EXPECT_EQ(convert_to_set({ "Label8Renamed" }), convert_to_set(annotation.get(4)));
+}
+
+TEST(RowCompressed, SwapColumns) {
+    annotate::RowCompressed<> annotation(5);
+    annotation.set_labels(0, { "Label0", "Label2", "Label8" });
+    annotation.set_labels(2, { "Label1", "Label2" });
+    annotation.set_labels(4, { "Label8" });
+
+    annotation.rename_columns({ { "Label2", "Label8" },
+                                { "Label8", "Label2" } });
+
+    EXPECT_EQ(convert_to_set({ "Label0", "Label8", "Label2" }), convert_to_set(annotation.get(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label8" }), convert_to_set(annotation.get(2)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(3)));
+    EXPECT_EQ(convert_to_set({ "Label2" }), convert_to_set(annotation.get(4)));
+}
+
+TEST(RowCompressed, RenameColumnsMerge) {
+    annotate::RowCompressed<> annotation(5);
+    annotation.set_labels(0, { "Label0", "Label2", "Label8" });
+    annotation.set_labels(2, { "Label1", "Label2" });
+    annotation.set_labels(4, { "Label8" });
+
+    ASSERT_DEATH(
+        annotation.rename_columns({ { "Label2", "Merged" },
+                                    { "Label8", "Merged" } }),
+        ""
+    );
+
+    // EXPECT_EQ(convert_to_set({ "Label0", "Merged" }), convert_to_set(annotation.get(0)));
+    // EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(1)));
+    // EXPECT_EQ(convert_to_set({ "Label1", "Merged" }), convert_to_set(annotation.get(2)));
+    // EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(3)));
+    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get(4)));
+}
+
+TEST(RowCompressed, RenameColumnsMergeAll) {
+    annotate::RowCompressed<> annotation(5);
+    annotation.set_labels(0, { "Label0", "Label2", "Label8" });
+    annotation.set_labels(2, { "Label1", "Label2" });
+    annotation.set_labels(4, { "Label8" });
+
+    ASSERT_DEATH(
+        annotation.rename_columns({ { "Label0", "Merged" },
+                                    { "Label1", "Merged" },
+                                    { "Label2", "Merged" },
+                                    { "Label8", "Merged" },
+                                }),
+        ""
+    );
+
+    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get(0)));
+    // EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(1)));
+    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get(2)));
+    // EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(3)));
+    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get(4)));
+}
+
 TEST(RowCompressed, has_labels) {
     std::unique_ptr<annotate::MultiLabelAnnotation<uint64_t, std::string>> annotation(
         new annotate::RowCompressed<>(5, false)
