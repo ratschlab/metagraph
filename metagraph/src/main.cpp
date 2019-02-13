@@ -1688,7 +1688,7 @@ int main(int argc, const char *argv[]) {
                     dict[old_name] = new_name;
                 }
 
-                annotation->rename_columns(dict);
+                annotation->rename_labels(dict);
 
                 annotation->serialize(config->outfbase);
                 if (config->verbose)

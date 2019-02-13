@@ -56,7 +56,7 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
 // to |second| and merges columns with matching names, if supported.
 template <typename IndexType, typename LabelType>
 void MultiLabelEncoded<IndexType, LabelType>
-::rename_columns(const std::unordered_map<Label, Label> &dict) {
+::rename_labels(const std::unordered_map<Label, Label> &dict) {
     std::vector<Label> index_to_label(label_encoder_.size());
     for (size_t i = 0; i < index_to_label.size(); ++i) {
         index_to_label[i] = label_encoder_.decode(i);

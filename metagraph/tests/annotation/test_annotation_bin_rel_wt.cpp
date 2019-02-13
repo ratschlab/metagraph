@@ -163,7 +163,7 @@ TEST(BinRelWTAnnotator, NoRenameColumns) {
     auto bin_rel_wt_anno = annotate::convert<annotate::BinRelWTAnnotator>(
         std::move(annotation)
     );
-    bin_rel_wt_anno->rename_columns({});
+    bin_rel_wt_anno->rename_labels({});
 
     EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(bin_rel_wt_anno->get(0)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(bin_rel_wt_anno->get(1)));
@@ -181,8 +181,8 @@ TEST(BinRelWTAnnotator, RenameColumns) {
     auto bin_rel_wt_anno = annotate::convert<annotate::BinRelWTAnnotator>(
         std::move(annotation)
     );
-    bin_rel_wt_anno->rename_columns({ { "Label2", "Label2Renamed" },
-                                      { "Label8", "Label8Renamed" } });
+    bin_rel_wt_anno->rename_labels({ { "Label2", "Label2Renamed" },
+                                     { "Label8", "Label8Renamed" } });
 
     EXPECT_EQ(convert_to_set({ "Label0", "Label2Renamed", "Label8Renamed" }), convert_to_set(bin_rel_wt_anno->get(0)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(bin_rel_wt_anno->get(1)));
@@ -200,8 +200,8 @@ TEST(BinRelWTAnnotator, SwapColumns) {
     auto bin_rel_wt_anno = annotate::convert<annotate::BinRelWTAnnotator>(
         std::move(annotation)
     );
-    bin_rel_wt_anno->rename_columns({ { "Label2", "Label8" },
-                                      { "Label8", "Label2" } });
+    bin_rel_wt_anno->rename_labels({ { "Label2", "Label8" },
+                                     { "Label8", "Label2" } });
 
     EXPECT_EQ(convert_to_set({ "Label0", "Label8", "Label2" }), convert_to_set(bin_rel_wt_anno->get(0)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(bin_rel_wt_anno->get(1)));
@@ -220,8 +220,8 @@ TEST(BinRelWTAnnotator, RenameColumnsMerge) {
         std::move(annotation)
     );
     ASSERT_DEATH(
-        bin_rel_wt_anno->rename_columns({ { "Label2", "Merged" },
-                                          { "Label8", "Merged" } }),
+        bin_rel_wt_anno->rename_labels({ { "Label2", "Merged" },
+                                         { "Label8", "Merged" } }),
         ""
     );
 
@@ -242,10 +242,10 @@ TEST(BinRelWTAnnotator, RenameColumnsMergeAll) {
         std::move(annotation)
     );
     ASSERT_DEATH(
-        bin_rel_wt_anno->rename_columns({ { "Label0", "Merged" },
-                                        { "Label1", "Merged" },
-                                        { "Label2", "Merged" },
-                                        { "Label8", "Merged" }, }),
+        bin_rel_wt_anno->rename_labels({ { "Label0", "Merged" },
+                                         { "Label1", "Merged" },
+                                         { "Label2", "Merged" },
+                                         { "Label8", "Merged" }, }),
         ""
     );
 

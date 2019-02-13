@@ -256,7 +256,7 @@ TEST(BRWTCompressed, NoRenameColumns) {
     auto brwt_anno = annotate::convert_to_simple_BRWT<BRWTCompressed<>>(
         std::move(annotation)
     );
-    brwt_anno->rename_columns({});
+    brwt_anno->rename_labels({});
 
     EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(brwt_anno->get(0)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(brwt_anno->get(1)));
@@ -274,8 +274,8 @@ TEST(BRWTCompressed, RenameColumns) {
     auto brwt_anno = annotate::convert_to_simple_BRWT<BRWTCompressed<>>(
         std::move(annotation)
     );
-    brwt_anno->rename_columns({ { "Label2", "Label2Renamed" },
-                                { "Label8", "Label8Renamed" } });
+    brwt_anno->rename_labels({ { "Label2", "Label2Renamed" },
+                               { "Label8", "Label8Renamed" } });
 
     EXPECT_EQ(convert_to_set({ "Label0", "Label2Renamed", "Label8Renamed" }), convert_to_set(brwt_anno->get(0)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(brwt_anno->get(1)));
@@ -293,8 +293,8 @@ TEST(BRWTCompressed, SwapColumns) {
     auto brwt_anno = annotate::convert_to_simple_BRWT<BRWTCompressed<>>(
         std::move(annotation)
     );
-    brwt_anno->rename_columns({ { "Label2", "Label8" },
-                                { "Label8", "Label2" } });
+    brwt_anno->rename_labels({ { "Label2", "Label8" },
+                               { "Label8", "Label2" } });
 
     EXPECT_EQ(convert_to_set({ "Label0", "Label8", "Label2" }), convert_to_set(brwt_anno->get(0)));
     EXPECT_EQ(convert_to_set({}), convert_to_set(brwt_anno->get(1)));
@@ -313,8 +313,8 @@ TEST(BRWTCompressed, RenameColumnsMerge) {
         std::move(annotation)
     );
     ASSERT_DEATH(
-        brwt_anno->rename_columns({ { "Label2", "Merged" },
-                                    { "Label8", "Merged" } }),
+        brwt_anno->rename_labels({ { "Label2", "Merged" },
+                                   { "Label8", "Merged" } }),
         ""
     );
 
@@ -335,10 +335,10 @@ TEST(BRWTCompressed, RenameColumnsMergeAll) {
         std::move(annotation)
     );
     ASSERT_DEATH(
-        brwt_anno->rename_columns({ { "Label0", "Merged" },
-                                    { "Label1", "Merged" },
-                                    { "Label2", "Merged" },
-                                    { "Label8", "Merged" }, }),
+        brwt_anno->rename_labels({ { "Label0", "Merged" },
+                                   { "Label1", "Merged" },
+                                   { "Label2", "Merged" },
+                                   { "Label8", "Merged" }, }),
         ""
     );
 
