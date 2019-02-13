@@ -1634,6 +1634,39 @@ int main(int argc, const char *argv[]) {
 
             for (const auto &file : config->infbase_annotators) {
                 auto annotation = initialize_annotation(file, *config);
+
+                if (config->print_column_names) {
+                    annotate::LabelEncoder<std::string> label_encoder;
+
+                    std::cout << "INFO: Scanning annotation " << file << std::endl;
+
+                    try {
+                        std::ifstream instream(file, std::ios::binary);
+
+                        // TODO: make this more reliable
+                        if (dynamic_cast<const annotate::ColumnCompressed<> *>(annotation.get())) {
+                            // Column compressed dumps the number of rows first
+                            // skipping it...
+                            load_number(instream);
+                        }
+
+                        if (!label_encoder.load(instream))
+                            throw std::ios_base::failure("");
+
+                    } catch (...) {
+                        std::cerr << "Error: Can't read label encoder from file "
+                                  << file << std::endl;
+                        exit(1);
+                    }
+
+                    std::cout << "INFO: Number of columns: " << label_encoder.size() << std::endl;
+                    for (size_t c = 0; c < label_encoder.size(); ++c) {
+                        std::cout << label_encoder.decode(c) << std::endl;
+                    }
+
+                    continue;
+                }
+
                 if (!annotation->load(file)) {
                     std::cerr << "ERROR: can't load annotation from file "
                               << file << std::endl;

@@ -12,6 +12,7 @@ class Config {
     bool verbose = false;
     bool print_graph = false;
     bool print_graph_internal_repr = false;
+    bool print_column_names = false;
     bool reverse = false;
     bool canonical = false;
     bool complete = false;

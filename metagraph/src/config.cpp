@@ -67,6 +67,8 @@ Config::Config(int argc, const char *argv[]) {
             verbose = true;
         } else if (!strcmp(argv[i], "--print")) {
             print_graph = true;
+        } else if (!strcmp(argv[i], "--print-col-names")) {
+            print_column_names = true;
         } else if (!strcmp(argv[i], "--print-internal")) {
             print_graph_internal_repr = true;
         } else if (!strcmp(argv[i], "--count-kmers")) {
@@ -564,7 +566,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-a --annotator [STR] \tannotator []\n");
             fprintf(stderr, "\t   --count-dummy \tshow number of dummy source and sink edges [off]\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
-            fprintf(stderr, "\t   --print-internal \tprint internal graph representation to the screen [off]\n");
+            fprintf(stderr, "\t   --print-internal \tprint internal graph representation to screen [off]\n");
+            fprintf(stderr, "\t   --print-col-names \tprint names of the columns in annotation to screen [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case ANNOTATE: {
