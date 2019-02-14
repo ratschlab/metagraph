@@ -90,13 +90,19 @@ void MultiLabelEncoded<IndexType, LabelType>
 // and return top |num_top| with the their counts.
 template <typename IndexType, typename LabelType>
 auto MultiLabelEncoded<IndexType, LabelType>
-::get_top_labels(const std::vector<Index> &indices, size_t num_top) const
+::get_top_labels(const std::vector<Index> &indices,
+                 size_t num_top,
+                 double min_label_frequency) const
 -> std::vector<std::pair<Label, size_t>> {
+    // TODO: use |min_label_frequency|
+    // auto counter = count_labels(indices, min_label_frequency);
     auto counter = count_labels(indices);
+
+    const uint64_t min_count = min_label_frequency * indices.size();
 
     std::vector<std::pair<size_t, size_t>> counts;
     for (size_t j = 0; j < counter.size(); ++j) {
-        if (counter[j])
+        if (counter[j] && counter[j] >= min_count)
             counts.emplace_back(j, counter[j]);
     }
     // sort in decreasing order

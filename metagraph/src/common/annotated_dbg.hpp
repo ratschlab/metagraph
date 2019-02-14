@@ -20,7 +20,9 @@ class AnnotatedDBG {
 
     // return top |num_top_labels| labels with their counts
     std::vector<std::pair<std::string, size_t>>
-    get_top_labels(const std::string &sequence, size_t num_top_labels) const;
+    get_top_labels(const std::string &sequence,
+                   size_t num_top_labels,
+                   double min_label_frequency = 0.0) const;
 
     void annotate_sequence(const std::string &sequence,
                            const std::vector<std::string> &labels);

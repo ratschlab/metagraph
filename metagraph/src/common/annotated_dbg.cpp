@@ -52,6 +52,7 @@ void AnnotatedDBG::annotate_sequence(const std::string &sequence,
 
 std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
                                                   double presence_ratio) const {
+    assert(presence_ratio >= 0);
     assert(graph_.get() && annotator_.get());
     assert(check_compatibility());
 
@@ -84,18 +85,35 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
 
 std::vector<std::pair<std::string, size_t>>
 AnnotatedDBG::get_top_labels(const std::string &sequence,
-                             size_t num_top_labels) const {
+                             size_t num_top_labels,
+                             double min_label_frequency) const {
+    assert(min_label_frequency >= 0);
     assert(graph_.get() && annotator_.get());
     assert(check_compatibility());
 
     std::vector<uint64_t> indices;
+    size_t num_missing_kmers = 0;
 
     graph_->map_to_nodes(sequence, [&](uint64_t i) {
-        if (i > 0)
+        if (i > 0) {
             indices.push_back(graph_to_anno_index(i));
+        } else {
+            num_missing_kmers++;
+        }
     });
 
-    return annotator_->get_top_labels(indices, num_top_labels);
+    if (indices.size() > 0
+        && indices.size()
+            >= min_label_frequency * (indices.size() + num_missing_kmers)) {
+
+        return annotator_->get_top_labels(indices, num_top_labels,
+            min_label_frequency
+                * (indices.size() + num_missing_kmers)
+                / indices.size()
+        );
+    } else {
+        return {};
+    }
 }
 
 uint64_t AnnotatedDBG::num_anno_rows() const {

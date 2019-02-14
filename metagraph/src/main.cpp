@@ -362,7 +362,9 @@ void execute_query(std::string seq_name,
     std::ostringstream oss;
 
     if (count_labels) {
-        auto top_labels = anno_graph.get_top_labels(sequence, num_top_labels);
+        auto top_labels = anno_graph.get_top_labels(sequence,
+                                                    num_top_labels,
+                                                    discovery_fraction);
 
         if (!top_labels.size() && suppress_unlabeled)
             return;

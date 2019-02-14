@@ -95,9 +95,11 @@ class MultiLabelAnnotation
 
     // Count all labels collected from the given rows
     // and return top |num_top| with the their counts.
+    // Skip labels with count frequency smaller than |min_label_frequency|.
     virtual std::vector<std::pair<Label, size_t>>
     get_top_labels(const std::vector<Index> &indices,
-                   size_t num_top = static_cast<size_t>(-1)) const = 0;
+                   size_t num_top = static_cast<size_t>(-1),
+                   double min_label_frequency = 0.0) const = 0;
 
     /************************* Properties *************************/
 
@@ -162,11 +164,14 @@ class MultiLabelEncoded
 
     // Count all labels collected from the given rows
     // and return top |num_top| with the their counts.
+    // Skip labels with count frequency smaller than |min_label_frequency|.
     virtual std::vector<std::pair<Label, size_t>>
     get_top_labels(const std::vector<Index> &indices,
-                   size_t num_top = static_cast<size_t>(-1)) const override final;
+                   size_t num_top = static_cast<size_t>(-1),
+                   double min_label_frequency = 0.0) const override final;
 
   protected:
+    // TODO: add |min_label_frequency| parameter: return only frequent labels
     virtual std::vector<uint64_t>
     count_labels(const std::vector<Index> &indices) const = 0;
 
