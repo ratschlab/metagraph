@@ -188,9 +188,11 @@ set(METALIBS ${METALIBS}
   -lsdsl -ldivsufsort -ldivsufsort64
   -lssl -lcrypto -llzma
   -lbrwt
-  -latomic
   OpenMP::OpenMP_CXX
 )
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+  set(METALIBS ${METALIBS} -latomic)
+endif()
 
 if(BUILD_STATIC)
   set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} -static)
