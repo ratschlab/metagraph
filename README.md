@@ -37,6 +37,7 @@ echo "\
 # OpenMP
 export LDFLAGS=\"\$LDFLAGS -L$(brew --prefix libomp)/lib\"
 export CPPFLAGS=\"\$CPPFLAGS -I$(brew --prefix libomp)/include\"
+export CXXFLAGS=\"\$CXXFLAGS -I$(brew --prefix libomp)/include\"
 # Clang C++ flags
 export LDFLAGS=\"\$LDFLAGS -L$(brew --prefix llvm)/lib -Wl,-rpath,$(brew --prefix llvm)/lib\"
 export CPPFLAGS=\"\$CPPFLAGS -I$(brew --prefix llvm)/include\"
