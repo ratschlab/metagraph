@@ -7,9 +7,18 @@
 
 namespace alphabets {
 
-const char kBOSSAlphabetProtein[] = "$ABCDEFGHIJKLMNOPQRSTUVWYZX";
-const uint8_t kBOSSLogSigmaProtein = std::log2(sizeof(kBOSSAlphabetProtein) - 2) + 1;
-const uint8_t kBOSSCharToProtein[128] = {
+constexpr size_t log2(size_t n) {
+    if (n < 2) {
+        return 0;
+    } else {
+        return log2(n >> 2) + 1;
+    }
+}
+
+
+constexpr char kBOSSAlphabetProtein[] = "$ABCDEFGHIJKLMNOPQRSTUVWYZX";
+constexpr uint8_t kBOSSLogSigmaProtein = log2(sizeof(kBOSSAlphabetProtein) - 2) + 1;
+constexpr uint8_t kBOSSCharToProtein[128] = {
     26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
     26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
     26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,  26, 26, 26, 26,
@@ -23,9 +32,9 @@ const std::vector<uint8_t> kBOSSCanonicalMapProtein = {};
 
 
 //for case-specific DNA and RNA (U <-> T) data
-const char kBOSSAlphabetDNACaseSent[] = "$ACGTNacgt";
-const uint8_t kBOSSLogSigmaDNACaseSent = std::log2(sizeof(kBOSSAlphabetDNACaseSent) - 2) + 1;
-const uint8_t kBOSSCharToDNACaseSent[128] = {
+constexpr char kBOSSAlphabetDNACaseSent[] = "$ACGTNacgt";
+constexpr uint8_t kBOSSLogSigmaDNACaseSent = log2(sizeof(kBOSSAlphabetDNACaseSent) - 2) + 1;
+constexpr uint8_t kBOSSCharToDNACaseSent[128] = {
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
@@ -39,9 +48,9 @@ const std::vector<uint8_t> kBOSSCanonicalMapDNACaseSent = { 0, 9, 8, 7, 6, 5, 4,
 
 
 //for DNA and RNA (U <-> T) alphabets
-const char kBOSSAlphabetDNA[] = "$ACGTN";
-const uint8_t kBOSSLogSigmaDNA = std::log2(sizeof(kBOSSAlphabetDNA) - 2) + 1;
-const uint8_t kBOSSCharToDNA[128] = {
+constexpr char kBOSSAlphabetDNA[] = "$ACGTN";
+constexpr uint8_t kBOSSLogSigmaDNA = log2(sizeof(kBOSSAlphabetDNA) - 2) + 1;
+constexpr uint8_t kBOSSCharToDNA[128] = {
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
     5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
@@ -55,9 +64,9 @@ const std::vector<uint8_t> kBOSSCanonicalMapDNA = { 0, 4, 3, 2, 1, 5 };
 
 
 //for DNA and RNA (U <-> T) alphabets
-const char kBOSSAlphabetDNA4[] = "$ACGT";
-const uint8_t kBOSSLogSigmaDNA4 = std::log2(sizeof(kBOSSAlphabetDNA4) - 2) + 1;
-const uint8_t kBOSSCharToDNA4[128] = {
+constexpr char kBOSSAlphabetDNA4[] = "$ACGT";
+constexpr uint8_t kBOSSLogSigmaDNA4 = log2(sizeof(kBOSSAlphabetDNA4) - 2) + 1;
+constexpr uint8_t kBOSSCharToDNA4[128] = {
     1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,
     1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,
     1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,
@@ -71,9 +80,9 @@ const std::vector<uint8_t> kBOSSCanonicalMapDNA4 = { 0, 4, 3, 2, 1 };
 
 
 
-const char kAlphabetProtein[] = "ABCDEFGHIJKLMNOPQRSTUVWYZX";
-const uint8_t kLogSigmaProtein = std::log2(sizeof(kAlphabetProtein) - 2) + 1;
-const uint8_t kCharToProtein[128] = {
+constexpr char kAlphabetProtein[] = "ABCDEFGHIJKLMNOPQRSTUVWYZX";
+constexpr uint8_t kLogSigmaProtein = log2(sizeof(kAlphabetProtein) - 2) + 1;
+constexpr uint8_t kCharToProtein[128] = {
     25, 25, 25, 25,  25, 25, 25, 25,  25, 25, 25, 25,  25, 25, 25, 25,
     25, 25, 25, 25,  25, 25, 25, 25,  25, 25, 25, 25,  25, 25, 25, 25,
     25, 25, 25, 25,  25, 25, 25, 25,  25, 25, 25, 25,  25, 25, 25, 25,
@@ -87,9 +96,9 @@ const std::vector<uint8_t> kCanonicalMapProtein = {};
 
 
 //for case-specific DNA and RNA (U <-> T) data
-const char kAlphabetDNACaseSent[] = "ACGTNacgt";
-const uint8_t kLogSigmaDNACaseSent = std::log2(sizeof(kAlphabetDNACaseSent) - 2) + 1;
-const uint8_t kCharToDNACaseSent[128] = {
+constexpr char kAlphabetDNACaseSent[] = "ACGTNacgt";
+constexpr uint8_t kLogSigmaDNACaseSent = log2(sizeof(kAlphabetDNACaseSent) - 2) + 1;
+constexpr uint8_t kCharToDNACaseSent[128] = {
     4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
     4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
     4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
@@ -103,9 +112,9 @@ const std::vector<uint8_t> kCanonicalMapDNACaseSent = { 8, 7, 6, 5, 4, 3, 2, 1, 
 
 
 //for DNA and RNA (U <-> T) alphabets
-const char kAlphabetDNA[] = "ACGTN";
-const uint8_t kLogSigmaDNA = std::log2(sizeof(kAlphabetDNA) - 2) + 1;
-const uint8_t kCharToDNA[128] = {
+constexpr char kAlphabetDNA[] = "ACGTN";
+constexpr uint8_t kLogSigmaDNA = log2(sizeof(kAlphabetDNA) - 2) + 1;
+constexpr uint8_t kCharToDNA[128] = {
     4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
     4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
     4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
@@ -119,9 +128,9 @@ const std::vector<uint8_t> kCanonicalMapDNA = { 3, 2, 1, 0, 4 };
 
 
 //for DNA and RNA (U <-> T) alphabets
-const char kAlphabetDNA4[] = "ACGT";
-const uint8_t kLogSigmaDNA4 = std::log2(sizeof(kAlphabetDNA4) - 2) + 1;
-const uint8_t kCharToDNA4[128] = {
+constexpr char kAlphabetDNA4[] = "ACGT";
+constexpr uint8_t kLogSigmaDNA4 = log2(sizeof(kAlphabetDNA4) - 2) + 1;
+constexpr uint8_t kCharToDNA4[128] = {
     0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
     0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
     0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
