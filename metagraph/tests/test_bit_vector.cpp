@@ -624,6 +624,38 @@ TEST(bit_vector_sd, MoveAssignmentDense) {
     reference_based_test(second, numbers);
 }
 
+TEST(bit_vector_stat, InitializeByBitsSparse) {
+    std::vector<uint64_t> set_bits = { 3, 6, 9, 14, 15 };
+    std::initializer_list<bool> init_list = { 0, 0, 0, 1, 0, 0, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+    std::vector<bool> numbers(init_list);
+    bit_vector_stat first(numbers);
+    bit_vector_stat second(
+        [&](const auto &callback) {
+            for (uint64_t pos : set_bits) {
+                callback(pos);
+            }
+        },
+        first.size(), set_bits.size());
+    reference_based_test(second, numbers);
+}
+
+TEST(bit_vector_stat, InitializeByBitsDense) {
+    std::vector<uint64_t> set_bits = { 0, 1, 3, 6, 8, 9, 11, 12, 13, 14, 15 };
+    std::initializer_list<bool> init_list = { 1, 1, 0, 1, 0, 0, 1, 0,
+                                              1, 1, 0, 1, 1, 1, 1, 1 };
+    std::vector<bool> numbers(init_list);
+    bit_vector_stat first(numbers);
+    bit_vector_stat second(
+        [&](const auto &callback) {
+            for (uint64_t pos : set_bits) {
+                callback(pos);
+            }
+        },
+        first.size(), set_bits.size());
+    reference_based_test(second, numbers);
+}
+
 TEST(bit_vector_sd, InitializeByBitsSparse) {
     std::vector<uint64_t> set_bits = { 3, 6, 9, 14, 15 };
     std::initializer_list<bool> init_list = { 0, 0, 0, 1, 0, 0, 1, 0,

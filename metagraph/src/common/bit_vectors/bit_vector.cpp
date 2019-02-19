@@ -259,11 +259,12 @@ uint64_t count_num_set_bits(const sdsl::bit_vector &vector) {
     return count;
 }
 
-bit_vector_stat::
-bit_vector_stat(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
-                uint64_t size,
-                uint64_t)
-      : vector_(size, false) {
+bit_vector_stat
+::bit_vector_stat(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
+                  uint64_t size,
+                  uint64_t num_set_bits)
+      : vector_(size, false),
+        num_set_bits_(num_set_bits) {
     call_ones([&](uint64_t pos) { vector_[pos] = true; });
 }
 
@@ -316,11 +317,12 @@ uint64_t bit_vector_stat::rank1(uint64_t id) const {
 }
 
 uint64_t bit_vector_stat::select1(uint64_t id) const {
-    assert(id > 0 && size() > 0 && id <= num_set_bits_);
-    assert(num_set_bits_ == rank1(size() - 1));
+    assert(id > 0 && size() > 0);
 
     if (requires_update_)
         const_cast<bit_vector_stat*>(this)->init_rs();
+
+    assert(id <= num_set_bits_);
     return slct_(id);
 }
 
@@ -487,6 +489,7 @@ void bit_vector_stat::init_rs() {
     slct_ = sdsl::select_support_mcl<>(&vector_);
 
     requires_update_ = false;
+    assert(num_set_bits_ == rank1(size() - 1));
 }
 
 
