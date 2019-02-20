@@ -94,8 +94,7 @@ class bit_vector_stat : public bit_vector {
     explicit bit_vector_stat(const std::vector<bool> &vector);
     explicit bit_vector_stat(const bit_vector_stat &other);
     bit_vector_stat(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
-                    uint64_t size,
-                    uint64_t num_set_bits);
+                    uint64_t size);
     bit_vector_stat(sdsl::bit_vector&& vector) noexcept;
     bit_vector_stat(bit_vector_stat&& other) noexcept;
     bit_vector_stat(std::initializer_list<bool> init);

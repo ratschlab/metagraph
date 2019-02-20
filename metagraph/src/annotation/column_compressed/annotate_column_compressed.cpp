@@ -12,11 +12,6 @@ using utils::remove_suffix;
 
 size_t kNumRowsInBlock = 5'000'000;
 
-// since std::set needs 32 bytes per element
-// switch when n < 64m + 32 * 8 * m \approx (1 << 8)m
-size_t kMaxNumIndicesLogRatio = 8;
-size_t kRowCutoff = 1'000'000;
-
 
 namespace annotate {
 
@@ -28,7 +23,7 @@ ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
         cached_columns_(
             num_columns_cached,
             caches::LRUCachePolicy<size_t>(),
-            [this](size_t j, bitmap_adaptive *col_uncompressed) {
+            [this](size_t j, bitmap *col_uncompressed) {
                 assert(col_uncompressed);
                 this->flush(j, *col_uncompressed);
                 delete col_uncompressed;
@@ -201,7 +196,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                 } else if (!bitmatrix_.at(col).get()) {
                     bitmatrix_.at(col) = std::move(new_column);
                 } else {
-                    new_column->add_to(dynamic_cast<bitmap*>(&decompress(col)));
+                    new_column->add_to(static_cast<bitmap*>(&decompress(col)));
                 }
             }
         }
@@ -334,8 +329,8 @@ uint64_t ColumnCompressed<Label>::num_relations() const {
 template <typename Label>
 void ColumnCompressed<Label>::set(Index i, size_t j, bool value) {
     assert(i < num_rows_);
-
-    decompress(j).set(i, value);
+    if (j >= bitmatrix_.size() || is_set(i, j) != value)
+        decompress(j).set(i, value);
 }
 
 template <typename Label>
@@ -374,7 +369,7 @@ void ColumnCompressed<Label>::flush() const {
 }
 
 template <typename Label>
-void ColumnCompressed<Label>::flush(size_t j, const bitmap_adaptive &vector) {
+void ColumnCompressed<Label>::flush(size_t j, const bitmap &vector) {
     assert(j < bitmatrix_.size());
     assert(cached_columns_.Cached(j));
 
@@ -391,8 +386,7 @@ void ColumnCompressed<Label>::flush(size_t j, const bitmap_adaptive &vector) {
 }
 
 template <typename Label>
-bitmap_adaptive&
-ColumnCompressed<Label>::decompress(size_t j) {
+bitmap_dyn& ColumnCompressed<Label>::decompress(size_t j) {
     assert(j < label_encoder_.size());
 
     try {
@@ -404,12 +398,10 @@ ColumnCompressed<Label>::decompress(size_t j) {
         if (j == bitmatrix_.size())
             bitmatrix_.emplace_back();
 
-        std::unique_ptr<bitmap_adaptive> vector{
-            new bitmap_adaptive(num_rows_, false)
-        };
-        assert(vector.get());
+        auto vector = std::make_unique<bitmap_adaptive>(num_rows_, 0);
+
         if (bitmatrix_[j].get())
-            bitmatrix_[j]->add_to(dynamic_cast<bitmap*>(vector.get()));
+            bitmatrix_[j]->add_to(static_cast<bitmap*>(vector.get()));
 
         cached_columns_.Put(j, vector.release());
         return *cached_columns_.Get(j);

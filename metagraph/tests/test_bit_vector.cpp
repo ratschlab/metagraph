@@ -636,7 +636,8 @@ TEST(bit_vector_stat, InitializeByBitsSparse) {
                 callback(pos);
             }
         },
-        first.size(), set_bits.size());
+        first.size()
+    );
     reference_based_test(second, numbers);
 }
 
@@ -652,7 +653,8 @@ TEST(bit_vector_stat, InitializeByBitsDense) {
                 callback(pos);
             }
         },
-        first.size(), set_bits.size());
+        first.size()
+    );
     reference_based_test(second, numbers);
 }
 

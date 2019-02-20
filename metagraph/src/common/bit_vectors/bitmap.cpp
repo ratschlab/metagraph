@@ -141,6 +141,10 @@ void bitmap_set::call_ones(const std::function<void(uint64_t)> &callback) const 
 // bitmap_vector: sdsl::bit_vector with mutexes //
 /////////////////////////////////////////////////////////////
 
+void bitmap_vector::call_ones(const std::function<void(uint64_t)> &callback) const {
+    ::call_ones(bit_vector_, callback);
+}
+
 void bitmap_vector::reset_mutex_pool(uint64_t pool_size) {
     bit_vector_mutexes_.clear();
     bit_vector_mutexes_.reserve(pool_size);
@@ -149,8 +153,7 @@ void bitmap_vector::reset_mutex_pool(uint64_t pool_size) {
     }
 }
 
-void bitmap_vector::call_critical(
-    const std::function<void(bitmap_vector *vector)> &callback) {
+void bitmap_vector::call_critical(const std::function<void(bitmap_vector *vector)> &callback) {
     // lock all mutexes
     std::vector<std::unique_ptr<std::lock_guard<std::mutex>>> vector_locks;
     vector_locks.reserve(bit_vector_mutexes_.size());
@@ -162,8 +165,7 @@ void bitmap_vector::call_critical(
     callback(this);
 }
 
-void bitmap_vector::call_critical(
-    const std::function<void(const bitmap_vector *vector)> &callback) const {
+void bitmap_vector::call_critical(const std::function<void(const bitmap_vector *vector)> &callback) const {
     // lock all mutexes
     std::vector<std::unique_ptr<std::lock_guard<std::mutex>>> vector_locks;
     vector_locks.reserve(bit_vector_mutexes_.size());

@@ -262,11 +262,14 @@ bit_vector_stat::bit_vector_stat(const bit_vector_stat &other) {
 
 bit_vector_stat
 ::bit_vector_stat(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
-                  uint64_t size,
-                  uint64_t num_set_bits)
+                  uint64_t size)
       : vector_(size, false),
-        num_set_bits_(num_set_bits) {
-    call_ones([&](uint64_t pos) { vector_[pos] = true; });
+        num_set_bits_(0) {
+    call_ones([&](uint64_t pos) {
+        assert(pos < size);
+        vector_[pos] = true;
+        num_set_bits_++;
+    });
 }
 
 bit_vector_stat::bit_vector_stat(sdsl::bit_vector&& vector) noexcept
@@ -1021,11 +1024,11 @@ bit_vector_adaptive_stat<optimal_representation>
             break;
         case RRR_VECTOR:
             vector_.reset(new bit_vector_rrr<>(
-                bit_vector_stat(call_ones, size, num_set_bits).convert_to<bit_vector_rrr<>>()
+                bit_vector_stat(call_ones, size).convert_to<bit_vector_rrr<>>()
             ));
             break;
         case STAT_VECTOR:
-            vector_.reset(new bit_vector_stat(call_ones, size, num_set_bits));
+            vector_.reset(new bit_vector_stat(call_ones, size));
             break;
     }
 }

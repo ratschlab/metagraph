@@ -248,12 +248,13 @@ void insert_default_values(const std::vector<uint64_t> &indexes,
     std::set<uint64_t> bits;
     uint64_t offset = 0;
     for (auto i : *vector) {
-        while (offset < indexes.size() && i + offset >= indexes[offset])
+        while (offset < indexes.size() && i + offset >= indexes[offset]) {
             ++offset;
-
+        }
         bits.emplace_hint(bits.end(), i + offset);
     }
     assert(vector->size() == bits.size());
+
     std::swap(bits, *vector);
 }
 

@@ -88,15 +88,15 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
                     RowCompressed<Label> *annotator) const;
     void release();
     void flush() const;
-    void flush(size_t j, const bitmap_adaptive &annotation_curr);
-    bitmap_adaptive& decompress(size_t j);
+    void flush(size_t j, const bitmap &annotation_curr);
+    bitmap_dyn& decompress(size_t j);
 
     uint64_t num_rows_;
 
     std::vector<std::unique_ptr<bit_vector>> bitmatrix_;
 
     caches::fixed_sized_cache<size_t,
-                              bitmap_adaptive*,
+                              bitmap_dyn*,
                               caches::LRUCachePolicy<size_t>> cached_columns_;
 
     LabelEncoder<Label> &label_encoder_ {

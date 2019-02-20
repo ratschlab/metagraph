@@ -10,14 +10,6 @@
 #include <sdsl/int_vector.hpp>
 
 
-void call_ones(const sdsl::bit_vector &vector,
-               const std::function<void(uint64_t)> &callback);
-
-void call_zeros(const sdsl::bit_vector &vector,
-                const std::function<void(uint64_t)> &callback);
-
-uint64_t count_num_set_bits(const sdsl::bit_vector &vector);
-
 class bitmap {
   public:
     virtual ~bitmap() {};
@@ -31,10 +23,13 @@ class bitmap {
     virtual void call_ones(const std::function<void(uint64_t)> &callback) const = 0;
 };
 
+
 class bitmap_dyn : public bitmap {
   public:
-    virtual void insert_zeros(const std::vector<uint64_t> &pos) = 0;
+    // indexes - positions of newly inserted elements in resulting vector
+    virtual void insert_zeros(const std::vector<uint64_t> &indexes) = 0;
 };
+
 
 class bitmap_set : public bitmap_dyn {
   public:
@@ -65,6 +60,7 @@ class bitmap_set : public bitmap_dyn {
     std::mutex mutex_;
 };
 
+
 class bitmap_vector : public bitmap_dyn {
   public:
     explicit bitmap_vector(uint64_t size = 0,
@@ -90,26 +86,21 @@ class bitmap_vector : public bitmap_dyn {
     inline uint64_t size() const { return bit_vector_.size(); }
     inline uint64_t num_set_bits() const { return num_set_bits_; }
 
-    inline void call_ones(const std::function<void(uint64_t)> &callback) const {
-        ::call_ones(bit_vector_, callback);
-    }
+    void call_ones(const std::function<void(uint64_t)> &callback) const;
 
     inline const sdsl::bit_vector& data() const { return bit_vector_; }
     inline sdsl::bit_vector& data() { return bit_vector_; }
 
   private:
     void reset_mutex_pool(uint64_t pool_size);
-    void call_critical(
-        const std::function<void(bitmap_vector *vector)> &callback
-    );
-    void call_critical(
-        const std::function<void(const bitmap_vector *vector)> &callback
-    ) const;
+    void call_critical(const std::function<void(bitmap_vector *vector)> &callback);
+    void call_critical(const std::function<void(const bitmap_vector *vector)> &callback) const;
 
     uint64_t num_set_bits_ = 0;
     sdsl::bit_vector bit_vector_;
     std::vector<std::unique_ptr<std::mutex>> bit_vector_mutexes_;
 };
+
 
 class bitmap_adaptive : public bitmap_dyn {
   public:
@@ -172,5 +163,14 @@ class bitmap_adaptive : public bitmap_dyn {
     uint64_t pool_size_;
     std::unique_ptr<bitmap_dyn> bitmap_;
 };
+
+
+void call_ones(const sdsl::bit_vector &vector,
+               const std::function<void(uint64_t)> &callback);
+
+void call_zeros(const sdsl::bit_vector &vector,
+                const std::function<void(uint64_t)> &callback);
+
+uint64_t count_num_set_bits(const sdsl::bit_vector &vector);
 
 #endif // __BITMAP_HPP__
