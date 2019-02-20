@@ -139,14 +139,16 @@ TEST(bitmap_adaptive, set_bits) {
 }
 
 
-TEST(bitmap_vector, ConcurrentWritingandReading) {
+TEST(bitmap_vector, ConcurrentReading) {
     utils::ThreadPool thread_pool(3);
-    bitmap_vector vector(10'000'000, false, 3);
+    bitmap_vector vector(10'000'000, false);
 
     std::vector<bool> bits;
 
     for (size_t i = 0; i < 10'000'000; ++i) {
         bits.push_back((i + (i * i) % 31) % 2);
+        if (bits.back())
+            vector.set(i, true);
     }
 
     std::vector<uint64_t> indices(10'000'000);
@@ -155,14 +157,6 @@ TEST(bitmap_vector, ConcurrentWritingandReading) {
     std::mt19937 g(1);
     std::shuffle(indices.begin(), indices.end(), g);
 
-    for (auto i : indices) {
-        thread_pool.enqueue([&](auto i) {
-            if (bits[i])
-                vector.set(i, true);
-        }, i);
-    }
-
-    thread_pool.join();
     reference_based_test(vector, bits);
 
     for (auto i : indices) {

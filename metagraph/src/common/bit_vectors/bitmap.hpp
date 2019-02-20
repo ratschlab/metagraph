@@ -33,13 +33,13 @@ class bitmap_dyn : public bitmap {
 
 class bitmap_set : public bitmap_dyn {
   public:
+    explicit bitmap_set(const bitmap_set &bits) = default;
     explicit bitmap_set(uint64_t size = 0, bool value = 0);
     explicit bitmap_set(uint64_t size, const std::set<uint64_t> &bits);
-    explicit bitmap_set(const bitmap_set &bits);
 
     bitmap_set(uint64_t size, std::initializer_list<uint64_t> init);
     bitmap_set(uint64_t size, std::set<uint64_t>&& bits) noexcept;
-    bitmap_set(bitmap_set&& bits) noexcept;
+    bitmap_set(bitmap_set&& bits) noexcept = default;
 
     void set(uint64_t id, bool val);
     bool operator[](uint64_t id) const;
@@ -57,23 +57,18 @@ class bitmap_set : public bitmap_dyn {
   private:
     size_t size_;
     std::set<uint64_t> bits_;
-    std::mutex mutex_;
 };
 
 
 class bitmap_vector : public bitmap_dyn {
   public:
-    explicit bitmap_vector(uint64_t size = 0,
-                           bool value = 0,
-                           uint64_t pool_size = 1);
-    explicit bitmap_vector(const sdsl::bit_vector &vector,
-                           uint64_t pool_size = 1);
-    explicit bitmap_vector(const bitmap_vector &vector);
+    explicit bitmap_vector(const bitmap_vector &vector) = default;
+    explicit bitmap_vector(uint64_t size = 0, bool value = 0);
+    explicit bitmap_vector(const sdsl::bit_vector &vector);
 
-    bitmap_vector(std::initializer_list<bool> init, uint64_t pool_size = 1);
-    bitmap_vector(sdsl::bit_vector&& vector,
-                  uint64_t pool_size = 1) noexcept;
-    bitmap_vector(bitmap_vector&& vector) noexcept;
+    bitmap_vector(std::initializer_list<bool> init);
+    bitmap_vector(sdsl::bit_vector&& vector) noexcept;
+    bitmap_vector(bitmap_vector&& vector) noexcept = default;
 
     void set(uint64_t id, bool val);
     inline bool operator[](uint64_t id) const { return bit_vector_[id]; }
@@ -92,42 +87,23 @@ class bitmap_vector : public bitmap_dyn {
     inline sdsl::bit_vector& data() { return bit_vector_; }
 
   private:
-    void reset_mutex_pool(uint64_t pool_size);
-    void call_critical(const std::function<void(bitmap_vector *vector)> &callback);
-    void call_critical(const std::function<void(const bitmap_vector *vector)> &callback) const;
-
     uint64_t num_set_bits_ = 0;
     sdsl::bit_vector bit_vector_;
-    std::vector<std::unique_ptr<std::mutex>> bit_vector_mutexes_;
 };
 
 
 class bitmap_adaptive : public bitmap_dyn {
   public:
-    explicit bitmap_adaptive(uint64_t size = 0,
-                             bool value = 0,
-                             uint64_t pool_size = 1);
+    explicit bitmap_adaptive(const bitmap_adaptive &vector) = default;
+    explicit bitmap_adaptive(uint64_t size = 0, bool value = 0);
+    explicit bitmap_adaptive(const sdsl::bit_vector &vector);
+    explicit bitmap_adaptive(uint64_t size, const std::set<uint64_t> &bits);
 
-    explicit bitmap_adaptive(const sdsl::bit_vector &vector,
-                             uint64_t pool_size = 1);
-
-    explicit bitmap_adaptive(uint64_t size,
-                             const std::set<uint64_t> &bits,
-                             uint64_t pool_size = 1);
-
-    bitmap_adaptive(std::initializer_list<bool> init,
-                    uint64_t pool_size = 1);
-
-    bitmap_adaptive(uint64_t size,
-                    std::initializer_list<uint64_t> init,
-                    uint64_t pool_size = 1);
-
-    bitmap_adaptive(sdsl::bit_vector&& vector,
-                    uint64_t pool_size = 1) noexcept;
-
-    bitmap_adaptive(uint64_t size,
-                    std::set<uint64_t>&& bits,
-                    uint64_t pool_size = 1) noexcept;
+    bitmap_adaptive(bitmap_adaptive&& vector) noexcept = default;
+    bitmap_adaptive(std::initializer_list<bool> init);
+    bitmap_adaptive(uint64_t size, std::initializer_list<uint64_t> init);
+    bitmap_adaptive(sdsl::bit_vector&& vector) noexcept;
+    bitmap_adaptive(uint64_t size, std::set<uint64_t>&& bits) noexcept;
 
     void set(uint64_t id, bool val);
     inline bool operator[](uint64_t id) const { return (*bitmap_)[id]; }
@@ -160,7 +136,6 @@ class bitmap_adaptive : public bitmap_dyn {
     void to_bit_vector();
     void to_set();
 
-    uint64_t pool_size_;
     std::unique_ptr<bitmap_dyn> bitmap_;
 };
 
