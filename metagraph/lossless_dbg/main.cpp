@@ -14,21 +14,28 @@
 #include <gtest/gtest.h>
 #endif
 
-using node_index = SequenceGraph::node_index;
-
 using namespace std;
 using namespace std::string_literals;
 
-const int k_k_mer = 4;
+// debugging functions
+struct d_ {template<typename T> d_ & operator ,(const T & x) { cerr << ' ' <<  x; return *this;}} d_t;
+#define D(args ...) { d_t,"|",__LINE__,"|",#args,":",args,"\n"; }
+
+using node_index = SequenceGraph::node_index;
+
+
+
 const string HUMAN_REFERENCE_FILENAME = "/Users/janstudeny/Library/Mobile Documents/com~apple~CloudDocs/Active projects/Master Thesis/genomic-data/GCF_000001405.38_GRCh38.p12_genomic.fna";
+const string HUMAN_CHROMOSOME_10_SAMPLE = ""s + dirname(__FILE__) + "/human_chromosome_10_sample.fasta";
 const int CHROMOSOME_NUMBER = 10;
 const int READ_LENGTH = 100;
-const int READ_COVERAGE = 10;
+const double READ_COVERAGE = 0.00001;
 const int test_seed = 3424;
 // todo change to proper thing
 #define x first
 #define y second
 #define all(x) begin(x),end(x)
+
 
 
 
@@ -83,6 +90,7 @@ private:
         return {k_mer,bifurcation_choices};
     }
     void build_graph(vector<string> raw_reads) {
+        cerr << "Starting building the graph" << endl;
         for(auto & read : raw_reads) {
             assert(read.size() >= k_k_mer);
             graph.add_sequence(read);
@@ -110,6 +118,15 @@ public:
         }
         return res;
     }
+    static void transform_to_fasta(string filename,vector<string> reads) {
+        ofstream myfile;
+        myfile.open (filename);
+        for(auto& read : reads) {
+            myfile << ">" << endl;
+            myfile << read << endl;
+        }
+        myfile.close();
+    }
 };
 
 class Sampler : public SamplerConvenient {
@@ -128,6 +145,22 @@ private:
     string reference;
     std::mt19937 generator;
 };
+class DeterministicSampler : public SamplerConvenient {
+public:
+    DeterministicSampler(vector<string> samples, int reference_size) : _reference_size(reference_size), samples(samples) {};
+    string sample(int length) {
+        string sample = samples[current_sample];
+        assert(length==sample.length());
+        current_sample = (current_sample + 1) % samples.size();
+        return sample;
+    }
+    int reference_size() {
+        return _reference_size;
+    }
+    vector<string> samples;
+    int _reference_size;
+    int current_sample = 0;
+};
 
 TEST(SamplerTest,SampleNoRandom) {
     auto sampler = Sampler("AAAAAAAAA",test_seed);
@@ -143,6 +176,16 @@ TEST(SamplerTest,SampleCoverage) {
     auto sampler = Sampler(sequence,test_seed);
     auto reads = sampler.sample_coverage(sequence.length()/2, 1);
     ASSERT_EQ(reads.size(), 2);
+}
+
+vector<string> read_reads_from_fasta(string filename) {
+    vector<string> result;
+    read_fasta_file_critical(
+            filename,
+            [&](kseq_t* read) {
+                    result.push_back(read->seq.s);
+            });
+    return result;
 }
 
 string get_human_chromosome(int chromosome_number,bool five_letter_alphabet=true) {
@@ -168,26 +211,21 @@ TEST(CompressingReads,GetChromosomeWorks) {
     EXPECT_EQ(chromosome.substr(0,10),"NNNNNNNNNN");
 }
 
-static void playground_dbg() {
-    DBGSuccinct dbgSuccinct(k_k_mer);
-    dbgSuccinct.add_sequence("ATAGAGAGAGAGAGAGAG");
-
-    auto node = k_mer_to_node(dbgSuccinct,"ATAG");
-    auto next_node = dbgSuccinct.traverse(node,'A');
-    cout << dbgSuccinct.get_node_sequence(next_node) << endl;
-    cout << "Hello metagraph!" << endl;
-}
 void to_be_determined() {
     auto chromosome = get_human_chromosome(CHROMOSOME_NUMBER);
     auto sampler = Sampler(chromosome,test_seed);
     auto reads = sampler.sample_coverage(READ_LENGTH, READ_COVERAGE);
+    SamplerConvenient::transform_to_fasta(HUMAN_CHROMOSOME_10_SAMPLE,reads);
+    auto compressed_reads = CompressedReads(reads);
+}
+void code_to_violate_assertion() {
+    auto reads = read_reads_from_fasta(HUMAN_CHROMOSOME_10_SAMPLE);
     auto compressed_reads = CompressedReads(reads);
 }
 
-
 int main(int argc,char**argv) {
-    //playground_dbg();
-    to_be_determined();
+    //to_be_determined();
+    code_to_violate_assertion();
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
