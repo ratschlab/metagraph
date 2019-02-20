@@ -7,6 +7,7 @@
 const size_t kMaxNumIndicesLogRatio = 8;
 const size_t kRowCutoff = 1'000'000;
 
+
 void call_ones(const sdsl::bit_vector &vector,
                const std::function<void(uint64_t)> &callback) {
     uint64_t j = 64;
@@ -81,34 +82,37 @@ bitmap_set::bitmap_set(uint64_t size, bool value)
       : size_(size) {
     if (value) {
         for (uint64_t i = 0; i < size; ++i) {
-            bits_.emplace_hint(bits_.end(), i);
+            bits_.insert(bits_.end(), i);
         }
     }
 }
 
 bitmap_set::bitmap_set(uint64_t size, const std::set<uint64_t> &bits)
-      : size_(size), bits_(bits) {}
+      : size_(size), bits_(bits) {
+    assert(bits_.lower_bound(size_) == bits_.end());
+}
 
 bitmap_set::bitmap_set(uint64_t size, std::initializer_list<uint64_t> init)
       : size_(size),
-        bits_(init) { }
+        bits_(init) {
+    assert(bits_.lower_bound(size_) == bits_.end());
+}
 
 bitmap_set::bitmap_set(uint64_t size, std::set<uint64_t>&& bits) noexcept
-      : size_(size), bits_(std::move(bits)) {}
+      : size_(size), bits_(std::move(bits)) {
+    assert(bits_.lower_bound(size_) == bits_.end());
+}
 
 void bitmap_set::set(uint64_t id, bool val) {
-    auto find = bits_.find(id);
-    if (find == bits_.end()) {
-        if (val)
-            bits_.insert(id);
+    if (val) {
+        bits_.insert(id);
     } else {
-        if (!val)
-            bits_.erase(find);
+        bits_.erase(id);
     }
 }
 
 bool bitmap_set::operator[](uint64_t id) const {
-    return bits_.find(id) != bits_.end();
+    return bits_.count(id);
 }
 
 uint64_t bitmap_set::get_int(uint64_t id, uint32_t width) const {
@@ -196,12 +200,12 @@ bitmap_adaptive
       : bitmap_(new bitmap_set(size, bits)) {}
 
 bitmap_adaptive
-::bitmap_adaptive(std::initializer_list<bool> init)
-      : bitmap_adaptive(sdsl::bit_vector(init)) {}
+::bitmap_adaptive(std::initializer_list<bool> bitmap)
+      : bitmap_adaptive(sdsl::bit_vector(bitmap)) {}
 
 bitmap_adaptive
-::bitmap_adaptive(uint64_t size, std::initializer_list<uint64_t> init)
-      : bitmap_adaptive(size, std::set<uint64_t>(init)) {}
+::bitmap_adaptive(uint64_t size, std::initializer_list<uint64_t> bits)
+      : bitmap_adaptive(size, std::set<uint64_t>(bits)) {}
 
 bitmap_adaptive
 ::bitmap_adaptive(sdsl::bit_vector&& vector) noexcept
@@ -212,9 +216,8 @@ bitmap_adaptive
       : bitmap_(new bitmap_set(size, std::move(bits))) {}
 
 void bitmap_adaptive::set(uint64_t id, bool val) {
-    if (val
-        && bitmap_->size() > kRowCutoff
-        && bitmap_->num_set_bits() >= (bitmap_->size() >> kMaxNumIndicesLogRatio))
+    if (val && bitmap_->size() > kRowCutoff
+            && bitmap_->num_set_bits() >= (bitmap_->size() >> kMaxNumIndicesLogRatio))
         to_bit_vector();
 
     bitmap_->set(id, val);
@@ -231,7 +234,7 @@ void bitmap_adaptive::to_bit_vector() {
 void bitmap_adaptive::to_set() {
     if (dynamic_cast<bitmap_vector*>(bitmap_.get())) {
         std::set<uint64_t> bits;
-        bitmap_->call_ones([&](auto i) { bits.emplace_hint(bits.end(), i); });
+        bitmap_->call_ones([&](auto i) { bits.insert(bits.end(), i); });
         bitmap_.reset(new bitmap_set(bitmap_->size(), std::move(bits)));
     }
 }

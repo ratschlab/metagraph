@@ -33,13 +33,11 @@ class bitmap_dyn : public bitmap {
 
 class bitmap_set : public bitmap_dyn {
   public:
-    explicit bitmap_set(const bitmap_set &bits) = default;
     explicit bitmap_set(uint64_t size = 0, bool value = 0);
-    explicit bitmap_set(uint64_t size, const std::set<uint64_t> &bits);
 
-    bitmap_set(uint64_t size, std::initializer_list<uint64_t> init);
+    bitmap_set(uint64_t size, const std::set<uint64_t> &bits);
     bitmap_set(uint64_t size, std::set<uint64_t>&& bits) noexcept;
-    bitmap_set(bitmap_set&& bits) noexcept = default;
+    bitmap_set(uint64_t size, std::initializer_list<uint64_t> init);
 
     void set(uint64_t id, bool val);
     bool operator[](uint64_t id) const;
@@ -62,13 +60,11 @@ class bitmap_set : public bitmap_dyn {
 
 class bitmap_vector : public bitmap_dyn {
   public:
-    explicit bitmap_vector(const bitmap_vector &vector) = default;
     explicit bitmap_vector(uint64_t size = 0, bool value = 0);
-    explicit bitmap_vector(const sdsl::bit_vector &vector);
 
-    bitmap_vector(std::initializer_list<bool> init);
+    explicit bitmap_vector(const sdsl::bit_vector &vector);
     bitmap_vector(sdsl::bit_vector&& vector) noexcept;
-    bitmap_vector(bitmap_vector&& vector) noexcept = default;
+    bitmap_vector(std::initializer_list<bool> bitmap);
 
     void set(uint64_t id, bool val);
     inline bool operator[](uint64_t id) const { return bit_vector_[id]; }
@@ -94,16 +90,15 @@ class bitmap_vector : public bitmap_dyn {
 
 class bitmap_adaptive : public bitmap_dyn {
   public:
-    explicit bitmap_adaptive(const bitmap_adaptive &vector) = default;
     explicit bitmap_adaptive(uint64_t size = 0, bool value = 0);
-    explicit bitmap_adaptive(const sdsl::bit_vector &vector);
-    explicit bitmap_adaptive(uint64_t size, const std::set<uint64_t> &bits);
 
-    bitmap_adaptive(bitmap_adaptive&& vector) noexcept = default;
-    bitmap_adaptive(std::initializer_list<bool> init);
-    bitmap_adaptive(uint64_t size, std::initializer_list<uint64_t> init);
+    explicit bitmap_adaptive(const sdsl::bit_vector &vector);
     bitmap_adaptive(sdsl::bit_vector&& vector) noexcept;
+    bitmap_adaptive(std::initializer_list<bool> bitmap);
+
+    bitmap_adaptive(uint64_t size, const std::set<uint64_t> &bits);
     bitmap_adaptive(uint64_t size, std::set<uint64_t>&& bits) noexcept;
+    bitmap_adaptive(uint64_t size, std::initializer_list<uint64_t> bits);
 
     void set(uint64_t id, bool val);
     inline bool operator[](uint64_t id) const { return (*bitmap_)[id]; }
