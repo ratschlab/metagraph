@@ -4,8 +4,8 @@
 
 // since std::set needs 32 bytes per element
 // switch when n < 64m + 32 * 8 * m \approx (1 << 8)m
-const size_t kMaxNumIndicesLogRatio = 8;
-const size_t kRowCutoff = 1'000'000;
+const size_t bitmap_adaptive::kMaxNumIndicesLogRatio = 8;
+const size_t bitmap_adaptive::kRowCutoff = 1'000'000;
 
 
 void call_ones(const sdsl::bit_vector &vector,
@@ -184,7 +184,7 @@ void bitmap_vector::insert_zeros(const std::vector<uint64_t> &pos) {
 
 bitmap_adaptive
 ::bitmap_adaptive(uint64_t size, bool value) {
-    if (value) {
+    if (value || size < kRowCutoff) {
         bitmap_.reset(new bitmap_vector(size, value));
     } else {
         bitmap_.reset(new bitmap_set(size, value));
@@ -215,12 +215,23 @@ bitmap_adaptive
 ::bitmap_adaptive(uint64_t size, std::set<uint64_t>&& bits) noexcept
       : bitmap_(new bitmap_set(size, std::move(bits))) {}
 
-void bitmap_adaptive::set(uint64_t id, bool val) {
-    if (val && bitmap_->size() > kRowCutoff
-            && bitmap_->num_set_bits() >= (bitmap_->size() >> kMaxNumIndicesLogRatio))
-        to_bit_vector();
+void bitmap_adaptive::insert_zeros(const std::vector<uint64_t> &pos) {
+    bitmap_->insert_zeros(pos);
+    check_switch();
+}
 
+void bitmap_adaptive::set(uint64_t id, bool val) {
     bitmap_->set(id, val);
+    check_switch();
+}
+
+void bitmap_adaptive::check_switch() {
+    if (size() < kRowCutoff
+        || bitmap_->num_set_bits() >= (bitmap_->size() >> kMaxNumIndicesLogRatio)) {
+        to_bit_vector();
+    } else {
+        to_set();
+    }
 }
 
 void bitmap_adaptive::to_bit_vector() {

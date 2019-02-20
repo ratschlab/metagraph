@@ -2,6 +2,9 @@
 
 #include "gtest/gtest.h"
 
+#define protected public
+#define private public
+
 #include "bitmap.hpp"
 #include "utils.hpp"
 
@@ -23,8 +26,22 @@ void reference_based_test(const bitmap &vector,
     ASSERT_DEATH(vector[vector.size()], "");
     ASSERT_DEATH(vector[vector.size() + 1], "");
 
+    sdsl::bit_vector reference_sdsl(reference.size(), false);
     for (size_t i = 0; i < vector.size(); ++i) {
         EXPECT_EQ(vector[i], reference[i]);
+        if (reference[i])
+            reference_sdsl[i] = true;
+    }
+
+    size_t i = 0;
+    for (; i + 64 <= vector.size(); i += 64) {
+        EXPECT_EQ(reference_sdsl.get_int(i), vector.get_int(i, 64));
+    }
+    if (i < vector.size()) {
+        EXPECT_EQ(
+            reference_sdsl.get_int(i, vector.size() - i),
+            vector.get_int(i, vector.size() - i)
+        );
     }
 }
 
@@ -282,24 +299,47 @@ TEST(bitmap_adaptive, call_ones_sparse_set) {
 }
 
 TEST(bitmap_adaptive, switch_type) {
-    {
-        bitmap_adaptive bm(1'000);
-        for (uint64_t i = 0; i * 2 < bm.size(); ++i) {
-            bm.set(i, true);
-            EXPECT_EQ(
-                true,
-                static_cast<bool>(dynamic_cast<bitmap_set*>(&bm.data()))
-            );
-        }
+    bitmap_adaptive bm(bitmap_adaptive::kRowCutoff - 2);
+
+    uint64_t i = 0;
+
+    // start as vector
+    EXPECT_EQ(
+        true,
+        static_cast<bool>(dynamic_cast<bitmap_vector*>(&bm.data()))
+    ) << bm.size() << " " << i;
+
+    for (; i + 1 < (bm.size() >> bitmap_adaptive::kMaxNumIndicesLogRatio); ++i) {
+        bm.set(i, true);
+        EXPECT_EQ(
+            true,
+            static_cast<bool>(dynamic_cast<bitmap_vector*>(&bm.data()))
+        ) << bm.size() << " " << i;
     }
-    {
-        bitmap_adaptive bm(2'000'000);
-        for (uint64_t i = 0; i * 2 < bm.size(); ++i) {
-            bm.set(i, true);
-            EXPECT_EQ(
-                i < (bm.size() >> 8),
-                static_cast<bool>(dynamic_cast<bitmap_set*>(&bm.data()))
-            );
-        }
+
+    bm.insert_zeros({ i });
+    EXPECT_EQ(true, static_cast<bool>(dynamic_cast<bitmap_vector*>(&bm.data())))
+        << bm.size() << " " << i;
+
+    // switch to set
+    bm.insert_zeros({ i });
+    EXPECT_EQ(true, static_cast<bool>(dynamic_cast<bitmap_set*>(&bm.data())))
+        << bm.size() << " " << i;
+
+    for (; i < (bm.size() >> bitmap_adaptive::kMaxNumIndicesLogRatio) - 1; ++i) {
+        bm.set(i, true);
+        EXPECT_EQ(
+            true,
+            static_cast<bool>(dynamic_cast<bitmap_set*>(&bm.data()))
+        ) << bm.size() << " " << i;
     }
+
+    // switch back to vector
+    bm.set(i, true);
+    EXPECT_EQ(
+        (bm.size() >> bitmap_adaptive::kMaxNumIndicesLogRatio),
+        bm.num_set_bits()
+    );
+    EXPECT_EQ(true, static_cast<bool>(dynamic_cast<bitmap_vector*>(&bm.data())))
+        << bm.size() << " " << i;
 }

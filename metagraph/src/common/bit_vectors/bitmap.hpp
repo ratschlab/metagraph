@@ -106,9 +106,8 @@ class bitmap_adaptive : public bitmap_dyn {
     inline uint64_t get_int(uint64_t id, uint32_t width) const {
         return bitmap_->get_int(id, width);
     }
-    inline void insert_zeros(const std::vector<uint64_t> &pos) {
-        bitmap_->insert_zeros(pos);
-    }
+
+    void insert_zeros(const std::vector<uint64_t> &pos);
 
     inline uint64_t size() const { return bitmap_->size(); }
     inline uint64_t num_set_bits() const { return bitmap_->num_set_bits(); }
@@ -128,10 +127,14 @@ class bitmap_adaptive : public bitmap_dyn {
     }
 
   private:
+    void check_switch();
     void to_bit_vector();
     void to_set();
 
     std::unique_ptr<bitmap_dyn> bitmap_;
+
+    static const size_t kMaxNumIndicesLogRatio;
+    static const size_t kRowCutoff;
 };
 
 
