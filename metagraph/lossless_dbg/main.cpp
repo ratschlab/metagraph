@@ -1,16 +1,17 @@
 #include <utility>
-
 #include <iostream>
 #define _DNA_GRAPH 1
 #ifdef SELF_STANDING
 #include <metagraph/dbg_succinct.hpp>
 #include <metagraph/sequence_graph.hpp>
 #include <metagraph/sequence_io.hpp>
+#include <metagraph/dbg_succinct_construct.hpp>
 #include <gtest/gtest.h>
 #else
 #include "dbg_succinct.hpp"
 #include "sequence_graph.hpp"
 #include "sequence_io.hpp"
+#include "dbg_succinct_construct.hpp"
 #include <gtest/gtest.h>
 #endif
 
@@ -51,8 +52,7 @@ class CompressedReads {
     using compressed_read_t = pair<k_mer_t,bifurcation_choices_t>;
 
 public:
-    CompressedReads(vector<string> raw_reads) :  read_length(raw_reads[0].length()), graph(k_k_mer) {
-        build_graph(raw_reads);
+    CompressedReads(vector<string> raw_reads) :  read_length(raw_reads[0].length()), graph(dbg_succ_graph_constructor(raw_reads)) {
         for(auto & read : raw_reads) {
             reads.insert(align_read(read));
         }
@@ -85,21 +85,24 @@ private:
             if (outnodes.size() > 1) {
                 bifurcation_choices.push_back(character);
             }
-            assert(outnodes.size() != 0);
+            assert(!outnodes.empty());
         }
         return {k_mer,bifurcation_choices};
     }
-    void build_graph(vector<string> raw_reads) {
+    static DBG_succ* dbg_succ_graph_constructor(vector<string> raw_reads) {
+        auto graph_constructor = DBGSuccConstructor(k_k_mer);
         cerr << "Starting building the graph" << endl;
         for(auto & read : raw_reads) {
             assert(read.size() >= k_k_mer);
-            graph.add_sequence(read);
+            graph_constructor.add_sequence(read);
         }
+        return new DBG_succ(&graph_constructor);
+        //graph = DBGSuccinct(stupid_old_representation);
     }
 
     multiset<compressed_read_t> reads;
     int read_length;
-    size_t k_k_mer = 21;
+    static const size_t k_k_mer = 21;
     DBGSuccinct graph;
 };
 
@@ -118,7 +121,7 @@ public:
         }
         return res;
     }
-    static void transform_to_fasta(string filename,vector<string> reads) {
+    static void transform_to_fasta(const string &filename,vector<string> reads) {
         ofstream myfile;
         myfile.open (filename);
         for(auto& read : reads) {
@@ -147,14 +150,14 @@ private:
 };
 class DeterministicSampler : public SamplerConvenient {
 public:
-    DeterministicSampler(vector<string> samples, int reference_size) : _reference_size(reference_size), samples(samples) {};
-    string sample(int length) {
+    DeterministicSampler(vector<string> samples, int reference_size) : _reference_size(reference_size), samples(std::move(samples)) {};
+    string sample(int length) override {
         string sample = samples[current_sample];
         assert(length==sample.length());
         current_sample = (current_sample + 1) % samples.size();
         return sample;
     }
-    int reference_size() {
+    int reference_size() override {
         return _reference_size;
     }
     vector<string> samples;
@@ -178,12 +181,12 @@ TEST(SamplerTest,SampleCoverage) {
     ASSERT_EQ(reads.size(), 2);
 }
 
-vector<string> read_reads_from_fasta(string filename) {
+vector<string> read_reads_from_fasta(const string &filename) {
     vector<string> result;
     read_fasta_file_critical(
             filename,
             [&](kseq_t* read) {
-                    result.push_back(read->seq.s);
+                result.push_back(read->seq.s);
             });
     return result;
 }
