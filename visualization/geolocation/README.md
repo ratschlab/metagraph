@@ -1,5 +1,7 @@
 # Search Geo Coordinates for DNA sequences
 
+#### This front end part was moved to a separate repository https://github.com/ratschlab/projects2019-dna_web_search
+
 1. Compile metagraph
 2. Run this
 ```
