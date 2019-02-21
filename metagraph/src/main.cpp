@@ -1,4 +1,4 @@
-#include <nlohmann/json.hpp>
+#include <json/json.h>
 
 #include "unix_tools.hpp"
 #include "config.hpp"
@@ -681,24 +681,34 @@ std::string form_client_reply(const std::string &received_message,
                               const AnnotatedDBG &anno_graph,
                               const Config &config) {
     try {
-        auto json = nlohmann::json::parse(received_message);
+        Json::Value json;
+        Json::CharReaderBuilder rbuilder;
+        std::unique_ptr<Json::CharReader> reader{ rbuilder.newCharReader() };
+        std::string errors;
 
-        // empty json is not a valid input
-        // TODO: send error messages properly
-        if (json.empty())
-            return "";
+        if (!reader->parse(
+                received_message.c_str(),
+                received_message.c_str() + received_message.size(),
+                &json,
+                &errors)) {
+            std::cerr << "Error: bad json file " << errors << std::endl;
+            //TODO: send errors in a json file
+            throw;
+        }
 
-        auto fasta = json.find("FASTA");
+        reader.reset();
+
+        auto& fasta = json["FASTA"];
 
         // TODO: remove this and accept only fasta files
-        auto seq = json.find("SEQ");
+        auto& seq = json["SEQ"];
 
         // discovery_fraction a proxy of 1 - %similarity
-        auto discovery_fraction = json.value("discovery_fraction",
-                                             config.discovery_fraction);
+        const auto& discovery_fraction = json.get("discovery_fraction",
+                                                  config.discovery_fraction);
 
-        auto count_labels = json.value("count_labels", config.count_labels);
-        auto num_top_labels = json.value("num_labels", config.num_top_labels);
+        const auto& count_labels = json.get("count_labels", config.count_labels);
+        const auto& num_top_labels = json.get("num_labels", config.num_top_labels);
 
         std::ostringstream oss;
 
@@ -707,22 +717,22 @@ std::string form_client_reply(const std::string &received_message,
                                         const std::string &seq) {
             execute_query(seq_name,
                           seq,
-                          count_labels,
+                          count_labels.asInt(),
                           config.suppress_unlabeled,
-                          num_top_labels,
-                          discovery_fraction,
+                          num_top_labels.asInt(),
+                          discovery_fraction.asDouble(),
                           config.anno_labels_delimiter,
                           anno_graph,
                           oss);
         };
 
-        if (seq != json.end()) {
+        if (!seq.isNull()) {
             // input is plain sequence
-            execute_server_query(*seq, *seq);
-        } else if (fasta != json.end()) {
+            execute_server_query(seq.asString(), seq.asString());
+        } else if (!fasta.isNull()) {
             // input is a FASTA sequence
             read_fasta_from_string(
-                *fasta,
+                fasta.asString(),
                 [&](kseq_t *read_stream) {
                     execute_server_query(
                         std::string(read_stream->name.s),
@@ -738,10 +748,6 @@ std::string form_client_reply(const std::string &received_message,
 
         return oss.str();
 
-    } catch (const nlohmann::json::parse_error &e) {
-        std::cerr << "Error: bad json file: " << e.what() << std::endl;
-        //TODO: send errors in a json file
-        throw;
     } catch (const std::exception &e) {
         std::cerr << "Error: processing request error: " << e.what() << std::endl;
         //TODO: send errors in a json file

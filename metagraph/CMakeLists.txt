@@ -188,6 +188,7 @@ set(METALIBS ${METALIBS}
   -lsdsl -ldivsufsort -ldivsufsort64
   -lssl -lcrypto -llzma
   -lbrwt
+  -ljsoncpp
   OpenMP::OpenMP_CXX
 )
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
