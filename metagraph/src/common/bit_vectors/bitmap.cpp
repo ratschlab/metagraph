@@ -228,11 +228,12 @@ void bitmap_adaptive::set(uint64_t id, bool val) {
 
 void bitmap_adaptive::check_switch() {
     if (size() < kRowCutoff
-        || bitmap_->num_set_bits() >= (bitmap_->size() >> kMaxNumIndicesLogRatio)) {
+            || bitmap_->num_set_bits()
+                    >= (bitmap_->size() >> kMaxNumIndicesLogRatio)) {
         to_bit_vector();
     } else if (size() >= kRowCutoff
-        && bitmap_->num_set_bits()
-            < (bitmap_->size() >> (kMaxNumIndicesLogRatio + kNumIndicesMargin))) {
+            && bitmap_->num_set_bits()
+                    < (bitmap_->size() >> (kMaxNumIndicesLogRatio + kNumIndicesMargin))) {
         to_set();
     }
 }
