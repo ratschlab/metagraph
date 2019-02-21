@@ -23,7 +23,8 @@ ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
         cached_columns_(
             num_columns_cached,
             caches::LRUCachePolicy<size_t>(),
-            [this](size_t j, std::vector<bool> *col_uncompressed) {
+            [this](size_t j, bitmap *col_uncompressed) {
+                assert(col_uncompressed);
                 this->flush(j, *col_uncompressed);
                 delete col_uncompressed;
             }
@@ -195,7 +196,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                 } else if (!bitmatrix_.at(col).get()) {
                     bitmatrix_.at(col) = std::move(new_column);
                 } else {
-                    new_column->add_to(&decompress(col));
+                    new_column->add_to(static_cast<bitmap*>(&decompress(col)));
                 }
             }
         }
@@ -215,9 +216,8 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 template <typename Label>
 void ColumnCompressed<Label>::insert_rows(const std::vector<Index> &rows) {
     assert(std::is_sorted(rows.begin(), rows.end()));
-
     for (size_t j = 0; j < label_encoder_.size(); ++j) {
-        utils::insert_default_values(rows, &decompress(j));
+        decompress(j).insert_zeros(rows);
     }
     num_rows_ += rows.size();
 }
@@ -260,7 +260,7 @@ void ColumnCompressed<Label>
         if (cols.size() == 1) {
             bitmatrix_.emplace_back(std::move(old_bitmatrix[*cols.begin()]));
         } else {
-            std::vector<bool> bit_vector(num_rows_, 0);
+            sdsl::bit_vector bit_vector(num_rows_, 0);
             for (size_t c : cols) {
                 old_bitmatrix[c]->add_to(&bit_vector);
                 old_bitmatrix[c].reset();
@@ -330,7 +330,7 @@ template <typename Label>
 void ColumnCompressed<Label>::set(Index i, size_t j, bool value) {
     assert(i < num_rows_);
     if (j >= bitmatrix_.size() || is_set(i, j) != value)
-        decompress(j)[i] = value;
+        decompress(j).set(i, value);
 }
 
 template <typename Label>
@@ -369,32 +369,42 @@ void ColumnCompressed<Label>::flush() const {
 }
 
 template <typename Label>
-void ColumnCompressed<Label>::flush(size_t j, const std::vector<bool> &vector) {
+void ColumnCompressed<Label>::flush(size_t j, const bitmap &vector) {
     assert(j < bitmatrix_.size());
     assert(cached_columns_.Cached(j));
 
     bitmatrix_[j].reset();
-    bitmatrix_[j].reset(new bit_vector_smart(vector));
+    bitmatrix_[j].reset(new bit_vector_smart(
+        [&](const auto &callback) { vector.call_ones(callback); },
+        vector.size(),
+        vector.num_set_bits()
+    ));
+
+    assert(vector.size() == bitmatrix_[j]->size());
+    assert(vector.num_set_bits() == bitmatrix_[j]->num_set_bits());
+    assert(bitmatrix_[j]->num_set_bits() == bitmatrix_[j]->rank1(bitmatrix_[j]->size() - 1));
 }
 
 template <typename Label>
-std::vector<bool>& ColumnCompressed<Label>::decompress(size_t j) {
+bitmap_dyn& ColumnCompressed<Label>::decompress(size_t j) {
     assert(j < label_encoder_.size());
 
     try {
         return *cached_columns_.Get(j);
     } catch (...) {
         assert(j <= bitmatrix_.size());
+        // initialize the bit_vector if it exists in bitmatrix,
+        // or if num_rows_ is small
         if (j == bitmatrix_.size())
             bitmatrix_.emplace_back();
 
-        auto *bit_vector = new std::vector<bool>(num_rows_, 0);
+        auto vector = std::make_unique<bitmap_adaptive>(num_rows_, 0);
 
         if (bitmatrix_[j].get())
-            bitmatrix_[j]->add_to(bit_vector);
+            bitmatrix_[j]->add_to(static_cast<bitmap*>(vector.get()));
 
-        cached_columns_.Put(j, bit_vector);
-        return *bit_vector;
+        cached_columns_.Put(j, vector.release());
+        return *cached_columns_.Get(j);
     }
 }
 
@@ -456,7 +466,7 @@ void ColumnCompressed<Label>
         if (!outstream.good())
             throw std::ofstream::failure("Bad stream");
 
-        auto& color = *bitmatrix_[i];
+        auto &color = *bitmatrix_[i];
 
         uint64_t set_bits = color.rank1(color.size());
         serialize_number(outstream, set_bits);
@@ -465,12 +475,6 @@ void ColumnCompressed<Label>
             serialize_number(outstream, color.select1(j));
         }
     }
-}
-
-template <typename Label>
-const std::vector<std::unique_ptr<bit_vector>>&
-ColumnCompressed<Label>::data() const {
-    return bitmatrix_;
 }
 
 template class ColumnCompressed<std::string>;

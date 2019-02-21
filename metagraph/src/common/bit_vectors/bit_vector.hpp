@@ -8,8 +8,10 @@
 #include <sdsl/wavelet_trees.hpp>
 #include <libmaus2/bitbtree/bitbtree.hpp>
 
+#include "bitmap.hpp"
 
-class bit_vector {
+
+class bit_vector : public bitmap {
   public:
     virtual ~bit_vector() {};
 
@@ -18,16 +20,16 @@ class bit_vector {
     virtual uint64_t rank0(uint64_t id) const;
     // Returns the i-th set bit, starting from 1
     virtual uint64_t select1(uint64_t i) const = 0;
-    virtual void set(uint64_t id, bool val) = 0;
+    virtual void set(uint64_t id, bool val) override = 0;
     // Can be redefined, e.g. without rebalancing
     virtual void setBitQuick(uint64_t id, bool val) { set(id, val); };
-    virtual bool operator[](uint64_t id) const = 0;
-    virtual uint64_t get_int(uint64_t id, uint32_t width) const = 0;
+    virtual bool operator[](uint64_t id) const override = 0;
+    virtual uint64_t get_int(uint64_t id, uint32_t width) const override = 0;
     virtual void insertBit(uint64_t id, bool val) = 0;
     virtual void deleteBit(uint64_t id) = 0;
     virtual bool load(std::istream &in) = 0;
     virtual void serialize(std::ostream &out) const = 0;
-    virtual uint64_t size() const = 0;
+    virtual uint64_t size() const override = 0;
     virtual uint64_t num_set_bits() const { return rank1(size() - 1); }
 
     // FYI: This function invalidates the current object
@@ -41,9 +43,10 @@ class bit_vector {
 
     virtual std::vector<bool> to_vector() const;
 
-    virtual void add_to(std::vector<bool> *other) const final;
+    template <class Vector>
+    void add_to(Vector *other) const;
 
-    virtual void call_ones(const std::function<void(uint64_t)> &callback) const = 0;
+    virtual void call_ones(const std::function<void(uint64_t)> &callback) const override = 0;
 };
 
 std::ostream& operator<<(std::ostream &os, const bit_vector &bv);
@@ -91,8 +94,7 @@ class bit_vector_stat : public bit_vector {
     explicit bit_vector_stat(const std::vector<bool> &vector);
     explicit bit_vector_stat(const bit_vector_stat &other);
     bit_vector_stat(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
-                    uint64_t size,
-                    uint64_t num_set_bits);
+                    uint64_t size);
     bit_vector_stat(sdsl::bit_vector&& vector) noexcept;
     bit_vector_stat(bit_vector_stat&& other) noexcept;
     bit_vector_stat(std::initializer_list<bool> init);
