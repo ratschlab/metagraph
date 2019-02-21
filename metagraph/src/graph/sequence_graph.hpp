@@ -57,6 +57,36 @@ class DeBruijnGraph : public SequenceGraph {
     // Traverse the incoming edge
     virtual node_index traverse_back(node_index node, char prev_char) const = 0;
 
+    // Maps k-mers from sequence to nodes of the graph similarly to map_to_nodes
+    // Guarantees that the k-mers from sequence are called in their natural order
+    virtual void sequence_map(const std::string::const_iterator &begin,
+                              const std::string::const_iterator &end,
+                              const std::function<void(node_index)> &callback,
+                              const std::function<bool()> &terminate = [](){ return false; }) const = 0;
+
+    virtual node_index kmer_to_node(const char *begin) const {
+        node_index node = npos;
+        map_to_nodes(std::string(begin, get_k()),
+            [&node](node_index i) { node = i; },
+        );
+        return result;
+    }
+
+    virtual node_index kmer_to_node(const std::string &kmer) const {
+        assert(kmer.size() == get_k());
+        return kmer_to_node(kmer.data());
+    }
+
+    using OutgoingEdgeCallback = std::function<void(node_index /* target_kmer */,
+                                                    char /* last_target_char */)>;
+    virtual void call_outgoing_kmers(node_index kmer,
+                                     const OutgoingEdgeCallback &callback) const = 0;
+
+    using IncomingEdgeCallback = std::function<void(node_index /* source_kmer */,
+                                                    char /* first_source_char */)>;
+    virtual void call_incoming_kmers(node_index kmer,
+                                     const IncomingEdgeCallback &callback) const = 0;
+
     // Check whether graph contains fraction of nodes from the sequence
     virtual bool find(const std::string &sequence,
                       double discovery_fraction = 1) const {
