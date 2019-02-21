@@ -133,8 +133,9 @@ class bitmap_adaptive : public bitmap_dyn {
 
     std::unique_ptr<bitmap_dyn> bitmap_;
 
-    static const size_t kMaxNumIndicesLogRatio;
     static const size_t kRowCutoff;
+    static const size_t kMaxNumIndicesLogRatio;
+    static const size_t kNumIndicesMargin;
 };
 
 

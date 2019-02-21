@@ -5,6 +5,7 @@
 // since std::set needs 32 bytes per element
 // switch when n < 64m + 32 * 8 * m \approx (1 << 8)m
 const size_t bitmap_adaptive::kMaxNumIndicesLogRatio = 8;
+const size_t bitmap_adaptive::kNumIndicesMargin = 2;
 const size_t bitmap_adaptive::kRowCutoff = 1'000'000;
 
 
@@ -229,7 +230,9 @@ void bitmap_adaptive::check_switch() {
     if (size() < kRowCutoff
         || bitmap_->num_set_bits() >= (bitmap_->size() >> kMaxNumIndicesLogRatio)) {
         to_bit_vector();
-    } else {
+    } else if (size() >= kRowCutoff
+        && bitmap_->num_set_bits()
+            < (bitmap_->size() >> (kMaxNumIndicesLogRatio + kNumIndicesMargin))) {
         to_set();
     }
 }

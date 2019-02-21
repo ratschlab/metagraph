@@ -307,39 +307,59 @@ TEST(bitmap_adaptive, switch_type) {
     EXPECT_EQ(
         true,
         static_cast<bool>(dynamic_cast<bitmap_vector*>(&bm.data()))
-    ) << bm.size() << " " << i;
+    ) << bm.size() << " " << i << " " << bm.num_set_bits();
 
     for (; i + 1 < (bm.size() >> bitmap_adaptive::kMaxNumIndicesLogRatio); ++i) {
         bm.set(i, true);
         EXPECT_EQ(
             true,
             static_cast<bool>(dynamic_cast<bitmap_vector*>(&bm.data()))
-        ) << bm.size() << " " << i;
+        ) << bm.size() << " " << i << " " << bm.num_set_bits();
     }
 
-    bm.insert_zeros({ i });
+    // too many bits set to switch back to set after increasing size
+    bm.insert_zeros({ bm.size() - 1 });
     EXPECT_EQ(true, static_cast<bool>(dynamic_cast<bitmap_vector*>(&bm.data())))
-        << bm.size() << " " << i;
+        << bm.size() << " " << i << " " << bm.num_set_bits();
+
+    bm.insert_zeros({ bm.size() - 1 });
+    EXPECT_EQ(true, static_cast<bool>(dynamic_cast<bitmap_vector*>(&bm.data())))
+        << bm.size() << " " << i << " " << bm.num_set_bits();
+
+    // start unsetting bits
+    ASSERT_LT(0u, i);
+    for (--i; bm.num_set_bits()
+            > (bm.size() >> (bitmap_adaptive::kMaxNumIndicesLogRatio
+                + bitmap_adaptive::kNumIndicesMargin)); --i) {
+        ASSERT_LT(0u, i);
+        bm.set(i, false);
+        EXPECT_EQ(
+            true,
+            static_cast<bool>(dynamic_cast<bitmap_vector*>(&bm.data()))
+        ) << bm.size() << " " << i << " " << bm.num_set_bits();
+    }
 
     // switch to set
-    bm.insert_zeros({ i });
-    EXPECT_EQ(true, static_cast<bool>(dynamic_cast<bitmap_set*>(&bm.data())))
-        << bm.size() << " " << i;
+    bm.set(i, false);
+    EXPECT_EQ(
+        true,
+        static_cast<bool>(dynamic_cast<bitmap_set*>(&bm.data()))
+    ) << bm.size() << " " << i << " " << bm.num_set_bits();
 
-    for (; i < (bm.size() >> bitmap_adaptive::kMaxNumIndicesLogRatio) - 1; ++i) {
+    // start resetting bits back to 1
+    for (; bm.num_set_bits() + 1
+            < (bm.size() >> bitmap_adaptive::kMaxNumIndicesLogRatio); ++i) {
         bm.set(i, true);
         EXPECT_EQ(
             true,
             static_cast<bool>(dynamic_cast<bitmap_set*>(&bm.data()))
-        ) << bm.size() << " " << i;
+        ) << bm.size() << " " << i << " " << bm.num_set_bits();
     }
 
-    // switch back to vector
+    //switch back to vector
     bm.set(i, true);
     EXPECT_EQ(
-        (bm.size() >> bitmap_adaptive::kMaxNumIndicesLogRatio),
-        bm.num_set_bits()
-    );
-    EXPECT_EQ(true, static_cast<bool>(dynamic_cast<bitmap_vector*>(&bm.data())))
-        << bm.size() << " " << i;
+        true,
+        static_cast<bool>(dynamic_cast<bitmap_vector*>(&bm.data()))
+    ) << bm.size() << " " << i << " " << bm.num_set_bits();
 }
