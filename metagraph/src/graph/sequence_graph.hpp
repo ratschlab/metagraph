@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <functional>
+#include <cassert>
 
 class bit_vector_dyn;
 
@@ -41,6 +42,10 @@ class SequenceGraph {
 
     virtual bool load(const std::string &filename_base) = 0;
     virtual void serialize(const std::string &filename_base) const = 0;
+
+    // Get the k-mer corresponding to node_index in form of a string.
+    // Note: This functionality could be expensive in many derived classes. Use sparingly.
+    virtual std::string get_node_sequence(node_index node_index) const = 0;
 };
 
 
@@ -57,19 +62,19 @@ class DeBruijnGraph : public SequenceGraph {
     // Traverse the incoming edge
     virtual node_index traverse_back(node_index node, char prev_char) const = 0;
 
-    // Maps k-mers from sequence to nodes of the graph similarly to map_to_nodes
+    // Map k-mers from sequence to nodes of the graph similarly to map_to_nodes
     // Guarantees that the k-mers from sequence are called in their natural order
-    virtual void sequence_map(const std::string::const_iterator &begin,
-                              const std::string::const_iterator &end,
-                              const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate = [](){ return false; }) const = 0;
+    virtual void map_sequence_sequentially(const std::string::const_iterator &begin,
+                                           const std::string::const_iterator &end,
+                                           const std::function<void(node_index)> &callback,
+                                           const std::function<bool()> &terminate
+                                               = [](){ return false; }) const = 0;
 
     virtual node_index kmer_to_node(const char *begin) const {
         node_index node = npos;
         map_to_nodes(std::string(begin, get_k()),
-            [&node](node_index i) { node = i; },
-        );
-        return result;
+            [&node](node_index i) { node = i; });
+        return node;
     }
 
     virtual node_index kmer_to_node(const std::string &kmer) const {

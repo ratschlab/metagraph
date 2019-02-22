@@ -23,6 +23,26 @@ class DBGHash : public DeBruijnGraph {
                       const std::function<void(node_index)> &callback,
                       const std::function<bool()> &terminate = [](){ return false; }) const;
 
+    // Map k-mers from sequence to nodes of the graph similarly to map_to_nodes
+    // Guarantees that the k-mers from sequence are called in their natural order
+    void map_sequence_sequentially(const std::string::const_iterator&,
+                                           const std::string::const_iterator&,
+                                           const std::function<void(node_index)>&,
+                                           const std::function<bool()>&) const {
+        // TODO: Complete map_sequence_sequentially for DBGHash.
+        throw "Not implemented";
+    }
+
+    void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const {
+        // TODO: Complete call_outgoing_kmers for DBGHash.
+        throw "Not implemented";
+    }
+
+    void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const {
+        // TODO: Complete call_incoming_kmers for DBGHash.
+        throw "Not implemented";
+    }
+
     // Traverse the outgoing edge
     node_index traverse(node_index node, char next_char) const;
     // Traverse the incoming edge
@@ -39,6 +59,10 @@ class DBGHash : public DeBruijnGraph {
 
     node_index kmer_to_node(const std::string &kmer) const;
     std::string node_to_kmer(node_index i) const;
+
+    std::string get_node_sequence(node_index node_index) const {
+        return node_to_kmer(node_index);
+    }
 
     size_t get_k() const { return k_; }
 
