@@ -34,22 +34,22 @@ class DBGSD : public DeBruijnGraph {
 
     // Map k-mers from sequence to nodes of the graph similarly to map_to_nodes
     // Guarantees that the k-mers from sequence are called in their natural order
-    void map_sequence_sequentially(const std::string::const_iterator&,
-                                           const std::string::const_iterator&,
-                                           const std::function<void(node_index)>&,
-                                           const std::function<bool()>&) const {
+    void map_kmers_sequentially(std::string::const_iterator,
+                                std::string::const_iterator,
+                                const std::function<void(node_index)> &,
+                                const std::function<bool()> &) const {
         // TODO: Complete map_sequence_sequentially for DBGSD.
-        throw "Not implemented";
+        throw std::runtime_error("Not implemented");
     }
 
     void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const {
         // TODO: Complete call_outgoing_kmers for DBGSD.
-        throw "Not implemented";
+        throw std::runtime_error("Not implemented");
     }
 
     void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const {
         // TODO: Complete call_incoming_kmers for DBGSD.
-        throw "Not implemented";
+        throw std::runtime_error("Not implemented");
     }
 
     // Traverse the outgoing edge

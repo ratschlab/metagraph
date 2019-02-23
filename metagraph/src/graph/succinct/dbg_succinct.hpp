@@ -579,7 +579,7 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual std::string get_node_sequence(node_index) const override final {
         // TODO: Complete get_node_sequence for DBGSuccinct.
-        throw "Not implemented";
+        throw std::runtime_error("Not implemented");
     }
 
     // Traverse graph mapping sequence to the graph nodes
@@ -590,22 +590,22 @@ class DBGSuccinct : public DeBruijnGraph {
 
     // Map k-mers from sequence to nodes of the graph similarly to map_to_nodes
     // Guarantees that the k-mers from sequence are called in their natural order
-    virtual void map_sequence_sequentially(const std::string::const_iterator&,
-                                           const std::string::const_iterator&,
-                                           const std::function<void(node_index)>&,
-                                           const std::function<bool()>&) const  override {
-        // TODO: Complete map_sequence_sequentially for DBGSuccinct.
-        throw "Not implemented";
+    virtual void map_kmers_sequentially(std::string::const_iterator,
+                                        std::string::const_iterator,
+                                        const std::function<void(node_index)> &,
+                                        const std::function<bool()> &) const override final {
+        // TODO: Implement
+        throw std::runtime_error("Not implemented");
     }
 
     virtual void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const override final {
-        // TODO: Complete call_outgoing_kmers for DBGSuccinct.
-        throw "Not implemented";
+        // TODO: Implement
+        throw std::runtime_error("Not implemented");
     }
 
     virtual void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const override final {
-        // TODO: Complete call_incoming_kmers for DBGSuccinct.
-        throw "Not implemented";
+        // TODO: Implement
+        throw std::runtime_error("Not implemented");
     }
 
     virtual uint64_t num_nodes() const override final;

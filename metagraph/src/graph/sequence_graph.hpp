@@ -4,7 +4,6 @@
 #include <vector>
 #include <string>
 #include <functional>
-#include <cassert>
 
 class bit_vector_dyn;
 
@@ -43,8 +42,8 @@ class SequenceGraph {
     virtual bool load(const std::string &filename_base) = 0;
     virtual void serialize(const std::string &filename_base) const = 0;
 
-    // Get the k-mer corresponding to node_index in form of a string.
-    // Note: This functionality could be expensive in many derived classes. Use sparingly.
+    // Get string corresponding to |node_index|.
+    // Note: Not efficient if sequences in nodes overlap. Use sparingly.
     virtual std::string get_node_sequence(node_index node_index) const = 0;
 };
 
@@ -64,23 +63,14 @@ class DeBruijnGraph : public SequenceGraph {
 
     // Map k-mers from sequence to nodes of the graph similarly to map_to_nodes
     // Guarantees that the k-mers from sequence are called in their natural order
-    virtual void map_sequence_sequentially(const std::string::const_iterator &begin,
-                                           const std::string::const_iterator &end,
-                                           const std::function<void(node_index)> &callback,
-                                           const std::function<bool()> &terminate
-                                               = [](){ return false; }) const = 0;
+    virtual void map_kmers_sequentially(std::string::const_iterator begin,
+                                        std::string::const_iterator end,
+                                        const std::function<void(node_index)> &callback,
+                                        const std::function<bool()> &terminate
+                                                        = [](){ return false; }) const = 0;
 
-    virtual node_index kmer_to_node(const char *begin) const {
-        node_index node = npos;
-        map_to_nodes(std::string(begin, get_k()),
-            [&node](node_index i) { node = i; });
-        return node;
-    }
-
-    virtual node_index kmer_to_node(const std::string &kmer) const {
-        assert(kmer.size() == get_k());
-        return kmer_to_node(kmer.data());
-    }
+    virtual node_index kmer_to_node(const char *begin) const;
+    virtual node_index kmer_to_node(const std::string &kmer) const;
 
     using OutgoingEdgeCallback = std::function<void(node_index /* target_kmer */,
                                                     char /* last_target_char */)>;
@@ -93,32 +83,7 @@ class DeBruijnGraph : public SequenceGraph {
                                      const IncomingEdgeCallback &callback) const = 0;
 
     // Check whether graph contains fraction of nodes from the sequence
-    virtual bool find(const std::string &sequence,
-                      double discovery_fraction = 1) const {
-        if (sequence.length() < get_k())
-            return false;
-
-        const size_t num_kmers = sequence.length() - get_k() + 1;
-        const size_t max_kmers_missing = num_kmers * (1 - discovery_fraction);
-        const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
-        size_t num_kmers_discovered = 0;
-        size_t num_kmers_missing = 0;
-
-        map_to_nodes(sequence,
-            [&](node_index node) {
-                if (node) {
-                    num_kmers_discovered++;
-                } else {
-                    num_kmers_missing++;
-                }
-            },
-            [&]() { return num_kmers_missing > max_kmers_missing
-                            || num_kmers_discovered >= min_kmers_discovered; }
-        );
-
-        return num_kmers_missing <= max_kmers_missing;
-    }
+    virtual bool find(const std::string &sequence, double discovery_fraction = 1) const;
 };
-
 
 #endif // __SEQUENCE_GRAPH_HPP__
