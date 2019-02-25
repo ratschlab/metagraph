@@ -87,3 +87,48 @@ TEST(dbg_aligner, repetitive_sequence_alignment) {
     EXPECT_EQ(sequence_2.size() - k + 1, path.size());
     EXPECT_EQ(sequence_2, aligner.get_path_sequence(path));
 }
+
+TEST(dbg_aligner, variation) {
+    size_t k = 4;
+    std::string sequence_1 = "AGCAACTCGAAA";
+    std::string sequence_2 = "AGCAATTCGAAA";
+
+    DBGSuccinct* graph = new DBGSuccinct(k);
+    graph->add_sequence(sequence_1);
+    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/1));
+    auto path = aligner.align(sequence_2);
+
+    EXPECT_EQ(sequence_2.size() - k + 1, path.size());
+    EXPECT_EQ(sequence_1, aligner.get_path_sequence(path));
+}
+
+TEST(dbg_aligner, variation_in_branching_point) {
+    size_t k = 4;
+    std::string sequence_1 = "AGCAACTCGAAA";
+    std::string sequence_2 = "AGCAATTCGAAA";
+    std::string sequence_3 = "AGCAAGGCGAAA";
+
+    DBGSuccinct* graph = new DBGSuccinct(k);
+    graph->add_sequence(sequence_1);
+    graph->add_sequence(sequence_2);
+    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/1));
+    auto path = aligner.align(sequence_3);
+
+    EXPECT_EQ(sequence_3.size() - k + 1, path.size());
+    EXPECT_TRUE(aligner.get_path_sequence(path).compare(sequence_1) == 0 ||
+                aligner.get_path_sequence(path).compare(sequence_2) == 0);
+}
+
+//TEST(dbg_aligner, variation_in_first_kmer) {
+//    size_t k = 4;
+//    std::string sequence_1 = "AGCCTCGAAA";
+//    std::string sequence_2 = "AGCTTCGAAA";
+//
+//    DBGSuccinct* graph = new DBGSuccinct(k);
+//    graph->add_sequence(sequence_1);
+//    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/1));
+//    auto path = aligner.align(sequence_2);
+//
+//    EXPECT_EQ(sequence_2.size() - k + 1, path.size());
+//    EXPECT_EQ(sequence_2, aligner.get_path_sequence(path));
+//}

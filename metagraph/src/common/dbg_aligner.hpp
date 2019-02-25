@@ -26,6 +26,15 @@ class DBGAligner : public AnnotatedDBG {
 
     // Return the corresponding sequence of a path according to nodes in the graph.
     std::string get_path_sequence(const std::vector<node_index>& path) const;
+
+  private:
+    // Align part of a sequence to the graph in the case of no exact map
+    // based on internal strategy. Terminates at the end of sequence or
+    // as soon as there is an exact match to a node in graph.
+    void inexact_map(std::string::const_iterator begin, std::string::const_iterator end,
+                     const node_index &last_mapped_node, const Annotator::VLabels &label_set,
+                     const std::function<void(node_index)> &callback,
+                     const std::function<bool()> &terminate = []() { return false; }) const;
 };
 
 #endif // __DBG_ALIGNER_HPP__
