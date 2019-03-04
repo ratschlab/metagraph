@@ -941,6 +941,29 @@ std::vector<edge_index> BOSS::map_to_edges(const std::string &sequence) const {
     return indices;
 }
 
+void BOSS::extend_from_seed(std::string::const_iterator begin,
+                                      std::string::const_iterator end,
+                                      const std::function<void(edge_index)> &callback,
+                                      const std::function<bool()> &terminate,
+                                      edge_index seed) const {
+    auto edge = seed;
+    if (edge) {
+        // Use the seed hint and begin extention right away.
+        edge = fwd(edge);
+    } else {
+        // Seed is taken from the first k characters.
+        std::string seed_str(begin, begin + k_ + 1);
+        auto encoded_seed = encode(seed_str);
+        edge = map_to_edge(&encoded_seed[0], &encoded_seed[k_ + 1]);
+    }
+    while (!terminate() && edge && begin + k_ != end) {
+        callback(edge);
+        edge = fwd(edge);
+        edge = pick_edge(edge, get_source_node(edge), encode(*(begin + k_ + 1)));
+        begin ++;
+    }
+}
+
 bool BOSS::find(const std::string &sequence,
                 double kmer_discovery_fraction) const {
     size_t kmer_size = k_ + 1;

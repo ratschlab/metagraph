@@ -76,8 +76,18 @@ class DeBruijnGraph : public SequenceGraph {
     virtual void map_to_nodes_sequentially(std::string::const_iterator begin,
                                            std::string::const_iterator end,
                                            const std::function<void(node_index)> &callback,
+                                           const std::function<bool()> &terminate = [](){ return false; }) const = 0;
+
+    // Perform extension on a provided seed based on the string iterator.
+    // If seed is npos, perform seeding automatically.
+    // Extend until the termination condition is satisfied or reached the end of the query.
+    // In canonical mode, non-canonical k-mers are not mapped to canonical ones
+    virtual void extend_from_seed(std::string::const_iterator begin,
+                                           std::string::const_iterator end,
+                                           const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate
-                                                        = [](){ return false; }) const = 0;
+                                                        = [](){ return false; },
+                                           node_index seed = npos) const = 0;
 
     virtual size_t outdegree(node_index) const = 0;
     virtual size_t indegree(node_index) const = 0;

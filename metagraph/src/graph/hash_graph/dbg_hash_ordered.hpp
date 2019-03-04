@@ -40,6 +40,19 @@ class DBGHashOrdered : public DeBruijnGraph {
         hash_dbg_->map_to_nodes_sequentially(begin, end, callback, terminate);
     }
 
+    // Perform extension on a provided seed based on the string iterator.
+    // If seed is npos, perform seeding automatically.
+    // Extend until the termination condition is satisfied or reached the end of the query.
+    // In canonical mode, non-canonical k-mers are not mapped to canonical ones
+    virtual void extend_from_seed(std::string::const_iterator,
+                                           std::string::const_iterator,
+                                           const std::function<void(node_index)>&,
+                                           const std::function<bool()>&,
+                                           node_index) const {
+        // TODO: Complete extend_from_seed for DBGHashOrdered.
+        throw std::runtime_error("Not implemented");
+    }
+
     void call_outgoing_kmers(node_index node,
                              const OutgoingEdgeCallback &callback) const {
         hash_dbg_->call_outgoing_kmers(node, callback);

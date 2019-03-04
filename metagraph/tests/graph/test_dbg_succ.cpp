@@ -2685,6 +2685,38 @@ TEST(DBGSuccinct, map_to_nodes) {
     }
 }
 
+TEST(DBGSuccinct, extend_from_seed) {
+    for (size_t k = 2; k < 11; ++k) {
+        std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(k - 1)) };
+        std::string sequence = "AGCTTCGAAGGCCTT";
+        graph->add_sequence(sequence);
+
+        dynamic_cast<DBGSuccinct&>(*graph).mask_dummy_kmers(1, false);
+
+        size_t node_counter = 0;
+        DBGSuccinct::node_index cur_node = 0;
+        bool termination_condition = true;
+        while (node_counter < sequence.size() - k + 1) {
+            graph->extend_from_seed(std::begin(sequence) + node_counter,
+                 std::end(sequence),
+                 [&](DBGSuccinct::node_index node) {
+                    ++ node_counter;
+                    cur_node = node;
+                    }, [&]() {
+                        return (node_counter == k/2 && termination_condition); },
+                 cur_node);
+            termination_condition = !termination_condition;
+        }
+        DBGSuccinct::node_index last_node = 0;
+        graph->map_to_nodes(sequence.substr(sequence.size() - k),
+                            [&](DBGSuccinct::node_index node){ last_node = node; });
+
+        EXPECT_FALSE(last_node == 0);
+        EXPECT_EQ(last_node, cur_node);
+        EXPECT_EQ(sequence.size() - k + 1, node_counter);
+    }
+}
+
 TEST(DBGSuccinct, map_to_edges) {
     for (size_t k = 1; k < 10; ++k) {
         std::unique_ptr<BOSS> graph { new BOSS(k) };
