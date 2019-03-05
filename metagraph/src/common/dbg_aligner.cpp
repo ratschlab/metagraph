@@ -5,18 +5,19 @@
 
 DBGAligner::DBGAligner(DeBruijnGraph *dbg, Annotator *annotation,
                        size_t num_threads) : AnnotatedDBG(dbg, annotation, num_threads) {
-    this->sub_loss_ = std::map<char, std::map<char, int>>({
+    // Substitution loss for each pair of nucleotides.
+    // Transition and transversion mutations have different loss values.
+        sub_loss_ = {
         {'a', {{'t', 2}, {'c', 2}, {'g', 1}}},
         {'g', {{'t', 2}, {'c', 2}, {'a', 1}}},
         {'c', {{'a', 2}, {'g', 2}, {'t', 1}}},
-        {'t', {{'a', 2}, {'g', 2}, {'c', 1}}}});
+        {'t', {{'a', 2}, {'g', 2}, {'c', 1}}}};
 }
 
 DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
     if (sequence.size() < graph_->get_k())
         return AlignedPath(sequence.end());
 
-    // TODO: What is the best container for the queue?
     std::priority_queue<AlignedPath, std::vector<AlignedPath>, AlignedPathCompare> queue;
     queue.push(AlignedPath(std::begin(sequence)));
 
@@ -50,14 +51,15 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
     return AlignedPath(sequence.end());
 }
 
-float DBGAligner::single_node_loss(const node_index& node, std::string::const_iterator begin) const {
-    auto node_sequence_it = std::begin(graph_->get_node_sequence(node));
+float DBGAligner::single_node_loss(node_index node, std::string::const_iterator begin) const {
+    // TODO: Compute indel loss as well.
+    std::string node_sequence = graph_->get_node_sequence(node);
+    auto node_sequence_it = std::begin(node_sequence);
     std::string::const_iterator end = begin + graph_->get_k();
     float loss = 0;
     while (begin != end) {
         if (std::tolower(*node_sequence_it) != std::tolower(*begin))
             loss += sub_loss_.at(std::tolower(*node_sequence_it)).at(std::tolower(*begin));
-        // TODO: Compute indel loss as well.
         ++ begin;
         ++ node_sequence_it;
     }
@@ -79,7 +81,6 @@ void DBGAligner::pick_all_strategy(std::vector<node_index> out_neighbors,
     }
 }
 
-//TODO: Write a strategy to handle indels.
 void DBGAligner::inexact_map(const AlignedPath &path,
                              std::string::const_iterator end,
                              const std::function<void(node_index,

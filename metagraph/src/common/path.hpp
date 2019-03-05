@@ -8,7 +8,8 @@ template <typename NodeType, typename VLabels>
 class Path {
 
   public:
-    Path(std::string::const_iterator mapped_it) : mapped_it_(mapped_it) { loss_ = 0.0; }
+    Path(std::string::const_iterator mapped_it) : mapped_it_(mapped_it) {
+        loss_ = 0.0; }
 
     Path(const Path&) = default;
     Path(Path&&) = default;
@@ -22,7 +23,8 @@ class Path {
                           std::end(labels));
         ++ mapped_it_;
     }
-    void set_sequence_it(std::string::const_iterator sequence_it) { mapped_it_ = sequence_it; }
+    void set_sequence_it(std::string::const_iterator sequence_it) {
+        mapped_it_ = sequence_it; }
 
     NodeType back() const { return nodes_.back(); }
     size_t size() const { return nodes_.size(); }
@@ -43,7 +45,8 @@ class Path {
 template <typename NodeType, typename VLabels>
 class PathCompare {
   public:
-    bool operator() (const Path<NodeType, VLabels> &lhs, const Path<NodeType, VLabels> &rhs) const {
+    bool operator() (const Path<NodeType, VLabels> &lhs,
+                     const Path<NodeType, VLabels> &rhs) const {
             return (lhs.loss_ > rhs.loss_);
     }
 };
