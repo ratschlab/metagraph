@@ -282,10 +282,10 @@ target_link_libraries(
 #-------------------
 
 file(GLOB header_files
-        "src/*.hpp"
-        "src/*/*.hpp"
-        "src/*/*/*.hpp"
-        )
+  "src/*.hpp"
+  "src/*/*.hpp"
+  "src/*/*/*.hpp"
+)
 
 install(TARGETS metagraph DESTINATION lib)
 install(FILES ${header_files} DESTINATION include/metagraph)
