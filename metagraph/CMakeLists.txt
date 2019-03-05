@@ -277,6 +277,18 @@ target_link_libraries(
   run_experiments metagraph ${METALIBS}
 )
 
+#-------------------
+# install library
+#-------------------
+
+file(GLOB header_files
+        "src/*.hpp"
+        "src/*/*.hpp"
+        "src/*/*/*.hpp"
+        )
+
+install(TARGETS metagraph DESTINATION lib)
+install(FILES ${header_files} DESTINATION include/metagraph)
 
 #-------------------
 # Unit Tests
