@@ -577,10 +577,9 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual void add_sequence(const std::string &sequence,
                               bit_vector_dyn *nodes_inserted = NULL) override final;
 
-    virtual std::string get_node_sequence(node_index) const override final {
-        // TODO: Complete get_node_sequence for DBGSuccinct.
-        throw std::runtime_error("Not implemented");
-    }
+    virtual std::string get_node_sequence(node_index node) const override final;
+
+    virtual char get_kmer_last_char(node_index node) const override final;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
@@ -619,7 +618,8 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual Config::StateType get_state() const final;
 
     virtual bool is_canonical_mode() const override final { return canonical_mode_; }
-
+    virtual bool is_single_outgoing(node_index i) const override final {
+            return boss_graph_->is_single_outgoing(kmer_to_boss_index(i)); }
     virtual const DBG_succ& get_boss() const final { return *boss_graph_; }
     virtual DBG_succ& get_boss() final { return *boss_graph_; }
     virtual DBG_succ* release_boss() final { return boss_graph_.release(); }

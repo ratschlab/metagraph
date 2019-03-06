@@ -69,12 +69,21 @@ class DBGHashOrdered : public DeBruijnGraph {
     node_index kmer_to_node(const std::string &kmer) const;
     std::string node_to_kmer(node_index i) const;
 
-    std::string get_node_sequence(node_index node_index) const {
-        return node_to_kmer(node_index);
+    std::string get_node_sequence(node_index node) const {
+        return node_to_kmer(node);
+    }
+
+    char get_kmer_last_char(node_index) const {
+        // TODO: Complete get_kmer_last_char for DBGHashOrdered.
+        throw std::runtime_error("Not implemented");
     }
 
     size_t get_k() const { return k_; }
     bool is_canonical_mode() const { return canonical_only_; }
+    bool is_single_outgoing(node_index) const {
+        // TODO: Complete is_single_outgoing for DBGHashOrdered.
+        throw std::runtime_error("Not implemented");
+    }
 
     uint64_t num_nodes() const { return kmers_.size(); }
 

@@ -55,6 +55,7 @@ class DeBruijnGraph : public SequenceGraph {
     virtual size_t get_k() const = 0;
 
     virtual bool is_canonical_mode() const { return false; }
+    virtual bool is_single_outgoing(node_index i) const = 0;
 
     // Traverse the outgoing edge
     virtual node_index traverse(node_index node, char next_char) const = 0;
@@ -71,6 +72,9 @@ class DeBruijnGraph : public SequenceGraph {
 
     virtual node_index kmer_to_node(const char *begin) const;
     virtual node_index kmer_to_node(const std::string &kmer) const;
+
+    // Get last character of a kmer corresponding to |node|.
+    virtual char get_kmer_last_char(node_index node) const = 0;
 
     using OutgoingEdgeCallback = std::function<void(node_index /* target_kmer */,
                                                     char /* last_target_char */)>;

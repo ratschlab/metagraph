@@ -2207,6 +2207,24 @@ void DBGSuccinct::add_seq(const std::string &sequence,
     assert(!valid_edges_.get() || !(*valid_edges_)[0]);
 }
 
+
+std::string DBGSuccinct::get_node_sequence(node_index node) const {
+    if (canonical_mode_) {
+        // TODO: Return node sequence for canonical case.
+        throw std::runtime_error("Not implemented");
+    } else {
+        auto boss_node_seq = boss_graph_->get_node_str(node);
+        auto last_char = boss_graph_->get_W(node);
+        if (last_char)
+            boss_node_seq.push_back(boss_graph_->decode(last_char));
+        return boss_node_seq;
+    }
+}
+
+char DBGSuccinct::get_kmer_last_char(node_index node) const {
+    return boss_graph_->decode(boss_graph_->get_W(node));
+}
+
 // Traverse graph mapping sequence to the graph nodes
 // and run callback for each node until the termination condition is satisfied
 void DBGSuccinct::map_to_nodes(const std::string &sequence,
