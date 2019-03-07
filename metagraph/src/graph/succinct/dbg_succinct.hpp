@@ -40,7 +40,7 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual void add_sequence(const std::string &sequence,
                               bit_vector_dyn *nodes_inserted = NULL) override final;
 
-    virtual std::string get_node_sequence(node_index) const override final;
+    virtual std::string get_node_sequence(node_index node) const override final;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied

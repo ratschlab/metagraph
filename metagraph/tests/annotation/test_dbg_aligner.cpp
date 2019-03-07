@@ -1,3 +1,5 @@
+#include "dbg_aligner.hpp"
+
 #include <gtest/gtest.h>
 
 #include "boss.hpp"
@@ -7,14 +9,13 @@
 
 TEST(dbg_aligner, align_sequence_too_short) {
     size_t k = 4;
-    std::string sequence = "CATTT";
+    std::string reference = "CATTT";
+    std::string query = "CAT";
 
-    std::shared_ptr<DBGSuccinct> graph = std::make_shared<DBGSuccinct>(k);
-    std::shared_ptr<AnnotatedDBG> anno_dbg =
-        std::make_shared<AnnotatedDBG>(graph, std::make_unique<annotate::ColumnCompressed<>>(1));
-    graph->add_sequence(sequence);
-    DBGAligner aligner(graph, anno_dbg);
-    auto path = aligner.align("CAT");
+    DBGSuccinct* graph = new DBGSuccinct(k);
+    graph->add_sequence(reference);
+    DBGAligner aligner(graph);
+    auto path = aligner.align(query);
 
     EXPECT_EQ(0ull, path.size());
     EXPECT_EQ("", aligner.get_path_sequence(path.get_nodes()));
@@ -22,14 +23,13 @@ TEST(dbg_aligner, align_sequence_too_short) {
 
 TEST(dbg_aligner, align_single_node) {
     size_t k = 3;
-    std::string sequence = "CAT";
+    std::string reference = "CAT";
+    std::string query = "CAT";
 
-    std::shared_ptr<DBGSuccinct> graph = std::make_shared<DBGSuccinct>(k);
-    std::shared_ptr<AnnotatedDBG> anno_dbg =
-        std::make_shared<AnnotatedDBG>(graph, std::make_unique<annotate::ColumnCompressed<>>(1));
-    graph->add_sequence(sequence);
-    DBGAligner aligner(graph, anno_dbg);
-    auto path = aligner.align("CAT");
+    DBGSuccinct* graph = new DBGSuccinct(k);
+    graph->add_sequence(reference);
+    DBGAligner aligner(graph);
+    auto path = aligner.align(query);
 
     EXPECT_EQ(1ull, path.size());
     EXPECT_EQ("CAT", aligner.get_path_sequence(path.get_nodes()));
@@ -37,148 +37,154 @@ TEST(dbg_aligner, align_single_node) {
 
 TEST(dbg_aligner, align_straight) {
     size_t k = 4;
-    std::string sequence = "AGCTTCGAGGCCAA";
+    std::string reference = "AGCTTCGAGGCCAA";
+    // Query is the same as the reference.
+    std::string query = "AGCTTCGAGGCCAA";
 
-    std::shared_ptr<DBGSuccinct> graph = std::make_shared<DBGSuccinct>(k);
-    std::shared_ptr<AnnotatedDBG> anno_dbg =
-        std::make_shared<AnnotatedDBG>(graph, std::make_unique<annotate::ColumnCompressed<>>(1));
-    graph->add_sequence(sequence);
-    DBGAligner aligner(graph, anno_dbg);
-    auto path = aligner.align(sequence);
+    DBGSuccinct* graph = new DBGSuccinct(k);
+    graph->add_sequence(reference);
+    DBGAligner aligner(graph);
+    auto path = aligner.align(query);
 
-    EXPECT_EQ(sequence.size() - k + 1, path.size());
-    EXPECT_EQ(sequence, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(query, aligner.get_path_sequence(path.get_nodes()));
 }
 
 TEST(dbg_aligner, align_ending_branch) {
     size_t k = 4;
-    std::string sequence_1 = "AGCTTCGAA";
-    std::string sequence_2 = "AGCTTCGAC";
+    std::string reference_1 = "AGCTTCGAA";
+    std::string reference_2 = "AGCTTCGAC";
+    // Query is the same as the second reference.
+    std::string query = "AGCTTCGAC";
 
-    std::shared_ptr<DBGSuccinct> graph = std::make_shared<DBGSuccinct>(k);
-    std::shared_ptr<AnnotatedDBG> anno_dbg =
-        std::make_shared<AnnotatedDBG>(graph, std::make_unique<annotate::ColumnCompressed<>>(1));
-    graph->add_sequence(sequence_1);
-    graph->add_sequence(sequence_2);
-    DBGAligner aligner(graph, anno_dbg);
-    auto path = aligner.align(sequence_2);
+    DBGSuccinct* graph = new DBGSuccinct(k);
+    graph->add_sequence(reference_1);
+    graph->add_sequence(reference_2);
+    DBGAligner aligner(graph);
+    auto path = aligner.align(query);
 
-    EXPECT_EQ(sequence_2.size() - k + 1, path.size());
-    EXPECT_EQ(sequence_2, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(query, aligner.get_path_sequence(path.get_nodes()));
 }
 
 TEST(dbg_aligner, align_branch) {
     size_t k = 4;
-    std::string sequence_1 = "AGCTTCGAATATTTGTT";
-    std::string sequence_2 = "AGCTTCGACGATTTGTT";
+    std::string reference_1 = "AGCTTCGAATATTTGTT";
+    std::string reference_2 = "AGCTTCGACGATTTGTT";
+    // Query is the same as the second reference.
+    std::string query = "AGCTTCGACGATTTGTT";
 
-    std::shared_ptr<DBGSuccinct> graph = std::make_shared<DBGSuccinct>(k);
-    std::shared_ptr<AnnotatedDBG> anno_dbg =
-        std::make_shared<AnnotatedDBG>(graph, std::make_unique<annotate::ColumnCompressed<>>(1));
-    graph->add_sequence(sequence_1);
-    graph->add_sequence(sequence_2);
-    DBGAligner aligner(graph, anno_dbg);
-    auto path = aligner.align(sequence_2);
+    DBGSuccinct* graph = new DBGSuccinct(k);
+    graph->add_sequence(reference_1);
+    graph->add_sequence(reference_2);
+    DBGAligner aligner(graph);
+    auto path = aligner.align(query);
 
-    EXPECT_EQ(sequence_2.size() - k + 1, path.size());
-    EXPECT_EQ(sequence_2, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(query, aligner.get_path_sequence(path.get_nodes()));
 }
 
 TEST(dbg_aligner, repetitive_sequence_alignment) {
     size_t k = 3;
-    std::string sequence_1 = "AGGGGGGGGGAAAAGGGGGGG";
-    std::string sequence_2 = "AGGGGG";
+    std::string reference_1 = "AGGGGGGGGGAAAAGGGGGGG";
+    std::string query = "AGGGGG";
 
-    std::shared_ptr<DBGSuccinct> graph = std::make_shared<DBGSuccinct>(k);
-    std::shared_ptr<AnnotatedDBG> anno_dbg =
-        std::make_shared<AnnotatedDBG>(graph, std::make_unique<annotate::ColumnCompressed<>>(1));
-    graph->add_sequence(sequence_1);
-    DBGAligner aligner(graph, anno_dbg);
-    auto path = aligner.align(sequence_2);
+    DBGSuccinct* graph = new DBGSuccinct(k);
+    graph->add_sequence(reference_1);
+    DBGAligner aligner(graph);
+    auto path = aligner.align(query);
 
-    EXPECT_EQ(sequence_2.size() - k + 1, path.size());
-    EXPECT_EQ(sequence_2, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(query, aligner.get_path_sequence(path.get_nodes()));
 }
 
 TEST(dbg_aligner, variation) {
     size_t k = 4;
-    std::string sequence_1 = "AGCAACTCGAAA";
-    std::string sequence_2 = "AGCAATTCGAAA";
+    std::string reference_1 = "AGCAACTCGAAA";
+    std::string query = "AGCAATTCGAAA";
 
-    std::shared_ptr<DBGSuccinct> graph = std::make_shared<DBGSuccinct>(k);
-    std::shared_ptr<AnnotatedDBG> anno_dbg =
-        std::make_shared<AnnotatedDBG>(graph, std::make_unique<annotate::ColumnCompressed<>>(1));
-    graph->add_sequence(sequence_1);
-    DBGAligner aligner(graph, anno_dbg);
-    auto path = aligner.align(sequence_2);
+    DBGSuccinct* graph = new DBGSuccinct(k);
+    graph->add_sequence(reference_1);
+    DBGAligner aligner(graph);
+    auto path = aligner.align(query);
 
-    EXPECT_EQ(sequence_2.size() - k + 1, path.size());
-    EXPECT_EQ(sequence_1, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(reference_1, aligner.get_path_sequence(path.get_nodes()));
 }
 
 TEST(dbg_aligner, variation_in_branching_point) {
     size_t k = 4;
-    std::string sequence_1 = "AGCAACTCGAAA";
-    std::string sequence_2 = "AGCAAGTCGAAA";
-    std::string sequence_3 = "AGCAATGCGAAA";
+    std::string reference_1 = "AGCAACTCGAAA";
+    std::string reference_2 = "AGCAAGTCGAAA";
+    std::string query = "AGCAATGCGAAA";
 
-    std::shared_ptr<DBGSuccinct> graph = std::make_shared<DBGSuccinct>(k);
-    std::shared_ptr<AnnotatedDBG> anno_dbg =
-        std::make_shared<AnnotatedDBG>(graph, std::make_unique<annotate::ColumnCompressed<>>(1));
-    graph->add_sequence(sequence_1);
-    graph->add_sequence(sequence_2);
-    DBGAligner aligner(graph, anno_dbg);
-    auto path = aligner.align(sequence_3);
+    DBGSuccinct* graph = new DBGSuccinct(k);
+    graph->add_sequence(reference_1);
+    graph->add_sequence(reference_2);
+    DBGAligner aligner(graph);
+    auto path = aligner.align(query);
 
-    EXPECT_EQ(sequence_3.size() - k + 1, path.size());
-    EXPECT_TRUE(aligner.get_path_sequence(path.get_nodes()).compare(sequence_1) == 0 ||
-                aligner.get_path_sequence(path.get_nodes()).compare(sequence_2) == 0);
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_TRUE(aligner.get_path_sequence(path.get_nodes()).compare(reference_1) == 0 ||
+                aligner.get_path_sequence(path.get_nodes()).compare(reference_2) == 0);
 }
 
 TEST(dbg_aligner, multiple_variations) {
     size_t k = 4;
-    std::string sequence_1 = "AGCAACTCGAAA";
-    std::string sequence_2 = "AGCAATTTGCAA";
+    std::string reference_1 = "AGCAACTCGAAA";
+    std::string query = "AGCAATTTGCAA";
 
-    std::shared_ptr<DBGSuccinct> graph = std::make_shared<DBGSuccinct>(k);
-    std::shared_ptr<AnnotatedDBG> anno_dbg =
-        std::make_shared<AnnotatedDBG>(graph, std::make_unique<annotate::ColumnCompressed<>>(1));
-    graph->add_sequence(sequence_1);
-    DBGAligner aligner(graph, anno_dbg);
-    auto path = aligner.align(sequence_2);
+    DBGSuccinct* graph = new DBGSuccinct(k);
+    graph->add_sequence(reference_1);
+    DBGAligner aligner(graph);
+    auto path = aligner.align(query);
 
-    EXPECT_EQ(sequence_2.size() - k + 1, path.size());
-    EXPECT_EQ(sequence_1, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(reference_1, aligner.get_path_sequence(path.get_nodes()));
 }
 
 TEST(dbg_aligner, noise_in_branching_point) {
     size_t k = 4;
-    std::string sequence_1 = "AAAAACTTTTTT";
-    std::string sequence_2 = "AAAAATTGGGGG";
-    std::string sequence_3 = "AAAAATTTTTTT";
+    std::string reference_1 = "AAAAACTTTTTT";
+    std::string reference_2 = "AAAAATTGGGGG";
+    std::string query = "AAAAATTTTTTT";
 
-    std::shared_ptr<DBGSuccinct> graph = std::make_shared<DBGSuccinct>(k);
-    std::shared_ptr<AnnotatedDBG> anno_dbg =
-        std::make_shared<AnnotatedDBG>(graph, std::make_unique<annotate::ColumnCompressed<>>(1));
-    graph->add_sequence(sequence_1);
-    graph->add_sequence(sequence_2);
-    DBGAligner aligner(graph, anno_dbg);
-    auto path = aligner.align(sequence_3);
+    DBGSuccinct* graph = new DBGSuccinct(k);
+    graph->add_sequence(reference_1);
+    graph->add_sequence(reference_2);
+    DBGAligner aligner(graph);
+    auto path = aligner.align(query);
 
-    EXPECT_EQ(sequence_3.size() - k + 1, path.size());
-    EXPECT_EQ(sequence_1, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(reference_1, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(1, path.get_total_loss());
 }
 
-//TEST(dbg_aligner, variation_in_first_kmer) {
-//    size_t k = 4;
-//    std::string sequence_1 = "AGCCTCGAAA";
-//    std::string sequence_2 = "AGCTTCGAAA";
-//
-//    DBGSuccinct* graph = new DBGSuccinct(k);
-//    graph->add_sequence(sequence_1);
-//    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/1));
-//    auto path = aligner.align(sequence_2);
-//
-//    EXPECT_EQ(sequence_2.size() - k + 1, path.size());
-//    EXPECT_EQ(sequence_2, aligner.get_path_sequence(path.get_nodes()));
-//}
+TEST(dbg_aligner, large_search_space) {
+    size_t k = 3;
+    std::string reference = "";
+    auto alphabet = {'A', 'G', 'T'};
+    for (auto first_letter : alphabet) {
+        for (auto second_letter : alphabet) {
+            for (auto third_letter : alphabet) {
+                reference = reference + first_letter +
+                            second_letter + third_letter;
+            }
+        }
+    }
+    std::string query = "AAA";
+    uint32_t unmapped_char_length = 50;
+    for (uint32_t i = 0; i < unmapped_char_length; i++) {
+        query += 'C';
+    }
+    DBGSuccinct* graph = new DBGSuccinct(k);
+    graph->add_sequence(reference);
+    DBGAligner aligner(graph);
+    auto path = aligner.align(query);
+
+    std::replace(query.begin(), query.end(), 'C' , 'T');
+
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(query, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(unmapped_char_length, path.get_total_loss());
+}
