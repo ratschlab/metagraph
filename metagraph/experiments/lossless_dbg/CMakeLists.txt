@@ -1,0 +1,16 @@
+cmake_minimum_required(VERSION 3.13)
+project(compression_naive_code)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++ -lc++fs")
+enable_testing()
+find_package(GTest REQUIRED)
+include_directories(${GTEST_INCLUDE_DIR})
+
+add_executable(compression_naive_code main.cpp)
+target_link_libraries(compression_naive_code metagraph)
+target_link_libraries(compression_naive_code sdsl)
+target_link_libraries(compression_naive_code maus2)
+target_link_libraries(compression_naive_code gtest)
+target_link_libraries(compression_naive_code z)
+target_link_libraries(compression_naive_code hts)
