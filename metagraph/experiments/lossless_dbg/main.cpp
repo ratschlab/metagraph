@@ -8,12 +8,6 @@ using json = nlohmann::json;
 #include "ProgressBar.hpp"
 #define _DNA_GRAPH 1
 
-#ifdef PART_OF_METAGRAPH
-#include "dbg_succinct.hpp"
-#include "sequence_graph.hpp"
-#include "sequence_io.hpp"
-#include "dbg_succinct_construct.hpp"
-#else
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"
 #pragma clang diagnostic ignored "-Wcomma"
@@ -27,7 +21,6 @@ using json = nlohmann::json;
 #undef private
 #undef protected
 #pragma clang diagnostic pop
-#endif
 #include <gtest/gtest.h>
 
 #pragma clang diagnostic push
