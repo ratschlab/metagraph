@@ -93,10 +93,10 @@ DBGHashOrdered::kmer_to_node(const std::string &kmer) const {
     return get_index(sequence_to_kmers(kmer)[0]);
 }
 
-std::string DBGHashOrdered::node_to_kmer(node_index i) const {
-    assert(i > 0);
-    assert(i <= kmers_.size());
-    return seq_encoder_.kmer_to_sequence(get_kmer(i), k_);
+std::string DBGHashOrdered::node_to_kmer(node_index node) const {
+    assert(node > 0);
+    assert(node <= kmers_.size());
+    return seq_encoder_.kmer_to_sequence(get_kmer(node), k_);
 }
 
 void DBGHashOrdered::serialize(std::ostream &out) const {

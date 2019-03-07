@@ -44,11 +44,13 @@ void DBGHash::map_to_nodes(const std::string &sequence,
 }
 
 DBGHash::node_index DBGHash::traverse(node_index node, char next_char) const {
+    assert(node);
     auto kmer = node_to_kmer(node).substr(1) + next_char;
     return kmer_to_node(kmer);
 }
 
 DBGHash::node_index DBGHash::traverse_back(node_index node, char prev_char) const {
+    assert(node);
     auto kmer = node_to_kmer(node);
     kmer.pop_back();
     return kmer_to_node(std::string(1, prev_char) + kmer);
@@ -56,6 +58,7 @@ DBGHash::node_index DBGHash::traverse_back(node_index node, char prev_char) cons
 
 void DBGHash::adjacent_outgoing_nodes(node_index node,
                                       std::vector<node_index> *target_nodes) const {
+    assert(node);
     assert(target_nodes);
 
     auto prefix = node_to_kmer(node).substr(1);
@@ -69,6 +72,7 @@ void DBGHash::adjacent_outgoing_nodes(node_index node,
 
 void DBGHash::adjacent_incoming_nodes(node_index node,
                                       std::vector<node_index> *source_nodes) const {
+    assert(node);
     assert(source_nodes);
 
     auto suffix = node_to_kmer(node);
@@ -92,9 +96,10 @@ DBGHash::node_index DBGHash::kmer_to_node(const std::string &kmer) const {
     return find->second + 1;
 }
 
-std::string DBGHash::node_to_kmer(node_index i) const {
-    assert(kmers_.at(i - 1).size() == k_);
-    return std::string(kmers_.at(i - 1));
+std::string DBGHash::node_to_kmer(node_index node) const {
+    assert(node);
+    assert(kmers_.at(node - 1).size() == k_);
+    return std::string(kmers_.at(node - 1));
 }
 
 void DBGHash::serialize(std::ostream &out) const {
