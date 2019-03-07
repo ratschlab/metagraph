@@ -3,23 +3,21 @@
 #include <map>
 #include <filesystem>
 #include <nlohmann/json.hpp>
+#include <ProgressBar.hpp>
 
 using json = nlohmann::json;
-#include <ProgressBar.hpp>
 #define _DNA_GRAPH 1
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"
 #pragma clang diagnostic ignored "-Wcomma"
+
 #include "dbg_succinct.hpp"
 #include "sequence_graph.hpp"
 #include "sequence_io.hpp"
 #include "dbg_succinct_construct.hpp"
-#define private public
-#define protected public
 #include "dbg_hash.hpp"
-#undef private
-#undef protected
+
 #pragma clang diagnostic pop
 #include <gtest/gtest.h>
 
@@ -87,9 +85,12 @@ reduce_maps(omp_out, omp_in)) \
 initializer(omp_priv(omp_orig))
 
 
-node_index k_mer_to_node(DBGSuccinct& de_Bruijn_Graph, const string &k_mer) {
+node_index k_mer_to_node(DBGSuccinct& de_Bruijn_Graph,
+                         const string &k_mer) {
     node_index result;
-    de_Bruijn_Graph.map_to_nodes(k_mer,[&](node_index node) {result = node;},[](){return true;});
+    de_Bruijn_Graph.map_to_nodes(k_mer, [&](node_index node) { result = node; },
+        [](){return true;}
+    );
     return result;
 }
 
@@ -99,9 +100,10 @@ class CompressedReads {
     using compressed_read_t = pair<k_mer_t,bifurcation_choices_t>;
     
 public:
-    CompressedReads(vector<string> raw_reads, int k_kmer=defult_k_k_mer) : k_k_mer(k_kmer),
-                                                            read_length(raw_reads[0].length()),
-                                                            graph(dbg_succ_graph_constructor(raw_reads,k_kmer)) {
+    CompressedReads(vector<string> raw_reads, int k_kmer = defult_k_k_mer)
+          : k_k_mer(k_kmer),
+            read_length(raw_reads[0].length()),
+            graph(dbg_succ_graph_constructor(raw_reads,k_kmer)) {
         for(auto & read : raw_reads) {
             compressed_reads.insert(align_read(read));
         }
@@ -120,7 +122,8 @@ public:
     }
     double bits_per_symbol(bool include_reference=false) {
         assert(!include_reference);
-        return static_cast<double>(compressed_size_without_reference())/(compressed_reads.size()*read_length);
+        return static_cast<double>(compressed_size_without_reference())
+                    / (compressed_reads.size()*read_length);
     }
     vector<string> get_reads() {
         vector<string> reads;
@@ -150,7 +153,7 @@ private:
     static DBG_succ* dbg_succ_graph_constructor(vector<string> raw_reads, int k_k_mer) {
         auto graph_constructor = DBGSuccConstructor(k_k_mer);
         cerr << "Starting building the graph" << endl;
-        for(auto & read : raw_reads) {
+        for(auto &read : raw_reads) {
             assert(read.size() >= k_k_mer);
             graph_constructor.add_sequence(read);
         }
@@ -344,33 +347,48 @@ void save_human_chromosome() {
 }
 
 void get_statistics() {
-    auto chromosome_cleaned = read_reads_from_fasta(HUMAN_CHROMOSOME_10_STRIPPED_N_FILENAME)[0];
+    auto chromosome_cleaned
+        = read_reads_from_fasta(HUMAN_CHROMOSOME_10_STRIPPED_N_FILENAME)[0];
+
     DBGHash graph(DEFAULT_K_KMER);
+
     graph.add_sequence(chromosome_cleaned);
-    int kmers_count = graph.indices_.size();
-    auto pb = ProgressBar(kmers_count,70,'=',' ',10000);
+
+    int kmers_count = graph.num_nodes();
+
+    auto pb = ProgressBar(kmers_count, 70, '=', ' ', 10000);
+
     map<int,int> kmer_outgoing_edges_statistics;
+
     // openmp doesn't work with maps
     //#pragma omp parallel for reduction(map_reduction:kmer_outgoing_edges_statistics)
     //for(auto it = graph.indices_.begin(); it != graph.indices_.end(); it++)
-    for(auto& index : graph.indices_) {
-        auto& [kmer,node_idx] = index;
-        vector<node_index> outgoing_edges;
-        graph.adjacent_outgoing_nodes(node_idx, &outgoing_edges);
+    vector<node_index> outgoing_edges;
+
+    for (size_t i = 1; i <= graph.num_nodes(); ++i) {
+        // const auto &kmer = graph.get_node_sequence(i);
+        graph.adjacent_outgoing_nodes(i, &outgoing_edges);
+
         kmer_outgoing_edges_statistics[outgoing_edges.size()]++;
+
+        outgoing_edges.clear();
+
         ++pb;
         pb.display();
     }
+
     json statistics(kmer_outgoing_edges_statistics);
+
     ofstream myfile;
+
     myfile.open(JSON_OUTPUT_FILE);
+
     myfile << statistics.dump(4) << endl;
     cout << statistics.dump(4) << endl;
-    myfile.close();
 }
 
 
-int main(int argc,char**argv) {
+int main(int argc, char *argv[]) {
     get_statistics();
     //save_human_chromosome();
     //playground_dbg();
