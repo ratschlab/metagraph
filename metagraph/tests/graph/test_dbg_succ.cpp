@@ -2341,3 +2341,34 @@ TEST(DBGSuccinct, map_to_nodes_DBG) {
         EXPECT_EQ(boss_indexes, dbg_indexes);
     }
 }
+
+TEST(DBGSuccinct, get_node_sequence) {
+    size_t k = 4;
+    std::string reference = "AGCTTCGAGGCCAA";
+    std::string query = "AGCT";
+
+    DBGSuccinct* graph = new DBGSuccinct(k);
+    graph->add_sequence(reference);
+
+    std::string mapped_query = "";
+    graph->map_to_nodes(query, [&](DBGSuccinct::node_index node){
+        mapped_query += graph->get_node_sequence(node); });
+
+    EXPECT_EQ(query, mapped_query);
+}
+
+TEST(DBGSuccinct, get_kmer_last_char) {
+    size_t k = 4;
+    std::string reference = "AGCTTCGAGGCCAA";
+    // Query is the same as the reference.
+    std::string query = "AGCTTCGAGGCCAA";
+
+    DBGSuccinct* graph = new DBGSuccinct(k);
+    graph->add_sequence(reference);
+
+    std::string mapped_query = "";
+    graph->map_to_nodes(query, [&](DBGSuccinct::node_index node){
+        mapped_query += graph->get_kmer_last_char(node); });
+
+    EXPECT_EQ(query.substr(k-1), mapped_query);
+}
