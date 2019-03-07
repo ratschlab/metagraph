@@ -43,7 +43,7 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual void add_sequence(const std::string &sequence,
                               bit_vector_dyn *nodes_inserted = NULL) override final;
 
-    virtual std::string get_node_sequence(node_index) const override final;
+    virtual std::string get_node_sequence(node_index node) const override final;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
@@ -80,6 +80,16 @@ class DBGSuccinct : public DeBruijnGraph {
                                 size_t min_match_length = 1,
                                 size_t max_num_allowed_matches = std::numeric_limits<size_t>::max()) const;
 
+    // Given a starting node, traverse the graph forward following the edge
+    // sequence delimited by begin and end. Terminate the traversal if terminate()
+    // returns true, or if the sequence is exhausted.
+    // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
+    virtual void traverse(node_index start,
+                          const char* begin,
+                          const char* end,
+                          const std::function<void(node_index)> &callback,
+                          const std::function<bool()> &terminate = [](){ return false; }) const override final;
+
     virtual void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const override final;
 
     virtual void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const override final;
@@ -89,6 +99,7 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual uint64_t num_nodes() const override final;
 
     virtual void mask_dummy_kmers(size_t num_threads, bool with_pruning) final;
+    virtual void reset_mask() final;
 
     virtual bool load_without_mask(const std::string &filename_base) final;
     virtual bool load(const std::string &filename_base) override;

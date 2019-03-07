@@ -23,6 +23,8 @@
 #include "dbg_bitmap_construct.hpp"
 #include "dbg_succinct.hpp"
 #include "graph_cleaning.hpp"
+#include "dbg_aligner.hpp"
+#include "aligner_methods.hpp"
 #include "server.hpp"
 #include "weighted_graph.hpp"
 #include "masked_graph.hpp"
@@ -578,6 +580,44 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
     target_annotator->serialize(config.outfbase);
     if (config.verbose)
         std::cout << timer.elapsed() << "sec" << std::endl;
+}
+
+std::vector<DBGAligner::DBGAlignment>
+align_sequences(const DeBruijnGraph &graph,
+                const Config &config,
+                const std::string &query,
+                bool forward_and_reverse_complement = false,
+                const std::string &reverse_complement_query = "") {
+    if (forward_and_reverse_complement) {
+        return config.alignment_seed_unimems
+            ? extend_mapping_forward_and_reverse_complement(
+                  query,
+                  reverse_complement_query,
+                  graph,
+                  DBGAlignerConfig(config),
+                  config.alignment_min_path_score
+              )
+            : DBGAligner(graph,
+                         DBGAlignerConfig(config)).align_forward_and_reverse_complement(
+                  query, reverse_complement_query, config.alignment_min_path_score
+              );
+    }
+
+    auto seeder = default_seeder;
+    if (config.alignment_seed_unimems) {
+        std::vector<DeBruijnGraph::node_index> nodes;
+        graph.map_to_nodes_sequentially(
+            query.begin(),
+            query.end(),
+            [&](auto node) { nodes.emplace_back(node); }
+        );
+
+        seeder = make_unimem_seeder(nodes);
+    }
+
+    return DBGAligner(graph, DBGAlignerConfig(config), seeder).align(
+        query, false, config.alignment_min_path_score
+    );
 }
 
 
@@ -2422,39 +2462,134 @@ int main(int argc, const char *argv[]) {
         case Config::ALIGN: {
             assert(config->infbase.size());
 
-            // load graph
-            auto graph = load_critical_graph_from_file(config->infbase);
+            // initialize aligner
+            auto graph = load_critical_dbg(config->infbase);
+            auto dbg = std::dynamic_pointer_cast<DBGSuccinct>(graph);
 
-            if (!config->alignment_length) {
-                if (config->distance > 0) {
-                    config->alignment_length = graph->get_k();
-                } else {
-                    config->alignment_length = graph->get_k() + 1;
+            if (config->map_sequences) {
+                if (!dbg) {
+                    std::cerr << "Error: this mode is only supported for DBGSuccinct"
+                              << std::endl;
+                    exit(1);
                 }
+
+                const auto& boss = dbg->get_boss();
+
+                if (!config->alignment_length) {
+                    config->alignment_length = graph->get_k();
+                } else if (config->alignment_length > graph->get_k()) {
+                    std::cerr << "Warning: Mapping to k-mers"
+                              << " longer than k is not supported." << std::endl;
+                    config->alignment_length = graph->get_k();
+                }
+
+                Timer timer;
+
+                std::cout << "Map sequences against the de Bruijn graph with ";
+                std::cout << "k=" << graph->get_k() << "\n"
+                          << "Length of mapped k-mers: "
+                          << config->alignment_length << std::endl;
+
+                for (const auto &file : files) {
+                    std::cout << "Map sequences from file " << file << std::endl;
+
+                    Timer data_reading_timer;
+
+                    read_fasta_file_critical(file, [&](kseq_t *read_stream) {
+                        if (config->verbose)
+                            std::cout << "Sequence: " << read_stream->seq.s << "\n";
+
+                        if (config->query_presence
+                                && config->alignment_length == graph->get_k()) {
+                            if (config->filter_present) {
+                                if (boss.find(read_stream->seq.s,
+                                              config->discovery_fraction,
+                                              config->kmer_mapping_mode))
+                                    std::cout << ">" << read_stream->name.s << "\n"
+                                                     << read_stream->seq.s << "\n";
+                            } else {
+                                std::cout << boss.find(read_stream->seq.s,
+                                                       config->discovery_fraction,
+                                                       config->kmer_mapping_mode) << "\n";
+                            }
+                            return;
+                        }
+
+                        assert(config->alignment_length <= graph->get_k());
+
+                        std::vector<uint64_t> graphindices;
+
+                        if (config->alignment_length == graph->get_k()) {
+                            graphindices = boss.map_to_edges(read_stream->seq.s);
+                        } else {
+                            graphindices = boss.map_to_nodes(read_stream->seq.s,
+                                                             config->alignment_length);
+                        }
+
+                        size_t num_discovered = std::count_if(
+                            graphindices.begin(), graphindices.end(),
+                            [](const auto &x) { return x > 0; }
+                        );
+
+                        const size_t num_kmers = graphindices.size();
+
+                        if (config->query_presence) {
+                            const size_t min_kmers_discovered =
+                                num_kmers - num_kmers * (1 - config->discovery_fraction);
+                            if (config->filter_present) {
+                                if (num_discovered >= min_kmers_discovered)
+                                    std::cout << ">" << read_stream->name.s << "\n"
+                                                     << read_stream->seq.s << "\n";
+                            } else {
+                                std::cout << (num_discovered >= min_kmers_discovered) << "\n";
+                            }
+                            return;
+                        }
+
+                        if (config->count_kmers) {
+                            std::cout << "Kmers matched (discovered/total): "
+                                      << num_discovered << "/"
+                                      << num_kmers << "\n";
+                            return;
+                        }
+
+                        for (size_t i = 0; i < graphindices.size(); ++i) {
+                            assert(i + config->alignment_length <= read_stream->seq.l);
+                            std::cout << std::string(read_stream->seq.s + i,
+                                                     config->alignment_length);
+                            std::cout << ": " << graphindices[i] << "\n";
+                        }
+                    }, config->reverse);
+
+                    if (config->verbose) {
+                        std::cout << "File processed in "
+                                  << data_reading_timer.elapsed()
+                                  << "sec, current mem usage: "
+                                  << (get_curr_RSS() >> 20) << " MiB"
+                                  << ", total time: " << timer.elapsed()
+                                  << "sec" << std::endl;
+                    }
+                }
+
+                return 0;
             }
 
-            if (config->alignment_length > graph->get_k() + 1) {
-                // std::cerr << "ERROR: Alignment patterns longer than"
-                //           << " the graph edge size are not supported."
-                //           << " Decrease the alignment length." << std::endl;
-                // exit(1);
-                std::cerr << "Warning: Aligning to k-mers"
-                          << " longer than k+1 is not supported." << std::endl;
-                config->alignment_length = graph->get_k() + 1;
-            }
-            if (config->distance > 0
-                    && config->alignment_length != graph->get_k()) {
-                std::cerr << "Warning: Aligning to k-mers longer or shorter than k"
-                          << " is not supported for fuzzy alignment." << std::endl;
-                config->alignment_length = graph->get_k();
-            }
+            // Reset mask to allow for seeding to dummy k-mers
+            if (dbg)
+                dbg->reset_mask();
+
+            ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
+            std::mutex print_mutex;
 
             Timer timer;
 
-            std::cout << "Align sequences against the de Bruijn graph with ";
-            std::cout << "k=" << graph->get_k() << "\n"
-                      << "Length of aligning k-mers: "
-                      << config->alignment_length << std::endl;
+            // fix seed length bounds
+            if (!config->alignment_min_seed_length || config->alignment_seed_unimems)
+                config->alignment_min_seed_length = graph->get_k();
+
+            if (config->alignment_max_seed_length == std::numeric_limits<size_t>::max()
+                    && !config->alignment_seed_unimems)
+                config->alignment_max_seed_length = graph->get_k();
 
             for (const auto &file : files) {
                 std::cout << "Align sequences from file " << file << std::endl;
@@ -2462,104 +2597,52 @@ int main(int argc, const char *argv[]) {
                 Timer data_reading_timer;
 
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-                    if (config->distance > 0) {
-                        uint64_t aln_len = read_stream->seq.l;
+                    thread_pool.enqueue([&](auto graph_ptr,
+                                            const Config &config,
+                                            std::string query,
+                                            std::string header) {
+                            std::string rc_query;
 
-                        // since we set aln_len = read_stream->seq.l, we only get a single hit vector
-                        auto graphindices = graph->align_fuzzy(
-                            read_stream->seq.s,
-                            aln_len,
-                            config->distance
-                        );
-                        //for (size_t i = 0; i < graphindices.size(); ++i) {
-                        size_t i = 0;
-
-                        int print_len = i + aln_len < read_stream->seq.l
-                                        ? aln_len
-                                        : (read_stream->seq.l - i);
-
-                        printf("%.*s: ", print_len, read_stream->seq.s + i);
-
-                        for (size_t l = 0; l < graphindices.at(i).size(); ++l) {
-                            HitInfo curr_hit(graphindices.at(i).at(l));
-                            for (size_t m = 0; m < curr_hit.path.size(); ++m) {
-                                std::cout << curr_hit.path.at(m) << ':';
+                            if (config.reverse) {
+                                rc_query = query;
+                                reverse_complement(rc_query.begin(), rc_query.end());
                             }
-                            for (size_t m = curr_hit.rl; m <= curr_hit.ru; ++m) {
-                                std::cout << m << " ";
+
+                            auto paths = align_sequences(*graph_ptr,
+                                                         config,
+                                                         query,
+                                                         config.reverse,
+                                                         rc_query);
+
+                            auto lock = std::lock_guard<std::mutex>(print_mutex);
+                            for (const auto &path : paths) {
+                                std::cout << header << "\t"
+                                          << query << "\t"
+                                          << path
+                                          << std::endl;
                             }
-                            std::cout << "[" << curr_hit.cigar << "] ";
-                        }
-                        //}
-                        std::cout << std::endl;
 
-                        return;
-                    }
-
-                    // Non-fuzzy mode
-
-                    if (config->verbose) {
-                        std::cout << "Sequence: " << read_stream->seq.s << "\n";
-                    }
-
-                    if (config->query_presence
-                            && config->alignment_length == graph->get_k() + 1) {
-                        if (config->filter_present) {
-                            if (graph->find(read_stream->seq.s,
-                                            config->discovery_fraction,
-                                            config->kmer_mapping_mode))
-                                std::cout << ">" << read_stream->name.s << "\n"
-                                                 << read_stream->seq.s << "\n";
-                        } else {
-                            std::cout << graph->find(read_stream->seq.s,
-                                                     config->discovery_fraction,
-                                                     config->kmer_mapping_mode) << "\n";
-                        }
-                        return;
-                    }
-
-                    assert(config->alignment_length <= graph->get_k() + 1);
-
-                    std::vector<uint64_t> graphindices;
-
-                    if (config->alignment_length == graph->get_k() + 1) {
-                        graphindices = graph->map_to_edges(read_stream->seq.s);
-                    } else {
-                        graphindices = graph->map_to_nodes(read_stream->seq.s,
-                                                           config->alignment_length);
-                    }
-
-                    size_t num_discovered = std::count_if(
-                        graphindices.begin(), graphindices.end(),
-                        [](const auto &x) { return x > 0; }
+                            if (paths.empty())
+                                std::cout << header << "\t"
+                                          << query << "\t"
+                                          << "*\t*\t"
+                                          << config.alignment_min_path_score << "\t*\t*"
+                                          << std::endl;
+                        },
+                        graph,
+                        *config,
+                        std::string(read_stream->seq.s),
+                        config->fasta_anno_comment_delim != Config::UNINITIALIZED_STR
+                            && read_stream->comment.l
+                                ? utils::join_strings(
+                                    { read_stream->name.s, read_stream->comment.s },
+                                    config->fasta_anno_comment_delim,
+                                    true)
+                                : std::string(read_stream->name.s)
                     );
+                });
 
-                    const size_t num_kmers = graphindices.size();
-
-                    if (config->query_presence) {
-                        const size_t min_kmers_discovered =
-                            num_kmers - num_kmers * (1 - config->discovery_fraction);
-                        if (config->filter_present) {
-                            if (num_discovered >= min_kmers_discovered)
-                                std::cout << ">" << read_stream->name.s << "\n"
-                                                 << read_stream->seq.s << "\n";
-                        } else {
-                            std::cout << (num_discovered >= min_kmers_discovered) << "\n";
-                        }
-                        return;
-                    }
-
-                    if (config->count_kmers) {
-                        std::cout << "Kmers matched (discovered/total): " << num_discovered << "/" << num_kmers << "\n";
-                        return;
-                    }
-
-                    for (size_t i = 0; i < graphindices.size(); ++i) {
-                        assert(i + config->alignment_length <= read_stream->seq.l);
-                        std::cout << std::string(read_stream->seq.s + i, config->alignment_length);
-                        std::cout << ": " << graphindices[i] << "\n";
-                    }
-                }, config->reverse);
+                thread_pool.join();
 
                 if (config->verbose) {
                     std::cout << "File processed in "

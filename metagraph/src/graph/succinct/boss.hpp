@@ -537,13 +537,14 @@ class BOSS {
     uint64_t index(RandomAccessIt begin, RandomAccessIt end) const {
         static_assert(std::is_same<TAlphabet&, decltype(*begin)>::value,
                       "Only encoded sequences can be queried");
-
         assert(begin + k_ == end);
 
         auto match = index_range(begin, end);
 
         return std::get<2>(match) == end ? std::get<1>(match) : 0;
     }
+
+  private:
 
     // TODO: revise the implementation, write unit tests
     std::vector<HitInfo> index_fuzzy(const std::string &str,

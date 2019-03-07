@@ -326,6 +326,39 @@ template void DBGSuccinct
                                                 size_t,
                                                 size_t) const;
 
+void DBGSuccinct::traverse(node_index start,
+                           const char* begin,
+                           const char* end,
+                           const std::function<void(node_index)> &callback,
+                           const std::function<bool()> &terminate) const {
+    assert(start != npos);
+    assert(end >= begin);
+
+    if (terminate())
+        return;
+
+    auto edge = kmer_to_boss_index(start);
+    assert(edge);
+
+    for (; begin != end && !terminate() && boss_graph_->get_W(edge); ++begin) {
+        edge = boss_graph_->fwd(edge);
+        edge = boss_graph_->pick_edge(edge,
+                                      boss_graph_->get_source_node(edge),
+                                      boss_graph_->encode(*begin));
+
+        if (!edge)
+            return;
+
+        start = boss_to_kmer_index(edge);
+
+        if (start != npos) {
+            callback(start);
+        } else {
+            return;
+        }
+    }
+}
+
 // Map sequence k-mers to the canonical graph nodes
 // and run callback for each node until the termination condition is satisfied
 void DBGSuccinct::map_to_nodes(const std::string &sequence,
@@ -633,6 +666,10 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
     assert(valid_edges_.get());
     assert(valid_edges_->size() == boss_graph_->num_edges() + 1);
     assert(!(*valid_edges_)[0]);
+}
+
+void DBGSuccinct::reset_mask() {
+    valid_edges_.reset();
 }
 
 uint64_t DBGSuccinct::kmer_to_boss_index(node_index kmer_index) const {
