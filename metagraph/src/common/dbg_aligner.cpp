@@ -3,11 +3,15 @@
 #include <string>
 #include <random>
 
+#include "bounded_priority_queue.hpp"
+
 DBGAligner::DBGAligner(DeBruijnGraph *dbg, Annotator *annotation,
-                       size_t num_threads) : AnnotatedDBG(dbg, annotation, num_threads) {
+                       size_t num_threads, uint64_t search_space_size) :
+                            AnnotatedDBG(dbg, annotation, num_threads),
+                            search_space_size_(search_space_size) {
     // Substitution loss for each pair of nucleotides.
     // Transition and transversion mutations have different loss values.
-        sub_loss_ = {
+    sub_loss_ = {
         {'a', {{'t', 2}, {'c', 2}, {'g', 1}}},
         {'g', {{'t', 2}, {'c', 2}, {'a', 1}}},
         {'c', {{'a', 2}, {'g', 2}, {'t', 1}}},
@@ -18,7 +22,7 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
     if (sequence.size() < graph_->get_k())
         return AlignedPath(sequence.end());
 
-    std::priority_queue<AlignedPath, std::vector<AlignedPath>, AlignedPathCompare> queue;
+    BoundedPriorityQueue<AlignedPath> queue (search_space_size_);
     queue.push(AlignedPath(std::begin(sequence)));
 
     while (!queue.empty()) {

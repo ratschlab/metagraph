@@ -1,8 +1,8 @@
+#ifndef __PATH_HPP__
+#define __PATH_HPP__
+
+
 #include <vector>
-
-
-template <typename NodeType, typename VLabels>
-class PathCompare;
 
 template <typename NodeType, typename VLabels>
 class Path {
@@ -33,6 +33,10 @@ class Path {
     std::vector<NodeType> get_nodes() const { return nodes_; }
     std::string::const_iterator get_sequence_it() const { return mapped_it_; }
 
+    bool operator< (const Path& other) const {
+            return (loss_ > other.loss_);
+    }
+
     template <typename NType, typename VL> friend class PathCompare;
 
   private:
@@ -42,11 +46,4 @@ class Path {
     std::string::const_iterator mapped_it_;
 };
 
-template <typename NodeType, typename VLabels>
-class PathCompare {
-  public:
-    bool operator() (const Path<NodeType, VLabels> &lhs,
-                     const Path<NodeType, VLabels> &rhs) const {
-            return (lhs.loss_ > rhs.loss_);
-    }
-};
+#endif  // __PATH_HPP__

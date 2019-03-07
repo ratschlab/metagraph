@@ -14,11 +14,11 @@ class DBGAligner : public AnnotatedDBG {
   public:
     typedef DeBruijnGraph::node_index node_index;
     typedef Path<node_index, Annotator::VLabels> AlignedPath;
-    typedef PathCompare<node_index, Annotator::VLabels> AlignedPathCompare;
 
     DBGAligner(DeBruijnGraph *dbg,
-                 Annotator *annotation,
-                 size_t num_threads = 0);
+               Annotator *annotation,
+               size_t num_threads = 0,
+               uint64_t search_space_size = 10);
 
     DBGAligner(const DBGAligner&) = default;
     DBGAligner(DBGAligner&&) = default;
@@ -39,6 +39,8 @@ class DBGAligner : public AnnotatedDBG {
     // Substitution loss for each pair of nucleotides. Transition and transversion mutations
     // have different loss values.
     std::map<char, std::map<char, int>> sub_loss_;
+    // Maximum number of paths to explore at the same time.
+    uint64_t search_space_size_;
 
     // Align part of a sequence to the graph in the case of no exact map
     // based on internal strategy. Calls callback for every possible alternative path.
