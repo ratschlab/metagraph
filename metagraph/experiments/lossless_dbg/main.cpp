@@ -5,19 +5,19 @@
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
-#include "ProgressBar.hpp"
+#include <ProgressBar.hpp>
 #define _DNA_GRAPH 1
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"
 #pragma clang diagnostic ignored "-Wcomma"
-#include <metagraph/dbg_succinct.hpp>
-#include <metagraph/sequence_graph.hpp>
-#include <metagraph/sequence_io.hpp>
-#include <metagraph/dbg_succinct_construct.hpp>
+#include "dbg_succinct.hpp"
+#include "sequence_graph.hpp"
+#include "sequence_io.hpp"
+#include "dbg_succinct_construct.hpp"
 #define private public
 #define protected public
-#include <metagraph/dbg_hash.hpp>
+#include "dbg_hash.hpp"
 #undef private
 #undef protected
 #pragma clang diagnostic pop

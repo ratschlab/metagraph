@@ -332,9 +332,9 @@ target_link_libraries(
 # Lossless dbg
 # -----
 
-add_executable(lossless_dbg lossless_dbg/main.cpp)
+add_executable(lossless_dbg experiments/lossless_dbg/main.cpp)
 target_link_libraries(
-        lossless_dbg metagraph ${METALIBS}
+    lossless_dbg metagraph ${METALIBS}
 )
 
 target_link_libraries(lossless_dbg gtest)
