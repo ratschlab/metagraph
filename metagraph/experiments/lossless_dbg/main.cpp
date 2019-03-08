@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <nlohmann/json.hpp>
 #include <ProgressBar.hpp>
+#include <tclap/CmdLine.h>
 
 using json = nlohmann::json;
 #define _DNA_GRAPH 1
@@ -31,7 +32,7 @@ namespace fs = std::filesystem;
 
 // debugging functions
 struct d_t {
-    template<typename T> d_ & operator,(const T & x) {
+    template<typename T> d_t & operator,(const T & x) {
         std::cerr << ' ' <<  x;
         return *this;
     }
@@ -125,7 +126,7 @@ public:
     int compressed_size_without_reference() {
         // returns size in bits
         int size = 0;
-        for(auto &read : reads) {
+        for(auto &read : compressed_reads) {
             // *2 for two bit encoding
             size += read.x.size() * 2;
             size += read.y.size() * 2;
@@ -404,6 +405,7 @@ void get_statistics() {
 
 
 int main(int argc, char *argv[]) {
+    TCLAP::CmdLine cmd("Compress reads",' ', "0.1");
     get_statistics();
     //save_human_chromosome();
     //playground_dbg();
