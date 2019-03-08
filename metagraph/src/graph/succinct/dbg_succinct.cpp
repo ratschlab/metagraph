@@ -2425,6 +2425,16 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
     assert(!(*valid_edges_)[0]);
 }
 
+bool DBGSuccinct::is_single_outgoing(node_index i) const {
+    std::vector<bool> dummy_edges_mask(boss_graph_->num_edges(), false);
+    boss_graph_->mark_sink_dummy_edges(&dummy_edges_mask);
+    boss_graph_->mark_source_dummy_edges(&dummy_edges_mask);
+    auto edge_index_in_boss = kmer_to_boss_index(i);
+
+    return dummy_edges_mask[edge_index_in_boss] ||
+           boss_graph_->is_single_outgoing(edge_index_in_boss);
+}
+
 uint64_t DBGSuccinct::kmer_to_boss_index(node_index kmer_index) const {
     assert(kmer_index <= num_nodes());
 

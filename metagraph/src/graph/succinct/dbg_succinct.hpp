@@ -610,6 +610,7 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual uint64_t num_nodes() const override final;
 
     virtual void mask_dummy_kmers(size_t num_threads, bool with_pruning) final;
+    virtual bool is_single_outgoing(node_index i) const override final;
 
     virtual bool load(const std::string &filename_base) override final;
     virtual void serialize(const std::string &filename_base) const override final;
@@ -618,8 +619,6 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual Config::StateType get_state() const final;
 
     virtual bool is_canonical_mode() const override final { return canonical_mode_; }
-    virtual bool is_single_outgoing(node_index i) const override final {
-            return boss_graph_->is_single_outgoing(kmer_to_boss_index(i)); }
     virtual const DBG_succ& get_boss() const final { return *boss_graph_; }
     virtual DBG_succ& get_boss() final { return *boss_graph_; }
     virtual DBG_succ* release_boss() final { return boss_graph_.release(); }

@@ -2372,3 +2372,36 @@ TEST(DBGSuccinct, get_kmer_last_char) {
 
     EXPECT_EQ(query.substr(k-1), mapped_query);
 }
+
+TEST(DBGSuccinct, is_single_outgoing_simple) {
+    size_t k = 4;
+    std::string reference = "CATC";
+
+    DBGSuccinct* graph = new DBGSuccinct(k);
+    graph->add_sequence(reference);
+
+    uint64_t single_outgoing_counter = 0;
+    for (uint64_t i = 0; i < graph->num_nodes(); ++i)
+        if (graph->is_single_outgoing(i))
+            ++ single_outgoing_counter;
+
+    // All nodes except the last dummy node should be single outgoing.
+    EXPECT_EQ(reference.size() + (k - 2) - 1ull, single_outgoing_counter);
+}
+
+TEST(DBGSuccinct, is_single_outgoing_for_multiple_valid_edges) {
+    size_t k = 4;
+    std::string reference = "AGGGGTC";
+
+    DBGSuccinct* graph = new DBGSuccinct(k);
+    graph->add_sequence(reference);
+
+    uint64_t single_outgoing_counter = 0;
+    for (uint64_t i = 0; i < graph->num_nodes(); ++i)
+        if (graph->is_single_outgoing(i))
+            ++ single_outgoing_counter;
+
+    // Only dummy nodes (except for last dummy node) and the two last valid kmers
+    // are single outgoing.
+    EXPECT_EQ((k - 2) + (k - 2) + 2, single_outgoing_counter);
+}
