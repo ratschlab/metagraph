@@ -30,8 +30,14 @@ using namespace std::string_literals;
 namespace fs = std::filesystem;
 
 // debugging functions
-struct d_ {template<typename T> d_ & operator ,(const T & x) { cerr << ' ' <<  x; return *this;}} d_t;
-#define D(args ...) { d_t,"|",__LINE__,"|",#args,":",args,"\n"; }
+struct d_t {
+    template<typename T> d_ & operator,(const T & x) {
+        std::cerr << ' ' <<  x;
+        return *this;
+    }
+};
+
+#define D(args ...) { d_t, "|", __LINE__, "|", #args, ":", args, "\n"; }
 
 using node_index = SequenceGraph::node_index;
 
@@ -39,6 +45,7 @@ string local_file(string filename) {
     return fs::path(__FILE__).parent_path() / filename;
 }
 
+// TODO: remove these constants
 const string HUMAN_REFERENCE_FILENAME = local_file("genomic_data/GCF_000001405.38_GRCh38.p12_genomic.fna");
 const string HUMAN_CHROMOSOME_10_SAMPLE = local_file("genomic_data/human_chromosome_10_sample.fasta");
 const string HUMAN_CHROMOSOME_10_FILENAME = local_file("genomic_data/human_chromosome_10.fasta");
@@ -96,11 +103,17 @@ node_index k_mer_to_node(DBGSuccinct& de_Bruijn_Graph,
 
 class CompressedReads {
     using bifurcation_choices_t = vector<char>;
-    using k_mer_t = string;
-    using compressed_read_t = pair<k_mer_t,bifurcation_choices_t>;
-    
+    using kmer_t = string;
+    using compressed_read_t = pair<kmer_t, bifurcation_choices_t>;
+
 public:
-    CompressedReads(vector<string> raw_reads, int k_kmer = defult_k_k_mer)
+    // TODO: read about lvalues, rvalues, etc
+    // http://thbecker.net/articles/rvalue_references/section_01.html
+    // const value
+    // CompressedReads(const vector<string> &raw_reads)
+    // non-const pointer to modify
+    // CompressedReads(vector<string> *raw_reads)
+    CompressedReads(const vector<string>& raw_reads, int k_kmer = defult_k_k_mer)
           : k_k_mer(k_kmer),
             read_length(raw_reads[0].length()),
             graph(dbg_succ_graph_constructor(raw_reads,k_kmer)) {
@@ -108,19 +121,21 @@ public:
             compressed_reads.insert(align_read(read));
         }
     }
+
     int compressed_size_without_reference() {
         // returns size in bits
         int size = 0;
-        for(auto & read : compressed_reads) {
+        for(auto &read : reads) {
             // *2 for two bit encoding
-            size += read.x.size()*2;
-            size += read.y.size()*2;
+            size += read.x.size() * 2;
+            size += read.y.size() * 2;
         }
         // to be really fair
         // size += sizeof(read_length);
         return size;
     }
-    double bits_per_symbol(bool include_reference=false) {
+
+    double bits_per_symbol(bool include_reference = false) {
         assert(!include_reference);
         return static_cast<double>(compressed_size_without_reference())
                     / (compressed_reads.size()*read_length);
@@ -137,9 +152,9 @@ private:
     compressed_read_t align_read(const string &read) {
         auto k_mer = read.substr(0,k_k_mer);
         auto bifurcation_choices = bifurcation_choices_t();
-        auto node = k_mer_to_node(graph,k_mer);
+        auto node = graph.kmer_to_node(read);
         // for all other characters
-        for(auto& character : read.substr(k_k_mer)) {
+        for (auto &character : read.substr(k_k_mer)) {
             vector<node_index> outnodes;
             graph.adjacent_incoming_nodes(node, &outnodes);
             if (outnodes.size() > 1) {
