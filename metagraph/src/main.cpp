@@ -682,45 +682,42 @@ std::string form_client_reply(const std::string &received_message,
                               const Config &config) {
     try {
         Json::Value json;
-        Json::CharReaderBuilder rbuilder;
-        std::unique_ptr<Json::CharReader> reader{ rbuilder.newCharReader() };
-        std::string errors;
 
-        if (!reader->parse(
-                received_message.c_str(),
-                received_message.c_str() + received_message.size(),
-                &json,
-                &errors)) {
-            std::cerr << "Error: bad json file " << errors << std::endl;
-            //TODO: send errors in a json file
-            throw;
+        {
+            Json::CharReaderBuilder rbuilder;
+            std::unique_ptr<Json::CharReader> reader { rbuilder.newCharReader() };
+            std::string errors;
+
+            if (!reader->parse(received_message.data(),
+                               received_message.data() + received_message.size(),
+                               &json,
+                               &errors)) {
+                std::cerr << "Error: bad json file:\n" << errors << std::endl;
+                //TODO: send error message back in a json file
+                throw;
+            }
         }
 
-        reader.reset();
-
-        auto& fasta = json["FASTA"];
-
-        // TODO: remove this and accept only fasta files
-        auto& seq = json["SEQ"];
+        const auto &fasta = json["FASTA"];
+        const auto &seq = json["SEQ"];
 
         // discovery_fraction a proxy of 1 - %similarity
-        const auto& discovery_fraction = json.get("discovery_fraction",
-                                                  config.discovery_fraction);
-
-        const auto& count_labels = json.get("count_labels", config.count_labels);
-        const auto& num_top_labels = json.get("num_labels", config.num_top_labels);
+        auto discovery_fraction = json.get("discovery_fraction",
+                                           config.discovery_fraction).asDouble();
+        auto count_labels = json.get("count_labels", config.count_labels).asBool();
+        auto num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
 
         std::ostringstream oss;
 
         // query callback shared by FASTA and sequence modes
-        auto execute_server_query = [&](const std::string &seq_name,
-                                        const std::string &seq) {
-            execute_query(seq_name,
-                          seq,
-                          count_labels.asInt(),
+        auto execute_server_query = [&](const std::string &name,
+                                        const std::string &sequence) {
+            execute_query(name,
+                          sequence,
+                          count_labels,
                           config.suppress_unlabeled,
-                          num_top_labels.asInt(),
-                          discovery_fraction.asDouble(),
+                          num_top_labels,
+                          discovery_fraction,
                           config.anno_labels_delimiter,
                           anno_graph,
                           oss);
@@ -748,6 +745,10 @@ std::string form_client_reply(const std::string &received_message,
 
         return oss.str();
 
+    } catch (const Json::LogicError &e) {
+        std::cerr << "Error: bad json file: " << e.what() << std::endl;
+        //TODO: send errors in a json file
+        throw;
     } catch (const std::exception &e) {
         std::cerr << "Error: processing request error: " << e.what() << std::endl;
         //TODO: send errors in a json file
