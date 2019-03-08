@@ -304,7 +304,7 @@ int main(int argc, char *argv[]) {
     TCLAP::ValueArg<std::string> nameArg("r",
                                          "reference",
                                          "path to human reference",
-                                         true,
+                                         false,
                                          HUMAN_REFERENCE_FILENAME,
                                          "string");
     cmd.add(nameArg);

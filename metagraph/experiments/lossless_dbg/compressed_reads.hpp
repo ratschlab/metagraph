@@ -1,0 +1,131 @@
+//
+// Created by Jan Studený on 2019-03-08.
+//
+
+#ifndef METAGRAPH_COMPRESSED_READS_HPP
+#define METAGRAPH_COMPRESSED_READS_HPP
+
+#include <utility>
+#include <iostream>
+#include <map>
+#include <filesystem>
+#include <vector>
+using namespace std;
+using namespace std::string_literals;
+using node_index = SequenceGraph::node_index;
+
+class CompressedReads {
+    using bifurcation_choices_t = vector<char>;
+    using kmer_t = string;
+    using compressed_read_t = pair<kmer_t, bifurcation_choices_t>;
+
+public:
+    // TODO: read about lvalues, rvalues, etc
+    // http://thbecker.net/articles/rvalue_references/section_01.html
+    // const value
+    // CompressedReads(const vector<string> &raw_reads)
+    // non-const pointer to modify
+    // CompressedReads(vector<string> *raw_reads)
+    CompressedReads(const vector<string>& raw_reads, int k_kmer = defult_k_k_mer)
+            : k_kmer(k_kmer),
+              read_length(raw_reads[0].length()),
+              graph(dbg_succ_graph_constructor(raw_reads,k_kmer)) {
+        for(auto & read : raw_reads) {
+            compressed_reads.insert(align_read(read));
+        }
+    }
+
+    int compressed_size_without_reference() {
+        // returns size in bits
+        int size = 0;
+        for(auto &read : compressed_reads) {
+            // *2 for two bit encoding
+            size += read.first.size() * 2;
+            size += read.second.size() * 2;
+        }
+        // to be really fair
+        // size += sizeof(read_length);
+        return size;
+    }
+
+    double bits_per_symbol(bool include_reference = false) {
+        assert(!include_reference);
+        return static_cast<double>(compressed_size_without_reference())
+               / (compressed_reads.size()*read_length);
+    }
+    vector<string> get_reads() {
+        vector<string> reads;
+        for(auto& compressed_read : compressed_reads) {
+            reads.push_back(decompress_read(compressed_read));
+        }
+        return reads;
+    }
+
+private:
+    compressed_read_t align_read(const string &read) {
+        auto k_mer = read.substr(0,k_kmer);
+        auto bifurcation_choices = bifurcation_choices_t();
+        auto node = graph.kmer_to_node(read);
+        // for all other characters
+        for (auto &character : read.substr(k_kmer)) {
+            vector<node_index> outnodes;
+            graph.adjacent_incoming_nodes(node, &outnodes);
+            if (outnodes.size() > 1) {
+                bifurcation_choices.push_back(character);
+            }
+            assert(!outnodes.empty());
+
+        }
+        return {k_mer,bifurcation_choices};
+    }
+    static DBG_succ* dbg_succ_graph_constructor(vector<string> raw_reads, int k_kmer) {
+        auto graph_constructor = DBGSuccConstructor(k_kmer);
+        cerr << "Starting building the graph" << endl;
+        for(auto &read : raw_reads) {
+            assert(read.size() >= k_kmer);
+            graph_constructor.add_sequence(read);
+        }
+        return new DBG_succ(&graph_constructor);
+        //graph = DBGSuccinct(stupid_old_representation);
+    }
+
+    string decompress_read(compressed_read_t compressed_read) {
+        string read;
+        auto& [starting_kmer,bifurcation_choices] = compressed_read;
+        auto current_bifurcation_choice = bifurcation_choices.begin();
+        auto node = graph.kmer_to_node(starting_kmer);
+        char next_char;
+        while(read.size() < read_length) {
+            int outgoing_degree = 0;
+            graph.call_outgoing_kmers(node,[&](node_index next_node, char character) {
+                outgoing_degree++;
+                if (outgoing_degree>1) {
+                    if (character == *current_bifurcation_choice) {
+                        //initial guess was wrong
+                        node = next_node;
+                        next_char = character;
+                    }
+                }
+                else {
+                    //initial guess
+                    node = next_node;
+                    next_char = character;
+                }
+            });
+            if (outgoing_degree>1) {
+                current_bifurcation_choice++;//prepare next choice
+            }
+            read += next_char;
+        }
+        return read;
+    }
+
+
+    multiset<compressed_read_t> compressed_reads;
+    int read_length;
+    int k_kmer;
+    static const int defult_k_k_mer = 21;
+    DBGSuccinct graph;
+};
+
+#endif //METAGRAPH_COMPRESSED_READS_HPP
