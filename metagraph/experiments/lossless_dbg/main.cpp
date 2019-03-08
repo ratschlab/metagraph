@@ -5,6 +5,13 @@
 #include <nlohmann/json.hpp>
 #include <ProgressBar.hpp>
 #include <tclap/CmdLine.h>
+#include <gtest/gtest.h>
+
+using TCLAP::ValueArg;
+using TCLAP::MultiArg;
+using TCLAP::UnlabeledValueArg;
+using TCLAP::UnlabeledMultiArg;
+using TCLAP::ValuesConstraint;
 
 using json = nlohmann::json;
 #define _DNA_GRAPH 1
@@ -19,8 +26,10 @@ using json = nlohmann::json;
 #include "dbg_succinct_construct.hpp"
 #include "dbg_hash.hpp"
 
+
+#include "compressed_reads.hpp"
+
 #pragma clang diagnostic pop
-#include <gtest/gtest.h>
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wconversion"
@@ -47,11 +56,11 @@ string local_file(string filename) {
 }
 
 // TODO: remove these constants
-const string HUMAN_REFERENCE_FILENAME = local_file("genomic_data/GCF_000001405.38_GRCh38.p12_genomic.fna");
-const string HUMAN_CHROMOSOME_10_SAMPLE = local_file("genomic_data/human_chromosome_10_sample.fasta");
-const string HUMAN_CHROMOSOME_10_FILENAME = local_file("genomic_data/human_chromosome_10.fasta");
-const string HUMAN_CHROMOSOME_10_STRIPPED_N_FILENAME = local_file("genomic_data/human_chromosome_10_n_trimmed.fasta");
-const string JSON_OUTPUT_FILE = local_file("statistics.json");
+string HUMAN_REFERENCE_FILENAME = local_file("genomic_data/GCF_000001405.38_GRCh38.p12_genomic.fna");
+string HUMAN_CHROMOSOME_10_SAMPLE = local_file("genomic_data/human_chromosome_10_sample.fasta");
+string HUMAN_CHROMOSOME_10_FILENAME = local_file("genomic_data/human_chromosome_10.fasta");
+string HUMAN_CHROMOSOME_10_STRIPPED_N_FILENAME = local_file("genomic_data/human_chromosome_10_n_trimmed.fasta");
+string JSON_OUTPUT_FILE = local_file("statistics.json");
 const int CHROMOSOME_NUMBER = 10;
 const int READ_LENGTH = 100;
 const double READ_COVERAGE = 0.00001;
@@ -101,120 +110,6 @@ node_index k_mer_to_node(DBGSuccinct& de_Bruijn_Graph,
     );
     return result;
 }
-
-class CompressedReads {
-    using bifurcation_choices_t = vector<char>;
-    using kmer_t = string;
-    using compressed_read_t = pair<kmer_t, bifurcation_choices_t>;
-
-public:
-    // TODO: read about lvalues, rvalues, etc
-    // http://thbecker.net/articles/rvalue_references/section_01.html
-    // const value
-    // CompressedReads(const vector<string> &raw_reads)
-    // non-const pointer to modify
-    // CompressedReads(vector<string> *raw_reads)
-    CompressedReads(const vector<string>& raw_reads, int k_kmer = defult_k_k_mer)
-          : k_k_mer(k_kmer),
-            read_length(raw_reads[0].length()),
-            graph(dbg_succ_graph_constructor(raw_reads,k_kmer)) {
-        for(auto & read : raw_reads) {
-            compressed_reads.insert(align_read(read));
-        }
-    }
-
-    int compressed_size_without_reference() {
-        // returns size in bits
-        int size = 0;
-        for(auto &read : compressed_reads) {
-            // *2 for two bit encoding
-            size += read.x.size() * 2;
-            size += read.y.size() * 2;
-        }
-        // to be really fair
-        // size += sizeof(read_length);
-        return size;
-    }
-
-    double bits_per_symbol(bool include_reference = false) {
-        assert(!include_reference);
-        return static_cast<double>(compressed_size_without_reference())
-                    / (compressed_reads.size()*read_length);
-    }
-    vector<string> get_reads() {
-        vector<string> reads;
-        for(auto& compressed_read : compressed_reads) {
-            reads.push_back(decompress_read(compressed_read));
-        }
-        return reads;
-    }
-    
-private:
-    compressed_read_t align_read(const string &read) {
-        auto k_mer = read.substr(0,k_k_mer);
-        auto bifurcation_choices = bifurcation_choices_t();
-        auto node = graph.kmer_to_node(read);
-        // for all other characters
-        for (auto &character : read.substr(k_k_mer)) {
-            vector<node_index> outnodes;
-            graph.adjacent_incoming_nodes(node, &outnodes);
-            if (outnodes.size() > 1) {
-                bifurcation_choices.push_back(character);
-            }
-            assert(!outnodes.empty());
-            
-        }
-        return {k_mer,bifurcation_choices};
-    }
-    static DBG_succ* dbg_succ_graph_constructor(vector<string> raw_reads, int k_k_mer) {
-        auto graph_constructor = DBGSuccConstructor(k_k_mer);
-        cerr << "Starting building the graph" << endl;
-        for(auto &read : raw_reads) {
-            assert(read.size() >= k_k_mer);
-            graph_constructor.add_sequence(read);
-        }
-        return new DBG_succ(&graph_constructor);
-        //graph = DBGSuccinct(stupid_old_representation);
-    }
-    
-    string decompress_read(compressed_read_t compressed_read) {
-        string read;
-        auto& [starting_kmer,bifurcation_choices] = compressed_read;
-        auto current_bifurcation_choice = bifurcation_choices.begin();
-        auto node = k_mer_to_node(graph,starting_kmer);
-        char next_char;
-        while(read.size() < read_length) {
-            int outgoing_degree = 0;
-            graph.call_outgoing_kmers(node,[&](node_index next_node, char character) {
-                outgoing_degree++;
-                if (outgoing_degree>1) {
-                    if (character == *current_bifurcation_choice) {
-                        //initial guess was wrong
-                        node = next_node;
-                        next_char = character;
-                    }
-                }
-                else {
-                    //initial guess
-                    node = next_node;
-                    next_char = character;
-                }
-            });
-            if (outgoing_degree>1) {
-                current_bifurcation_choice++;//prepare next choice
-            }
-            read += next_char;
-        }
-        return read;
-    }
-    
-    
-    multiset<compressed_read_t> compressed_reads;
-    int read_length;
-    int k_k_mer;
-    static const int defult_k_k_mer = 21;
-    DBGSuccinct graph;
-};
 
 class SamplerConvenient {
 public:
@@ -338,7 +233,7 @@ TEST(CompressedReads,IdentityTest1) {
 }
 
 static void playground_dbg() {
-    //    DBGSuccinct dbgSuccinct(k_k_mer);
+    //    DBGSuccinct dbgSuccinct(k_kmer);
     //    dbgSuccinct.add_sequence("ATAGAGAGAGAGAGAGAG");
     //
     //    auto node = k_mer_to_node(dbgSuccinct,"ATAG");
@@ -406,6 +301,15 @@ void get_statistics() {
 
 int main(int argc, char *argv[]) {
     TCLAP::CmdLine cmd("Compress reads",' ', "0.1");
+    TCLAP::ValueArg<std::string> nameArg("r",
+                                         "reference",
+                                         "path to human reference",
+                                         true,
+                                         HUMAN_REFERENCE_FILENAME,
+                                         "string");
+    cmd.add(nameArg);
+    cmd.parse( argc, argv );
+    HUMAN_REFERENCE_FILENAME = nameArg.getValue();
     get_statistics();
     //save_human_chromosome();
     //playground_dbg();
