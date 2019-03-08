@@ -10,6 +10,9 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "RELEASE")
 endif()
 
+add_subdirectory(
+  external-libraries/jsoncpp
+)
 
 if(NOT CMAKE_DBG_ALPHABET)
   set(CMAKE_DBG_ALPHABET "DNA")
@@ -114,6 +117,7 @@ cmake_policy(SET CMP0015 NEW)
 link_directories(
   ${CMAKE_BINARY_DIR}/KMC
   ${CMAKE_BINARY_DIR}/lib
+  ${CMAKE_BINARY_DIR}/external-libraries/jsoncpp/src/lib_json
   external-libraries/libmaus2/lib
   external-libraries/sdsl-lite/lib
 )
@@ -143,6 +147,7 @@ include_directories(
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/binrel_wt/include
+  external-libraries/jsoncpp/include
   external-libraries/asio/asio/include
   ${INCLUDE_DIRS}
 )

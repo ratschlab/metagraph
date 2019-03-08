@@ -6,7 +6,6 @@
 - cmake 3.6.1
 - GNU GCC with C++17 (gcc-8 or higher) or LLVM Clang (clang-7 or higher)
 - HTSlib
-- jsoncpp
 - boost
 - folly (optional)
 
@@ -14,7 +13,7 @@ All can be installed with [brew](https://brew.sh) or [linuxbrew](https://linuxbr
 
 #### For compiling with GNU GCC:
 ```
-brew install gcc autoconf automake libtool cmake make htslib jsoncpp
+brew install gcc autoconf automake libtool cmake make htslib
 brew install --build-from-source boost
 (optional) brew install --build-from-source double-conversion gflags glog lz4 snappy zstd folly
 brew install gcc@8
@@ -30,7 +29,7 @@ export CXX=\"\$(which g++-8)\"
 
 #### For compiling with LLVM Clang:
 ```
-brew install llvm libomp autoconf automake libtool cmake make htslib jsoncpp boost folly
+brew install llvm libomp autoconf automake libtool cmake make htslib boost folly
 ```
 Then set the environment variables accordingly:
 ```
