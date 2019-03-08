@@ -30,7 +30,7 @@ class DBGAligner : public AnnotatedDBG {
 
     // Compute the edit distance between a node in the graph and a kmer in the string
     // according to loss parameters in this class.
-    float single_node_loss(node_index node, std::string::const_iterator begin) const;
+    float single_node_loss(node_index node, char next_char) const;
 
     // Return the corresponding sequence of a path according to nodes in the graph.
     std::string get_path_sequence(const std::vector<node_index>& path) const;

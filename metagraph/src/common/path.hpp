@@ -1,7 +1,6 @@
 #ifndef __PATH_HPP__
 #define __PATH_HPP__
 
-
 #include <vector>
 
 template <typename NodeType, typename VLabels>

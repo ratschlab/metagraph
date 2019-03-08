@@ -157,6 +157,7 @@ TEST(dbg_aligner, noise_in_branching_point) {
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference_1, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(1, path.get_total_loss());
 }
 
 TEST(dbg_aligner, large_search_space) {
@@ -185,19 +186,5 @@ TEST(dbg_aligner, large_search_space) {
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(query, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(unmapped_char_length, path.get_total_loss());
 }
-
-
-//TEST(dbg_aligner, variation_in_first_kmer) {
-//    size_t k = 4;
-//    std::string reference_1 = "AGCCTCGAAA";
-//    std::string sequence_2 = "AGCTTCGAAA";
-//
-//    DBGSuccinct* graph = new DBGSuccinct(k);
-//    graph->add_sequence(reference_1);
-//    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/1));
-//    auto path = aligner.align(sequence_2);
-//
-//    EXPECT_EQ(sequence_2.size() - k + 1, path.size());
-//    EXPECT_EQ(sequence_2, aligner.get_path_sequence(path.get_nodes()));
-//}

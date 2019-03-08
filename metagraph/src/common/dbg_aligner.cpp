@@ -12,10 +12,10 @@ DBGAligner::DBGAligner(DeBruijnGraph *dbg, Annotator *annotation,
     // Substitution loss for each pair of nucleotides.
     // Transition and transversion mutations have different loss values.
     sub_loss_ = {
-        {'a', {{'t', 2}, {'c', 2}, {'g', 1}}},
-        {'g', {{'t', 2}, {'c', 2}, {'a', 1}}},
-        {'c', {{'a', 2}, {'g', 2}, {'t', 1}}},
-        {'t', {{'a', 2}, {'g', 2}, {'c', 1}}}};
+        {'a', {{'a', 0}, {'t', 2}, {'c', 2}, {'g', 1}}},
+        {'g', {{'g', 0}, {'t', 2}, {'c', 2}, {'a', 1}}},
+        {'c', {{'c', 0}, {'a', 2}, {'g', 2}, {'t', 1}}},
+        {'t', {{'t', 0}, {'a', 2}, {'g', 2}, {'c', 1}}}};
 }
 
 DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
@@ -48,26 +48,19 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
                         AlignedPath alternative_path(path);
                         alternative_path.set_sequence_it(last_mapped_position);
                         alternative_path.push_back(node, single_node_loss(node,
-                            alternative_path.get_sequence_it()), annotator_->get(node));
+                            *(alternative_path.get_sequence_it() + graph_->get_k() - 1)),
+                        annotator_->get(node));
                         queue.push(alternative_path);
                         } );
     }
     return AlignedPath(sequence.end());
 }
 
-float DBGAligner::single_node_loss(node_index node, std::string::const_iterator begin) const {
+float DBGAligner::single_node_loss(node_index node, char next_char) const {
     // TODO: Compute indel loss as well.
-    std::string node_sequence = graph_->get_node_sequence(node);
-    auto node_sequence_it = std::begin(node_sequence);
-    std::string::const_iterator end = begin + graph_->get_k();
-    float loss = 0;
-    while (begin != end) {
-        if (std::tolower(*node_sequence_it) != std::tolower(*begin))
-            loss += sub_loss_.at(std::tolower(*node_sequence_it)).at(std::tolower(*begin));
-        ++ begin;
-        ++ node_sequence_it;
-    }
-    return loss;
+    // TODO: Compute the loss in case of inexact seeding.
+    char node_last_char = graph_->get_kmer_last_char(node);
+    return sub_loss_.at(std::tolower(next_char)).at(std::tolower(node_last_char));
 }
 
 void DBGAligner::randomly_pick_strategy(std::vector<node_index> out_neighbors,
@@ -91,7 +84,9 @@ void DBGAligner::inexact_map(const AlignedPath &path,
                                 std::string::const_iterator)> &callback) const {
     if (path.get_sequence_it() + graph_->get_k() > end)
         return;
-    // TODO: Do inexact_seeding in case last_mapped_node is npos.
+    // TODO: Do inexact_seeding in case last mapped node is npos.
+    if (!path.back())
+        return;
     std::vector<node_index> out_neighbors;
     graph_->adjacent_outgoing_nodes(path.back(), &out_neighbors);
 
