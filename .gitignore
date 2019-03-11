@@ -26,3 +26,8 @@ metagraph/build*
 *.un~
 tags
 
+# CMake build directory for kmc
+metagraph/KMC/
+
+# CMake (by CLion)
+cmake-build-*/
