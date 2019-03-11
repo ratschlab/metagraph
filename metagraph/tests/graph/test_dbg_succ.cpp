@@ -2126,6 +2126,231 @@ TEST(DBGSuccinct, TraversalsDBG) {
     }
 }
 
+TEST(DBGSuccinct, CallOutgoingEdges) {
+    for (size_t k = 3; k < 11; ++k) {
+        std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new DBG_succ(k - 1)) };
+
+        graph->add_sequence(std::string(100, 'A') + std::string(100, 'C')
+                                                  + std::string(k - 1, 'G'));
+
+        uint64_t it = 0;
+
+        // AAA -> AAA
+        // AAA -> AAC
+        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+        std::set<char> set { 'A', 'C' };
+        graph->call_outgoing_kmers(it,
+            [&](auto i, char c) {
+                ASSERT_TRUE(set.count(c))
+                    << k
+                    << "\n" << c
+                    << "\n" << graph->get_node_sequence(it)
+                    << "\n" << graph->get_node_sequence(i);
+                set.erase(c);
+                EXPECT_EQ(i, graph->traverse(it, c));
+            }
+        );
+        ASSERT_TRUE(set.empty());
+
+        // AAC -> ACC
+        it = graph->traverse(it, 'C');
+        set = { 'C', };
+        graph->call_outgoing_kmers(it,
+            [&](auto i, char c) {
+                ASSERT_TRUE(set.count(c))
+                    << k
+                    << "\n" << c
+                    << "\n" << graph->get_node_sequence(it)
+                    << "\n" << graph->get_node_sequence(i);
+                set.erase(c);
+                EXPECT_EQ(i, graph->traverse(it, c));
+            }
+        );
+        ASSERT_TRUE(set.empty());
+
+        // CCC -> CCC
+        // CCC -> CCG
+        graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
+        set = { 'C', 'G' };
+        graph->call_outgoing_kmers(it,
+            [&](auto i, char c) {
+                ASSERT_TRUE(set.count(c))
+                    << k
+                    << "\n" << c
+                    << "\n" << graph->get_node_sequence(it)
+                    << "\n" << graph->get_node_sequence(i);
+                set.erase(c);
+                EXPECT_EQ(i, graph->traverse(it, c));
+            }
+        );
+        ASSERT_TRUE(set.empty());
+
+        // CCG -> CGG
+        it = graph->traverse(it, 'G');
+        set = { 'G', };
+        graph->call_outgoing_kmers(it,
+            [&](auto i, char c) {
+                ASSERT_TRUE(set.count(c))
+                    << k
+                    << "\n" << c
+                    << "\n" << graph->get_node_sequence(it)
+                    << "\n" << graph->get_node_sequence(i);
+                set.erase(c);
+                EXPECT_EQ(i, graph->traverse(it, c));
+            }
+        );
+        ASSERT_TRUE(set.empty());
+
+        // CGG -> GG$
+        graph->map_to_nodes("C" + std::string(k - 1, 'G'), [&](auto i) { it = i; });
+        set = { '$', };
+        graph->call_outgoing_kmers(it,
+            [&](auto i, char c) {
+                ASSERT_TRUE(set.count(c))
+                    << k
+                    << "\n" << c
+                    << "\n" << graph->get_node_sequence(it)
+                    << "\n" << graph->get_node_sequence(i);
+                set.erase(c);
+                if (c != '$') {
+                    EXPECT_EQ(i, graph->traverse(it, c))
+                        << graph->get_node_sequence(i) << '\n' << c;
+                }
+            }
+        );
+        ASSERT_TRUE(set.empty());
+
+        // GGG does not exist
+        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        ASSERT_EQ(DeBruijnGraph::npos, it);
+        // GG$ is mapped to GGN, which does not exist
+        graph->map_to_nodes(std::string(k - 1, 'G') + '$', [&](auto i) { it = i; });
+        ASSERT_EQ(DeBruijnGraph::npos, it);
+
+        // If dummy nodes are not masked, and therefore
+        // represented in DBG, iterate through them as well.
+        // $$$ -> $$$
+        // $$$ -> $$A
+        it = 1;
+        ASSERT_EQ(std::string(k, '$'), graph->get_node_sequence(it));
+        set = { '$', 'A' };
+        graph->call_outgoing_kmers(it,
+            [&](auto i, char c) {
+                ASSERT_TRUE(set.count(c))
+                    << k
+                    << "\n" << c
+                    << "\n" << graph->get_node_sequence(it)
+                    << "\n" << graph->get_node_sequence(i);
+                set.erase(c);
+                if (c != '$') {
+                    EXPECT_EQ(i, graph->traverse(it, c))
+                        << graph->get_node_sequence(i) << '\n' << c;
+                }
+            }
+        );
+        ASSERT_TRUE(set.empty());
+
+
+        // Hide all dummy k-mers
+        dynamic_cast<DBGSuccinct&>(*graph).mask_dummy_kmers(1, false);
+
+        // AAA -> AAA
+        // AAA -> AAC
+        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+        set = { 'A', 'C' };
+        graph->call_outgoing_kmers(it,
+            [&](auto i, char c) {
+                ASSERT_TRUE(set.count(c))
+                    << k
+                    << "\n" << c
+                    << "\n" << graph->get_node_sequence(it)
+                    << "\n" << graph->get_node_sequence(i);
+                set.erase(c);
+                EXPECT_EQ(i, graph->traverse(it, c));
+            }
+        );
+        ASSERT_TRUE(set.empty());
+
+        // AAC -> ACC
+        it = graph->traverse(it, 'C');
+        set = { 'C', };
+        graph->call_outgoing_kmers(it,
+            [&](auto i, char c) {
+                ASSERT_TRUE(set.count(c))
+                    << k
+                    << "\n" << c
+                    << "\n" << graph->get_node_sequence(it)
+                    << "\n" << graph->get_node_sequence(i);
+                set.erase(c);
+                EXPECT_EQ(i, graph->traverse(it, c));
+            }
+        );
+        ASSERT_TRUE(set.empty());
+
+        // CCC -> CCC
+        // CCC -> CCG
+        graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
+        set = { 'C', 'G' };
+        graph->call_outgoing_kmers(it,
+            [&](auto i, char c) {
+                ASSERT_TRUE(set.count(c))
+                    << k
+                    << "\n" << c
+                    << "\n" << graph->get_node_sequence(it)
+                    << "\n" << graph->get_node_sequence(i);
+                set.erase(c);
+                EXPECT_EQ(i, graph->traverse(it, c));
+            }
+        );
+        ASSERT_TRUE(set.empty());
+
+        // CCG -> CGG
+        it = graph->traverse(it, 'G');
+        set = { 'G', };
+        graph->call_outgoing_kmers(it,
+            [&](auto i, char c) {
+                ASSERT_TRUE(set.count(c))
+                    << k
+                    << "\n" << c
+                    << "\n" << graph->get_node_sequence(it)
+                    << "\n" << graph->get_node_sequence(i);
+                set.erase(c);
+                EXPECT_EQ(i, graph->traverse(it, c));
+            }
+        );
+        ASSERT_TRUE(set.empty());
+
+        // CGG -> {}
+        graph->map_to_nodes("C" + std::string(k - 1, 'G'), [&](auto i) { it = i; });
+        set = {};
+        graph->call_outgoing_kmers(it,
+            [&](auto i, char c) {
+                ASSERT_TRUE(set.count(c))
+                    << k
+                    << "\n" << c
+                    << "\n" << graph->get_node_sequence(it)
+                    << "\n" << graph->get_node_sequence(i);
+                set.erase(c);
+                if (c != '$') {
+                    EXPECT_EQ(i, graph->traverse(it, c))
+                        << graph->get_node_sequence(i) << '\n' << c;
+                }
+            }
+        );
+        ASSERT_TRUE(set.empty());
+
+        // GGG does not exist
+        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        ASSERT_EQ(DeBruijnGraph::npos, it);
+        // GG$ is mapped to GGN, which does not exist
+        graph->map_to_nodes(std::string(k - 1, 'G') + '$', [&](auto i) { it = i; });
+        ASSERT_EQ(DeBruijnGraph::npos, it);
+
+        // $$$ is masked and is not accessible
+        ASSERT_TRUE(std::string(k, '$') != graph->get_node_sequence(1));
+    }
+}
+
 TEST(DBGSuccinct, OutgoingAdjacent) {
     for (size_t k = 2; k < 11; ++k) {
         std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new DBG_succ(k - 1)) };

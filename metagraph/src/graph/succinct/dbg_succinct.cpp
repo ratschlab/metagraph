@@ -2131,6 +2131,25 @@ node_index DBGSuccinct::traverse_back(node_index node, char prev_char) const {
     );
 }
 
+void DBGSuccinct::call_outgoing_kmers(node_index node,
+                                      const OutgoingEdgeCallback &callback) const {
+    assert(node);
+
+    auto boss_edge = kmer_to_boss_index(node);
+
+    auto last = boss_graph_->fwd(boss_edge);
+    auto first = boss_graph_->pred_last(last - 1) + 1;
+
+    for (auto i = first; i <= last; ++i) {
+        assert(boss_graph_->get_W(boss_edge) % boss_graph_->alph_size
+                == boss_graph_->get_node_last_value(i));
+
+        auto next = boss_to_kmer_index(i);
+        if (next != npos)
+            callback(next, boss_graph_->decode(boss_graph_->get_W(i)));
+    }
+}
+
 void DBGSuccinct::adjacent_outgoing_nodes(node_index node,
                                           std::vector<node_index> *target_nodes) const {
     assert(node);
@@ -2205,6 +2224,16 @@ void DBGSuccinct::add_seq(const std::string &sequence,
     }
 
     assert(!valid_edges_.get() || !(*valid_edges_)[0]);
+}
+
+std::string DBGSuccinct::get_node_sequence(node_index node) const {
+    assert(node);
+    assert(node <= num_nodes());
+
+    auto boss_edge = kmer_to_boss_index(node);
+
+    return boss_graph_->get_node_str(boss_edge)
+            + boss_graph_->decode(boss_graph_->get_W(boss_edge));
 }
 
 // Traverse graph mapping sequence to the graph nodes
