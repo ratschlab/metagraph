@@ -22,18 +22,20 @@ using json = nlohmann::json;
 
 #include "dbg_succinct.hpp"
 #include "sequence_graph.hpp"
-#include "sequence_io.hpp"
 #include "dbg_succinct_construct.hpp"
 #include "dbg_hash.hpp"
 
 
+#include "compressed_reads.hpp"
+#include "samplers.hpp"
+#include "utils.hpp"
 
 #pragma clang diagnostic pop
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wconversion"
 
-#include "compressed_reads.hpp"
+
 
 using namespace std;
 using namespace std::string_literals;
@@ -71,93 +73,6 @@ const int DEFAULT_K_KMER = 21;
 #define y second
 #define all(x) begin(x),end(x)
 
-// openmp reductions
-
-void reduce_maps(\
-                 std::map<int, int>& output, \
-                 std::map<int, int>& input)
-{
-    for (auto& X : input) {
-        output[X.first] += X.second;
-    }
-}
-
-#pragma omp declare reduction(map_reduction : \
-std::map<int, int> : \
-reduce_maps(omp_out, omp_in)) \
-initializer(omp_priv(omp_orig))
-
-class SamplerConvenient {
-public:
-    virtual string sample(int length) = 0;
-    virtual int reference_size() = 0;
-    virtual vector<string> sample_coverage(int length, double coverage) {
-        int count = ceil(reference_size()*coverage/length);
-        return sample(length, count);
-    }
-    virtual vector<string> sample(int length, int count) {
-        auto res = vector<string>();
-        for(int i=0;i<count;i++) {
-            res.push_back(sample(length));
-        }
-        return res;
-    }
-};
-
-class Sampler : public SamplerConvenient {
-public:
-    Sampler(string reference, unsigned int seed) : reference(std::move(reference)) {
-        generator = std::mt19937(seed); //Standard mersenne_twister_engine seeded with rd()
-    };
-    string sample(int length) override {
-        std::uniform_int_distribution<> dis(0, reference.length()-1-length);
-        return reference.substr(dis(generator),length);
-    }
-    int reference_size() override {
-        return reference.size();
-    }
-private:
-    string reference;
-    std::mt19937 generator;
-};
-
-class DeterministicSampler : public SamplerConvenient {
-public:
-    DeterministicSampler(vector<string> samples, int reference_size) : _reference_size(reference_size), samples(std::move(samples)) {};
-    string sample(int length) override {
-        string sample = samples[current_sample];
-        assert(length==sample.length());
-        current_sample = (current_sample + 1) % samples.size();
-        return sample;
-    }
-    int reference_size() override {
-        return _reference_size;
-    }
-    vector<string> samples;
-    int _reference_size;
-    int current_sample = 0;
-};
-
-void transform_to_fasta(const string &filename,vector<string> reads) {
-    ofstream myfile;
-    myfile.open (filename);
-    for(auto& read : reads) {
-        myfile << ">" << endl;
-        myfile << read << endl;
-    }
-    myfile.close();
-}
-
-vector<string> read_reads_from_fasta(const string &filename) {
-    vector<string> result;
-    read_fasta_file_critical(
-                             filename,
-                             [&](kseq_t* read) {
-                                 result.push_back(read->seq.s);
-                             });
-    return result;
-}
-
 string get_human_chromosome(int chromosome_number,bool five_letter_alphabet=true) {
     int current_chromosome=1;
     string result;
@@ -173,39 +88,6 @@ string get_human_chromosome(int chromosome_number,bool five_letter_alphabet=true
         transform(all(result),result.begin(),::toupper);
     }
     return result;
-}
-
-TEST(SamplerTest,SampleNoRandom) {
-    auto sampler = Sampler("AAAAAAAAA",test_seed);
-    ASSERT_EQ(sampler.sample(2),"AA");
-}
-
-TEST(SamplerTest,SampleNormal) {
-    auto sampler = Sampler("ADFAGADFDS",test_seed);
-    ASSERT_EQ(sampler.sample(4),"ADFD");
-}
-TEST(SamplerTest,SampleCoverage) {
-    auto sequence = "ADFAGADFDS"s;
-    auto sampler = Sampler(sequence,test_seed);
-    auto reads = sampler.sample_coverage(sequence.length()/2, 1);
-    ASSERT_EQ(reads.size(), 2);
-}
-
-TEST(CompressingReads,GetChromosomeWorks) {
-    auto chromosome = get_human_chromosome(CHROMOSOME_NUMBER);
-    EXPECT_EQ(chromosome.length(), 133'797'422);
-    EXPECT_EQ(chromosome.substr(0,10),"NNNNNNNNNN");
-}
-
-TEST(CompressedReads,IdentityTest1) {
-    set<string> reads = {"ATGCGATCGATATGCGAGA",
-                         "ATGCGATCGAGACTACGAG",
-                         "GTACGATAGACATGACGAG",
-                         "ACTGACGAGACACAGATGC"};
-    auto compressed_reads = CompressedReads(vector<string>(all(reads)));
-    auto decompressed_reads = compressed_reads.get_reads();
-    set<string> decompressed_read_set = set<string>(all(decompressed_reads));
-    ASSERT_EQ(reads, decompressed_read_set);
 }
 
 void to_be_determined() {
@@ -237,12 +119,10 @@ void get_statistics() {
     auto pb = ProgressBar(kmers_count, 70, '=', ' ', 10000);
 
     map<int,int> kmer_outgoing_edges_statistics;
-
-    // openmp doesn't work with maps
-    //#pragma omp parallel for reduction(map_reduction:kmer_outgoing_edges_statistics)
-    //for(auto it = graph.indices_.begin(); it != graph.indices_.end(); it++)
+    
     vector<node_index> outgoing_edges;
 
+    #pragma omp parallel for reduction(map_reduction:kmer_outgoing_edges_statistics)
     for (size_t i = 1; i <= graph.num_nodes(); ++i) {
         // const auto &kmer = graph.get_node_sequence(i);
         graph.adjacent_outgoing_nodes(i, &outgoing_edges);
@@ -272,11 +152,11 @@ int main(int argc, char *argv[]) {
                                          "reference",
                                          "path to human reference",
                                          false,
-                                         HUMAN_REFERENCE_FILENAME,
+                                         HUMAN_CHROMOSOME_10_STRIPPED_N_FILENAME,
                                          "string");
     cmd.add(nameArg);
     cmd.parse( argc, argv );
-    HUMAN_REFERENCE_FILENAME = nameArg.getValue();
+    HUMAN_CHROMOSOME_10_STRIPPED_N_FILENAME = nameArg.getValue();
     get_statistics();
     //save_human_chromosome();
     //playground_dbg();

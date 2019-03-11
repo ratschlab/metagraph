@@ -23,6 +23,10 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		C384D62D2236A05800AA99A4 /* compressed_reads.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = compressed_reads.hpp; sourceTree = "<group>"; };
+		C384D62E2236A07600AA99A4 /* samplers.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = samplers.hpp; sourceTree = "<group>"; };
+		C384D62F2236A0DC00AA99A4 /* utils.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = utils.hpp; sourceTree = "<group>"; };
+		C384D6302236A25800AA99A4 /* tests.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = tests.hpp; sourceTree = "<group>"; };
 		C3A89E6A22205426007AB96B /* lossless_dbg */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = lossless_dbg; sourceTree = BUILT_PRODUCTS_DIR; };
 		C3A89E74222054B3007AB96B /* main.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = main.cpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -41,7 +45,11 @@
 		C3A89E6122205426007AB96B = {
 			isa = PBXGroup;
 			children = (
+				C384D62D2236A05800AA99A4 /* compressed_reads.hpp */,
 				C3A89E74222054B3007AB96B /* main.cpp */,
+				C384D62E2236A07600AA99A4 /* samplers.hpp */,
+				C384D62F2236A0DC00AA99A4 /* utils.hpp */,
+				C384D6302236A25800AA99A4 /* tests.hpp */,
 				C3A89E6B22205426007AB96B /* Products */,
 			);
 			sourceTree = "<group>";
