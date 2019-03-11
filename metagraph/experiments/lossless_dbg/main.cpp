@@ -27,13 +27,13 @@ using json = nlohmann::json;
 #include "dbg_hash.hpp"
 
 
-#include "compressed_reads.hpp"
 
 #pragma clang diagnostic pop
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wconversion"
 
+#include "compressed_reads.hpp"
 
 using namespace std;
 using namespace std::string_literals;
@@ -71,20 +71,6 @@ const int DEFAULT_K_KMER = 21;
 #define y second
 #define all(x) begin(x),end(x)
 
-//class ProgressBar {
-//public:
-//    int skips_before_report;
-//    int current_time = 0;
-//    ProgressBar(int skips_before_report) : skips_before_report(skips_before_report) {};
-//    void invoke(function<void(void)> fn) {
-//        current_time++;
-//        if ((current_time%skips_before_report) == 0) {
-//            fn();
-//        }
-//    }
-//};
-
-
 // openmp reductions
 
 void reduce_maps(\
@@ -100,16 +86,6 @@ void reduce_maps(\
 std::map<int, int> : \
 reduce_maps(omp_out, omp_in)) \
 initializer(omp_priv(omp_orig))
-
-
-node_index k_mer_to_node(DBGSuccinct& de_Bruijn_Graph,
-                         const string &k_mer) {
-    node_index result;
-    de_Bruijn_Graph.map_to_nodes(k_mer, [&](node_index node) { result = node; },
-        [](){return true;}
-    );
-    return result;
-}
 
 class SamplerConvenient {
 public:
@@ -232,15 +208,6 @@ TEST(CompressedReads,IdentityTest1) {
     ASSERT_EQ(reads, decompressed_read_set);
 }
 
-static void playground_dbg() {
-    //    DBGSuccinct dbgSuccinct(k_kmer);
-    //    dbgSuccinct.add_sequence("ATAGAGAGAGAGAGAGAG");
-    //
-    //    auto node = k_mer_to_node(dbgSuccinct,"ATAG");
-    //    auto next_node = dbgSuccinct.traverse(node,'A');
-    //    cout << dbgSuccinct.get_path_sequence({next_node}) << endl;
-    //    cout << "Hello metagraph!" << endl;
-}
 void to_be_determined() {
     auto chromosome = get_human_chromosome(CHROMOSOME_NUMBER);
     auto sampler = Sampler(chromosome,test_seed);
