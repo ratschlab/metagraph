@@ -67,12 +67,8 @@ string JSON_OUTPUT_FILE = local_file("statistics.json");
 const int CHROMOSOME_NUMBER = 10;
 const int READ_LENGTH = 100;
 const double READ_COVERAGE = 0.00001;
-const int test_seed = 3424;
-const int DEFAULT_K_KMER = 21;
 // todo change to proper thing
-#define x first
-#define y second
-#define all(x) begin(x),end(x)
+
 
 string get_human_chromosome(int chromosome_number,bool five_letter_alphabet=true) {
     int current_chromosome=1;

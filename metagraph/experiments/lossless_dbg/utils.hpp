@@ -11,6 +11,10 @@
 
 #include "sequence_io.hpp"
 
+#define x first
+#define y second
+#define all(x) begin(x),end(x)
+
 
 void transform_to_fasta(const string &filename,vector<string> reads) {
     ofstream myfile;

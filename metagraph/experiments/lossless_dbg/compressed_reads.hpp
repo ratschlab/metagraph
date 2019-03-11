@@ -5,6 +5,7 @@
 #ifndef METAGRAPH_COMPRESSED_READS_HPP
 #define METAGRAPH_COMPRESSED_READS_HPP
 
+
 #include <utility>
 #include <iostream>
 #include <map>
@@ -13,6 +14,8 @@
 using namespace std;
 using namespace std::string_literals;
 using node_index = SequenceGraph::node_index;
+const int DEFAULT_K_KMER = 21;
+
 
 class CompressedReads {
     using bifurcation_choices_t = vector<char>;
@@ -26,7 +29,7 @@ public:
     // CompressedReads(const vector<string> &raw_reads)
     // non-const pointer to modify
     // CompressedReads(vector<string> *raw_reads)
-    CompressedReads(const vector<string>& raw_reads, int k_kmer = defult_k_k_mer)
+    CompressedReads(const vector<string>& raw_reads, int k_kmer = DEFAULT_K_KMER)
             : k_kmer(k_kmer),
               read_length(raw_reads[0].length()),
               graph(dbg_succ_graph_constructor(raw_reads,k_kmer)) {
@@ -63,23 +66,23 @@ public:
 
 private:
     compressed_read_t align_read(const string &read) {
-        auto k_mer = read.substr(0,k_kmer);
+        auto kmer = read.substr(0,k_kmer);
         auto bifurcation_choices = bifurcation_choices_t();
-        auto node = graph.kmer_to_node(read);
+        auto node = graph.kmer_to_node(kmer);
         // for all other characters
         for (auto &character : read.substr(k_kmer)) {
             vector<node_index> outnodes;
-            graph.adjacent_incoming_nodes(node, &outnodes);
+            graph.adjacent_outgoing_nodes(node, &outnodes);
             if (outnodes.size() > 1) {
                 bifurcation_choices.push_back(character);
             }
+            node = graph.traverse(node,character);
             assert(!outnodes.empty());
-
         }
-        return {k_mer,bifurcation_choices};
+        return {kmer,bifurcation_choices};
     }
     static DBG_succ* dbg_succ_graph_constructor(vector<string> raw_reads, int k_kmer) {
-        auto graph_constructor = DBGSuccConstructor(k_kmer);
+        auto graph_constructor = DBGSuccConstructor(k_kmer - 1);// because DBG_succ has smaller kmers
         cerr << "Starting building the graph" << endl;
         for(auto &read : raw_reads) {
             assert(read.size() >= k_kmer);
@@ -90,10 +93,10 @@ private:
     }
 
     string decompress_read(compressed_read_t compressed_read) {
-        string read;
         auto& [starting_kmer,bifurcation_choices] = compressed_read;
         auto current_bifurcation_choice = bifurcation_choices.begin();
         auto node = graph.kmer_to_node(starting_kmer);
+        string read = starting_kmer;
         char next_char;
         while(read.size() < read_length) {
             int outgoing_degree = 0;
