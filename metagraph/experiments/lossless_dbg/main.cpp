@@ -29,6 +29,7 @@ using json = nlohmann::json;
 #include "compressed_reads.hpp"
 #include "samplers.hpp"
 #include "utils.hpp"
+#include "tests.hpp"
 
 #pragma clang diagnostic pop
 
@@ -157,11 +158,11 @@ int main(int argc, char *argv[]) {
     cmd.add(nameArg);
     cmd.parse( argc, argv );
     HUMAN_CHROMOSOME_10_STRIPPED_N_FILENAME = nameArg.getValue();
-    get_statistics();
+    //get_statistics();
     //save_human_chromosome();
     //playground_dbg();
     //to_be_determined();
     //    code_to_violate_assertion();
-    //    ::testing::InitGoogleTest(&argc, argv);
-    //    return RUN_ALL_TESTS();
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
 }
