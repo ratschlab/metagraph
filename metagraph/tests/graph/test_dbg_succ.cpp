@@ -2268,7 +2268,6 @@ TEST(DBGSuccinct, TraversalsDBGCanonical) {
     }
 }
 
-
 TEST(DBGSuccinct, CallOutgoingEdges) {
     for (size_t k = 3; k < 11; ++k) {
         std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(k - 1)) };
