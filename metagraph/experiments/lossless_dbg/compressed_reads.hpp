@@ -97,7 +97,7 @@ private:
         }
         return {kmer,bifurcation_choices};
     }
-    static DBG_succ* dbg_succ_graph_constructor(vector<string> raw_reads, int k_kmer) {
+    static DBG_succ* dbg_succ_graph_constructor(const vector<string> &raw_reads, int k_kmer) {
         auto graph_constructor = DBGSuccConstructor(k_kmer - 1);// because DBG_succ has smaller kmers
         cerr << "Starting building the graph" << endl;
         for(auto &read : raw_reads) {
@@ -108,7 +108,7 @@ private:
         //graph = DBGSuccinct(stupid_old_representation);
     }
 
-    string decompress_read(compressed_read_t compressed_read) {
+    string decompress_read(const compressed_read_t &compressed_read) {
         auto& [starting_kmer,bifurcation_choices] = compressed_read;
         auto current_bifurcation_choice = bifurcation_choices.begin();
         auto node = graph.kmer_to_node(starting_kmer);
