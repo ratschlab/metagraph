@@ -11,6 +11,11 @@
 #include <map>
 #include <filesystem>
 #include <vector>
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
+
+
 using namespace std;
 using namespace std::string_literals;
 using node_index = SequenceGraph::node_index;
@@ -56,12 +61,23 @@ public:
         return static_cast<double>(compressed_size_without_reference())
                / (compressed_reads.size()*read_length);
     }
+
     vector<string> get_reads() {
         vector<string> reads;
         for(auto& compressed_read : compressed_reads) {
             reads.push_back(decompress_read(compressed_read));
         }
         return reads;
+    }
+
+    json get_statistics() {
+        map<int,int> bifurcation_size_histogram;
+        for(auto& read : compressed_reads) {
+            bifurcation_size_histogram[read.second.size()]++;
+        }
+        json result = bifurcation_size_histogram;
+        cerr << result.dump(4) << endl;
+        return result;
     }
 
 private:
