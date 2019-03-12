@@ -15,8 +15,27 @@
 #define y second
 #define all(x) begin(x),end(x)
 
+namespace fs = std::filesystem;
 
-void transform_to_fasta(const string &filename,vector<string> reads) {
+#define local_file(filename) (fs::path(__FILE__).parent_path() / (filename))
+
+void save_string(const string &to_save,const string &filename) {
+    ofstream myfile;
+    myfile.open (filename);
+    myfile << to_save;
+    myfile.close();
+}
+
+struct d_t {
+    template<typename T> d_t & operator,(const T & x) {
+        std::cerr << ' ' <<  x;
+        return *this;
+    }
+};
+
+#define D(args ...) { d_t, "|", __LINE__, "|", #args, ":", args, "\n"; }
+
+void transform_to_fasta(const string &filename,const vector<string>& reads) {
     ofstream myfile;
     myfile.open (filename);
     for(auto& read : reads) {
@@ -24,6 +43,10 @@ void transform_to_fasta(const string &filename,vector<string> reads) {
         myfile << read << endl;
     }
     myfile.close();
+}
+
+void write_reads_to_fasta(const vector<string>& reads,const string &filename) {
+    transform_to_fasta(filename,reads);
 }
 
 vector<string> read_reads_from_fasta(const string &filename) {

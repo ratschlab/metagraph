@@ -15,16 +15,16 @@
 
 class SamplerConvenient {
 public:
-    virtual string sample(int length) = 0;
+    virtual string sample(int sample_length) = 0;
     virtual int reference_size() = 0;
-    virtual vector<string> sample_coverage(int length, double coverage) {
-        int count = ceil(reference_size()*coverage/length);
-        return sample(length, count);
+    virtual vector<string> sample_coverage(int sample_length, double coverage) {
+        int count = ceil(reference_size()*coverage/sample_length);
+        return sample(sample_length, count);
     }
-    virtual vector<string> sample(int length, int count) {
+    virtual vector<string> sample(int sample_length, int count) {
         auto res = vector<string>();
         for(int i=0;i<count;i++) {
-            res.push_back(sample(length));
+            res.push_back(sample(sample_length));
         }
         return res;
     }
@@ -35,9 +35,9 @@ public:
     Sampler(string reference, unsigned int seed) : reference(std::move(reference)) {
         generator = std::mt19937(seed); //Standard mersenne_twister_engine seeded with rd()
     };
-    string sample(int length) override {
-        std::uniform_int_distribution<> dis(0, reference.length()-1-length);
-        return reference.substr(dis(generator),length);
+    string sample(int sample_length) override {
+        std::uniform_int_distribution<> dis(0, reference.length()-1-sample_length);
+        return reference.substr(dis(generator),sample_length);
     }
     int reference_size() override {
         return reference.size();
@@ -50,9 +50,9 @@ private:
 class DeterministicSampler : public SamplerConvenient {
 public:
     DeterministicSampler(vector<string> samples, int reference_size) : _reference_size(reference_size), samples(std::move(samples)) {};
-    string sample(int length) override {
+    string sample(int sample_length) override {
         string sample = samples[current_sample];
-        assert(length==sample.length());
+        assert(sample_length==sample.length());
         current_sample = (current_sample + 1) % samples.size();
         return sample;
     }

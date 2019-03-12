@@ -75,7 +75,9 @@ public:
         for(auto& read : compressed_reads) {
             bifurcation_size_histogram[read.second.size()]++;
         }
-        json result = bifurcation_size_histogram;
+        json result = {{"bifurcation_size",bifurcation_size_histogram},
+                       {"total_size",compressed_size_without_reference()},
+                       {"number_of_reads",compressed_reads.size()}};
         cerr << result.dump(4) << endl;
         return result;
     }

@@ -4,5 +4,3 @@ add_executable(compressor main.cpp)
 target_link_libraries(
         compressor metagraph ${METALIBS}
 )
-
-target_link_libraries(compressor gtest)

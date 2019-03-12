@@ -21,3 +21,4 @@ target_link_libraries(lossless_dbg metagraph ${METALIBS} gtest)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 add_subdirectory(playground/compressor)
+add_subdirectory(playground/sampler)

@@ -28,7 +28,7 @@ using json = nlohmann::json;
 
 #include "compressed_reads.hpp"
 #include "samplers.hpp"
-#include "utils.hpp"
+#include "utilities.hpp"
 #include "tests.hpp"
 
 #pragma clang diagnostic pop
@@ -40,7 +40,7 @@ using json = nlohmann::json;
 
 using namespace std;
 using namespace std::string_literals;
-namespace fs = std::filesystem;
+
 
 // debugging functions
 struct d_t {

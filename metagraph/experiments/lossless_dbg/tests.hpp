@@ -9,7 +9,7 @@
 #ifndef tests_h
 #define tests_h
 
-#include "utils.hpp"
+#include "utilities.hpp"
 #include "compressed_reads.hpp"
 #include "samplers.hpp"
 
