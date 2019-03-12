@@ -41,22 +41,8 @@ using json = nlohmann::json;
 using namespace std;
 using namespace std::string_literals;
 
-
-// debugging functions
-struct d_t {
-    template<typename T> d_t & operator,(const T & x) {
-        std::cerr << ' ' <<  x;
-        return *this;
-    }
-};
-
-#define D(args ...) { d_t, "|", __LINE__, "|", #args, ":", args, "\n"; }
-
 using node_index = SequenceGraph::node_index;
 
-string local_file(string filename) {
-    return fs::path(__FILE__).parent_path() / filename;
-}
 
 // TODO: remove these constants
 string HUMAN_REFERENCE_FILENAME = local_file("genomic_data/GCF_000001405.38_GRCh38.p12_genomic.fna");
