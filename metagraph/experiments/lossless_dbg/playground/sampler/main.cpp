@@ -8,7 +8,6 @@
 #include <nlohmann/json.hpp>
 #include <ProgressBar.hpp>
 #include <tclap/CmdLine.h>
-#include <gtest/gtest.h>
 
 using TCLAP::ValueArg;
 using TCLAP::MultiArg;
@@ -32,7 +31,6 @@ using json = nlohmann::json;
 #include "compressed_reads.hpp"
 #include "samplers.hpp"
 #include "utilities.hpp"
-#include "tests.hpp"
 
 #pragma clang diagnostic pop
 
