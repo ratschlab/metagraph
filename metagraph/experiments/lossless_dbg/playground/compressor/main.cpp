@@ -69,6 +69,7 @@ int main(int argc, char *argv[]) {
                                           "string");
     cmd.add(inputArg);
     cmd.add(statsArg);
+    cmd.add(decompressedArg);
     cmd.parse(argc, argv);
     auto input_filename = inputArg.getValue();
     auto statistics_filename = statsArg.getValue();
