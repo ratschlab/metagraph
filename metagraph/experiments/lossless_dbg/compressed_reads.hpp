@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <vector>
 #include <nlohmann/json.hpp>
+#include "utilities.hpp"
 
 using json = nlohmann::json;
 
