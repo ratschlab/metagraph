@@ -49,33 +49,34 @@ using node_index = SequenceGraph::node_index;
 
 int main(int argc, char *argv[]) {
     TCLAP::CmdLine cmd("Compress reads",' ', "0.1");
-    TCLAP::ValueArg<std::string> inputArg("i",
-                                         "input",
-                                         "FASTA/Q file that should be compressed",
-                                         true,
-                                         "",
-                                         "string");
-    TCLAP::ValueArg<std::string> statsArg("s",
-                                          "statistics",
-                                          "Filename of json file that will output statistics about compressed file.",
+    TCLAP::ValueArg<std::string> leftArg("l",
+                                          "left_hand_side",
+                                          "FASTA/Q file that should be compressed",
                                           true,
-                                          "statistics.json",
-                                          "string");
-    TCLAP::ValueArg<std::string> decompressedArg("d",
-                                          "decompressed_file",
-                                          "[for debugging purposes] Output the reads back in FASTA format.",
-                                          false,
                                           "",
                                           "string");
-    cmd.add(inputArg);
-    cmd.add(statsArg);
+    TCLAP::ValueArg<std::string> rightArg("r",
+                                          "right_hand_side",
+                                          "FASTA/Q file that should be compressed",
+                                          true,
+                                          "",
+                                          "string");
+    cmd.add(leftArg);
+    cmd.add(rightArg);
     cmd.parse(argc, argv);
-    auto input_filename = inputArg.getValue();
-    auto statistics_filename = statsArg.getValue();
-    auto reads = read_reads_from_fasta(input_filename);
-    auto compressed_reads = CompressedReads(reads);
-    auto statistics = compressed_reads.get_statistics();
-    save_string(statistics.dump(4),statistics_filename);
-
-    return 0;
+    auto left = leftArg.getValue();
+    auto right = rightArg.getValue();
+    auto left_reads_ordered = read_reads_from_fasta(left);
+    auto right_reads_ordered = read_reads_from_fasta(right);
+    auto left_reads = multiset<string>(all(left_reads_ordered));
+    auto right_reads = multiset<string>(all(right_reads_ordered));
+    if (left_reads == right_reads) {
+        cout << "Reads are identical up to ordering" << endl;
+        return 0;
+    }
+    else {
+        cout << "Files differ!!!" << endl;
+        cerr << "Files differ!!!" << endl;
+        return -1;
+    }
 }

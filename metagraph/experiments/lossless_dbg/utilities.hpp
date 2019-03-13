@@ -10,6 +10,19 @@
 #define utils_h
 
 #include "sequence_io.hpp"
+#include <nlohmann/json.hpp>
+
+namespace nlohmann {
+    template <typename T>
+    struct adl_serializer<std::map<int, T>> {
+    static void to_json(json& j, std::unordered_map<int, T> const& map) {
+        for (auto& [key, value] : map) {
+            // map int to string
+            j[std::to_string(key)] = value;
+        }
+    }
+};
+}
 
 #define x first
 #define y second
