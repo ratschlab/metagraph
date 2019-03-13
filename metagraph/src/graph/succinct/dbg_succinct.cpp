@@ -2256,12 +2256,11 @@ void DBGSuccinct::map_to_nodes(const std::string &sequence,
         assert(forward.size() == rev_compl.size());
 
         for (size_t i = 0; i < forward.size() && !terminate(); ++i) {
-            if (sequence.substr(i, get_k())
-                    < sequence_rev_compl.substr(sequence.size() - get_k() - i, get_k())) {
-                callback(boss_to_kmer_index(forward[i]));
-            } else {
-                callback(boss_to_kmer_index(rev_compl[rev_compl.size() - 1 - i]));
-            }
+            // the definition of a canonical k-mer is redefined:
+            //      use k-mer with smaller index in the BOSS table.
+            callback(boss_to_kmer_index(
+                std::min(forward[i], rev_compl[rev_compl.size() - 1 - i])
+            ));
         }
 
     } else {
