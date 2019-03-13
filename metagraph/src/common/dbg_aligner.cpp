@@ -103,8 +103,9 @@ void DBGAligner::inexact_map(const AlignedPath &path,
     if (!path.back())
         return;
     std::vector<node_index> out_neighbors;
-    graph_->adjacent_outgoing_nodes(path.back(), &out_neighbors);
-
+   // TODO: char is not used currently.
+    graph_->call_outgoing_kmers(path.back(), [&](node_index node, char)
+                                             { out_neighbors.push_back(node); });
     pick_all_strategy(out_neighbors, [&](node_index node) {
                            callback(node, path.get_sequence_it()); });
 }

@@ -170,6 +170,10 @@ std::string DBGSuccinct::get_node_sequence(node_index node) const {
             + boss_graph_->decode(boss_graph_->get_W(boss_edge));
 }
 
+char DBGSuccinct::get_kmer_last_char(node_index node) const {
+    return boss_graph_->decode(boss_graph_->get_W(node));
+}
+
 // Traverse graph mapping sequence to the graph nodes
 // and run callback for each node until the termination condition is satisfied.
 // Guarantees that nodes are called in the same order as the input sequence.
