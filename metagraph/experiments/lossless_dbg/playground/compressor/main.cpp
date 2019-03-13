@@ -76,6 +76,10 @@ int main(int argc, char *argv[]) {
     auto compressed_reads = CompressedReads(reads);
     auto statistics = compressed_reads.get_statistics();
     save_string(statistics.dump(4),statistics_filename);
+    if (decompressedArg.isSet()) {
+        auto decompressed_filename = decompressedArg.getValue();
+        write_reads_to_fasta(compressed_reads.get_reads(),decompressed_filename);
+    }
 
     return 0;
 }

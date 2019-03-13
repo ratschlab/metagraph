@@ -71,7 +71,7 @@ int main(int argc, char *argv[]) {
     auto left_reads = multiset<string>(all(left_reads_ordered));
     auto right_reads = multiset<string>(all(right_reads_ordered));
     if (left_reads == right_reads) {
-        cout << "Reads are identical up to ordering" << endl;
+        cout << "Reads are identical up to ordering." << endl;
         return 0;
     }
     else {
