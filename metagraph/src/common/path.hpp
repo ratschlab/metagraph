@@ -26,6 +26,7 @@ class Path {
         mapped_it_ = sequence_it; }
 
     NodeType back() const { return nodes_.back(); }
+    NodeType last_parent() const { return nodes_.at(nodes_.size() - 1); }
     size_t size() const { return nodes_.size(); }
     float get_total_loss() const { return loss_; }
     VLabels get_labels() const { return label_set_; }

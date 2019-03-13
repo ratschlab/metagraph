@@ -22,11 +22,12 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
     if (sequence.size() < graph_->get_k())
         return AlignedPath(sequence.end());
 
-    BoundedPriorityQueue<AlignedPath> queue (search_space_size_);
+    std::map<DPAlignmentKey, DPAlignmentValue> dp_alignment;
+    BoundedPriorityQueue<AlignedPath> queue(search_space_size_);
     queue.push(AlignedPath(std::begin(sequence)));
 
     while (!queue.empty()) {
-        AlignedPath path = queue.top();
+        auto path = queue.top();
         queue.pop();
 
         if (path.get_sequence_it() + graph_->get_k() > std::end(sequence))
@@ -50,8 +51,21 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
                         alternative_path.push_back(node, single_node_loss(node,
                             *(alternative_path.get_sequence_it() + graph_->get_k() - 1)),
                         annotator_->get(node));
-                        queue.push(alternative_path);
-                        } );
+
+                        DPAlignmentKey alternative_key{.node = alternative_path.back(),
+                                           .query_it = alternative_path.get_sequence_it()};
+                        DPAlignmentValue alternative_value = {.parent = alternative_path.last_parent(),
+                                                              .loss = alternative_path.get_total_loss()};
+                        auto dp_alignment_it = dp_alignment.find(alternative_key);
+                        if (dp_alignment_it == dp_alignment.end()) {
+                            dp_alignment[alternative_key] = alternative_value;
+                            queue.push(alternative_path);
+                        }
+                        if (dp_alignment_it->second.loss > alternative_path.get_total_loss()) {
+                            dp_alignment_it->second = alternative_value;
+                            queue.push(alternative_path);
+                        }
+                        });
     }
     return AlignedPath(sequence.end());
 }
@@ -65,6 +79,7 @@ float DBGAligner::single_node_loss(node_index node, char next_char) const {
 
 void DBGAligner::randomly_pick_strategy(std::vector<node_index> out_neighbors,
                                         const std::function<void(node_index)> &callback) const {
+    // random_device creates a different seed everytime this function is called.
     std::random_device r;
     std::default_random_engine engine(r());
     std::uniform_int_distribution<int> uniform_dist(0, out_neighbors.size() - 1);

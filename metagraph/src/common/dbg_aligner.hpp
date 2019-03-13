@@ -15,6 +15,21 @@ class DBGAligner : public AnnotatedDBG {
     typedef DeBruijnGraph::node_index node_index;
     typedef Path<node_index, Annotator::VLabels> AlignedPath;
 
+    struct DPAlignmentKey {
+        // The node in the underlying graph.
+        node_index node;
+        std::string::const_iterator query_it;
+
+        bool operator< (const DPAlignmentKey &other) const {
+            return node == other.node ? (query_it < other.query_it) : (node < other.node);
+        }
+    };
+    struct DPAlignmentValue {
+        // Index of the node which corresponds to the path with lowest cost.
+        node_index parent;
+        float loss;
+    };
+
     DBGAligner(DeBruijnGraph *dbg,
                Annotator *annotation,
                size_t num_threads = 0,
