@@ -72,9 +72,9 @@ public:
     }
 
     json get_statistics() {
-        map<int,int> bifurcation_size_histogram;
+        map<string,int> bifurcation_size_histogram;
         for(auto& read : compressed_reads) {
-            bifurcation_size_histogram[read.second.size()]++;
+            bifurcation_size_histogram[to_string(read.second.size())]++;
         }
         json result = {{"bifurcation_size",bifurcation_size_histogram},
                        {"total_size",compressed_size_without_reference()},

@@ -101,16 +101,16 @@ void get_statistics() {
 
     auto pb = ProgressBar(kmers_count, 70, '=', ' ', 10000);
 
-    map<int,int> kmer_outgoing_edges_statistics;
+    map<string,int> kmer_outgoing_edges_statistics;
     
     vector<node_index> outgoing_edges;
 
-    #pragma omp parallel for reduction(map_reduction:kmer_outgoing_edges_statistics)
+    //#pragma omp parallel for reduction(map_reduction:kmer_outgoing_edges_statistics)
     for (size_t i = 1; i <= graph.num_nodes(); ++i) {
         // const auto &kmer = graph.get_node_sequence(i);
         graph.adjacent_outgoing_nodes(i, &outgoing_edges);
 
-        kmer_outgoing_edges_statistics[outgoing_edges.size()]++;
+        kmer_outgoing_edges_statistics[to_string(outgoing_edges.size())]++;
 
         outgoing_edges.clear();
 
