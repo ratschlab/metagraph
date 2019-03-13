@@ -2257,10 +2257,10 @@ void DBGSuccinct::map_to_nodes(const std::string &sequence,
 
         for (size_t i = 0; i < forward.size() && !terminate(); ++i) {
             if (sequence.substr(i, get_k())
-                    < sequence_rev_compl.substr(i, get_k())) {
+                    < sequence_rev_compl.substr(sequence.size() - get_k() - i, get_k())) {
                 callback(boss_to_kmer_index(forward[i]));
             } else {
-                callback(boss_to_kmer_index(rev_compl[i]));
+                callback(boss_to_kmer_index(rev_compl[rev_compl.size() - 1 - i]));
             }
         }
 

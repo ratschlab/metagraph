@@ -32,10 +32,11 @@ inline TAlphabet encode(char s, const TAlphabet kCharToNucleotide[]) {
 }
 
 template <typename TAlphabet>
-inline std::vector<TAlphabet> encode(const std::string &sequence,
+inline std::vector<TAlphabet> encode(std::string::const_iterator begin,
+                                     std::string::const_iterator end,
                                      const TAlphabet kCharToNucleotide[]) {
-    std::vector<TAlphabet> seq_encoded(sequence.size(), 0);
-    std::transform(sequence.begin(), sequence.end(), seq_encoded.begin(),
+    std::vector<TAlphabet> seq_encoded(end - begin, 0);
+    std::transform(begin, end, seq_encoded.begin(),
         [&](char c) { return encode(c, kCharToNucleotide); }
     );
     return seq_encoded;
@@ -62,12 +63,12 @@ inline void sequence_to_kmers(size_t k,
         bool suffix_matched_forward = std::equal(suffix.begin(), suffix.end(),
                                                  &seq[i + k - suffix.size()]);
         bool suffix_matched_reverse = std::equal(suffix.begin(), suffix.end(),
-                                                 &rev_comp[i + k - suffix.size()]);
+                                                 &rev_comp[rev_comp.size() - i - suffix.size()]);
         if (!suffix_matched_forward && !suffix_matched_reverse)
             continue;
 
         auto forward = KMER(&seq[i], k);
-        auto reverse = KMER(&rev_comp[i], k);
+        auto reverse = KMER(&rev_comp[rev_comp.size() - i - k], k);
 
         if (forward < reverse) {
             if (suffix_matched_forward)
@@ -214,12 +215,12 @@ char KmerExtractor::decode(TAlphabet c) {
 std::vector<KmerExtractor::TAlphabet>
 KmerExtractor::encode(const std::string &sequence) {
     #ifndef NDEBUG
-    auto encoded = extractor::encode(sequence, kCharToNucleotide);
+    auto encoded = extractor::encode(sequence.begin(), sequence.end(), kCharToNucleotide);
     assert(std::all_of(encoded.begin(), encoded.end(),
         [&](TAlphabet c) { return c < alphabet.size(); }
     ));
     #endif
-    return extractor::encode(sequence, kCharToNucleotide);
+    return extractor::encode(sequence.begin(), sequence.end(), kCharToNucleotide);
 }
 
 std::string KmerExtractor::decode(const std::vector<TAlphabet> &sequence) {
@@ -311,12 +312,12 @@ KmerExtractor2BitTDecl(char)
 KmerExtractor2BitTDecl(std::vector<KmerExtractor2Bit::TAlphabet>)
 ::encode(const std::string &sequence) const {
     #ifndef NDEBUG
-    auto encoded = extractor::encode(sequence, char_to_code_);
+    auto encoded = extractor::encode(sequence.begin(), sequence.end(), char_to_code_);
     assert(std::all_of(encoded.begin(), encoded.end(),
         [&](TAlphabet c) { return c < alphabet.size(); }
     ));
     #endif
-    return extractor::encode(sequence, char_to_code_);
+    return extractor::encode(sequence.begin(), sequence.end(), char_to_code_);
 }
 
 KmerExtractor2BitTDecl(std::string)

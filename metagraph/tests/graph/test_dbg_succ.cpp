@@ -13,6 +13,7 @@
 #include "dbg_succinct.hpp"
 #include "dbg_succinct_construct.hpp"
 #include "utils.hpp"
+#include "helpers.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 
@@ -2095,6 +2096,59 @@ TEST(DBGSuccinct, Traversals) {
     }
 }
 
+TEST(DBGSuccinct, TraversalsCanonical) {
+    for (size_t k = 2; k <= 10; ++k) {
+        DBGSuccConstructor constructor(k - 1);
+        constructor.add_sequence(std::string(100, 'A') + std::string(100, 'C'));
+        constructor.add_sequence(std::string(100, 'G') + std::string(100, 'T'));
+        std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new DBG_succ(&constructor), true) };
+
+        uint64_t it = 0;
+        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+        graph->map_to_nodes(
+            std::string(k, 'T'),
+            [&](auto i) {
+                EXPECT_EQ(i, it);
+            }
+        );
+
+        uint64_t it2;
+        graph->map_to_nodes(
+            std::string(k - 1, 'A') + "C",
+            [&](auto i) { it2 = i; }
+        );
+        EXPECT_EQ(it, graph->traverse(it, 'A'));
+        EXPECT_EQ(it2, graph->traverse(it, 'C'));
+        EXPECT_EQ(it, graph->traverse_back(it2, 'A'));
+        EXPECT_EQ(DBGSuccinct::npos, graph->traverse(it, 'G'));
+        EXPECT_EQ(DBGSuccinct::npos, graph->traverse_back(it2, 'G'));
+
+        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        ASSERT_NE(DBGSuccinct::npos, it);
+        graph->map_to_nodes(
+            std::string(k, 'C'),
+            [&](auto i) {
+                EXPECT_EQ(i, it);
+            }
+        );
+        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        ASSERT_NE(DBGSuccinct::npos, it);
+        graph->map_to_nodes(
+            std::string(k, 'C'),
+            [&](auto i) {
+                EXPECT_EQ(i, it);
+            }
+        );
+        graph->map_to_nodes(
+            std::string(k - 1, 'G') + "T",
+            [&](auto i) { it2 = i; }
+        );
+        ASSERT_NE(DBGSuccinct::npos, it2);
+        EXPECT_EQ(DBGSuccinct::npos, graph->traverse(it2, 'T'));
+        EXPECT_NE(DBGSuccinct::npos, graph->traverse(it2, 'C'));
+    }
+}
+
 TEST(DBGSuccinct, TraversalsDBG) {
     const auto npos = DeBruijnGraph::npos;
 
@@ -2363,6 +2417,7 @@ TEST(DBGSuccinct, OutgoingAdjacent) {
 
         // AA, AAAAA
         graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+        ASSERT_NE(SequenceGraph::npos, it);
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{ it, graph->traverse(it, 'C') }),
@@ -2382,6 +2437,7 @@ TEST(DBGSuccinct, OutgoingAdjacent) {
 
         // CC, CCCCC
         graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
+        ASSERT_NE(SequenceGraph::npos, it);
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{
@@ -2403,6 +2459,7 @@ TEST(DBGSuccinct, OutgoingAdjacent) {
 
         // GGGGG
         graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        ASSERT_NE(SequenceGraph::npos, it);
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{ it, graph->traverse(it, 'G') }),
@@ -2426,6 +2483,7 @@ TEST(DBGSuccinct, IncomingAdjacent) {
 
         // AA, AAAAA
         graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+        ASSERT_NE(SequenceGraph::npos, it);
         graph->adjacent_incoming_nodes(it, &adjacent_nodes);
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{ it }),
@@ -2444,6 +2502,7 @@ TEST(DBGSuccinct, IncomingAdjacent) {
 
         // CC, CCCCC
         graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
+        ASSERT_NE(SequenceGraph::npos, it);
         graph->adjacent_incoming_nodes(it, &adjacent_nodes);
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{
@@ -2468,6 +2527,7 @@ TEST(DBGSuccinct, IncomingAdjacent) {
 
         // GG, GGGGG
         graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        ASSERT_NE(SequenceGraph::npos, it);
         graph->adjacent_incoming_nodes(it, &adjacent_nodes);
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{
@@ -2564,5 +2624,54 @@ TEST(DBGSuccinct, map_to_nodes_DBG) {
         );
 
         EXPECT_EQ(boss_indexes, dbg_indexes);
+    }
+}
+
+TEST(DBGSuccinct, map_to_nodes_DBG_canonical) {
+    for (size_t k = 1; k < 10; ++k) {
+        std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new DBG_succ(k)) };
+        std::unique_ptr<DeBruijnGraph> graph_can { new DBGSuccinct(new DBG_succ(k), true) };
+
+        graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
+        graph->add_sequence(std::string(100, 'G') + std::string(100, 'T'));
+        graph_can->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
+        graph_can->add_sequence(std::string(100, 'G') + std::string(100, 'T'));
+
+        std::string sequence_to_map = std::string(2, 'T')
+                                        + std::string(k + 3, 'A')
+                                        + std::string(2 * k, 'C');
+        auto rev_seq = sequence_to_map;
+        reverse_complement(rev_seq.begin(), rev_seq.end());
+
+        std::vector<uint64_t> indices_forward;
+        graph->map_to_nodes(
+            sequence_to_map,
+            [&](auto i) { indices_forward.push_back(i); }
+        );
+        std::vector<uint64_t> indices_reverse;
+        graph->map_to_nodes(
+            rev_seq,
+            [&](auto i) { indices_reverse.push_back(i); }
+        );
+        std::reverse(indices_reverse.begin(), indices_reverse.end());
+
+        std::vector<uint64_t> indices_canonical;
+        graph_can->map_to_nodes(
+            sequence_to_map,
+            [&](auto i) { indices_canonical.push_back(i); }
+        );
+
+        ASSERT_EQ(indices_forward.size(), indices_reverse.size());
+        ASSERT_EQ(indices_forward.size(), indices_canonical.size());
+
+        for (size_t i = 0; i < indices_forward.size(); ++i) {
+            if (!indices_forward[i]) {
+                EXPECT_EQ(indices_canonical[i], indices_reverse[i]);
+            } else if (!indices_reverse[i]) {
+                EXPECT_EQ(indices_canonical[i], indices_forward[i]);
+            } else {
+                EXPECT_EQ(indices_canonical[i], std::min(indices_forward[i], indices_reverse[i]));
+            }
+        }
     }
 }
