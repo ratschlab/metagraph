@@ -64,6 +64,7 @@ TEST(KmerExtractor, encode_decode_string) {
         Vector<KmerExtractor::Kmer256> kmers;
 
         encoder.sequence_to_kmers(sequence, k, {}, &kmers);
+        EXPECT_EQ(kmers, encoder.sequence_to_kmers<KmerExtractor::Kmer256>(sequence, k));
         ASSERT_LT(2u, kmers.size());
         kmers.erase(kmers.begin());
         kmers.erase(kmers.end() - 1);
@@ -96,6 +97,12 @@ TEST(KmerExtractor, encode_decode_string_suffix) {
                 );
                 Vector<KmerExtractor::Kmer256> kmers;
                 encoder.sequence_to_kmers(sequence, k, suffix_encoded, &kmers);
+                EXPECT_EQ(
+                    kmers,
+                    encoder.sequence_to_kmers<KmerExtractor::Kmer256>(
+                        sequence, k, false, suffix_encoded
+                    )
+                );
                 for (const auto &kmer : kmers) {
                     auto jt = sequence_dummy.find(suffix, it);
                     ASSERT_NE(std::string::npos, jt);
@@ -192,6 +199,7 @@ TEST(KmerExtractor2Bit, encode_decode_string) {
         Vector<KmerExtractor2Bit::Kmer256> kmers;
 
         encoder.sequence_to_kmers(sequence, k, {}, &kmers);
+        EXPECT_EQ(kmers, encoder.sequence_to_kmers<sdsl::uint256_t>(sequence, k));
         ASSERT_LT(0u, kmers.size());
 
         std::string reconstructed = encoder.kmer_to_sequence(kmers[0], k);
@@ -205,7 +213,6 @@ TEST(KmerExtractor2Bit, encode_decode_string) {
         // #endif
     }
 }
-
 
 TEST(KmerExtractor2Bit, encode_decode_string_suffix) {
     KmerExtractor2Bit encoder;
@@ -235,6 +242,12 @@ TEST(KmerExtractor2Bit, encode_decode_string_suffix) {
                     bits[jt + len - k - 1] = 1;
                     it = jt;
                 }
+                EXPECT_EQ(
+                    kmers,
+                    encoder.sequence_to_kmers<sdsl::uint256_t>(
+                        sequence, k, false, encoder.encode(suffix)
+                    )
+                );
             }
             EXPECT_EQ(bits.size(), std::accumulate(bits.begin(), bits.end(), 0u));
         }
