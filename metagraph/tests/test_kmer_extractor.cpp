@@ -5,6 +5,7 @@
 
 #include "kmer_extractor.hpp"
 #include "utils.hpp"
+#include "helpers.hpp"
 
 // Disable death tests
 #ifndef _DEATH_TEST
@@ -76,6 +77,50 @@ TEST(KmerExtractor, encode_decode_string) {
     }
 }
 
+TEST(KmerExtractor, encode_decode_string_suffix) {
+    KmerExtractor encoder;
+    std::string sequence = "AAGGCAGCCTACCCCTCTGN";
+    std::vector<bool> bits(sequence.size(), false);
+    for (uint64_t k = 2; k <= sequence.length(); ++k) {
+        auto sequence_dummy = std::string(k - 1, '$') + sequence + "$";
+        for (size_t len = 1; len < std::min(k, uint64_t(5)); ++len) {
+            bits.assign(sequence.length() + 1, false);
+            auto suffixes = utils::generate_strings("ATGCN$", len);
+            for (const auto &suffix : suffixes) {
+                auto it = k - len;
+                std::vector<uint8_t> suffix_encoded;
+                std::transform(
+                    suffix.begin(), suffix.end(),
+                    std::back_inserter(suffix_encoded),
+                    [&](char c) { return c == '$' ? 0 : encoder.encode(c); }
+                );
+                Vector<KmerExtractor::Kmer256> kmers;
+                encoder.sequence_to_kmers(sequence, k, suffix_encoded, &kmers);
+                for (const auto &kmer : kmers) {
+                    auto jt = sequence_dummy.find(suffix, it);
+                    ASSERT_NE(std::string::npos, jt);
+                    ++jt;
+                    ASSERT_GE(jt + len, k + 1);
+                    ASSERT_GE(sequence_dummy.length(), jt + len - 1);
+                    EXPECT_EQ(
+                        std::string(
+                            sequence_dummy.begin() + jt + len - k - 1,
+                            sequence_dummy.begin() + jt + len - 1
+                        ),
+                        encoder.kmer_to_sequence(kmer, k)
+                    );
+                    ASSERT_GT(bits.size(), jt + len - k - 1);
+                    ASSERT_FALSE(bits[jt + len - k - 1]);
+                    bits[jt + len - k - 1] = 1;
+                    it = jt;
+                }
+            }
+            EXPECT_EQ(bits.size(), std::accumulate(bits.begin(), bits.end(), 0u))
+                << k << " " << len;
+        }
+    }
+}
+
 
 TEST(KmerExtractor2Bit, encode_decode) {
     KmerExtractor2Bit encoder;
@@ -92,7 +137,7 @@ TEST(KmerExtractor2Bit, encode_decode) {
 }
 
 KmerExtractor2Bit::Kmer64 to_kmer(const KmerExtractor2Bit &encoder,
-                              const std::string &kmer) {
+                                  const std::string &kmer) {
     Vector<KmerExtractor2Bit::Kmer64> kmers;
     encoder.sequence_to_kmers(kmer, kmer.size(), {}, &kmers);
     return kmers.at(0);
@@ -158,5 +203,40 @@ TEST(KmerExtractor2Bit, encode_decode_string) {
         // #else
         //     EXPECT_EQ(std::string("AAGGCAGCCTACNCCCTCTG"), reconstructed);
         // #endif
+    }
+}
+
+
+TEST(KmerExtractor2Bit, encode_decode_string_suffix) {
+    KmerExtractor2Bit encoder;
+    std::string sequence = "AAGGCAGCCTACCCCTCTG";
+    std::vector<bool> bits;
+    for (uint64_t k = 2; k <= sequence.length(); ++k) {
+        for (size_t len = 1; len < std::min(k, uint64_t(5)); ++len) {
+            bits.assign(sequence.size() + 1 - k, false);
+            auto suffixes = utils::generate_strings("ATGC", len);
+            for (const auto &suffix : suffixes) {
+                uint64_t it = k - len;
+                Vector<KmerExtractor2Bit::Kmer256> kmers;
+                encoder.sequence_to_kmers(sequence, k, encoder.encode(suffix), &kmers);
+                for (const auto &kmer : kmers) {
+                    auto jt = sequence.find(suffix, it);
+                    ASSERT_NE(std::string::npos, jt);
+                    ++jt;
+                    EXPECT_EQ(
+                        std::string(
+                            sequence.begin() + jt + len - k - 1,
+                            sequence.begin() + jt + len - 1
+                        ),
+                        encoder.kmer_to_sequence(kmer, k)
+                    );
+                    ASSERT_GT(bits.size(), jt + len - k - 1);
+                    ASSERT_FALSE(bits[jt + len - k - 1]);
+                    bits[jt + len - k - 1] = 1;
+                    it = jt;
+                }
+            }
+            EXPECT_EQ(bits.size(), std::accumulate(bits.begin(), bits.end(), 0u));
+        }
     }
 }
