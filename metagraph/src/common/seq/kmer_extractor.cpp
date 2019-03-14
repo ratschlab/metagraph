@@ -121,7 +121,7 @@ inline void sequence_to_kmers_slide(size_t k,
             if (rev_comp.empty() || rev >= kmer) {
                 kmers->emplace_back(kmer);
             } else if (std::equal(suffix.begin(), suffix.end(),
-                               &rev_comp[seq.size() - i - suffix.size()])) {
+                                  &rev_comp[seq.size() - i - suffix.size()])) {
                 kmers->emplace_back(rev);
             }
         } else if (rev_comp.size()
