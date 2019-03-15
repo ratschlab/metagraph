@@ -43,9 +43,7 @@ TEST(Construct_SD_64, ConstructionNEAppendingSimplePath) {
         EXPECT_EQ(1u, constructed.num_nodes());
 
         DBGSD appended(k);
-        ASSERT_EQ(appended.capacity(), appended.num_nodes()) << k;
         ASSERT_DEATH(appended.add_sequence(std::string(100, 'A')), "");
-        ASSERT_EQ(appended.capacity(), appended.num_nodes()) << k;
 
         ASSERT_NE(constructed, appended);
     }
@@ -61,9 +59,7 @@ TEST(Construct_SD_64, ConstructionNEAppendingTwoPaths) {
 
         DBGSD appended(k);
         ASSERT_DEATH(appended.add_sequence(std::string(100, 'A')), "");
-        ASSERT_EQ(appended.capacity(), appended.num_nodes()) << k;
         ASSERT_DEATH(appended.add_sequence(std::string(50, 'C')), "");
-        ASSERT_EQ(appended.capacity(), appended.num_nodes()) << k;
 
         ASSERT_NE(constructed, appended);
     }
@@ -113,11 +109,6 @@ TEST(Construct_SD_64, ConstructionEQAppending) {
         EXPECT_EQ(kmers.size(), constructed.num_nodes());
 
         DBGSD appended(k);
-        // for (const auto &sequence : input_data) {
-            ASSERT_EQ(appended.capacity(), appended.num_nodes()) << k;
-            // ASSERT_DEATH(appended.add_sequence(sequence), "");
-        // }
-
         EXPECT_NE(constructed, appended);
     }
 }
@@ -147,11 +138,6 @@ TEST(Construct_SD_64, ConstructionEQAppendingCanonical) {
         EXPECT_EQ(kmers.size(), constructed.num_nodes());
 
         DBGSD appended(k);
-        // for (const auto &sequence : input_data) {
-            ASSERT_EQ(appended.capacity(), appended.num_nodes()) << k;
-            // ASSERT_DEATH(appended.add_sequence(sequence), "");
-        // }
-
         EXPECT_NE(constructed, appended);
     }
 }
