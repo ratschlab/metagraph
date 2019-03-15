@@ -2419,6 +2419,7 @@ TEST(DBGSuccinct, OutgoingAdjacent) {
         graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
         ASSERT_NE(SequenceGraph::npos, it);
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{ it, graph->traverse(it, 'C') }),
             convert_to_set(adjacent_nodes)
@@ -2427,11 +2428,15 @@ TEST(DBGSuccinct, OutgoingAdjacent) {
 
         // AC, AAAAC
         it = graph->traverse(it, 'C');
-        auto outset = convert_to_set(std::vector<uint64_t>{ graph->traverse(it, 'C') });
-        if (k == 2)
-            outset.insert(graph->traverse(it, 'G'));
-
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        auto outset = convert_to_set(std::vector<uint64_t>{ graph->traverse(it, 'C') });
+        if (k == 2) {
+            outset.insert(graph->traverse(it, 'G'));
+            ASSERT_EQ(2u, adjacent_nodes.size());
+        } else {
+            ASSERT_EQ(1u, adjacent_nodes.size());
+        }
+
         EXPECT_EQ(outset, convert_to_set(adjacent_nodes));
         adjacent_nodes.clear();
 
@@ -2439,6 +2444,7 @@ TEST(DBGSuccinct, OutgoingAdjacent) {
         graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
         ASSERT_NE(SequenceGraph::npos, it);
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{
                 it,
@@ -2451,6 +2457,7 @@ TEST(DBGSuccinct, OutgoingAdjacent) {
         // CG, CCCCG
         it = graph->traverse(it, 'G');
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{ graph->traverse(it, 'G') }),
             convert_to_set(adjacent_nodes)
@@ -2461,8 +2468,9 @@ TEST(DBGSuccinct, OutgoingAdjacent) {
         graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
         ASSERT_NE(SequenceGraph::npos, it);
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
-            convert_to_set(std::vector<uint64_t>{ it, graph->traverse(it, 'G') }),
+            convert_to_set(std::vector<uint64_t>{ graph->traverse(it, 'G') }),
             convert_to_set(adjacent_nodes)
         );
         adjacent_nodes.clear();
@@ -2485,6 +2493,7 @@ TEST(DBGSuccinct, IncomingAdjacent) {
         graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
         ASSERT_NE(SequenceGraph::npos, it);
         graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{ it }),
             convert_to_set(adjacent_nodes)
@@ -2494,6 +2503,7 @@ TEST(DBGSuccinct, IncomingAdjacent) {
         // AC, AAAAC
         it = graph->traverse(it, 'C');
         graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{ graph->traverse_back(it, 'A') }),
             convert_to_set(adjacent_nodes)
@@ -2504,6 +2514,7 @@ TEST(DBGSuccinct, IncomingAdjacent) {
         graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
         ASSERT_NE(SequenceGraph::npos, it);
         graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{
                 it,
@@ -2516,6 +2527,7 @@ TEST(DBGSuccinct, IncomingAdjacent) {
         // CG, CCCCG
         it = graph->traverse(it, 'G');
         graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{
                 graph->traverse_back(it, 'A'),
@@ -2529,6 +2541,7 @@ TEST(DBGSuccinct, IncomingAdjacent) {
         graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
         ASSERT_NE(SequenceGraph::npos, it);
         graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{
                 it,

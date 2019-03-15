@@ -1309,6 +1309,7 @@ TEST(DBGSD, OutgoingAdjacent) {
         // AA, AAAAA
         graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{ it, graph->traverse(it, 'C') }),
             convert_to_set(adjacent_nodes)
@@ -1318,16 +1319,21 @@ TEST(DBGSD, OutgoingAdjacent) {
         // AC, AAAAC
         it = graph->traverse(it, 'C');
         auto outset = convert_to_set(std::vector<uint64_t>{ graph->traverse(it, 'C') });
-        if (k == 2)
-            outset.insert(graph->traverse(it, 'G'));
-
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        if (k == 2) {
+            outset.insert(graph->traverse(it, 'G'));
+            ASSERT_EQ(2u, adjacent_nodes.size());
+        } else {
+            ASSERT_EQ(1u, adjacent_nodes.size());
+        }
+
         EXPECT_EQ(outset, convert_to_set(adjacent_nodes));
         adjacent_nodes.clear();
 
         // CC, CCCCC
         graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{
                 it,
@@ -1340,6 +1346,7 @@ TEST(DBGSD, OutgoingAdjacent) {
         // CG, CCCCG
         it = graph->traverse(it, 'G');
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{ graph->traverse(it, 'G') }),
             convert_to_set(adjacent_nodes)
@@ -1349,8 +1356,9 @@ TEST(DBGSD, OutgoingAdjacent) {
         // GGGGG
         graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
-            convert_to_set(std::vector<uint64_t>{ it, graph->traverse(it, 'G') }),
+            convert_to_set(std::vector<uint64_t>{ graph->traverse(it, 'G') }),
             convert_to_set(adjacent_nodes)
         );
         adjacent_nodes.clear();
@@ -1370,6 +1378,7 @@ TEST(DBGSD, IncomingAdjacent) {
         // AA, AAAAA
         graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
         graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{ it }),
             convert_to_set(adjacent_nodes)
@@ -1379,6 +1388,7 @@ TEST(DBGSD, IncomingAdjacent) {
         // AC, AAAAC
         it = graph->traverse(it, 'C');
         graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{ graph->traverse_back(it, 'A') }),
             convert_to_set(adjacent_nodes)
@@ -1388,6 +1398,7 @@ TEST(DBGSD, IncomingAdjacent) {
         // CC, CCCCC
         graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
         graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{
                 it,
@@ -1400,6 +1411,7 @@ TEST(DBGSD, IncomingAdjacent) {
         // CG, CCCCG
         it = graph->traverse(it, 'G');
         graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{
                 graph->traverse_back(it, 'A'),
@@ -1412,6 +1424,7 @@ TEST(DBGSD, IncomingAdjacent) {
         // GG, GGGGG
         graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
         graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
             convert_to_set(std::vector<uint64_t>{
                 it,

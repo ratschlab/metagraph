@@ -8,9 +8,6 @@
 #include "helpers.hpp"
 
 
-const std::string kAlphabet = "ACGTN";
-
-
 DBGHashOrdered::DBGHashOrdered(size_t k, bool canonical_only)
       : k_(k), canonical_only_(canonical_only) {}
 
@@ -59,7 +56,7 @@ void DBGHashOrdered::adjacent_outgoing_nodes(node_index node,
 
     const auto kmer = get_kmer(node);
 
-    for (char c : kAlphabet) {
+    for (char c : seq_encoder_.alphabet) {
         auto next_kmer = kmer;
         next_kmer.to_next(k_, seq_encoder_.encode(c));
         auto next = get_index(next_kmer);
@@ -74,7 +71,7 @@ void DBGHashOrdered::adjacent_incoming_nodes(node_index node,
 
     const auto kmer = get_kmer(node);
 
-    for (char c : kAlphabet) {
+    for (char c : seq_encoder_.alphabet) {
         auto next_kmer = kmer;
         next_kmer.to_prev(k_, seq_encoder_.encode(c));
         auto next = get_index(next_kmer);
