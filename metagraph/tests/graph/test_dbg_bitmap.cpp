@@ -28,10 +28,12 @@ const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 const KmerExtractor2Bit kmer_extractor;
 
 uint64_t kmer_string_to_index(const DBGSD &graph, const std::string &kmer) {
-    Vector<DBGSD::Kmer> kmers;
-    graph.seq_encoder_.sequence_to_kmers(kmer, graph.k_, {}, &kmers);
-    assert(kmers.size() == 1);
-    return typename DBGSD::Kmer::KMerWordType(1u) + kmers[0].data();
+    DBGSD::node_index node;
+    graph.map_to_nodes_sequentially(
+        kmer.begin(), kmer.end(),
+        [&](const auto i) { node = i; }
+    );
+    return graph.node_to_index(node);
 }
 
 
@@ -1243,6 +1245,10 @@ TEST(DBGSD, TraversalsCanonical) {
 
         std::unique_ptr<DBGSD> graph { new DBGSD(&constructor) };
 
+        auto map_to_nodes_sequentially = [&](const auto &seq, auto callback) {
+            graph->map_to_nodes_sequentially(seq.begin(), seq.end(), callback);
+        };
+
         uint64_t it = 0;
         graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
         graph->map_to_nodes(
@@ -1251,11 +1257,27 @@ TEST(DBGSD, TraversalsCanonical) {
                 EXPECT_EQ(i, it);
             }
         );
+        map_to_nodes_sequentially(
+            std::string(k, 'A'),
+            [&](auto i) {
+                EXPECT_EQ(i, it);
+            }
+        );
+        map_to_nodes_sequentially(
+            std::string(k, 'T'),
+            [&](auto i) {
+                EXPECT_NE(i, it);
+            }
+        );
 
         uint64_t it2 = 0;
         graph->map_to_nodes(
             std::string(k - 1, 'A') + "C",
             [&](auto i) { it2 = i; }
+        );
+        map_to_nodes_sequentially(
+            std::string(k - 1, 'A') + "C",
+            [&](auto i) { EXPECT_EQ(it2, i); }
         );
         EXPECT_EQ(it, graph->traverse(it, 'A'));
         EXPECT_EQ(it2, graph->traverse(it, 'C'));
@@ -1273,11 +1295,40 @@ TEST(DBGSD, TraversalsCanonical) {
                 EXPECT_EQ(i, it);
             }
         );
+        map_to_nodes_sequentially(
+            std::string(k, 'C'),
+            [&](auto i) {
+                EXPECT_EQ(i, it);
+            }
+        );
         EXPECT_EQ(DBGSD::npos, graph->traverse(it, 'A'));
         EXPECT_EQ(DBGSD::npos, graph->traverse(it, 'G'));
         EXPECT_EQ(DBGSD::npos, graph->traverse(it, 'T'));
 
+        map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { it = i; });
+        ASSERT_NE(DBGSD::npos, it);
+        map_to_nodes_sequentially(
+            std::string(k, 'C'),
+            [&](auto i) {
+                EXPECT_NE(i, it);
+            }
+        );
+        graph->map_to_nodes(
+            std::string(k, 'C'),
+            [&](auto i) {
+                EXPECT_NE(i, it);
+            }
+        );
 
+        map_to_nodes_sequentially(
+            std::string(k - 1, 'G') + "T",
+            [&](auto i) { it2 = i; }
+        );
+        ASSERT_NE(DBGSD::npos, it2);
+        EXPECT_EQ(DBGSD::npos, graph->traverse(it, 'A'));
+        EXPECT_EQ(it, graph->traverse(it, 'G'));
+        EXPECT_EQ(it2, graph->traverse(it, 'T'));
+        EXPECT_EQ(it, graph->traverse_back(it2, 'G'));
 
         graph->map_to_nodes(
             std::string(k - 1, 'G') + "T",
@@ -1471,7 +1522,13 @@ TEST(DBGSD, TraversalsDBGCanonical) {
 
         uint64_t it = 0;
 
+        auto map_to_nodes_sequentially = [&](const auto &seq, auto callback) {
+            graph->map_to_nodes_sequentially(seq.begin(), seq.end(), callback);
+        };
+
         graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+        ASSERT_NE(npos, it);
+        map_to_nodes_sequentially(std::string(k, 'A'), [&](auto i) { it = i; });
         ASSERT_NE(npos, it);
 
         EXPECT_EQ(it, graph->traverse(it, 'A'));
@@ -1483,6 +1540,11 @@ TEST(DBGSD, TraversalsDBGCanonical) {
 
 
         // reverse complement
+        map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { it = i; });
+        ASSERT_NE(npos, it);
+        EXPECT_EQ(it, graph->traverse(it, 'G'));
+        ASSERT_NE(npos, graph->traverse(it, 'T'));
+        EXPECT_EQ(it, graph->traverse_back(graph->traverse(it, 'T'), 'G'));
 
 
         graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });

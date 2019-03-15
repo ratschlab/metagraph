@@ -209,6 +209,82 @@ TEST(DBGHashOrdered, Traversals) {
     }
 }
 
+TEST(DBGHashOrdered, TraversalsCanonical) {
+    for (size_t k = 2; k <= 10; ++k) {
+        std::unique_ptr<DeBruijnGraph> graph { new DBGHashOrdered(k, true) };
+        graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
+
+        auto map_to_nodes_sequentially = [&](const auto &seq, auto callback) {
+            graph->map_to_nodes_sequentially(seq.begin(), seq.end(), callback);
+        };
+
+        uint64_t it = 0;
+        map_to_nodes_sequentially(std::string(k, 'A'), [&](auto i) { it = i; });
+        map_to_nodes_sequentially(
+            std::string(k, 'T'),
+            [&](auto i) {
+                EXPECT_NE(i, it);
+            }
+        );
+        graph->map_to_nodes(
+            std::string(k, 'T'),
+            [&](auto i) {
+                EXPECT_EQ(i, it);
+            }
+        );
+
+        uint64_t it2;
+        map_to_nodes_sequentially(
+            std::string(k - 1, 'A') + "C",
+            [&](auto i) { it2 = i; }
+        );
+        EXPECT_EQ(it, graph->traverse(it, 'A'));
+        EXPECT_EQ(it2, graph->traverse(it, 'C'));
+        EXPECT_EQ(it, graph->traverse_back(it2, 'A'));
+        EXPECT_EQ(DBGHashOrdered::npos, graph->traverse(it, 'G'));
+        EXPECT_EQ(DBGHashOrdered::npos, graph->traverse_back(it2, 'G'));
+
+        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        ASSERT_NE(DBGHashOrdered::npos, it);
+        map_to_nodes_sequentially(
+            std::string(k, 'C'),
+            [&](auto i) {
+                EXPECT_EQ(i, it);
+            }
+        );
+        graph->map_to_nodes(
+            std::string(k, 'C'),
+            [&](auto i) {
+                EXPECT_EQ(i, it);
+            }
+        );
+        map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { it = i; });
+        ASSERT_NE(DBGHashOrdered::npos, it);
+        map_to_nodes_sequentially(
+            std::string(k, 'C'),
+            [&](auto i) {
+                EXPECT_NE(i, it);
+            }
+        );
+        graph->map_to_nodes(
+            std::string(k, 'C'),
+            [&](auto i) {
+                EXPECT_NE(i, it);
+            }
+        );
+
+        map_to_nodes_sequentially(
+            std::string(k - 1, 'G') + "T",
+            [&](auto i) { it2 = i; }
+        );
+        ASSERT_NE(DBGHashOrdered::npos, it2);
+        EXPECT_EQ(DBGHashOrdered::npos, graph->traverse(it, 'A'));
+        EXPECT_EQ(it, graph->traverse(it, 'G'));
+        EXPECT_EQ(it2, graph->traverse(it, 'T'));
+        EXPECT_EQ(it, graph->traverse_back(it2, 'G'));
+    }
+}
+
 TEST(DBGHashOrdered, OutgoingAdjacent) {
     for (size_t k = 2; k <= 20; ++k) {
         DBGHashOrdered graph(k);

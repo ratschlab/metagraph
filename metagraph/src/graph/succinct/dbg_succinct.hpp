@@ -585,15 +585,14 @@ class DBGSuccinct : public DeBruijnGraph {
                               const std::function<void(node_index)> &callback,
                               const std::function<bool()> &terminate = [](){ return false; }) const override;
 
-    // Map k-mers from sequence to nodes of the graph similarly to map_to_nodes
-    // Guarantees that the k-mers from sequence are called in their natural order
-    virtual void map_kmers_sequentially(std::string::const_iterator,
-                                        std::string::const_iterator,
-                                        const std::function<void(node_index)> &,
-                                        const std::function<bool()> &) const override final {
-        // TODO: Implement
-        throw std::runtime_error("Not implemented");
-    }
+    // Traverse graph mapping sequence to the graph nodes
+    // and run callback for each node until the termination condition is satisfied.
+    // Guarantees that nodes are called in the same order as the input sequence.
+    // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
+    virtual void map_to_nodes_sequentially(std::string::const_iterator begin,
+                                           std::string::const_iterator end,
+                                           const std::function<void(node_index)> &callback,
+                                           const std::function<bool()> &terminate = [](){ return false; }) const override final;
 
     virtual void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const override final;
 

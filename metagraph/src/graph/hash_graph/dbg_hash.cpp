@@ -40,6 +40,20 @@ void DBGHash::map_to_nodes(const std::string &sequence,
     }
 }
 
+void DBGHash::map_to_nodes_sequentially(std::string::const_iterator begin,
+                                        std::string::const_iterator end,
+                                        const std::function<void(node_index)> &callback,
+                                        const std::function<bool()> &terminate) const {
+    for (auto it = begin; it + k_ <= end; ++it) {
+        auto node = kmer_to_node(std::string(it, it + k_));
+
+        callback(node);
+
+        if (terminate())
+            return;
+    }
+}
+
 DBGHash::node_index DBGHash::traverse(node_index node, char next_char) const {
     assert(node);
     auto kmer = node_to_kmer(node).substr(1) + next_char;

@@ -28,6 +28,14 @@ class SequenceGraph {
                               const std::function<void(node_index)> &callback,
                               const std::function<bool()> &terminate = [](){ return false; }) const = 0;
 
+    // Traverse graph mapping sequence to the graph nodes
+    // and run callback for each node until the termination condition is satisfied.
+    // Guarantees that nodes are called in the same order as the input sequence
+    virtual void map_to_nodes_sequentially(std::string::const_iterator begin,
+                                           std::string::const_iterator end,
+                                           const std::function<void(node_index)> &callback,
+                                           const std::function<bool()> &terminate = [](){ return false; }) const = 0;
+
     // Given a node index and a pointer to a vector of node indices, iterates
     // over all the outgoing edges and pushes back indices of their target nodes.
     virtual void adjacent_outgoing_nodes(node_index node,
@@ -61,12 +69,14 @@ class DeBruijnGraph : public SequenceGraph {
     // Traverse the incoming edge
     virtual node_index traverse_back(node_index node, char prev_char) const = 0;
 
-    // Map k-mers from sequence to nodes of the graph similarly to map_to_nodes
-    // Guarantees that the k-mers from sequence are called in their natural order
-    virtual void map_kmers_sequentially(std::string::const_iterator begin,
-                                        std::string::const_iterator end,
-                                        const std::function<void(node_index)> &callback,
-                                        const std::function<bool()> &terminate
+    // Traverse graph mapping sequence to the graph nodes
+    // and run callback for each node until the termination condition is satisfied.
+    // Guarantees that nodes are called in the same order as the input sequence.
+    // In canonical mode, non-canonical k-mers are not mapped to canonical ones
+    virtual void map_to_nodes_sequentially(std::string::const_iterator begin,
+                                           std::string::const_iterator end,
+                                           const std::function<void(node_index)> &callback,
+                                           const std::function<bool()> &terminate
                                                         = [](){ return false; }) const = 0;
 
     virtual size_t outdegree(node_index) const = 0;

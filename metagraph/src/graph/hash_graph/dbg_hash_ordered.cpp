@@ -33,6 +33,26 @@ void DBGHashOrdered::add_sequence(const std::string &sequence,
     }
 }
 
+// Traverse graph mapping sequence to the graph nodes
+// and run callback for each node until the termination condition is satisfied.
+// Guarantees that nodes are called in the same order as the input sequence.
+// In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
+void DBGHashOrdered::map_to_nodes_sequentially(
+                              std::string::const_iterator begin,
+                              std::string::const_iterator end,
+                              const std::function<void(node_index)> &callback,
+                              const std::function<bool()> &terminate) const {
+    std::string str(begin, end);
+    for (const auto &kmer : sequence_to_kmers(std::string(begin, end))) {
+        callback(get_index(kmer));
+
+        if (terminate())
+            return;
+    }
+}
+
+// Traverse graph mapping sequence to the graph nodes
+// and run callback for each node until the termination condition is satisfied
 void DBGHashOrdered::map_to_nodes(const std::string &sequence,
                                   const std::function<void(node_index)> &callback,
                                   const std::function<bool()> &terminate) const {

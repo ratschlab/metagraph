@@ -2237,6 +2237,24 @@ std::string DBGSuccinct::get_node_sequence(node_index node) const {
 }
 
 // Traverse graph mapping sequence to the graph nodes
+// and run callback for each node until the termination condition is satisfied.
+// Guarantees that nodes are called in the same order as the input sequence.
+// In canonical mode, non-canonical k-mers are not mapped to canonical ones
+void DBGSuccinct::map_to_nodes_sequentially(std::string::const_iterator begin,
+                                            std::string::const_iterator end,
+                                            const std::function<void(node_index)> &callback,
+                                            const std::function<bool()> &terminate) const {
+    if (begin + get_k() > end)
+        return;
+
+    boss_graph_->map_to_edges(
+        std::string(begin, end),
+        [&](DBG_succ::edge_index i) { callback(boss_to_kmer_index(i)); },
+        terminate
+    );
+}
+
+// Map sequence k-mers to the canonical graph nodes
 // and run callback for each node until the termination condition is satisfied
 void DBGSuccinct::map_to_nodes(const std::string &sequence,
                                const std::function<void(node_index)> &callback,
