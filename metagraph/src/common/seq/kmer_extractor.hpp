@@ -117,6 +117,8 @@ class KmerExtractor2BitT {
         return kmer.to_string(k, alphabet);
     }
 
+    std::string reverse_complement(const std::string &sequence) const;
+
     // map input character to k-mer character
     TAlphabet encode(char s) const;
     std::vector<TAlphabet> encode(const std::string &sequence) const;

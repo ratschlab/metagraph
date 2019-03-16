@@ -18,7 +18,7 @@ class DBGHashOrdered : public DeBruijnGraph {
                                        std::deque<Kmer, std::allocator<Kmer>>,
                                        std::uint64_t>;
   public:
-    explicit DBGHashOrdered(size_t k, bool canonical_only = false);
+    explicit DBGHashOrdered(size_t k, bool canonical_mode = false);
 
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal
@@ -42,15 +42,12 @@ class DBGHashOrdered : public DeBruijnGraph {
         throw std::runtime_error("Not implemented");
     }
 
-    void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const {
-        // TODO: Complete call_outgoing_kmers for DBGHashOrdered.
-        throw std::runtime_error("Not implemented");
-    }
 
-    void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const {
-        // TODO: Complete call_incoming_kmers for DBGHashOrdered.
-        throw std::runtime_error("Not implemented");
-    }
+    void call_outgoing_kmers(node_index node,
+                             const OutgoingEdgeCallback &callback) const;
+
+    void call_incoming_kmers(node_index node,
+                             const IncomingEdgeCallback &callback) const;
 
     // Traverse the outgoing edge
     node_index traverse(node_index node, char next_char) const;
@@ -69,14 +66,11 @@ class DBGHashOrdered : public DeBruijnGraph {
     size_t outdegree(node_index) const;
 
     node_index kmer_to_node(const std::string &kmer) const;
-    std::string node_to_kmer(node_index node) const;
 
-    std::string get_node_sequence(node_index node) const {
-        return node_to_kmer(node);
-    }
+    std::string get_node_sequence(node_index node) const;
 
     size_t get_k() const { return k_; }
-    bool is_canonical_mode() const { return canonical_only_; }
+    bool is_canonical_mode() const { return canonical_mode_; }
 
     uint64_t num_nodes() const { return kmers_.size(); }
 
@@ -87,12 +81,12 @@ class DBGHashOrdered : public DeBruijnGraph {
     bool load(const std::string &filename);
 
   private:
-    Vector<Kmer> sequence_to_kmers(const std::string &sequence) const;
+    Vector<Kmer> sequence_to_kmers(const std::string &sequence, bool canonical = false) const;
     node_index get_index(const Kmer &kmer) const;
     Kmer get_kmer(node_index node) const;
 
     size_t k_;
-    bool canonical_only_;
+    bool canonical_mode_;
 
     KmerIndex kmers_;
     KmerExtractor2Bit seq_encoder_;

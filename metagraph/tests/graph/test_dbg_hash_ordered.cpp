@@ -165,7 +165,7 @@ TEST(DBGHashOrdered, CheckGraph) {
         }
 
         for (uint64_t i = 1; i <= graph.num_nodes(); ++i) {
-            ASSERT_EQ(i, graph.kmer_to_node(graph.node_to_kmer(i)));
+            EXPECT_EQ(i, graph.kmer_to_node(graph.get_node_sequence(i)));
         }
     }
 
@@ -183,7 +183,8 @@ TEST(DBGHashOrdered, CheckGraph) {
         }
 
         for (uint64_t i = 1; i <= graph.num_nodes(); ++i) {
-            ASSERT_EQ(i, graph.kmer_to_node(graph.node_to_kmer(i)));
+            EXPECT_EQ(i, graph.kmer_to_node(graph.get_node_sequence(i)))
+                << "Num nodes: " << graph.num_nodes();
         }
     }
 }

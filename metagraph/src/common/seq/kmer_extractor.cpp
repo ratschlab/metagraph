@@ -43,6 +43,16 @@ inline std::vector<TAlphabet> encode(std::string::const_iterator begin,
     return seq_encoded;
 }
 
+template <typename TAlphabet>
+std::vector<TAlphabet>
+inline reverse_complement(const std::vector<TAlphabet> &sequence,
+                          const std::vector<uint8_t> &canonical_map) {
+    std::vector<TAlphabet> rev_comp(sequence.size());
+    std::transform(sequence.rbegin(), sequence.rend(), rev_comp.begin(),
+                   [&](const auto c) -> TAlphabet { return canonical_map.at(c); });
+    return rev_comp;
+}
+
 
 /*
  * k-mer extractors
@@ -190,9 +200,7 @@ inline void sequence_to_kmers(const std::vector<TAlphabet> &seq,
             sequence_to_kmers_slide(k, seq, suffix, kmers);
         }
     } else {
-        std::vector<TAlphabet> rev_comp(seq.size());
-        std::transform(seq.rbegin(), seq.rend(), rev_comp.begin(),
-                       [&](const auto c) -> TAlphabet { return canonical_map.at(c); });
+        auto rev_comp = reverse_complement(seq, canonical_map);
         if (suffix.size() > 1) {
             sequence_to_kmers_canonical(k, seq, rev_comp, suffix, kmers);
         } else {
@@ -394,6 +402,11 @@ KmerExtractor2BitTDecl(std::vector<KmerExtractor2Bit::TAlphabet>)
 KmerExtractor2BitTDecl(std::string)
 ::decode(const std::vector<TAlphabet> &sequence) const {
     return extractor::decode(sequence, alphabet);
+}
+
+KmerExtractor2BitTDecl(std::string)
+::reverse_complement(const std::string &sequence) const {
+    return decode(extractor::reverse_complement(encode(sequence), complement_code_));
 }
 
 /**
