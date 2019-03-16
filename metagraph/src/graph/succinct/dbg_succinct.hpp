@@ -362,7 +362,7 @@ class DBG_succ {
      */
     uint64_t bwd(uint64_t i) const;
 
-    inline node_index get_source_node(edge_index i) const;
+    node_index get_source_node(edge_index i) const;
 
     // Given the alphabet index return the corresponding symbol
     char decode(TAlphabet s) const;
