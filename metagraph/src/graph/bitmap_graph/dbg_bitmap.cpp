@@ -281,9 +281,7 @@ void DBGSD::call_kmers(Call<node_index, const std::string&> callback) const {
 
 Vector<DBGSD::Kmer> DBGSD::sequence_to_kmers(const std::string &sequence,
                                              bool to_canonical) const {
-    Vector<Kmer> kmers;
-    seq_encoder_.sequence_to_kmers<uint64_t>(sequence, k_, {}, &kmers, to_canonical);
-    return kmers;
+    return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, to_canonical);
 }
 
 DBGSD::node_index DBGSD::get_node(const Kmer &kmer) const {

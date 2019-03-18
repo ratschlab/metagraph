@@ -106,11 +106,11 @@ class KmerExtractor2BitT {
                            const std::vector<TAlphabet> &suffix,
                            Vector<Kmer<T>> *kmers,
                            bool canonical_mode = false) const;
-    template <class T>
-    Vector<Kmer<T>> sequence_to_kmers(const std::string &sequence,
-                                      size_t k,
-                                      bool canonical_mode = false,
-                                      const std::vector<TAlphabet> &suffix = {}) const;
+    template <class KMER>
+    Vector<KMER> sequence_to_kmers(const std::string &sequence,
+                                   size_t k,
+                                   bool canonical_mode = false,
+                                   const std::vector<TAlphabet> &suffix = {}) const;
 
     template <class T>
     std::string kmer_to_sequence(const Kmer<T> &kmer, size_t k) const {

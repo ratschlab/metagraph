@@ -381,12 +381,12 @@ KmerExtractor2BitTDecl(template <typename T> void)
     );
 }
 
-KmerExtractor2BitTDecl(template <typename T> auto)
+KmerExtractor2BitTDecl(template <typename KMER> Vector<KMER>)
 ::sequence_to_kmers(const std::string &sequence,
                     size_t k,
                     bool canonical_mode,
-                    const std::vector<TAlphabet> &suffix) const -> Vector<Kmer<T>> {
-    Vector<Kmer<T>> kmers;
+                    const std::vector<TAlphabet> &suffix) const {
+    Vector<KMER> kmers;
 
     if (sequence.length() < k)
         return kmers;
@@ -414,10 +414,10 @@ ExplicitInstantiation_sequence_to_kmers(sdsl::uint256_t)
 #define ExplicitInstantiation_sequence_to_kmers_vector(T) \
 template \
 Vector<KmerExtractor2Bit::Kmer<T>> KmerExtractor2Bit \
-::sequence_to_kmers<T>(const std::string&, \
-                       size_t, \
-                       bool, \
-                       const std::vector<TAlphabet>&) const;
+::sequence_to_kmers<KmerExtractor2Bit::Kmer<T>>(const std::string&, \
+                                                size_t, \
+                                                bool, \
+                                                const std::vector<TAlphabet>&) const;
 
 ExplicitInstantiation_sequence_to_kmers_vector(uint64_t)
 ExplicitInstantiation_sequence_to_kmers_vector(sdsl::uint128_t)

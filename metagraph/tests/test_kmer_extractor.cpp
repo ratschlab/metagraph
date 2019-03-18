@@ -199,7 +199,7 @@ TEST(KmerExtractor2Bit, encode_decode_string) {
         Vector<KmerExtractor2Bit::Kmer256> kmers;
 
         encoder.sequence_to_kmers(sequence, k, {}, &kmers);
-        EXPECT_EQ(kmers, encoder.sequence_to_kmers<sdsl::uint256_t>(sequence, k));
+        EXPECT_EQ(kmers, encoder.sequence_to_kmers<KmerExtractor2Bit::Kmer256>(sequence, k));
         ASSERT_LT(0u, kmers.size());
 
         std::string reconstructed = encoder.kmer_to_sequence(kmers[0], k);
@@ -244,7 +244,7 @@ TEST(KmerExtractor2Bit, encode_decode_string_suffix) {
                 }
                 EXPECT_EQ(
                     kmers,
-                    encoder.sequence_to_kmers<sdsl::uint256_t>(
+                    encoder.sequence_to_kmers<KmerExtractor2Bit::Kmer256>(
                         sequence, k, false, encoder.encode(suffix)
                     )
                 );

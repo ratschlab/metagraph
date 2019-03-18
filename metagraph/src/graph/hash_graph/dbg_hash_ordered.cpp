@@ -150,15 +150,7 @@ bool DBGHashOrdered::load(const std::string &filename) {
 
 Vector<DBGHashOrdered::Kmer>
 DBGHashOrdered::sequence_to_kmers(const std::string &sequence) const {
-    if (sequence.size() < k_)
-        return {};
-
-    Vector<Kmer> kmers;
-    kmers.reserve(sequence.size() - k_ + 1);
-
-    seq_encoder_.sequence_to_kmers(sequence, k_, {}, &kmers, canonical_only_);
-
-    return kmers;
+    return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical_only_);
 }
 
 DBGHashOrdered::node_index DBGHashOrdered::get_index(const Kmer &kmer) const {
