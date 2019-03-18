@@ -21,6 +21,9 @@ template <typename Label = std::string>
 class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     friend ColumnCompressed<Label>;
 
+    template <class A, typename L>
+    friend std::unique_ptr<A> convert(RowCompressed<L>&&);
+
   public:
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
     using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;

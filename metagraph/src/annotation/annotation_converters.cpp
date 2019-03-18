@@ -5,9 +5,81 @@
 #include "BRWT_builders.hpp"
 #include "partitionings.hpp"
 #include "utils.hpp"
+#include "binary_matrix.hpp"
+#include "annotate_row_compressed.hpp"
 
 
 namespace annotate {
+
+
+template <>
+std::unique_ptr<RowFlatAnnotator>
+convert<RowFlatAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
+    uint64_t num_set_bits = annotator.num_relations();
+    uint64_t num_rows = annotator.num_objects();
+    uint64_t num_columns = annotator.num_labels();
+
+    auto matrix = std::make_unique<RowConcatenated<>>(
+        [&](auto callback) {
+            utils::call_rows(callback, dynamic_cast<const BinaryMatrixRowDynamic &>(*annotator.matrix_));
+        },
+        num_columns,
+        num_rows,
+        num_set_bits
+    );
+
+    return std::make_unique<RowFlatAnnotator>(std::move(matrix),
+                                              annotator.label_encoder_);
+}
+
+template <>
+std::unique_ptr<RainbowfishAnnotator>
+convert<RainbowfishAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
+    uint64_t num_columns = annotator.num_labels();
+
+    auto matrix = std::make_unique<Rainbowfish>([&](auto callback) {
+        utils::call_rows(callback, dynamic_cast<const BinaryMatrixRowDynamic &>(*annotator.matrix_));
+    }, num_columns);
+
+    return std::make_unique<RainbowfishAnnotator>(std::move(matrix),
+                                                  annotator.label_encoder_);
+}
+
+template <>
+std::unique_ptr<BinRelWT_sdslAnnotator>
+convert<BinRelWT_sdslAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
+    uint64_t num_set_bits = annotator.num_relations();
+    uint64_t num_columns = annotator.num_labels();
+
+    auto matrix = std::make_unique<BinRelWT_sdsl>(
+        [&](auto callback) {
+            utils::call_rows(callback, dynamic_cast<const BinaryMatrixRowDynamic &>(*annotator.matrix_));
+        },
+        num_set_bits,
+        num_columns
+    );
+
+    return std::make_unique<BinRelWT_sdslAnnotator>(std::move(matrix),
+                                                    annotator.label_encoder_);
+}
+
+template <>
+std::unique_ptr<BinRelWTAnnotator>
+convert<BinRelWTAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
+    uint64_t num_set_bits = annotator.num_relations();
+    uint64_t num_columns = annotator.num_labels();
+
+    auto matrix = std::make_unique<BinRelWT>(
+        [&](auto callback) {
+            utils::call_rows(callback, dynamic_cast<const BinaryMatrixRowDynamic &>(*annotator.matrix_));
+        },
+        num_set_bits,
+        num_columns
+    );
+
+    return std::make_unique<BinRelWTAnnotator>(std::move(matrix),
+                                               annotator.label_encoder_);
+}
 
 
 template <>

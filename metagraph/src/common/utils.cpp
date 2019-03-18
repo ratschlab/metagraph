@@ -9,6 +9,8 @@
 #include <boost/multiprecision/integer.hpp>
 #include <boost/functional/hash/hash.hpp>
 
+#include "binary_matrix.hpp"
+
 
 std::size_t SmallVectorHash::operator()(const SmallVector &vector) const {
     return boost::hash_range(vector.begin(), vector.end());
@@ -405,6 +407,15 @@ void call_rows(const std::function<void(const SetBitPositions &)> &callback,
     while (cur_row++ < transformer.rows()) {
         callback(indices);
         indices.clear();
+    }
+}
+
+void call_rows(const std::function<void(const SetBitPositions &)> &callback,
+               const BinaryMatrixRowDynamic &row_major_matrix) {
+    const auto num_rows = row_major_matrix.num_rows();
+
+    for (size_t i = 0; i < num_rows; ++i) {
+        callback(row_major_matrix.get_row(i));
     }
 }
 

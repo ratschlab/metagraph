@@ -495,6 +495,28 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
 }
 
 
+template <class AnnotatorTo, class AnnotatorFrom>
+void convert(std::unique_ptr<AnnotatorFrom> annotator,
+             const Config &config,
+             const Timer &timer) {
+    if (config.verbose)
+        std::cout << "Converting to " << Config::annotype_to_string(config.anno_type)
+                  << " annotator...\t" << std::flush;
+
+    auto target_annotator = annotate::convert<AnnotatorTo>(std::move(*annotator));
+    annotator.reset();
+    if (config.verbose)
+        std::cout << timer.elapsed() << "sec" << std::endl;
+
+    if (config.verbose)
+        std::cout << "Serializing to " << config.outfbase
+                  << "...\t" << std::flush;
+    target_annotator->serialize(config.outfbase);
+    if (config.verbose)
+        std::cout << timer.elapsed() << "sec" << std::endl;
+}
+
+
 void print_boss_stats(const DBG_succ &boss_graph,
                       bool count_dummy = false,
                       size_t num_threads = 0,
@@ -1811,11 +1833,100 @@ int main(int argc, const char *argv[]) {
                 return 0;
             }
 
-            std::unique_ptr<annotate::ColumnCompressed<>> annotator;
-
             if (dynamic_cast<const annotate::ColumnCompressed<> *>(annotation.get())) {
-                annotator.reset(dynamic_cast<annotate::ColumnCompressed<> *>(annotation.release()));
+                std::unique_ptr<annotate::ColumnCompressed<>> annotator {
+                    dynamic_cast<annotate::ColumnCompressed<> *>(annotation.release())
+                };
                 assert(annotator.get());
+
+                switch (config->anno_type) {
+                    case Config::ColumnCompressed:
+                        break;
+                    case Config::RowCompressed: {
+                        if (config->verbose)
+                            std::cout << "Converting...\t" << std::flush;
+
+                        annotate::RowCompressed<> row_annotator(0);
+                        annotator->convert_to_row_annotator(&row_annotator,
+                                                            config->parallel);
+                        annotator.reset();
+
+                        row_annotator.serialize(config->outfbase);
+                        if (config->verbose)
+                            std::cout << timer.elapsed() << "sec" << std::endl;
+                        break;
+                    }
+                    case Config::BRWT: {
+                        if (config->verbose)
+                            std::cout << "Converting...\t" << std::flush;
+
+                        auto brwt_annotator = config->greedy_brwt
+                            ? annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
+                                std::move(*annotator),
+                                config->parallel)
+                            : annotate::convert_to_simple_BRWT<annotate::BRWTCompressed<>>(
+                                std::move(*annotator),
+                                config->arity_brwt,
+                                config->parallel);
+
+                        annotator.reset();
+
+                        brwt_annotator->serialize(config->outfbase);
+                        if (config->verbose)
+                            std::cout << timer.elapsed() << "sec" << std::endl;
+                        break;
+                    }
+                    case Config::BinRelWT_sdsl: {
+                        convert<annotate::BinRelWT_sdslAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
+                    case Config::BinRelWT: {
+                        convert<annotate::BinRelWTAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
+                    case Config::RowFlat: {
+                        convert<annotate::RowFlatAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
+                    case Config::RBFish: {
+                        convert<annotate::RainbowfishAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
+                }
+
+            } else if (dynamic_cast<const annotate::RowCompressed<> *>(annotation.get())) {
+                std::unique_ptr<annotate::RowCompressed<>> annotator {
+                    dynamic_cast<annotate::RowCompressed<> *>(annotation.release())
+                };
+                assert(annotator.get());
+
+                switch (config->anno_type) {
+                    case Config::RowCompressed: {
+                        break;
+                    }
+                    case Config::BinRelWT_sdsl: {
+                        convert<annotate::BinRelWT_sdslAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
+                    case Config::BinRelWT: {
+                        convert<annotate::BinRelWTAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
+                    case Config::RowFlat: {
+                        convert<annotate::RowFlatAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
+                    case Config::RBFish: {
+                        convert<annotate::RainbowfishAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
+                    default:
+                        std::cerr << "Error: Conversion to other representation"
+                                  << " is implemented only for ColumnCompressed annotation."
+                                  << std::endl;
+                        exit(1);
+                }
+
             } else {
                 std::cerr << "Error: Conversion to other representation"
                           << " is implemented only for ColumnCompressed annotation."
@@ -1823,122 +1934,6 @@ int main(int argc, const char *argv[]) {
                 exit(1);
             }
 
-            switch (config->anno_type) {
-                case Config::ColumnCompressed:
-                    break;
-                case Config::RowCompressed: {
-                    if (config->verbose)
-                        std::cout << "Converting...\t" << std::flush;
-
-                    annotate::RowCompressed<> row_annotator(0);
-                    annotator->convert_to_row_annotator(&row_annotator,
-                                                        config->parallel);
-                    annotator.reset();
-
-                    row_annotator.serialize(config->outfbase);
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-                    break;
-                }
-                case Config::BRWT: {
-                    if (config->verbose)
-                        std::cout << "Converting...\t" << std::flush;
-
-                    auto brwt_annotator = config->greedy_brwt
-                        ? annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
-                            std::move(*annotator),
-                            config->parallel)
-                        : annotate::convert_to_simple_BRWT<annotate::BRWTCompressed<>>(
-                            std::move(*annotator),
-                            config->arity_brwt,
-                            config->parallel);
-
-                    annotator.reset();
-
-                    brwt_annotator->serialize(config->outfbase);
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-                    break;
-                }
-                case Config::BinRelWT_sdsl: {
-                    if (config->verbose)
-                        std::cout << "Converting...\t" << std::flush;
-
-                    auto binrelwt_sdsl_annotator
-                            = annotate::convert<annotate::BinRelWT_sdslAnnotator>(
-                        std::move(*annotator)
-                    );
-                    annotator.reset();
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-
-                    if (config->verbose)
-                        std::cout << "Serializing to " << config->outfbase
-                                  << "...\t" << std::flush;
-                    binrelwt_sdsl_annotator->serialize(config->outfbase);
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-                    break;
-                }
-                case Config::BinRelWT: {
-                    if (config->verbose)
-                        std::cout << "Converting...\t" << std::flush;
-
-                    auto binrelwt_annotator = annotate::convert<annotate::BinRelWTAnnotator>(
-                        std::move(*annotator)
-                    );
-                    annotator.reset();
-                    if (config->verbose)
-                       std::cout << timer.elapsed() << "sec" << std::endl;
-
-                    if (config->verbose)
-                        std::cout << "Serializing to " << config->outfbase
-                                  << "...\t" << std::flush;
-                    binrelwt_annotator->serialize(config->outfbase);
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-                    break;
-                }
-                case Config::RowFlat: {
-                    if (config->verbose)
-                        std::cout << "Converting to flat annotator...\t" << std::flush;
-
-                    auto flat_annotator = annotate::convert<annotate::RowFlatAnnotator>(
-                        std::move(*annotator)
-                    );
-                    annotator.reset();
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-
-                    if (config->verbose)
-                        std::cout << "Serializing to " << config->outfbase
-                                  << "...\t" << std::flush;
-                    flat_annotator->serialize(config->outfbase);
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-                    break;
-                }
-                case Config::RBFish: {
-                    if (config->verbose)
-                        std::cout << "Converting to rainbowfish annotator...\t" << std::flush;
-
-                    auto flat_annotator = annotate::convert<annotate::RainbowfishAnnotator>(
-                        std::move(*annotator)
-                    );
-                    annotator.reset();
-
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-
-                    if (config->verbose)
-                        std::cout << "Serializing to " << config->outfbase
-                                  << "...\t" << std::flush;
-                    flat_annotator->serialize(config->outfbase);
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-                    break;
-                }
-            }
             return 0;
         }
         case Config::TRANSFORM: {

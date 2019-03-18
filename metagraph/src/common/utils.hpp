@@ -34,6 +34,8 @@ struct SmallVectorHash {
     std::size_t operator()(const SmallVector &vector) const;
 };
 
+class BinaryMatrixRowDynamic;
+
 
 namespace utils {
 
@@ -331,6 +333,8 @@ namespace utils {
     using SetBitPositions = std::vector<uint64_t>;
     void call_rows(const std::function<void(const SetBitPositions &)> &callback,
                    RowsFromColumnsTransformer&& transformer);
+    void call_rows(const std::function<void(const SetBitPositions &)> &callback,
+                   const BinaryMatrixRowDynamic &row_major_matrix);
 
     template <typename... Args>
     void call_rows(const std::function<void(const SetBitPositions &)> &callback,

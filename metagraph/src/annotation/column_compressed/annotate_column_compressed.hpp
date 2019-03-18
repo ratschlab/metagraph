@@ -19,9 +19,6 @@ class RowCompressed;
 
 template <typename Label = std::string>
 class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
-    template <typename L>
-    friend class FastColumnCompressed;
-
     template <class A, typename L>
     friend std::unique_ptr<A> convert(ColumnCompressed<L>&&);
 
