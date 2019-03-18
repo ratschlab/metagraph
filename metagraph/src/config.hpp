@@ -28,6 +28,7 @@ class Config {
     bool filter_present = false;
     bool dump_raw_anno = false;
     bool sparse = false;
+    bool fast = false;
     bool count_labels = false;
     bool suppress_unlabeled = false;
     bool generate_filtered_fasta = false;

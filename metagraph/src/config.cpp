@@ -95,6 +95,8 @@ Config::Config(int argc, const char *argv[]) {
             suppress_unlabeled = true;
         } else if (!strcmp(argv[i], "--sparse")) {
             sparse = true;
+        } else if (!strcmp(argv[i], "--fast")) {
+            fast = true;
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
             parallel = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--parts-total")) {
@@ -591,6 +593,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --header-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
             fprintf(stderr, "\t   --anno-label [STR]\t\tadd label to annotation for all sequences from the files passed []\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+            // fprintf(stderr, "\t   --fast \t\t\tannotate in fast regime (leads to repeated labels and bigger annotation) [off]\n");
         } break;
         case ANNOTATE_COORDINATES: {
             fprintf(stderr, "Usage: %s coordinate -i <graph> [options] <PATH1> [[PATH2] ...]\n"
@@ -605,6 +608,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --filter-k [INT] \t\tlength of k-mers used for counting and filtering [3]\n");
             fprintf(stderr, "\t   --coord-binsize [INT]\tstepsize for k-mer coordinates in input sequences from the fasta files [1000]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t   --fast \t\t\tannotate in fast regime [off]\n");
         } break;
         case MERGE_ANNOTATIONS: {
             fprintf(stderr, "Usage: %s merge_anno [options] -o <annotator_basename> <ANNOT1> [[ANNOT2] ...]\n\n", prog_name.c_str());

@@ -1372,7 +1372,8 @@ int main(int argc, const char *argv[]) {
             AnnotatedDBG anno_graph(
                 graph_temp.release(),
                 annotation_temp.release(),
-                config->parallel
+                config->parallel,
+                config->fast
             );
 
             if (!anno_graph.check_compatibility()) {

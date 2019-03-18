@@ -1,11 +1,15 @@
 #include "annotated_dbg.hpp"
 
+#include "annotate_row_compressed.hpp"
+
 
 AnnotatedDBG::AnnotatedDBG(SequenceGraph *dbg,
                            Annotator *annotation,
-                           size_t num_threads)
+                           size_t num_threads,
+                           bool force_fast)
       : graph_(dbg), annotator_(annotation),
-        thread_pool_(num_threads > 1 ? num_threads : 0) {}
+        thread_pool_(num_threads > 1 ? num_threads : 0),
+        force_fast_(force_fast) {}
 
 void AnnotatedDBG::insert_zero_rows(Annotator *annotator,
                                     const bit_vector_dyn &inserted_edges) {
@@ -34,6 +38,15 @@ void AnnotatedDBG::annotate_sequence_thread_safe(std::string sequence,
         return;
 
     std::lock_guard<std::mutex> lock(mutex_);
+
+    if (force_fast_) {
+        auto row_major = dynamic_cast<annotate::RowCompressed<std::string>*>(annotator_.get());
+        if (row_major) {
+            row_major->add_labels_fast(indices, labels);
+            return;
+        }
+    }
+
     annotator_->add_labels(indices, labels);
 }
 

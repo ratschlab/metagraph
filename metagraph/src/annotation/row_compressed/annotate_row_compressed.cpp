@@ -74,6 +74,39 @@ void RowCompressed<Label>::add_labels(const std::vector<Index> &indices,
 }
 
 template <typename Label>
+void RowCompressed<Label>::add_labels_fast(const std::vector<Index> &indices,
+                                           const VLabels &labels) {
+    std::vector<uint64_t> col_ids;
+    col_ids.reserve(labels.size());
+    for (const auto &label : labels) {
+        col_ids.push_back(label_encoder_.insert_and_encode(label));
+    }
+    std::sort(col_ids.begin(), col_ids.end());
+    col_ids.erase(std::unique(col_ids.begin(), col_ids.end()), col_ids.end());
+
+    auto unique_indices = indices;
+    std::sort(unique_indices.begin(), unique_indices.end());
+    unique_indices.erase(
+        std::unique(unique_indices.begin(), unique_indices.end()),
+        unique_indices.end()
+    );
+
+    if (dynamic_cast<VectorRowBinMat*>(matrix_.get())) {
+        for (Index i : unique_indices) {
+            for (auto j : col_ids) {
+                dynamic_cast<VectorRowBinMat&>(*matrix_).force_set(i, j);
+            }
+        }
+    } else {
+        for (Index i : unique_indices) {
+            for (auto j : col_ids) {
+                matrix_->set(i, j);
+            }
+        }
+    }
+}
+
+template <typename Label>
 bool RowCompressed<Label>::has_label(Index i, const Label &label) const {
     try {
         return matrix_->get(i, label_encoder_.encode(label));

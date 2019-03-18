@@ -36,6 +36,7 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     void add_label(Index i, const Label &label);
     void add_labels(Index i, const VLabels &labels);
     void add_labels(const std::vector<Index> &indices, const VLabels &labels);
+    void add_labels_fast(const std::vector<Index> &indices, const VLabels &labels);
 
     bool has_label(Index i, const Label &label) const;
     bool has_labels(Index i, const VLabels &labels) const;
