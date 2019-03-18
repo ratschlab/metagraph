@@ -248,6 +248,20 @@ void ColumnCompressed<Label>::insert_rows(const std::vector<Index> &rows) {
     num_rows_ += rows.size();
 }
 
+template <typename Label>
+void ColumnCompressed<Label>
+::call_indices(const Label &label,
+               const std::function<void(const Index&)> callback) const {
+    uint64_t encoding = -1llu;
+    try {
+        encoding = label_encoder_.encode(label);
+    } catch (...) {
+        return;
+    }
+
+    get_column(encoding).call_ones(callback);
+}
+
 // For each pair (first, second) in the dictionary, renames
 // column |first| with |second| and merges the columns with matching names.
 template <typename Label>
@@ -361,12 +375,7 @@ void ColumnCompressed<Label>::set(Index i, size_t j, bool value) {
 
 template <typename Label>
 bool ColumnCompressed<Label>::is_set(Index i, size_t j) const {
-    if (cached_columns_.Cached(j)) {
-        return (*cached_columns_.Get(j))[i];
-    } else {
-        assert(j < bitmatrix_.size() && bitmatrix_[j].get());
-        return (*bitmatrix_[j])[i];
-    }
+    return get_column(j)[i];
 }
 
 template <typename Label>
@@ -435,6 +444,16 @@ bitmap_dyn& ColumnCompressed<Label>::decompress(size_t j) {
 }
 
 template <typename Label>
+const bitmap& ColumnCompressed<Label>::get_column(size_t j) const {
+    if (cached_columns_.Cached(j)) {
+        return (*cached_columns_.Get(j));
+    } else {
+        assert(j < bitmatrix_.size() && bitmatrix_[j].get());
+        return (*bitmatrix_[j]);
+    }
+}
+
+template <typename Label>
 void ColumnCompressed<Label>
 ::convert_to_row_annotator(RowCompressed<Label> *annotator,
                            size_t num_threads) const {
@@ -490,12 +509,10 @@ void ColumnCompressed<Label>
 
         auto &color = *bitmatrix_[i];
 
-        uint64_t set_bits = color.rank1(color.size());
-        serialize_number(outstream, set_bits);
-
-        for (uint64_t j = 1; j <= set_bits; ++j) {
-            serialize_number(outstream, color.select1(j));
-        }
+        serialize_number(outstream, color.num_set_bits());
+        color.call_ones([&](const auto &pos) {
+            serialize_number(outstream, pos);
+        });
     }
 }
 
