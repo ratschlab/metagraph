@@ -64,6 +64,9 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     VLabels get_labels(const std::vector<Index> &indices,
                        double presence_ratio) const;
 
+    void call_indices(const Label &label,
+                      const std::function<void(const Index&)> callback) const;
+
     uint64_t num_objects() const;
     size_t num_labels() const;
     uint64_t num_relations() const;

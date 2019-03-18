@@ -6,6 +6,7 @@
 #include <vector>
 #include <unordered_map>
 #include <memory>
+#include <functional>
 
 
 namespace annotate {
@@ -102,6 +103,9 @@ class MultiLabelAnnotation
     get_top_labels(const std::vector<Index> &indices,
                    size_t num_top = static_cast<size_t>(-1),
                    double min_label_frequency = 0.0) const = 0;
+
+    virtual void call_indices(const Label &label,
+                              const std::function<void(const Index&)> callback) const = 0;
 
     /************************* Properties *************************/
 
