@@ -10,6 +10,7 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "RELEASE")
 endif()
 
+set(JSONCPP_WITH_TESTS FALSE)
 add_subdirectory(
   external-libraries/jsoncpp
 )
@@ -194,11 +195,12 @@ set(METALIBS ${METALIBS}
   -lssl -lcrypto -llzma
   -lbrwt
   -ljsoncpp
+  -latomic
   OpenMP::OpenMP_CXX
 )
-if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-  set(METALIBS ${METALIBS} -latomic)
-endif()
+#if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+#  set(METALIBS ${METALIBS} -latomic)
+#endif()
 
 if(BUILD_STATIC)
   set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} -static)

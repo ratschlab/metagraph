@@ -30,7 +30,7 @@ class bit_vector : public bitmap {
     virtual bool load(std::istream &in) = 0;
     virtual void serialize(std::ostream &out) const = 0;
     virtual uint64_t size() const override = 0;
-    virtual uint64_t num_set_bits() const { return rank1(size() - 1); }
+    virtual uint64_t num_set_bits() const override { return rank1(size() - 1); }
 
     // FYI: This function invalidates the current object
     template <class Vector>
