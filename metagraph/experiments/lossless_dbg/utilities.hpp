@@ -11,6 +11,7 @@
 
 #include <vector>
 #include <iostream>
+#include <fstream>
 #include <nlohmann/json.hpp>
 #include "sequence_io.hpp"
 

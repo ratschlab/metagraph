@@ -30,6 +30,7 @@ using json = nlohmann::json;
 #include "samplers.hpp"
 #include "utilities.hpp"
 #include "tests.hpp"
+#include "path_encoder_baseline.hpp"
 
 #pragma clang diagnostic pop
 
@@ -42,7 +43,6 @@ using namespace std;
 using namespace std::string_literals;
 
 using node_index = SequenceGraph::node_index;
-
 
 // TODO: remove these constants
 string HUMAN_REFERENCE_FILENAME = local_file("genomic_data/GCF_000001405.38_GRCh38.p12_genomic.fna");
