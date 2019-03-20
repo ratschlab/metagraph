@@ -29,17 +29,29 @@ public:
     std::vector<path_id> encode(const std::vector<std::string> &sequences) {
         // sort them so we have fixed relative ordering
         // probably not need to sort globally as we want only relative ordering
-        sort(all(sequences));
+        //sort(all(sequences));
         for(auto& sequence : sequences) {
             increment_joins(sequence);
         }
         return {};
     }
     
-    void increment_joins(string sequence) {
+    // when parallelizing beware that we need to account also artificial joins that will be populatated gradually
+    // optimize : don't always copy the string when creating substring
+    void increment_joins(const string& sequence) {
         auto kmer = sequence.substr(0,graph.get_k());
+        additional_bifurcations.insert(kmer);
         joins[kmer]['$']++;
-        
+        auto node = graph.kmer_to_node(kmer);
+        int kmer_position = 0;
+        for(auto& base : sequence.substr(graph.get_k())) {
+            node = graph.traverse(node,base);
+            kmer_position++;
+            kmer = sequence.substr(kmer_position,graph.get_k());
+            if (!graph.is_single_incoming(node) or additional_bifurcations.count(kmer)) {
+                joins[kmer][sequence[kmer_position-1]]++;
+            }
+        }
     }
     
     void compress() {
@@ -70,7 +82,7 @@ private:
     
 };
 
-//
-//int main() {
-//
-//}
+
+int main() {
+
+}
