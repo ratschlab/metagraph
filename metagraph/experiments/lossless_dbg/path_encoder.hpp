@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <vector>
 #include <nlohmann/json.hpp>
+#include <sequence_graph.hpp>
 
 #include "utilities.hpp"
 

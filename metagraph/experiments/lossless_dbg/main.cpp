@@ -30,7 +30,6 @@ using json = nlohmann::json;
 #include "samplers.hpp"
 #include "utilities.hpp"
 #include "tests.hpp"
-#include "path_encoder_baseline.hpp"
 
 #pragma clang diagnostic pop
 
