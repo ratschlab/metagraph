@@ -5,13 +5,15 @@
 #include <vector>
 #include <functional>
 #include <iterator>
+#include <cmath>
+#include <cassert>
 
 template <class T, class Container = std::vector<T>,
           class Compare = std::less<typename Container::value_type>>
 class BoundedPriorityQueue : public std::priority_queue<T, Container, Compare> {
   public:
     BoundedPriorityQueue() = delete;
-    BoundedPriorityQueue(uint64_t size) : max_size(size) {}
+    BoundedPriorityQueue(size_t size) : max_size(size) { assert(size > 0); }
 
     // Push the value in the queue and remove the element with lower priority
     // in case the size of queue was about to exceed max_size.
@@ -21,7 +23,7 @@ class BoundedPriorityQueue : public std::priority_queue<T, Container, Compare> {
         }
         else {
             // Search for the lowes priority element among the leaves of the heap.
-            auto mid = std::begin(this->c) + this->size() / 2;
+            auto mid = std::begin(this->c) + std::floor((this->size() - 1) / 2.0);
             auto end = std::end(this->c);
             auto min_element = std::min_element(mid, end);
             // If the new value has a value greater than the smallest value in the heap,
@@ -41,7 +43,7 @@ class BoundedPriorityQueue : public std::priority_queue<T, Container, Compare> {
         }
         else {
             // Search for the lowes priority element among the leaves of the heap.
-            auto mid = std::begin(this->c) + this->size() / 2;
+            auto mid = std::begin(this->c) + std::floor((this->size() - 1) / 2.0);
             auto end = std::end(this->c);
             auto min_element = std::min_element(mid, end);
             // If the new value has a value greater than the smallest value in the heap,
@@ -55,7 +57,7 @@ class BoundedPriorityQueue : public std::priority_queue<T, Container, Compare> {
     }
 
   private:
-    uint64_t max_size;
+    size_t max_size;
 };
 
 #endif //  __BOUNDED_PRIORITY_QUEUE_HPP__
