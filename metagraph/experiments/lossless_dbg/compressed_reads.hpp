@@ -43,7 +43,7 @@ class CompressedReads : public PathDatabase {
             k_kmer_(k_kmer),
             read_length(raw_reads[0].length()) {
         for (const auto &read : raw_reads) {
-            compressed_reads_.insert(encode_read(read));
+            compressed_reads_.push_back(encode_read(read));
         }
     }
 
@@ -61,7 +61,7 @@ class CompressedReads : public PathDatabase {
         return reads;
     }
 
-    size_t num_paths() const { return compressed_reads_.size(); }
+    size_t num_paths() const override { return compressed_reads_.size(); }
 
     json get_statistics() const {
         std::map<std::string, int> bifurcation_size_histogram;
@@ -97,27 +97,24 @@ class CompressedReads : public PathDatabase {
     std::vector<path_id> encode(const std::vector<std::string> &sequences) override {
         std::vector<path_id> ids;
         for (const auto &read : sequences) {
-            compressed_reads_.insert(encode_read(read));
+            compressed_reads_.push_back(encode_read(read));
             ids.push_back(ids.size());
         }
         return ids;
     }
 
-    node_index get_first_node(path_id path) const {}
-    node_index get_last_node(path_id path) const {}
-
     // returns ids of all paths that go through sequence |str|
-    std::vector<path_id> get_paths_going_through(const std::string &str) const {}
-    std::vector<path_id> get_paths_going_through(node_index node) const {}
+    std::vector<path_id> get_paths_going_through(const std::string &str) const override {}
+    std::vector<path_id> get_paths_going_through(node_index node) const override {}
 
     // make one traversal step through the selected path
-    node_index get_next_node(node_index node, path_id path) const {}
+    node_index get_next_node(node_index node, path_id path) const override {}
 
     // transition to the next node consistent with the history
     // return npos if there is no transition consistent with the history
-    node_index get_next_consistent_node(const std::string &history) const {}
+    node_index get_next_consistent_node(const std::string &history) const override {}
 
-    std::string decode(path_id path) const {
+    std::string decode(path_id path) const override {
         auto it = compressed_reads_.begin();
         for (size_t i = 0; i < path; ++i) {
             ++it;
@@ -193,7 +190,7 @@ class CompressedReads : public PathDatabase {
     }
 
 
-    std::multiset<compressed_read_t> compressed_reads_;
+    std::vector<compressed_read_t> compressed_reads_;
     const int read_length;
     const int k_kmer_;
 };

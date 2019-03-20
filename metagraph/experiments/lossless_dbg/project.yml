@@ -1,0 +1,22 @@
+name: PathDatabase
+options:
+  bundleIdPrefix: com.myapp
+targets:
+  PathDatabase:
+    type: application
+    platform: macOS
+    sources: [path_encoder_baseline.cpp, path_encoder.hpp]
+    settings:
+      configs:
+        debug:
+          COMPILER_INDEX_STORE_ENABLE: no
+          OTHER_LDFLAGS: '-lmetagraph -lz -lgtest -lsdsl -lhts -lmaus2 -lc++fs -fopenmp'
+          HEADER_SEARCH_PATHS: '/usr/local/include /usr/local/include/metagraph /Users/janstudeny/metagenome_lossless_dbg/metagraph/external-libraries/**'
+          CLANG_CXX_LANGUAGE_STANDARD: c++17
+          LIBRARY_SEARCH_PATHS: /usr/local/lib /usr/local/opt/llvm/lib
+        release:
+          COMPILER_INDEX_STORE_ENABLE: no
+          OTHER_LDFLAGS: '-lmetagraph -lz -lgtest -lsdsl -lhts -lmaus2 -lc++fs -fopenmp'
+          HEADER_SEARCH_PATHS: '/usr/local/include /usr/local/include/metagraph /Users/janstudeny/metagenome_lossless_dbg/metagraph/external-libraries/**'
+          CLANG_CXX_LANGUAGE_STANDARD: c++17
+          LIBRARY_SEARCH_PATHS: /usr/local/lib /usr/local/opt/llvm/lib
