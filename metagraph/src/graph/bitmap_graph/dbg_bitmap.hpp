@@ -66,11 +66,16 @@ class DBGSD : public DeBruijnGraph {
     void adjacent_incoming_nodes(node_index node,
                                  std::vector<node_index> *source_nodes) const;
 
+    uint64_t outdegree(node_index) const {
+        // TODO: Complete outdegree for DBGSD.
+        throw std::runtime_error("Not implemented");
+    }
+
     node_index kmer_to_node(const std::string &kmer) const;
     std::string node_to_kmer(node_index i) const;
 
-    std::string get_node_sequence(node_index node_index) const {
-        return node_to_kmer(node_index);
+    std::string get_node_sequence(node_index node) const {
+        return node_to_kmer(node);
     }
 
     inline size_t get_k() const { return k_; }

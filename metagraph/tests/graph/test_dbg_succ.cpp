@@ -2688,3 +2688,55 @@ TEST(DBGSuccinct, map_to_nodes_DBG_canonical) {
         }
     }
 }
+
+TEST(DBGSuccinct, get_outdegree_single_node) {
+    for (size_t k = 2; k < 10; ++k) {
+        std::unique_ptr<DBGSuccinct> graph { new DBGSuccinct(k) };
+        graph->add_sequence(std::string(k - 1, 'A') + 'C');
+        graph->mask_dummy_kmers(1, false);
+        EXPECT_EQ(1ull, graph->num_nodes());
+        EXPECT_EQ(0ull, graph->outdegree(1));
+    }
+}
+
+TEST(DBGSuccinct, get_maximum_outdegree) {
+    for (size_t k = 2; k < 10; ++k) {
+        std::unique_ptr<DBGSuccinct> graph { new DBGSuccinct(k) };
+        graph->add_sequence(std::string(k - 1, 'A') + 'A');
+        graph->add_sequence(std::string(k - 1, 'A') + 'C');
+        graph->add_sequence(std::string(k - 1, 'A') + 'G');
+        graph->add_sequence(std::string(k - 1, 'A') + 'T');
+        graph->mask_dummy_kmers(1, false);
+
+        DBGSuccinct::node_index max_outdegree_node_index;
+        graph->map_to_nodes(std::string(k, 'A'), [&](DBGSuccinct::node_index node) {
+                                                    max_outdegree_node_index = node; });
+
+        EXPECT_EQ(4ull, graph->num_nodes());
+        for (size_t i = 1; i <= graph->num_nodes(); ++i) {
+            if (i == max_outdegree_node_index)
+                EXPECT_EQ(4ull, graph->outdegree(i));
+            else
+                EXPECT_EQ(0ull, graph->outdegree(i));
+        }
+    }
+}
+
+TEST(DBGSuccinct, get_outdegree_loop) {
+    for (size_t k = 2; k < 10; ++k) {
+        std::unique_ptr<DBGSuccinct> graph { new DBGSuccinct(k) };
+        graph->add_sequence(std::string(k - 1, 'A') + std::string(k - 1, 'C') +
+                            std::string(k - 1, 'G') + std::string(k, 'T'));
+        graph->add_sequence(std::string(k, 'A'));
+        graph->mask_dummy_kmers(1, false);
+
+        DBGSuccinct::node_index loop_node_index;
+        graph->map_to_nodes(std::string(k, 'A'), [&](DBGSuccinct::node_index node) { loop_node_index = node; });
+        for (size_t i = 1; i <= graph->num_nodes(); ++i) {
+            if (i == loop_node_index)
+                EXPECT_EQ(2ull, graph->outdegree(i));
+            else
+                EXPECT_EQ(1ull, graph->outdegree(i));
+        }
+    }
+}

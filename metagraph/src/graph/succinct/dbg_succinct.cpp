@@ -2272,6 +2272,16 @@ void DBGSuccinct::map_to_nodes(const std::string &sequence,
     }
 }
 
+uint64_t DBGSuccinct::outdegree(node_index node) const {
+    assert(node);
+
+    auto boss_edge = kmer_to_boss_index(node);
+    auto last_outgoing_edge = boss_graph_->fwd(boss_edge);
+    if (!boss_to_kmer_index(last_outgoing_edge))
+        return 0;
+    return last_outgoing_edge - boss_graph_->pred_last(last_outgoing_edge - 1);
+}
+
 uint64_t DBGSuccinct::num_nodes() const {
     return valid_edges_.get()
                 ? valid_edges_->num_set_bits()

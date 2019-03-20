@@ -602,6 +602,7 @@ class DBGSuccinct : public DeBruijnGraph {
         throw std::runtime_error("Not implemented");
     }
 
+    virtual uint64_t outdegree(node_index node) const override final;
     virtual uint64_t num_nodes() const override final;
 
     virtual void mask_dummy_kmers(size_t num_threads, bool with_pruning) final;

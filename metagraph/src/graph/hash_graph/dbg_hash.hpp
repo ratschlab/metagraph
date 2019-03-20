@@ -5,11 +5,12 @@
 #include <tsl/hopscotch_map.h>
 
 #include "sequence_graph.hpp"
+#include "kmer_extractor.hpp"
 
 
 class DBGHash : public DeBruijnGraph {
   public:
-    DBGHash(const size_t k) : k_(k) {}
+    explicit DBGHash(const size_t k) : k_(k), kAlphabet_(seq_encoder_.alphabet) {}
 
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal
@@ -57,6 +58,8 @@ class DBGHash : public DeBruijnGraph {
     void adjacent_incoming_nodes(node_index node,
                                  std::vector<node_index> *source_nodes) const;
 
+    uint64_t outdegree(node_index node) const;
+
     node_index kmer_to_node(const std::string &kmer) const;
     std::string node_to_kmer(node_index node) const;
 
@@ -65,7 +68,6 @@ class DBGHash : public DeBruijnGraph {
     }
 
     size_t get_k() const { return k_; }
-
     uint64_t num_nodes() const { return kmers_.size(); }
 
     void serialize(std::ostream &out) const;
@@ -80,6 +82,8 @@ class DBGHash : public DeBruijnGraph {
     size_t k_;
     tsl::hopscotch_map<std::string, uint64_t> indices_;
     std::vector<std::string> kmers_;
+    KmerExtractor2Bit seq_encoder_;
+    const std::string kAlphabet_;
 
     static constexpr auto kExtension = ".hashdbg";
 };

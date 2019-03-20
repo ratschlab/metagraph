@@ -414,3 +414,52 @@ TEST(DBGHashOrdered, Serialize) {
         EXPECT_FALSE(graph.find("GCTAAAAATATATATATTAAAAAAACATG"));
     }
 }
+
+TEST(DBGHashOrdered, get_outdegree_single_node) {
+    for (size_t k = 2; k < 10; ++k) {
+        std::unique_ptr<DBGHashOrdered> graph { new DBGHashOrdered(k) };
+        graph->add_sequence(std::string(k - 1, 'A') + 'C');
+        EXPECT_EQ(1ull, graph->num_nodes());
+        EXPECT_EQ(0ull, graph->outdegree(1));
+    }
+}
+
+TEST(DBGHashOrdered, get_maximum_outdegree) {
+    for (size_t k = 2; k < 10; ++k) {
+        std::unique_ptr<DBGHashOrdered> graph { new DBGHashOrdered(k) };
+        graph->add_sequence(std::string(k - 1, 'A') + 'A');
+        graph->add_sequence(std::string(k - 1, 'A') + 'C');
+        graph->add_sequence(std::string(k - 1, 'A') + 'G');
+        graph->add_sequence(std::string(k - 1, 'A') + 'T');
+
+        DBGHashOrdered::node_index max_outdegree_node_index;
+        graph->map_to_nodes(std::string(k, 'A'), [&](DBGHashOrdered::node_index node) {
+                                                    max_outdegree_node_index = node; });
+
+        EXPECT_EQ(4ull, graph->num_nodes());
+        for (size_t i = 1; i <= graph->num_nodes(); ++i) {
+            if (i == max_outdegree_node_index)
+                EXPECT_EQ(4ull, graph->outdegree(i));
+            else
+                EXPECT_EQ(0ull, graph->outdegree(i));
+        }
+    }
+}
+
+TEST(DBGHashOrdered, get_outdegree_loop) {
+    for (size_t k = 2; k < 10; ++k) {
+        std::unique_ptr<DBGHashOrdered> graph { new DBGHashOrdered(k) };
+        graph->add_sequence(std::string(k - 1, 'A') + std::string(k - 1, 'C') +
+                            std::string(k - 1, 'G') + std::string(k, 'T'));
+        graph->add_sequence(std::string(k, 'A'));
+
+        DBGHashOrdered::node_index loop_node_index;
+        graph->map_to_nodes(std::string(k, 'A'), [&](DBGHashOrdered::node_index node) { loop_node_index = node; });
+        for (size_t i = 1; i <= graph->num_nodes(); ++i) {
+            if (i == loop_node_index)
+                EXPECT_EQ(2ull, graph->outdegree(i));
+            else
+                EXPECT_EQ(1ull, graph->outdegree(i));
+        }
+    }
+}

@@ -9,7 +9,7 @@
 
 
 DBGHashOrdered::DBGHashOrdered(size_t k, bool canonical_only)
-      : k_(k), canonical_only_(canonical_only) {}
+      : k_(k), canonical_only_(canonical_only), kAlphabet_(seq_encoder_.alphabet) {}
 
 void DBGHashOrdered::add_sequence(const std::string &sequence,
                                   bit_vector_dyn *nodes_inserted) {
@@ -56,7 +56,7 @@ void DBGHashOrdered::adjacent_outgoing_nodes(node_index node,
 
     const auto kmer = get_kmer(node);
 
-    for (char c : seq_encoder_.alphabet) {
+    for (char c : kAlphabet_) {
         auto next_kmer = kmer;
         next_kmer.to_next(k_, seq_encoder_.encode(c));
         auto next = get_index(next_kmer);
@@ -71,13 +71,28 @@ void DBGHashOrdered::adjacent_incoming_nodes(node_index node,
 
     const auto kmer = get_kmer(node);
 
-    for (char c : seq_encoder_.alphabet) {
+    for (char c : kAlphabet_) {
         auto next_kmer = kmer;
         next_kmer.to_prev(k_, seq_encoder_.encode(c));
         auto next = get_index(next_kmer);
         if (next != npos)
             source_nodes->push_back(next);
     }
+}
+
+uint64_t DBGHashOrdered::outdegree(node_index node) const {
+    assert(node);
+
+    const auto kmer = get_kmer(node);
+    uint64_t outdegree = 0;
+    for (char c : kAlphabet_) {
+        auto next_kmer = kmer;
+        next_kmer.to_next(k_, seq_encoder_.encode(c));
+        auto next_node = get_index(next_kmer);
+        if (next_node != npos)
+            ++ outdegree;
+    }
+    return outdegree;
 }
 
 DBGHashOrdered::node_index
