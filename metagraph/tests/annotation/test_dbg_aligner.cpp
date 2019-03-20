@@ -173,8 +173,8 @@ TEST(dbg_aligner, large_search_space) {
         }
     }
     std::string query = "AAA";
-    uint32_t unmapped_char_length = 50;
-    for (uint32_t i = 0; i < unmapped_char_length; i++) {
+    uint64_t unmapped_char_length = 12;
+    for (size_t i = 0; i < unmapped_char_length; i++) {
         query += 'C';
     }
     DBGSuccinct* graph = new DBGSuccinct(k);
@@ -182,9 +182,10 @@ TEST(dbg_aligner, large_search_space) {
     DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/1));
     auto path = aligner.align(query);
 
-    std::replace(query.begin(), query.end(), 'C' , 'T');
+    std::string aligned_query(query);
+    std::replace(aligned_query.begin(), aligned_query.end(), 'C' , 'T');
 
     EXPECT_EQ(query.size() - k + 1, path.size());
-    EXPECT_EQ(query, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(aligned_query, aligner.get_path_sequence(path.get_nodes()));
     EXPECT_EQ(unmapped_char_length, path.get_total_loss());
 }

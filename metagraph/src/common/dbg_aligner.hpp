@@ -33,7 +33,10 @@ class DBGAligner : public AnnotatedDBG {
     DBGAligner(DeBruijnGraph *dbg,
                Annotator *annotation,
                size_t num_threads = 0,
-               uint64_t search_space_size = 10);
+               uint64_t search_space_size = 10,
+               float path_loss_weak_threshold = 10,
+               float insertion_penalty = 3,
+               float deletion_penalty = 3);
 
     DBGAligner(const DBGAligner&) = default;
     DBGAligner(DBGAligner&&) = default;
@@ -43,9 +46,13 @@ class DBGAligner : public AnnotatedDBG {
     // Align a sequence to the underlying graph based on the strategy defined in the graph.
     AlignedPath align(const std::string& sequence) const;
 
-    // Compute the edit distance between a node in the graph and a kmer in the string
+    // Compute the edit distance between a node in the graph and a char in the sequence
     // according to loss parameters in this class.
     float single_node_loss(node_index node, char next_char) const;
+
+    // Compute the edit distance between the query sequence and the aligned path
+    // according to loss parameters in this class.
+    float whole_path_loss(const AlignedPath& path, std::string::const_iterator begin) const;
 
     // Return the corresponding sequence of a path according to nodes in the graph.
     std::string get_path_sequence(const std::vector<node_index>& path) const;
@@ -56,6 +63,9 @@ class DBGAligner : public AnnotatedDBG {
     std::map<char, std::map<char, int>> sub_loss_;
     // Maximum number of paths to explore at the same time.
     uint64_t search_space_size_;
+    float path_loss_weak_threshold_;
+    float insertion_penalty_;
+    float deletion_penalty_;
 
     // Align part of a sequence to the graph in the case of no exact map
     // based on internal strategy. Calls callback for every possible alternative path.

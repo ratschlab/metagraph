@@ -6,9 +6,14 @@
 #include "bounded_priority_queue.hpp"
 
 DBGAligner::DBGAligner(DeBruijnGraph *dbg, Annotator *annotation,
-                       size_t num_threads, uint64_t search_space_size) :
+                       size_t num_threads, uint64_t search_space_size,
+                       float path_loss_weak_threshold,
+                       float insertion_penalty, float deletion_penalty) :
                             AnnotatedDBG(dbg, annotation, num_threads),
-                            search_space_size_(search_space_size) {
+                            search_space_size_(search_space_size),
+                            path_loss_weak_threshold_(path_loss_weak_threshold),
+                            insertion_penalty_(insertion_penalty),
+                            deletion_penalty_(deletion_penalty) {
     // Substitution loss for each pair of nucleotides.
     // Transition and transversion mutations have different loss values.
     sub_loss_ = {
@@ -24,10 +29,10 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
 
     std::map<DPAlignmentKey, DPAlignmentValue> dp_alignment;
     BoundedPriorityQueue<AlignedPath> queue(search_space_size_);
-    queue.push(AlignedPath(std::begin(sequence)));
+    queue.push(std::move(AlignedPath(std::begin(sequence))));
 
     while (!queue.empty()) {
-        auto path = queue.top();
+        auto path = std::move(queue.top());
         queue.pop();
 
         if (path.get_sequence_it() + graph_->get_k() > std::end(sequence))
@@ -36,7 +41,7 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
         node_index seed = path.size() > 0 ? path.back() : graph_->npos;
         graph_->extend_from_seed(path.get_sequence_it(), std::end(sequence),
                                        [&](node_index node) {
-                                            path.push_back(node, 0, annotator_->get(node));},
+                                            path.push_back(node, annotator_->get(node));},
                                        [&]() { return (path.size() > 0 &&
                                                 graph_->outdegree(path.back()) != 1); },
                                        seed);
@@ -48,9 +53,16 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
                     [&](node_index node, std::string::const_iterator last_mapped_position) {
                         AlignedPath alternative_path(path);
                         alternative_path.set_sequence_it(last_mapped_position);
-                        alternative_path.push_back(node, single_node_loss(node,
-                            *(alternative_path.get_sequence_it() + graph_->get_k() - 1)),
-                        annotator_->get(node));
+
+                        if (alternative_path.get_total_loss() < path_loss_weak_threshold_) {
+                            alternative_path.push_back(node, annotator_->get(node),
+                                single_node_loss(node, *(alternative_path.get_sequence_it() +
+                                    graph_->get_k() - 1)));
+                        } else {
+                            alternative_path.push_back(node, annotator_->get(node));
+                            alternative_path.update_total_loss(
+                                whole_path_loss(alternative_path, std::begin(sequence)));
+                        }
 
                         DPAlignmentKey alternative_key{.node = alternative_path.back(),
                                            .query_it = alternative_path.get_sequence_it()};
@@ -59,15 +71,30 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
                         auto dp_alignment_it = dp_alignment.find(alternative_key);
                         if (dp_alignment_it == dp_alignment.end()) {
                             dp_alignment[alternative_key] = alternative_value;
-                            queue.push(alternative_path);
+                            queue.push(std::move(alternative_path));
                         }
-                        if (dp_alignment_it->second.loss > alternative_path.get_total_loss()) {
+                        else if (dp_alignment_it->second.loss > alternative_path.get_total_loss()) {
                             dp_alignment_it->second = alternative_value;
-                            queue.push(alternative_path);
+                            queue.push(std::move(alternative_path));
                         }
                         });
     }
     return AlignedPath(sequence.end());
+}
+
+float DBGAligner::whole_path_loss(const AlignedPath& path, std::string::const_iterator begin) const {
+    auto path_sequence = get_path_sequence(path.get_nodes());
+    std::string query_sequence(begin, path.get_sequence_it() + graph_->get_k() - 1);
+    float alignment_loss[query_sequence.size() + 1][path_sequence.size() + 1] = {};
+    for (size_t i = 1; i <= query_sequence.size(); ++i) {
+        for (size_t j = 1; j <= path_sequence.size(); ++j) {
+            alignment_loss[i][j] = std::min({alignment_loss[i-1][j-1] +
+                    sub_loss_.at(std::tolower(query_sequence[i-1]))
+                             .at(std::tolower(path_sequence[j-1])),
+                alignment_loss[i][j-1] + insertion_penalty_, alignment_loss[i-1][j] + deletion_penalty_});
+        }
+    }
+    return alignment_loss[query_sequence.size()][path_sequence.size()];
 }
 
 float DBGAligner::single_node_loss(node_index node, char next_char) const {
