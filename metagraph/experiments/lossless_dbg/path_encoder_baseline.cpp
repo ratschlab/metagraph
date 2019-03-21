@@ -42,30 +42,9 @@ public:
         for(auto& sequence : sequences) {
             route_sequence(sequence);
         }
-//        for(auto& sequence : sequences) {
-//            populate_splits(sequence);
-//        }
+        
         return {};
     }
-    
-    // when parallelizing beware that we need to account also artificial joins that will be populatated gradually
-    // optimize : don't always copy the string when creating a substring (simple replacement with string_view doesn't work as maps don't work with them)
-    // use node instead of kmer
-//    void increment_joins(const string& sequence) {
-//        auto kmer = sequence.substr(0,graph.get_k());
-//        additional_bifurcations.insert(kmer);
-//        joins[kmer]['~']++;
-//        auto node = graph.kmer_to_node(kmer);
-//        int kmer_position = 0;
-//        for(auto& base : sequence.substr(graph.get_k())) {
-//            node = graph.traverse(node,base);
-//            kmer_position++;
-//            kmer = sequence.substr(kmer_position,graph.get_k());
-//            if (node_is_join(kmer, node)) {
-//                joins[kmer][sequence[kmer_position-1]]++;
-//            }
-//        }
-//    }
     
     void route_sequence(const string& sequence) {
         auto kmer = sequence.substr(0,graph.get_k());
@@ -99,30 +78,6 @@ public:
         routing_table.insert(rt_index,'~');
         
     }
-    
-//    void populate_splits(const string& sequence) {
-//        auto kmer = sequence.substr(0,graph.get_k());
-//        auto node = graph.kmer_to_node(kmer);
-//        // always putting new read above all other reads
-//        int relative_position = number_of_reads_at_join(kmer)
-//                                - joins[kmer]['~'] // excluding the newly created kmers
-//                                + number_of_reads_starting_at_kmer[kmer]; // + relative offset
-//        // todo: currently the relative offset is based on ordering of the reads in file
-//        // better to sort them
-//        number_of_reads_starting_at_kmer[kmer]++;
-//        for(auto& base : sequence.substr(graph.get_k())) {
-//
-//        }
-//    }
-    
-//    int number_of_reads_at_join(const string& kmer) {
-//        int result = 0;
-//        for(auto& [branch_base_character,count] : joins[kmer]) {
-//            result += count;
-//        }
-//        return result;
-//    }
-    
     
     // returns the number of reads that were already stored and should have lower index
     int offset_for_symbol(const map<char,int>& join,char symbol) {
