@@ -2740,3 +2740,52 @@ TEST(DBGSuccinct, get_outdegree_loop) {
         }
     }
 }
+
+TEST(DBGSuccinct, get_node_sequence) {
+    size_t k = 4;
+    std::string reference = "AGCTTCGAGGCCAA";
+    std::string query = "AGCT";
+
+    auto graph = std::make_unique<DBGSuccinct>(k);
+    graph->add_sequence(reference);
+
+    std::string mapped_query = "";
+    graph->map_to_nodes(query, [&](DBGSuccinct::node_index node) {
+        mapped_query += graph->get_node_sequence(node);
+    });
+
+    EXPECT_EQ(query, mapped_query);
+}
+
+TEST(DBGSuccinct, is_single_outgoing_simple) {
+    size_t k = 4;
+    std::string reference = "CATC";
+
+    auto graph = std::make_unique<DBGSuccinct>(k);
+    graph->add_sequence(reference);
+
+    uint64_t single_outgoing_counter = 0;
+    for (uint64_t i = 1; i <= graph->num_nodes(); ++i)
+        if (graph->outdegree(i) == 1)
+            single_outgoing_counter++;
+
+    // All nodes except the last dummy node should be single outgoing.
+    EXPECT_EQ(reference.size(), single_outgoing_counter);
+}
+
+TEST(DBGSuccinct, is_single_outgoing_for_multiple_valid_edges) {
+    size_t k = 4;
+    std::string reference = "AGGGGTC";
+
+    auto graph = std::make_unique<DBGSuccinct>(k);
+    graph->add_sequence(reference);
+
+    uint64_t single_outgoing_counter = 0;
+    for (uint64_t i = 1; i <= graph->num_nodes(); ++i)
+        if (graph->outdegree(i) == 1)
+            single_outgoing_counter++;
+
+    // All nodes except the source dummy, the sink dummy, 'AGGG',
+    // and 'GGGG' have a single outgoing edge.
+    EXPECT_EQ(reference.size() - 2, single_outgoing_counter);
+}
