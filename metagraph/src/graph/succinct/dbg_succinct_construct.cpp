@@ -112,12 +112,13 @@ encode_filter_suffix_boss(const std::string &filter_suffix) {
 template <typename KMER>
 DBGBOSSChunkConstructor<KMER>
 ::DBGBOSSChunkConstructor(size_t k,
-                     const std::string &filter_suffix,
-                     size_t num_threads,
-                     double memory_preallocated,
-                     bool verbose)
+                          bool canonical_mode,
+                          const std::string &filter_suffix,
+                          size_t num_threads,
+                          double memory_preallocated,
+                          bool verbose)
       : kmer_collector_(k + 1,
-                        false,
+                        canonical_mode,
                         encode_filter_suffix_boss<KmerExtractor>(filter_suffix),
                         num_threads,
                         memory_preallocated,
@@ -245,6 +246,7 @@ DBG_succ* DBGSuccConstructor
 IDBGBOSSChunkConstructor*
 IDBGBOSSChunkConstructor
 ::initialize(size_t k,
+             bool canonical_mode,
              const std::string &filter_suffix,
              size_t num_threads,
              double memory_preallocated,
@@ -253,15 +255,15 @@ IDBGBOSSChunkConstructor
 
     if ((k + 1) * Extractor::kLogSigma <= 64) {
         return new DBGBOSSChunkConstructor<typename Extractor::Kmer64>(
-            k, filter_suffix, num_threads, memory_preallocated, verbose
+            k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
         );
     } else if ((k + 1) * Extractor::kLogSigma <= 128) {
         return new DBGBOSSChunkConstructor<typename Extractor::Kmer128>(
-            k, filter_suffix, num_threads, memory_preallocated, verbose
+            k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
         );
     } else {
         return new DBGBOSSChunkConstructor<typename Extractor::Kmer256>(
-            k, filter_suffix, num_threads, memory_preallocated, verbose
+            k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
         );
     }
 }

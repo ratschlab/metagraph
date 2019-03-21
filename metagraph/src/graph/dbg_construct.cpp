@@ -102,7 +102,7 @@ typedef std::function<void(const std::string&)> CallbackString;
 template <typename KMER, class KmerExtractor>
 void extract_kmers(std::function<void(CallbackString)> generate_reads,
                    size_t k,
-                   bool canonical_mode,
+                   bool both_strands_mode,
                    Vector<KMER> *kmers,
                    const std::vector<TAlphabet> &suffix,
                    size_t num_threads,
@@ -118,7 +118,12 @@ void extract_kmers(std::function<void(CallbackString)> generate_reads,
     KmerExtractor kmer_extractor;
 
     generate_reads([&](const std::string &read) {
-        kmer_extractor.sequence_to_kmers(read, k, suffix, &temp_storage, canonical_mode);
+        kmer_extractor.sequence_to_kmers(read, k, suffix, &temp_storage);
+        if (both_strands_mode) {
+            auto rev_read = read;
+            reverse_complement(rev_read.begin(), rev_read.end());
+            kmer_extractor.sequence_to_kmers(rev_read, k, suffix, &temp_storage);
+        }
 
         if (temp_storage.size() < kMaxKmersChunkSize)
             return;
@@ -146,7 +151,7 @@ void extract_kmers(std::function<void(CallbackString)> generate_reads,
 template <typename KMER, class KmerExtractor>
 KmerCollector<KMER, KmerExtractor>
 ::KmerCollector(size_t k,
-                bool canonical_mode,
+                bool both_strands_mode,
                 Sequence&& filter_suffix_encoded,
                 size_t num_threads,
                 double memory_preallocated,
@@ -158,7 +163,7 @@ KmerCollector<KMER, KmerExtractor>
         stored_sequences_size_(0),
         verbose_(verbose),
         filter_suffix_encoded_(std::move(filter_suffix_encoded)),
-        canonical_mode_(canonical_mode) {
+        both_strands_mode_(both_strands_mode) {
     assert(num_threads_ > 0);
     static_assert(KMER::kBitsPerChar == KmerExtractor::kLogSigma);
 
@@ -196,7 +201,7 @@ template <typename KMER, class KmerExtractor>
 void KmerCollector<KMER, KmerExtractor>
 ::add_sequences(const std::function<void(CallbackString)> &generate_sequences) {
     thread_pool_.enqueue(extract_kmers<KMER, Extractor>, generate_sequences,
-                         k_, canonical_mode_, &kmers_,
+                         k_, both_strands_mode_, &kmers_,
                          filter_suffix_encoded_,
                          num_threads_, verbose_,
                          std::ref(mutex_resize_), std::ref(mutex_copy_), true);
@@ -214,7 +219,7 @@ void KmerCollector<KMER, KmerExtractor>::release_task_to_pool() {
                              }
                              delete current_sequences_storage;
                          },
-                         k_, canonical_mode_, &kmers_, filter_suffix_encoded_,
+                         k_, both_strands_mode_, &kmers_, filter_suffix_encoded_,
                          num_threads_, verbose_,
                          std::ref(mutex_resize_), std::ref(mutex_copy_), true);
     stored_sequences_size_ = 0;

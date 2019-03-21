@@ -36,7 +36,7 @@ class KmerCollector {
     Extractor kmer_extractor_;
   public:
     explicit KmerCollector(size_t k,
-                           bool canonical_mode = false,
+                           bool both_strands_mode = false,
                            Sequence&& filter_suffix_encoded = {},
                            size_t num_threads = 1,
                            double memory_preallocated = 0,
@@ -75,7 +75,7 @@ class KmerCollector {
     void join();
 
     inline bool verbose() const { return verbose_; }
-    inline bool is_canonical_mode() const { return canonical_mode_; }
+    inline bool is_both_strands_mode() const { return both_strands_mode_; }
     inline size_t num_threads() const { return num_threads_; }
     inline size_t alphabet_size() const { return kmer_extractor_.alphabet.size(); }
 
@@ -97,7 +97,7 @@ class KmerCollector {
 
     Sequence filter_suffix_encoded_;
 
-    bool canonical_mode_;
+    bool both_strands_mode_;
 };
 
 

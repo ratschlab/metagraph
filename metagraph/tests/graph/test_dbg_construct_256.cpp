@@ -14,6 +14,7 @@
 #include "dbg_succinct_merge.hpp"
 #include "dbg_succinct_construct.hpp"
 #include "utils.hpp"
+#include "helpers.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 
@@ -103,6 +104,29 @@ TEST(Construct_256, ConstructionEQAppending) {
 
         DBG_succ appended(k);
         for (const auto &sequence : input_data) {
+            appended.add_sequence(sequence);
+        }
+
+        EXPECT_EQ(constructed, appended);
+    }
+}
+
+TEST(Construct_256, ConstructionEQAppendingCanonical) {
+    for (size_t k = 1; k < kMaxK; ++k) {
+        std::vector<std::string> input_data = {
+            "ACAGCTAGCTAGCTAGCTAGCTG",
+            "ATATTATAAAAAATTTTAAAAAA",
+            "ATATATTCTCTCTCTCTCATA",
+            "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+        };
+        DBGSuccConstructor constructor(k, true);
+        constructor.add_sequences(input_data);
+        DBG_succ constructed(&constructor);
+
+        DBG_succ appended(k);
+        for (auto &sequence : input_data) {
+            appended.add_sequence(sequence);
+            reverse_complement(sequence.begin(), sequence.end());
             appended.add_sequence(sequence);
         }
 

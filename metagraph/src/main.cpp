@@ -761,7 +761,7 @@ std::string form_client_reply(const std::string &received_message,
             );
         } else {
             std::cerr << "Error: no input sequences received from client" << std::endl;
-            // TODO: no input sequences -> form an error message for the client 
+            // TODO: no input sequences -> form an error message for the client
             throw std::domain_error("No input sequences");
         }
 
@@ -817,9 +817,6 @@ int main(int argc, const char *argv[]) {
                 graph.reset(new DBGSD(config->k, config->canonical));
 
             } else if (config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic) {
-                if (config->canonical)
-                    config->reverse = true;
-
                 std::unique_ptr<DBG_succ> boss_graph { new DBG_succ(config->k - 1) };
 
                 if (config->verbose) {
@@ -861,6 +858,7 @@ int main(int argc, const char *argv[]) {
                     std::unique_ptr<IDBGBOSSChunkConstructor> constructor(
                         IDBGBOSSChunkConstructor::initialize(
                             boss_graph->get_k(),
+                            config->canonical,
                             suffix,
                             config->parallel,
                             static_cast<uint64_t>(config->memory_available) << 30,
@@ -975,9 +973,6 @@ int main(int argc, const char *argv[]) {
                 graph.reset(sd_graph.release());
 
             } else {
-                if (config->canonical)
-                    config->reverse = false;
-
                 //slower method
 
                 switch (config->graph_type) {

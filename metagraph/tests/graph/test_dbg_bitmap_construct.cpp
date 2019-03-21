@@ -21,6 +21,7 @@
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
 #include "utils.hpp"
+#include "helpers.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 
@@ -105,10 +106,42 @@ TEST(Construct_SD_64, ConstructionEQAppending) {
 
         Vector<KmerExtractor2Bit::Kmer64> kmers;
         for (const auto &str : input_data) {
-            kmer_extractor.sequence_to_kmers(
-                str, k, {}, &kmers
-            );
+            kmer_extractor.sequence_to_kmers(str, k, {}, &kmers);
         }
+        std::sort(kmers.begin(), kmers.end());
+        kmers.erase(std::unique(kmers.begin(), kmers.end()), kmers.end());
+        EXPECT_EQ(kmers.size(), constructed.num_nodes());
+
+        DBGSD appended(k);
+        // for (const auto &sequence : input_data) {
+            ASSERT_EQ(appended.capacity(), appended.num_nodes()) << k;
+            // ASSERT_DEATH(appended.add_sequence(sequence), "");
+        // }
+
+        EXPECT_NE(constructed, appended);
+    }
+}
+
+TEST(Construct_SD_64, ConstructionEQAppendingCanonical) {
+    for (size_t k = 2; k <= kMaxK; ++k) {
+        std::vector<std::string> input_data = {
+            "ACAGCTAGCTAGCTAGCTAGCTG",
+            "ATATTATAAAAAATTTTAAAAAA",
+            "ATATATTCTCTCTCTCTCATA",
+            "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+        };
+        DBGSDConstructor constructor(k, true);
+        constructor.add_sequences(input_data);
+        DBGSD constructed(&constructor);
+
+        Vector<KmerExtractor2Bit::Kmer64> kmers;
+        for (const auto &str : input_data) {
+            kmer_extractor.sequence_to_kmers(str, k, {}, &kmers);
+            auto rev_str = str;
+            reverse_complement(rev_str.begin(), rev_str.end());
+            kmer_extractor.sequence_to_kmers(rev_str, k, {}, &kmers);
+        }
+
         std::sort(kmers.begin(), kmers.end());
         kmers.erase(std::unique(kmers.begin(), kmers.end()), kmers.end());
         EXPECT_EQ(kmers.size(), constructed.num_nodes());
