@@ -64,8 +64,8 @@ public:
         auto kmer = sequence.substr(0,graph.get_k());
         auto node = graph.kmer_to_node(kmer);
         // always putting new read above all other reads
-        int relative_position = offset_for_symbol(joins[node],'~');
         int relative_starting_position = joins[node]['~'];
+        int relative_position = branch_starting_offset(joins[node],'~') + relative_starting_position;
         joins[node]['~']++;
         
         int kmer_position = 0;
@@ -146,9 +146,7 @@ public:
         string sequence = kmer;
         
         int relative_starting_position = path.second;
-        int relative_position = offset_for_symbol(joins.at(node),'~')
-        - joins.at(node).at('~')
-        + relative_starting_position;
+        int relative_position = branch_starting_offset(joins.at(node),'~') + relative_starting_position;
         
         int kmer_position = 0;
         char base;

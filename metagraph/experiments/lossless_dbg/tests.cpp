@@ -42,29 +42,40 @@ TEST(SamplerTest,SampleCoverage) {
 //    EXPECT_EQ(chromosome.substr(0,10),"NNNNNNNNNN");
 //}
 
-TEST(PathDatabase,IdentityTest1) {
-    set<string> reads = {"ATGCGATCGATATGCGAGA",
-                         "ATGCGATCGAGACTACGAG",
-                         "GTACGATAGACATGACGAG",
-                         "ACTGACGAGACACAGATGC"};
-    auto compressed_reads = CompressedReads(vector<string>(all(reads)),5);
-    auto decompressed_reads = compressed_reads.get_reads();
-    set<string> decompressed_read_set = set<string>(all(decompressed_reads));
-    ASSERT_EQ(reads, decompressed_read_set);
-}
-TEST(PathDatabase,IdentityTest2) {
-    set<string> reads = {"ATGCGATCGATATGCGAGA",
-                         "ATGCGATCGAGACTACGAG",
-                         "GTACGATAGACATGACGAG",
-                         "ACTGACGAGACACAGATGC"};
-    auto reads_vectorized = vector<string>(all(reads));
-    auto database = PathDatabaseBaseline(reads_vectorized,5);
-    auto handles = database.encode(reads_vectorized);
-    set<string> decompressed_read_set;
+
+vector<string> reads_for_testing_short = {"ATGCGATCGATATGCGAGA",
+                                          "ATGCGATCGAGACTACGAG",
+                                          "GTACGATAGACATGACGAG",
+                                          "ACTGACGAGACACAGATGC"};
+
+template <typename T>
+void check_compression_decompression(PathDatabase<T>& db,vector<string>& reads) {
+    auto handles = db.encode(reads);
+    vector<string> decompressed_reads;
+    decompressed_reads.reserve(handles.size());
     for(auto& handle : handles) {
-        decompressed_read_set.insert(database.decode(handle));
+        decompressed_reads.push_back(db.decode(handle));
     }
-    ASSERT_EQ(reads, decompressed_read_set);
+    ASSERT_EQ(reads,decompressed_reads);
 }
+
+TEST(PathDatabase,IdentityTest1) {
+    auto db = CompressedReads(reads_for_testing_short,5);
+    check_compression_decompression(db,reads_for_testing_short);
+}
+
+TEST(PathDatabase,IdentityTest2) {
+    auto database = PathDatabaseBaseline(reads_for_testing_short,5);
+    check_compression_decompression(database,reads_for_testing_short);
+}
+
+#if defined(__linux__) || true
+
+TEST(PathDatabase,LongTest) {
+    string reads_filename = "/cluster/home/studenyj/";
+
+}
+
+#endif
 
 #endif /* tests_h */

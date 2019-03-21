@@ -47,9 +47,9 @@ class CompressedReads : public PathDatabase<int> {
           : PathDatabase(std::shared_ptr<const DeBruijnGraph> { graph }),
             k_kmer_(k_kmer),
             read_length(raw_reads[0].length()) {
-        for (const auto &read : raw_reads) {
-            compressed_reads_.push_back(encode_read(read));
-        }
+//        for (const auto &read : raw_reads) {
+//            compressed_reads_.push_back(encode_read(read));
+//        }
     }
 
     CompressedReads(const vector<string> &raw_reads,
