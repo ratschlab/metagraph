@@ -17,9 +17,11 @@
 project(lossless_dbg)
 set(cpp_code_files tests.cpp utilities.cpp path_database_baseline.cpp)
 add_executable(tests ${cpp_code_files})
+add_executable(path_encoder_toolbox main.cpp ${cpp_code_files})
+install(TARGETS path_encoder_toolbox DESTINATION bin)
 
 target_link_libraries(tests metagraph ${METALIBS} gtest gtest_main)
-message("CPP Code files are ${cpp_code_files}")
+target_link_libraries(path_encoder_toolbox metagraph ${METALIBS} gtest gtest_main)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 #add_subdirectory(playground/compressor)
