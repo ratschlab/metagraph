@@ -66,6 +66,8 @@ class DBGHashOrdered : public DeBruijnGraph {
     void adjacent_incoming_nodes(node_index node,
                                  std::vector<node_index> *source_nodes) const;
 
+    size_t outdegree(node_index) const;
+
     node_index kmer_to_node(const std::string &kmer) const;
     std::string node_to_kmer(node_index node) const;
 
