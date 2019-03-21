@@ -16,7 +16,7 @@
 
 #include "utilities.hpp"
 
-
+template <typename path_id>
 class PathDatabase {
   public:
     PathDatabase(std::shared_ptr<const DeBruijnGraph> graph)
@@ -24,7 +24,6 @@ class PathDatabase {
 
     virtual ~PathDatabase() {}
 
-    using path_id = size_t;
     using node_index = DeBruijnGraph::node_index;
 
     // compress a batch of sequences
