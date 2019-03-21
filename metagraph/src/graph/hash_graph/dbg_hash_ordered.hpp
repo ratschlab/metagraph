@@ -66,7 +66,7 @@ class DBGHashOrdered : public DeBruijnGraph {
     void adjacent_incoming_nodes(node_index node,
                                  std::vector<node_index> *source_nodes) const;
 
-    uint64_t outdegree(node_index) const;
+    size_t outdegree(node_index) const;
 
     node_index kmer_to_node(const std::string &kmer) const;
     std::string node_to_kmer(node_index node) const;
@@ -96,7 +96,6 @@ class DBGHashOrdered : public DeBruijnGraph {
 
     KmerIndex kmers_;
     KmerExtractor2Bit seq_encoder_;
-    const std::string kAlphabet_;
 
     static constexpr auto kExtension = ".orhashdbg";
 };

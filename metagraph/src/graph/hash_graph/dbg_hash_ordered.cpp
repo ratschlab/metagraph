@@ -9,7 +9,7 @@
 
 
 DBGHashOrdered::DBGHashOrdered(size_t k, bool canonical_only)
-      : k_(k), canonical_only_(canonical_only), kAlphabet_(seq_encoder_.alphabet) {}
+      : k_(k), canonical_only_(canonical_only) {}
 
 void DBGHashOrdered::add_sequence(const std::string &sequence,
                                   bit_vector_dyn *nodes_inserted) {
@@ -56,7 +56,7 @@ void DBGHashOrdered::adjacent_outgoing_nodes(node_index node,
 
     const auto kmer = get_kmer(node);
 
-    for (char c : kAlphabet_) {
+    for (char c : seq_encoder_.alphabet) {
         auto next_kmer = kmer;
         next_kmer.to_next(k_, seq_encoder_.encode(c));
         auto next = get_index(next_kmer);
@@ -71,7 +71,7 @@ void DBGHashOrdered::adjacent_incoming_nodes(node_index node,
 
     const auto kmer = get_kmer(node);
 
-    for (char c : kAlphabet_) {
+    for (char c : seq_encoder_.alphabet) {
         auto next_kmer = kmer;
         next_kmer.to_prev(k_, seq_encoder_.encode(c));
         auto next = get_index(next_kmer);
@@ -80,18 +80,33 @@ void DBGHashOrdered::adjacent_incoming_nodes(node_index node,
     }
 }
 
-uint64_t DBGHashOrdered::outdegree(node_index node) const {
+size_t DBGHashOrdered::outdegree(node_index node) const {
     assert(node);
 
-    const auto kmer = get_kmer(node);
-    uint64_t outdegree = 0;
-    for (char c : kAlphabet_) {
-        auto next_kmer = kmer;
-        next_kmer.to_next(k_, seq_encoder_.encode(c));
-        auto next_node = get_index(next_kmer);
-        if (next_node != npos)
-            ++ outdegree;
+    size_t outdegree = 0;
+
+    if (canonical_only_) {
+        auto kmer_str = get_node_sequence(node).substr(1);
+        kmer_str.push_back('\0');
+
+        for (char c : seq_encoder_.alphabet) {
+            kmer_str.back() = c;
+
+            if (get_index(sequence_to_kmers(kmer_str)[0]) != npos)
+                outdegree++;
+        }
+    } else {
+        const auto kmer = get_kmer(node);
+
+        for (char c : seq_encoder_.alphabet) {
+            auto next_kmer = kmer;
+            next_kmer.to_next(k_, seq_encoder_.encode(c));
+
+            if (get_index(next_kmer) != npos)
+                outdegree++;
+        }
     }
+
     return outdegree;
 }
 

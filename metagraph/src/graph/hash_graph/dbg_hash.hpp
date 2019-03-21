@@ -10,7 +10,7 @@
 
 class DBGHash : public DeBruijnGraph {
   public:
-    explicit DBGHash(const size_t k) : k_(k), kAlphabet_(seq_encoder_.alphabet) {}
+    explicit DBGHash(size_t k) : k_(k) {}
 
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal
@@ -58,7 +58,7 @@ class DBGHash : public DeBruijnGraph {
     void adjacent_incoming_nodes(node_index node,
                                  std::vector<node_index> *source_nodes) const;
 
-    uint64_t outdegree(node_index node) const;
+    size_t outdegree(node_index node) const;
 
     node_index kmer_to_node(const std::string &kmer) const;
     std::string node_to_kmer(node_index node) const;
@@ -83,7 +83,6 @@ class DBGHash : public DeBruijnGraph {
     tsl::hopscotch_map<std::string, uint64_t> indices_;
     std::vector<std::string> kmers_;
     KmerExtractor2Bit seq_encoder_;
-    const std::string kAlphabet_;
 
     static constexpr auto kExtension = ".hashdbg";
 };

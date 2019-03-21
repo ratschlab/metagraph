@@ -66,7 +66,7 @@ class DBGSD : public DeBruijnGraph {
     void adjacent_incoming_nodes(node_index node,
                                  std::vector<node_index> *source_nodes) const;
 
-    uint64_t outdegree(node_index) const {
+    size_t outdegree(node_index) const {
         // TODO: Complete outdegree for DBGSD.
         throw std::runtime_error("Not implemented");
     }

@@ -2272,14 +2272,29 @@ void DBGSuccinct::map_to_nodes(const std::string &sequence,
     }
 }
 
-uint64_t DBGSuccinct::outdegree(node_index node) const {
+size_t DBGSuccinct::outdegree(node_index node) const {
     assert(node);
 
     auto boss_edge = kmer_to_boss_index(node);
-    auto last_outgoing_edge = boss_graph_->fwd(boss_edge);
-    if (!boss_to_kmer_index(last_outgoing_edge))
+
+    if (!boss_graph_->get_W(boss_edge)) {
+        // |node| is a sink dummy boss edge, hence has no outgoing edges
         return 0;
-    return last_outgoing_edge - boss_graph_->pred_last(last_outgoing_edge - 1);
+    }
+
+    auto last_target_kmer = boss_graph_->fwd(boss_edge);
+
+    if (!boss_graph_->get_W(last_target_kmer)) {
+        // There is a sunk dummy target, hence this is the only outgoing edge
+        if (valid_edges_.get()) {
+            // if mask is defined, skip boss dummy sink edges
+            return 0;
+        } else {
+            return 1;
+        }
+    }
+
+    return last_target_kmer - boss_graph_->pred_last(last_target_kmer - 1);
 }
 
 uint64_t DBGSuccinct::num_nodes() const {

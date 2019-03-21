@@ -60,7 +60,7 @@ void DBGHash::adjacent_outgoing_nodes(node_index node,
 
     auto prefix = node_to_kmer(node).substr(1);
 
-    for (char c : kAlphabet_) {
+    for (char c : seq_encoder_.alphabet) {
         auto next = kmer_to_node(prefix + c);
         if (next != npos)
             target_nodes->push_back(next);
@@ -75,22 +75,26 @@ void DBGHash::adjacent_incoming_nodes(node_index node,
     auto suffix = node_to_kmer(node);
     suffix.pop_back();
 
-    for (char c : kAlphabet_) {
+    for (char c : seq_encoder_.alphabet) {
         auto next = kmer_to_node(std::string(1, c) + suffix);
         if (next != npos)
             source_nodes->push_back(next);
     }
 }
 
-uint64_t DBGHash::outdegree(node_index node) const {
+size_t DBGHash::outdegree(node_index node) const {
     assert(node);
 
-    auto prefix = node_to_kmer(node).substr(1);
-    uint64_t outdegree = 0;
-    for (char c : kAlphabet_) {
-        auto next_node = kmer_to_node(prefix + c);
-        if (next_node != npos)
-            ++ outdegree;
+    size_t outdegree = 0;
+
+    auto next = node_to_kmer(node).substr(1);
+    next.push_back('\0');
+
+    for (char c : seq_encoder_.alphabet) {
+        next.back() = c;
+
+        if (kmer_to_node(next) != npos)
+            outdegree++;
     }
     return outdegree;
 }
@@ -156,7 +160,7 @@ std::string DBGHash::encode_sequence(const std::string &sequence) const {
     std::string result = sequence;
 
     for (char &c : result) {
-        if (kAlphabet_.find(c) == std::string::npos)
+        if (seq_encoder_.alphabet.find(c) == std::string::npos)
             c = 'N';
     }
     return result;
