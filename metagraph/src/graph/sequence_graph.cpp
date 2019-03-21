@@ -4,15 +4,15 @@
 
 
 DeBruijnGraph::node_index DeBruijnGraph::kmer_to_node(const char *begin) const {
-    node_index node = npos;
-    map_to_nodes(std::string(begin, get_k()),
-        [&node](node_index i) { node = i; });
-    return node;
+    return kmer_to_node(std::string(begin, get_k()));
 }
 
 DeBruijnGraph::node_index DeBruijnGraph::kmer_to_node(const std::string &kmer) const {
     assert(kmer.size() == get_k());
-    return kmer_to_node(kmer.data());
+
+    node_index node = npos;
+    map_to_nodes(kmer, [&node](node_index i) { node = i; });
+    return node;
 }
 
 // Check whether graph contains fraction of nodes from the sequence
