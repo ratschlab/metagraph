@@ -12,6 +12,9 @@
 #include <iostream>
 #include <map>
 #include <vector>
+#include <random>
+
+using namespace std;
 
 class SamplerConvenient {
 public:

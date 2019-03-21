@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 #include <ProgressBar.hpp>
 #include <tclap/CmdLine.h>
+#include <random>
 
 using TCLAP::ValueArg;
 using TCLAP::MultiArg;
@@ -34,9 +35,6 @@ using json = nlohmann::json;
 
 using namespace std;
 using namespace std::string_literals;
-
-
-using node_index = SequenceGraph::node_index;
 
 
 
