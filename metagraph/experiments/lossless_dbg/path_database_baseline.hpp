@@ -54,6 +54,7 @@ public:
         for(auto& sequence : sequences) {
             int relative_order = route_sequence(sequence);
             encoded.push_back({starting_node(sequence),relative_order});
+            encoded_paths++;
         }
         
         return encoded;
@@ -72,6 +73,7 @@ public:
             if (node_is_split(node)) {
                 auto& routing_table = splits[node];
                 auto rt_index = routing_table.begin();
+                assert(relative_position <= routing_table.size());
                 advance(rt_index,relative_position);
                 routing_table.insert(rt_index,base);
                 relative_position = rank(routing_table,base,relative_position)-1;
@@ -81,7 +83,7 @@ public:
             if (node_is_join(node)) {
                 // todo better name (it is a symbol that determines from which branch we came)
                 auto join_symbol = sequence[kmer_position-1];
-                relative_position += offset_for_symbol(joins[node],join_symbol);
+                relative_position += branch_starting_offset(joins[node],join_symbol);
                 joins[node][join_symbol]++;
             }
         }
@@ -99,7 +101,16 @@ public:
         int result = 0;
         for(auto&[base,count] : join) {
             result += count;
-            if (base == symbol) break;
+            if (base >= symbol) break;
+        }
+        return result;
+    }
+
+    int branch_starting_offset(const map<char,int>& join,char symbol) const {
+        int result = 0;
+        for(auto&[base,count] : join) {
+            if (base >= symbol) break;
+            result += count;
         }
         return result;
     }
@@ -125,7 +136,9 @@ public:
         
     }
     
-    size_t num_paths() const override;
+    size_t num_paths() const override {
+        return encoded_paths;
+    };
     
     std::string decode(path_id path) const override {
         auto node = path.first;
@@ -153,13 +166,14 @@ public:
             }
             if (base == '~') break;
             node = graph.traverse(node,base);
+            assert(node);
             kmer_position++;
             sequence.append(1,base); // 1 times base
             
             if (node_is_join(node)) {
                 // todo better name (it is a symbol that determines from which branch we came)
                 auto join_symbol = sequence[kmer_position-1];
-                relative_position += offset_for_symbol(joins.at(node),join_symbol);
+                relative_position += branch_starting_offset(joins.at(node),join_symbol);
             }
         }
         
@@ -176,6 +190,7 @@ public:
     
 private:
     // denote how many reads are joining from every branch (ATCGN~) (~ denotes start of a new read)
+    int encoded_paths = 0;
     std::map<node_index,map<char,int>> joins;
     // denote where the reads should go (ATCGN~) (~ denodes the end of particular read)
     

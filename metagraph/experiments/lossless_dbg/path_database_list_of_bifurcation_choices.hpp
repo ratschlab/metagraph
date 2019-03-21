@@ -19,6 +19,9 @@
 #include "path_database.hpp"
 #include "utilities.hpp"
 
+#pragma GCC diagnostic ignored "-Wmissing-noreturn"
+#pragma GCC diagnostic ignored "-Wreturn-type"
+
 using json = nlohmann::json;
 
 
