@@ -9,9 +9,13 @@
 #ifndef tests_h
 #define tests_h
 
+#include <gtest/gtest.h>
 #include "utilities.hpp"
-#include "compressed_reads.hpp"
+#include "path_database_list_of_bifurcation_choices.hpp"
 #include "samplers.hpp"
+#include "path_database_baseline.hpp"
+//#include "path_database.hpp"
+
 
 const int test_seed = 3424;
 
@@ -38,7 +42,7 @@ TEST(SamplerTest,SampleCoverage) {
 //    EXPECT_EQ(chromosome.substr(0,10),"NNNNNNNNNN");
 //}
 
-TEST(CompressedReads,IdentityTest1) {
+TEST(PathDatabase,IdentityTest1) {
     set<string> reads = {"ATGCGATCGATATGCGAGA",
                          "ATGCGATCGAGACTACGAG",
                          "GTACGATAGACATGACGAG",
@@ -48,6 +52,19 @@ TEST(CompressedReads,IdentityTest1) {
     set<string> decompressed_read_set = set<string>(all(decompressed_reads));
     ASSERT_EQ(reads, decompressed_read_set);
 }
-
+TEST(PathDatabase,IdentityTest2) {
+    set<string> reads = {"ATGCGATCGATATGCGAGA",
+                         "ATGCGATCGAGACTACGAG",
+                         "GTACGATAGACATGACGAG",
+                         "ACTGACGAGACACAGATGC"};
+    auto reads_vectorized = vector<string>(all(reads));
+    auto database = PathDatabaseBaseline(reads_vectorized,5);
+    auto handles = database.encode(reads_vectorized);
+    set<string> decompressed_read_set;
+    for(auto& handle : handles) {
+        decompressed_read_set.insert(database.decode(handle));
+    }
+    ASSERT_EQ(reads, decompressed_read_set);
+}
 
 #endif /* tests_h */

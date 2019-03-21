@@ -2,8 +2,8 @@
 // Created by Jan Studený on 2019-03-08.
 //
 
-#ifndef METAGRAPH_COMPRESSED_READS_HPP
-#define METAGRAPH_COMPRESSED_READS_HPP
+#ifndef METAGRAPH_PATH_DATABASE_LIST_OF_BIFURCATION_CHOICES_HPP
+#define METAGRAPH_PATH_DATABASE_LIST_OF_BIFURCATION_CHOICES_HPP
 
 
 #include <utility>
@@ -13,7 +13,10 @@
 #include <vector>
 #include <nlohmann/json.hpp>
 
-#include "path_encoder.hpp"
+#include "dbg_succinct.hpp"
+#include "dbg_succinct_construct.hpp"
+
+#include "path_database.hpp"
 #include "utilities.hpp"
 
 using json = nlohmann::json;
@@ -24,9 +27,8 @@ using namespace std::string_literals;
 using node_index = SequenceGraph::node_index;
 const int DEFAULT_K_KMER = 21;
 
-
 // Stores reads in a compressed format
-class CompressedReads : public PathDatabase {
+class CompressedReads : public PathDatabase<int> {
   public:
     // TODO: read about lvalues, rvalues, etc
     // http://thbecker.net/articles/rvalue_references/section_01.html
@@ -115,11 +117,7 @@ class CompressedReads : public PathDatabase {
     node_index get_next_consistent_node(const std::string &history) const override {}
 
     std::string decode(path_id path) const override {
-        auto it = compressed_reads_.begin();
-        for (size_t i = 0; i < path; ++i) {
-            ++it;
-        }
-        return decode_read(*it);
+        return decode_read(compressed_reads_[path]);
     }
 
   private:
@@ -195,4 +193,4 @@ class CompressedReads : public PathDatabase {
     const int k_kmer_;
 };
 
-#endif //METAGRAPH_COMPRESSED_READS_HPP
+#endif //METAGRAPH_PATH_DATABASE_LIST_OF_BIFURCATION_CHOICES_HPP

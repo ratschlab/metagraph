@@ -13,18 +13,30 @@
 #include <vector>
 #include <nlohmann/json.hpp>
 #include <sequence_graph.hpp>
+#include "dbg_succinct_construct.hpp"
+#include "dbg_succinct.hpp"
 
 #include "utilities.hpp"
 
-template <typename path_id>
+template <typename _path_id>
 class PathDatabase {
   public:
+    // convenience constructor
+    explicit PathDatabase(const vector<string> &raw_reads,
+                    size_t k_kmer = 21 /* default kmer */)
+            : PathDatabase(std::shared_ptr<const DeBruijnGraph> {
+                                new DBGSuccinct(dbg_succ_graph_constructor(raw_reads, k_kmer))
+                                })
+                {}
+
+
     PathDatabase(std::shared_ptr<const DeBruijnGraph> graph)
           : graph_(graph) {}
 
-    virtual ~PathDatabase() {}
+     ~PathDatabase() = default;
 
     using node_index = DeBruijnGraph::node_index;
+    using path_id = _path_id;
 
     // compress a batch of sequences
     virtual std::vector<path_id>
@@ -62,6 +74,17 @@ class PathDatabase {
 
   protected:
     std::shared_ptr<const DeBruijnGraph> graph_;
+
+    static DBG_succ* dbg_succ_graph_constructor(const vector<string> &raw_reads,
+                                                size_t k_kmer) {
+        auto graph_constructor = DBGSuccConstructor(k_kmer - 1);// because DBG_succ has smaller kmers
+        for(auto &read : raw_reads) {
+            assert(read.size() >= k_kmer);
+            graph_constructor.add_sequence(read);
+        }
+        return new DBG_succ(&graph_constructor);
+        //graph = DBGSuccinct(stupid_old_representation);
+    }
 };
 
 

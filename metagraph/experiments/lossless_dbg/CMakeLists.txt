@@ -15,9 +15,11 @@
 #target_link_libraries(compression_naive_code z)
 #target_link_libraries(compression_naive_code hts)
 project(lossless_dbg)
-add_executable(lossless_dbg main.cpp)
-target_link_libraries(lossless_dbg metagraph ${METALIBS} gtest)
+set(cpp_code_files tests.cpp  utilities.cpp path_database_baseline.cpp)
+add_executable(tests ${cpp_code_files})
 
+target_link_libraries(tests metagraph ${METALIBS} gtest gtest_main)
+message("CPP Code files are ${cpp_code_files}")
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 add_subdirectory(playground/compressor)

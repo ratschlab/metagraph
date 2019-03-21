@@ -37,60 +37,31 @@ namespace fs = std::filesystem;
 
 #define local_file(filename) (fs::path(__FILE__).parent_path() / (filename))
 
-void save_string(const string &to_save,const string &filename) {
-    ofstream myfile;
-    myfile.open (filename);
-    myfile << to_save;
-    myfile.close();
-}
+void save_string(const string &to_save,const string &filename);
 
 struct d_t {
-    template<typename T> d_t & operator,(const T & x) {
-        std::cerr << ' ' <<  x;
-        return *this;
-    }
+    template<typename T> d_t & operator,(const T & x);
 };
+
+
 
 #define D(args ...) { d_t, "|", __LINE__, "|", #args, ":", args, "\n"; }
 
-void transform_to_fasta(const string &filename,const vector<string>& reads) {
-    ofstream myfile;
-    myfile.open (filename);
-    for(auto& read : reads) {
-        myfile << ">" << endl;
-        myfile << read << endl;
-    }
-    myfile.close();
-}
+void transform_to_fasta(const string &filename,const vector<string>& reads);
 
-void write_reads_to_fasta(const vector<string>& reads,const string &filename) {
-    transform_to_fasta(filename,reads);
-}
+void write_reads_to_fasta(const vector<string>& reads,const string &filename);
 
-vector<string> read_reads_from_fasta(const string &filename) {
-    vector<string> result;
-    read_fasta_file_critical(
-                             filename,
-                             [&](kseq_t* read) {
-                                 result.push_back(read->seq.s);
-                             });
-    return result;
-}
+vector<string> read_reads_from_fasta(const string &filename);
 
 // openmp reductions
 
 void reduce_maps(\
                  std::map<int, int>& output, \
-                 std::map<int, int>& input)
-{
-    for (auto& X : input) {
-        output[X.first] += X.second;
-    }
-}
+                 std::map<int, int>& input);
 
-#pragma omp declare reduction(map_reduction : \
-std::map<int, int> : \
-reduce_maps(omp_out, omp_in)) \
-initializer(omp_priv(omp_orig))
+//#pragma omp declare reduction(map_reduction : \
+//std::map<int, int> : \
+//reduce_maps(omp_out, omp_in)) \
+//initializer(omp_priv(omp_orig))
 
 #endif /* utils_h */
