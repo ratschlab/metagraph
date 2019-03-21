@@ -89,9 +89,9 @@ int main(int argc, char *argv[]) {
     auto output_filename = outputArg.getValue();
     auto read_length = read_lengthArg.getValue();
     auto seed = seedArg.getValue();
-
+    auto generator = std::mt19937(seed);
     auto reference = read_reads_from_fasta(reference_filename)[0];
-    auto sampler = Sampler(reference,seed);
+    auto sampler = Sampler(reference,generator);
     auto reads = sampler.sample_coverage(read_length,coverage);
     write_reads_to_fasta(reads,output_filename);
     return 0;

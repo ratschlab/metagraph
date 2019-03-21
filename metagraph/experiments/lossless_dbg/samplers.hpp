@@ -32,8 +32,7 @@ public:
 
 class Sampler : public SamplerConvenient {
 public:
-    Sampler(string reference, unsigned int seed) : reference(std::move(reference)) {
-        generator = std::mt19937(seed); //Standard mersenne_twister_engine seeded with rd()
+    Sampler(string reference, std::mt19937 generator) : reference(std::move(reference)), generator(generator) {
     };
     string sample(int sample_length) override {
         std::uniform_int_distribution<> dis(0, reference.length()-1-sample_length);
