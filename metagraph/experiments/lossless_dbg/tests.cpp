@@ -76,15 +76,24 @@ TEST(PathDatabase,IdentityTest1) {
 }
 
 TEST(PathDatabase,IdentityTest2) {
-    auto database = PathDatabaseBaseline(reads_for_testing_short,5);
-    check_compression_decompression(database,reads_for_testing_short);
+    auto db = PathDatabaseBaseline(reads_for_testing_short,5);
+    check_compression_decompression(db,reads_for_testing_short);
 }
 
 #if defined(__linux__) || true
 
-TEST(PathDatabase,LongTest) {
-    string reads_filename = "/cluster/home/studenyj/";
+TEST(PathDatabase,LongTestCompressedReads) {
+    string reads_filename = "/cluster/home/studenyj/genomic_data/human_chr10_artifical_reads.fasta";
+    auto reads = read_reads_from_fasta(reads_filename);
+    auto db = CompressedReads(reads);
+    check_compression_decompression(db,reads);
+}
 
+TEST(PathDatabase,LongTestBaseline) {
+    string reads_filename = "/cluster/home/studenyj/genomic_data/human_chr10_artifical_reads.fasta";
+    auto reads = read_reads_from_fasta(reads_filename);
+    auto db = PathDatabaseBaseline(reads);
+    check_compression_decompression(db,reads);
 }
 
 #endif
