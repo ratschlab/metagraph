@@ -31,34 +31,29 @@ using node_index = SequenceGraph::node_index;
 const int DEFAULT_K_KMER = 21;
 
 // Stores reads in a compressed format
-class CompressedReads : public PathDatabase<int> {
+class PathDatabaseListBC : public PathDatabase<int> {
   public:
     // TODO: read about lvalues, rvalues, etc
     // http://thbecker.net/articles/rvalue_references/section_01.html
     // const value
-    // CompressedReads(const vector<string> &raw_reads)
+    // PathDatabaseListBC(const vector<string> &raw_reads)
     // non-const pointer to modify
-    // CompressedReads(vector<string> *raw_reads)
+    // PathDatabaseListBC(vector<string> *raw_reads)
     //
     // Graph |graph| must contain all k-mers from the sequences passed
-    CompressedReads(DBGSuccinct *graph,
+    PathDatabaseListBC(DBGSuccinct *graph,
                     const vector<string> &raw_reads,
                     size_t k_kmer = DEFAULT_K_KMER)
           : PathDatabase(std::shared_ptr<const DeBruijnGraph> { graph }),
             k_kmer_(k_kmer),
             read_length(raw_reads[0].length()) {
-//        for (const auto &read : raw_reads) {
-//            compressed_reads_.push_back(encode_read(read));
-//        }
     }
 
-    CompressedReads(const vector<string> &raw_reads,
+    PathDatabaseListBC(const vector<string> &raw_reads,
                     size_t k_kmer = DEFAULT_K_KMER)
-          : CompressedReads(new DBGSuccinct(dbg_succ_graph_constructor(raw_reads, k_kmer)),
-                            raw_reads,
-                            k_kmer) {}
+          : PathDatabase(raw_reads,k_kmer), k_kmer_(k_kmer),read_length(raw_reads[0].length()) {}
 
-    std::vector<string> get_reads() const {
+    std::vector<string> get_all_reads() const {
         vector<string> reads;
         for (const auto &compressed_read : compressed_reads_) {
             reads.push_back(decode_read(compressed_read));

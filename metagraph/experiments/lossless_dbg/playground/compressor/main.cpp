@@ -74,12 +74,13 @@ int main(int argc, char *argv[]) {
     auto input_filename = inputArg.getValue();
     auto statistics_filename = statsArg.getValue();
     auto reads = read_reads_from_fasta(input_filename);
-    auto compressed_reads = CompressedReads(reads);
-    auto statistics = compressed_reads.get_statistics();
+    auto db = PathDatabaseListBC(reads);
+    db.encode(reads);
+    auto statistics = db.get_statistics();
     save_string(statistics.dump(4),statistics_filename);
     if (decompressedArg.isSet()) {
         auto decompressed_filename = decompressedArg.getValue();
-        write_reads_to_fasta(compressed_reads.get_reads(),decompressed_filename);
+        write_reads_to_fasta(db.get_all_reads(),decompressed_filename);
     }
 
     return 0;

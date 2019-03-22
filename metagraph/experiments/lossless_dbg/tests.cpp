@@ -80,7 +80,7 @@ void short_identity_test() {
     check_compression_decompression<T>(reads_for_testing_short,5);
 }
 TEST(PathDatabase,IdentityTestCompressedReads) {
-    short_identity_test<CompressedReads>();
+    short_identity_test<PathDatabaseListBC>();
 }
 
 TEST(PathDatabase,IdentityTestPathDatabaseBaseline) {
@@ -96,7 +96,7 @@ void long_identity_test() {
     check_compression_decompression<T>(reads);
 }
 TEST(PathDatabase,LongTestCompressedReads) {
-    long_identity_test<CompressedReads>();
+    long_identity_test<PathDatabaseListBC>();
 }
 
 TEST(PathDatabase,LongTestBaseline) {
