@@ -68,7 +68,7 @@ class PathDatabaseListBC : public PathDatabase<int> {
         for (const auto &read : compressed_reads_) {
             bifurcation_size_histogram[to_string(read.second.size())]++;
         }
-        json result = {{"bifurcation_size",bifurcation_size_histogram},
+        json result = {{"bifurcation_histogram",bifurcation_size_histogram},
                        {"total_size",compressed_size_without_reference()},
                        {"bifurcation_size", compressed_size_without_reference()-2*num_paths()*graph_->get_k()},
                        {"number_of_reads",compressed_reads_.size()}};
