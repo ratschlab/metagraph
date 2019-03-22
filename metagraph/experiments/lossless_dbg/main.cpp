@@ -26,6 +26,10 @@ using json = nlohmann::json;
 #include "playground/sampler/main.cpp"
 #undef main
 
+#define main main_compressor
+#include "playground/compressor/main.cpp"
+#undef main
+
 #pragma clang diagnostic pop
 
 #pragma clang diagnostic push
@@ -33,15 +37,11 @@ using json = nlohmann::json;
 
 
 int main(int argc, char *argv[]) {
-    TCLAP::CmdLine cmd("Compress reads", ' ', "");
+    TCLAP::CmdLine cmd("Toolbox for experiments", ' ', "");
 
     std::vector<std::string> regimes {
             "sample",
-            "matrices",
-            "subsets",
-            "to_rrr",
-            "stats",
-            "query"
+            "compress_statistics"
     };
 
     ValuesConstraint<std::string> regime_constraint(regimes);
@@ -59,5 +59,8 @@ int main(int argc, char *argv[]) {
 
     if (regime == "sample") {
         main_sampler(argc-1,new_argv);
+    }
+    else if (regime == "compress_statistics") {
+        main_compressor(argc-1,new_argv);
     }
 }

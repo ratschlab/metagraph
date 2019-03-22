@@ -69,31 +69,38 @@ void check_compression_decompression(PathDatabase<T>& db,vector<string>& reads) 
     }
     ASSERT_EQ(reads,decompressed_reads);
 }
-
-TEST(PathDatabase,IdentityTest1) {
-    auto db = CompressedReads(reads_for_testing_short,5);
-    check_compression_decompression(db,reads_for_testing_short);
+template <typename T>
+void check_compression_decompression(vector<string>& reads, int k_kmer=21) {
+    auto db = T(reads,k_kmer);
+    check_compression_decompression(db,reads);
 }
 
-TEST(PathDatabase,IdentityTest2) {
-    auto db = PathDatabaseBaseline(reads_for_testing_short,5);
-    check_compression_decompression(db,reads_for_testing_short);
+template <typename T>
+void short_identity_test() {
+    check_compression_decompression<T>(reads_for_testing_short,5);
+}
+TEST(PathDatabase,IdentityTestCompressedReads) {
+    short_identity_test<CompressedReads>();
 }
 
-#if defined(__linux__) || true
+TEST(PathDatabase,IdentityTestPathDatabaseBaseline) {
+    short_identity_test<PathDatabaseBaseline>();
+}
 
-TEST(PathDatabase,LongTestCompressedReads) {
+#if defined(__linux__) || false
+
+template <typename T>
+void long_identity_test() {
     string reads_filename = "/cluster/home/studenyj/genomic_data/human_chr10_artifical_reads.fasta";
     auto reads = read_reads_from_fasta(reads_filename);
-    auto db = CompressedReads(reads);
-    check_compression_decompression(db,reads);
+    check_compression_decompression<T>(reads);
+}
+TEST(PathDatabase,LongTestCompressedReads) {
+    long_identity_test<CompressedReads>();
 }
 
 TEST(PathDatabase,LongTestBaseline) {
-    string reads_filename = "/cluster/home/studenyj/genomic_data/human_chr10_artifical_reads.fasta";
-    auto reads = read_reads_from_fasta(reads_filename);
-    auto db = PathDatabaseBaseline(reads);
-    check_compression_decompression(db,reads);
+    long_identity_test<PathDatabaseBaseline>();
 }
 
 #endif
