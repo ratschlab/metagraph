@@ -143,8 +143,14 @@ void read_fasta_from_string(const std::string &fasta_flat,
         std::cerr << "ERROR: opening for writing to pipe failed" << std::endl;
         exit(1);
     }
-    write(p[1], fasta_flat.c_str(), fasta_flat.length());
+    auto sent = write(p[1], fasta_flat.c_str(), fasta_flat.length());
     close(p[1]);
+
+    if (sent != static_cast<int64_t>(fasta_flat.length())) {
+        std::cerr << "ERROR: writing to pipe failed" << std::endl;
+        close(p[0]);
+        exit(1);
+    }
 
     // gzFile from pipe
     gzFile input_p = gzdopen(p[0], "r");
