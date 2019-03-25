@@ -113,6 +113,24 @@ size_t DBGHash::outdegree(node_index node) const {
     return outdegree;
 }
 
+size_t DBGHash::indegree(node_index node) const {
+    assert(node);
+
+    size_t indegree = 0;
+
+    auto next = node_to_kmer(node);
+    next.pop_back();
+    next.insert(0, 1, '\0');
+
+    for (char c : seq_encoder_.alphabet) {
+        next.front() = c;
+
+        if (kmer_to_node(next) != npos)
+            indegree++;
+    }
+    return indegree;
+}
+
 DBGHash::node_index DBGHash::kmer_to_node(const std::string &kmer) const {
     if (kmer.length() != k_)
         throw std::runtime_error("Error: incompatible k-mer size");

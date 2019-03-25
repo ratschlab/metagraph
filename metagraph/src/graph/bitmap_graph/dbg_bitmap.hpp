@@ -63,6 +63,11 @@ class DBGSD : public DeBruijnGraph {
         throw std::runtime_error("Not implemented");
     }
 
+    size_t indegree(node_index) const {
+        // TODO: Complete outdegree for DBGSD.
+        throw std::runtime_error("Not implemented");
+    }
+
     template <class... T>
     using Call = typename std::function<void(T...)>;
 

@@ -80,6 +80,7 @@ class DeBruijnGraph : public SequenceGraph {
                                                         = [](){ return false; }) const = 0;
 
     virtual size_t outdegree(node_index) const = 0;
+    virtual size_t indegree(node_index) const = 0;
 
     virtual node_index kmer_to_node(const char *begin) const;
     virtual node_index kmer_to_node(const std::string &kmer) const;

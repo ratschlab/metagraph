@@ -2295,7 +2295,7 @@ size_t DBGSuccinct::outdegree(node_index node) const {
 
     auto boss_edge = kmer_to_boss_index(node);
 
-    if (!boss_graph_->get_W(boss_edge)) {
+    if (boss_edge > 1 && !boss_graph_->get_W(boss_edge)) {
         // |node| is a sink dummy boss edge, hence has no outgoing edges
         return 0;
     }
@@ -2313,6 +2313,28 @@ size_t DBGSuccinct::outdegree(node_index node) const {
     }
 
     return last_target_kmer - boss_graph_->pred_last(last_target_kmer - 1);
+}
+
+size_t DBGSuccinct::indegree(node_index node) const {
+    assert(node);
+
+    auto boss_edge = kmer_to_boss_index(node);
+
+    if (boss_edge == 1)
+        return 1;
+
+    TAlphabet d = boss_graph_->get_node_last_value(boss_edge);
+
+    auto x = boss_graph_->bwd(boss_edge);
+
+    size_t first_valid = !valid_edges_.get() || (*valid_edges_)[x];
+
+    if (x + 1 == boss_graph_->get_W().size())
+        return first_valid;
+
+    uint64_t y = boss_graph_->succ_W(x + 1, d);
+    return first_valid + boss_graph_->rank_W(y - 1, d + boss_graph_->alph_size)
+                        - boss_graph_->rank_W(x - 1, d + boss_graph_->alph_size);
 }
 
 uint64_t DBGSuccinct::num_nodes() const {

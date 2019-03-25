@@ -138,6 +138,24 @@ size_t DBGHashOrdered::outdegree(node_index node) const {
     return outdegree;
 }
 
+size_t DBGHashOrdered::indegree(node_index node) const {
+    assert(node);
+
+    size_t indegree = 0;
+
+    const auto &kmer = get_kmer(node);
+
+    for (char c : seq_encoder_.alphabet) {
+        auto next_kmer = kmer;
+        next_kmer.to_prev(k_, seq_encoder_.encode(c));
+
+        if (get_index(next_kmer) != npos)
+            indegree++;
+    }
+
+    return indegree;
+}
+
 DBGHashOrdered::node_index
 DBGHashOrdered::kmer_to_node(const std::string &kmer) const {
     assert(kmer.length() == k_);

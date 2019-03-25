@@ -494,7 +494,7 @@ TEST(DBGHashOrdered, Serialize) {
 
 TEST(DBGHashOrdered, get_outdegree_single_node) {
     for (size_t k = 2; k < 10; ++k) {
-        std::unique_ptr<DBGHashOrdered> graph { new DBGHashOrdered(k) };
+        auto graph = std::make_unique<DBGHashOrdered>(k);
         graph->add_sequence(std::string(k - 1, 'A') + 'C');
         EXPECT_EQ(1ull, graph->num_nodes());
         EXPECT_EQ(0ull, graph->outdegree(1));
@@ -503,40 +503,93 @@ TEST(DBGHashOrdered, get_outdegree_single_node) {
 
 TEST(DBGHashOrdered, get_maximum_outdegree) {
     for (size_t k = 2; k < 10; ++k) {
-        std::unique_ptr<DBGHashOrdered> graph { new DBGHashOrdered(k) };
+        auto graph = std::make_unique<DBGHashOrdered>(k);
         graph->add_sequence(std::string(k - 1, 'A') + 'A');
         graph->add_sequence(std::string(k - 1, 'A') + 'C');
         graph->add_sequence(std::string(k - 1, 'A') + 'G');
         graph->add_sequence(std::string(k - 1, 'A') + 'T');
 
-        DBGHashOrdered::node_index max_outdegree_node_index;
-        graph->map_to_nodes(std::string(k, 'A'), [&](DBGHashOrdered::node_index node) {
-                                                    max_outdegree_node_index = node; });
+        auto max_outdegree_node_index = graph->kmer_to_node(std::string(k, 'A'));
 
-        EXPECT_EQ(4ull, graph->num_nodes());
+        ASSERT_EQ(4ull, graph->num_nodes());
         for (size_t i = 1; i <= graph->num_nodes(); ++i) {
-            if (i == max_outdegree_node_index)
+            if (i == max_outdegree_node_index) {
                 EXPECT_EQ(4ull, graph->outdegree(i));
-            else
+            } else {
                 EXPECT_EQ(0ull, graph->outdegree(i));
+            }
         }
     }
 }
 
 TEST(DBGHashOrdered, get_outdegree_loop) {
     for (size_t k = 2; k < 10; ++k) {
-        std::unique_ptr<DBGHashOrdered> graph { new DBGHashOrdered(k) };
+        auto graph = std::make_unique<DBGHashOrdered>(k);
         graph->add_sequence(std::string(k - 1, 'A') + std::string(k - 1, 'C') +
                             std::string(k - 1, 'G') + std::string(k, 'T'));
         graph->add_sequence(std::string(k, 'A'));
 
-        DBGHashOrdered::node_index loop_node_index;
-        graph->map_to_nodes(std::string(k, 'A'), [&](DBGHashOrdered::node_index node) { loop_node_index = node; });
+        auto loop_node_index = graph->kmer_to_node(std::string(k, 'A'));
+
+        ASSERT_TRUE(graph->num_nodes() > 1);
         for (size_t i = 1; i <= graph->num_nodes(); ++i) {
-            if (i == loop_node_index)
+            if (i == loop_node_index) {
                 EXPECT_EQ(2ull, graph->outdegree(i));
-            else
+            } else {
                 EXPECT_EQ(1ull, graph->outdegree(i));
+            }
+        }
+    }
+}
+
+TEST(DBGHashOrdered, get_indegree_single_node) {
+    for (size_t k = 2; k < 10; ++k) {
+        auto graph = std::make_unique<DBGHashOrdered>(k);
+        graph->add_sequence(std::string(k - 1, 'A') + 'C');
+        EXPECT_EQ(1ull, graph->num_nodes());
+        EXPECT_EQ(0ull, graph->indegree(1));
+    }
+}
+
+TEST(DBGHashOrdered, get_maximum_indegree) {
+    for (size_t k = 2; k < 10; ++k) {
+        auto graph = std::make_unique<DBGHashOrdered>(k);
+        graph->add_sequence('A' + std::string(k - 1, 'A'));
+        graph->add_sequence('C' + std::string(k - 1, 'A'));
+        graph->add_sequence('G' + std::string(k - 1, 'A'));
+        graph->add_sequence('T' + std::string(k - 1, 'A'));
+
+        auto max_indegree_node_index = graph->kmer_to_node(std::string(k, 'A'));
+
+        ASSERT_EQ(4ull, graph->num_nodes());
+        for (size_t i = 1; i <= graph->num_nodes(); ++i) {
+            if (i == max_indegree_node_index) {
+                EXPECT_EQ(4ull, graph->indegree(i));
+            } else {
+                EXPECT_EQ(0ull, graph->indegree(i));
+            }
+        }
+    }
+}
+
+TEST(DBGHashOrdered, get_indegree_loop) {
+    for (size_t k = 2; k < 10; ++k) {
+        auto graph = std::make_unique<DBGHashOrdered>(k);
+
+        graph->add_sequence(std::string(k, 'A')
+                                + std::string(k - 1, 'C')
+                                + std::string(k - 1, 'G')
+                                + std::string(k, 'T'));
+
+        auto loop_node_index = graph->kmer_to_node(std::string(k, 'T'));
+
+        ASSERT_TRUE(graph->num_nodes() > 1);
+        for (size_t i = 1; i <= graph->num_nodes(); ++i) {
+            if (i == loop_node_index) {
+                EXPECT_EQ(2ull, graph->indegree(i));
+            } else {
+                EXPECT_EQ(1ull, graph->indegree(i));
+            }
         }
     }
 }

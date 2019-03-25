@@ -65,6 +65,7 @@ class DBGHash : public DeBruijnGraph {
                                  std::vector<node_index> *source_nodes) const;
 
     size_t outdegree(node_index node) const;
+    size_t indegree(node_index node) const;
 
     node_index kmer_to_node(const std::string &kmer) const;
     std::string node_to_kmer(node_index node) const;
