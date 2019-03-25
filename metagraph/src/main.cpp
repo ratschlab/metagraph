@@ -16,7 +16,7 @@
 #include "annotation_converters.hpp"
 #include "kmc_parser.hpp"
 #include "dbg_hash_ordered.hpp"
-#include "dbg_hash.hpp"
+#include "dbg_hash_string.hpp"
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
 #include "server.hpp"

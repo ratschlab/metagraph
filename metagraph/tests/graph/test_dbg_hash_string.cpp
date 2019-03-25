@@ -5,7 +5,7 @@
 #include <htslib/kseq.h>
 #include "gtest/gtest.h"
 
-#include "dbg_hash.hpp"
+#include "dbg_hash_string.hpp"
 #include "utils.hpp"
 
 const std::string test_data_dir = "../tests/data";
