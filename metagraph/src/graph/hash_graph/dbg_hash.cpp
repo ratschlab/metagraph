@@ -7,8 +7,8 @@
 #include "utils.hpp"
 
 
-void DBGHash::add_sequence(const std::string &sequence,
-                           bit_vector_dyn *nodes_inserted) {
+void DBGHashString::add_sequence(const std::string &sequence,
+                                 bit_vector_dyn *nodes_inserted) {
     assert(!nodes_inserted || nodes_inserted->size() == num_nodes());
 
     auto seq_encoded = encode_sequence(sequence);
@@ -27,9 +27,9 @@ void DBGHash::add_sequence(const std::string &sequence,
     }
 }
 
-void DBGHash::map_to_nodes(const std::string &sequence,
-                           const std::function<void(node_index)> &callback,
-                           const std::function<bool()> &terminate) const {
+void DBGHashString::map_to_nodes(const std::string &sequence,
+                                 const std::function<void(node_index)> &callback,
+                                 const std::function<bool()> &terminate) const {
     for (size_t i = 0; i + k_ <= sequence.size(); ++i) {
         auto node = kmer_to_node(std::string(&sequence[i], &sequence[i + k_]));
 
@@ -40,10 +40,10 @@ void DBGHash::map_to_nodes(const std::string &sequence,
     }
 }
 
-void DBGHash::map_to_nodes_sequentially(std::string::const_iterator begin,
-                                        std::string::const_iterator end,
-                                        const std::function<void(node_index)> &callback,
-                                        const std::function<bool()> &terminate) const {
+void DBGHashString::map_to_nodes_sequentially(std::string::const_iterator begin,
+                                              std::string::const_iterator end,
+                                              const std::function<void(node_index)> &callback,
+                                              const std::function<bool()> &terminate) const {
     for (auto it = begin; it + k_ <= end; ++it) {
         auto node = kmer_to_node(std::string(it, it + k_));
 
@@ -54,21 +54,21 @@ void DBGHash::map_to_nodes_sequentially(std::string::const_iterator begin,
     }
 }
 
-DBGHash::node_index DBGHash::traverse(node_index node, char next_char) const {
+DBGHashString::node_index DBGHashString::traverse(node_index node, char next_char) const {
     assert(node);
     auto kmer = node_to_kmer(node).substr(1) + next_char;
     return kmer_to_node(kmer);
 }
 
-DBGHash::node_index DBGHash::traverse_back(node_index node, char prev_char) const {
+DBGHashString::node_index DBGHashString::traverse_back(node_index node, char prev_char) const {
     assert(node);
     auto kmer = node_to_kmer(node);
     kmer.pop_back();
     return kmer_to_node(std::string(1, prev_char) + kmer);
 }
 
-void DBGHash::adjacent_outgoing_nodes(node_index node,
-                                      std::vector<node_index> *target_nodes) const {
+void DBGHashString::adjacent_outgoing_nodes(node_index node,
+                                            std::vector<node_index> *target_nodes) const {
     assert(node);
     assert(target_nodes);
 
@@ -81,8 +81,8 @@ void DBGHash::adjacent_outgoing_nodes(node_index node,
     }
 }
 
-void DBGHash::adjacent_incoming_nodes(node_index node,
-                                      std::vector<node_index> *source_nodes) const {
+void DBGHashString::adjacent_incoming_nodes(node_index node,
+                                            std::vector<node_index> *source_nodes) const {
     assert(node);
     assert(source_nodes);
 
@@ -96,7 +96,7 @@ void DBGHash::adjacent_incoming_nodes(node_index node,
     }
 }
 
-size_t DBGHash::outdegree(node_index node) const {
+size_t DBGHashString::outdegree(node_index node) const {
     assert(node);
 
     size_t outdegree = 0;
@@ -113,7 +113,7 @@ size_t DBGHash::outdegree(node_index node) const {
     return outdegree;
 }
 
-size_t DBGHash::indegree(node_index node) const {
+size_t DBGHashString::indegree(node_index node) const {
     assert(node);
 
     size_t indegree = 0;
@@ -131,7 +131,7 @@ size_t DBGHash::indegree(node_index node) const {
     return indegree;
 }
 
-DBGHash::node_index DBGHash::kmer_to_node(const std::string &kmer) const {
+DBGHashString::node_index DBGHashString::kmer_to_node(const std::string &kmer) const {
     if (kmer.length() != k_)
         throw std::runtime_error("Error: incompatible k-mer size");
 
@@ -142,13 +142,13 @@ DBGHash::node_index DBGHash::kmer_to_node(const std::string &kmer) const {
     return find->second + 1;
 }
 
-std::string DBGHash::node_to_kmer(node_index node) const {
+std::string DBGHashString::node_to_kmer(node_index node) const {
     assert(node);
     assert(kmers_.at(node - 1).size() == k_);
     return std::string(kmers_.at(node - 1));
 }
 
-void DBGHash::serialize(std::ostream &out) const {
+void DBGHashString::serialize(std::ostream &out) const {
     if (!out.good())
         throw std::ofstream::failure("Error: trying to dump graph to a bad stream");
 
@@ -157,13 +157,13 @@ void DBGHash::serialize(std::ostream &out) const {
     serialize_string_number_map(out, indices_);
 }
 
-void DBGHash::serialize(const std::string &filename) const {
+void DBGHashString::serialize(const std::string &filename) const {
     std::ofstream out(utils::remove_suffix(filename, kExtension) + kExtension,
                       std::ios::binary);
     serialize(out);
 }
 
-bool DBGHash::load(std::istream &in) {
+bool DBGHashString::load(std::istream &in) {
     if (!in.good())
         return false;
 
@@ -182,13 +182,13 @@ bool DBGHash::load(std::istream &in) {
     }
 }
 
-bool DBGHash::load(const std::string &filename) {
+bool DBGHashString::load(const std::string &filename) {
     std::ifstream in(utils::remove_suffix(filename, kExtension) + kExtension,
                      std::ios::binary);
     return load(in);
 }
 
-std::string DBGHash::encode_sequence(const std::string &sequence) const {
+std::string DBGHashString::encode_sequence(const std::string &sequence) const {
     std::string result = sequence;
 
     for (char &c : result) {

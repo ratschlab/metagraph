@@ -393,6 +393,8 @@ Config::GraphType Config::string_to_graphtype(const std::string &string) {
         return GraphType::SUCCINCT;
     } else if (string == "hash") {
         return GraphType::HASH;
+    } else if (string == "hashstr") {
+        return GraphType::HASH_STR;
     } else if (string == "bitmap") {
         return GraphType::BITMAP;
     } else {
@@ -405,7 +407,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     fprintf(stderr, "Metagraph: comprehensive metagenome graph representation -- Version 0.1\n\n");
 
     const char annotation_list[] = "('column', 'row', 'bin_rel_wt_sdsl', 'bin_rel_wt', 'flat', 'rbfish', 'brwt')";
-    const char graph_list[] = "('succinct', 'hash', 'bitmap')";
+    const char graph_list[] = "('succinct', 'hash', 'hashstr', 'bitmap')";
 
     switch (identity) {
         case NO_IDENTITY: {

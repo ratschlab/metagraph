@@ -16,6 +16,7 @@
 #include "annotation_converters.hpp"
 #include "kmc_parser.hpp"
 #include "dbg_hash_ordered.hpp"
+#include "dbg_hash.hpp"
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
 #include "server.hpp"
@@ -33,6 +34,9 @@ Config::GraphType parse_graph_extension(const std::string &filename) {
 
     } else if (utils::ends_with(filename, ".orhashdbg")) {
         return Config::GraphType::HASH;
+
+    } else if (utils::ends_with(filename, ".hashstrdbg")) {
+        return Config::GraphType::HASH_STR;
 
     } else if (utils::ends_with(filename, ".bitmapdbg")) {
         return Config::GraphType::BITMAP;
@@ -66,6 +70,9 @@ std::unique_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
 
         case Config::GraphType::HASH:
             return load_critical_graph_from_file<DBGHashOrdered>(filename);
+
+        case Config::GraphType::HASH_STR:
+            return load_critical_graph_from_file<DBGHashString>(filename);
 
         case Config::GraphType::BITMAP:
             return load_critical_graph_from_file<DBGSD>(filename);
@@ -981,6 +988,15 @@ int main(int argc, const char *argv[]) {
                         break;
                     case Config::GraphType::HASH:
                         graph.reset(new DBGHashOrdered(config->k, config->canonical));
+                        break;
+                    case Config::GraphType::HASH_STR:
+                        if (config->canonical) {
+                            std::cerr << "Warning: string hash-based de Bruijn graph"
+                                      << " does not support canonical mode."
+                                      << " Normal mode will be used instead." << std::endl;
+                        }
+                        // TODO: implement canonical mode
+                        graph.reset(new DBGHashString(config->k));
                         break;
                     case Config::GraphType::BITMAP:
                         std::cerr << "Error: Bitmap-graph construction"

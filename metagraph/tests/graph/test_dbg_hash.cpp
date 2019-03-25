@@ -12,24 +12,24 @@ const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 
 
-TEST(DBGHash, InitializeEmpty) {
-    DBGHash graph(20);
+TEST(DBGHashString, InitializeEmpty) {
+    DBGHashString graph(20);
 
     EXPECT_EQ(0u, graph.num_nodes());
     EXPECT_FALSE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
     EXPECT_FALSE(graph.find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
 }
 
-TEST(DBGHash, SerializeEmpty) {
+TEST(DBGHashString, SerializeEmpty) {
     {
-        DBGHash graph(20);
+        DBGHashString graph(20);
 
         ASSERT_EQ(0u, graph.num_nodes());
 
         graph.serialize(test_dump_basename);
     }
 
-    DBGHash graph(0);
+    DBGHashString graph(0);
 
     ASSERT_TRUE(graph.load(test_dump_basename));
 
@@ -40,8 +40,8 @@ TEST(DBGHash, SerializeEmpty) {
     EXPECT_FALSE(graph.find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
 }
 
-TEST(DBGHash, InsertSequence) {
-    DBGHash graph(20);
+TEST(DBGHashString, InsertSequence) {
+    DBGHashString graph(20);
 
     graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
     graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC");
@@ -51,8 +51,8 @@ TEST(DBGHash, InsertSequence) {
     EXPECT_FALSE(graph.find("CATGTTTTTTTAATATATATATTTTTAGC"));
 }
 
-TEST(DBGHash, CheckGraph) {
-    DBGHash graph(20);
+TEST(DBGHashString, CheckGraph) {
+    DBGHashString graph(20);
 
     const std::string alphabet = "ACGTN";
 
@@ -69,9 +69,9 @@ TEST(DBGHash, CheckGraph) {
     }
 }
 
-TEST(DBGHash, Traversals) {
+TEST(DBGHashString, Traversals) {
     for (size_t k = 2; k <= 20; ++k) {
-        DBGHash graph(k);
+        DBGHashString graph(k);
 
         graph.add_sequence(std::string(100, 'A') + std::string(100, 'C')
                                                  + std::string(100, 'G'));
@@ -84,20 +84,20 @@ TEST(DBGHash, Traversals) {
         EXPECT_EQ(it, graph.traverse(it, 'A'));
         EXPECT_EQ(it2, graph.traverse(it, 'C'));
         EXPECT_EQ(it, graph.traverse_back(it2, 'A'));
-        EXPECT_EQ(DBGHash::npos, graph.traverse(it, 'G'));
-        EXPECT_EQ(DBGHash::npos, graph.traverse_back(it2, 'G'));
+        EXPECT_EQ(DBGHashString::npos, graph.traverse(it, 'G'));
+        EXPECT_EQ(DBGHashString::npos, graph.traverse_back(it2, 'G'));
     }
 }
 
-TEST(DBGHash, OutgoingAdjacent) {
+TEST(DBGHashString, OutgoingAdjacent) {
     for (size_t k = 2; k <= 20; ++k) {
-        DBGHash graph(k);
+        DBGHashString graph(k);
 
         graph.add_sequence(std::string(100, 'A') + std::string(100, 'C')
                                                  + std::string(100, 'G'));
 
         uint64_t it = 0;
-        std::vector<DBGHash::node_index> adjacent_nodes;
+        std::vector<DBGHashString::node_index> adjacent_nodes;
 
         // AA, AAAAA
         graph.map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
@@ -161,15 +161,15 @@ TEST(DBGHash, OutgoingAdjacent) {
     }
 }
 
-TEST(DBGHash, IncomingAdjacent) {
+TEST(DBGHashString, IncomingAdjacent) {
     for (size_t k = 2; k <= 20; ++k) {
-        DBGHash graph(k);
+        DBGHashString graph(k);
 
         graph.add_sequence(std::string(100, 'A') + std::string(100, 'C')
                                                  + std::string(100, 'G'));
 
         uint64_t it = 0;
-        std::vector<DBGHash::node_index> adjacent_nodes;
+        std::vector<DBGHashString::node_index> adjacent_nodes;
 
         // AA, AAAAA
         graph.map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
@@ -232,9 +232,9 @@ TEST(DBGHash, IncomingAdjacent) {
     }
 }
 
-TEST(DBGHash, Serialize) {
+TEST(DBGHashString, Serialize) {
     {
-        DBGHash graph(20);
+        DBGHashString graph(20);
 
         graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
         graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC");
@@ -246,7 +246,7 @@ TEST(DBGHash, Serialize) {
         graph.serialize(test_dump_basename);
     }
 
-    DBGHash graph(0);
+    DBGHashString graph(0);
 
     ASSERT_TRUE(graph.load(test_dump_basename));
 
@@ -257,18 +257,18 @@ TEST(DBGHash, Serialize) {
     EXPECT_FALSE(graph.find("CATGTTTTTTTAATATATATATTTTTAGC"));
 }
 
-TEST(DBGHash, get_outdegree_single_node) {
+TEST(DBGHashString, get_outdegree_single_node) {
     for (size_t k = 2; k < 10; ++k) {
-        auto graph = std::make_unique<DBGHash>(k);
+        auto graph = std::make_unique<DBGHashString>(k);
         graph->add_sequence(std::string(k - 1, 'A') + 'C');
         EXPECT_EQ(1ull, graph->num_nodes());
         EXPECT_EQ(0ull, graph->outdegree(1));
     }
 }
 
-TEST(DBGHash, get_maximum_outdegree) {
+TEST(DBGHashString, get_maximum_outdegree) {
     for (size_t k = 2; k < 10; ++k) {
-        auto graph = std::make_unique<DBGHash>(k);
+        auto graph = std::make_unique<DBGHashString>(k);
         graph->add_sequence(std::string(k - 1, 'A') + 'A');
         graph->add_sequence(std::string(k - 1, 'A') + 'C');
         graph->add_sequence(std::string(k - 1, 'A') + 'G');
@@ -287,9 +287,9 @@ TEST(DBGHash, get_maximum_outdegree) {
     }
 }
 
-TEST(DBGHash, get_outdegree_loop) {
+TEST(DBGHashString, get_outdegree_loop) {
     for (size_t k = 2; k < 10; ++k) {
-        auto graph = std::make_unique<DBGHash>(k);
+        auto graph = std::make_unique<DBGHashString>(k);
         graph->add_sequence(std::string(k - 1, 'A') + std::string(k - 1, 'C') +
                             std::string(k - 1, 'G') + std::string(k, 'T'));
         graph->add_sequence(std::string(k, 'A'));
@@ -307,18 +307,18 @@ TEST(DBGHash, get_outdegree_loop) {
     }
 }
 
-TEST(DBGHash, get_indegree_single_node) {
+TEST(DBGHashString, get_indegree_single_node) {
     for (size_t k = 2; k < 10; ++k) {
-        auto graph = std::make_unique<DBGHash>(k);
+        auto graph = std::make_unique<DBGHashString>(k);
         graph->add_sequence(std::string(k - 1, 'A') + 'C');
         EXPECT_EQ(1ull, graph->num_nodes());
         EXPECT_EQ(0ull, graph->indegree(1));
     }
 }
 
-TEST(DBGHash, get_maximum_indegree) {
+TEST(DBGHashString, get_maximum_indegree) {
     for (size_t k = 2; k < 10; ++k) {
-        auto graph = std::make_unique<DBGHash>(k);
+        auto graph = std::make_unique<DBGHashString>(k);
         graph->add_sequence('A' + std::string(k - 1, 'A'));
         graph->add_sequence('C' + std::string(k - 1, 'A'));
         graph->add_sequence('G' + std::string(k - 1, 'A'));
@@ -337,9 +337,9 @@ TEST(DBGHash, get_maximum_indegree) {
     }
 }
 
-TEST(DBGHash, get_indegree_loop) {
+TEST(DBGHashString, get_indegree_loop) {
     for (size_t k = 2; k < 10; ++k) {
-        auto graph = std::make_unique<DBGHash>(k);
+        auto graph = std::make_unique<DBGHashString>(k);
 
         graph->add_sequence(std::string(k, 'A')
                                 + std::string(k - 1, 'C')

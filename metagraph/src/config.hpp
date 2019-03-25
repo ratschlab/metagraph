@@ -120,6 +120,7 @@ class Config {
         INVALID = -1,
         SUCCINCT = 1,
         HASH,
+        HASH_STR,
         BITMAP,
     };
 

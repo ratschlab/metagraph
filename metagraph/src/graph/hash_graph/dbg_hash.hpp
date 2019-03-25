@@ -1,5 +1,5 @@
-#ifndef __DBG_HASH_HPP__
-#define __DBG_HASH_HPP__
+#ifndef __DBG_HASH_STRING_HPP__
+#define __DBG_HASH_STRING_HPP__
 
 #include <fstream>
 #include <tsl/hopscotch_map.h>
@@ -8,9 +8,9 @@
 #include "kmer_extractor.hpp"
 
 
-class DBGHash : public DeBruijnGraph {
+class DBGHashString : public DeBruijnGraph {
   public:
-    explicit DBGHash(size_t k) : k_(k) {}
+    explicit DBGHashString(size_t k) : k_(k) {}
 
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal
@@ -41,12 +41,12 @@ class DBGHash : public DeBruijnGraph {
                       const std::function<bool()> &terminate = [](){ return false; }) const;
 
     void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const {
-        // TODO: Complete call_outgoing_kmers for DBGHash.
+        // TODO: Complete call_outgoing_kmers for DBGHashString.
         throw std::runtime_error("Not implemented");
     }
 
     void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const {
-        // TODO: Complete call_incoming_kmers for DBGHash.
+        // TODO: Complete call_incoming_kmers for DBGHashString.
         throw std::runtime_error("Not implemented");
     }
 
@@ -91,7 +91,7 @@ class DBGHash : public DeBruijnGraph {
     std::vector<std::string> kmers_;
     KmerExtractor2Bit seq_encoder_;
 
-    static constexpr auto kExtension = ".hashdbg";
+    static constexpr auto kExtension = ".hashstrdbg";
 };
 
-#endif // __DBG_HASH_HPP__
+#endif // __DBG_HASH_STRING_HPP__
