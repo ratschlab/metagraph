@@ -117,10 +117,10 @@ public:
     }
 
     bool node_is_join(node_index node) const {
-        return !graph.is_single_incoming(node) or additional_joins.count(node);
+        return graph.indegree(node) > 1 or additional_joins.count(node);
     }
     bool node_is_split(node_index node) const {
-        return !graph.is_single_outgoing(node) or additional_splits.count(node);
+        return graph.outdegree(node) > 1 or additional_splits.count(node);
     }
 
     int rank(const routing_table_t& routing_table, char symbol, int position) const {
@@ -160,7 +160,7 @@ public:
                 relative_position = rank(routing_table,base,relative_position)-1;
             }
             else {
-                assert(graph.is_single_outgoing(node));
+                assert(graph.outdegree(node) == 1);
                 graph.call_outgoing_kmers(node,[&base](node_index node,char edge_label ) { base = edge_label;});
             }
             if (base == '$') break;

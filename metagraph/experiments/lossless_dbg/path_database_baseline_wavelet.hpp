@@ -51,11 +51,11 @@ public:
     // graph contains all reads
     // sequences are of size at least k
     PathDatabaseBaselineWavelet(std::shared_ptr<const DeBruijnGraph> graph) : PathDatabaseBaseline(graph),
-                                                                              routing_table(log2(sizeof(RoutingTableAlphabet)))
+                                                                              routing_table(sizeof(RoutingTableAlphabet))
                                                                               {}
 
     PathDatabaseBaselineWavelet(const vector<string> &raw_reads, size_t k_kmer) : PathDatabaseBaseline(raw_reads,k_kmer),
-                                                                                  routing_table(log2(sizeof(RoutingTableAlphabet)))
+                                                                                  routing_table(sizeof(RoutingTableAlphabet))
                                                                                   {}
 
     std::vector<path_id> encode(const std::vector<std::string> &sequences) override {
@@ -146,7 +146,7 @@ public:
                 relative_position = rank_of_base;
             }
             else {
-                assert(graph.is_single_outgoing(node));
+                assert(graph.outdegree(node) == 1);
                 graph.call_outgoing_kmers(node,[&base](node_index node,char edge_label ) { base = rc(edge_label);});
             }
             if (base == '$'_rc) break;
@@ -163,7 +163,9 @@ public:
 
         return sequence;
     }
+    void serialize() {
 
+    }
 
 private:
     wavelet_tree_stat routing_table;
