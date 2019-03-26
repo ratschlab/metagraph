@@ -5,7 +5,7 @@ targets:
   PathDatabase:
     type: application
     platform: macOS
-    sources: [utilities.cpp, tests.cpp, path_database_baseline.cpp, path_database_baseline.hpp]
+    sources: [utilities.cpp, tests.cpp, path_database_baseline.cpp, path_database_baseline.hpp, path_database_baseline_wavelet.hpp]
     settings:
       configs:
         debug:

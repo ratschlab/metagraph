@@ -14,6 +14,7 @@
 #include "path_database_list_of_bifurcation_choices.hpp"
 #include "samplers.hpp"
 #include "path_database_baseline.hpp"
+#include "path_database_baseline_wavelet.hpp"
 //#include "path_database.hpp"
 
 
@@ -79,12 +80,17 @@ template <typename T>
 void short_identity_test() {
     check_compression_decompression<T>(reads_for_testing_short,5);
 }
+
 TEST(PathDatabase,IdentityTestCompressedReads) {
     short_identity_test<PathDatabaseListBC>();
 }
 
 TEST(PathDatabase,IdentityTestPathDatabaseBaseline) {
     short_identity_test<PathDatabaseBaseline>();
+}
+
+TEST(PathDatabase,IdentityTestPathDatabaseBaselineWavelet) {
+    short_identity_test<PathDatabaseBaselineWavelet>();
 }
 
 #if defined(__linux__) || false

@@ -8,13 +8,11 @@
 #include_directories(${GTEST_INCLUDE_DIR})
 #
 #add_executable(compression_naive_code main.cpp)
-#target_link_libraries(compression_naive_code metagraph)
-#target_link_libraries(compression_naive_code sdsl)
-#target_link_libraries(compression_naive_code maus2)
-#target_link_libraries(compression_naive_code gtest)
-#target_link_libraries(compression_naive_code z)
-#target_link_libraries(compression_naive_code hts)
 project(lossless_dbg)
+if(NOT DEFINED METALIBS)
+    set(METALIBS metagraph sdsl maus2 z hts)
+endif()
+
 set(cpp_code_files tests.cpp utilities.cpp path_database_baseline.cpp)
 add_executable(tests ${cpp_code_files})
 add_executable(path_encoder_toolbox main.cpp ${cpp_code_files})
