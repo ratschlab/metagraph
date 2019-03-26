@@ -1,7 +1,7 @@
-#cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.13)
 #project(compression_naive_code)
 #
-#set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 17)
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++ -lc++fs")
 #enable_testing()
 #find_package(GTest REQUIRED)
@@ -10,7 +10,8 @@
 #add_executable(compression_naive_code main.cpp)
 project(lossless_dbg)
 if(NOT DEFINED METALIBS)
-    set(METALIBS metagraph sdsl maus2 z hts)
+    set(METALIBS metagraph sdsl maus2 z hts c++fs)
+    string(APPEND CMAKE_CXX_FLAGS " -D_DNA_GRAPH")
 endif()
 
 set(cpp_code_files tests.cpp utilities.cpp path_database_baseline.cpp)
@@ -22,6 +23,7 @@ target_link_libraries(tests metagraph ${METALIBS} gtest gtest_main)
 target_link_libraries(path_encoder_toolbox metagraph ${METALIBS} gtest gtest_main)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+include_directories(/usr/local/include/metagraph)
 #add_subdirectory(playground/compressor)
 add_subdirectory(playground/sampler)
 #add_subdirectory(playground/tester)

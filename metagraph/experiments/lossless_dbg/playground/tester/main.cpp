@@ -5,7 +5,6 @@
 #include <iostream>
 #include <map>
 #include <filesystem>
-#include <nlohmann/json.hpp>
 #include <ProgressBar.hpp>
 #include <tclap/CmdLine.h>
 
@@ -14,9 +13,6 @@ using TCLAP::MultiArg;
 using TCLAP::UnlabeledValueArg;
 using TCLAP::UnlabeledMultiArg;
 using TCLAP::ValuesConstraint;
-
-using json = nlohmann::json;
-#define _DNA_GRAPH 1
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"

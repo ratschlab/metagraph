@@ -138,7 +138,7 @@ public:
 //                auto new_relative_position = rank(routing_table_naive,tochar(base),relative_position)-1;
 
                 // -1 as rank is inclusive of the absolute position
-                auto rank_of_base = routing_table.rank(base,absolute_position)- occurrences_of_base_before_block - 1;
+                auto rank_of_base = routing_table.rank(base,absolute_position) - occurrences_of_base_before_block - 1;
 
 //                assert(base_check == tochar(base));
 //                assert(rank_of_base == new_relative_position);

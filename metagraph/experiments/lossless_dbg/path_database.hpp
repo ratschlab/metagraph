@@ -12,7 +12,7 @@
 #include <filesystem>
 #include <vector>
 #include <nlohmann/json.hpp>
-#include <sequence_graph.hpp>
+#include "sequence_graph.hpp"
 #include "dbg_succinct_construct.hpp"
 #include "dbg_succinct.hpp"
 

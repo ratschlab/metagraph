@@ -3,7 +3,6 @@
 #include <map>
 #include <filesystem>
 #include <nlohmann/json.hpp>
-#include <ProgressBar.hpp>
 #include <tclap/CmdLine.h>
 #include <gtest/gtest.h>
 
