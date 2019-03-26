@@ -69,8 +69,8 @@ template <typename G, int L>
 template <typename V>
 KMer<G, L>::KMer(const V &arr, size_t k) : seq_(0) {
     if (k * kBitsPerChar > sizeof(KMerWordType) * 8 || k < 2) {
-        std::cerr << "ERROR: Invalid k-mer size "
-                  << k << ": must be between 2 and "
+        std::cerr << "ERROR: Invalid k-mer size: passed "
+                  << k << " but must be between 2 and "
                   << sizeof(KMerWordType) * 8 / kBitsPerChar << std::endl;
         exit(1);
     }
