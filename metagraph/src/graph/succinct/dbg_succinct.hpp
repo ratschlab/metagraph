@@ -43,8 +43,6 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual std::string get_node_sequence(node_index node) const override final;
 
-	virtual char get_kmer_last_char(node_index node) const override final;
-
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
     virtual void map_to_nodes(const std::string &sequence,

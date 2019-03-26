@@ -100,7 +100,7 @@ float DBGAligner::whole_path_loss(const AlignedPath& path, std::string::const_it
 float DBGAligner::single_node_loss(node_index node, char next_char) const {
     // TODO: Compute indel loss as well.
     // TODO: Compute the loss in case of inexact seeding.
-    char node_last_char = graph_->get_kmer_last_char(node);
+    char node_last_char = graph_->get_node_sequence(node).back();
     return sub_loss_.at(std::tolower(next_char)).at(std::tolower(node_last_char));
 }
 
