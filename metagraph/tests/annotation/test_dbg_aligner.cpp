@@ -173,7 +173,7 @@ TEST(dbg_aligner, large_search_space) {
         }
     }
     std::string query = "AAA";
-    uint64_t unmapped_char_length = 12;
+    uint64_t unmapped_char_length = 50;
     for (size_t i = 0; i < unmapped_char_length; i++) {
         query += 'C';
     }

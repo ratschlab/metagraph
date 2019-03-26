@@ -43,7 +43,7 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
                                        [&](node_index node) {
                                             path.push_back(node, annotator_->get(node));},
                                        [&]() { return (path.size() > 0 &&
-                                                graph_->outdegree(path.back()) != 1); },
+                                                (graph_->outdegree(path.back()) > 1)); },
                                        seed);
 
         if (path.get_sequence_it() + graph_->get_k() > std::end(sequence))
@@ -98,8 +98,8 @@ float DBGAligner::whole_path_loss(const AlignedPath& path, std::string::const_it
 }
 
 float DBGAligner::single_node_loss(node_index node, char next_char) const {
-    // TODO: Compute indel loss as well.
     // TODO: Compute the loss in case of inexact seeding.
+    // TODO: Construct sequence last char more efficiently.
     char node_last_char = graph_->get_node_sequence(node).back();
     return sub_loss_.at(std::tolower(next_char)).at(std::tolower(node_last_char));
 }
@@ -140,6 +140,7 @@ void DBGAligner::inexact_map(const AlignedPath &path,
 std::string DBGAligner::get_path_sequence(const std::vector<node_index>& path) const {
     if (path.size() < 1)
         return "";
+    // TODO: Construct sequence more efficiently.
     std::string sequence = graph_->get_node_sequence(path.front());
     for (auto path_it = std::next(path.begin()); path_it != path.end(); ++path_it) {
         sequence.push_back(graph_->get_node_sequence(*path_it).back());

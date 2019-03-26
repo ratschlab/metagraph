@@ -144,6 +144,7 @@ void DBGHashOrderedImpl<KMER>::map_to_nodes_sequentially(
                               std::string::const_iterator end,
                               const std::function<void(node_index)> &callback,
                               const std::function<bool()> &terminate) const {
+    // TODO: Start from the seed if provided.
     std::string str(begin, end);
     for (const auto &kmer : sequence_to_kmers(std::string(begin, end))) {
         callback(get_index(kmer));
