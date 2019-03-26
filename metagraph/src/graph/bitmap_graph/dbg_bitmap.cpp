@@ -36,7 +36,7 @@ void DBGSD::map_to_nodes(const std::string &sequence,
                          const std::function<void(node_index)> &callback,
                          const std::function<bool()> &terminate) const {
     for (const auto &kmer : sequence_to_kmers(sequence, canonical_mode_)) {
-        callback(kmer_to_node(kmer));
+        callback(to_node(kmer));
 
         if (terminate())
             return;
@@ -52,7 +52,7 @@ void DBGSD::map_to_nodes_sequentially(std::string::const_iterator begin,
                                       const std::function<void(node_index)> &callback,
                                       const std::function<bool()> &terminate) const {
     for (const auto &kmer : sequence_to_kmers(std::string(begin, end))) {
-        callback(kmer_to_node(kmer));
+        callback(to_node(kmer));
 
         if (terminate())
             return;
@@ -65,7 +65,7 @@ DBGSD::traverse(node_index node, char next_char) const {
 
     auto kmer = node_to_kmer(node);
     kmer.to_next(k_, seq_encoder_.encode(next_char));
-    return kmer_to_node(kmer);
+    return to_node(kmer);
 }
 
 DBGSD::node_index
@@ -74,7 +74,7 @@ DBGSD::traverse_back(node_index node, char prev_char) const {
 
     auto kmer = node_to_kmer(node);
     kmer.to_prev(k_, seq_encoder_.encode(prev_char));
-    return kmer_to_node(kmer);
+    return to_node(kmer);
 }
 
 void DBGSD::call_outgoing_kmers(node_index node,
@@ -85,7 +85,7 @@ void DBGSD::call_outgoing_kmers(node_index node,
         auto next_kmer = kmer;
         next_kmer.to_next(k_, seq_encoder_.encode(c));
 
-        auto next_index = kmer_to_node(next_kmer);
+        auto next_index = to_node(next_kmer);
         if (next_index != npos)
             callback(next_index, c);
     }
@@ -99,7 +99,7 @@ void DBGSD::call_incoming_kmers(node_index node,
         auto next_kmer = kmer;
         next_kmer.to_prev(k_, seq_encoder_.encode(c));
 
-        auto next_index = kmer_to_node(next_kmer);
+        auto next_index = to_node(next_kmer);
         if (next_index != npos)
             callback(next_index, c);
     }
@@ -124,7 +124,7 @@ void DBGSD::adjacent_incoming_nodes(node_index node,
 }
 
 DBGSD::node_index
-DBGSD::kmer_to_node(const Kmer &kmer) const {
+DBGSD::to_node(const Kmer &kmer) const {
     auto index = kmer.data() + 1;
     assert(index < kmers_.size());
 
@@ -134,7 +134,7 @@ DBGSD::kmer_to_node(const Kmer &kmer) const {
 DBGSD::node_index
 DBGSD::kmer_to_node(const std::string &kmer) const {
     assert(kmer.size() == k_);
-    return kmer_to_node(Kmer(seq_encoder_.encode(kmer)));
+    return to_node(Kmer(seq_encoder_.encode(kmer)));
 }
 
 uint64_t DBGSD::node_to_index(node_index node) const {
@@ -155,7 +155,7 @@ std::string DBGSD::get_node_sequence(node_index node) const {
     assert(node);
     assert(sequence_to_kmers(seq_encoder_.kmer_to_sequence(
         node_to_kmer(node), k_)).size() == 1);
-    assert(node == kmer_to_node(sequence_to_kmers(seq_encoder_.kmer_to_sequence(
+    assert(node == to_node(sequence_to_kmers(seq_encoder_.kmer_to_sequence(
         node_to_kmer(node), k_))[0]));
 
     return seq_encoder_.kmer_to_sequence(node_to_kmer(node), k_);

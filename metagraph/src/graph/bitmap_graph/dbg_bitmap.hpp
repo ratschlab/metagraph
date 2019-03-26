@@ -119,7 +119,7 @@ class DBGSD : public DeBruijnGraph {
 
     uint64_t node_to_index(node_index node) const;
     Kmer node_to_kmer(node_index node) const;
-    node_index kmer_to_node(const Kmer &kmer) const;
+    node_index to_node(const Kmer &kmer) const;
 
     void call_paths(Call<const std::vector<node_index>,
                          const std::vector<uint8_t>&> callback,
