@@ -66,7 +66,7 @@ public:
         auto node = graph.kmer_to_node(kmer);
         // always putting new read above all other reads
         int relative_starting_position = joins[node]['$'];
-        int relative_position = branch_starting_offset(joins[node],'$') + relative_starting_position;
+        int relative_position = branch_starting_offset(node,'$') + relative_starting_position;
         joins[node]['$']++;
 
         int kmer_position = 0;
@@ -84,7 +84,7 @@ public:
             if (node_is_join(node)) {
                 // todo better name (it is a symbol that determines from which branch we came)
                 auto join_symbol = sequence[kmer_position-1];
-                relative_position += branch_starting_offset(joins[node],join_symbol);
+                relative_position += branch_starting_offset(node,join_symbol);
                 joins[node][join_symbol]++;
             }
         }
@@ -107,11 +107,13 @@ public:
         return result;
     }
 
-    int branch_starting_offset(const map<char,int>& join,char symbol) const {
+    int branch_starting_offset(node_index node,char symbol) const {
         int result = 0;
-        for(auto&[base,count] : join) {
-            if (base >= symbol) break;
-            result += count;
+        if (joins.count(node)) {
+            for (auto&[base, count] : joins.at(node)) {
+                if (base >= symbol) break;
+                result += count;
+            }
         }
         return result;
     }
@@ -147,7 +149,7 @@ public:
         string sequence = kmer;
 
         int relative_starting_position = path.second;
-        int relative_position = branch_starting_offset(joins.at(node),'$') + relative_starting_position;
+        int relative_position = branch_starting_offset(node,'$') + relative_starting_position;
 
         int kmer_position = 0;
         char base;
@@ -172,7 +174,7 @@ public:
             if (node_is_join(node)) {
                 // todo better name (it is a symbol that determines from which branch we came)
                 auto join_symbol = sequence[kmer_position-1];
-                relative_position += branch_starting_offset(joins.at(node),join_symbol);
+                relative_position += branch_starting_offset(node,join_symbol);
             }
         }
 

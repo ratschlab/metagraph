@@ -63,6 +63,7 @@ public:
         vector<path_id> encoded = PathDatabaseBaseline::encode(sequences);
             // add additional bifurcation
         construct_routing_table();
+        construct_edge_multiplicity_table();
         return encoded;
     }
 
@@ -111,6 +112,20 @@ public:
             );
         routing_table = wavelet_tree_stat(sizeof(RoutingTableAlphabet),routing_table_array_encoded);
     }
+    void construct_edge_multiplicity_table() {
+        vector<bool> is_join_node(graph.num_nodes());
+        for(int node=1;node<=graph.num_nodes();node++) {
+            is_join_node[node-1] = node_is_join(node);
+            if (node_is_join(node)) {
+                for(int rc=0;rc<'N'_rc;rc++) { // don't need to store last branch as we only compute prefix sum excluding
+                                               // the branch which we came from (N in this case)
+                    edge_multiplicity_table.push_back(PathDatabaseBaseline::joins[node][tochar(rc)]);
+                }
+            }
+        }
+        joins = bit_vector_stat(is_join_node);
+
+    }
 
 
     std::string decode(path_id path) const override {
@@ -119,7 +134,7 @@ public:
         string sequence = kmer;
 
         int relative_starting_position = path.second;
-        int relative_position = branch_starting_offset(joins.at(node),'$') + relative_starting_position;
+        int relative_position = branch_starting_offset(node,'$') + relative_starting_position;
 
         int kmer_position = 0;
         int base;
@@ -157,18 +172,48 @@ public:
             if (node_is_join(node)) {
                 // todo better name (it is a symbol that determines from which branch we came)
                 auto join_symbol = sequence[kmer_position-1];
-                relative_position += branch_starting_offset(joins.at(node),join_symbol);
+//                auto tv = PathDatabaseBaseline::branch_starting_offset(node,join_symbol);
+//                auto cv = branch_starting_offset(node,join_symbol);
+//                assert(tv==cv);
+                relative_position += branch_starting_offset(node,join_symbol);
             }
         }
 
         return sequence;
     }
-    void serialize() {
+    int branch_starting_offset(node_index node,char branch_label) const {
+        //node-1 as we are indexing from 0
+        //rank1 - 1 because the rank is inclusive
+        // * 'N' as we write multiple values
+        int starting_offset = (joins.rank1(node-1)-1)*'N'_rc;
+        int result = 0;
+        for(int previous_branch=0;previous_branch<rc(branch_label);previous_branch++) {
+            result += edge_multiplicity_table[starting_offset+previous_branch];
+        }
+        return result;
+    }
 
+
+    void serialize(fs::path folder) {
+        fstream edge_multiplicity_file(folder / "edge_multiplicity.bin");
+        fstream routing_table_file(folder / "routing_table.bin");
+        fstream joins_file(folder / "joins.bin");
+        string graph_filename = (folder / "graph.bin");
+
+        serialize_edge_multiplicity_table(edge_multiplicity_file);
+        routing_table.serialize(routing_table_file);
+        joins.serialize(joins_file);
+        graph.serialize(graph_filename);
+    }
+
+    void serialize_edge_multiplicity_table(std::ostream &out) {
+        ::serialize(out,edge_multiplicity_table);
     }
 
 private:
     wavelet_tree_stat routing_table;
+    bit_vector_stat joins;
+    vector<int> edge_multiplicity_table;
 };
 
 #endif /* path_database_baseline_hpp */
