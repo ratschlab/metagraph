@@ -92,6 +92,22 @@ void DBGBitmap::call_outgoing_kmers(node_index node,
     }
 }
 
+size_t DBGBitmap::outdegree(node_index node) const {
+    size_t outdegree = 0;
+    const auto &kmer = node_to_kmer(node);
+
+    for (char c : alphabet) {
+        auto next_kmer = kmer;
+        next_kmer.to_next(k_, seq_encoder_.encode(c));
+
+        auto next_index = to_node(next_kmer);
+        if (next_index != npos)
+            outdegree++;
+    }
+
+    return outdegree;
+}
+
 void DBGBitmap::call_incoming_kmers(node_index node,
                                     const OutgoingEdgeCallback &callback) const {
     const auto &kmer = node_to_kmer(node);
@@ -104,6 +120,22 @@ void DBGBitmap::call_incoming_kmers(node_index node,
         if (next_index != npos)
             callback(next_index, c);
     }
+}
+
+size_t DBGBitmap::indegree(node_index node) const {
+    size_t indegree = 0;
+    const auto &kmer = node_to_kmer(node);
+
+    for (char c : alphabet) {
+        auto next_kmer = kmer;
+        next_kmer.to_prev(k_, seq_encoder_.encode(c));
+
+        auto next_index = to_node(next_kmer);
+        if (next_index != npos)
+            indegree++;
+    }
+
+    return indegree;
 }
 
 void DBGBitmap::adjacent_outgoing_nodes(node_index node,

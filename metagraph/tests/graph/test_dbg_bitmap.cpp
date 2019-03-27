@@ -1592,3 +1592,56 @@ TEST(DBGBitmap, map_to_nodes) {
                             [&](auto i) { EXPECT_EQ(expected_result[pos++], i); });
     }
 }
+
+TEST(DBGBitmap, get_outdegree_single_node) {
+    for (size_t k = 2; k < 10; ++k) {
+        DBGBitmapConstructor constructor(k);
+        constructor.add_sequence(std::string(k - 1, 'A') + 'C');
+        std::unique_ptr<DBGBitmap> graph { new DBGBitmap(&constructor) };
+        EXPECT_EQ(1ull, graph->num_nodes());
+        EXPECT_EQ(0ull, graph->outdegree(1));
+    }
+}
+
+TEST(DBGBitmap, get_maximum_outdegree) {
+    for (size_t k = 2; k < 10; ++k) {
+        DBGBitmapConstructor constructor(k);
+        constructor.add_sequence(std::string(k - 1, 'A') + 'A');
+        constructor.add_sequence(std::string(k - 1, 'A') + 'C');
+        constructor.add_sequence(std::string(k - 1, 'A') + 'G');
+        constructor.add_sequence(std::string(k - 1, 'A') + 'T');
+        std::unique_ptr<DBGBitmap> graph { new DBGBitmap(&constructor) };
+
+        DBGBitmap::node_index max_outdegree_node_index;
+        graph->map_to_nodes(std::string(k, 'A'), [&](DBGBitmap::node_index node) {
+                                                    max_outdegree_node_index = node; });
+
+        EXPECT_EQ(4ull, graph->num_nodes());
+        for (size_t i = 1; i <= graph->num_nodes(); ++i) {
+            if (i == max_outdegree_node_index)
+                EXPECT_EQ(4ull, graph->outdegree(i));
+            else
+                EXPECT_EQ(0ull, graph->outdegree(i));
+        }
+    }
+}
+
+TEST(DBGBitmap, get_outdegree_loop) {
+    for (size_t k = 2; k < 10; ++k) {
+        DBGBitmapConstructor constructor(k);
+        constructor.add_sequence(std::string(k - 1, 'A') + std::string(k - 1, 'C') +
+                                 std::string(k - 1, 'G') + std::string(k, 'T'));
+        constructor.add_sequence(std::string(k, 'A'));
+        std::unique_ptr<DBGBitmap> graph { new DBGBitmap(&constructor) };
+
+        DBGBitmap::node_index loop_node_index;
+        graph->map_to_nodes(std::string(k, 'A'),
+                            [&](DBGBitmap::node_index node) { loop_node_index = node; });
+        for (size_t i = 1; i <= graph->num_nodes(); ++i) {
+            if (i == loop_node_index)
+                EXPECT_EQ(2ull, graph->outdegree(i));
+            else
+                EXPECT_EQ(1ull, graph->outdegree(i));
+        }
+    }
+}

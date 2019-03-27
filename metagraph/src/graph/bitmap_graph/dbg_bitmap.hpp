@@ -58,15 +58,9 @@ class DBGBitmap : public DeBruijnGraph {
     void adjacent_incoming_nodes(node_index node,
                                  std::vector<node_index> *source_nodes) const;
 
-    size_t outdegree(node_index) const {
-        // TODO: Complete outdegree for DBGBitmap.
-        throw std::runtime_error("Not implemented");
-    }
+    size_t outdegree(node_index node) const;
 
-    size_t indegree(node_index) const {
-        // TODO: Complete outdegree for DBGBitmap.
-        throw std::runtime_error("Not implemented");
-    }
+    size_t indegree(node_index node) const;
 
     template <class... T>
     using Call = typename std::function<void(T...)>;
