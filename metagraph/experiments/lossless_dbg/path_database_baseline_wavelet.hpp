@@ -10,6 +10,7 @@
 
 #include "path_database.hpp"
 #include "utils.hpp"
+#include "utilities.hpp"
 #include <iostream>
 #include <set>
 #include <map>
@@ -57,6 +58,7 @@ public:
     PathDatabaseBaselineWavelet(const vector<string> &raw_reads, size_t k_kmer) : PathDatabaseBaseline(raw_reads,k_kmer),
                                                                                   routing_table(sizeof(RoutingTableAlphabet))
                                                                                   {}
+
 
     std::vector<path_id> encode(const std::vector<std::string> &sequences) override {
 
@@ -200,14 +202,27 @@ public:
         fstream joins_file(folder / "joins.bin");
         string graph_filename = (folder / "graph.bin");
 
-        serialize_edge_multiplicity_table(edge_multiplicity_file);
+        ::serialize(edge_multiplicity_file,edge_multiplicity_table);
         routing_table.serialize(routing_table_file);
         joins.serialize(joins_file);
         graph.serialize(graph_filename);
     }
 
-    void serialize_edge_multiplicity_table(std::ostream &out) {
-        ::serialize(out,edge_multiplicity_table);
+    static PathDatabaseBaselineWavelet deserialize(fs::path folder)  {
+        fstream edge_multiplicity_file(folder / "edge_multiplicity.bin");
+        fstream routing_table_file(folder / "routing_table.bin");
+        fstream joins_file(folder / "joins.bin");
+        string graph_filename = (folder / "graph.bin");
+
+        auto graph = std::shared_ptr<DeBruijnGraph>{
+                new DBGSuccinct(21)
+                };
+        graph->load(graph_filename);
+        auto db = PathDatabaseBaselineWavelet(graph);
+        ::deserialize(edge_multiplicity_file,db.edge_multiplicity_table);
+        db.routing_table.load(routing_table_file);
+        db.joins.load(joins_file);
+        return db;
     }
 
 private:

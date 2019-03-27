@@ -15,6 +15,9 @@
 #include "samplers.hpp"
 #include "path_database_baseline.hpp"
 #include "path_database_baseline_wavelet.hpp"
+#include <filesystem>
+using namespace std;
+namespace fs = std::filesystem;
 //#include "path_database.hpp"
 
 
@@ -81,6 +84,30 @@ void short_identity_test() {
     check_compression_decompression<T>(reads_for_testing_short,5);
 }
 
+
+template <typename T>
+void serialization_deserialization_test(vector<string>& reads, int k_kmer=21) {
+    auto db = T(reads,k_kmer);
+    auto handles = db.encode(reads);
+    vector<string> decompressed_reads;
+    decompressed_reads.reserve(handles.size());
+    auto output_folder = fs::temp_directory_path() / "serdes/" ;
+    fs::create_directories(output_folder);
+    db.serialize(output_folder);
+    auto newdb = T::deserialize(output_folder);
+    decompressed_reads.reserve(handles.size());
+    for(auto& handle : handles) {
+        decompressed_reads.push_back(newdb.decode(handle));
+    }
+    ASSERT_EQ(reads,decompressed_reads);
+
+}
+
+template <typename T>
+void short_serdes_test() {
+    serialization_deserialization_test<T>(reads_for_testing_short,5);
+}
+
 TEST(PathDatabase,IdentityTestCompressedReads) {
     short_identity_test<PathDatabaseListBC>();
 }
@@ -91,6 +118,10 @@ TEST(PathDatabase,IdentityTestPathDatabaseBaseline) {
 
 TEST(PathDatabase,IdentityTestPathDatabaseBaselineWavelet) {
     short_identity_test<PathDatabaseBaselineWavelet>();
+}
+
+TEST(PathDatabase,SerDesTest) {
+    short_serdes_test<PathDatabaseBaselineWavelet>();
 }
 
 #if defined(__linux__) || false
