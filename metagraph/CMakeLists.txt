@@ -31,13 +31,20 @@ else()
   string(APPEND CMAKE_CXX_FLAGS " -D_PROTEIN_GRAPH")
 endif()
 
-
+# turn every warning to an error
+# in master branch BE_SUPER_STRICT is the default
+if(DEFINED BE_SUPER_STRICT)
 string(APPEND CMAKE_CXX_FLAGS " \
   -Wall -Wextra -Werror \
   -msse4.2 \
   -D_THREAD_SAFE -pthread \
 ") # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
-
+else()
+  string(APPEND CMAKE_CXX_FLAGS " \
+  -msse4.2 \
+  -D_THREAD_SAFE -pthread \
+") # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
+endif()
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   string(APPEND CMAKE_CXX_FLAGS " \
     -Wno-exit-time-destructors \
@@ -319,6 +326,18 @@ add_executable(run_experiments ${experiment_files})
 target_link_libraries(
   run_experiments metagraph ${METALIBS}
 )
+
+
+# -------
+# Lossless dbg
+# -----
+
+add_executable(lossless_dbg lossless_dbg/main.cpp)
+target_link_libraries(
+        lossless_dbg metagraph ${METALIBS}
+)
+
+target_link_libraries(lossless_dbg gtest)
 
 #-------------------
 # install library
