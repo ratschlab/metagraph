@@ -40,15 +40,9 @@ class DBGHashString : public DeBruijnGraph {
                       const std::function<void(node_index)> &callback,
                       const std::function<bool()> &terminate = [](){ return false; }) const;
 
-    void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const {
-        // TODO: Complete call_outgoing_kmers for DBGHashString.
-        throw std::runtime_error("Not implemented");
-    }
+    void call_outgoing_kmers(node_index node, const OutgoingEdgeCallback &callback) const;
 
-    void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const {
-        // TODO: Complete call_incoming_kmers for DBGHashString.
-        throw std::runtime_error("Not implemented");
-    }
+    void call_incoming_kmers(node_index node, const IncomingEdgeCallback &callback) const;
 
     // Traverse the outgoing edge
     node_index traverse(node_index node, char next_char) const;
