@@ -80,9 +80,10 @@ public:
                                                                               routing_table(sizeof(RoutingTableAlphabet))
                                                                               {}
 
-    PathDatabaseBaselineWavelet(const vector<string> &raw_reads, size_t k_kmer) : PathDatabaseBaseline(raw_reads,k_kmer),
-                                                                                  routing_table(sizeof(RoutingTableAlphabet))
-                                                                                  {}
+    PathDatabaseBaselineWavelet(const vector<string> &raw_reads,
+                                size_t k_kmer = 21 /* default */) : PathDatabaseBaseline(raw_reads,k_kmer),
+                                                                    routing_table(sizeof(RoutingTableAlphabet))
+                                                                    {}
 
 
     std::vector<path_id> encode(const std::vector<std::string> &sequences) override {
