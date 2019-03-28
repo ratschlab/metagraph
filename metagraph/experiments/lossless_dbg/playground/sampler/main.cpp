@@ -58,7 +58,7 @@ int main(int argc, char *argv[]) {
                                                 "subsample-size"
                                                 "Subsample the reference to 'subsample-size' base pairs.",
                                                 false,
-                                                10000000000000,
+                                                -1,
                                                 "int");
     TCLAP::ValueArg<int>          seedArg("s",
                                                  "seed",
