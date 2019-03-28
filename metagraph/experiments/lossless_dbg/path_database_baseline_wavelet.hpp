@@ -254,8 +254,8 @@ public:
     }
 
 
-    void serialize(fs::path folder) {
-        fs::create_directories(folder);
+    void serialize(const fs::path& folder) const {
+        fs::create_directories(folder / "nothing.bin");
         ofstream edge_multiplicity_file(folder / "edge_multiplicity.bin", ios_base::trunc | ios_base::out);
         ofstream routing_table_file(folder / "routing_table.bin", ios_base::trunc | ios_base::out);
         ofstream joins_file(folder / "joins.bin", ios_base::trunc | ios_base::out);
@@ -267,7 +267,7 @@ public:
         graph.serialize(graph_filename);
     }
 
-    static PathDatabaseBaselineWavelet deserialize(fs::path folder)  {
+    static PathDatabaseBaselineWavelet deserialize(const fs::path& folder) {
         ifstream edge_multiplicity_file(folder / "edge_multiplicity.bin");
         ifstream routing_table_file(folder / "routing_table.bin");
         ifstream joins_file(folder / "joins.bin");
