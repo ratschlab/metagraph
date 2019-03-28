@@ -71,14 +71,14 @@ int main(int argc, char *argv[]) {
     cmd.add(compressedArg);
     cmd.parse(argc, argv);
     auto input_filename = inputArg.getValue();
-    auto statistics_filename = statsArg.getValue();
+    auto statistics_filename = statisticsArg.getValue();
     auto reads = read_reads_from_fasta(input_filename);
-    auto db = PathDatabaseListBaselineWavelet(reads);
+    auto db = PathDatabaseBaselineWavelet(reads);
     db.encode(reads);
     if (statisticsArg.isSet()) {
         //auto statistics = db.get_statistics();
         throw std::runtime_error("Not supported yet");
-        save_string(statistics.dump(4),statistics_filename);
+        //save_string(statistics.dump(4),statistics_filename);
     }
     if (compressedArg.isSet()) {
         fs::path compress_folder = compressedArg.getValue();

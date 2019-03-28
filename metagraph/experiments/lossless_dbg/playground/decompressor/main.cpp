@@ -67,7 +67,7 @@ int main(int argc, char *argv[]) {
     auto output_filename = outputArg.getValue();
     auto db = PathDatabaseBaselineWavelet::deserialize(input_folder);
     auto reads = db.decode_all_reads();
-    save_reads_to_fasta(output_filename,reads);
+    write_reads_to_fasta(reads,output_filename);
 
     return 0;
 }
