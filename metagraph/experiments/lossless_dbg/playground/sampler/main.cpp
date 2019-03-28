@@ -54,6 +54,12 @@ int main(int argc, char *argv[]) {
                                                  false,
                                                  100,
                                                  "int");
+    TCLAP::Valuearg<int>          subsampleArg("s",
+                                                "subsample-size"
+                                                "Subsample the reference to 'subsample-size' base pairs.",
+                                                false,
+                                                10000000000000,
+                                                "int");
     TCLAP::ValueArg<int>          seedArg("s",
                                                  "seed",
                                                  "Seed for a random generator",
@@ -62,7 +68,7 @@ int main(int argc, char *argv[]) {
                                                  "int");
     TCLAP::ValueArg<std::string> outputArg("o",
                                           "output",
-                                          "Filename of json file that will output statistics about compressed file.",
+                                          "Filename where to store sampled reads.",
                                           false,
                                           "output.fasta",
                                           "string");
@@ -76,9 +82,11 @@ int main(int argc, char *argv[]) {
     auto output_filename = outputArg.getValue();
     auto read_length = read_lengthArg.getValue();
     auto seed = seedArg.getValue();
+    auto subsample_size = subsampleArg.getValue();
     auto generator = std::mt19937(seed);
     auto reference = read_reads_from_fasta(reference_filename)[0];
-    auto sampler = Sampler(reference,generator);
+    Sampler sampler = subsampleArg.isSet() ? Sampler(reference,generator) :
+                                             SubSampler(reference,subsample_size,generator);
     auto reads = sampler.sample_coverage(read_length,coverage);
     write_reads_to_fasta(reads,output_filename);
     return 0;
