@@ -18,6 +18,8 @@ add_library(path_encoding
         utilities.cpp
         path_database_baseline.cpp)
 
+target_link_libraries(path_encoding metagraph ${METALIBS})
+
 add_executable(tests tests.cpp)
 add_executable(path_encoder_toolbox main.cpp)
 
