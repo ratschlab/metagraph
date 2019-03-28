@@ -22,8 +22,8 @@ add_executable(tests tests.cpp)
 add_executable(path_encoder_toolbox main.cpp)
 
 
-target_link_libraries(tests metagraph ${METALIBS} path_encoder_toolbox gtest gtest_main)
-target_link_libraries(path_encoder_toolbox metagraph ${METALIBS} path_encoder_toolbox gtest gtest_main )
+target_link_libraries(tests metagraph ${METALIBS} path_encoding gtest gtest_main)
+target_link_libraries(path_encoder_toolbox metagraph ${METALIBS} path_encoding gtest gtest_main )
 
 install(TARGETS path_encoder_toolbox DESTINATION bin)
 
