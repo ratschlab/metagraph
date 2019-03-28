@@ -26,6 +26,10 @@ using TCLAP::ValuesConstraint;
 #include "playground/compressor/main.cpp"
 #undef main
 
+#define main main_decompressor
+#include "playground/decompressor/main.cpp"
+#undef main
+
 #pragma clang diagnostic pop
 
 #pragma clang diagnostic push
@@ -37,7 +41,8 @@ int main(int argc, char *argv[]) {
 
     std::vector<std::string> regimes {
             "sample",
-            "compress_statistics"
+            "compress",
+            "decompress"
     };
 
     ValuesConstraint<std::string> regime_constraint(regimes);
@@ -56,7 +61,10 @@ int main(int argc, char *argv[]) {
     if (regime == "sample") {
         main_sampler(argc-1,new_argv);
     }
-    else if (regime == "compress_statistics") {
+    else if (regime == "compress") {
         main_compressor(argc-1,new_argv);
+    }
+    else if (regime == "decompress") {
+        main_decompressor(argc-1,new_argv);
     }
 }

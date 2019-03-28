@@ -16,6 +16,30 @@
 #include <map>
 #include "alphabets.hpp"
 
+template<typename POD>
+std::istream &deserialize(std::istream &is, vector<POD> &v) {
+    static_assert(std::is_trivial<POD>::value && std::is_standard_layout<POD>::value,
+                  "Can only deserialize POD types with this function");
+
+    decltype(v.size()) size;
+    is.read(reinterpret_cast<char*>(&size), sizeof(size));
+    v.resize(size);
+    is.read(reinterpret_cast<char*>(v.data()), v.size() * sizeof(POD));
+    return is;
+}
+
+template<typename POD>
+std::ostream &serialize(std::ostream &os, const vector<POD> &v) {
+    // this only works on built in data types (PODs)
+    static_assert(std::is_trivial<POD>::value && std::is_standard_layout<POD>::value,
+                  "Can only serialize POD types with this function");
+
+    auto size = v.size();
+    os.write(reinterpret_cast<char const*>(&size), sizeof(size));
+    os.write(reinterpret_cast<char const*>(v.data()), v.size() * sizeof(POD));
+    return os;
+}
+
 #pragma GCC diagnostic ignored "-Wmissing-noreturn"
 #pragma GCC diagnostic ignored "-Wreturn-type"
 
@@ -114,11 +138,12 @@ public:
             );
         routing_table = wavelet_tree_stat(sizeof(RoutingTableAlphabet),routing_table_array_encoded);
     }
+
     void construct_edge_multiplicity_table() {
         vector<bool> is_join_node(graph.num_nodes());
         for(int node=1;node<=graph.num_nodes();node++) {
-            is_join_node[node-1] = node_is_join(node);
-            if (node_is_join(node)) {
+            is_join_node[node-1] = PathDatabaseBaseline::node_is_join(node);
+            if (PathDatabaseBaseline::node_is_join(node)) {
                 for(int rc=0;rc<'N'_rc;rc++) { // don't need to store last branch as we only compute prefix sum excluding
                                                // the branch which we came from (N in this case)
                     edge_multiplicity_table.push_back(PathDatabaseBaseline::joins[node][tochar(rc)]);
@@ -183,6 +208,37 @@ public:
 
         return sequence;
     }
+
+    vector<string> decode_all_reads() const {
+        auto reads = vector<string>();
+        for(node_index node=1;node<=graph.num_nodes();node++) {
+            auto count = number_of_reads_starting_at_node(node);
+            for(auto relative_index=0;relative_index<count;relative_index++) {
+                reads.push_back(decode({node,relative_index}));
+            }
+        }
+        return reads;
+    }
+
+    int number_of_reads_starting_at_node(node_index node) const {
+        int result = 0;
+        if (node_is_join(node)) {
+            int starting_offset = (joins.rank1(node-1)-1)*'N'_rc;
+            result = edge_multiplicity_table[starting_offset + '$'_rc];
+        }
+        return result;
+    }
+
+    bool node_is_join(node_index node) const {
+        return joins[node-1]; // 0 based
+    }
+
+    bool node_is_split(node_index node) const {
+        auto offset = routing_table.select('#'_rc,node);
+        // is not the last element of routing table and next character is not starting of new node
+        return routing_table.size() != (offset + 1) and routing_table[offset+1] != '#'_rc;
+    }
+
     int branch_starting_offset(node_index node,char branch_label) const {
         //node-1 as we are indexing from 0
         //rank1 - 1 because the rank is inclusive
@@ -197,9 +253,10 @@ public:
 
 
     void serialize(fs::path folder) {
-        fstream edge_multiplicity_file(folder / "edge_multiplicity.bin");
-        fstream routing_table_file(folder / "routing_table.bin");
-        fstream joins_file(folder / "joins.bin");
+        fs::create_directories(folder);
+        ofstream edge_multiplicity_file(folder / "edge_multiplicity.bin");
+        ofstream routing_table_file(folder / "routing_table.bin");
+        ofstream joins_file(folder / "joins.bin");
         string graph_filename = (folder / "graph.bin");
 
         ::serialize(edge_multiplicity_file,edge_multiplicity_table);
@@ -209,9 +266,9 @@ public:
     }
 
     static PathDatabaseBaselineWavelet deserialize(fs::path folder)  {
-        fstream edge_multiplicity_file(folder / "edge_multiplicity.bin");
-        fstream routing_table_file(folder / "routing_table.bin");
-        fstream joins_file(folder / "joins.bin");
+        ifstream edge_multiplicity_file(folder / "edge_multiplicity.bin");
+        ifstream routing_table_file(folder / "routing_table.bin");
+        ifstream joins_file(folder / "joins.bin");
         string graph_filename = (folder / "graph.bin");
 
         auto graph = std::shared_ptr<DeBruijnGraph>{

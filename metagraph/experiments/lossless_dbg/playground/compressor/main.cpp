@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <nlohmann/json.hpp>
 #include <tclap/CmdLine.h>
+#include <filesystem>
 
 using TCLAP::ValueArg;
 using TCLAP::MultiArg;
@@ -26,7 +27,7 @@ using json = nlohmann::json;
 #include "dbg_hash.hpp"
 
 
-#include "path_database_list_of_bifurcation_choices.hpp"
+#include "path_database_baseline_wavelet.hpp"
 #include "samplers.hpp"
 #include "utilities.hpp"
 
@@ -53,32 +54,35 @@ int main(int argc, char *argv[]) {
                                          true,
                                          "",
                                          "string");
-    TCLAP::ValueArg<std::string> statsArg("s",
+    TCLAP::ValueArg<std::string> statisticsArg("s",
                                           "statistics",
                                           "Filename of json file that will output statistics about compressed file.",
-                                          true,
+                                          false,
                                           "statistics.json",
                                           "string");
-    TCLAP::ValueArg<std::string> decompressedArg("d",
-                                          "decompressed_file",
-                                          "[for debugging purposes] Output the reads back in FASTA format.",
+    TCLAP::ValueArg<fs::path> compressedArg("o",
+                                          "output",
+                                          "Folder where to store the compressed files.",
                                           false,
                                           "",
                                           "string");
     cmd.add(inputArg);
-    cmd.add(statsArg);
-    cmd.add(decompressedArg);
+    cmd.add(statisticsArg);
+    cmd.add(compressedArg);
     cmd.parse(argc, argv);
     auto input_filename = inputArg.getValue();
     auto statistics_filename = statsArg.getValue();
     auto reads = read_reads_from_fasta(input_filename);
-    auto db = PathDatabaseListBC(reads);
+    auto db = PathDatabaseListBaselineWavelet(reads);
     db.encode(reads);
-    auto statistics = db.get_statistics();
-    save_string(statistics.dump(4),statistics_filename);
-    if (decompressedArg.isSet()) {
-        auto decompressed_filename = decompressedArg.getValue();
-        write_reads_to_fasta(db.get_all_reads(),decompressed_filename);
+    if (statisticsArg.isSet()) {
+        //auto statistics = db.get_statistics();
+        throw std::runtime_error("Not supported yet");
+        save_string(statistics.dump(4),statistics_filename);
+    }
+    if (compressedArg.isSet()) {
+        fs::path compress_folder = compressedArg.getValue();
+        db.serialize(compress_folder);
     }
 
     return 0;

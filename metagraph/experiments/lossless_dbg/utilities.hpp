@@ -40,11 +40,11 @@ namespace fs = std::filesystem;
 
 void save_string(const string &to_save,const string &filename);
 
-template<typename POD>
-std::ostream& serialize(std::ostream& os, std::vector<POD> const& v);
-
-template<typename POD>
-std::istream& deserialize(std::istream& is, std::vector<POD>& v);
+//template<typename POD>
+//std::ostream& serialize(std::ostream& os, std::vector<POD> const& v);
+//
+//template<typename POD>
+//std::istream& deserialize(std::istream& is, std::vector<POD>& v);
 
 struct d_t {
     template<typename T> d_t & operator,(const T & x);

@@ -92,6 +92,7 @@ void serialization_deserialization_test(vector<string>& reads, int k_kmer=21) {
     vector<string> decompressed_reads;
     decompressed_reads.reserve(handles.size());
     auto output_folder = fs::temp_directory_path() / "serdes/" ;
+    cout << "Files saved to: " << output_folder << endl;
     fs::create_directories(output_folder);
     db.serialize(output_folder);
     auto newdb = T::deserialize(output_folder);
