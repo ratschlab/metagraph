@@ -5,7 +5,6 @@
 
 #include "kmer_extractor.hpp"
 #include "utils.hpp"
-#include "helpers.hpp"
 
 // Disable death tests
 #ifndef _DEATH_TEST

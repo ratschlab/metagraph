@@ -21,7 +21,7 @@
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
 #include "utils.hpp"
-#include "helpers.hpp"
+#include "reverse_complement.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 

@@ -14,7 +14,7 @@
 #include "dbg_succinct_merge.hpp"
 #include "dbg_succinct_construct.hpp"
 #include "utils.hpp"
-#include "helpers.hpp"
+#include "reverse_complement.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 

@@ -7,7 +7,7 @@
 #include "utils.hpp"
 #include "unix_tools.hpp"
 #include "reads_filtering.hpp"
-#include "helpers.hpp"
+#include "reverse_complement.hpp"
 
 using TAlphabet = KmerExtractor::TAlphabet;
 

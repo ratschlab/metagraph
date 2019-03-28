@@ -1,5 +1,5 @@
-#ifndef __HELPERS_HPP__
-#define __HELPERS_HPP__
+#ifndef __REVERSE_COMPLEMENT_HPP__
+#define __REVERSE_COMPLEMENT_HPP__
 
 /* The MIT License
    Copyright (c) 2008-2016 Broad Institute
@@ -67,4 +67,4 @@ inline void reverse_complement(const kstring_t &seq) {
     reverse_complement(&seq.s[0], &seq.s[0] + seq.l);
 }
 
-#endif // __HELPERS_HPP__
+#endif // __REVERSE_COMPLEMENT_HPP__

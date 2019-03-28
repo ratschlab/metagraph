@@ -14,6 +14,15 @@
 class DBGSuccConstructor;
 
 
+/**
+ * This class contains a succinct representation of the de bruijn graph
+ * following ideas and suggestions presented here:
+ * http://link.springer.com/chapter/10.1007/978-3-642-33122-0_18
+ *
+ * There is also conceptual code available at
+ * https://code.google.com/p/csalib/downloads/list
+ * that has been used as a reference for this implementation.
+ */
 class DBG_succ {
   public:
     static const uint64_t npos;

@@ -12,6 +12,7 @@
 #include "annotate_column_compressed.hpp"
 #include "serialization.hpp"
 #include "utils.hpp"
+#include "reverse_complement.hpp"
 #include "static_annotators_def.hpp"
 #include "annotation_converters.hpp"
 #include "kmc_parser.hpp"

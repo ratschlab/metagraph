@@ -5,6 +5,7 @@
 
 #include "vcf_parser.hpp"
 #include "serialization.hpp"
+#include "reverse_complement.hpp"
 
 const char kDefaultFastQualityChar = 'I';
 
