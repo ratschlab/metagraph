@@ -49,7 +49,8 @@ private:
     string reference;
     std::mt19937 generator;
 };
-class SubSampler : Sampler {
+class SubSampler : public Sampler {
+public:
     SubSampler(string reference, int subsample_size, std::mt19937 generator) :
         Sampler(reference.substr(
                 std::uniform_int_distribution<>(0,reference.length()-min(subsample_size,(int)reference.length()))(generator),

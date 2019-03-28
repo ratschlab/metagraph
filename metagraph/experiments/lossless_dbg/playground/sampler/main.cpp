@@ -76,6 +76,7 @@ int main(int argc, char *argv[]) {
     cmd.add(coverageArg);
     cmd.add(outputArg);
     cmd.add(read_lengthArg);
+    cmd.add(subsampleArg);
     cmd.parse(argc, argv);
     auto reference_filename = referenceArg.getValue();
     auto coverage = coverageArg.getValue();
