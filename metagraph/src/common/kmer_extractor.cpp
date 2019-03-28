@@ -82,7 +82,7 @@ inline void sequence_to_kmers_slide(size_t k,
     assert(kmers);
     assert(seq.size() >= k);
 
-    KMER kmer(seq, k);
+    KMER kmer(seq.data(), k);
     if (suffix.empty() || std::equal(suffix.begin(), suffix.end(),
                                      &seq[k - suffix.size()]))
         kmers->push_back(kmer);
@@ -156,7 +156,7 @@ inline void sequence_to_kmers_canonical_slide(size_t k,
     assert(seq.size() == rev_comp.size());
 
     // initialize and add the first kmer from sequence
-    KMER kmer(seq, k);
+    KMER kmer(seq.data(), k);
     KMER rev(&rev_comp[seq.size() - k], k);
 
     push_back_smallest(kmer, &seq[k - suffix.size()],

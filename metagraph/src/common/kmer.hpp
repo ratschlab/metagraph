@@ -14,7 +14,7 @@ class KMer {
     friend std::ostream& operator<<(std::ostream &os, const KMer<U, P> &kmer);
 
   public:
-    typedef G KMerWordType;
+    typedef G WordType;
     typedef uint64_t CharType;
     static constexpr int kBitsPerChar = L;
 
@@ -24,8 +24,8 @@ class KMer {
     template <typename T>
     KMer(const std::vector<T> &arr) : KMer(arr, arr.size()) {}
 
-    explicit KMer(KMerWordType &&seq) : seq_(seq) {}
-    explicit KMer(const KMerWordType &seq) : seq_(seq) {}
+    explicit KMer(WordType &&seq) : seq_(seq) {}
+    explicit KMer(const WordType &seq) : seq_(seq) {}
 
     // corresponds to the BOSS (co-lex, one-swapped) order of k-mers
     bool operator<(const KMer &other) const { return seq_ < other.seq_; }
@@ -57,21 +57,21 @@ class KMer {
     inline void to_next(size_t k, CharType new_last);
     inline void to_prev(size_t k, CharType new_first);
 
-    inline const KMerWordType& data() const { return seq_; }
+    inline const WordType& data() const { return seq_; }
 
   private:
     static const CharType kFirstCharMask;
-    KMerWordType seq_; // kmer sequence
+    WordType seq_; // kmer sequence
 };
 
 
 template <typename G, int L>
 template <typename V>
 KMer<G, L>::KMer(const V &arr, size_t k) : seq_(0) {
-    if (k * kBitsPerChar > sizeof(KMerWordType) * 8 || k < 2) {
+    if (k * kBitsPerChar > sizeof(WordType) * 8 || k < 2) {
         std::cerr << "ERROR: Invalid k-mer size: passed "
                   << k << " but must be between 2 and "
-                  << sizeof(KMerWordType) * 8 / kBitsPerChar << std::endl;
+                  << sizeof(WordType) * 8 / kBitsPerChar << std::endl;
         exit(1);
     }
 
@@ -92,11 +92,11 @@ KMer<G, L>::KMer(const V &arr, size_t k) : seq_(0) {
  */
 template <typename G, int L>
 void KMer<G, L>::to_next(size_t k, CharType new_last, CharType old_last) {
-    assert(old_last == (seq_ & KMerWordType(kFirstCharMask)));
+    assert(old_last == (seq_ & WordType(kFirstCharMask)));
     // s[6]s[5]s[4]s[3]s[2]s[1]s[7]
     seq_ = seq_ >> kBitsPerChar;
     // 0000s[6]s[5]s[4]s[3]s[2]s[1]
-    seq_ += KMerWordType(old_last) << static_cast<int>(kBitsPerChar * (k - 1));
+    seq_ += WordType(old_last) << static_cast<int>(kBitsPerChar * (k - 1));
     // s[7]s[6]s[5]s[4]s[3]s[2]s[1]
     seq_ |= kFirstCharMask;
     // s[7]s[6]s[5]s[4]s[3]s[2]1111
@@ -111,7 +111,7 @@ void KMer<G, L>::to_next(size_t k, CharType new_last, CharType old_last) {
  */
 template <typename G, int L>
 void KMer<G, L>::to_next(size_t k, CharType new_last) {
-    KMerWordType old_last = seq_ & KMerWordType(kFirstCharMask);
+    WordType old_last = seq_ & WordType(kFirstCharMask);
     // s[6]s[5]s[4]s[3]s[2]s[1]s[7]
     seq_ = seq_ >> kBitsPerChar;
     // 0000s[6]s[5]s[4]s[3]s[2]s[1]
@@ -126,7 +126,7 @@ void KMer<G, L>::to_next(size_t k, CharType new_last) {
 template <typename G, int L>
 void KMer<G, L>::to_prev(size_t k, CharType new_first) {
     const int shift = kBitsPerChar * (k - 1);
-    KMerWordType last_char = seq_ >> shift;
+    WordType last_char = seq_ >> shift;
     // s[7]s[6]s[5]s[4]s[3]s[2]s[8]
     seq_ |= kFirstCharMask;
     seq_ -= kFirstCharMask - new_first;
@@ -142,7 +142,7 @@ void KMer<G, L>::to_prev(size_t k, CharType new_first) {
 template <typename G, int L>
 typename KMer<G, L>::CharType KMer<G, L>::operator[](size_t i) const {
     static_assert(kBitsPerChar <= 64, "Too large digit!");
-    assert(kBitsPerChar * (i + 1) <= sizeof(KMerWordType) * 8);
+    assert(kBitsPerChar * (i + 1) <= sizeof(WordType) * 8);
     return static_cast<uint64_t>(seq_ >> static_cast<int>(kBitsPerChar * i))
              & kFirstCharMask;
 }

@@ -5,7 +5,7 @@
 
 
 template <typename G, int L>
-const typename KMerPacked<G, L>::KMerCharType
+const typename KMerPacked<G, L>::CharType
 KMerPacked<G, L>::kFirstCharMask = (1llu << kBitsPerChar) - 1;
 
 template <typename G, int L>

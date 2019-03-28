@@ -125,7 +125,7 @@ DBGBOSSChunkConstructor<KMER>
                         verbose) {
     if (filter_suffix == std::string(filter_suffix.size(), DBG_succ::kSentinel)) {
         kmer_collector_.emplace_back(
-            std::vector<KmerExtractor::TAlphabet>(k + 1, DBG_succ::kSentinelCode), k + 1
+            std::vector<KmerExtractor::TAlphabet>(k + 1, DBG_succ::kSentinelCode)
         );
     }
 }
