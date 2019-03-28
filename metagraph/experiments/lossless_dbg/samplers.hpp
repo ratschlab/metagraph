@@ -51,7 +51,7 @@ private:
 };
 class SubSampler : public Sampler {
 public:
-    SubSampler(string reference, int subsample_size, std::mt19937 generator) :
+    SubSampler(const string& reference, int subsample_size, std::mt19937 generator) :
         Sampler(reference.substr(
                 std::uniform_int_distribution<>(0,reference.length()-min(subsample_size,(int)reference.length()))(generator),
                 min(subsample_size,(int)reference.length())

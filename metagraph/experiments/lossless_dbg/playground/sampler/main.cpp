@@ -86,8 +86,8 @@ int main(int argc, char *argv[]) {
     auto subsample_size = subsampleArg.getValue();
     auto generator = std::mt19937(seed);
     auto reference = read_reads_from_fasta(reference_filename)[0];
-    Sampler sampler = subsampleArg.isSet() ? Sampler(reference,generator) :
-                                             SubSampler(reference,subsample_size,generator);
+    Sampler sampler = subsampleArg.isSet() ?  SubSampler(reference,subsample_size,generator) :
+                                              Sampler(reference,generator);
     auto reads = sampler.sample_coverage(read_length,coverage);
     write_reads_to_fasta(reads,output_filename);
     return 0;

@@ -255,7 +255,7 @@ public:
 
 
     void serialize(const fs::path& folder) const {
-        fs::create_directories(folder / "nothing.bin");
+        fs::create_directories(folder / "xxx.bin");
         ofstream edge_multiplicity_file(folder / "edge_multiplicity.bin", ios_base::trunc | ios_base::out);
         ofstream routing_table_file(folder / "routing_table.bin", ios_base::trunc | ios_base::out);
         ofstream joins_file(folder / "joins.bin", ios_base::trunc | ios_base::out);
