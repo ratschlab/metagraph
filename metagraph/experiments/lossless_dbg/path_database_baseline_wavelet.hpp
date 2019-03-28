@@ -256,10 +256,10 @@ public:
 
     void serialize(fs::path folder) {
         fs::create_directories(folder);
-        ofstream edge_multiplicity_file(folder / "edge_multiplicity.bin");
-        ofstream routing_table_file(folder / "routing_table.bin");
-        ofstream joins_file(folder / "joins.bin");
-        string graph_filename = (folder / "graph.bin");
+        ofstream edge_multiplicity_file(folder / "edge_multiplicity.bin", mode = fstream::trunc | fstream::out);
+        ofstream routing_table_file(folder / "routing_table.bin", mode = fstream::trunc | fstream::out);
+        ofstream joins_file(folder / "joins.bin", mode = fstream::trunc | fstream::out);
+        string graph_filename = (folder / "graph.bin", mode = fstream::trunc | fstream::out);
 
         ::serialize(edge_multiplicity_file,edge_multiplicity_table);
         routing_table.serialize(routing_table_file);
