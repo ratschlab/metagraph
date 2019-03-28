@@ -60,7 +60,7 @@ int main(int argc, char *argv[]) {
                                           false,
                                           "statistics.json",
                                           "string");
-    TCLAP::ValueArg<fs::path> compressedArg("o",
+    TCLAP::ValueArg<std::string> compressedArg("o",
                                           "output",
                                           "Folder where to store the compressed files.",
                                           false,

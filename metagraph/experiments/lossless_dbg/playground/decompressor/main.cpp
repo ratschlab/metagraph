@@ -48,13 +48,13 @@ using node_index = SequenceGraph::node_index;
 
 int main(int argc, char *argv[]) {
     TCLAP::CmdLine cmd("Decompress reads",' ', "0.1");
-    TCLAP::ValueArg<fs::path> inputArg("i",
+    TCLAP::ValueArg<std::string> inputArg("i",
                                          "input",
                                          "Folder where to store the compressed files.",
                                          true,
                                          "",
                                          "string");
-    TCLAP::ValueArg<fs::path> outputArg("o",
+    TCLAP::ValueArg<std::string> outputArg("o",
                                           "output",
                                           "FASTA/Q file that should be compressed",
                                           true,
