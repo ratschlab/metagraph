@@ -256,10 +256,10 @@ public:
 
     void serialize(fs::path folder) {
         fs::create_directories(folder);
-        ofstream edge_multiplicity_file(folder / "edge_multiplicity.bin", mode = ios_base::trunc | ios_base::out);
-        ofstream routing_table_file(folder / "routing_table.bin", mode = ios_base::trunc | ios_base::out);
-        ofstream joins_file(folder / "joins.bin", mode = ios_base::trunc | ios_base::out);
-        string graph_filename = (folder / "graph.bin", mode = ios_base::trunc | ios_base::out);
+        ofstream edge_multiplicity_file(folder / "edge_multiplicity.bin", ios_base::trunc | ios_base::out);
+        ofstream routing_table_file(folder / "routing_table.bin", ios_base::trunc | ios_base::out);
+        ofstream joins_file(folder / "joins.bin", ios_base::trunc | ios_base::out);
+        string graph_filename = (folder / "graph.bin", ios_base::trunc | ios_base::out);
 
         ::serialize(edge_multiplicity_file,edge_multiplicity_table);
         routing_table.serialize(routing_table_file);
