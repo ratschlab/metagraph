@@ -259,7 +259,7 @@ public:
         ofstream edge_multiplicity_file(folder / "edge_multiplicity.bin", ios_base::trunc | ios_base::out);
         ofstream routing_table_file(folder / "routing_table.bin", ios_base::trunc | ios_base::out);
         ofstream joins_file(folder / "joins.bin", ios_base::trunc | ios_base::out);
-        string graph_filename = (folder / "graph.bin", ios_base::trunc | ios_base::out);
+        string graph_filename = folder / "graph.bin";
 
         ::serialize(edge_multiplicity_file,edge_multiplicity_table);
         routing_table.serialize(routing_table_file);
@@ -271,7 +271,7 @@ public:
         ifstream edge_multiplicity_file(folder / "edge_multiplicity.bin");
         ifstream routing_table_file(folder / "routing_table.bin");
         ifstream joins_file(folder / "joins.bin");
-        string graph_filename = (folder / "graph.bin");
+        string graph_filename = folder / "graph.bin";
 
         auto graph = std::shared_ptr<DeBruijnGraph>{
                 new DBGSuccinct(21)
