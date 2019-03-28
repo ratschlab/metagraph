@@ -54,7 +54,7 @@ int main(int argc, char *argv[]) {
                                                  false,
                                                  100,
                                                  "int");
-    TCLAP::Valuearg<int>          subsampleArg("s",
+    TCLAP::ValueArg<int>          subsampleArg("s",
                                                 "subsample-size"
                                                 "Subsample the reference to 'subsample-size' base pairs.",
                                                 false,
