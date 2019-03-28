@@ -46,7 +46,7 @@ class AnnotatedDBG {
     void annotate_sequence_thread_safe(std::string sequence,
                                        std::vector<std::string> labels);
 
-    std::unique_ptr<DeBruijnGraph> graph_;
+    std::shared_ptr<DeBruijnGraph> graph_;
     std::unique_ptr<Annotator> annotator_;
 
     ThreadPool thread_pool_;
