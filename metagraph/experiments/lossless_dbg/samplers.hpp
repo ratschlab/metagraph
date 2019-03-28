@@ -13,6 +13,7 @@
 #include <map>
 #include <vector>
 #include <random>
+#include <cassert>
 
 using namespace std;
 

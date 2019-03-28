@@ -9,6 +9,7 @@
 #define path_database_baseline_wavelet_hpp
 
 #include "path_database.hpp"
+#include "path_database_baseline.hpp"
 #include "utils.hpp"
 #include "utilities.hpp"
 #include <iostream>
