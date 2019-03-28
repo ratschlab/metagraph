@@ -54,7 +54,7 @@ class SubSampler : Sampler {
         Sampler(reference.substr(
                 std::uniform_int_distribution<>(0,reference.length()-min(subsample_size,(int)reference.length()))(generator),
                 min(subsample_size,(int)reference.length())
-                )
+                ),
                 generator)
                 {}
 };
