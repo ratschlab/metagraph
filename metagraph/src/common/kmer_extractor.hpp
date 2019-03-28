@@ -10,7 +10,7 @@
 
 #include "utils.hpp"
 #include "kmer.hpp"
-#include "kmer_packed.hpp"
+#include "kmer_boss.hpp"
 #include "alphabets.hpp"
 
 
@@ -32,9 +32,9 @@ class KmerExtractor {
     );
     #endif
 
-    typedef KMer<uint64_t, kLogSigma> Kmer64;
-    typedef KMer<sdsl::uint128_t, kLogSigma> Kmer128;
-    typedef KMer<sdsl::uint256_t, kLogSigma> Kmer256;
+    typedef KMerBOSS<uint64_t, kLogSigma> Kmer64;
+    typedef KMerBOSS<sdsl::uint128_t, kLogSigma> Kmer128;
+    typedef KMerBOSS<sdsl::uint256_t, kLogSigma> Kmer256;
 
     // alphabet for k-mer representation
     typedef uint8_t TAlphabet;
@@ -87,7 +87,7 @@ class KmerExtractor2BitT {
 
     // k-mer
     template <class T>
-    using Kmer = KMerPacked<T, kLogSigma>;
+    using Kmer = KMer<T, kLogSigma>;
 
     typedef Kmer<uint64_t> Kmer64;
     typedef Kmer<sdsl::uint128_t> Kmer128;

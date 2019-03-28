@@ -9,64 +9,39 @@
 
 
 template <typename T>
-T encode_c(char c, const T *char_map) {
-    assert(static_cast<size_t>(c) < 128);
-    return char_map[static_cast<size_t>(c)];
-}
+T encode_c(char c, const T *char_map);
 
 template <typename T>
-char decode_c(T a, const std::string &alphabet) {
-    assert(a < alphabet.size());
-    return alphabet[a];
-}
+char decode_c(T a, const std::string &alphabet);
 
 template <typename T>
-std::vector<T> encode_c(const std::string &sequence, const T *char_map) {
-    std::vector<T> encoded;
-    std::transform(sequence.begin(), sequence.end(),
-                   std::back_inserter(encoded),
-                   [&](char c) { return encode_c(c, char_map); });
-    assert(encoded.size() == sequence.size());
-
-    return encoded;
-}
+std::vector<T> encode_c(const std::string &sequence, const T *char_map);
 
 template <typename T>
-std::string decode_c(const std::vector<T> &encoded, const std::string &alphabet) {
-    std::string decoded;
-    std::transform(encoded.begin(), encoded.end(),
-                   std::back_inserter(decoded),
-                   [&](T a) { return decode_c(a, alphabet); });
-    assert(decoded.size() == encoded.size());
-
-    return decoded;
-}
+std::string decode_c(const std::vector<T> &encoded, const std::string &alphabet);
 
 typedef uint8_t TAlphabet;
-template std::vector<TAlphabet> encode_c(const std::string &sequence, const TAlphabet *char_map);
 
-
- // Nucleotide
-std::vector<TAlphabet> encode_nucleotide(const std::string &sequence) {
+// Nucleotide 2 bit
+std::vector<TAlphabet> encode_nucleotide_2bit(const std::string &sequence) {
     const TAlphabet kCharToNucleotide[128] = {
-        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 0, 4, 1,  4, 4, 4, 2,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 4, 4, 4,  3, 3, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 0, 4, 1,  4, 4, 4, 2,  4, 4, 4, 4,  4, 4, 4, 4,
-        4, 4, 4, 4,  3, 3, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4
+        0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
+        0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
+        0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
+        0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
+        0, 0, 0, 1,  0, 0, 0, 2,  0, 0, 0, 0,  0, 0, 0, 0,
+        0, 0, 0, 0,  3, 3, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
+        0, 0, 0, 1,  0, 0, 0, 2,  0, 0, 0, 0,  0, 0, 0, 0,
+        0, 0, 0, 0,  3, 3, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0
     };
 
     return encode_c(sequence, kCharToNucleotide);
 }
 
 template <typename G, int L>
-std::string decode_nucleotide(const KMer<G, L> &kmer, size_t k) {
-    return kmer.to_string(k, "ACGTN");
+std::string decode_nucleotide_2bit(const KMer<G, L> &kmer, size_t k) {
+    return kmer.to_string(k, "ACGT");
 }
-
 
 
 template <typename G, int L>
@@ -82,34 +57,51 @@ void test_kmer_codec(const std::string &sequence,
         ASSERT_LE(k, encoded.size());
         std::vector<KMer<G, L>> kmers;
         KMer<G, L> kmer_packed(encoded.data(), k);
+
         for (uint64_t i = 0; i + k <= encoded.size(); ++i) {
             kmers.emplace_back(std::vector<TAlphabet>(encoded.begin() + i,
                                                       encoded.begin() + i + k));
+            assert(i + k <= sequence.size());
             ASSERT_EQ(sequence.substr(i, k), decoder(kmers.back(), k))
-                 << k << " " << i;
+                 << sequence.substr(i, k) << " " << k << " " << i;
 
             KMer<G, L> kmer_alt(encoded.data() + i, k);
-            ASSERT_EQ(kmers.back(), kmer_alt) << k << " " << i;
+            ASSERT_EQ(kmers.back(), kmer_alt) << sequence.substr(i, k) << " " << k << " " << i;
 
-            ASSERT_EQ(kmers.back(), kmer_packed) << k << " " << i;
+            ASSERT_EQ(kmers.back(), kmer_packed) << sequence.substr(i, k) << " " << k << " " << i;
 
             if (i + k < encoded.size())
-                kmer_packed.to_next(k, encoded[i + k], encoded[i + k - 1]);
+                kmer_packed.to_next(k, encoded[i + k]);
         }
     }
 }
 
-TEST(Kmer, nucleotide_alphabet_pack_64) {
-    const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAN";
-    test_kmer_codec<uint64_t, 3>(sequence, encode_nucleotide, decode_nucleotide<uint64_t, 3>);
+TEST(KmerPacked, nucleotide_alphabet_pack_6_2Bit) {
+    const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAA";
+    test_kmer_codec<uint64_t, 2>(sequence, encode_nucleotide_2bit, decode_nucleotide_2bit<uint64_t, 2>);
 }
 
-TEST(Kmer, nucleotide_alphabet_pack_128) {
-    const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAN";
-    test_kmer_codec<sdsl::uint128_t, 3>(sequence, encode_nucleotide, decode_nucleotide<sdsl::uint128_t, 3>);
+TEST(KmerPacked, nucleotide_alphabet_pack_128_2Bit) {
+    const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAA";
+    test_kmer_codec<sdsl::uint128_t, 2>(sequence, encode_nucleotide_2bit, decode_nucleotide_2bit<sdsl::uint128_t, 2>);
 }
 
-TEST(Kmer, nucleotide_alphabet_pack_256) {
-    const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAN";
-    test_kmer_codec<sdsl::uint256_t, 3>(sequence, encode_nucleotide, decode_nucleotide<sdsl::uint256_t, 3>);
+TEST(KmerPacked, nucleotide_alphabet_pack_256_2Bit) {
+    const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAA";
+    test_kmer_codec<sdsl::uint256_t, 2>(sequence, encode_nucleotide_2bit, decode_nucleotide_2bit<sdsl::uint256_t, 2>);
+}
+
+TEST(KmerPacked, nucleotide_alphabet_pack_6) {
+    const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAA";
+    test_kmer_codec<uint64_t, 3>(sequence, encode_nucleotide_2bit, decode_nucleotide_2bit<uint64_t, 3>);
+}
+
+TEST(KmerPacked, nucleotide_alphabet_pack_128) {
+    const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAA";
+    test_kmer_codec<sdsl::uint128_t, 3>(sequence, encode_nucleotide_2bit, decode_nucleotide_2bit<sdsl::uint128_t, 3>);
+}
+
+TEST(KmerPacked, nucleotide_alphabet_pack_256) {
+    const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAA";
+    test_kmer_codec<sdsl::uint256_t, 3>(sequence, encode_nucleotide_2bit, decode_nucleotide_2bit<sdsl::uint256_t, 3>);
 }
