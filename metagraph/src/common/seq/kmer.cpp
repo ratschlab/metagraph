@@ -4,7 +4,7 @@
 
 
 template <typename G, int L>
-const typename KMer<G, L>::KMerCharType
+const typename KMer<G, L>::CharType
 KMer<G, L>::kFirstCharMask = (1llu << kBitsPerChar) - 1;
 
 template <typename G, int L>
