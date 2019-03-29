@@ -95,6 +95,9 @@ namespace utils {
     uint32_t code_length(uint64_t a);
 
 
+    void set_num_threads(unsigned int num_threads);
+    unsigned int get_num_threads();
+
     /**
      * The code was copied and has been modified from:
      * https://github.com/progschj/ThreadPool/blob/master/ThreadPool.h

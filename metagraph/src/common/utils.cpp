@@ -19,6 +19,17 @@ std::size_t SmallVectorHash::operator()(const SmallVector &vector) const {
 
 namespace utils {
 
+static unsigned int NUM_THREADS_METAGRAPH_GLOBAL = 1;
+
+
+void set_num_threads(unsigned int num_threads) {
+    NUM_THREADS_METAGRAPH_GLOBAL = std::max(1u, num_threads);
+}
+
+unsigned int get_num_threads() {
+    return NUM_THREADS_METAGRAPH_GLOBAL;
+}
+
 bool ends_with(const std::string &str, const std::string &suffix) {
     auto actual_suffix = str.substr(
         std::max(0, static_cast<int>(str.size())

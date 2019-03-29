@@ -13,7 +13,7 @@ std::string
 KMer<G, L>::to_string(size_t k, const std::string &alphabet) const {
     std::string seq(k, '\0');
 
-    for (size_t i = 0; i < seq.length(); ++i) {
+    for (size_t i = 0; i < k; ++i) {
         assert(operator[](i) < alphabet.size());
         seq[i] = alphabet[operator[](i)];
     }
