@@ -151,7 +151,12 @@ include_directories(
   external-libraries/binrel_wt/include
   external-libraries/jsoncpp/include
   external-libraries/asio/asio/include
+  external-libraries/cpp_progress_bar
   ${INCLUDE_DIRS}
+)
+
+add_library(progress_bar STATIC
+  external-libraries/cpp_progress_bar/progress_bar.cpp
 )
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules")
@@ -196,6 +201,7 @@ set(METALIBS ${METALIBS}
   -lssl -lcrypto -llzma
   -lbrwt
   -ljsoncpp
+  progress_bar
   OpenMP::OpenMP_CXX
 )
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")

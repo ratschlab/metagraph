@@ -1,5 +1,7 @@
 #include "annotation_converters.hpp"
 
+#include <progress_bar.hpp>
+
 #include "static_annotators_def.hpp"
 #include "annotate_column_compressed.hpp"
 #include "BRWT_builders.hpp"
@@ -19,9 +21,17 @@ convert<RowFlatAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
     uint64_t num_rows = annotator.num_objects();
     uint64_t num_columns = annotator.num_labels();
 
+    ProgressBar progress_bar(num_rows, "Processing rows");
+
     auto matrix = std::make_unique<RowConcatenated<>>(
         [&](auto callback) {
-            utils::call_rows(callback, dynamic_cast<const BinaryMatrixRowDynamic &>(*annotator.matrix_));
+            utils::call_rows(
+                [&](auto&... params) {
+                    callback(params...);
+                    ++progress_bar;
+                },
+                dynamic_cast<const BinaryMatrixRowDynamic &>(*annotator.matrix_)
+            );
         },
         num_columns,
         num_rows,

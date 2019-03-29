@@ -40,3 +40,6 @@
 [submodule "metagraph/external-libraries/jsoncpp"]
 	path = metagraph/external-libraries/jsoncpp
 	url = https://github.com/open-source-parsers/jsoncpp.git
+[submodule "metagraph/external-libraries/cpp_progress_bar"]
+	path = metagraph/external-libraries/cpp_progress_bar
+	url = https://github.com/karasikov/cpp_progress_bar
