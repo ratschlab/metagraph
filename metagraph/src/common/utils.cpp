@@ -388,6 +388,8 @@ void RowsFromColumnsTransformer::call_next(ValueCallback callback) {
     index_heap_.pop();
     num_set_bits_left_--;
 
+    // TODO: Important!
+    // Load multiple values from the stream to improve cache efficiency
     if (streams_[index.col_id]->values_left())
         index_heap_.emplace(kmer_label_pair {
             streams_[index.col_id]->next_value(),

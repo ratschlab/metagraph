@@ -441,6 +441,7 @@ void ColumnCompressed<Label>::add_labels(uint64_t begin, uint64_t end,
     assert(begin <= end);
     assert(end <= annotator->matrix_->num_rows());
 
+    // TODO: use RowsFromColumnsTransformer
     for (size_t j = 0; j < bitmatrix_.size(); ++j) {
         uint64_t first = begin == 0
                             ? 1
