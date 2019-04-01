@@ -174,7 +174,7 @@ find_library(FOLLY_LIBRARIES
 )
 if(FOLLY_LIBRARIES)
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
-  set(METALIBS -lfolly -lglog)
+  set(METALIBS -lfolly -lglog -lgflags -ldouble-conversion -ldl -liberty -lboost_regex -lboost_filesystem -lboost_program_options)
 else()
   message(WARNING "Folly was not found.\n"
   "Install folly to reduce RAM required by the row-compressed annotator.")
