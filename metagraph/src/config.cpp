@@ -99,7 +99,7 @@ Config::Config(int argc, const char *argv[]) {
             fast = true;
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
             parallel = atoi(argv[++i]);
-            utils::set_num_threads(atoi(argv[++i]));
+            utils::set_num_threads(parallel);
         } else if (!strcmp(argv[i], "--parts-total")) {
             parts_total = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--part-idx")) {
