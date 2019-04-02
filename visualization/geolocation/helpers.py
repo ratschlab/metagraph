@@ -3,14 +3,6 @@
 # coding: utf-8
 #
 
-import os
-import sys
-import re
-import subprocess
-import numpy as np
-from scipy.io import loadmat
-from tempfile import NamedTemporaryFile
-
 
 __author__ = 'Mikhail Karasikov'
 
@@ -59,4 +51,3 @@ def get_js_sample_list(annotations):
 
     js_output += '];\n'
     return js_output
-

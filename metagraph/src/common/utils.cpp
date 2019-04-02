@@ -9,6 +9,8 @@
 #include <boost/multiprecision/integer.hpp>
 #include <boost/functional/hash/hash.hpp>
 
+#include "binary_matrix.hpp"
+
 
 std::size_t SmallVectorHash::operator()(const SmallVector &vector) const {
     return boost::hash_range(vector.begin(), vector.end());
@@ -16,6 +18,17 @@ std::size_t SmallVectorHash::operator()(const SmallVector &vector) const {
 
 
 namespace utils {
+
+static unsigned int NUM_THREADS_METAGRAPH_GLOBAL = 1;
+
+
+void set_num_threads(unsigned int num_threads) {
+    NUM_THREADS_METAGRAPH_GLOBAL = std::max(1u, num_threads);
+}
+
+unsigned int get_num_threads() {
+    return NUM_THREADS_METAGRAPH_GLOBAL;
+}
 
 bool ends_with(const std::string &str, const std::string &suffix) {
     auto actual_suffix = str.substr(
@@ -237,6 +250,27 @@ void insert_default_values(const std::vector<uint64_t> &, sdsl::bit_vector *);
 template
 void insert_default_values(const std::vector<uint64_t> &, std::vector<SmallVector> *);
 
+template <>
+void insert_default_values(const std::vector<uint64_t> &indexes,
+                           std::set<uint64_t> *vector) {
+    assert(vector);
+
+    if (indexes.empty())
+        return;
+
+    std::set<uint64_t> bits;
+    uint64_t offset = 0;
+    for (auto i : *vector) {
+        while (offset < indexes.size() && i + offset >= indexes[offset]) {
+            ++offset;
+        }
+        bits.emplace_hint(bits.end(), i + offset);
+    }
+    assert(vector->size() == bits.size());
+
+    std::swap(bits, *vector);
+}
+
 template <typename T>
 void erase(std::vector<T> *vector, const std::vector<bool> &erase_mask) {
     assert(vector);
@@ -384,6 +418,15 @@ void call_rows(const std::function<void(const SetBitPositions &)> &callback,
     while (cur_row++ < transformer.rows()) {
         callback(indices);
         indices.clear();
+    }
+}
+
+void call_rows(const std::function<void(const SetBitPositions &)> &callback,
+               const BinaryMatrixRowDynamic &row_major_matrix) {
+    const auto num_rows = row_major_matrix.num_rows();
+
+    for (size_t i = 0; i < num_rows; ++i) {
+        callback(row_major_matrix.get_row(i));
     }
 }
 

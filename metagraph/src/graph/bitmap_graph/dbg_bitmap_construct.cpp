@@ -44,7 +44,7 @@ DBGSD::Chunk* SDChunkConstructor<KMER>
             [&](const auto &index_callback) {
                 kmer_collector_.call_kmers(
                     [&](const auto &kmer) {
-                        index_callback(typename KMER::KMerWordType(1u) + kmer.data());
+                        index_callback(typename KMER::WordType(1u) + kmer.data());
                     }
                 );
             },

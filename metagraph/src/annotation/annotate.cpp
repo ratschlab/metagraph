@@ -52,17 +52,57 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
 }
 
 
+// For each pair (first, second) in the dictionary, renames column |first|
+// to |second| and merges columns with matching names, if supported.
+template <typename IndexType, typename LabelType>
+void MultiLabelEncoded<IndexType, LabelType>
+::rename_labels(const std::unordered_map<Label, Label> &dict) {
+    std::vector<Label> index_to_label(label_encoder_.size());
+    for (size_t i = 0; i < index_to_label.size(); ++i) {
+        index_to_label[i] = label_encoder_.decode(i);
+    }
+    for (const auto &pair : dict) {
+        index_to_label[label_encoder_.encode(pair.first)] = pair.second;
+    }
+
+    label_encoder_.clear();
+
+    // insert new column labels
+    for (const auto &label : index_to_label) {
+        try {
+            label_encoder_.encode(label);
+            // no exception -> there already exists a column with this name
+            std::cerr << "Error: detected more than one column with"
+                      << " target name " << label
+                      << ". Merging columns is not implemented"
+                      << " for this annotation type."
+                      << std::endl;
+            exit(1);
+        } catch (...) {
+            // this is the first column with this name
+            label_encoder_.insert_and_encode(label);
+        }
+    }
+}
+
+
 // Count all labels collected from the given rows
 // and return top |num_top| with the their counts.
 template <typename IndexType, typename LabelType>
 auto MultiLabelEncoded<IndexType, LabelType>
-::get_top_labels(const std::vector<Index> &indices, size_t num_top) const
+::get_top_labels(const std::vector<Index> &indices,
+                 size_t num_top,
+                 double min_label_frequency) const
 -> std::vector<std::pair<Label, size_t>> {
+    // TODO: use |min_label_frequency|
+    // auto counter = count_labels(indices, min_label_frequency);
     auto counter = count_labels(indices);
+
+    const uint64_t min_count = min_label_frequency * indices.size();
 
     std::vector<std::pair<size_t, size_t>> counts;
     for (size_t j = 0; j < counter.size(); ++j) {
-        if (counter[j])
+        if (counter[j] && counter[j] >= min_count)
             counts.emplace_back(j, counter[j]);
     }
     // sort in decreasing order

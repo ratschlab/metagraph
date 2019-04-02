@@ -34,6 +34,8 @@ struct SmallVectorHash {
     std::size_t operator()(const SmallVector &vector) const;
 };
 
+class BinaryMatrixRowDynamic;
+
 
 namespace utils {
 
@@ -92,6 +94,9 @@ namespace utils {
 
     uint32_t code_length(uint64_t a);
 
+
+    void set_num_threads(unsigned int num_threads);
+    unsigned int get_num_threads();
 
     /**
      * The code was copied and has been modified from:
@@ -331,6 +336,8 @@ namespace utils {
     using SetBitPositions = std::vector<uint64_t>;
     void call_rows(const std::function<void(const SetBitPositions &)> &callback,
                    RowsFromColumnsTransformer&& transformer);
+    void call_rows(const std::function<void(const SetBitPositions &)> &callback,
+                   const BinaryMatrixRowDynamic &row_major_matrix);
 
     template <typename... Args>
     void call_rows(const std::function<void(const SetBitPositions &)> &callback,

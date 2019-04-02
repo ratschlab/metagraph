@@ -49,7 +49,7 @@ class SDChunkConstructor : public ISDChunkConstructor {
 
     inline size_t get_k() const { return kmer_collector_.get_k(); }
 
-    inline bool is_canonical_mode() const { return kmer_collector_.is_canonical_mode(); }
+    inline bool is_canonical_mode() const { return kmer_collector_.is_both_strands_mode(); }
 
     DBGSD::Chunk* build_chunk();
 

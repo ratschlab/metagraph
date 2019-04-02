@@ -6,13 +6,13 @@
 #define protected public
 
 #include "dbg_succinct.hpp"
-#include "kmer.hpp"
+#include "kmer_boss.hpp"
 #include "kmer_extractor.hpp"
 #include "utils.hpp"
 
 typedef sdsl::uint128_t KMerBaseType;
 const size_t kBitsPerChar = KmerExtractor::kLogSigma;
-typedef KMer<KMerBaseType, kBitsPerChar> KMER;
+typedef KMerBOSS<KMerBaseType, kBitsPerChar> KMER;
 const size_t kSizeOfKmer = sizeof(KMerBaseType);
 
 

@@ -247,6 +247,108 @@ TEST(BRWTCompressed, Serialization) {
 //     }
 // }
 
+TEST(BRWTCompressed, NoRenameColumns) {
+    annotate::ColumnCompressed<> annotation(5);
+    annotation.set_labels(0, { "Label0", "Label2", "Label8" });
+    annotation.set_labels(2, { "Label1", "Label2" });
+    annotation.set_labels(4, { "Label8" });
+
+    auto brwt_anno = annotate::convert_to_simple_BRWT<BRWTCompressed<>>(
+        std::move(annotation)
+    );
+    brwt_anno->rename_labels({});
+
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(brwt_anno->get(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(brwt_anno->get(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }), convert_to_set(brwt_anno->get(2)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(brwt_anno->get(3)));
+    EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(brwt_anno->get(4)));
+}
+
+TEST(BRWTCompressed, RenameColumns) {
+    annotate::ColumnCompressed<> annotation(5);
+    annotation.set_labels(0, { "Label0", "Label2", "Label8" });
+    annotation.set_labels(2, { "Label1", "Label2" });
+    annotation.set_labels(4, { "Label8" });
+
+    auto brwt_anno = annotate::convert_to_simple_BRWT<BRWTCompressed<>>(
+        std::move(annotation)
+    );
+    brwt_anno->rename_labels({ { "Label2", "Label2Renamed" },
+                               { "Label8", "Label8Renamed" } });
+
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2Renamed", "Label8Renamed" }), convert_to_set(brwt_anno->get(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(brwt_anno->get(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2Renamed" }), convert_to_set(brwt_anno->get(2)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(brwt_anno->get(3)));
+    EXPECT_EQ(convert_to_set({ "Label8Renamed" }), convert_to_set(brwt_anno->get(4)));
+}
+
+TEST(BRWTCompressed, SwapColumns) {
+    annotate::ColumnCompressed<> annotation(5);
+    annotation.set_labels(0, { "Label0", "Label2", "Label8" });
+    annotation.set_labels(2, { "Label1", "Label2" });
+    annotation.set_labels(4, { "Label8" });
+
+    auto brwt_anno = annotate::convert_to_simple_BRWT<BRWTCompressed<>>(
+        std::move(annotation)
+    );
+    brwt_anno->rename_labels({ { "Label2", "Label8" },
+                               { "Label8", "Label2" } });
+
+    EXPECT_EQ(convert_to_set({ "Label0", "Label8", "Label2" }), convert_to_set(brwt_anno->get(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(brwt_anno->get(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label8" }), convert_to_set(brwt_anno->get(2)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(brwt_anno->get(3)));
+    EXPECT_EQ(convert_to_set({ "Label2" }), convert_to_set(brwt_anno->get(4)));
+}
+
+TEST(BRWTCompressed, RenameColumnsMerge) {
+    annotate::ColumnCompressed<> annotation(5);
+    annotation.set_labels(0, { "Label0", "Label2", "Label8" });
+    annotation.set_labels(2, { "Label1", "Label2" });
+    annotation.set_labels(4, { "Label8" });
+
+    auto brwt_anno = annotate::convert_to_simple_BRWT<BRWTCompressed<>>(
+        std::move(annotation)
+    );
+    ASSERT_DEATH(
+        brwt_anno->rename_labels({ { "Label2", "Merged" },
+                                   { "Label8", "Merged" } }),
+        ""
+    );
+
+    // EXPECT_EQ(convert_to_set({ "Label0", "Merged" }), convert_to_set(brwt_anno->get(0)));
+    // EXPECT_EQ(convert_to_set({}), convert_to_set(brwt_anno->get(1)));
+    // EXPECT_EQ(convert_to_set({ "Label1", "Merged" }), convert_to_set(brwt_anno->get(2)));
+    // EXPECT_EQ(convert_to_set({}), convert_to_set(brwt_anno->get(3)));
+    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(brwt_anno->get(4)));
+}
+
+TEST(BRWTCompressed, RenameColumnsMergeAll) {
+    annotate::ColumnCompressed<> annotation(5);
+    annotation.set_labels(0, { "Label0", "Label2", "Label8" });
+    annotation.set_labels(2, { "Label1", "Label2" });
+    annotation.set_labels(4, { "Label8" });
+
+    auto brwt_anno = annotate::convert_to_simple_BRWT<BRWTCompressed<>>(
+        std::move(annotation)
+    );
+    ASSERT_DEATH(
+        brwt_anno->rename_labels({ { "Label0", "Merged" },
+                                   { "Label1", "Merged" },
+                                   { "Label2", "Merged" },
+                                   { "Label8", "Merged" }, }),
+        ""
+    );
+
+    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(brwt_anno->get(0)));
+    // EXPECT_EQ(convert_to_set({}), convert_to_set(brwt_anno->get(1)));
+    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(brwt_anno->get(2)));
+    // EXPECT_EQ(convert_to_set({}), convert_to_set(brwt_anno->get(3)));
+    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(brwt_anno->get(4)));
+}
+
 TEST(BRWTCompressed, has_labels) {
     annotate::ColumnCompressed<> init_anno(5);
 

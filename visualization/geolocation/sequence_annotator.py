@@ -3,12 +3,8 @@
 # coding: utf-8
 #
 
-import os
 import sys
-import re
 import subprocess
-import numpy as np
-from scipy.io import loadmat
 from tempfile import NamedTemporaryFile
 from helpers import get_js_sample_list
 

@@ -67,6 +67,8 @@ Config::Config(int argc, const char *argv[]) {
             verbose = true;
         } else if (!strcmp(argv[i], "--print")) {
             print_graph = true;
+        } else if (!strcmp(argv[i], "--print-col-names")) {
+            print_column_names = true;
         } else if (!strcmp(argv[i], "--print-internal")) {
             print_graph_internal_repr = true;
         } else if (!strcmp(argv[i], "--count-kmers")) {
@@ -93,8 +95,11 @@ Config::Config(int argc, const char *argv[]) {
             suppress_unlabeled = true;
         } else if (!strcmp(argv[i], "--sparse")) {
             sparse = true;
+        } else if (!strcmp(argv[i], "--fast")) {
+            fast = true;
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
             parallel = atoi(argv[++i]);
+            utils::set_num_threads(atoi(argv[++i]));
         } else if (!strcmp(argv[i], "--parts-total")) {
             parts_total = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--part-idx")) {
@@ -389,6 +394,8 @@ Config::GraphType Config::string_to_graphtype(const std::string &string) {
         return GraphType::SUCCINCT;
     } else if (string == "hash") {
         return GraphType::HASH;
+    } else if (string == "hashstr") {
+        return GraphType::HASH_STR;
     } else if (string == "bitmap") {
         return GraphType::BITMAP;
     } else {
@@ -401,7 +408,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     fprintf(stderr, "Metagraph: comprehensive metagenome graph representation -- Version 0.1\n\n");
 
     const char annotation_list[] = "('column', 'row', 'bin_rel_wt_sdsl', 'bin_rel_wt', 'flat', 'rbfish', 'brwt')";
-    const char graph_list[] = "('succinct', 'hash', 'bitmap')";
+    const char graph_list[] = "('succinct', 'hash', 'hashstr', 'bitmap')";
 
     switch (identity) {
         case NO_IDENTITY: {
@@ -564,7 +571,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-a --annotator [STR] \tannotator []\n");
             fprintf(stderr, "\t   --count-dummy \tshow number of dummy source and sink edges [off]\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
-            fprintf(stderr, "\t   --print-internal \tprint internal graph representation to the screen [off]\n");
+            fprintf(stderr, "\t   --print-internal \tprint internal graph representation to screen [off]\n");
+            fprintf(stderr, "\t   --print-col-names \tprint names of the columns in annotation to screen [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case ANNOTATE: {
@@ -588,6 +596,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --header-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
             fprintf(stderr, "\t   --anno-label [STR]\t\tadd label to annotation for all sequences from the files passed []\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+            // fprintf(stderr, "\t   --fast \t\t\tannotate in fast regime (leads to repeated labels and bigger annotation) [off]\n");
         } break;
         case ANNOTATE_COORDINATES: {
             fprintf(stderr, "Usage: %s coordinate -i <graph> [options] <PATH1> [[PATH2] ...]\n"
@@ -602,12 +611,15 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --filter-k [INT] \t\tlength of k-mers used for counting and filtering [3]\n");
             fprintf(stderr, "\t   --coord-binsize [INT]\tstepsize for k-mer coordinates in input sequences from the fasta files [1000]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t   --fast \t\t\tannotate in fast regime [off]\n");
         } break;
         case MERGE_ANNOTATIONS: {
             fprintf(stderr, "Usage: %s merge_anno [options] -o <annotator_basename> <ANNOT1> [[ANNOT2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
-            fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
+            fprintf(stderr, "\t   --anno-type [STR] \tinternal annotation representation [column]\n");
+            fprintf(stderr, "\t                     \t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
+            // fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case CLASSIFY: {

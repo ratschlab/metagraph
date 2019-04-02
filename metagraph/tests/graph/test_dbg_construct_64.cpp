@@ -14,6 +14,7 @@
 #include "dbg_succinct_merge.hpp"
 #include "dbg_succinct_construct.hpp"
 #include "utils.hpp"
+#include "reverse_complement.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 
@@ -21,7 +22,7 @@ const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
 
-typedef KMer<uint64_t, KmerExtractor::kLogSigma> KMER;
+typedef KMerBOSS<uint64_t, KmerExtractor::kLogSigma> KMER;
 const int kMaxK = sizeof(KMER) * 8 / KmerExtractor::kLogSigma;
 
 
@@ -103,6 +104,29 @@ TEST(Construct_64, ConstructionEQAppending) {
 
         DBG_succ appended(k);
         for (const auto &sequence : input_data) {
+            appended.add_sequence(sequence);
+        }
+
+        EXPECT_EQ(constructed, appended);
+    }
+}
+
+TEST(Construct_64, ConstructionEQAppendingCanonical) {
+    for (size_t k = 1; k < kMaxK; ++k) {
+        std::vector<std::string> input_data = {
+            "ACAGCTAGCTAGCTAGCTAGCTG",
+            "ATATTATAAAAAATTTTAAAAAA",
+            "ATATATTCTCTCTCTCTCATA",
+            "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+        };
+        DBGSuccConstructor constructor(k, true);
+        constructor.add_sequences(input_data);
+        DBG_succ constructed(&constructor);
+
+        DBG_succ appended(k);
+        for (auto &sequence : input_data) {
+            appended.add_sequence(sequence);
+            reverse_complement(sequence.begin(), sequence.end());
             appended.add_sequence(sequence);
         }
 

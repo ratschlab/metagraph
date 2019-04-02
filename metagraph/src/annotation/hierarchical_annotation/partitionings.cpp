@@ -213,7 +213,7 @@ binary_grouping_greedy(const BRWTBottomUpBuilder::VectorsPtr &columns) {
 
 std::function<BRWTBottomUpBuilder::Partition(const BRWTBottomUpBuilder::VectorsPtr &)>
 get_parallel_binary_grouping_greedy(size_t num_threads) {
-    return [&num_threads](const BRWTBottomUpBuilder::VectorsPtr &columns) {
+    return [num_threads](const BRWTBottomUpBuilder::VectorsPtr &columns) {
         return parallel_binary_grouping_greedy(columns, num_threads);
     };
 }

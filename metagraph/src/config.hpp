@@ -12,6 +12,7 @@ class Config {
     bool verbose = false;
     bool print_graph = false;
     bool print_graph_internal_repr = false;
+    bool print_column_names = false;
     bool reverse = false;
     bool canonical = false;
     bool complete = false;
@@ -27,6 +28,7 @@ class Config {
     bool filter_present = false;
     bool dump_raw_anno = false;
     bool sparse = false;
+    bool fast = false;
     bool count_labels = false;
     bool suppress_unlabeled = false;
     bool generate_filtered_fasta = false;
@@ -118,6 +120,7 @@ class Config {
         INVALID = -1,
         SUCCINCT = 1,
         HASH,
+        HASH_STR,
         BITMAP,
     };
 

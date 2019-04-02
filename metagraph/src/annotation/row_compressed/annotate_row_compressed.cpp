@@ -74,6 +74,39 @@ void RowCompressed<Label>::add_labels(const std::vector<Index> &indices,
 }
 
 template <typename Label>
+void RowCompressed<Label>::add_labels_fast(const std::vector<Index> &indices,
+                                           const VLabels &labels) {
+    std::vector<uint64_t> col_ids;
+    col_ids.reserve(labels.size());
+    for (const auto &label : labels) {
+        col_ids.push_back(label_encoder_.insert_and_encode(label));
+    }
+    std::sort(col_ids.begin(), col_ids.end());
+    col_ids.erase(std::unique(col_ids.begin(), col_ids.end()), col_ids.end());
+
+    auto unique_indices = indices;
+    std::sort(unique_indices.begin(), unique_indices.end());
+    unique_indices.erase(
+        std::unique(unique_indices.begin(), unique_indices.end()),
+        unique_indices.end()
+    );
+
+    if (dynamic_cast<VectorRowBinMat*>(matrix_.get())) {
+        for (Index i : unique_indices) {
+            for (auto j : col_ids) {
+                dynamic_cast<VectorRowBinMat&>(*matrix_).force_set(i, j);
+            }
+        }
+    } else {
+        for (Index i : unique_indices) {
+            for (auto j : col_ids) {
+                matrix_->set(i, j);
+            }
+        }
+    }
+}
+
+template <typename Label>
 bool RowCompressed<Label>::has_label(Index i, const Label &label) const {
     try {
         return matrix_->get(i, label_encoder_.encode(label));
@@ -119,10 +152,67 @@ bool RowCompressed<Label>::merge_load(const std::vector<std::string> &filenames)
         return false;
 
     try {
-        return label_encoder_.load(instream) && matrix_->load(instream);
+        bool is_successfully_loaded = label_encoder_.load(instream)
+                                            && matrix_->load(instream);
+        if (filenames.size() == 1 || !is_successfully_loaded)
+            return is_successfully_loaded;
+
+        assert(filenames.size() > 1);
+
+        if (!dynamic_cast<VectorRowBinMat*>(matrix_.get())) {
+            std::cerr << "Error: loading from multiple row annotators is supported"
+                      << " only for the VectorRowBinMat representation" << std::endl;
+            exit(1);
+        }
+
+        auto &matrix = dynamic_cast<VectorRowBinMat&>(*matrix_);
+        auto next_block = std::make_unique<VectorRowBinMat>(matrix_->num_rows());
+
+        for (auto filename : filenames) {
+            if (filename == filenames[0])
+                continue;
+
+            std::ifstream instream(remove_suffix(filename, kExtension) + kExtension,
+                                   std::ios::binary);
+            if (!instream.good())
+                return false;
+
+            LabelEncoder<Label> label_encoder_load;
+            if (!label_encoder_load.load(instream)
+                    || !next_block->load(instream)
+                    || next_block->num_rows() != matrix_->num_rows())
+                return false;
+
+            // add new columns
+            std::vector<uint64_t> new_column_positions(label_encoder_load.size());
+
+            for (size_t c = 0; c < label_encoder_load.size(); ++c) {
+                try {
+                    new_column_positions[c]
+                        = label_encoder_.encode(label_encoder_load.decode(c));
+                    std::cerr << "Warning: the merged annotations have common"
+                              << " labels. The merged result will include"
+                              << " duplicates and be bigger than expected."
+                              << " Detected label: "
+                              << label_encoder_load.decode(c) << std::endl;
+                } catch (...) {
+                    // the label is new
+                    new_column_positions[c]
+                        = label_encoder_.insert_and_encode(label_encoder_load.decode(c));
+                }
+            }
+
+            // set all bits from the next block
+            for (uint64_t i = 0; i < next_block->num_rows(); ++i) {
+                for (auto j : next_block->get_row(i)) {
+                    matrix.force_set(i, new_column_positions[j]);
+                }
+            }
+        }
     } catch (...) {
         return false;
     }
+    return true;
 }
 
 template <typename Label>

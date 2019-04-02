@@ -37,6 +37,7 @@ echo "\
 # OpenMP
 export LDFLAGS=\"\$LDFLAGS -L$(brew --prefix libomp)/lib\"
 export CPPFLAGS=\"\$CPPFLAGS -I$(brew --prefix libomp)/include\"
+export CXXFLAGS=\"\$CXXFLAGS -I$(brew --prefix libomp)/include\"
 # Clang C++ flags
 export LDFLAGS=\"\$LDFLAGS -L$(brew --prefix llvm)/lib -Wl,-rpath,$(brew --prefix llvm)/lib\"
 export CPPFLAGS=\"\$CPPFLAGS -I$(brew --prefix llvm)/include\"
@@ -53,7 +54,7 @@ export CXX=\"\$(which clang++)\"
 ### Compile
 1. `git clone --recursive https://github.com/ratschlab/projects2014-metagenome.git`
 2. make sure all submodules are downloaded: `git submodule update --init --recursive`
-3. install **libmaus2** and **sdsl-lite** in `metagraph/external-libraries/` following the corresponding istructions  
+3. install **libmaus2** and **sdsl-lite** in `metagraph/external-libraries/` following the corresponding instructions
 or simply run the following script
 ```bash
 git submodule update --init --recursive

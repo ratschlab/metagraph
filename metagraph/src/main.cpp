@@ -1,3 +1,5 @@
+#include <json/json.h>
+
 #include "unix_tools.hpp"
 #include "config.hpp"
 #include "sequence_io.hpp"
@@ -10,10 +12,12 @@
 #include "annotate_column_compressed.hpp"
 #include "serialization.hpp"
 #include "utils.hpp"
+#include "reverse_complement.hpp"
 #include "static_annotators_def.hpp"
 #include "annotation_converters.hpp"
 #include "kmc_parser.hpp"
 #include "dbg_hash_ordered.hpp"
+#include "dbg_hash_string.hpp"
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
 #include "server.hpp"
@@ -31,6 +35,9 @@ Config::GraphType parse_graph_extension(const std::string &filename) {
 
     } else if (utils::ends_with(filename, ".orhashdbg")) {
         return Config::GraphType::HASH;
+
+    } else if (utils::ends_with(filename, ".hashstrdbg")) {
+        return Config::GraphType::HASH_STR;
 
     } else if (utils::ends_with(filename, ".bitmapdbg")) {
         return Config::GraphType::BITMAP;
@@ -64,6 +71,9 @@ std::unique_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
 
         case Config::GraphType::HASH:
             return load_critical_graph_from_file<DBGHashOrdered>(filename);
+
+        case Config::GraphType::HASH_STR:
+            return load_critical_graph_from_file<DBGHashString>(filename);
 
         case Config::GraphType::BITMAP:
             return load_critical_graph_from_file<DBGSD>(filename);
@@ -360,7 +370,9 @@ void execute_query(std::string seq_name,
     std::ostringstream oss;
 
     if (count_labels) {
-        auto top_labels = anno_graph.get_top_labels(sequence, num_top_labels);
+        auto top_labels = anno_graph.get_top_labels(sequence,
+                                                    num_top_labels,
+                                                    discovery_fraction);
 
         if (!top_labels.size() && suppress_unlabeled)
             return;
@@ -488,6 +500,28 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
     }
 
     return anno_graph;
+}
+
+
+template <class AnnotatorTo, class AnnotatorFrom>
+void convert(std::unique_ptr<AnnotatorFrom> annotator,
+             const Config &config,
+             const Timer &timer) {
+    if (config.verbose)
+        std::cout << "Converting to " << Config::annotype_to_string(config.anno_type)
+                  << " annotator...\t" << std::flush;
+
+    auto target_annotator = annotate::convert<AnnotatorTo>(std::move(*annotator));
+    annotator.reset();
+    if (config.verbose)
+        std::cout << timer.elapsed() << "sec" << std::endl;
+
+    if (config.verbose)
+        std::cout << "Serializing to " << config.outfbase
+                  << "...\t" << std::flush;
+    target_annotator->serialize(config.outfbase);
+    if (config.verbose)
+        std::cout << timer.elapsed() << "sec" << std::endl;
 }
 
 
@@ -673,6 +707,89 @@ void parse_sequences(const std::vector<std::string> &files,
     }
 }
 
+std::string form_client_reply(const std::string &received_message,
+                              const AnnotatedDBG &anno_graph,
+                              const Config &config) {
+    try {
+        Json::Value json;
+
+        {
+            Json::CharReaderBuilder rbuilder;
+            std::unique_ptr<Json::CharReader> reader { rbuilder.newCharReader() };
+            std::string errors;
+
+            if (!reader->parse(received_message.data(),
+                               received_message.data() + received_message.size(),
+                               &json,
+                               &errors)) {
+                std::cerr << "Error: bad json file:\n" << errors << std::endl;
+                //TODO: send error message back in a json file
+                throw;
+            }
+        }
+
+        const auto &fasta = json["FASTA"];
+        const auto &seq = json["SEQ"];
+
+        // discovery_fraction a proxy of 1 - %similarity
+        auto discovery_fraction = json.get("discovery_fraction",
+                                           config.discovery_fraction).asDouble();
+        auto count_labels = json.get("count_labels", config.count_labels).asBool();
+        auto num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
+
+        std::ostringstream oss;
+
+        // query callback shared by FASTA and sequence modes
+        auto execute_server_query = [&](const std::string &name,
+                                        const std::string &sequence) {
+            execute_query(name,
+                          sequence,
+                          count_labels,
+                          config.suppress_unlabeled,
+                          num_top_labels,
+                          discovery_fraction,
+                          config.anno_labels_delimiter,
+                          anno_graph,
+                          oss);
+        };
+
+        if (!seq.isNull()) {
+            // input is plain sequence
+            execute_server_query(seq.asString(), seq.asString());
+        } else if (!fasta.isNull()) {
+            // input is a FASTA sequence
+            read_fasta_from_string(
+                fasta.asString(),
+                [&](kseq_t *read_stream) {
+                    execute_server_query(
+                        std::string(read_stream->name.s),
+                        std::string(read_stream->seq.s)
+                    );
+                }
+            );
+        } else {
+            std::cerr << "Error: no input sequences received from client" << std::endl;
+            // TODO: no input sequences -> form an error message for the client
+            throw std::domain_error("No input sequences");
+        }
+
+        return oss.str();
+
+    } catch (const Json::LogicError &e) {
+        std::cerr << "Error: bad json file: " << e.what() << std::endl;
+        //TODO: send errors in a json file
+        throw;
+    } catch (const std::exception &e) {
+        std::cerr << "Error: processing request error: " << e.what() << std::endl;
+        //TODO: send errors in a json file
+        throw;
+    } catch (...) {
+        std::cerr << "Error: processing request error" << std::endl;
+        //TODO: send errors in a json file
+        throw;
+    }
+}
+
 
 int main(int argc, const char *argv[]) {
     std::unique_ptr<Config> config { new Config(argc, argv) };
@@ -708,9 +825,6 @@ int main(int argc, const char *argv[]) {
                 graph.reset(new DBGSD(config->k, config->canonical));
 
             } else if (config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic) {
-                if (config->canonical)
-                    config->reverse = true;
-
                 std::unique_ptr<DBG_succ> boss_graph { new DBG_succ(config->k - 1) };
 
                 if (config->verbose) {
@@ -752,6 +866,7 @@ int main(int argc, const char *argv[]) {
                     std::unique_ptr<IDBGBOSSChunkConstructor> constructor(
                         IDBGBOSSChunkConstructor::initialize(
                             boss_graph->get_k(),
+                            config->canonical,
                             suffix,
                             config->parallel,
                             static_cast<uint64_t>(config->memory_available) << 30,
@@ -866,9 +981,6 @@ int main(int argc, const char *argv[]) {
                 graph.reset(sd_graph.release());
 
             } else {
-                if (config->canonical)
-                    config->reverse = false;
-
                 //slower method
 
                 switch (config->graph_type) {
@@ -877,6 +989,15 @@ int main(int argc, const char *argv[]) {
                         break;
                     case Config::GraphType::HASH:
                         graph.reset(new DBGHashOrdered(config->k, config->canonical));
+                        break;
+                    case Config::GraphType::HASH_STR:
+                        if (config->canonical) {
+                            std::cerr << "Warning: string hash-based de Bruijn graph"
+                                      << " does not support canonical mode."
+                                      << " Normal mode will be used instead." << std::endl;
+                        }
+                        // TODO: implement canonical mode
+                        graph.reset(new DBGHashString(config->k));
                         break;
                     case Config::GraphType::BITMAP:
                         std::cerr << "Error: Bitmap-graph construction"
@@ -1268,7 +1389,8 @@ int main(int argc, const char *argv[]) {
             AnnotatedDBG anno_graph(
                 graph_temp.release(),
                 annotation_temp.release(),
-                config->parallel
+                config->parallel,
+                config->fast
             );
 
             if (!anno_graph.check_compatibility()) {
@@ -1298,8 +1420,15 @@ int main(int argc, const char *argv[]) {
                         0, kNumCachedColumns, config->verbose
                     )
                 );
+            } else if (config->anno_type == Config::RowCompressed) {
+                annotation.reset(
+                    new annotate::RowCompressed<>(0)
+                );
             } else {
-                throw std::runtime_error("To be implemented");
+                std::cerr << "ERROR: Merging of annotations '"
+                          << config->annotype_to_string(config->anno_type)
+                          << "' is not implemented." << std::endl;
+                exit(1);
             }
 
             if (!annotation->merge_load(files)) {
@@ -1395,18 +1524,12 @@ int main(int argc, const char *argv[]) {
                 signals.async_wait([&](auto, auto) { io_context.stop(); });
 
                 Server server(io_context, config->port,
-                    [&](const std::string &input_sequence) {
-                        std::ostringstream oss;
-                        execute_query(input_sequence,
-                                      input_sequence,
-                                      config->count_labels,
-                                      config->suppress_unlabeled,
-                                      config->num_top_labels,
-                                      config->discovery_fraction,
-                                      config->anno_labels_delimiter,
-                                      *anno_graph,
-                                      oss);
-                        return oss.str();
+                    [&](const std::string &received_message) {
+                        return form_client_reply(
+                            received_message,
+                            *anno_graph,
+                            *config
+                        );
                     }
                 );
 
@@ -1627,6 +1750,39 @@ int main(int argc, const char *argv[]) {
 
             for (const auto &file : config->infbase_annotators) {
                 auto annotation = initialize_annotation(file, *config);
+
+                if (config->print_column_names) {
+                    annotate::LabelEncoder<std::string> label_encoder;
+
+                    std::cout << "INFO: Scanning annotation " << file << std::endl;
+
+                    try {
+                        std::ifstream instream(file, std::ios::binary);
+
+                        // TODO: make this more reliable
+                        if (dynamic_cast<const annotate::ColumnCompressed<> *>(annotation.get())) {
+                            // Column compressed dumps the number of rows first
+                            // skipping it...
+                            load_number(instream);
+                        }
+
+                        if (!label_encoder.load(instream))
+                            throw std::ios_base::failure("");
+
+                    } catch (...) {
+                        std::cerr << "Error: Can't read label encoder from file "
+                                  << file << std::endl;
+                        exit(1);
+                    }
+
+                    std::cout << "INFO: Number of columns: " << label_encoder.size() << std::endl;
+                    for (size_t c = 0; c < label_encoder.size(); ++c) {
+                        std::cout << label_encoder.decode(c) << std::endl;
+                    }
+
+                    continue;
+                }
+
                 if (!annotation->load(file)) {
                     std::cerr << "ERROR: can't load annotation from file "
                               << file << std::endl;
@@ -1644,15 +1800,14 @@ int main(int argc, const char *argv[]) {
 
             Timer timer;
 
-            auto annotator = std::make_unique<annotate::ColumnCompressed<>>(
-                0, kNumCachedColumns, config->verbose
-            );
+            auto annotation = initialize_annotation(files.at(0), *config);
 
             if (config->verbose)
                 std::cout << "Loading annotator...\t" << std::flush;
 
-            if (!annotator->load(files.at(0))) {
-                std::cerr << "ERROR: can't load annotations" << std::endl;
+            if (!annotation->load(files.at(0))) {
+                std::cerr << "ERROR: can't load annotation from file "
+                          << files.at(0) << std::endl;
                 exit(1);
             }
             if (config->verbose)
@@ -1662,7 +1817,7 @@ int main(int argc, const char *argv[]) {
                 if (config->verbose)
                     std::cout << "Renaming...\t" << std::flush;
 
-                std::map<std::string, std::string> dict;
+                std::unordered_map<std::string, std::string> dict;
                 std::ifstream instream(config->rename_instructions_file);
                 if (!instream.is_open()) {
                     std::cerr << "ERROR: Can't open file "
@@ -1681,129 +1836,117 @@ int main(int argc, const char *argv[]) {
                     }
                     dict[old_name] = new_name;
                 }
-                annotator->rename_columns(dict);
 
-                annotator->serialize(config->outfbase);
+                annotation->rename_labels(dict);
+
+                annotation->serialize(config->outfbase);
                 if (config->verbose)
                     std::cout << timer.elapsed() << "sec" << std::endl;
+
+                return 0;
             }
 
-            switch (config->anno_type) {
-                case Config::ColumnCompressed:
-                    break;
-                case Config::RowCompressed: {
-                    if (config->verbose)
-                        std::cout << "Converting...\t" << std::flush;
+            if (dynamic_cast<const annotate::ColumnCompressed<> *>(annotation.get())) {
+                std::unique_ptr<annotate::ColumnCompressed<>> annotator {
+                    dynamic_cast<annotate::ColumnCompressed<> *>(annotation.release())
+                };
+                assert(annotator.get());
 
-                    annotate::RowCompressed<> row_annotator(0);
-                    annotator->convert_to_row_annotator(&row_annotator,
-                                                        config->parallel);
-                    annotator.reset();
+                switch (config->anno_type) {
+                    case Config::ColumnCompressed:
+                        break;
+                    case Config::RowCompressed: {
+                        if (config->verbose)
+                            std::cout << "Converting...\t" << std::flush;
 
-                    row_annotator.serialize(config->outfbase);
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-                    break;
+                        annotate::RowCompressed<> row_annotator(0);
+                        annotator->convert_to_row_annotator(&row_annotator,
+                                                            config->parallel);
+                        annotator.reset();
+
+                        row_annotator.serialize(config->outfbase);
+                        if (config->verbose)
+                            std::cout << timer.elapsed() << "sec" << std::endl;
+                        break;
+                    }
+                    case Config::BRWT: {
+                        if (config->verbose)
+                            std::cout << "Converting...\t" << std::flush;
+
+                        auto brwt_annotator = config->greedy_brwt
+                            ? annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
+                                std::move(*annotator),
+                                config->parallel)
+                            : annotate::convert_to_simple_BRWT<annotate::BRWTCompressed<>>(
+                                std::move(*annotator),
+                                config->arity_brwt,
+                                config->parallel);
+
+                        annotator.reset();
+
+                        brwt_annotator->serialize(config->outfbase);
+                        if (config->verbose)
+                            std::cout << timer.elapsed() << "sec" << std::endl;
+                        break;
+                    }
+                    case Config::BinRelWT_sdsl: {
+                        convert<annotate::BinRelWT_sdslAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
+                    case Config::BinRelWT: {
+                        convert<annotate::BinRelWTAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
+                    case Config::RowFlat: {
+                        convert<annotate::RowFlatAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
+                    case Config::RBFish: {
+                        convert<annotate::RainbowfishAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
                 }
-                case Config::BRWT: {
-                    if (config->verbose)
-                        std::cout << "Converting...\t" << std::flush;
 
-                    auto brwt_annotator = config->greedy_brwt
-                        ? annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
-                            std::move(*annotator),
-                            config->parallel)
-                        : annotate::convert_to_simple_BRWT<annotate::BRWTCompressed<>>(
-                            std::move(*annotator),
-                            config->arity_brwt,
-                            config->parallel);
+            } else if (dynamic_cast<const annotate::RowCompressed<> *>(annotation.get())) {
+                std::unique_ptr<annotate::RowCompressed<>> annotator {
+                    dynamic_cast<annotate::RowCompressed<> *>(annotation.release())
+                };
+                assert(annotator.get());
 
-                    annotator.reset();
-
-                    brwt_annotator->serialize(config->outfbase);
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-                    break;
+                switch (config->anno_type) {
+                    case Config::RowCompressed: {
+                        break;
+                    }
+                    case Config::BinRelWT_sdsl: {
+                        convert<annotate::BinRelWT_sdslAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
+                    case Config::BinRelWT: {
+                        convert<annotate::BinRelWTAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
+                    case Config::RowFlat: {
+                        convert<annotate::RowFlatAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
+                    case Config::RBFish: {
+                        convert<annotate::RainbowfishAnnotator>(std::move(annotator), *config, timer);
+                        break;
+                    }
+                    default:
+                        std::cerr << "Error: Conversion to other representation"
+                                  << " is implemented only for ColumnCompressed annotation."
+                                  << std::endl;
+                        exit(1);
                 }
-                case Config::BinRelWT_sdsl: {
-                    if (config->verbose)
-                        std::cout << "Converting...\t" << std::flush;
 
-                    auto binrelwt_sdsl_annotator
-                            = annotate::convert<annotate::BinRelWT_sdslAnnotator>(
-                        std::move(*annotator)
-                    );
-                    annotator.reset();
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-
-                    if (config->verbose)
-                        std::cout << "Serializing to " << config->outfbase
-                                  << "...\t" << std::flush;
-                    binrelwt_sdsl_annotator->serialize(config->outfbase);
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-                    break;
-                }
-                case Config::BinRelWT: {
-                    if (config->verbose)
-                        std::cout << "Converting...\t" << std::flush;
-
-                    auto binrelwt_annotator = annotate::convert<annotate::BinRelWTAnnotator>(
-                        std::move(*annotator)
-                    );
-                    annotator.reset();
-                    if (config->verbose)
-                       std::cout << timer.elapsed() << "sec" << std::endl;
-
-                    if (config->verbose)
-                        std::cout << "Serializing to " << config->outfbase
-                                  << "...\t" << std::flush;
-                    binrelwt_annotator->serialize(config->outfbase);
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-                    break;
-                }
-                case Config::RowFlat: {
-                    if (config->verbose)
-                        std::cout << "Converting to flat annotator...\t" << std::flush;
-
-                    auto flat_annotator = annotate::convert<annotate::RowFlatAnnotator>(
-                        std::move(*annotator)
-                    );
-                    annotator.reset();
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-
-                    if (config->verbose)
-                        std::cout << "Serializing to " << config->outfbase
-                                  << "...\t" << std::flush;
-                    flat_annotator->serialize(config->outfbase);
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-                    break;
-                }
-                case Config::RBFish: {
-                    if (config->verbose)
-                        std::cout << "Converting to rainbowfish annotator...\t" << std::flush;
-
-                    auto flat_annotator = annotate::convert<annotate::RainbowfishAnnotator>(
-                        std::move(*annotator)
-                    );
-                    annotator.reset();
-
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-
-                    if (config->verbose)
-                        std::cout << "Serializing to " << config->outfbase
-                                  << "...\t" << std::flush;
-                    flat_annotator->serialize(config->outfbase);
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-                    break;
-                }
+            } else {
+                std::cerr << "Error: Conversion to other representation"
+                          << " is implemented only for ColumnCompressed annotation."
+                          << std::endl;
+                exit(1);
             }
+
             return 0;
         }
         case Config::TRANSFORM: {

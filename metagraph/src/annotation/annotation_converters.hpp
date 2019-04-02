@@ -7,6 +7,14 @@
 namespace annotate {
 
 template <typename Label>
+class RowCompressed;
+
+template <class StaticAnnotation, typename Label>
+typename std::unique_ptr<StaticAnnotation>
+convert(RowCompressed<Label>&& annotation);
+
+
+template <typename Label>
 class ColumnCompressed;
 
 template <class StaticAnnotation, typename Label>

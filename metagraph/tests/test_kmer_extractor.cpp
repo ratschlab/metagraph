@@ -63,6 +63,7 @@ TEST(KmerExtractor, encode_decode_string) {
         Vector<KmerExtractor::Kmer256> kmers;
 
         encoder.sequence_to_kmers(sequence, k, {}, &kmers);
+        EXPECT_EQ(kmers, encoder.sequence_to_kmers<KmerExtractor::Kmer256>(sequence, k));
         ASSERT_LT(2u, kmers.size());
         kmers.erase(kmers.begin());
         kmers.erase(kmers.end() - 1);
@@ -73,6 +74,75 @@ TEST(KmerExtractor, encode_decode_string) {
         }
 
         EXPECT_EQ(sequence, reconstructed);
+    }
+}
+
+TEST(KmerExtractor, encode_decode_string_suffix) {
+    KmerExtractor encoder;
+    std::string sequence = "AAGGCAGCCTACCCCTCTGN";
+    std::vector<bool> bits(sequence.size(), false);
+    for (uint64_t k = 2; k <= sequence.length(); ++k) {
+        auto sequence_dummy = std::string(k - 1, '$') + sequence + "$";
+        for (size_t len = 1; len < std::min(k, uint64_t(5)); ++len) {
+            bits.assign(sequence.length() + 1, false);
+            for (const auto &suffix : utils::generate_strings("ATGCN$", len)) {
+                auto it = k - len;
+                std::vector<uint8_t> suffix_encoded;
+                std::transform(suffix.begin(), suffix.end(), std::back_inserter(suffix_encoded),
+                    [&](char c) { return c == '$' ? 0 : encoder.encode(c); });
+                Vector<KmerExtractor::Kmer256> kmers;
+                encoder.sequence_to_kmers(sequence, k, suffix_encoded, &kmers);
+                EXPECT_EQ(
+                    kmers,
+                    encoder.sequence_to_kmers<KmerExtractor::Kmer256>(
+                        sequence, k, false, suffix_encoded
+                    )
+                );
+                for (const auto &kmer : kmers) {
+                    auto jt = sequence_dummy.find(suffix, it);
+                    ASSERT_NE(std::string::npos, jt);
+                    ++jt;
+                    ASSERT_GE(jt + len, k + 1);
+                    ASSERT_GE(sequence_dummy.length(), jt + len - 1);
+                    EXPECT_EQ(
+                        std::string(
+                            sequence_dummy.begin() + jt + len - k - 1,
+                            sequence_dummy.begin() + jt + len - 1
+                        ),
+                        encoder.kmer_to_sequence(kmer, k)
+                    );
+                    ASSERT_GT(bits.size(), jt + len - k - 1);
+                    ASSERT_FALSE(bits[jt + len - k - 1]);
+                    bits[jt + len - k - 1] = 1;
+                    it = jt;
+                }
+            }
+            EXPECT_EQ(bits.size(), std::accumulate(bits.begin(), bits.end(), 0u))
+                << k << " " << len;
+        }
+    }
+}
+
+TEST(KmerExtractor, encode_decode_string_canonical_suffix) {
+    KmerExtractor encoder;
+    std::string sequence = "AAGGCAGCCTACCCCTCTGN";
+    std::vector<bool> bits;
+    for (uint64_t k = 2; k <= sequence.length(); ++k) {
+        for (size_t len = 1; len < std::min(k, uint64_t(5)); ++len) {
+            for (const auto &suffix : utils::generate_strings("ATGCN$", len)) {
+                Vector<KmerExtractor::Kmer256> kmers;
+                std::vector<uint8_t> encoded;
+                std::transform(suffix.begin(), suffix.end(), std::back_inserter(encoded),
+                    [&](auto c) { return c == '$' ? 0 : encoder.encode(c); });
+                encoder.sequence_to_kmers(sequence, k, encoded, &kmers, true);
+                EXPECT_EQ(
+                    kmers,
+                    encoder.sequence_to_kmers<KmerExtractor::Kmer256>(
+                        sequence, k, true, encoded
+                    )
+                );
+            }
+        }
     }
 }
 
@@ -92,7 +162,7 @@ TEST(KmerExtractor2Bit, encode_decode) {
 }
 
 KmerExtractor2Bit::Kmer64 to_kmer(const KmerExtractor2Bit &encoder,
-                              const std::string &kmer) {
+                                  const std::string &kmer) {
     Vector<KmerExtractor2Bit::Kmer64> kmers;
     encoder.sequence_to_kmers(kmer, kmer.size(), {}, &kmers);
     return kmers.at(0);
@@ -147,6 +217,7 @@ TEST(KmerExtractor2Bit, encode_decode_string) {
         Vector<KmerExtractor2Bit::Kmer256> kmers;
 
         encoder.sequence_to_kmers(sequence, k, {}, &kmers);
+        EXPECT_EQ(kmers, encoder.sequence_to_kmers<KmerExtractor2Bit::Kmer256>(sequence, k));
         ASSERT_LT(0u, kmers.size());
 
         std::string reconstructed = encoder.kmer_to_sequence(kmers[0], k);
@@ -158,5 +229,65 @@ TEST(KmerExtractor2Bit, encode_decode_string) {
         // #else
         //     EXPECT_EQ(std::string("AAGGCAGCCTACNCCCTCTG"), reconstructed);
         // #endif
+    }
+}
+
+TEST(KmerExtractor2Bit, encode_decode_string_suffix) {
+    KmerExtractor2Bit encoder;
+    std::string sequence = "AAGGCAGCCTACCCCTCTG";
+    std::vector<bool> bits;
+    for (uint64_t k = 2; k <= sequence.length(); ++k) {
+        for (size_t len = 1; len < std::min(k, uint64_t(5)); ++len) {
+            bits.assign(sequence.size() + 1 - k, false);
+            for (const auto &suffix : utils::generate_strings("ATGC", len)) {
+                uint64_t it = k - len;
+                Vector<KmerExtractor2Bit::Kmer256> kmers;
+                encoder.sequence_to_kmers(sequence, k, encoder.encode(suffix), &kmers);
+                for (const auto &kmer : kmers) {
+                    auto jt = sequence.find(suffix, it);
+                    ASSERT_NE(std::string::npos, jt);
+                    ++jt;
+                    EXPECT_EQ(
+                        std::string(
+                            sequence.begin() + jt + len - k - 1,
+                            sequence.begin() + jt + len - 1
+                        ),
+                        encoder.kmer_to_sequence(kmer, k)
+                    );
+                    ASSERT_GT(bits.size(), jt + len - k - 1);
+                    ASSERT_FALSE(bits[jt + len - k - 1]);
+                    bits[jt + len - k - 1] = 1;
+                    it = jt;
+                }
+
+                EXPECT_EQ(
+                    kmers,
+                    encoder.sequence_to_kmers<KmerExtractor2Bit::Kmer256>(
+                        sequence, k, false, encoder.encode(suffix)
+                    )
+                );
+            }
+            EXPECT_EQ(bits.size(), std::accumulate(bits.begin(), bits.end(), 0u));
+        }
+    }
+}
+
+TEST(KmerExtractor2Bit, encode_decode_string_canonical_suffix) {
+    KmerExtractor2Bit encoder;
+    std::string sequence = "AAGGCAGCCTACCCCTCTG";
+    std::vector<bool> bits;
+    for (uint64_t k = 2; k <= sequence.length(); ++k) {
+        for (size_t len = 1; len < std::min(k, uint64_t(5)); ++len) {
+            for (const auto &suffix : utils::generate_strings("ATGC", len)) {
+                Vector<KmerExtractor2Bit::Kmer256> kmers;
+                encoder.sequence_to_kmers(sequence, k, encoder.encode(suffix), &kmers, true);
+                EXPECT_EQ(
+                    kmers,
+                    encoder.sequence_to_kmers<KmerExtractor2Bit::Kmer256>(
+                        sequence, k, true, encoder.encode(suffix)
+                    )
+                );
+            }
+        }
     }
 }

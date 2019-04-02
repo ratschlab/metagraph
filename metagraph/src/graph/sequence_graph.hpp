@@ -28,10 +28,31 @@ class SequenceGraph {
                               const std::function<void(node_index)> &callback,
                               const std::function<bool()> &terminate = [](){ return false; }) const = 0;
 
+    // Traverse graph mapping sequence to the graph nodes
+    // and run callback for each node until the termination condition is satisfied.
+    // Guarantees that nodes are called in the same order as the input sequence
+    virtual void map_to_nodes_sequentially(std::string::const_iterator begin,
+                                           std::string::const_iterator end,
+                                           const std::function<void(node_index)> &callback,
+                                           const std::function<bool()> &terminate = [](){ return false; }) const = 0;
+
+    // Given a node index and a pointer to a vector of node indices, iterates
+    // over all the outgoing edges and pushes back indices of their target nodes.
+    virtual void adjacent_outgoing_nodes(node_index node,
+                                         std::vector<node_index> *target_nodes) const = 0;
+    // Given a node index and a pointer to a vector of node indices, iterates
+    // over all the incoming edges and pushes back indices of their source nodes.
+    virtual void adjacent_incoming_nodes(node_index node,
+                                         std::vector<node_index> *source_nodes) const = 0;
+
     virtual uint64_t num_nodes() const = 0;
 
     virtual bool load(const std::string &filename_base) = 0;
     virtual void serialize(const std::string &filename_base) const = 0;
+
+    // Get string corresponding to |node_index|.
+    // Note: Not efficient if sequences in nodes overlap. Use sparingly.
+    virtual std::string get_node_sequence(node_index node_index) const = 0;
 };
 
 
@@ -48,33 +69,34 @@ class DeBruijnGraph : public SequenceGraph {
     // Traverse the incoming edge
     virtual node_index traverse_back(node_index node, char prev_char) const = 0;
 
+    // Traverse graph mapping sequence to the graph nodes
+    // and run callback for each node until the termination condition is satisfied.
+    // Guarantees that nodes are called in the same order as the input sequence.
+    // In canonical mode, non-canonical k-mers are not mapped to canonical ones
+    virtual void map_to_nodes_sequentially(std::string::const_iterator begin,
+                                           std::string::const_iterator end,
+                                           const std::function<void(node_index)> &callback,
+                                           const std::function<bool()> &terminate
+                                                        = [](){ return false; }) const = 0;
+
+    virtual size_t outdegree(node_index) const = 0;
+    virtual size_t indegree(node_index) const = 0;
+
+    virtual node_index kmer_to_node(const char *begin) const;
+    virtual node_index kmer_to_node(const std::string &kmer) const;
+
+    using OutgoingEdgeCallback = std::function<void(node_index /* target_kmer */,
+                                                    char /* last_target_char */)>;
+    virtual void call_outgoing_kmers(node_index kmer,
+                                     const OutgoingEdgeCallback &callback) const = 0;
+
+    using IncomingEdgeCallback = std::function<void(node_index /* source_kmer */,
+                                                    char /* first_source_char */)>;
+    virtual void call_incoming_kmers(node_index kmer,
+                                     const IncomingEdgeCallback &callback) const = 0;
+
     // Check whether graph contains fraction of nodes from the sequence
-    virtual bool find(const std::string &sequence,
-                      double discovery_fraction = 1) const {
-        if (sequence.length() < get_k())
-            return false;
-
-        const size_t num_kmers = sequence.length() - get_k() + 1;
-        const size_t max_kmers_missing = num_kmers * (1 - discovery_fraction);
-        const size_t min_kmers_discovered = num_kmers - max_kmers_missing;
-        size_t num_kmers_discovered = 0;
-        size_t num_kmers_missing = 0;
-
-        map_to_nodes(sequence,
-            [&](node_index node) {
-                if (node) {
-                    num_kmers_discovered++;
-                } else {
-                    num_kmers_missing++;
-                }
-            },
-            [&]() { return num_kmers_missing > max_kmers_missing
-                            || num_kmers_discovered >= min_kmers_discovered; }
-        );
-
-        return num_kmers_missing <= max_kmers_missing;
-    }
+    virtual bool find(const std::string &sequence, double discovery_fraction = 1) const;
 };
-
 
 #endif // __SEQUENCE_GRAPH_HPP__

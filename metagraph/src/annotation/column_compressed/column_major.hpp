@@ -1,8 +1,6 @@
 #ifndef __COLUMN_MAJOR_HPP__
 #define __COLUMN_MAJOR_HPP__
 
-#include <map>
-
 #include "binary_matrix.hpp"
 #include "bit_vector.hpp"
 

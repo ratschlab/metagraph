@@ -5,6 +5,10 @@
 
 #include "serialization.hpp"
 
+const double SD_SMALLER_THAN_RRR_MAX_DENSITY = 0.035;
+const double SD_SMALLER_THAN_STAT_MAX_DENSITY = 0.20;
+const double STAT_SMALLER_THAN_SD_MAX_DENSITY = 0.74;
+
 
 uint64_t bit_vector::rank0(uint64_t id) const {
     return std::min(id + 1, size()) - rank1(id);
@@ -16,11 +20,23 @@ std::vector<bool> bit_vector::to_vector() const {
     return result;
 }
 
-void bit_vector::add_to(std::vector<bool> *other) const {
+template <class Vector>
+void bit_vector::add_to(Vector *other) const {
     assert(other);
     assert(other->size() == size());
     call_ones([other](auto i) { (*other)[i] = true; });
 }
+
+template void bit_vector::add_to(sdsl::bit_vector*) const;
+template void bit_vector::add_to(std::vector<bool>*) const;
+
+template <>
+void bit_vector::add_to(bitmap *other) const {
+    assert(other);
+    assert(other->size() == size());
+    call_ones([other](auto i) { other->set(i, true); });
+}
+
 
 std::ostream& operator<<(std::ostream &os, const bit_vector &bv) {
     for (bool a : bv.to_vector()) {
@@ -32,10 +48,26 @@ std::ostream& operator<<(std::ostream &os, const bit_vector &bv) {
 template <class Vector>
 Vector bit_vector::convert_to() {
     if (dynamic_cast<Vector*>(this)) {
-        return Vector(dynamic_cast<Vector&&>(*this));
+        // to the same type, no conversion
+        return dynamic_cast<Vector&&>(*this);
+
     } else if (dynamic_cast<bit_vector_stat*>(this)) {
+        // stat -> anything else
         return Vector(std::move(dynamic_cast<bit_vector_stat*>(this)->vector_));
+
+    } else if (dynamic_cast<bit_vector_adaptive*>(this)
+                && dynamic_cast<Vector*>(dynamic_cast<bit_vector_adaptive*>(this)->vector_.get())) {
+        // adaptive(x) -> x
+        return dynamic_cast<Vector&&>(*dynamic_cast<bit_vector_adaptive*>(this)->vector_);
+
+    // TODO: sd -> small if sparse enough
+    // TODO: rrr -> small if dense enough
+
+    // TODO: sd -> smart if sparse enough
+    // TODO: stat -> smart if dense enough
+
     } else {
+        // anything -> anything (slower: with full reconstruction)
         sdsl::bit_vector bv(size(), 0);
         call_ones([&bv](auto i) { bv[i] = true; });
         return Vector(std::move(bv));
@@ -52,15 +84,33 @@ template bit_vector_rrr<63> bit_vector::convert_to<bit_vector_rrr<63>>();
 template bit_vector_rrr<127> bit_vector::convert_to<bit_vector_rrr<127>>();
 template bit_vector_rrr<255> bit_vector::convert_to<bit_vector_rrr<255>>();
 template bit_vector_small bit_vector::convert_to<bit_vector_small>();
+template bit_vector_smart bit_vector::convert_to<bit_vector_smart>();
 template sdsl::bit_vector bit_vector::convert_to<sdsl::bit_vector>();
 
 template <class Vector>
 Vector bit_vector::copy_to() const {
     if (dynamic_cast<const Vector*>(this)) {
+        // copy to the same type, no conversion
         return Vector(dynamic_cast<const Vector&>(*this));
+
     } else if (dynamic_cast<const bit_vector_stat*>(this)) {
+        // copy stat -> anything else
         auto bv = dynamic_cast<const bit_vector_stat*>(this)->vector_;
         return Vector(std::move(bv));
+
+    } else if (dynamic_cast<const bit_vector_adaptive*>(this)
+                && dynamic_cast<Vector*>(dynamic_cast<const bit_vector_adaptive*>(this)->vector_.get())) {
+        // copy adaptive(x) -> x
+        return Vector(dynamic_cast<const Vector&>(
+                *dynamic_cast<const bit_vector_adaptive*>(this)->vector_
+        ));
+
+    // TODO: copy sd -> small if sparse enough
+    // TODO: copy rrr -> small if dense enough
+
+    // TODO: copy sd -> smart if sparse enough
+    // TODO: copy stat -> smart if dense enough
+
     } else {
         sdsl::bit_vector bv(size(), 0);
         call_ones([&bv](auto i) { bv[i] = true; });
@@ -78,7 +128,9 @@ template bit_vector_rrr<63> bit_vector::copy_to<bit_vector_rrr<63>>() const;
 template bit_vector_rrr<127> bit_vector::copy_to<bit_vector_rrr<127>>() const;
 template bit_vector_rrr<255> bit_vector::copy_to<bit_vector_rrr<255>>() const;
 template bit_vector_small bit_vector::copy_to<bit_vector_small>() const;
+template bit_vector_smart bit_vector::copy_to<bit_vector_smart>() const;
 template sdsl::bit_vector bit_vector::copy_to<sdsl::bit_vector>() const;
+
 
 /////////////////////////////
 // bit_vector_dyn, libmaus //
@@ -109,6 +161,10 @@ template bit_vector_dyn::bit_vector_dyn(const sdsl::bit_vector &);
 
 bit_vector_dyn::bit_vector_dyn(std::initializer_list<bool> init)
       : bit_vector_dyn(pack_bits(std::vector<bool>(init)), init.size()) {}
+
+std::unique_ptr<bit_vector> bit_vector_dyn::copy() const {
+    return std::make_unique<bit_vector_dyn>(*this);
+}
 
 uint64_t bit_vector_dyn::rank1(uint64_t id) const {
     return vector_.rank1(id);
@@ -179,6 +235,7 @@ void bit_vector_dyn::call_ones(const std::function<void(uint64_t)> &callback) co
     }
 }
 
+
 ///////////////////////////////////////////////
 // bit_vector_stat, sdsl rank-select support //
 ///////////////////////////////////////////////
@@ -203,25 +260,16 @@ bit_vector_stat::bit_vector_stat(const bit_vector_stat &other) {
     *this = other;
 }
 
-uint64_t count_num_set_bits(const sdsl::bit_vector &vector) {
-    uint64_t count = 0;
-    uint64_t i = 0;
-    for (; i + 64 <= vector.size(); i += 64) {
-        count += sdsl::bits::cnt(vector.get_int(i));
-    }
-    for (; i < vector.size(); ++i) {
-        if (vector[i])
-            count++;
-    }
-    return count;
-}
-
-bit_vector_stat::
-bit_vector_stat(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
-                uint64_t size,
-                uint64_t)
-      : vector_(size, false) {
-    call_ones([&](uint64_t pos) { vector_[pos] = true; });
+bit_vector_stat
+::bit_vector_stat(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
+                  uint64_t size)
+      : vector_(size, false),
+        num_set_bits_(0) {
+    call_ones([&](uint64_t pos) {
+        assert(pos < size);
+        vector_[pos] = true;
+        num_set_bits_++;
+    });
 }
 
 bit_vector_stat::bit_vector_stat(sdsl::bit_vector&& vector) noexcept
@@ -261,6 +309,10 @@ bit_vector_stat& bit_vector_stat::operator=(bit_vector_stat&& other) noexcept {
     return *this;
 }
 
+std::unique_ptr<bit_vector> bit_vector_stat::copy() const {
+    return std::make_unique<bit_vector_stat>(*this);
+}
+
 uint64_t bit_vector_stat::rank1(uint64_t id) const {
     if (requires_update_)
         const_cast<bit_vector_stat*>(this)->init_rs();
@@ -269,11 +321,12 @@ uint64_t bit_vector_stat::rank1(uint64_t id) const {
 }
 
 uint64_t bit_vector_stat::select1(uint64_t id) const {
-    assert(id > 0 && size() > 0 && id <= num_set_bits_);
-    assert(num_set_bits_ == rank1(size() - 1));
+    assert(id > 0 && size() > 0);
 
     if (requires_update_)
         const_cast<bit_vector_stat*>(this)->init_rs();
+
+    assert(id <= num_set_bits_);
     return slct_(id);
 }
 
@@ -367,58 +420,6 @@ bool bit_vector_stat::load(std::istream &in) {
     }
 }
 
-void call_ones(const sdsl::bit_vector &vector,
-               const std::function<void(uint64_t)> &callback) {
-    uint64_t j = 64;
-    uint64_t i = 0;
-    uint64_t word;
-    for (; j <= vector.size(); j += 64) {
-        word = vector.get_int(i);
-        if (!word) {
-            i += 64;
-            continue;
-        }
-
-        i += sdsl::bits::lo(word);
-        callback(i++);
-
-        for (; i < j; ++i) {
-            if (vector[i])
-                callback(i);
-        }
-    }
-    for (; i < vector.size(); ++i) {
-        if (vector[i])
-            callback(i);
-    }
-}
-
-void call_zeros(const sdsl::bit_vector &vector,
-                const std::function<void(uint64_t)> &callback) {
-    uint64_t j = 64;
-    uint64_t i = 0;
-    uint64_t word;
-    for (; j <= vector.size(); j += 64) {
-        word = ~vector.get_int(i);
-        if (!word) {
-            i += 64;
-            continue;
-        }
-
-        i += sdsl::bits::lo(word);
-        callback(i++);
-
-        for (; i < j; ++i) {
-            if (!vector[i])
-                callback(i);
-        }
-    }
-    for (; i < vector.size(); ++i) {
-        if (!vector[i])
-            callback(i);
-    }
-}
-
 void bit_vector_stat::call_ones(const std::function<void(uint64_t)> &callback) const {
     if (num_set_bits_ * 2 < size()) {
         ::call_ones(vector_, callback);
@@ -440,174 +441,7 @@ void bit_vector_stat::init_rs() {
     slct_ = sdsl::select_support_mcl<>(&vector_);
 
     requires_update_ = false;
-}
-
-////////////////////////////////////////////////////////////////
-// bit_vector_small, sdsl hybrid method                       //
-////////////////////////////////////////////////////////////////
-
-const double SD_RRR_VECTOR_DENSITY_CUTOFF = 0.035;
-
-enum VectorCode {
-    RRR_VECTOR = 0,
-    SD_VECTOR,
-    STAT_VECTOR
-};
-
-VectorCode smallest_vector_representation(uint64_t size, uint64_t num_set_bits) {
-    // TODO: entropy estimate
-    if (num_set_bits < SD_RRR_VECTOR_DENSITY_CUTOFF * size
-            || num_set_bits > (1 - SD_RRR_VECTOR_DENSITY_CUTOFF) * size) {
-        return VectorCode::SD_VECTOR;
-    } else {
-        return VectorCode::RRR_VECTOR;
-    }
-}
-
-VectorCode representation(const bit_vector &vector) {
-    if (dynamic_cast<const bit_vector_sd*>(&vector)) {
-        return VectorCode::SD_VECTOR;
-
-    } else if (dynamic_cast<const bit_vector_rrr<>*>(&vector)) {
-        return VectorCode::RRR_VECTOR;
-
-    } else if (dynamic_cast<const bit_vector_stat*>(&vector)) {
-        return VectorCode::STAT_VECTOR;
-
-    } else {
-        throw std::runtime_error("Unsupported type");
-    }
-}
-
-bit_vector_small::bit_vector_small(uint64_t size, bool value)
-      : vector_(new bit_vector_sd(size, value)) {}
-
-template <class BitVector>
-bit_vector_small::bit_vector_small(const BitVector &vector)
-      : bit_vector_small(bit_vector_stat(vector).convert_to<sdsl::bit_vector>()) {}
-
-template bit_vector_small::bit_vector_small(const std::vector<bool> &);
-
-bit_vector_small::bit_vector_small(const sdsl::bit_vector &vector) {
-    uint64_t num_set_bits = sdsl::util::cnt_one_bits(vector);
-
-    switch (smallest_vector_representation(vector.size(), num_set_bits)) {
-        case SD_VECTOR:
-            vector_.reset(new bit_vector_sd(vector));
-            break;
-        case RRR_VECTOR:
-            vector_.reset(new bit_vector_rrr<>(vector));
-            break;
-        case STAT_VECTOR:
-            vector_.reset(new bit_vector_stat(sdsl::bit_vector(vector)));
-            break;
-    }
-}
-
-bit_vector_small::bit_vector_small(const bit_vector_small &other) {
-    *this = other;
-}
-
-bit_vector_small
-::bit_vector_small(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
-                   uint64_t size,
-                   uint64_t num_set_bits) {
-    switch (smallest_vector_representation(size, num_set_bits)) {
-        case SD_VECTOR:
-            vector_.reset(new bit_vector_sd(call_ones, size, num_set_bits));
-            break;
-        case RRR_VECTOR:
-            vector_.reset(new bit_vector_rrr<>(
-                bit_vector_stat(call_ones, size, num_set_bits).convert_to<bit_vector_rrr<>>()
-            ));
-            break;
-        case STAT_VECTOR:
-            vector_.reset(new bit_vector_stat(call_ones, size, num_set_bits));
-            break;
-    }
-}
-
-bit_vector_small& bit_vector_small::operator=(const bit_vector_small &other) {
-    switch (representation(*other.vector_)) {
-        case SD_VECTOR:
-            vector_.reset(new bit_vector_sd(other.vector_->copy_to<bit_vector_sd>()));
-            break;
-        case RRR_VECTOR:
-            vector_.reset(new bit_vector_rrr<>(other.vector_->copy_to<bit_vector_rrr<>>()));
-            break;
-        case STAT_VECTOR:
-            vector_.reset(new bit_vector_stat(other.vector_->copy_to<bit_vector_stat>()));
-            break;
-    }
-
-    return *this;
-}
-
-bit_vector_small::bit_vector_small(std::initializer_list<bool> init)
-      : bit_vector_small(sdsl::bit_vector(init)) {}
-
-uint64_t bit_vector_small::rank1(uint64_t id) const {
-    return vector_->rank1(id);
-}
-
-uint64_t bit_vector_small::select1(uint64_t id) const {
-    return vector_->select1(id);
-}
-
-void bit_vector_small::set(uint64_t id, bool val) {
-    vector_->set(id, val);
-}
-
-bool bit_vector_small::operator[](uint64_t id) const {
-    return vector_->operator[](id);
-}
-
-uint64_t bit_vector_small::get_int(uint64_t id, uint32_t width) const {
-    return vector_->get_int(id, width);
-}
-
-void bit_vector_small::insertBit(uint64_t id, bool val) {
-    assert(id <= size());
-    vector_->insertBit(id, val);
-}
-
-void bit_vector_small::deleteBit(uint64_t id) {
-    assert(id < size());
-    vector_->deleteBit(id);
-}
-
-bool bit_vector_small::load(std::istream &in) {
-    switch (load_number(in)) {
-        case VectorCode::SD_VECTOR:
-            vector_.reset(new bit_vector_sd());
-            break;
-        case VectorCode::RRR_VECTOR:
-            vector_.reset(new bit_vector_rrr<>());
-            break;
-        case VectorCode::STAT_VECTOR:
-            vector_.reset(new bit_vector_stat());
-            break;
-        default:
-            return false;
-    }
-    return vector_->load(in);
-}
-
-void bit_vector_small::serialize(std::ostream &out) const {
-    serialize_number(out, representation(*vector_));
-    vector_->serialize(out);
-}
-
-uint64_t bit_vector_small::size() const {
-    return vector_->size();
-}
-
-std::vector<bool> bit_vector_small::to_vector() const {
-    return vector_->to_vector();
-}
-
-void bit_vector_small::call_ones(const std::function<void(uint64_t)> &callback) const {
-    vector_->call_ones(callback);
+    assert(num_set_bits_ == rank1(size() - 1));
 }
 
 
@@ -742,6 +576,10 @@ bit_vector_sd& bit_vector_sd::operator=(bit_vector_sd&& other) noexcept {
     return *this;
 }
 
+std::unique_ptr<bit_vector> bit_vector_sd::copy() const {
+    return std::make_unique<bit_vector_sd>(*this);
+}
+
 uint64_t bit_vector_sd::rank1(uint64_t id) const {
     //the rank method in SDSL does not include id in the count
     size_t idx = id >= this->size() ? this->size() : id + 1;
@@ -842,7 +680,6 @@ void bit_vector_sd::call_ones(const std::function<void(uint64_t)> &callback) con
 }
 
 
-
 ////////////////////////////////////////////////////////////////
 //  bit_vector_rrr, sdsl compressed with rank-select support  //
 ////////////////////////////////////////////////////////////////
@@ -904,6 +741,11 @@ bit_vector_rrr<log_block_size>::operator=(bit_vector_rrr<log_block_size>&& other
     slct0_ = std::move(other.slct0_);
     slct0_.set_vector(&vector_);
     return *this;
+}
+
+template <size_t log_block_size>
+std::unique_ptr<bit_vector> bit_vector_rrr<log_block_size>::copy() const {
+    return std::make_unique<bit_vector_rrr<log_block_size>>(*this);
 }
 
 template <size_t log_block_size>
@@ -1039,3 +881,200 @@ template class bit_vector_rrr<31>;
 template class bit_vector_rrr<63>;
 template class bit_vector_rrr<127>;
 template class bit_vector_rrr<255>;
+
+
+////////////////////////////////////////////
+// bit_vector_adaptive abstract interface //
+////////////////////////////////////////////
+
+bit_vector_adaptive::bit_vector_adaptive(const bit_vector_adaptive &other)
+      : vector_(other.vector_->copy()) {}
+
+bit_vector_adaptive&
+bit_vector_adaptive::operator=(const bit_vector_adaptive &other) {
+    vector_ = other.vector_->copy();
+    return *this;
+}
+
+uint64_t bit_vector_adaptive::rank1(uint64_t id) const {
+    return vector_->rank1(id);
+}
+
+uint64_t bit_vector_adaptive::select1(uint64_t id) const {
+    return vector_->select1(id);
+}
+
+void bit_vector_adaptive::set(uint64_t id, bool val) {
+    vector_->set(id, val);
+}
+
+bool bit_vector_adaptive::operator[](uint64_t id) const {
+    return vector_->operator[](id);
+}
+
+uint64_t bit_vector_adaptive::get_int(uint64_t id, uint32_t width) const {
+    return vector_->get_int(id, width);
+}
+
+void bit_vector_adaptive::insertBit(uint64_t id, bool val) {
+    assert(id <= size());
+    vector_->insertBit(id, val);
+}
+
+void bit_vector_adaptive::deleteBit(uint64_t id) {
+    assert(id < size());
+    vector_->deleteBit(id);
+}
+
+uint64_t bit_vector_adaptive::size() const {
+    return vector_->size();
+}
+
+std::vector<bool> bit_vector_adaptive::to_vector() const {
+    return vector_->to_vector();
+}
+
+void
+bit_vector_adaptive
+::call_ones(const std::function<void(uint64_t)> &callback) const {
+    vector_->call_ones(callback);
+}
+
+bit_vector_adaptive::VectorCode
+bit_vector_adaptive::representation_tag(const bit_vector &vector) {
+    if (dynamic_cast<const bit_vector_sd*>(&vector)) {
+        return VectorCode::SD_VECTOR;
+
+    } else if (dynamic_cast<const bit_vector_rrr<>*>(&vector)) {
+        return VectorCode::RRR_VECTOR;
+
+    } else if (dynamic_cast<const bit_vector_stat*>(&vector)) {
+        return VectorCode::STAT_VECTOR;
+
+    } else {
+        throw std::runtime_error("Unsupported type");
+    }
+}
+
+bool bit_vector_adaptive::load(std::istream &in) {
+    switch (load_number(in)) {
+        case VectorCode::SD_VECTOR:
+            vector_.reset(new bit_vector_sd());
+            break;
+        case VectorCode::RRR_VECTOR:
+            vector_.reset(new bit_vector_rrr<>());
+            break;
+        case VectorCode::STAT_VECTOR:
+            vector_.reset(new bit_vector_stat());
+            break;
+        default:
+            return false;
+    }
+    return vector_->load(in);
+}
+
+void bit_vector_adaptive::serialize(std::ostream &out) const {
+    serialize_number(out, representation_tag(*vector_));
+    vector_->serialize(out);
+}
+
+
+template <bit_vector_adaptive::DefineRepresentation optimal_representation>
+bit_vector_adaptive_stat<optimal_representation>
+::bit_vector_adaptive_stat(uint64_t size, bool value) {
+    switch (optimal_representation(size, size * static_cast<uint64_t>(value))) {
+        case SD_VECTOR:
+            vector_.reset(new bit_vector_sd(size, value));
+            break;
+        case RRR_VECTOR:
+            vector_.reset(new bit_vector_rrr<>(size, value));
+            break;
+        case STAT_VECTOR:
+            vector_.reset(new bit_vector_stat(size, value));
+            break;
+    }
+}
+
+template <bit_vector_adaptive::DefineRepresentation optimal_representation>
+bit_vector_adaptive_stat<optimal_representation>
+::bit_vector_adaptive_stat(const sdsl::bit_vector &vector) {
+    uint64_t num_set_bits = sdsl::util::cnt_one_bits(vector);
+
+    switch (optimal_representation(vector.size(), num_set_bits)) {
+        case SD_VECTOR:
+            vector_.reset(new bit_vector_sd(vector));
+            break;
+        case RRR_VECTOR:
+            vector_.reset(new bit_vector_rrr<>(vector));
+            break;
+        case STAT_VECTOR:
+            vector_.reset(new bit_vector_stat(sdsl::bit_vector(vector)));
+            break;
+    }
+}
+
+template <bit_vector_adaptive::DefineRepresentation optimal_representation>
+bit_vector_adaptive_stat<optimal_representation>
+::bit_vector_adaptive_stat(const VoidCall<const VoidCall<uint64_t>&> &call_ones,
+                           uint64_t size,
+                           uint64_t num_set_bits) {
+    switch (optimal_representation(size, num_set_bits)) {
+        case SD_VECTOR:
+            vector_.reset(new bit_vector_sd(call_ones, size, num_set_bits));
+            break;
+        case RRR_VECTOR:
+            vector_.reset(new bit_vector_rrr<>(
+                bit_vector_stat(call_ones, size).convert_to<bit_vector_rrr<>>()
+            ));
+            break;
+        case STAT_VECTOR:
+            vector_.reset(new bit_vector_stat(call_ones, size));
+            break;
+    }
+}
+
+template <bit_vector_adaptive::DefineRepresentation optimal_representation>
+std::unique_ptr<bit_vector>
+bit_vector_adaptive_stat<optimal_representation>
+::copy() const {
+    auto copy = new bit_vector_adaptive_stat();
+    copy->vector_ = vector_->copy();
+    return std::unique_ptr<bit_vector> { copy };
+}
+
+template class bit_vector_adaptive_stat<smallest_representation>;
+template class bit_vector_adaptive_stat<smart_representation>;
+
+
+///////////////////////////////////////////////////
+// bit_vector_small, the smallest representation //
+///////////////////////////////////////////////////
+
+bit_vector_adaptive::VectorCode
+smallest_representation(uint64_t size, uint64_t num_set_bits) {
+    assert(num_set_bits <= size);
+
+    // TODO: entropy estimate
+    if (num_set_bits < SD_SMALLER_THAN_RRR_MAX_DENSITY * size
+            || num_set_bits > (1 - SD_SMALLER_THAN_RRR_MAX_DENSITY) * size) {
+        return bit_vector_adaptive::VectorCode::SD_VECTOR;
+    } else {
+        return bit_vector_adaptive::VectorCode::RRR_VECTOR;
+    }
+}
+
+////////////////////////////////////////////////
+// bit_vector_smart, fast/small hybrid method //
+////////////////////////////////////////////////
+
+bit_vector_adaptive::VectorCode
+smart_representation(uint64_t size, uint64_t num_set_bits) {
+    assert(num_set_bits <= size);
+
+    if (num_set_bits < SD_SMALLER_THAN_STAT_MAX_DENSITY * size
+            || num_set_bits > STAT_SMALLER_THAN_SD_MAX_DENSITY * size) {
+        return bit_vector_adaptive::VectorCode::SD_VECTOR;
+    } else {
+        return bit_vector_adaptive::VectorCode::STAT_VECTOR;
+    }
+}

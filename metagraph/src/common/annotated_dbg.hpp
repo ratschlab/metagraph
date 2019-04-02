@@ -12,7 +12,8 @@ class AnnotatedDBG {
 
     AnnotatedDBG(SequenceGraph *dbg,
                  Annotator *annotation,
-                 size_t num_threads = 0);
+                 size_t num_threads = 0,
+                 bool force_fast = false);
 
     // return labels that occur at least in |presence_ratio| k-mers
     std::vector<std::string>
@@ -20,7 +21,9 @@ class AnnotatedDBG {
 
     // return top |num_top_labels| labels with their counts
     std::vector<std::pair<std::string, size_t>>
-    get_top_labels(const std::string &sequence, size_t num_top_labels) const;
+    get_top_labels(const std::string &sequence,
+                   size_t num_top_labels,
+                   double min_label_frequency = 0.0) const;
 
     void annotate_sequence(const std::string &sequence,
                            const std::vector<std::string> &labels);
@@ -48,6 +51,7 @@ class AnnotatedDBG {
 
     utils::ThreadPool thread_pool_;
     std::mutex mutex_;
+    bool force_fast_;
 };
 
 #endif // __ANNOTATED_DBG_HPP__

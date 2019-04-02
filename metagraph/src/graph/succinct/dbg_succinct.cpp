@@ -1,15 +1,5 @@
 #include "dbg_succinct.hpp"
 
-/**
- * This class contains a succinct representation of the de bruijn graph
- * following ideas and suggestions presented here:
- * http://link.springer.com/chapter/10.1007/978-3-642-33122-0_18
- *
- * There is also conceptual code available at
- * https://code.google.com/p/csalib/downloads/list
- * that has been used as a reference for this implementation.
- */
-
 #include <cassert>
 #include <vector>
 #include <stack>
@@ -21,7 +11,7 @@
 
 #include "dbg_succinct_construct.hpp"
 #include "serialization.hpp"
-#include "helpers.hpp"
+#include "reverse_complement.hpp"
 
 using utils::remove_suffix;
 using TAlphabet = DBG_succ::TAlphabet;
@@ -554,6 +544,32 @@ DBG_succ::node_index DBG_succ::traverse(node_index node, char edge_label) const 
 
 DBG_succ::node_index DBG_succ::traverse_back(node_index node, char edge_label) const {
     return incoming(node, encode(edge_label));
+}
+
+void DBG_succ::call_adjacent_incoming_edges(edge_index edge,
+                                            std::function<void(edge_index)> callback) const {
+    CHECK_INDEX(edge);
+
+    edge_index next_incoming = bwd(edge);
+
+    callback(next_incoming);
+
+    if (next_incoming + 1 == W_->size()) {
+        assert(indegree(get_source_node(edge)) == 1);
+        return;
+    }
+
+    TAlphabet d = get_node_last_value(edge);
+    assert(d == get_W(next_incoming));
+
+    // iterate through all indices with edge label d + alph_size
+    // which are less than the next index with edge label d
+    const auto ubound = succ_W(next_incoming + 1, d);
+
+    while (++next_incoming < ubound
+            && (next_incoming = succ_W(next_incoming, d + alph_size)) < ubound) {
+        callback(next_incoming);
+    }
 }
 
 /**
@@ -2105,6 +2121,64 @@ node_index DBGSuccinct::traverse_back(node_index node, char prev_char) const {
     );
 }
 
+void DBGSuccinct::call_outgoing_kmers(node_index node,
+                                      const OutgoingEdgeCallback &callback) const {
+    assert(node);
+
+    auto boss_edge = kmer_to_boss_index(node);
+
+    auto last = boss_graph_->fwd(boss_edge);
+    auto first = boss_graph_->pred_last(last - 1) + 1;
+
+    for (auto i = first; i <= last; ++i) {
+        assert(boss_graph_->get_W(boss_edge) % boss_graph_->alph_size
+                == boss_graph_->get_node_last_value(i));
+
+        auto next = boss_to_kmer_index(i);
+        if (next != npos)
+            callback(next, boss_graph_->decode(boss_graph_->get_W(i)));
+    }
+}
+
+void DBGSuccinct::adjacent_outgoing_nodes(node_index node,
+                                          std::vector<node_index> *target_nodes) const {
+    assert(node);
+    assert(target_nodes);
+
+    auto boss_edge = kmer_to_boss_index(node);
+
+    auto last = boss_graph_->fwd(boss_edge);
+    auto first = boss_graph_->pred_last(last - 1) + 1;
+
+    for (auto i = first; i <= last; ++i) {
+        assert(boss_graph_->get_W(boss_edge) % boss_graph_->alph_size
+                == boss_graph_->get_node_last_value(i));
+
+        auto next = boss_to_kmer_index(i);
+        if (next != npos)
+            target_nodes->emplace_back(next);
+    }
+}
+
+void DBGSuccinct::adjacent_incoming_nodes(node_index node,
+                                          std::vector<node_index> *source_nodes) const {
+    assert(node);
+    assert(source_nodes);
+
+    auto edge = kmer_to_boss_index(node);
+
+    boss_graph_->call_adjacent_incoming_edges(edge,
+        [&](DBG_succ::edge_index incoming_boss_edge) {
+            assert(boss_graph_->get_W(incoming_boss_edge) % boss_graph_->alph_size
+                    == boss_graph_->get_node_last_value(edge));
+
+            auto prev = boss_to_kmer_index(incoming_boss_edge);
+            if (prev != npos)
+                source_nodes->emplace_back(prev);
+        }
+    );
+}
+
 // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
 // is passed. If passed, |nodes_inserted| must have length equal
 // to the number of nodes in graph.
@@ -2142,7 +2216,35 @@ void DBGSuccinct::add_seq(const std::string &sequence,
     assert(!valid_edges_.get() || !(*valid_edges_)[0]);
 }
 
+std::string DBGSuccinct::get_node_sequence(node_index node) const {
+    assert(node);
+    assert(node <= num_nodes());
+
+    auto boss_edge = kmer_to_boss_index(node);
+
+    return boss_graph_->get_node_str(boss_edge)
+            + boss_graph_->decode(boss_graph_->get_W(boss_edge));
+}
+
 // Traverse graph mapping sequence to the graph nodes
+// and run callback for each node until the termination condition is satisfied.
+// Guarantees that nodes are called in the same order as the input sequence.
+// In canonical mode, non-canonical k-mers are not mapped to canonical ones
+void DBGSuccinct::map_to_nodes_sequentially(std::string::const_iterator begin,
+                                            std::string::const_iterator end,
+                                            const std::function<void(node_index)> &callback,
+                                            const std::function<bool()> &terminate) const {
+    if (begin + get_k() > end)
+        return;
+
+    boss_graph_->map_to_edges(
+        std::string(begin, end),
+        [&](DBG_succ::edge_index i) { callback(boss_to_kmer_index(i)); },
+        terminate
+    );
+}
+
+// Map sequence k-mers to the canonical graph nodes
 // and run callback for each node until the termination condition is satisfied
 void DBGSuccinct::map_to_nodes(const std::string &sequence,
                                const std::function<void(node_index)> &callback,
@@ -2162,12 +2264,11 @@ void DBGSuccinct::map_to_nodes(const std::string &sequence,
         assert(forward.size() == rev_compl.size());
 
         for (size_t i = 0; i < forward.size() && !terminate(); ++i) {
-            if (sequence.substr(i, get_k())
-                    < sequence_rev_compl.substr(i, get_k())) {
-                callback(boss_to_kmer_index(forward[i]));
-            } else {
-                callback(boss_to_kmer_index(rev_compl[i]));
-            }
+            // the definition of a canonical k-mer is redefined:
+            //      use k-mer with smaller index in the BOSS table.
+            callback(boss_to_kmer_index(
+                std::min(forward[i], rev_compl[rev_compl.size() - 1 - i])
+            ));
         }
 
     } else {
@@ -2177,6 +2278,53 @@ void DBGSuccinct::map_to_nodes(const std::string &sequence,
             terminate
         );
     }
+}
+
+size_t DBGSuccinct::outdegree(node_index node) const {
+    assert(node);
+
+    auto boss_edge = kmer_to_boss_index(node);
+
+    if (boss_edge > 1 && !boss_graph_->get_W(boss_edge)) {
+        // |node| is a sink dummy boss edge, hence has no outgoing edges
+        return 0;
+    }
+
+    auto last_target_kmer = boss_graph_->fwd(boss_edge);
+
+    if (!boss_graph_->get_W(last_target_kmer)) {
+        // There is a sunk dummy target, hence this is the only outgoing edge
+        if (valid_edges_.get()) {
+            // if mask is defined, skip boss dummy sink edges
+            return 0;
+        } else {
+            return 1;
+        }
+    }
+
+    return last_target_kmer - boss_graph_->pred_last(last_target_kmer - 1);
+}
+
+size_t DBGSuccinct::indegree(node_index node) const {
+    assert(node);
+
+    auto boss_edge = kmer_to_boss_index(node);
+
+    if (boss_edge == 1)
+        return 1;
+
+    TAlphabet d = boss_graph_->get_node_last_value(boss_edge);
+
+    auto x = boss_graph_->bwd(boss_edge);
+
+    size_t first_valid = !valid_edges_.get() || (*valid_edges_)[x];
+
+    if (x + 1 == boss_graph_->get_W().size())
+        return first_valid;
+
+    uint64_t y = boss_graph_->succ_W(x + 1, d);
+    return first_valid + boss_graph_->rank_W(y - 1, d + boss_graph_->alph_size)
+                        - boss_graph_->rank_W(x - 1, d + boss_graph_->alph_size);
 }
 
 uint64_t DBGSuccinct::num_nodes() const {

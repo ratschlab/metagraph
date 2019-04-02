@@ -14,6 +14,7 @@ class IDBGBOSSChunkConstructor : public IChunkConstructor<DBG_succ::Chunk> {
     // TODO: replace with variadic template
     static IDBGBOSSChunkConstructor* initialize(
         size_t k,
+        bool canonical_mode = false,
         const std::string &filter_suffix = std::string(),
         size_t num_threads = 1,
         double memory_preallocated = 0,
@@ -27,6 +28,7 @@ class DBGBOSSChunkConstructor : public IDBGBOSSChunkConstructor {
 
   public:
     DBGBOSSChunkConstructor(size_t k,
+                            bool canonical_mode = false,
                             const std::string &filter_suffix = std::string(),
                             size_t num_threads = 1,
                             double memory_preallocated = 0,
@@ -50,12 +52,14 @@ class DBGBOSSChunkConstructor : public IDBGBOSSChunkConstructor {
 class DBGSuccConstructor : public GraphConstructor {
   public:
     explicit DBGSuccConstructor(size_t k,
+                                bool canonical_mode = false,
                                 const std::string &filter_suffix = std::string(),
                                 size_t num_threads = 1,
                                 double memory_preallocated = 0,
                                 bool verbose = false)
           : constructor_(IDBGBOSSChunkConstructor::initialize(
                 k,
+                canonical_mode,
                 filter_suffix,
                 num_threads,
                 memory_preallocated,

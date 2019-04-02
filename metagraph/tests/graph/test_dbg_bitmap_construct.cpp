@@ -21,6 +21,7 @@
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
 #include "utils.hpp"
+#include "reverse_complement.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 
@@ -28,7 +29,7 @@ const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
 
-typedef KMerPacked<uint64_t, KmerExtractor2Bit::kLogSigma> KMER;
+typedef KMer<uint64_t, KmerExtractor2Bit::kLogSigma> KMER;
 const int kMaxK = sizeof(KMER) * 8 / KmerExtractor2Bit::kLogSigma - 1;
 
 const KmerExtractor2Bit kmer_extractor;
@@ -42,9 +43,7 @@ TEST(Construct_SD_64, ConstructionNEAppendingSimplePath) {
         EXPECT_EQ(1u, constructed.num_nodes());
 
         DBGSD appended(k);
-        ASSERT_EQ(appended.capacity(), appended.num_nodes()) << k;
         ASSERT_DEATH(appended.add_sequence(std::string(100, 'A')), "");
-        ASSERT_EQ(appended.capacity(), appended.num_nodes()) << k;
 
         ASSERT_NE(constructed, appended);
     }
@@ -60,9 +59,7 @@ TEST(Construct_SD_64, ConstructionNEAppendingTwoPaths) {
 
         DBGSD appended(k);
         ASSERT_DEATH(appended.add_sequence(std::string(100, 'A')), "");
-        ASSERT_EQ(appended.capacity(), appended.num_nodes()) << k;
         ASSERT_DEATH(appended.add_sequence(std::string(50, 'C')), "");
-        ASSERT_EQ(appended.capacity(), appended.num_nodes()) << k;
 
         ASSERT_NE(constructed, appended);
     }
@@ -105,20 +102,42 @@ TEST(Construct_SD_64, ConstructionEQAppending) {
 
         Vector<KmerExtractor2Bit::Kmer64> kmers;
         for (const auto &str : input_data) {
-            kmer_extractor.sequence_to_kmers(
-                str, k, {}, &kmers
-            );
+            kmer_extractor.sequence_to_kmers(str, k, {}, &kmers);
         }
         std::sort(kmers.begin(), kmers.end());
         kmers.erase(std::unique(kmers.begin(), kmers.end()), kmers.end());
         EXPECT_EQ(kmers.size(), constructed.num_nodes());
 
         DBGSD appended(k);
-        // for (const auto &sequence : input_data) {
-            ASSERT_EQ(appended.capacity(), appended.num_nodes()) << k;
-            // ASSERT_DEATH(appended.add_sequence(sequence), "");
-        // }
+        EXPECT_NE(constructed, appended);
+    }
+}
 
+TEST(Construct_SD_64, ConstructionEQAppendingCanonical) {
+    for (size_t k = 2; k <= kMaxK; ++k) {
+        std::vector<std::string> input_data = {
+            "ACAGCTAGCTAGCTAGCTAGCTG",
+            "ATATTATAAAAAATTTTAAAAAA",
+            "ATATATTCTCTCTCTCTCATA",
+            "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+        };
+        DBGSDConstructor constructor(k, true);
+        constructor.add_sequences(input_data);
+        DBGSD constructed(&constructor);
+
+        Vector<KmerExtractor2Bit::Kmer64> kmers;
+        for (const auto &str : input_data) {
+            kmer_extractor.sequence_to_kmers(str, k, {}, &kmers);
+            auto rev_str = str;
+            reverse_complement(rev_str.begin(), rev_str.end());
+            kmer_extractor.sequence_to_kmers(rev_str, k, {}, &kmers);
+        }
+
+        std::sort(kmers.begin(), kmers.end());
+        kmers.erase(std::unique(kmers.begin(), kmers.end()), kmers.end());
+        EXPECT_EQ(kmers.size(), constructed.num_nodes());
+
+        DBGSD appended(k);
         EXPECT_NE(constructed, appended);
     }
 }

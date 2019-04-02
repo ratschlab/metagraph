@@ -14,6 +14,15 @@
 class DBGSuccConstructor;
 
 
+/**
+ * This class contains a succinct representation of the de bruijn graph
+ * following ideas and suggestions presented here:
+ * http://link.springer.com/chapter/10.1007/978-3-642-33122-0_18
+ *
+ * There is also conceptual code available at
+ * https://code.google.com/p/csalib/downloads/list
+ * that has been used as a reference for this implementation.
+ */
 class DBG_succ {
   public:
     static const uint64_t npos;
@@ -113,6 +122,9 @@ class DBG_succ {
 
     node_index traverse(node_index node, char edge_label) const;
     node_index traverse_back(node_index node, char edge_label) const;
+
+    void call_adjacent_incoming_edges(edge_index edge,
+                                      std::function<void(edge_index)> callback) const;
 
     /**
      * Add a full sequence to the graph.
@@ -559,11 +571,22 @@ class DBGSuccinct : public DeBruijnGraph {
     // Traverse the incoming edge
     virtual node_index traverse_back(node_index node, char prev_char) const override final;
 
+    // Given a node index and a pointer to a vector of node indices, iterates
+    // over all the outgoing edges and pushes back indices of their target nodes.
+    virtual void adjacent_outgoing_nodes(node_index node,
+                                         std::vector<node_index> *target_nodes) const override final;
+    // Given a node index and a pointer to a vector of node indices, iterates
+    // over all the incoming edges and pushes back indices of their source nodes.
+    virtual void adjacent_incoming_nodes(node_index node,
+                                         std::vector<node_index> *source_nodes) const override final;
+
     // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
     // is passed. If passed, |nodes_inserted| must have length equal
     // to the number of nodes in graph.
     virtual void add_sequence(const std::string &sequence,
                               bit_vector_dyn *nodes_inserted = NULL) override final;
+
+    virtual std::string get_node_sequence(node_index) const override final;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
@@ -571,6 +594,24 @@ class DBGSuccinct : public DeBruijnGraph {
                               const std::function<void(node_index)> &callback,
                               const std::function<bool()> &terminate = [](){ return false; }) const override;
 
+    // Traverse graph mapping sequence to the graph nodes
+    // and run callback for each node until the termination condition is satisfied.
+    // Guarantees that nodes are called in the same order as the input sequence.
+    // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
+    virtual void map_to_nodes_sequentially(std::string::const_iterator begin,
+                                           std::string::const_iterator end,
+                                           const std::function<void(node_index)> &callback,
+                                           const std::function<bool()> &terminate = [](){ return false; }) const override final;
+
+    virtual void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const override final;
+
+    virtual void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const override final {
+        // TODO: Implement
+        throw std::runtime_error("Not implemented");
+    }
+
+    virtual size_t outdegree(node_index node) const override final;
+    virtual size_t indegree(node_index node) const override final;
     virtual uint64_t num_nodes() const override final;
 
     virtual void mask_dummy_kmers(size_t num_threads, bool with_pruning) final;

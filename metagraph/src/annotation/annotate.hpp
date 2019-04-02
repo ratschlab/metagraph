@@ -80,10 +80,11 @@ class MultiLabelAnnotation
     virtual bool has_label(Index i, const Label &label) const = 0;
     virtual bool has_labels(Index i, const VLabels &labels) const = 0;
 
-    virtual void serialize(const std::string &filename) const override = 0;
-    virtual bool merge_load(const std::vector<std::string> &filenames) override = 0;
-
     virtual void insert_rows(const std::vector<Index> &rows) = 0;
+
+    // For each pair (L, L') in the dictionary, replaces label |L| with |L'|
+    // and merges all relations (*, L') with matching labels L', if supported.
+    virtual void rename_labels(const std::unordered_map<Label, Label> &dict) = 0;
 
     /*********************** Special queries **********************/
 
@@ -94,9 +95,11 @@ class MultiLabelAnnotation
 
     // Count all labels collected from the given rows
     // and return top |num_top| with the their counts.
+    // Skip labels with count frequency smaller than |min_label_frequency|.
     virtual std::vector<std::pair<Label, size_t>>
     get_top_labels(const std::vector<Index> &indices,
-                   size_t num_top = static_cast<size_t>(-1)) const = 0;
+                   size_t num_top = static_cast<size_t>(-1),
+                   double min_label_frequency = 0.0) const = 0;
 
     /************************* Properties *************************/
 
@@ -153,42 +156,22 @@ class MultiLabelEncoded
 
     /******************* General functionality *******************/
 
-    virtual void set_labels(Index i, const VLabels &labels) override = 0;
-    virtual VLabels get_labels(Index i) const override = 0;
-
-    virtual void add_label(Index i, const Label &label) override = 0;
-    virtual void add_labels(Index i, const VLabels &labels) override = 0;
-    virtual void add_labels(const std::vector<Index> &indices,
-                            const VLabels &labels) override = 0;
-
-    virtual bool has_label(Index i, const Label &label) const override = 0;
-    virtual bool has_labels(Index i, const VLabels &labels) const override = 0;
-
-    virtual void serialize(const std::string &filename) const override = 0;
-    virtual bool merge_load(const std::vector<std::string> &filenames) override = 0;
-
-    virtual void insert_rows(const std::vector<Index> &rows) override = 0;
+    // For each pair (L, L') in the dictionary, replaces label |L| with |L'|
+    // and merges all relations (*, L') with matching labels L', if supported.
+    virtual void rename_labels(const std::unordered_map<Label, Label> &dict) override;
 
     /*********************** Special queries **********************/
 
-    // Get labels that occur at least in |presence_ratio| rows.
-    // If |presence_ratio| = 0, return all occurring labels.
-    virtual VLabels get_labels(const std::vector<Index> &indices,
-                               double presence_ratio) const override = 0;
-
     // Count all labels collected from the given rows
     // and return top |num_top| with the their counts.
+    // Skip labels with count frequency smaller than |min_label_frequency|.
     virtual std::vector<std::pair<Label, size_t>>
     get_top_labels(const std::vector<Index> &indices,
-                   size_t num_top = static_cast<size_t>(-1)) const override final;
-
-    /************************* Properties *************************/
-
-    virtual uint64_t num_objects() const override = 0;
-    virtual size_t num_labels() const override = 0;
-    virtual uint64_t num_relations() const override = 0;
+                   size_t num_top = static_cast<size_t>(-1),
+                   double min_label_frequency = 0.0) const override final;
 
   protected:
+    // TODO: add |min_label_frequency| parameter: return only frequent labels
     virtual std::vector<uint64_t>
     count_labels(const std::vector<Index> &indices) const = 0;
 

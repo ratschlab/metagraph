@@ -10,7 +10,7 @@
 
 #include "utils.hpp"
 #include "kmer.hpp"
-#include "kmer_packed.hpp"
+#include "kmer_boss.hpp"
 #include "alphabets.hpp"
 
 
@@ -32,9 +32,9 @@ class KmerExtractor {
     );
     #endif
 
-    typedef KMer<uint64_t, kLogSigma> Kmer64;
-    typedef KMer<sdsl::uint128_t, kLogSigma> Kmer128;
-    typedef KMer<sdsl::uint256_t, kLogSigma> Kmer256;
+    typedef KMerBOSS<uint64_t, kLogSigma> Kmer64;
+    typedef KMerBOSS<sdsl::uint128_t, kLogSigma> Kmer128;
+    typedef KMerBOSS<sdsl::uint256_t, kLogSigma> Kmer256;
 
     // alphabet for k-mer representation
     typedef uint8_t TAlphabet;
@@ -50,6 +50,12 @@ class KmerExtractor {
                                   const std::vector<TAlphabet> &suffix,
                                   Vector<KMER> *kmers,
                                   bool canonical_mode = false);
+
+    template <class KMER>
+    static Vector<KMER> sequence_to_kmers(const std::string &sequence,
+                                          size_t k,
+                                          bool canonical_mode = false,
+                                          const std::vector<TAlphabet> &suffix = {});
 
     template <class KMER>
     static std::string kmer_to_sequence(const KMER &kmer, size_t k) {
@@ -81,7 +87,7 @@ class KmerExtractor2BitT {
 
     // k-mer
     template <class T>
-    using Kmer = KMerPacked<T, kLogSigma>;
+    using Kmer = KMer<T, kLogSigma>;
 
     typedef Kmer<uint64_t> Kmer64;
     typedef Kmer<sdsl::uint128_t> Kmer128;
@@ -100,11 +106,18 @@ class KmerExtractor2BitT {
                            const std::vector<TAlphabet> &suffix,
                            Vector<Kmer<T>> *kmers,
                            bool canonical_mode = false) const;
+    template <class KMER>
+    Vector<KMER> sequence_to_kmers(const std::string &sequence,
+                                   size_t k,
+                                   bool canonical_mode = false,
+                                   const std::vector<TAlphabet> &suffix = {}) const;
 
     template <class T>
     std::string kmer_to_sequence(const Kmer<T> &kmer, size_t k) const {
         return kmer.to_string(k, alphabet);
     }
+
+    std::string reverse_complement(const std::string &sequence) const;
 
     // map input character to k-mer character
     TAlphabet encode(char s) const;

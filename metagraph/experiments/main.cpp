@@ -28,24 +28,34 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     DataGenerator generator;
     generator.set_seed(42);
 
+    auto mem_before = get_curr_mem2();
+
     auto other = generator.generate_random_column(n, d)->convert_to<BitVector>();
 
-    std::string outname = std::string("test.")
-                        + prefix
-                        + "." + std::to_string(n) + "_" + std::to_string(d)
-                        + ".bv";
-    std::filesystem::path path(outname);
+    if (static_cast<int>(other.rank1(1)) < -1
+            || static_cast<int>(other.rank0(1)) < -1)
+        throw std::runtime_error("Never happends, just initializing the rank support");
+
+    std::filesystem::path path(std::string("test.")
+                                + prefix
+                                + "." + std::to_string(n) + "_" + std::to_string(d)
+                                + ".bv");
     std::ofstream out(path, std::ios::binary);
 
     other.serialize(out);
     out.close();
+
     const auto serialized_size = std::filesystem::file_size(path);
 
-    std::cout << prefix << "\t"
-              << n << " " << d << "\t"
-              << "observed density: "
-              << static_cast<double>(other.num_set_bits()) / other.size() << "\t"
-              << static_cast<double>(serialized_size) * 8 / n << std::endl;
+    std::filesystem::remove(path);
+
+    std::cout << prefix
+              << "\t" << n
+              << "\t" << d
+              << "\t" << 1. * other.num_set_bits() / other.size()
+              << "\t" << 1. * serialized_size * 8 / n
+              << "\t" << get_curr_mem2() - mem_before
+              << std::endl;
 }
 
 std::vector<double> get_densities(uint64_t num_cols,
@@ -139,6 +149,7 @@ int main(int argc, char *argv[]) {
         if (regime == "vectors") {
             std::vector<std::string> vector_types {
                 "small",
+                "smart",
                 "stat",
                 "sd",
                 "rrr63",
@@ -162,6 +173,10 @@ int main(int argc, char *argv[]) {
                 test_vector_points<bit_vector_small>(length_arg.getValue(),
                                                      density_arg.getValue(),
                                                      "small");
+            } else if (vector_type == "smart") {
+                test_vector_points<bit_vector_smart>(length_arg.getValue(),
+                                                     density_arg.getValue(),
+                                                     "smart");
             } else if (vector_type == "stat") {
                 test_vector_points<bit_vector_stat>(length_arg.getValue(),
                                                     density_arg.getValue(),

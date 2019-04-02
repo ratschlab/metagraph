@@ -32,25 +32,41 @@ class DBGSD : public DeBruijnGraph {
                       const std::function<void(node_index)> &callback,
                       const std::function<bool()> &terminate = [](){ return false; }) const;
 
+    // Traverse graph mapping sequence to the graph nodes
+    // and run callback for each node until the termination condition is satisfied.
+    // Guarantees that nodes are called in the same order as the input sequence.
+    // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
+    void map_to_nodes_sequentially(std::string::const_iterator begin,
+                                   std::string::const_iterator end,
+                                   const std::function<void(node_index)> &callback,
+                                   const std::function<bool()> &terminate = [](){ return false; }) const;
+
+    void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const;
+    void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const;
+
     // Traverse the outgoing edge
     node_index traverse(node_index node, char next_char) const;
     // Traverse the incoming edge
     node_index traverse_back(node_index node, char prev_char) const;
 
-    node_index kmer_to_node(const std::string &kmer) const;
-    std::string node_to_kmer(node_index i) const;
+    // Given a node index and a pointer to a vector of node indices, iterates
+    // over all the outgoing edges and pushes back indices of their target nodes.
+    void adjacent_outgoing_nodes(node_index node,
+                                 std::vector<node_index> *target_nodes) const;
+    // Given a node index and a pointer to a vector of node indices, iterates
+    // over all the incoming edges and pushes back indices of their source nodes.
+    void adjacent_incoming_nodes(node_index node,
+                                 std::vector<node_index> *source_nodes) const;
 
-    inline size_t get_k() const { return k_; }
-    inline bool is_canonical_mode() const { return canonical_mode_; }
+    size_t outdegree(node_index) const {
+        // TODO: Complete outdegree for DBGSD.
+        throw std::runtime_error("Not implemented");
+    }
 
-    inline uint64_t num_nodes() const { return kmers_.num_set_bits() - 1; }
-    inline uint64_t capacity() const { return kmers_.size() - 1; }
-
-    void serialize(std::ostream &out) const;
-    void serialize(const std::string &filename) const;
-
-    bool load(std::istream &in);
-    bool load(const std::string &filename);
+    size_t indegree(node_index) const {
+        // TODO: Complete outdegree for DBGSD.
+        throw std::runtime_error("Not implemented");
+    }
 
     template <class... T>
     using Call = typename std::function<void(T...)>;
@@ -62,6 +78,22 @@ class DBGSD : public DeBruijnGraph {
     // exactly all kmers in graph
     void call_sequences(Call<const std::string&> callback,
                         bool split_to_contigs = false) const;
+
+    node_index kmer_to_node(const std::string &kmer) const;
+
+    std::string get_node_sequence(node_index node) const;
+
+    inline size_t get_k() const { return k_; }
+    inline bool is_canonical_mode() const { return canonical_mode_; }
+
+    uint64_t num_nodes() const;
+
+
+    void serialize(std::ostream &out) const;
+    void serialize(const std::string &filename) const;
+
+    bool load(std::istream &in);
+    bool load(const std::string &filename);
 
     bool operator==(const DBGSD &other) const { return equals(other, false); }
     bool operator!=(const DBGSD &other) const { return !(*this == other); }
@@ -75,34 +107,27 @@ class DBGSD : public DeBruijnGraph {
     using Chunk = bit_vector_sd;
 
   private:
-    KmerExtractor2Bit seq_encoder_;
     using Kmer = KmerExtractor2Bit::Kmer64;
 
-    // Not supported
-    void add_sequence(const std::string &sequence,
-                      bit_vector_dyn *nodes_inserted = NULL);
+    void add_sequence(const std::string &,
+                      bit_vector_dyn *) {
+        throw std::runtime_error("Not implemented");
+    }
 
     Vector<Kmer> sequence_to_kmers(const std::string &sequence,
-                                   bool to_canonical = false) const;
+                                   bool canonical = false) const;
 
-    // get the node index if |kmer| is in the graph and npos otherwise
-    node_index get_node(const Kmer &kmer) const;
-
-    // translate index |node| from [1...1+|A|^k] to a Kmer in A^k
-    Kmer to_kmer(node_index node) const;
-    // translate |kmer| from A^k to a node index in [1...1+|A|^k]
-    node_index to_index(const Kmer &kmer) const;
-
-    std::vector<node_index> outgoing(node_index node) const;
-
-    typedef uint8_t TAlphabet;
+    uint64_t node_to_index(node_index node) const;
+    Kmer node_to_kmer(node_index node) const;
+    node_index to_node(const Kmer &kmer) const;
 
     void call_paths(Call<const std::vector<node_index>,
-                    const std::vector<TAlphabet>&> callback,
+                         const std::vector<uint8_t>&> callback,
                     bool split_to_contigs) const;
 
     size_t k_;
     bool canonical_mode_;
+    KmerExtractor2Bit seq_encoder_;
 
     bit_vector_sd kmers_;
 

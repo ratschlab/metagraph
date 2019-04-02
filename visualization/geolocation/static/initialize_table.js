@@ -1,7 +1,6 @@
-var list = imageSeries.data;
-
-if (list.length > 0) {
-    list = imageSeries.data;
+function add_to_table(list, table_id) {
+    if (list.length < 1)
+        return;
 
     var columns = []
 
@@ -9,7 +8,7 @@ if (list.length > 0) {
         columns.push(column_name);
     }
 
-    var tbl = document.getElementById('matched_samples');
+    var tbl = document.getElementById(table_id);
 
     var tr = tbl.insertRow();
 
@@ -35,3 +34,5 @@ if (list.length > 0) {
         }
     }
 }
+
+add_to_table(samples, 'matched_samples');

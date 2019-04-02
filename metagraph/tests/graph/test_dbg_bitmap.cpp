@@ -27,21 +27,30 @@ const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 
 const KmerExtractor2Bit kmer_extractor;
 
+uint64_t kmer_string_to_index(const DBGSD &graph, const std::string &kmer) {
+    DBGSD::node_index node;
+    graph.map_to_nodes_sequentially(
+        kmer.begin(), kmer.end(),
+        [&](const auto i) { node = i; }
+    );
+    return graph.node_to_index(node);
+}
+
 
 TEST(DBGSDConstructedFull, InitializeComplete) {
     {
         DBGSD graph(20, false);
-        EXPECT_EQ(std::string("AAAAAAAAAAAAAAAAAAAA"), graph.node_to_kmer(1));
-        EXPECT_EQ(1u, graph.kmer_to_node("AAAAAAAAAAAAAAAAAAAA"));
+        EXPECT_EQ(std::string("AAAAAAAAAAAAAAAAAAAA"), graph.get_node_sequence(1));
+        EXPECT_EQ(1u, kmer_string_to_index(graph, "AAAAAAAAAAAAAAAAAAAA"));
 
     // #if _DNA4_GRAPH
-        EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("TTTTTTTTTTTTTTTTTTTT"));
+        EXPECT_EQ(graph.num_nodes(), kmer_string_to_index(graph, "TTTTTTTTTTTTTTTTTTTT"));
     // #elif _DNA_GRAPH
-    //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("NNNNNNNNNNNNNNNNNNNN"));
+    //     EXPECT_EQ(graph.num_nodes(), kmer_string_to_index(graph, "NNNNNNNNNNNNNNNNNNNN"));
     // #elif _DNA_CASE_SENSITIVE_GRAPH
-    //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("tttttttttttttttttttt"));
+    //     EXPECT_EQ(graph.num_nodes(), kmer_string_to_index(graph, "tttttttttttttttttttt"));
     // #elif _PROTEIN_GRAPH
-    //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("XXXXXXXXXXXXXXXXXXXX"));
+    //     EXPECT_EQ(graph.num_nodes(), kmer_string_to_index(graph, "XXXXXXXXXXXXXXXXXXXX"));
     // #endif
 
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
@@ -52,17 +61,17 @@ TEST(DBGSDConstructedFull, InitializeComplete) {
 
     {
         DBGSD graph(20, true);
-        EXPECT_EQ(std::string("AAAAAAAAAAAAAAAAAAAA"), graph.node_to_kmer(1));
-        EXPECT_EQ(1u, graph.kmer_to_node("AAAAAAAAAAAAAAAAAAAA"));
+        EXPECT_EQ(std::string("AAAAAAAAAAAAAAAAAAAA"), graph.get_node_sequence(1));
+        EXPECT_EQ(1u, kmer_string_to_index(graph, "AAAAAAAAAAAAAAAAAAAA"));
 
     // #if _DNA4_GRAPH
-        EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("TTTTTTTTTTTTTTTTTTTT"));
+        EXPECT_EQ(graph.num_nodes(), kmer_string_to_index(graph, "TTTTTTTTTTTTTTTTTTTT"));
     // #elif _DNA_GRAPH
-    //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("NNNNNNNNNNNNNNNNNNNN"));
+    //     EXPECT_EQ(graph.num_nodes(), kmer_string_to_index(graph, "NNNNNNNNNNNNNNNNNNNN"));
     // #elif _DNA_CASE_SENSITIVE_GRAPH
-    //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("tttttttttttttttttttt"));
+    //     EXPECT_EQ(graph.num_nodes(), kmer_string_to_index(graph, "tttttttttttttttttttt"));
     // #elif _PROTEIN_GRAPH
-    //     EXPECT_EQ(graph.num_nodes(), graph.kmer_to_node("XXXXXXXXXXXXXXXXXXXX"));
+    //     EXPECT_EQ(graph.num_nodes(), kmer_string_to_index(graph, "XXXXXXXXXXXXXXXXXXXX"));
     // #endif
 
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
@@ -194,9 +203,9 @@ TEST(DBGSDConstructedFull, CheckGraph) {
         }
 
         for (uint64_t i = 1; i <= 1000; ++i) {
-            auto kmer = graph.node_to_kmer(i);
+            auto kmer = graph.get_node_sequence(i);
             ASSERT_EQ(20u, kmer.size());
-            auto node = graph.kmer_to_node(kmer);
+            auto node = kmer_string_to_index(graph, kmer);
             ASSERT_EQ(i, node);
         }
     }
@@ -215,9 +224,9 @@ TEST(DBGSDConstructedFull, CheckGraph) {
         }
 
         for (uint64_t i = 1; i <= 1000; ++i) {
-            auto kmer = graph.node_to_kmer(i);
+            auto kmer = graph.get_node_sequence(i);
             ASSERT_EQ(20u, kmer.size());
-            auto node = graph.kmer_to_node(kmer);
+            auto node = kmer_string_to_index(graph, kmer);
             ASSERT_EQ(i, node) << kmer;
         }
     }
@@ -1213,13 +1222,13 @@ TEST(DBGSD, Traversals) {
 
         constructor.add_sequence(std::string(100, 'A') + std::string(100, 'C'));
 
-        auto graph = std::make_unique<DBGSD>(&constructor);
+        std::unique_ptr<DeBruijnGraph> graph { new DBGSD(&constructor) };
 
         uint64_t it = 0;
         graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
 
-        uint64_t it2 = graph->kmer_to_node(std::string(k - 1, 'A') + "C");
-        ASSERT_EQ(graph->kmer_to_node(std::string(k, 'A')), it);
+        uint64_t it2;
+        graph->map_to_nodes(std::string(k - 1, 'A') + "C", [&](auto i) { it2 = i; });
         EXPECT_EQ(it, graph->traverse(it, 'A'));
         EXPECT_EQ(it2, graph->traverse(it, 'C'));
         EXPECT_EQ(it, graph->traverse_back(it2, 'A'));
@@ -1234,14 +1243,42 @@ TEST(DBGSD, TraversalsCanonical) {
 
         constructor.add_sequence(std::string(100, 'A') + std::string(100, 'C'));
 
-        auto graph = std::make_unique<DBGSD>(&constructor);
+        std::unique_ptr<DBGSD> graph { new DBGSD(&constructor) };
+
+        auto map_to_nodes_sequentially = [&](const auto &seq, auto callback) {
+            graph->map_to_nodes_sequentially(seq.begin(), seq.end(), callback);
+        };
 
         uint64_t it = 0;
         graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
-        ASSERT_NE(graph->kmer_to_node(std::string(k, 'T')), it);
+        graph->map_to_nodes(
+            std::string(k, 'T'),
+            [&](auto i) {
+                EXPECT_EQ(i, it);
+            }
+        );
+        map_to_nodes_sequentially(
+            std::string(k, 'A'),
+            [&](auto i) {
+                EXPECT_EQ(i, it);
+            }
+        );
+        map_to_nodes_sequentially(
+            std::string(k, 'T'),
+            [&](auto i) {
+                EXPECT_NE(i, it);
+            }
+        );
 
-        uint64_t it2 = graph->kmer_to_node(std::string(k - 1, 'A') + "C");
-        ASSERT_EQ(graph->kmer_to_node(std::string(k, 'A')), it);
+        uint64_t it2 = 0;
+        graph->map_to_nodes(
+            std::string(k - 1, 'A') + "C",
+            [&](auto i) { it2 = i; }
+        );
+        map_to_nodes_sequentially(
+            std::string(k - 1, 'A') + "C",
+            [&](auto i) { EXPECT_EQ(it2, i); }
+        );
         EXPECT_EQ(it, graph->traverse(it, 'A'));
         EXPECT_EQ(it2, graph->traverse(it, 'C'));
         EXPECT_EQ(it, graph->traverse_back(it2, 'A'));
@@ -1249,19 +1286,58 @@ TEST(DBGSD, TraversalsCanonical) {
         EXPECT_EQ(DBGSD::npos, graph->traverse_back(it2, 'G'));
 
         graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
-        // GGG..G is added as a reverse complement to CCC..C, and mapped to CCC..C
         ASSERT_NE(DBGSD::npos, it);
-        ASSERT_EQ(graph->kmer_to_node(std::string(k, 'C')), it);
-        ASSERT_NE(graph->kmer_to_node(std::string(k, 'G')), it);
-        ASSERT_NE(graph->kmer_to_node(std::string(k, 'G')), DBGSD::npos);
+        uint64_t it3 = 0;
+        graph->map_to_nodes(
+            std::string(k, 'C'),
+            [&](auto i) {
+                it3 = i;
+                EXPECT_EQ(i, it);
+            }
+        );
+        map_to_nodes_sequentially(
+            std::string(k, 'C'),
+            [&](auto i) {
+                EXPECT_EQ(i, it);
+            }
+        );
+        EXPECT_EQ(DBGSD::npos, graph->traverse(it, 'A'));
+        EXPECT_EQ(DBGSD::npos, graph->traverse(it, 'G'));
+        EXPECT_EQ(DBGSD::npos, graph->traverse(it, 'T'));
 
-        it = graph->kmer_to_node(std::string(k, 'G'));
-        it2 = graph->kmer_to_node(std::string(k - 1, 'G') + "T");
+        map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { it = i; });
+        ASSERT_NE(DBGSD::npos, it);
+        map_to_nodes_sequentially(
+            std::string(k, 'C'),
+            [&](auto i) {
+                EXPECT_NE(i, it);
+            }
+        );
+        graph->map_to_nodes(
+            std::string(k, 'C'),
+            [&](auto i) {
+                EXPECT_NE(i, it);
+            }
+        );
+
+        map_to_nodes_sequentially(
+            std::string(k - 1, 'G') + "T",
+            [&](auto i) { it2 = i; }
+        );
         ASSERT_NE(DBGSD::npos, it2);
         EXPECT_EQ(DBGSD::npos, graph->traverse(it, 'A'));
         EXPECT_EQ(it, graph->traverse(it, 'G'));
         EXPECT_EQ(it2, graph->traverse(it, 'T'));
         EXPECT_EQ(it, graph->traverse_back(it2, 'G'));
+
+        graph->map_to_nodes(
+            std::string(k - 1, 'G') + "T",
+            [&](auto i) { it2 = i; }
+        );
+        ASSERT_NE(DBGSD::npos, it2);
+        EXPECT_EQ(DBGSD::npos, graph->traverse_back(it2, 'G'));
+        EXPECT_EQ(it3, graph->traverse(it2, 'C'));
+        EXPECT_NE(DBGSD::npos, graph->traverse_back(it2, 'A'));
     }
 }
 
@@ -1296,6 +1372,146 @@ TEST(DBGSD, TraversalsDBG) {
     }
 }
 
+TEST(DBGSD, OutgoingAdjacent) {
+    for (size_t k = 2; k <= 20; ++k) {
+        DBGSDConstructor constructor(k);
+        constructor.add_sequence(std::string(100, 'A') + std::string(100, 'C')
+                                                       + std::string(100, 'G'));
+        std::unique_ptr<DeBruijnGraph> graph { new DBGSD(&constructor) };
+
+        uint64_t it = 0;
+        std::vector<DBGSD::node_index> adjacent_nodes;
+
+        // AA, AAAAA
+        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(2u, adjacent_nodes.size());
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ it, graph->traverse(it, 'C') }),
+            convert_to_set(adjacent_nodes)
+        );
+        adjacent_nodes.clear();
+
+        // AC, AAAAC
+        it = graph->traverse(it, 'C');
+        auto outset = convert_to_set(std::vector<uint64_t>{ graph->traverse(it, 'C') });
+        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        if (k == 2) {
+            outset.insert(graph->traverse(it, 'G'));
+            ASSERT_EQ(2u, adjacent_nodes.size());
+        } else {
+            ASSERT_EQ(1u, adjacent_nodes.size());
+        }
+
+        EXPECT_EQ(outset, convert_to_set(adjacent_nodes));
+        adjacent_nodes.clear();
+
+        // CC, CCCCC
+        graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
+        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(2u, adjacent_nodes.size());
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{
+                it,
+                graph->traverse(it, 'G')
+            }),
+            convert_to_set(adjacent_nodes)
+        );
+        adjacent_nodes.clear();
+
+        // CG, CCCCG
+        it = graph->traverse(it, 'G');
+        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(1u, adjacent_nodes.size());
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ graph->traverse(it, 'G') }),
+            convert_to_set(adjacent_nodes)
+        );
+        adjacent_nodes.clear();
+
+        // GGGGG
+        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(1u, adjacent_nodes.size());
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ graph->traverse(it, 'G') }),
+            convert_to_set(adjacent_nodes)
+        );
+        adjacent_nodes.clear();
+    }
+}
+
+TEST(DBGSD, IncomingAdjacent) {
+    for (size_t k = 2; k <= 20; ++k) {
+        DBGSDConstructor constructor(k);
+        constructor.add_sequence(std::string(100, 'A') + std::string(100, 'C')
+                                                       + std::string(100, 'G'));
+        std::unique_ptr<DeBruijnGraph> graph { new DBGSD(&constructor) };
+
+        uint64_t it = 0;
+        std::vector<DBGSD::node_index> adjacent_nodes;
+
+        // AA, AAAAA
+        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(1u, adjacent_nodes.size());
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ it }),
+            convert_to_set(adjacent_nodes)
+        );
+        adjacent_nodes.clear();
+
+        // AC, AAAAC
+        it = graph->traverse(it, 'C');
+        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(1u, adjacent_nodes.size());
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{ graph->traverse_back(it, 'A') }),
+            convert_to_set(adjacent_nodes)
+        );
+        adjacent_nodes.clear();
+
+        // CC, CCCCC
+        graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
+        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(2u, adjacent_nodes.size());
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{
+                it,
+                graph->traverse_back(it, 'A')
+            }),
+            convert_to_set(adjacent_nodes)
+        );
+        adjacent_nodes.clear();
+
+        // CG, CCCCG
+        it = graph->traverse(it, 'G');
+        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(2u, adjacent_nodes.size());
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{
+                graph->traverse_back(it, 'A'),
+                graph->traverse_back(it, 'C')
+            }),
+            convert_to_set(adjacent_nodes)
+        );
+        adjacent_nodes.clear();
+
+        // GG, GGGGG
+        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
+        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
+        ASSERT_EQ(2u, adjacent_nodes.size());
+        EXPECT_EQ(
+            convert_to_set(std::vector<uint64_t>{
+                it,
+                graph->traverse_back(it, 'C')
+            }),
+            convert_to_set(adjacent_nodes)
+        );
+        adjacent_nodes.clear();
+    }
+}
+
 TEST(DBGSD, TraversalsDBGCanonical) {
     const auto npos = DeBruijnGraph::npos;
 
@@ -1306,29 +1522,36 @@ TEST(DBGSD, TraversalsDBGCanonical) {
 
         uint64_t it = 0;
 
-        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
-        ASSERT_NE(npos, it);
+        auto map_to_nodes_sequentially = [&](const auto &seq, auto callback) {
+            graph->map_to_nodes_sequentially(seq.begin(), seq.end(), callback);
+        };
 
         graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
+        ASSERT_NE(npos, it);
+        map_to_nodes_sequentially(std::string(k, 'A'), [&](auto i) { it = i; });
         ASSERT_NE(npos, it);
 
         EXPECT_EQ(it, graph->traverse(it, 'A'));
-
         ASSERT_NE(npos, graph->traverse(it, 'C'));
         EXPECT_NE(it, graph->traverse(it, 'C'));
-
         EXPECT_EQ(it, graph->traverse_back(graph->traverse(it, 'C'), 'A'));
-
         EXPECT_EQ(npos, graph->traverse(it, 'G'));
         EXPECT_EQ(npos, graph->traverse_back(it + 1, 'G'));
 
+
         // reverse complement
-        it = dynamic_cast<DBGSD&>(*graph).kmer_to_node(std::string(k, 'G'));
+        map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { it = i; });
+        ASSERT_NE(npos, it);
+        EXPECT_EQ(it, graph->traverse(it, 'G'));
+        ASSERT_NE(npos, graph->traverse(it, 'T'));
+        EXPECT_EQ(it, graph->traverse_back(graph->traverse(it, 'T'), 'G'));
+
+
+        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
         ASSERT_NE(npos, it);
 
-        EXPECT_EQ(it, graph->traverse(it, 'G')) << dynamic_cast<DBGSD&>(*graph);
-        EXPECT_NE(npos, graph->traverse(it, 'T'));
-        EXPECT_EQ(it, graph->traverse_back(graph->traverse(it, 'T'), 'G'));
+        EXPECT_EQ(npos, graph->traverse(it, 'G'));
+        EXPECT_EQ(npos, graph->traverse(it, 'T'));
     }
 }
 
@@ -1348,8 +1571,9 @@ TEST(DBGSD, map_to_nodes) {
         };
 
         for (size_t i = 2; i + k <= sequence_to_map.size(); ++i) {
-            expected_result.push_back(
-                graph->kmer_to_node(sequence_to_map.substr(i, k))
+            graph->map_to_nodes(
+                sequence_to_map.substr(i, k),
+                [&](auto i) { expected_result.push_back(i);}
             );
         }
 

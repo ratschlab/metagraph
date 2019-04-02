@@ -9,7 +9,6 @@
 #include <htslib/kseq.h>
 
 #include "unix_tools.hpp"
-#include "helpers.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 
@@ -32,5 +31,9 @@ void read_vcf_file_critical(const std::string &filename,
                             std::vector<std::string> *annotation,
                             std::function<void(std::string&,
                                                std::vector<std::string>*)> callback);
+
+void read_fasta_from_string(const std::string &fasta_flat,
+                            std::function<void(kseq_t*)> callback,
+                            bool with_reverse = false);
 
 #endif // __SEQUENCE_IO__

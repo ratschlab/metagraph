@@ -10,6 +10,10 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "RELEASE")
 endif()
 
+set(JSONCPP_WITH_TESTS FALSE)
+add_subdirectory(
+  external-libraries/jsoncpp
+)
 
 if(NOT CMAKE_DBG_ALPHABET)
   set(CMAKE_DBG_ALPHABET "DNA")
@@ -38,6 +42,8 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     -Wno-unused-function \
     -Wno-old-style-cast \
     -Wno-atomic-alignment \
+    -Wno-unused-parameter \
+    -Wno-extra-semi-stmt \
   ")
 endif()
 
@@ -113,6 +119,7 @@ cmake_policy(SET CMP0015 NEW)
 link_directories(
   ${CMAKE_BINARY_DIR}/KMC
   ${CMAKE_BINARY_DIR}/lib
+  ${CMAKE_BINARY_DIR}/external-libraries/jsoncpp/src/lib_json
   external-libraries/libmaus2/lib
   external-libraries/sdsl-lite/lib
 )
@@ -142,8 +149,14 @@ include_directories(
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/binrel_wt/include
+  external-libraries/jsoncpp/include
   external-libraries/asio/asio/include
+  external-libraries/cpp_progress_bar
   ${INCLUDE_DIRS}
+)
+
+add_library(progress_bar STATIC
+  external-libraries/cpp_progress_bar/progress_bar.cpp
 )
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules")
@@ -187,9 +200,13 @@ set(METALIBS ${METALIBS}
   -lsdsl -ldivsufsort -ldivsufsort64
   -lssl -lcrypto -llzma
   -lbrwt
-  -latomic
+  -ljsoncpp
+  progress_bar
   OpenMP::OpenMP_CXX
 )
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+  set(METALIBS ${METALIBS} -latomic)
+endif()
 
 if(BUILD_STATIC)
   set(CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS} -static)
@@ -274,6 +291,18 @@ target_link_libraries(
   run_experiments metagraph ${METALIBS}
 )
 
+#-------------------
+# install library
+#-------------------
+
+file(GLOB header_files
+  "src/*.hpp"
+  "src/*/*.hpp"
+  "src/*/*/*.hpp"
+)
+
+install(TARGETS metagraph DESTINATION lib)
+install(FILES ${header_files} DESTINATION include/metagraph)
 
 #-------------------
 # Unit Tests
