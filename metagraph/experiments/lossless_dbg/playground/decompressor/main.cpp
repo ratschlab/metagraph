@@ -27,7 +27,7 @@ using json = nlohmann::json;
 #include "dbg_hash.hpp"
 
 
-#include "path_database_baseline_wavelet.hpp"
+#include "path_database_baseline_wavelet_deprecated.hpp"
 #include "samplers.hpp"
 #include "utilities.hpp"
 
@@ -65,7 +65,7 @@ int main(int argc, char *argv[]) {
     cmd.parse(argc, argv);
     auto input_folder = inputArg.getValue();
     auto output_filename = outputArg.getValue();
-    auto db = PathDatabaseBaselineWavelet::deserialize(input_folder);
+    auto db = PathDatabaseBaselineWaveletDeprecated::deserialize(input_folder);
     auto reads = db.decode_all_reads();
     write_reads_to_fasta(reads,output_filename);
 

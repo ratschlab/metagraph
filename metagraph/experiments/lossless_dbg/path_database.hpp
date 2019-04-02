@@ -72,6 +72,8 @@ class PathDatabase {
     // return npos if there is no transition consistent with the history
     virtual node_index get_next_consistent_node(const std::string &history) const = 0;
 
+    virtual void serialize(const fs::path& folder) const = 0;
+
   protected:
     std::shared_ptr<const DeBruijnGraph> graph_;
 

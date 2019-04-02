@@ -27,7 +27,7 @@ using json = nlohmann::json;
 #include "dbg_hash.hpp"
 
 
-#include "path_database_baseline_wavelet.hpp"
+#include "path_database_baseline_wavelet_deprecated.hpp"
 #include "samplers.hpp"
 #include "utilities.hpp"
 
@@ -73,7 +73,7 @@ int main(int argc, char *argv[]) {
     auto input_filename = inputArg.getValue();
     auto statistics_filename = statisticsArg.getValue();
     auto reads = read_reads_from_fasta(input_filename);
-    auto db = PathDatabaseBaselineWavelet(reads);
+    auto db = PathDatabaseBaselineWaveletDeprecated(reads);
     db.encode(reads);
     if (statisticsArg.isSet()) {
         //auto statistics = db.get_statistics();

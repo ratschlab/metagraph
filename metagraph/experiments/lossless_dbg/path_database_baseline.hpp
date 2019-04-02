@@ -189,6 +189,8 @@ public:
 
     PathDatabase::node_index get_next_consistent_node(const std::string &history) const override {};
 
+    void serialize(const fs::path& folder) const {};
+
 protected:
     // denote how many reads are joining from every branch ($ATCGN) ($ denotes start of a new read)
     int encoded_paths = 0;

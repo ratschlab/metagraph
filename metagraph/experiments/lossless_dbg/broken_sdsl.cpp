@@ -14,6 +14,9 @@ using namespace sdsl;
 int main() {
     wt_rlmn<> wt;
     construct_im(wt,"ABCD",1);
+    wt_rlmn<> wt2;
+    int_vector<> vector(5);
+    construct_im(wt2,vector);
 
     return 0;
 }

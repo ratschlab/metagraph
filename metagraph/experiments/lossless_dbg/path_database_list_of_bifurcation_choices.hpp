@@ -186,6 +186,8 @@ class PathDatabaseListBC : public PathDatabase<int> {
         //graph = DBGSuccinct(stupid_old_representation);
     }
 
+    void serialize(const fs::path& folder) const {};
+
 
     std::vector<compressed_read_t> compressed_reads_;
     const int read_length;

@@ -5,44 +5,20 @@
 //  Created by Jan Studený on 21/03/2019.
 //
 
-#ifndef path_database_baseline_wavelet_hpp
-#define path_database_baseline_wavelet_hpp
+#ifndef path_database_baseline_wavelet_deprecated_hpp
+#define path_database_baseline_wavelet_deprecated_hpp
 
 #include "path_database.hpp"
 #include "path_database_baseline.hpp"
+#include "path_database_baseline_wavelet.hpp"
 #include "utils.hpp"
 #include "utilities.hpp"
 #include <iostream>
 #include <set>
 #include <map>
 #include "alphabets.hpp"
-#include <sdsl/wt_rlmn.hpp>
-#include <sdsl/sd_vector.hpp>
 
 
-template<typename POD>
-std::istream &deserialize(std::istream &is, vector<POD> &v) {
-    static_assert(std::is_trivial<POD>::value && std::is_standard_layout<POD>::value,
-                  "Can only deserialize POD types with this function");
-
-    decltype(v.size()) size;
-    is.read(reinterpret_cast<char*>(&size), sizeof(size));
-    v.resize(size);
-    is.read(reinterpret_cast<char*>(v.data()), v.size() * sizeof(POD));
-    return is;
-}
-
-template<typename POD>
-std::ostream &serialize(std::ostream &os, const vector<POD> &v) {
-    // this only works on built in data types (PODs)
-    static_assert(std::is_trivial<POD>::value && std::is_standard_layout<POD>::value,
-                  "Can only serialize POD types with this function");
-
-    auto size = v.size();
-    os.write(reinterpret_cast<char const*>(&size), sizeof(size));
-    os.write(reinterpret_cast<char const*>(v.data()), v.size() * sizeof(POD));
-    return os;
-}
 
 #pragma GCC diagnostic ignored "-Wmissing-noreturn"
 #pragma GCC diagnostic ignored "-Wreturn-type"
@@ -50,40 +26,20 @@ std::ostream &serialize(std::ostream &os, const vector<POD> &v) {
 using namespace std;
 using alphabets::log2;
 
-// todo find a tool that removes this relative namespacing issue
-// say to Mikhail that "de_bruijn_graph" instead of "metagraph/de_bruijn_graph" is the same violation as this
 
-
-using routing_character_t = int;
-const char RoutingTableAlphabet[] = {'$','A','C','G','T','N','#','?'};
-// improvement (constexpr use https://github.com/serge-sans-paille/frozen)
-const map<char,int> RoutingTableInverseAlphabet = {{'$',0},{'A',1},{'C',2},{'G',3},{'T',4},{'N',5},{'#',6},{'?',7}};
-const auto& rte2int = RoutingTableInverseAlphabet;
-
-int operator""_rc(char c) {
-    return RoutingTableInverseAlphabet.at(c);
-}
-int rc(char c) {
-    return RoutingTableInverseAlphabet.at(c);
-}
-
-char tochar(routing_character_t rc) {
-    return RoutingTableAlphabet[rc];
-}
-
-//template <class Wavelet = sdsl::wt_rlmn<sdsl::sd_vector<>>>
-using Wavelet = sdsl::wt_rlmn<>;
-class PathDatabaseBaselineWavelet : public PathDatabaseBaseline {
+class PathDatabaseBaselineWaveletDeprecated : public PathDatabaseBaseline {
 public:
     using routing_table_t = vector<char>;
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
-    PathDatabaseBaselineWavelet(std::shared_ptr<const DeBruijnGraph> graph) : PathDatabaseBaseline(graph)
+    PathDatabaseBaselineWaveletDeprecated(std::shared_ptr<const DeBruijnGraph> graph) : PathDatabaseBaseline(graph),
+                                                                              routing_table(sizeof(RoutingTableAlphabet))
                                                                               {}
 
-    PathDatabaseBaselineWavelet(const vector<string> &raw_reads,
-                                size_t k_kmer = 21 /* default */) : PathDatabaseBaseline(raw_reads,k_kmer)
+    PathDatabaseBaselineWaveletDeprecated(const vector<string> &raw_reads,
+                                size_t k_kmer = 21 /* default */) : PathDatabaseBaseline(raw_reads,k_kmer),
+                                                                    routing_table(sizeof(RoutingTableAlphabet))
                                                                     {}
 
 
@@ -135,14 +91,11 @@ public:
                 }
             }
         }
-        //routing_table_array.push_back('\0'); // end of sequence
-        sdsl::int_vector<0> routing_table_array_encoded(routing_table_array.size());
-        for(int i=0;i<routing_table_array.size();i++) {
-            routing_table_array_encoded[i] = RoutingTableInverseAlphabet.at(routing_table_array[i]);
-        }
-        construct_im(routing_table,routing_table_array,0);
-        //routing_table = Wavelet(routing_table_array_encoded,routing_table_array_encoded.size());
-        //routing_table = Wavelet(&routing_table_array[0],routing_table_array.size());
+        vector<int> routing_table_array_encoded;
+        transform(all(routing_table_array),back_inserter(routing_table_array_encoded),[](char c) {
+            return RoutingTableInverseAlphabet.at(c);}
+            );
+        routing_table = wavelet_tree_stat(sizeof(RoutingTableAlphabet),routing_table_array_encoded);
     }
 
     void construct_edge_multiplicity_table() {
@@ -173,21 +126,21 @@ public:
         int base;
         while(true) {
             if (node_is_split(node)) {
-                auto routing_table_block = routing_table.select( node,'#'_rc)+1;
+                auto routing_table_block = routing_table.select('#'_rc, node)+1;
                 auto absolute_position = routing_table_block+relative_position;
                 base = routing_table[absolute_position];
-                auto occurrences_of_base_before_block = routing_table.rank(routing_table_block,base);
+                auto occurrences_of_base_before_block = routing_table.rank(base,routing_table_block-1);
 
-//                //checkers
+                // checkers
 //                auto& routing_table_naive = splits.at(node);
 //                auto rt_index = routing_table_naive.begin();
 //                advance(rt_index,relative_position);
 //                char base_check = *rt_index;
 //                auto new_relative_position = rank(routing_table_naive,tochar(base),relative_position)-1;
 
-                auto rank_of_base = routing_table.rank(absolute_position,base) - occurrences_of_base_before_block;
+                // -1 as rank is inclusive of the absolute position
+                auto rank_of_base = routing_table.rank(base,absolute_position) - occurrences_of_base_before_block - 1;
 
-//                //checkers
 //                assert(base_check == tochar(base));
 //                assert(rank_of_base == new_relative_position);
 
@@ -240,7 +193,7 @@ public:
     }
 
     bool node_is_split(node_index node) const {
-        auto offset = routing_table.select(node,'#'_rc);
+        auto offset = routing_table.select('#'_rc,node);
         // is not the last element of routing table and next character is not starting of new node
         return routing_table.size() != (offset + 1) and routing_table[offset+1] != '#'_rc;
     }
@@ -271,7 +224,7 @@ public:
         graph.serialize(graph_filename);
     }
 
-    static PathDatabaseBaselineWavelet deserialize(const fs::path& folder) {
+    static PathDatabaseBaselineWaveletDeprecated deserialize(const fs::path& folder) {
         ifstream edge_multiplicity_file(folder / "edge_multiplicity.bin");
         ifstream routing_table_file(folder / "routing_table.bin");
         ifstream joins_file(folder / "joins.bin");
@@ -281,7 +234,7 @@ public:
                 new DBGSuccinct(21)
                 };
         graph->load(graph_filename);
-        auto db = PathDatabaseBaselineWavelet(graph);
+        auto db = PathDatabaseBaselineWaveletDeprecated(graph);
         ::deserialize(edge_multiplicity_file,db.edge_multiplicity_table);
         db.routing_table.load(routing_table_file);
         db.joins.load(joins_file);
@@ -289,7 +242,7 @@ public:
     }
 
 private:
-    Wavelet routing_table;
+    wavelet_tree_stat routing_table;
     bit_vector_stat joins;
     vector<int> edge_multiplicity_table;
 };

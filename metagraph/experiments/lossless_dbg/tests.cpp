@@ -14,6 +14,7 @@
 #include "path_database_list_of_bifurcation_choices.hpp"
 #include "samplers.hpp"
 #include "path_database_baseline.hpp"
+#include "path_database_baseline_wavelet_deprecated.hpp"
 #include "path_database_baseline_wavelet.hpp"
 #include <filesystem>
 using namespace std;
@@ -47,6 +48,15 @@ TEST(SamplerTest,SampleCoverage) {
     auto sequence = "ADFAGADFDS"s;
     auto sampler = Sampler(sequence,generator);
     auto reads = sampler.sample_coverage(sequence.length()/2, 1);
+    ASSERT_EQ(reads.size(), 2);
+}
+TEST(SamplerTest,SubSample) {
+    auto state = stringstream(random_generator_state);
+    auto generator = mt19937();
+    state >> generator;
+    auto sequence = "ADFAGADFDSAFDAGDGDASGDSFADSGDSVBABDFDASFDSAFADAFDSFASDVCZVCXFDAF"s;
+    auto sampler = SubSampler(sequence,10,generator);
+    auto reads = sampler.sample_coverage(5, 1);
     ASSERT_EQ(reads.size(), 2);
 }
 
@@ -117,12 +127,16 @@ TEST(PathDatabase,IdentityTestPathDatabaseBaseline) {
     short_identity_test<PathDatabaseBaseline>();
 }
 
+TEST(PathDatabase,IdentityTestPathDatabaseBaselineWaveletDeprecated) {
+    short_identity_test<PathDatabaseBaselineWaveletDeprecated>();
+}
+
 TEST(PathDatabase,IdentityTestPathDatabaseBaselineWavelet) {
     short_identity_test<PathDatabaseBaselineWavelet>();
 }
 
 TEST(PathDatabase,SerDesTest) {
-    short_serdes_test<PathDatabaseBaselineWavelet>();
+    short_serdes_test<PathDatabaseBaselineWaveletDeprecated>();
 }
 
 #if defined(__linux__) || false
