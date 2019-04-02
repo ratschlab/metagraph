@@ -140,7 +140,7 @@ public:
         for(int i=0;i<routing_table_array.size();i++) {
             routing_table_array_encoded[i] = RoutingTableInverseAlphabet.at(routing_table_array[i]);
         }
-        construct_im(routing_table,routing_table_array,0);
+        construct_im(routing_table,routing_table_array_encoded,0);
         //routing_table = Wavelet(routing_table_array_encoded,routing_table_array_encoded.size());
         //routing_table = Wavelet(&routing_table_array[0],routing_table_array.size());
     }
