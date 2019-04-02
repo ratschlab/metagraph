@@ -9,6 +9,7 @@
 #include "utils.hpp"
 #include "binary_matrix.hpp"
 #include "annotate_row_compressed.hpp"
+#include "vector_row_binmat.hpp"
 
 
 namespace annotate {
@@ -23,11 +24,15 @@ convert<RowFlatAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
 
     ProgressBar progress_bar(num_rows, "Processing rows");
 
+    if (dynamic_cast<VectorRowBinMat*>(annotator.matrix_.get()))
+        dynamic_cast<VectorRowBinMat&>(*annotator.matrix_).standardize_rows();
+
     auto matrix = std::make_unique<RowConcatenated<>>(
         [&](auto callback) {
             utils::call_rows(
-                [&](auto&... params) {
-                    callback(params...);
+                [&](const auto &row) {
+                    assert(std::is_sorted(row.begin(), row.end()));
+                    callback(row);
                     ++progress_bar;
                 },
                 dynamic_cast<const BinaryMatrixRowDynamic &>(*annotator.matrix_)
