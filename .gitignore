@@ -21,5 +21,6 @@ build
 .*.swp
 .ipynb_checkpoints
 *lsf.o*
+*.lsf
 *.pyc
 
