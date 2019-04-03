@@ -349,7 +349,7 @@ void call_rows(const std::function<void(const SetBitPositions &)> &callback,
 }
 
 void call_rows(const std::function<void(const SetBitPositions &)> &callback,
-               const BinaryMatrix &row_major_matrix) {
+               const BinaryMatrixRowDynamic &row_major_matrix) {
     const auto num_rows = row_major_matrix.num_rows();
 
     for (size_t i = 0; i < num_rows; ++i) {

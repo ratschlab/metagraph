@@ -2,8 +2,6 @@
 
 #include "utils.hpp"
 #include "static_annotators_def.hpp"
-#include "annotate_row_compressed.hpp"
-#include "annotation_converters.hpp"
 
 using utils::remove_suffix;
 
@@ -113,32 +111,9 @@ template <class BinaryMatrixType, typename Label>
 bool
 StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::merge_load(const std::vector<std::string> &filenames) {
-    if (filenames.size() > 1) {
-        if (!dynamic_cast<RowConcatenated<>*>(matrix_.get())) {
-            std::cerr << "Error: loading from multiple row annotators is supported"
-                      << " only for the RowConcatenated representation" << std::endl;
-            exit(1);
-        }
-        std::unique_ptr<RowCompressed<> > row_annotator;
-
-        for(auto filename : filenames) {
-            StaticBinRelAnnotator<BinaryMatrixType, Label> orig_annotator;
-            orig_annotator.load(filename);
-
-            if(!row_annotator)
-                row_annotator.reset(new RowCompressed<>(orig_annotator.num_objects()));
-
-            int row = 0;
-            utils::call_rows([&](const std::vector<uint64_t> &v) {
-                VLabels vl;
-                std::for_each(v.begin(), v.end(), [&](uint64_t i) { vl.push_back(orig_annotator.label_encoder_.decode(i)); });
-                row_annotator->set_labels(row++, vl);
-            }, dynamic_cast<const BinaryMatrix &>(*orig_annotator.matrix_));
-        }
-        
-        exit(1);
-        return true;
-    }
+    if (filenames.size() > 1)
+        std::cerr << "Warning: Can't merge static annotators."
+                     " Only the first will be loaded." << std::endl;
 
     std::ifstream instream(remove_suffix(filenames.at(0), kFileExtension)
                                                             + kFileExtension,

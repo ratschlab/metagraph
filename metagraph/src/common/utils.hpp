@@ -29,7 +29,7 @@ struct SmallVectorHash {
     std::size_t operator()(const SmallVector &vector) const;
 };
 
-class BinaryMatrix;
+class BinaryMatrixRowDynamic;
 
 
 namespace utils {
@@ -244,7 +244,7 @@ namespace utils {
     void call_rows(const std::function<void(const SetBitPositions &)> &callback,
                    RowsFromColumnsTransformer&& transformer);
     void call_rows(const std::function<void(const SetBitPositions &)> &callback,
-                   const BinaryMatrix &row_major_matrix);
+                   const BinaryMatrixRowDynamic &row_major_matrix);
 
     template <typename... Args>
     void call_rows(const std::function<void(const SetBitPositions &)> &callback,

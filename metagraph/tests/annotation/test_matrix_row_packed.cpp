@@ -1,10 +1,7 @@
 #include "gtest/gtest.h"
 
 #include "rainbowfish.hpp"
-#include "annotate_row_compressed.hpp"
 #include "annotate_column_compressed.hpp"
-#include "static_annotators_def.hpp"
-#include "annotation_converters.hpp"
 #include "utils.hpp"
 #include "bit_vector.hpp"
 
@@ -204,73 +201,5 @@ TEST(RowPacked, RainbowfishBufferAllSizes) {
                     num_relations++;
             }
         }
-    }
-}
-
-const std::string test_dump_basename_vec_bad = test_dump_basename + "_bad_filename";
-const std::string test_dump_basename_vec_good = test_dump_basename + "_row_flat";
-
-//TEST(RowFlat, MergeLoadDisjoint) {
-//    {
-//        annotate::RowFlatAnnotator annotation;
-//        annotation.set_labels(0, { "Label0", "Label2", "Label8" });
-//        annotation.set_labels(2, { "Label1", "Label2" });
-//        annotation.set_labels(4, { "Label8" });
-//
-//        annotation.serialize(test_dump_basename_vec_good + "_1");
-//    }
-//    {
-//        annotate::RowFlatAnnotator annotation;
-//        annotation.set_labels(1, { "2_Label0", "2_Label2", "2_Label8" });
-//        annotation.set_labels(2, { "2_Label1", "2_Label9", "2_Label0" });
-//        annotation.set_labels(3, { "2_Label8" });
-//
-//        annotation.serialize(test_dump_basename_vec_good + "_2");
-//    }
-//    {
-//        annotate::RowFlatAnnotator annotation;
-//        ASSERT_TRUE(annotation.merge_load({ test_dump_basename_vec_good + "_1",
-//                                            test_dump_basename_vec_good + "_2" }));
-//
-//        EXPECT_EQ(5u, annotation.num_objects());
-//        EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation.get(0)));
-//        EXPECT_EQ(convert_to_set({ "2_Label0", "2_Label2", "2_Label8" }), convert_to_set(annotation.get(1)));
-//        EXPECT_EQ(convert_to_set({ "Label1", "2_Label1", "Label2", "2_Label9", "2_Label0" }),
-//                    convert_to_set(annotation.get(2)));
-//        EXPECT_EQ(convert_to_set({ "2_Label8" }), convert_to_set(annotation.get(3)));
-//        EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation.get(4)));
-//    }
-//}
-
-TEST(RowFlat, MergeLoad) {
-    {
-        annotate::ColumnCompressed<> column_annotator(5);
-        column_annotator.add_labels(0, {"Label0", "Label2", "Label8"});
-        column_annotator.add_labels(2, {"Label1", "Label2"});
-        column_annotator.add_labels(4, {"Label8"});
-
-        auto annotation = annotate::convert<annotate::RowFlatAnnotator>(std::move(column_annotator));
-        annotation->serialize(test_dump_basename_vec_good + "_1");
-    }
-    {
-        annotate::ColumnCompressed<> column_annotator(5);
-        column_annotator.set_labels(1, { "Label0", "Label2", "Label8" });
-        column_annotator.set_labels(2, { "Label1", "Label9", "Label0" });
-        column_annotator.set_labels(3, { "Label8" });
-
-        auto annotation = annotate::convert<annotate::RowFlatAnnotator>(std::move(column_annotator));
-        annotation->serialize(test_dump_basename_vec_good + "_2");
-    }
-    {
-        annotate::RowFlatAnnotator annotation;
-        ASSERT_TRUE(annotation.merge_load({ test_dump_basename_vec_good + "_1",
-                                            test_dump_basename_vec_good + "_2" }));
-
-        EXPECT_EQ(5u, annotation.num_objects());
-        EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation.get(0)));
-        EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation.get(1)));
-        EXPECT_EQ(convert_to_set({ "Label1", "Label2", "Label9", "Label0" }), convert_to_set(annotation.get(2)));
-        EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation.get(3)));
-        EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation.get(4)));
     }
 }
