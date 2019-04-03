@@ -136,13 +136,18 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
         //}
 
         // iterate all rows
-        for(uint64_t row = 0; row < orig_annotator.num_objects(); ++row) {
-            std::cout << "row: " << row << std::endl;
-            VLabels labels = orig_annotator.get_labels(row);
-            row_annotator.set_labels(row, labels);
-            std::cout << "set_labels | row: " << row << std::endl;
-            std::for_each(labels.begin(), labels.end(), [](std::string s){std::cout << s << std::endl; });
-        }
+        //for(uint64_t row = 0; row < orig_annotator.num_objects(); ++row) {
+        //    std::cout << "row: " << row << std::endl;
+        //    VLabels labels = orig_annotator.get_labels(row);
+        //    row_annotator.set_labels(row, labels);
+        //    std::cout << "set_labels | row: " << row << std::endl;
+        //    std::for_each(labels.begin(), labels.end(), [](std::string s){std::cout << s << std::endl; });
+        //}
+
+        utils::call_rows([](const std::vector<uint64_t> &v) {
+            std::for_each(v.begin(), v.end(), [](uint64_t i) { std::cout << i << std::endl; });
+        }, dynamic_cast<const BinaryMatrix &>(*orig_annotator.matrix_));
+        exit(1);
 
         // print non-empty rows from testcase
         std::cout << "-----" << std::endl;

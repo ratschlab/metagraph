@@ -23,4 +23,5 @@ metagraph/build*
 *lsf.o*
 *.lsf
 *.pyc
-
+*.un~
+tags
