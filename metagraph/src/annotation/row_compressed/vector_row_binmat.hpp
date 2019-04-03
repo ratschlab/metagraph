@@ -29,6 +29,9 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
     void force_set(Row row, Column column);
     void clear_row(Row row);
 
+    // sort all indexes in rows and leave only distinct ones
+    void standardize_rows();
+
     void insert_rows(const std::vector<Row> &rows);
 
     bool load(std::istream &in);

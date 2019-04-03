@@ -26,6 +26,15 @@ void VectorRowBinMat::force_set(Row row, Column column) {
         num_columns_ = column + 1;
 }
 
+void VectorRowBinMat::standardize_rows() {
+    #pragma omp parallel for num_threads(utils::get_num_threads())
+    for (size_t i = 0; i < vector_.size(); ++i) {
+        std::sort(vector_[i].begin(), vector_[i].end());
+        vector_[i].erase(std::unique(vector_[i].begin(), vector_[i].end()),
+                         vector_[i].end());
+    }
+}
+
 std::vector<VectorRowBinMat::Column>
 VectorRowBinMat::get_row(Row row) const {
     assert(row < vector_.size());

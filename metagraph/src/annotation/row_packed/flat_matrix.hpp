@@ -7,6 +7,8 @@
 #include "bit_vector.hpp"
 
 
+// TODO: fix this and make consistent with other annotators
+// (Empty annotatino can have multiple objects)
 template <typename BitVector = bit_vector_sd>
 class RowConcatenated : public BinaryMatrix {
   public:
