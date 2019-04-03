@@ -26,6 +26,8 @@ class BinaryMatrix {
 
     // number of ones in the matrix
     virtual uint64_t num_relations() const = 0;
+    void dump() {};
+    uint64_t select1([[maybe_unused]] uint64_t i) { return 0; };
 };
 
 

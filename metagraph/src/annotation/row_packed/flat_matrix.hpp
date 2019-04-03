@@ -31,6 +31,17 @@ class RowConcatenated : public BinaryMatrix {
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
 
+    uint64_t select1(uint64_t i) {
+        return compressed_rows_->select1(i);
+    }
+    void dump() {
+        for(uint64_t i = 1; i <= compressed_rows_->num_set_bits(); i++) {
+            uint64_t idx = compressed_rows_->select1(i);
+            std::cout << idx << std::endl;
+            assert(get(idx/num_columns(), idx%num_columns()));
+        }
+    }
+
     // number of ones in the matrix
     uint64_t num_relations() const { return compressed_rows_->num_set_bits(); }
 
