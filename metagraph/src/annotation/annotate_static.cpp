@@ -114,67 +114,30 @@ bool
 StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::merge_load(const std::vector<std::string> &filenames) {
     if (filenames.size() > 1) {
-        StaticBinRelAnnotator<BinaryMatrixType, Label> orig_annotator;
+        if (!dynamic_cast<RowConcatenated<>*>(matrix_.get())) {
+            std::cerr << "Error: loading from multiple row annotators is supported"
+                      << " only for the RowConcatenated representation" << std::endl;
+            exit(1);
+        }
+        std::unique_ptr<RowCompressed<> > row_annotator;
 
-        // convert just 1 file for now
-        orig_annotator.load({filenames.at(1)});
-        //orig_annotator.get_matrix()->dump();
+        for(auto filename : filenames) {
+            StaticBinRelAnnotator<BinaryMatrixType, Label> orig_annotator;
+            orig_annotator.load(filename);
 
-        // would merge all into this dynamic annotator, but how to deal with num rows?
-        RowCompressed<> row_annotator(orig_annotator.num_objects());
+            if(!row_annotator)
+                row_annotator.reset(new RowCompressed<>(orig_annotator.num_objects()));
 
-        // skip rows with no labels
-        //for(uint64_t i = 1; i <= orig_annotator.num_relations(); ) {
-        //    uint64_t idx = orig_annotator.get_matrix()->select1(i);
-        //    uint64_t row = idx/orig_annotator.num_labels();
-        //    std::cout << "row: " << row << ", i: " << i << ", idx: " << idx << std::endl;
-        //    VLabels labels = orig_annotator.get_labels(row);
-        //    row_annotator.set_labels(row, labels);
-        //    std::cout << "set_labels | row: " << row << std::endl;
-        //    std::for_each(labels.begin(), labels.end(), [](std::string s){std::cout << s << std::endl; });
-        //    i += labels.size();
-        //}
-
-        // iterate all rows
-        //for(uint64_t row = 0; row < orig_annotator.num_objects(); ++row) {
-        //    std::cout << "row: " << row << std::endl;
-        //    VLabels labels = orig_annotator.get_labels(row);
-        //    row_annotator.set_labels(row, labels);
-        //    std::cout << "set_labels | row: " << row << std::endl;
-        //    std::for_each(labels.begin(), labels.end(), [](std::string s){std::cout << s << std::endl; });
-        //}
-
-        utils::call_rows([](const std::vector<uint64_t> &v) {
-            std::for_each(v.begin(), v.end(), [](uint64_t i) { std::cout << i << std::endl; });
-        }, dynamic_cast<const BinaryMatrix &>(*orig_annotator.matrix_));
+            int row = 0;
+            utils::call_rows([&](const std::vector<uint64_t> &v) {
+                VLabels vl;
+                std::for_each(v.begin(), v.end(), [&](uint64_t i) { vl.push_back(orig_annotator.label_encoder_.decode(i)); });
+                row_annotator->set_labels(row++, vl);
+            }, dynamic_cast<const BinaryMatrix &>(*orig_annotator.matrix_));
+        }
+        
         exit(1);
-
-        // print non-empty rows from testcase
-        std::cout << "-----" << std::endl;
-        VLabels row = row_annotator.get(1);
-        std::for_each(row.begin(), row.end(), [](std::string s){std::cout << s << std::endl;});
-        std::cout << "," << std::endl;
-        row = row_annotator.get(2);
-        std::for_each(row.begin(), row.end(), [](std::string s){std::cout << s << std::endl;});
-        std::cout << "," << std::endl;
-        row = row_annotator.get(3);
-        std::for_each(row.begin(), row.end(), [](std::string s){std::cout << s << std::endl;});
-        std::cout << "---convert---" << std::endl;
-
-        // convert to rowflat (generalizing to BinaryMatrixType produces linker error)
-        auto static_annotator = annotate::convert<annotate::RowFlatAnnotator>(std::move(row_annotator));
-        // print same rows as above
-        row = static_annotator->get_labels(1);
-        std::for_each(row.begin(), row.end(), [](std::string s){std::cout << s << std::endl;});
-        std::cout << "," << std::endl;
-        row = static_annotator->get_labels(2);
-        std::for_each(row.begin(), row.end(), [](std::string s){std::cout << s << std::endl;});
-        std::cout << "," << std::endl;
-        row = static_annotator->get_labels(3);
-        std::for_each(row.begin(), row.end(), [](std::string s){std::cout << s << std::endl;});
-        exit(1);
-        std::cerr << "Warning: Can't merge static annotators."
-                     " Only the first will be loaded." << std::endl;
+        return true;
     }
 
     std::ifstream instream(remove_suffix(filenames.at(0), kFileExtension)

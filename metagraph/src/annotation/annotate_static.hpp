@@ -42,9 +42,9 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
 
     const BinaryMatrixType& data() const { return *matrix_; }
 
-    BinaryMatrixType* get_matrix() {
-        return matrix_.get();
-    }
+    //BinaryMatrixType* get_matrix() {
+    //    return matrix_.get();
+    //}
 
   private:
     std::vector<uint64_t> count_labels(const std::vector<Index> &indices) const override;
