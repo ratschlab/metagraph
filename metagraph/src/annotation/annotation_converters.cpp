@@ -35,7 +35,7 @@ convert<RowFlatAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
                     callback(row);
                     ++progress_bar;
                 },
-                dynamic_cast<const BinaryMatrixRowDynamic &>(*annotator.matrix_)
+                dynamic_cast<const BinaryMatrix &>(*annotator.matrix_)
             );
         },
         num_columns,
@@ -53,7 +53,7 @@ convert<RainbowfishAnnotator, std::string>(RowCompressed<std::string>&& annotato
     uint64_t num_columns = annotator.num_labels();
 
     auto matrix = std::make_unique<Rainbowfish>([&](auto callback) {
-        utils::call_rows(callback, dynamic_cast<const BinaryMatrixRowDynamic &>(*annotator.matrix_));
+        utils::call_rows(callback, dynamic_cast<const BinaryMatrix &>(*annotator.matrix_));
     }, num_columns);
 
     return std::make_unique<RainbowfishAnnotator>(std::move(matrix),
@@ -68,7 +68,7 @@ convert<BinRelWT_sdslAnnotator, std::string>(RowCompressed<std::string>&& annota
 
     auto matrix = std::make_unique<BinRelWT_sdsl>(
         [&](auto callback) {
-            utils::call_rows(callback, dynamic_cast<const BinaryMatrixRowDynamic &>(*annotator.matrix_));
+            utils::call_rows(callback, dynamic_cast<const BinaryMatrix &>(*annotator.matrix_));
         },
         num_set_bits,
         num_columns
@@ -86,7 +86,7 @@ convert<BinRelWTAnnotator, std::string>(RowCompressed<std::string>&& annotator) 
 
     auto matrix = std::make_unique<BinRelWT>(
         [&](auto callback) {
-            utils::call_rows(callback, dynamic_cast<const BinaryMatrixRowDynamic &>(*annotator.matrix_));
+            utils::call_rows(callback, dynamic_cast<const BinaryMatrix &>(*annotator.matrix_));
         },
         num_set_bits,
         num_columns
