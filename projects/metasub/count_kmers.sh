@@ -28,5 +28,5 @@ fi
 
 #filename="$(basename $FILE)"
 mkdir -p "/scratch/$SAMPLE.cache"
-/usr/bin/time -v $KMC -k$K -m10 -ci$cutoff -fq -t$num_threads "@"$FILES $OUT/$SAMPLE /scratch/$SAMPLE.cache
+/usr/bin/time -v $KMC -k$K -m10 -ci$cutoff -fq -t$num_threads "@"$FILES $OUT/${SAMPLE}.k${K} /scratch/$SAMPLE.cache
 rm -r "/scratch/$SAMPLE.cache"
