@@ -7,7 +7,7 @@ mem=32000
 threads=4
 pmem=$(($mem / $threads))
 
-outdir=/cluster/work/grlab/projects/metagenome/results/metasub_wasabi/output_k${K}
+outdir=/cluster/work/grlab/projects/metagenome/data/metasub/kmc_counts/output_k${K}
 mkdir -p $outdir
 fnames_dir=${outdir}/fnames_kmc
 mkdir -p $fnames_dir
