@@ -4,17 +4,17 @@
 #include <random>
 
 #include "bounded_priority_queue.hpp"
+#include "ssw_cpp.h"
 
 DBGAligner::DBGAligner(DeBruijnGraph *dbg, Annotator *annotation,
                        size_t num_threads, size_t search_space_size,
-                       float path_loss_weak_threshold,
-                       float insertion_penalty, float deletion_penalty, size_t max_sw_table_size) :
+                       float path_loss_sub_threshold,
+                       float insertion_penalty, float deletion_penalty) :
                             AnnotatedDBG(dbg, annotation, num_threads),
                             search_space_size_(search_space_size),
-                            path_loss_weak_threshold_(path_loss_weak_threshold),
+                            path_loss_sub_threshold_(path_loss_sub_threshold),
                             insertion_penalty_(insertion_penalty),
-                            deletion_penalty_(deletion_penalty),
-                            max_sw_table_size_(max_sw_table_size) {
+                            deletion_penalty_(deletion_penalty) {
     // Substitution loss for each pair of nucleotides.
     // Transition and transversion mutations have different loss values.
     sub_loss_ = {
@@ -53,12 +53,8 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
                     [&](node_index node, std::string::const_iterator last_mapped_position) {
                         AlignedPath alternative_path(path);
                         alternative_path.set_sequence_it(last_mapped_position);
-                        size_t sw_table_size = (alternative_path.size() + graph_->get_k() - 1)
-                                               * (alternative_path.get_sequence_it() - std::begin(sequence));
-                        // If the loss is less than the threshold or the Smith-Waterman table size is too large,
-                        // continue with single char loss computation.
-                        if (alternative_path.get_total_loss() < path_loss_weak_threshold_
-                            || sw_table_size > max_sw_table_size_) {
+                        // If the loss is less than the threshold continue with single char loss computation.
+                        if (alternative_path.get_total_loss() < path_loss_sub_threshold_ * path.size()) {
                             // TODO: Construct sequence last char more efficiently.
                             alternative_path.push_back(node, annotator_->get(node),
                                 single_char_loss(*(alternative_path.get_sequence_it() +
@@ -94,6 +90,34 @@ float DBGAligner::single_char_loss(char char_in_query, char char_in_graph) const
     catch (const std::out_of_range&) {
         return sub_loss_.at('$').at('$');
     }
+}
+
+namespace {
+// helper function to pring and alignment based on SSW library.
+static void PrintAlignment(const StripedSmithWaterman::Alignment& alignment){
+    std::cout << "===== SSW result =====" << std::endl;
+    std::cout << "Best Smith-Waterman score:\t" << alignment.sw_score << std::endl
+       << "Next-best Smith-Waterman score:\t" << alignment.sw_score_next_best << std::endl
+       << "Number of mismatches:\t" << alignment.mismatches << std::endl
+       << "Cigar: " << alignment.cigar_string << std::endl;
+    std::cout << "======================" << std::endl;
+}
+
+}  // namespace
+
+float DBGAligner::ssw_loss(const AlignedPath& path, std::string::const_iterator begin) const {
+    auto ref = get_path_sequence(path.get_nodes());
+    std::string query(begin, path.get_sequence_it() + graph_->get_k() - 1);
+
+    int32_t maskLen = strlen(query.c_str())/2;
+    maskLen = maskLen < 15 ? 15 : maskLen;
+    StripedSmithWaterman::Aligner aligner;
+    StripedSmithWaterman::Filter filter;
+    StripedSmithWaterman::Alignment alignment;
+
+    aligner.Align(query.c_str(), ref.c_str(), ref.size(), filter, &alignment, maskLen);
+    PrintAlignment(alignment);
+    return alignment.sw_score;
 }
 
 float DBGAligner::whole_path_loss(const AlignedPath& path, std::string::const_iterator begin) const {

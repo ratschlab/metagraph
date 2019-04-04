@@ -34,10 +34,9 @@ class DBGAligner : public AnnotatedDBG {
                Annotator *annotation,
                size_t num_threads = 0,
                size_t search_space_size = 10,
-               float path_loss_weak_threshold = 100,
+               float path_loss_sub_threshold = 0.1,
                float insertion_penalty = 3,
-               float deletion_penalty = 3,
-               size_t max_sw_table_size = 1000*1000);
+               float deletion_penalty = 3);
 
     DBGAligner(const DBGAligner&) = default;
     DBGAligner(DBGAligner&&) = default;
@@ -51,15 +50,13 @@ class DBGAligner : public AnnotatedDBG {
     std::string get_path_sequence(const std::vector<node_index>& path) const;
 
   private:
-    // Substitution loss for each pair of nucleotides. Transition and transversion mutations
-    // have different loss values.
-    std::map<char, std::map<char, int>> sub_loss_;
+    // Substitution loss for each pair of nucleotides.
+    std::map<char, std::map<char, uint16_t>> sub_loss_;
     // Maximum number of paths to explore at the same time.
     size_t search_space_size_;
-    float path_loss_weak_threshold_;
-    float insertion_penalty_;
-    float deletion_penalty_;
-    size_t max_sw_table_size_;
+    uint64_t path_loss_sub_threshold_;
+    uint16_t insertion_penalty_;
+    uint16_t deletion_penalty_;
 
     // Align part of a sequence to the graph in the case of no exact map
     // based on internal strategy. Calls callback for every possible alternative path.
@@ -82,6 +79,9 @@ class DBGAligner : public AnnotatedDBG {
     // according to loss parameters in this class.
     float whole_path_loss(const AlignedPath& path, std::string::const_iterator begin) const;
 
+    // Compute the distance between the query sequence and the aligned path sequence
+    // according to the CSSW library.
+    float ssw_loss(const AlignedPath& path, std::string::const_iterator begin) const;
 };
 
 #endif // __DBG_ALIGNER_HPP__
