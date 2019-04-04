@@ -94,6 +94,30 @@ if(result)
   message(FATAL_ERROR "Build step for KMC failed: ${result}")
 endif()
 
+#-----------------------
+# Smith Waterman Library
+#-----------------------
+set(SSW_MAIN_DIR "${PROJECT_SOURCE_DIR}/external-libraries/Complete-Striped-Smith-Waterman-Library/src")
+if(NOT DEFINED BUILD_SSW)
+  set(BUILD_SSW TRUE)
+endif()
+configure_file(CMakeListsSSW.txt.in SSW/CMakeLists.txt @ONLY)
+execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
+  RESULT_VARIABLE result
+  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/SSW
+)
+if(result)
+  message(FATAL_ERROR "CMake step for SSW failed: ${result}")
+endif()
+execute_process(COMMAND ${CMAKE_COMMAND} --build . --config Release -- -j
+  RESULT_VARIABLE result
+  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/SSW
+)
+if(result)
+  message(FATAL_ERROR "Build step for SSW failed: ${result}")
+endif()
+
+#---------------------
 
 # Profile build type
 set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O3 -g")
@@ -129,6 +153,7 @@ link_directories(
   ${CMAKE_BINARY_DIR}/external-libraries/jsoncpp/src/lib_json
   external-libraries/libmaus2/lib
   external-libraries/sdsl-lite/lib
+  ${CMAKE_BINARY_DIR}/SSW
 )
 
 MACRO(SUBDIRLIST result curdir)
@@ -159,6 +184,7 @@ include_directories(
   external-libraries/jsoncpp/include
   external-libraries/asio/asio/include
   external-libraries/cpp_progress_bar
+  external-libraries/Complete-Striped-Smith-Waterman-Library/src
   ${INCLUDE_DIRS}
 )
 
@@ -232,6 +258,8 @@ set(METALIBS ${METALIBS}
   -lbrwt
   -ljsoncpp
   progress_bar
+  -lSSWlib
+  OpenMP::OpenMP_CXX
 )
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   set(METALIBS ${METALIBS} -latomic)

@@ -2368,15 +2368,13 @@ int main(int argc, const char *argv[]) {
                       << dbg_succinct_graph->get_k() << std::endl;
 
             // TODO: Find the best annotator type and set it.
-            DBGAligner aligner(graph.get());
+            DBGAligner aligner(graph.get(), config->alignment_num_top_paths,
+                               config->alignment_sw_threshold, config->verbose);
             Timer timer;
             for (const auto &file : files) {
                 std::cout << "Align sequences from file " << file << std::endl;
                 // TODO: Get the file name from config.
-                auto alignment_output_file = file.substr(file.rfind("/") + 1,
-                                                         file.rfind(".fast")
-                                                         - (file.rfind("/") + 1))
-                                             + ".sam";
+                auto alignment_output_file = config->outfbase;
                 std::ofstream outstream(alignment_output_file);
                 if (!outstream.is_open()) {
                     std::cout << "Error: Cannot open file " << alignment_output_file << std::endl;
@@ -2392,13 +2390,13 @@ int main(int argc, const char *argv[]) {
                                   << "sec, current mem usage: "
                                   << get_curr_RSS() / (1 << 20) << " MiB"
                                   << std::endl;
-                        std::cout << "Query " << std::string(read_stream->seq.s)
-                                  << " is aligned with " << aligner.get_path_sequence(path.get_nodes())
+                        std::cout << "Q: " << std::string(read_stream->seq.s) << std::endl
+                                  << "P: " << aligner.get_path_sequence(path.get_nodes())
                                   << std::endl;
                     }
-                    outstream << "Query" << std::endl << std::string(read_stream->seq.s) << std::endl
-                              << "Aligned path" << std::endl << aligner.get_path_sequence(path.get_nodes())
-                              << std::endl << "With total score " << path.get_total_loss() << std::endl;
+                    outstream << "Q: " << std::string(read_stream->seq.s) << std::endl
+                              << "P: " << aligner.get_path_sequence(path.get_nodes())
+                              << std::endl << "With total loss " << path.get_total_loss() << std::endl;
                 }, config->reverse,
                     get_filter_filename(file, config->filter_k,
                                         config->min_count - 1,

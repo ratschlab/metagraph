@@ -50,6 +50,7 @@ class Config {
     unsigned int suffix_len = 0;
     unsigned int frequency = 1;
     unsigned int alignment_length = 0;
+    unsigned int alignment_num_top_paths = 10;
     unsigned int memory_available = 0;
     unsigned int min_count = 1;
     unsigned int max_count = std::numeric_limits<unsigned int>::max();
@@ -64,6 +65,7 @@ class Config {
 
     double discovery_fraction = 1.0;
     double label_mask_out_fraction = 0.0;
+    double alignment_sw_threshold = 0.1;
 
     std::vector<std::string> fname;
     std::vector<std::string> anno_labels;

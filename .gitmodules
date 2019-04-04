@@ -43,3 +43,6 @@
 [submodule "metagraph/external-libraries/cpp_progress_bar"]
 	path = metagraph/external-libraries/cpp_progress_bar
 	url = https://github.com/karasikov/cpp_progress_bar
+[submodule "metagraph/external-libraries/Complete-Striped-Smith-Waterman-Library"]
+	path = metagraph/external-libraries/Complete-Striped-Smith-Waterman-Library
+	url = git@github.com:mengyao/Complete-Striped-Smith-Waterman-Library.git

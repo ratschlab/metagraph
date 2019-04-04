@@ -32,11 +32,11 @@ class DBGAligner {
     };
 
     DBGAligner(DeBruijnGraph *graph,
-               size_t search_space_size = 10,
-               float path_loss_weak_threshold = 100,
+               size_t num_top_paths = 10,
+               float sw_threshold = 0.1,
+               bool verbose = false,
                float insertion_penalty = 3,
-               float deletion_penalty = 3,
-               size_t max_sw_table_size = 1000*1000);
+               float deletion_penalty = 3);
 
     DBGAligner() = delete;
     DBGAligner(const DBGAligner&) = default;
@@ -52,15 +52,14 @@ class DBGAligner {
 
   private:
     std::shared_ptr<DeBruijnGraph> graph_;
-    // Substitution loss for each pair of nucleotides. Transition and transversion mutations
-    // have different loss values.
-    std::map<char, std::map<char, int>> sub_loss_;
+    // Substitution loss for each pair of nucleotides.
+    std::map<char, std::map<char, uint16_t>> sub_loss_;
     // Maximum number of paths to explore at the same time.
-    size_t search_space_size_;
-    float path_loss_weak_threshold_;
-    float insertion_penalty_;
-    float deletion_penalty_;
-    size_t max_sw_table_size_;
+    size_t num_top_paths_;
+    uint64_t sw_threshold_;
+    bool verbose_;
+    uint16_t insertion_penalty_;
+    uint16_t deletion_penalty_;
 
     // Align part of a sequence to the graph in the case of no exact map
     // based on internal strategy. Calls callback for every possible alternative path.
@@ -83,6 +82,9 @@ class DBGAligner {
     // according to loss parameters in this class.
     float whole_path_loss(const AlignedPath& path, std::string::const_iterator begin) const;
 
+    // Compute the distance between the query sequence and the aligned path sequence
+    // according to the CSSW library.
+    float ssw_loss(const AlignedPath& path, std::string::const_iterator begin) const;
 };
 
 #endif // __DBG_ALIGNER_HPP__

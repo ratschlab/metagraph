@@ -4,17 +4,15 @@
 #include <random>
 
 #include "bounded_priority_queue.hpp"
+#include "ssw_cpp.h"
 
-DBGAligner::DBGAligner(DeBruijnGraph *graph,
-                       size_t search_space_size,
-                       float path_loss_weak_threshold,
-                       float insertion_penalty, float deletion_penalty,
-                       size_t max_sw_table_size) : graph_(graph),
-                            search_space_size_(search_space_size),
-                            path_loss_weak_threshold_(path_loss_weak_threshold),
+DBGAligner::DBGAligner(DeBruijnGraph *graph, size_t num_top_paths,
+                       float sw_threshold, bool verbose,
+                       float insertion_penalty, float deletion_penalty) :
+                            graph_(graph), num_top_paths_(num_top_paths),
+                            sw_threshold_(sw_threshold), verbose_(verbose),
                             insertion_penalty_(insertion_penalty),
-                            deletion_penalty_(deletion_penalty),
-                            max_sw_table_size_(max_sw_table_size) {
+                            deletion_penalty_(deletion_penalty) {
     // Substitution loss for each pair of nucleotides.
     // Transition and transversion mutations have different loss values.
     sub_loss_ = {
@@ -25,12 +23,24 @@ DBGAligner::DBGAligner(DeBruijnGraph *graph,
         {'$', {{'$', 2}}}};
 }
 
+namespace {
+
+template <typename T>
+float std_dev (const std::vector<T>& list, T mean) {
+    float std_dev = 0;
+    for (auto it = list.begin(); it != list.end(); ++it)
+        std_dev += std::pow((*it) - mean, 2.0);
+    return std::pow(std_dev / list.size(), 0.5);
+}
+
+}  // namespace
+
 DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
     if (sequence.size() < graph_->get_k())
         return AlignedPath(sequence.end());
 
     std::map<DPAlignmentKey, DPAlignmentValue> dp_alignment;
-    BoundedPriorityQueue<AlignedPath> queue(search_space_size_);
+    BoundedPriorityQueue<AlignedPath> queue(num_top_paths_);
     queue.push(std::move(AlignedPath(std::begin(sequence))));
     while (!queue.empty()) {
         auto path = std::move(queue.top());
@@ -41,7 +51,10 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
         node_index seed = path.size() > 0 ? path.back() : graph_->npos;
         graph_->extend_from_seed(path.get_sequence_it(), std::end(sequence),
                                        [&](node_index node) {
-                                            path.push_back(node, {});},
+                                        // TODO: Check if this is necessary.
+                                        if (node != graph_->npos)
+                                            path.push_back(node, {});
+                                        },
                                        [&]() { return (path.size() > 0 &&
                                                 (graph_->outdegree(path.back()) > 1)); },
                                        seed);
@@ -53,12 +66,8 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
                     [&](node_index node, std::string::const_iterator last_mapped_position) {
                         AlignedPath alternative_path(path);
                         alternative_path.set_sequence_it(last_mapped_position);
-                        size_t sw_table_size = (alternative_path.size() + graph_->get_k() - 1)
-                                               * (alternative_path.get_sequence_it() - std::begin(sequence));
-                        // If the loss is less than the threshold or the Smith-Waterman table size is too large,
-                        // continue with single char loss computation.
-                        if (alternative_path.get_total_loss() < path_loss_weak_threshold_
-                            || sw_table_size > max_sw_table_size_) {
+                        // If the loss is less than the threshold continue with single char loss computation.
+                        if (alternative_path.get_total_loss() < sw_threshold_ * sequence.size()) {
                             // TODO: Construct sequence last char more efficiently.
                             alternative_path.push_back(node, {},
                                 single_char_loss(*(alternative_path.get_sequence_it() +
@@ -84,6 +93,20 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
                         }
                         });
 
+        if (verbose_ && path.size() % 50 == 0) {
+            auto shadow_queue(queue);
+            std::cout << "Loss mean and std of paths (top path size: "
+                      << path.size() << "): ";
+            std::vector<float> loss_values;
+            loss_values.reserve(queue.size());
+            while (!shadow_queue.empty()) {
+                loss_values.push_back(shadow_queue.top().get_total_loss());
+                shadow_queue.pop();
+            }
+            float mean = std::accumulate(loss_values.begin(), loss_values.end(), 0);
+            mean /= loss_values.size();
+            std::cout << mean << ", " << std_dev<float>(loss_values, mean) << std::endl;
+        }
     }
     return AlignedPath(sequence.end());
 }
@@ -95,6 +118,36 @@ float DBGAligner::single_char_loss(char char_in_query, char char_in_graph) const
     catch (const std::out_of_range&) {
         return sub_loss_.at('$').at('$');
     }
+}
+
+namespace {
+// helper function to print an alignment based on SSW library.
+static void PrintAlignment(const StripedSmithWaterman::Alignment& alignment){
+    std::cout << "===== SSW result =====" << std::endl;
+    std::cout << "Best Smith-Waterman score:\t" << alignment.sw_score << std::endl
+       << "Next-best Smith-Waterman score:\t" << alignment.sw_score_next_best << std::endl
+       << "Number of mismatches:\t" << alignment.mismatches << std::endl
+       << "Cigar: " << alignment.cigar_string << std::endl;
+    std::cout << "======================" << std::endl;
+}
+
+}  // namespace
+
+float DBGAligner::ssw_loss(const AlignedPath& path, std::string::const_iterator begin) const {
+    auto ref = get_path_sequence(path.get_nodes());
+    std::string query(begin, path.get_sequence_it() + graph_->get_k() - 1);
+
+    int32_t maskLen = strlen(query.c_str())/2;
+    maskLen = maskLen < 15 ? 15 : maskLen;
+    StripedSmithWaterman::Aligner aligner;
+    StripedSmithWaterman::Filter filter;
+    StripedSmithWaterman::Alignment alignment;
+
+    aligner.Align(query.c_str(), ref.c_str(), ref.size(), filter, &alignment, maskLen);
+    if (verbose_) {
+        PrintAlignment(alignment);
+    }
+    return alignment.sw_score;
 }
 
 float DBGAligner::whole_path_loss(const AlignedPath& path, std::string::const_iterator begin) const {
