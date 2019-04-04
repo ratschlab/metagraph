@@ -9,7 +9,7 @@ string(APPEND CMAKE_CXX_FLAGS " \
 ")
 elseif(UNIX)
 string(APPEND CMAKE_CXX_FLAGS " \
-    -pipe -Wall -O3 -m64 -Wl -std=c++11 \
+    -pipe -Wall -O3 -m64 -std=c++11 \
 ")
 endif()
 

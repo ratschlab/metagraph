@@ -41,7 +41,10 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
         node_index seed = path.size() > 0 ? path.back() : graph_->npos;
         graph_->extend_from_seed(path.get_sequence_it(), std::end(sequence),
                                        [&](node_index node) {
-                                            path.push_back(node, annotator_->get(node));},
+                                        // TODO: Check if this is necessary.
+                                        if (node != graph_->npos)
+                                            path.push_back(node, annotator_->get(node));
+                                        },
                                        [&]() { return (path.size() > 0 &&
                                                 (graph_->outdegree(path.back()) > 1)); },
                                        seed);
