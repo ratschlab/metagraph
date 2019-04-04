@@ -3,11 +3,14 @@
 
 ### Count k-mers with KMC
 
-TODO:
+Count all k-mers using KMC3. 
 ```bash
-TODO
+bash run_count_kmers.sh
 ```
-
+This will invoke
+```bash
+count_kmers.sh
+```
 
 Create a list of all kmc dumps
 ```bash
@@ -15,8 +18,10 @@ cat -1S ~/big_graph/metasub_wasabi/*.kmc_suf > metasub_kmc.txt
 ```
 
 ### Build graphs from KMC
-
-TODO
+Generate a graph from each kmc file:
+```bash
+bash run_kmc_to_graphs_array.sh
+```
 
 ### Extract contigs from single graphs
 
@@ -32,24 +37,27 @@ bsub -J contigs_k15[1-4173]%600 \
 ```
 
 ### Build graph
-````bash
+```bash
 $METAGRAPH build --canonical --complete --graph bitmap \
     -o graph_17_complete_canonical.bitmapdbg -k 17
-````
+```
 
-````bash
+```bash
 $METAGRAPH build --canonical --complete --graph bitmap \
     -o graph_15_complete_canonical.bitmapdbg -k 15
-````
+```
 
 ### Build annotation
 
 #### Construct columns
-TODO
+Generate an annotation columns for all contigs of a sample
+```bash
+bash run_annotate_contigs.sh
+```
 
 #### Transform to BRWT
 
-````bash
+```bash
 bsub -J convert_metasub_to_brwt_pm \
     -o conversion_to_brwt_f2_k13.lsf \
     -W 150:00 -n 30 -R "rusage[mem=10000] span[hosts=1]" \
@@ -58,9 +66,9 @@ bsub -J convert_metasub_to_brwt_pm \
         --anno-type brwt --greedy \
         ~/big_graph/metasub_wasabi_graph_anno.k13.f2.column.annodbg \
         2>&1"
-````
+```
 
-````bash
+```bash
 bsub -J convert_metasub_to_brwt_pm \
     -oo conversion_to_brwt.lsf \
     -W 150:00 -n 30 -R "rusage[mem=19000] span[hosts=1]" \
@@ -69,7 +77,7 @@ bsub -J convert_metasub_to_brwt_pm \
         --anno-type brwt --greedy -p 60 \
         ~/big_graph/metasub_wasabi_graph_anno.column.annodbg \
         2>&1"
-````
+```
 
 #### Optimize BRWT
 
