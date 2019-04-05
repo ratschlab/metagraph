@@ -18,6 +18,8 @@ database-cli
 *.DS_Store
 *._*
 build
+build_profile
+build_debug
 .*.swp
 .ipynb_checkpoints
 *lsf.o*
