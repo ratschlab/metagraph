@@ -277,6 +277,15 @@ uint64_t RowCompressed<Label>::num_relations() const {
     return matrix_->num_relations();
 }
 
+template <typename Label>
+LabelEncoder<Label>* RowCompressed<Label>::load_label_encoder(const std::string &filename) {
+    std::ifstream instream(remove_suffix(filename, kExtension) + kExtension,
+                           std::ios::binary);
+    auto *label_encoder = new LabelEncoder<Label>();
+    label_encoder->load(instream);
+    return label_encoder;
+}
+
 template class RowCompressed<std::string>;
 
 } // namespace annotate

@@ -36,6 +36,15 @@ void LabelEncoder<std::string>::serialize(std::ostream &outstream) const {
     StringSerialisation::serialiseStringVector(outstream, decode_label_);
 }
 
+template<typename Label>
+void LabelEncoder<Label>::merge(const std::vector<LabelEncoder<Label>*> label_encoders) {
+    for(auto label_encoder : label_encoders) {
+        for(size_t i = 0; i < label_encoder->size(); ++i) {
+            insert_and_encode(label_encoder->decode(i));
+        }
+    }
+}
+
 template<>
 bool LabelEncoder<std::string>::load(std::istream &instream) {
     if (!instream.good())

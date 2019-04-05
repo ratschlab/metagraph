@@ -55,6 +55,8 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     size_t num_labels() const;
     uint64_t num_relations() const;
 
+    static LabelEncoder<Label>* load_label_encoder(const std::string &filename);
+
   private:
     void reinitialize(uint64_t num_rows);
 
