@@ -15,6 +15,10 @@ add_subdirectory(
   external-libraries/jsoncpp
 )
 
+add_subdirectory(
+  external-libraries/libmaus2
+)
+
 if(NOT CMAKE_DBG_ALPHABET)
   set(CMAKE_DBG_ALPHABET "DNA")
 endif()
@@ -120,7 +124,7 @@ link_directories(
   ${CMAKE_BINARY_DIR}/KMC
   ${CMAKE_BINARY_DIR}/lib
   ${CMAKE_BINARY_DIR}/external-libraries/jsoncpp/src/lib_json
-  external-libraries/libmaus2/lib
+  ${CMAKE_BINARY_DIR}/external-libraries/libmaus2
   external-libraries/sdsl-lite/lib
 )
 
