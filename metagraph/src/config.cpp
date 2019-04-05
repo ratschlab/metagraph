@@ -543,6 +543,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --filter-present\t\treport only present input sequences [off]\n");
             fprintf(stderr, "\t   --count-kmers \t\tquery the number of k-mers discovered [off]\n");
             fprintf(stderr, "\t   --align-length [INT]\t\tlength of subsequences to align [k]\n");
+            fprintf(stderr, "\t   --align-num-paths [INT]\t\tnumber of parallel paths to explore at any point [10]\n");
+            fprintf(stderr, "\t   --align-sw-threshold [FLOAT]\t\tthreshold proportion to the path length to determine if Smith Waterman should be computed for a path. [0.1]\n");
             fprintf(stderr, "\t-d --distance [INT] \t\tmax allowed alignment distance [0]\n");
         } break;
         case COMPARE: {

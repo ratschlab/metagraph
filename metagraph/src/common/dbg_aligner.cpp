@@ -69,7 +69,7 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
                         AlignedPath alternative_path(path);
                         alternative_path.set_sequence_it(last_mapped_position);
                         // If the loss is less than the threshold continue with single char loss computation.
-                        if (alternative_path.get_total_loss() < sw_threshold_ * path.size()) {
+                        if (alternative_path.get_total_loss() < sw_threshold_ * sequence.size()) {
                             // TODO: Construct sequence last char more efficiently.
                             alternative_path.push_back(node, annotator_->get(node),
                                 single_char_loss(*(alternative_path.get_sequence_it() +

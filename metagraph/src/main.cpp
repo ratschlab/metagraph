@@ -2113,10 +2113,7 @@ int main(int argc, const char *argv[]) {
             for (const auto &file : files) {
                 std::cout << "Align sequences from file " << file << std::endl;
                 // TODO: Get the file name from config.
-                auto alignment_output_file = file.substr(file.rfind("/") + 1,
-                                                         file.rfind(".fast")
-                                                         - (file.rfind("/") + 1))
-                                             + ".sam";
+                auto alignment_output_file = config->outfbase;
                 std::ofstream outstream(alignment_output_file);
                 if (!outstream.is_open()) {
                     std::cout << "Error: Cannot open file " << alignment_output_file << std::endl;
@@ -2137,7 +2134,7 @@ int main(int argc, const char *argv[]) {
                                   << std::endl;
                     }
                     outstream << "Q: " << std::string(read_stream->seq.s) << std::endl
-                              << "P: " << std::endl << aligner.get_path_sequence(path.get_nodes())
+                              << "P: " << aligner.get_path_sequence(path.get_nodes())
                               << std::endl << "With total loss " << path.get_total_loss() << std::endl;
                 }, config->reverse,
                     get_filter_filename(file, config->filter_k,
