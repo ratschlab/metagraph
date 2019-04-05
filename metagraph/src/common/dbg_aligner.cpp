@@ -7,12 +7,12 @@
 #include "ssw_cpp.h"
 
 DBGAligner::DBGAligner(DeBruijnGraph *dbg, Annotator *annotation,
-                       size_t num_threads, size_t search_space_size,
-                       float path_loss_sub_threshold,
-                       float insertion_penalty, float deletion_penalty) :
+                       size_t num_top_paths, float sw_threshold, bool verbose,
+                       float insertion_penalty, float deletion_penalty,
+                       size_t num_threads) :
                             AnnotatedDBG(dbg, annotation, num_threads),
-                            search_space_size_(search_space_size),
-                            path_loss_sub_threshold_(path_loss_sub_threshold),
+                            num_top_paths_(num_top_paths),
+                            sw_threshold_(sw_threshold), verbose_(verbose),
                             insertion_penalty_(insertion_penalty),
                             deletion_penalty_(deletion_penalty) {
     // Substitution loss for each pair of nucleotides.
@@ -25,12 +25,24 @@ DBGAligner::DBGAligner(DeBruijnGraph *dbg, Annotator *annotation,
         {'$', {{'$', 2}}}};
 }
 
+namespace {
+
+template <typename T>
+float std_dev (const std::vector<T>& list, T mean) {
+    float std_dev = 0;
+    for (auto it = list.begin(); it != list.end(); ++it)
+        std_dev += std::pow((*it) - mean, 2.0);
+    return std::pow(std_dev / list.size(), 0.5);
+}
+
+}  // namespace
+
 DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
     if (sequence.size() < graph_->get_k())
         return AlignedPath(sequence.end());
 
     std::map<DPAlignmentKey, DPAlignmentValue> dp_alignment;
-    BoundedPriorityQueue<AlignedPath> queue(search_space_size_);
+    BoundedPriorityQueue<AlignedPath> queue(num_top_paths_);
     queue.push(std::move(AlignedPath(std::begin(sequence))));
     while (!queue.empty()) {
         auto path = std::move(queue.top());
@@ -57,7 +69,7 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
                         AlignedPath alternative_path(path);
                         alternative_path.set_sequence_it(last_mapped_position);
                         // If the loss is less than the threshold continue with single char loss computation.
-                        if (alternative_path.get_total_loss() < path_loss_sub_threshold_ * path.size()) {
+                        if (alternative_path.get_total_loss() < sw_threshold_ * path.size()) {
                             // TODO: Construct sequence last char more efficiently.
                             alternative_path.push_back(node, annotator_->get(node),
                                 single_char_loss(*(alternative_path.get_sequence_it() +
@@ -82,6 +94,21 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
                             queue.push(std::move(alternative_path));
                         }
                         });
+
+        if (verbose_ && path.size() % 50 == 0) {
+            auto shadow_queue(queue);
+            std::cout << "Loss mean and std of paths (top path size: "
+                      << path.size() << "): ";
+            std::vector<float> loss_values;
+            loss_values.reserve(queue.size());
+            while (!shadow_queue.empty()) {
+                loss_values.push_back(shadow_queue.top().get_total_loss());
+                shadow_queue.pop();
+            }
+            float mean = std::accumulate(loss_values.begin(), loss_values.end(), 0);
+            mean /= loss_values.size();
+            std::cout << mean << ", " << std_dev<float>(loss_values, mean) << std::endl;
+        }
     }
     return AlignedPath(sequence.end());
 }

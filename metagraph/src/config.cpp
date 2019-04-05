@@ -136,6 +136,10 @@ Config::Config(int argc, const char *argv[]) {
             count_labels = true;
         } else if (!strcmp(argv[i], "--align-length")) {
             alignment_length = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--align-num-paths")) {
+            alignment_num_top_paths = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--align-sw-threshold")) {
+            alignment_sw_threshold = std::stof(argv[++i]);
         } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
             frequency = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--distance")) {
@@ -306,6 +310,9 @@ Config::Config(int argc, const char *argv[]) {
         print_usage_and_exit = true;
 
     if (discovery_fraction < 0 || discovery_fraction > 1)
+        print_usage_and_exit = true;
+
+    if (alignment_sw_threshold < 0 || alignment_sw_threshold > 1)
         print_usage_and_exit = true;
 
     if (outfbase.size() && !utils::check_if_writable(outfbase)) {

@@ -2107,7 +2107,8 @@ int main(int argc, const char *argv[]) {
                       << dbg_succinct_graph->get_k() << std::endl;
 
             // TODO: Find the best annotator type and set it.
-            DBGAligner aligner(graph.release(), new annotate::ColumnCompressed<>(/*num_rows=*/1));
+            DBGAligner aligner(graph.release(), new annotate::ColumnCompressed<>(/*num_rows=*/1),
+                               config->alignment_num_top_paths, config->alignment_sw_threshold, config->verbose);
             Timer timer;
             for (const auto &file : files) {
                 std::cout << "Align sequences from file " << file << std::endl;
@@ -2135,9 +2136,9 @@ int main(int argc, const char *argv[]) {
                                   << " is aligned with " << aligner.get_path_sequence(path.get_nodes())
                                   << std::endl;
                     }
-                    outstream << "Query" << std::endl << std::string(read_stream->seq.s) << std::endl
-                              << "Aligned path" << std::endl << aligner.get_path_sequence(path.get_nodes())
-                              << std::endl << "With total score " << path.get_total_loss() << std::endl;
+                    outstream << "Q: " << std::string(read_stream->seq.s) << std::endl
+                              << "P: " << std::endl << aligner.get_path_sequence(path.get_nodes())
+                              << std::endl << "With total loss " << path.get_total_loss() << std::endl;
                 }, config->reverse,
                     get_filter_filename(file, config->filter_k,
                                         config->max_unreliable_abundance,

@@ -32,11 +32,12 @@ class DBGAligner : public AnnotatedDBG {
 
     DBGAligner(DeBruijnGraph *dbg,
                Annotator *annotation,
-               size_t num_threads = 0,
-               size_t search_space_size = 10,
-               float path_loss_sub_threshold = 0.1,
+               size_t num_top_paths = 10,
+               float sw_threshold = 0.1,
+               bool verbose = false,
                float insertion_penalty = 3,
-               float deletion_penalty = 3);
+               float deletion_penalty = 3,
+               size_t num_threads = 0);
 
     DBGAligner(const DBGAligner&) = default;
     DBGAligner(DBGAligner&&) = default;
@@ -53,8 +54,9 @@ class DBGAligner : public AnnotatedDBG {
     // Substitution loss for each pair of nucleotides.
     std::map<char, std::map<char, uint16_t>> sub_loss_;
     // Maximum number of paths to explore at the same time.
-    size_t search_space_size_;
-    uint64_t path_loss_sub_threshold_;
+    size_t num_top_paths_;
+    uint64_t sw_threshold_;
+    bool verbose_;
     uint16_t insertion_penalty_;
     uint16_t deletion_penalty_;
 

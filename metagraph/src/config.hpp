@@ -51,6 +51,7 @@ class Config {
     unsigned int frequency = 1;
     unsigned int nsplits = 1;
     unsigned int alignment_length = 0;
+    unsigned int alignment_num_top_paths = 10;
     unsigned int memory_available = 0;
     unsigned int max_unreliable_abundance = 0;
     unsigned int unreliable_kmers_threshold = 0;
@@ -63,6 +64,7 @@ class Config {
     unsigned int port = 5555;
 
     double discovery_fraction = 1.0;
+    double alignment_sw_threshold = 0.1;
 
     std::vector<std::string> fname;
     std::vector<std::string> anno_labels;
