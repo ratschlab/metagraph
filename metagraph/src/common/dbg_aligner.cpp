@@ -123,7 +123,7 @@ float DBGAligner::single_char_loss(char char_in_query, char char_in_graph) const
 }
 
 namespace {
-// helper function to pring and alignment based on SSW library.
+// helper function to print an alignment based on SSW library.
 static void PrintAlignment(const StripedSmithWaterman::Alignment& alignment){
     std::cout << "===== SSW result =====" << std::endl;
     std::cout << "Best Smith-Waterman score:\t" << alignment.sw_score << std::endl
@@ -146,7 +146,9 @@ float DBGAligner::ssw_loss(const AlignedPath& path, std::string::const_iterator 
     StripedSmithWaterman::Alignment alignment;
 
     aligner.Align(query.c_str(), ref.c_str(), ref.size(), filter, &alignment, maskLen);
-    PrintAlignment(alignment);
+    if (verbose_) {
+        PrintAlignment(alignment);
+    }
     return alignment.sw_score;
 }
 

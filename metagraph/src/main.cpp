@@ -2132,8 +2132,8 @@ int main(int argc, const char *argv[]) {
                                   << "sec, current mem usage: "
                                   << get_curr_RSS() / (1 << 20) << " MiB"
                                   << std::endl;
-                        std::cout << "Query " << std::string(read_stream->seq.s)
-                                  << " is aligned with " << aligner.get_path_sequence(path.get_nodes())
+                        std::cout << "Q: " << std::string(read_stream->seq.s) << std::endl
+                                  << "P: " << aligner.get_path_sequence(path.get_nodes())
                                   << std::endl;
                     }
                     outstream << "Q: " << std::string(read_stream->seq.s) << std::endl
