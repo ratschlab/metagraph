@@ -1,5 +1,7 @@
 cmake_minimum_required (VERSION 3.6.1)
 project(Metagraph)
+include(CheckFunctionExists)
+include(CheckLibraryExists)
 
 enable_testing()
 
@@ -178,7 +180,16 @@ find_library(FOLLY_LIBRARIES
 )
 if(FOLLY_LIBRARIES)
   string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
-  set(METALIBS -lfolly -lglog -lgflags -ldouble-conversion -ldl -liberty -lboost_regex -lboost_filesystem -lboost_program_options)
+  set(METALIBS -lfolly -lglog -lgflags -ldouble-conversion -ldl -lboost_regex -lboost_filesystem -lboost_program_options)
+  check_function_exists(cplus_demangle_v3_callback CPLUS_DEMANGLE)
+  if(NOT CPLUS_DEMANGLE)
+    check_library_exists(iberty cplus_demangle_v3_callback /usr/lib CPLUS_DEMANGLE_LIB)
+    if (CPLUS_DEMANGLE_LIB)
+      set(METALIBS ${METALIBS} -liberty)
+    else()
+      message(FATAL_ERROR "cplus_demangle_v3_callback not found")
+    endif()
+  endif()
 else()
   message(WARNING "Folly was not found.\n"
   "Install folly to reduce RAM required by the row-compressed annotator.")
