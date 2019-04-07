@@ -37,6 +37,26 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
 
+    class StreamRows {
+      public:
+        StreamRows(std::ifstream &instream);
+        std::unique_ptr<std::vector<Row> > next_row();
+      private:
+        std::ifstream in_;
+        uint64_t size_;
+        uint8_t width_;
+        uint8_t b_ = 0;
+        uint64_t i_ = 0;
+    };
+    //static void write_rows(std::ofstream &outstream,
+    //                       BinaryMatrix::GetRow &callback,
+    //                       uint64_t num_rows,
+    //                       uint64_t num_cols);
+    static void write_rows(std::ofstream &outstream,
+                    const std::function<void (const std::function<void(void)>&, const std::function<void (const std::vector<uint64_t> &)>&, const std::function<void(void)>&)> &callback,
+                    uint64_t num_rows,
+                    uint64_t num_cols);
+
     // number of ones in the matrix
     uint64_t num_relations() const;
     // matrix density

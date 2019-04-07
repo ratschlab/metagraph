@@ -8,6 +8,7 @@
 #include "utils.hpp"
 #include "vector_row_binmat.hpp"
 #include "eigen_spmat.hpp"
+#include "binary_matrix.hpp"
 
 using utils::remove_suffix;
 
@@ -281,9 +282,66 @@ template <typename Label>
 LabelEncoder<Label>* RowCompressed<Label>::load_label_encoder(const std::string &filename) {
     std::ifstream instream(remove_suffix(filename, kExtension) + kExtension,
                            std::ios::binary);
+
     auto *label_encoder = new LabelEncoder<Label>();
-    label_encoder->load(instream);
+    if (!label_encoder->load(instream))
+        throw std::ifstream::failure("Bad stream");
+
     return label_encoder;
+}
+
+template <typename Label>
+bool RowCompressed<Label>::stream_counts(const std::string &filename,
+                                         uint64_t &num_objects,
+                                         uint64_t &num_relations,
+                                         bool sparse) {
+    throw std::runtime_error("Not implemented");
+    //return stream_rows(filename, [](const std::vector<uint64_t> &row){}, sparse);
+}
+
+template <typename Label>
+RowCompressed<Label>
+::StreamRows::StreamRows(const std::string &filename, bool sparse) {
+    std::ifstream instream(remove_suffix(filename, kExtension) + kExtension,
+                           std::ios::binary);
+
+    if (!instream.good())
+        throw std::runtime_error("Bad stream");
+
+    // skip header
+    LabelEncoder<Label> label_encoder_load;
+    if (!label_encoder_load.load(instream))
+        throw std::runtime_error("Could not load label encoder");
+
+    // rows
+    if (sparse) {
+        throw std::runtime_error("Not implemented");
+    } else {
+        sr_ = std::make_unique<VectorRowBinMat::StreamRows>(instream);
+    }
+}
+
+template <typename Label>
+void RowCompressed<Label>
+::write_rows(const std::string &filename,
+             const LabelEncoder<Label> &label_encoder,
+             const uint64_t num_rows,
+             const std::function<void (const std::function<void(void)>&, const std::function<void (const std::vector<uint64_t> &)>&, const std::function<void(void)>&)> &callback,
+             //BinaryMatrix::GetRow &callback,
+             bool sparse) {
+    std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension,
+                            std::ios::binary);
+    if (!outstream.good())
+        throw std::ofstream::failure("Bad stream");
+
+    label_encoder.serialize(outstream);
+
+    if (sparse) {
+        throw std::runtime_error("Not implemented");
+    } else {
+        uint64_t num_cols = label_encoder.size();
+        VectorRowBinMat::write_rows(outstream, callback, num_rows, num_cols);
+    }
 }
 
 template class RowCompressed<std::string>;

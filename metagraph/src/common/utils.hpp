@@ -23,6 +23,7 @@ typedef std::vector<uint32_t> SmallVector;
 #endif
 
 #include "serialization.hpp"
+#include "binary_matrix.hpp"
 
 
 struct SmallVectorHash {
@@ -240,14 +241,13 @@ namespace utils {
                             std::vector<kmer_label_pair>> index_heap_;
     };
 
-    using SetBitPositions = std::vector<uint64_t>;
-    void call_rows(const std::function<void(const SetBitPositions &)> &callback,
+    void call_rows(BinaryMatrix::PutRow &callback,
                    RowsFromColumnsTransformer&& transformer);
-    void call_rows(const std::function<void(const SetBitPositions &)> &callback,
+    void call_rows(BinaryMatrix::PutRow &callback,
                    const BinaryMatrix &row_major_matrix);
 
     template <typename... Args>
-    void call_rows(const std::function<void(const SetBitPositions &)> &callback,
+    void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
                    Args&&... args) {
         call_rows(callback,
                   RowsFromColumnsTransformer(std::forward<Args>(args)...));

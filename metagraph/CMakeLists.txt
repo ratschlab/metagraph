@@ -36,6 +36,7 @@ string(APPEND CMAKE_CXX_FLAGS " \
   -Wall -Wextra -Werror \
   -msse4.2 \
   -D_THREAD_SAFE -pthread \
+  -Wno-unused-parameter \
 ") # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")

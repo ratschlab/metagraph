@@ -326,7 +326,7 @@ void RowsFromColumnsTransformer::call_next(ValueCallback callback) {
 }
 
 
-void call_rows(const std::function<void(const SetBitPositions &)> &callback,
+void call_rows(BinaryMatrix::PutRow &callback,
                RowsFromColumnsTransformer&& transformer) {
     uint64_t cur_row = 0;
     std::vector<uint64_t> indices;
@@ -348,7 +348,7 @@ void call_rows(const std::function<void(const SetBitPositions &)> &callback,
     }
 }
 
-void call_rows(const std::function<void(const SetBitPositions &)> &callback,
+void call_rows(BinaryMatrix::PutRow &callback,
                const BinaryMatrix &row_major_matrix) {
     const auto num_rows = row_major_matrix.num_rows();
 
