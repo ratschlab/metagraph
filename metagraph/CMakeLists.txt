@@ -329,7 +329,7 @@ include_directories(
 )
 
 link_directories(
-  external-libraries/libmaus2/lib
+  ${CMAKE_BINARY_DIR}/libmaus2/lib
   external-libraries/sdsl-lite/lib
   external-libraries/binrel_wt/lib
 )
