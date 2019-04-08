@@ -58,32 +58,16 @@ DBGSD::Chunk* SDChunkConstructor<KMER>
 }
 
 DBGSD* DBGSDConstructor
-::build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
+::build_graph_from_chunks(const std::vector<std::unique_ptr<DBGSD::Chunk>> &chunks,
                           bool canonical_mode,
                           bool verbose) {
-    if (!chunk_filenames.size())
+    if (chunks.empty())
         return new DBGSD(2);
-
-    std::vector<DBGSD::Chunk> chunks;
 
     uint64_t cumulative_size = 1;
 
-    for (auto file : chunk_filenames) {
-        file = utils::remove_suffix(file, ".dbgsdchunk") + ".dbgsdchunk";
-
-        std::ifstream chunk_in(file, std::ios::binary);
-
-        if (!chunk_in.good()) {
-            std::cerr << "ERROR: input file " << file << " corrupted" << std::endl;
-            exit(1);
-        }
-
-        chunks.emplace_back();
-        chunks.back().load(chunk_in);
-
-        assert(chunks.empty() || chunks.back().size() == chunks.front().size());
-
-        cumulative_size += chunks.back().num_set_bits();
+    for (const auto &chunk : chunks) {
+        cumulative_size += chunk->num_set_bits();
     }
 
     if (verbose)
@@ -97,21 +81,21 @@ DBGSD* DBGSDConstructor
     graph->kmers_ = DBGSD::Chunk(
         [&](const auto &index_callback) {
             index_callback(0);
-            for (size_t i = 0; i < chunk_filenames.size(); ++i) {
+            for (size_t i = 0; i < chunks.size(); ++i) {
                 if (verbose) {
                     std::cout << "Chunk "
-                              << chunk_filenames[i]
+                              << i
                               << " loaded..." << std::flush;
                 }
 
-                chunks[i].call_ones(index_callback);
+                chunks[i]->call_ones(index_callback);
 
                 if (verbose) {
                     std::cout << " concatenated" << std::endl;
                 }
             }
         },
-        chunks[0].size(), cumulative_size
+        chunks[0]->size(), cumulative_size
     );
 
     graph->canonical_mode_ = canonical_mode;
@@ -121,6 +105,34 @@ DBGSD* DBGSDConstructor
     graph->k_ = sdsl::bits::hi(graph->kmers_.size()) / KmerExtractor2Bit::kLogSigma;
 
     return graph.release();
+}
+
+DBGSD* DBGSDConstructor
+::build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
+                          bool canonical_mode,
+                          bool verbose) {
+    if (chunk_filenames.empty())
+        return new DBGSD(2);
+
+    std::vector<std::unique_ptr<DBGSD::Chunk>> chunks;
+
+    for (auto file : chunk_filenames) {
+        file = utils::remove_suffix(file, ".dbgsdchunk") + ".dbgsdchunk";
+
+        std::ifstream chunk_in(file, std::ios::binary);
+
+        if (!chunk_in.good()) {
+            std::cerr << "ERROR: input file " << file << " corrupted" << std::endl;
+            exit(1);
+        }
+
+        chunks.emplace_back(new DBGSD::Chunk());
+        chunks.back()->load(chunk_in);
+
+        assert(chunks.empty() || chunks.back()->size() == chunks.front()->size());
+    }
+
+    return build_graph_from_chunks(chunks, canonical_mode, verbose);
 }
 
 ISDChunkConstructor*

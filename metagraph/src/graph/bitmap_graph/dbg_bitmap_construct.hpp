@@ -97,6 +97,10 @@ class DBGSDConstructor : public GraphConstructor {
     static DBGSD* build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
                                           bool canonical_mode = false,
                                           bool verbose = false);
+
+    static DBGSD* build_graph_from_chunks(const std::vector<std::unique_ptr<DBGSD::Chunk>> &chunk,
+                                          bool canonical_mode = false,
+                                          bool verbose = false);
   private:
     std::unique_ptr<ISDChunkConstructor> constructor_;
 };

@@ -927,6 +927,7 @@ int main(int argc, const char *argv[]) {
                 }
 
                 std::unique_ptr<DBGSDConstructor> constructor;
+                std::vector<std::unique_ptr<DBGSD::Chunk>> chunks;
 
                 //one pass per suffix
                 for (const std::string &suffix : suffices) {
@@ -952,9 +953,9 @@ int main(int argc, const char *argv[]) {
                         [&](const auto &loop) { constructor->add_sequences(loop); }
                     );
 
+                    chunks.emplace_back(constructor->build_chunk());
                     if (config->outfbase.size() && config->suffix.size()) {
-                        const DBGSD::Chunk* next_block = constructor->build_chunk();
-                        std::cout << "Graph chunk with " << next_block->num_set_bits()
+                        std::cout << "Graph chunk with " << chunks.back()->num_set_bits()
                                   << " k-mers was built in "
                                   << timer.elapsed() << "sec" << std::endl;
 
@@ -962,18 +963,15 @@ int main(int argc, const char *argv[]) {
                                   << suffix << "'...\t" << std::flush;
                         timer.reset();
                         std::ofstream out(config->outfbase + "." + suffix + ".dbgsdchunk");
-                        next_block->serialize(out);
+                        chunks.back()->serialize(out);
                         std::cout << timer.elapsed() << "sec" << std::endl;
-                        sd_graph.reset(new DBGSD(config->k));
                     }
 
                     if (config->suffix.size())
                         return 0;
-
-                    constructor->build_graph(sd_graph.get());
                 }
 
-                graph.reset(sd_graph.release());
+                graph.reset(constructor->build_graph_from_chunks(chunks));
 
             } else {
                 //slower method
