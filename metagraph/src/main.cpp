@@ -825,7 +825,7 @@ int main(int argc, const char *argv[]) {
                 graph.reset(new DBGSD(config->k, config->canonical));
 
             } else if (config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic) {
-                std::unique_ptr<DBG_succ> boss_graph { new DBG_succ(config->k - 1) };
+                auto boss_graph = std::make_unique<DBG_succ>(config->k - 1);
 
                 if (config->verbose) {
                     std::cout << "Start reading data and extracting k-mers" << std::endl;
@@ -892,18 +892,18 @@ int main(int argc, const char *argv[]) {
                         std::cout << timer.elapsed() << "sec" << std::endl;
                     }
 
-                    graph_data.extend(*next_block);
-                    delete next_block;
-
                     if (config->suffix.size())
                         return 0;
+
+                    graph_data.extend(*next_block);
+                    delete next_block;
                 }
 
                 graph_data.initialize_graph(boss_graph.get());
                 graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
 
             } else if (config->graph_type == Config::GraphType::BITMAP && !config->dynamic) {
-                std::unique_ptr<DBGSD> sd_graph { new DBGSD(config->k) };
+                auto sd_graph = std::make_unique<DBGSD>(config->k);
 
                 if (config->verbose) {
                     std::cout << "Start reading data and extracting k-mers" << std::endl;
@@ -913,8 +913,8 @@ int main(int argc, const char *argv[]) {
                 assert(config->nsplits > 0);
                 size_t suffix_len = std::min(
                     static_cast<size_t>(std::ceil(std::log2(config->nsplits)
-                                                    / std::log2(sd_graph->alphabet.size() - 1))),
-                    sd_graph->get_k() - 2
+                                                    / std::log2(sd_graph->alphabet.size()))),
+                    sd_graph->get_k()
                 );
                 std::deque<std::string> suffices;
                 if (config->suffix.size()) {
@@ -933,12 +933,7 @@ int main(int argc, const char *argv[]) {
                     timer.reset();
 
                     if (suffix.size() > 0 || suffices.size() > 1) {
-                        if (valid_kmer_suffix(suffix)) {
-                            std::cout << "\nSuffix: " << suffix << std::endl;
-                        } else {
-                            std::cout << "\nSkipping suffix: " << suffix << std::endl;
-                            continue;
-                        }
+                        std::cout << "\nSuffix: " << suffix << std::endl;
                     }
 
                     constructor.reset(
