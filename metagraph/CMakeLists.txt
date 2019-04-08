@@ -100,6 +100,34 @@ if(result)
   message(FATAL_ERROR "Build step for KMC failed: ${result}")
 endif()
 
+#----------
+# libmaus2
+#----------
+set(LIBMAUS2_MAIN_DIR "${PROJECT_SOURCE_DIR}/external-libraries/libmaus2")
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/libmaus2)
+execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}"
+  -DCMAKE_INSTALL_PREFIX:PATH=${CMAKE_BINARY_DIR}/libmaus2
+  ${LIBMAUS2_MAIN_DIR}
+  RESULT_VARIABLE result
+  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/libmaus2
+)
+if(result)
+  message(FATAL_ERROR "CMake step for libmaus2 failed: ${result}")
+endif()
+execute_process(COMMAND ${CMAKE_COMMAND} --build . --config Release -- -j
+  RESULT_VARIABLE result
+  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/libmaus2
+)
+if(result)
+  message(FATAL_ERROR "Build step for libmaus2 failed: ${result}")
+endif()
+execute_process(COMMAND ${CMAKE_COMMAND} --build . --target install
+  RESULT_VARIABLE result
+  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/libmaus2
+)
+if(result)
+  message(FATAL_ERROR "Installation step for libmaus2 failed: ${result}")
+endif()
 
 # Profile build type
 set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O3 -g")
@@ -122,7 +150,7 @@ link_directories(
   ${CMAKE_BINARY_DIR}/KMC
   ${CMAKE_BINARY_DIR}/lib
   ${CMAKE_BINARY_DIR}/external-libraries/jsoncpp/src/lib_json
-  external-libraries/libmaus2/lib
+  ${CMAKE_BINARY_DIR}/libmaus2
   external-libraries/sdsl-lite/lib
 )
 
@@ -141,7 +169,7 @@ SUBDIRLIST(INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src")
 
 include_directories(
   external-libraries/KMC/kmc_api
-  external-libraries/libmaus2/include
+  ${CMAKE_BINARY_DIR}/libmaus2/include
   external-libraries/sdsl-lite/include
   external-libraries/rollinghashcpp
   external-libraries/ips4o
