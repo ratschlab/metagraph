@@ -317,7 +317,7 @@ RowCompressed<Label>
     if (sparse) {
         throw std::runtime_error("Not implemented");
     } else {
-        sr_ = std::make_unique<VectorRowBinMat::StreamRows>(instream);
+        sr_ = std::make_unique<VectorRowBinMat::StreamRows>(instream, filename);
     }
 }
 
@@ -326,7 +326,7 @@ void RowCompressed<Label>
 ::write_rows(const std::string &filename,
              const LabelEncoder<Label> &label_encoder,
              const uint64_t num_rows,
-             const std::function<void (const std::function<void(void)>&, const std::function<void (const std::vector<uint64_t> &)>&, const std::function<void(void)>&)> &callback,
+             const std::function<void (const std::function<void (const std::vector<uint64_t> &)>&)> &callback,
              //BinaryMatrix::GetRow &callback,
              bool sparse) {
     std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension,
@@ -340,7 +340,7 @@ void RowCompressed<Label>
         throw std::runtime_error("Not implemented");
     } else {
         uint64_t num_cols = label_encoder.size();
-        VectorRowBinMat::write_rows(outstream, callback, num_rows, num_cols);
+        VectorRowBinMat::write_rows(outstream, filename, callback, num_rows, num_cols);
     }
 }
 

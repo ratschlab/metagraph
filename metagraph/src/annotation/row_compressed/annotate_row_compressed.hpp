@@ -72,7 +72,7 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     static void write_rows(const std::string &filename,
                            const LabelEncoder<Label> &label_encoder,
                            const uint64_t num_rows,
-                           const std::function<void (const std::function<void(void)>&, const std::function<void (const std::vector<uint64_t> &)>&, const std::function<void(void)>&)> &callback,
+                           const std::function<void (const std::function<void (const std::vector<uint64_t> &)>&)> &callback,
                            //BinaryMatrix::GetRow &callback,
                            bool sparse);
 

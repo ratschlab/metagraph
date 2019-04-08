@@ -390,10 +390,7 @@ TEST(RowCompressed, Merge) {
         reencode.push_back(v);
     }
 
-    auto callback3 = [&](const std::function<void(void)> &init, const std::function<void (const std::vector<uint64_t> &)> &row_callback, const std::function<void(void)> &finalize) {
-
-        init();
-
+    auto callback3 = [&](const std::function<void (const std::vector<uint64_t> &)> &row_callback) {
         std::set<uint64_t> label_set;
         bool done = false;
         while (!done) {
@@ -412,8 +409,6 @@ TEST(RowCompressed, Merge) {
             // std::for_each(merged_row.begin(), merged_row.end(), [&](uint64_t s) { std::cout << merged_label_enc->decode(s) << std::endl; });
             // std::cout << "," << std::endl;
         }
-
-        finalize();
     };
 
     // TODO: stream_counts to get num_rows
