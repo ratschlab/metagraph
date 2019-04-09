@@ -27,7 +27,7 @@ class BinaryMatrix {
     // number of ones in the matrix
     virtual uint64_t num_relations() const = 0;
 
-    using SetBitPositions = std::vector<uint64_t>;
+    using SetBitPositions = std::vector<Column>;
     using PutRow = const std::function<void(const SetBitPositions &)>;
     using GetRow = const std::function<const SetBitPositions (void)>;
 };

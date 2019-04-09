@@ -304,17 +304,22 @@ TEST(RowCompressed, Merge) {
     for(auto filename : filenames) {
         LEncoder* label_encoder = annotate::RowCompressed<std::string>::load_label_encoder(filename);
         label_encoders.push_back(label_encoder);
-        std::cout << "-------" << std::endl;
-        for(size_t i = 0; i < label_encoder->size(); ++i) {
-            std::cout << label_encoder->decode(i) << std::endl;
-        }
+        //std::cout << "-------" << std::endl;
+        //for(size_t i = 0; i < label_encoder->size(); ++i) {
+        //    std::cout << label_encoder->decode(i) << std::endl;
+        //}
     }
     LEncoder* merged_label_enc { new LEncoder() };
     merged_label_enc->merge(label_encoders);
-    std::cout << "-------" << std::endl;
-    for(size_t i = 0; i < merged_label_enc->size(); ++i) {
-        std::cout << merged_label_enc->decode(i) << std::endl;
-    }
+    //std::cout << "-------" << std::endl;
+    //for(size_t i = 0; i < merged_label_enc->size(); ++i) {
+    //    std::cout << merged_label_enc->decode(i) << std::endl;
+    //}
+
+    std::vector<std::vector<size_t> > label_mapping(label_encoders.size());
+    for(size_t i = 0; i < label_encoders.size(); ++i)
+        for(size_t c = 0; c < label_encoders[i]->size(); ++c)
+            label_mapping[i].push_back(merged_label_enc->encode(label_encoders[i]->decode(c)));
 
     std::cout << "=======" << std::endl;
     //uint64_t num_rows = 0;
@@ -390,7 +395,7 @@ TEST(RowCompressed, Merge) {
         reencode.push_back(v);
     }
 
-    auto callback3 = [&](const std::function<void (const std::vector<uint64_t> &)> &row_callback) {
+    auto callback = [&](const std::function<void (const std::vector<uint64_t> &)> &row_callback) {
         std::set<uint64_t> label_set;
         bool done = false;
         while (!done) {
@@ -402,7 +407,8 @@ TEST(RowCompressed, Merge) {
                     break;
                 }
                 for(auto label : *row)
-                    label_set.insert(merged_label_enc->encode(label_encoders.at(i)->decode(label)));
+                    label_set.insert(label_mapping.at(i)[label]);
+                    //label_set.insert(merged_label_enc->encode(label_encoders.at(i)->decode(label)));
             }
             std::vector<uint64_t> merged_row(label_set.begin(), label_set.end());
             row_callback(merged_row);
@@ -411,12 +417,14 @@ TEST(RowCompressed, Merge) {
         }
     };
 
-    // TODO: stream_counts to get num_rows
-    const uint64_t num_rows = 5;
-    annotate::RowCompressed<>::write_rows(test_dump_basename_row_compressed_merge + "_merged",
+    //TODO: this will be needed (num_relations) when building rowflat
+    //uint64_t num_rows;
+    //uint64_t num_relations;
+    //annotate::RowCompressed<>::stream_counts(filenames.at(0), num_rows, num_relations, false);
+
+    uint64_t num_rows = annotate::RowCompressed<>::write_rows(test_dump_basename_row_compressed_merge + "_merged",
                                           *merged_label_enc,
-                                          num_rows,
-                                          callback3,
+                                          callback,
                                           false);
     // int i = 0;
     // std::unique_ptr<std::vector<VectorRowBinMat::Row> > row;

@@ -45,11 +45,10 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
         sdsl::int_vector_buffer<> *inbuf_;
         uint64_t i_ = 0;
     };
-    static void write_rows(std::ofstream &outstream,
-                    const std::string &filename,
-                    const std::function<void (const std::function<void (const std::vector<uint64_t> &)>&)> &callback,
-                    uint64_t num_rows,
-                    uint64_t num_cols);
+    static uint64_t write_rows(std::ofstream &outstream,
+                               const std::string &filename,
+                               const std::function<void (const std::function<void (const std::vector<uint64_t> &)>&)> &callback,
+                               uint64_t num_cols);
 
     // number of ones in the matrix
     uint64_t num_relations() const;

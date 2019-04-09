@@ -160,35 +160,39 @@ std::unique_ptr<std::vector<VectorRowBinMat::Row> > VectorRowBinMat::StreamRows:
     return nullptr;
 }
 
-void VectorRowBinMat::write_rows(std::ofstream &outstream,
+uint64_t VectorRowBinMat::write_rows(std::ofstream &outstream,
                 const std::string &filename,
                 const std::function<void (const std::function<void (const std::vector<uint64_t> &)>&)> &callback,
-                uint64_t num_rows,
                 uint64_t num_cols) {
 
     uint8_t width = utils::code_length(num_cols);
+    uint64_t num_rows = 0;
 
-    serialize_number(outstream, num_rows);
+    // write dummy num_rows value to fill in later
+    uint64_t header_offs = outstream.tellp();
+    serialize_number(outstream, 0);
     serialize_number(outstream, num_cols);
-    if (num_rows == 0)
-        return;
+    outstream.flush();
 
-    uint64_t offs = outstream.tellp();
-    std::cout << "offset: " << offs << std::endl;
-    outstream.close();
-
+    uint64_t iv_offs = outstream.tellp();
     auto outbuf = sdsl::int_vector_buffer<>(filename,
                                             std::ios::out,
                                             1024*1024,
                                             width,
                                             false,
-                                            offs);
+                                            iv_offs);
 
     callback([&](const std::vector<uint64_t> &row) {
         for(auto val : row)
             outbuf.push_back(val + 1);
         outbuf.push_back(0);
+        num_rows++;
     });
 
     outbuf.close();
+
+    outstream.seekp(header_offs);
+    serialize_number(outstream, num_rows);
+
+    return num_rows;
 }

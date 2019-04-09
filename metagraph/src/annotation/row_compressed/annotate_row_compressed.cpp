@@ -291,12 +291,20 @@ LabelEncoder<Label>* RowCompressed<Label>::load_label_encoder(const std::string 
 }
 
 template <typename Label>
-bool RowCompressed<Label>::stream_counts(std::string filename,
+void RowCompressed<Label>::stream_counts(std::string filename,
                                          uint64_t &num_objects,
                                          uint64_t &num_relations,
                                          bool sparse) {
-    throw std::runtime_error("Not implemented");
-    //return stream_rows(filename, [](const std::vector<uint64_t> &row){}, sparse);
+    filename = remove_suffix(filename, kExtension) + kExtension;
+    StreamRows sr(filename, sparse);
+    std::unique_ptr<std::vector<VectorRowBinMat::Row> > row;
+
+    num_objects = 0;
+    num_relations = 0;
+    while(row = sr.next_row()) {
+        num_objects++;
+        num_relations += row->size();
+    }
 }
 
 template <typename Label>
@@ -322,12 +330,10 @@ RowCompressed<Label>
 }
 
 template <typename Label>
-void RowCompressed<Label>
+uint64_t RowCompressed<Label>
 ::write_rows(std::string filename,
              const LabelEncoder<Label> &label_encoder,
-             const uint64_t num_rows,
              const std::function<void (const std::function<void (const std::vector<uint64_t> &)>&)> &callback,
-             //BinaryMatrix::GetRow &callback,
              bool sparse) {
     filename = remove_suffix(filename, kExtension) + kExtension;
     std::ofstream outstream(filename, std::ios::binary);
@@ -341,7 +347,7 @@ void RowCompressed<Label>
         throw std::runtime_error("Not implemented");
     } else {
         uint64_t num_cols = label_encoder.size();
-        VectorRowBinMat::write_rows(outstream, filename, callback, num_rows, num_cols);
+        return VectorRowBinMat::write_rows(outstream, filename, callback, num_cols);
     }
 }
 

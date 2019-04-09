@@ -57,7 +57,7 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     uint64_t num_relations() const;
 
     static LabelEncoder<Label>* load_label_encoder(const std::string &filename);
-    static bool stream_counts(std::string filename,
+    static void stream_counts(std::string filename,
                               uint64_t &num_objects,
                               uint64_t &num_relations,
                               bool sparse = false);
@@ -65,13 +65,13 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
       public:
         StreamRows(std::string filename, bool sparse);
         // TODO: decode and return VLabels?
+        // or, make private, and make rowcompressed merge a friend method of RowCompressed class
         std::unique_ptr<std::vector<VectorRowBinMat::Row> > next_row() { return sr_->next_row(); };
       private:
         std::unique_ptr<VectorRowBinMat::StreamRows> sr_;
     };
-    static void write_rows(std::string filename,
+    static uint64_t write_rows(std::string filename,
                            const LabelEncoder<Label> &label_encoder,
-                           const uint64_t num_rows,
                            const std::function<void (const std::function<void (const std::vector<uint64_t> &)>&)> &callback,
                            //BinaryMatrix::GetRow &callback,
                            bool sparse);
