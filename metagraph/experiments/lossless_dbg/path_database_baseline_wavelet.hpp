@@ -72,7 +72,7 @@ char tochar(routing_character_t rc) {
 }
 
 //template <class Wavelet = sdsl::wt_rlmn<sdsl::sd_vector<>>>
-using Wavelet = sdsl::wt_rlmn<>;
+template<class Wavelet = sdsl::wt_rlmn<>>
 class PathDatabaseBaselineWavelet : public PathDatabaseBaseline {
 public:
     using routing_table_t = vector<char>;
@@ -141,8 +141,6 @@ public:
             routing_table_array_encoded[i] = RoutingTableInverseAlphabet.at(routing_table_array[i]);
         }
         construct_im(routing_table,routing_table_array_encoded,0);
-        //routing_table = Wavelet(routing_table_array_encoded,routing_table_array_encoded.size());
-        //routing_table = Wavelet(&routing_table_array[0],routing_table_array.size());
     }
 
     void construct_edge_multiplicity_table() {

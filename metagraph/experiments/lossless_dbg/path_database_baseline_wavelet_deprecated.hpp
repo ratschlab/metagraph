@@ -109,7 +109,7 @@ public:
                 }
             }
         }
-        joins = bit_vector_stat(is_join_node);
+        joins = bit_vector_small(is_join_node);
 
     }
 
@@ -243,7 +243,7 @@ public:
 
 private:
     wavelet_tree_stat routing_table;
-    bit_vector_stat joins;
+    bit_vector_small joins;
     vector<int> edge_multiplicity_table;
 };
 

@@ -28,8 +28,11 @@ using json = nlohmann::json;
 
 
 #include "path_database_baseline_wavelet_deprecated.hpp"
+#include "path_database_baseline_wavelet.hpp"
 #include "samplers.hpp"
 #include "utilities.hpp"
+
+void compressReads(const ValueArg<string> &statisticsArg, ValueArg<string> &compressedArg, const vector<string> &reads);
 
 #pragma clang diagnostic pop
 
@@ -45,6 +48,20 @@ using namespace std::string_literals;
 using node_index = SequenceGraph::node_index;
 
 
+template<class Database>
+void compressReads(const ValueArg<string> &statisticsArg, ValueArg<string> &compressedArg, const vector<string> &reads) {
+    auto db = Database(reads);
+    db.encode(reads);
+    if (statisticsArg.isSet()) {
+        //auto statistics = db.get_statistics();
+        //throw std::runtime_error("Not supported yet");
+        //save_string(statistics.dump(4),statistics_filename);
+    }
+    if (compressedArg.isSet()) {
+        fs::path compress_folder = compressedArg.getValue();
+        db.serialize(compress_folder);
+    }
+}
 
 int main(int argc, char *argv[]) {
     TCLAP::CmdLine cmd("Compress reads",' ', "0.1");
@@ -53,37 +70,42 @@ int main(int argc, char *argv[]) {
                                          "FASTA/Q file that should be compressed",
                                          true,
                                          "",
-                                         "string");
+                                         "string",cmd);
     TCLAP::ValueArg<std::string> statisticsArg("s",
                                           "statistics",
                                           "Filename of json file that will output statistics about compressed file.",
                                           false,
                                           "statistics.json",
-                                          "string");
+                                          "string",cmd);
     TCLAP::ValueArg<std::string> compressedArg("o",
                                           "output",
                                           "Folder where to store the compressed files.",
                                           false,
                                           "",
-                                          "string");
-    cmd.add(inputArg);
-    cmd.add(statisticsArg);
-    cmd.add(compressedArg);
+                                          "string",cmd);
+    std::vector<std::string> regimes {
+            "wavelet",
+            "wavelet_old",
+    };
+    ValuesConstraint<std::string> regime_constraint(regimes);
+    ValueArg<std::string> compressor_type("c",
+                                          "compressor-type",
+                                          "Which compressor to choose",
+                                          false,
+                                          "wavelet",
+                                          &regime_constraint, cmd);
     cmd.parse(argc, argv);
     auto input_filename = inputArg.getValue();
     auto statistics_filename = statisticsArg.getValue();
     auto reads = read_reads_from_fasta(input_filename);
-    auto db = PathDatabaseBaselineWaveletDeprecated(reads);
-    db.encode(reads);
-    if (statisticsArg.isSet()) {
-        //auto statistics = db.get_statistics();
-        throw std::runtime_error("Not supported yet");
-        //save_string(statistics.dump(4),statistics_filename);
+    auto compressor = compressor_type.getValue();
+    if (compressor == "wavelet") {
+        compressReads<PathDatabaseWavelet>(statisticsArg, compressedArg, reads);
     }
-    if (compressedArg.isSet()) {
-        fs::path compress_folder = compressedArg.getValue();
-        db.serialize(compress_folder);
+    else if (compressor == "wavelet_old") {
+        compressReads<PathDatabaseWaveletDeprecated>(statisticsArg, compressedArg, reads);
     }
 
     return 0;
 }
+
