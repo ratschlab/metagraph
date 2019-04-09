@@ -13,7 +13,8 @@ DBGBitmap::DBGBitmap(size_t k, bool canonical_mode)
       : alphabet(seq_encoder_.alphabet),
         k_(k),
         canonical_mode_(canonical_mode),
-        kmers_(std::pow(static_cast<long double>(alphabet.size()), k_) + 1, true) {
+        kmers_(std::pow(static_cast<long double>(alphabet.size()), k_) + 1, true),
+        complete_(true) {
     assert(k > 1);
     assert(kmers_.num_set_bits() == kmers_.size());
     if (k * std::log2(alphabet.size()) >= 64) {
@@ -127,8 +128,11 @@ DBGBitmap::node_index
 DBGBitmap::to_node(const Kmer &kmer) const {
     auto index = kmer.data() + 1;
     assert(index < kmers_.size());
+    assert(!complete_ || kmers_[index]);
 
-    return kmers_[index] ? kmers_.rank1(index) - 1 : npos;
+    return complete_
+        ? index
+        : (kmers_[index] ? kmers_.rank1(index) - 1 : npos);
 }
 
 DBGBitmap::node_index
@@ -141,14 +145,14 @@ uint64_t DBGBitmap::node_to_index(node_index node) const {
     assert(node);
     assert(node < kmers_.num_set_bits());
 
-    return kmers_.select1(node + 1);
+    return complete_ ? node : kmers_.select1(node + 1);
 }
 
 DBGBitmap::Kmer DBGBitmap::node_to_kmer(node_index node) const {
     assert(node);
     assert(node < kmers_.num_set_bits());
 
-    return Kmer { kmers_.select1(node + 1) - 1 };
+    return Kmer { complete_ ? node - 1 : kmers_.select1(node + 1) - 1 };
 }
 
 std::string DBGBitmap::get_node_sequence(node_index node) const {
@@ -190,6 +194,8 @@ bool DBGBitmap::load(std::istream &in) {
         kmers_.load(in);
         if (!in.good())
             return false;
+
+        complete_ = (kmers_.size() == kmers_.num_set_bits());
 
         try {
             canonical_mode_ = load_number(in);
@@ -371,7 +377,7 @@ bool DBGBitmap::equals(const DBGBitmap &other, bool verbose) const {
                 mismatch += (pos != other.kmers_.select1(cur_one++));
             }
         );
-        return !mismatch;
+        return cur_one == other.kmers_.num_set_bits() + 1 && !mismatch;
     }
 
     if (k_ == other.k_
@@ -384,7 +390,7 @@ bool DBGBitmap::equals(const DBGBitmap &other, bool verbose) const {
                 mismatch += (pos != other.kmers_.select1(cur_one++));
             }
         );
-        return !mismatch;
+        return cur_one == other.kmers_.num_set_bits() + 1 && !mismatch;
     }
 
     return false;
@@ -392,6 +398,7 @@ bool DBGBitmap::equals(const DBGBitmap &other, bool verbose) const {
 
 std::ostream& operator<<(std::ostream &out, const DBGBitmap &graph) {
     out << "k: " << graph.k_ << std::endl
+        << "complete: " << graph.complete_ << std::endl
         << "canonical: " << graph.canonical_mode_ << std::endl
         << "nodes:" << std::endl;
 

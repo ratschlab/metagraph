@@ -162,6 +162,8 @@ DBGBitmapConstructor
 
     graph->canonical_mode_ = canonical_mode;
 
+    graph->complete_ = false;
+
     assert(!(sdsl::bits::hi(graph->kmers_.size()) % KmerExtractor2Bit::kLogSigma));
 
     graph->k_ = sdsl::bits::hi(graph->kmers_.size()) / KmerExtractor2Bit::kLogSigma;
@@ -206,4 +208,5 @@ void DBGBitmapConstructor::build_graph(DBGBitmap *graph) {
         chunk->size(), chunk->num_set_bits() + 1
     );
     delete chunk;
+    graph->complete_ = false;
 }

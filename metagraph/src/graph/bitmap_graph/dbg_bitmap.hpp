@@ -100,6 +100,8 @@ class DBGBitmap : public DeBruijnGraph {
 
     bool equals(const DBGBitmap &other, bool verbose = false) const;
 
+    inline bool is_complete() const { return complete_; }
+
     friend std::ostream& operator<<(std::ostream &out, const DBGBitmap &graph);
 
     const std::string &alphabet;
@@ -130,6 +132,8 @@ class DBGBitmap : public DeBruijnGraph {
     KmerExtractor2Bit seq_encoder_;
 
     bit_vector_sd kmers_;
+
+    bool complete_ = false;
 
     static constexpr auto kExtension = ".bitmapdbg";
 };

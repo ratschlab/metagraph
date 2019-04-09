@@ -40,6 +40,7 @@ uint64_t kmer_string_to_index(const DBGBitmap &graph, const std::string &kmer) {
 TEST(DBGBitmapConstructedFull, InitializeComplete) {
     {
         DBGBitmap graph(20, false);
+        ASSERT_TRUE(graph.is_complete());
         EXPECT_EQ(std::string("AAAAAAAAAAAAAAAAAAAA"), graph.get_node_sequence(1));
         EXPECT_EQ(1u, kmer_string_to_index(graph, "AAAAAAAAAAAAAAAAAAAA"));
 
@@ -61,6 +62,7 @@ TEST(DBGBitmapConstructedFull, InitializeComplete) {
 
     {
         DBGBitmap graph(20, true);
+        ASSERT_TRUE(graph.is_complete());
         EXPECT_EQ(std::string("AAAAAAAAAAAAAAAAAAAA"), graph.get_node_sequence(1));
         EXPECT_EQ(1u, kmer_string_to_index(graph, "AAAAAAAAAAAAAAAAAAAA"));
 
