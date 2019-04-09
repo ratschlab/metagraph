@@ -128,25 +128,20 @@ double VectorRowBinMat::density() const {
     return static_cast<double>(num_relations()) / num_columns() / num_rows();
 }
 
-VectorRowBinMat::StreamRows::StreamRows(std::ifstream &instream, const std::string filename) {
+VectorRowBinMat::StreamRows::StreamRows(std::ifstream &instream, const std::string &filename) {
     if (!instream.good())
         throw std::ifstream::failure("Bad stream");
 
     (void)load_number(instream);
     (void)load_number(instream);
 
-    auto int_vector_filename = filename + ".int_vector";
-    std::ofstream outstream(int_vector_filename, std::ios::binary);
-
-    std::copy(
-        (std::istreambuf_iterator<char>(instream)),
-         std::istreambuf_iterator<char>(),
-         std::ostreambuf_iterator<char>(outstream)
-    );
-
-    outstream.close();
-    inbuf_ = new sdsl::int_vector_buffer<>(int_vector_filename,
-                                           std::ios::in);
+    uint64_t offs = instream.tellg();
+    inbuf_ = new sdsl::int_vector_buffer<>(filename,
+                                           std::ios::in,
+                                           1024*1024,
+                                           0,
+                                           false,
+                                           offs);
 }
 
 std::unique_ptr<std::vector<VectorRowBinMat::Row> > VectorRowBinMat::StreamRows::next_row() {
@@ -172,17 +167,22 @@ void VectorRowBinMat::write_rows(std::ofstream &outstream,
                 uint64_t num_cols) {
 
     uint8_t width = utils::code_length(num_cols);
+
     serialize_number(outstream, num_rows);
     serialize_number(outstream, num_cols);
-
-    if (num_rows <= 0)
+    if (num_rows == 0)
         return;
 
-    auto int_vector_filename = filename + ".int_vector";
-    auto outbuf = sdsl::int_vector_buffer<>(int_vector_filename,
+    uint64_t offs = outstream.tellp();
+    std::cout << "offset: " << offs << std::endl;
+    outstream.close();
+
+    auto outbuf = sdsl::int_vector_buffer<>(filename,
                                             std::ios::out,
                                             1024*1024,
-                                            width);
+                                            width,
+                                            false,
+                                            offs);
 
     callback([&](const std::vector<uint64_t> &row) {
         for(auto val : row)
@@ -191,14 +191,4 @@ void VectorRowBinMat::write_rows(std::ofstream &outstream,
     });
 
     outbuf.close();
-
-    std::ifstream instream(int_vector_filename);
-
-    std::copy(
-        (std::istreambuf_iterator<char>(instream)),
-         std::istreambuf_iterator<char>(),
-         std::ostreambuf_iterator<char>(outstream)
-    );
-
-    std::remove(int_vector_filename.c_str());
 }

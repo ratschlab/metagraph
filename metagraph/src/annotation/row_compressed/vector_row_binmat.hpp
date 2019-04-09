@@ -39,7 +39,7 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
 
     class StreamRows {
       public:
-        StreamRows(std::ifstream &instream, const std::string filename);
+        StreamRows(std::ifstream &instream, const std::string &filename);
         std::unique_ptr<std::vector<Row> > next_row();
       private:
         sdsl::int_vector_buffer<> *inbuf_;

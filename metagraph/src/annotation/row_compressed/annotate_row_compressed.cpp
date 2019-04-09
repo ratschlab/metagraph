@@ -291,7 +291,7 @@ LabelEncoder<Label>* RowCompressed<Label>::load_label_encoder(const std::string 
 }
 
 template <typename Label>
-bool RowCompressed<Label>::stream_counts(const std::string &filename,
+bool RowCompressed<Label>::stream_counts(std::string filename,
                                          uint64_t &num_objects,
                                          uint64_t &num_relations,
                                          bool sparse) {
@@ -301,9 +301,9 @@ bool RowCompressed<Label>::stream_counts(const std::string &filename,
 
 template <typename Label>
 RowCompressed<Label>
-::StreamRows::StreamRows(const std::string &filename, bool sparse) {
-    std::ifstream instream(remove_suffix(filename, kExtension) + kExtension,
-                           std::ios::binary);
+::StreamRows::StreamRows(std::string filename, bool sparse) {
+    filename = remove_suffix(filename, kExtension) + kExtension;
+    std::ifstream instream(filename, std::ios::binary);
 
     if (!instream.good())
         throw std::runtime_error("Bad stream");
@@ -323,14 +323,15 @@ RowCompressed<Label>
 
 template <typename Label>
 void RowCompressed<Label>
-::write_rows(const std::string &filename,
+::write_rows(std::string filename,
              const LabelEncoder<Label> &label_encoder,
              const uint64_t num_rows,
              const std::function<void (const std::function<void (const std::vector<uint64_t> &)>&)> &callback,
              //BinaryMatrix::GetRow &callback,
              bool sparse) {
-    std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension,
-                            std::ios::binary);
+    filename = remove_suffix(filename, kExtension) + kExtension;
+    std::ofstream outstream(filename, std::ios::binary);
+
     if (!outstream.good())
         throw std::ofstream::failure("Bad stream");
 
