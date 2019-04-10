@@ -132,7 +132,7 @@ TEST(PathDatabase,IdentityTestPathDatabaseBaselineWaveletDeprecated) {
 }
 
 TEST(PathDatabase,IdentityTestPathDatabaseBaselineWavelet) {
-    short_identity_test<PathDatabaseBaselineWavelet>();
+    short_identity_test<PathDatabaseBaselineWavelet<>>();
 }
 
 TEST(PathDatabase,SerDesTest) {

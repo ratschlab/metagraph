@@ -32,7 +32,6 @@ using json = nlohmann::json;
 #include "samplers.hpp"
 #include "utilities.hpp"
 
-void compressReads(const ValueArg<string> &statisticsArg, ValueArg<string> &compressedArg, const vector<string> &reads);
 
 #pragma clang diagnostic pop
 
@@ -100,10 +99,10 @@ int main(int argc, char *argv[]) {
     auto reads = read_reads_from_fasta(input_filename);
     auto compressor = compressor_type.getValue();
     if (compressor == "wavelet") {
-        compressReads<PathDatabaseWavelet>(statisticsArg, compressedArg, reads);
+        compressReads<PathDatabaseBaselineWavelet<>>(statisticsArg, compressedArg, reads);
     }
     else if (compressor == "wavelet_old") {
-        compressReads<PathDatabaseWaveletDeprecated>(statisticsArg, compressedArg, reads);
+        compressReads<PathDatabaseBaselineWaveletDeprecated>(statisticsArg, compressedArg, reads);
     }
 
     return 0;

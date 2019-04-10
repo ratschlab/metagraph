@@ -256,7 +256,7 @@ public:
     }
 
 
-    void serialize(const fs::path& folder) const {
+    void serialize(const fs::path& folder) const override {
         fs::create_directories(folder / "xxx.bin");
         ofstream edge_multiplicity_file(folder / "edge_multiplicity.bin", ios_base::trunc | ios_base::out);
         ofstream routing_table_file(folder / "routing_table.bin", ios_base::trunc | ios_base::out);
