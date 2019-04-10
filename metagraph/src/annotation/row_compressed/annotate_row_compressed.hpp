@@ -64,8 +64,6 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     class StreamRows {
       public:
         StreamRows(std::string filename, bool sparse);
-        // TODO: decode and return VLabels?
-        // or, make private, and make rowcompressed merge a friend method of RowCompressed class
         std::unique_ptr<std::vector<VectorRowBinMat::Row> > next_row() { return sr_->next_row(); };
       private:
         std::unique_ptr<VectorRowBinMat::StreamRows> sr_;

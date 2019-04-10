@@ -1,7 +1,7 @@
 #include "annotation_converters.hpp"
 
 #include <progress_bar.hpp>
-
+#include "annotate.hpp"
 #include "static_annotators_def.hpp"
 #include "annotate_column_compressed.hpp"
 #include "BRWT_builders.hpp"
@@ -213,5 +213,58 @@ convert<BinRelWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotato
         annotator.label_encoder_
     );
 }
+
+template <>
+uint64_t
+merge<RowCompressed<>, std::string, false>(const std::vector<std::string> &filenames,
+                                           const std::string &outfile) {
+
+    typedef LabelEncoder<std::string> LEncoder;
+    std::vector<LEncoder*> label_encoders;
+    for(auto filename : filenames) {
+        LEncoder* label_encoder = RowCompressed<std::string>::load_label_encoder(filename);
+        label_encoders.push_back(label_encoder);
+    }
+
+    LEncoder* merged_label_enc { new LEncoder() };
+    merged_label_enc->merge(label_encoders);
+
+    std::vector<std::vector<uint64_t> > label_mappings;
+    for(size_t i = 0; i < filenames.size(); ++i) {
+        std::vector<uint64_t> v;
+        for(size_t j = 0; j < label_encoders.at(i)->size(); ++j)
+            v.push_back(merged_label_enc->encode(label_encoders.at(i)->decode(j)));
+        label_mappings.push_back(v);
+    }
+
+
+    std::vector<RowCompressed<>::StreamRows*> annotators;
+    for(size_t i = 0; i < filenames.size(); ++i) {
+        auto annotator = new RowCompressed<>::StreamRows(filenames.at(i), false);
+        annotators.push_back(annotator);
+    }
+
+    auto callback = [&](const std::function<void (const std::vector<uint64_t> &)> &write_row) {
+        std::set<uint64_t> label_set;
+        while (true) {
+            label_set.clear();
+            for(size_t i = 0; i < annotators.size(); ++i) {
+                auto row = annotators[i]->next_row();
+                if(!row)
+                    return;
+                for(auto label : *row)
+                    label_set.insert(label_mappings.at(i)[label]);
+            }
+            std::vector<uint64_t> merged_row(label_set.begin(), label_set.end());
+            write_row(merged_row);
+        }
+    };
+
+    return RowCompressed<>::write_rows(outfile,
+                                       *merged_label_enc,
+                                       callback,
+                                       false);
+}
+
 
 } // namespace annotate

@@ -2,6 +2,7 @@
 #define __ANNOTATION_CONVERTERS_HPP__
 
 #include <memory>
+#include <vector>
 
 
 namespace annotate {
@@ -12,6 +13,9 @@ class RowCompressed;
 template <class StaticAnnotation, typename Label>
 typename std::unique_ptr<StaticAnnotation>
 convert(RowCompressed<Label>&& annotation);
+
+template <class Annotation, typename Label, bool sparse>
+uint64_t merge(const std::vector<std::string> &filenames, const std::string &outfile);
 
 
 template <typename Label>
