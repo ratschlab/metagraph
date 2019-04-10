@@ -160,11 +160,11 @@ std::unique_ptr<std::vector<VectorRowBinMat::Row> > VectorRowBinMat::StreamRows:
     return nullptr;
 }
 
-uint64_t VectorRowBinMat::write_rows(std::ofstream &outstream,
-                const std::string &filename,
-                const std::function<void (const std::function<void (const std::vector<uint64_t> &)>&)> &callback,
-                uint64_t num_cols) {
+uint64_t VectorRowBinMat::append_rows(const std::string &filename,
+                                      const std::function<void (const std::function<void (const std::vector<uint64_t> &)>&)> &callback,
+                                      uint64_t num_cols) {
 
+    std::ofstream outstream(filename, std::ios::binary|std::ios::in|std::ios::ate);
     uint8_t width = utils::code_length(num_cols);
     uint64_t num_rows = 0;
 

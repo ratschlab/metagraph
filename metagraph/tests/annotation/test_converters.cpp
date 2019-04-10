@@ -272,7 +272,7 @@ TEST(RowCompressed, Merge) {
         auto annotation = new annotate::RowCompressed<>(5);
         annotation->add_labels(1, {"Label0", "Label3"});
         annotation->add_labels(2, {"Label0", "Label9", "Label7"});
-        annotation->add_labels(4, {"Label1", "Label3", "Label9", "Label10", "9", "a", "b", "c", "d", "e", "f", "10"});
+        annotation->add_labels(4, {"Label1", "Label3", "Label9", "Label10", "Label5", "Label6", "Label11", "Label12", "Label13", "Label14", "Label15", "Label16"});
         const std::string filename = test_dump_basename_row_compressed_merge + "_2";
         annotation->serialize(filename);
         filenames.push_back(filename + annotate::kRowAnnotatorExtension);
@@ -287,7 +287,7 @@ TEST(RowCompressed, Merge) {
         annotation->add_labels(1, {"Label0", "Label3"});
         annotation->add_labels(2, {"Label0", "Label2", "Label1", "Label9", "Label7"});
         annotation->add_labels(3, {"Label2", "Label8", "Label1"});
-        annotation->add_labels(4, {"Label2", "Label1", "Label3", "Label9", "Label10", "9", "a", "b", "c", "d", "e", "f", "10"});
+        annotation->add_labels(4, {"Label2", "Label1", "Label3", "Label9", "Label10", "Label5", "Label6", "Label11", "Label12", "Label13", "Label14", "Label15", "Label16"});
 
         annotate::RowCompressed<> written(num_rows);
         written.merge_load({ test_dump_basename_row_compressed_merge + "_merged" });

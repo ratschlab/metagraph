@@ -7,7 +7,16 @@
 #include "utils.hpp"
 
 
+namespace annotate {
+template <typename Label>
+class RowCompressed;
+}
+
+
 class VectorRowBinMat : public BinaryMatrixRowDynamic {
+    template <typename Label>
+    friend class annotate::RowCompressed;
+
   public:
     VectorRowBinMat(uint64_t num_rows = 0) : vector_(num_rows) {}
 
@@ -37,19 +46,6 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
 
-    class StreamRows {
-      public:
-        StreamRows(std::ifstream &instream, const std::string &filename);
-        std::unique_ptr<std::vector<Row> > next_row();
-      private:
-        sdsl::int_vector_buffer<> *inbuf_;
-        uint64_t i_ = 0;
-    };
-    static uint64_t write_rows(std::ofstream &outstream,
-                               const std::string &filename,
-                               const std::function<void (const std::function<void (const std::vector<uint64_t> &)>&)> &callback,
-                               uint64_t num_cols);
-
     // number of ones in the matrix
     uint64_t num_relations() const;
     // matrix density
@@ -58,6 +54,19 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
   private:
     uint64_t num_columns_ = 0;
     std::vector<SmallVector> vector_;
+
+    class StreamRows {
+      public:
+        StreamRows(std::ifstream &instream, const std::string &filename);
+        std::unique_ptr<std::vector<Row> > next_row();
+      private:
+        sdsl::int_vector_buffer<> *inbuf_;
+        uint64_t i_ = 0;
+    };
+
+    static uint64_t append_rows(const std::string &filename,
+                                const std::function<void (const std::function<void (const std::vector<uint64_t> &)>&)> &callback,
+                                uint64_t num_cols);
 };
 
 #endif // __VECTOR_ROW_BINMAT_HPP__

@@ -342,12 +342,13 @@ uint64_t RowCompressed<Label>
         throw std::ofstream::failure("Bad stream");
 
     label_encoder.serialize(outstream);
+    outstream.close();
 
     if (sparse) {
         throw std::runtime_error("Not implemented");
     } else {
         uint64_t num_cols = label_encoder.size();
-        return VectorRowBinMat::write_rows(outstream, filename, callback, num_cols);
+        return VectorRowBinMat::append_rows(filename, callback, num_cols);
     }
 }
 
