@@ -8,6 +8,7 @@
 #include "annotate.hpp"
 #include "binary_matrix.hpp"
 #include "vector_row_binmat.hpp"
+#include "annotation_converters.hpp"
 
 
 namespace annotate {
@@ -24,6 +25,8 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     template <class A, typename L>
     friend std::unique_ptr<A> convert(RowCompressed<L>&&);
+    template <class A, typename L, bool s>
+    friend uint64_t merge(const std::vector<std::string>&, const std::string&);
 
   public:
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
@@ -56,6 +59,17 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     size_t num_labels() const;
     uint64_t num_relations() const;
 
+  private:
+    void reinitialize(uint64_t num_rows);
+
+    std::vector<uint64_t> count_labels(const std::vector<Index> &indices) const;
+
+    std::unique_ptr<BinaryMatrixRowDynamic> matrix_;
+
+    LabelEncoder<Label> &label_encoder_ {
+        MultiLabelEncoded<uint64_t, Label>::label_encoder_
+    };
+
     static LabelEncoder<Label>* load_label_encoder(const std::string &filename);
     static void stream_counts(std::string filename,
                               uint64_t &num_objects,
@@ -71,19 +85,7 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     static uint64_t write_rows(std::string filename,
                            const LabelEncoder<Label> &label_encoder,
                            const std::function<void (const std::function<void (const std::vector<uint64_t> &)>&)> &callback,
-                           //BinaryMatrix::GetRow &callback,
                            bool sparse);
-
-  private:
-    void reinitialize(uint64_t num_rows);
-
-    std::vector<uint64_t> count_labels(const std::vector<Index> &indices) const;
-
-    std::unique_ptr<BinaryMatrixRowDynamic> matrix_;
-
-    LabelEncoder<Label> &label_encoder_ {
-        MultiLabelEncoded<uint64_t, Label>::label_encoder_
-    };
 
     static constexpr auto kExtension = kRowAnnotatorExtension;
 };

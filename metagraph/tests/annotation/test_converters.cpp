@@ -278,7 +278,8 @@ TEST(RowCompressed, Merge) {
         filenames.push_back(filename + annotate::kRowAnnotatorExtension);
     }
 
-    uint64_t num_rows = annotate::merge<annotate::RowCompressed<>, std::string, false>(filenames, test_dump_basename_row_compressed_merge + "_merged");
+    uint64_t num_rows = annotate::merge<annotate::RowCompressed<>, std::string>(filenames, test_dump_basename_row_compressed_merge + "_merged");
+    EXPECT_EQ(5u, num_rows);
 
     {
         auto annotation = new annotate::RowCompressed<>(5);

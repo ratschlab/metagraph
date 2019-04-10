@@ -241,9 +241,9 @@ namespace utils {
                             std::vector<kmer_label_pair>> index_heap_;
     };
 
-    void call_rows(BinaryMatrix::PutRow &callback,
+    void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
                    RowsFromColumnsTransformer&& transformer);
-    void call_rows(BinaryMatrix::PutRow &callback,
+    void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
                    const BinaryMatrix &row_major_matrix);
 
     template <typename... Args>

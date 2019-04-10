@@ -14,7 +14,7 @@ template <class StaticAnnotation, typename Label>
 typename std::unique_ptr<StaticAnnotation>
 convert(RowCompressed<Label>&& annotation);
 
-template <class Annotation, typename Label, bool sparse>
+template <class Annotation, typename Label, bool sparse = false>
 uint64_t merge(const std::vector<std::string> &filenames, const std::string &outfile);
 
 
