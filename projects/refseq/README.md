@@ -275,3 +275,89 @@ for k in {43..85}; do \
             $outdir/complete.1161.1.genomic.fna.gz.kmc_suf $k";\
 done
 ```
+
+### Build other graph representations
+
+#### Bitmap
+
+```bash
+for k in {10..31}; do \
+    data_root="$HOME/metagenome/data/refseq/refseq_var_k/complete.1161.1.genomic.fna.gz/complete.1161.1.genomic.fna.gz.k$k"; \
+    bsub -J build_bitmap_k${k} \
+         -oo $data_root/graph_bitmap.lsf \
+         -W 20:00 -n 6 -R "rusage[mem=10000] span[hosts=1]" \
+        "gtime -v ../../metagraph/build_release/metagengraph build -v \
+            --graph bitmap \
+            --mem-cap-gb 40 -k $k -p 12 \
+            -o $data_root/graph_bitmap \
+            $data_root/complete.1161.1.genomic.fna.gz.contigs.fasta.gz"; \
+done
+```
+
+#### Hash-based
+
+```bash
+for k in {10..85}; do \
+    data_root="$HOME/metagenome/data/refseq/refseq_var_k/complete.1161.1.genomic.fna.gz/complete.1161.1.genomic.fna.gz.k$k"; \
+    bsub -J build_hash_k${k} \
+         -oo $data_root/graph_hash.lsf \
+         -W 20:00 -n 1 -R "rusage[mem=100000] span[hosts=1]" \
+        "gtime -v ../../metagraph/build_release/metagengraph build -v \
+            --graph hash \
+            -k $k \
+            -o $data_root/graph_hash \
+            $data_root/complete.1161.1.genomic.fna.gz.contigs.fasta.gz"; \
+done
+
+
+for k in {10..85}; do \
+    data_root="$HOME/metagenome/data/refseq/refseq_var_k/complete.1161.1.genomic.fna.gz/complete.1161.1.genomic.fna.gz.k$k"; \
+    bsub -J build_hashstr_k${k} \
+         -oo $data_root/graph_hashstr.lsf \
+         -W 20:00 -n 1 -R "rusage[mem=180000] span[hosts=1]" \
+        "gtime -v ../../metagraph/build_release/metagengraph build -v \
+            --graph hashstr \
+            -k $k \
+            -o $data_root/graph_hashstr \
+            $data_root/complete.1161.1.genomic.fna.gz.contigs.fasta.gz"; \
+done
+```
+
+
+## Measure graph stats
+
+```bash
+ls -1aS $HOME/metagenome/data/refseq/refseq_var_k/complete.1161.1.genomic.fna.gz/complete.1161.1.genomic.fna.gz.k*/*.dbg \
+    | xargs -n 1 -I % bash -c \
+        'memcap="$(($(du --block-size=1M % | cut -f1) * 5 / 4 + 100))"; \
+        bsub -J "stats_succinct" -W 3:00 -n 1 -R "rusage[mem=$memcap] span[hosts=1]" \
+             -oo %.stats \
+            "gtime -v ../../metagraph/build/metagengraph stats %"'
+```
+
+```bash
+ls -1aS $HOME/metagenome/data/refseq/refseq_var_k/complete.1161.1.genomic.fna.gz/complete.1161.1.genomic.fna.gz.k*/*.bitmapdbg \
+    | xargs -n 1 -I % bash -c \
+        'memcap="$(($(du --block-size=1M % | cut -f1) * 5 / 4 + 100))"; \
+        bsub -J "stats_bitmap" -W 3:00 -n 1 -R "rusage[mem=$memcap] span[hosts=1]" \
+             -oo %.stats \
+            "gtime -v ../../metagraph/build/metagengraph stats %"'
+```
+
+```bash
+ls -1aS $HOME/metagenome/data/refseq/refseq_var_k/complete.1161.1.genomic.fna.gz/complete.1161.1.genomic.fna.gz.k*/*.orhashdbg \
+    | xargs -n 1 -I % bash -c \
+        'memcap="$(($(du --block-size=1M % | cut -f1) * 6))"; \
+        bsub -J "stats_hash" -W 3:00 -n 1 -R "rusage[mem=$memcap] span[hosts=1]" \
+             -oo %.stats \
+            "gtime -v ../../metagraph/build/metagengraph stats %"'
+```
+
+```bash
+ls -1aS $HOME/metagenome/data/refseq/refseq_var_k/complete.1161.1.genomic.fna.gz/complete.1161.1.genomic.fna.gz.k*/*.hashstrdbg \
+    | xargs -n 1 -I % bash -c \
+        'memcap="$(($(du --block-size=1M % | cut -f1) * 30))"; \
+        bsub -J "stats_hashstr" -W 3:00 -n 1 -R "rusage[mem=$memcap] span[hosts=1]" \
+             -oo %.stats \
+            "gtime -v ../../metagraph/build/metagengraph stats %"'
+```
