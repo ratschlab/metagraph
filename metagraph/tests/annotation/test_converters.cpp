@@ -13,6 +13,7 @@
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
 const std::string test_dump_basename_row_compressed_merge = test_dump_basename + "_row_compressed_merge";
+const std::string test_dump_basename_rowflat_merge = test_dump_basename + "_rowflat_merge";
 
 
 class ConvertFromRowCompressed : public ::testing::Test {
@@ -340,9 +341,9 @@ TEST_F(MergeAnnotators, RowFlat_to_RowCompressed) {
         row_flat_annotators.push_back(row_flat.release());
     }
 
-    uint64_t merged_num_rows = annotate::merge<annotate::RowFlatAnnotator, annotate::RowCompressed<>, std::string>(row_flat_annotators, "asdf");
+    uint64_t merged_num_rows = annotate::merge<annotate::RowFlatAnnotator, annotate::RowCompressed<>, std::string>(row_flat_annotators, test_dump_basename_rowflat_merge);
     EXPECT_EQ(num_rows, merged_num_rows);
 
     merged_annotation = new annotate::RowCompressed<>(num_rows);
-    merged_annotation->merge_load({ "asdf" });
+    merged_annotation->merge_load({ test_dump_basename_rowflat_merge });
 }
