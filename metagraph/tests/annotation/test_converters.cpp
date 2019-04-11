@@ -48,11 +48,60 @@ class ConvertFromRowCompressed : public ::testing::Test {
         delete initial_annotation;
         delete annotation;
     }
-
 };
 
 annotate::RowCompressed<> *ConvertFromRowCompressed::initial_annotation = nullptr;
 annotate::MultiLabelEncoded<uint64_t, std::string> *ConvertFromRowCompressed::annotation = nullptr;
+
+class MergeAnnotators : public ::testing::Test {
+  protected:
+    static const uint64_t num_rows = 5;
+    static annotate::RowCompressed<> *input_annotation_1;
+    static annotate::RowCompressed<> *input_annotation_2;
+    static annotate::RowCompressed<> *merged_annotation_expected;
+    static annotate::RowCompressed<> *merged_annotation;
+
+    virtual void SetUp() {
+
+        input_annotation_1 = new annotate::RowCompressed<>(num_rows);
+        input_annotation_1->add_labels(0, {"Label0", "Label2", "Label8"});
+        input_annotation_1->add_labels(2, {"Label1", "Label2"});
+        input_annotation_1->add_labels(3, {"Label1", "Label2", "Label8"});
+        input_annotation_1->add_labels(4, {"Label2"});
+
+        input_annotation_2 = new annotate::RowCompressed<>(num_rows);
+        input_annotation_2->add_labels(1, {"Label0", "Label3"});
+        input_annotation_2->add_labels(2, {"Label0", "Label9", "Label7"});
+        input_annotation_2->add_labels(4, {"Label1", "Label3", "Label9", "Label10", "Label5", "Label6", "Label11", "Label12", "Label13", "Label14", "Label15", "Label16"});
+
+        merged_annotation_expected = new annotate::RowCompressed<>(num_rows);
+        merged_annotation_expected->add_labels(0, {"Label0", "Label2", "Label8"});
+        merged_annotation_expected->add_labels(1, {"Label0", "Label3"});
+        merged_annotation_expected->add_labels(2, {"Label0", "Label2", "Label1", "Label9", "Label7"});
+        merged_annotation_expected->add_labels(3, {"Label2", "Label8", "Label1"});
+        merged_annotation_expected->add_labels(4, {"Label2", "Label1", "Label3", "Label9", "Label10", "Label5", "Label6", "Label11", "Label12", "Label13", "Label14", "Label15", "Label16"});
+    }
+
+    virtual void TearDown() {
+        ASSERT_TRUE(merged_annotation);
+        for(uint64_t i = 0; i < num_rows; ++i) {
+            auto row_expected = merged_annotation_expected->get_labels(i);
+            auto row = merged_annotation->get_labels(i);
+            EXPECT_EQ(row_expected, row);
+        }
+
+        delete input_annotation_1;
+        delete input_annotation_2;
+        delete merged_annotation_expected;
+        delete merged_annotation;
+    }
+};
+
+const uint64_t MergeAnnotators::num_rows;
+annotate::RowCompressed<> *MergeAnnotators::input_annotation_1 = nullptr;
+annotate::RowCompressed<> *MergeAnnotators::input_annotation_2 = nullptr;
+annotate::RowCompressed<> *MergeAnnotators::merged_annotation_expected = nullptr;
+annotate::RowCompressed<> *MergeAnnotators::merged_annotation = nullptr;
 
 
 class ConvertFromColumnCompressed : public ::testing::Test {
@@ -208,15 +257,15 @@ TEST_F(ConvertFromRowCompressed, to_BinRelWT_sdsl) {
     ).release();;
 }
 
-// TEST(ConvertFromRowCompressedEmpty, to_RowFlat) {
-//     annotate::RowCompressed<> empty_column_annotator(5);
-//     auto empty_annotation = annotate::convert<annotate::RowFlatAnnotator>(
-//         std::move(empty_column_annotator)
-//     );
-//     EXPECT_EQ(0u, empty_annotation->num_labels());
-//     EXPECT_EQ(5u, empty_annotation->num_objects());
-//     EXPECT_EQ(0u, empty_annotation->num_relations());
-// }
+TEST(ConvertFromRowCompressedEmpty, to_RowFlat) {
+    annotate::RowCompressed<> empty_column_annotator(5);
+    auto empty_annotation = annotate::convert<annotate::RowFlatAnnotator>(
+        std::move(empty_column_annotator)
+    );
+    EXPECT_EQ(0u, empty_annotation->num_labels());
+    EXPECT_EQ(5u, empty_annotation->num_objects());
+    EXPECT_EQ(0u, empty_annotation->num_relations());
+}
 
 TEST_F(ConvertFromRowCompressed, to_RowFlat) {
     annotation = annotate::convert<annotate::RowFlatAnnotator>(
@@ -256,47 +305,44 @@ TEST_F(ConvertFromRowCompressed, to_RainbowfishAnnotator) {
 //     ).release();
 // }
 
-TEST(RowCompressed, Merge) {
+TEST_F(MergeAnnotators, RowCompressed) {
     std::vector<std::string> filenames;
     {
-        auto annotation = new annotate::RowCompressed<>(5);
-        annotation->add_labels(0, {"Label0", "Label2", "Label8"});
-        annotation->add_labels(2, {"Label1", "Label2"});
-        annotation->add_labels(3, {"Label1", "Label2", "Label8"});
-        annotation->add_labels(4, {"Label2"});
         const std::string filename = test_dump_basename_row_compressed_merge + "_1";
-        annotation->serialize(filename);
+        input_annotation_1->serialize(filename);
         filenames.push_back(filename + annotate::kRowAnnotatorExtension);
     }
     {
-        auto annotation = new annotate::RowCompressed<>(5);
-        annotation->add_labels(1, {"Label0", "Label3"});
-        annotation->add_labels(2, {"Label0", "Label9", "Label7"});
-        annotation->add_labels(4, {"Label1", "Label3", "Label9", "Label10", "Label5", "Label6", "Label11", "Label12", "Label13", "Label14", "Label15", "Label16"});
         const std::string filename = test_dump_basename_row_compressed_merge + "_2";
-        annotation->serialize(filename);
+        input_annotation_2->serialize(filename);
         filenames.push_back(filename + annotate::kRowAnnotatorExtension);
     }
 
-    uint64_t num_rows = annotate::merge<annotate::RowCompressed<>, std::string>(filenames, test_dump_basename_row_compressed_merge + "_merged");
-    EXPECT_EQ(5u, num_rows);
+    uint64_t merged_num_rows = annotate::merge<annotate::RowCompressed<>, annotate::RowCompressed<>, std::string>(filenames, test_dump_basename_row_compressed_merge + "_merged");
+    EXPECT_EQ(num_rows, merged_num_rows);
 
+    merged_annotation = new annotate::RowCompressed<>(num_rows);
+    merged_annotation->merge_load({ test_dump_basename_row_compressed_merge + "_merged" });
+}
+
+TEST_F(MergeAnnotators, RowFlat_to_RowCompressed) {
+    std::vector<const annotate::RowFlatAnnotator*> row_flat_annotators;
     {
-        auto annotation = new annotate::RowCompressed<>(5);
-        annotation->add_labels(0, {"Label0", "Label2", "Label8"});
-        annotation->add_labels(1, {"Label0", "Label3"});
-        annotation->add_labels(2, {"Label0", "Label2", "Label1", "Label9", "Label7"});
-        annotation->add_labels(3, {"Label2", "Label8", "Label1"});
-        annotation->add_labels(4, {"Label2", "Label1", "Label3", "Label9", "Label10", "Label5", "Label6", "Label11", "Label12", "Label13", "Label14", "Label15", "Label16"});
-
-        annotate::RowCompressed<> written(num_rows);
-        written.merge_load({ test_dump_basename_row_compressed_merge + "_merged" });
-
-        for(uint64_t i = 0; i < num_rows; ++i) {
-            auto row_expected = annotation->get_labels(i);
-            auto row = written.get_labels(i);
-            EXPECT_EQ(row_expected, row);
-        }
-
+        auto row_flat = annotate::convert<annotate::RowFlatAnnotator>(
+            std::move(*input_annotation_1)
+        );
+        row_flat_annotators.push_back(row_flat.release());
     }
+    {
+        auto row_flat = annotate::convert<annotate::RowFlatAnnotator>(
+            std::move(*input_annotation_2)
+        );
+        row_flat_annotators.push_back(row_flat.release());
+    }
+
+    uint64_t merged_num_rows = annotate::merge<annotate::RowFlatAnnotator, annotate::RowCompressed<>, std::string>(row_flat_annotators, "asdf");
+    EXPECT_EQ(num_rows, merged_num_rows);
+
+    merged_annotation = new annotate::RowCompressed<>(num_rows);
+    merged_annotation->merge_load({ "asdf" });
 }

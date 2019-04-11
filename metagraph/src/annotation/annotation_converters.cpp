@@ -216,7 +216,7 @@ convert<BinRelWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotato
 
 template <>
 uint64_t
-merge<RowCompressed<>, std::string, false>(const std::vector<std::string> &filenames,
+merge<RowCompressed<>, RowCompressed<>, std::string, false>(const std::vector<std::string> &filenames,
                                            const std::string &outfile) {
 
     typedef LabelEncoder<std::string> LEncoder;
@@ -266,5 +266,11 @@ merge<RowCompressed<>, std::string, false>(const std::vector<std::string> &filen
                                        false);
 }
 
+template <>
+uint64_t
+merge<RowFlatAnnotator, RowCompressed<>, std::string, false>(const std::vector<const RowFlatAnnotator*> &annotators,
+                                           const std::string &outfile) {
+    throw std::runtime_error("Not implemented");
+}
 
 } // namespace annotate
