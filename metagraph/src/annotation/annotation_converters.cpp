@@ -214,17 +214,12 @@ convert<BinRelWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotato
     );
 }
 
-template <>
-uint64_t
-merge<RowCompressed<>, RowCompressed<>, std::string, false>(const std::vector<std::string> &filenames,
-                                           const std::string &outfile) {
-
-    typedef LabelEncoder<std::string> LEncoder;
-    std::vector<LEncoder*> label_encoders;
-    for(auto filename : filenames) {
-        LEncoder* label_encoder = RowCompressed<std::string>::load_label_encoder(filename);
-        label_encoders.push_back(label_encoder);
-    }
+uint64_t merge_rows(
+    const std::vector<LEncoder*> &label_encoders,
+    const std::function<const std::vector<uint64_t>(const uint64_t, const uint64_t)> &get_row,
+    const uint64_t &num_rows,
+    const std::function<uint64_t(LEncoder&, const std::function<void (WriteRowFunction&)>)> &write_rows
+) {
 
     LEncoder* merged_label_enc { new LEncoder() };
     merged_label_enc->merge(label_encoders);
@@ -237,51 +232,7 @@ merge<RowCompressed<>, RowCompressed<>, std::string, false>(const std::vector<st
         label_mappings.push_back(v);
     }
 
-
-    std::vector<RowCompressed<>::StreamRows*> annotators;
-    for(size_t i = 0; i < filenames.size(); ++i) {
-        auto annotator = new RowCompressed<>::StreamRows(filenames.at(i), false);
-        annotators.push_back(annotator);
-    }
-
-    auto callback = [&](const std::function<void (const std::vector<uint64_t> &)> &write_row) {
-        std::set<uint64_t> label_set;
-        while (true) {
-            label_set.clear();
-            for(size_t i = 0; i < annotators.size(); ++i) {
-                auto row = annotators[i]->next_row();
-                if(!row)
-                    return;
-                for(auto label : *row)
-                    label_set.insert(label_mappings.at(i)[label]);
-            }
-            std::vector<uint64_t> merged_row(label_set.begin(), label_set.end());
-            write_row(merged_row);
-        }
-    };
-
-    return RowCompressed<>::write_rows(outfile,
-                                       *merged_label_enc,
-                                       callback,
-                                       false);
-}
-
-
-
-uint64_t merge_rows(const std::vector<LabelEncoder<std::string>*> &label_encoders, const std::function<const std::vector<uint64_t>(const uint64_t, const uint64_t)> &get_row, const uint64_t &num_rows, const std::function<uint64_t(LabelEncoder<std::string>&, const std::function<void(const std::function<void (const std::vector<uint64_t> &)>&)>)> &write_rows) {
-    typedef LabelEncoder<std::string> LEncoder;
-    LEncoder* merged_label_enc { new LEncoder() };
-    merged_label_enc->merge(label_encoders);
-
-    std::vector<std::vector<uint64_t> > label_mappings;
-    for(size_t i = 0; i < label_encoders.size(); ++i) {
-        std::vector<uint64_t> v;
-        for(size_t j = 0; j < label_encoders.at(i)->size(); ++j)
-            v.push_back(merged_label_enc->encode(label_encoders.at(i)->decode(j)));
-        label_mappings.push_back(v);
-    }
-
-    return write_rows(*merged_label_enc, [&](const std::function<void (const std::vector<uint64_t> &)> &write_row) {
+    return write_rows(*merged_label_enc, [&](WriteRowFunction &write_row) {
         std::set<uint64_t> label_set;
         for (uint64_t r = 0; r < num_rows; ++r) {
             label_set.clear();
@@ -297,12 +248,47 @@ uint64_t merge_rows(const std::vector<LabelEncoder<std::string>*> &label_encoder
 
 template <>
 uint64_t
+merge<RowCompressed<>, RowCompressed<>, std::string, false>(const std::vector<std::string> &filenames,
+                                                            const std::string &outfile) {
+    assert(filenames.size()>0);
+    uint64_t num_rows;
+    uint64_t num_cols;
+    RowCompressed<>::stream_counts(filenames.at(0), num_rows, num_cols, false);
+
+    std::vector<LEncoder*> label_encoders;
+    for(auto filename : filenames) {
+        LEncoder* label_encoder = RowCompressed<std::string>::load_label_encoder(filename);
+        label_encoders.push_back(label_encoder);
+    }
+
+    std::vector<RowCompressed<>::StreamRows*> annotators;
+    for(size_t i = 0; i < filenames.size(); ++i) {
+        auto annotator = new RowCompressed<>::StreamRows(filenames.at(i), false);
+        annotators.push_back(annotator);
+    }
+
+    return merge_rows(
+        label_encoders,
+        [&](const uint64_t row_idx, const uint64_t annotator_idx) -> const std::vector<uint64_t> {
+            return *annotators[annotator_idx]->next_row();
+        },
+        num_rows,
+        [&](LEncoder &merged_label_enc, const std::function<void (WriteRowFunction&)> &callback) {
+            return RowCompressed<>::write_rows(outfile,
+                                               merged_label_enc,
+                                               callback,
+                                               false);
+        }
+    );
+}
+
+template <>
+uint64_t
 merge<RowFlatAnnotator, RowCompressed<>, std::string, false>(const std::vector<const RowFlatAnnotator*> &annotators,
-                                           const std::string &outfile) {
+                                                             const std::string &outfile) {
     assert(annotators.size()>0);
     const uint64_t num_rows = annotators.at(0)->num_objects();
 
-    typedef LabelEncoder<std::string> LEncoder;
     std::vector<LEncoder*> label_encoders;
     for(auto annotator : annotators) {
         label_encoders.push_back(&annotator->label_encoder_);
@@ -310,12 +296,11 @@ merge<RowFlatAnnotator, RowCompressed<>, std::string, false>(const std::vector<c
 
     return merge_rows(
         label_encoders,
-        // should this return ptr instead of by value
         [&](const uint64_t row_idx, const uint64_t annotator_idx) -> const std::vector<uint64_t> {
             return annotators.at(annotator_idx)->matrix_->get_row(row_idx);
         },
         num_rows,
-        [&](LabelEncoder<std::string> &merged_label_enc, const std::function<void (const std::function<void (const std::vector<uint64_t> &)>&)> &callback) {
+        [&](LEncoder &merged_label_enc, const std::function<void (WriteRowFunction&)> &callback) {
             return RowCompressed<>::write_rows(outfile,
                                                merged_label_enc,
                                                callback,

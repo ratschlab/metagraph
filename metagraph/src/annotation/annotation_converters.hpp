@@ -3,9 +3,16 @@
 
 #include <memory>
 #include <vector>
+#include <functional>
+
+#include "annotate.hpp"
 
 
 namespace annotate {
+
+typedef LabelEncoder<std::string> LEncoder;
+typedef const std::function<void (const std::vector<uint64_t> &)> WriteRowFunction;
+
 
 template <typename Label>
 class RowCompressed;
