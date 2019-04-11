@@ -258,15 +258,15 @@ TEST_F(ConvertFromRowCompressed, to_BinRelWT_sdsl) {
     ).release();;
 }
 
-//TEST(ConvertFromRowCompressedEmpty, to_RowFlat) {
-//    annotate::RowCompressed<> empty_column_annotator(5);
-//    auto empty_annotation = annotate::convert<annotate::RowFlatAnnotator>(
-//        std::move(empty_column_annotator)
-//    );
-//    EXPECT_EQ(0u, empty_annotation->num_labels());
-//    EXPECT_EQ(5u, empty_annotation->num_objects());
-//    EXPECT_EQ(0u, empty_annotation->num_relations());
-//}
+// TEST(ConvertFromRowCompressedEmpty, to_RowFlat) {
+//     annotate::RowCompressed<> empty_column_annotator(5);
+//     auto empty_annotation = annotate::convert<annotate::RowFlatAnnotator>(
+//         std::move(empty_column_annotator)
+//     );
+//     EXPECT_EQ(0u, empty_annotation->num_labels());
+//     EXPECT_EQ(5u, empty_annotation->num_objects());
+//     EXPECT_EQ(0u, empty_annotation->num_relations());
+// }
 
 TEST_F(ConvertFromRowCompressed, to_RowFlat) {
     annotation = annotate::convert<annotate::RowFlatAnnotator>(
