@@ -292,7 +292,7 @@ TEST(RowCompressed, Merge) {
         annotate::RowCompressed<> written(num_rows);
         written.merge_load({ test_dump_basename_row_compressed_merge + "_merged" });
 
-        for(uint64_t i = 0; i < num_rows - 1; ++i) {
+        for(uint64_t i = 0; i < num_rows; ++i) {
             auto row_expected = annotation->get_labels(i);
             auto row = written.get_labels(i);
             EXPECT_EQ(row_expected, row);
