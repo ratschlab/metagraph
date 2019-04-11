@@ -266,20 +266,10 @@ merge<RowCompressed<>, RowCompressed<>, std::string, false>(const std::vector<st
                                        false);
 }
 
-template <>
-uint64_t
-merge<RowFlatAnnotator, RowCompressed<>, std::string, false>(const std::vector<const RowFlatAnnotator*> &annotators,
-                                           const std::string &outfile) {
-    assert(annotators.size()>0);
-    const uint64_t num_rows = annotators.at(0)->num_objects();
 
-    //TODO: generalize with above and move to utils::merge_rows or similar
+
+uint64_t merge_rows(const std::vector<LabelEncoder<std::string>*> &label_encoders, const std::function<const std::vector<uint64_t>(const uint64_t, const uint64_t)> &get_row, const uint64_t &num_rows, const std::function<uint64_t(LabelEncoder<std::string>&, const std::function<void(const std::function<void (const std::vector<uint64_t> &)>&)>)> &write_rows) {
     typedef LabelEncoder<std::string> LEncoder;
-    std::vector<LEncoder*> label_encoders;
-    for(auto annotator : annotators) {
-        label_encoders.push_back(&annotator->label_encoder_);
-    }
-
     LEncoder* merged_label_enc { new LEncoder() };
     merged_label_enc->merge(label_encoders);
 
@@ -291,24 +281,47 @@ merge<RowFlatAnnotator, RowCompressed<>, std::string, false>(const std::vector<c
         label_mappings.push_back(v);
     }
 
-    auto callback = [&](const std::function<void (const std::vector<uint64_t> &)> &write_row) {
+    return write_rows(*merged_label_enc, [&](const std::function<void (const std::vector<uint64_t> &)> &write_row) {
         std::set<uint64_t> label_set;
         for (uint64_t r = 0; r < num_rows; ++r) {
             label_set.clear();
-            for(size_t a = 0; a < annotators.size(); ++a) {
-                assert(num_rows==annotators.at(a)->num_objects());
-                for(auto label : annotators.at(a)->matrix_->get_row(r))
+            for (uint64_t a = 0; a < label_encoders.size(); ++a) {
+                for(auto label : get_row(r, a))
                     label_set.insert(label_mappings.at(a)[label]);
             }
             std::vector<uint64_t> merged_row(label_set.begin(), label_set.end());
             write_row(merged_row);
         }
-    };
+    });
+}
 
-    return RowCompressed<>::write_rows(outfile,
-                                       *merged_label_enc,
-                                       callback,
-                                       false);
+template <>
+uint64_t
+merge<RowFlatAnnotator, RowCompressed<>, std::string, false>(const std::vector<const RowFlatAnnotator*> &annotators,
+                                           const std::string &outfile) {
+    assert(annotators.size()>0);
+    const uint64_t num_rows = annotators.at(0)->num_objects();
+
+    typedef LabelEncoder<std::string> LEncoder;
+    std::vector<LEncoder*> label_encoders;
+    for(auto annotator : annotators) {
+        label_encoders.push_back(&annotator->label_encoder_);
+    }
+
+    return merge_rows(
+        label_encoders,
+        // should this return ptr instead of by value
+        [&](const uint64_t row_idx, const uint64_t annotator_idx) -> const std::vector<uint64_t> {
+            return annotators.at(annotator_idx)->matrix_->get_row(row_idx);
+        },
+        num_rows,
+        [&](LabelEncoder<std::string> &merged_label_enc, const std::function<void (const std::function<void (const std::vector<uint64_t> &)>&)> &callback) {
+            return RowCompressed<>::write_rows(outfile,
+                                               merged_label_enc,
+                                               callback,
+                                               false);
+        }
+    );
 }
 
 } // namespace annotate
