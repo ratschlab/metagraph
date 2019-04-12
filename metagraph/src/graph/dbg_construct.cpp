@@ -232,7 +232,6 @@ void KmerCollector<KMER, KmerExtractor>::join() {
 
     if (verbose_) {
         std::cout << "Reading data has finished" << std::endl;
-        get_RAM();
         std::cout << "Sorting k-mers and appending succinct"
                   << " representation from current bin...\t" << std::flush;
     }

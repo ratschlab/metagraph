@@ -236,7 +236,7 @@ void annotate_data(const std::vector<std::string> &files,
             std::cout << "File processed in "
                       << data_reading_timer.elapsed()
                       << "sec, current mem usage: "
-                      << get_curr_mem2() / (1 << 20) << " MiB"
+                      << (get_curr_RSS() >> 20) << " MiB"
                       << ", total time: " << timer.elapsed()
                       << "sec" << std::endl;
         }
@@ -335,7 +335,7 @@ void annotate_coordinates(const std::vector<std::string> &files,
             std::cout << "File processed in "
                       << data_reading_timer.elapsed()
                       << "sec, current mem usage: "
-                      << get_curr_mem2() / (1 << 20) << " MiB"
+                      << (get_curr_RSS() >> 20) << " MiB"
                       << ", total time: " << timer.elapsed()
                       << "sec" << std::endl;
         }
@@ -696,7 +696,7 @@ void parse_sequences(const std::vector<std::string> &files,
             std::cout << "File processed in "
                       << data_reading_timer.elapsed()
                       << "sec, current mem usage: "
-                      << get_curr_mem2() / (1 << 20) << " MiB"
+                      << (get_curr_RSS() >> 20) << " MiB"
                       << ", total time: " << timer.elapsed()
                       << "sec" << std::endl;
         }
@@ -1234,7 +1234,7 @@ int main(int argc, const char *argv[]) {
                         std::cout << "File processed in "
                                   << data_reading_timer.elapsed()
                                   << "sec, current mem usage: "
-                                  << get_curr_mem2() / (1 << 20) << " MiB"
+                                  << (get_curr_RSS() >> 20) << " MiB"
                                   << ", total time: " << timer.elapsed()
                                   << "sec" << std::endl;
                     }
@@ -1291,7 +1291,7 @@ int main(int argc, const char *argv[]) {
                     std::cout << "File processed in "
                               << data_reading_timer.elapsed()
                               << "sec, current mem usage: "
-                              << get_curr_mem2() / (1 << 20) << " MiB"
+                              << (get_curr_RSS() >> 20) << " MiB"
                               << ", total time: " << timer.elapsed()
                               << "sec" << std::endl;
                 }
@@ -1482,7 +1482,7 @@ int main(int argc, const char *argv[]) {
                     std::cout << "File processed in "
                               << data_reading_timer.elapsed()
                               << "sec, current mem usage: "
-                              << get_curr_mem2() / (1 << 20) << " MiB"
+                              << (get_curr_RSS() >> 20) << " MiB"
                               << ", total time: " << timer.elapsed()
                               << "sec" << std::endl;
                 }
@@ -1504,7 +1504,7 @@ int main(int argc, const char *argv[]) {
 
             std::cout << "Graph loaded in "
                       << timer.elapsed() << "sec, current mem usage: "
-                      << get_curr_mem2() / (1 << 20) << " MiB" << std::endl;
+                      << (get_curr_RSS() >> 20) << " MiB" << std::endl;
 
             const size_t num_threads = std::max(1u, config->parallel);
 
@@ -2240,7 +2240,7 @@ int main(int argc, const char *argv[]) {
                     std::cout << "File processed in "
                               << data_reading_timer.elapsed()
                               << "sec, current mem usage: "
-                              << get_curr_mem2() / (1 << 20) << " MiB"
+                              << (get_curr_RSS() >> 20) << " MiB"
                               << ", total time: " << timer.elapsed()
                               << "sec" << std::endl;
                 }

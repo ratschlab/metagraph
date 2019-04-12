@@ -28,7 +28,7 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     DataGenerator generator;
     generator.set_seed(42);
 
-    auto mem_before = get_curr_mem2();
+    auto mem_before = get_curr_RSS();
 
     auto other = generator.generate_random_column(n, d)->convert_to<BitVector>();
 
@@ -54,7 +54,7 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
               << "\t" << d
               << "\t" << 1. * other.num_set_bits() / other.size()
               << "\t" << 1. * serialized_size * 8 / n
-              << "\t" << get_curr_mem2() - mem_before
+              << "\t" << get_curr_RSS() - mem_before
               << std::endl;
 }
 
