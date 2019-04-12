@@ -21,7 +21,7 @@ template <class StaticAnnotation, typename Label>
 typename std::unique_ptr<StaticAnnotation>
 convert(RowCompressed<Label>&& annotation);
 
-template <class FromAnnotation, class ToAnnotation, typename Label>
+template <class FromAnnotation, class ToAnnotation, typename Label, bool sparse = false>
 typename std::unique_ptr<ToAnnotation>
 convert(const std::string &filename);
 

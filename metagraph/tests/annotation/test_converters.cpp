@@ -14,15 +14,17 @@ const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
 const std::string test_dump_basename_row_compressed_merge = test_dump_basename + "_row_compressed_merge";
 const std::string test_dump_basename_rowflat_merge = test_dump_basename + "_rowflat_merge";
+const std::string test_dump_basename_row_compressed_to_rowflat = test_dump_basename + "_row_compressed_to_rowflat";
 
 
 class ConvertFromRowCompressed : public ::testing::Test {
   protected:
+    static const uint64_t num_rows = 5;
     static annotate::RowCompressed<> *initial_annotation;
     static annotate::MultiLabelEncoded<uint64_t, std::string> *annotation;
 
     virtual void SetUp() {
-        initial_annotation = new annotate::RowCompressed<>(5);
+        initial_annotation = new annotate::RowCompressed<>(num_rows);
         initial_annotation->add_labels(0, {"Label0", "Label2", "Label8"});
         initial_annotation->add_labels(2, {"Label1", "Label2"});
         initial_annotation->add_labels(3, {"Label1", "Label2", "Label8"});
@@ -51,6 +53,7 @@ class ConvertFromRowCompressed : public ::testing::Test {
     }
 };
 
+const uint64_t ConvertFromRowCompressed::num_rows;
 annotate::RowCompressed<> *ConvertFromRowCompressed::initial_annotation = nullptr;
 annotate::MultiLabelEncoded<uint64_t, std::string> *ConvertFromRowCompressed::annotation = nullptr;
 
@@ -272,6 +275,18 @@ TEST_F(ConvertFromRowCompressed, to_RowFlat) {
     annotation = annotate::convert<annotate::RowFlatAnnotator>(
         std::move(*initial_annotation)
     ).release();;
+}
+
+TEST_F(ConvertFromRowCompressed, stream_to_RowFlat) {
+    std::string kRowAnnotatorExtension = ".row.annodbg"; //TODO
+    initial_annotation->serialize(test_dump_basename_row_compressed_to_rowflat + kRowAnnotatorExtension);
+
+    auto rowflat = annotate::convert<annotate::RowCompressed<>, annotate::RowFlatAnnotator, std::string>(
+        test_dump_basename_row_compressed_to_rowflat + kRowAnnotatorExtension
+    );
+    annotate::merge<annotate::RowFlatAnnotator, annotate::RowCompressed<>, std::string>({ rowflat.get() }, "asdf" + kRowAnnotatorExtension); //TODO
+    annotation = new annotate::RowCompressed<>(num_rows);
+    annotation->merge_load({ "asdf" + kRowAnnotatorExtension });
 }
 
 // TEST(ConvertFromRowCompressedEmpty, to_Rainbowfish) {

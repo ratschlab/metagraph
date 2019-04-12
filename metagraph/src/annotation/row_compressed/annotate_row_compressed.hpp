@@ -26,6 +26,8 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     template <class A, typename L>
     friend std::unique_ptr<A> convert(RowCompressed<L>&&);
     template <class A1, class A2, typename L, bool s>
+    friend std::unique_ptr<A2> convert(const std::string&);
+    template <class A1, class A2, typename L, bool s>
     friend uint64_t merge(const std::vector<std::string>&, const std::string&);
     template <class A1, class A2, typename L, bool s>
     friend uint64_t merge(const std::vector<const A1*>&, const std::string&);

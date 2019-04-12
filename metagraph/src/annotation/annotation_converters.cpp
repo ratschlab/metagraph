@@ -48,6 +48,36 @@ convert<RowFlatAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
 }
 
 template <>
+std::unique_ptr<RowFlatAnnotator>
+convert<RowCompressed<>, RowFlatAnnotator, std::string, false>(const std::string &filename) {
+    uint64_t num_rows;
+    uint64_t num_relations;
+    RowCompressed<>::stream_counts(filename, num_rows, num_relations, false);
+
+    LEncoder *label_encoder = RowCompressed<std::string>::load_label_encoder(filename);
+
+    auto annotator = new RowCompressed<>::StreamRows(filename, false);
+
+    ProgressBar progress_bar(num_rows, "Processing rows");
+
+    auto matrix = std::make_unique<RowConcatenated<>>(
+        [&](auto callback) {
+            for(uint64_t r = 0; r < num_rows; ++r) {
+                auto row = annotator->next_row();
+                std::sort(row->begin(), row->end());
+                callback(*row);
+                ++progress_bar;
+            }
+        },
+        label_encoder->size(),
+        num_rows,
+        num_relations
+    );
+
+    return std::make_unique<RowFlatAnnotator>(std::move(matrix), *label_encoder);
+}
+
+template <>
 std::unique_ptr<RainbowfishAnnotator>
 convert<RainbowfishAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
     uint64_t num_columns = annotator.num_labels();
@@ -252,8 +282,8 @@ merge<RowCompressed<>, RowCompressed<>, std::string, false>(const std::vector<st
                                                             const std::string &outfile) {
     assert(filenames.size()>0);
     uint64_t num_rows;
-    uint64_t num_cols;
-    RowCompressed<>::stream_counts(filenames.at(0), num_rows, num_cols, false);
+    uint64_t num_relations;
+    RowCompressed<>::stream_counts(filenames.at(0), num_rows, num_relations, false);
 
     std::vector<LEncoder*> label_encoders;
     for(auto filename : filenames) {
