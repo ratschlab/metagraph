@@ -83,6 +83,8 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual BOSS& get_boss() final { return *boss_graph_; }
     virtual BOSS* release_boss() final { return boss_graph_.release(); }
 
+    virtual bool operator==(const DeBruijnGraph &other) const override final;
+
   private:
     void add_seq(const std::string &sequence, bit_vector_dyn *nodes_inserted);
     uint64_t kmer_to_boss_index(node_index kmer_index) const;

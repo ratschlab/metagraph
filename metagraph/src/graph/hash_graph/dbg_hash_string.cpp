@@ -223,6 +223,24 @@ bool DBGHashString::load(const std::string &filename) {
     return load(in);
 }
 
+bool DBGHashString::operator==(const DeBruijnGraph &other) const {
+    if (!dynamic_cast<const DBGHashString*>(&other)) {
+        throw std::runtime_error("Not implemented");
+        return false;
+    }
+
+    const auto& other_hash = *dynamic_cast<const DBGHashString*>(&other);
+    if (k_ != other_hash.k_)
+        return false;
+
+    for (const auto &kmer : kmers_) {
+        if (other_hash.indices_.find(kmer) == other_hash.indices_.end())
+            return false;
+    }
+
+    return true;
+}
+
 std::string DBGHashString::encode_sequence(const std::string &sequence) const {
     std::string result = sequence;
 

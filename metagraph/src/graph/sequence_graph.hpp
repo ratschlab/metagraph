@@ -97,6 +97,9 @@ class DeBruijnGraph : public SequenceGraph {
 
     // Check whether graph contains fraction of nodes from the sequence
     virtual bool find(const std::string &sequence, double discovery_fraction = 1) const;
+
+    virtual bool operator==(const DeBruijnGraph &other) const;
+    virtual bool operator!=(const DeBruijnGraph &other) const { return !operator==(other); }
 };
 
 #endif // __SEQUENCE_GRAPH_HPP__

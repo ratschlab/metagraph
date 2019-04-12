@@ -77,6 +77,8 @@ class DBGHashString : public DeBruijnGraph {
     bool load(std::istream &in);
     bool load(const std::string &filename);
 
+    virtual bool operator==(const DeBruijnGraph &other) const override final;
+
   private:
     std::string encode_sequence(const std::string &sequence) const;
 

@@ -455,3 +455,19 @@ DBGSuccinct::node_index DBGSuccinct::boss_to_kmer_index(uint64_t boss_index) con
 
     return valid_edges_->rank1(boss_index);
 }
+
+bool DBGSuccinct::operator==(const DeBruijnGraph &other) const {
+    if (dynamic_cast<const DBGSuccinct*>(&other)) {
+        const auto& other_succ = *dynamic_cast<const DBGSuccinct*>(&other);
+        if (boss_graph_.get() == other_succ.boss_graph_.get())
+            return true;
+
+        if (!boss_graph_.get() || !other_succ.boss_graph_.get())
+            return false;
+
+        return boss_graph_->equals_internally(*other_succ.boss_graph_, false);
+    }
+
+    throw std::runtime_error("Not implemented");
+    return false;
+}

@@ -78,6 +78,22 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     bool load(std::istream &in);
     bool load(const std::string &filename);
 
+    bool operator==(const DeBruijnGraph &other) const {
+        if (!dynamic_cast<const DBGHashOrderedImpl<KMER>*>(&other))
+            throw std::runtime_error("Not implemented");
+
+        const auto& other_hash = *dynamic_cast<const DBGHashOrderedImpl<KMER>*>(&other);
+        if (k_ != other_hash.k_ || canonical_mode_ != other_hash.canonical_mode_)
+            return false;
+
+        for (const auto &kmer : kmers_) {
+            if (other_hash.kmers_.find(kmer) == other_hash.kmers_.end())
+                return false;
+        }
+
+        return true;
+    }
+
   private:
     Vector<Kmer> sequence_to_kmers(const std::string &sequence, bool canonical = false) const {
         return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical);

@@ -41,3 +41,8 @@ bool DeBruijnGraph::find(const std::string &sequence,
 
     return num_kmers_missing <= max_kmers_missing;
 }
+
+bool DeBruijnGraph::operator==(const DeBruijnGraph &) const {
+    throw std::runtime_error("Not implemented");
+    return false;
+}

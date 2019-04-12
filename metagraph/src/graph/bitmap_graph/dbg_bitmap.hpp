@@ -92,6 +92,8 @@ class DBGBitmap : public DeBruijnGraph {
     bool operator==(const DBGBitmap &other) const { return equals(other, false); }
     bool operator!=(const DBGBitmap &other) const { return !(*this == other); }
 
+    virtual bool operator==(const DeBruijnGraph &other) const override final;
+
     bool equals(const DBGBitmap &other, bool verbose = false) const;
 
     inline bool is_complete() const { return complete_; }

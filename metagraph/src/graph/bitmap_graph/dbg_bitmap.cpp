@@ -383,6 +383,13 @@ Vector<DBGBitmap::Kmer> DBGBitmap::sequence_to_kmers(const std::string &sequence
     return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, to_canonical);
 }
 
+bool DBGBitmap::operator==(const DeBruijnGraph &other) const {
+    if (dynamic_cast<const DBGBitmap*>(&other))
+        return equals(*dynamic_cast<const DBGBitmap*>(&other), false);
+
+    throw std::runtime_error("Not implemented");
+}
+
 bool DBGBitmap::equals(const DBGBitmap &other, bool verbose) const {
     if (verbose) {
         if (k_ != other.k_) {

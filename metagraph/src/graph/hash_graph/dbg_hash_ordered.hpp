@@ -97,6 +97,15 @@ class DBGHashOrdered : public DeBruijnGraph {
     bool load(std::istream &in);
     bool load(const std::string &filename);
 
+    virtual bool operator==(const DeBruijnGraph &other) const override final {
+        if (!dynamic_cast<const DBGHashOrdered*>(&other)) {
+            throw std::runtime_error("Not implemented");
+            return false;
+        }
+
+        return *hash_dbg_ == *dynamic_cast<const DBGHashOrdered*>(&other)->hash_dbg_;
+    }
+
     static constexpr auto kExtension = ".orhashdbg";
 
     class DBGHashOrderedInterface : public DeBruijnGraph {
