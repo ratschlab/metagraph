@@ -14,20 +14,32 @@ void recover_source_dummy_nodes(size_t k,
                                 Vector<KMER> *kmers,
                                 size_t num_threads,
                                 bool verbose) {
+    // TODO: remove redundant kmers in a separate function
     // remove redundant dummy kmers inplace
     size_t cur_pos = 0;
     size_t dummy_begin = kmers->size();
     size_t num_dummy_parent_kmers = 0;
+
+    KmerExtractor::TAlphabet edge_label, node_last_char;
 
     for (size_t i = 0; i < dummy_begin; ++i) {
         const KMER &kmer = kmers->at(i);
         // we never add reads shorter than k
         assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
 
-        KmerExtractor::TAlphabet edge_label;
+        node_last_char = kmer[1];
+        edge_label = kmer[0];
+
+        // skip redundant sink dummy kmers
+        if (i + 1 < dummy_begin
+                && node_last_char == kmers->at(i + 1)[1]
+                && edge_label == 0 && node_last_char > 0) {
+            kmers->at(cur_pos++) = kmer;
+            continue;
+        }
 
         // check if it's not a source dummy kmer
-        if (kmer[1] > 0 || (edge_label = kmer[0]) == 0) {
+        if (node_last_char > 0 || edge_label == 0) {
             kmers->at(cur_pos++) = kmer;
             continue;
         }
