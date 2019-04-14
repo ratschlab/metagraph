@@ -164,7 +164,7 @@ class DBG_succ {
     mark_all_dummy_edges(size_t num_threads) const;
 
     // Prune redundant dummy edges in graph
-    // and mark all dummy edges that cannot be removed
+    // and mark all dummy edges that cannot be removed.
     std::vector<bool>
     prune_and_mark_all_dummy_edges(size_t num_threads);
 

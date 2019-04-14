@@ -697,10 +697,10 @@ TEST(Misc, RemoveSuffix) {
 
 TEST(Vector, ReserveInfinityCheckThrow) {
     Vector<int> vector;
-    EXPECT_THROW(vector.reserve(2llu << 60), std::bad_alloc);
+    EXPECT_THROW(vector.reserve(1llu << 59), std::bad_alloc);
 }
 
 TEST(Vector, ResizeInfinityCheckThrow) {
     Vector<int> vector;
-    EXPECT_THROW(vector.resize(2llu << 60), std::bad_alloc);
+    EXPECT_THROW(vector.resize(1llu << 59), std::bad_alloc);
 }
