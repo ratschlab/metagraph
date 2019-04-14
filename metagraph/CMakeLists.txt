@@ -109,6 +109,11 @@ set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg -g")
 # Debug build type
 set(CMAKE_CXX_FLAGS_DEBUG "-O2 -g")
 
+# Link time optimization
+if(LINK_OPT)
+  string(APPEND CMAKE_CXX_FLAGS " -flto")
+endif()
+
 # Thread sanitizer build type
 set(CMAKE_CXX_FLAGS_THREADS "-DNDEBUG -O2 -g -fsanitize=thread")
 set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
