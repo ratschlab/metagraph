@@ -11,7 +11,6 @@
 namespace annotate {
 
 typedef LabelEncoder<std::string> LEncoder;
-typedef const std::function<void (const std::vector<uint64_t> &)> WriteRowFunction;
 
 
 template <typename Label>

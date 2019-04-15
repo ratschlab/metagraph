@@ -88,7 +88,7 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     };
     static uint64_t write_rows(std::string filename,
                            const LabelEncoder<Label> &label_encoder,
-                           const std::function<void (const std::function<void (const std::vector<uint64_t> &)>&)> &callback,
+                           const std::function<void (BinaryMatrix::RowCallback&)> &callback,
                            bool sparse);
 
     static constexpr auto kExtension = kRowAnnotatorExtension;

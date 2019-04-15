@@ -64,9 +64,9 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
         uint64_t i_ = 0;
     };
 
-    static uint64_t append_rows(const std::string &filename,
-                                const std::function<void (const std::function<void (const std::vector<uint64_t> &)>&)> &callback,
-                                uint64_t num_cols);
+    static uint64_t append_matrix(const std::string &filename,
+                                  const std::function<void (BinaryMatrix::RowCallback&)> &callback,
+                                  uint64_t num_cols);
 };
 
 #endif // __VECTOR_ROW_BINMAT_HPP__

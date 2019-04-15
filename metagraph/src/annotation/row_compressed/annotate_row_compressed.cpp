@@ -333,7 +333,7 @@ template <typename Label>
 uint64_t RowCompressed<Label>
 ::write_rows(std::string filename,
              const LabelEncoder<Label> &label_encoder,
-             const std::function<void (const std::function<void (const std::vector<uint64_t> &)>&)> &callback,
+             const std::function<void (BinaryMatrix::RowCallback&)> &callback,
              bool sparse) {
     filename = remove_suffix(filename, kExtension) + kExtension;
     std::ofstream outstream(filename, std::ios::binary);
@@ -348,7 +348,7 @@ uint64_t RowCompressed<Label>
         throw std::runtime_error("Not implemented");
     } else {
         uint64_t num_cols = label_encoder.size();
-        return VectorRowBinMat::append_rows(filename, callback, num_cols);
+        return VectorRowBinMat::append_matrix(filename, callback, num_cols);
     }
 }
 

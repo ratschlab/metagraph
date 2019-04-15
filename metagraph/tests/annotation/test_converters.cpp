@@ -278,11 +278,11 @@ TEST_F(ConvertFromRowCompressed, to_RowFlat) {
 }
 
 TEST_F(ConvertFromRowCompressed, stream_to_RowFlat) {
-    std::string kRowAnnotatorExtension = ".row.annodbg"; //TODO
-    initial_annotation->serialize(test_dump_basename_row_compressed_to_rowflat + kRowAnnotatorExtension);
+    const auto rowflat_filename = test_dump_basename_row_compressed_to_rowflat + annotate::kRowAnnotatorExtension;
+    initial_annotation->serialize(rowflat_filename);
 
     annotation = annotate::convert<annotate::RowCompressed<>, annotate::RowFlatAnnotator, std::string>(
-        test_dump_basename_row_compressed_to_rowflat + kRowAnnotatorExtension
+        rowflat_filename
     ).release();
 }
 

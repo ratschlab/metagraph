@@ -248,7 +248,7 @@ uint64_t merge_rows(
     const std::vector<LEncoder*> &label_encoders,
     const std::function<const std::vector<uint64_t>(const uint64_t, const uint64_t)> &get_row,
     const uint64_t &num_rows,
-    const std::function<uint64_t(LEncoder&, const std::function<void (WriteRowFunction&)>)> &write_rows
+    const std::function<uint64_t(LEncoder&, const std::function<void (BinaryMatrix::RowCallback&)>)> &write_rows
 ) {
 
     LEncoder* merged_label_enc { new LEncoder() };
@@ -262,7 +262,7 @@ uint64_t merge_rows(
         label_mappings.push_back(v);
     }
 
-    return write_rows(*merged_label_enc, [&](WriteRowFunction &write_row) {
+    return write_rows(*merged_label_enc, [&](BinaryMatrix::RowCallback &write_row) {
         std::set<uint64_t> label_set;
         for (uint64_t r = 0; r < num_rows; ++r) {
             label_set.clear();
@@ -303,7 +303,7 @@ merge<RowCompressed<>, RowCompressed<>, std::string, false>(const std::vector<st
             return *annotators[annotator_idx]->next_row();
         },
         num_rows,
-        [&](LEncoder &merged_label_enc, const std::function<void (WriteRowFunction&)> &callback) {
+        [&](LEncoder &merged_label_enc, const std::function<void (BinaryMatrix::RowCallback&)> &callback) {
             return RowCompressed<>::write_rows(outfile,
                                                merged_label_enc,
                                                callback,
@@ -330,7 +330,7 @@ merge<RowFlatAnnotator, RowCompressed<>, std::string, false>(const std::vector<c
             return annotators.at(annotator_idx)->matrix_->get_row(row_idx);
         },
         num_rows,
-        [&](LEncoder &merged_label_enc, const std::function<void (WriteRowFunction&)> &callback) {
+        [&](LEncoder &merged_label_enc, const std::function<void (BinaryMatrix::RowCallback&)> &callback) {
             return RowCompressed<>::write_rows(outfile,
                                                merged_label_enc,
                                                callback,
