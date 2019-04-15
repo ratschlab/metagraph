@@ -96,6 +96,15 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
     }
 }
 
+std::vector<std::string>
+AnnotatedDBG::get_labels(const SequenceGraph::node_index &index) const {
+    assert(graph_.get() && annotator_.get());
+    assert(check_compatibility());
+    assert(index != SequenceGraph::npos);
+
+    return annotator_->get_labels(graph_to_anno_index(index));
+}
+
 std::vector<std::pair<std::string, size_t>>
 AnnotatedDBG::get_top_labels(const std::string &sequence,
                              size_t num_top_labels,
@@ -129,6 +138,43 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
     }
 }
 
+bool AnnotatedDBG::label_exists(const std::string &label) const {
+    assert(annotator_.get());
+
+    return annotator_->label_exists(label);
+}
+
+bool AnnotatedDBG::has_label(const SequenceGraph::node_index &index,
+                             const std::string &label) const {
+    assert(graph_.get() && annotator_.get());
+    assert(check_compatibility());
+    assert(index != SequenceGraph::npos);
+
+    return annotator_->has_label(graph_to_anno_index(index), label);
+}
+
+void AnnotatedDBG
+::call_indices(const std::string &label,
+               const std::function<void(const SequenceGraph::node_index&)> callback) const {
+    assert(graph_.get() && annotator_.get());
+    assert(check_compatibility());
+
+    annotator_->call_indices(
+        label,
+        [&](const auto &index) { callback(anno_to_graph_index(index)); }
+    );
+}
+
+uint64_t AnnotatedDBG
+::count_labels(SequenceGraph::node_index index,
+               const std::vector<std::string> &labels_to_match) const {
+    assert(graph_.get() && annotator_.get());
+    assert(check_compatibility());
+    assert(index != SequenceGraph::npos);
+
+    return annotator_->count_labels(graph_to_anno_index(index), labels_to_match);
+}
+
 uint64_t AnnotatedDBG::num_anno_rows() const {
     assert(graph_.get() || annotator_.get());
 
@@ -141,6 +187,11 @@ AnnotatedDBG::Annotator::Index
 AnnotatedDBG::graph_to_anno_index(SequenceGraph::node_index kmer_index) {
     assert(kmer_index);
     return kmer_index - 1;
+}
+
+SequenceGraph::node_index
+AnnotatedDBG::anno_to_graph_index(Annotator::Index anno_index) {
+    return anno_index + 1;
 }
 
 bool AnnotatedDBG::check_compatibility() const {
