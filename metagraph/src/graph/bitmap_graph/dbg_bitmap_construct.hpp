@@ -5,94 +5,52 @@
 #include "dbg_construct.hpp"
 
 
-class ISDChunkConstructor : public IChunkConstructor<DBGSD::Chunk> {
+class ISDChunkConstructor : public IGraphChunkConstructor<DBGSD::Chunk> {
   public:
+    virtual ~ISDChunkConstructor() {}
+
+    static ISDChunkConstructor* initialize(size_t k,
+                                           bool canonical_mode = false,
+                                           const std::string &filter_suffix = "",
+                                           size_t num_threads = 1,
+                                           double memory_preallocated = 0,
+                                           bool verbose = false);
+
     virtual void add_sequence(const std::string &sequence) = 0;
+    virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;
 
     virtual DBGSD::Chunk* build_chunk() = 0;
 
     virtual size_t get_k() const = 0;
-
     virtual bool is_canonical_mode() const = 0;
-
-    // TODO: replace with variadic template
-    static ISDChunkConstructor* initialize(
-        size_t k,
-        bool canonical_mode = false,
-        const std::string &filter_suffix = std::string(),
-        size_t num_threads = 1,
-        double memory_preallocated = 0,
-        bool verbose = false
-    );
 };
 
 
-template <typename KMER>
-class SDChunkConstructor : public ISDChunkConstructor {
-    friend ISDChunkConstructor;
-
+class DBGSDConstructor : public IGraphConstructor<DBGSD> {
   public:
-    SDChunkConstructor(size_t k,
-                       bool canonical_mode = false,
-                       const std::string &filter_suffix = std::string(),
-                       size_t num_threads = 1,
-                       double memory_preallocated = 0,
-                       bool verbose = false);
+    DBGSDConstructor(size_t k,
+                     bool canonical_mode = false,
+                     const std::string &filter_suffix = "",
+                     size_t num_threads = 1,
+                     double memory_preallocated = 0,
+                     bool verbose = false);
 
-    inline void add_sequence(const std::string &sequence) {
-        kmer_collector_.add_sequence(sequence);
-    }
-
-    inline void add_sequences(std::function<void(CallbackString)> generate_sequences) {
-        kmer_collector_.add_sequences(generate_sequences);
-    }
-
-    inline size_t get_k() const { return kmer_collector_.get_k(); }
-
-    inline bool is_canonical_mode() const { return kmer_collector_.is_both_strands_mode(); }
-
-    DBGSD::Chunk* build_chunk();
-
-  private:
-    KmerCollector<KMER, KmerExtractor2Bit> kmer_collector_;
-};
-
-
-class DBGSDConstructor : public GraphConstructor {
-  public:
-    explicit DBGSDConstructor(size_t k,
-                              bool canonical_mode = false,
-                              const std::string &filter_suffix = std::string(),
-                              size_t num_threads = 1,
-                              double memory_preallocated = 0,
-                              bool verbose = false)
-          : constructor_(ISDChunkConstructor::initialize(
-                k,
-                canonical_mode,
-                filter_suffix,
-                num_threads,
-                memory_preallocated,
-                verbose)
-          ) {}
-    inline void add_sequence(const std::string &sequence) {
+    void add_sequence(const std::string &sequence) {
         constructor_->add_sequence(sequence);
     }
 
-    inline void add_sequences(const std::vector<std::string> &sequences) {
-        constructor_->add_sequences(
-            [&sequences](const CallbackString &callback) {
-                std::for_each(sequences.begin(), sequences.end(), callback);
-            }
-        );
+    void add_sequences(const std::vector<std::string> &sequences) {
+        constructor_->add_sequences([&sequences](const CallString &callback) {
+            std::for_each(sequences.begin(), sequences.end(), callback);
+        });
     }
 
-    inline void add_sequences(const std::function<void(CallbackString)> &callback) {
-        constructor_->add_sequences(callback);
+    void add_sequences(std::function<void(CallString)> generate_sequences) {
+        constructor_->add_sequences(generate_sequences);
     }
 
     void build_graph(DBGSD *graph);
-
-    DBGSD::Chunk* build_chunk();
+    DBGSD::Chunk* build_chunk() { return constructor_->build_chunk(); }
 
     static DBGSD* build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
                                           bool canonical_mode = false,

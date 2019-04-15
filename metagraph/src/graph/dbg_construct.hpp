@@ -7,25 +7,30 @@
 #include "kmer_extractor.hpp"
 
 
-typedef std::function<void(const std::string&)> CallbackString;
+typedef std::function<void(const std::string&)> CallString;
 
 
 template <class GraphChunk>
-class IChunkConstructor {
+class IGraphChunkConstructor {
   public:
-    virtual ~IChunkConstructor() {}
+    virtual ~IGraphChunkConstructor() {}
 
     virtual void add_sequence(const std::string &sequence) = 0;
-
-    virtual void add_sequences(std::function<void(CallbackString)> generate_sequences) = 0;
+    virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;
 
     virtual GraphChunk* build_chunk() = 0;
 };
 
 
-class GraphConstructor {
+template <class Graph>
+class IGraphConstructor {
   public:
-    virtual ~GraphConstructor() {}
+    virtual ~IGraphConstructor() {}
+
+    virtual void add_sequence(const std::string &sequence) = 0;
+    virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;
+
+    virtual void build_graph(Graph *graph) = 0;
 };
 
 
@@ -51,7 +56,7 @@ class KmerCollector {
     // TODO: another for std::string&& ?
     void add_sequence(const std::string &sequence);
 
-    void add_sequences(const std::function<void(CallbackString)> &generate_sequences);
+    void add_sequences(const std::function<void(CallString)> &generate_sequences);
 
     template <typename... Args>
     inline void emplace_back(Args&&... args) {

@@ -1,6 +1,36 @@
 #include "dbg_bitmap_construct.hpp"
 
 
+template <typename KMER>
+class SDChunkConstructor : public ISDChunkConstructor {
+    friend ISDChunkConstructor;
+
+  private:
+    SDChunkConstructor(size_t k,
+                       bool canonical_mode = false,
+                       const std::string &filter_suffix = "",
+                       size_t num_threads = 1,
+                       double memory_preallocated = 0,
+                       bool verbose = false);
+
+    void add_sequence(const std::string &sequence) {
+        kmer_collector_.add_sequence(sequence);
+    }
+
+    void add_sequences(std::function<void(CallString)> generate_sequences) {
+        kmer_collector_.add_sequences(generate_sequences);
+    }
+
+    size_t get_k() const { return kmer_collector_.get_k(); }
+
+    bool is_canonical_mode() const { return kmer_collector_.is_both_strands_mode(); }
+
+    DBGSD::Chunk* build_chunk();
+
+    KmerCollector<KMER, KmerExtractor2Bit> kmer_collector_;
+};
+
+
 template <class KmerExtractor>
 inline std::vector<typename KmerExtractor::TAlphabet>
 encode_filter_suffix(const std::string &filter_suffix) {
@@ -32,6 +62,21 @@ SDChunkConstructor<KMER>
                         memory_preallocated,
                         verbose) {}
 
+DBGSDConstructor::DBGSDConstructor(size_t k,
+                                   bool canonical_mode,
+                                   const std::string &filter_suffix,
+                                   size_t num_threads,
+                                   double memory_preallocated,
+                                   bool verbose)
+      : constructor_(ISDChunkConstructor::initialize(
+            k,
+            canonical_mode,
+            filter_suffix,
+            num_threads,
+            memory_preallocated,
+            verbose)
+        ) {}
+
 /**
  * Initialize graph chunk from a list of sorted kmers.
  */
@@ -57,7 +102,8 @@ DBGSD::Chunk* SDChunkConstructor<KMER>
     return chunk.release();
 }
 
-DBGSD* DBGSDConstructor
+DBGSD*
+DBGSDConstructor
 ::build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
                           bool canonical_mode,
                           bool verbose) {
@@ -160,8 +206,4 @@ void DBGSDConstructor::build_graph(DBGSD *graph) {
         chunk->size(), chunk->num_set_bits() + 1
     );
     delete chunk;
-}
-
-DBGSD::Chunk* DBGSDConstructor::build_chunk() {
-    return constructor_->build_chunk();
 }

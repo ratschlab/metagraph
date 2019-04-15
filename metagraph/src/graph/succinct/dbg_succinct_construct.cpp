@@ -121,6 +121,32 @@ encode_filter_suffix_boss(const std::string &filter_suffix) {
     return filter_suffix_encoded;
 }
 
+
+template <typename KMER>
+class DBGBOSSChunkConstructor : public IDBGBOSSChunkConstructor {
+    friend IDBGBOSSChunkConstructor;
+
+  private:
+    DBGBOSSChunkConstructor(size_t k,
+                            bool canonical_mode = false,
+                            const std::string &filter_suffix = "",
+                            size_t num_threads = 1,
+                            double memory_preallocated = 0,
+                            bool verbose = false);
+
+    void add_sequence(const std::string &sequence) {
+        kmer_collector_.add_sequence(sequence);
+    }
+
+    void add_sequences(std::function<void(CallString)> generate_sequences) {
+        kmer_collector_.add_sequences(generate_sequences);
+    }
+
+    DBG_succ::Chunk* build_chunk();
+
+    KmerCollector<KMER, KmerExtractor> kmer_collector_;
+};
+
 template <typename KMER>
 DBGBOSSChunkConstructor<KMER>
 ::DBGBOSSChunkConstructor(size_t k,
@@ -240,6 +266,22 @@ DBG_succ::Chunk* DBGBOSSChunkConstructor<KMER>
 
     return result;
 }
+
+
+DBGSuccConstructor::DBGSuccConstructor(size_t k,
+                                       bool canonical_mode,
+                                       const std::string &filter_suffix,
+                                       size_t num_threads,
+                                       double memory_preallocated,
+                                       bool verbose)
+      : constructor_(IDBGBOSSChunkConstructor::initialize(
+            k,
+            canonical_mode,
+            filter_suffix,
+            num_threads,
+            memory_preallocated,
+            verbose)
+      ) {}
 
 void DBGSuccConstructor::build_graph(DBG_succ *graph) {
     auto chunk = constructor_->build_chunk();
