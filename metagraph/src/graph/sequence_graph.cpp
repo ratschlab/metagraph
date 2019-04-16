@@ -65,6 +65,22 @@ void DeBruijnGraph
     std::stack<std::tuple<node_index, node_index, std::string, char>> paths;
     std::vector<std::pair<node_index, char>> targets;
 
+    // linear paths first
+    call_nodes(
+        [&](const auto &start) {
+            if (visited[start] || indegree(start))
+                return;
+
+            call_sequences_from(start,
+                                callback,
+                                &visited,
+                                &discovered,
+                                &paths,
+                                &targets);
+            }
+    );
+
+    // then cycles
     call_nodes(
         [&](const auto &start) {
             if (visited[start])
@@ -89,6 +105,24 @@ void DeBruijnGraph
     std::stack<std::tuple<node_index, node_index, std::string, char>> paths;
     std::vector<std::pair<node_index, char>> targets;
 
+    // linear paths first
+    call_nodes(
+        [&](const auto &start) {
+            if (visited[start] || indegree(start))
+                return;
+
+            call_sequences_from(start,
+                                callback,
+                                &visited,
+                                &discovered,
+                                &paths,
+                                &targets,
+                                true,
+                                max_pruned_dead_end_size);
+            }
+    );
+
+    // then cycles
     call_nodes(
         [&](const auto &start) {
             if (visited[start])

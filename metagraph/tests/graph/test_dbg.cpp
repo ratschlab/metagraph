@@ -266,6 +266,35 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsFourLoops) {
     }
 }
 
+TYPED_TEST(DeBruijnGraphTest, CallPathsExtractsLongestOneLoop) {
+    for (size_t k = 4; k < 14; ++k) {
+        std::vector<std::string> sequences { "ATGCAGTACTCAG",
+                                             "GGGGGGGGGGGGG" };
+        auto graph = build_graph<TypeParam>(k, sequences);
+
+        std::vector<std::string> contigs;
+        graph->call_sequences([&](const auto &contig) { contigs.push_back(contig); });
+
+        EXPECT_EQ(2u, contigs.size());
+        EXPECT_EQ(convert_to_set({ "ATGCAGTACTCAG", std::string(k, 'G') }),
+                  convert_to_set(contigs)) << k;
+    }
+}
+
+TYPED_TEST(DeBruijnGraphTest, CallPathsExtractsLongestTwoLoops) {
+    for (size_t k = 4; k < 14; ++k) {
+        std::vector<std::string> sequences { "ATGCAGTACTCAG",
+                                             "ATGCAGTACTGAG",
+                                             "GGGGGGGGGGGGG" };
+        auto graph = build_graph<TypeParam>(k, sequences);
+
+        std::vector<std::string> contigs;
+        graph->call_sequences([&](const auto &contig) { contigs.push_back(contig); });
+
+        EXPECT_EQ(3u, contigs.size());
+    }
+}
+
 TYPED_TEST(DeBruijnGraphTest, CallUnitigsFourLoops) {
     for (size_t k = 2; k <= 20; ++k) {
         std::vector<std::string> sequences { std::string(100, 'A'),
@@ -346,6 +375,20 @@ TYPED_TEST(DeBruijnGraphTest, CallPaths) {
         {
             auto graph = build_graph<TypeParam>(k, { "AAACT",
                                                      "AAATG" });
+
+            std::vector<std::string> reconst;
+
+            graph->call_sequences([&](const auto &sequence) {
+                reconst.push_back(sequence);
+            });
+            auto reconstructed = build_graph<TypeParam>(k, reconst);
+
+            EXPECT_EQ(*graph, *reconstructed);
+        }
+        {
+            auto graph = build_graph<TypeParam>(k, { "ATGCAGTACTCAG",
+                                                     "ATGCAGTAGTCAG",
+                                                     "GGGGGGGGGGGGG" });
 
             std::vector<std::string> reconst;
 
