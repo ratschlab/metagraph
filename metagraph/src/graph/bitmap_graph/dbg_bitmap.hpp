@@ -62,17 +62,6 @@ class DBGBitmap : public DeBruijnGraph {
 
     size_t indegree(node_index node) const;
 
-    template <class... T>
-    using Call = typename std::function<void(T...)>;
-
-    // traverse all nodes in graph
-    void call_kmers(Call<node_index, const std::string&> callback) const;
-
-    // call paths (or simple paths if |split_to_contigs| is true) that cover
-    // exactly all kmers in graph
-    void call_sequences(Call<const std::string&> callback,
-                        bool split_to_contigs = false) const;
-
     node_index kmer_to_node(const std::string &kmer) const;
 
     std::string get_node_sequence(node_index node) const;
@@ -118,10 +107,6 @@ class DBGBitmap : public DeBruijnGraph {
     uint64_t node_to_index(node_index node) const;
     Kmer node_to_kmer(node_index node) const;
     node_index to_node(const Kmer &kmer) const;
-
-    void call_paths(Call<const std::vector<node_index>,
-                         const std::vector<uint8_t>&> callback,
-                    bool split_to_contigs) const;
 
     size_t k_;
     bool canonical_mode_;

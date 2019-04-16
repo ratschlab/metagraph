@@ -224,6 +224,58 @@ void DBGSuccinct::map_to_nodes(const std::string &sequence,
     }
 }
 
+void DBGSuccinct
+::call_sequences(const std::function<void(const std::string&)> &callback) const {
+    assert(boss_graph_.get());
+    boss_graph_->call_sequences(callback);
+}
+
+void DBGSuccinct
+::call_contigs(const std::function<void(const std::string&)> &callback,
+               size_t max_pruned_dead_end_size) const {
+    assert(boss_graph_.get());
+    boss_graph_->call_contigs(callback, max_pruned_dead_end_size);
+}
+
+void DBGSuccinct
+::call_kmers(const std::function<void(node_index, const std::string&)> &callback) const {
+    assert(boss_graph_.get());
+    boss_graph_->call_kmers([&](auto index, const std::string &seq) {
+        assert(boss_graph_->get_last(index));
+        do {
+            auto cur_W = boss_graph_->get_W(index);
+            if (!cur_W)
+                break;
+
+            auto node = boss_to_kmer_index(index);
+            if (node != npos)
+                callback(node, seq + boss_graph_->decode(cur_W));
+        } while (!boss_graph_->get_last(--index));
+    });
+}
+
+void DBGSuccinct
+::call_nodes(const std::function<void(const node_index&)> &callback,
+             const std::function<bool()> &stop_early) const {
+    auto nnodes = num_nodes();
+    if (!canonical_mode_) {
+        for (node_index i = 1; i <= nnodes; ++i) {
+            callback(i);
+            if (stop_early())
+                return;
+        }
+        return;
+    }
+
+    call_kmers([&](auto i, const auto &kmer) {
+        if (stop_early())
+            return;
+
+        if (i == kmer_to_node(kmer))
+            callback(i);
+    });
+}
+
 size_t DBGSuccinct::outdegree(node_index node) const {
     assert(node);
 
@@ -407,7 +459,7 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
     valid_edges_.reset();
 
     //TODO: use sdsl::bit_vector as mask
-    std::vector<bool> vector_mask = with_pruning
+    auto vector_mask = with_pruning
         ? boss_graph_->prune_and_mark_all_dummy_edges(num_threads)
         : boss_graph_->mark_all_dummy_edges(num_threads);
 

@@ -5,6 +5,7 @@
 #include "bit_vector.hpp"
 #include "config.hpp"
 
+
 class BOSS;
 
 
@@ -57,6 +58,17 @@ class DBGSuccinct : public DeBruijnGraph {
                                            std::string::const_iterator end,
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate = [](){ return false; }) const override final;
+
+    // TODO: compare these to DeBruijnGraph implementations
+    virtual void call_sequences(const std::function<void(const std::string&)> &callback) const override final;
+
+    virtual void call_contigs(const std::function<void(const std::string&)> &callback,
+                              size_t max_pruned_dead_end_size) const override final;
+
+    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override final;
+
+    virtual void call_nodes(const std::function<void(const node_index&)> &callback,
+                            const std::function<bool()> &stop_early = [](){ return false; }) const override final;
 
     virtual void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const override final;
 

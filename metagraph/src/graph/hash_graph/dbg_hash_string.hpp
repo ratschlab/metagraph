@@ -61,6 +61,8 @@ class DBGHashString : public DeBruijnGraph {
     size_t outdegree(node_index node) const;
     size_t indegree(node_index node) const;
 
+    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override final;
+
     node_index kmer_to_node(const std::string &kmer) const;
     std::string node_to_kmer(node_index node) const;
 

@@ -165,6 +165,13 @@ size_t DBGHashString::indegree(node_index node) const {
     return indegree;
 }
 
+void DBGHashString
+::call_kmers(const std::function<void(node_index, const std::string&)> &callback) const {
+    for (const auto &kmer : indices_) {
+        callback(kmer.second + 1, kmer.first);
+    }
+}
+
 DBGHashString::node_index
 DBGHashString::kmer_to_node(const std::string &kmer) const {
     if (kmer.length() != k_)

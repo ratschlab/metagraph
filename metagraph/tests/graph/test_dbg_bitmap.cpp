@@ -558,7 +558,7 @@ TEST(DBGBitmap, CallPathsEmptyGraph) {
         empty.call_sequences([&](const auto &sequence) {
             empty_reconst.add_sequence(sequence);
             ++nseq;
-        }, false);
+        });
         ASSERT_EQ(0u, nseq);
         DBGBitmap reconstructed(&empty_reconst);
 
@@ -573,9 +573,9 @@ TEST(DBGBitmap, CallContigsEmptyGraph) {
         DBGBitmapConstructor empty_reconst(k);
 
         uint64_t nseq = 0;
-        empty.call_sequences([&](const auto &sequence) {
+        empty.call_contigs([&](const auto &sequence) {
             empty_reconst.add_sequence(sequence);
-        }, true);
+        });
         ASSERT_EQ(0u, nseq);
         DBGBitmap reconstructed(&empty_reconst);
 
@@ -591,13 +591,10 @@ TEST(DBGBitmap, CallPathsTwoLoops) {
 
         ASSERT_EQ(1u, graph.num_nodes());
 
-        size_t num_paths = 0;
         size_t num_sequences = 0;
 
-        graph.call_paths([&](const auto &, const auto &) { num_paths++; }, false);
-        graph.call_sequences([&](const auto &) { num_sequences++; }, false);
+        graph.call_sequences([&](const auto &) { num_sequences++; });
 
-        EXPECT_EQ(graph.num_nodes(), num_paths);
         EXPECT_EQ(graph.num_nodes(), num_sequences);
     }
 }
@@ -610,13 +607,10 @@ TEST(DBGBitmap, CallContigsTwoLoops) {
 
         ASSERT_EQ(1u, graph.num_nodes());
 
-        size_t num_paths = 0;
         size_t num_sequences = 0;
 
-        graph.call_paths([&](const auto &, const auto &) { num_paths++; }, true);
-        graph.call_sequences([&](const auto &) { num_sequences++; }, true);
+        graph.call_contigs([&](const auto &) { num_sequences++; });
 
-        EXPECT_EQ(graph.num_nodes(), num_paths);
         EXPECT_EQ(graph.num_nodes(), num_sequences);
     }
 }
@@ -631,13 +625,10 @@ TEST(DBGBitmap, CallPathsFourLoops) {
 
         ASSERT_EQ(3u, graph.num_nodes());
 
-        size_t num_paths = 0;
         size_t num_sequences = 0;
 
-        graph.call_paths([&](const auto &, const auto &) { num_paths++; }, false);
-        graph.call_sequences([&](const auto &) { num_sequences++; }, false);
+        graph.call_sequences([&](const auto &) { num_sequences++; });
 
-        EXPECT_EQ(graph.num_nodes(), num_paths);
         EXPECT_EQ(graph.num_nodes(), num_sequences);
     }
 }
@@ -652,13 +643,10 @@ TEST(DBGBitmap, CallContigsFourLoops) {
 
         ASSERT_EQ(3u, graph.num_nodes());
 
-        size_t num_paths = 0;
         size_t num_sequences = 0;
 
-        graph.call_paths([&](const auto &, const auto &) { num_paths++; }, true);
-        graph.call_sequences([&](const auto &) { num_sequences++; }, true);
+        graph.call_contigs([&](const auto &) { num_sequences++; });
 
-        EXPECT_EQ(graph.num_nodes(), num_paths);
         EXPECT_EQ(graph.num_nodes(), num_sequences);
     }
 }
@@ -675,7 +663,7 @@ TEST(DBGBitmap, CallPaths) {
 
             graph.call_sequences([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
-            }, false);
+            });
             DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
@@ -690,7 +678,7 @@ TEST(DBGBitmap, CallPaths) {
             DBGBitmapConstructor reconst(k);
             graph.call_sequences([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
-            }, false);
+            });
             DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
@@ -705,7 +693,7 @@ TEST(DBGBitmap, CallPaths) {
             DBGBitmapConstructor reconst(k);
             graph.call_sequences([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
-            }, false);
+            });
             DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
@@ -719,7 +707,7 @@ TEST(DBGBitmap, CallPaths) {
             DBGBitmapConstructor reconst(k);
             graph.call_sequences([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
-            }, false);
+            });
             DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
@@ -733,7 +721,7 @@ TEST(DBGBitmap, CallPaths) {
             DBGBitmapConstructor reconst(k);
             graph.call_sequences([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
-            }, false);
+            });
             DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
@@ -751,9 +739,9 @@ TEST(DBGBitmap, CallContigs) {
 
             DBGBitmapConstructor reconst(k);
 
-            graph.call_sequences([&](const auto &sequence) {
+            graph.call_contigs([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
-            }, true);
+            });
             DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
@@ -766,9 +754,9 @@ TEST(DBGBitmap, CallContigs) {
             DBGBitmap graph(&constructor);
 
             DBGBitmapConstructor reconst(k);
-            graph.call_sequences([&](const auto &sequence) {
+            graph.call_contigs([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
-            }, true);
+            });
             DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
@@ -781,9 +769,9 @@ TEST(DBGBitmap, CallContigs) {
             DBGBitmap graph(&constructor);
 
             DBGBitmapConstructor reconst(k);
-            graph.call_sequences([&](const auto &sequence) {
+            graph.call_contigs([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
-            }, true);
+            });
             DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
@@ -795,9 +783,9 @@ TEST(DBGBitmap, CallContigs) {
             DBGBitmap graph(&constructor);
 
             DBGBitmapConstructor reconst(k);
-            graph.call_sequences([&](const auto &sequence) {
+            graph.call_contigs([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
-            }, true);
+            });
             DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
@@ -809,9 +797,9 @@ TEST(DBGBitmap, CallContigs) {
             DBGBitmap graph(&constructor);
 
             DBGBitmapConstructor reconst(k);
-            graph.call_sequences([&](const auto &sequence) {
+            graph.call_contigs([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
-            }, true);
+            });
             DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
