@@ -60,7 +60,7 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
         StreamRows(std::ifstream &instream, const std::string &filename);
         std::unique_ptr<std::vector<Row> > next_row();
       private:
-        sdsl::int_vector_buffer<> *inbuf_;
+        std::unique_ptr<sdsl::int_vector_buffer<> > inbuf_;
         uint64_t i_ = 0;
     };
 

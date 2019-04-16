@@ -136,12 +136,12 @@ VectorRowBinMat::StreamRows::StreamRows(std::ifstream &instream, const std::stri
     (void)load_number(instream);
 
     uint64_t offs = instream.tellg();
-    inbuf_ = new sdsl::int_vector_buffer<>(filename,
-                                           std::ios::in,
-                                           1024*1024,
-                                           0,
-                                           false,
-                                           offs);
+    inbuf_ = std::make_unique<sdsl::int_vector_buffer<> >(filename,
+                                                          std::ios::in,
+                                                          1024*1024,
+                                                          0,
+                                                          false,
+                                                          offs);
 }
 
 std::unique_ptr<std::vector<VectorRowBinMat::Row> > VectorRowBinMat::StreamRows::next_row() {
@@ -183,8 +183,9 @@ uint64_t VectorRowBinMat::append_matrix(const std::string &filename,
                                             iv_offs);
 
     callback([&](const std::vector<uint64_t> &row) {
-        for(auto val : row)
+        for (auto val : row) {
             outbuf.push_back(val + 1);
+        }
         outbuf.push_back(0);
         num_rows++;
     });

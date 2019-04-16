@@ -52,9 +52,9 @@ std::unique_ptr<RowFlatAnnotator>
 convert<RowCompressed<>, RowFlatAnnotator, std::string, false>(const std::string &filename) {
     uint64_t num_rows;
     uint64_t num_relations;
-    RowCompressed<>::stream_counts(filename, num_rows, num_relations, false);
+    RowCompressed<>::stream_counts(filename, &num_rows, &num_relations, false);
 
-    LEncoder *label_encoder = RowCompressed<std::string>::load_label_encoder(filename);
+    auto label_encoder = RowCompressed<std::string>::load_label_encoder(filename);
 
     auto annotator = new RowCompressed<>::StreamRows(filename, false);
 
@@ -62,7 +62,7 @@ convert<RowCompressed<>, RowFlatAnnotator, std::string, false>(const std::string
 
     auto matrix = std::make_unique<RowConcatenated<>>(
         [&](auto callback) {
-            for(uint64_t r = 0; r < num_rows; ++r) {
+            for (uint64_t r = 0; r < num_rows; ++r) {
                 auto row = annotator->next_row();
                 std::sort(row->begin(), row->end());
                 callback(*row);
@@ -245,30 +245,31 @@ convert<BinRelWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotato
 }
 
 uint64_t merge_rows(
-    const std::vector<LEncoder*> &label_encoders,
+    const std::vector<const LEncoder*> &label_encoders,
     const std::function<const std::vector<uint64_t>(const uint64_t, const uint64_t)> &get_row,
     const uint64_t &num_rows,
     const std::function<uint64_t(LEncoder&, const std::function<void (BinaryMatrix::RowCallback&)>)> &write_rows
 ) {
-
-    LEncoder* merged_label_enc { new LEncoder() };
-    merged_label_enc->merge(label_encoders);
+    LEncoder merged_label_enc;
+    merged_label_enc.merge(label_encoders);
 
     std::vector<std::vector<uint64_t> > label_mappings;
-    for(size_t i = 0; i < label_encoders.size(); ++i) {
+    for (size_t i = 0; i < label_encoders.size(); ++i) {
         std::vector<uint64_t> v;
-        for(size_t j = 0; j < label_encoders.at(i)->size(); ++j)
-            v.push_back(merged_label_enc->encode(label_encoders.at(i)->decode(j)));
+        for (size_t j = 0; j < label_encoders.at(i)->size(); ++j) {
+            v.push_back(merged_label_enc.encode(label_encoders.at(i)->decode(j)));
+        }
         label_mappings.push_back(v);
     }
 
-    return write_rows(*merged_label_enc, [&](BinaryMatrix::RowCallback &write_row) {
+    return write_rows(merged_label_enc, [&](BinaryMatrix::RowCallback &write_row) {
         std::set<uint64_t> label_set;
         for (uint64_t r = 0; r < num_rows; ++r) {
             label_set.clear();
             for (uint64_t a = 0; a < label_encoders.size(); ++a) {
-                for(auto label : get_row(r, a))
+                for (auto label : get_row(r, a)) {
                     label_set.insert(label_mappings.at(a)[label]);
+                }
             }
             std::vector<uint64_t> merged_row(label_set.begin(), label_set.end());
             write_row(merged_row);
@@ -283,18 +284,20 @@ merge<RowCompressed<>, RowCompressed<>, std::string, false>(const std::vector<st
     assert(filenames.size()>0);
     uint64_t num_rows;
     uint64_t num_relations;
-    RowCompressed<>::stream_counts(filenames.at(0), num_rows, num_relations, false);
+    RowCompressed<>::stream_counts(filenames.at(0), &num_rows, &num_relations, false);
 
-    std::vector<LEncoder*> label_encoders;
-    for(auto filename : filenames) {
-        LEncoder* label_encoder = RowCompressed<std::string>::load_label_encoder(filename);
-        label_encoders.push_back(label_encoder);
+    std::vector<std::unique_ptr<const LEncoder> > label_encoders_;
+    std::vector<const LEncoder*> label_encoders;
+    for (auto filename : filenames) {
+        auto label_encoder = RowCompressed<std::string>::load_label_encoder(filename);
+        label_encoders.push_back(label_encoder.get());
+        label_encoders_.push_back(std::move(label_encoder));
     }
 
-    std::vector<RowCompressed<>::StreamRows*> annotators;
-    for(size_t i = 0; i < filenames.size(); ++i) {
-        auto annotator = new RowCompressed<>::StreamRows(filenames.at(i), false);
-        annotators.push_back(annotator);
+    std::vector<std::unique_ptr<RowCompressed<>::StreamRows> > annotators;
+    for (size_t i = 0; i < filenames.size(); ++i) {
+        auto annotator = std::make_unique<RowCompressed<>::StreamRows>(filenames.at(i), false);
+        annotators.push_back(std::move(annotator));
     }
 
     return merge_rows(
@@ -319,8 +322,8 @@ merge<RowFlatAnnotator, RowCompressed<>, std::string, false>(const std::vector<c
     assert(annotators.size()>0);
     const uint64_t num_rows = annotators.at(0)->num_objects();
 
-    std::vector<LEncoder*> label_encoders;
-    for(auto annotator : annotators) {
+    std::vector<const LEncoder*> label_encoders;
+    for (auto annotator : annotators) {
         label_encoders.push_back(&annotator->label_encoder_);
     }
 

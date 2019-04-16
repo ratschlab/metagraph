@@ -135,7 +135,7 @@ class LabelEncoder {
     bool load(std::istream &instream);
     void serialize(std::ostream &outstream) const;
 
-    void merge(const std::vector<LabelEncoder<Label>*> label_encoders);
+    void merge(const std::vector<const LabelEncoder<Label>*> &label_encoders);
 
     void clear() { encode_label_.clear(); decode_label_.clear(); }
 

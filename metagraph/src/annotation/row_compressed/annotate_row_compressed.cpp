@@ -279,29 +279,34 @@ uint64_t RowCompressed<Label>::num_relations() const {
 }
 
 template <typename Label>
-LabelEncoder<Label>* RowCompressed<Label>::load_label_encoder(const std::string &filename) {
+const std::unique_ptr<const LabelEncoder<Label> > RowCompressed<Label>::load_label_encoder(const std::string &filename) {
     std::ifstream instream(remove_suffix(filename, kExtension) + kExtension,
                            std::ios::binary);
 
-    auto *label_encoder = new LabelEncoder<Label>();
+    auto label_encoder = std::make_unique<LabelEncoder<Label> >();
     if (!label_encoder->load(instream))
         throw std::ifstream::failure("Bad stream");
 
-    return label_encoder;
+    return std::move(label_encoder);
 }
 
 template <typename Label>
 void RowCompressed<Label>::stream_counts(std::string filename,
-                                         uint64_t &num_objects,
-                                         uint64_t &num_relations,
+                                         uint64_t *num_objects_,
+                                         uint64_t *num_relations_,
                                          bool sparse) {
+    assert(num_objects_);
+    assert(num_relations_);
+    uint64_t &num_objects = *num_objects_;
+    uint64_t &num_relations = *num_relations_;
+
     filename = remove_suffix(filename, kExtension) + kExtension;
     StreamRows sr(filename, sparse);
     std::unique_ptr<std::vector<VectorRowBinMat::Row> > row;
 
     num_objects = 0;
     num_relations = 0;
-    while(row = sr.next_row()) {
+    while (row = sr.next_row()) {
         num_objects++;
         num_relations += row->size();
     }

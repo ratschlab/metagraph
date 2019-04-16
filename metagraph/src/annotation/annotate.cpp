@@ -37,9 +37,9 @@ void LabelEncoder<std::string>::serialize(std::ostream &outstream) const {
 }
 
 template<typename Label>
-void LabelEncoder<Label>::merge(const std::vector<LabelEncoder<Label>*> label_encoders) {
-    for(auto label_encoder : label_encoders) {
-        for(size_t i = 0; i < label_encoder->size(); ++i) {
+void LabelEncoder<Label>::merge(const std::vector<const LabelEncoder<Label>*> &label_encoders) {
+    for (const auto &label_encoder : label_encoders) {
+        for (size_t i = 0; i < label_encoder->size(); ++i) {
             insert_and_encode(label_encoder->decode(i));
         }
     }

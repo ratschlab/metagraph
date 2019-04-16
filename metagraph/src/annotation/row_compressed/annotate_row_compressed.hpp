@@ -74,15 +74,15 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
         MultiLabelEncoded<uint64_t, Label>::label_encoder_
     };
 
-    static LabelEncoder<Label>* load_label_encoder(const std::string &filename);
+    static const std::unique_ptr<const LabelEncoder<Label> > load_label_encoder(const std::string &filename);
     static void stream_counts(std::string filename,
-                              uint64_t &num_objects,
-                              uint64_t &num_relations,
+                              uint64_t *num_objects,
+                              uint64_t *num_relations,
                               bool sparse = false);
     class StreamRows {
       public:
         StreamRows(std::string filename, bool sparse);
-        std::unique_ptr<std::vector<VectorRowBinMat::Row> > next_row() { return sr_->next_row(); };
+        std::unique_ptr<std::vector<VectorRowBinMat::Row> > next_row() { return std::move(sr_->next_row()); };
       private:
         std::unique_ptr<VectorRowBinMat::StreamRows> sr_;
     };
