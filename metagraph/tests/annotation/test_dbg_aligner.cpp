@@ -14,7 +14,7 @@ TEST(dbg_aligner, align_sequence_too_short) {
 
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference);
-    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/1));
+    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/graph->num_nodes() + 1));
     auto path = aligner.align(query);
 
     EXPECT_EQ(0ull, path.size());
@@ -28,11 +28,25 @@ TEST(dbg_aligner, align_single_node) {
 
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference);
-    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/1));
+    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/graph->num_nodes() + 1));
     auto path = aligner.align(query);
 
     EXPECT_EQ(1ull, path.size());
     EXPECT_EQ("CAT", aligner.get_path_sequence(path.get_nodes()));
+}
+
+TEST(dbg_aligner, inexact_seeding) {
+    size_t k = 3;
+    std::string reference = "CATTGTTTT";
+    std::string query = "CCCCTGTTTT";
+
+    DBGSuccinct* graph = new DBGSuccinct(k);
+    graph->add_sequence(reference);
+    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/graph->num_nodes() + 1));
+    auto path = aligner.align(query);
+
+    EXPECT_EQ(4ull, path.size());
+    EXPECT_EQ("TGTTTT", aligner.get_path_sequence(path.get_nodes()));
 }
 
 TEST(dbg_aligner, align_straight) {
@@ -43,7 +57,7 @@ TEST(dbg_aligner, align_straight) {
 
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference);
-    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/1));
+    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/graph->num_nodes() + 1));
     auto path = aligner.align(query);
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -60,7 +74,7 @@ TEST(dbg_aligner, align_ending_branch) {
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference_1);
     graph->add_sequence(reference_2);
-    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/1));
+    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/graph->num_nodes() + 1));
     auto path = aligner.align(query);
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -77,7 +91,7 @@ TEST(dbg_aligner, align_branch) {
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference_1);
     graph->add_sequence(reference_2);
-    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/1));
+    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/graph->num_nodes() + 1));
     auto path = aligner.align(query);
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -91,7 +105,7 @@ TEST(dbg_aligner, repetitive_sequence_alignment) {
 
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference_1);
-    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/1));
+    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/graph->num_nodes() + 1));
     auto path = aligner.align(query);
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -105,7 +119,7 @@ TEST(dbg_aligner, variation) {
 
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference_1);
-    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/1));
+    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/graph->num_nodes() + 1));
     auto path = aligner.align(query);
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -121,7 +135,7 @@ TEST(dbg_aligner, variation_in_branching_point) {
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference_1);
     graph->add_sequence(reference_2);
-    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/1));
+    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/graph->num_nodes() + 1));
     auto path = aligner.align(query);
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -136,7 +150,7 @@ TEST(dbg_aligner, multiple_variations) {
 
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference_1);
-    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/1));
+    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/graph->num_nodes() + 1));
     auto path = aligner.align(query);
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -152,7 +166,7 @@ TEST(dbg_aligner, noise_in_branching_point) {
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference_1);
     graph->add_sequence(reference_2);
-    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/1));
+    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/graph->num_nodes() + 1));
     auto path = aligner.align(query);
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -160,32 +174,50 @@ TEST(dbg_aligner, noise_in_branching_point) {
     EXPECT_EQ(1, path.get_total_loss());
 }
 
-TEST(dbg_aligner, large_search_space) {
-    size_t k = 3;
-    std::string reference = "";
-    auto alphabet = {'A', 'G', 'T'};
-    for (auto first_letter : alphabet) {
-        for (auto second_letter : alphabet) {
-            for (auto third_letter : alphabet) {
-                reference = reference + first_letter +
-                            second_letter + third_letter;
-            }
-        }
-    }
-    std::string query = "AAA";
-    uint64_t unmapped_char_length = 100;
-    for (size_t i = 0; i < unmapped_char_length; i++) {
-        query += 'C';
-    }
+// TODO: How to test a large search space?
+//TEST(dbg_aligner, large_search_space) {
+//    size_t k = 3;
+//    std::string reference = "";
+//    auto alphabet = {'A', 'G', 'T'};
+//    for (auto first_letter : alphabet) {
+//        for (auto second_letter : alphabet) {
+//            for (auto third_letter : alphabet) {
+//                reference = reference + first_letter +
+//                            second_letter + third_letter;
+//            }
+//        }
+//    }
+//    std::string query = "AAA";
+//    uint64_t unmapped_char_length = 100;
+//    for (size_t i = 0; i < unmapped_char_length; i++) {
+//        query += 'C';
+//    }
+//    DBGSuccinct* graph = new DBGSuccinct(k);
+//    graph->add_sequence(reference);
+//    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/graph->num_nodes() + 1));
+//    auto path = aligner.align(query);
+//
+//    std::string aligned_query(query);
+//    std::replace(aligned_query.begin(), aligned_query.end(), 'C' , 'T');
+//
+//    EXPECT_EQ(query.size() - k + 1, path.size());
+//    EXPECT_EQ(aligned_query, aligner.get_path_sequence(path.get_nodes()));
+//    EXPECT_EQ(unmapped_char_length, path.get_total_loss());
+//}
+
+// TODO: How to report loss in case of a large gap in query?
+TEST(dbg_aligner, large_gap) {
+    size_t k = 10;
+    std::string reference = "AAAAAAAAAATTTTTTTTTTATATATATATAATTAATTAATTTAAATTTAAAAATTTTTCCCCCCCCCCGGGGGGGGGG";
+    std::string query =     "AAAAAAAAAA";
+    query +=                "GGGGGGGGGG";
+
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference);
-    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/1));
+    DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/graph->num_nodes() + 1));
     auto path = aligner.align(query);
 
-    std::string aligned_query(query);
-    std::replace(aligned_query.begin(), aligned_query.end(), 'C' , 'T');
-
-    EXPECT_EQ(query.size() - k + 1, path.size());
-    EXPECT_EQ(aligned_query, aligner.get_path_sequence(path.get_nodes()));
-    EXPECT_EQ(unmapped_char_length, path.get_total_loss());
+    // Note: Expected values depend on re-seeding threshold.
+    EXPECT_EQ(4ul, path.size());
+    EXPECT_EQ("AAAAAAAAAAAAGGGGGGGGGG", aligner.get_path_sequence(path.get_nodes()));
 }

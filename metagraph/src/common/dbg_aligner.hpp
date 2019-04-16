@@ -25,8 +25,6 @@ class DBGAligner : public AnnotatedDBG {
         }
     };
     struct DPAlignmentValue {
-        // Index of the node which corresponds to the path with lowest cost.
-        node_index parent;
         float loss;
     };
 
@@ -34,6 +32,7 @@ class DBGAligner : public AnnotatedDBG {
                Annotator *annotation,
                size_t num_top_paths = 10,
                float sw_threshold = 0.1,
+               float re_seeding_threshold = 0.3,
                bool verbose = false,
                float insertion_penalty = 3,
                float deletion_penalty = 3,
@@ -55,10 +54,11 @@ class DBGAligner : public AnnotatedDBG {
     std::map<char, std::map<char, uint16_t>> sub_loss_;
     // Maximum number of paths to explore at the same time.
     size_t num_top_paths_;
-    uint64_t sw_threshold_;
+    float sw_threshold_;
+    float re_seeding_threshold_;
     bool verbose_;
-    uint16_t insertion_penalty_;
-    uint16_t deletion_penalty_;
+    float insertion_penalty_;
+    float deletion_penalty_;
 
     // Align part of a sequence to the graph in the case of no exact map
     // based on internal strategy. Calls callback for every possible alternative path.

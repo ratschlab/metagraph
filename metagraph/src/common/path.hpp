@@ -22,6 +22,16 @@ class Path {
                           std::end(labels));
         ++ query_it_;
     }
+    void append_path(const Path& other) {
+        for (auto node : other.nodes_)
+            nodes_.push_back(node);
+        loss_ += other.loss_;
+        label_set_.insert(std::end(label_set_),
+                          std::begin(other.label_set_),
+                          std::end(other.label_set_));
+        query_it_ = other.query_it_;
+    }
+
     void update_total_loss(float loss) { loss_ = loss; }
     void set_sequence_it(std::string::const_iterator sequence_it) {
         query_it_ = sequence_it; }

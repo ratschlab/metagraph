@@ -7,12 +7,15 @@
 #include "ssw_cpp.h"
 
 DBGAligner::DBGAligner(DeBruijnGraph *dbg, Annotator *annotation,
-                       size_t num_top_paths, float sw_threshold, bool verbose,
+                       size_t num_top_paths, float sw_threshold,
+                       float re_seeding_threshold, bool verbose,
                        float insertion_penalty, float deletion_penalty,
                        size_t num_threads) :
                             AnnotatedDBG(dbg, annotation, num_threads),
                             num_top_paths_(num_top_paths),
-                            sw_threshold_(sw_threshold), verbose_(verbose),
+                            sw_threshold_(sw_threshold),
+                            re_seeding_threshold_(re_seeding_threshold),
+                            verbose_(verbose),
                             insertion_penalty_(insertion_penalty),
                             deletion_penalty_(deletion_penalty) {
     // Substitution loss for each pair of nucleotides.
@@ -25,8 +28,7 @@ DBGAligner::DBGAligner(DeBruijnGraph *dbg, Annotator *annotation,
         {'$', {{'$', 2}}}};
 }
 
-namespace {
-
+namespace { // Helper function.
 template <typename T>
 float std_dev (const std::vector<T>& list, T mean) {
     float std_dev = 0;
@@ -34,40 +36,58 @@ float std_dev (const std::vector<T>& list, T mean) {
         std_dev += std::pow((*it) - mean, 2.0);
     return std::pow(std_dev / list.size(), 0.5);
 }
-
 }  // namespace
 
 DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
     if (sequence.size() < graph_->get_k())
         return AlignedPath(sequence.end());
 
+    std::vector<AlignedPath> partial_paths;
+    uint32_t print_frequency = 50;
     std::map<DPAlignmentKey, DPAlignmentValue> dp_alignment;
     BoundedPriorityQueue<AlignedPath> queue(num_top_paths_);
     queue.push(std::move(AlignedPath(std::begin(sequence))));
     while (!queue.empty()) {
         auto path = std::move(queue.top());
         queue.pop();
-        if (path.get_sequence_it() + graph_->get_k() > std::end(sequence))
-            return path;
+
+        if (path.get_sequence_it() + graph_->get_k() > std::end(sequence)) {
+            partial_paths.push_back(path);
+            break;
+        }
+
+        if (path.get_total_loss() / 2 > path.size() * re_seeding_threshold_) {
+            partial_paths.push_back(path);
+            queue = BoundedPriorityQueue<AlignedPath>(num_top_paths_);
+            assert(queue.empty());
+            path = AlignedPath(path.get_sequence_it() + 1);
+        }
 
         node_index seed = path.size() > 0 ? path.back() : graph_->npos;
         graph_->extend_from_seed(path.get_sequence_it(), std::end(sequence),
                                        [&](node_index node) {
-                                        // TODO: Check if this is necessary.
                                         if (node != graph_->npos)
+                                            // TODO: Fix the annotator issue.
                                             path.push_back(node, annotator_->get(node));
                                         },
                                        [&]() { return (path.size() > 0 &&
                                                 (graph_->outdegree(path.back()) > 1)); },
                                        seed);
 
-        if (path.get_sequence_it() + graph_->get_k() > std::end(sequence))
-            return path;
+        if (path.get_sequence_it() + graph_->get_k() > std::end(sequence)) {
+            partial_paths.push_back(path);
+            break;
+        }
 
         inexact_map(path, std::end(sequence),
                     [&](node_index node, std::string::const_iterator last_mapped_position) {
                         AlignedPath alternative_path(path);
                         alternative_path.set_sequence_it(last_mapped_position);
+                        // Seeding was not successful. To do inexact seeding, query_it is incremented.
+                        if (node == graph_->npos) {
+                            queue.push(std::move(alternative_path));
+                            return;
+                        }
                         // If the loss is less than the threshold continue with single char loss computation.
                         if (alternative_path.get_total_loss() < sw_threshold_ * sequence.size()) {
                             // TODO: Construct sequence last char more efficiently.
@@ -82,8 +102,7 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
 
                         DPAlignmentKey alternative_key{.node = alternative_path.back(),
                                            .query_it = alternative_path.get_sequence_it()};
-                        DPAlignmentValue alternative_value = {.parent = alternative_path.last_parent(),
-                                                              .loss = alternative_path.get_total_loss()};
+                        DPAlignmentValue alternative_value = {.loss = alternative_path.get_total_loss()};
                         auto dp_alignment_it = dp_alignment.find(alternative_key);
                         if (dp_alignment_it == dp_alignment.end()) {
                             dp_alignment[alternative_key] = alternative_value;
@@ -95,7 +114,7 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
                         }
                         });
 
-        if (verbose_ && path.size() % 50 == 0) {
+        if (verbose_ && path.size() % print_frequency == 0) {
             auto shadow_queue(queue);
             std::cout << "Loss mean and std of paths (top path size: "
                       << path.size() << "): ";
@@ -110,7 +129,19 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
             std::cout << mean << ", " << std_dev<float>(loss_values, mean) << std::endl;
         }
     }
-    return AlignedPath(sequence.end());
+    if (partial_paths.empty())
+        return AlignedPath(std::end(sequence));
+
+    AlignedPath complete_path(partial_paths.front());
+    for (auto partial_path = std::begin(partial_paths) + 1;
+         partial_path != std::end(partial_paths); ++ partial_path) {
+        complete_path.append_path(*partial_path);
+    }
+    complete_path.update_total_loss(whole_path_loss(complete_path, std::begin(sequence)));
+    // TODO: Stitch partial paths together and return the corresponding path.
+    // Insertions is the parts in query that aren't matched and for deletion,
+    // we have to find approximation or exact distance using labeling schemes.
+    return complete_path;
 }
 
 float DBGAligner::single_char_loss(char char_in_query, char char_in_graph) const {
@@ -139,7 +170,7 @@ float DBGAligner::ssw_loss(const AlignedPath& path, std::string::const_iterator 
     auto ref = get_path_sequence(path.get_nodes());
     std::string query(begin, path.get_sequence_it() + graph_->get_k() - 1);
 
-    int32_t maskLen = strlen(query.c_str())/2;
+    int32_t maskLen = strlen(query.c_str()) / 2;
     maskLen = maskLen < 15 ? 15 : maskLen;
     StripedSmithWaterman::Aligner aligner;
     StripedSmithWaterman::Filter filter;
@@ -188,9 +219,10 @@ void DBGAligner::inexact_map(const AlignedPath &path,
                                 std::string::const_iterator)> &callback) const {
     if (path.get_sequence_it() + graph_->get_k() > end)
         return;
-    // TODO: Do inexact_seeding in case last mapped node is npos.
-    if (path.size() == 0)
+    if (path.size() == 0) {
+        callback(graph_->npos, path.get_sequence_it() + 1);
         return;
+    }
     std::vector<node_index> out_neighbors;
    // TODO: char is not used currently.
     graph_->call_outgoing_kmers(path.back(), [&](node_index node, char)
@@ -204,8 +236,14 @@ std::string DBGAligner::get_path_sequence(const std::vector<node_index>& path) c
         return "";
     // TODO: Construct sequence more efficiently.
     std::string sequence = graph_->get_node_sequence(path.front());
-    for (auto path_it = std::next(path.begin()); path_it != path.end(); ++path_it) {
-        sequence.push_back(graph_->get_node_sequence(*path_it).back());
+    auto prev_node = path.front();
+    for (auto path_it = std::next(std::begin(path)); path_it != std::end(path); ++path_it) {
+        std::string next_seq = graph_->get_node_sequence(*path_it);
+        if (graph_->traverse(prev_node, next_seq.back()) != graph_->npos)
+            sequence.push_back(next_seq.back());
+        else
+            sequence += next_seq;
+        prev_node = *path_it;
     }
     return sequence;
 }

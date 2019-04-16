@@ -2108,7 +2108,8 @@ int main(int argc, const char *argv[]) {
 
             // TODO: Find the best annotator type and set it.
             DBGAligner aligner(graph.release(), new annotate::ColumnCompressed<>(/*num_rows=*/1),
-                               config->alignment_num_top_paths, config->alignment_sw_threshold, config->verbose);
+                               config->alignment_num_top_paths, config->alignment_sw_threshold,
+                               config->alignment_sw_threshold * 3.0, config->verbose);
             Timer timer;
             for (const auto &file : files) {
                 std::cout << "Align sequences from file " << file << std::endl;
@@ -2150,6 +2151,7 @@ int main(int argc, const char *argv[]) {
                               << ", total time: " << timer.elapsed()
                               << "sec" << std::endl;
                 }
+                outstream.close();
             }
             return 0;
         }
