@@ -2369,7 +2369,7 @@ int main(int argc, const char *argv[]) {
 
             // TODO: Find the best annotator type and set it.
             DBGAligner aligner(graph.get(), config->alignment_num_top_paths,
-                               config->alignment_sw_threshold, config->verbose);
+                               config->verbose, config->alignment_sw_threshold);
             Timer timer;
             for (const auto &file : files) {
                 std::cout << "Align sequences from file " << file << std::endl;
@@ -2391,12 +2391,12 @@ int main(int argc, const char *argv[]) {
                                   << get_curr_RSS() / (1 << 20) << " MiB"
                                   << std::endl;
                         std::cout << "Q: " << std::string(read_stream->seq.s) << std::endl
-                                  << "P: " << aligner.get_path_sequence(path.get_nodes())
+                                  << "P: " << path.get_sequence()
                                   << std::endl;
                     }
                     outstream << "Q: " << std::string(read_stream->seq.s) << std::endl
-                              << "P: " << aligner.get_path_sequence(path.get_nodes())
-                              << std::endl << "With total loss " << path.get_total_loss() << std::endl;
+                              << "P: " << path.get_sequence()
+                              << std::endl << "With total score " << path.get_total_score() << std::endl;
                 }, config->reverse,
                     get_filter_filename(file, config->filter_k,
                                         config->min_count - 1,
@@ -2411,6 +2411,7 @@ int main(int argc, const char *argv[]) {
                               << ", total time: " << timer.elapsed()
                               << "sec" << std::endl;
                 }
+                outstream.close();
             }
             return 0;
         }
