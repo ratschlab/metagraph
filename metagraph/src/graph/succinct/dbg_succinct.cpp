@@ -277,18 +277,11 @@ uint64_t DBG_succ::select_W(uint64_t i, TAlphabet c) const {
  * a character c the last index of a character c preceding in W[1..i].
  */
 uint64_t DBG_succ::pred_W(uint64_t i, TAlphabet c) const {
-    assert(i < W_->size());
+    CHECK_INDEX(i);
 
-    size_t max_iter = 10;
-    if (state == Config::STAT) {
-        max_iter = 1000;
-    }
-    for (size_t t = 0; t < max_iter; ++t, --i) {
-        if (i == 0 || get_W(i) == c)
-            return i;
-    }
+    uint64_t prev = W_->prev(i, c);
 
-    return select_W(rank_W(i, c), c);
+    return prev < W_->size() ? prev : 0;
 }
 
 /**
@@ -296,22 +289,9 @@ uint64_t DBG_succ::pred_W(uint64_t i, TAlphabet c) const {
  * a character c the first index of a character c in W[i..N].
  */
 uint64_t DBG_succ::succ_W(uint64_t i, TAlphabet c) const {
-    assert(i < W_->size());
+    CHECK_INDEX(i);
 
-    size_t max_iter = 10;
-    if (state == Config::STAT) {
-        max_iter = 1000;
-    }
-    for (size_t t = 0; t < max_iter; ++t) {
-        if (i + t == W_->size() || get_W(i + t) == c)
-            return i + t;
-    }
-
-    uint64_t rk = rank_W(i, c);
-    if (rk == rank_W(W_->size() - 1, c))
-        return W_->size();
-
-    return select_W(rk + 1, c);
+    return W_->next(i, c);
 }
 
 /**
