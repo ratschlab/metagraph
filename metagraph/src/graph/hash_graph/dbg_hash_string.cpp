@@ -22,7 +22,7 @@ void DBGHashString::add_sequence(const std::string &sequence,
         if (index_insert.second) {
             kmers_.push_back(index_insert.first->first);
             if (nodes_inserted)
-                nodes_inserted->insertBit(kmers_.size() - 1, true);
+                nodes_inserted->insert_bit(kmers_.size() - 1, true);
         }
     }
 }

@@ -42,11 +42,11 @@ DBG_succ::DBG_succ(size_t k)
     assert(bits_per_char_W_ <= sizeof(TAlphabet) * 8
             && "Choose type for TAlphabet properly");
 
-    last_->insertBit(0, false);
+    last_->insert_bit(0, false);
     W_->insert(0, 0);
 
     // add the dummy source node
-    last_->insertBit(1, true);
+    last_->insert_bit(1, true);
     W_->insert(0, 0);
     for (size_t j = 1; j < alph_size; j++) {
         F_[j] = 1;
@@ -1342,7 +1342,7 @@ edge_index DBG_succ::append_pos(TAlphabet c, edge_index source_node,
 
     update_F(c, +1);
     W_->insert(sentinel_pos, kSentinelCode);
-    last_->insertBit(sentinel_pos, true);
+    last_->insert_bit(sentinel_pos, true);
 
     if (edges_inserted)
         edges_inserted->push_back(sentinel_pos);
@@ -1370,7 +1370,7 @@ uint64_t DBG_succ::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
 
         // insert the new edge
         update_F(get_node_last_value(begin), +1);
-        last_->insertBit(begin, false);
+        last_->insert_bit(begin, false);
         W_->insert(pos, c);
 
         assert(pos);
@@ -1408,9 +1408,9 @@ void DBG_succ::erase_edges_dyn(const std::set<edge_index> &edges) {
         // remove one of the 0s from last instead of 1.
         if (get_last(edge_id) && (edge >= shift + 1)
                               && !get_last(edge_id - 1)) {
-            last_->deleteBit(edge_id - 1);
+            last_->delete_bit(edge_id - 1);
         } else {
-            last_->deleteBit(edge_id);
+            last_->delete_bit(edge_id);
         }
         shift++;
     }
@@ -2186,8 +2186,8 @@ void DBGSuccinct::add_seq(const std::string &sequence,
 
         for (auto i : inserted_indexes) {
             if (valid_edges_.get())
-                valid_edges_->insertBit(i, true);
-            nodes_inserted->insertBit(boss_to_kmer_index(i), true);
+                valid_edges_->insert_bit(i, true);
+            nodes_inserted->insert_bit(boss_to_kmer_index(i), true);
         }
     } else {
         boss_graph_->add_sequence(sequence, true);

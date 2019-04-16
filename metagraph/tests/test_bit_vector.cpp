@@ -233,16 +233,16 @@ void test_bit_vector_ins_del(bit_vector *vector, std::vector<bool> *numbers) {
 
     for (size_t i = 0; i < numbers->size(); ++i) {
         numbers->insert(numbers->begin() + i, i % 16);
-        vector->insertBit(i, i % 16);
+        vector->insert_bit(i, i % 16);
         reference_based_test(*vector, *numbers);
         numbers->erase(numbers->begin() + i, numbers->begin() + i + 1);
-        vector->deleteBit(i);
+        vector->delete_bit(i);
 
         numbers->insert(numbers->begin() + i, 0);
-        vector->insertBit(i, 0);
+        vector->insert_bit(i, 0);
         reference_based_test(*vector, *numbers);
         numbers->erase(numbers->begin() + i, numbers->begin() + i + 1);
-        vector->deleteBit(i);
+        vector->delete_bit(i);
     }
 }
 
@@ -711,7 +711,7 @@ TEST(bit_vector_stat, ConcurrentReadingAfterWriting) {
         ASSERT_EQ(0u, vector.rank1(i));
     }
     for (size_t i = 0; i < bits.size(); ++i) {
-        vector.insertBit(i, bits[i]);
+        vector.insert_bit(i, bits[i]);
     }
     for (size_t t = 0; t < 5; ++t) {
         thread_pool.enqueue([&]() {

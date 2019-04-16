@@ -198,12 +198,12 @@ uint64_t bit_vector_dyn::get_int(uint64_t id, uint32_t width) const {
     return word;
 }
 
-void bit_vector_dyn::insertBit(uint64_t id, bool val) {
+void bit_vector_dyn::insert_bit(uint64_t id, bool val) {
     assert(id <= size());
     vector_.insertBit(id, val);
 }
 
-void bit_vector_dyn::deleteBit(uint64_t id) {
+void bit_vector_dyn::delete_bit(uint64_t id) {
     assert(id < size());
     vector_.deleteBit(id);
 }
@@ -353,7 +353,7 @@ void bit_vector_stat::set(uint64_t id, bool val) {
     requires_update_ = true;
 }
 
-void bit_vector_stat::insertBit(uint64_t id, bool val) {
+void bit_vector_stat::insert_bit(uint64_t id, bool val) {
     assert(id <= size());
 
     if (val)
@@ -366,7 +366,7 @@ void bit_vector_stat::insertBit(uint64_t id, bool val) {
     requires_update_ = true;
 }
 
-void bit_vector_stat::deleteBit(uint64_t id) {
+void bit_vector_stat::delete_bit(uint64_t id) {
     assert(size() > 0);
     assert(id < size());
 
@@ -610,11 +610,11 @@ uint64_t bit_vector_sd::get_int(uint64_t id, uint32_t width) const {
     return vector_.get_int(id, width);
 }
 
-void bit_vector_sd::insertBit(uint64_t, bool) {
+void bit_vector_sd::insert_bit(uint64_t, bool) {
     throw std::runtime_error("Not supported");
 }
 
-void bit_vector_sd::deleteBit(uint64_t) {
+void bit_vector_sd::delete_bit(uint64_t) {
     throw std::runtime_error("Not supported");
 }
 
@@ -788,12 +788,12 @@ uint64_t bit_vector_rrr<log_block_size>
 }
 
 template <size_t log_block_size>
-void bit_vector_rrr<log_block_size>::insertBit(uint64_t, bool) {
+void bit_vector_rrr<log_block_size>::insert_bit(uint64_t, bool) {
     throw std::runtime_error("Not supported");
 }
 
 template <size_t log_block_size>
-void bit_vector_rrr<log_block_size>::deleteBit(uint64_t) {
+void bit_vector_rrr<log_block_size>::delete_bit(uint64_t) {
     throw std::runtime_error("Not supported");
 }
 
@@ -916,14 +916,14 @@ uint64_t bit_vector_adaptive::get_int(uint64_t id, uint32_t width) const {
     return vector_->get_int(id, width);
 }
 
-void bit_vector_adaptive::insertBit(uint64_t id, bool val) {
+void bit_vector_adaptive::insert_bit(uint64_t id, bool val) {
     assert(id <= size());
-    vector_->insertBit(id, val);
+    vector_->insert_bit(id, val);
 }
 
-void bit_vector_adaptive::deleteBit(uint64_t id) {
+void bit_vector_adaptive::delete_bit(uint64_t id) {
     assert(id < size());
-    vector_->deleteBit(id);
+    vector_->delete_bit(id);
 }
 
 uint64_t bit_vector_adaptive::size() const {

@@ -107,7 +107,7 @@ void DBGHashOrderedImpl<KMER>::add_sequence(const std::string &sequence,
         auto index_insert = kmers_.insert(kmer);
 
         if (index_insert.second && nodes_inserted)
-            nodes_inserted->insertBit(kmers_.size() - 1, true);
+            nodes_inserted->insert_bit(kmers_.size() - 1, true);
     }
 
     if (!canonical_mode_)
@@ -117,7 +117,7 @@ void DBGHashOrderedImpl<KMER>::add_sequence(const std::string &sequence,
         auto index_insert = kmers_.insert(kmer);
 
         if (index_insert.second && nodes_inserted)
-            nodes_inserted->insertBit(kmers_.size() - 1, true);
+            nodes_inserted->insert_bit(kmers_.size() - 1, true);
     }
 }
 
