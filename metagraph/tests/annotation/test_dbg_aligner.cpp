@@ -10,7 +10,7 @@
 TEST(dbg_aligner, align_sequence_too_short) {
     size_t k = 4;
     std::string reference = "CATTT";
-    std::string query = "CAT";
+    std::string query =     "CAT";
 
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference);
@@ -24,7 +24,7 @@ TEST(dbg_aligner, align_sequence_too_short) {
 TEST(dbg_aligner, align_single_node) {
     size_t k = 3;
     std::string reference = "CAT";
-    std::string query = "CAT";
+    std::string query =     "CAT";
 
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference);
@@ -38,7 +38,7 @@ TEST(dbg_aligner, align_single_node) {
 TEST(dbg_aligner, inexact_seeding) {
     size_t k = 3;
     std::string reference = "CATTGTTTT";
-    std::string query = "CCCCTGTTTT";
+    std::string query =     "CCCCTGTTTT";
 
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference);
@@ -53,7 +53,7 @@ TEST(dbg_aligner, align_straight) {
     size_t k = 4;
     std::string reference = "AGCTTCGAGGCCAA";
     // Query is the same as the reference.
-    std::string query = "AGCTTCGAGGCCAA";
+    std::string query =     "AGCTTCGAGGCCAA";
 
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference);
@@ -69,7 +69,7 @@ TEST(dbg_aligner, align_ending_branch) {
     std::string reference_1 = "AGCTTCGAA";
     std::string reference_2 = "AGCTTCGAC";
     // Query is the same as the second reference.
-    std::string query = "AGCTTCGAC";
+    std::string query =       "AGCTTCGAC";
 
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference_1);
@@ -86,7 +86,7 @@ TEST(dbg_aligner, align_branch) {
     std::string reference_1 = "AGCTTCGAATATTTGTT";
     std::string reference_2 = "AGCTTCGACGATTTGTT";
     // Query is the same as the second reference.
-    std::string query = "AGCTTCGACGATTTGTT";
+    std::string query =       "AGCTTCGACGATTTGTT";
 
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference_1);
@@ -100,11 +100,11 @@ TEST(dbg_aligner, align_branch) {
 
 TEST(dbg_aligner, repetitive_sequence_alignment) {
     size_t k = 3;
-    std::string reference_1 = "AGGGGGGGGGAAAAGGGGGGG";
-    std::string query = "AGGGGG";
+    std::string reference = "AGGGGGGGGGAAAAGGGGGGG";
+    std::string query =       "AGGGGG";
 
     DBGSuccinct* graph = new DBGSuccinct(k);
-    graph->add_sequence(reference_1);
+    graph->add_sequence(reference);
     DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/graph->num_nodes() + 1));
     auto path = aligner.align(query);
 
@@ -114,23 +114,23 @@ TEST(dbg_aligner, repetitive_sequence_alignment) {
 
 TEST(dbg_aligner, variation) {
     size_t k = 4;
-    std::string reference_1 = "AGCAACTCGAAA";
-    std::string query = "AGCAATTCGAAA";
+    std::string reference = "AGCAACTCGAAA";
+    std::string query =     "AGCAATTCGAAA";
 
     DBGSuccinct* graph = new DBGSuccinct(k);
-    graph->add_sequence(reference_1);
+    graph->add_sequence(reference);
     DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/graph->num_nodes() + 1));
     auto path = aligner.align(query);
 
     EXPECT_EQ(query.size() - k + 1, path.size());
-    EXPECT_EQ(reference_1, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(reference, aligner.get_path_sequence(path.get_nodes()));
 }
 
 TEST(dbg_aligner, variation_in_branching_point) {
     size_t k = 4;
     std::string reference_1 = "AGCAACTCGAAA";
     std::string reference_2 = "AGCAAGTCGAAA";
-    std::string query = "AGCAATGCGAAA";
+    std::string query =       "AGCAATGCGAAA";
 
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference_1);
@@ -146,7 +146,7 @@ TEST(dbg_aligner, variation_in_branching_point) {
 TEST(dbg_aligner, multiple_variations) {
     size_t k = 4;
     std::string reference_1 = "AGCAACTCGAAA";
-    std::string query = "AGCAATTTGCAA";
+    std::string query =       "AGCAATTTGCAA";
 
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference_1);
@@ -161,7 +161,7 @@ TEST(dbg_aligner, noise_in_branching_point) {
     size_t k = 4;
     std::string reference_1 = "AAAAACTTTTTT";
     std::string reference_2 = "AAAAATTGGGGG";
-    std::string query = "AAAAATTTTTTT";
+    std::string query =       "AAAAATTTTTTT";
 
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference_1);

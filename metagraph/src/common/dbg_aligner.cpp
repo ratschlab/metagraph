@@ -67,7 +67,6 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
         graph_->extend_from_seed(path.get_sequence_it(), std::end(sequence),
                                        [&](node_index node) {
                                         if (node != graph_->npos)
-                                            // TODO: Fix the annotator issue.
                                             path.push_back(node, annotator_->get(node));
                                         },
                                        [&]() { return (path.size() > 0 &&
@@ -83,8 +82,9 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
                     [&](node_index node, std::string::const_iterator last_mapped_position) {
                         AlignedPath alternative_path(path);
                         alternative_path.set_sequence_it(last_mapped_position);
-                        // Seeding was not successful. To do inexact seeding, query_it is incremented.
                         if (node == graph_->npos) {
+                            // Seeding was not successful. To do inexact seeding,
+                            // a path with incremented query_it is pushed to the queue.
                             queue.push(std::move(alternative_path));
                             return;
                         }
@@ -132,9 +132,12 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
     if (partial_paths.empty())
         return AlignedPath(std::end(sequence));
 
+    // TODO: How to report the score for the case with a large gap???
     AlignedPath complete_path(partial_paths.front());
     for (auto partial_path = std::begin(partial_paths) + 1;
          partial_path != std::end(partial_paths); ++ partial_path) {
+        // TODO: Find shortest path between the end node of a partial path
+        // and the first node of the next partial path.
         complete_path.append_path(*partial_path);
     }
     complete_path.update_total_loss(whole_path_loss(complete_path, std::begin(sequence)));
