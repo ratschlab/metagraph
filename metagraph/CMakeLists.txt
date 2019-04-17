@@ -106,6 +106,12 @@ set(CMAKE_CXX_FLAGS_DEBUG "-O2 -g")
 # Link time optimization
 if(LINK_OPT)
   string(APPEND CMAKE_CXX_FLAGS " -flto")
+  string(APPEND CMAKE_EXE_LINKER_FLAGS " -flto")
+  if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+    set(CMAKE_AR  "gcc-ar")
+    set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> qcs <TARGET> <LINK_FLAGS> <OBJECTS>")
+    set(CMAKE_CXX_ARCHIVE_FINISH   true)
+  endif()
 endif()
 
 # Thread sanitizer build type
