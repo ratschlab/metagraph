@@ -29,7 +29,7 @@ TEST(SamplerTest,SampleNoRandom) {
     auto state = stringstream(random_generator_state);
     auto generator = mt19937();
     state >> generator;
-    auto sampler = Sampler("AAAAAAAAA",generator);
+    auto sampler = NoisySampler("AAAAAAAAA",generator);
     ASSERT_EQ(sampler.sample(2),"AA");
 }
 
@@ -38,7 +38,7 @@ TEST(SamplerTest,DISABLED_SampleNormal) {
     auto state = stringstream(random_generator_state);
     auto generator = mt19937();
     state >> generator;
-    auto sampler = Sampler("ADFAGADFDS",generator);
+    auto sampler = NoisySampler("ADFAGADFDS",generator);
     ASSERT_EQ(sampler.sample(4),"ADFD");
 }
 TEST(SamplerTest,SampleCoverage) {
@@ -46,7 +46,7 @@ TEST(SamplerTest,SampleCoverage) {
     auto generator = mt19937();
     state >> generator;
     auto sequence = "ADFAGADFDS"s;
-    auto sampler = Sampler(sequence,generator);
+    auto sampler = NoisySampler(sequence,generator);
     auto reads = sampler.sample_coverage(sequence.length()/2, 1);
     ASSERT_EQ(reads.size(), 2);
 }

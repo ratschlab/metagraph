@@ -41,53 +41,55 @@ int main(int argc, char *argv[]) {
                                          "Path to the reference from which the sampler will sample (FASTA file)",
                                          true,
                                          "",
-                                         "string");
+                                         "string",cmd);
     TCLAP::ValueArg<double>          coverageArg("c",
                                               "coverage",
                                               "Coverage of reads",
                                               false,
                                               1.0,
-                                              "double");
+                                              "double",cmd);
+    TCLAP::ValueArg<double>          error_probabilityArg("p",
+                                                 "error-probability",
+                                                 "Probability of a substitution error",
+                                                 false,
+                                                 0.0,
+                                                 "double",cmd);
     TCLAP::ValueArg<int>          read_lengthArg("l",
                                                  "read-length",
                                                  "Length of individual reads",
                                                  false,
                                                  100,
-                                                 "int");
+                                                 "int",cmd);
     TCLAP::ValueArg<int>          subsampleArg("z",
                                                 "subsample-size",
                                                 "Subsample the reference to 'subsample-size' base pairs.",
                                                 false,
                                                 -1,
-                                                "int");
+                                                "int",cmd);
     TCLAP::ValueArg<int>          seedArg("s",
                                                  "seed",
                                                  "Seed for a random generator",
                                                  false,
                                                  12345,
-                                                 "int");
+                                                 "int",cmd);
     TCLAP::ValueArg<std::string> outputArg("o",
                                           "output",
                                           "Filename where to store sampled reads.",
                                           false,
                                           "output.fasta",
-                                          "string");
-    cmd.add(referenceArg);
-    cmd.add(coverageArg);
-    cmd.add(outputArg);
-    cmd.add(read_lengthArg);
-    cmd.add(subsampleArg);
+                                          "string",cmd);
     cmd.parse(argc, argv);
     auto reference_filename = referenceArg.getValue();
     auto coverage = coverageArg.getValue();
     auto output_filename = outputArg.getValue();
     auto read_length = read_lengthArg.getValue();
+    auto error_probability = error_probabilityArg.getValue();
     auto seed = seedArg.getValue();
     auto subsample_size = subsampleArg.getValue();
     auto generator = std::mt19937(seed);
     auto reference = read_reads_from_fasta(reference_filename)[0];
-    Sampler sampler = subsampleArg.isSet() ?  SubSampler(reference,subsample_size,generator) :
-                                              Sampler(reference,generator);
+    NoisySampler sampler = subsampleArg.isSet() ?  SubSampler(reference,subsample_size,generator,error_probability) :
+                                              NoisySampler(reference,generator,error_probability);
     auto reads = sampler.sample_coverage(read_length,coverage);
     write_reads_to_fasta(reads,output_filename);
     return 0;

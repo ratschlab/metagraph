@@ -34,29 +34,40 @@ public:
     }
 };
 
-class Sampler : public SamplerConvenient {
+class NoisySampler : public SamplerConvenient {
 public:
-    Sampler(string reference, std::mt19937 generator) : reference(std::move(reference)), generator(generator) {
+    NoisySampler(string reference, std::mt19937 generator,double probability_of_error=0) : reference(std::move(reference)), generator(generator) {
     };
     string sample(int sample_length) override {
         std::uniform_int_distribution<> dis(0, reference.length()-1-sample_length);
-        return reference.substr(dis(generator),sample_length);
+        string output = reference.substr(dis(generator),sample_length);
+        for(auto& e : output) {
+            map<char,int> to_offset = {{'A',0,},{'C',1},{'G',2},{'T',3}};
+            char to_char[] = {'A','C','G','T'};
+            std::discrete_distribution<> err({1-probability_of_error,
+                                              probability_of_error/3,
+                                              probability_of_error/3,
+                                              probability_of_error/3});
+            e = to_char[(to_offset[e]+err(generator))%4];
+        }
     }
     int reference_size() override {
         return reference.size();
     }
 private:
+    double probability_of_error;
     string reference;
     std::mt19937 generator;
 };
-class SubSampler : public Sampler {
+class SubSampler : public NoisySampler {
 public:
-    SubSampler(const string& reference, int subsample_size, std::mt19937 generator) :
-        Sampler(reference.substr(
+    SubSampler(const string& reference, int subsample_size, std::mt19937 generator,double probability_of_error) :
+        NoisySampler(reference.substr(
                 std::uniform_int_distribution<>(0,reference.length()-min(subsample_size,(int)reference.length()))(generator),
                 min(subsample_size,(int)reference.length())
                 ),
-                generator)
+                generator,
+                probability_of_error)
                 {}
 };
 
