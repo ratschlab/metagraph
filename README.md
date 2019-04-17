@@ -78,32 +78,6 @@ popd
 * Linking against dynamic libraries in Anaconda when compiling libmaus2
   * Solution: make sure that packages like Anaconda are not listed in the exported environment variables
 
-* Trying to link against dynamic OpenMP libraries when compiling in static executables.
-  * Solution: apply patch
-```diff
---- a/metagraph/CMakeLists.txt
-+++ b/metagraph/CMakeLists.txt
-@@ -42,6 +42,10 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
- endif()
-
- find_package(OpenMP REQUIRED)
-+if(OPENMP_FOUND)
-+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-+endif()
- if(NOT TARGET OpenMP::OpenMP_CXX)
-     add_library(OpenMP_TARGET INTERFACE)
-     add_library(OpenMP::OpenMP_CXX ALIAS OpenMP_TARGET)
-@@ -188,7 +192,6 @@ set(METALIBS ${METALIBS}
-   -lssl -lcrypto -llzma
-   -lbrwt
-   -latomic
--  OpenMP::OpenMP_CXX
- )
-
- if(BUILD_STATIC)
- ```
-
 
 ### Build types: `cmake .. <arguments>` where arguments are:
 - `-DCMAKE_BUILD_TYPE=[Debug|Release|Profile]` -- build modes (`Release` by default)
