@@ -173,32 +173,37 @@ add_subdirectory(
 
 set(FOLLY_LIBRARIES FOLLY_LIBRARIES-NOTFOUND)
 find_library(FOLLY_LIBRARIES
-  NAMES libfolly.a folly
+  NAMES folly
   HINTS
   ENV LD_LIBRARY_PATH
   PATHS
-  ~/.linuxbrew/lib/
+    ~/.linuxbrew/lib
 )
-
 if(FOLLY_LIBRARIES)
-  find_library(LIBERTY iberty HINTS ENV LD_LIBRARY_PATH PATHS ~/.linuxbrew/lib)
+  string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
+  set(METALIBS ${METALIBS}
+    ${FOLLY_LIBRARIES}
+    -ldouble-conversion
+    -ldl
+    -lboost_regex
+    -lboost_filesystem
+    -lboost_program_options
+  )
+  if(NOT BUILD_STATIC)
+    set(METALIBS ${METALIBS}
+      -lglog
+      -lgflags
+    )
+  endif()
+  find_library(LIBERTY
+    NAMES iberty
+    HINTS
+    ENV LD_LIBRARY_PATH
+    PATHS
+      ~/.linuxbrew/lib
+  )
   if(LIBERTY)
-    # link dynamically
-    message("Linking Folly dynamically")
-    string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
-    set(METALIBS -lfolly -liberty -lglog -lgflags -ldouble-conversion -ldl -lboost_regex -lboost_filesystem -lboost_program_options)
-  else()
-    # check if found folly library is static
-    get_filename_component(FOLLY_FILE ${FOLLY_LIBRARIES} NAME)
-    if(FOLLY_FILE STREQUAL "libfolly.a")
-      # link statically
-      message("Linking Folly statically")
-      string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
-      set(METALIBS ${FOLLY_LIBRARIES})
-    else()
-      set(FOLLY_LIBRARIES FOLLY_LIBRARIES-NOTFOUND)
-      message(WARNING "Please rebuild Folly statically.")
-    endif()
+    set(METALIBS ${METALIBS} ${LIBERTY})
   endif()
 else()
   message(WARNING "Folly was not found.\n"
