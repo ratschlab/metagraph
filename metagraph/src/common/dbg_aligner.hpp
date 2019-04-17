@@ -25,17 +25,17 @@ class DBGAligner : public AnnotatedDBG {
         }
     };
     struct DPAlignmentValue {
-        float loss;
+        float score;
     };
 
     DBGAligner(DeBruijnGraph *dbg,
                Annotator *annotation,
                size_t num_top_paths = 10,
-               float sw_threshold = 0.1,
-               float re_seeding_threshold = 0.3,
                bool verbose = false,
-               float insertion_penalty = 3,
-               float deletion_penalty = 3,
+               float sw_threshold = 0.8,
+               float re_seeding_threshold = 0.6,
+               float insertion_penalty = -3,
+               float deletion_penalty = -3,
                size_t num_threads = 0);
 
     DBGAligner(const DBGAligner&) = default;
@@ -49,14 +49,17 @@ class DBGAligner : public AnnotatedDBG {
     // Return the corresponding sequence of a path according to nodes in the graph.
     std::string get_path_sequence(const std::vector<node_index>& path) const;
 
+    float get_match_score() const { return match_score_; }
+
   private:
-    // Substitution loss for each pair of nucleotides.
-    std::map<char, std::map<char, uint16_t>> sub_loss_;
+    // Substitution score for each pair of nucleotides.
+    std::map<char, std::map<char, int8_t>> sub_score_;
     // Maximum number of paths to explore at the same time.
     size_t num_top_paths_;
+    bool verbose_;
     float sw_threshold_;
     float re_seeding_threshold_;
-    bool verbose_;
+    float match_score_;
     float insertion_penalty_;
     float deletion_penalty_;
 
@@ -74,16 +77,16 @@ class DBGAligner : public AnnotatedDBG {
     void pick_all_strategy(std::vector<node_index> out_neighbors,
                            const std::function<void(node_index)> &callback) const;
 
-    // Return the loss of substitution. If not in sub_loss_ return a fixed maximized loss value.
-    float single_char_loss(char char_in_query, char char_in_graph) const;
+    // Return the score of substitution. If not in sub_score_ return a fixed maximized score value.
+    float single_char_score(char char_in_query, char char_in_graph) const;
 
     // Compute the edit distance between the query sequence and the aligned path
-    // according to loss parameters in this class.
-    float whole_path_loss(const AlignedPath& path, std::string::const_iterator begin) const;
+    // according to score parameters in this class.
+    float whole_path_score(const AlignedPath& path, std::string::const_iterator begin) const;
 
     // Compute the distance between the query sequence and the aligned path sequence
     // according to the CSSW library.
-    float ssw_loss(const AlignedPath& path, std::string::const_iterator begin) const;
+    float ssw_score(const AlignedPath& path, std::string::const_iterator begin) const;
 };
 
 #endif // __DBG_ALIGNER_HPP__

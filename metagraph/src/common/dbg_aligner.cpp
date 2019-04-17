@@ -7,25 +7,26 @@
 #include "ssw_cpp.h"
 
 DBGAligner::DBGAligner(DeBruijnGraph *dbg, Annotator *annotation,
-                       size_t num_top_paths, float sw_threshold,
-                       float re_seeding_threshold, bool verbose,
+                       size_t num_top_paths, bool verbose,
+                       float sw_threshold, float re_seeding_threshold,
                        float insertion_penalty, float deletion_penalty,
                        size_t num_threads) :
                             AnnotatedDBG(dbg, annotation, num_threads),
                             num_top_paths_(num_top_paths),
+                            verbose_(verbose),
                             sw_threshold_(sw_threshold),
                             re_seeding_threshold_(re_seeding_threshold),
-                            verbose_(verbose),
                             insertion_penalty_(insertion_penalty),
                             deletion_penalty_(deletion_penalty) {
-    // Substitution loss for each pair of nucleotides.
-    // Transition and transversion mutations have different loss values.
-    sub_loss_ = {
-        {'a', {{'a', 0}, {'t', 2}, {'c', 2}, {'g', 1}}},
-        {'g', {{'g', 0}, {'t', 2}, {'c', 2}, {'a', 1}}},
-        {'c', {{'c', 0}, {'a', 2}, {'g', 2}, {'t', 1}}},
-        {'t', {{'t', 0}, {'a', 2}, {'g', 2}, {'c', 1}}},
-        {'$', {{'$', 2}}}};
+    match_score_ = 1;
+    // Substitution score for each pair of nucleotides.
+    // Transition and transversion mutations have different score values.
+    sub_score_ = {
+        {'a', {{'a', match_score_}, {'t', -2}, {'c', -2}, {'g', -1}}},
+        {'g', {{'g', match_score_}, {'t', -2}, {'c', -2}, {'a', -1}}},
+        {'c', {{'c', match_score_}, {'a', -2}, {'g', -2}, {'t', -1}}},
+        {'t', {{'t', match_score_}, {'a', -2}, {'g', -2}, {'c', -1}}},
+        {'$', {{'$', -2}}}};
 }
 
 namespace { // Helper function.
@@ -56,18 +57,20 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
             break;
         }
 
-        if (path.get_total_loss() / 2 > path.size() * re_seeding_threshold_) {
+        if (path.get_total_score() < 0) {
             partial_paths.push_back(path);
             queue = BoundedPriorityQueue<AlignedPath>(num_top_paths_);
             assert(queue.empty());
-            path = AlignedPath(path.get_sequence_it() + 1);
+            path = AlignedPath(path.get_sequence_it());
         }
 
         node_index seed = path.size() > 0 ? path.back() : graph_->npos;
         graph_->extend_from_seed(path.get_sequence_it(), std::end(sequence),
                                        [&](node_index node) {
+                                        float score = (path.size() > 0 ? match_score_ :
+                                                       match_score_ * graph_->get_k());
                                         if (node != graph_->npos)
-                                            path.push_back(node, annotator_->get(node));
+                                                path.push_back(node, annotator_->get(node), score);
                                         },
                                        [&]() { return (path.size() > 0 &&
                                                 (graph_->outdegree(path.back()) > 1)); },
@@ -88,27 +91,25 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
                             queue.push(std::move(alternative_path));
                             return;
                         }
-                        // If the loss is less than the threshold continue with single char loss computation.
-                        if (alternative_path.get_total_loss() < sw_threshold_ * sequence.size()) {
+                        if (alternative_path.get_total_score() > sw_threshold_ * sequence.size()) {
                             // TODO: Construct sequence last char more efficiently.
                             alternative_path.push_back(node, annotator_->get(node),
-                                single_char_loss(*(alternative_path.get_sequence_it() +
+                                single_char_score(*(alternative_path.get_sequence_it() +
                                     graph_->get_k() - 1), graph_->get_node_sequence(node).back()));
                         } else {
                             alternative_path.push_back(node, annotator_->get(node));
-                            alternative_path.update_total_loss(
-                                whole_path_loss(alternative_path, std::begin(sequence)));
+                            alternative_path.update_total_score(
+                                whole_path_score(alternative_path, std::begin(sequence)));
                         }
-
                         DPAlignmentKey alternative_key{.node = alternative_path.back(),
                                            .query_it = alternative_path.get_sequence_it()};
-                        DPAlignmentValue alternative_value = {.loss = alternative_path.get_total_loss()};
+                        DPAlignmentValue alternative_value = {.score = alternative_path.get_total_score()};
                         auto dp_alignment_it = dp_alignment.find(alternative_key);
                         if (dp_alignment_it == dp_alignment.end()) {
                             dp_alignment[alternative_key] = alternative_value;
                             queue.push(std::move(alternative_path));
                         }
-                        else if (dp_alignment_it->second.loss > alternative_path.get_total_loss()) {
+                        else if (dp_alignment_it->second.score < alternative_path.get_total_score()) {
                             dp_alignment_it->second = alternative_value;
                             queue.push(std::move(alternative_path));
                         }
@@ -118,15 +119,15 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
             auto shadow_queue(queue);
             std::cout << "Loss mean and std of paths (top path size: "
                       << path.size() << "): ";
-            std::vector<float> loss_values;
-            loss_values.reserve(queue.size());
+            std::vector<float> score_values;
+            score_values.reserve(queue.size());
             while (!shadow_queue.empty()) {
-                loss_values.push_back(shadow_queue.top().get_total_loss());
+                score_values.push_back(shadow_queue.top().get_total_score());
                 shadow_queue.pop();
             }
-            float mean = std::accumulate(loss_values.begin(), loss_values.end(), 0);
-            mean /= loss_values.size();
-            std::cout << mean << ", " << std_dev<float>(loss_values, mean) << std::endl;
+            float mean = std::accumulate(score_values.begin(), score_values.end(), 0);
+            mean /= score_values.size();
+            std::cout << mean << ", " << std_dev<float>(score_values, mean) << std::endl;
         }
     }
     if (partial_paths.empty())
@@ -140,19 +141,19 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
         // and the first node of the next partial path.
         complete_path.append_path(*partial_path);
     }
-    complete_path.update_total_loss(whole_path_loss(complete_path, std::begin(sequence)));
+    complete_path.update_total_score(whole_path_score(complete_path, std::begin(sequence)));
     // TODO: Stitch partial paths together and return the corresponding path.
     // Insertions is the parts in query that aren't matched and for deletion,
     // we have to find approximation or exact distance using labeling schemes.
     return complete_path;
 }
 
-float DBGAligner::single_char_loss(char char_in_query, char char_in_graph) const {
+float DBGAligner::single_char_score(char char_in_query, char char_in_graph) const {
     try {
-        return sub_loss_.at(std::tolower(char_in_query)).at(std::tolower(char_in_graph));
+        return sub_score_.at(std::tolower(char_in_query)).at(std::tolower(char_in_graph));
     }
     catch (const std::out_of_range&) {
-        return sub_loss_.at('$').at('$');
+        return sub_score_.at('$').at('$');
     }
 }
 
@@ -162,42 +163,50 @@ static void PrintAlignment(const StripedSmithWaterman::Alignment& alignment){
     std::cout << "===== SSW result =====" << std::endl;
     std::cout << "Best Smith-Waterman score:\t" << alignment.sw_score << std::endl
        << "Next-best Smith-Waterman score:\t" << alignment.sw_score_next_best << std::endl
+       << "Reference start:\t" << alignment.ref_begin << std::endl
+       << "Reference end:\t" << alignment.ref_end << std::endl
+       << "Query start:\t" << alignment.query_begin << std::endl
+       << "Query end:\t" << alignment.query_end << std::endl
+       << "Next-best reference end:\t" << alignment.ref_end_next_best << std::endl
        << "Number of mismatches:\t" << alignment.mismatches << std::endl
        << "Cigar: " << alignment.cigar_string << std::endl;
     std::cout << "======================" << std::endl;
 }
-
 }  // namespace
 
-float DBGAligner::ssw_loss(const AlignedPath& path, std::string::const_iterator begin) const {
+float DBGAligner::ssw_score(const AlignedPath& path, std::string::const_iterator begin) const {
     auto ref = get_path_sequence(path.get_nodes());
     std::string query(begin, path.get_sequence_it() + graph_->get_k() - 1);
 
     int32_t maskLen = strlen(query.c_str()) / 2;
     maskLen = maskLen < 15 ? 15 : maskLen;
-    StripedSmithWaterman::Aligner aligner;
+
     StripedSmithWaterman::Filter filter;
     StripedSmithWaterman::Alignment alignment;
 
-    aligner.Align(query.c_str(), ref.c_str(), ref.size(), filter, &alignment, maskLen);
+    StripedSmithWaterman::Aligner aligner;
+    if (!aligner.Align(query.c_str(), ref.c_str(), ref.size(), filter, &alignment, maskLen)) {
+        std::cout << "Failure in SSW calculation. Computing SSW inefficiently.\n";
+        return whole_path_score(path, begin);
+    }
     if (verbose_) {
         PrintAlignment(alignment);
     }
     return alignment.sw_score;
 }
 
-float DBGAligner::whole_path_loss(const AlignedPath& path, std::string::const_iterator begin) const {
+float DBGAligner::whole_path_score(const AlignedPath& path, std::string::const_iterator begin) const {
     auto path_sequence = get_path_sequence(path.get_nodes());
     std::string query_sequence(begin, path.get_sequence_it() + graph_->get_k() - 1);
-    float alignment_loss[query_sequence.size() + 1][path_sequence.size() + 1] = {};
+    float alignment_score[query_sequence.size() + 1][path_sequence.size() + 1] = {};
     for (size_t i = 1; i <= query_sequence.size(); ++i) {
         for (size_t j = 1; j <= path_sequence.size(); ++j) {
-            alignment_loss[i][j] = std::min({alignment_loss[i-1][j-1] +
-                    single_char_loss(query_sequence[i-1], path_sequence[j-1]),
-                alignment_loss[i][j-1] + insertion_penalty_, alignment_loss[i-1][j] + deletion_penalty_});
+            alignment_score[i][j] = std::max({alignment_score[i-1][j-1] +
+                    single_char_score(query_sequence[i-1], path_sequence[j-1]),
+                alignment_score[i][j-1] + insertion_penalty_, alignment_score[i-1][j] + deletion_penalty_});
         }
     }
-    return alignment_loss[query_sequence.size()][path_sequence.size()];
+    return alignment_score[query_sequence.size()][path_sequence.size()];
 }
 
 void DBGAligner::randomly_pick_strategy(std::vector<node_index> out_neighbors,

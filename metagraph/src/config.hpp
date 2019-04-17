@@ -64,7 +64,7 @@ class Config {
     unsigned int port = 5555;
 
     double discovery_fraction = 1.0;
-    double alignment_sw_threshold = 0.1;
+    double alignment_sw_threshold = 0.8;
 
     std::vector<std::string> fname;
     std::vector<std::string> anno_labels;
