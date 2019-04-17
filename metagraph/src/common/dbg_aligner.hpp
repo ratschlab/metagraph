@@ -59,9 +59,13 @@ class DBGAligner : public AnnotatedDBG {
     bool verbose_;
     float sw_threshold_;
     float re_seeding_threshold_;
-    float match_score_;
+    int8_t match_score_;
     float insertion_penalty_;
     float deletion_penalty_;
+
+    // CSSW library related fields.
+    int8_t cssw_score_matrix_[5*5];
+    int8_t cssw_translation_matrix_[128];
 
     // Align part of a sequence to the graph in the case of no exact map
     // based on internal strategy. Calls callback for every possible alternative path.

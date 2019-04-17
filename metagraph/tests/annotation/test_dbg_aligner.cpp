@@ -146,8 +146,8 @@ TEST(dbg_aligner, variation_in_branching_point) {
 
 TEST(dbg_aligner, multiple_variations) {
     size_t k = 4;
-    std::string reference = "ACGCAACTCGAAA";
-    std::string query =     "ACGCAATTTGCAA";
+    std::string reference = "ACGCAACTCTCTGAAC";
+    std::string query =     "ACGCAATTTTCTGTAA";
 
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference);
@@ -160,9 +160,9 @@ TEST(dbg_aligner, multiple_variations) {
 
 TEST(dbg_aligner, noise_in_branching_point) {
     size_t k = 4;
-    std::string reference_1 = "AAAAACTTTTTT";
-    std::string reference_2 = "AAAAATTGGGGG";
-    std::string query =       "AAAAATTTTTTT";
+    std::string reference_1 = "AAAACTTTTTT";
+    std::string reference_2 = "AAAATTGGGGG";
+    std::string query =       "AAAATTTTTTT";
 
     DBGSuccinct* graph = new DBGSuccinct(k);
     graph->add_sequence(reference_1);

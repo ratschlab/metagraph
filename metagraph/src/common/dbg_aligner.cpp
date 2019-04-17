@@ -27,6 +27,34 @@ DBGAligner::DBGAligner(DeBruijnGraph *dbg, Annotator *annotation,
         {'c', {{'c', match_score_}, {'a', -2}, {'g', -2}, {'t', -1}}},
         {'t', {{'t', match_score_}, {'a', -2}, {'g', -2}, {'c', -1}}},
         {'$', {{'$', -2}}}};
+
+    // score for the following chars respectively:
+    // A  C  G  T   N (or other ambiguous code)
+    std::initializer_list<int8_t> score_matrix_init_list = {
+    match_score_, sub_score_['a']['c'], sub_score_['a']['g'], sub_score_['a']['t'], sub_score_['$']['$'],
+    sub_score_['c']['a'], match_score_, sub_score_['c']['g'], sub_score_['c']['t'], sub_score_['$']['$'],
+    sub_score_['g']['a'], sub_score_['g']['c'], match_score_, sub_score_['g']['t'], sub_score_['$']['$'],
+    sub_score_['t']['a'], sub_score_['t']['c'], sub_score_['t']['g'], match_score_, sub_score_['$']['$'],
+    sub_score_['$']['$'], sub_score_['$']['$'], sub_score_['$']['$'], sub_score_['$']['$'], sub_score_['$']['$']};
+
+    std::copy(std::begin(score_matrix_init_list), std::end(score_matrix_init_list), std::begin(cssw_score_matrix_));
+
+    std::initializer_list<int8_t> translation_matrix_init_list = {
+    4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+    4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+    4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+    4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+  //   A     C            G
+    4, 0, 4, 1,  4, 4, 4, 2,  4, 4, 4, 4,  4, 4, 4, 4,
+  //             T
+    4, 4, 4, 4,  3, 0, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
+  //   a     c            g
+    4, 0, 4, 1,  4, 4, 4, 2,  4, 4, 4, 4,  4, 4, 4, 4,
+  //             t
+    4, 4, 4, 4,  3, 0, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4};
+
+    std::copy(std::begin(translation_matrix_init_list), std::end(translation_matrix_init_list),
+              std::begin(cssw_translation_matrix_));
 }
 
 namespace { // Helper function.
@@ -99,7 +127,7 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
                         } else {
                             alternative_path.push_back(node, annotator_->get(node));
                             alternative_path.update_total_score(
-                                whole_path_score(alternative_path, std::begin(sequence)));
+                                ssw_score(alternative_path, std::begin(sequence)));
                         }
                         DPAlignmentKey alternative_key{.node = alternative_path.back(),
                                            .query_it = alternative_path.get_sequence_it()};
@@ -183,8 +211,9 @@ float DBGAligner::ssw_score(const AlignedPath& path, std::string::const_iterator
 
     StripedSmithWaterman::Filter filter;
     StripedSmithWaterman::Alignment alignment;
-
-    StripedSmithWaterman::Aligner aligner;
+    StripedSmithWaterman::Aligner aligner(cssw_score_matrix_, 5,
+                                          cssw_translation_matrix_, 128);
+    aligner.SetGapPenalty(std::abs(deletion_penalty_), std::abs(deletion_penalty_));
     if (!aligner.Align(query.c_str(), ref.c_str(), ref.size(), filter, &alignment, maskLen)) {
         std::cout << "Failure in SSW calculation. Computing SSW inefficiently.\n";
         return whole_path_score(path, begin);
@@ -192,7 +221,14 @@ float DBGAligner::ssw_score(const AlignedPath& path, std::string::const_iterator
     if (verbose_) {
         PrintAlignment(alignment);
     }
-    return alignment.sw_score;
+
+    // Calculate mismatch score for either X or S in cigar
+    // (mismatched or not counted due to clipping).
+    // TODO: Count mismatches more accurately based on different values in sub_score_.
+    float score = sub_score_.at('$').at('$') * alignment.mismatches
+                  + match_score_ * (alignment.query_end - alignment.query_begin + 1.0)
+                  + sub_score_.at('$').at('$') * (query.size() - 1.0 - alignment.query_end);
+    return score;
 }
 
 float DBGAligner::whole_path_score(const AlignedPath& path, std::string::const_iterator begin) const {
