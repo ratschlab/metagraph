@@ -16,6 +16,77 @@ const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/bit_vector_dump_test";
 
 
+void test_next_subvector(const bit_vector &vector, uint64_t idx) {
+    if (vector.size() == 0)
+        return;
+
+    uint64_t count = idx ? vector.rank1(idx - 1) : 0;
+
+    for (size_t t = 0; t < 10 && idx < vector.size(); ++t) {
+        auto next = vector.next1(idx);
+        ASSERT_TRUE(next <= vector.size());
+
+        if (next == vector.size()) {
+            ASSERT_EQ(count, vector.num_set_bits());
+            break;
+        }
+
+        EXPECT_EQ(count + 1, vector.rank1(next));
+
+        count++;
+        idx = next + 1;
+    }
+}
+
+void test_next(const bit_vector &vector) {
+    ASSERT_DEATH(vector.next1(vector.size()), "");
+    ASSERT_DEATH(vector.next1(vector.size() + 1), "");
+    ASSERT_DEATH(vector.next1(vector.size() * 2), "");
+
+    test_next_subvector(vector, 0);
+    test_next_subvector(vector, vector.size() / 5);
+    test_next_subvector(vector, vector.size() / 2);
+    test_next_subvector(vector, vector.size() * 2 / 3);
+    test_next_subvector(vector, vector.size() - 1);
+}
+
+void test_prev_subvector(const bit_vector &vector, uint64_t idx) {
+    if (vector.size() == 0)
+        return;
+
+    uint64_t count = vector.rank1(idx);
+
+    for (size_t t = 0; t < 10; ++t) {
+        auto prev = vector.prev1(idx);
+        ASSERT_TRUE(prev <= vector.size());
+
+        if (prev == vector.size()) {
+            ASSERT_TRUE(count <= 1);
+            break;
+        }
+
+        EXPECT_EQ(count, vector.rank1(prev));
+
+        if (!prev)
+            break;
+
+        count--;
+        idx = prev - 1;
+    }
+}
+
+void test_prev(const bit_vector &vector) {
+    ASSERT_DEATH(vector.prev1(vector.size()), "");
+    ASSERT_DEATH(vector.prev1(vector.size() + 1), "");
+    ASSERT_DEATH(vector.prev1(vector.size() * 2), "");
+
+    test_prev_subvector(vector, 0);
+    test_prev_subvector(vector, vector.size() / 5);
+    test_prev_subvector(vector, vector.size() / 2);
+    test_prev_subvector(vector, vector.size() * 2 / 3);
+    test_prev_subvector(vector, vector.size() - 1);
+}
+
 void reference_based_test(const bit_vector &vector,
                           const std::vector<bool> &reference) {
     size_t max_rank = std::accumulate(reference.begin(), reference.end(), 0u);
@@ -44,6 +115,9 @@ void reference_based_test(const bit_vector &vector,
     }
 
     EXPECT_EQ(reference, vector.to_vector());
+
+    test_next(vector);
+    test_prev(vector);
 }
 
 
@@ -309,39 +383,55 @@ TEST(bit_vector_small, InsertDeleteException) {
 
 
 TEST(bit_vector_dyn, Serialization) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    std::unique_ptr<bit_vector> vector { new bit_vector_dyn(init_list) };
-    std::vector<bool> numbers(init_list);
-    ASSERT_TRUE(vector);
-    std::ofstream outstream(test_dump_basename, std::ios::binary);
-    vector->serialize(outstream);
-    outstream.close();
+    std::vector<std::initializer_list<bool>> init_lists = {
+        { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0 },
+        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1 },
+        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1 },
+        { 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1 },
+        { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
+    };
+    for (auto init_list : init_lists) {
+        std::unique_ptr<bit_vector> vector { new bit_vector_dyn(init_list) };
+        std::vector<bool> numbers(init_list);
+        ASSERT_TRUE(vector);
+        std::ofstream outstream(test_dump_basename, std::ios::binary);
+        vector->serialize(outstream);
+        outstream.close();
 
-    vector.reset(new bit_vector_dyn());
-    ASSERT_TRUE(vector);
-    std::ifstream instream(test_dump_basename, std::ios::binary);
-    ASSERT_TRUE(vector->load(instream));
+        vector.reset(new bit_vector_dyn());
+        ASSERT_TRUE(vector);
+        std::ifstream instream(test_dump_basename, std::ios::binary);
+        ASSERT_TRUE(vector->load(instream));
 
-    reference_based_test(*vector, numbers);
+        reference_based_test(*vector, numbers);
+    }
 }
 
 TEST(bit_vector_stat, Serialization) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    std::unique_ptr<bit_vector> vector { new bit_vector_stat(init_list) };
-    std::vector<bool> numbers(init_list);
-    ASSERT_TRUE(vector);
-    std::ofstream outstream(test_dump_basename, std::ios::binary);
-    vector->serialize(outstream);
-    outstream.close();
+    std::vector<std::initializer_list<bool>> init_lists = {
+        { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0 },
+        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1 },
+        { 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1 },
+        { 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1 },
+        { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }
+    };
+    for (auto init_list : init_lists) {
+        std::unique_ptr<bit_vector> vector { new bit_vector_stat(init_list) };
+        std::vector<bool> numbers(init_list);
+        ASSERT_TRUE(vector);
+        std::ofstream outstream(test_dump_basename, std::ios::binary);
+        vector->serialize(outstream);
+        outstream.close();
 
-    vector.reset(new bit_vector_stat());
-    ASSERT_TRUE(vector);
-    std::ifstream instream(test_dump_basename, std::ios::binary);
-    ASSERT_TRUE(vector->load(instream));
+        vector.reset(new bit_vector_stat());
+        ASSERT_TRUE(vector);
+        std::ifstream instream(test_dump_basename, std::ios::binary);
+        ASSERT_TRUE(vector->load(instream));
 
-    reference_based_test(*vector, numbers);
+        reference_based_test(*vector, numbers);
+    }
 }
 
 TEST(bit_vector_sd, Serialization) {

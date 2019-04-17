@@ -9,6 +9,12 @@ const double SD_SMALLER_THAN_RRR_MAX_DENSITY = 0.035;
 const double SD_SMALLER_THAN_STAT_MAX_DENSITY = 0.20;
 const double STAT_SMALLER_THAN_SD_MAX_DENSITY = 0.74;
 
+// TODO: run benchmarks and optimize these parameters
+const size_t MAX_ITER_BIT_VECTOR_STAT = 1000;
+const size_t MAX_ITER_BIT_VECTOR_DYN = 10;
+const size_t MAX_ITER_BIT_VECTOR_SD = 10;
+const size_t MAX_ITER_BIT_VECTOR_RRR = 10;
+
 
 uint64_t bit_vector::rank0(uint64_t id) const {
     return std::min(id + 1, size()) - rank1(id);
@@ -132,6 +138,95 @@ template bit_vector_smart bit_vector::copy_to<bit_vector_smart>() const;
 template sdsl::bit_vector bit_vector::copy_to<sdsl::bit_vector>() const;
 
 
+
+// taken from https://github.com/xxsds/sdsl-lite/blob/master/include/sdsl/util.hpp
+// this function has been modified.
+template <class t_int_vec>
+typename t_int_vec::size_type
+next_bit(const t_int_vec &v,
+         uint64_t idx,
+         uint64_t max_steps = std::numeric_limits<uint64_t>::max()) {
+    uint64_t pos  = idx >> 6;
+    uint64_t node = v.data()[pos];
+    node >>= (idx & 0x3F);
+    if (node) {
+        return idx + std::min(max_steps, static_cast<uint64_t>(sdsl::bits::lo(node)));
+    } else {
+        ++pos;
+        uint64_t end = std::min(max_steps, v.bit_size());
+        while ((pos << 6) < end) {
+            if (v.data()[pos]) {
+                return std::min((pos << 6) | sdsl::bits::lo(v.data()[pos]), end);
+            }
+            ++pos;
+        }
+        return end;
+    }
+}
+
+// taken from https://github.com/xxsds/sdsl-lite/blob/master/include/sdsl/util.hpp
+// this function has been modified.
+template <class t_int_vec>
+typename t_int_vec::size_type
+prev_bit(const t_int_vec &v,
+         uint64_t idx,
+         uint64_t max_steps = std::numeric_limits<uint64_t>::max()) {
+    uint64_t pos  = idx >> 6;
+    uint64_t node = v.data()[pos];
+    node <<= 63 - (idx & 0x3F);
+    if (node) {
+        return std::min(idx - std::min(idx, max_steps),
+                        sdsl::bits::hi(node) + (pos << 6) - (63 - (idx & 0x3F)));
+    } else {
+        --pos;
+        uint64_t end = std::min(idx - max_steps, v.bit_size());
+        while ((pos << 6) < end) {
+            if (v.data()[pos]) {
+                return (pos << 6) | sdsl::bits::hi(v.data()[pos]);
+            }
+            --pos;
+        }
+        return end;
+    }
+}
+
+template <typename BitVector>
+inline uint64_t next1(const BitVector &v,
+                      uint64_t pos,
+                      size_t num_steps) {
+    assert(pos < v.size());
+
+    if (v[pos])
+        return pos;
+
+    for (size_t t = 1; t < num_steps; ++t) {
+        if (pos + t == v.size() || v[pos + t])
+            return pos + t;
+    }
+
+    uint64_t rk = v.rank1(pos) + 1;
+    return rk <= v.num_set_bits() ? v.select1(rk) : v.size();
+}
+
+template <typename BitVector>
+inline uint64_t prev1(const BitVector &v,
+                      uint64_t pos,
+                      size_t num_steps) {
+    assert(pos < v.size());
+
+    for (size_t t = 0; t < num_steps; ++t, --pos) {
+        if (v[pos])
+            return pos;
+
+        if (pos == 0)
+            return v.size();
+    }
+
+    uint64_t rk = v.rank1(pos);
+    return rk ? v.select1(rk) : v.size();
+}
+
+
 /////////////////////////////
 // bit_vector_dyn, libmaus //
 /////////////////////////////
@@ -173,6 +268,18 @@ uint64_t bit_vector_dyn::rank1(uint64_t id) const {
 uint64_t bit_vector_dyn::select1(uint64_t id) const {
     assert(id > 0 && size() > 0 && id <= rank1(size() - 1));
     return vector_.select1(id - 1);
+}
+
+uint64_t bit_vector_dyn::next1(uint64_t pos) const {
+    assert(pos < size());
+
+    return ::next1(*this, pos, MAX_ITER_BIT_VECTOR_DYN);
+}
+
+uint64_t bit_vector_dyn::prev1(uint64_t pos) const {
+    assert(pos < size());
+
+    return ::prev1(*this, pos, MAX_ITER_BIT_VECTOR_DYN);
 }
 
 void bit_vector_dyn::set(uint64_t id, bool val) {
@@ -328,6 +435,28 @@ uint64_t bit_vector_stat::select1(uint64_t id) const {
 
     assert(id <= num_set_bits_);
     return slct_(id);
+}
+
+uint64_t bit_vector_stat::next1(uint64_t pos) const {
+    assert(pos < size());
+
+    auto next = next_bit(vector_, pos, MAX_ITER_BIT_VECTOR_STAT);
+    if (next < pos + MAX_ITER_BIT_VECTOR_STAT)
+        return next;
+
+    uint64_t rk = rank1(pos) + 1;
+    return rk <= num_set_bits() ? select1(rk) : size();
+}
+
+uint64_t bit_vector_stat::prev1(uint64_t pos) const {
+    assert(pos < size());
+
+    auto next = prev_bit(vector_, pos, MAX_ITER_BIT_VECTOR_STAT);
+    if (next < vector_.size() && next > pos - MAX_ITER_BIT_VECTOR_STAT)
+        return next;
+
+    uint64_t rk = rank1(pos);
+    return rk ? select1(rk) : size();
 }
 
 bool bit_vector_stat::operator[](uint64_t id) const {
@@ -594,6 +723,18 @@ uint64_t bit_vector_sd::select1(uint64_t id) const {
     return !inverted_ ? slct1_(id) : slct0_(id);
 }
 
+uint64_t bit_vector_sd::next1(uint64_t pos) const {
+    assert(pos < size());
+
+    return ::next1(*this, pos, MAX_ITER_BIT_VECTOR_SD);
+}
+
+uint64_t bit_vector_sd::prev1(uint64_t pos) const {
+    assert(pos < size());
+
+    return ::prev1(*this, pos, MAX_ITER_BIT_VECTOR_SD);
+}
+
 void bit_vector_sd::set(uint64_t, bool) {
     throw std::runtime_error("Not supported");
 }
@@ -763,6 +904,20 @@ uint64_t bit_vector_rrr<log_block_size>::select1(uint64_t id) const {
 }
 
 template <size_t log_block_size>
+uint64_t bit_vector_rrr<log_block_size>::next1(uint64_t pos) const {
+    assert(pos < size());
+
+    return ::next1(*this, pos, MAX_ITER_BIT_VECTOR_RRR);
+}
+
+template <size_t log_block_size>
+uint64_t bit_vector_rrr<log_block_size>::prev1(uint64_t pos) const {
+    assert(pos < size());
+
+    return ::prev1(*this, pos, MAX_ITER_BIT_VECTOR_RRR);
+}
+
+template <size_t log_block_size>
 uint64_t bit_vector_rrr<log_block_size>::select0(uint64_t id) const {
     assert(id > 0 && size() > 0 && id <= size() - num_set_bits());
     assert(num_set_bits() == rank1(size() - 1));
@@ -902,6 +1057,14 @@ uint64_t bit_vector_adaptive::rank1(uint64_t id) const {
 
 uint64_t bit_vector_adaptive::select1(uint64_t id) const {
     return vector_->select1(id);
+}
+
+uint64_t bit_vector_adaptive::next1(uint64_t id) const {
+    return vector_->next1(id);
+}
+
+uint64_t bit_vector_adaptive::prev1(uint64_t id) const {
+    return vector_->prev1(id);
 }
 
 void bit_vector_adaptive::set(uint64_t id, bool val) {

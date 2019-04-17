@@ -21,6 +21,9 @@ class bit_vector : public bitmap {
     // Returns the i-th set bit, starting from 1
     virtual uint64_t select1(uint64_t i) const = 0;
 
+    virtual uint64_t next1(uint64_t id) const = 0;
+    virtual uint64_t prev1(uint64_t id) const = 0;
+
     virtual void insert_bit(uint64_t id, bool val) = 0;
     virtual void delete_bit(uint64_t id) = 0;
     virtual void set(uint64_t id, bool val) override = 0;
@@ -68,6 +71,9 @@ class bit_vector_dyn : public bit_vector {
     uint64_t rank1(uint64_t id) const override;
     uint64_t select1(uint64_t id) const override;
 
+    uint64_t next1(uint64_t id) const override;
+    uint64_t prev1(uint64_t id) const override;
+
     void set(uint64_t id, bool val) override;
     void setBitQuick(uint64_t id, bool val) override;
     bool operator[](uint64_t id) const override;
@@ -110,6 +116,9 @@ class bit_vector_stat : public bit_vector {
 
     uint64_t rank1(uint64_t id) const override;
     uint64_t select1(uint64_t id) const override;
+
+    uint64_t next1(uint64_t id) const override;
+    uint64_t prev1(uint64_t id) const override;
 
     void set(uint64_t id, bool val) override;
     bool operator[](uint64_t id) const override;
@@ -164,6 +173,9 @@ class bit_vector_sd : public bit_vector {
     uint64_t rank1(uint64_t id) const override;
     uint64_t select1(uint64_t id) const override;
 
+    uint64_t next1(uint64_t id) const override;
+    uint64_t prev1(uint64_t id) const override;
+
     void set(uint64_t id, bool val) override;
     bool operator[](uint64_t id) const override;
     uint64_t get_int(uint64_t id, uint32_t width) const override;
@@ -215,6 +227,9 @@ class bit_vector_rrr : public bit_vector {
     uint64_t select0(uint64_t id) const;
     uint64_t select1(uint64_t id) const override;
 
+    uint64_t next1(uint64_t id) const override;
+    uint64_t prev1(uint64_t id) const override;
+
     void set(uint64_t id, bool val) override;
     bool operator[](uint64_t id) const override;
     uint64_t get_int(uint64_t id, uint32_t width) const override;
@@ -249,6 +264,9 @@ class bit_vector_adaptive : public bit_vector {
 
     virtual uint64_t rank1(uint64_t id) const override final;
     virtual uint64_t select1(uint64_t id) const override final;
+
+    virtual uint64_t next1(uint64_t id) const override final;
+    virtual uint64_t prev1(uint64_t id) const override final;
 
     virtual void set(uint64_t id, bool val) override final;
     virtual bool operator[](uint64_t id) const override final;

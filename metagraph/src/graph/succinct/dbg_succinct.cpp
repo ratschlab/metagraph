@@ -319,18 +319,14 @@ uint64_t DBG_succ::select_last(uint64_t i) const {
  * and a given position i the position of the last set bit in last[1..i].
  */
 uint64_t DBG_succ::pred_last(uint64_t i) const {
-    assert(i < last_->size());
+    if (!i)
+        return 0;
 
-    size_t max_iter = 10;
-    if (state == Config::STAT) {
-        max_iter = 1000;
-    }
-    for (size_t t = 0; t < max_iter; ++t, --i) {
-        if (i == 0 || get_last(i))
-            return i;
-    }
+    CHECK_INDEX(i);
 
-    return select_last(rank_last(i));
+    uint64_t prev = last_->prev1(i);
+
+    return prev < last_->size() ? prev : 0;
 }
 
 /**
@@ -340,20 +336,7 @@ uint64_t DBG_succ::pred_last(uint64_t i) const {
 uint64_t DBG_succ::succ_last(uint64_t i) const {
     CHECK_INDEX(i);
 
-    size_t max_iter = 10;
-    if (state == Config::STAT) {
-        max_iter = 1000;
-    }
-    for (size_t t = 0; t < max_iter; ++t) {
-        if (i + t == W_->size() || get_last(i + t))
-            return i + t;
-    }
-
-    uint64_t next_rank = get_source_node(i);
-
-    assert(next_rank <= last_->num_set_bits());
-
-    return select_last(next_rank);
+    return last_->next1(i);
 }
 
 /**
