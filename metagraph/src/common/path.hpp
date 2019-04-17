@@ -15,14 +15,20 @@ class Path {
     Path& operator= (const Path&) = default;
     Path& operator= (Path&&) = default;
 
-    void push_back(NodeType node, const VLabels &labels, float score=0) {
-        nodes_.push_back(node);
-        score_ += score;
-        label_set_.insert(std::end(label_set_), std::begin(labels),
-                          std::end(labels));
-        ++ query_it_;
+    void seed(NodeType node, const VLabels &labels, std::string sequence, float score=0) {
+        push_back(node, labels, score);
+        sequence_ += sequence;
     }
-    void append_path(const Path& other) {
+    void extend(NodeType node, const VLabels &labels, char extention, float score=0) {
+        push_back(node, labels, score);
+        sequence_ += extention;
+    }
+    // Assume paths are appended on the correct order.
+    void append_path(const Path& other, int64_t k) {
+        if (nodes_.size() > 0)
+            sequence_ += other.sequence_.substr(k - 2);
+        else
+            sequence_ = other.sequence_;
         for (auto node : other.nodes_)
             nodes_.push_back(node);
         score_ += other.score_;
@@ -33,8 +39,8 @@ class Path {
     }
 
     void update_total_score(float score) { score_ = score; }
-    void set_sequence_it(std::string::const_iterator sequence_it) {
-        query_it_ = sequence_it; }
+    void set_query_it(std::string::const_iterator query_it) {
+        query_it_ = query_it; }
 
     NodeType back() const { return nodes_.back(); }
     NodeType last_parent() const { return nodes_.at(nodes_.size() - 1); }
@@ -44,7 +50,8 @@ class Path {
     VLabels get_labels() const { return label_set_; }
     std::vector<NodeType> get_nodes() const { return nodes_; }
 
-    std::string::const_iterator get_sequence_it() const { return query_it_; }
+    std::string::const_iterator get_query_it() const { return query_it_; }
+    std::string get_sequence() const { return sequence_; }
 
     // The paths are sorted in BoundedPriorityQueue in increasing order of score
     // per number of nodes. This gives paths with lower absolute score, but higher
@@ -58,6 +65,15 @@ class Path {
     std::vector<NodeType> nodes_;
     VLabels label_set_;
     std::string::const_iterator query_it_;
+    std::string sequence_;
+
+    void push_back(NodeType node, const VLabels &labels, float score=0) {
+        nodes_.push_back(node);
+        score_ += score;
+        label_set_.insert(std::end(label_set_), std::begin(labels),
+                          std::end(labels));
+        ++ query_it_;
+    }
 };
 
 #endif  // __PATH_HPP__

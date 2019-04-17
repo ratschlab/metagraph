@@ -2131,11 +2131,11 @@ int main(int argc, const char *argv[]) {
                                   << get_curr_RSS() / (1 << 20) << " MiB"
                                   << std::endl;
                         std::cout << "Q: " << std::string(read_stream->seq.s) << std::endl
-                                  << "P: " << aligner.get_path_sequence(path.get_nodes())
+                                  << "P: " << path.get_sequence()
                                   << std::endl;
                     }
                     outstream << "Q: " << std::string(read_stream->seq.s) << std::endl
-                              << "P: " << aligner.get_path_sequence(path.get_nodes())
+                              << "P: " << path.get_sequence()
                               << std::endl << "With total score " << path.get_total_score() << std::endl;
                 }, config->reverse,
                     get_filter_filename(file, config->filter_k,

@@ -46,9 +46,6 @@ class DBGAligner : public AnnotatedDBG {
     // Align a sequence to the underlying graph based on the strategy defined in the graph.
     AlignedPath align(const std::string& sequence) const;
 
-    // Return the corresponding sequence of a path according to nodes in the graph.
-    std::string get_path_sequence(const std::vector<node_index>& path) const;
-
     float get_match_score() const { return match_score_; }
 
   private:
@@ -70,16 +67,8 @@ class DBGAligner : public AnnotatedDBG {
     // Align part of a sequence to the graph in the case of no exact map
     // based on internal strategy. Calls callback for every possible alternative path.
     void inexact_map(const AlignedPath &path, std::string::const_iterator end,
-                     const std::function<void(node_index,
+                     const std::function<void(node_index, char,
                         std::string::const_iterator)> &callback) const;
-
-    // Strategy: Randomly choose between possible outgoing neighbors.
-    void randomly_pick_strategy(std::vector<node_index> out_neighbors,
-                                const std::function<void(node_index)> &callback) const;
-
-    // Strategy: Call callback for all edges. This is equivalent to exhaustive search.
-    void pick_all_strategy(std::vector<node_index> out_neighbors,
-                           const std::function<void(node_index)> &callback) const;
 
     // Return the score of substitution. If not in sub_score_ return a fixed maximized score value.
     float single_char_score(char char_in_query, char char_in_graph) const;

@@ -18,7 +18,7 @@ TEST(dbg_aligner, align_sequence_too_short) {
     auto path = aligner.align(query);
 
     EXPECT_EQ(0ull, path.size());
-    EXPECT_EQ("", aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ("", path.get_sequence());
 }
 
 TEST(dbg_aligner, align_single_node) {
@@ -32,7 +32,7 @@ TEST(dbg_aligner, align_single_node) {
     auto path = aligner.align(query);
 
     EXPECT_EQ(1ull, path.size());
-    EXPECT_EQ("CAT", aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ("CAT", path.get_sequence());
 }
 
 TEST(dbg_aligner, inexact_seeding) {
@@ -46,7 +46,7 @@ TEST(dbg_aligner, inexact_seeding) {
     auto path = aligner.align(query);
 
     EXPECT_EQ(4ull, path.size());
-    EXPECT_EQ("TGTTTT", aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ("TGTTTT", path.get_sequence());
 }
 
 TEST(dbg_aligner, align_straight) {
@@ -61,7 +61,7 @@ TEST(dbg_aligner, align_straight) {
     auto path = aligner.align(query);
 
     EXPECT_EQ(query.size() - k + 1, path.size());
-    EXPECT_EQ(query, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(query, path.get_sequence());
     EXPECT_EQ(query.size() * aligner.get_match_score(), path.get_total_score());
 }
 
@@ -79,7 +79,7 @@ TEST(dbg_aligner, align_ending_branch) {
     auto path = aligner.align(query);
 
     EXPECT_EQ(query.size() - k + 1, path.size());
-    EXPECT_EQ(query, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(query, path.get_sequence());
 }
 
 TEST(dbg_aligner, align_branch) {
@@ -96,7 +96,7 @@ TEST(dbg_aligner, align_branch) {
     auto path = aligner.align(query);
 
     EXPECT_EQ(query.size() - k + 1, path.size());
-    EXPECT_EQ(query, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(query, path.get_sequence());
 }
 
 TEST(dbg_aligner, repetitive_sequence_alignment) {
@@ -110,7 +110,7 @@ TEST(dbg_aligner, repetitive_sequence_alignment) {
     auto path = aligner.align(query);
 
     EXPECT_EQ(query.size() - k + 1, path.size());
-    EXPECT_EQ(query, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(query, path.get_sequence());
 }
 
 TEST(dbg_aligner, variation) {
@@ -124,7 +124,7 @@ TEST(dbg_aligner, variation) {
     auto path = aligner.align(query);
 
     EXPECT_EQ(query.size() - k + 1, path.size());
-    EXPECT_EQ(reference, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(reference, path.get_sequence());
 }
 
 TEST(dbg_aligner, variation_in_branching_point) {
@@ -140,8 +140,11 @@ TEST(dbg_aligner, variation_in_branching_point) {
     auto path = aligner.align(query);
 
     EXPECT_EQ(query.size() - k + 1, path.size());
-    EXPECT_TRUE(aligner.get_path_sequence(path.get_nodes()).compare(reference_1) == 0 ||
-                aligner.get_path_sequence(path.get_nodes()).compare(reference_2) == 0);
+    EXPECT_TRUE(path.get_sequence().compare(reference_1) == 0 ||
+                path.get_sequence().compare(reference_2) == 0)
+        << "Path: " << path.get_sequence() << std::endl
+        << "Ref1: " << reference_1 << std::endl
+        << "Ref2: " << reference_2 << std::endl;
 }
 
 TEST(dbg_aligner, multiple_variations) {
@@ -155,7 +158,7 @@ TEST(dbg_aligner, multiple_variations) {
     auto path = aligner.align(query);
 
     EXPECT_EQ(query.size() - k + 1, path.size());
-    EXPECT_EQ(reference, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(reference, path.get_sequence());
 }
 
 TEST(dbg_aligner, noise_in_branching_point) {
@@ -171,7 +174,7 @@ TEST(dbg_aligner, noise_in_branching_point) {
     auto path = aligner.align(query);
 
     EXPECT_EQ(query.size() - k + 1, path.size());
-    EXPECT_EQ(reference_1, aligner.get_path_sequence(path.get_nodes()));
+    EXPECT_EQ(reference_1, path.get_sequence());
     EXPECT_EQ((query.size() - 1) * aligner.get_match_score() - 1, path.get_total_score());
 }
 
@@ -202,14 +205,15 @@ TEST(dbg_aligner, noise_in_branching_point) {
 //    std::replace(aligned_query.begin(), aligned_query.end(), 'C' , 'T');
 //
 //    EXPECT_EQ(query.size() - k + 1, path.size());
-//    EXPECT_EQ(aligned_query, aligner.get_path_sequence(path.get_nodes()));
+//    EXPECT_EQ(aligned_query, path.get_sequence());
 //    EXPECT_EQ(-1.0 * unmapped_char_length, path.get_total_score());
 //}
 
 // TODO: How to report loss in case of a large gap in query?
 TEST(dbg_aligner, large_gap) {
     size_t k = 10;
-    std::string reference = "AAAAAAAAAATTTTTTTTTTATATATATATAATTAATTAATTTAAATTTAAAAATTTTTCCCCCCCCCCGGGGGGGGGGGCGCGCGCGCGC";
+    std::string reference = "AAAAAAAAAATTTTTTTTTTATATATATATAATTAATTAA";
+    reference +=            "TTTAAATTTAAAAATTTTTCCCCCCCCCCGGGGGGGGGGGCGCGCGCGCGC";
     std::string query =     "AAAAAAAAAA";
     query +=                "GGGGGGGGGGGCGCGCGCGCGC";
 
@@ -217,8 +221,10 @@ TEST(dbg_aligner, large_gap) {
     graph->add_sequence(reference);
     DBGAligner aligner (graph, new annotate::ColumnCompressed<>(/*num_rows=*/graph->num_nodes() + 1));
     auto path = aligner.align(query);
-    auto path_seq = aligner.get_path_sequence(path.get_nodes());
+    auto path_seq = path.get_sequence();
 
     EXPECT_EQ(query.substr(0, k), path_seq.substr(0, k));
-    EXPECT_EQ(query.substr(query.size() - 2 * k), path_seq.substr(path_seq.size() - 2 * k));
+    EXPECT_EQ(query.substr(query.size() - k), path_seq.substr(path_seq.size() - k))
+        << "Path : " << path_seq << std::endl
+        << "query: " << query << std::endl;
 }
