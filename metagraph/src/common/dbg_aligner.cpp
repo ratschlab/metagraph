@@ -3,7 +3,6 @@
 #include <string>
 #include <random>
 
-#include "bounded_priority_queue.hpp"
 #include "ssw_cpp.h"
 
 DBGAligner::DBGAligner(DeBruijnGraph *dbg, Annotator *annotation,
@@ -59,7 +58,7 @@ DBGAligner::DBGAligner(DeBruijnGraph *dbg, Annotator *annotation,
 
 namespace { // Helper function.
 template <typename T>
-float std_dev(const std::vector<T>& list, T mean) {
+float std_dev(const std::vector<T> &list, T mean) {
     float std_dev = 0;
     for (auto it = list.begin(); it != list.end(); ++it)
         std_dev += std::pow((*it) - mean, 2.0);
@@ -67,7 +66,7 @@ float std_dev(const std::vector<T>& list, T mean) {
 }
 }  // namespace
 
-DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
+DBGAligner::AlignedPath DBGAligner::align(const std::string &sequence) const {
     if (sequence.size() < graph_->get_k())
         return AlignedPath(sequence.end());
 
@@ -92,61 +91,14 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
             path = AlignedPath(path.get_query_it());
         }
 
-        node_index seed = path.size() > 0 ? path.back() : graph_->npos;
-        graph_->extend_from_seed(path.get_query_it(), std::end(sequence),
-                [&](node_index node) {
-                if (node == graph_->npos)
-                    return;
-                auto node_seq = graph_->get_node_sequence(node);
-                if (path.size() > 0) {
-                    path.extend(node, annotator_->get(node),
-                                node_seq.back(), match_score_);
-                } else {
-                    path.seed(node, annotator_->get(node), node_seq,
-                              match_score_ * graph_->get_k());
-                }},
-                [&]() { return (path.size() > 0 &&
-                        (graph_->outdegree(path.back()) > 1)); },
-                seed);
+        exact_map(path, sequence);
 
         if (path.get_query_it() + graph_->get_k() > std::end(sequence)) {
             partial_paths.push_back(path);
             break;
         }
 
-        inexact_map(path, std::end(sequence),
-                [&](node_index node, char extention,
-                        std::string::const_iterator last_mapped_position) {
-                    AlignedPath alternative_path(path);
-                    alternative_path.set_query_it(last_mapped_position);
-                    if (node == graph_->npos) {
-                        // Seeding was not successful. To do inexact seeding,
-                        // a path with incremented query_it is pushed to the queue.
-                        queue.push(std::move(alternative_path));
-                        return;
-                    }
-                    if (alternative_path.get_total_score() > sw_threshold_ * sequence.size()) {
-                        alternative_path.extend(node, annotator_->get(node), extention,
-                            single_char_score(*(alternative_path.get_query_it() +
-                                graph_->get_k() - 1), graph_->get_node_sequence(node).back()));
-                    } else {
-                        alternative_path.extend(node, annotator_->get(node), extention);
-                        alternative_path.update_total_score(
-                            ssw_score(alternative_path, std::begin(sequence)));
-                    }
-                    DPAlignmentKey alternative_key{.node = alternative_path.back(),
-                                       .query_it = alternative_path.get_query_it()};
-                    DPAlignmentValue alternative_value = {.score = alternative_path.get_total_score()};
-                    auto dp_alignment_it = dp_alignment.find(alternative_key);
-                    if (dp_alignment_it == dp_alignment.end()) {
-                        dp_alignment[alternative_key] = alternative_value;
-                        queue.push(std::move(alternative_path));
-                    }
-                    else if (dp_alignment_it->second.score < alternative_path.get_total_score()) {
-                        dp_alignment_it->second = alternative_value;
-                        queue.push(std::move(alternative_path));
-                    }
-                    });
+        inexact_map(path, std::end(sequence), queue, dp_alignment, sequence);
 
         if (verbose_ && path.size() % print_frequency == 0) {
             auto shadow_queue(queue);
@@ -163,6 +115,7 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
             std::cout << mean << ", " << std_dev<float>(score_values, mean) << std::endl;
         }
     }
+
     if (partial_paths.empty())
         return AlignedPath(std::end(sequence));
 
@@ -181,6 +134,65 @@ DBGAligner::AlignedPath DBGAligner::align(const std::string& sequence) const {
     return complete_path;
 }
 
+void DBGAligner::exact_map(AlignedPath &path, const std::string &sequence) const {
+    node_index seed = path.size() > 0 ? path.back() : graph_->npos;
+    graph_->extend_from_seed(path.get_query_it(), std::end(sequence),
+            [&](node_index node) {
+            if (node == graph_->npos)
+                return;
+            auto node_seq = graph_->get_node_sequence(node);
+            if (path.size() > 0) {
+                path.extend(node, annotator_->get(node),
+                            node_seq.back(), match_score_);
+            } else {
+                path.seed(node, annotator_->get(node), node_seq,
+                          match_score_ * graph_->get_k());
+            }},
+            [&]() { return (path.size() > 0 &&
+                    (graph_->outdegree(path.back()) > 1)); },
+            seed);
+}
+
+void DBGAligner::inexact_map(AlignedPath& path,
+                             std::string::const_iterator end,
+                             BoundedPriorityQueue<AlignedPath> &queue,
+                             std::map<DPAlignmentKey, DPAlignmentValue> &dp_alignment,
+                             const std::string &sequence) const {
+    if (path.get_query_it() + graph_->get_k() > end)
+        return;
+    if (path.size() == 0) {
+        // To do inexact seeding, a path with incremented query_it is pushed to the queue.
+        path.set_query_it(path.get_query_it() + 1);
+        queue.push(std::move(path));
+        return;
+    }
+    graph_->call_outgoing_kmers(path.back(), [&](node_index node, char extention) {
+        AlignedPath alternative_path(path);
+        alternative_path.set_query_it(path.get_query_it());
+        if (alternative_path.get_total_score() > sw_threshold_ * sequence.size()) {
+            alternative_path.extend(node, annotator_->get(node), extention,
+                single_char_score(*(alternative_path.get_query_it() +
+                    graph_->get_k() - 1), graph_->get_node_sequence(node).back()));
+        } else {
+            alternative_path.extend(node, annotator_->get(node), extention);
+            alternative_path.update_total_score(
+                ssw_score(alternative_path, std::begin(sequence)));
+        }
+        DPAlignmentKey alternative_key{.node = alternative_path.back(),
+                           .query_it = alternative_path.get_query_it()};
+        DPAlignmentValue alternative_value = {.score = alternative_path.get_total_score()};
+        auto dp_alignment_it = dp_alignment.find(alternative_key);
+        if (dp_alignment_it == dp_alignment.end()) {
+            dp_alignment[alternative_key] = alternative_value;
+            queue.push(std::move(alternative_path));
+        }
+        else if (dp_alignment_it->second.score < alternative_path.get_total_score()) {
+            dp_alignment_it->second = alternative_value;
+            queue.push(std::move(alternative_path));
+        }
+        });
+}
+
 float DBGAligner::single_char_score(char char_in_query, char char_in_graph) const {
     try {
         return sub_score_.at(std::tolower(char_in_query)).at(std::tolower(char_in_graph));
@@ -192,7 +204,7 @@ float DBGAligner::single_char_score(char char_in_query, char char_in_graph) cons
 
 namespace {
 // helper function to print an alignment based on SSW library.
-static void PrintAlignment(const StripedSmithWaterman::Alignment& alignment){
+static void PrintAlignment(const StripedSmithWaterman::Alignment &alignment){
     std::cout << "===== SSW result =====" << std::endl;
     std::cout << "Best Smith-Waterman score:\t" << alignment.sw_score << std::endl
        << "Next-best Smith-Waterman score:\t" << alignment.sw_score_next_best << std::endl
@@ -207,7 +219,7 @@ static void PrintAlignment(const StripedSmithWaterman::Alignment& alignment){
 }
 }  // namespace
 
-float DBGAligner::ssw_score(const AlignedPath& path, std::string::const_iterator begin) const {
+float DBGAligner::ssw_score(const AlignedPath &path, std::string::const_iterator begin) const {
     auto ref = path.get_sequence();
     std::string query(begin, path.get_query_it() + graph_->get_k() - 1);
 
@@ -236,7 +248,7 @@ float DBGAligner::ssw_score(const AlignedPath& path, std::string::const_iterator
     return score;
 }
 
-float DBGAligner::whole_path_score(const AlignedPath& path, std::string::const_iterator begin) const {
+float DBGAligner::whole_path_score(const AlignedPath &path, std::string::const_iterator begin) const {
     auto path_sequence = path.get_sequence();
     std::string query_sequence(begin, path.get_query_it() + graph_->get_k() - 1);
     float alignment_score[query_sequence.size() + 1][path_sequence.size() + 1] = {};
@@ -248,19 +260,4 @@ float DBGAligner::whole_path_score(const AlignedPath& path, std::string::const_i
         }
     }
     return alignment_score[query_sequence.size()][path_sequence.size()];
-}
-
-void DBGAligner::inexact_map(const AlignedPath &path,
-                             std::string::const_iterator end,
-                             const std::function<void(node_index, char,
-                                std::string::const_iterator)> &callback) const {
-    if (path.get_query_it() + graph_->get_k() > end)
-        return;
-    if (path.size() == 0) {
-        callback(graph_->npos,'$', path.get_query_it() + 1);
-        return;
-    }
-    graph_->call_outgoing_kmers(path.back(), [&](node_index node, char extention)
-                                             { callback(node, extention,
-                                                        path.get_query_it()); });
 }

@@ -24,7 +24,7 @@ class Path {
         sequence_ += extention;
     }
     // Assume paths are appended on the correct order.
-    void append_path(const Path& other, int64_t k) {
+    void append_path(const Path &other, int64_t k) {
         if (nodes_.size() > 0)
             sequence_ += other.sequence_.substr(k - 2);
         else
@@ -56,7 +56,7 @@ class Path {
     // The paths are sorted in BoundedPriorityQueue in increasing order of score
     // per number of nodes. This gives paths with lower absolute score, but higher
     // score per node to appear at the top of the queue.
-    bool operator< (const Path& other) const {
+    bool operator< (const Path &other) const {
         return (this->score_/float(this->size()) < other.score_/float(other.size()));
     }
 
