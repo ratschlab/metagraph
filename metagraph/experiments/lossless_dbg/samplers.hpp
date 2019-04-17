@@ -61,7 +61,7 @@ private:
 };
 class SubSampler : public NoisySampler {
 public:
-    SubSampler(const string& reference, int subsample_size, std::mt19937 generator,double probability_of_error) :
+    SubSampler(const string& reference, int subsample_size, std::mt19937 generator,double probability_of_error=0) :
         NoisySampler(reference.substr(
                 std::uniform_int_distribution<>(0,reference.length()-min(subsample_size,(int)reference.length()))(generator),
                 min(subsample_size,(int)reference.length())
