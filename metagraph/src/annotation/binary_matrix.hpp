@@ -13,6 +13,7 @@ class BinaryMatrix {
 
     typedef std::vector<Column> RowSetBits;
     typedef const std::function<void(const RowSetBits &)> RowCallback;
+    typedef std::function<void(Row, Column)> ValueCallback ;
 
     virtual ~BinaryMatrix() {}
 

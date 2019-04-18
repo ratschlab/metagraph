@@ -56,6 +56,10 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
         MultiLabelEncoded<uint64_t, Label>::label_encoder_
     };
 
+    virtual std::vector<uint64_t> get_label_indexes(Index i) const {
+        return matrix_->get_row(i);
+    }
+
     static const std::string kFileExtension;
 };
 

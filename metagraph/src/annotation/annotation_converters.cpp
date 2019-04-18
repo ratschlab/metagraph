@@ -29,6 +29,7 @@ convert<RowFlatAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
 
     auto matrix = std::make_unique<RowConcatenated<>>(
         [&](auto callback) {
+            //TODO: move progressbar into call_rows w/ on/off flag?
             utils::call_rows(
                 [&](const auto &row) {
                     assert(std::is_sorted(row.begin(), row.end()));
@@ -248,7 +249,7 @@ uint64_t merge_rows(
     const std::vector<const LEncoder*> &label_encoders,
     const std::function<const std::vector<uint64_t>(const uint64_t, const uint64_t)> &get_row,
     const uint64_t &num_rows,
-    const std::function<uint64_t(LEncoder&, const std::function<void (BinaryMatrix::RowCallback&)>)> &write_rows
+    const std::function<uint64_t(LEncoder&, const std::function<void (const BinaryMatrix::RowCallback&)>)> &write_rows
 ) {
     LEncoder merged_label_enc;
     merged_label_enc.merge(label_encoders);
@@ -306,7 +307,7 @@ merge<RowCompressed<>, RowCompressed<>, std::string, false>(const std::vector<st
             return *annotators[annotator_idx]->next_row();
         },
         num_rows,
-        [&](LEncoder &merged_label_enc, const std::function<void (BinaryMatrix::RowCallback&)> &callback) {
+        [&](LEncoder &merged_label_enc, const std::function<void (const BinaryMatrix::RowCallback&)> &callback) {
             return RowCompressed<>::write_rows(outfile,
                                                merged_label_enc,
                                                callback,
@@ -333,13 +334,44 @@ merge<RowFlatAnnotator, RowCompressed<>, std::string, false>(const std::vector<c
             return annotators.at(annotator_idx)->matrix_->get_row(row_idx);
         },
         num_rows,
-        [&](LEncoder &merged_label_enc, const std::function<void (BinaryMatrix::RowCallback&)> &callback) {
+        [&](LEncoder &merged_label_enc, const std::function<void (const BinaryMatrix::RowCallback&)> &callback) {
             return RowCompressed<>::write_rows(outfile,
                                                merged_label_enc,
                                                callback,
                                                false);
         }
     );
+}
+
+template <>
+uint64_t
+merge<RowFlatAnnotator, RowFlatAnnotator, std::string, false>(const std::vector<const RowFlatAnnotator*> &annotators,
+                                                              const std::string &ofbase) {
+    assert(annotators.size()>0);
+    const uint64_t num_rows = annotators.at(0)->num_objects();
+
+    std::vector<const LEncoder*> label_encoders;
+    for (auto annotator : annotators) {
+        label_encoders.push_back(&annotator->label_encoder_);
+    }
+
+    merge_rows(
+        label_encoders,
+        [&](const uint64_t row_idx, const uint64_t annotator_idx) -> const std::vector<uint64_t> {
+            return annotators.at(annotator_idx)->matrix_->get_row(row_idx);
+        },
+        num_rows,
+        [&](LEncoder &merged_label_enc, const std::function<void (const BinaryMatrix::RowCallback&)> &callback) {
+            return RowCompressed<>::write_rows(ofbase, //TODO: how to get filename in order to delete afterwards?
+                                               merged_label_enc,
+                                               callback,
+                                               false);
+        }
+    );
+
+    auto rowflat = convert<RowCompressed<>, RowFlatAnnotator, std::string>(ofbase);
+    rowflat->serialize(ofbase);
+    return num_rows;
 }
 
 } // namespace annotate

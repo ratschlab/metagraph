@@ -92,6 +92,19 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     std::vector<std::unique_ptr<bit_vector>> bitmatrix_;
 
+    virtual std::vector<uint64_t> get_label_indexes(Index i) const {
+        //TODO: don't duplicate code w/ get_labels()
+
+        assert(i < num_rows_);
+
+        std::vector<uint64_t> labels;
+        for (size_t j = 0; j < num_labels(); ++j) {
+            if (is_set(i, j))
+                labels.push_back(j);
+        }
+        return labels;
+    }
+
     caches::fixed_sized_cache<size_t,
                               bitmap_dyn*,
                               caches::LRUCachePolicy<size_t>> cached_columns_;

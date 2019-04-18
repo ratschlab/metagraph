@@ -148,6 +148,8 @@ class LabelEncoder {
 template <typename IndexType, typename LabelType>
 class MultiLabelEncoded
       : public MultiLabelAnnotation<IndexType, LabelType> {
+    template <class A, typename L, bool s>
+    friend uint64_t merge(const std::vector<const MultiLabelEncoded<uint64_t, L>*>&, const std::vector<std::string>&, const std::string&);
 
   public:
     using Index = typename MultiLabelAnnotation<IndexType, LabelType>::Index;
@@ -178,6 +180,14 @@ class MultiLabelEncoded
     count_labels(const std::vector<Index> &indices) const = 0;
 
     LabelEncoder<Label> label_encoder_;
+
+    virtual std::vector<uint64_t> get_label_indexes(Index i) const {
+        VLabels vl = this->get_labels(i);
+        std::vector<uint64_t> vi;
+        for (auto l : vl)
+            vi.push_back(label_encoder_.encode(l));
+        return vi;
+    }
 };
 
 } // namespace annotate

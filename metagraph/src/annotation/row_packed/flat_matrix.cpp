@@ -9,7 +9,7 @@
 
 template <typename BitVector>
 RowConcatenated<BitVector>::
-RowConcatenated(const std::function<void(RowCallback)> &call_rows,
+RowConcatenated(const std::function<void(const RowCallback&)> &call_rows,
                 uint64_t num_columns,
                 uint64_t num_rows,
                 uint64_t num_set_bits)
