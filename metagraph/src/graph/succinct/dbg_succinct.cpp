@@ -14,7 +14,7 @@
 #include "reverse_complement.hpp"
 
 using utils::remove_suffix;
-using TAlphabet = DBG_succ::TAlphabet;
+using TAlphabet = BOSS::TAlphabet;
 
 
 #define CHECK_INDEX(idx) \
@@ -24,13 +24,13 @@ using TAlphabet = DBG_succ::TAlphabet;
     assert(idx <= num_nodes()); \
     assert(idx > 0)
 
-const DBG_succ::node_index DBG_succ::npos = 0;
+const BOSS::node_index BOSS::npos = 0;
 
-typedef DBG_succ::node_index node_index;
-typedef DBG_succ::edge_index edge_index;
+typedef BOSS::node_index node_index;
+typedef BOSS::edge_index edge_index;
 
 
-DBG_succ::DBG_succ(size_t k)
+BOSS::BOSS(size_t k)
       : alph_size(kmer_extractor_.alphabet.size()),
         alphabet(kmer_extractor_.alphabet),
         bits_per_char_W_(boost::multiprecision::msb(alph_size - 1) + 2),
@@ -54,25 +54,25 @@ DBG_succ::DBG_succ(size_t k)
     assert(is_valid());
 }
 
-DBG_succ::DBG_succ(DBGSuccConstructor *builder) : DBG_succ::DBG_succ() {
+BOSS::BOSS(BOSSConstructor *builder) : BOSS::BOSS() {
     assert(builder);
 
     builder->build_graph(this);
     assert(is_valid());
 }
 
-DBG_succ::~DBG_succ() {
+BOSS::~BOSS() {
     delete W_;
     delete last_;
 }
 
 /**
- * Given a pointer to a graph structures G1 and G2, the function compares their elements to the
+ * Given a pointer to BOSS tables G1 and G2, the function compares their elements to the
  * each other. It will perform an element wise comparison of the arrays W, last and
  * F and will only check for identity. If any element differs, the function will return
  * false and true otherwise.
  */
-bool DBG_succ::equals_internally(const DBG_succ &other, bool verbose) const {
+bool BOSS::equals_internally(const BOSS &other, bool verbose) const {
     // compare size
     if (W_->size() != other.W_->size()) {
         if (verbose)
@@ -125,11 +125,11 @@ bool DBG_succ::equals_internally(const DBG_succ &other, bool verbose) const {
 }
 
 /**
- * Check whether graphs store the same data.
+ * Check whether BOSS tables store the same data.
  * FYI: this function reconstructs all the kmers, so
  * the complexity is at least O(k x n).
  */
-bool DBG_succ::operator==(const DBG_succ &other) const {
+bool BOSS::operator==(const BOSS &other) const {
     uint64_t i = 1;
     uint64_t j = 1;
 
@@ -164,7 +164,7 @@ bool DBG_succ::operator==(const DBG_succ &other) const {
     return i == W_->size() && j == other.W_->size();
 }
 
-void DBG_succ::serialize(const std::string &filename) const {
+void BOSS::serialize(const std::string &filename) const {
     const auto out_filename = remove_suffix(filename, kExtension) + kExtension;
 
     std::ofstream outstream(out_filename, std::ios::binary);
@@ -179,7 +179,7 @@ void DBG_succ::serialize(const std::string &filename) const {
     outstream.close();
 }
 
-void DBG_succ::serialize(std::ofstream &outstream) const {
+void BOSS::serialize(std::ofstream &outstream) const {
     if (!outstream.good())
         throw std::ofstream::failure("Error: Can't write to file");
 
@@ -198,7 +198,7 @@ void DBG_succ::serialize(std::ofstream &outstream) const {
     outstream.flush();
 }
 
-bool DBG_succ::load(const std::string &filename) {
+bool BOSS::load(const std::string &filename) {
     auto file = remove_suffix(filename, kExtension) + kExtension;
 
     std::ifstream instream(file, std::ios::binary);
@@ -206,7 +206,7 @@ bool DBG_succ::load(const std::string &filename) {
     return load(instream);
 }
 
-bool DBG_succ::load(std::ifstream &instream) {
+bool BOSS::load(std::ifstream &instream) {
     // if not specified in the file, the default for loading is dynamic
     state = Config::DYN;
 
@@ -238,7 +238,7 @@ bool DBG_succ::load(std::ifstream &instream) {
         }
         return W_->load(instream) && last_->load(instream);
     } catch (const std::bad_alloc &exception) {
-        std::cerr << "ERROR: Not enough memory to load DBG_succ." << std::endl;
+        std::cerr << "ERROR: Not enough memory to load the BOSS table." << std::endl;
         return false;
     } catch (...) {
         return false;
@@ -256,7 +256,7 @@ bool DBG_succ::load(std::ifstream &instream) {
  * from the alphabet and returns the number of occurences of c in W up to
  * position i.
  */
-uint64_t DBG_succ::rank_W(uint64_t i, TAlphabet c) const {
+uint64_t BOSS::rank_W(uint64_t i, TAlphabet c) const {
     assert(i < W_->size());
 
     return i == 0 ? 0 : W_->rank(c, i) - (c == 0);
@@ -266,7 +266,7 @@ uint64_t DBG_succ::rank_W(uint64_t i, TAlphabet c) const {
  * Uses the array W and gets a count i and a character c from
  * the alphabet and returns the position of the i-th occurence of c in W.
  */
-uint64_t DBG_succ::select_W(uint64_t i, TAlphabet c) const {
+uint64_t BOSS::select_W(uint64_t i, TAlphabet c) const {
     assert(i + (c == 0) <= W_->rank(c, W_->size() - 1));
 
     return i == 0 ? 0 : W_->select(c, i + (c == 0));
@@ -276,7 +276,7 @@ uint64_t DBG_succ::select_W(uint64_t i, TAlphabet c) const {
  * This is a convenience function that returns for array W, a position i and
  * a character c the last index of a character c preceding in W[1..i].
  */
-uint64_t DBG_succ::pred_W(uint64_t i, TAlphabet c) const {
+uint64_t BOSS::pred_W(uint64_t i, TAlphabet c) const {
     CHECK_INDEX(i);
 
     uint64_t prev = W_->prev(i, c);
@@ -288,7 +288,7 @@ uint64_t DBG_succ::pred_W(uint64_t i, TAlphabet c) const {
  * This is a convenience function that returns for array W, a position i and
  * a character c the first index of a character c in W[i..N].
  */
-uint64_t DBG_succ::succ_W(uint64_t i, TAlphabet c) const {
+uint64_t BOSS::succ_W(uint64_t i, TAlphabet c) const {
     CHECK_INDEX(i);
 
     return W_->next(i, c);
@@ -298,7 +298,7 @@ uint64_t DBG_succ::succ_W(uint64_t i, TAlphabet c) const {
  * Uses the object's array last and a position and
  * returns the number of set bits up to that postion.
  */
-uint64_t DBG_succ::rank_last(uint64_t i) const {
+uint64_t BOSS::rank_last(uint64_t i) const {
     assert(i < last_->size());
 
     return i == 0 ? 0 : last_->rank1(i);
@@ -308,7 +308,7 @@ uint64_t DBG_succ::rank_last(uint64_t i) const {
  * Uses the object's array last and a given position i and
  * returns the position of the i-th set bit in last[1..i].
  */
-uint64_t DBG_succ::select_last(uint64_t i) const {
+uint64_t BOSS::select_last(uint64_t i) const {
     assert(i <= last_->num_set_bits());
 
     return i == 0 ? 0 : last_->select1(i);
@@ -318,7 +318,7 @@ uint64_t DBG_succ::select_last(uint64_t i) const {
  * This is a convenience function that returns for the object's array last
  * and a given position i the position of the last set bit in last[1..i].
  */
-uint64_t DBG_succ::pred_last(uint64_t i) const {
+uint64_t BOSS::pred_last(uint64_t i) const {
     if (!i)
         return 0;
 
@@ -333,7 +333,7 @@ uint64_t DBG_succ::pred_last(uint64_t i) const {
  * This is a convenience function that returns for the object's array last
  * and a given position i the position of the first set bit in last[i..N].
  */
-uint64_t DBG_succ::succ_last(uint64_t i) const {
+uint64_t BOSS::succ_last(uint64_t i) const {
     CHECK_INDEX(i);
 
     return last_->next1(i);
@@ -343,7 +343,7 @@ uint64_t DBG_succ::succ_last(uint64_t i) const {
  * This function gets a position i that reflects the i-th node and returns the
  * position in W that corresponds to the i-th node's last character.
  */
-uint64_t DBG_succ::bwd(uint64_t i) const {
+uint64_t BOSS::bwd(uint64_t i) const {
     CHECK_INDEX(i);
 
     uint64_t node_rank = get_source_node(i);
@@ -360,7 +360,7 @@ uint64_t DBG_succ::bwd(uint64_t i) const {
  * This functions gets a position i reflecting the r-th occurence of the corresponding
  * character c in W and returns the position of the r-th occurence of c in last.
  */
-uint64_t DBG_succ::fwd(uint64_t i) const {
+uint64_t BOSS::fwd(uint64_t i) const {
     CHECK_INDEX(i);
 
     // get value of W at position i
@@ -373,7 +373,7 @@ uint64_t DBG_succ::fwd(uint64_t i) const {
     return select_last(rank_last(o) + r);
 }
 
-node_index DBG_succ::get_source_node(edge_index i) const {
+node_index BOSS::get_source_node(edge_index i) const {
     CHECK_INDEX(i);
     return rank_last(i - 1) + 1;
 }
@@ -382,7 +382,7 @@ node_index DBG_succ::get_source_node(edge_index i) const {
  * Using the offset structure F this function returns the value of the last
  * position of the source node for edge i.
  */
-TAlphabet DBG_succ::get_node_last_value(edge_index i) const {
+TAlphabet BOSS::get_node_last_value(edge_index i) const {
     CHECK_INDEX(i);
 
     if (i == 0)
@@ -400,7 +400,7 @@ TAlphabet DBG_succ::get_node_last_value(edge_index i) const {
  * returns the k-th last character of the source node for edge i.
  */
 std::pair<TAlphabet, edge_index>
-DBG_succ::get_minus_k_value(edge_index i, size_t k) const {
+BOSS::get_minus_k_value(edge_index i, size_t k) const {
     CHECK_INDEX(i);
 
     for (; k > 0; --k) {
@@ -413,7 +413,7 @@ DBG_succ::get_minus_k_value(edge_index i, size_t k) const {
  * Given a node index i and an edge label c, this function returns the
  * index of the outgoing edge with label c if it exists and npos otherwise.
  */
-edge_index DBG_succ::outgoing_edge_idx(node_index i, TAlphabet c) const {
+edge_index BOSS::outgoing_edge_idx(node_index i, TAlphabet c) const {
     CHECK_NODE(i);
     assert(c < alph_size);
 
@@ -424,7 +424,7 @@ edge_index DBG_succ::outgoing_edge_idx(node_index i, TAlphabet c) const {
  * Given an edge index i and a character c, get the index of the edge with
  * label c outgoing from the same source node if such exists and npos otherwise.
  */
-edge_index DBG_succ::pick_edge(edge_index edge, node_index node, TAlphabet c) const {
+edge_index BOSS::pick_edge(edge_index edge, node_index node, TAlphabet c) const {
     CHECK_INDEX(edge);
     CHECK_NODE(node);
     assert(c < alph_size);
@@ -445,7 +445,7 @@ edge_index DBG_succ::pick_edge(edge_index edge, node_index node, TAlphabet c) co
  * Given a node index i and an edge label c, this function returns the
  * index of the node the edge is pointing to.
  */
-node_index DBG_succ::outgoing(node_index i, TAlphabet c) const {
+node_index BOSS::outgoing(node_index i, TAlphabet c) const {
     CHECK_NODE(i);
 
     c %= alph_size;
@@ -464,7 +464,7 @@ node_index DBG_succ::outgoing(node_index i, TAlphabet c) const {
  * Given a node index i and an edge label c, this function returns the
  * index of the node the incoming edge belongs to.
  */
-node_index DBG_succ::incoming(node_index i, TAlphabet c) const {
+node_index BOSS::incoming(node_index i, TAlphabet c) const {
     CHECK_NODE(i);
 
     // only one incoming edge for the dummy source node
@@ -501,16 +501,16 @@ node_index DBG_succ::incoming(node_index i, TAlphabet c) const {
     return npos;
 }
 
-DBG_succ::node_index DBG_succ::traverse(node_index node, char edge_label) const {
+BOSS::node_index BOSS::traverse(node_index node, char edge_label) const {
     return outgoing(node, encode(edge_label));
 }
 
-DBG_succ::node_index DBG_succ::traverse_back(node_index node, char edge_label) const {
+BOSS::node_index BOSS::traverse_back(node_index node, char edge_label) const {
     return incoming(node, encode(edge_label));
 }
 
-void DBG_succ::call_adjacent_incoming_edges(edge_index edge,
-                                            std::function<void(edge_index)> callback) const {
+void BOSS::call_adjacent_incoming_edges(edge_index edge,
+                                        std::function<void(edge_index)> callback) const {
     CHECK_INDEX(edge);
 
     edge_index next_incoming = bwd(edge);
@@ -539,7 +539,7 @@ void DBG_succ::call_adjacent_incoming_edges(edge_index edge,
  * Given a node index i, this function returns the number of outgoing
  * edges from node i.
  */
-size_t DBG_succ::outdegree(node_index i) const {
+size_t BOSS::outdegree(node_index i) const {
     CHECK_NODE(i);
 
     return select_last(i) - (i == 1 ? 0 : select_last(i - 1));
@@ -549,7 +549,7 @@ size_t DBG_succ::outdegree(node_index i) const {
  * Given an edge index i, this function returns true if that is
  * the only outgoing edge from its source node.
  */
-bool DBG_succ::is_single_outgoing(edge_index i) const {
+bool BOSS::is_single_outgoing(edge_index i) const {
     CHECK_INDEX(i);
 
     return get_last(i) && (i == 1 || get_last(i - 1));
@@ -559,7 +559,7 @@ bool DBG_succ::is_single_outgoing(edge_index i) const {
  * Given an edge index i, this function returns true if that is
  * the only edge incoming to its target node.
  */
-bool DBG_succ::is_single_incoming(edge_index i) const {
+bool BOSS::is_single_incoming(edge_index i) const {
     CHECK_INDEX(i);
 
     TAlphabet c = get_W(i);
@@ -588,7 +588,7 @@ bool DBG_succ::is_single_incoming(edge_index i) const {
  * Given a node index i, this function returns the number of incoming
  * edges to the node i.
  */
-size_t DBG_succ::indegree(node_index i) const {
+size_t BOSS::indegree(node_index i) const {
     CHECK_NODE(i);
 
     if (i == 1)
@@ -611,8 +611,8 @@ size_t DBG_succ::indegree(node_index i) const {
  * max_distance, this function returns all nodes with labels at most
  * max_distance many edits away from str.
  */
-std::vector<HitInfo> DBG_succ::index_fuzzy(const std::string &str,
-                                           size_t max_distance) const {
+std::vector<HitInfo> BOSS::index_fuzzy(const std::string &str,
+                                       size_t max_distance) const {
     std::vector<HitInfo> result;
     std::priority_queue<HitInfo, std::vector<HitInfo>, HitInfoCompare> hits;
     std::priority_queue<HitInfo, std::vector<HitInfo>, HitInfoCompare> hits2;
@@ -739,7 +739,7 @@ std::vector<HitInfo> DBG_succ::index_fuzzy(const std::string &str,
  * of the corresponding node or the closest predecessor, if no node
  * with the sequence is not found.
  */
-node_index DBG_succ::pred_kmer(const std::vector<TAlphabet> &kmer) const {
+node_index BOSS::pred_kmer(const std::vector<TAlphabet> &kmer) const {
     assert(kmer.size() == k_);
 
     // get first
@@ -786,7 +786,7 @@ node_index DBG_succ::pred_kmer(const std::vector<TAlphabet> &kmer) const {
  * This function gets two edge indices and returns if their source
  * node labels share a k-1 suffix.
  */
-bool DBG_succ::compare_node_suffix(edge_index first, edge_index second) const {
+bool BOSS::compare_node_suffix(edge_index first, edge_index second) const {
     for (size_t i = 0; i < k_ - 1; ++i) {
         if (get_node_last_value(first) != get_node_last_value(second)) {
             return false;
@@ -797,7 +797,7 @@ bool DBG_succ::compare_node_suffix(edge_index first, edge_index second) const {
     return true;
 }
 
-bool DBG_succ::compare_node_suffix(edge_index first, const TAlphabet *second) const {
+bool BOSS::compare_node_suffix(edge_index first, const TAlphabet *second) const {
     for (auto it = second + k_ - 1; it > second; --it) {
         if (get_node_last_value(first) != *it) {
             return false;
@@ -811,7 +811,7 @@ bool DBG_succ::compare_node_suffix(edge_index first, const TAlphabet *second) co
  * Given an edge index i, this function returns the k-mer sequence of its
  * source node.
  */
-std::vector<TAlphabet> DBG_succ::get_node_seq(edge_index k_node) const {
+std::vector<TAlphabet> BOSS::get_node_seq(edge_index k_node) const {
     CHECK_INDEX(k_node);
 
     std::vector<TAlphabet> ret(k_, get_node_last_value(k_node));
@@ -830,14 +830,14 @@ std::vector<TAlphabet> DBG_succ::get_node_seq(edge_index k_node) const {
  * Given a node index k_node, this function returns the k-mer sequence of the
  * node as a string.
  */
-std::string DBG_succ::get_node_str(edge_index k_node) const {
+std::string BOSS::get_node_str(edge_index k_node) const {
     CHECK_INDEX(k_node);
     return decode(get_node_seq(k_node));
 }
 
-void DBG_succ::map_to_nodes(const std::string &sequence,
-                            const std::function<void(node_index)> &callback,
-                            const std::function<bool()> &terminate) const {
+void BOSS::map_to_nodes(const std::string &sequence,
+                        const std::function<void(node_index)> &callback,
+                        const std::function<bool()> &terminate) const {
     auto seq_encoded = encode(sequence);
 
     for (size_t i = 0; i + k_ - 1 < seq_encoded.size(); ++i) {
@@ -866,8 +866,8 @@ void DBG_succ::map_to_nodes(const std::string &sequence,
     }
 }
 
-std::vector<node_index> DBG_succ::map_to_nodes(const std::string &sequence,
-                                               size_t kmer_size) const {
+std::vector<node_index> BOSS::map_to_nodes(const std::string &sequence,
+                                           size_t kmer_size) const {
     if (kmer_size == 0 || kmer_size > k_)
         kmer_size = k_;
 
@@ -905,9 +905,9 @@ std::vector<node_index> DBG_succ::map_to_nodes(const std::string &sequence,
     return indices;
 }
 
-void DBG_succ::map_to_edges(const std::string &sequence,
-                            const std::function<void(edge_index)> &callback,
-                            const std::function<bool()> &terminate) const {
+void BOSS::map_to_edges(const std::string &sequence,
+                        const std::function<void(edge_index)> &callback,
+                        const std::function<bool()> &terminate) const {
     auto seq_encoded = encode(sequence);
 
     for (size_t i = 0; i + k_ + 1 <= seq_encoded.size(); ++i) {
@@ -932,7 +932,7 @@ void DBG_succ::map_to_edges(const std::string &sequence,
     }
 }
 
-std::vector<edge_index> DBG_succ::map_to_edges(const std::string &sequence) const {
+std::vector<edge_index> BOSS::map_to_edges(const std::string &sequence) const {
     std::vector<edge_index> indices;
     indices.reserve(sequence.size());
     map_to_edges(sequence,
@@ -940,8 +940,8 @@ std::vector<edge_index> DBG_succ::map_to_edges(const std::string &sequence) cons
     return indices;
 }
 
-bool DBG_succ::find(const std::string &sequence,
-                    double kmer_discovery_fraction) const {
+bool BOSS::find(const std::string &sequence,
+                double kmer_discovery_fraction) const {
     size_t kmer_size = k_ + 1;
 
     if (sequence.length() < kmer_size)
@@ -967,9 +967,9 @@ bool DBG_succ::find(const std::string &sequence,
     return num_kmers_missing <= max_kmers_missing;
 }
 
-bool DBG_succ::find(const std::string &sequence,
-                    double kmer_discovery_fraction,
-                    size_t kmer_mapping_mode) const {
+bool BOSS::find(const std::string &sequence,
+                double kmer_discovery_fraction,
+                size_t kmer_mapping_mode) const {
     if (!kmer_mapping_mode)
         return find(sequence, kmer_discovery_fraction);
 
@@ -1069,9 +1069,9 @@ bool DBG_succ::find(const std::string &sequence,
     return num_kmers_missing <= max_kmers_missing;
 }
 
-std::vector<std::vector<HitInfo>> DBG_succ::align_fuzzy(const std::string &sequence,
-                                                        size_t alignment_length,
-                                                        size_t max_distance) const {
+std::vector<std::vector<HitInfo>> BOSS::align_fuzzy(const std::string &sequence,
+                                                    size_t alignment_length,
+                                                    size_t max_distance) const {
     std::vector<std::vector<HitInfo>> hit_list;
 
     if (alignment_length == 0) {
@@ -1090,16 +1090,16 @@ std::vector<std::vector<HitInfo>> DBG_succ::align_fuzzy(const std::string &seque
 }
 
 /**
- * Returns the number of nodes on the current graph.
+ * Returns the number of nodes in BOSS graph.
  */
-uint64_t DBG_succ::num_nodes() const {
+uint64_t BOSS::num_nodes() const {
     return last_->num_set_bits();
 }
 
 /**
- * Return the number of edges in the current graph.
+ * Return the number of edges in BOSS graph.
  */
-uint64_t DBG_succ::num_edges() const {
+uint64_t BOSS::num_edges() const {
     return W_->size() - 1;
 }
 
@@ -1107,7 +1107,7 @@ uint64_t DBG_succ::num_edges() const {
  * This function gets a value of the alphabet c and updates the offset of
  * all following values by +1 is positive is true and by -1 otherwise.
  */
-void DBG_succ::update_F(TAlphabet c, int value) {
+void BOSS::update_F(TAlphabet c, int value) {
     assert(c < alph_size);
     assert(std::abs(value) == 1);
 
@@ -1116,26 +1116,26 @@ void DBG_succ::update_F(TAlphabet c, int value) {
     }
 }
 
-TAlphabet DBG_succ::encode(char s) const {
+TAlphabet BOSS::encode(char s) const {
     assert(kmer_extractor_.encode(kSentinel) != kSentinelCode);
     assert(kmer_extractor_.encode(kSentinel) != kSentinelCode + alph_size);
     return kmer_extractor_.encode(s);
 }
 
-std::vector<TAlphabet> DBG_succ::encode(const std::string &sequence) const {
+std::vector<TAlphabet> BOSS::encode(const std::string &sequence) const {
     std::vector<TAlphabet> seq_encoded(sequence.size());
     std::transform(sequence.begin(), sequence.end(),
                    seq_encoded.begin(), [this](char c) { return this->encode(c); });
     return seq_encoded;
 }
 
-char DBG_succ::decode(TAlphabet c) const {
+char BOSS::decode(TAlphabet c) const {
     assert(kmer_extractor_.alphabet[kSentinelCode] == kSentinel);
     assert(c < 2 * alph_size);
     return kmer_extractor_.decode(c % alph_size);
 }
 
-std::string DBG_succ::decode(const std::vector<TAlphabet> &sequence) const {
+std::string BOSS::decode(const std::vector<TAlphabet> &sequence) const {
     std::string str(sequence.size(), 0);
     std::transform(sequence.begin(), sequence.end(),
                    str.begin(), [this](TAlphabet x) { return this->decode(x); });
@@ -1153,7 +1153,7 @@ void convert(wavelet_tree **W_, bit_vector **last_) {
     *last_ = last_new;
 }
 
-void DBG_succ::switch_state(Config::StateType new_state) {
+void BOSS::switch_state(Config::StateType new_state) {
 
     //std::cerr << "switching state from " << this->state << " to " << state << std::endl;
     if (state == new_state)
@@ -1176,7 +1176,7 @@ void DBG_succ::switch_state(Config::StateType new_state) {
     state = new_state;
 }
 
-void DBG_succ::print_internal_representation(std::ostream &os) const {
+void BOSS::print_internal_representation(std::ostream &os) const {
     os << "F:";
     for (auto i : F_) {
         os << " " << i;
@@ -1189,7 +1189,7 @@ void DBG_succ::print_internal_representation(std::ostream &os) const {
     os << std::endl;
 }
 
-void DBG_succ::print(std::ostream &os) const {
+void BOSS::print(std::ostream &os) const {
     assert(is_valid());
     auto vertex_header = std::string("Vertex");
     vertex_header.resize(k_, ' ');
@@ -1209,7 +1209,7 @@ void DBG_succ::print(std::ostream &os) const {
     }
 }
 
-void DBG_succ::print_adj_list(std::ostream &os) const {
+void BOSS::print_adj_list(std::ostream &os) const {
     for (uint64_t edge = 1; edge < W_->size(); ++edge) {
         os << 1 + rank_last(fwd(edge) - 1)
            << " ";
@@ -1223,8 +1223,8 @@ void DBG_succ::print_adj_list(std::ostream &os) const {
 ///////////////
 
 // add a full sequence to the graph
-void DBG_succ::add_sequence(const std::string &seq, bool try_extend,
-                            std::vector<uint64_t> *edges_inserted) {
+void BOSS::add_sequence(const std::string &seq, bool try_extend,
+                        std::vector<uint64_t> *edges_inserted) {
     if (seq.size() < k_ + 1)
         return;
 
@@ -1256,9 +1256,9 @@ void DBG_succ::add_sequence(const std::string &seq, bool try_extend,
  * creates an outgoing edge from the same source node with
  * label c if it is not a part of the graph yet.
  */
-edge_index DBG_succ::append_pos(TAlphabet c, edge_index source_node,
-                                const TAlphabet *source_node_kmer,
-                                std::vector<uint64_t> *edges_inserted) {
+edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
+                            const TAlphabet *source_node_kmer,
+                            std::vector<uint64_t> *edges_inserted) {
     CHECK_INDEX(source_node);
     assert(source_node_kmer);
     assert(std::vector<TAlphabet>(source_node_kmer, source_node_kmer + k_)
@@ -1336,7 +1336,7 @@ edge_index DBG_succ::append_pos(TAlphabet c, edge_index source_node,
 }
 
 
-uint64_t DBG_succ::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
+uint64_t BOSS::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
     if (begin > 1 && get_W(begin) == kSentinelCode) {
         // the source node is the dead-end with outgoing sentinel
         // replace this sentinel with the proper label
@@ -1362,9 +1362,9 @@ uint64_t DBG_succ::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
 }
 
 
-// Given an edge list, remove them from the graph.
+// Given an edge list, remove them from the BOSS graph.
 // TODO: fix the implementation (anchoring the isolated nodes)
-void DBG_succ::erase_edges_dyn(const std::set<edge_index> &edges) {
+void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
     uint64_t shift = 0;
 
     for (edge_index edge : edges) {
@@ -1400,11 +1400,11 @@ void DBG_succ::erase_edges_dyn(const std::set<edge_index> &edges) {
 }
 
 /**
- * Erase exactly all the masked edges from the graph,
- * may invalidate the graph (if leaves nodes with no incoming edges).
+ * Erase exactly all the masked edges from the BOSS graph,
+ * may invalidate the BOSS table (if leaves nodes with no incoming edges).
  * Returns the number of edges erased.
  */
-uint64_t DBG_succ::erase_edges(const std::vector<bool> &edges_to_remove_mask) {
+uint64_t BOSS::erase_edges(const std::vector<bool> &edges_to_remove_mask) {
     size_t num_edges_to_remove = std::count(edges_to_remove_mask.begin(),
                                             edges_to_remove_mask.end(), true);
     if (!num_edges_to_remove)
@@ -1468,10 +1468,10 @@ uint64_t DBG_succ::erase_edges(const std::vector<bool> &edges_to_remove_mask) {
  * Depth first edge traversal.
  * Traverse all edges reachable from the given one.
  */
-void DBG_succ::edge_DFT(edge_index start,
-                        Call<edge_index> pre_visit,
-                        Call<edge_index> post_visit,
-                        std::function<bool(edge_index)> end_branch) const {
+void BOSS::edge_DFT(edge_index start,
+                    Call<edge_index> pre_visit,
+                    Call<edge_index> post_visit,
+                    std::function<bool(edge_index)> end_branch) const {
     CHECK_INDEX(start);
 
     // start traversal in the source node of the given edge
@@ -1507,7 +1507,7 @@ void DBG_succ::edge_DFT(edge_index start,
  * and find all redundant dummy edges.
  */
 template <typename T, typename U>
-void traverse_dummy_edges(const DBG_succ &graph,
+void traverse_dummy_edges(const BOSS &graph,
                           edge_index subtree_root,
                           size_t check_depth,
                           std::vector<T> *redundant_mask,
@@ -1568,7 +1568,7 @@ void traverse_dummy_edges(const DBG_succ &graph,
  * Traverse the entire dummy tree, detect all redundant
  * dummy source edges and return number of these edges.
  */
-uint64_t traverse_dummy_edges(const DBG_succ &graph,
+uint64_t traverse_dummy_edges(const BOSS &graph,
                               std::vector<bool> *redundant_mask,
                               std::vector<bool> *traversed_mask,
                               size_t num_threads,
@@ -1669,12 +1669,12 @@ uint64_t traverse_dummy_edges(const DBG_succ &graph,
  * and erase all redundant dummy edges.
  * If passed, mark |source_dummy_edges| with positions
  * of non-redundant dummy source edges.
- * Return value: edges removed from the initial graph.
+ * Return value: edges removed from the BOSS graph.
  */
 std::vector<bool>
-DBG_succ::erase_redundant_dummy_edges(std::vector<bool> *source_dummy_edges,
-                                      size_t num_threads,
-                                      bool verbose) {
+BOSS::erase_redundant_dummy_edges(std::vector<bool> *source_dummy_edges,
+                                  size_t num_threads,
+                                  bool verbose) {
     std::vector<bool> redundant_dummy_edges_mask(W_->size(), false);
 
     if (source_dummy_edges) {
@@ -1708,15 +1708,15 @@ DBG_succ::erase_redundant_dummy_edges(std::vector<bool> *source_dummy_edges,
     return redundant_dummy_edges_mask;
 }
 
-uint64_t DBG_succ::mark_source_dummy_edges(std::vector<bool> *mask,
-                                           size_t num_threads,
-                                           bool verbose) const {
+uint64_t BOSS::mark_source_dummy_edges(std::vector<bool> *mask,
+                                       size_t num_threads,
+                                       bool verbose) const {
     assert(!mask || mask->size() == W_->size());
 
     return traverse_dummy_edges(*this, NULL, mask, num_threads, verbose);
 }
 
-uint64_t DBG_succ::mark_sink_dummy_edges(std::vector<bool> *mask) const {
+uint64_t BOSS::mark_sink_dummy_edges(std::vector<bool> *mask) const {
     if (!mask)
         return rank_W(num_edges(), 0) - 1;
 
@@ -1738,7 +1738,7 @@ uint64_t DBG_succ::mark_sink_dummy_edges(std::vector<bool> *mask) const {
     return num_dummy_sink_edges;
 }
 
-std::vector<bool> DBG_succ::mark_all_dummy_edges(size_t num_threads) const {
+std::vector<bool> BOSS::mark_all_dummy_edges(size_t num_threads) const {
     std::vector<bool> edge_mask(num_edges() + 1, 0);
 
     mark_source_dummy_edges(&edge_mask, num_threads);
@@ -1750,7 +1750,7 @@ std::vector<bool> DBG_succ::mark_all_dummy_edges(size_t num_threads) const {
     return edge_mask;
 }
 
-std::vector<bool> DBG_succ::prune_and_mark_all_dummy_edges(size_t num_threads) {
+std::vector<bool> BOSS::prune_and_mark_all_dummy_edges(size_t num_threads) {
     std::vector<bool> edge_mask(num_edges() + 1, 0);
 
     erase_redundant_dummy_edges(&edge_mask, num_threads);
@@ -1763,11 +1763,11 @@ std::vector<bool> DBG_succ::prune_and_mark_all_dummy_edges(size_t num_threads) {
 }
 
 /**
- * Get the nodes of graph |other| merged into the current graph. The graph
- * |other| is fully traversed and all edges are added to to the current graph.
+ * Merge BOSS table |other| into the current one. The BOSS |other|
+ * is fully traversed and all edges are added to to the current BOSS table.
  * This function is well suited to merge small graphs into large ones.
  */
-void DBG_succ::merge(const DBG_succ &other) {
+void BOSS::merge(const BOSS &other) {
     other.call_sequences([&](const std::string &sequence) {
         add_sequence(sequence, true);
     });
@@ -1777,9 +1777,9 @@ void DBG_succ::merge(const DBG_succ &other) {
  * Traverse graph and extract directed paths covering the graph
  * edge, edge -> edge, edge -> ... -> edge, ... (k+1 - mer, k+...+1 - mer, ...)
  */
-void DBG_succ::call_paths(Call<const std::vector<edge_index>,
-                               const std::vector<TAlphabet>&> callback,
-                          bool split_to_contigs) const {
+void BOSS::call_paths(Call<const std::vector<edge_index>,
+                           const std::vector<TAlphabet>&> callback,
+                      bool split_to_contigs) const {
     // keep track of reached edges
     std::vector<bool> discovered(W_->size(), false);
     // keep track of edges that are already included in covering paths
@@ -1799,16 +1799,16 @@ void DBG_succ::call_paths(Call<const std::vector<edge_index>,
 }
 
 struct Edge {
-    DBG_succ::edge_index id;
+    BOSS::edge_index id;
     std::vector<TAlphabet> source_kmer;
 };
 
-void DBG_succ::call_paths(edge_index starting_kmer,
-                          Call<const std::vector<edge_index>,
-                               const std::vector<TAlphabet>&> callback,
-                          bool split_to_contigs,
-                          std::vector<bool> *discovered_ptr,
-                          std::vector<bool> *visited_ptr) const {
+void BOSS::call_paths(edge_index starting_kmer,
+                      Call<const std::vector<edge_index>,
+                           const std::vector<TAlphabet>&> callback,
+                      bool split_to_contigs,
+                      std::vector<bool> *discovered_ptr,
+                      std::vector<bool> *visited_ptr) const {
     assert(discovered_ptr && visited_ptr);
 
     auto &discovered = *discovered_ptr;
@@ -1884,15 +1884,15 @@ void DBG_succ::call_paths(edge_index starting_kmer,
     }
 }
 
-void DBG_succ::call_sequences(Call<const std::string&> callback) const {
+void BOSS::call_sequences(Call<const std::string&> callback) const {
     std::string sequence;
 
     call_paths([&](const auto&, const auto &path) {
         sequence.clear();
 
         for (TAlphabet c : path) {
-            if (c != DBG_succ::kSentinelCode) {
-                sequence.push_back(DBG_succ::decode(c));
+            if (c != BOSS::kSentinelCode) {
+                sequence.push_back(BOSS::decode(c));
             }
         }
 
@@ -1901,8 +1901,8 @@ void DBG_succ::call_sequences(Call<const std::string&> callback) const {
     }, false);
 }
 
-void DBG_succ::call_contigs(Call<const std::string&> callback,
-                            size_t max_pruned_dead_end_size) const {
+void BOSS::call_contigs(Call<const std::string&> callback,
+                        size_t max_pruned_dead_end_size) const {
     std::string sequence;
 
     call_paths([&](const auto&, const auto &path) {
@@ -1912,7 +1912,7 @@ void DBG_succ::call_contigs(Call<const std::string&> callback,
 
         for (TAlphabet c : path) {
             if (c != kSentinelCode) {
-                sequence.push_back(DBG_succ::decode(c));
+                sequence.push_back(BOSS::decode(c));
             }
         }
 
@@ -1926,8 +1926,7 @@ void DBG_succ::call_contigs(Call<const std::string&> callback,
     }, true);
 }
 
-void DBG_succ::call_edges(Call<edge_index,
-                               const std::vector<TAlphabet>&> callback) const {
+void BOSS::call_edges(Call<edge_index, const std::vector<TAlphabet>&> callback) const {
     call_paths([&](const auto &indices, const auto &path) {
         assert(path.size() == indices.size() + k_);
 
@@ -1940,14 +1939,14 @@ void DBG_succ::call_edges(Call<edge_index,
 }
 
 struct Node {
-    DBG_succ::node_index id;
+    BOSS::node_index id;
     std::string kmer;
 };
 
 /**
  * Traverse graph and iterate over all nodes
  */
-void DBG_succ::call_kmers(Call<node_index, const std::string&> callback) const {
+void BOSS::call_kmers(Call<node_index, const std::string&> callback) const {
     // std::vector<bool> discovered(W_->size(), false);
     std::vector<bool> visited(W_->size(), false);
 
@@ -1974,7 +1973,7 @@ void DBG_succ::call_kmers(Call<node_index, const std::string&> callback) const {
             while (!visited[node]) {
                 assert(node > 0);
 
-                if (kmer.front() != DBG_succ::kSentinel)
+                if (kmer.front() != BOSS::kSentinel)
                     callback(node, kmer);
 
                 visited[node] = true;
@@ -1988,7 +1987,7 @@ void DBG_succ::call_kmers(Call<node_index, const std::string&> callback) const {
                 // traverse if there is only one outgoing edge
                 if (is_single_outgoing(node)) {
                     node = fwd(node);
-                    kmer.back() = DBG_succ::decode(get_node_last_value(node));
+                    kmer.back() = BOSS::decode(get_node_last_value(node));
                 } else {
                     // loop over outgoing edges
                     do {
@@ -1997,7 +1996,7 @@ void DBG_succ::call_kmers(Call<node_index, const std::string&> callback) const {
                         uint64_t target_node = fwd(node);
 
                         if (target_node && !visited[target_node]) {
-                            kmer.back() = DBG_succ::decode(get_node_last_value(target_node));
+                            kmer.back() = BOSS::decode(get_node_last_value(target_node));
                             branchnodes.push({ target_node, kmer });
                         }
                     } while (--node > 1 && !get_last(node));
@@ -2008,7 +2007,7 @@ void DBG_succ::call_kmers(Call<node_index, const std::string&> callback) const {
     }
 }
 
-bool DBG_succ::is_valid() const {
+bool BOSS::is_valid() const {
     assert((*W_)[0] == 0);
     assert(W_->size() >= 2);
     assert(get_node_str(1) == std::string(k_, kSentinel) && "First kmer must be dummy");
@@ -2028,17 +2027,17 @@ bool DBG_succ::is_valid() const {
     return true;
 }
 
-std::ostream& operator<<(std::ostream &os, const DBG_succ &graph) {
+std::ostream& operator<<(std::ostream &os, const BOSS &graph) {
     graph.print(os);
     return os;
 }
 
 
 DBGSuccinct::DBGSuccinct(size_t k, bool canonical_mode)
-      : boss_graph_(std::make_unique<DBG_succ>(k - 1)),
+      : boss_graph_(std::make_unique<BOSS>(k - 1)),
         canonical_mode_(canonical_mode) {}
 
-DBGSuccinct::DBGSuccinct(DBG_succ *boss_graph, bool canonical_mode)
+DBGSuccinct::DBGSuccinct(BOSS *boss_graph, bool canonical_mode)
       : boss_graph_(boss_graph),
         canonical_mode_(canonical_mode) {}
 
@@ -2057,7 +2056,7 @@ node_index DBGSuccinct::traverse(node_index node, char next_char) const {
     assert(node);
 
     // dbg node is a boss edge
-    DBG_succ::edge_index edge = boss_graph_->fwd(kmer_to_boss_index(node));
+    BOSS::edge_index edge = boss_graph_->fwd(kmer_to_boss_index(node));
     return boss_to_kmer_index(
         boss_graph_->pick_edge(edge,
                                boss_graph_->get_source_node(edge),
@@ -2131,7 +2130,7 @@ void DBGSuccinct::adjacent_incoming_nodes(node_index node,
     auto edge = kmer_to_boss_index(node);
 
     boss_graph_->call_adjacent_incoming_edges(edge,
-        [&](DBG_succ::edge_index incoming_boss_edge) {
+        [&](BOSS::edge_index incoming_boss_edge) {
             assert(boss_graph_->get_W(incoming_boss_edge) % boss_graph_->alph_size
                     == boss_graph_->get_node_last_value(edge));
 
@@ -2202,7 +2201,7 @@ void DBGSuccinct::map_to_nodes_sequentially(std::string::const_iterator begin,
 
     boss_graph_->map_to_edges(
         std::string(begin, end),
-        [&](DBG_succ::edge_index i) { callback(boss_to_kmer_index(i)); },
+        [&](BOSS::edge_index i) { callback(boss_to_kmer_index(i)); },
         terminate
     );
 }
@@ -2237,7 +2236,7 @@ void DBGSuccinct::map_to_nodes(const std::string &sequence,
     } else {
         boss_graph_->map_to_edges(
             sequence,
-            [&](DBG_succ::edge_index i) { callback(boss_to_kmer_index(i)); },
+            [&](BOSS::edge_index i) { callback(boss_to_kmer_index(i)); },
             terminate
         );
     }

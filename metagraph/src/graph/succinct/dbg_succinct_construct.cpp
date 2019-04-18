@@ -65,7 +65,7 @@ void recover_source_dummy_nodes(size_t k,
             shrink_kmers(kmers, num_threads, verbose, dummy_begin);
 
         kmers->push_back(kmers->at(i));
-        kmers->back().to_prev(k + 1, DBG_succ::kSentinelCode);
+        kmers->back().to_prev(k + 1, BOSS::kSentinelCode);
     }
     if (verbose) {
         std::cout << "Number of dummy k-mers with dummy prefix of length 1: "
@@ -92,7 +92,7 @@ void recover_source_dummy_nodes(size_t k,
                 shrink_kmers(kmers, num_threads, verbose, dummy_begin);
 
             kmers->push_back(kmers->at(i));
-            kmers->back().to_prev(k + 1, DBG_succ::kSentinelCode);
+            kmers->back().to_prev(k + 1, BOSS::kSentinelCode);
         }
         sort_and_remove_duplicates(kmers, num_threads, dummy_begin);
 
@@ -113,8 +113,8 @@ encode_filter_suffix_boss(const std::string &filter_suffix) {
         filter_suffix.begin(), filter_suffix.end(),
         std::back_inserter(filter_suffix_encoded),
         [&kmer_extractor](char c) {
-            return c == DBG_succ::kSentinel
-                            ? DBG_succ::kSentinelCode
+            return c == BOSS::kSentinel
+                            ? BOSS::kSentinelCode
                             : kmer_extractor.encode(c);
         }
     );
@@ -123,16 +123,16 @@ encode_filter_suffix_boss(const std::string &filter_suffix) {
 
 
 template <typename KMER>
-class DBGBOSSChunkConstructor : public IDBGBOSSChunkConstructor {
-    friend IDBGBOSSChunkConstructor;
+class BOSSChunkConstructor : public IBOSSChunkConstructor {
+    friend IBOSSChunkConstructor;
 
   private:
-    DBGBOSSChunkConstructor(size_t k,
-                            bool canonical_mode = false,
-                            const std::string &filter_suffix = "",
-                            size_t num_threads = 1,
-                            double memory_preallocated = 0,
-                            bool verbose = false);
+    BOSSChunkConstructor(size_t k,
+                         bool canonical_mode = false,
+                         const std::string &filter_suffix = "",
+                         size_t num_threads = 1,
+                         double memory_preallocated = 0,
+                         bool verbose = false);
 
     void add_sequence(const std::string &sequence) {
         kmer_collector_.add_sequence(sequence);
@@ -142,28 +142,28 @@ class DBGBOSSChunkConstructor : public IDBGBOSSChunkConstructor {
         kmer_collector_.add_sequences(generate_sequences);
     }
 
-    DBG_succ::Chunk* build_chunk();
+    BOSS::Chunk* build_chunk();
 
     KmerCollector<KMER, KmerExtractor> kmer_collector_;
 };
 
 template <typename KMER>
-DBGBOSSChunkConstructor<KMER>
-::DBGBOSSChunkConstructor(size_t k,
-                          bool canonical_mode,
-                          const std::string &filter_suffix,
-                          size_t num_threads,
-                          double memory_preallocated,
-                          bool verbose)
+BOSSChunkConstructor<KMER>
+::BOSSChunkConstructor(size_t k,
+                       bool canonical_mode,
+                       const std::string &filter_suffix,
+                       size_t num_threads,
+                       double memory_preallocated,
+                       bool verbose)
       : kmer_collector_(k + 1,
                         canonical_mode,
                         encode_filter_suffix_boss<KmerExtractor>(filter_suffix),
                         num_threads,
                         memory_preallocated,
                         verbose) {
-    if (filter_suffix == std::string(filter_suffix.size(), DBG_succ::kSentinel)) {
+    if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
         kmer_collector_.emplace_back(
-            std::vector<KmerExtractor::TAlphabet>(k + 1, DBG_succ::kSentinelCode)
+            std::vector<KmerExtractor::TAlphabet>(k + 1, BOSS::kSentinelCode)
         );
     }
 }
@@ -171,10 +171,10 @@ DBGBOSSChunkConstructor<KMER>
 //TODO cleanup
 // k is node length
 template <typename KMER>
-DBG_succ::Chunk* chunk_from_kmers(KmerExtractor::TAlphabet alph_size,
-                                  size_t k,
-                                  const KMER *kmers,
-                                  uint64_t num_kmers) {
+BOSS::Chunk* chunk_from_kmers(KmerExtractor::TAlphabet alph_size,
+                              size_t k,
+                              const KMER *kmers,
+                              uint64_t num_kmers) {
     assert(std::is_sorted(kmers, kmers + num_kmers));
 
     // the array containing edge labels
@@ -229,11 +229,11 @@ DBG_succ::Chunk* chunk_from_kmers(KmerExtractor::TAlphabet alph_size,
     W.resize(curpos);
     last.resize(curpos);
 
-    return new DBG_succ::Chunk(k, std::move(W), std::move(last), std::move(F));
+    return new BOSS::Chunk(k, std::move(W), std::move(last), std::move(F));
 }
 
 template <typename KMER>
-DBG_succ::Chunk* DBGBOSSChunkConstructor<KMER>
+BOSS::Chunk* BOSSChunkConstructor<KMER>
 ::build_chunk() {
     kmer_collector_.join();
 
@@ -244,7 +244,7 @@ DBG_succ::Chunk* DBGBOSSChunkConstructor<KMER>
         }
         Timer timer;
 
-        // kmer_collector stores (DBG_succ::k_ + 1)-mers
+        // kmer_collector stores (BOSS::k_ + 1)-mers
         recover_source_dummy_nodes(kmer_collector_.get_k() - 1,
                                    &kmer_collector_.data(),
                                    kmer_collector_.num_threads(),
@@ -254,8 +254,8 @@ DBG_succ::Chunk* DBGBOSSChunkConstructor<KMER>
             std::cout << timer.elapsed() << "sec" << std::endl;
     }
 
-    // kmer_collector stores (DBG_succ::k_ + 1)-mers
-    DBG_succ::Chunk *result = chunk_from_kmers(
+    // kmer_collector stores (BOSS::k_ + 1)-mers
+    BOSS::Chunk *result = chunk_from_kmers(
         kmer_collector_.alphabet_size(),
         kmer_collector_.get_k() - 1,
         kmer_collector_.data().data(),
@@ -268,13 +268,13 @@ DBG_succ::Chunk* DBGBOSSChunkConstructor<KMER>
 }
 
 
-DBGSuccConstructor::DBGSuccConstructor(size_t k,
-                                       bool canonical_mode,
-                                       const std::string &filter_suffix,
-                                       size_t num_threads,
-                                       double memory_preallocated,
-                                       bool verbose)
-      : constructor_(IDBGBOSSChunkConstructor::initialize(
+BOSSConstructor::BOSSConstructor(size_t k,
+                                 bool canonical_mode,
+                                 const std::string &filter_suffix,
+                                 size_t num_threads,
+                                 double memory_preallocated,
+                                 bool verbose)
+      : constructor_(IBOSSChunkConstructor::initialize(
             k,
             canonical_mode,
             filter_suffix,
@@ -283,22 +283,22 @@ DBGSuccConstructor::DBGSuccConstructor(size_t k,
             verbose)
       ) {}
 
-void DBGSuccConstructor::build_graph(DBG_succ *graph) {
+void BOSSConstructor::build_graph(BOSS *graph) {
     auto chunk = constructor_->build_chunk();
     // initialize graph from the chunk built
-    chunk->initialize_graph(graph);
+    chunk->initialize_boss(graph);
     delete chunk;
 }
 
-DBG_succ* DBGSuccConstructor
+BOSS* BOSSConstructor
 ::build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
                           bool verbose) {
     // TODO: move from chunk to here?
-    return DBG_succ::Chunk::build_graph_from_chunks(chunk_filenames, verbose);
+    return BOSS::Chunk::build_boss_from_chunks(chunk_filenames, verbose);
 }
 
-IDBGBOSSChunkConstructor*
-IDBGBOSSChunkConstructor
+IBOSSChunkConstructor*
+IBOSSChunkConstructor
 ::initialize(size_t k,
              bool canonical_mode,
              const std::string &filter_suffix,
@@ -308,15 +308,15 @@ IDBGBOSSChunkConstructor
     using Extractor = KmerExtractor;
 
     if ((k + 1) * Extractor::kLogSigma <= 64) {
-        return new DBGBOSSChunkConstructor<typename Extractor::Kmer64>(
+        return new BOSSChunkConstructor<typename Extractor::Kmer64>(
             k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
         );
     } else if ((k + 1) * Extractor::kLogSigma <= 128) {
-        return new DBGBOSSChunkConstructor<typename Extractor::Kmer128>(
+        return new BOSSChunkConstructor<typename Extractor::Kmer128>(
             k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
         );
     } else {
-        return new DBGBOSSChunkConstructor<typename Extractor::Kmer256>(
+        return new BOSSChunkConstructor<typename Extractor::Kmer256>(
             k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
         );
     }

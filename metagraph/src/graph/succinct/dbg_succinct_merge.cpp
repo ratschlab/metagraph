@@ -5,16 +5,16 @@
 
 #include "utils.hpp"
 
-using TAlphabet = DBG_succ::TAlphabet;
+using TAlphabet = BOSS::TAlphabet;
 
 namespace merge {
 
 /**
  * Helper function to determine the bin boundaries, given
- * a number of bins basen on the total number of nodes in graph.
+ * a number of bins based on the size of the BOSS table.
  * [v[0], v[1]), [v[1], v[2]), ...
  */
-std::vector<uint64_t> get_bins(const DBG_succ &G, uint64_t num_bins, bool verbose) {
+std::vector<uint64_t> get_bins(const BOSS &G, uint64_t num_bins, bool verbose) {
     assert(num_bins > 0);
 
     uint64_t num_nodes = G.num_nodes();
@@ -61,7 +61,7 @@ std::vector<uint64_t> subset_bins(const std::vector<uint64_t> &ref_bins,
                                  ref_bins.begin() + (chunk_idx + 1) * chunk_size + 1);
 }
 
-std::vector<uint64_t> get_chunk(const DBG_succ &graph,
+std::vector<uint64_t> get_chunk(const BOSS &graph,
                                 const std::vector<std::vector<TAlphabet>> &border_kmers,
                                 bool with_tail) {
     std::vector<uint64_t> result;
@@ -118,19 +118,19 @@ void print_bin_stats(const std::vector<std::vector<uint64_t>> &bins) {
 }
 
 
-DBG_succ::Chunk* merge_blocks(const std::vector<const DBG_succ*> &Gv,
-                              std::vector<uint64_t> kv,
-                              const std::vector<uint64_t> &nv,
-                              bool verbose);
+BOSS::Chunk* merge_blocks(const std::vector<const BOSS*> &Gv,
+                          std::vector<uint64_t> kv,
+                          const std::vector<uint64_t> &nv,
+                          bool verbose);
 
 /**
- * Distribute the merging of a set of graph structures over
+ * Distribute the merging of a set of BOSS tables over
  * bins, such that n parallel threads are used.
  */
-void parallel_merge_wrapper(const std::vector<const DBG_succ*> &graphs,
+void parallel_merge_wrapper(const std::vector<const BOSS*> &graphs,
                             const std::vector<std::vector<uint64_t>> &bins,
                             std::mutex *mu,
-                            std::vector<DBG_succ::Chunk*> *chunks,
+                            std::vector<BOSS::Chunk*> *chunks,
                             bool verbose) {
     assert(mu);
     assert(graphs.size() > 0);
@@ -166,9 +166,9 @@ void parallel_merge_wrapper(const std::vector<const DBG_succ*> &graphs,
 }
 
 
-void stack_graph_chunks(const std::vector<DBG_succ::Chunk*> &graph_chunks,
-                        DBG_succ::Chunk *merged) {
-    for (DBG_succ::Chunk *chunk : graph_chunks) {
+void concatenate_boss_chunks(const std::vector<BOSS::Chunk*> &boss_chunks,
+                             BOSS::Chunk *merged) {
+    for (BOSS::Chunk *chunk : boss_chunks) {
         assert(chunk);
         merged->extend(*chunk);
         delete chunk;
@@ -176,17 +176,17 @@ void stack_graph_chunks(const std::vector<DBG_succ::Chunk*> &graph_chunks,
 }
 
 
-DBG_succ::Chunk* merge_blocks_to_chunk(const std::vector<const DBG_succ*> &graphs,
-                                       size_t chunk_idx,
-                                       size_t num_chunks,
-                                       size_t num_threads,
-                                       size_t num_bins_per_thread,
-                                       bool verbose) {
+BOSS::Chunk* merge_blocks_to_chunk(const std::vector<const BOSS*> &graphs,
+                                   size_t chunk_idx,
+                                   size_t num_chunks,
+                                   size_t num_threads,
+                                   size_t num_bins_per_thread,
+                                   bool verbose) {
     assert(graphs.size() > 0);
     assert(num_chunks > 0);
     assert(chunk_idx < num_chunks);
 
-    // get bins in graphs according to required threads
+    // get bins in BOSS tables according to required threads
     if (verbose) {
         std::cout << "Collecting reference bins" << std::endl;
         std::cout << "parallel " << num_threads
@@ -212,7 +212,7 @@ DBG_succ::Chunk* merge_blocks_to_chunk(const std::vector<const DBG_succ*> &graph
         // Make the kmers from different bins differ
         // by a prefix of length at least 2.
         // So that we don't have to adjust the W array when concatenating.
-        border_kmers.back()[0] = DBG_succ::kSentinelCode;
+        border_kmers.back()[0] = BOSS::kSentinelCode;
     }
 
     if (verbose)
@@ -231,7 +231,7 @@ DBG_succ::Chunk* merge_blocks_to_chunk(const std::vector<const DBG_succ*> &graph
     std::vector<std::thread> threads;
     std::mutex mu;
 
-    std::vector<DBG_succ::Chunk*> blocks;
+    std::vector<BOSS::Chunk*> blocks;
 
     for (size_t tid = 0; tid < num_threads; tid++) {
         threads.emplace_back(parallel_merge_wrapper, graphs,
@@ -255,13 +255,13 @@ DBG_succ::Chunk* merge_blocks_to_chunk(const std::vector<const DBG_succ*> &graph
     if (verbose)
         std::cout << "Collecting results" << std::endl;
 
-    DBG_succ::Chunk *result = new DBG_succ::Chunk(graphs.at(0)->get_k());
-    stack_graph_chunks(blocks, result);
+    BOSS::Chunk *result = new BOSS::Chunk(graphs.at(0)->get_k());
+    concatenate_boss_chunks(blocks, result);
     return result;
 }
 
 
-DBG_succ* merge(const std::vector<const DBG_succ*> &Gv, bool verbose) {
+BOSS* merge(const std::vector<const BOSS*> &Gv, bool verbose) {
     std::vector<uint64_t> kv;
     std::vector<uint64_t> nv;
 
@@ -270,15 +270,15 @@ DBG_succ* merge(const std::vector<const DBG_succ*> &Gv, bool verbose) {
         nv.push_back(Gv[i]->get_W().size());
     }
 
-    std::unique_ptr<DBG_succ::Chunk> merged(merge_blocks(Gv, kv, nv, verbose));
+    std::unique_ptr<BOSS::Chunk> merged(merge_blocks(Gv, kv, nv, verbose));
 
-    DBG_succ *graph = new DBG_succ(Gv.at(0)->get_k());
-    merged->initialize_graph(graph);
+    BOSS *graph = new BOSS(Gv.at(0)->get_k());
+    merged->initialize_boss(graph);
     return graph;
 }
 
 
-std::vector<std::vector<TAlphabet>> get_last_added_nodes(const std::vector<const DBG_succ*> &Gv,
+std::vector<std::vector<TAlphabet>> get_last_added_nodes(const std::vector<const BOSS*> &Gv,
                                                          const std::vector<uint64_t> &kv) {
     assert(Gv.size());
 
@@ -287,9 +287,9 @@ std::vector<std::vector<TAlphabet>> get_last_added_nodes(const std::vector<const
     std::vector<std::vector<TAlphabet>> last_added_nodes(alph_size);
     // init last added nodes, if not starting from the beginning
     for (size_t i = 0; i < Gv.size(); i++) {
-        // check whether we can merge the given graphs
+        // check whether we can merge the given BOSS tables
         assert(Gv.at(i)->get_k() == Gv.at(0)->get_k()
-                && "Graphs have different k-mer lengths - cannot be merged!\n");
+                && "BOSS tables have different k-mer size - cannot be merged!\n");
 
         if (kv.at(i) < 2)
             continue;
@@ -312,14 +312,14 @@ std::vector<std::vector<TAlphabet>> get_last_added_nodes(const std::vector<const
     return last_added_nodes;
 }
 
-DBG_succ::Chunk* merge_blocks(const std::vector<const DBG_succ*> &Gv,
-                              std::vector<uint64_t> kv,
-                              const std::vector<uint64_t> &nv,
-                              bool verbose) {
+BOSS::Chunk* merge_blocks(const std::vector<const BOSS*> &Gv,
+                          std::vector<uint64_t> kv,
+                          const std::vector<uint64_t> &nv,
+                          bool verbose) {
     assert(kv.size() == Gv.size());
     assert(nv.size() == Gv.size());
 
-    DBG_succ::Chunk *chunk = new DBG_succ::Chunk(Gv.at(0)->get_k());
+    BOSS::Chunk *chunk = new BOSS::Chunk(Gv.at(0)->get_k());
 
     const size_t alph_size = Gv.at(0)->alph_size;
 
@@ -379,7 +379,7 @@ DBG_succ::Chunk* merge_blocks(const std::vector<const DBG_succ*> &Gv,
 
         // check whether we already added a node whose outgoing edge points to the
         // same node as the current one
-        TAlphabet next_in_W = val != DBG_succ::kSentinelCode
+        TAlphabet next_in_W = val != BOSS::kSentinelCode
                                 && utils::seq_equal(seq1, last_added_nodes[val], 1)
                               ? val + alph_size
                               : val;
@@ -392,8 +392,8 @@ DBG_succ::Chunk* merge_blocks(const std::vector<const DBG_succ*> &Gv,
 
             // compare the last two added nodes
             if (utils::seq_equal(seq1, pred_node)) {
-                if (seq1.back() != DBG_succ::kSentinelCode
-                        && chunk->get_W_back() == DBG_succ::kSentinelCode) {
+                if (seq1.back() != BOSS::kSentinelCode
+                        && chunk->get_W_back() == BOSS::kSentinelCode) {
                     remove_dummy_edge = true;
                     chunk->alter_W_back(next_in_W);
                 } else {

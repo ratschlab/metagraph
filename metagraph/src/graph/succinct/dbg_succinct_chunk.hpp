@@ -6,7 +6,7 @@
 #include "dbg_succinct.hpp"
 
 
-class DBG_succ::Chunk {
+class BOSS::Chunk {
   public:
     typedef uint8_t TAlphabet;
 
@@ -32,14 +32,14 @@ class DBG_succ::Chunk {
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
 
-    void initialize_graph(DBG_succ *graph) const;
+    void initialize_boss(BOSS *graph) const;
 
     /**
-     * Merge graph chunks loaded from the files passed
+     * Merge BOSS chunks loaded from the files passed
      */
-    static DBG_succ*
-    build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
-                            bool verbose = false);
+    static BOSS*
+    build_boss_from_chunks(const std::vector<std::string> &chunk_filenames,
+                           bool verbose = false);
 
   private:
     const size_t alph_size_;

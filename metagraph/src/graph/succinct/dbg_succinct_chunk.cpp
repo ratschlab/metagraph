@@ -6,7 +6,7 @@
 #include "utils.hpp"
 
 
-DBG_succ::Chunk::Chunk(size_t k)
+BOSS::Chunk::Chunk(size_t k)
       : alph_size_(KmerExtractor::alphabet.size()),
         bits_per_char_W_(boost::multiprecision::msb(alph_size_ - 1) + 2),
         k_(k), W_(1, 0), last_(1, 0), F_(alph_size_, 0) {
@@ -14,10 +14,10 @@ DBG_succ::Chunk::Chunk(size_t k)
     assert(alph_size_ * 2 < 1llu << bits_per_char_W_);
 }
 
-DBG_succ::Chunk::Chunk(size_t k,
-                       std::vector<TAlphabet>&& W,
-                       std::vector<bool>&& last,
-                       std::vector<uint64_t>&& F)
+BOSS::Chunk::Chunk(size_t k,
+                   std::vector<TAlphabet>&& W,
+                   std::vector<bool>&& last,
+                   std::vector<uint64_t>&& F)
       : alph_size_(KmerExtractor::alphabet.size()),
         bits_per_char_W_(boost::multiprecision::msb(alph_size_ - 1) + 2),
         k_(k), W_(std::move(W)), last_(std::move(last)), F_(std::move(F)) {
@@ -25,7 +25,7 @@ DBG_succ::Chunk::Chunk(size_t k,
     assert(alph_size_ * 2 < 1llu << bits_per_char_W_);
 }
 
-void DBG_succ::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
+void BOSS::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
     W_.push_back(W);
     for (TAlphabet a = F + 1; a < F_.size(); ++a) {
         F_[a]++;
@@ -33,16 +33,16 @@ void DBG_succ::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
     last_.push_back(last);
 }
 
-DBG_succ::Chunk::TAlphabet
-DBG_succ::Chunk::get_W_back() const { return W_.back(); }
+BOSS::Chunk::TAlphabet
+BOSS::Chunk::get_W_back() const { return W_.back(); }
 
-void DBG_succ::Chunk::alter_W_back(TAlphabet W) { W_.back() = W; }
+void BOSS::Chunk::alter_W_back(TAlphabet W) { W_.back() = W; }
 
-void DBG_succ::Chunk::alter_last_back(bool last) { last_.back() = last; }
+void BOSS::Chunk::alter_last_back(bool last) { last_.back() = last; }
 
-uint64_t DBG_succ::Chunk::size() const { return W_.size() - 1; }
+uint64_t BOSS::Chunk::size() const { return W_.size() - 1; }
 
-void DBG_succ::Chunk::extend(const DBG_succ::Chunk &other) {
+void BOSS::Chunk::extend(const BOSS::Chunk &other) {
     assert(k_ == other.k_);
 
     W_.reserve(W_.size() + other.size());
@@ -57,7 +57,7 @@ void DBG_succ::Chunk::extend(const DBG_succ::Chunk &other) {
     }
 }
 
-void DBG_succ::Chunk::initialize_graph(DBG_succ *graph) const {
+void BOSS::Chunk::initialize_boss(BOSS *graph) const {
     delete graph->W_;
     graph->W_ = new wavelet_tree_stat(bits_per_char_W_, W_);
 
@@ -73,10 +73,10 @@ void DBG_succ::Chunk::initialize_graph(DBG_succ *graph) const {
     assert(graph->is_valid());
 }
 
-DBG_succ*
-DBG_succ::Chunk::build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
-                                         bool verbose) {
-    DBG_succ *graph = new DBG_succ();
+BOSS*
+BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filenames,
+                                    bool verbose) {
+    BOSS *graph = new BOSS();
     if (!chunk_filenames.size())
         return graph;
 
@@ -110,7 +110,7 @@ DBG_succ::Chunk::build_graph_from_chunks(const std::vector<std::string> &chunk_f
     for (size_t i = 0; i < chunk_filenames.size(); ++i) {
         auto filename = utils::remove_suffix(chunk_filenames[i], ".dbgchunk")
                                                         + ".dbgchunk";
-        DBG_succ::Chunk graph_chunk(0);
+        BOSS::Chunk graph_chunk(0);
         if (!graph_chunk.load(filename)) {
             std::cerr << "ERROR: input file "
                       << filename << " corrupted" << std::endl;
@@ -174,7 +174,7 @@ DBG_succ::Chunk::build_graph_from_chunks(const std::vector<std::string> &chunk_f
     return graph;
 }
 
-bool DBG_succ::Chunk::load(const std::string &infbase) {
+bool BOSS::Chunk::load(const std::string &infbase) {
     try {
         std::ifstream instream(utils::remove_suffix(infbase, ".dbgchunk")
                                                                 + ".dbgchunk",
@@ -188,7 +188,7 @@ bool DBG_succ::Chunk::load(const std::string &infbase) {
 
         return F_.size() == alph_size_;
     } catch (const std::bad_alloc &exception) {
-        std::cerr << "ERROR: Not enough memory to load graph chunk from "
+        std::cerr << "ERROR: Not enough memory to load BOSS chunk from "
                   << infbase << "." << std::endl;
         return false;
     } catch (...) {
@@ -196,7 +196,7 @@ bool DBG_succ::Chunk::load(const std::string &infbase) {
     }
 }
 
-void DBG_succ::Chunk::serialize(const std::string &outbase) const {
+void BOSS::Chunk::serialize(const std::string &outbase) const {
     std::ofstream outstream(utils::remove_suffix(outbase, ".dbgchunk")
                                                                 + ".dbgchunk",
                             std::ios::binary);

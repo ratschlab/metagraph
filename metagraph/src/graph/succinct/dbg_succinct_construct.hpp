@@ -5,32 +5,32 @@
 #include "dbg_succinct.hpp"
 
 
-class IDBGBOSSChunkConstructor : public IGraphChunkConstructor<DBG_succ::Chunk> {
+class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
   public:
-    virtual ~IDBGBOSSChunkConstructor() {}
+    virtual ~IBOSSChunkConstructor() {}
 
-    static IDBGBOSSChunkConstructor* initialize(size_t k,
-                                                bool canonical_mode = false,
-                                                const std::string &filter_suffix = "",
-                                                size_t num_threads = 1,
-                                                double memory_preallocated = 0,
-                                                bool verbose = false);
+    static IBOSSChunkConstructor* initialize(size_t k,
+                                             bool canonical_mode = false,
+                                             const std::string &filter_suffix = "",
+                                             size_t num_threads = 1,
+                                             double memory_preallocated = 0,
+                                             bool verbose = false);
 
     virtual void add_sequence(const std::string &sequence) = 0;
     virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;
 
-    virtual DBG_succ::Chunk* build_chunk() = 0;
+    virtual BOSS::Chunk* build_chunk() = 0;
 };
 
 
-class DBGSuccConstructor : public IGraphConstructor<DBG_succ> {
+class BOSSConstructor : public IGraphConstructor<BOSS> {
   public:
-    DBGSuccConstructor(size_t k,
-                       bool canonical_mode = false,
-                       const std::string &filter_suffix = "",
-                       size_t num_threads = 1,
-                       double memory_preallocated = 0,
-                       bool verbose = false);
+    BOSSConstructor(size_t k,
+                    bool canonical_mode = false,
+                    const std::string &filter_suffix = "",
+                    size_t num_threads = 1,
+                    double memory_preallocated = 0,
+                    bool verbose = false);
 
     void add_sequence(const std::string &sequence) {
         constructor_->add_sequence(sequence);
@@ -46,12 +46,12 @@ class DBGSuccConstructor : public IGraphConstructor<DBG_succ> {
         });
     }
 
-    void build_graph(DBG_succ *graph);
+    void build_graph(BOSS *graph);
 
-    static DBG_succ* build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
-                                             bool verbose = false);
+    static BOSS* build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
+                                         bool verbose = false);
   private:
-    std::unique_ptr<IDBGBOSSChunkConstructor> constructor_;
+    std::unique_ptr<IBOSSChunkConstructor> constructor_;
 };
 
 #endif // __DBG_SUCCINCT_CONSTRUCT_HPP__

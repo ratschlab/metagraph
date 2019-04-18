@@ -51,7 +51,7 @@ std::string remove_graph_extension(const std::string &filename) {
     return utils::remove_suffix(filename, ".dbg", ".orhashdbg", ".bitmapdbg");
 }
 
-template <class Graph = DBG_succ>
+template <class Graph = BOSS>
 std::unique_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
     auto *graph = new Graph(2);
     if (!graph->load(filename)) {
@@ -351,10 +351,10 @@ void annotate_coordinates(const std::vector<std::string> &files,
  * AC$T, A$$T, ..., $AAA -- invalid
  */
 bool valid_kmer_suffix(const std::string &suffix) {
-    size_t last = suffix.rfind(DBG_succ::kSentinel);
+    size_t last = suffix.rfind(BOSS::kSentinel);
     return last == std::string::npos
             || suffix.substr(0, last + 1)
-                == std::string(last + 1, DBG_succ::kSentinel);
+                == std::string(last + 1, BOSS::kSentinel);
 }
 
 
@@ -525,7 +525,7 @@ void convert(std::unique_ptr<AnnotatorFrom> annotator,
 }
 
 
-void print_boss_stats(const DBG_succ &boss_graph,
+void print_boss_stats(const BOSS &boss_graph,
                       bool count_dummy = false,
                       size_t num_threads = 0,
                       bool verbose = false) {
@@ -825,7 +825,7 @@ int main(int argc, const char *argv[]) {
                 graph.reset(new DBGSD(config->k, config->canonical));
 
             } else if (config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic) {
-                auto boss_graph = std::make_unique<DBG_succ>(config->k - 1);
+                auto boss_graph = std::make_unique<BOSS>(config->k - 1);
 
                 if (config->verbose) {
                     std::cout << "Start reading data and extracting k-mers" << std::endl;
@@ -848,7 +848,7 @@ int main(int argc, const char *argv[]) {
                     );
                 }
 
-                DBG_succ::Chunk graph_data(boss_graph->get_k());
+                BOSS::Chunk graph_data(boss_graph->get_k());
 
                 //one pass per suffix
                 for (const std::string &suffix : suffices) {
@@ -863,8 +863,8 @@ int main(int argc, const char *argv[]) {
                         }
                     }
 
-                    std::unique_ptr<IDBGBOSSChunkConstructor> constructor(
-                        IDBGBOSSChunkConstructor::initialize(
+                    std::unique_ptr<IBOSSChunkConstructor> constructor(
+                        IBOSSChunkConstructor::initialize(
                             boss_graph->get_k(),
                             config->canonical,
                             suffix,
@@ -899,7 +899,7 @@ int main(int argc, const char *argv[]) {
                     delete next_block;
                 }
 
-                graph_data.initialize_graph(boss_graph.get());
+                graph_data.initialize_boss(boss_graph.get());
                 graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
 
             } else if (config->graph_type == Config::GraphType::BITMAP && !config->dynamic) {
@@ -1594,7 +1594,7 @@ int main(int argc, const char *argv[]) {
             std::unique_ptr<DeBruijnGraph> graph;
             if (config->graph_type == Config::GraphType::SUCCINCT) {
                 graph.reset(
-                    new DBGSuccinct(DBG_succ::Chunk::build_graph_from_chunks(
+                    new DBGSuccinct(BOSS::Chunk::build_boss_from_chunks(
                         chunk_files, config->verbose
                     ), config->canonical)
                 );
@@ -1623,12 +1623,12 @@ int main(int argc, const char *argv[]) {
             return 0;
         }
         case Config::MERGE: {
-            DBG_succ *graph = NULL;
+            BOSS *graph = NULL;
 
             Timer timer;
 
             std::vector<std::unique_ptr<DBGSuccinct>> dbg_graphs;
-            std::vector<const DBG_succ*> graphs;
+            std::vector<const BOSS*> graphs;
 
             config->canonical = true;
 
@@ -1697,8 +1697,8 @@ int main(int argc, const char *argv[]) {
                                       + "." + std::to_string(config->part_idx)
                                       + "_" + std::to_string(config->parts_total));
                 } else {
-                    graph = new DBG_succ(graphs[0]->get_k());
-                    chunk->initialize_graph(graph);
+                    graph = new BOSS(graphs[0]->get_k());
+                    chunk->initialize_boss(graph);
                 }
                 delete chunk;
             } else {

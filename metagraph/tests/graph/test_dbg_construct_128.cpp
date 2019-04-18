@@ -28,11 +28,11 @@ const int kMaxK = sizeof(KMER) * 8 / KmerExtractor::kLogSigma;
 
 TEST(Construct_128, ConstructionEQAppendingSimplePath) {
     for (size_t k = 1; k < kMaxK; ++k) {
-        DBGSuccConstructor constructor(k);
+        BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A') });
-        DBG_succ constructed(&constructor);
+        BOSS constructed(&constructor);
 
-        DBG_succ appended(k);
+        BOSS appended(k);
         appended.add_sequence(std::string(100, 'A'));
 
         EXPECT_EQ(constructed, appended);
@@ -41,12 +41,12 @@ TEST(Construct_128, ConstructionEQAppendingSimplePath) {
 
 TEST(Construct_128, ConstructionEQAppendingTwoPaths) {
     for (size_t k = 1; k < kMaxK; ++k) {
-        DBGSuccConstructor constructor(k);
+        BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A'),
                                     std::string(50, 'B') });
-        DBG_succ constructed(&constructor);
+        BOSS constructed(&constructor);
 
-        DBG_succ appended(k);
+        BOSS appended(k);
         appended.add_sequence(std::string(100, 'A'));
         appended.add_sequence(std::string(50, 'B'));
 
@@ -56,15 +56,15 @@ TEST(Construct_128, ConstructionEQAppendingTwoPaths) {
 
 TEST(Construct_128, ConstructionLowerCase) {
     for (size_t k = 1; k < kMaxK; ++k) {
-        DBGSuccConstructor constructor_first(k);
+        BOSSConstructor constructor_first(k);
         constructor_first.add_sequences({ std::string(100, 'A'),
                                           std::string(50, 'C') });
-        DBG_succ first(&constructor_first);
+        BOSS first(&constructor_first);
 
-        DBGSuccConstructor constructor_second(k);
+        BOSSConstructor constructor_second(k);
         constructor_second.add_sequences({ std::string(100, 'a'),
                                            std::string(50, 'c') });
-        DBG_succ second(&constructor_second);
+        BOSS second(&constructor_second);
 
 #if _DNA_CASE_SENSITIVE_GRAPH
         EXPECT_FALSE(first.equals_internally(second));
@@ -76,15 +76,15 @@ TEST(Construct_128, ConstructionLowerCase) {
 
 TEST(Construct_128, ConstructionDummySentinel) {
     for (size_t k = 1; k < kMaxK; ++k) {
-        DBGSuccConstructor constructor_first(k);
+        BOSSConstructor constructor_first(k);
         constructor_first.add_sequences({ std::string(100, 'N'),
                                           std::string(50, '$') });
-        DBG_succ first(&constructor_first);
+        BOSS first(&constructor_first);
 
-        DBGSuccConstructor constructor_second(k);
+        BOSSConstructor constructor_second(k);
         constructor_second.add_sequences({ std::string(100, 'N'),
                                            std::string(50, '.') });
-        DBG_succ second(&constructor_second);
+        BOSS second(&constructor_second);
 
         EXPECT_TRUE(first.equals_internally(second));
     }
@@ -98,11 +98,11 @@ TEST(Construct_128, ConstructionEQAppending) {
             "ATATATTCTCTCTCTCTCATA",
             "GTGTGTGTGGGGGGCCCTTTTTTCATA",
         };
-        DBGSuccConstructor constructor(k);
+        BOSSConstructor constructor(k);
         constructor.add_sequences(input_data);
-        DBG_succ constructed(&constructor);
+        BOSS constructed(&constructor);
 
-        DBG_succ appended(k);
+        BOSS appended(k);
         for (const auto &sequence : input_data) {
             appended.add_sequence(sequence);
         }
@@ -119,11 +119,11 @@ TEST(Construct_128, ConstructionEQAppendingCanonical) {
             "ATATATTCTCTCTCTCTCATA",
             "GTGTGTGTGGGGGGCCCTTTTTTCATA",
         };
-        DBGSuccConstructor constructor(k, true);
+        BOSSConstructor constructor(k, true);
         constructor.add_sequences(input_data);
-        DBG_succ constructed(&constructor);
+        BOSS constructed(&constructor);
 
-        DBG_succ appended(k);
+        BOSS appended(k);
         for (auto &sequence : input_data) {
             appended.add_sequence(sequence);
             reverse_complement(sequence.begin(), sequence.end());
@@ -136,11 +136,11 @@ TEST(Construct_128, ConstructionEQAppendingCanonical) {
 
 TEST(Construct_128, ConstructionLong) {
     for (size_t k = 1; k < kMaxK; ++k) {
-        DBGSuccConstructor constructor(k);
+        BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(k + 1, 'A') });
-        DBG_succ constructed(&constructor);
+        BOSS constructed(&constructor);
 
-        DBG_succ appended(k);
+        BOSS appended(k);
         appended.add_sequence(std::string(k + 1, 'A'));
 
         EXPECT_EQ(constructed, appended);
@@ -150,11 +150,11 @@ TEST(Construct_128, ConstructionLong) {
 
 TEST(Construct_128, ConstructionShort) {
     for (size_t k = 1; k < kMaxK; ++k) {
-        DBGSuccConstructor constructor(k);
+        BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(k, 'A') });
-        DBG_succ constructed(&constructor);
+        BOSS constructed(&constructor);
 
-        DBG_succ appended(k);
+        BOSS appended(k);
         appended.add_sequence(std::string(k, 'A'));
 
         EXPECT_EQ(constructed, appended);

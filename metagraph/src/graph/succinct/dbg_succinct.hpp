@@ -11,19 +11,19 @@
 #include "kmer_extractor.hpp"
 #include "utils.hpp"
 
-class DBGSuccConstructor;
+class BOSSConstructor;
 
 
 /**
- * This class contains a succinct representation of the de bruijn graph
- * following ideas and suggestions presented here:
+ * This class implements the BOSS table, a succinct representation
+ * of the de Bruijn graph following ideas and suggestions presented here:
  * http://link.springer.com/chapter/10.1007/978-3-642-33122-0_18
  *
  * There is also conceptual code available at
  * https://code.google.com/p/csalib/downloads/list
  * that has been used as a reference for this implementation.
  */
-class DBG_succ {
+class BOSS {
   public:
     static const uint64_t npos;
     // in [1,...,num_nodes], 0 = npos (invalid index)
@@ -33,23 +33,23 @@ class DBG_succ {
 
     typedef uint8_t TAlphabet;
 
-    explicit DBG_succ(size_t k = 1);
-    explicit DBG_succ(DBGSuccConstructor *builder);
-    ~DBG_succ();
+    explicit BOSS(size_t k = 1);
+    explicit BOSS(BOSSConstructor *builder);
+    ~BOSS();
 
     /**
-     * Check whether graphs store the same data.
+     * Check whether BOSS tables store the same data.
      * FYI: this function reconstructs all the kmers, and
      * the complexity is at least O(k x n).
      */
-    bool operator==(const DBG_succ &other) const;
+    bool operator==(const BOSS &other) const;
 
     /**
      * Perform an element wise comparison of the arrays W, last and
      * F and will only check for identity. If any element differs, return
      * false and true otherwise.
      */
-    bool equals_internally(const DBG_succ &other, bool verbose = false) const;
+    bool equals_internally(const BOSS &other, bool verbose = false) const;
 
     // Return the k-mer length
     size_t get_k() const { return k_; }
@@ -183,7 +183,7 @@ class DBG_succ {
     * The edges of `other` are fully traversed and nodes are added if not existing yet.
     * This function is well suited to merge small graphs into large ones.
     */
-    void merge(const DBG_succ &other);
+    void merge(const BOSS &other);
 
     /**
      * Using the offset structure F this function returns the value of the last
@@ -550,13 +550,13 @@ class DBG_succ {
     class Chunk;
 };
 
-std::ostream& operator<<(std::ostream &os, const DBG_succ &graph);
+std::ostream& operator<<(std::ostream &os, const BOSS &graph);
 
 
 class DBGSuccinct : public DeBruijnGraph {
   public:
     explicit DBGSuccinct(size_t k, bool canonical_mode = false);
-    explicit DBGSuccinct(DBG_succ *boss_graph, bool canonical_mode = false);
+    explicit DBGSuccinct(BOSS *boss_graph, bool canonical_mode = false);
 
     virtual ~DBGSuccinct() {}
 
@@ -624,16 +624,16 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual bool is_canonical_mode() const override final { return canonical_mode_; }
 
-    virtual const DBG_succ& get_boss() const final { return *boss_graph_; }
-    virtual DBG_succ& get_boss() final { return *boss_graph_; }
-    virtual DBG_succ* release_boss() final { return boss_graph_.release(); }
+    virtual const BOSS& get_boss() const final { return *boss_graph_; }
+    virtual BOSS& get_boss() final { return *boss_graph_; }
+    virtual BOSS* release_boss() final { return boss_graph_.release(); }
 
   private:
     void add_seq(const std::string &sequence, bit_vector_dyn *nodes_inserted);
     uint64_t kmer_to_boss_index(node_index kmer_index) const;
     node_index boss_to_kmer_index(uint64_t boss_index) const;
 
-    std::unique_ptr<DBG_succ> boss_graph_;
+    std::unique_ptr<BOSS> boss_graph_;
     // all edges in boss except dummy
     std::unique_ptr<bit_vector> valid_edges_;
 
