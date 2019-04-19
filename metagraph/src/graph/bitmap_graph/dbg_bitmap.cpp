@@ -223,7 +223,20 @@ bool DBGBitmap::load(std::istream &in) {
 
     try {
         k_ = load_number(in);
-        kmers_.load(in);
+
+        auto pos = in.tellg();
+
+        if (!kmers_.load(in)) {
+            kmers_ = decltype(kmers_)();
+            // backward compatibility for loading bit_vector_sd
+            in.seekg(pos, in.beg);
+            bit_vector_sd temp_vector;
+            if (!temp_vector.load(in))
+                return false;
+
+            kmers_ = temp_vector.convert_to<bit_vector_smart>();
+        }
+
         if (!in.good())
             return false;
 

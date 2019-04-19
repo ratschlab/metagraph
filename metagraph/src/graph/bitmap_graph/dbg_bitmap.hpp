@@ -91,7 +91,7 @@ class DBGBitmap : public DeBruijnGraph {
 
     const std::string &alphabet;
 
-    using Chunk = bit_vector_sd;
+    using Chunk = bit_vector_smart;
 
     static constexpr auto kChunkFileExtension = ".dbgsdchunk";
 
@@ -114,7 +114,7 @@ class DBGBitmap : public DeBruijnGraph {
     bool canonical_mode_;
     KmerExtractor2Bit seq_encoder_;
 
-    bit_vector_sd kmers_;
+    bit_vector_smart kmers_;
 
     bool complete_ = false;
 
