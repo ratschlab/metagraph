@@ -1,4 +1,4 @@
-#include "dbg_succinct_merge.hpp"
+#include "boss_merge.hpp"
 
 #include <thread>
 #include <mutex>

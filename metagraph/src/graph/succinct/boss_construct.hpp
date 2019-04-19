@@ -2,7 +2,7 @@
 #define __DBG_SUCCINCT_CONSTRUCT_HPP__
 
 #include "dbg_construct.hpp"
-#include "dbg_succinct.hpp"
+#include "boss.hpp"
 
 
 class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {

@@ -3,7 +3,7 @@
 
 #include <type_traits>
 
-#include "dbg_succinct.hpp"
+#include "boss.hpp"
 
 
 class BOSS::Chunk {

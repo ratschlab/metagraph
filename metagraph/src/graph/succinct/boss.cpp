@@ -1,4 +1,4 @@
-#include "dbg_succinct.hpp"
+#include "boss.hpp"
 
 #include <cassert>
 #include <vector>
@@ -9,7 +9,7 @@
 
 #include <boost/multiprecision/integer.hpp>
 
-#include "dbg_succinct_construct.hpp"
+#include "boss_construct.hpp"
 #include "serialization.hpp"
 #include "reverse_complement.hpp"
 

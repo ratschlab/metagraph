@@ -1,4 +1,4 @@
-#include "dbg_succinct_chunk.hpp"
+#include "boss_chunk.hpp"
 
 #include <boost/multiprecision/integer.hpp>
 

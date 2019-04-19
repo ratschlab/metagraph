@@ -5,8 +5,8 @@
 #include <vector>
 #include <string>
 
-#include "dbg_succinct.hpp"
-#include "dbg_succinct_chunk.hpp"
+#include "boss.hpp"
+#include "boss_chunk.hpp"
 
 
 namespace merge {

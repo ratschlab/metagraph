@@ -5,7 +5,7 @@
 #define private public
 #define protected public
 
-#include "dbg_succinct.hpp"
+#include "boss.hpp"
 #include "kmer_boss.hpp"
 #include "kmer_extractor.hpp"
 #include "utils.hpp"

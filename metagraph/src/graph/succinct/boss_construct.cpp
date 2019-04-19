@@ -1,9 +1,9 @@
-#include "dbg_succinct_construct.hpp"
+#include "boss_construct.hpp"
 
 #include <ips4o.hpp>
 
 #include "unix_tools.hpp"
-#include "dbg_succinct_chunk.hpp"
+#include "boss_chunk.hpp"
 
 
 // Although this function could be parallelized better,

@@ -10,9 +10,9 @@
 #define protected public
 #define private public
 
-#include "dbg_succinct.hpp"
-#include "dbg_succinct_merge.hpp"
-#include "dbg_succinct_construct.hpp"
+#include "boss.hpp"
+#include "boss_merge.hpp"
+#include "boss_construct.hpp"
 #include "utils.hpp"
 #include "reverse_complement.hpp"
 
