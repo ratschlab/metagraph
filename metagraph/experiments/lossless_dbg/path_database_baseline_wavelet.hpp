@@ -245,10 +245,12 @@ public:
         return result;
     }
 
+    // is join or start of the read
     bool node_is_join(node_index node) const {
         return joins[node-1]; // 0 based
     }
 
+    // is split or end of the read
     bool node_is_split(node_index node) const {
         auto offset = routing_table.select(node,'#'_rc);
         // is not the last element of routing table and next character is not starting of new node
@@ -373,9 +375,6 @@ public:
     }
 
     path_id get_global_path_id(node_index node, int relative_position) {
-        if (node_is_join(node) and relative_position < branch_size(node,'$')) {
-            return {node,relative_position};
-        }
         char base = '\0';
         if (node_is_join(node)) {
             for(auto c = 'N'_rc; c >= 0;c++) {
@@ -389,6 +388,9 @@ public:
         else {
             assert(graph.outdegree(node) == 1);
             graph.call_outgoing_kmers(node,[&base](node_index node,char edge_label ) { base = rc(edge_label);});
+        }
+        if (base == '$') {
+            return {node,relative_position};
         }
         assert(base);
         node = graph.traverse_back(node,base);
