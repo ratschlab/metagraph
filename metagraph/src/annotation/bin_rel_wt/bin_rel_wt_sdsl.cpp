@@ -33,7 +33,8 @@ BinRelWT_sdsl
 
     assert(index == num_relations);
 
-    delimiters_ = bit_vector_stat(std::move(delimiters_vec))
+
+    delimiters_ = bit_vector_stat(to_sdsl(std::move(delimiters_vec)))
                     .convert_to<bit_vector_rrr<>>();
 
     construct_im(wt_, std::move(flat));

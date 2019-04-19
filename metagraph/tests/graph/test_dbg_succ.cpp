@@ -438,7 +438,7 @@ TEST(DBGSuccinct, RemoveDummyEdgesLinear) {
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << bit_vector_stat(redundant_edges);
+            << "Removed edges\n" << to_sdsl(redundant_edges);
         EXPECT_EQ(graph, dynamic_graph);
     }
 }
@@ -469,7 +469,7 @@ TEST(DBGSuccinct, RemoveDummyEdgesThreePaths) {
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << bit_vector_stat(redundant_edges);
+            << "Removed edges\n" << to_sdsl(redundant_edges);
         EXPECT_EQ(graph, dynamic_graph);
     }
 }
@@ -502,7 +502,7 @@ TEST(DBGSuccinct, RemoveDummyEdgesFourPaths) {
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << bit_vector_stat(redundant_edges);
+            << "Removed edges\n" << to_sdsl(redundant_edges);
         EXPECT_EQ(graph, dynamic_graph);
     }
 }
@@ -537,7 +537,7 @@ TEST(DBGSuccinct, RemoveDummyEdgesFivePaths) {
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << bit_vector_stat(redundant_edges);
+            << "Removed edges\n" << to_sdsl(redundant_edges);
         EXPECT_EQ(graph, dynamic_graph);
     }
 }
@@ -572,7 +572,7 @@ TEST(DBGSuccinct, RemoveDummyEdges) {
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << bit_vector_stat(redundant_edges);
+            << "Removed edges\n" << to_sdsl(redundant_edges);
         EXPECT_EQ(graph, dynamic_graph);
     }
 }
@@ -641,7 +641,7 @@ TEST(DBGSuccinct, RemoveDummyEdgesLinearParallel) {
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << bit_vector_stat(redundant_edges);
+            << "Removed edges\n" << to_sdsl(redundant_edges);
         EXPECT_EQ(graph, dynamic_graph);
     }
 }
@@ -672,7 +672,7 @@ TEST(DBGSuccinct, RemoveDummyEdgesThreePathsParallel) {
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << bit_vector_stat(redundant_edges);
+            << "Removed edges\n" << to_sdsl(redundant_edges);
         EXPECT_EQ(graph, dynamic_graph);
     }
 }
@@ -705,7 +705,7 @@ TEST(DBGSuccinct, RemoveDummyEdgesFourPathsParallel) {
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << bit_vector_stat(redundant_edges);
+            << "Removed edges\n" << to_sdsl(redundant_edges);
         EXPECT_EQ(graph, dynamic_graph);
     }
 }
@@ -740,7 +740,7 @@ TEST(DBGSuccinct, RemoveDummyEdgesFivePathsParallel) {
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << bit_vector_stat(redundant_edges);
+            << "Removed edges\n" << to_sdsl(redundant_edges);
         EXPECT_EQ(graph, dynamic_graph);
     }
 }
@@ -775,7 +775,7 @@ TEST(DBGSuccinct, RemoveDummyEdgesParallel) {
         EXPECT_TRUE(graph.equals_internally(dynamic_graph))
             << "Clear graph\n" << graph
             << "Cleaned up graph\n" << dynamic_graph
-            << "Removed edges\n" << bit_vector_stat(redundant_edges);
+            << "Removed edges\n" << to_sdsl(redundant_edges);
         EXPECT_EQ(graph, dynamic_graph);
     }
 }

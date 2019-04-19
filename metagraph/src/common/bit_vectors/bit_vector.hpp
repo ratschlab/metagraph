@@ -11,6 +11,10 @@
 #include "bitmap.hpp"
 
 
+sdsl::bit_vector to_sdsl(const std::vector<bool> &vector);
+sdsl::bit_vector to_sdsl(std::vector<bool>&& vector);
+
+
 class bit_vector : public bitmap {
   public:
     virtual ~bit_vector() {};
@@ -65,7 +69,7 @@ class bit_vector : public bitmap {
 
     virtual std::unique_ptr<bit_vector> copy() const = 0;
 
-    virtual std::vector<bool> to_vector() const;
+    virtual sdsl::bit_vector to_vector() const;
 
     template <class Vector>
     void add_to(Vector *other) const;
@@ -79,8 +83,7 @@ std::ostream& operator<<(std::ostream &os, const bit_vector &bv);
 class bit_vector_dyn : public bit_vector {
   public:
     explicit bit_vector_dyn(uint64_t size = 0, bool value = 0);
-    template <class BitVector>
-    explicit bit_vector_dyn(const BitVector &vector);
+    explicit bit_vector_dyn(const sdsl::bit_vector &vector);
     bit_vector_dyn(std::initializer_list<bool> init);
 
     virtual std::unique_ptr<bit_vector> copy() const override;
@@ -118,7 +121,6 @@ class bit_vector_stat : public bit_vector {
 
   public:
     explicit bit_vector_stat(uint64_t size = 0, bool value = 0);
-    explicit bit_vector_stat(const std::vector<bool> &vector);
     explicit bit_vector_stat(const sdsl::bit_vector &vector) noexcept
           : bit_vector_stat(sdsl::bit_vector(vector)) {}
     explicit bit_vector_stat(const bit_vector_stat &other);
@@ -173,8 +175,6 @@ class bit_vector_stat : public bit_vector {
 class bit_vector_sd : public bit_vector {
   public:
     explicit bit_vector_sd(uint64_t size = 0, bool value = false);
-    template <class BitVector>
-    explicit bit_vector_sd(const BitVector &vector);
     explicit bit_vector_sd(const sdsl::bit_vector &vector);
     explicit bit_vector_sd(const bit_vector_sd &other);
 
@@ -208,7 +208,7 @@ class bit_vector_sd : public bit_vector {
 
     uint64_t size() const override { return vector_.size(); }
 
-    std::vector<bool> to_vector() const override;
+    sdsl::bit_vector to_vector() const override;
 
     void call_ones(const std::function<void(uint64_t)> &callback) const override;
 
@@ -262,7 +262,7 @@ class bit_vector_rrr : public bit_vector {
 
     uint64_t size() const override { return vector_.size(); }
 
-    std::vector<bool> to_vector() const override;
+    sdsl::bit_vector to_vector() const override;
 
     void call_ones(const std::function<void(uint64_t)> &callback) const override;
 
@@ -300,7 +300,7 @@ class bit_vector_adaptive : public bit_vector {
 
     virtual uint64_t size() const override final;
 
-    virtual std::vector<bool> to_vector() const override final;
+    virtual sdsl::bit_vector to_vector() const override final;
 
     template <class T>
     using VoidCall = std::function<void(T)>;

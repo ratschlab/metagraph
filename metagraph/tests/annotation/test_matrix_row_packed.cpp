@@ -179,7 +179,7 @@ TEST(RowPacked, RainbowfishBufferAllSizes) {
     for (uint64_t i = 0; i < 8; ++i) {
         std::vector<bit_vector_small> columns_small;
         for (auto &a : columns) {
-            columns_small.emplace_back(a);
+            columns_small.emplace_back(to_sdsl(a));
         }
 
         std::vector<const bit_vector_small*> columns_small_ptr;

@@ -406,13 +406,13 @@ Config::StateType DBGSuccinct::get_state() const {
 void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
     valid_edges_.reset();
 
-    std::vector<bool> vector = with_pruning
+    //TODO: use sdsl::bit_vector as mask
+    std::vector<bool> vector_mask = with_pruning
         ? boss_graph_->prune_and_mark_all_dummy_edges(num_threads)
         : boss_graph_->mark_all_dummy_edges(num_threads);
 
-    for (uint64_t i = 0; i < vector.size(); ++i) {
-        vector[i] = !vector[i];
-    }
+    auto vector = to_sdsl(std::move(vector_mask));
+    vector.flip();
 
     switch (get_state()) {
         case Config::STAT: {

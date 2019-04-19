@@ -58,11 +58,13 @@ void BOSS::Chunk::extend(const BOSS::Chunk &other) {
 }
 
 void BOSS::Chunk::initialize_boss(BOSS *graph) const {
+    assert(graph->W_);
     delete graph->W_;
     graph->W_ = new wavelet_tree_stat(bits_per_char_W_, W_);
 
+    assert(graph->last_);
     delete graph->last_;
-    graph->last_ = new bit_vector_stat(last_);
+    graph->last_ = new bit_vector_stat(to_sdsl(last_));
 
     graph->F_ = F_;
 
