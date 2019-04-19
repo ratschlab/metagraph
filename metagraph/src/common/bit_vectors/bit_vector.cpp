@@ -53,6 +53,10 @@ std::ostream& operator<<(std::ostream &os, const bit_vector &bv) {
 
 template <class Vector>
 Vector bit_vector::convert_to() {
+    static_assert(!std::is_same<Vector, bit_vector_smart>::value, "");
+    static_assert(!std::is_same<Vector, bit_vector_small>::value, "");
+    static_assert(!std::is_same<Vector, bit_vector_adaptive>::value, "");
+
     if (dynamic_cast<Vector*>(this)) {
         // to the same type, no conversion
         return dynamic_cast<Vector&&>(*this);
@@ -65,12 +69,6 @@ Vector bit_vector::convert_to() {
                 && dynamic_cast<Vector*>(dynamic_cast<bit_vector_adaptive*>(this)->vector_.get())) {
         // adaptive(x) -> x
         return dynamic_cast<Vector&&>(*dynamic_cast<bit_vector_adaptive*>(this)->vector_);
-
-    // TODO: sd -> small if sparse enough
-    // TODO: rrr -> small if dense enough
-
-    // TODO: sd -> smart if sparse enough
-    // TODO: stat -> smart if dense enough
 
     } else {
         // anything -> anything (slower: with full reconstruction)
@@ -89,12 +87,20 @@ template bit_vector_rrr<31> bit_vector::convert_to<bit_vector_rrr<31>>();
 template bit_vector_rrr<63> bit_vector::convert_to<bit_vector_rrr<63>>();
 template bit_vector_rrr<127> bit_vector::convert_to<bit_vector_rrr<127>>();
 template bit_vector_rrr<255> bit_vector::convert_to<bit_vector_rrr<255>>();
-template bit_vector_small bit_vector::convert_to<bit_vector_small>();
-template bit_vector_smart bit_vector::convert_to<bit_vector_smart>();
 template sdsl::bit_vector bit_vector::convert_to<sdsl::bit_vector>();
+template<> bit_vector_small bit_vector::convert_to() {
+    return bit_vector_small(std::move(*this));
+}
+template<> bit_vector_smart bit_vector::convert_to() {
+    return bit_vector_smart(std::move(*this));
+}
 
 template <class Vector>
 Vector bit_vector::copy_to() const {
+    static_assert(!std::is_same<Vector, bit_vector_smart>::value, "");
+    static_assert(!std::is_same<Vector, bit_vector_small>::value, "");
+    static_assert(!std::is_same<Vector, bit_vector_adaptive>::value, "");
+
     if (dynamic_cast<const Vector*>(this)) {
         // copy to the same type, no conversion
         return Vector(dynamic_cast<const Vector&>(*this));
@@ -111,13 +117,8 @@ Vector bit_vector::copy_to() const {
                 *dynamic_cast<const bit_vector_adaptive*>(this)->vector_
         ));
 
-    // TODO: copy sd -> small if sparse enough
-    // TODO: copy rrr -> small if dense enough
-
-    // TODO: copy sd -> smart if sparse enough
-    // TODO: copy stat -> smart if dense enough
-
     } else {
+        // anything -> anything (slower: with full reconstruction)
         sdsl::bit_vector bv(size(), 0);
         call_ones([&bv](auto i) { bv[i] = true; });
         return Vector(std::move(bv));
@@ -133,9 +134,13 @@ template bit_vector_rrr<31> bit_vector::copy_to<bit_vector_rrr<31>>() const;
 template bit_vector_rrr<63> bit_vector::copy_to<bit_vector_rrr<63>>() const;
 template bit_vector_rrr<127> bit_vector::copy_to<bit_vector_rrr<127>>() const;
 template bit_vector_rrr<255> bit_vector::copy_to<bit_vector_rrr<255>>() const;
-template bit_vector_small bit_vector::copy_to<bit_vector_small>() const;
-template bit_vector_smart bit_vector::copy_to<bit_vector_smart>() const;
 template sdsl::bit_vector bit_vector::copy_to<sdsl::bit_vector>() const;
+template<> bit_vector_small bit_vector::copy_to() const {
+    return bit_vector_small(*this);
+}
+template<> bit_vector_smart bit_vector::copy_to() const {
+    return bit_vector_smart(*this);
+}
 
 
 
@@ -1160,18 +1165,32 @@ bit_vector_adaptive_stat<optimal_representation>
 
 template <bit_vector_adaptive::DefineRepresentation optimal_representation>
 bit_vector_adaptive_stat<optimal_representation>
-::bit_vector_adaptive_stat(const sdsl::bit_vector &vector) {
-    uint64_t num_set_bits = sdsl::util::cnt_one_bits(vector);
-
-    switch (optimal_representation(vector.size(), num_set_bits)) {
+::bit_vector_adaptive_stat(const bit_vector &vector) {
+    switch (optimal_representation(vector.size(), vector.num_set_bits())) {
         case SD_VECTOR:
-            vector_.reset(new bit_vector_sd(vector));
+            vector_.reset(new bit_vector_sd(vector.copy_to<bit_vector_sd>()));
             break;
         case RRR_VECTOR:
-            vector_.reset(new bit_vector_rrr<>(vector));
+            vector_.reset(new bit_vector_rrr<>(vector.copy_to<bit_vector_rrr<>>()));
             break;
         case STAT_VECTOR:
-            vector_.reset(new bit_vector_stat(sdsl::bit_vector(vector)));
+            vector_.reset(new bit_vector_stat(vector.copy_to<bit_vector_stat>()));
+            break;
+    }
+}
+
+template <bit_vector_adaptive::DefineRepresentation optimal_representation>
+bit_vector_adaptive_stat<optimal_representation>
+::bit_vector_adaptive_stat(bit_vector&& vector) {
+    switch (optimal_representation(vector.size(), vector.num_set_bits())) {
+        case SD_VECTOR:
+            vector_.reset(new bit_vector_sd(vector.convert_to<bit_vector_sd>()));
+            break;
+        case RRR_VECTOR:
+            vector_.reset(new bit_vector_rrr<>(vector.convert_to<bit_vector_rrr<>>()));
+            break;
+        case STAT_VECTOR:
+            vector_.reset(new bit_vector_stat(vector.convert_to<bit_vector_stat>()));
             break;
     }
 }

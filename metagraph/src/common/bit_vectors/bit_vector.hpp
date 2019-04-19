@@ -39,7 +39,24 @@ class bit_vector : public bitmap {
     virtual uint64_t size() const override = 0;
     virtual uint64_t num_set_bits() const override { return rank1(size() - 1); }
 
-    // FYI: This function invalidates the current object
+    /*
+        Convert vector to other types:
+            - bit_vector_small
+            - bit_vector_smart
+            - bit_vector_dyn
+            - bit_vector_stat
+            - bit_vector_sd
+            - bit_vector_rrr<3>
+            - bit_vector_rrr<8>
+            - bit_vector_rrr<15>
+            - bit_vector_rrr<31>
+            - bit_vector_rrr<63>
+            - bit_vector_rrr<127>
+            - bit_vector_rrr<255>
+            - sdsl::bit_vector
+
+        FYI: This function invalidates the current object
+    */
     template <class Vector>
     Vector convert_to();
 
@@ -102,6 +119,8 @@ class bit_vector_stat : public bit_vector {
   public:
     explicit bit_vector_stat(uint64_t size = 0, bool value = 0);
     explicit bit_vector_stat(const std::vector<bool> &vector);
+    explicit bit_vector_stat(const sdsl::bit_vector &vector) noexcept
+          : bit_vector_stat(sdsl::bit_vector(vector)) {}
     explicit bit_vector_stat(const bit_vector_stat &other);
     bit_vector_stat(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
                     uint64_t size);
@@ -319,14 +338,14 @@ class bit_vector_adaptive : public bit_vector {
  */
 template <bit_vector_adaptive::DefineRepresentation optimal_representation>
 class bit_vector_adaptive_stat : public bit_vector_adaptive {
+    friend bit_vector;
+
   public:
     explicit bit_vector_adaptive_stat(uint64_t size = 0, bool value = false);
 
     template <class BitVector>
     explicit bit_vector_adaptive_stat(const BitVector &vector)
-      : bit_vector_adaptive_stat(bit_vector_stat(vector).convert_to<sdsl::bit_vector>()) {}
-
-    explicit bit_vector_adaptive_stat(const sdsl::bit_vector &vector);
+      : bit_vector_adaptive_stat(static_cast<bit_vector&&>(bit_vector_stat(vector))) {}
 
     bit_vector_adaptive_stat(const VoidCall<const VoidCall<uint64_t>&> &call_ones,
                              uint64_t size,
@@ -336,6 +355,10 @@ class bit_vector_adaptive_stat : public bit_vector_adaptive {
       : bit_vector_adaptive_stat(sdsl::bit_vector(init)) {}
 
     virtual std::unique_ptr<bit_vector> copy() const override final;
+
+  private:
+    explicit bit_vector_adaptive_stat(const bit_vector &vector);
+    bit_vector_adaptive_stat(bit_vector&& vector);
 };
 
 /**
