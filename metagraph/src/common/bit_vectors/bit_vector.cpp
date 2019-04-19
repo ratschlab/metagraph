@@ -78,16 +78,13 @@ Vector bit_vector::convert_to() {
         // stat -> anything else
         return Vector(std::move(dynamic_cast<bit_vector_stat*>(this)->vector_));
 
-    } else if (dynamic_cast<bit_vector_adaptive*>(this)
-                && dynamic_cast<Vector*>(dynamic_cast<bit_vector_adaptive*>(this)->vector_.get())) {
-        // adaptive(x) -> x
-        return dynamic_cast<Vector&&>(*dynamic_cast<bit_vector_adaptive*>(this)->vector_);
+    } else if (dynamic_cast<bit_vector_adaptive*>(this)) {
+        // adaptive(x) -> anything
+        return dynamic_cast<bit_vector_adaptive*>(this)->vector_->convert_to<Vector>();
 
     } else {
         // anything -> anything (slower: with full reconstruction)
-        sdsl::bit_vector bv(size(), 0);
-        call_ones([&bv](auto i) { bv[i] = true; });
-        return Vector(std::move(bv));
+        return Vector(to_vector());
     }
 }
 template bit_vector_dyn bit_vector::convert_to<bit_vector_dyn>();
@@ -123,18 +120,13 @@ Vector bit_vector::copy_to() const {
         auto bv = dynamic_cast<const bit_vector_stat*>(this)->vector_;
         return Vector(std::move(bv));
 
-    } else if (dynamic_cast<const bit_vector_adaptive*>(this)
-                && dynamic_cast<Vector*>(dynamic_cast<const bit_vector_adaptive*>(this)->vector_.get())) {
-        // copy adaptive(x) -> x
-        return Vector(dynamic_cast<const Vector&>(
-                *dynamic_cast<const bit_vector_adaptive*>(this)->vector_
-        ));
+    } else if (dynamic_cast<const bit_vector_adaptive*>(this)) {
+        // copy adaptive(x) -> anything
+        return dynamic_cast<const bit_vector_adaptive*>(this)->vector_->copy_to<Vector>();
 
     } else {
         // anything -> anything (slower: with full reconstruction)
-        sdsl::bit_vector bv(size(), 0);
-        call_ones([&bv](auto i) { bv[i] = true; });
-        return Vector(std::move(bv));
+        return Vector(to_vector());
     }
 }
 template bit_vector_dyn bit_vector::copy_to<bit_vector_dyn>() const;
@@ -249,27 +241,23 @@ inline uint64_t prev1(const BitVector &v,
 // bit_vector_dyn, libmaus //
 /////////////////////////////
 
-template <class BitVector>
-std::vector<uint64_t> pack_bits(const BitVector &v) {
+// repack bits for BitBTree (uses different order)
+std::vector<uint64_t> pack_bits(const sdsl::bit_vector &v) {
     std::vector<uint64_t> bits((v.size() + 63) / 64);
-    for (size_t i = 0; i < v.size(); ++i) {
-        libmaus2::bitio::putBit(bits.data(), i, v[i]);
-    }
+    ::call_ones(v, [&](auto i) {
+        libmaus2::bitio::setBit(bits.data(), i);
+    });
     return bits;
 }
-
-bit_vector_dyn::bit_vector_dyn(const std::vector<uint64_t> &bits_packed,
-                               size_t num_bits)
-      : vector_(num_bits, bits_packed.data()) {}
 
 bit_vector_dyn::bit_vector_dyn(uint64_t size, bool value)
       : vector_(size, value) {}
 
 bit_vector_dyn::bit_vector_dyn(const sdsl::bit_vector &v)
-      : bit_vector_dyn(pack_bits(v), v.size()) {}
+      : vector_(v.size(), pack_bits(v).data()) {}
 
 bit_vector_dyn::bit_vector_dyn(std::initializer_list<bool> init)
-      : bit_vector_dyn(pack_bits(std::vector<bool>(init)), init.size()) {}
+      : bit_vector_dyn(sdsl::bit_vector(init)) {}
 
 std::unique_ptr<bit_vector> bit_vector_dyn::copy() const {
     return std::make_unique<bit_vector_dyn>(*this);
@@ -350,9 +338,9 @@ void bit_vector_dyn::serialize(std::ostream &out) const {
 }
 
 void bit_vector_dyn::call_ones(const std::function<void(uint64_t)> &callback) const {
-    for (uint64_t i = 0; i < vector_.size(); ++i) {
-        if (vector_[i])
-            callback(i);
+    uint64_t i = 0;
+    while (i < size() && (i = next1(i)) < size()) {
+        callback(i++);
     }
 }
 
@@ -554,14 +542,7 @@ bool bit_vector_stat::load(std::istream &in) {
 }
 
 void bit_vector_stat::call_ones(const std::function<void(uint64_t)> &callback) const {
-    if (num_set_bits_ * 2 < size()) {
-        ::call_ones(vector_, callback);
-    } else {
-        for (uint64_t i = 0; i < vector_.size(); ++i) {
-            if (vector_[i])
-                callback(i);
-        }
-    }
+    ::call_ones(vector_, callback);
 }
 
 void bit_vector_stat::init_rs() {

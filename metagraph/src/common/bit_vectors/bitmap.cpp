@@ -11,6 +11,15 @@ const size_t bitmap_adaptive::kRowCutoff = 1'000'000;
 
 void call_ones(const sdsl::bit_vector &vector,
                const std::function<void(uint64_t)> &callback) {
+    if (sdsl::util::cnt_one_bits(vector) > vector.size() / 2) {
+        //TODO: benchmark to check if this actually makes it faster
+        for (uint64_t i = 0; i < vector.size(); ++i) {
+            if (vector[i])
+                callback(i);
+        }
+        return;
+    }
+
     uint64_t j = 64;
     uint64_t i = 0;
     uint64_t word;

@@ -105,13 +105,12 @@ class bit_vector_dyn : public bit_vector {
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
 
-    uint64_t size() const  override { return vector_.size(); }
+    uint64_t size() const override { return vector_.size(); }
+    uint64_t num_set_bits() const override { return vector_.count1(); }
 
     void call_ones(const std::function<void(uint64_t)> &callback) const override;
 
   private:
-    bit_vector_dyn(const std::vector<uint64_t> &bits_packed, size_t num_bits);
-
     libmaus2::bitbtree::BitBTree<6, 64> vector_;
 };
 
@@ -153,6 +152,8 @@ class bit_vector_stat : public bit_vector {
 
     uint64_t size() const override { return vector_.size(); }
     uint64_t num_set_bits() const override { return num_set_bits_; }
+
+    sdsl::bit_vector to_vector() const override { return vector_; }
 
     void call_ones(const std::function<void(uint64_t)> &callback) const override;
 
