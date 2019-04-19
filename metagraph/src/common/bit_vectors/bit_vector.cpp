@@ -381,7 +381,7 @@ bit_vector_stat
 
 bit_vector_stat::bit_vector_stat(sdsl::bit_vector&& vector) noexcept
       : vector_(std::move(vector)),
-        num_set_bits_(count_num_set_bits(vector_)) {}
+        num_set_bits_(sdsl::util::cnt_one_bits(vector_)) {}
 
 bit_vector_stat::bit_vector_stat(bit_vector_stat&& other) noexcept {
     *this = std::move(other);
@@ -536,7 +536,7 @@ bool bit_vector_stat::load(std::istream &in) {
                       << " and select support dumped. Reserialize to"
                       << " make the loading faster." << std::endl;
 
-            num_set_bits_ = count_num_set_bits(vector_);
+            num_set_bits_ = sdsl::util::cnt_one_bits(vector_);
             requires_update_ = true;
             init_rs();
         }
@@ -589,7 +589,7 @@ bit_vector_sd::bit_vector_sd(uint64_t size, bool value)
 
 bit_vector_sd::bit_vector_sd(const sdsl::bit_vector &vector) {
     // check if it needs to be inverted
-    uint64_t num_set_bits = count_num_set_bits(vector);
+    uint64_t num_set_bits = sdsl::util::cnt_one_bits(vector);
 
     if (num_set_bits <= vector.size() / 2) {
         // vector is sparse, no need to invert
