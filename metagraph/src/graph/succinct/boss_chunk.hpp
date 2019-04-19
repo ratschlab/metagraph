@@ -1,5 +1,5 @@
-#ifndef __DBG_SUCCINCT_CHUNK_HPP__
-#define __DBG_SUCCINCT_CHUNK_HPP__
+#ifndef __BOSS_CHUNK_HPP__
+#define __BOSS_CHUNK_HPP__
 
 #include <type_traits>
 
@@ -51,4 +51,4 @@ class BOSS::Chunk {
 };
 
 
-#endif // __DBG_SUCCINCT_CHUNK_HPP__
+#endif // __BOSS_CHUNK_HPP__

@@ -1,5 +1,5 @@
-#ifndef __MERGE_HPP__
-#define __MERGE_HPP__
+#ifndef __BOSS_MERGE_HPP__
+#define __BOSS_MERGE_HPP__
 
 #include <cstdint>
 #include <vector>
@@ -27,4 +27,4 @@ namespace merge {
 
 } // namespace merge
 
-#endif // __MERGE_HPP__
+#endif // __BOSS_MERGE_HPP__

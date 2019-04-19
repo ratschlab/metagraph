@@ -1,5 +1,5 @@
-#ifndef __DBG_SUCCINCT_CONSTRUCT_HPP__
-#define __DBG_SUCCINCT_CONSTRUCT_HPP__
+#ifndef __BOSS_CONSTRUCT_HPP__
+#define __BOSS_CONSTRUCT_HPP__
 
 #include "dbg_construct.hpp"
 #include "boss.hpp"
@@ -54,4 +54,4 @@ class BOSSConstructor : public IGraphConstructor<BOSS> {
     std::unique_ptr<IBOSSChunkConstructor> constructor_;
 };
 
-#endif // __DBG_SUCCINCT_CONSTRUCT_HPP__
+#endif // __BOSS_CONSTRUCT_HPP__

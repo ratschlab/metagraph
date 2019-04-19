@@ -1,5 +1,5 @@
-#ifndef __DBG_SUCCINCT_HPP__
-#define __DBG_SUCCINCT_HPP__
+#ifndef __BOSS_HPP__
+#define __BOSS_HPP__
 
 #include <type_traits>
 
@@ -644,4 +644,4 @@ class DBGSuccinct : public DeBruijnGraph {
 };
 
 
-#endif // __DBG_SUCCINCT_HPP__
+#endif // __BOSS_HPP__
