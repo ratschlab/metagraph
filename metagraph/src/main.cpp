@@ -12,6 +12,7 @@
 #include "annotate_column_compressed.hpp"
 #include "serialization.hpp"
 #include "utils.hpp"
+#include "threading.hpp"
 #include "reverse_complement.hpp"
 #include "static_annotators_def.hpp"
 #include "annotation_converters.hpp"
@@ -1144,9 +1145,9 @@ int main(int argc, const char *argv[]) {
                 std::cout << "Start reading data and extracting k-mers" << std::endl;
             }
 
-            utils::ThreadPool thread_pool_files(kMaxNumParallelReadFiles);
-            utils::ThreadPool thread_pool(std::max(1u, config->parallel) - 1,
-                                          std::max(1u, config->parallel));
+            ThreadPool thread_pool_files(kMaxNumParallelReadFiles);
+            ThreadPool thread_pool(std::max(1u, config->parallel) - 1,
+                                   std::max(1u, config->parallel));
             Timer timer;
 
             // iterate over input files
@@ -1441,7 +1442,7 @@ int main(int argc, const char *argv[]) {
 
             auto anno_graph = initialize_annotated_dbg(*config);
 
-            utils::ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
+            ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
 
             Timer timer;
 

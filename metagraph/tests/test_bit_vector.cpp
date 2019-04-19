@@ -1,7 +1,7 @@
 #include "gtest/gtest.h"
 
 #include "bit_vector.hpp"
-#include "utils.hpp"
+#include "threading.hpp"
 
 // Disable death tests
 #ifndef _DEATH_TEST
@@ -783,7 +783,7 @@ TEST(bit_vector_sd, InitializeByBitsDense) {
 }
 
 TEST(bit_vector_stat, ConcurrentReadingAfterWriting) {
-    utils::ThreadPool thread_pool(3);
+    ThreadPool thread_pool(3);
     bit_vector_stat vector;
 
     std::vector<bool> bits;

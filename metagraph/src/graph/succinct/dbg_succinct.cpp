@@ -8,6 +8,7 @@
 #include "boss.hpp"
 #include "serialization.hpp"
 #include "reverse_complement.hpp"
+#include "utils.hpp"
 
 using utils::remove_suffix;
 

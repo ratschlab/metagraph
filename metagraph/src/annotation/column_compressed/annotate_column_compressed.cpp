@@ -6,6 +6,7 @@
 
 #include "serialization.hpp"
 #include "utils.hpp"
+#include "threading.hpp"
 #include "annotate_row_compressed.hpp"
 
 using utils::remove_suffix;
@@ -424,7 +425,7 @@ void ColumnCompressed<Label>
         return;
     }
 
-    utils::ThreadPool thread_pool(num_threads);
+    ThreadPool thread_pool(num_threads);
     for (uint64_t i = 0; i < num_rows_; i += kNumRowsInBlock) {
         thread_pool.enqueue(
             [this](const auto&... args) { this->add_labels(args...); },

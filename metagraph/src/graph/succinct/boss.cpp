@@ -12,6 +12,7 @@
 #include "boss_construct.hpp"
 #include "serialization.hpp"
 #include "reverse_complement.hpp"
+#include "utils.hpp"
 
 using utils::remove_suffix;
 using TAlphabet = BOSS::TAlphabet;
@@ -1598,7 +1599,7 @@ uint64_t traverse_dummy_edges(const BOSS &graph,
         return num_dummy_traversed;
     }
 
-    utils::ThreadPool pool(num_threads);
+    ThreadPool pool(num_threads);
 
     std::unique_ptr<std::vector<char>> edges_threadsafe;
     if (redundant_mask || traversed_mask)

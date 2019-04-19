@@ -3,7 +3,7 @@
 
 #include "sequence_graph.hpp"
 #include "annotate.hpp"
-#include "utils.hpp"
+#include "threading.hpp"
 
 
 class AnnotatedDBG {
@@ -49,7 +49,7 @@ class AnnotatedDBG {
     std::unique_ptr<SequenceGraph> graph_;
     std::unique_ptr<Annotator> annotator_;
 
-    utils::ThreadPool thread_pool_;
+    ThreadPool thread_pool_;
     std::mutex mutex_;
     bool force_fast_;
 };

@@ -1,5 +1,7 @@
 #include "vector_row_binmat.hpp"
 
+#include "threading.hpp"
+
 
 bool VectorRowBinMat::get(Row row, Column column) const {
     assert(row < vector_.size());
@@ -27,7 +29,7 @@ void VectorRowBinMat::force_set(Row row, Column column) {
 }
 
 void VectorRowBinMat::standardize_rows() {
-    #pragma omp parallel for num_threads(utils::get_num_threads())
+    #pragma omp parallel for num_threads(get_num_threads())
     for (size_t i = 0; i < vector_.size(); ++i) {
         std::sort(vector_[i].begin(), vector_[i].end());
         vector_[i].erase(std::unique(vector_[i].begin(), vector_[i].end()),

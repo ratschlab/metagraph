@@ -5,6 +5,7 @@
 #include <shared_mutex>
 
 #include "kmer_extractor.hpp"
+#include "threading.hpp"
 
 
 typedef std::function<void(const std::string&)> CallString;
@@ -93,7 +94,7 @@ class KmerCollector {
     mutable std::shared_timed_mutex mutex_copy_;
 
     size_t num_threads_;
-    utils::ThreadPool thread_pool_;
+    ThreadPool thread_pool_;
 
     std::vector<std::string> sequences_storage_;
     size_t stored_sequences_size_;

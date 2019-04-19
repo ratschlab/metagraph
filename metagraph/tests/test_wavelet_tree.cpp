@@ -1,7 +1,7 @@
 #include "gtest/gtest.h"
 
 #include "wavelet_tree.hpp"
-#include "utils.hpp"
+#include "threading.hpp"
 
 // Disable death tests
 #ifndef _DEATH_TEST
@@ -512,7 +512,7 @@ TEST(wavelet_tree_dyn, BeyondTheDNA) {
 
 
 TEST(wavelet_tree_stat, ConcurrentReadingAfterWriting) {
-    utils::ThreadPool thread_pool(3);
+    ThreadPool thread_pool(3);
     wavelet_tree_stat vector(4);
 
     size_t tested_number = 15;

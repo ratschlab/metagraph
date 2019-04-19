@@ -6,7 +6,7 @@
 #define private public
 
 #include "bitmap.hpp"
-#include "utils.hpp"
+#include "threading.hpp"
 
 // Disable death tests
 #ifndef _DEATH_TEST
@@ -157,7 +157,7 @@ TEST(bitmap_adaptive, set_bits) {
 
 
 TEST(bitmap_vector, ConcurrentReading) {
-    utils::ThreadPool thread_pool(3);
+    ThreadPool thread_pool(3);
     bitmap_vector vector(10'000'000, false);
 
     std::vector<bool> bits;

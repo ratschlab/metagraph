@@ -9,7 +9,6 @@
 #include "wavelet_tree.hpp"
 #include "bit_vector.hpp"
 #include "kmer_extractor.hpp"
-#include "utils.hpp"
 
 class BOSSConstructor;
 
