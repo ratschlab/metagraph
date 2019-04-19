@@ -131,13 +131,14 @@ public:
     void construct_routing_table() {
         vector<char> routing_table_array;
         for(int node=1;node<=graph.num_nodes();node++) {
-            routing_table_array.push_back('#');
+            routing_table_array.push_back('#');// to always start a block with #
             if (splits.count(node)) {
                 for(auto& choice : splits[node]) {
                     routing_table_array.push_back(choice);
                 }
             }
         }
+        routing_table_array.push_back('#'); // to also always end a block with #
         //routing_table_array.push_back('\0'); // end of sequence
         sdsl::int_vector<0> routing_table_array_encoded(routing_table_array.size());
         for(int i=0;i<routing_table_array.size();i++) {
@@ -165,6 +166,17 @@ public:
         auto routing_table_block = routing_table_offset(node);
         auto occurrences_of_symbol_before_block = routing_table.rank(routing_table_block,symbol);
         return routing_table.select(occurrences_of_symbol_before_block+occurrence) - routing_table_block;
+    }
+
+    int routing_table_rank(node_index node, int position, char symbol) {
+        auto routing_table_block = routing_table_offset(node);
+        auto absolute_position = routing_table_block+position;
+        auto occurrences_of_base_before_block = routing_table.rank(routing_table_block,symbol);
+        return routing_table.rank(absolute_position,symbol) - occurrences_of_base_before_block;
+    }
+    void get_paths_going_through() {
+        //catch: relative indices in node can be from the same sequence if the read is going there multiple times
+        //use set to filter out duplicates or be smarter and stop when arrived to the starting node again
     }
 
     std::string decode(path_id path) const override {
@@ -235,12 +247,32 @@ public:
         }
         return reads;
     }
+    vector<string> decode_all_reads_inverse() const {
+        auto reads = vector<string>();
+        for(node_index node=1;node<=graph.num_nodes();node++) {
+            auto count = number_of_reads_ending_at_node(node);
+            for(auto read_index=0;read_index<count;read_index++) {
+                auto relative_index = routing_table_select(node,read_index+1,'$');
+                reads.push_back(get_global_path_id(node,relative_index));
+            }
+        }
+        return reads;
+    }
 
     int number_of_reads_starting_at_node(node_index node) const {
         int result = 0;
         if (node_is_join(node)) {
             int starting_offset = (joins.rank1(node-1)-1)*'N'_rc;
             result = edge_multiplicity_table[starting_offset + '$'_rc];
+        }
+        return result;
+    }
+
+    int number_of_reads_ending_at_node(node_index node) const {
+        int result = 0;
+        if (node_is_split(node)) {
+            auto size = routing_table_select(node,1,'#');
+            result = routing_table_rank(node,size,'$');
         }
         return result;
     }
@@ -395,7 +427,7 @@ public:
         assert(base);
         node = graph.traverse_back(node,base);
         if (node_is_split(node)) {
-            relative_position = routing_table_select(node,relative_position,base);
+            relative_position = routing_table_select(node,relative_position+1,base);// +1 as relative_position is 0-based
         }
         return get_global_path_id(node,relative_position);
     }
