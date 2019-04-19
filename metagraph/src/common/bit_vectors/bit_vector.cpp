@@ -721,6 +721,13 @@ uint64_t bit_vector_sd::rank1(uint64_t id) const {
                       : idx - rk1_(idx);
 }
 
+uint64_t bit_vector_sd::select0(uint64_t id) const {
+    assert(id > 0 && size() > 0 && id <= rank0(size() - 1));
+    assert(num_set_bits() == rank1(size() - 1));
+
+    return !inverted_ ? slct0_(id) : slct1_(id);
+}
+
 uint64_t bit_vector_sd::select1(uint64_t id) const {
     assert(id > 0 && size() > 0 && id <= num_set_bits());
     assert(num_set_bits() == rank1(size() - 1));
@@ -805,7 +812,7 @@ void bit_vector_sd::call_ones(const std::function<void(uint64_t)> &callback) con
         // sparse
         uint64_t num_ones = num_set_bits();
         for (uint64_t i = 1; i <= num_ones; ++i) {
-            callback(select1(i));
+            callback(slct1_(i));
         }
     } else {
         // dense, vector_ keeps positions of zeros
@@ -901,6 +908,14 @@ uint64_t bit_vector_rrr<log_block_size>::rank1(uint64_t id) const {
 }
 
 template <size_t log_block_size>
+uint64_t bit_vector_rrr<log_block_size>::select0(uint64_t id) const {
+    assert(id > 0 && size() > 0 && id <= size() - num_set_bits());
+    assert(num_set_bits() == rank1(size() - 1));
+
+    return slct0_(id);
+}
+
+template <size_t log_block_size>
 uint64_t bit_vector_rrr<log_block_size>::select1(uint64_t id) const {
     assert(id > 0 && size() > 0 && id <= num_set_bits());
     assert(num_set_bits() == rank1(size() - 1));
@@ -920,14 +935,6 @@ uint64_t bit_vector_rrr<log_block_size>::prev1(uint64_t pos) const {
     assert(pos < size());
 
     return ::prev1(*this, pos, MAX_ITER_BIT_VECTOR_RRR);
-}
-
-template <size_t log_block_size>
-uint64_t bit_vector_rrr<log_block_size>::select0(uint64_t id) const {
-    assert(id > 0 && size() > 0 && id <= size() - num_set_bits());
-    assert(num_set_bits() == rank1(size() - 1));
-
-    return slct0_(id);
 }
 
 template <size_t log_block_size>

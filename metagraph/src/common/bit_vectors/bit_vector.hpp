@@ -190,6 +190,7 @@ class bit_vector_sd : public bit_vector {
     virtual std::unique_ptr<bit_vector> copy() const override;
 
     uint64_t rank1(uint64_t id) const override;
+    uint64_t select0(uint64_t id) const;
     uint64_t select1(uint64_t id) const override;
 
     uint64_t next1(uint64_t id) const override;

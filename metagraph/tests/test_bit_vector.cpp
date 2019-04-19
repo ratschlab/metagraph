@@ -213,6 +213,27 @@ TEST(bit_vector_rrr, nonCommonQueries) {
     }
 }
 
+TEST(bit_vector_sd, nonCommonQueries) {
+    // Mainly test select0.
+    auto vector = std::make_unique<bit_vector_sd>(10, 1);
+    ASSERT_TRUE(vector);
+    EXPECT_EQ(10u, vector->size());
+    for (size_t i = 0; i < vector->size(); ++i) {
+        EXPECT_EQ(1, (*vector)[i]);
+        ASSERT_DEATH(vector->select0(i), "");
+    }
+
+    vector.reset(new bit_vector_sd(10, 0));
+    ASSERT_TRUE(vector);
+    EXPECT_EQ(10u, vector->size());
+    for (size_t i = 0; i < vector->size(); ++i) {
+        EXPECT_EQ(0, (*vector)[i]);
+        EXPECT_EQ(i, vector->select0(i + 1));
+        EXPECT_EQ(i + 1, vector->rank0(vector->select0(i + 1)));
+        EXPECT_EQ(i, vector->select0(vector->rank0(i)));
+    }
+}
+
 void test_bit_vector_set(bit_vector *vector, std::vector<bool> *numbers) {
     reference_based_test(*vector, *numbers);
 
