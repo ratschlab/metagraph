@@ -10,6 +10,7 @@
 #define protected public
 #define private public
 
+#include "dbg_succinct.hpp"
 #include "boss.hpp"
 #include "boss_construct.hpp"
 #include "utils.hpp"

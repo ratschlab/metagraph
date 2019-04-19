@@ -20,6 +20,7 @@
 #include "dbg_hash_string.hpp"
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
+#include "dbg_succinct.hpp"
 #include "server.hpp"
 
 typedef annotate::MultiLabelAnnotation<uint64_t, std::string> Annotator;
