@@ -48,18 +48,15 @@ using node_index = SequenceGraph::node_index;
 
 
 template<class Database>
-void compressReads(const ValueArg<string> &statisticsArg, ValueArg<string> &compressedArg, const vector<string> &reads) {
+Database compressReads(ValueArg<string> &compressedArg, const vector<string> &reads) {
     auto db = Database(reads);
     db.encode(reads);
-    if (statisticsArg.isSet()) {
-        //auto statistics = db.get_statistics();
-        //throw std::runtime_error("Not supported yet");
-        //save_string(statistics.dump(4),statistics_filename);
-    }
+
     if (compressedArg.isSet()) {
         fs::path compress_folder = compressedArg.getValue();
         db.serialize(compress_folder);
     }
+    return db;
 }
 
 int main(int argc, char *argv[]) {
@@ -99,10 +96,14 @@ int main(int argc, char *argv[]) {
     auto reads = read_reads_from_fasta(input_filename);
     auto compressor = compressor_type.getValue();
     if (compressor == "wavelet") {
-        compressReads<PathDatabaseBaselineWavelet<>>(statisticsArg, compressedArg, reads);
+        auto db = compressReads<PathDatabaseBaselineWavelet<>>(compressedArg, reads);
+        if (statisticsArg.isSet()) {
+            auto statistics = db.get_statistics();
+            save_string(statistics.dump(4),statisticsArg.getValue());
+        }
     }
     else if (compressor == "wavelet_old") {
-        compressReads<PathDatabaseBaselineWaveletDeprecated>(statisticsArg, compressedArg, reads);
+        compressReads<PathDatabaseBaselineWaveletDeprecated>(compressedArg, reads);
     }
 
     return 0;

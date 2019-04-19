@@ -47,6 +47,9 @@ std::ostream &serialize(std::ostream &os, const vector<POD> &v) {
 #pragma GCC diagnostic ignored "-Wmissing-noreturn"
 #pragma GCC diagnostic ignored "-Wreturn-type"
 
+#define STATS_JOINS_HISTOGRAM (1u << 0)
+#define STATS_SPLITS_HISTOGRAM (1u << 1)
+
 using namespace std;
 using alphabets::log2;
 
@@ -171,7 +174,7 @@ public:
         int base;
         while(true) {
             if (node_is_split(node)) {
-                auto routing_table_block = routing_table.select( node,'#'_rc)+1;
+                auto routing_table_block = routing_table_offset(node);
                 auto absolute_position = routing_table_block+relative_position;
                 base = routing_table[absolute_position];
                 auto occurrences_of_base_before_block = routing_table.rank(routing_table_block,base);
@@ -213,6 +216,8 @@ public:
         return sequence;
     }
 
+    int routing_table_offset(node_index node) const { return routing_table.select(node, '#'_rc) + 1; }
+
     vector<string> decode_all_reads() const {
         auto reads = vector<string>();
         for(node_index node=1;node<=graph.num_nodes();node++) {
@@ -249,6 +254,7 @@ public:
         // * 'N' as we write multiple values
         int starting_offset = (joins.rank1(node-1)-1)*'N'_rc;
         int result = 0;
+        assert(rc(branch_label) <= 'N'_rc); // no information for other symbols
         for(int previous_branch=0;previous_branch<rc(branch_label);previous_branch++) {
             result += edge_multiplicity_table[starting_offset+previous_branch];
         }
@@ -284,6 +290,71 @@ public:
         db.routing_table.load(routing_table_file);
         db.joins.load(joins_file);
         return db;
+    }
+
+    json get_statistics(unsigned int verbosity = 0) const {
+        int true_joins = 0;
+        int added_joins = 0;
+        int true_splits = 0;
+        int added_splits = 0;
+        std::map<int, int> joins_diff_symbols_histogram;
+        std::map<int, int> splits_size_histogram;
+        std::map<int, int> splits_diff_symbols_histogram;
+
+        for (int node = 1; node <= graph.num_nodes();node++) {
+            if (node_is_join(node)) {
+                if (graph.indegree(node) > 1) {
+                    true_joins++;
+                }
+                else {
+                    added_joins++;
+                }
+                if (verbosity & STATS_JOINS_HISTOGRAM) {
+                    int prev = 0;
+                    int cardinality = 0;
+                    for (char c : {'$','A','C','G','T','N'}) {
+                        int cur = branch_starting_offset(node,c);
+                        if (cur != prev) {
+                            cardinality++;
+                        }
+                    }
+                    joins_diff_symbols_histogram[cardinality]++; // size histogram doesn't have infromation whether N was present
+                                                         // ToDo: fix this
+                }
+            }
+            if (node_is_split(node)) {
+                if (graph.outdegree(node) > 1) {
+                    true_splits++;
+                }
+                else {
+                    added_splits++;
+                }
+                if (verbosity & STATS_SPLITS_HISTOGRAM) {
+                    set<int> diff_symbols;
+                    int start = routing_table_offset(node);
+                    int i = start;
+                    for (; routing_table[i] != '#'_rc; i++) {
+                        diff_symbols.insert(routing_table[i]);
+                    }
+                    splits_diff_symbols_histogram[diff_symbols.size()]++;
+                    splits_size_histogram[i - start]++;
+                }
+            }
+        }
+        json result = {{"true_joins", true_joins},
+                       {"added_joins", added_joins},
+                       {"true_splits", true_splits},
+                       {"added_splits", added_splits}
+                      };
+        if (verbosity & STATS_SPLITS_HISTOGRAM) {
+            result["splits_diff_symbols_histogram"] = splits_diff_symbols_histogram;
+            result["splits_size_histogram"] = splits_size_histogram;
+        }
+        if (verbosity & STATS_JOINS_HISTOGRAM) {
+            result["splits_diff_symbols_histogram"] = splits_diff_symbols_histogram;
+        }
+        cerr << result.dump(4) << endl;
+        return result;
     }
 
 private:
