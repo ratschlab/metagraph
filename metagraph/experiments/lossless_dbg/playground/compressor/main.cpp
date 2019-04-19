@@ -99,7 +99,7 @@ int main(int argc, char *argv[]) {
         auto db = compressReads<PathDatabaseBaselineWavelet<>>(compressedArg, reads);
         if (statisticsArg.isSet()) {
             auto statistics = db.get_statistics();
-            save_string(statistics.dump(4),statisticsArg.getValue());
+            save_string(statistics.dump(4),statistics_filename);
         }
     }
     else if (compressor == "wavelet_old") {

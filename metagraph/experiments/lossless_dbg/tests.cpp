@@ -111,7 +111,6 @@ void serialization_deserialization_test(vector<string>& reads, int k_kmer=21) {
         decompressed_reads.push_back(newdb.decode(handle));
     }
     ASSERT_EQ(reads,decompressed_reads);
-
 }
 
 template <typename T>

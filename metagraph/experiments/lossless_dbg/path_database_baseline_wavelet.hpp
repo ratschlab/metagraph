@@ -161,6 +161,11 @@ public:
 
     }
 
+    int routing_table_select(node_index node, int occurrence, char symbol) {
+        auto routing_table_block = routing_table_offset(node);
+        auto occurrences_of_symbol_before_block = routing_table.rank(routing_table_block,symbol);
+        return routing_table.select(occurrences_of_symbol_before_block+occurrence) - routing_table_block;
+    }
 
     std::string decode(path_id path) const override {
         auto node = path.first;
@@ -169,6 +174,8 @@ public:
 
         int relative_starting_position = path.second;
         int relative_position = branch_starting_offset(node,'$') + relative_starting_position;
+
+
 
         int kmer_position = 0;
         int base;
@@ -259,6 +266,14 @@ public:
             result += edge_multiplicity_table[starting_offset+previous_branch];
         }
         return result;
+    }
+
+    int branch_size(node_index node, char branch_label) const {
+        // todo: merge with branch_starting_offset
+        int starting_offset = (joins.rank1(node-1)-1)*'N'_rc;
+        int result = 0;
+        assert(rc(branch_label) <= 'T'_rc); // no information for other symbols
+        return edge_multiplicity_table[starting_offset+rc(branch_label)];
     }
 
 
@@ -355,6 +370,32 @@ public:
         }
         cerr << result.dump(4) << endl;
         return result;
+    }
+
+    path_id get_global_path_id(node_index node, int relative_position) {
+        if (node_is_join(node) and relative_position < branch_size(node,'$')) {
+            return {node,relative_position};
+        }
+        char base = '\0';
+        if (node_is_join(node)) {
+            for(auto c = 'N'_rc; c >= 0;c++) {
+                auto offset = branch_starting_offset(node,tochar(c));
+                if (offset <= relative_position) {
+                    base = tochar(c);
+                    relative_position -= offset;
+                }
+            }
+        }
+        else {
+            assert(graph.outdegree(node) == 1);
+            graph.call_outgoing_kmers(node,[&base](node_index node,char edge_label ) { base = rc(edge_label);});
+        }
+        assert(base);
+        node = graph.traverse_back(node,base);
+        if (node_is_split(node)) {
+            relative_position = routing_table_select(node,relative_position,base);
+        }
+        return get_global_path_id(node,relative_position);
     }
 
 private:
