@@ -117,6 +117,7 @@ merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotators, 
         num_rows,
         [&](LEncoder &merged_label_enc, const std::function<void (const BinaryMatrix::RowCallback&)> &callback) {
             //TODO: add write_rows to rowflat which just writes rowcompressed then converts and serializes as below, then can use template param here and delete if statement below
+            //TODO: minor problem; conversion to rowflat overwrites outfile.row.annodbg if it exists
             return RowCompressed<Label>::write_rows(outfile,
                                                merged_label_enc,
                                                callback,
@@ -125,7 +126,9 @@ merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotators, 
     );
 
     if (!std::is_same<RowCompressed<Label>, ToAnnotation>::value) {
+        //TODO: implement other target annotation types w/ rowcompressed file input (no change here needed)
         auto out_annotator = convert<RowCompressed<Label>, ToAnnotation, Label>(outfile);
+        //TODO: should delete outfile.row.annodbg here
         out_annotator->serialize(outfile);
     }
 
