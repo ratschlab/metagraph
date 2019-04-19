@@ -8,7 +8,7 @@
 #include "bit_vector.hpp"
 
 
-class DBGSDConstructor;
+class DBGBitmapConstructor;
 
 /**
  * Node-centric de Bruijn graph
@@ -16,15 +16,15 @@ class DBGSDConstructor;
  * In canonical mode, for each k-mer in the graph, its
  * reverse complement is stored in the graph as well.
  */
-class DBGSD : public DeBruijnGraph {
-    friend DBGSDConstructor;
+class DBGBitmap : public DeBruijnGraph {
+    friend DBGBitmapConstructor;
 
   public:
     // Initialize complete graph
-    explicit DBGSD(size_t k, bool canonical_mode = false);
+    explicit DBGBitmap(size_t k, bool canonical_mode = false);
 
     // Initialize graph from builder
-    explicit DBGSD(DBGSDConstructor *builder);
+    explicit DBGBitmap(DBGBitmapConstructor *builder);
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
@@ -59,12 +59,12 @@ class DBGSD : public DeBruijnGraph {
                                  std::vector<node_index> *source_nodes) const;
 
     size_t outdegree(node_index) const {
-        // TODO: Complete outdegree for DBGSD.
+        // TODO: Complete outdegree for DBGBitmap.
         throw std::runtime_error("Not implemented");
     }
 
     size_t indegree(node_index) const {
-        // TODO: Complete outdegree for DBGSD.
+        // TODO: Complete outdegree for DBGBitmap.
         throw std::runtime_error("Not implemented");
     }
 
@@ -95,12 +95,12 @@ class DBGSD : public DeBruijnGraph {
     bool load(std::istream &in);
     bool load(const std::string &filename);
 
-    bool operator==(const DBGSD &other) const { return equals(other, false); }
-    bool operator!=(const DBGSD &other) const { return !(*this == other); }
+    bool operator==(const DBGBitmap &other) const { return equals(other, false); }
+    bool operator!=(const DBGBitmap &other) const { return !(*this == other); }
 
-    bool equals(const DBGSD &other, bool verbose = false) const;
+    bool equals(const DBGBitmap &other, bool verbose = false) const;
 
-    friend std::ostream& operator<<(std::ostream &out, const DBGSD &graph);
+    friend std::ostream& operator<<(std::ostream &out, const DBGBitmap &graph);
 
     const std::string &alphabet;
 

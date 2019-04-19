@@ -2,16 +2,16 @@
 
 
 template <typename KMER>
-class SDChunkConstructor : public ISDChunkConstructor {
-    friend ISDChunkConstructor;
+class BitmapChunkConstructor : public IBitmapChunkConstructor {
+    friend IBitmapChunkConstructor;
 
   private:
-    SDChunkConstructor(size_t k,
-                       bool canonical_mode = false,
-                       const std::string &filter_suffix = "",
-                       size_t num_threads = 1,
-                       double memory_preallocated = 0,
-                       bool verbose = false);
+    BitmapChunkConstructor(size_t k,
+                           bool canonical_mode = false,
+                           const std::string &filter_suffix = "",
+                           size_t num_threads = 1,
+                           double memory_preallocated = 0,
+                           bool verbose = false);
 
     void add_sequence(const std::string &sequence) {
         kmer_collector_.add_sequence(sequence);
@@ -25,7 +25,7 @@ class SDChunkConstructor : public ISDChunkConstructor {
 
     bool is_canonical_mode() const { return kmer_collector_.is_both_strands_mode(); }
 
-    DBGSD::Chunk* build_chunk();
+    DBGBitmap::Chunk* build_chunk();
 
     KmerCollector<KMER, KmerExtractor2Bit> kmer_collector_;
 };
@@ -48,13 +48,13 @@ encode_filter_suffix(const std::string &filter_suffix) {
 }
 
 template <typename KMER>
-SDChunkConstructor<KMER>
-::SDChunkConstructor(size_t k,
-                     bool canonical_mode,
-                     const std::string &filter_suffix,
-                     size_t num_threads,
-                     double memory_preallocated,
-                     bool verbose)
+BitmapChunkConstructor<KMER>
+::BitmapChunkConstructor(size_t k,
+                         bool canonical_mode,
+                         const std::string &filter_suffix,
+                         size_t num_threads,
+                         double memory_preallocated,
+                         bool verbose)
       : kmer_collector_(k,
                         canonical_mode,
                         encode_filter_suffix<KmerExtractor2Bit>(filter_suffix),
@@ -62,13 +62,13 @@ SDChunkConstructor<KMER>
                         memory_preallocated,
                         verbose) {}
 
-DBGSDConstructor::DBGSDConstructor(size_t k,
-                                   bool canonical_mode,
-                                   const std::string &filter_suffix,
-                                   size_t num_threads,
-                                   double memory_preallocated,
-                                   bool verbose)
-      : constructor_(ISDChunkConstructor::initialize(
+DBGBitmapConstructor::DBGBitmapConstructor(size_t k,
+                                           bool canonical_mode,
+                                           const std::string &filter_suffix,
+                                           size_t num_threads,
+                                           double memory_preallocated,
+                                           bool verbose)
+      : constructor_(IBitmapChunkConstructor::initialize(
             k,
             canonical_mode,
             filter_suffix,
@@ -81,11 +81,11 @@ DBGSDConstructor::DBGSDConstructor(size_t k,
  * Initialize graph chunk from a list of sorted kmers.
  */
 template <typename KMER>
-DBGSD::Chunk* SDChunkConstructor<KMER>
+DBGBitmap::Chunk* BitmapChunkConstructor<KMER>
 ::build_chunk() {
     kmer_collector_.join();
-    std::unique_ptr<DBGSD::Chunk> chunk {
-        new DBGSD::Chunk(
+    std::unique_ptr<DBGBitmap::Chunk> chunk {
+        new DBGBitmap::Chunk(
             [&](const auto &index_callback) {
                 kmer_collector_.call_kmers(
                     [&](const auto &kmer) {
@@ -102,15 +102,15 @@ DBGSD::Chunk* SDChunkConstructor<KMER>
     return chunk.release();
 }
 
-DBGSD*
-DBGSDConstructor
+DBGBitmap*
+DBGBitmapConstructor
 ::build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
                           bool canonical_mode,
                           bool verbose) {
     if (!chunk_filenames.size())
-        return new DBGSD(2);
+        return new DBGBitmap(2);
 
-    std::vector<DBGSD::Chunk> chunks;
+    std::vector<DBGBitmap::Chunk> chunks;
 
     uint64_t cumulative_size = 1;
 
@@ -136,11 +136,11 @@ DBGSDConstructor
         std::cout << "Cumulative size of chunks: "
                   << cumulative_size - 1 << std::endl;
 
-    std::unique_ptr<DBGSD> graph{
-        new DBGSD(2)
+    std::unique_ptr<DBGBitmap> graph{
+        new DBGBitmap(2)
     };
 
-    graph->kmers_ = DBGSD::Chunk(
+    graph->kmers_ = DBGBitmap::Chunk(
         [&](const auto &index_callback) {
             index_callback(0);
             for (size_t i = 0; i < chunk_filenames.size(); ++i) {
@@ -169,8 +169,8 @@ DBGSDConstructor
     return graph.release();
 }
 
-ISDChunkConstructor*
-ISDChunkConstructor
+IBitmapChunkConstructor*
+IBitmapChunkConstructor
 ::initialize(size_t k,
              bool canonical_mode,
              const std::string &filter_suffix,
@@ -180,21 +180,21 @@ ISDChunkConstructor
     using Extractor = KmerExtractor2Bit;
 
     if (k * Extractor::kLogSigma <= 64) {
-        return new SDChunkConstructor<typename Extractor::Kmer64>(
+        return new BitmapChunkConstructor<typename Extractor::Kmer64>(
             k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
         );
     } else if (k * Extractor::kLogSigma <= 128) {
-        return new SDChunkConstructor<typename Extractor::Kmer128>(
+        return new BitmapChunkConstructor<typename Extractor::Kmer128>(
             k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
         );
     } else {
-        return new SDChunkConstructor<typename Extractor::Kmer256>(
+        return new BitmapChunkConstructor<typename Extractor::Kmer256>(
             k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
         );
     }
 }
 
-void DBGSDConstructor::build_graph(DBGSD *graph) {
+void DBGBitmapConstructor::build_graph(DBGBitmap *graph) {
     auto chunk = constructor_->build_chunk();
     graph->k_ = constructor_->get_k();
     graph->canonical_mode_ = constructor_->is_canonical_mode();

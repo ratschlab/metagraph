@@ -78,7 +78,7 @@ std::unique_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
             return load_critical_graph_from_file<DBGHashString>(filename);
 
         case Config::GraphType::BITMAP:
-            return load_critical_graph_from_file<DBGSD>(filename);
+            return load_critical_graph_from_file<DBGBitmap>(filename);
 
         case Config::GraphType::INVALID:
             return load_critical_graph_from_file<DefaultGraphType>(filename);
@@ -824,7 +824,7 @@ int main(int argc, const char *argv[]) {
                     exit(1);
                 }
 
-                graph.reset(new DBGSD(config->k, config->canonical));
+                graph.reset(new DBGBitmap(config->k, config->canonical));
 
             } else if (config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic) {
                 auto boss_graph = std::make_unique<BOSS>(config->k - 1);
@@ -905,7 +905,7 @@ int main(int argc, const char *argv[]) {
                 graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
 
             } else if (config->graph_type == Config::GraphType::BITMAP && !config->dynamic) {
-                auto sd_graph = std::make_unique<DBGSD>(config->k);
+                auto sd_graph = std::make_unique<DBGBitmap>(config->k);
 
                 if (config->verbose) {
                     std::cout << "Start reading data and extracting k-mers" << std::endl;
@@ -928,7 +928,7 @@ int main(int argc, const char *argv[]) {
                     );
                 }
 
-                std::unique_ptr<DBGSDConstructor> constructor;
+                std::unique_ptr<DBGBitmapConstructor> constructor;
 
                 //one pass per suffix
                 for (const std::string &suffix : suffices) {
@@ -939,7 +939,7 @@ int main(int argc, const char *argv[]) {
                     }
 
                     constructor.reset(
-                        new DBGSDConstructor(
+                        new DBGBitmapConstructor(
                             sd_graph->get_k(),
                             config->canonical,
                             suffix,
@@ -955,7 +955,7 @@ int main(int argc, const char *argv[]) {
                     );
 
                     if (config->outfbase.size() && config->suffix.size()) {
-                        const DBGSD::Chunk* next_block = constructor->build_chunk();
+                        const DBGBitmap::Chunk* next_block = constructor->build_chunk();
                         std::cout << "Graph chunk with " << next_block->num_set_bits()
                                   << " k-mers was built in "
                                   << timer.elapsed() << "sec" << std::endl;
@@ -966,7 +966,7 @@ int main(int argc, const char *argv[]) {
                         std::ofstream out(config->outfbase + "." + suffix + ".dbgsdchunk");
                         next_block->serialize(out);
                         std::cout << timer.elapsed() << "sec" << std::endl;
-                        sd_graph.reset(new DBGSD(config->k));
+                        sd_graph.reset(new DBGBitmap(config->k));
                     }
 
                     if (config->suffix.size())
@@ -1602,7 +1602,7 @@ int main(int argc, const char *argv[]) {
                 );
             } else if (config->graph_type == Config::GraphType::BITMAP) {
                 graph.reset(
-                    DBGSDConstructor::build_graph_from_chunks(
+                    DBGBitmapConstructor::build_graph_from_chunks(
                         chunk_files, config->canonical, config->verbose
                     )
                 );

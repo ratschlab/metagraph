@@ -27,8 +27,8 @@ const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 
 const KmerExtractor2Bit kmer_extractor;
 
-uint64_t kmer_string_to_index(const DBGSD &graph, const std::string &kmer) {
-    DBGSD::node_index node;
+uint64_t kmer_string_to_index(const DBGBitmap &graph, const std::string &kmer) {
+    DBGBitmap::node_index node;
     graph.map_to_nodes_sequentially(
         kmer.begin(), kmer.end(),
         [&](const auto i) { node = i; }
@@ -37,9 +37,9 @@ uint64_t kmer_string_to_index(const DBGSD &graph, const std::string &kmer) {
 }
 
 
-TEST(DBGSDConstructedFull, InitializeComplete) {
+TEST(DBGBitmapConstructedFull, InitializeComplete) {
     {
-        DBGSD graph(20, false);
+        DBGBitmap graph(20, false);
         EXPECT_EQ(std::string("AAAAAAAAAAAAAAAAAAAA"), graph.get_node_sequence(1));
         EXPECT_EQ(1u, kmer_string_to_index(graph, "AAAAAAAAAAAAAAAAAAAA"));
 
@@ -60,7 +60,7 @@ TEST(DBGSDConstructedFull, InitializeComplete) {
     }
 
     {
-        DBGSD graph(20, true);
+        DBGBitmap graph(20, true);
         EXPECT_EQ(std::string("AAAAAAAAAAAAAAAAAAAA"), graph.get_node_sequence(1));
         EXPECT_EQ(1u, kmer_string_to_index(graph, "AAAAAAAAAAAAAAAAAAAA"));
 
@@ -81,15 +81,15 @@ TEST(DBGSDConstructedFull, InitializeComplete) {
     }
 }
 
-TEST(DBGSDConstructedFull, SerializeComplete) {
+TEST(DBGBitmapConstructedFull, SerializeComplete) {
     {
-        DBGSD graph(20, false);
+        DBGBitmap graph(20, false);
 
         graph.serialize(test_dump_basename);
     }
 
     {
-        DBGSD graph(2, false);
+        DBGBitmap graph(2, false);
 
         ASSERT_TRUE(graph.load(test_dump_basename));
         EXPECT_EQ(20u, graph.get_k());
@@ -101,13 +101,13 @@ TEST(DBGSDConstructedFull, SerializeComplete) {
     }
 
     {
-        DBGSD graph(20, true);
+        DBGBitmap graph(20, true);
 
         graph.serialize(test_dump_basename);
     }
 
     {
-        DBGSD graph(2, true);
+        DBGBitmap graph(2, true);
 
         ASSERT_TRUE(graph.load(test_dump_basename));
         EXPECT_EQ(20u, graph.get_k());
@@ -119,9 +119,9 @@ TEST(DBGSDConstructedFull, SerializeComplete) {
     }
 }
 
-TEST(DBGSDConstructedFull, InsertSequence) {
+TEST(DBGBitmapConstructedFull, InsertSequence) {
     {
-        DBGSD graph(20, false);
+        DBGBitmap graph(20, false);
 
         ASSERT_DEATH(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "");
         ASSERT_DEATH(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), "");
@@ -135,7 +135,7 @@ TEST(DBGSDConstructedFull, InsertSequence) {
     }
 
     {
-        DBGSD graph(20, true);
+        DBGBitmap graph(20, true);
 
         ASSERT_DEATH(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "");
         ASSERT_DEATH(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), "");
@@ -149,9 +149,9 @@ TEST(DBGSDConstructedFull, InsertSequence) {
     }
 }
 
-TEST(DBGSDConstructedFull, ReverseComplement) {
+TEST(DBGBitmapConstructedFull, ReverseComplement) {
     {
-        DBGSD graph(20, false);
+        DBGBitmap graph(20, false);
 
         ASSERT_DEATH(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "");
 
@@ -170,7 +170,7 @@ TEST(DBGSDConstructedFull, ReverseComplement) {
     }
 
     {
-        DBGSD graph(20, true);
+        DBGBitmap graph(20, true);
 
         ASSERT_DEATH(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "");
 
@@ -188,9 +188,9 @@ TEST(DBGSDConstructedFull, ReverseComplement) {
     }
 }
 
-TEST(DBGSDConstructedFull, CheckGraph) {
+TEST(DBGBitmapConstructedFull, CheckGraph) {
     {
-        DBGSD graph(20, false);
+        DBGBitmap graph(20, false);
 
         const std::string alphabet = "ACGT";
 
@@ -211,7 +211,7 @@ TEST(DBGSDConstructedFull, CheckGraph) {
     }
 
     {
-        DBGSD graph(20, true);
+        DBGBitmap graph(20, true);
 
         const std::string alphabet = "ACGT";
 
@@ -232,9 +232,9 @@ TEST(DBGSDConstructedFull, CheckGraph) {
     }
 }
 
-TEST(DBGSDConstructedFull, Serialize) {
+TEST(DBGBitmapConstructedFull, Serialize) {
     {
-        DBGSD graph(20, false);
+        DBGBitmap graph(20, false);
 
         ASSERT_DEATH(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "");
         ASSERT_DEATH(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), "");
@@ -250,7 +250,7 @@ TEST(DBGSDConstructedFull, Serialize) {
     }
 
     {
-        DBGSD graph(2, false);
+        DBGBitmap graph(2, false);
 
         ASSERT_TRUE(graph.load(test_dump_basename));
 
@@ -265,7 +265,7 @@ TEST(DBGSDConstructedFull, Serialize) {
     }
 
     {
-        DBGSD graph(20, true);
+        DBGBitmap graph(20, true);
 
         ASSERT_DEATH(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "");
         ASSERT_DEATH(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), "");
@@ -281,7 +281,7 @@ TEST(DBGSDConstructedFull, Serialize) {
     }
 
     {
-        DBGSD graph(2, true);
+        DBGBitmap graph(2, true);
 
         ASSERT_TRUE(graph.load(test_dump_basename));
 
@@ -296,11 +296,11 @@ TEST(DBGSDConstructedFull, Serialize) {
     }
 }
 
-TEST(DBGSDConstructed, InsertSequence) {
-    DBGSDConstructor constructor(20);
+TEST(DBGBitmapConstructed, InsertSequence) {
+    DBGBitmapConstructor constructor(20);
     constructor.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
     constructor.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC");
-    DBGSD graph(20);
+    DBGBitmap graph(20);
     constructor.build_graph(&graph);
 
     EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
@@ -308,8 +308,8 @@ TEST(DBGSDConstructed, InsertSequence) {
     EXPECT_FALSE(graph.find("CATGTTTTTTTAATATATATATTTTTAGC"));
 }
 
-TEST(DBGSDConstructed, CheckGraph) {
-    DBGSDConstructor constructor(20);
+TEST(DBGBitmapConstructed, CheckGraph) {
+    DBGBitmapConstructor constructor(20);
 
     const std::string alphabet = "ACGTN";
 
@@ -320,7 +320,7 @@ TEST(DBGSDConstructed, CheckGraph) {
         }
         constructor.add_sequence(seq);
     }
-    DBGSD graph(20);
+    DBGBitmap graph(20);
     constructor.build_graph(&graph);
 
     for (size_t i = 0; i < 100; ++i) {
@@ -332,12 +332,12 @@ TEST(DBGSDConstructed, CheckGraph) {
     }
 }
 
-TEST(DBGSDConstructed, Serialize) {
+TEST(DBGBitmapConstructed, Serialize) {
     {
-        DBGSDConstructor constructor(20);
+        DBGBitmapConstructor constructor(20);
         constructor.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
         constructor.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC");
-        DBGSD graph(20);
+        DBGBitmap graph(20);
         constructor.build_graph(&graph);
 
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
@@ -347,7 +347,7 @@ TEST(DBGSDConstructed, Serialize) {
         graph.serialize(test_dump_basename);
     }
 
-    DBGSD graph(20);
+    DBGBitmap graph(20);
 
     ASSERT_TRUE(graph.load(test_dump_basename));
 
@@ -362,8 +362,8 @@ constexpr double kEps = std::numeric_limits<double>::epsilon();
 
 //TODO
 /*
-void test_graph(DBGSD *graph, const bit_vector_sd &ref, bool canonical_only) {
-    DBGSD ngraph(2);
+void test_graph(DBGBitmap *graph, const bit_vector_sd &ref, bool canonical_only) {
+    DBGBitmap ngraph(2);
     ngraph.k_ = ngraph.infer_k();
     EXPECT_EQ(ref, graph->kmers_);
     EXPECT_EQ(canonical_only, graph->canonical_only_);
@@ -371,28 +371,28 @@ void test_graph(DBGSD *graph, const bit_vector_sd &ref, bool canonical_only) {
 */
 
 
-TEST(DBGSD, GraphDefaultConstructor) {
-    DBGSD *graph_ = NULL;
+TEST(DBGBitmap, GraphDefaultConstructor) {
+    DBGBitmap *graph_ = NULL;
 
     ASSERT_NO_THROW({
-        graph_ = new DBGSD(2);
+        graph_ = new DBGBitmap(2);
     });
     ASSERT_TRUE(graph_ != NULL);
     delete graph_;
 
     ASSERT_NO_THROW({
-        DBGSD graph(2);
+        DBGBitmap graph(2);
     });
 }
 
 /*
 
-TEST(DBGSD, SmallGraphTraversal) {
+TEST(DBGBitmap, SmallGraphTraversal) {
     gzFile input_p = gzopen(test_fasta.c_str(), "r");
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
 
-    DBGSDConstructor constructor(3);
+    DBGBitmapConstructor constructor(3);
 
     for (size_t i = 1; kseq_read(read_stream) >= 0; ++i) {
         constructor.add_sequences({ read_stream->seq.s });
@@ -400,18 +400,18 @@ TEST(DBGSD, SmallGraphTraversal) {
     kseq_destroy(read_stream);
     gzclose(input_p);
 
-    DBGSD *graph = new DBGSD(&constructor);
+    DBGBitmap *graph = new DBGBitmap(&constructor);
 
     //traversal
     std::vector<size_t> outgoing_edges = { 0, 3, 4, 14, 5, 7, 12, 18, 19, 15, 20, 0,
                                            8, 0, 10, 21, 11, 11, 13, 0, 22, 16, 17 };
     ASSERT_EQ(outgoing_edges.size(), graph->num_nodes() + 1);
 
-    EXPECT_EQ(1u, graph->outgoing(1, DBGSD::kSentinelCode));
+    EXPECT_EQ(1u, graph->outgoing(1, DBGBitmap::kSentinelCode));
 
     for (size_t i = 1; i <= graph->num_edges(); ++i) {
         //test forward traversal given an output edge label
-        if (graph->get_W(i) != DBGSD::kSentinelCode) {
+        if (graph->get_W(i) != DBGBitmap::kSentinelCode) {
             uint64_t node_idx = graph->rank_last(i - 1) + 1;
 
             EXPECT_EQ(outgoing_edges[i],
@@ -439,118 +439,118 @@ TEST(DBGSD, SmallGraphTraversal) {
 }
 */
 
-TEST(DBGSD, AddSequenceSimplePath) {
+TEST(DBGBitmap, AddSequenceSimplePath) {
     for (size_t k = 2; k <= 10; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'A'));
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
 
         EXPECT_EQ(1u, graph.num_nodes());
     }
 }
 
-TEST(DBGSD, AddSequenceSimplePaths) {
+TEST(DBGBitmap, AddSequenceSimplePaths) {
     for (size_t k = 2; k <= 10; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'A'));
         constructor.add_sequence(std::string(100, 'C'));
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
 
         EXPECT_EQ(2u, graph.num_nodes());
     }
 }
 
-TEST(DBGSD, NonASCIIStrings) {
-    DBGSDConstructor constructor_first(6);
+TEST(DBGBitmap, NonASCIIStrings) {
+    DBGBitmapConstructor constructor_first(6);
     constructor_first.add_sequences({
         // cyrillic A and C
         "АСАСАСАСАСАСА",
         "плохая строка",
         "АСАСАСАСАСАСА"
     });
-    DBGSD graph(&constructor_first);
+    DBGBitmap graph(&constructor_first);
     ASSERT_EQ(1u, graph.num_nodes());
 }
 
-TEST(DBGSD, AddSequence) {
+TEST(DBGBitmap, AddSequence) {
     {
-        DBGSDConstructor constructor(4);
+        DBGBitmapConstructor constructor(4);
         constructor.add_sequence("AAAC");
         constructor.add_sequence("CAAC");
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
         EXPECT_EQ(2u, graph.num_nodes());
     }
     {
-        DBGSDConstructor constructor(4);
+        DBGBitmapConstructor constructor(4);
         constructor.add_sequence("AAAC");
         constructor.add_sequence("CAAC");
         constructor.add_sequence("GAAC");
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
         EXPECT_EQ(3u, graph.num_nodes());
     }
     {
-        DBGSDConstructor constructor(4);
+        DBGBitmapConstructor constructor(4);
         constructor.add_sequence("AAAC");
         constructor.add_sequence("AACG");
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
         EXPECT_EQ(2u, graph.num_nodes());
     }
     {
-        DBGSDConstructor constructor(5);
+        DBGBitmapConstructor constructor(5);
         constructor.add_sequence("AGACT");
         constructor.add_sequence("GACTT");
         constructor.add_sequence("ACTAT");
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
         EXPECT_EQ(3u, graph.num_nodes());
     }
 }
 
-TEST(DBGSD, AddSequences) {
+TEST(DBGBitmap, AddSequences) {
     {
-        DBGSDConstructor constructor(4);
+        DBGBitmapConstructor constructor(4);
         constructor.add_sequences({
             "AAAC",
             "CAAC"
         });
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
         EXPECT_EQ(2u, graph.num_nodes());
     }
     {
-        DBGSDConstructor constructor(4);
+        DBGBitmapConstructor constructor(4);
         constructor.add_sequences({
            "AAAC",
            "CAAC",
            "GAAC"
         });
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
         EXPECT_EQ(3u, graph.num_nodes());
     }
     {
-        DBGSDConstructor constructor(4);
+        DBGBitmapConstructor constructor(4);
         constructor.add_sequences({
             "AAAC",
             "AACG"
         });
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
         EXPECT_EQ(2u, graph.num_nodes());
     }
     {
-        DBGSDConstructor constructor(5);
+        DBGBitmapConstructor constructor(5);
         constructor.add_sequences({
            "AGACT",
            "GACTT",
            "ACTAT"
         });
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
         EXPECT_EQ(3u, graph.num_nodes());
     }
 }
 
-TEST(DBGSD, CallPathsEmptyGraph) {
+TEST(DBGBitmap, CallPathsEmptyGraph) {
     for (size_t k = 2; k <= 10; ++k) {
-        DBGSDConstructor empty_const(k);
-        DBGSD empty(&empty_const);
-        DBGSDConstructor empty_reconst(k);
+        DBGBitmapConstructor empty_const(k);
+        DBGBitmap empty(&empty_const);
+        DBGBitmapConstructor empty_reconst(k);
 
         uint64_t nseq = 0;
         empty.call_sequences([&](const auto &sequence) {
@@ -558,34 +558,34 @@ TEST(DBGSD, CallPathsEmptyGraph) {
             ++nseq;
         }, false);
         ASSERT_EQ(0u, nseq);
-        DBGSD reconstructed(&empty_reconst);
+        DBGBitmap reconstructed(&empty_reconst);
 
         EXPECT_EQ(empty, reconstructed);
     }
 }
 
-TEST(DBGSD, CallContigsEmptyGraph) {
+TEST(DBGBitmap, CallContigsEmptyGraph) {
     for (size_t k = 2; k <= 10; ++k) {
-        DBGSDConstructor empty_const(k);
-        DBGSD empty(&empty_const);
-        DBGSDConstructor empty_reconst(k);
+        DBGBitmapConstructor empty_const(k);
+        DBGBitmap empty(&empty_const);
+        DBGBitmapConstructor empty_reconst(k);
 
         uint64_t nseq = 0;
         empty.call_sequences([&](const auto &sequence) {
             empty_reconst.add_sequence(sequence);
         }, true);
         ASSERT_EQ(0u, nseq);
-        DBGSD reconstructed(&empty_reconst);
+        DBGBitmap reconstructed(&empty_reconst);
 
         EXPECT_EQ(empty, reconstructed);
     }
 }
 
-TEST(DBGSD, CallPathsTwoLoops) {
+TEST(DBGBitmap, CallPathsTwoLoops) {
     for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A') });
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
 
         ASSERT_EQ(1u, graph.num_nodes());
 
@@ -600,11 +600,11 @@ TEST(DBGSD, CallPathsTwoLoops) {
     }
 }
 
-TEST(DBGSD, CallContigsTwoLoops) {
+TEST(DBGBitmap, CallContigsTwoLoops) {
     for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A') });
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
 
         ASSERT_EQ(1u, graph.num_nodes());
 
@@ -619,13 +619,13 @@ TEST(DBGSD, CallContigsTwoLoops) {
     }
 }
 
-TEST(DBGSD, CallPathsFourLoops) {
+TEST(DBGBitmap, CallPathsFourLoops) {
     for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A'),
                                     std::string(100, 'G'),
                                     std::string(100, 'C') });
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
 
         ASSERT_EQ(3u, graph.num_nodes());
 
@@ -640,13 +640,13 @@ TEST(DBGSD, CallPathsFourLoops) {
     }
 }
 
-TEST(DBGSD, CallContigsFourLoops) {
+TEST(DBGBitmap, CallContigsFourLoops) {
     for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A'),
                                     std::string(100, 'G'),
                                     std::string(100, 'C') });
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
 
         ASSERT_EQ(3u, graph.num_nodes());
 
@@ -661,166 +661,166 @@ TEST(DBGSD, CallContigsFourLoops) {
     }
 }
 
-TEST(DBGSD, CallPaths) {
+TEST(DBGBitmap, CallPaths) {
     for (size_t k = 3; k <= 10; ++k) {
         {
-            DBGSDConstructor constructor(k);
+            DBGBitmapConstructor constructor(k);
             constructor.add_sequence("AAACACTAG");
             constructor.add_sequence("AACGACATG");
-            DBGSD graph(&constructor);
+            DBGBitmap graph(&constructor);
 
-            DBGSDConstructor reconst(k);
+            DBGBitmapConstructor reconst(k);
 
             graph.call_sequences([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
             }, false);
-            DBGSD reconstructed(&reconst);
+            DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
         }
         {
-            DBGSDConstructor constructor(k);
+            DBGBitmapConstructor constructor(k);
             constructor.add_sequence("AGACACTGA");
             constructor.add_sequence("GACTACGTA");
             constructor.add_sequence("ACTAACGTA");
-            DBGSD graph(&constructor);
+            DBGBitmap graph(&constructor);
 
-            DBGSDConstructor reconst(k);
+            DBGBitmapConstructor reconst(k);
             graph.call_sequences([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
             }, false);
-            DBGSD reconstructed(&reconst);
+            DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
         }
         {
-            DBGSDConstructor constructor(k);
+            DBGBitmapConstructor constructor(k);
             constructor.add_sequence("AGACACAGT");
             constructor.add_sequence("GACTTGCAG");
             constructor.add_sequence("ACTAGTCAG");
-            DBGSD graph(&constructor);
+            DBGBitmap graph(&constructor);
 
-            DBGSDConstructor reconst(k);
+            DBGBitmapConstructor reconst(k);
             graph.call_sequences([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
             }, false);
-            DBGSD reconstructed(&reconst);
+            DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
         }
         {
-            DBGSDConstructor constructor(k);
+            DBGBitmapConstructor constructor(k);
             constructor.add_sequence("AAACTCGTAGC");
             constructor.add_sequence("AAATGCGTAGC");
-            DBGSD graph(&constructor);
+            DBGBitmap graph(&constructor);
 
-            DBGSDConstructor reconst(k);
+            DBGBitmapConstructor reconst(k);
             graph.call_sequences([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
             }, false);
-            DBGSD reconstructed(&reconst);
+            DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
         }
         {
-            DBGSDConstructor constructor(k);
+            DBGBitmapConstructor constructor(k);
             constructor.add_sequence("AAACT");
             constructor.add_sequence("AAATG");
-            DBGSD graph(&constructor);
+            DBGBitmap graph(&constructor);
 
-            DBGSDConstructor reconst(k);
+            DBGBitmapConstructor reconst(k);
             graph.call_sequences([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
             }, false);
-            DBGSD reconstructed(&reconst);
+            DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
         }
     }
 }
 
-TEST(DBGSD, CallContigs) {
+TEST(DBGBitmap, CallContigs) {
     for (size_t k = 2; k <= 10; ++k) {
         {
-            DBGSDConstructor constructor(k);
+            DBGBitmapConstructor constructor(k);
             constructor.add_sequence("AAACACTAG");
             constructor.add_sequence("AACGACATG");
-            DBGSD graph(&constructor);
+            DBGBitmap graph(&constructor);
 
-            DBGSDConstructor reconst(k);
+            DBGBitmapConstructor reconst(k);
 
             graph.call_sequences([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
             }, true);
-            DBGSD reconstructed(&reconst);
+            DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
         }
         {
-            DBGSDConstructor constructor(k);
+            DBGBitmapConstructor constructor(k);
             constructor.add_sequence("AGACACTGA");
             constructor.add_sequence("GACTACGTA");
             constructor.add_sequence("ACTAACGTA");
-            DBGSD graph(&constructor);
+            DBGBitmap graph(&constructor);
 
-            DBGSDConstructor reconst(k);
+            DBGBitmapConstructor reconst(k);
             graph.call_sequences([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
             }, true);
-            DBGSD reconstructed(&reconst);
+            DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
         }
         {
-            DBGSDConstructor constructor(k);
+            DBGBitmapConstructor constructor(k);
             constructor.add_sequence("AGACACAGT");
             constructor.add_sequence("GACTTGCAG");
             constructor.add_sequence("ACTAGTCAG");
-            DBGSD graph(&constructor);
+            DBGBitmap graph(&constructor);
 
-            DBGSDConstructor reconst(k);
+            DBGBitmapConstructor reconst(k);
             graph.call_sequences([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
             }, true);
-            DBGSD reconstructed(&reconst);
+            DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
         }
         {
-            DBGSDConstructor constructor(k);
+            DBGBitmapConstructor constructor(k);
             constructor.add_sequence("AAACTCGTAGC");
             constructor.add_sequence("AAATGCGTAGC");
-            DBGSD graph(&constructor);
+            DBGBitmap graph(&constructor);
 
-            DBGSDConstructor reconst(k);
+            DBGBitmapConstructor reconst(k);
             graph.call_sequences([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
             }, true);
-            DBGSD reconstructed(&reconst);
+            DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
         }
         {
-            DBGSDConstructor constructor(k);
+            DBGBitmapConstructor constructor(k);
             constructor.add_sequence("AAACT");
             constructor.add_sequence("AAATG");
-            DBGSD graph(&constructor);
+            DBGBitmap graph(&constructor);
 
-            DBGSDConstructor reconst(k);
+            DBGBitmapConstructor reconst(k);
             graph.call_sequences([&](const auto &sequence) {
                 reconst.add_sequence(sequence);
             }, true);
-            DBGSD reconstructed(&reconst);
+            DBGBitmap reconstructed(&reconst);
 
             ASSERT_EQ(graph, reconstructed);
         }
     }
 }
 
-TEST(DBGSD, CallKmersEmptyGraph) {
+TEST(DBGBitmap, CallKmersEmptyGraph) {
     for (size_t k = 2; k <= 30; ++k) {
-        DBGSDConstructor constructor(k);
-        DBGSD empty(&constructor);
+        DBGBitmapConstructor constructor(k);
+        DBGBitmap empty(&constructor);
 
         size_t num_kmers = 0;
         empty.call_kmers([&](auto, const auto &sequence) {
@@ -832,11 +832,11 @@ TEST(DBGSD, CallKmersEmptyGraph) {
     }
 }
 
-TEST(DBGSD, CallKmersTwoLoops) {
+TEST(DBGBitmap, CallKmersTwoLoops) {
     for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A') });
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
 
         ASSERT_EQ(1u, graph.num_nodes());
 
@@ -849,13 +849,13 @@ TEST(DBGSD, CallKmersTwoLoops) {
     }
 }
 
-TEST(DBGSD, CallKmersFourLoops) {
+TEST(DBGBitmap, CallKmersFourLoops) {
     for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A'),
                                     std::string(100, 'G'),
                                     std::string(100, 'C') });
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
 
         ASSERT_EQ(3u, graph.num_nodes());
 
@@ -870,13 +870,13 @@ TEST(DBGSD, CallKmersFourLoops) {
     }
 }
 
-TEST(DBGSD, CallKmersFourLoopsDynamic) {
+TEST(DBGBitmap, CallKmersFourLoopsDynamic) {
     for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'A'));
         constructor.add_sequence(std::string(100, 'G'));
         constructor.add_sequence(std::string(100, 'C'));
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
 
         size_t num_kmers = 0;
         graph.call_kmers([&](auto, const auto &sequence) {
@@ -889,11 +889,11 @@ TEST(DBGSD, CallKmersFourLoopsDynamic) {
     }
 }
 
-TEST(DBGSD, CallKmersTestPath) {
+TEST(DBGBitmap, CallKmersTestPath) {
     for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'A') + std::string(k, 'C'));
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
 
         size_t num_kmers = 0;
         graph.call_kmers([&](auto, const auto&) { num_kmers++; });
@@ -901,13 +901,13 @@ TEST(DBGSD, CallKmersTestPath) {
     }
 }
 
-TEST(DBGSD, CallKmersTestPathACA) {
+TEST(DBGBitmap, CallKmersTestPathACA) {
     for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'A')
                             + std::string(k, 'C')
                             + std::string(100, 'A'));
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
 
         size_t num_kmers = 0;
         graph.call_kmers([&](auto, const auto&) { num_kmers++; });
@@ -915,12 +915,12 @@ TEST(DBGSD, CallKmersTestPathACA) {
     }
 }
 
-TEST(DBGSD, CallKmersTestPathDisconnected) {
+TEST(DBGBitmap, CallKmersTestPathDisconnected) {
     for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'A'));
         constructor.add_sequence(std::string(100, 'T'));
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
 
         size_t num_kmers = 0;
         graph.call_kmers([&](auto, const auto&) { num_kmers++; });
@@ -928,12 +928,12 @@ TEST(DBGSD, CallKmersTestPathDisconnected) {
     }
 }
 
-TEST(DBGSD, CallKmersTestPathDisconnected2) {
+TEST(DBGBitmap, CallKmersTestPathDisconnected2) {
     for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'G'));
         constructor.add_sequence(std::string(k, 'A') + "T");
-        DBGSD graph(&constructor);
+        DBGBitmap graph(&constructor);
 
         size_t num_kmers = 0;
         graph.call_kmers([&](auto, const auto&) { num_kmers++; });
@@ -942,14 +942,14 @@ TEST(DBGSD, CallKmersTestPathDisconnected2) {
 }
 
 /*
-void test_pred_kmer(const DBGSD &graph,
+void test_pred_kmer(const DBGBitmap &graph,
                     const std::string &kmer_s,
                     uint64_t expected_idx) {
-    std::vector<DBGSD::TAlphabet> kmer(kmer_s.size());
+    std::vector<DBGBitmap::TAlphabet> kmer(kmer_s.size());
     std::transform(kmer_s.begin(), kmer_s.end(), kmer.begin(),
                    [&graph](char c) {
-                       return c == DBGSD::kSentinel
-                                   ? DBGSD::kSentinelCode
+                       return c == DBGBitmap::kSentinel
+                                   ? DBGBitmap::kSentinelCode
                                    : graph.encode(c);
                    });
     EXPECT_EQ(expected_idx, graph.select_last(graph.pred_kmer(kmer)))
@@ -957,9 +957,9 @@ void test_pred_kmer(const DBGSD &graph,
        ;
 }
 
-TEST(DBGSD, PredKmer) {
+TEST(DBGBitmap, PredKmer) {
     {
-        DBGSD graph(5);
+        DBGBitmap graph(5);
 
         test_pred_kmer(graph, "ACGCG", 1);
         test_pred_kmer(graph, "$$$$A", 1);
@@ -968,7 +968,7 @@ TEST(DBGSD, PredKmer) {
         test_pred_kmer(graph, "$$$$$", 1);
     }
     {
-        DBGSD graph(5);
+        DBGBitmap graph(5);
         graph.add_sequence("AAAAAA");
 
         test_pred_kmer(graph, "ACGCG", 7);
@@ -978,7 +978,7 @@ TEST(DBGSD, PredKmer) {
         test_pred_kmer(graph, "$$$$$", 2);
     }
     {
-        DBGSD graph(5);
+        DBGBitmap graph(5);
         graph.add_sequence("ACACAA");
 
         test_pred_kmer(graph, "ACGCG", 8);
@@ -989,7 +989,7 @@ TEST(DBGSD, PredKmer) {
     }
 #ifndef _PROTEIN_GRAPH
     {
-        DBGSD graph(5);
+        DBGBitmap graph(5);
         graph.add_sequence("AAACGTAGTATGTAGC");
 
         test_pred_kmer(graph, "ACGCG", 13);
@@ -999,7 +999,7 @@ TEST(DBGSD, PredKmer) {
         test_pred_kmer(graph, "$$$$$", 2);
     }
     {
-        DBGSD graph(5);
+        DBGBitmap graph(5);
         graph.add_sequence("AAACGAAGGAAGTACGC");
 
         test_pred_kmer(graph, "ACGCG", 17);
@@ -1009,7 +1009,7 @@ TEST(DBGSD, PredKmer) {
         test_pred_kmer(graph, "$$$$$", 2);
     }
     {
-        DBGSD graph(2);
+        DBGBitmap graph(2);
         graph.add_sequence("ATAATATCC");
         graph.add_sequence("ATACGC");
         graph.add_sequence("ATACTC");
@@ -1032,11 +1032,11 @@ TEST(DBGSD, PredKmer) {
 #endif
 }
 
-TEST(DBGSD, PredKmerRandomTest) {
+TEST(DBGBitmap, PredKmerRandomTest) {
     srand(1);
 
     for (size_t k = 1; k < 8; ++k) {
-        DBGSD graph(k);
+        DBGBitmap graph(k);
 
         for (size_t p = 0; p < 10; ++p) {
             size_t length = rand() % 400;
@@ -1063,7 +1063,7 @@ TEST(DBGSD, PredKmerRandomTest) {
         }
 
         for (const auto &kmer_str : all_kmer_str) {
-            std::vector<DBGSD::TAlphabet> kmer = graph.encode(kmer_str);
+            std::vector<DBGBitmap::TAlphabet> kmer = graph.encode(kmer_str);
 
             uint64_t lower_bound = graph.select_last(graph.pred_kmer(kmer));
 
@@ -1088,11 +1088,11 @@ TEST(DBGSD, PredKmerRandomTest) {
 }
 */
 
-TEST(DBGSD, FindSequenceDBG) {
+TEST(DBGBitmap, FindSequenceDBG) {
     for (size_t k = 2; k <= 10; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'A'));
-        std::unique_ptr<DeBruijnGraph> graph { new DBGSD(&constructor) };
+        std::unique_ptr<DeBruijnGraph> graph { new DBGBitmap(&constructor) };
 
         EXPECT_FALSE(graph->find(std::string(k - 1, 'A')));
         EXPECT_FALSE(graph->find(std::string(k - 1, 'A'), 1));
@@ -1174,9 +1174,9 @@ TEST(DBGSD, FindSequenceDBG) {
 
 // TODO
 /*
-TEST(DBGSD, KmerMappingMode) {
+TEST(DBGBitmap, KmerMappingMode) {
     for (size_t k = 1; k < 10; ++k) {
-        DBGSD graph(k);
+        DBGBitmap graph(k);
 
         const std::string check(k + 1, 'A');
         graph.add_sequence(std::string(100, 'A'));
@@ -1216,13 +1216,13 @@ TEST(DBGSD, KmerMappingMode) {
 }
 */
 
-TEST(DBGSD, Traversals) {
+TEST(DBGBitmap, Traversals) {
     for (size_t k = 2; k <= 10; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
 
         constructor.add_sequence(std::string(100, 'A') + std::string(100, 'C'));
 
-        std::unique_ptr<DeBruijnGraph> graph { new DBGSD(&constructor) };
+        std::unique_ptr<DeBruijnGraph> graph { new DBGBitmap(&constructor) };
 
         uint64_t it = 0;
         graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
@@ -1232,18 +1232,18 @@ TEST(DBGSD, Traversals) {
         EXPECT_EQ(it, graph->traverse(it, 'A'));
         EXPECT_EQ(it2, graph->traverse(it, 'C'));
         EXPECT_EQ(it, graph->traverse_back(it2, 'A'));
-        EXPECT_EQ(DBGSD::npos, graph->traverse(it, 'G'));
-        EXPECT_EQ(DBGSD::npos, graph->traverse_back(it2, 'G'));
+        EXPECT_EQ(DBGBitmap::npos, graph->traverse(it, 'G'));
+        EXPECT_EQ(DBGBitmap::npos, graph->traverse_back(it2, 'G'));
     }
 }
 
-TEST(DBGSD, TraversalsCanonical) {
+TEST(DBGBitmap, TraversalsCanonical) {
     for (size_t k = 2; k <= 10; ++k) {
-        DBGSDConstructor constructor(k, true);
+        DBGBitmapConstructor constructor(k, true);
 
         constructor.add_sequence(std::string(100, 'A') + std::string(100, 'C'));
 
-        std::unique_ptr<DBGSD> graph { new DBGSD(&constructor) };
+        std::unique_ptr<DBGBitmap> graph { new DBGBitmap(&constructor) };
 
         auto map_to_nodes_sequentially = [&](const auto &seq, auto callback) {
             graph->map_to_nodes_sequentially(seq.begin(), seq.end(), callback);
@@ -1282,11 +1282,11 @@ TEST(DBGSD, TraversalsCanonical) {
         EXPECT_EQ(it, graph->traverse(it, 'A'));
         EXPECT_EQ(it2, graph->traverse(it, 'C'));
         EXPECT_EQ(it, graph->traverse_back(it2, 'A'));
-        EXPECT_EQ(DBGSD::npos, graph->traverse(it, 'G'));
-        EXPECT_EQ(DBGSD::npos, graph->traverse_back(it2, 'G'));
+        EXPECT_EQ(DBGBitmap::npos, graph->traverse(it, 'G'));
+        EXPECT_EQ(DBGBitmap::npos, graph->traverse_back(it2, 'G'));
 
         graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
-        ASSERT_NE(DBGSD::npos, it);
+        ASSERT_NE(DBGBitmap::npos, it);
         uint64_t it3 = 0;
         graph->map_to_nodes(
             std::string(k, 'C'),
@@ -1301,12 +1301,12 @@ TEST(DBGSD, TraversalsCanonical) {
                 EXPECT_EQ(i, it);
             }
         );
-        EXPECT_EQ(DBGSD::npos, graph->traverse(it, 'A'));
-        EXPECT_EQ(DBGSD::npos, graph->traverse(it, 'G'));
-        EXPECT_EQ(DBGSD::npos, graph->traverse(it, 'T'));
+        EXPECT_EQ(DBGBitmap::npos, graph->traverse(it, 'A'));
+        EXPECT_EQ(DBGBitmap::npos, graph->traverse(it, 'G'));
+        EXPECT_EQ(DBGBitmap::npos, graph->traverse(it, 'T'));
 
         map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { it = i; });
-        ASSERT_NE(DBGSD::npos, it);
+        ASSERT_NE(DBGBitmap::npos, it);
         map_to_nodes_sequentially(
             std::string(k, 'C'),
             [&](auto i) {
@@ -1324,8 +1324,8 @@ TEST(DBGSD, TraversalsCanonical) {
             std::string(k - 1, 'G') + "T",
             [&](auto i) { it2 = i; }
         );
-        ASSERT_NE(DBGSD::npos, it2);
-        EXPECT_EQ(DBGSD::npos, graph->traverse(it, 'A'));
+        ASSERT_NE(DBGBitmap::npos, it2);
+        EXPECT_EQ(DBGBitmap::npos, graph->traverse(it, 'A'));
         EXPECT_EQ(it, graph->traverse(it, 'G'));
         EXPECT_EQ(it2, graph->traverse(it, 'T'));
         EXPECT_EQ(it, graph->traverse_back(it2, 'G'));
@@ -1334,20 +1334,20 @@ TEST(DBGSD, TraversalsCanonical) {
             std::string(k - 1, 'G') + "T",
             [&](auto i) { it2 = i; }
         );
-        ASSERT_NE(DBGSD::npos, it2);
-        EXPECT_EQ(DBGSD::npos, graph->traverse_back(it2, 'G'));
+        ASSERT_NE(DBGBitmap::npos, it2);
+        EXPECT_EQ(DBGBitmap::npos, graph->traverse_back(it2, 'G'));
         EXPECT_EQ(it3, graph->traverse(it2, 'C'));
-        EXPECT_NE(DBGSD::npos, graph->traverse_back(it2, 'A'));
+        EXPECT_NE(DBGBitmap::npos, graph->traverse_back(it2, 'A'));
     }
 }
 
-TEST(DBGSD, TraversalsDBG) {
+TEST(DBGBitmap, TraversalsDBG) {
     const auto npos = DeBruijnGraph::npos;
 
     for (size_t k = 2; k < 11; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'A') + std::string(100, 'C'));
-        std::unique_ptr<DeBruijnGraph> graph { new DBGSD(&constructor) };
+        std::unique_ptr<DeBruijnGraph> graph { new DBGBitmap(&constructor) };
 
         uint64_t it = 0;
 
@@ -1372,15 +1372,15 @@ TEST(DBGSD, TraversalsDBG) {
     }
 }
 
-TEST(DBGSD, OutgoingAdjacent) {
+TEST(DBGBitmap, OutgoingAdjacent) {
     for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'A') + std::string(100, 'C')
                                                        + std::string(100, 'G'));
-        std::unique_ptr<DeBruijnGraph> graph { new DBGSD(&constructor) };
+        std::unique_ptr<DeBruijnGraph> graph { new DBGBitmap(&constructor) };
 
         uint64_t it = 0;
-        std::vector<DBGSD::node_index> adjacent_nodes;
+        std::vector<DBGBitmap::node_index> adjacent_nodes;
 
         // AA, AAAAA
         graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
@@ -1441,15 +1441,15 @@ TEST(DBGSD, OutgoingAdjacent) {
     }
 }
 
-TEST(DBGSD, IncomingAdjacent) {
+TEST(DBGBitmap, IncomingAdjacent) {
     for (size_t k = 2; k <= 20; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'A') + std::string(100, 'C')
                                                        + std::string(100, 'G'));
-        std::unique_ptr<DeBruijnGraph> graph { new DBGSD(&constructor) };
+        std::unique_ptr<DeBruijnGraph> graph { new DBGBitmap(&constructor) };
 
         uint64_t it = 0;
-        std::vector<DBGSD::node_index> adjacent_nodes;
+        std::vector<DBGBitmap::node_index> adjacent_nodes;
 
         // AA, AAAAA
         graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
@@ -1512,13 +1512,13 @@ TEST(DBGSD, IncomingAdjacent) {
     }
 }
 
-TEST(DBGSD, TraversalsDBGCanonical) {
+TEST(DBGBitmap, TraversalsDBGCanonical) {
     const auto npos = DeBruijnGraph::npos;
 
     for (size_t k = 2; k < 11; ++k) {
-        DBGSDConstructor constructor(k, true);
+        DBGBitmapConstructor constructor(k, true);
         constructor.add_sequence(std::string(100, 'A') + std::string(100, 'C'));
-        std::unique_ptr<DeBruijnGraph> graph { new DBGSD(&constructor) };
+        std::unique_ptr<DeBruijnGraph> graph { new DBGBitmap(&constructor) };
 
         uint64_t it = 0;
 
@@ -1555,11 +1555,11 @@ TEST(DBGSD, TraversalsDBGCanonical) {
     }
 }
 
-TEST(DBGSD, map_to_nodes) {
+TEST(DBGBitmap, map_to_nodes) {
     for (size_t k = 2; k <= 10; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'A') + std::string(100, 'C'));
-        std::unique_ptr<DBGSD> graph { new DBGSD(&constructor) };
+        std::unique_ptr<DBGBitmap> graph { new DBGBitmap(&constructor) };
 
 
         std::string sequence_to_map = std::string(2, 'T')

@@ -37,12 +37,12 @@ const KmerExtractor2Bit kmer_extractor;
 
 TEST(Construct_SD_64, ConstructionNEAppendingSimplePath) {
     for (size_t k = 2; k <= kMaxK; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A') });
-        DBGSD constructed(&constructor);
+        DBGBitmap constructed(&constructor);
         EXPECT_EQ(1u, constructed.num_nodes());
 
-        DBGSD appended(k);
+        DBGBitmap appended(k);
         ASSERT_DEATH(appended.add_sequence(std::string(100, 'A')), "");
 
         ASSERT_NE(constructed, appended);
@@ -51,13 +51,13 @@ TEST(Construct_SD_64, ConstructionNEAppendingSimplePath) {
 
 TEST(Construct_SD_64, ConstructionNEAppendingTwoPaths) {
     for (size_t k = 2; k <= kMaxK; ++k) {
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A'),
                                     std::string(50, 'C') });
-        DBGSD constructed(&constructor);
+        DBGBitmap constructed(&constructor);
         EXPECT_EQ(2u, constructed.num_nodes());
 
-        DBGSD appended(k);
+        DBGBitmap appended(k);
         ASSERT_DEATH(appended.add_sequence(std::string(100, 'A')), "");
         ASSERT_DEATH(appended.add_sequence(std::string(50, 'C')), "");
 
@@ -69,15 +69,15 @@ TEST(Construct_SD_64, ConstructionNEAppendingTwoPaths) {
 /*
 TEST(Construct_SD_64, ConstructionLowerCase) {
     for (size_t k = 2; k <= kMaxK; ++k) {
-        DBGSDConstructor constructor_first(k);
+        DBGBitmapConstructor constructor_first(k);
         constructor_first.add_sequences({ std::string(100, 'A'),
                                           std::string(50, 'C') });
-        DBGSD first(&constructor_first);
+        DBGBitmap first(&constructor_first);
 
-        DBGSDConstructor constructor_second(k);
+        DBGBitmapConstructor constructor_second(k);
         constructor_second.add_sequences({ std::string(100, 'a'),
                                            std::string(50, 'c') });
-        DBGSD second(&constructor_second);
+        DBGBitmap second(&constructor_second);
 
 #if _DNA_CASE_SENSITIVE_GRAPH
         EXPECT_FALSE(first.equals_internally(second));
@@ -96,9 +96,9 @@ TEST(Construct_SD_64, ConstructionEQAppending) {
             "ATATATTCTCTCTCTCTCATA",
             "GTGTGTGTGGGGGGCCCTTTTTTCATA",
         };
-        DBGSDConstructor constructor(k);
+        DBGBitmapConstructor constructor(k);
         constructor.add_sequences(input_data);
-        DBGSD constructed(&constructor);
+        DBGBitmap constructed(&constructor);
 
         Vector<KmerExtractor2Bit::Kmer64> kmers;
         for (const auto &str : input_data) {
@@ -108,7 +108,7 @@ TEST(Construct_SD_64, ConstructionEQAppending) {
         kmers.erase(std::unique(kmers.begin(), kmers.end()), kmers.end());
         EXPECT_EQ(kmers.size(), constructed.num_nodes());
 
-        DBGSD appended(k);
+        DBGBitmap appended(k);
         EXPECT_NE(constructed, appended);
     }
 }
@@ -121,9 +121,9 @@ TEST(Construct_SD_64, ConstructionEQAppendingCanonical) {
             "ATATATTCTCTCTCTCTCATA",
             "GTGTGTGTGGGGGGCCCTTTTTTCATA",
         };
-        DBGSDConstructor constructor(k, true);
+        DBGBitmapConstructor constructor(k, true);
         constructor.add_sequences(input_data);
-        DBGSD constructed(&constructor);
+        DBGBitmap constructed(&constructor);
 
         Vector<KmerExtractor2Bit::Kmer64> kmers;
         for (const auto &str : input_data) {
@@ -137,7 +137,7 @@ TEST(Construct_SD_64, ConstructionEQAppendingCanonical) {
         kmers.erase(std::unique(kmers.begin(), kmers.end()), kmers.end());
         EXPECT_EQ(kmers.size(), constructed.num_nodes());
 
-        DBGSD appended(k);
+        DBGBitmap appended(k);
         EXPECT_NE(constructed, appended);
     }
 }
@@ -504,13 +504,13 @@ TEST(ExtractKmersPacked_64, ExtractKmersParallelRemoveRedundant) {
     ASSERT_EQ(1u, result.size());
 }
 
-TEST(DBGSDMergeChunks, DumpedChunked) {
+TEST(DBGBitmapMergeChunks, DumpedChunked) {
     for (size_t k = 2; k < 11; ++k) {
-        std::vector<std::unique_ptr<ISDChunkConstructor>> constructors;
-        constructors.emplace_back(ISDChunkConstructor::initialize(k, false, "A"));
-        constructors.emplace_back(ISDChunkConstructor::initialize(k, false, "C"));
-        constructors.emplace_back(ISDChunkConstructor::initialize(k, false, "G"));
-        constructors.emplace_back(ISDChunkConstructor::initialize(k, false, "T"));
+        std::vector<std::unique_ptr<IBitmapChunkConstructor>> constructors;
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "A"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "C"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "G"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "T"));
 
         for (auto &constructor : constructors) {
             constructor->add_sequence("AAACT");
@@ -537,13 +537,13 @@ TEST(DBGSDMergeChunks, DumpedChunked) {
             delete chunk;
         }
 
-        std::unique_ptr<DBGSD> chunked{
-            DBGSDConstructor::build_graph_from_chunks(files)
+        std::unique_ptr<DBGBitmap> chunked{
+            DBGBitmapConstructor::build_graph_from_chunks(files)
         };
 
         ASSERT_TRUE(chunked.get());
 
-        DBGSDConstructor full_constructor(k);
+        DBGBitmapConstructor full_constructor(k);
         full_constructor.add_sequence("AAACT");
         full_constructor.add_sequence("ACTATG");
         full_constructor.add_sequence(std::string(50, 'C'));
@@ -553,7 +553,7 @@ TEST(DBGSDMergeChunks, DumpedChunked) {
         full_constructor.add_sequence(std::string(60, 'G'));
         full_constructor.add_sequence(std::string(60, 'C'));
 
-        DBGSD full(2);
+        DBGBitmap full(2);
         full_constructor.build_graph(&full);
         ASSERT_EQ(full_constructor.constructor_->get_k(), full.get_k());
 
@@ -561,13 +561,13 @@ TEST(DBGSDMergeChunks, DumpedChunked) {
     }
 }
 
-TEST(DBGSDMergeChunks, DumpedChunkedCanonical) {
+TEST(DBGBitmapMergeChunks, DumpedChunkedCanonical) {
     for (size_t k = 2; k < 11; ++k) {
-        std::vector<std::unique_ptr<ISDChunkConstructor>> constructors;
-        constructors.emplace_back(ISDChunkConstructor::initialize(k, true, "A"));
-        constructors.emplace_back(ISDChunkConstructor::initialize(k, true, "C"));
-        constructors.emplace_back(ISDChunkConstructor::initialize(k, true, "G"));
-        constructors.emplace_back(ISDChunkConstructor::initialize(k, true, "T"));
+        std::vector<std::unique_ptr<IBitmapChunkConstructor>> constructors;
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "A"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "C"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "G"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "T"));
 
         for (auto &constructor : constructors) {
             constructor->add_sequence("AAACT");
@@ -594,13 +594,13 @@ TEST(DBGSDMergeChunks, DumpedChunkedCanonical) {
             delete chunk;
         }
 
-        std::unique_ptr<DBGSD> chunked{
-            DBGSDConstructor::build_graph_from_chunks(files, true)
+        std::unique_ptr<DBGBitmap> chunked{
+            DBGBitmapConstructor::build_graph_from_chunks(files, true)
         };
 
         ASSERT_TRUE(chunked.get());
 
-        DBGSDConstructor full_constructor(k, true);
+        DBGBitmapConstructor full_constructor(k, true);
         full_constructor.add_sequence("AAACT");
         full_constructor.add_sequence("ACTATG");
         full_constructor.add_sequence(std::string(50, 'C'));
@@ -610,7 +610,7 @@ TEST(DBGSDMergeChunks, DumpedChunkedCanonical) {
         full_constructor.add_sequence(std::string(60, 'G'));
         full_constructor.add_sequence(std::string(60, 'C'));
 
-        DBGSD full(2);
+        DBGBitmap full(2);
         full_constructor.build_graph(&full);
         ASSERT_EQ(full_constructor.constructor_->get_k(), full.get_k());
 
@@ -618,15 +618,15 @@ TEST(DBGSDMergeChunks, DumpedChunkedCanonical) {
     }
 }
 
-TEST(DBGSDMergeChunks, ParallelDumpedChunked) {
+TEST(DBGBitmapMergeChunks, ParallelDumpedChunked) {
     const size_t num_threads = 4;
 
     for (size_t k = 2; k < 11; ++k) {
-        std::vector<std::unique_ptr<ISDChunkConstructor>> constructors;
-        constructors.emplace_back(ISDChunkConstructor::initialize(k, false, "A", num_threads));
-        constructors.emplace_back(ISDChunkConstructor::initialize(k, false, "C", num_threads));
-        constructors.emplace_back(ISDChunkConstructor::initialize(k, false, "G", num_threads));
-        constructors.emplace_back(ISDChunkConstructor::initialize(k, false, "T", num_threads));
+        std::vector<std::unique_ptr<IBitmapChunkConstructor>> constructors;
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "A", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "C", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "G", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "T", num_threads));
 
         for (auto &constructor : constructors) {
             constructor->add_sequence("AAACT");
@@ -655,13 +655,13 @@ TEST(DBGSDMergeChunks, ParallelDumpedChunked) {
             delete chunk;
         }
 
-        std::unique_ptr<DBGSD> chunked{
-            DBGSDConstructor::build_graph_from_chunks(files)
+        std::unique_ptr<DBGBitmap> chunked{
+            DBGBitmapConstructor::build_graph_from_chunks(files)
         };
 
         ASSERT_TRUE(chunked.get());
 
-        DBGSDConstructor full_constructor(k);
+        DBGBitmapConstructor full_constructor(k);
         full_constructor.add_sequence("AAACT");
         full_constructor.add_sequence("ACTATG");
         full_constructor.add_sequence(std::string(50, 'C'));
@@ -671,7 +671,7 @@ TEST(DBGSDMergeChunks, ParallelDumpedChunked) {
         full_constructor.add_sequence(std::string(60, 'G'));
         full_constructor.add_sequence(std::string(60, 'C'));
 
-        DBGSD full(2);
+        DBGBitmap full(2);
         full_constructor.build_graph(&full);
         ASSERT_EQ(full.num_nodes(), chunk_size);
         ASSERT_EQ(full_constructor.constructor_->get_k(), full.get_k());
@@ -680,15 +680,15 @@ TEST(DBGSDMergeChunks, ParallelDumpedChunked) {
     }
 }
 
-TEST(DBGSDMergeChunks, ParallelDumpedChunkedCanonical) {
+TEST(DBGBitmapMergeChunks, ParallelDumpedChunkedCanonical) {
     const size_t num_threads = 4;
 
     for (size_t k = 2; k < 11; ++k) {
-        std::vector<std::unique_ptr<ISDChunkConstructor>> constructors;
-        constructors.emplace_back(ISDChunkConstructor::initialize(k, true, "A", num_threads));
-        constructors.emplace_back(ISDChunkConstructor::initialize(k, true, "C", num_threads));
-        constructors.emplace_back(ISDChunkConstructor::initialize(k, true, "G", num_threads));
-        constructors.emplace_back(ISDChunkConstructor::initialize(k, true, "T", num_threads));
+        std::vector<std::unique_ptr<IBitmapChunkConstructor>> constructors;
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "A", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "C", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "G", num_threads));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "T", num_threads));
 
         for (auto &constructor : constructors) {
             constructor->add_sequence("AAACT");
@@ -717,13 +717,13 @@ TEST(DBGSDMergeChunks, ParallelDumpedChunkedCanonical) {
             delete chunk;
         }
 
-        std::unique_ptr<DBGSD> chunked{
-            DBGSDConstructor::build_graph_from_chunks(files, true)
+        std::unique_ptr<DBGBitmap> chunked{
+            DBGBitmapConstructor::build_graph_from_chunks(files, true)
         };
 
         ASSERT_TRUE(chunked.get());
 
-        DBGSDConstructor full_constructor(k, true);
+        DBGBitmapConstructor full_constructor(k, true);
         full_constructor.add_sequence("AAACT");
         full_constructor.add_sequence("ACTATG");
         full_constructor.add_sequence(std::string(50, 'C'));
@@ -733,7 +733,7 @@ TEST(DBGSDMergeChunks, ParallelDumpedChunkedCanonical) {
         full_constructor.add_sequence(std::string(60, 'G'));
         full_constructor.add_sequence(std::string(60, 'C'));
 
-        DBGSD full(2);
+        DBGBitmap full(2);
         full_constructor.build_graph(&full);
         ASSERT_EQ(full.num_nodes(), chunk_size);
         ASSERT_EQ(full_constructor.constructor_->get_k(), full.get_k());
