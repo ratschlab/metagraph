@@ -281,7 +281,7 @@ TEST_F(ConvertFromRowCompressed, stream_to_RowFlat) {
     const auto rowflat_filename = test_dump_basename_row_compressed_to_rowflat + annotate::kRowAnnotatorExtension;
     initial_annotation->serialize(rowflat_filename);
 
-    annotation = annotate::convert<annotate::RowCompressed<>, annotate::RowFlatAnnotator, std::string>(
+    annotation = annotate::convert<annotate::RowFlatAnnotator, std::string>(
         rowflat_filename
     ).release();
 }

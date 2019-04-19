@@ -4,8 +4,11 @@
 #include <memory>
 #include <vector>
 #include <functional>
+#include <progress_bar.hpp>
 
 #include "annotate.hpp"
+#include "annotate_static.hpp"
+#include "static_annotators_def.hpp"
 #include "annotate_row_compressed.hpp"
 
 #include "utils.hpp"
@@ -59,6 +62,45 @@ void relax_BRWT(StaticAnnotation *annotation,
                 size_t relax_max_arity,
                 size_t num_threads = 1);
 
+template <class StaticAnnotation, typename Label = std::string, bool sparse = false>
+std::unique_ptr<StaticAnnotation>
+convert(const std::string &filename) {
+    using MatrixType = typename StaticAnnotation::binary_matrix_type;
+
+    uint64_t num_rows;
+    uint64_t num_relations;
+    RowCompressed<Label>::stream_counts(filename, &num_rows, &num_relations, sparse);
+
+    auto label_encoder = RowCompressed<Label>::load_label_encoder(filename);
+
+    constexpr size_t num_passes = std::is_same<MatrixType, Rainbowfish>::value ? 2u : 1u;
+    ProgressBar progress_bar(num_rows*num_passes, "Processing rows");
+
+    auto callback = [&](auto callback) {
+        auto annotator = std::make_unique<typename RowCompressed<Label>::StreamRows>(filename, sparse);
+        for (uint64_t r = 0; r < num_rows; ++r) {
+            auto row = annotator->next_row();
+            std::sort(row->begin(), row->end());
+            callback(*row);
+            ++progress_bar;
+        }
+    };
+
+    std::unique_ptr<MatrixType> matrix;
+    if constexpr (std::is_same<MatrixType, RowConcatenated<> >::value) {
+        matrix = std::make_unique<MatrixType>(callback, label_encoder->size(), num_rows, num_relations);
+    } else if constexpr (std::is_same<MatrixType, Rainbowfish>::value) {
+        matrix = std::make_unique<MatrixType>(callback, label_encoder->size());
+    } else if constexpr (std::is_same<MatrixType, BinRelWT>::value) {
+        matrix = std::make_unique<MatrixType>(callback, num_relations, label_encoder->size());
+    } else if constexpr (std::is_same<MatrixType, BinRelWT_sdsl>::value) {
+        matrix = std::make_unique<MatrixType>(callback, num_relations, label_encoder->size());
+    } else {
+        static_assert(utils::dependent_false<StaticAnnotation>::value);
+    }
+
+    return std::make_unique<StaticAnnotation>(std::move(matrix), *label_encoder);
+}
 
 uint64_t merge_rows(
     const std::vector<const LEncoder*> &label_encoders,
@@ -125,9 +167,8 @@ merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotators, 
         }
     );
 
-    if (!std::is_same<RowCompressed<Label>, ToAnnotation>::value) {
-        //TODO: implement other target annotation types w/ rowcompressed file input (no change here needed)
-        auto out_annotator = convert<RowCompressed<Label>, ToAnnotation, Label>(outfile);
+    if constexpr (!std::is_same<RowCompressed<Label>, ToAnnotation>::value) {
+        auto out_annotator = convert<ToAnnotation, Label, sparse>(outfile);
         //TODO: should delete outfile.row.annodbg here
         out_annotator->serialize(outfile);
     }

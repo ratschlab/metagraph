@@ -1991,22 +1991,22 @@ int main(int argc, const char *argv[]) {
 
                     switch (config->anno_type) {
                         case Config::RowFlat: {
-                            auto annotator = annotate::convert<annotate::RowCompressed<>, annotate::RowFlatAnnotator, std::string>(files.at(0));
+                            auto annotator = annotate::convert<annotate::RowFlatAnnotator, std::string>(files.at(0));
                             target_annotator = std::move(annotator);
                             break;
                         }
                         case Config::RBFish: {
-                            auto annotator = annotate::convert<annotate::RowCompressed<>, annotate::RainbowfishAnnotator, std::string>(files.at(0));
+                            auto annotator = annotate::convert<annotate::RainbowfishAnnotator, std::string>(files.at(0));
                             target_annotator = std::move(annotator);
                             break;
                         }
                         case Config::BinRelWT_sdsl: {
-                            auto annotator = annotate::convert<annotate::RowCompressed<>, annotate::BinRelWT_sdslAnnotator, std::string>(files.at(0));
+                            auto annotator = annotate::convert<annotate::BinRelWT_sdslAnnotator, std::string>(files.at(0));
                             target_annotator = std::move(annotator);
                             break;
                         }
                         case Config::BinRelWT: {
-                            auto annotator = annotate::convert<annotate::RowCompressed<>, annotate::BinRelWTAnnotator, std::string>(files.at(0));
+                            auto annotator = annotate::convert<annotate::BinRelWTAnnotator, std::string>(files.at(0));
                             target_annotator = std::move(annotator);
                             break;
                         }

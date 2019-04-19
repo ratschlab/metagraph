@@ -336,6 +336,8 @@ namespace utils {
                                          uint64_t sample_size,
                                          std::mt19937 &gen);
 
+    template<class T> struct dependent_false : std::false_type {};
+
 } // namespace utils
 
 template <typename T>

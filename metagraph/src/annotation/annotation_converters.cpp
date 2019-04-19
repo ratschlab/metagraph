@@ -49,35 +49,6 @@ convert<RowFlatAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
 }
 
 template <>
-std::unique_ptr<RowFlatAnnotator>
-convert<RowCompressed<>, RowFlatAnnotator, std::string, false>(const std::string &filename) {
-    uint64_t num_rows;
-    uint64_t num_relations;
-    RowCompressed<>::stream_counts(filename, &num_rows, &num_relations, false);
-
-    auto label_encoder = RowCompressed<std::string>::load_label_encoder(filename);
-
-    ProgressBar progress_bar(num_rows, "Processing rows");
-
-    auto matrix = std::make_unique<RowConcatenated<>>(
-        [&](auto callback) {
-            auto annotator = std::make_unique<RowCompressed<>::StreamRows>(filename, false);
-            for (uint64_t r = 0; r < num_rows; ++r) {
-                auto row = annotator->next_row();
-                std::sort(row->begin(), row->end());
-                callback(*row);
-                ++progress_bar;
-            }
-        },
-        label_encoder->size(),
-        num_rows,
-        num_relations
-    );
-
-    return std::make_unique<RowFlatAnnotator>(std::move(matrix), *label_encoder);
-}
-
-template <>
 std::unique_ptr<RainbowfishAnnotator>
 convert<RainbowfishAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
     uint64_t num_columns = annotator.num_labels();
@@ -88,31 +59,6 @@ convert<RainbowfishAnnotator, std::string>(RowCompressed<std::string>&& annotato
 
     return std::make_unique<RainbowfishAnnotator>(std::move(matrix),
                                                   annotator.label_encoder_);
-}
-
-//TODO: these can be templatized; only difference is progressbar since this one is 2-pass
-template <>
-std::unique_ptr<RainbowfishAnnotator>
-convert<RowCompressed<>, RainbowfishAnnotator, std::string, false>(const std::string &filename) {
-    uint64_t num_rows;
-    uint64_t num_relations;
-    RowCompressed<>::stream_counts(filename, &num_rows, &num_relations, false);
-
-    auto label_encoder = RowCompressed<std::string>::load_label_encoder(filename);
-
-    ProgressBar progress_bar(2u*num_rows, "Processing rows");
-
-    auto matrix = std::make_unique<Rainbowfish>([&](auto callback) {
-        auto annotator = std::make_unique<RowCompressed<>::StreamRows>(filename, false);
-        for (uint64_t r = 0; r < num_rows; ++r) {
-            auto row = annotator->next_row();
-            std::sort(row->begin(), row->end());
-            callback(*row);
-            ++progress_bar;
-        }
-    }, label_encoder->size());
-
-    return std::make_unique<RainbowfishAnnotator>(std::move(matrix), *label_encoder);
 }
 
 template <>
@@ -134,30 +80,6 @@ convert<BinRelWT_sdslAnnotator, std::string>(RowCompressed<std::string>&& annota
 }
 
 template <>
-std::unique_ptr<BinRelWT_sdslAnnotator>
-convert<RowCompressed<>, BinRelWT_sdslAnnotator, std::string, false>(const std::string &filename) {
-    uint64_t num_rows;
-    uint64_t num_relations;
-    RowCompressed<>::stream_counts(filename, &num_rows, &num_relations, false);
-
-    auto label_encoder = RowCompressed<std::string>::load_label_encoder(filename);
-
-    ProgressBar progress_bar(num_rows, "Processing rows");
-
-    auto matrix = std::make_unique<BinRelWT_sdsl>([&](auto callback) {
-        auto annotator = std::make_unique<RowCompressed<>::StreamRows>(filename, false);
-        for (uint64_t r = 0; r < num_rows; ++r) {
-            auto row = annotator->next_row();
-            std::sort(row->begin(), row->end());
-            callback(*row);
-            ++progress_bar;
-        }
-    }, num_relations, label_encoder->size());
-
-    return std::make_unique<BinRelWT_sdslAnnotator>(std::move(matrix), *label_encoder);
-}
-
-template <>
 std::unique_ptr<BinRelWTAnnotator>
 convert<BinRelWTAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
     uint64_t num_set_bits = annotator.num_relations();
@@ -174,31 +96,6 @@ convert<BinRelWTAnnotator, std::string>(RowCompressed<std::string>&& annotator) 
     return std::make_unique<BinRelWTAnnotator>(std::move(matrix),
                                                annotator.label_encoder_);
 }
-
-template <>
-std::unique_ptr<BinRelWTAnnotator>
-convert<RowCompressed<>, BinRelWTAnnotator, std::string, false>(const std::string &filename) {
-    uint64_t num_rows;
-    uint64_t num_relations;
-    RowCompressed<>::stream_counts(filename, &num_rows, &num_relations, false);
-
-    auto label_encoder = RowCompressed<std::string>::load_label_encoder(filename);
-
-    ProgressBar progress_bar(num_rows, "Processing rows");
-
-    auto matrix = std::make_unique<BinRelWT>([&](auto callback) {
-        auto annotator = std::make_unique<RowCompressed<>::StreamRows>(filename, false);
-        for (uint64_t r = 0; r < num_rows; ++r) {
-            auto row = annotator->next_row();
-            std::sort(row->begin(), row->end());
-            callback(*row);
-            ++progress_bar;
-        }
-    }, num_relations, label_encoder->size());
-
-    return std::make_unique<BinRelWTAnnotator>(std::move(matrix), *label_encoder);
-}
-
 
 template <>
 std::unique_ptr<RowFlatAnnotator>
@@ -441,7 +338,7 @@ merge<RowFlatAnnotator, RowFlatAnnotator, std::string, false>(const std::vector<
         }
     );
 
-    auto rowflat = convert<RowCompressed<>, RowFlatAnnotator, std::string>(ofbase);
+    auto rowflat = convert<RowFlatAnnotator, std::string>(ofbase);
     rowflat->serialize(ofbase);
     return num_rows;
 }
