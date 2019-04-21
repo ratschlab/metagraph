@@ -25,6 +25,10 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     template <class A, typename L, class P>
     friend std::unique_ptr<A> convert_to_BRWT(ColumnCompressed<L>&&, P, size_t);
 
+    //TODO: remove
+    template <class A, typename L, bool s>
+    friend uint64_t merge(const std::vector<const MultiLabelEncoded<uint64_t, L>*>&, const std::vector<std::string>&, const std::string&);
+
   public:
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
     using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;

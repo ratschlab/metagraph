@@ -399,16 +399,21 @@ TEST_F(MergeAnnotators, Mixed_to_RowFlat) {
     }
     {
         auto annotator = std::make_unique<annotate::ColumnCompressed<> >(5);
-        annotator->add_labels(0, {"Label0", "Label2", "Label8"});
-        annotator->add_labels(2, {"Label1", "Label2"});
-        annotator->add_labels(3, {"Label1", "Label2", "Label8"});
-        annotator->add_labels(4, {"Label2"});
+        annotator->add_labels(1, {"Label0", "Label3"});
+        annotator->add_labels(2, {"Label0", "Label9", "Label7"});
+        annotator->add_labels(4, {"Label1", "Label3", "Label9", "Label10", "Label5", "Label6", "Label11", "Label12", "Label13", "Label14", "Label15", "Label16"});
         annotators.push_back(annotator.get());
         annotators_.push_back(std::move(annotator));
     }
     {
+        //TODO: move into fixture as input_annotation_3 and make non-overlapping
         const std::string filename = test_dump_basename_row_compressed_merge + "_mixed_2";
-        input_annotation_2->serialize(filename);
+        auto annotation = std::make_unique<annotate::RowCompressed<> >(num_rows);
+        annotation->add_labels(0, {"Label0"});
+        annotation->add_labels(2, {"Label1"});
+        annotation->add_labels(3, {"Label1"});
+        annotation->add_labels(4, {"Label2"});
+        annotation->serialize(filename);
         filenames.push_back(filename + annotate::kRowAnnotatorExtension);
     }
 

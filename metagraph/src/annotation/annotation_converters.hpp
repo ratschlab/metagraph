@@ -145,13 +145,52 @@ merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotators, 
             throw std::runtime_error("streaming only supported for rowcompressed annotator");
         }
     }
-
     merge_rows(
         label_encoders,
         [&](const uint64_t row_idx, const uint64_t annotator_idx) -> const std::vector<uint64_t> {
-            //TODO: instead some vector of some sort of union-type elements?
+            //TODO: common row-streaming interface which buffers
+            //TODO: remove row_idx arg so this is a one-way iterator callback
             if (annotator_idx < annotators.size()) {
-                return annotators.at(annotator_idx)->get_label_indexes(row_idx);
+                if (const auto annotator = dynamic_cast<const ColumnCompressed<Label>*>(annotators.at(annotator_idx))) {
+                    //TODO: move into iterator obj
+                    static std::unique_ptr<utils::RowsFromColumnsTransformer> transformer;
+                    static uint64_t cur_row = 0;
+                    static uint64_t row = 0;
+                    static uint64_t column;
+                    std::vector<uint64_t> indices;
+
+                    if (transformer.get() && (row == cur_row)) {
+                        indices.push_back(column);
+                    }
+
+                    if (!transformer) {
+                        annotator->flush();
+                        transformer.reset(new utils::RowsFromColumnsTransformer(annotator->bitmatrix_));
+                    }
+                    assert(row_idx < transformer->rows());
+                    assert(cur_row < transformer->rows());
+
+                    if (!transformer->values_left() || row > cur_row) {
+                        cur_row++;
+                        return indices;
+                    }
+
+                    while (true) {
+                        if (!transformer->values_left())
+                            break;
+                        transformer->call_next([&](uint64_t row_, uint64_t column_) {
+                            row = row_;
+                            column = column_;
+                        });
+                        if (row != cur_row)
+                            break;
+                        indices.push_back(column);
+                    }
+                    cur_row++;
+                    return indices;
+                } else {
+                    return annotators.at(annotator_idx)->get_label_indexes(row_idx);
+                }
             } else {
                 return *streams[annotator_idx-annotators.size()]->next_row();
             }
