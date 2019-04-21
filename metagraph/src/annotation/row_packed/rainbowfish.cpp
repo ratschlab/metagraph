@@ -194,8 +194,8 @@ bool Rainbowfish::load(std::istream &in) {
         num_columns_ = load_number(in);
         num_relations_ = load_number(in);
         buffer_size_ = load_number(in);
-        row_codes_.load(in);
-        row_code_delimiters_.load(in);
+        if (!row_codes_.load(in) || !row_code_delimiters_.load(in))
+            return false;
 
         // TODO: handle diff types
         reduced_matrix_.clear();

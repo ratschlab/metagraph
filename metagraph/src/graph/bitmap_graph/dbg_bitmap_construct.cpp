@@ -125,7 +125,8 @@ DBGBitmapConstructor
         }
 
         chunks.emplace_back();
-        chunks.back().load(chunk_in);
+        if (!chunks.back().load(chunk_in))
+            throw std::ifstream::failure("ERROR: can't read bitmap chunk from " + file);
 
         assert(chunks.empty() || chunks.back().size() == chunks.front().size());
 

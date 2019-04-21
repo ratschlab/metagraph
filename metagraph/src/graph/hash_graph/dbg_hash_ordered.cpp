@@ -391,8 +391,7 @@ bool DBGHashOrdered::load(std::istream &in) {
 
         // the actual value of |canonical| will be set in load
         hash_dbg_ = initialize_graph(k, false);
-        hash_dbg_->load(in);
-        return in.good();
+        return hash_dbg_->load(in) && in.good();
     } catch (...) {
         return false;
     }

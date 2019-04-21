@@ -100,7 +100,8 @@ bool BRWT::load(std::istream &in) {
         child_nodes_.reserve(num_child_nodes);
         for (size_t i = 0; i < num_child_nodes; ++i) {
             child_nodes_.emplace_back(new BRWT());
-            child_nodes_.back()->load(in);
+            if (!child_nodes_.back()->load(in))
+                return false;
         }
         return !child_nodes_.size()
                     || child_nodes_.size() == assignments_.num_groups();

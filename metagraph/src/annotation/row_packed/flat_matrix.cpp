@@ -65,7 +65,8 @@ bool RowConcatenated<BitVector>::load(std::istream &in) {
     compressed_rows_.reset(new BitVector());
     try {
         num_columns_ = load_number(in);
-        compressed_rows_->load(in);
+        if (!compressed_rows_->load(in))
+            return false;
     } catch (...) {
         return false;
     }
