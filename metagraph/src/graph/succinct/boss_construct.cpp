@@ -6,6 +6,57 @@
 #include "boss_chunk.hpp"
 
 
+template <typename KMER>
+void erase_redundant_dummy_kmers(Vector<KMER> *kmers) {
+
+    assert(std::is_sorted(kmers->begin(), kmers->end()));
+
+    size_t cur_pos = 0;
+
+    KmerExtractor::TAlphabet edge_label, node_last_char;
+
+    for (size_t i = 0; i < kmers->size(); ++i) {
+        const KMER &kmer = kmers->at(i);
+        node_last_char = kmer[1];
+        edge_label = kmer[0];
+
+        // check if the k-mer isn't dummy
+        if (edge_label && node_last_char) {
+            kmers->at(cur_pos++) = kmer;
+            continue;
+        }
+
+        // skip redundant sink dummy kmers
+        if (node_last_char && !edge_label
+                           && i + 1 < kmers->size()
+                           && KMER::compare_suffix(kmer, kmers->at(i + 1), 0)) {
+            continue;
+        }
+
+        // check if it isn't a source dummy kmer
+        if (!edge_label || node_last_char) {
+            kmers->at(cur_pos++) = kmer;
+            continue;
+        }
+
+        bool redundant = false;
+        for (size_t j = i + 1; j < kmers->size()
+                                && KMER::compare_suffix(kmer, kmers->at(j), 1); ++j) {
+            if (edge_label == kmers->at(j)[0]) {
+                // This source dummy kmer is redundant and has to be erased
+                redundant = true;
+                break;
+            }
+        }
+
+        // keep the dummy kmer in the list if it's not redundant
+        if (!redundant)
+            kmers->at(cur_pos++) = kmer;
+    }
+
+    kmers->resize(cur_pos);
+}
+
 // Although this function could be parallelized better,
 // the experiments show it's already fast enough.
 // k is node length
@@ -14,51 +65,23 @@ void recover_source_dummy_nodes(size_t k,
                                 Vector<KMER> *kmers,
                                 size_t num_threads,
                                 bool verbose) {
-    // TODO: remove redundant kmers in a separate function
-    // remove redundant dummy kmers inplace
-    size_t cur_pos = 0;
+    erase_redundant_dummy_kmers(kmers);
+
     size_t dummy_begin = kmers->size();
     size_t num_dummy_parent_kmers = 0;
-
-    KmerExtractor::TAlphabet edge_label, node_last_char;
 
     for (size_t i = 0; i < dummy_begin; ++i) {
         const KMER &kmer = kmers->at(i);
         // we never add reads shorter than k
         assert(kmer[1] != 0 || kmer[0] != 0 || kmer[k] == 0);
 
-        node_last_char = kmer[1];
-        edge_label = kmer[0];
-
-        // skip redundant sink dummy kmers
-        if (i + 1 < dummy_begin
-                && edge_label == 0 && node_last_char > 0
-                && KMER::compare_suffix(kmer, kmers->at(i + 1), 0)) {
-            continue;
-        }
-
+        auto node_last_char = kmer[1];
+        auto edge_label = kmer[0];
         // check if it's not a source dummy kmer
-        if (node_last_char > 0 || edge_label == 0) {
-            kmers->at(cur_pos++) = kmer;
-            continue;
-        }
-
-        bool redundant = false;
-        for (size_t j = i + 1; j < dummy_begin
-                                && KMER::compare_suffix(kmer, kmers->at(j), 1); ++j) {
-            if (edge_label == kmers->at(j)[0]) {
-                // This source dummy kmer is redundant and has to be erased
-                redundant = true;
-                break;
-            }
-        }
-        if (redundant)
+        if (node_last_char || !edge_label)
             continue;
 
         num_dummy_parent_kmers++;
-
-        // leave this dummy kmer in the list
-        kmers->at(cur_pos++) = kmer;
 
         if (kmers->size() + 1 > kmers->capacity())
             shrink_kmers(kmers, num_threads, verbose, dummy_begin);
@@ -76,11 +99,6 @@ void recover_source_dummy_nodes(size_t k,
         std::cout << "Number of dummy k-mers with dummy prefix of length 2: "
                   << kmers->size() - dummy_begin << std::endl;
     }
-
-    std::copy(kmers->begin() + dummy_begin, kmers->end(),
-              kmers->begin() + cur_pos);
-    kmers->resize(kmers->size() - dummy_begin + cur_pos);
-    dummy_begin = cur_pos;
 
     for (size_t c = 3; c < k + 1; ++c) {
         size_t succ_dummy_begin = dummy_begin;
