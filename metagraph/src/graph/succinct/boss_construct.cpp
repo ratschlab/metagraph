@@ -32,9 +32,8 @@ void recover_source_dummy_nodes(size_t k,
 
         // skip redundant sink dummy kmers
         if (i + 1 < dummy_begin
-                && node_last_char == kmers->at(i + 1)[1]
-                && edge_label == 0 && node_last_char > 0) {
-            kmers->at(cur_pos++) = kmer;
+                && edge_label == 0 && node_last_char > 0
+                && KMER::compare_suffix(kmer, kmers->at(i + 1), 0)) {
             continue;
         }
 
