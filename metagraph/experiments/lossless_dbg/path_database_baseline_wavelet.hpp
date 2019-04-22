@@ -162,21 +162,22 @@ public:
 
     }
 
-    int routing_table_select(node_index node, int occurrence, char symbol) {
+    int routing_table_select(node_index node, int occurrence, char symbol) const {
         auto routing_table_block = routing_table_offset(node);
-        auto occurrences_of_symbol_before_block = routing_table.rank(routing_table_block,symbol);
-        return routing_table.select(occurrences_of_symbol_before_block+occurrence) - routing_table_block;
+        auto occurrences_of_symbol_before_block = routing_table.rank(routing_table_block,rc(symbol));
+        return routing_table.select(occurrences_of_symbol_before_block+occurrence,rc(symbol)) - routing_table_block;
     }
 
-    int routing_table_rank(node_index node, int position, char symbol) {
+    int routing_table_rank(node_index node, int position, char symbol) const {
         auto routing_table_block = routing_table_offset(node);
         auto absolute_position = routing_table_block+position;
-        auto occurrences_of_base_before_block = routing_table.rank(routing_table_block,symbol);
-        return routing_table.rank(absolute_position,symbol) - occurrences_of_base_before_block;
+        auto occurrences_of_base_before_block = routing_table.rank(routing_table_block,rc(symbol));
+        return routing_table.rank(absolute_position,rc(symbol)) - occurrences_of_base_before_block;
     }
-    void get_paths_going_through() {
+    vector<path_id> get_paths_going_through(node_index node) {
         //catch: relative indices in node can be from the same sequence if the read is going there multiple times
         //use set to filter out duplicates or be smarter and stop when arrived to the starting node again
+
     }
 
     std::string decode(path_id path) const override {
@@ -253,7 +254,7 @@ public:
             auto count = number_of_reads_ending_at_node(node);
             for(auto read_index=0;read_index<count;read_index++) {
                 auto relative_index = routing_table_select(node,read_index+1,'$');
-                reads.push_back(get_global_path_id(node,relative_index));
+                reads.push_back(decode(get_global_path_id(node,relative_index)));
             }
         }
         return reads;
@@ -406,10 +407,10 @@ public:
         return result;
     }
 
-    path_id get_global_path_id(node_index node, int relative_position) {
+    path_id get_global_path_id(node_index node, int relative_position) const {
         char base = '\0';
         if (node_is_join(node)) {
-            for(auto c = 'N'_rc; c >= 0;c++) {
+            for(auto c = 'N'_rc; c >= 0;c--) {
                 auto offset = branch_starting_offset(node,tochar(c));
                 if (offset <= relative_position) {
                     base = tochar(c);
@@ -418,8 +419,8 @@ public:
             }
         }
         else {
-            assert(graph.outdegree(node) == 1);
-            graph.call_outgoing_kmers(node,[&base](node_index node,char edge_label ) { base = rc(edge_label);});
+            assert(graph.indegree(node) == 1);
+            graph.call_incoming_kmers(node,[&base](node_index node,char edge_label ) { base = rc(edge_label);});
         }
         if (base == '$') {
             return {node,relative_position};

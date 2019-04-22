@@ -83,10 +83,37 @@ void check_compression_decompression(PathDatabase<T>& db,vector<string>& reads) 
     }
     ASSERT_EQ(reads,decompressed_reads);
 }
+
+template <typename T>
+void check_decompression_all(T& db,vector<string>& reads) {
+    db.encode(reads);
+    auto decompressed_reads = db.decode_all_reads();
+    ASSERT_EQ(multiset<string>(all(reads)),multiset<string>(all(decompressed_reads)));
+}
+
+template <typename T>
+void check_decompression_inverse(T& db,vector<string>& reads) {
+    db.encode(reads);
+    auto decompressed_reads = db.decode_all_reads_inverse();
+    ASSERT_EQ(reads,decompressed_reads);
+}
+
 template <typename T>
 void check_compression_decompression(vector<string>& reads, int k_kmer=21) {
     auto db = T(reads,k_kmer);
     check_compression_decompression(db,reads);
+}
+
+template <typename T>
+void short_reads_decode_all() {
+    auto db = T(reads_for_testing_short,5);
+    check_decompression_all(db,reads_for_testing_short);
+}
+
+template <typename T>
+void short_reads_decode_inverse() {
+    auto db = T(reads_for_testing_short,5);
+    check_decompression_inverse(db,reads_for_testing_short);
 }
 
 template <typename T>
@@ -136,6 +163,14 @@ TEST(PathDatabase,IdentityTestPathDatabaseBaselineWavelet) {
 
 TEST(PathDatabase,SerDesTest) {
     short_serdes_test<PathDatabaseBaselineWaveletDeprecated>();
+}
+
+TEST(PathDatabase,DecodeAllInverse) {
+    short_reads_decode_inverse<PathDatabaseBaselineWavelet<>>();
+}
+
+TEST(PathDatabase,DecodeAll) {
+    short_reads_decode_all<PathDatabaseBaselineWavelet<>>();
 }
 
 #if defined(__linux__) || false
