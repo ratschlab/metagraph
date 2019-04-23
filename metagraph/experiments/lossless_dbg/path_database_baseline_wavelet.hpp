@@ -350,6 +350,7 @@ public:
         ofstream joins_file(folder / "joins.bin", ios_base::trunc | ios_base::out);
         string graph_filename = folder / "graph.bin";
 
+        cout << size_in_mega_bytes(edge_multiplicity_table) << endl;
         edge_multiplicity_table.serialize(edge_multiplicity_file);
         routing_table.serialize(routing_table_file);
         joins.serialize(joins_file);
