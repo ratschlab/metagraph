@@ -4,6 +4,7 @@
 #include <memory>
 #include <vector>
 #include <functional>
+#include <filesystem>
 #include <progress_bar.hpp>
 
 #include "annotate.hpp"
@@ -131,6 +132,9 @@ merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotators, 
         }
     }
 
+    std::string tmpfile = outfile;
+    tmpfile += RowCompressed<Label>::kExtension;
+
     merge_rows(
         label_encoders,
         [&](const uint64_t annotator_idx) -> const std::vector<uint64_t> {
@@ -142,16 +146,21 @@ merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotators, 
         },
         num_rows,
         [&](LEncoder &merged_label_enc, const std::function<void (const BinaryMatrix::RowCallback&)> &callback) {
-            //TODO: minor problem; conversion to rowflat overwrites outfile.row.annodbg if it exists
-            return RowCompressed<Label>::write_rows(outfile,
+            size_t c = 0;
+            while (std::filesystem::exists(tmpfile)) {
+                tmpfile = outfile + "." + std::to_string(++c);
+                tmpfile += RowCompressed<Label>::kExtension;
+            }
+
+            return RowCompressed<Label>::write_rows(tmpfile,
                                                     merged_label_enc,
                                                     callback);
         }
     );
 
     if constexpr (!std::is_same<RowCompressed<Label>, ToAnnotation>::value) {
-        auto out_annotator = convert<ToAnnotation, Label>(outfile);
-        //TODO: should delete outfile.row.annodbg here
+        auto out_annotator = convert<ToAnnotation, Label>(tmpfile);
+        std::filesystem::remove(tmpfile);
         out_annotator->serialize(outfile);
     }
 

@@ -258,8 +258,36 @@ namespace utils {
         }
         uint64_t values_left() { return transformer_->values_left(); };
 
+        std::vector<uint64_t> next_row() {
+            std::vector<uint64_t> indices;
+
+            if (i_ > 0 && (row_ == i_)) {
+                indices.push_back(column_);
+            }
+
+            if (!values_left() || row_ > i_) {
+                i_++;
+                return indices;
+            }
+
+            while (true) {
+                if (!values_left())
+                    break;
+                std::tie(row_, column_) = next_set_bit();
+                if (row_ != i_)
+                    break;
+                indices.push_back(column_);
+            }
+            i_++;
+            return indices;
+        }
+
       private:
         std::unique_ptr<utils::RowsFromColumnsTransformer> transformer_;
+
+        uint64_t i_ = 0;
+        uint64_t row_ = 0;
+        uint64_t column_;
     };
 
     void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,

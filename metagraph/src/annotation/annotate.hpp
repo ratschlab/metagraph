@@ -226,35 +226,9 @@ class IterateRowsBySetBits : public IterateRows<IndexType, LabelType> {
     IterateRowsBySetBits(std::unique_ptr<SetBitsIterator> set_bits_iterator) :
         set_bits_iterator_(std::move(set_bits_iterator)) {};
     
-    virtual std::vector<uint64_t> next_row() {
-        std::vector<uint64_t> indices;
-
-        if (i_ > 0 && (row_ == i_)) {
-            indices.push_back(column_);
-        }
-
-        if (!set_bits_iterator_->values_left() || row_ > i_) {
-            i_++;
-            return indices;
-        }
-
-        while (true) {
-            if (!set_bits_iterator_->values_left())
-                break;
-            std::tie(row_, column_) = set_bits_iterator_->next_set_bit();
-            if (row_ != i_)
-                break;
-            indices.push_back(column_);
-        }
-        i_++;
-        return indices;
-    }
+    virtual std::vector<uint64_t> next_row() { return set_bits_iterator_->next_row(); }
   protected:
     std::unique_ptr<SetBitsIterator> set_bits_iterator_;
-
-    typename MultiLabelEncoded<IndexType, LabelType>::Index i_ = 0;
-    typename MultiLabelEncoded<IndexType, LabelType>::Index row_ = 0;
-    uint64_t column_;
 };
 
 } // namespace annotate
