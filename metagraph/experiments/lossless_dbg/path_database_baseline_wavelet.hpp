@@ -174,6 +174,20 @@ public:
         auto occurrences_of_base_before_block = routing_table.rank(routing_table_block,rc(symbol));
         return routing_table.rank(absolute_position,rc(symbol)) - occurrences_of_base_before_block;
     }
+
+    char routing_table_get(node_index node, int position) const {
+        auto routing_table_block = routing_table_offset(node);
+        return tochar(routing_table[routing_table_block+position]);
+    }
+
+    void routing_table_print_content(node_index node) const {
+        auto size = routing_table_select(node,1,'#');
+        for (int i=0;i<size;i++) {
+            cout << routing_table_get(node,i);
+        }
+        cout << endl;
+    }
+
     vector<path_id> get_paths_going_through(node_index node) {
         //catch: relative indices in node can be from the same sequence if the read is going there multiple times
         //use set to filter out duplicates or be smarter and stop when arrived to the starting node again
@@ -254,10 +268,15 @@ public:
             auto count = number_of_reads_ending_at_node(node);
             for(auto read_index=0;read_index<count;read_index++) {
                 auto relative_index = routing_table_select(node,read_index+1,'$');
-                reads.push_back(decode(get_global_path_id(node,relative_index)));
+                auto id = get_global_path_id(node,relative_index);
+                reads.push_back(decode(id));
             }
         }
         return reads;
+    }
+
+    bool is_valid_path_id(path_id path_id) const {
+        return node_is_join(path_id.first) && path_id.second < branch_size(path_id.first,'$');
     }
 
     int number_of_reads_starting_at_node(node_index node) const {
@@ -408,27 +427,40 @@ public:
     }
 
     path_id get_global_path_id(node_index node, int relative_position) const {
-        char base = '\0';
+        char first_base = '\0';
         if (node_is_join(node)) {
             for(auto c = 'N'_rc; c >= 0;c--) {
                 auto offset = branch_starting_offset(node,tochar(c));
                 if (offset <= relative_position) {
-                    base = tochar(c);
+                    first_base = tochar(c);
                     relative_position -= offset;
+                    break;
                 }
             }
         }
         else {
             assert(graph.indegree(node) == 1);
-            graph.call_incoming_kmers(node,[&base](node_index node,char edge_label ) { base = rc(edge_label);});
+            // alternative for
+            // graph.call_incoming_kmers(node,[&first_base](node_index node,char edge_label ) { first_base = rc(edge_label);});
+            for(auto c : "ACGTN"s) {
+                if (graph.traverse_back(node,c)) {
+                    first_base = c;
+                    break;
+                }
+            }
+
         }
-        if (base == '$') {
+        if (first_base == '$') {
+            assert(is_valid_path_id({node,relative_position}));
             return {node,relative_position};
         }
-        assert(base);
-        node = graph.traverse_back(node,base);
+        assert(first_base);
+        // ToDo: get faster last character of a kmer
+        auto kmer = graph.get_node_sequence(node);
+        auto last_base = kmer[kmer.size()-1];
+        node = graph.traverse_back(node,first_base);
         if (node_is_split(node)) {
-            relative_position = routing_table_select(node,relative_position+1,base);// +1 as relative_position is 0-based
+            relative_position = routing_table_select(node,relative_position+1,last_base);// +1 as relative_position is 0-based
         }
         return get_global_path_id(node,relative_position);
     }

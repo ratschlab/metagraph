@@ -95,7 +95,7 @@ template <typename T>
 void check_decompression_inverse(T& db,vector<string>& reads) {
     db.encode(reads);
     auto decompressed_reads = db.decode_all_reads_inverse();
-    ASSERT_EQ(reads,decompressed_reads);
+    ASSERT_EQ(multiset<string>(all(reads)),multiset<string>(all(decompressed_reads)));
 }
 
 template <typename T>
