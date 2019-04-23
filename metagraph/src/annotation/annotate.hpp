@@ -157,7 +157,7 @@ class IterateRowsByIndex;
 template <typename IndexType, typename LabelType>
 class MultiLabelEncoded
       : public MultiLabelAnnotation<IndexType, LabelType> {
-    template <class A, typename L, bool s>
+    template <class A, typename L>
     friend uint64_t merge(const std::vector<const MultiLabelEncoded<uint64_t, L>*>&, const std::vector<std::string>&, const std::string&);
 
     template <typename I, typename L>

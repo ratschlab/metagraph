@@ -11,8 +11,6 @@ namespace annotate {
 
 template <class BinaryMatrixType, typename Label = std::string>
 class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
-    template <class A1, class A2, typename L, bool s>
-    friend uint64_t merge(const std::vector<const A1*>&, const std::string&);
   public:
     typedef BinaryMatrixType binary_matrix_type;
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;

@@ -25,13 +25,9 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     template <class A, typename L>
     friend std::unique_ptr<A> convert(RowCompressed<L>&&);
-    template <class A, typename L, bool s>
+    template <class A, typename L>
     friend std::unique_ptr<A> convert(const std::string&);
-    template <class A1, class A2, typename L, bool s>
-    friend uint64_t merge(const std::vector<std::string>&, const std::string&);
-    template <class A1, class A2, typename L, bool s>
-    friend uint64_t merge(const std::vector<const A1*>&, const std::string&);
-    template <class A, typename L, bool s>
+    template <class A, typename L>
     friend uint64_t merge(const std::vector<const MultiLabelEncoded<uint64_t, L>*>&, const std::vector<std::string>&, const std::string&);
 
   public:
@@ -79,19 +75,17 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     static const std::unique_ptr<const LabelEncoder<Label> > load_label_encoder(const std::string &filename);
     static void stream_counts(std::string filename,
                               uint64_t *num_objects,
-                              uint64_t *num_relations,
-                              bool sparse = false);
+                              uint64_t *num_relations);
     class StreamRows {
       public:
-        StreamRows(std::string filename, bool sparse);
+        StreamRows(std::string filename);
         std::unique_ptr<std::vector<VectorRowBinMat::Row> > next_row() { return std::move(sr_->next_row()); };
       private:
         std::unique_ptr<VectorRowBinMat::StreamRows> sr_;
     };
     static uint64_t write_rows(std::string filename,
                            const LabelEncoder<Label> &label_encoder,
-                           const std::function<void (BinaryMatrix::RowCallback&)> &callback,
-                           bool sparse);
+                           const std::function<void (BinaryMatrix::RowCallback&)> &callback);
 
     virtual std::vector<uint64_t> get_label_indexes(Index i) const {
         return matrix_->get_row(i);

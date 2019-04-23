@@ -293,15 +293,14 @@ const std::unique_ptr<const LabelEncoder<Label> > RowCompressed<Label>::load_lab
 template <typename Label>
 void RowCompressed<Label>::stream_counts(std::string filename,
                                          uint64_t *num_objects_,
-                                         uint64_t *num_relations_,
-                                         bool sparse) {
+                                         uint64_t *num_relations_) {
     assert(num_objects_);
     assert(num_relations_);
     uint64_t &num_objects = *num_objects_;
     uint64_t &num_relations = *num_relations_;
 
     filename = remove_suffix(filename, kExtension) + kExtension;
-    StreamRows sr(filename, sparse);
+    StreamRows sr(filename);
     std::unique_ptr<std::vector<VectorRowBinMat::Row> > row;
 
     num_objects = 0;
@@ -314,7 +313,7 @@ void RowCompressed<Label>::stream_counts(std::string filename,
 
 template <typename Label>
 RowCompressed<Label>
-::StreamRows::StreamRows(std::string filename, bool sparse) {
+::StreamRows::StreamRows(std::string filename) {
     filename = remove_suffix(filename, kExtension) + kExtension;
     std::ifstream instream(filename, std::ios::binary);
 
@@ -327,19 +326,14 @@ RowCompressed<Label>
         throw std::runtime_error("Could not load label encoder");
 
     // rows
-    if (sparse) {
-        throw std::runtime_error("Not implemented");
-    } else {
-        sr_ = std::make_unique<VectorRowBinMat::StreamRows>(instream, filename);
-    }
+    sr_ = std::make_unique<VectorRowBinMat::StreamRows>(instream, filename);
 }
 
 template <typename Label>
 uint64_t RowCompressed<Label>
 ::write_rows(std::string filename,
              const LabelEncoder<Label> &label_encoder,
-             const std::function<void (BinaryMatrix::RowCallback&)> &callback,
-             bool sparse) {
+             const std::function<void (BinaryMatrix::RowCallback&)> &callback) {
     filename = remove_suffix(filename, kExtension) + kExtension;
     std::ofstream outstream(filename, std::ios::binary);
 
@@ -349,12 +343,8 @@ uint64_t RowCompressed<Label>
     label_encoder.serialize(outstream);
     outstream.close();
 
-    if (sparse) {
-        throw std::runtime_error("Not implemented");
-    } else {
-        uint64_t num_cols = label_encoder.size();
-        return VectorRowBinMat::append_matrix(filename, callback, num_cols);
-    }
+    uint64_t num_cols = label_encoder.size();
+    return VectorRowBinMat::append_matrix(filename, callback, num_cols);
 }
 
 template class RowCompressed<std::string>;

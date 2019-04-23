@@ -26,18 +26,6 @@ template <class StaticAnnotation, typename Label>
 typename std::unique_ptr<StaticAnnotation>
 convert(RowCompressed<Label>&& annotation);
 
-template <class FromAnnotation, class ToAnnotation, typename Label, bool sparse = false>
-typename std::unique_ptr<ToAnnotation>
-convert(const std::string &filename);
-
-
-//TODO: rather than remove eigenspmat, make it identifiable by file extension?
-template <class FromAnnotation, class ToAnnotation, typename Label, bool sparse = false>
-uint64_t merge(const std::vector<std::string> &filenames, const std::string &outfile);
-
-template <class FromAnnotation, class ToAnnotation, typename Label, bool sparse = false>
-uint64_t merge(const std::vector<const FromAnnotation*> &annotators, const std::string &outfile);
-
 
 template <typename Label>
 class ColumnCompressed;
@@ -62,14 +50,14 @@ void relax_BRWT(StaticAnnotation *annotation,
                 size_t relax_max_arity,
                 size_t num_threads = 1);
 
-template <class StaticAnnotation, typename Label = std::string, bool sparse = false>
+template <class StaticAnnotation, typename Label = std::string>
 std::unique_ptr<StaticAnnotation>
 convert(const std::string &filename) {
     using MatrixType = typename StaticAnnotation::binary_matrix_type;
 
     uint64_t num_rows;
     uint64_t num_relations;
-    RowCompressed<Label>::stream_counts(filename, &num_rows, &num_relations, sparse);
+    RowCompressed<Label>::stream_counts(filename, &num_rows, &num_relations);
 
     auto label_encoder = RowCompressed<Label>::load_label_encoder(filename);
 
@@ -77,7 +65,7 @@ convert(const std::string &filename) {
     ProgressBar progress_bar(num_rows*num_passes, "Processing rows");
 
     auto callback = [&](auto callback) {
-        auto annotator = std::make_unique<typename RowCompressed<Label>::StreamRows>(filename, sparse);
+        auto annotator = std::make_unique<typename RowCompressed<Label>::StreamRows>(filename);
         for (uint64_t r = 0; r < num_rows; ++r) {
             auto row = annotator->next_row();
             std::sort(row->begin(), row->end());
@@ -109,7 +97,7 @@ uint64_t merge_rows(
     const std::function<uint64_t(LEncoder&, const std::function<void (const BinaryMatrix::RowCallback&)>)> &write_rows
 );
 
-template <class ToAnnotation, typename Label, bool sparse = false>
+template <class ToAnnotation, typename Label>
 uint64_t
 merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotators, const std::vector<std::string> &filenames, const std::string &outfile) {
 
@@ -119,7 +107,7 @@ merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotators, 
     if (annotators.size()>0) {
         num_rows = annotators.at(0)->num_objects();
     } else if (filenames.size()>0) {
-        RowCompressed<Label>::stream_counts(filenames.at(0), &num_rows, &num_relations, sparse);
+        RowCompressed<Label>::stream_counts(filenames.at(0), &num_rows, &num_relations);
     }
     assert(num_rows);
 
@@ -139,7 +127,7 @@ merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotators, 
             label_encoders.push_back(label_encoder.get());
             loaded_label_encoders.push_back(std::move(label_encoder));
 
-            auto annotator = std::make_unique<class RowCompressed<Label>::StreamRows>(filename, sparse);
+            auto annotator = std::make_unique<class RowCompressed<Label>::StreamRows>(filename);
             streams.push_back(std::move(annotator));
 
         } else {
@@ -161,13 +149,12 @@ merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotators, 
             //TODO: minor problem; conversion to rowflat overwrites outfile.row.annodbg if it exists
             return RowCompressed<Label>::write_rows(outfile,
                                                     merged_label_enc,
-                                                    callback,
-                                                    sparse);
+                                                    callback);
         }
     );
 
     if constexpr (!std::is_same<RowCompressed<Label>, ToAnnotation>::value) {
-        auto out_annotator = convert<ToAnnotation, Label, sparse>(outfile);
+        auto out_annotator = convert<ToAnnotation, Label>(outfile);
         //TODO: should delete outfile.row.annodbg here
         out_annotator->serialize(outfile);
     }
