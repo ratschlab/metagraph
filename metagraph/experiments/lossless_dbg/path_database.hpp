@@ -65,7 +65,7 @@ class PathDatabase {
     virtual std::vector<path_id> get_paths_going_through(node_index node) const = 0;
 
     // make one traversal step through the selected path
-    // TODO: Figure out what to do if node is visited multiple times in a path.
+    // TODO: Figure out what to do if the node is visited multiple times in the path.
     virtual node_index get_next_node(node_index node, path_id path) const = 0;
 
     // transition to the next node consistent with the history

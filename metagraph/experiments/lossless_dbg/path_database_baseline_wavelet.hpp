@@ -18,6 +18,7 @@
 #include "alphabets.hpp"
 #include <sdsl/wt_rlmn.hpp>
 #include <sdsl/sd_vector.hpp>
+#include <sdsl/enc_vector.hpp>
 
 
 template<typename POD>
@@ -119,16 +120,18 @@ public:
     }
 
     void construct_edge_multiplicity_table() {
+        vector<int> edge_multiplicity_table_builder;
         vector<bool> is_join_node(graph.num_nodes());
         for(int node=1;node<=graph.num_nodes();node++) {
             is_join_node[node-1] = PathDatabaseBaseline::node_is_join(node);
             if (PathDatabaseBaseline::node_is_join(node)) {
                 for(int rc=0;rc<'N'_rc;rc++) { // don't need to store last branch as we only compute prefix sum excluding
                                                // the branch which we came from (N in this case)
-                    edge_multiplicity_table.push_back(PathDatabaseBaseline::joins[node][tochar(rc)]);
+                    edge_multiplicity_table_builder.push_back(PathDatabaseBaseline::joins[node][tochar(rc)]);
                 }
             }
         }
+        edge_multiplicity_table = sdsl::enc_vector<>(edge_multiplicity_table_builder);
         joins = bit_vector_stat(is_join_node);
 
     }
@@ -347,7 +350,7 @@ public:
         ofstream joins_file(folder / "joins.bin", ios_base::trunc | ios_base::out);
         string graph_filename = folder / "graph.bin";
 
-        ::serialize(edge_multiplicity_file,edge_multiplicity_table);
+        edge_multiplicity_table.serialize(edge_multiplicity_file);
         routing_table.serialize(routing_table_file);
         joins.serialize(joins_file);
         graph.serialize(graph_filename);
@@ -364,7 +367,7 @@ public:
                 };
         graph->load(graph_filename);
         auto db = PathDatabaseBaselineWavelet(graph);
-        ::deserialize(edge_multiplicity_file,db.edge_multiplicity_table);
+        db.edge_multiplicity_table.load(edge_multiplicity_file);
         db.routing_table.load(routing_table_file);
         db.joins.load(joins_file);
         return db;
@@ -477,7 +480,7 @@ public:
 private:
     Wavelet routing_table;
     bit_vector_stat joins;
-    vector<int> edge_multiplicity_table;
+    sdsl::enc_vector<> edge_multiplicity_table;
 };
 
 #endif /* path_database_baseline_hpp */
