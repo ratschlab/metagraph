@@ -10,6 +10,8 @@
 #define tests_h
 
 #include <gtest/gtest.h>
+#define private public
+#define protected public
 #include "utilities.hpp"
 #include "path_database_list_of_bifurcation_choices.hpp"
 #include "samplers.hpp"
@@ -121,6 +123,13 @@ void short_identity_test() {
     check_compression_decompression<T>(reads_for_testing_short,5);
 }
 
+template <class T=PathDatabaseBaselineWavelet<>>
+void check_paths_going_through() {
+    auto db = T(reads_for_testing_short,5);
+    db.encode(reads_for_testing_short);
+    ASSERT_EQ(db.get_paths_going_through(db.graph.kmer_to_node("CATGA")),vector<typename T::path_id>({{db.graph.kmer_to_node("GTACG"),0}}));
+}
+
 
 template <typename T>
 void serialization_deserialization_test(vector<string>& reads, int k_kmer=21) {
@@ -171,6 +180,9 @@ TEST(PathDatabase,DecodeAllInverse) {
 
 TEST(PathDatabase,DecodeAll) {
     short_reads_decode_all<PathDatabaseBaselineWavelet<>>();
+}
+TEST(PathDatabase,PathsGoingThrough) {
+    check_paths_going_through<PathDatabaseBaselineWavelet<>>();
 }
 
 #if defined(__linux__) || false

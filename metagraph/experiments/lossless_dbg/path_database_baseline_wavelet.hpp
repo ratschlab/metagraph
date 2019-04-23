@@ -99,35 +99,6 @@ public:
         return encoded;
     }
 
-//    void routing_table_add_delimiters(const std::vector<std::string> &sequences) {
-//        split_size.resize(graph.num_nodes());
-//        for(auto& sequence : sequences) {
-//            increment_splits(sequence);
-//        }
-//
-//        int routing_table_entries = 1;
-//        for(int node=1;node<=graph.num_nodes();node++) {
-//            routing_table_entries++; // for # symbol
-//            routing_table_entries += split_size[node];
-//        }
-//
-//        vector<int> table(routing_table_entries,'?'_rc);
-//    }
-//
-//    void increment_splits(const string& sequence) {
-//        auto kmer = sequence.substr(0,graph.get_k());
-//        auto node = graph.kmer_to_node(kmer);
-//        int kmer_position = 0;
-//        for(auto& base : sequence.substr(graph.get_k())) {
-//            if (node_is_split(node)) {
-//                split_size[node]++;
-//            }
-//            node = graph.traverse(node,base);
-//            kmer_position++;
-//        }
-//        split_size[node]++; // additional split (end)
-//    }
-
     void construct_routing_table() {
         vector<char> routing_table_array;
         for(int node=1;node<=graph.num_nodes();node++) {
@@ -162,6 +133,8 @@ public:
 
     }
 
+    int routing_table_offset(node_index node) const { return routing_table.select(node, '#'_rc) + 1; }
+
     int routing_table_select(node_index node, int occurrence, char symbol) const {
         auto routing_table_block = routing_table_offset(node);
         auto occurrences_of_symbol_before_block = routing_table.rank(routing_table_block,rc(symbol));
@@ -180,18 +153,28 @@ public:
         return tochar(routing_table[routing_table_block+position]);
     }
 
+    int routing_table_size(node_index node) const {
+        return routing_table_select(node,1,'#');
+    }
+
     void routing_table_print_content(node_index node) const {
-        auto size = routing_table_select(node,1,'#');
+        auto size = routing_table_size(node);
         for (int i=0;i<size;i++) {
             cout << routing_table_get(node,i);
         }
         cout << endl;
     }
 
-    vector<path_id> get_paths_going_through(node_index node) {
+    vector<path_id> get_paths_going_through(node_index node) const override  {
         //catch: relative indices in node can be from the same sequence if the read is going there multiple times
         //use set to filter out duplicates or be smarter and stop when arrived to the starting node again
-
+        //todo: improve speed by not getting global path for the same reads
+        auto coverage = get_coverage(node);
+        set<path_id> out;
+        for(int position=0;position<coverage;position++) {
+            out.insert(get_global_path_id(node,position));
+        }
+        return vector<path_id>(all(out));
     }
 
     std::string decode(path_id path) const override {
@@ -250,7 +233,26 @@ public:
         return sequence;
     }
 
-    int routing_table_offset(node_index node) const { return routing_table.select(node, '#'_rc) + 1; }
+
+    int get_coverage(node_index node, char inverse_edge_label='?') const {
+        if (node_is_split(node)) {
+            return routing_table_size(node);
+        }
+        if (node_is_join(node)) {
+            if (inverse_edge_label == '?') {
+                return joins_size(node);
+            }
+            else {
+                return branch_size(node,inverse_edge_label);
+            }
+        }
+        char base;
+        // one can also traverse backwards
+        graph.call_outgoing_kmers(node,[&base](node_index node,char edge_label ) { base = edge_label;});
+        auto kmer = graph.get_node_sequence(node);
+        auto last_base = kmer[kmer.size()-1];
+        return get_coverage(graph.traverse(node,base),last_base);
+    }
 
     vector<string> decode_all_reads() const {
         auto reads = vector<string>();
@@ -262,6 +264,7 @@ public:
         }
         return reads;
     }
+
     vector<string> decode_all_reads_inverse() const {
         auto reads = vector<string>();
         for(node_index node=1;node<=graph.num_nodes();node++) {
@@ -330,6 +333,12 @@ public:
         return edge_multiplicity_table[starting_offset+rc(branch_label)];
     }
 
+    int joins_size(node_index node) const {
+        // warning: correct only when N not used
+        // todo: decide on adding also the last symbol
+        // todo: rename
+        return branch_starting_offset(node,'N');
+    }
 
     void serialize(const fs::path& folder) const override {
         fs::create_directories(folder / "xxx.bin");
