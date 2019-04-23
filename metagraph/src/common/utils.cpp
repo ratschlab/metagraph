@@ -325,7 +325,6 @@ void RowsFromColumnsTransformer::call_next(ValueCallback callback) {
     callback(index.row_id, index.col_id);
 }
 
-
 void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
                RowsFromColumnsTransformer&& transformer) {
     uint64_t cur_row = 0;

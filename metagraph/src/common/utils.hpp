@@ -241,6 +241,27 @@ namespace utils {
                             std::vector<kmer_label_pair>> index_heap_;
     };
 
+    class RowsFromColumnsIterator {
+      public:
+        RowsFromColumnsIterator(std::unique_ptr<utils::RowsFromColumnsTransformer> transformer) {
+            transformer_ = std::move(transformer);
+        }
+
+        std::tuple<uint64_t, uint64_t> next_set_bit() {
+            uint64_t row;
+            uint64_t column;
+            transformer_->call_next([&](uint64_t row_, uint64_t column_) {
+                row = row_;
+                column = column_;
+            });
+            return std::make_tuple(row, column);
+        }
+        uint64_t values_left() { return transformer_->values_left(); };
+
+      private:
+        std::unique_ptr<utils::RowsFromColumnsTransformer> transformer_;
+    };
+
     void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
                    RowsFromColumnsTransformer&& transformer);
     void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,

@@ -109,7 +109,6 @@ uint64_t merge_rows(
     const std::function<uint64_t(LEncoder&, const std::function<void (const BinaryMatrix::RowCallback&)>)> &write_rows
 );
 
-//TODO: delete other merge functions?
 template <class ToAnnotation, typename Label, bool sparse = false>
 uint64_t
 merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotators, const std::vector<std::string> &filenames, const std::string &outfile) {
@@ -151,7 +150,6 @@ merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotators, 
     merge_rows(
         label_encoders,
         [&](const uint64_t annotator_idx) -> const std::vector<uint64_t> {
-            //TODO: remove row_idx arg so this is a one-way iterator callback
             if (annotator_idx < annotators.size()) {
                 return annotator_row_iterators.at(annotator_idx)->next_row();
             } else {

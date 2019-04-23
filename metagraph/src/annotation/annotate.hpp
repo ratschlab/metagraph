@@ -222,9 +222,12 @@ class IterateRowsByIndex : public IterateRows<IndexType, LabelType> {
     const MultiLabelEncoded<IndexType, LabelType> &annotator_;
 };
 
-template <typename IndexType, typename LabelType>
+template <class SetBitsIterator, typename IndexType, typename LabelType>
 class IterateRowsBySetBits : public IterateRows<IndexType, LabelType> {
   public:
+    IterateRowsBySetBits(std::unique_ptr<SetBitsIterator> set_bits_iterator) :
+        set_bits_iterator_(std::move(set_bits_iterator)) {};
+    
     virtual std::vector<uint64_t> next_row() {
         std::vector<uint64_t> indices;
 
@@ -232,15 +235,15 @@ class IterateRowsBySetBits : public IterateRows<IndexType, LabelType> {
             indices.push_back(column_);
         }
 
-        if (!values_left_() || row_ > i_) {
+        if (!set_bits_iterator_->values_left() || row_ > i_) {
             i_++;
             return indices;
         }
 
         while (true) {
-            if (!values_left_())
+            if (!set_bits_iterator_->values_left())
                 break;
-            std::tie(row_, column_) = next_set_bit_();
+            std::tie(row_, column_) = set_bits_iterator_->next_set_bit();
             if (row_ != i_)
                 break;
             indices.push_back(column_);
@@ -249,34 +252,11 @@ class IterateRowsBySetBits : public IterateRows<IndexType, LabelType> {
         return indices;
     }
   protected:
-    virtual std::tuple<IndexType, uint64_t> next_set_bit_() = 0;
-    virtual uint64_t values_left_() = 0;
+    std::unique_ptr<SetBitsIterator> set_bits_iterator_;
 
     typename MultiLabelEncoded<IndexType, LabelType>::Index i_ = 0;
     typename MultiLabelEncoded<IndexType, LabelType>::Index row_ = 0;
     uint64_t column_;
-};
-
-template <typename IndexType, typename LabelType>
-class IterateRowsFromTransformer : public IterateRowsBySetBits<IndexType, LabelType> {
-  public:
-    IterateRowsFromTransformer(std::unique_ptr<utils::RowsFromColumnsTransformer> transformer) {
-        transformer_ = std::move(transformer);
-    }
-
-  protected:
-    virtual std::tuple<IndexType, uint64_t> next_set_bit_() {
-        uint64_t row;
-        uint64_t column;
-        transformer_->call_next([&](uint64_t row_, uint64_t column_) {
-            row = row_;
-            column = column_;
-        });
-        return std::make_tuple(row, column);
-    }
-    virtual uint64_t values_left_() { return transformer_->values_left(); };
-
-    std::unique_ptr<utils::RowsFromColumnsTransformer> transformer_;
 };
 
 } // namespace annotate

@@ -16,7 +16,6 @@ const char kColumnAnnotatorExtension[] = ".column.annodbg";
 template <typename Label>
 class RowCompressed;
 
-
 template <typename Label = std::string>
 class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     template <class A, typename L>
@@ -82,7 +81,9 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     virtual std::unique_ptr<IterateRows<uint64_t, Label> > iterator() const { 
         flush();
         auto transformer = std::make_unique<utils::RowsFromColumnsTransformer>(bitmatrix_);
-        return std::move(std::make_unique<IterateRowsFromTransformer<uint64_t, Label> >(std::move(transformer)));
+        auto set_bits_iter = std::make_unique<utils::RowsFromColumnsIterator>(std::move(transformer));
+        using iter_type = IterateRowsBySetBits<utils::RowsFromColumnsIterator, uint64_t, Label>;
+        return std::move(std::make_unique<iter_type>(std::move(set_bits_iter)));
     };
   private:
     void set(Index i, size_t j, bool value);
