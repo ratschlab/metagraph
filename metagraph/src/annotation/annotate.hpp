@@ -8,8 +8,6 @@
 #include <memory>
 #include <tuple>
 
-#include "utils.hpp"
-
 
 namespace annotate {
 

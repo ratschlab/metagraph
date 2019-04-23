@@ -7,6 +7,7 @@
 
 #include "annotate.hpp"
 #include "bit_vector.hpp"
+#include "utils.hpp"
 
 
 namespace annotate {

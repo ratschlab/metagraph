@@ -7,11 +7,7 @@
 #include <progress_bar.hpp>
 
 #include "annotate.hpp"
-#include "annotate_static.hpp"
 #include "static_annotators_def.hpp"
-#include "annotate_row_compressed.hpp"
-
-#include "utils.hpp"
 
 
 namespace annotate {
