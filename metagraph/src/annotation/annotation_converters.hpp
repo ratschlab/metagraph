@@ -104,7 +104,7 @@ convert(const std::string &filename) {
 
 uint64_t merge_rows(
     const std::vector<const LEncoder*> &label_encoders,
-    const std::function<const std::vector<uint64_t>(const uint64_t, const uint64_t)> &get_row,
+    const std::function<const std::vector<uint64_t>(const uint64_t)> &get_next_row,
     const uint64_t &num_rows,
     const std::function<uint64_t(LEncoder&, const std::function<void (const BinaryMatrix::RowCallback&)>)> &write_rows
 );
@@ -125,8 +125,10 @@ merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotators, 
     assert(num_rows);
 
     std::vector<const LEncoder*> label_encoders;
+    std::vector<std::unique_ptr<IterateRows<uint64_t, Label> > > annotator_row_iterators;
     for (auto annotator : annotators) {
         label_encoders.push_back(&annotator->label_encoder_);
+        annotator_row_iterators.push_back(annotator->iterator());
     }
 
     std::vector<std::unique_ptr<const LEncoder> > loaded_label_encoders;
@@ -145,64 +147,24 @@ merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotators, 
             throw std::runtime_error("streaming only supported for rowcompressed annotator");
         }
     }
+
     merge_rows(
         label_encoders,
-        [&](const uint64_t row_idx, const uint64_t annotator_idx) -> const std::vector<uint64_t> {
-            //TODO: common row-streaming interface which buffers
+        [&](const uint64_t annotator_idx) -> const std::vector<uint64_t> {
             //TODO: remove row_idx arg so this is a one-way iterator callback
             if (annotator_idx < annotators.size()) {
-                if (const auto annotator = dynamic_cast<const ColumnCompressed<Label>*>(annotators.at(annotator_idx))) {
-                    //TODO: move into iterator obj
-                    static std::unique_ptr<utils::RowsFromColumnsTransformer> transformer;
-                    static uint64_t cur_row = 0;
-                    static uint64_t row = 0;
-                    static uint64_t column;
-                    std::vector<uint64_t> indices;
-
-                    if (transformer.get() && (row == cur_row)) {
-                        indices.push_back(column);
-                    }
-
-                    if (!transformer) {
-                        annotator->flush();
-                        transformer.reset(new utils::RowsFromColumnsTransformer(annotator->bitmatrix_));
-                    }
-                    assert(row_idx < transformer->rows());
-                    assert(cur_row < transformer->rows());
-
-                    if (!transformer->values_left() || row > cur_row) {
-                        cur_row++;
-                        return indices;
-                    }
-
-                    while (true) {
-                        if (!transformer->values_left())
-                            break;
-                        transformer->call_next([&](uint64_t row_, uint64_t column_) {
-                            row = row_;
-                            column = column_;
-                        });
-                        if (row != cur_row)
-                            break;
-                        indices.push_back(column);
-                    }
-                    cur_row++;
-                    return indices;
-                } else {
-                    return annotators.at(annotator_idx)->get_label_indexes(row_idx);
-                }
+                return annotator_row_iterators.at(annotator_idx)->next_row();
             } else {
                 return *streams[annotator_idx-annotators.size()]->next_row();
             }
         },
         num_rows,
         [&](LEncoder &merged_label_enc, const std::function<void (const BinaryMatrix::RowCallback&)> &callback) {
-            //TODO: add write_rows to rowflat which just writes rowcompressed then converts and serializes as below, then can use template param here and delete if statement below
             //TODO: minor problem; conversion to rowflat overwrites outfile.row.annodbg if it exists
             return RowCompressed<Label>::write_rows(outfile,
-                                               merged_label_enc,
-                                               callback,
-                                               sparse);
+                                                    merged_label_enc,
+                                                    callback,
+                                                    sparse);
         }
     );
 

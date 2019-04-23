@@ -5,6 +5,10 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <memory>
+#include <tuple>
+
+#include "utils.hpp"
 
 
 namespace annotate {
@@ -39,7 +43,6 @@ class AnnotationCategory {
     virtual bool load(const std::string &filename) { return merge_load({ filename }); }
     virtual bool merge_load(const std::vector<std::string> &filenames) = 0;
 };
-
 
 // Graph annotation
 // An annotated graph is a graph with labeled edges.
@@ -144,6 +147,12 @@ class LabelEncoder {
     std::vector<Label> decode_label_;
 };
 
+template <typename IndexType, typename LabelType>
+class IterateRows;
+
+template <typename IndexType, typename LabelType>
+class IterateRowsByIndex;
+
 
 template <typename IndexType, typename LabelType>
 class MultiLabelEncoded
@@ -151,6 +160,8 @@ class MultiLabelEncoded
     template <class A, typename L, bool s>
     friend uint64_t merge(const std::vector<const MultiLabelEncoded<uint64_t, L>*>&, const std::vector<std::string>&, const std::string&);
 
+    template <typename I, typename L>
+    friend class IterateRowsByIndex;
   public:
     using Index = typename MultiLabelAnnotation<IndexType, LabelType>::Index;
     using Label = typename MultiLabelAnnotation<IndexType, LabelType>::Label;
@@ -174,6 +185,10 @@ class MultiLabelEncoded
                    size_t num_top = static_cast<size_t>(-1),
                    double min_label_frequency = 0.0) const override final;
 
+    virtual std::unique_ptr<IterateRows<IndexType, LabelType> > iterator() const { 
+        return std::move(std::make_unique<IterateRowsByIndex<IndexType, LabelType> >(*this));
+    };
+
   protected:
     // TODO: add |min_label_frequency| parameter: return only frequent labels
     virtual std::vector<uint64_t>
@@ -189,6 +204,79 @@ class MultiLabelEncoded
         }
         return indexes;
     }
+};
+
+template <typename IndexType, typename LabelType>
+class IterateRows {
+  public:
+    virtual std::vector<uint64_t> next_row() = 0;
+};
+
+template <typename IndexType, typename LabelType>
+class IterateRowsByIndex : public IterateRows<IndexType, LabelType> {
+  public:
+    IterateRowsByIndex(const MultiLabelEncoded<IndexType, LabelType>& annotator) : annotator_(annotator) {};
+    virtual std::vector<uint64_t> next_row() { return annotator_.get_label_indexes(i_++); };
+  private:
+    typename MultiLabelEncoded<IndexType, LabelType>::Index i_ = 0;
+    const MultiLabelEncoded<IndexType, LabelType> &annotator_;
+};
+
+template <typename IndexType, typename LabelType>
+class IterateRowsBySetBits : public IterateRows<IndexType, LabelType> {
+  public:
+    virtual std::vector<uint64_t> next_row() {
+        std::vector<uint64_t> indices;
+
+        if (i_ > 0 && (row_ == i_)) {
+            indices.push_back(column_);
+        }
+
+        if (!values_left_() || row_ > i_) {
+            i_++;
+            return indices;
+        }
+
+        while (true) {
+            if (!values_left_())
+                break;
+            std::tie(row_, column_) = next_set_bit_();
+            if (row_ != i_)
+                break;
+            indices.push_back(column_);
+        }
+        i_++;
+        return indices;
+    }
+  protected:
+    virtual std::tuple<IndexType, uint64_t> next_set_bit_() = 0;
+    virtual uint64_t values_left_() = 0;
+
+    typename MultiLabelEncoded<IndexType, LabelType>::Index i_ = 0;
+    typename MultiLabelEncoded<IndexType, LabelType>::Index row_ = 0;
+    uint64_t column_;
+};
+
+template <typename IndexType, typename LabelType>
+class IterateRowsFromTransformer : public IterateRowsBySetBits<IndexType, LabelType> {
+  public:
+    IterateRowsFromTransformer(std::unique_ptr<utils::RowsFromColumnsTransformer> transformer) {
+        transformer_ = std::move(transformer);
+    }
+
+  protected:
+    virtual std::tuple<IndexType, uint64_t> next_set_bit_() {
+        uint64_t row;
+        uint64_t column;
+        transformer_->call_next([&](uint64_t row_, uint64_t column_) {
+            row = row_;
+            column = column_;
+        });
+        return std::make_tuple(row, column);
+    }
+    virtual uint64_t values_left_() { return transformer_->values_left(); };
+
+    std::unique_ptr<utils::RowsFromColumnsTransformer> transformer_;
 };
 
 } // namespace annotate

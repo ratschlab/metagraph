@@ -79,6 +79,11 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     const auto& data() const { return bitmatrix_; };
 
+    virtual std::unique_ptr<IterateRows<uint64_t, Label> > iterator() const { 
+        flush();
+        auto transformer = std::make_unique<utils::RowsFromColumnsTransformer>(bitmatrix_);
+        return std::move(std::make_unique<IterateRowsFromTransformer<uint64_t, Label> >(std::move(transformer)));
+    };
   private:
     void set(Index i, size_t j, bool value);
     bool is_set(Index i, size_t j) const;
@@ -95,19 +100,6 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     uint64_t num_rows_;
 
     std::vector<std::unique_ptr<bit_vector>> bitmatrix_;
-
-    virtual std::vector<uint64_t> get_label_indexes(Index i) const {
-        //TODO: don't duplicate code w/ get_labels()
-
-        assert(i < num_rows_);
-
-        std::vector<uint64_t> labels;
-        for (size_t j = 0; j < num_labels(); ++j) {
-            if (is_set(i, j))
-                labels.push_back(j);
-        }
-        return labels;
-    }
 
     caches::fixed_sized_cache<size_t,
                               bitmap_dyn*,
