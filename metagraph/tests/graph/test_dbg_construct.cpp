@@ -22,11 +22,23 @@ const std::string test_data_dir = "../tests/data";
 const std::string test_fasta = test_data_dir + "/test_construct.fa";
 const std::string test_dump_basename = test_data_dir + "/graph_dump_test";
 
-typedef KMerBOSS<uint64_t, KmerExtractor::kLogSigma> KMER;
-const int kMaxK = sizeof(KMER) * 8 / KmerExtractor::kLogSigma;
+template <typename Kmer>
+class Construct : public ::testing::Test { };
+
+template <typename Kmer>
+class ExtractKmers : public ::testing::Test { };
+
+typedef ::testing::Types<KMerBOSS<uint64_t, KmerExtractor::kLogSigma>,
+                         KMerBOSS<sdsl::uint128_t, KmerExtractor::kLogSigma>,
+                         KMerBOSS<sdsl::uint256_t, KmerExtractor::kLogSigma>> KmerTypes;
+
+TYPED_TEST_CASE(Construct, KmerTypes);
+TYPED_TEST_CASE(ExtractKmers, KmerTypes);
+
+#define kMaxK ( sizeof(TypeParam) * 8 / KmerExtractor::kLogSigma )
 
 
-TEST(Construct_64, ConstructionEQAppendingSimplePath) {
+TYPED_TEST(Construct, ConstructionEQAppendingSimplePath) {
     for (size_t k = 1; k < kMaxK; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A') });
@@ -39,7 +51,7 @@ TEST(Construct_64, ConstructionEQAppendingSimplePath) {
     }
 }
 
-TEST(Construct_64, ConstructionEQAppendingTwoPaths) {
+TYPED_TEST(Construct, ConstructionEQAppendingTwoPaths) {
     for (size_t k = 1; k < kMaxK; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A'),
@@ -54,7 +66,7 @@ TEST(Construct_64, ConstructionEQAppendingTwoPaths) {
     }
 }
 
-TEST(Construct_64, ConstructionLowerCase) {
+TYPED_TEST(Construct, ConstructionLowerCase) {
     for (size_t k = 1; k < kMaxK; ++k) {
         BOSSConstructor constructor_first(k);
         constructor_first.add_sequences({ std::string(100, 'A'),
@@ -74,7 +86,7 @@ TEST(Construct_64, ConstructionLowerCase) {
     }
 }
 
-TEST(Construct_64, ConstructionDummySentinel) {
+TYPED_TEST(Construct, ConstructionDummySentinel) {
     for (size_t k = 1; k < kMaxK; ++k) {
         BOSSConstructor constructor_first(k);
         constructor_first.add_sequences({ std::string(100, 'N'),
@@ -90,7 +102,7 @@ TEST(Construct_64, ConstructionDummySentinel) {
     }
 }
 
-TEST(Construct_64, ConstructionEQAppending) {
+TYPED_TEST(Construct, ConstructionEQAppending) {
     for (size_t k = 1; k < kMaxK; ++k) {
         std::vector<std::string> input_data = {
             "ACAGCTAGCTAGCTAGCTAGCTG",
@@ -111,7 +123,7 @@ TEST(Construct_64, ConstructionEQAppending) {
     }
 }
 
-TEST(Construct_64, ConstructionEQAppendingCanonical) {
+TYPED_TEST(Construct, ConstructionEQAppendingCanonical) {
     for (size_t k = 1; k < kMaxK; ++k) {
         std::vector<std::string> input_data = {
             "ACAGCTAGCTAGCTAGCTAGCTG",
@@ -134,7 +146,7 @@ TEST(Construct_64, ConstructionEQAppendingCanonical) {
     }
 }
 
-TEST(Construct_64, ConstructionLong) {
+TYPED_TEST(Construct, ConstructionLong) {
     for (size_t k = 1; k < kMaxK; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(k + 1, 'A') });
@@ -148,7 +160,7 @@ TEST(Construct_64, ConstructionLong) {
     }
 }
 
-TEST(Construct_64, ConstructionShort) {
+TYPED_TEST(Construct, ConstructionShort) {
     for (size_t k = 1; k < kMaxK; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(k, 'A') });
@@ -164,9 +176,9 @@ TEST(Construct_64, ConstructionShort) {
 
 using TAlphabet = KmerExtractor::TAlphabet;
 
-TEST(ExtractKmers_64, ExtractKmersFromStringWithoutFiltering) {
+TYPED_TEST(ExtractKmers, ExtractKmersFromStringWithoutFiltering) {
     for (size_t k = 2; k <= kMaxK; ++k) {
-        Vector<KMER> result;
+        Vector<TypeParam> result;
 
         // NNN -> $NNN$
         for (size_t length = 0; length < k; ++length) {
@@ -188,11 +200,11 @@ TEST(ExtractKmers_64, ExtractKmersFromStringWithoutFiltering) {
     }
 }
 
-TEST(ExtractKmers_64, ExtractKmersFromStringWithFilteringOne) {
+TYPED_TEST(ExtractKmers, ExtractKmersFromStringWithFilteringOne) {
     std::vector<TAlphabet> suffix = { 0 };
 
     for (size_t k = 2; k <= kMaxK; ++k) {
-        Vector<KMER> result;
+        Vector<TypeParam> result;
 
         for (size_t length = 0; length < k; ++length) {
             KmerExtractor::sequence_to_kmers(
@@ -213,7 +225,7 @@ TEST(ExtractKmers_64, ExtractKmersFromStringWithFilteringOne) {
 
     suffix.assign({ KmerExtractor::encode('N') });
     for (size_t k = 2; k <= kMaxK; ++k) {
-        Vector<KMER> result;
+        Vector<TypeParam> result;
 
         for (size_t length = 0; length < k; ++length) {
             KmerExtractor::sequence_to_kmers(
@@ -237,9 +249,9 @@ TEST(ExtractKmers_64, ExtractKmersFromStringWithFilteringOne) {
 }
 
 
-TEST(ExtractKmers_64, ExtractKmersFromStringWithFilteringTwo) {
+TYPED_TEST(ExtractKmers, ExtractKmersFromStringWithFilteringTwo) {
     for (size_t k = 3; k <= kMaxK; ++k) {
-        Vector<KMER> result;
+        Vector<TypeParam> result;
 
         for (size_t length = 0; length < k; ++length) {
             KmerExtractor::sequence_to_kmers(
@@ -298,8 +310,8 @@ TEST(ExtractKmers_64, ExtractKmersFromStringWithFilteringTwo) {
     }
 }
 
-TEST(ExtractKmers_64, ExtractKmersFromStringAppend) {
-    Vector<KMER> result;
+TYPED_TEST(ExtractKmers, ExtractKmersFromStringAppend) {
+    Vector<TypeParam> result;
 
     // A...A -> $A...A$
     KmerExtractor::sequence_to_kmers(
@@ -316,11 +328,11 @@ TEST(ExtractKmers_64, ExtractKmersFromStringAppend) {
 
 typedef std::function<void(const std::string&)> CallbackString;
 
-template <typename KMER, class KmerExtractor>
+template <typename TypeParam, class KmerExtractor>
 void extract_kmers(std::function<void(CallbackString)> generate_reads,
                    size_t k,
                    bool canonical_mode,
-                   Vector<KMER> *kmers,
+                   Vector<TypeParam> *kmers,
                    const std::vector<TAlphabet> &suffix,
                    size_t num_threads,
                    bool verbose,
@@ -329,16 +341,17 @@ void extract_kmers(std::function<void(CallbackString)> generate_reads,
                    bool remove_redundant = true);
 
 // TODO: k is node length
+template <typename TypeParam>
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
-                                        Vector<KMER> *kmers,
+                                        Vector<TypeParam> *kmers,
                                         const std::vector<TAlphabet> &suffix,
                                         std::mutex &mutex_resize,
                                         std::shared_timed_mutex &mutex,
                                         bool remove_redundant,
                                         size_t reserved_capacity) {
     kmers->reserve(reserved_capacity);
-    extract_kmers<KMER, KmerExtractor>(
+    extract_kmers<TypeParam, KmerExtractor>(
         [reads](CallbackString callback) {
             for (auto &&read : *reads) {
                 callback(std::move(read));
@@ -350,8 +363,8 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
     delete reads;
 }
 
-TEST(ExtractKmers_64, ExtractKmersAppendParallelReserved) {
-    Vector<KMER> result;
+TYPED_TEST(ExtractKmers, ExtractKmersAppendParallelReserved) {
+    Vector<TypeParam> result;
     std::mutex mu_resize;
     std::shared_timed_mutex mu;
     size_t sequence_size = 500;
@@ -387,8 +400,8 @@ TEST(ExtractKmers_64, ExtractKmersAppendParallelReserved) {
     ASSERT_EQ((sequence_size + 1) * 20, result.size());
 }
 
-TEST(ExtractKmers_64, ExtractKmersAppendParallel) {
-    Vector<KMER> result;
+TYPED_TEST(ExtractKmers, ExtractKmersAppendParallel) {
+    Vector<TypeParam> result;
     std::mutex mu_resize;
     std::shared_timed_mutex mu;
     size_t sequence_size = 500;
@@ -420,8 +433,8 @@ TEST(ExtractKmers_64, ExtractKmersAppendParallel) {
     ASSERT_EQ(6u, result.size());
 }
 
-TEST(ExtractKmers_64, ExtractKmersParallelRemoveRedundantReserved) {
-    Vector<KMER> result;
+TYPED_TEST(ExtractKmers, ExtractKmersParallelRemoveRedundantReserved) {
+    Vector<TypeParam> result;
     std::mutex mu_resize;
     std::shared_timed_mutex mu;
 
@@ -473,8 +486,8 @@ TEST(ExtractKmers_64, ExtractKmersParallelRemoveRedundantReserved) {
     ASSERT_EQ(5u, result.size());
 }
 
-TEST(ExtractKmers_64, ExtractKmersParallelRemoveRedundant) {
-    Vector<KMER> result;
+TYPED_TEST(ExtractKmers, ExtractKmersParallelRemoveRedundant) {
+    Vector<TypeParam> result;
     std::mutex mu_resize;
     std::shared_timed_mutex mu;
 
