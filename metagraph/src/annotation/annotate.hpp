@@ -194,7 +194,14 @@ class MultiLabelEncoded
 
     LabelEncoder<Label> label_encoder_;
 
-    virtual std::vector<uint64_t> get_label_indexes(Index i) const = 0;
+    virtual std::vector<uint64_t> get_label_indexes(Index i) const {
+        VLabels labels = this->get_labels(i);
+        std::vector<uint64_t> indexes;
+        for (const auto &label : labels) {
+            indexes.push_back(label_encoder_.encode(label));
+        }
+        return indexes;
+    }
 };
 
 template <typename IndexType, typename LabelType>

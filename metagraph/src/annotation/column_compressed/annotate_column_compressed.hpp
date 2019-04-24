@@ -109,8 +109,6 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     bool verbose_;
 
-    virtual std::vector<uint64_t> get_label_indexes(Index i) const { throw std::runtime_error("Error: Not implemented"); };
-
     static constexpr auto kExtension = kColumnAnnotatorExtension;
 };
 
