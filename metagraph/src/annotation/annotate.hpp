@@ -220,15 +220,15 @@ class IterateRowsByIndex : public IterateRows<IndexType, LabelType> {
     const MultiLabelEncoded<IndexType, LabelType> &annotator_;
 };
 
-template <class SetBitsIterator, typename IndexType, typename LabelType>
-class IterateRowsBySetBits : public IterateRows<IndexType, LabelType> {
+template <class RowIterator, typename IndexType, typename LabelType>
+class IterateRowsByRowIterator : public IterateRows<IndexType, LabelType> {
   public:
-    IterateRowsBySetBits(std::unique_ptr<SetBitsIterator> set_bits_iterator) :
-        set_bits_iterator_(std::move(set_bits_iterator)) {};
+    IterateRowsByRowIterator(std::unique_ptr<RowIterator> row_iterator) :
+        row_iterator_(std::move(row_iterator)) {};
     
-    virtual std::vector<uint64_t> next_row() { return set_bits_iterator_->next_row(); }
+    virtual std::vector<uint64_t> next_row() { return row_iterator_->next_row(); }
   protected:
-    std::unique_ptr<SetBitsIterator> set_bits_iterator_;
+    std::unique_ptr<RowIterator> row_iterator_;
 };
 
 } // namespace annotate

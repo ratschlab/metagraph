@@ -78,9 +78,9 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     virtual std::unique_ptr<IterateRows<uint64_t, Label> > iterator() const { 
         flush();
         auto transformer = std::make_unique<utils::RowsFromColumnsTransformer>(bitmatrix_);
-        auto set_bits_iter = std::make_unique<utils::RowsFromColumnsIterator>(std::move(transformer));
-        using iter_type = IterateRowsBySetBits<utils::RowsFromColumnsIterator, uint64_t, Label>;
-        return std::move(std::make_unique<iter_type>(std::move(set_bits_iter)));
+        auto row_iter = std::make_unique<utils::RowsFromColumnsIterator>(std::move(transformer));
+        using iter_type = IterateRowsByRowIterator<utils::RowsFromColumnsIterator, uint64_t, Label>;
+        return std::move(std::make_unique<iter_type>(std::move(row_iter)));
     };
   private:
     void set(Index i, size_t j, bool value);

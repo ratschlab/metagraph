@@ -247,40 +247,10 @@ namespace utils {
             transformer_ = std::move(transformer);
         }
 
-        std::tuple<uint64_t, uint64_t> next_set_bit() {
-            uint64_t row;
-            uint64_t column;
-            transformer_->call_next([&](uint64_t row_, uint64_t column_) {
-                row = row_;
-                column = column_;
-            });
-            return std::make_tuple(row, column);
-        }
+        std::tuple<uint64_t, uint64_t> next_set_bit();
         uint64_t values_left() { return transformer_->values_left(); };
 
-        std::vector<uint64_t> next_row() {
-            std::vector<uint64_t> indices;
-
-            if (i_ > 0 && (row_ == i_)) {
-                indices.push_back(column_);
-            }
-
-            if (!values_left() || row_ > i_) {
-                i_++;
-                return indices;
-            }
-
-            while (true) {
-                if (!values_left())
-                    break;
-                std::tie(row_, column_) = next_set_bit();
-                if (row_ != i_)
-                    break;
-                indices.push_back(column_);
-            }
-            i_++;
-            return indices;
-        }
+        std::vector<uint64_t> next_row();
 
       private:
         std::unique_ptr<utils::RowsFromColumnsTransformer> transformer_;

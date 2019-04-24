@@ -29,7 +29,6 @@ convert<RowFlatAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
 
     auto matrix = std::make_unique<RowConcatenated<>>(
         [&](auto callback) {
-            //TODO: move progressbar into call_rows w/ on/off flag?
             utils::call_rows(
                 [&](const auto &row) {
                     assert(std::is_sorted(row.begin(), row.end()));

@@ -331,8 +331,7 @@ TEST_F(MergeAnnotators, RowCompressed) {
         filenames.push_back(filename + annotate::kRowAnnotatorExtension);
     }
 
-    std::vector<const annotate::MultiLabelEncoded<uint64_t, std::string>*> empty; // TODO: make work with empty initializer list, or make another signature that omits
-    uint64_t merged_num_rows = annotate::merge<annotate::RowCompressed<> >(empty, filenames, test_dump_basename_row_compressed_merge + "_merged");
+    uint64_t merged_num_rows = annotate::merge<annotate::RowCompressed<>, std::string>({}, filenames, test_dump_basename_row_compressed_merge + "_merged");
     EXPECT_EQ(num_rows, merged_num_rows);
 
     merged_annotation = new annotate::RowCompressed<>(num_rows);
@@ -382,11 +381,9 @@ TEST_F(MergeAnnotators, RowFlat_to_RowFlat) {
     EXPECT_EQ(num_rows, merged_num_rows);
 
     merged_annotation = new annotate::RowFlatAnnotator();
-    //TODO: merge_load methods should be replaced with load, possibly can go on superclass being essentially label_encoder->load and matrix->load
     merged_annotation->merge_load({ filename });
 }
 
-//TODO: delete other merge tests?
 TEST_F(MergeAnnotators, Mixed_to_RowFlat) {
     std::vector<std::unique_ptr<const annotate::MultiLabelEncoded<uint64_t, std::string> > > annotators_;
     std::vector<const annotate::MultiLabelEncoded<uint64_t, std::string>*> annotators;
