@@ -2,6 +2,7 @@
 #define __ANNOTATION_CONVERTERS_HPP__
 
 #include <memory>
+#include <cassert>
 #include <vector>
 #include <functional>
 #include <filesystem>
@@ -87,29 +88,30 @@ convert(const std::string &filename) {
     return std::make_unique<StaticAnnotation>(std::move(matrix), *label_encoder);
 }
 
-uint64_t merge_rows(
-    const std::vector<const LEncoder*> &label_encoders,
-    const std::function<const std::vector<uint64_t>(const uint64_t)> &get_next_row,
-    const uint64_t &num_rows,
-    const std::function<uint64_t(LEncoder&, const std::function<void (const BinaryMatrix::RowCallback&)>)> &write_rows
-);
+void merge_rows(const std::vector<const LEncoder*> &label_encoders,
+                std::function<const std::vector<uint64_t>(uint64_t)> get_next_row,
+                uint64_t num_rows,
+                std::function<void(const LEncoder& /* merged encoder */,
+                                   std::function<void(BinaryMatrix::RowCallback)> /* call row */)> callback);
 
 template <class ToAnnotation, typename Label>
-uint64_t
-merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotators, const std::vector<std::string> &filenames, const std::string &outfile) {
+uint64_t merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotators,
+               const std::vector<std::string> &filenames,
+               const std::string &outfile) {
+    assert((annotators.size() || filenames.size()) && "nothing to merge");
 
     uint64_t num_rows;
     uint64_t num_relations;
 
-    if (annotators.size()>0) {
+    if (annotators.size()) {
         num_rows = annotators.at(0)->num_objects();
-    } else if (filenames.size()>0) {
+    } else {
         RowCompressed<Label>::stream_counts(filenames.at(0), &num_rows, &num_relations);
     }
     assert(num_rows);
 
     std::vector<const LEncoder*> label_encoders;
-    std::vector<std::unique_ptr<IterateRows<uint64_t, Label> > > annotator_row_iterators;
+    std::vector<std::unique_ptr<IterateRows>> annotator_row_iterators;
     for (auto annotator : annotators) {
         label_encoders.push_back(&annotator->label_encoder_);
         annotator_row_iterators.push_back(annotator->iterator());
@@ -132,12 +134,9 @@ merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotators, 
         }
     }
 
-    std::string tmpfile = outfile;
-    tmpfile += RowCompressed<Label>::kExtension;
-
     merge_rows(
         label_encoders,
-        [&](const uint64_t annotator_idx) -> const std::vector<uint64_t> {
+        [&](uint64_t annotator_idx) -> const std::vector<uint64_t> {
             if (annotator_idx < annotators.size()) {
                 return annotator_row_iterators.at(annotator_idx)->next_row();
             } else {
@@ -145,22 +144,16 @@ merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotators, 
             }
         },
         num_rows,
-        [&](LEncoder &merged_label_enc, const std::function<void (const BinaryMatrix::RowCallback&)> &callback) {
-            size_t c = 0;
-            while (std::filesystem::exists(tmpfile)) {
-                tmpfile = outfile + "." + std::to_string(++c);
-                tmpfile += RowCompressed<Label>::kExtension;
-            }
-
-            return RowCompressed<Label>::write_rows(tmpfile,
+        [&](const LEncoder &merged_label_enc,
+                std::function<void(BinaryMatrix::RowCallback)> callback) {
+            return RowCompressed<Label>::write_rows(outfile,
                                                     merged_label_enc,
                                                     callback);
         }
     );
 
     if constexpr (!std::is_same<RowCompressed<Label>, ToAnnotation>::value) {
-        auto out_annotator = convert<ToAnnotation, Label>(tmpfile);
-        std::filesystem::remove(tmpfile);
+        auto out_annotator = convert<ToAnnotation, Label>(outfile);
         out_annotator->serialize(outfile);
     }
 

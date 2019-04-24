@@ -37,11 +37,9 @@ void LabelEncoder<std::string>::serialize(std::ostream &outstream) const {
 }
 
 template<typename Label>
-void LabelEncoder<Label>::merge(const std::vector<const LabelEncoder<Label>*> &label_encoders) {
-    for (const auto &label_encoder : label_encoders) {
-        for (size_t i = 0; i < label_encoder->size(); ++i) {
-            insert_and_encode(label_encoder->decode(i));
-        }
+void LabelEncoder<Label>::merge(const LabelEncoder<Label> &other) {
+    for (size_t i = 0; i < other.size(); ++i) {
+        insert_and_encode(other.decode(i));
     }
 }
 
@@ -130,6 +128,27 @@ auto MultiLabelEncoded<IndexType, LabelType>
 
     return top_counts;
 }
+
+template <typename IndexType, typename LabelType>
+class IterateRowsByIndex : public IterateRows {
+  public:
+    IterateRowsByIndex(const MultiLabelEncoded<IndexType, LabelType> &annotator)
+          : annotator_(annotator) {};
+
+    std::vector<uint64_t> next_row() override final {
+        return annotator_.get_label_indexes(i_++);
+    };
+
+  private:
+    typename MultiLabelEncoded<IndexType, LabelType>::Index i_ = 0;
+    const MultiLabelEncoded<IndexType, LabelType> &annotator_;
+};
+
+template <typename IndexType, typename LabelType>
+std::unique_ptr<IterateRows>
+MultiLabelEncoded<IndexType, LabelType>::iterator() const {
+    return std::make_unique<IterateRowsByIndex<IndexType, LabelType>>(*this);
+};
 
 template class MultiLabelEncoded<uint64_t, std::string>;
 

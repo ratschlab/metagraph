@@ -79,13 +79,13 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     class StreamRows {
       public:
         StreamRows(std::string filename);
-        std::unique_ptr<std::vector<VectorRowBinMat::Row> > next_row() { return std::move(sr_->next_row()); };
+        std::unique_ptr<std::vector<VectorRowBinMat::Row>> next_row() { return sr_->next_row(); };
       private:
         std::unique_ptr<VectorRowBinMat::StreamRows> sr_;
     };
     static uint64_t write_rows(std::string filename,
                            const LabelEncoder<Label> &label_encoder,
-                           const std::function<void (BinaryMatrix::RowCallback&)> &callback);
+                           const std::function<void(BinaryMatrix::RowCallback&)> &callback);
 
     virtual std::vector<uint64_t> get_label_indexes(Index i) const {
         return matrix_->get_row(i);

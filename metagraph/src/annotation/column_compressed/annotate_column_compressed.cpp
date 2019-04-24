@@ -479,6 +479,30 @@ void ColumnCompressed<Label>
     }
 }
 
+template <class RowIterator>
+class IterateRowsByRowIterator : public IterateRows {
+  public:
+    IterateRowsByRowIterator(std::unique_ptr<RowIterator> row_iterator)
+          : row_iterator_(std::move(row_iterator)) {};
+
+    std::vector<uint64_t> next_row() override final {
+        return row_iterator_->next_row();
+    }
+
+  private:
+    std::unique_ptr<RowIterator> row_iterator_;
+};
+
+template <typename Label>
+std::unique_ptr<IterateRows>
+ColumnCompressed<Label>::iterator() const {
+    flush();
+    auto transformer = std::make_unique<utils::RowsFromColumnsTransformer>(bitmatrix_);
+    auto row_iter = std::make_unique<utils::RowsFromColumnsIterator>(std::move(transformer));
+    using iter_type = IterateRowsByRowIterator<utils::RowsFromColumnsIterator>;
+    return std::make_unique<iter_type>(std::move(row_iter));
+};
+
 template class ColumnCompressed<std::string>;
 
 } // namespace annotate

@@ -6,7 +6,6 @@
 #include <vector>
 #include <unordered_map>
 #include <memory>
-#include <tuple>
 
 
 namespace annotate {
@@ -41,6 +40,7 @@ class AnnotationCategory {
     virtual bool load(const std::string &filename) { return merge_load({ filename }); }
     virtual bool merge_load(const std::vector<std::string> &filenames) = 0;
 };
+
 
 // Graph annotation
 // An annotated graph is a graph with labeled edges.
@@ -136,7 +136,7 @@ class LabelEncoder {
     bool load(std::istream &instream);
     void serialize(std::ostream &outstream) const;
 
-    void merge(const std::vector<const LabelEncoder<Label>*> &label_encoders);
+    void merge(const LabelEncoder<Label> &other);
 
     void clear() { encode_label_.clear(); decode_label_.clear(); }
 
@@ -145,27 +145,32 @@ class LabelEncoder {
     std::vector<Label> decode_label_;
 };
 
-template <typename IndexType, typename LabelType>
-class IterateRows;
 
-template <typename IndexType, typename LabelType>
-class IterateRowsByIndex;
+class IterateRows {
+  public:
+    virtual ~IterateRows() {}
+    virtual std::vector<uint64_t> next_row() = 0;
+};
 
 
 template <typename IndexType, typename LabelType>
 class MultiLabelEncoded
       : public MultiLabelAnnotation<IndexType, LabelType> {
     template <class A, typename L>
-    friend uint64_t merge(const std::vector<const MultiLabelEncoded<uint64_t, L>*>&, const std::vector<std::string>&, const std::string&);
+    friend uint64_t merge(const std::vector<const MultiLabelEncoded<uint64_t, L>*>&,
+                          const std::vector<std::string>&, const std::string&);
 
     template <typename I, typename L>
     friend class IterateRowsByIndex;
+
   public:
     using Index = typename MultiLabelAnnotation<IndexType, LabelType>::Index;
     using Label = typename MultiLabelAnnotation<IndexType, LabelType>::Label;
     using VLabels = typename MultiLabelAnnotation<IndexType, LabelType>::VLabels;
 
     virtual ~MultiLabelEncoded() {}
+
+    virtual std::unique_ptr<IterateRows> iterator() const;
 
     /******************* General functionality *******************/
 
@@ -183,16 +188,10 @@ class MultiLabelEncoded
                    size_t num_top = static_cast<size_t>(-1),
                    double min_label_frequency = 0.0) const override final;
 
-    virtual std::unique_ptr<IterateRows<IndexType, LabelType> > iterator() const { 
-        return std::move(std::make_unique<IterateRowsByIndex<IndexType, LabelType> >(*this));
-    };
-
   protected:
     // TODO: add |min_label_frequency| parameter: return only frequent labels
     virtual std::vector<uint64_t>
     count_labels(const std::vector<Index> &indices) const = 0;
-
-    LabelEncoder<Label> label_encoder_;
 
     virtual std::vector<uint64_t> get_label_indexes(Index i) const {
         VLabels labels = this->get_labels(i);
@@ -202,33 +201,8 @@ class MultiLabelEncoded
         }
         return indexes;
     }
-};
 
-template <typename IndexType, typename LabelType>
-class IterateRows {
-  public:
-    virtual std::vector<uint64_t> next_row() = 0;
-};
-
-template <typename IndexType, typename LabelType>
-class IterateRowsByIndex : public IterateRows<IndexType, LabelType> {
-  public:
-    IterateRowsByIndex(const MultiLabelEncoded<IndexType, LabelType>& annotator) : annotator_(annotator) {};
-    virtual std::vector<uint64_t> next_row() { return annotator_.get_label_indexes(i_++); };
-  private:
-    typename MultiLabelEncoded<IndexType, LabelType>::Index i_ = 0;
-    const MultiLabelEncoded<IndexType, LabelType> &annotator_;
-};
-
-template <class RowIterator, typename IndexType, typename LabelType>
-class IterateRowsByRowIterator : public IterateRows<IndexType, LabelType> {
-  public:
-    IterateRowsByRowIterator(std::unique_ptr<RowIterator> row_iterator) :
-        row_iterator_(std::move(row_iterator)) {};
-    
-    virtual std::vector<uint64_t> next_row() { return row_iterator_->next_row(); }
-  protected:
-    std::unique_ptr<RowIterator> row_iterator_;
+    LabelEncoder<Label> label_encoder_;
 };
 
 } // namespace annotate

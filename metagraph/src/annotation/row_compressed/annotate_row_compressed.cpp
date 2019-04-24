@@ -305,7 +305,7 @@ void RowCompressed<Label>::stream_counts(std::string filename,
 
     num_objects = 0;
     num_relations = 0;
-    while (row = sr.next_row()) {
+    while ((row = sr.next_row())) {
         num_objects++;
         num_relations += row->size();
     }

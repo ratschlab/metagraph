@@ -213,35 +213,37 @@ convert<BinRelWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotato
     );
 }
 
-uint64_t merge_rows(
-    const std::vector<const LEncoder*> &label_encoders,
-    const std::function<const std::vector<uint64_t>(const uint64_t)> &get_next_row,
-    const uint64_t &num_rows,
-    const std::function<uint64_t(LEncoder&, const std::function<void (const BinaryMatrix::RowCallback&)>)> &write_rows
-) {
+void merge_rows(const std::vector<const LEncoder*> &label_encoders,
+                std::function<const std::vector<uint64_t>(uint64_t)> get_next_row,
+                uint64_t num_rows,
+                std::function<void(const LEncoder&,
+                                   std::function<void(BinaryMatrix::RowCallback)>)> write_rows) {
     LEncoder merged_label_enc;
-    merged_label_enc.merge(label_encoders);
-
     std::vector<std::vector<uint64_t> > label_mappings;
-    for (size_t i = 0; i < label_encoders.size(); ++i) {
+
+    for (const auto *label_encoder : label_encoders) {
+        merged_label_enc.merge(*label_encoder);
+
         std::vector<uint64_t> v;
-        for (size_t j = 0; j < label_encoders.at(i)->size(); ++j) {
-            v.push_back(merged_label_enc.encode(label_encoders.at(i)->decode(j)));
+        for (size_t j = 0; j < label_encoder->size(); ++j) {
+            v.push_back(merged_label_enc.encode(label_encoder->decode(j)));
         }
         label_mappings.push_back(v);
     }
 
-    return write_rows(merged_label_enc, [&](BinaryMatrix::RowCallback &write_row) {
-        std::set<uint64_t> label_set;
+    write_rows(merged_label_enc, [&](BinaryMatrix::RowCallback write_row) {
+        std::set<uint64_t> indexes;
         for (uint64_t r = 0; r < num_rows; ++r) {
-            label_set.clear();
             for (uint64_t a = 0; a < label_encoders.size(); ++a) {
-                for (auto label : get_next_row(a)) {
-                    label_set.insert(label_mappings.at(a)[label]);
+                const auto &old_index_to_new = label_mappings.at(a);
+                for (auto old_i : get_next_row(a)) {
+                    indexes.insert(old_index_to_new[old_i]);
                 }
             }
-            std::vector<uint64_t> merged_row(label_set.begin(), label_set.end());
+            std::vector<uint64_t> merged_row(indexes.begin(), indexes.end());
             write_row(merged_row);
+
+            indexes.clear();
         }
     });
 }
