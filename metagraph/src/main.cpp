@@ -1104,38 +1104,37 @@ int main(int argc, const char *argv[]) {
 
             timer.reset();
 
-            auto annotation = initialize_annotation(config->infbase_annotators.size()
-                                                        ? config->infbase_annotators.at(0)
-                                                        : "",
-                                                    *config);
+            if (config->infbase_annotators.size()) {
+                auto annotation = initialize_annotation(config->infbase_annotators.at(0), *config);
 
-            if (!annotation->load(config->infbase_annotators.at(0))) {
-                std::cerr << "ERROR: can't load annotations" << std::endl;
-                exit(1);
-            } else if (config->verbose) {
-                std::cout << "Annotation was loaded in "
-                          << timer.elapsed() << "sec" << std::endl;
+                if (!annotation->load(config->infbase_annotators.at(0))) {
+                    std::cerr << "ERROR: can't load annotations" << std::endl;
+                    exit(1);
+                } else if (config->verbose) {
+                    std::cout << "Annotation was loaded in "
+                              << timer.elapsed() << "sec" << std::endl;
+                }
+
+                timer.reset();
+
+                assert(inserted_edges.get());
+
+                if (annotation->num_objects() + 1 != inserted_edges->size()
+                                                    - inserted_edges->num_set_bits()) {
+                    std::cerr << "ERROR: incompatible graph and annotation." << std::endl;
+                    exit(1);
+                }
+
+                if (config->verbose)
+                    std::cout << "Insert empty rows to the annotation matrix..." << std::flush;
+
+                AnnotatedDBG::insert_zero_rows(annotation.get(), *inserted_edges);
+
+                if (config->verbose)
+                    std::cout << "\tdone in " << timer.elapsed() << "sec" << std::endl;
+
+                annotation->serialize(config->outfbase);
             }
-
-            timer.reset();
-
-            assert(inserted_edges.get());
-
-            if (annotation->num_objects() + 1 != inserted_edges->size()
-                                                - inserted_edges->num_set_bits()) {
-                std::cerr << "ERROR: incompatible graph and annotation." << std::endl;
-                exit(1);
-            }
-
-            if (config->verbose)
-                std::cout << "Insert empty rows to the annotation matrix..." << std::flush;
-
-            AnnotatedDBG::insert_zero_rows(annotation.get(), *inserted_edges);
-
-            if (config->verbose)
-                std::cout << "\tdone in " << timer.elapsed() << "sec" << std::endl;
-
-            annotation->serialize(config->outfbase);
 
             return 0;
         }
