@@ -128,33 +128,32 @@ double VectorRowBinMat::density() const {
     return static_cast<double>(num_relations()) / num_columns() / num_rows();
 }
 
-VectorRowBinMat::StreamRows::StreamRows(std::ifstream &instream, const std::string &filename) {
-    if (!instream.good())
+VectorRowBinMat::StreamRows::StreamRows(const std::string &filename, size_t offset) {
+    std::ifstream instream(filename, std::ios::binary);
+
+    if (!instream.good() || !instream.seekg(offset).good())
         throw std::ifstream::failure("Bad stream");
 
     (void)load_number(instream);
     (void)load_number(instream);
 
-    uint64_t offs = instream.tellg();
-    inbuf_ = std::make_unique<sdsl::int_vector_buffer<> >(filename,
-                                                          std::ios::in,
-                                                          1024*1024,
-                                                          0,
-                                                          false,
-                                                          offs);
+    inbuf_ = sdsl::int_vector_buffer<>(filename,
+                                       std::ios::in | std::ios::binary,
+                                       1024 * 1024,
+                                       0,
+                                       false,
+                                       instream.tellg());
 }
 
-std::unique_ptr<std::vector<VectorRowBinMat::Row> > VectorRowBinMat::StreamRows::next_row() {
+std::vector<VectorRowBinMat::Column>* VectorRowBinMat::StreamRows::next_row() {
+    row_.clear();
 
-    auto row_vector = std::make_unique<std::vector<VectorRowBinMat::Row> >();
-
-    while (i_ < inbuf_->size()) {
-        auto value = (*inbuf_)[i_];
-        i_++;
+    while (i_ < inbuf_.size()) {
+        auto value = inbuf_[i_++];
         if (value) {
-            row_vector->push_back(value - 1);
+            row_.push_back(value - 1);
         } else {
-            return row_vector;
+            return &row_;
         }
     }
     return nullptr;
@@ -176,8 +175,8 @@ uint64_t VectorRowBinMat::append_matrix(const std::string &filename,
 
     uint64_t iv_offs = outstream.tellp();
     auto outbuf = sdsl::int_vector_buffer<>(filename,
-                                            std::ios::out,
-                                            1024*1024,
+                                            std::ios::out | std::ios::binary,
+                                            1024 * 1024,
                                             width,
                                             false,
                                             iv_offs);

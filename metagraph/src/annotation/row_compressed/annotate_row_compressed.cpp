@@ -279,32 +279,48 @@ uint64_t RowCompressed<Label>::num_relations() const {
 }
 
 template <typename Label>
-const std::unique_ptr<const LabelEncoder<Label> > RowCompressed<Label>::load_label_encoder(const std::string &filename) {
-    std::ifstream instream(remove_suffix(filename, kExtension) + kExtension,
-                           std::ios::binary);
+std::unique_ptr<LabelEncoder<Label>>
+RowCompressed<Label>::load_label_encoder(const std::string &filebase) {
+    auto filename = remove_suffix(filebase, kExtension) + kExtension;
 
-    auto label_encoder = std::make_unique<LabelEncoder<Label> >();
-    if (!label_encoder->load(instream))
-        throw std::ifstream::failure("Bad stream");
+    std::ifstream instream(filename, std::ios::binary);
+    if (!instream.good())
+        throw std::ifstream::failure("Cannot read from file " + filename);
 
-    return std::move(label_encoder);
+    try {
+        return load_label_encoder(instream);
+    } catch (...) {
+        throw std::ifstream::failure("Cannot load label encoder from file " + filename);
+    }
 }
 
 template <typename Label>
-void RowCompressed<Label>::stream_counts(std::string filename,
+std::unique_ptr<LabelEncoder<Label>>
+RowCompressed<Label>::load_label_encoder(std::istream &instream) {
+    if (!instream.good())
+        throw std::istream::failure("Bad stream");
+
+    auto label_encoder = std::make_unique<LabelEncoder<Label>>();
+    if (!label_encoder->load(instream))
+        throw std::istream::failure("Cannot load label encoder");
+
+    return label_encoder;
+}
+
+template <typename Label>
+void RowCompressed<Label>::stream_counts(const std::string &filename,
                                          uint64_t *num_objects_,
                                          uint64_t *num_relations_) {
     assert(num_objects_);
     assert(num_relations_);
     uint64_t &num_objects = *num_objects_;
     uint64_t &num_relations = *num_relations_;
-
-    filename = remove_suffix(filename, kExtension) + kExtension;
-    StreamRows sr(filename);
-    std::unique_ptr<std::vector<VectorRowBinMat::Row> > row;
-
     num_objects = 0;
     num_relations = 0;
+    const std::vector<VectorRowBinMat::Row> *row;
+
+    StreamRows sr(filename);
+
     while ((row = sr.next_row())) {
         num_objects++;
         num_relations += row->size();
@@ -316,24 +332,17 @@ RowCompressed<Label>
 ::StreamRows::StreamRows(std::string filename) {
     filename = remove_suffix(filename, kExtension) + kExtension;
     std::ifstream instream(filename, std::ios::binary);
-
-    if (!instream.good())
-        throw std::runtime_error("Bad stream");
-
     // skip header
-    LabelEncoder<Label> label_encoder_load;
-    if (!label_encoder_load.load(instream))
-        throw std::runtime_error("Could not load label encoder");
-
+    load_label_encoder(instream);
     // rows
-    sr_ = std::make_unique<VectorRowBinMat::StreamRows>(instream, filename);
+    sr_ = std::make_unique<VectorRowBinMat::StreamRows>(filename, instream.tellg());
 }
 
 template <typename Label>
-uint64_t RowCompressed<Label>
+void RowCompressed<Label>
 ::write_rows(std::string filename,
              const LabelEncoder<Label> &label_encoder,
-             const std::function<void (BinaryMatrix::RowCallback&)> &callback) {
+             const std::function<void(BinaryMatrix::RowCallback&)> &call_rows) {
     filename = remove_suffix(filename, kExtension) + kExtension;
     std::ofstream outstream(filename, std::ios::binary);
 
@@ -344,7 +353,7 @@ uint64_t RowCompressed<Label>
     outstream.close();
 
     uint64_t num_cols = label_encoder.size();
-    return VectorRowBinMat::append_matrix(filename, callback, num_cols);
+    VectorRowBinMat::append_matrix(filename, call_rows, num_cols);
 }
 
 template class RowCompressed<std::string>;

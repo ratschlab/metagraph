@@ -130,9 +130,21 @@ auto MultiLabelEncoded<IndexType, LabelType>
 }
 
 template <typename IndexType, typename LabelType>
+std::vector<uint64_t>
+MultiLabelEncoded<IndexType, LabelType>::get_label_indexes(Index i) const {
+    VLabels labels = this->get_labels(i);
+    std::vector<uint64_t> indexes;
+    indexes.reserve(labels.size());
+    for (const auto &label : labels) {
+        indexes.push_back(label_encoder_.encode(label));
+    }
+    return indexes;
+}
+
+template <typename Annotator>
 class IterateRowsByIndex : public IterateRows {
   public:
-    IterateRowsByIndex(const MultiLabelEncoded<IndexType, LabelType> &annotator)
+    IterateRowsByIndex(const Annotator &annotator)
           : annotator_(annotator) {};
 
     std::vector<uint64_t> next_row() override final {
@@ -140,14 +152,14 @@ class IterateRowsByIndex : public IterateRows {
     };
 
   private:
-    typename MultiLabelEncoded<IndexType, LabelType>::Index i_ = 0;
-    const MultiLabelEncoded<IndexType, LabelType> &annotator_;
+    typename Annotator::Index i_ = 0;
+    const Annotator &annotator_;
 };
 
 template <typename IndexType, typename LabelType>
 std::unique_ptr<IterateRows>
 MultiLabelEncoded<IndexType, LabelType>::iterator() const {
-    return std::make_unique<IterateRowsByIndex<IndexType, LabelType>>(*this);
+    return std::make_unique<IterateRowsByIndex<MultiLabelEncoded<IndexType, LabelType>>>(*this);
 };
 
 template class MultiLabelEncoded<uint64_t, std::string>;

@@ -7,7 +7,6 @@
 
 #include "annotate.hpp"
 #include "bit_vector.hpp"
-#include "utils.hpp"
 
 
 namespace annotate {
@@ -16,6 +15,7 @@ const char kColumnAnnotatorExtension[] = ".column.annodbg";
 
 template <typename Label>
 class RowCompressed;
+
 
 template <typename Label = std::string>
 class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {

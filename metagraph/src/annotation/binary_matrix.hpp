@@ -11,8 +11,8 @@ class BinaryMatrix {
     typedef uint64_t Row;
     typedef uint64_t Column;
 
-    typedef std::vector<Column> RowSetBits;
-    typedef const std::function<void(const RowSetBits &)> RowCallback;
+    typedef std::vector<Column> SetBitPositions;
+    typedef const std::function<void(const SetBitPositions &)> RowCallback;
     typedef std::function<void(Row, Column)> ValueCallback ;
 
     virtual ~BinaryMatrix() {}
@@ -30,8 +30,6 @@ class BinaryMatrix {
 
     // number of ones in the matrix
     virtual uint64_t num_relations() const = 0;
-
-    using SetBitPositions = std::vector<Column>;
 };
 
 

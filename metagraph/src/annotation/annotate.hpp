@@ -156,13 +156,6 @@ class IterateRows {
 template <typename IndexType, typename LabelType>
 class MultiLabelEncoded
       : public MultiLabelAnnotation<IndexType, LabelType> {
-    template <class A, typename L>
-    friend uint64_t merge(const std::vector<const MultiLabelEncoded<uint64_t, L>*>&,
-                          const std::vector<std::string>&, const std::string&);
-
-    template <typename I, typename L>
-    friend class IterateRowsByIndex;
-
   public:
     using Index = typename MultiLabelAnnotation<IndexType, LabelType>::Index;
     using Label = typename MultiLabelAnnotation<IndexType, LabelType>::Label;
@@ -171,6 +164,9 @@ class MultiLabelEncoded
     virtual ~MultiLabelEncoded() {}
 
     virtual std::unique_ptr<IterateRows> iterator() const;
+    virtual std::vector<uint64_t> get_label_indexes(Index i) const;
+
+    virtual const LabelEncoder<Label>& get_label_encoder() const final { return label_encoder_; };
 
     /******************* General functionality *******************/
 
@@ -192,15 +188,6 @@ class MultiLabelEncoded
     // TODO: add |min_label_frequency| parameter: return only frequent labels
     virtual std::vector<uint64_t>
     count_labels(const std::vector<Index> &indices) const = 0;
-
-    virtual std::vector<uint64_t> get_label_indexes(Index i) const {
-        VLabels labels = this->get_labels(i);
-        std::vector<uint64_t> indexes;
-        for (const auto &label : labels) {
-            indexes.push_back(label_encoder_.encode(label));
-        }
-        return indexes;
-    }
 
     LabelEncoder<Label> label_encoder_;
 };

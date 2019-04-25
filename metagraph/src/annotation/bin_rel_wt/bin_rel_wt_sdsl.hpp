@@ -10,9 +10,6 @@ class BinRelWT_sdsl : public BinaryMatrix {
   public:
     BinRelWT_sdsl() : delimiters_(1, 1) {};
 
-    typedef std::vector<Column> RowSetBits;
-    typedef std::function<void(const RowSetBits &)> RowCallback;
-
     BinRelWT_sdsl(const std::function<void(const RowCallback &)> &generate_rows,
                   uint64_t num_set_bits,
                   uint64_t num_columns);
