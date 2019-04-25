@@ -24,7 +24,7 @@
 #include "dbg_succinct.hpp"
 #include "server.hpp"
 
-typedef annotate::MultiLabelAnnotation<uint64_t, std::string> Annotator;
+typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
 const size_t kMaxNumParallelReadFiles = 5;
 
@@ -435,8 +435,10 @@ std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
                                                  uint64_t num_rows = 0) {
     std::unique_ptr<Annotator> annotation;
 
-    Config::AnnotationType anno_type = config.anno_type;
-    anno_type = parse_annotation_extension(filename);
+    Config::AnnotationType anno_type = parse_annotation_extension(filename);
+
+    if (anno_type == Config::AnnotationType::Invalid)
+        anno_type = config.anno_type;
 
     switch (anno_type) {
         case Config::ColumnCompressed: {
@@ -1419,9 +1421,7 @@ int main(int argc, const char *argv[]) {
             return 0;
         }
         case Config::MERGE_ANNOTATIONS: {
-
-            std::vector<std::unique_ptr<const Annotator> > annotators_;
-            std::vector<const annotate::MultiLabelEncoded<uint64_t, std::string>*> annotators;
+            std::vector<std::unique_ptr<Annotator>> annotators;
             std::vector<std::string> stream_files;
 
             for (const auto &filename : files) {
@@ -1435,14 +1435,12 @@ int main(int argc, const char *argv[]) {
                                   << filename << std::endl;
                         exit(1);
                     }
-
-                    annotators.push_back(dynamic_cast<const annotate::MultiLabelEncoded<uint64_t, std::string>*>(annotator.get()));
-                    annotators_.push_back(std::move(annotator));
+                    annotators.push_back(std::move(annotator));
                 }
             }
 
             if (config->anno_type == Config::RowCompressed) {
-                annotate::merge<annotate::RowCompressed<> >(annotators, stream_files, config->outfbase);
+                annotate::merge<annotate::RowCompressed<>>(annotators, stream_files, config->outfbase);
             } else if (config->anno_type == Config::RowFlat) {
                 annotate::merge<annotate::RowFlatAnnotator>(annotators, stream_files, config->outfbase);
             } else if (config->anno_type == Config::RBFish) {

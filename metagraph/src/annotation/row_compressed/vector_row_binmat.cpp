@@ -132,7 +132,7 @@ VectorRowBinMat::StreamRows::StreamRows(const std::string &filename, size_t offs
     std::ifstream instream(filename, std::ios::binary);
 
     if (!instream.good() || !instream.seekg(offset).good())
-        throw std::ifstream::failure("Bad stream");
+        throw std::ifstream::failure("Cannot read rows from file " + filename);
 
     (void)load_number(instream);
     (void)load_number(instream);
@@ -159,40 +159,39 @@ std::vector<VectorRowBinMat::Column>* VectorRowBinMat::StreamRows::next_row() {
     return nullptr;
 }
 
-uint64_t VectorRowBinMat::append_matrix(const std::string &filename,
-                                        const std::function<void (BinaryMatrix::RowCallback&)> &callback,
-                                        uint64_t num_cols) {
+void VectorRowBinMat::append_matrix(const std::string &filename,
+                                    const std::function<void(BinaryMatrix::RowCallback&)> &call_rows,
+                                    uint64_t num_cols) {
+    std::ofstream outstream(filename, std::ios::binary | std::ios::app);
 
-    std::ofstream outstream(filename, std::ios::binary|std::ios::in|std::ios::ate);
-    uint8_t width = utils::code_length(num_cols);
     uint64_t num_rows = 0;
 
     // write dummy num_rows value to fill in later
-    uint64_t header_offs = outstream.tellp();
+    const uint64_t header_offs = outstream.tellp();
     serialize_number(outstream, 0);
     serialize_number(outstream, num_cols);
-    outstream.flush();
+    const uint64_t iv_offs = outstream.tellp();
+    outstream.close();
 
-    uint64_t iv_offs = outstream.tellp();
-    auto outbuf = sdsl::int_vector_buffer<>(filename,
-                                            std::ios::out | std::ios::binary,
-                                            1024 * 1024,
-                                            width,
-                                            false,
-                                            iv_offs);
+    {
+        auto outbuf = sdsl::int_vector_buffer<>(filename,
+                                                std::ios::out | std::ios::binary,
+                                                1024 * 1024,
+                                                utils::code_length(num_cols),
+                                                false,
+                                                iv_offs);
 
-    callback([&](const std::vector<uint64_t> &row) {
-        for (auto val : row) {
-            outbuf.push_back(val + 1);
-        }
-        outbuf.push_back(0);
-        num_rows++;
-    });
+        call_rows([&](const std::vector<uint64_t> &row) {
+            for (auto val : row) {
+                outbuf.push_back(val + 1);
+            }
+            outbuf.push_back(0);
+            num_rows++;
+        });
+        outbuf.close();
+    }
 
-    outbuf.close();
-
+    outstream.open(filename, std::ios::in | std::ios::out | std::ios::binary);
     outstream.seekp(header_offs);
     serialize_number(outstream, num_rows);
-
-    return num_rows;
 }

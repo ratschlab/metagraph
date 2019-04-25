@@ -50,6 +50,28 @@ void merge(const std::vector<const MultiLabelEncoded<uint64_t, Label>*> &annotat
            const std::vector<std::string> &filenames,
            const std::string &outfile);
 
+template <class ToAnnotation, class Annotation>
+void merge(const std::vector<std::shared_ptr<Annotation>> &annotators,
+           const std::vector<std::string> &filenames,
+           const std::string &outfile) {
+    std::vector<const MultiLabelEncoded<uint64_t, typename Annotation::Label>*> anno_vector;
+    for (const auto &annotator : annotators) {
+        anno_vector.push_back(annotator.get());
+    }
+    merge<ToAnnotation>(anno_vector, filenames, outfile);
+}
+
+template <class ToAnnotation, class Annotation>
+void merge(const std::vector<std::unique_ptr<Annotation>> &annotators,
+           const std::vector<std::string> &filenames,
+           const std::string &outfile) {
+    std::vector<const MultiLabelEncoded<uint64_t, typename Annotation::Label>*> anno_vector;
+    for (const auto &annotator : annotators) {
+        anno_vector.push_back(annotator.get());
+    }
+    merge<ToAnnotation>(anno_vector, filenames, outfile);
+}
+
 } // namespace annotate
 
 #endif // __ANNOTATION_CONVERTERS_HPP__

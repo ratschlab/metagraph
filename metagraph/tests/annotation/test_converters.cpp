@@ -351,18 +351,16 @@ TEST_F(MergeAnnotators, RowCompressed) {
 }
 
 TEST_F(MergeAnnotators, RowFlat_to_RowCompressed) {
-    std::vector<const annotate::MultiLabelEncoded<uint64_t, std::string>*> row_flat_annotators;
+    std::vector<std::unique_ptr<annotate::MultiLabelEncoded<uint64_t, std::string>>> row_flat_annotators;
     {
-        auto row_flat = annotate::convert<annotate::RowFlatAnnotator>(
+        row_flat_annotators.push_back(annotate::convert<annotate::RowFlatAnnotator>(
             std::move(*input_annotation_1)
-        );
-        row_flat_annotators.push_back(row_flat.release());
+        ));
     }
     {
-        auto row_flat = annotate::convert<annotate::RowFlatAnnotator>(
+        row_flat_annotators.push_back(annotate::convert<annotate::RowFlatAnnotator>(
             std::move(*input_annotation_2)
-        );
-        row_flat_annotators.push_back(row_flat.release());
+        ));
     }
 
     const auto filename = test_dump_basename_rowflat_merge + "_to_rowcompressed";
@@ -374,18 +372,16 @@ TEST_F(MergeAnnotators, RowFlat_to_RowCompressed) {
 }
 
 TEST_F(MergeAnnotators, RowFlat_to_RowFlat) {
-    std::vector<const annotate::MultiLabelEncoded<uint64_t, std::string>*> row_flat_annotators;
+    std::vector<std::unique_ptr<annotate::MultiLabelEncoded<uint64_t, std::string>>> row_flat_annotators;
     {
-        auto row_flat = annotate::convert<annotate::RowFlatAnnotator>(
+        row_flat_annotators.push_back(annotate::convert<annotate::RowFlatAnnotator>(
             std::move(*input_annotation_1)
-        );
-        row_flat_annotators.push_back(row_flat.release());
+        ));
     }
     {
-        auto row_flat = annotate::convert<annotate::RowFlatAnnotator>(
+        row_flat_annotators.push_back(annotate::convert<annotate::RowFlatAnnotator>(
             std::move(*input_annotation_2)
-        );
-        row_flat_annotators.push_back(row_flat.release());
+        ));
     }
 
     const auto filename = test_dump_basename_rowflat_merge + "_to_rowflat";
@@ -397,23 +393,20 @@ TEST_F(MergeAnnotators, RowFlat_to_RowFlat) {
 }
 
 TEST_F(MergeAnnotators, Mixed_to_RowFlat) {
-    std::vector<std::unique_ptr<const annotate::MultiLabelEncoded<uint64_t, std::string> > > annotators_;
-    std::vector<const annotate::MultiLabelEncoded<uint64_t, std::string>*> annotators;
+    std::vector<std::unique_ptr<annotate::MultiLabelEncoded<uint64_t, std::string>>> annotators;
     std::vector<std::string> filenames;
     {
         auto annotator = annotate::convert<annotate::RowFlatAnnotator>(
             std::move(*input_annotation_1)
         );
-        annotators.push_back(annotator.get());
-        annotators_.push_back(std::move(annotator));
+        annotators.push_back(std::move(annotator));
     }
     {
         auto annotator = std::make_unique<annotate::ColumnCompressed<> >(5);
         annotator->add_labels(1, {"Label0", "Label3"});
         annotator->add_labels(2, {"Label0", "Label9", "Label7"});
         annotator->add_labels(4, {"Label1", "Label3", "Label9", "Label10", "Label5", "Label6", "Label11", "Label12", "Label13", "Label14", "Label15", "Label16"});
-        annotators.push_back(annotator.get());
-        annotators_.push_back(std::move(annotator));
+        annotators.push_back(std::move(annotator));
     }
     //TODO
     {
@@ -421,8 +414,7 @@ TEST_F(MergeAnnotators, Mixed_to_RowFlat) {
         annotator->add_labels(1, {"Label0", "Label3"});
         annotator->add_labels(2, {"Label0", "Label9", "Label7"});
         annotator->add_labels(4, {"Label1", "Label3", "Label9", "Label10", "Label5", "Label6", "Label11", "Label12", "Label13", "Label14", "Label15", "Label16"});
-        annotators.push_back(annotator.get());
-        annotators_.push_back(std::move(annotator));
+        annotators.push_back(std::move(annotator));
     }
     {
         //TODO: move into fixture as input_annotation_3 and make non-overlapping

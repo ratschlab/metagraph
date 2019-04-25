@@ -344,16 +344,15 @@ void RowCompressed<Label>
              const LabelEncoder<Label> &label_encoder,
              const std::function<void(BinaryMatrix::RowCallback&)> &call_rows) {
     filename = remove_suffix(filename, kExtension) + kExtension;
-    std::ofstream outstream(filename, std::ios::binary);
 
+    std::ofstream outstream(filename, std::ios::binary);
     if (!outstream.good())
-        throw std::ofstream::failure("Bad stream");
+        throw std::ofstream::failure("Cannot write to file " + filename);
 
     label_encoder.serialize(outstream);
     outstream.close();
 
-    uint64_t num_cols = label_encoder.size();
-    VectorRowBinMat::append_matrix(filename, call_rows, num_cols);
+    VectorRowBinMat::append_matrix(filename, call_rows, label_encoder.size());
 }
 
 template class RowCompressed<std::string>;
