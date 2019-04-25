@@ -278,10 +278,20 @@ TEST_F(ConvertFromRowCompressed, to_RowFlat) {
 }
 
 TEST_F(ConvertFromRowCompressed, stream_to_RowFlat) {
-    const auto rowflat_filename = test_dump_basename_row_compressed_to_rowflat + annotate::kRowAnnotatorExtension;
+    initial_annotation->serialize(test_dump_basename_row_compressed_to_rowflat);
+
+    annotation = annotate::convert<annotate::RowFlatAnnotator>(
+        test_dump_basename_row_compressed_to_rowflat
+    ).release();
+}
+
+TEST_F(ConvertFromRowCompressed, stream_to_RowFlat2) {
+    const auto rowflat_filename = test_dump_basename_row_compressed_to_rowflat
+                                                + annotate::kRowAnnotatorExtension;
+
     initial_annotation->serialize(rowflat_filename);
 
-    annotation = annotate::convert<annotate::RowFlatAnnotator, std::string>(
+    annotation = annotate::convert<annotate::RowFlatAnnotator>(
         rowflat_filename
     ).release();
 }
@@ -331,13 +341,13 @@ TEST_F(MergeAnnotators, RowCompressed) {
         filenames.push_back(filename + annotate::kRowAnnotatorExtension);
     }
 
-    uint64_t merged_num_rows = annotate::merge<annotate::RowCompressed<>, std::string>(
+    annotate::merge<annotate::RowCompressed<>>(
         {}, filenames, test_dump_basename_row_compressed_merge + "_merged"
     );
-    EXPECT_EQ(num_rows, merged_num_rows);
 
     merged_annotation = new annotate::RowCompressed<>(num_rows);
     merged_annotation->merge_load({ test_dump_basename_row_compressed_merge + "_merged" });
+    EXPECT_EQ(num_rows, merged_annotation->num_objects());
 }
 
 TEST_F(MergeAnnotators, RowFlat_to_RowCompressed) {
@@ -356,11 +366,11 @@ TEST_F(MergeAnnotators, RowFlat_to_RowCompressed) {
     }
 
     const auto filename = test_dump_basename_rowflat_merge + "_to_rowcompressed";
-    uint64_t merged_num_rows = annotate::merge<annotate::RowFlatAnnotator>(row_flat_annotators, {}, filename);
-    EXPECT_EQ(num_rows, merged_num_rows);
+    annotate::merge<annotate::RowFlatAnnotator>(row_flat_annotators, {}, filename);
 
     merged_annotation = new annotate::RowCompressed<>(num_rows);
     merged_annotation->merge_load({ filename });
+    EXPECT_EQ(num_rows, merged_annotation->num_objects());
 }
 
 TEST_F(MergeAnnotators, RowFlat_to_RowFlat) {
@@ -379,11 +389,11 @@ TEST_F(MergeAnnotators, RowFlat_to_RowFlat) {
     }
 
     const auto filename = test_dump_basename_rowflat_merge + "_to_rowflat";
-    uint64_t merged_num_rows = annotate::merge<annotate::RowFlatAnnotator>(row_flat_annotators, {}, filename);
-    EXPECT_EQ(num_rows, merged_num_rows);
+    annotate::merge<annotate::RowFlatAnnotator>(row_flat_annotators, {}, filename);
 
     merged_annotation = new annotate::RowFlatAnnotator();
     merged_annotation->merge_load({ filename });
+    EXPECT_EQ(num_rows, merged_annotation->num_objects());
 }
 
 TEST_F(MergeAnnotators, Mixed_to_RowFlat) {
@@ -427,9 +437,9 @@ TEST_F(MergeAnnotators, Mixed_to_RowFlat) {
     }
 
     const auto outfile = test_dump_basename_rowflat_merge + "_mixed_to_rowflat";
-    uint64_t merged_num_rows = annotate::merge<annotate::RowFlatAnnotator>(annotators, filenames, outfile);
-    EXPECT_EQ(num_rows, merged_num_rows);
+    annotate::merge<annotate::RowFlatAnnotator>(annotators, filenames, outfile);
 
     merged_annotation = new annotate::RowFlatAnnotator();
     merged_annotation->merge_load({ outfile });
+    EXPECT_EQ(num_rows, merged_annotation->num_objects());
 }
