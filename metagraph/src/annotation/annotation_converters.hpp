@@ -2,6 +2,7 @@
 #define __ANNOTATION_CONVERTERS_HPP__
 
 #include <memory>
+#include <vector>
 
 
 namespace annotate {
