@@ -7,6 +7,7 @@
 
 #include <sdsl/wavelet_trees.hpp>
 #include <libmaus2/wavelet/DynamicWaveletTree.hpp>
+#include <dynamic.hpp>
 
 
 class wavelet_tree {
@@ -17,9 +18,9 @@ class wavelet_tree {
     virtual uint64_t select(uint64_t c, uint64_t i) const = 0;
     virtual uint64_t operator[](uint64_t id) const = 0;
 
-    // get the position of the next value |var| in subvector [id, ...]
+    // get the position of the next value |val| in subvector [id, ...]
     virtual uint64_t next(uint64_t id, uint64_t val) const = 0;
-    // get the position of the previous value |var| in subvector [..., id]
+    // get the position of the previous value |val| in subvector [..., id]
     // if doesn't exist, return size()
     virtual uint64_t prev(uint64_t id, uint64_t val) const = 0;
 
@@ -113,8 +114,8 @@ class wavelet_tree_dyn : public wavelet_tree {
     void insert(uint64_t id, uint64_t val);
     void remove(uint64_t id);
 
-    uint64_t size() const { return wwt_->size(); }
-    uint8_t logsigma() const { return wwt_->b; }
+    uint64_t size() const { return dwt_->size(); }
+    uint8_t logsigma() const { return logsigma_; } //wwt_->b; }
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
@@ -125,6 +126,9 @@ class wavelet_tree_dyn : public wavelet_tree {
 
   private:
     std::unique_ptr<libmaus2::wavelet::DynamicWaveletTree<6, 64>> wwt_;
+    std::unique_ptr<dyn::wt_str> dwt_;
+    uint8_t logsigma_;
+
 };
 
 

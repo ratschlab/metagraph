@@ -17,6 +17,17 @@ add_subdirectory(
   external-libraries/jsoncpp
 )
 
+#set(INSTALL_DIR "${PROJECT_SOURCE_DIR}/build/external-libraries/DYNAMIC/sparsepp-prefix")
+#message(STATUS "variable is: " ${INSTALL_DIR})
+include_directories(
+  build/external-libraries/DYNAMIC/sparsepp-prefix
+  build/external-libraries/DYNAMIC/sparsepp-prefix/src/sparsepp/sparsepp
+  ${INCLUDE_DIRS}
+)
+add_subdirectory(
+  external-libraries/DYNAMIC
+)
+
 if(NOT CMAKE_DBG_ALPHABET)
   set(CMAKE_DBG_ALPHABET "DNA")
 endif()
@@ -36,6 +47,10 @@ string(APPEND CMAKE_CXX_FLAGS " \
   -Wall -Wextra -Werror \
   -msse4.2 \
   -D_THREAD_SAFE -pthread \
+  -Wno-unused-parameter \
+  -Wno-unused-variable \
+  -Wno-sign-compare \
+  -Wno-unused-but-set-variable \
 ") # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -101,7 +116,7 @@ set(CMAKE_EXE_LINKER_FLAGS_PROFILE "-pg -g")
 set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg -g")
 
 # Debug build type
-set(CMAKE_CXX_FLAGS_DEBUG "-O2 -g")
+set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g3 -ggdb")
 
 # Link time optimization
 if(LINK_OPT)
@@ -147,6 +162,9 @@ SUBDIRLIST(INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src")
 include_directories(
   external-libraries/KMC/kmc_api
   external-libraries/libmaus2/include
+  external-libraries/DYNAMIC/include
+  external-libraries/DYNAMIC/sparsepp-prefix
+  external-libraries/DYNAMIC/sparsepp-prefix/src/sparsepp/sparsepp
   external-libraries/sdsl-lite/include
   external-libraries/rollinghashcpp
   external-libraries/ips4o

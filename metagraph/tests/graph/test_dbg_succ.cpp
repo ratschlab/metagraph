@@ -1138,6 +1138,8 @@ TEST(DBGSuccinct, CallContigs) {
             BOSS reconstructed(k);
 
             graph.call_contigs([&](const auto &sequence) {
+                if (sequence == "CTGA")
+                    std::cout << "CTGA" << std::endl;
                 reconstructed.add_sequence(sequence);
             });
 
