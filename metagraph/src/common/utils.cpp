@@ -34,17 +34,23 @@ std::string remove_suffix(const std::string &str, const std::string &suffix) {
 }
 
 std::string join_strings(const std::vector<std::string> &strings,
-                         const std::string &delimiter) {
-    if (!strings.size())
-        return "";
+                         const std::string &delimiter,
+                         bool discard_empty_strings) {
+    auto it = std::find_if(strings.begin(), strings.end(),
+        [&](const auto &str) { return !discard_empty_strings || !str.empty(); }
+    );
 
-    if (strings.size() == 1)
-        return strings[0];
-
-    std::string result = strings[0];
-    for (size_t i = 1; i < strings.size(); ++i) {
-        result += delimiter + strings[i];
+    std::string result = "";
+    for (; it != strings.end(); ++it) {
+        if (it->size() || !discard_empty_strings) {
+            result += *it;
+            result += delimiter;
+        }
     }
+    // remove last appended delimiter
+    if (result.size())
+        result.resize(result.size() - delimiter.size());
+
     return result;
 }
 

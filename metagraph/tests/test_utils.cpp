@@ -679,6 +679,40 @@ TEST(Misc, JoinStrings) {
 
     EXPECT_EQ(std::vector<std::string>({ "23" }),
               utils::split_string("123", "1"));
+
+    EXPECT_EQ(".1", utils::join_strings({ "", "1" }, "."));
+    EXPECT_EQ("1.", utils::join_strings({ "1", "" }, "."));
+    EXPECT_EQ(".1", utils::join_strings({ "", "1" }, ".", false));
+    EXPECT_EQ("1.", utils::join_strings({ "1", "" }, ".", false));
+    EXPECT_EQ("1", utils::join_strings({ "", "1" }, ".", true));
+    EXPECT_EQ("1", utils::join_strings({ "1", "" }, ".", true));
+
+    EXPECT_EQ("..", utils::join_strings({ "", "", "" }, "."));
+    EXPECT_EQ("..3", utils::join_strings({ "", "", "3" }, "."));
+    EXPECT_EQ("1..", utils::join_strings({ "1", "", "" }, "."));
+    EXPECT_EQ(".2.", utils::join_strings({ "", "2", "" }, "."));
+    EXPECT_EQ("1.2.", utils::join_strings({ "1", "2", "" }, "."));
+    EXPECT_EQ("1..3", utils::join_strings({ "1", "", "3" }, "."));
+    EXPECT_EQ(".2.3", utils::join_strings({ "", "2", "3" }, "."));
+    EXPECT_EQ("1.2.3", utils::join_strings({ "1", "2", "3" }, "."));
+
+    EXPECT_EQ("..", utils::join_strings({ "", "", "" }, ".", false));
+    EXPECT_EQ("..3", utils::join_strings({ "", "", "3" }, ".", false));
+    EXPECT_EQ("1..", utils::join_strings({ "1", "", "" }, ".", false));
+    EXPECT_EQ(".2.", utils::join_strings({ "", "2", "" }, ".", false));
+    EXPECT_EQ("1.2.", utils::join_strings({ "1", "2", "" }, ".", false));
+    EXPECT_EQ("1..3", utils::join_strings({ "1", "", "3" }, ".", false));
+    EXPECT_EQ(".2.3", utils::join_strings({ "", "2", "3" }, ".", false));
+    EXPECT_EQ("1.2.3", utils::join_strings({ "1", "2", "3" }, ".", false));
+
+    EXPECT_EQ("", utils::join_strings({ "", "", "" }, ".", true));
+    EXPECT_EQ("3", utils::join_strings({ "", "", "3" }, ".", true));
+    EXPECT_EQ("1", utils::join_strings({ "1", "", "" }, ".", true));
+    EXPECT_EQ("2", utils::join_strings({ "", "2", "" }, ".", true));
+    EXPECT_EQ("1.2", utils::join_strings({ "1", "2", "" }, ".", true));
+    EXPECT_EQ("1.3", utils::join_strings({ "1", "", "3" }, ".", true));
+    EXPECT_EQ("2.3", utils::join_strings({ "", "2", "3" }, ".", true));
+    EXPECT_EQ("1.2.3", utils::join_strings({ "1", "2", "3" }, ".", true));
 }
 
 TEST(Misc, RemoveSuffix) {

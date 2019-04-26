@@ -2096,9 +2096,10 @@ int main(int argc, const char *argv[]) {
                 uint64_t counter = 0;
                 const auto &dump_sequence = [&](const auto &sequence) {
                     if (!write_fasta(out_fasta_gz,
-                                     (config->header.size()
-                                        ? config->header + "."
-                                        : "") + std::to_string(counter),
+                                     utils::join_strings({ config->header,
+                                                            std::to_string(counter) },
+                                                         ".",
+                                                         true),
                                      sequence)) {
                         std::cerr << "ERROR: Can't write extracted sequences to "
                                   << out_filename << std::endl;
