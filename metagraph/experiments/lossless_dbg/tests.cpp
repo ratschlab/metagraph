@@ -129,6 +129,17 @@ void check_paths_going_through() {
     db.encode(reads_for_testing_short);
     ASSERT_EQ(db.get_paths_going_through(db.graph.kmer_to_node("CATGA")),vector<typename T::path_id>({{db.graph.kmer_to_node("GTACG"),0}}));
 }
+template<typename T=PathDatabaseBaselineWavelet<>>
+void check_small_get_next_consistent_node() {
+    string middle = "ACTGCGT";
+    vector<string> reads = {"C" + middle + "T","A" + middle + "G"};
+    auto db = T(reads,5);
+    db.encode(reads);
+    auto split_node = db.graph.kmer_to_node("TGCGT");
+    ASSERT_EQ(db.get_next_consistent_node(split_node,"C" + middle),db.graph.kmer_to_node("GCGT"s + "T"s));
+    ASSERT_EQ(db.get_next_consistent_node(split_node,"A" + middle),db.graph.kmer_to_node("GCGT"s + "G"s));
+    ASSERT_EQ(db.get_next_consistent_node(split_node,middle),0);
+}
 
 
 template <typename T>
@@ -183,6 +194,9 @@ TEST(PathDatabase,DecodeAll) {
 }
 TEST(PathDatabase,PathsGoingThrough) {
     check_paths_going_through<PathDatabaseBaselineWavelet<>>();
+}
+TEST(PathDatabase,ConsistentNode) {
+    check_small_get_next_consistent_node<>();
 }
 
 #if defined(__linux__) || false
