@@ -1823,7 +1823,7 @@ int main(int argc, const char *argv[]) {
             std::unique_ptr<Annotator> annotation;
 
             if (anno_file_type != Config::RowCompressed || config->rename_instructions_file.size()) {
-                // not streaming from disk
+                // Load annotation from disk
 
                 annotation = initialize_annotation(files.at(0), *config);
 
@@ -1872,6 +1872,7 @@ int main(int argc, const char *argv[]) {
                 }
             }
 
+            // TODO: clean this stuff up, simplify logic and move to annotation_converters.hpp/cpp
             if (anno_file_type == Config::ColumnCompressed) {
                 std::unique_ptr<annotate::ColumnCompressed<>> annotator {
                     dynamic_cast<annotate::ColumnCompressed<> *>(annotation.release())
