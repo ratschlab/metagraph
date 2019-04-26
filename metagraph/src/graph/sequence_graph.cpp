@@ -203,8 +203,12 @@ void DeBruijnGraph
 
         nodes.emplace(i, get_node_sequence(i));
         while (nodes.size()) {
+            // FYI: structured binding is a new thing that often
+            // leads to issues, so avoid using it.
+            // https://stackoverflow.com/questions/50799719/reference-to-local-binding-declared-in-enclosing-function?noredirect=1&lq=1
             auto [node, sequence] = std::move(nodes.top());
             nodes.pop();
+
             while (!visited[node]) {
                 visited[node] = true;
                 callback(node, sequence);
@@ -214,7 +218,7 @@ void DeBruijnGraph
                 char next_c = '\0';
                 call_outgoing_kmers(
                     node,
-                    [&](const auto &next, char c) {
+                    [&, &sequence=sequence](const auto &next, char c) {
                         if (visited[next])
                             return;
 
