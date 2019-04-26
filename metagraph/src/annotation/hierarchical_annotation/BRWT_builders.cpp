@@ -1,7 +1,8 @@
 #include "BRWT_builders.hpp"
-#include "omp.h"
 
 #include <cmath>
+#include <omp.h>
+#include <progress_bar.hpp>
 
 
 BRWT
@@ -135,6 +136,8 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
         nodes[i].group_sizes = { 1 };
     }
 
+    ProgressBar progress_bar(columns.size() - 1, "Building BRWT");
+
     while (nodes.size() > 1) {
         auto groups = partitioner(columns);
 
@@ -156,6 +159,9 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
             parent_columns[g] = std::make_unique<bit_vector_rrr<>>(
                 parent.second->convert_to<bit_vector_rrr<>>()
             );
+
+            #pragma omp critical
+            progress_bar += group.size() - 1;
         }
 
         nodes = std::move(parent_nodes);
@@ -180,6 +186,8 @@ void BRWTOptimizer::relax(BRWT *brwt_matrix,
         if (node.child_nodes_.size())
             parents.push_front(const_cast<BRWT*>(&node));
     });
+
+    ProgressBar progress_bar(parents.size(), "Optimizing BRWT");
 
     while (!parents.empty()) {
         auto &parent = *parents.front();
@@ -211,6 +219,9 @@ void BRWTOptimizer::relax(BRWT *brwt_matrix,
 
         parent = BRWTBuilder::initialize(std::move(updated_parent),
                                          std::move(parent.nonzero_rows_));
+
+        #pragma omp critical
+        ++progress_bar;
     }
 }
 
