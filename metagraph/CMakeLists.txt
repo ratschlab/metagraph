@@ -50,7 +50,6 @@ string(APPEND CMAKE_CXX_FLAGS " \
   -Wno-unused-parameter \
   -Wno-unused-variable \
   -Wno-sign-compare \
-  -Wno-unused-but-set-variable \
 ") # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")

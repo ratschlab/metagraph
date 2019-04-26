@@ -6,7 +6,6 @@
 #include <atomic>
 
 #include <sdsl/wavelet_trees.hpp>
-#include <libmaus2/wavelet/DynamicWaveletTree.hpp>
 #include <dynamic.hpp>
 
 
@@ -98,11 +97,6 @@ class wavelet_tree_dyn : public wavelet_tree {
     template <class Vector>
     wavelet_tree_dyn(uint8_t logsigma, const Vector &vector);
 
-    wavelet_tree_dyn(const wavelet_tree_dyn &other);
-    wavelet_tree_dyn(wavelet_tree_dyn&& other);
-    wavelet_tree_dyn& operator=(const wavelet_tree_dyn &other);
-    wavelet_tree_dyn& operator=(wavelet_tree_dyn&& other);
-
     uint64_t rank(uint64_t c, uint64_t i) const;
     uint64_t select(uint64_t c, uint64_t i) const;
     uint64_t operator[](uint64_t id) const;
@@ -114,8 +108,8 @@ class wavelet_tree_dyn : public wavelet_tree {
     void insert(uint64_t id, uint64_t val);
     void remove(uint64_t id);
 
-    uint64_t size() const { return dwt_->size(); }
-    uint8_t logsigma() const { return logsigma_; } //wwt_->b; }
+    uint64_t size() const { return dwt_.size(); }
+    uint8_t logsigma() const;
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
@@ -125,10 +119,7 @@ class wavelet_tree_dyn : public wavelet_tree {
     sdsl::int_vector<> to_vector() const;
 
   private:
-    std::unique_ptr<libmaus2::wavelet::DynamicWaveletTree<6, 64>> wwt_;
-    std::unique_ptr<dyn::wt_str> dwt_;
-    uint8_t logsigma_;
-
+    dyn::wt_str dwt_;
 };
 
 

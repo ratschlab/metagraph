@@ -45,4 +45,4 @@
 	url = https://github.com/karasikov/cpp_progress_bar
 [submodule "metagraph/external-libraries/DYNAMIC"]
 	path = metagraph/external-libraries/DYNAMIC
-	url = https://github.com/xxsds/DYNAMIC
+	url = https://github.com/xxsds/DYNAMIC.git
