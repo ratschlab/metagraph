@@ -6,6 +6,7 @@
 
 #include "utils.hpp"
 #include "serialization.hpp"
+#include "binary_matrix.hpp"
 
 
 Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,
@@ -68,7 +69,7 @@ Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,
 
     uint64_t rows = 0;
     SmallVector row_indices_small;
-    call_rows([&](const utils::SetBitPositions &row_indices) {
+    call_rows([&](const BinaryMatrix::SetBitPositions &row_indices) {
         ++rows;
         row_indices_small.assign(row_indices.begin(), row_indices.end());
         if (vector_coder.size()) {

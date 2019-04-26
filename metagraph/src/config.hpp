@@ -107,6 +107,7 @@ class Config {
     static StateType string_to_state(const std::string &string);
 
     enum AnnotationType {
+        Invalid = -1,
         ColumnCompressed = 1,
         RowCompressed,
         BRWT,

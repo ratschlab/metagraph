@@ -11,6 +11,10 @@ class BinaryMatrix {
     typedef uint64_t Row;
     typedef uint64_t Column;
 
+    typedef std::vector<Column> SetBitPositions;
+    typedef const std::function<void(const SetBitPositions &)> RowCallback;
+    typedef std::function<void(Row, Column)> ValueCallback ;
+
     virtual ~BinaryMatrix() {}
 
     virtual uint64_t num_columns() const = 0;

@@ -21,7 +21,7 @@ BinRelWT_sdsl
 
     uint64_t index = 0;
 
-    generate_rows([&](const RowSetBits &row_set_bits) {
+    generate_rows([&](const SetBitPositions &row_set_bits) {
         for (const auto &col_index : row_set_bits) {
             assert(col_index < num_columns);
             assert(index < flat.size());

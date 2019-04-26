@@ -23,13 +23,14 @@ typedef std::vector<uint32_t> SmallVector;
 #endif
 
 #include "serialization.hpp"
+#include "binary_matrix.hpp"
 
 
 struct SmallVectorHash {
     std::size_t operator()(const SmallVector &vector) const;
 };
 
-class BinaryMatrixRowDynamic;
+class BinaryMatrix;
 
 
 namespace utils {
@@ -240,14 +241,32 @@ namespace utils {
                             std::vector<kmer_label_pair>> index_heap_;
     };
 
-    using SetBitPositions = std::vector<uint64_t>;
-    void call_rows(const std::function<void(const SetBitPositions &)> &callback,
+    class RowsFromColumnsIterator {
+      public:
+        RowsFromColumnsIterator(std::unique_ptr<utils::RowsFromColumnsTransformer> transformer) {
+            transformer_ = std::move(transformer);
+        }
+
+        std::tuple<uint64_t, uint64_t> next_set_bit();
+        uint64_t values_left() { return transformer_->values_left(); };
+
+        std::vector<uint64_t> next_row();
+
+      private:
+        std::unique_ptr<utils::RowsFromColumnsTransformer> transformer_;
+
+        uint64_t i_ = 0;
+        uint64_t row_ = 0;
+        uint64_t column_;
+    };
+
+    void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
                    RowsFromColumnsTransformer&& transformer);
-    void call_rows(const std::function<void(const SetBitPositions &)> &callback,
-                   const BinaryMatrixRowDynamic &row_major_matrix);
+    void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
+                   const BinaryMatrix &row_major_matrix);
 
     template <typename... Args>
-    void call_rows(const std::function<void(const SetBitPositions &)> &callback,
+    void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
                    Args&&... args) {
         call_rows(callback,
                   RowsFromColumnsTransformer(std::forward<Args>(args)...));
@@ -335,6 +354,8 @@ namespace utils {
     std::vector<uint64_t> sample_indexes(uint64_t universe_size,
                                          uint64_t sample_size,
                                          std::mt19937 &gen);
+
+    template<class T> struct dependent_false : std::false_type {};
 
 } // namespace utils
 
