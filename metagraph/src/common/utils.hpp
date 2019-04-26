@@ -46,7 +46,8 @@ namespace utils {
     }
 
     std::string join_strings(const std::vector<std::string> &strings,
-                             const std::string &delimiter);
+                             const std::string &delimiter,
+                             bool discard_empty_strings = false);
 
     std::vector<std::string> split_string(const std::string &string,
                                           const std::string &delimiter);
