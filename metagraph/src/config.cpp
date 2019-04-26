@@ -180,6 +180,8 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "--unitigs")) {
             to_fasta = true;
             unitigs = true;
+        } else if (!strcmp(argv[i], "--header")) {
+            header = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "--prune-end")) {
             pruned_dead_end_size = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--count-dummy")) {
@@ -668,6 +670,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --to-adj-list \t\twrite the adjacency list to file [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\t\textract sequences from graph and write to compressed fasta file [off]\n");
             fprintf(stderr, "\t   --unitigs \t\t\textract all simple paths from graph and write to compressed fasta file [off]\n");
+            fprintf(stderr, "\t   --header [STR] \t\theader for sequences in FASTA output [\"\"]\n");
             fprintf(stderr, "\t   --prune-end [INT] \t\tprune all dead ends not longer than this value [0]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;

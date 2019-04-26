@@ -2091,12 +2091,18 @@ int main(int argc, const char *argv[]) {
                     exit(1);
                 }
 
+                uint64_t counter = 0;
                 const auto &dump_sequence = [&](const auto &sequence) {
-                    if (!write_fasta(out_fasta_gz, "", sequence)) {
+                    if (!write_fasta(out_fasta_gz,
+                                     (config->header.size()
+                                        ? config->header + "."
+                                        : "") + std::to_string(counter),
+                                     sequence)) {
                         std::cerr << "ERROR: Can't write extracted sequences to "
                                   << out_filename << std::endl;
                         exit(1);
                     }
+                    counter++;
                 };
 
                 if (config->unitigs || config->pruned_dead_end_size > 0) {

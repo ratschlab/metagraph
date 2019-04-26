@@ -76,6 +76,7 @@ class Config {
     std::string fasta_header_delimiter;
     std::string anno_labels_delimiter = ":";
     std::string annotation_label = "";
+    std::string header = "";
 
     enum IdentityType {
         NO_IDENTITY = -1,
