@@ -193,11 +193,11 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsEmptyGraph) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphTest, CallContigsEmptyGraph) {
+TYPED_TEST(DeBruijnGraphTest, CallUnitigsEmptyGraph) {
     for (size_t k = 2; k <= 10; ++k) {
         auto empty = build_graph<TypeParam>(k);
         std::vector<std::string> sequences;
-        empty->call_contigs([&](const auto &sequence) {
+        empty->call_unitigs([&](const auto &sequence) {
             sequences.push_back(sequence);
         });
         ASSERT_EQ(0u, sequences.size());
@@ -226,7 +226,7 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsTwoLoops) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphTest, CallContigsTwoLoops) {
+TYPED_TEST(DeBruijnGraphTest, CallUnitigsTwoLoops) {
     for (size_t k = 2; k <= 20; ++k) {
         std::vector<std::string> sequences { std::string(100, 'A') };
         auto graph = build_graph<TypeParam>(k, sequences);
@@ -235,9 +235,9 @@ TYPED_TEST(DeBruijnGraphTest, CallContigsTwoLoops) {
         ASSERT_EQ(1u, graph_batch->num_nodes());
 
         size_t num_sequences = 0;
-        graph->call_contigs([&](auto&) { num_sequences++; });
+        graph->call_unitigs([&](auto&) { num_sequences++; });
         size_t num_sequences_batch = 0;
-        graph_batch->call_contigs([&](auto&) { num_sequences_batch++; });
+        graph_batch->call_unitigs([&](auto&) { num_sequences_batch++; });
 
         EXPECT_EQ(graph->num_nodes(), num_sequences);
         EXPECT_EQ(graph_batch->num_nodes(), num_sequences_batch);
@@ -266,7 +266,7 @@ TYPED_TEST(DeBruijnGraphTest, CallPathsFourLoops) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphTest, CallContigsFourLoops) {
+TYPED_TEST(DeBruijnGraphTest, CallUnitigsFourLoops) {
     for (size_t k = 2; k <= 20; ++k) {
         std::vector<std::string> sequences { std::string(100, 'A'),
                                              std::string(100, 'G'),
@@ -277,9 +277,9 @@ TYPED_TEST(DeBruijnGraphTest, CallContigsFourLoops) {
         ASSERT_EQ(3u, graph_batch->num_nodes());
 
         size_t num_sequences = 0;
-        graph->call_contigs([&](auto&) { num_sequences++; });
+        graph->call_unitigs([&](auto&) { num_sequences++; });
         size_t num_sequences_batch = 0;
-        graph_batch->call_contigs([&](auto&) { num_sequences_batch++; });
+        graph_batch->call_unitigs([&](auto&) { num_sequences_batch++; });
 
         EXPECT_EQ(graph->num_nodes(), num_sequences);
         EXPECT_EQ(graph_batch->num_nodes(), num_sequences_batch);
@@ -359,7 +359,7 @@ TYPED_TEST(DeBruijnGraphTest, CallPaths) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphTest, CallContigs) {
+TYPED_TEST(DeBruijnGraphTest, CallUnitigs) {
     for (size_t k = 2; k <= 10; ++k) {
         {
             auto graph = build_graph<TypeParam>(k, { "AAACACTAG",
@@ -367,7 +367,7 @@ TYPED_TEST(DeBruijnGraphTest, CallContigs) {
 
             std::vector<std::string> reconst;
 
-            graph->call_contigs([&](const auto &sequence) {
+            graph->call_unitigs([&](const auto &sequence) {
                 reconst.push_back(sequence);
             });
             auto reconstructed = build_graph<TypeParam>(k, reconst);
@@ -381,7 +381,7 @@ TYPED_TEST(DeBruijnGraphTest, CallContigs) {
 
             std::vector<std::string> reconst;
 
-            graph->call_contigs([&](const auto &sequence) {
+            graph->call_unitigs([&](const auto &sequence) {
                 reconst.push_back(sequence);
             });
             auto reconstructed = build_graph<TypeParam>(k, reconst);
@@ -395,7 +395,7 @@ TYPED_TEST(DeBruijnGraphTest, CallContigs) {
 
             std::vector<std::string> reconst;
 
-            graph->call_contigs([&](const auto &sequence) {
+            graph->call_unitigs([&](const auto &sequence) {
                 reconst.push_back(sequence);
             });
             auto reconstructed = build_graph<TypeParam>(k, reconst);
@@ -408,7 +408,7 @@ TYPED_TEST(DeBruijnGraphTest, CallContigs) {
 
             std::vector<std::string> reconst;
 
-            graph->call_contigs([&](const auto &sequence) {
+            graph->call_unitigs([&](const auto &sequence) {
                 reconst.push_back(sequence);
             });
             auto reconstructed = build_graph<TypeParam>(k, reconst);
@@ -421,7 +421,7 @@ TYPED_TEST(DeBruijnGraphTest, CallContigs) {
 
             std::vector<std::string> reconst;
 
-            graph->call_contigs([&](const auto &sequence) {
+            graph->call_unitigs([&](const auto &sequence) {
                 reconst.push_back(sequence);
             });
             auto reconstructed = build_graph<TypeParam>(k, reconst);

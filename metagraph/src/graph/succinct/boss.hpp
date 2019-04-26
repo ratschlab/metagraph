@@ -116,7 +116,7 @@ class BOSS {
 
     void call_sequences(Call<const std::string&> callback) const;
 
-    void call_contigs(Call<const std::string&> callback,
+    void call_unitigs(Call<const std::string&> callback,
                       size_t max_pruned_dead_end_size = 0) const;
 
     node_index traverse(node_index node, char edge_label) const;

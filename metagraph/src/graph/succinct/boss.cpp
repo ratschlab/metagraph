@@ -1902,7 +1902,7 @@ void BOSS::call_sequences(Call<const std::string&> callback) const {
     }, false);
 }
 
-void BOSS::call_contigs(Call<const std::string&> callback,
+void BOSS::call_unitigs(Call<const std::string&> callback,
                         size_t max_pruned_dead_end_size) const {
     std::string sequence;
 

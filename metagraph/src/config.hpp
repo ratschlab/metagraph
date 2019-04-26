@@ -22,7 +22,7 @@ class Config {
     bool fasta_anno = false;
     bool to_adj_list = false;
     bool to_fasta = false;
-    bool contigs = false;
+    bool unitigs = false;
     bool count_kmers_query = false;
     bool query_presence = false;
     bool filter_present = false;

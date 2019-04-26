@@ -81,7 +81,7 @@ void DeBruijnGraph
 }
 
 void DeBruijnGraph
-::call_contigs(const std::function<void(const std::string&)> &callback,
+::call_unitigs(const std::function<void(const std::string&)> &callback,
                size_t max_pruned_dead_end_size) const {
     auto nnodes = num_nodes();
     sdsl::bit_vector discovered(nnodes + 1, false);

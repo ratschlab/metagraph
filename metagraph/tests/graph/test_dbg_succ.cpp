@@ -909,12 +909,12 @@ TEST(BOSS, CallPathsEmptyGraph) {
     }
 }
 
-TEST(BOSS, CallContigsEmptyGraph) {
+TEST(BOSS, CallUnitigsEmptyGraph) {
     for (size_t k = 1; k < 30; ++k) {
         BOSS empty(k);
         BOSS reconstructed(k);
 
-        empty.call_contigs([&](const auto &sequence) {
+        empty.call_unitigs([&](const auto &sequence) {
             reconstructed.add_sequence(sequence);
         });
 
@@ -939,7 +939,7 @@ TEST(BOSS, CallPathsOneLoop) {
     }
 }
 
-TEST(BOSS, CallContigsOneLoop) {
+TEST(BOSS, CallUnitigsOneLoop) {
     for (size_t k = 1; k < 20; ++k) {
         BOSS graph(k);
 
@@ -949,7 +949,7 @@ TEST(BOSS, CallContigsOneLoop) {
         size_t num_sequences = 0;
 
         graph.call_paths([&](const auto &, const auto &) { num_paths++; }, true);
-        graph.call_contigs([&](const auto &) { num_sequences++; });
+        graph.call_unitigs([&](const auto &) { num_sequences++; });
 
         EXPECT_EQ(graph.num_edges(), num_paths);
         EXPECT_EQ(graph.num_edges() - 1, num_sequences);
@@ -975,7 +975,7 @@ TEST(BOSS, CallPathsTwoLoops) {
     }
 }
 
-TEST(BOSS, CallContigsTwoLoops) {
+TEST(BOSS, CallUnitigsTwoLoops) {
     for (size_t k = 1; k < 20; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A') });
@@ -987,7 +987,7 @@ TEST(BOSS, CallContigsTwoLoops) {
         size_t num_sequences = 0;
 
         graph.call_paths([&](const auto &, const auto &) { num_paths++; }, true);
-        graph.call_contigs([&](const auto &) { num_sequences++; });
+        graph.call_unitigs([&](const auto &) { num_sequences++; });
 
         EXPECT_EQ(graph.num_edges(), num_paths);
         EXPECT_EQ(graph.num_edges() - 1, num_sequences);
@@ -1015,7 +1015,7 @@ TEST(BOSS, CallPathsFourLoops) {
     }
 }
 
-TEST(BOSS, CallContigsFourLoops) {
+TEST(BOSS, CallUnitigsFourLoops) {
     for (size_t k = 1; k < 20; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A'),
@@ -1029,7 +1029,7 @@ TEST(BOSS, CallContigsFourLoops) {
         size_t num_sequences = 0;
 
         graph.call_paths([&](const auto &, const auto &) { num_paths++; }, true);
-        graph.call_contigs([&](const auto &) { num_sequences++; });
+        graph.call_unitigs([&](const auto &) { num_sequences++; });
 
         EXPECT_EQ(graph.num_edges(), num_paths);
         EXPECT_EQ(graph.num_edges() - 1, num_sequences);
@@ -1113,7 +1113,7 @@ TEST(BOSS, CallPaths) {
     }
 }
 
-TEST(BOSS, CallContigs) {
+TEST(BOSS, CallUnitigs) {
     for (size_t k = 1; k < 10; ++k) {
         {
             BOSS graph(k);
@@ -1123,7 +1123,7 @@ TEST(BOSS, CallContigs) {
 
             BOSS reconstructed(k);
 
-            graph.call_contigs([&](const auto &sequence) {
+            graph.call_unitigs([&](const auto &sequence) {
                 reconstructed.add_sequence(sequence);
             });
 
@@ -1138,7 +1138,7 @@ TEST(BOSS, CallContigs) {
 
             BOSS reconstructed(k);
 
-            graph.call_contigs([&](const auto &sequence) {
+            graph.call_unitigs([&](const auto &sequence) {
                 reconstructed.add_sequence(sequence);
             });
 
@@ -1153,7 +1153,7 @@ TEST(BOSS, CallContigs) {
 
             BOSS reconstructed(k);
 
-            graph.call_contigs([&](const auto &sequence) {
+            graph.call_unitigs([&](const auto &sequence) {
                 reconstructed.add_sequence(sequence);
             });
 
@@ -1167,7 +1167,7 @@ TEST(BOSS, CallContigs) {
 
             BOSS reconstructed(k);
 
-            graph.call_contigs([&](const auto &sequence) {
+            graph.call_unitigs([&](const auto &sequence) {
                 reconstructed.add_sequence(sequence);
             });
 
@@ -1181,7 +1181,7 @@ TEST(BOSS, CallContigs) {
 
             BOSS reconstructed(k);
 
-            graph.call_contigs([&](const auto &sequence) {
+            graph.call_unitigs([&](const auto &sequence) {
                 reconstructed.add_sequence(sequence);
             });
 
@@ -1190,7 +1190,7 @@ TEST(BOSS, CallContigs) {
     }
 }
 
-TEST(BOSS, CallContigs1) {
+TEST(BOSS, CallUnitigs1) {
     BOSSConstructor constructor(3);
     constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
                                 "ACTCT" });
@@ -1218,7 +1218,7 @@ TEST(BOSS, CallContigs1) {
     EXPECT_EQ(contigs.size(), num_contigs);
 }
 
-TEST(BOSS, CallContigsDisconnected1) {
+TEST(BOSS, CallUnitigsDisconnected1) {
     BOSSConstructor constructor(3);
     constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
                                 "ACTCT",
@@ -1248,7 +1248,7 @@ TEST(BOSS, CallContigsDisconnected1) {
     EXPECT_EQ(contigs.size(), num_contigs);
 }
 
-TEST(BOSS, CallContigsDisconnected2) {
+TEST(BOSS, CallUnitigsDisconnected2) {
     BOSSConstructor constructor(3);
     constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
                                 "ACTCT",
@@ -1280,7 +1280,7 @@ TEST(BOSS, CallContigsDisconnected2) {
     EXPECT_EQ(contigs.size(), num_contigs);
 }
 
-TEST(BOSS, CallContigsTwoComponents) {
+TEST(BOSS, CallUnitigsTwoComponents) {
     BOSSConstructor constructor(3);
     constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
                                 "ACTCT",
@@ -1315,7 +1315,7 @@ TEST(BOSS, CallContigsTwoComponents) {
     EXPECT_EQ(contigs.size(), num_contigs);
 }
 
-TEST(BOSS, CallContigsWithPruning) {
+TEST(BOSS, CallUnitigsWithPruning) {
     BOSSConstructor constructor(4);
     constructor.add_sequences({
         "ACTATAGCTAGTCTATGCGA",
@@ -1341,7 +1341,7 @@ TEST(BOSS, CallContigsWithPruning) {
             "TCTAG",
         };
         size_t num_contigs = 0;
-        graph.call_contigs(
+        graph.call_unitigs(
             [&](const auto &str) {
                 EXPECT_TRUE(contigs.count(str)) << str;
                 num_contigs++;
@@ -1360,7 +1360,7 @@ TEST(BOSS, CallContigsWithPruning) {
             "TCTAG",
         };
         size_t num_contigs = 0;
-        graph.call_contigs(
+        graph.call_unitigs(
             [&](const auto &str) {
                 EXPECT_TRUE(contigs.count(str)) << str;
                 num_contigs++;
@@ -1379,7 +1379,7 @@ TEST(BOSS, CallContigsWithPruning) {
             "TCTAG",
         };
         size_t num_contigs = 0;
-        graph.call_contigs(
+        graph.call_unitigs(
             [&](const auto &str) {
                 EXPECT_TRUE(contigs.count(str)) << str;
                 num_contigs++;
@@ -1398,7 +1398,7 @@ TEST(BOSS, CallContigsWithPruning) {
             "TCTAG",
         };
         size_t num_contigs = 0;
-        graph.call_contigs(
+        graph.call_unitigs(
             [&](const auto &str) {
                 EXPECT_TRUE(contigs.count(str)) << str;
                 num_contigs++;
@@ -1416,7 +1416,7 @@ TEST(BOSS, CallContigsWithPruning) {
             "TCTAG",
         };
         size_t num_contigs = 0;
-        graph.call_contigs(
+        graph.call_unitigs(
             [&](const auto &str) {
                 EXPECT_TRUE(contigs.count(str)) << str;
                 num_contigs++;
@@ -1434,7 +1434,7 @@ TEST(BOSS, CallContigsWithPruning) {
             "TCTAG",
         };
         size_t num_contigs = 0;
-        graph.call_contigs(
+        graph.call_unitigs(
             [&](const auto &str) {
                 EXPECT_TRUE(contigs.count(str)) << str;
                 num_contigs++;

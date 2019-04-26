@@ -2099,8 +2099,8 @@ int main(int argc, const char *argv[]) {
                     }
                 };
 
-                if (config->contigs || config->pruned_dead_end_size > 0) {
-                    graph->call_contigs(dump_sequence, config->pruned_dead_end_size);
+                if (config->unitigs || config->pruned_dead_end_size > 0) {
+                    graph->call_unitigs(dump_sequence, config->pruned_dead_end_size);
                 } else {
                     graph->call_sequences(dump_sequence);
                 }

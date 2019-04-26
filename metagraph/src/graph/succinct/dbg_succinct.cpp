@@ -231,10 +231,10 @@ void DBGSuccinct
 }
 
 void DBGSuccinct
-::call_contigs(const std::function<void(const std::string&)> &callback,
+::call_unitigs(const std::function<void(const std::string&)> &callback,
                size_t max_pruned_dead_end_size) const {
     assert(boss_graph_.get());
-    boss_graph_->call_contigs(callback, max_pruned_dead_end_size);
+    boss_graph_->call_unitigs(callback, max_pruned_dead_end_size);
 }
 
 void DBGSuccinct

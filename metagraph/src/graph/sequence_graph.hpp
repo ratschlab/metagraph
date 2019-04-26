@@ -81,8 +81,9 @@ class DeBruijnGraph : public SequenceGraph {
                                            const std::function<bool()> &terminate
                                                         = [](){ return false; }) const = 0;
 
+    // TODO: move to graph_algorithm.hpp
     virtual void call_sequences(const std::function<void(const std::string&)> &callback) const;
-    virtual void call_contigs(const std::function<void(const std::string&)> &callback,
+    virtual void call_unitigs(const std::function<void(const std::string&)> &callback,
                               size_t max_pruned_dead_end_size = 0) const;
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const;
 
