@@ -58,26 +58,9 @@ class DBGBitmap : public DeBruijnGraph {
     void adjacent_incoming_nodes(node_index node,
                                  std::vector<node_index> *source_nodes) const;
 
-    size_t outdegree(node_index) const {
-        // TODO: Complete outdegree for DBGBitmap.
-        throw std::runtime_error("Not implemented");
-    }
+    size_t outdegree(node_index node) const;
 
-    size_t indegree(node_index) const {
-        // TODO: Complete outdegree for DBGBitmap.
-        throw std::runtime_error("Not implemented");
-    }
-
-    template <class... T>
-    using Call = typename std::function<void(T...)>;
-
-    // traverse all nodes in graph
-    void call_kmers(Call<node_index, const std::string&> callback) const;
-
-    // call paths (or simple paths if |split_to_contigs| is true) that cover
-    // exactly all kmers in graph
-    void call_sequences(Call<const std::string&> callback,
-                        bool split_to_contigs = false) const;
+    size_t indegree(node_index node) const;
 
     node_index kmer_to_node(const std::string &kmer) const;
 
@@ -98,7 +81,11 @@ class DBGBitmap : public DeBruijnGraph {
     bool operator==(const DBGBitmap &other) const { return equals(other, false); }
     bool operator!=(const DBGBitmap &other) const { return !(*this == other); }
 
+    bool operator==(const DeBruijnGraph &other) const;
+
     bool equals(const DBGBitmap &other, bool verbose = false) const;
+
+    inline bool is_complete() const { return complete_; }
 
     friend std::ostream& operator<<(std::ostream &out, const DBGBitmap &graph);
 
@@ -121,15 +108,13 @@ class DBGBitmap : public DeBruijnGraph {
     Kmer node_to_kmer(node_index node) const;
     node_index to_node(const Kmer &kmer) const;
 
-    void call_paths(Call<const std::vector<node_index>,
-                         const std::vector<uint8_t>&> callback,
-                    bool split_to_contigs) const;
-
     size_t k_;
     bool canonical_mode_;
     KmerExtractor2Bit seq_encoder_;
 
     bit_vector_sd kmers_;
+
+    bool complete_ = false;
 
     static constexpr auto kExtension = ".bitmapdbg";
 };

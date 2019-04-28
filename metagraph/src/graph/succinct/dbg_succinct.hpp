@@ -5,6 +5,7 @@
 #include "bit_vector.hpp"
 #include "config.hpp"
 
+
 class BOSS;
 
 
@@ -58,6 +59,17 @@ class DBGSuccinct : public DeBruijnGraph {
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate = [](){ return false; }) const override final;
 
+    // TODO: compare these to DeBruijnGraph implementations
+    virtual void call_sequences(const std::function<void(const std::string&)> &callback) const override final;
+
+    virtual void call_unitigs(const std::function<void(const std::string&)> &callback,
+                              size_t max_pruned_dead_end_size) const override final;
+
+    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override final;
+
+    virtual void call_nodes(const std::function<void(const node_index&)> &callback,
+                            const std::function<bool()> &stop_early = [](){ return false; }) const override final;
+
     virtual void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const override final;
 
     virtual void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const override final {
@@ -82,6 +94,8 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual const BOSS& get_boss() const final { return *boss_graph_; }
     virtual BOSS& get_boss() final { return *boss_graph_; }
     virtual BOSS* release_boss() final { return boss_graph_.release(); }
+
+    virtual bool operator==(const DeBruijnGraph &other) const override final;
 
   private:
     void add_seq(const std::string &sequence, bit_vector_dyn *nodes_inserted);

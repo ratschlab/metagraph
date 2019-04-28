@@ -361,9 +361,10 @@ BOSS::Chunk* merge_blocks(const std::vector<const BOSS*> &Gv,
             std::cout << "." << std::flush;
             if (added % 100'000 == 0) {
                 std::cout << "added " << added;
-                for (size_t i = 0; i < Gv.size(); i++)
+                for (size_t i = 0; i < Gv.size(); i++) {
                     std::cout << " - G" << i << ": edge " << kv.at(i)
                                              << "/" << Gv.at(i)->get_W().size();
+                }
                 std::cout << std::endl;
             }
         }

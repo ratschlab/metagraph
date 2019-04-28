@@ -13,7 +13,8 @@ DBGBitmap::DBGBitmap(size_t k, bool canonical_mode)
       : alphabet(seq_encoder_.alphabet),
         k_(k),
         canonical_mode_(canonical_mode),
-        kmers_(std::pow(static_cast<long double>(alphabet.size()), k_) + 1, true) {
+        kmers_(std::pow(static_cast<long double>(alphabet.size()), k_) + 1, true),
+        complete_(true) {
     assert(k > 1);
     assert(kmers_.num_set_bits() == kmers_.size());
     if (k * std::log2(alphabet.size()) >= 64) {
@@ -91,6 +92,22 @@ void DBGBitmap::call_outgoing_kmers(node_index node,
     }
 }
 
+size_t DBGBitmap::outdegree(node_index node) const {
+    size_t outdegree = 0;
+    const auto &kmer = node_to_kmer(node);
+
+    for (char c : alphabet) {
+        auto next_kmer = kmer;
+        next_kmer.to_next(k_, seq_encoder_.encode(c));
+
+        auto next_index = to_node(next_kmer);
+        if (next_index != npos)
+            outdegree++;
+    }
+
+    return outdegree;
+}
+
 void DBGBitmap::call_incoming_kmers(node_index node,
                                     const OutgoingEdgeCallback &callback) const {
     const auto &kmer = node_to_kmer(node);
@@ -103,6 +120,22 @@ void DBGBitmap::call_incoming_kmers(node_index node,
         if (next_index != npos)
             callback(next_index, c);
     }
+}
+
+size_t DBGBitmap::indegree(node_index node) const {
+    size_t indegree = 0;
+    const auto &kmer = node_to_kmer(node);
+
+    for (char c : alphabet) {
+        auto next_kmer = kmer;
+        next_kmer.to_prev(k_, seq_encoder_.encode(c));
+
+        auto next_index = to_node(next_kmer);
+        if (next_index != npos)
+            indegree++;
+    }
+
+    return indegree;
 }
 
 void DBGBitmap::adjacent_outgoing_nodes(node_index node,
@@ -127,8 +160,11 @@ DBGBitmap::node_index
 DBGBitmap::to_node(const Kmer &kmer) const {
     auto index = kmer.data() + 1;
     assert(index < kmers_.size());
+    assert(!complete_ || kmers_[index]);
 
-    return kmers_[index] ? kmers_.rank1(index) - 1 : npos;
+    return complete_
+        ? index
+        : (kmers_[index] ? kmers_.rank1(index) - 1 : npos);
 }
 
 DBGBitmap::node_index
@@ -141,14 +177,14 @@ uint64_t DBGBitmap::node_to_index(node_index node) const {
     assert(node);
     assert(node < kmers_.num_set_bits());
 
-    return kmers_.select1(node + 1);
+    return complete_ ? node : kmers_.select1(node + 1);
 }
 
 DBGBitmap::Kmer DBGBitmap::node_to_kmer(node_index node) const {
     assert(node);
     assert(node < kmers_.num_set_bits());
 
-    return Kmer { kmers_.select1(node + 1) - 1 };
+    return Kmer { complete_ ? node - 1 : kmers_.select1(node + 1) - 1 };
 }
 
 std::string DBGBitmap::get_node_sequence(node_index node) const {
@@ -191,6 +227,8 @@ bool DBGBitmap::load(std::istream &in) {
         if (!in.good())
             return false;
 
+        complete_ = (kmers_.size() == kmers_.num_set_bits());
+
         try {
             canonical_mode_ = load_number(in);
             if (in.eof())
@@ -211,138 +249,16 @@ bool DBGBitmap::load(const std::string &filename) {
     return load(in);
 }
 
-typedef uint8_t TAlphabet;
-struct Edge {
-    DBGBitmap::node_index id;
-    std::vector<TAlphabet> source_kmer;
-};
-
-/**
- * Traverse graph and extract directed paths covering the graph
- * edge, edge -> edge, edge -> ... -> edge, ... (k+1 - mer, k+...+1 - mer, ...)
- */
-void DBGBitmap::call_paths(Call<const std::vector<node_index>,
-                                const std::vector<TAlphabet>&> callback,
-                           bool split_to_contigs) const {
-    uint64_t nnodes = num_nodes();
-    // keep track of reached edges
-    sdsl::bit_vector discovered(nnodes + 1, false);
-    // keep track of edges that are already included in covering paths
-    sdsl::bit_vector visited(nnodes + 1, false);
-    // store all branch nodes on the way
-    std::deque<Edge> nodes;
-    std::vector<node_index> path;
-    std::vector<node_index> target_nodes;
-
-    // start at the source node
-    for (node_index j = 1; j <= nnodes; ++j) {
-        uint64_t i = node_to_index(j);
-        if (!kmers_[i])
-            continue;
-
-        if (visited[j])
-            continue;
-
-        //TODO: traverse backwards
-
-        discovered[j] = true;
-
-        // TODO: replace this double conversion
-        nodes.push_back({ j, seq_encoder_.encode(get_node_sequence(j)) });
-        nodes.back().source_kmer.pop_back();
-
-        // keep traversing until we have worked off all branches from the queue
-        while (!nodes.empty()) {
-            node_index node = nodes.front().id;
-            auto sequence = std::move(nodes.front().source_kmer);
-            path.clear();
-            nodes.pop_front();
-            assert(node);
-
-            // traverse simple path until we reach its tail or
-            // the first edge that has been already visited
-            while (!visited[node]) {
-                assert(node);
-                assert(node <= nnodes);
-                assert(discovered[node]);
-
-                sequence.push_back(node_to_kmer(node)[k_ - 1]);
-                path.push_back(node);
-                visited[node] = true;
-
-                target_nodes.clear();
-
-                adjacent_outgoing_nodes(node, &target_nodes);
-
-                if (!target_nodes.size())
-                    continue;
-
-                if (target_nodes.size() == 1) {
-                    node = target_nodes[0];
-                    discovered[node] = true;
-                    continue;
-                }
-
-                std::vector<TAlphabet> kmer(sequence.end() - k_ + 1, sequence.end());
-
-                bool continue_traversal = false;
-                for (const auto &next : target_nodes) {
-                    if (!discovered[next]) {
-                        continue_traversal = true;
-                        discovered[next] = true;
-                        nodes.push_back({ next, kmer });
-                    }
-                }
-
-                if (split_to_contigs)
-                    break;
-
-                if (continue_traversal) {
-                    node = nodes.back().id;
-                    nodes.pop_back();
-                    continue;
-                } else {
-                    break;
-                }
-            }
-
-            if (path.size())
-                callback(path, sequence);
-        }
-    }
-}
-
-void DBGBitmap::call_sequences(Call<const std::string&> callback,
-                               bool split_to_contigs) const {
-    std::string sequence;
-
-    call_paths([&](const auto&, const auto &path) {
-        if (path.size()) {
-            sequence.clear();
-            std::transform(path.begin(), path.end(),
-                           std::back_inserter(sequence),
-                           [&](char c) {
-                               return seq_encoder_.decode(c);
-                           });
-            callback(sequence);
-        }
-    }, split_to_contigs);
-}
-
-/**
- * Traverse graph and iterate over all nodes
- */
-void DBGBitmap::call_kmers(Call<node_index, const std::string&> callback) const {
-    uint64_t nnodes = num_nodes();
-    for (size_t node = 1; node <= nnodes; ++node) {
-        if (kmers_[node_to_index(node)])
-            callback(node, get_node_sequence(node));
-    }
-}
-
 Vector<DBGBitmap::Kmer> DBGBitmap::sequence_to_kmers(const std::string &sequence,
                                                      bool to_canonical) const {
     return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, to_canonical);
+}
+
+bool DBGBitmap::operator==(const DeBruijnGraph &other) const {
+    if (dynamic_cast<const DBGBitmap*>(&other))
+        return equals(*dynamic_cast<const DBGBitmap*>(&other), false);
+
+    throw std::runtime_error("Not implemented");
 }
 
 bool DBGBitmap::equals(const DBGBitmap &other, bool verbose) const {
@@ -371,7 +287,7 @@ bool DBGBitmap::equals(const DBGBitmap &other, bool verbose) const {
                 mismatch += (pos != other.kmers_.select1(cur_one++));
             }
         );
-        return !mismatch;
+        return cur_one == other.kmers_.num_set_bits() + 1 && !mismatch;
     }
 
     if (k_ == other.k_
@@ -384,7 +300,7 @@ bool DBGBitmap::equals(const DBGBitmap &other, bool verbose) const {
                 mismatch += (pos != other.kmers_.select1(cur_one++));
             }
         );
-        return !mismatch;
+        return cur_one == other.kmers_.num_set_bits() + 1 && !mismatch;
     }
 
     return false;
@@ -392,6 +308,7 @@ bool DBGBitmap::equals(const DBGBitmap &other, bool verbose) const {
 
 std::ostream& operator<<(std::ostream &out, const DBGBitmap &graph) {
     out << "k: " << graph.k_ << std::endl
+        << "complete: " << graph.complete_ << std::endl
         << "canonical: " << graph.canonical_mode_ << std::endl
         << "nodes:" << std::endl;
 

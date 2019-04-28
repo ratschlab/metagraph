@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <memory>
 
 
 namespace annotate {
@@ -135,6 +136,8 @@ class LabelEncoder {
     bool load(std::istream &instream);
     void serialize(std::ostream &outstream) const;
 
+    void merge(const LabelEncoder<Label> &other);
+
     void clear() { encode_label_.clear(); decode_label_.clear(); }
 
   private:
@@ -143,16 +146,27 @@ class LabelEncoder {
 };
 
 
+class IterateRows {
+  public:
+    virtual ~IterateRows() {}
+    virtual std::vector<uint64_t> next_row() = 0;
+};
+
+
 template <typename IndexType, typename LabelType>
 class MultiLabelEncoded
       : public MultiLabelAnnotation<IndexType, LabelType> {
-
   public:
     using Index = typename MultiLabelAnnotation<IndexType, LabelType>::Index;
     using Label = typename MultiLabelAnnotation<IndexType, LabelType>::Label;
     using VLabels = typename MultiLabelAnnotation<IndexType, LabelType>::VLabels;
 
     virtual ~MultiLabelEncoded() {}
+
+    virtual std::unique_ptr<IterateRows> iterator() const;
+    virtual std::vector<uint64_t> get_label_indexes(Index i) const;
+
+    virtual const LabelEncoder<Label>& get_label_encoder() const final { return label_encoder_; };
 
     /******************* General functionality *******************/
 

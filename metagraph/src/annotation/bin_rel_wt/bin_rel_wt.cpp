@@ -86,7 +86,7 @@ BinRelWT::BinRelWT(const std::function<void(const RowCallback &)> &generate_rows
     relation_pairs.reserve(num_relations);
 
     uint64_t row_counter = 0;
-    generate_rows([&](const RowSetBits &row_set_bits) {
+    generate_rows([&](const SetBitPositions &row_set_bits) {
         for (const auto &col_index : row_set_bits) {
             brwt::binary_relation::pair_type relation = {
                 .object = to_object_id(row_counter),

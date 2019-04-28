@@ -83,7 +83,7 @@ void test_graph(BOSS *graph, const std::string &last,
 }
 
 
-TEST(DBGSuccinct, GraphDefaultConstructor) {
+TEST(BOSS, GraphDefaultConstructor) {
     BOSS *graph_ = NULL;
 
     ASSERT_NO_THROW({
@@ -104,19 +104,19 @@ TEST(DBGSuccinct, GraphDefaultConstructor) {
 }
 
 #if _DNA_GRAPH
-TEST(DBGSuccinct, EmptyGraph) {
+TEST(BOSS, EmptyGraph) {
     BOSS *graph = new BOSS(3);
     test_graph(graph, "01", { 0, 0 }, "0 1 1 1 1 1 ");
     delete graph;
 }
 
-TEST(DBGSuccinct, SwitchState) {
+TEST(BOSS, SwitchState) {
     BOSS *graph = new BOSS(3);
     test_graph(graph, "01", { 0, 0 }, "0 1 1 1 1 1 ");
     delete graph;
 }
 
-TEST(DBGSuccinct, AddSequenceFast) {
+TEST(BOSS, AddSequenceFast) {
     gzFile input_p = gzopen(test_fasta.c_str(), "r");
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
@@ -150,7 +150,7 @@ TEST(DBGSuccinct, AddSequenceFast) {
 }
 #endif
 
-TEST(DBGSuccinct, SmallGraphTraversal) {
+TEST(BOSS, SmallGraphTraversal) {
     gzFile input_p = gzopen(test_fasta.c_str(), "r");
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
@@ -208,7 +208,7 @@ TEST(DBGSuccinct, SmallGraphTraversal) {
     delete graph;
 }
 
-TEST(DBGSuccinct, Serialization) {
+TEST(BOSS, Serialization) {
     gzFile input_p = gzopen(test_fasta.c_str(), "r");
     kseq_t *read_stream = kseq_init(input_p);
     ASSERT_TRUE(read_stream);
@@ -233,7 +233,7 @@ TEST(DBGSuccinct, Serialization) {
     delete graph;
 }
 
-TEST(DBGSuccinct, AddSequenceSimplePath) {
+TEST(BOSS, AddSequenceSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A'));
@@ -242,7 +242,7 @@ TEST(DBGSuccinct, AddSequenceSimplePath) {
     }
 }
 
-TEST(DBGSuccinct, CountDummyEdgesSimplePath) {
+TEST(BOSS, CountDummyEdgesSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A') + 'N');
@@ -252,7 +252,7 @@ TEST(DBGSuccinct, CountDummyEdgesSimplePath) {
     }
 }
 
-TEST(DBGSuccinct, CountDummyEdgesSimplePathParallel) {
+TEST(BOSS, CountDummyEdgesSimplePathParallel) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A') + 'N');
@@ -262,7 +262,7 @@ TEST(DBGSuccinct, CountDummyEdgesSimplePathParallel) {
     }
 }
 
-TEST(DBGSuccinct, CountDummyEdgesTwoPaths) {
+TEST(BOSS, CountDummyEdgesTwoPaths) {
     for (size_t k = 1; k < 40; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A') + 'N');
@@ -273,7 +273,7 @@ TEST(DBGSuccinct, CountDummyEdgesTwoPaths) {
     }
 }
 
-TEST(DBGSuccinct, CountDummyEdgesTwoPathsParallel) {
+TEST(BOSS, CountDummyEdgesTwoPathsParallel) {
     for (size_t k = 1; k < 40; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A') + 'N');
@@ -284,7 +284,7 @@ TEST(DBGSuccinct, CountDummyEdgesTwoPathsParallel) {
     }
 }
 
-TEST(DBGSuccinct, MarkDummySinkEdgesSimplePath) {
+TEST(BOSS, MarkDummySinkEdgesSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A') + 'N');
@@ -296,7 +296,7 @@ TEST(DBGSuccinct, MarkDummySinkEdgesSimplePath) {
     }
 }
 
-TEST(DBGSuccinct, MarkDummySinkEdgesTwoPaths) {
+TEST(BOSS, MarkDummySinkEdgesTwoPaths) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A') + 'N');
@@ -310,7 +310,7 @@ TEST(DBGSuccinct, MarkDummySinkEdgesTwoPaths) {
     }
 }
 
-TEST(DBGSuccinct, MarkDummySourceEdgesSimplePath) {
+TEST(BOSS, MarkDummySourceEdgesSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A'));
@@ -325,7 +325,7 @@ TEST(DBGSuccinct, MarkDummySourceEdgesSimplePath) {
     }
 }
 
-TEST(DBGSuccinct, MarkDummySourceEdgesTwoPaths) {
+TEST(BOSS, MarkDummySourceEdgesTwoPaths) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A'));
@@ -342,7 +342,7 @@ TEST(DBGSuccinct, MarkDummySourceEdgesTwoPaths) {
     }
 }
 
-TEST(DBGSuccinct, MarkDummySourceEdgesSimplePathParallel) {
+TEST(BOSS, MarkDummySourceEdgesSimplePathParallel) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A'));
@@ -357,7 +357,7 @@ TEST(DBGSuccinct, MarkDummySourceEdgesSimplePathParallel) {
     }
 }
 
-TEST(DBGSuccinct, MarkDummySourceEdgesTwoPathsParallel) {
+TEST(BOSS, MarkDummySourceEdgesTwoPathsParallel) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A'));
@@ -374,7 +374,7 @@ TEST(DBGSuccinct, MarkDummySourceEdgesTwoPathsParallel) {
     }
 }
 
-TEST(DBGSuccinct, RemoveDummyEdgesForClearGraph) {
+TEST(BOSS, RemoveDummyEdgesForClearGraph) {
     for (size_t k = 1; k < 10; ++k) {
         std::unique_ptr<BOSS> first_ptr;
         std::unique_ptr<BOSS> second_ptr;
@@ -416,7 +416,7 @@ TEST(DBGSuccinct, RemoveDummyEdgesForClearGraph) {
     }
 }
 
-TEST(DBGSuccinct, RemoveDummyEdgesLinear) {
+TEST(BOSS, RemoveDummyEdgesLinear) {
     for (size_t k = 1; k < 10; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequence(std::string(20, 'A'));
@@ -443,7 +443,7 @@ TEST(DBGSuccinct, RemoveDummyEdgesLinear) {
     }
 }
 
-TEST(DBGSuccinct, RemoveDummyEdgesThreePaths) {
+TEST(BOSS, RemoveDummyEdgesThreePaths) {
     for (size_t k = 1; k < 10; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(20, 'A'),
@@ -474,7 +474,7 @@ TEST(DBGSuccinct, RemoveDummyEdgesThreePaths) {
     }
 }
 
-TEST(DBGSuccinct, RemoveDummyEdgesFourPaths) {
+TEST(BOSS, RemoveDummyEdgesFourPaths) {
     for (size_t k = 1; k < 10; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(20, 'A'),
@@ -507,7 +507,7 @@ TEST(DBGSuccinct, RemoveDummyEdgesFourPaths) {
     }
 }
 
-TEST(DBGSuccinct, RemoveDummyEdgesFivePaths) {
+TEST(BOSS, RemoveDummyEdgesFivePaths) {
     for (size_t k = 1; k < 10; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(20, 'A'),
@@ -542,7 +542,7 @@ TEST(DBGSuccinct, RemoveDummyEdgesFivePaths) {
     }
 }
 
-TEST(DBGSuccinct, RemoveDummyEdges) {
+TEST(BOSS, RemoveDummyEdges) {
     for (size_t k = 1; k < 10; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(20, 'A'),
@@ -577,7 +577,7 @@ TEST(DBGSuccinct, RemoveDummyEdges) {
     }
 }
 
-TEST(DBGSuccinct, RemoveDummyEdgesForClearGraphParallel) {
+TEST(BOSS, RemoveDummyEdgesForClearGraphParallel) {
     for (size_t k = 1; k < 10; ++k) {
         std::unique_ptr<BOSS> first_ptr;
         std::unique_ptr<BOSS> second_ptr;
@@ -619,7 +619,7 @@ TEST(DBGSuccinct, RemoveDummyEdgesForClearGraphParallel) {
     }
 }
 
-TEST(DBGSuccinct, RemoveDummyEdgesLinearParallel) {
+TEST(BOSS, RemoveDummyEdgesLinearParallel) {
     for (size_t k = 1; k < 10; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequence(std::string(20, 'A'));
@@ -646,7 +646,7 @@ TEST(DBGSuccinct, RemoveDummyEdgesLinearParallel) {
     }
 }
 
-TEST(DBGSuccinct, RemoveDummyEdgesThreePathsParallel) {
+TEST(BOSS, RemoveDummyEdgesThreePathsParallel) {
     for (size_t k = 1; k < 10; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(20, 'A'),
@@ -677,7 +677,7 @@ TEST(DBGSuccinct, RemoveDummyEdgesThreePathsParallel) {
     }
 }
 
-TEST(DBGSuccinct, RemoveDummyEdgesFourPathsParallel) {
+TEST(BOSS, RemoveDummyEdgesFourPathsParallel) {
     for (size_t k = 1; k < 10; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(20, 'A'),
@@ -710,7 +710,7 @@ TEST(DBGSuccinct, RemoveDummyEdgesFourPathsParallel) {
     }
 }
 
-TEST(DBGSuccinct, RemoveDummyEdgesFivePathsParallel) {
+TEST(BOSS, RemoveDummyEdgesFivePathsParallel) {
     for (size_t k = 1; k < 10; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(20, 'A'),
@@ -745,7 +745,7 @@ TEST(DBGSuccinct, RemoveDummyEdgesFivePathsParallel) {
     }
 }
 
-TEST(DBGSuccinct, RemoveDummyEdgesParallel) {
+TEST(BOSS, RemoveDummyEdgesParallel) {
     for (size_t k = 1; k < 10; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(20, 'A'),
@@ -780,12 +780,13 @@ TEST(DBGSuccinct, RemoveDummyEdgesParallel) {
     }
 }
 
-TEST(DBGSuccinct, AddSequenceBugRevealingTestcase) {
+TEST(BOSS, AddSequenceBugRevealingTestcase) {
     BOSS graph(1);
     graph.add_sequence("CTGAG", false);
 }
 
-TEST(DBGSuccinct, NonASCIIStrings) {
+// TODO: these are duplicates of tests in test_dbg
+TEST(BOSS, NonASCIIStrings) {
     BOSSConstructor constructor_first(5);
     constructor_first.add_sequences({
         // cyrillic A and C
@@ -797,7 +798,7 @@ TEST(DBGSuccinct, NonASCIIStrings) {
     ASSERT_EQ(2u, graph.num_edges()) << graph;
 }
 
-TEST(DBGSuccinct, AddSequence) {
+TEST(BOSS, AddSequence) {
     {
         BOSS graph(3);
         graph.add_sequence("AAAC");
@@ -830,7 +831,7 @@ TEST(DBGSuccinct, AddSequence) {
     }
 }
 
-TEST(DBGSuccinct, AppendSequence) {
+TEST(BOSS, AppendSequence) {
     {
         BOSS graph(3);
         graph.add_sequence("AAAC", true);
@@ -863,7 +864,7 @@ TEST(DBGSuccinct, AppendSequence) {
     }
 }
 
-TEST(DBGSuccinct, AppendSequenceAnyKmerSize) {
+TEST(BOSS, AppendSequenceAnyKmerSize) {
     for (size_t k = 1; k < 10; ++k) {
         {
             BOSS graph(k);
@@ -895,7 +896,7 @@ TEST(DBGSuccinct, AppendSequenceAnyKmerSize) {
     }
 }
 
-TEST(DBGSuccinct, CallPathsEmptyGraph) {
+TEST(BOSS, CallPathsEmptyGraph) {
     for (size_t k = 1; k < 30; ++k) {
         BOSS empty(k);
         BOSS reconstructed(k);
@@ -908,12 +909,12 @@ TEST(DBGSuccinct, CallPathsEmptyGraph) {
     }
 }
 
-TEST(DBGSuccinct, CallContigsEmptyGraph) {
+TEST(BOSS, CallUnitigsEmptyGraph) {
     for (size_t k = 1; k < 30; ++k) {
         BOSS empty(k);
         BOSS reconstructed(k);
 
-        empty.call_contigs([&](const auto &sequence) {
+        empty.call_unitigs([&](const auto &sequence) {
             reconstructed.add_sequence(sequence);
         });
 
@@ -921,7 +922,7 @@ TEST(DBGSuccinct, CallContigsEmptyGraph) {
     }
 }
 
-TEST(DBGSuccinct, CallPathsOneLoop) {
+TEST(BOSS, CallPathsOneLoop) {
     for (size_t k = 1; k < 20; ++k) {
         BOSS graph(k);
 
@@ -938,7 +939,7 @@ TEST(DBGSuccinct, CallPathsOneLoop) {
     }
 }
 
-TEST(DBGSuccinct, CallContigsOneLoop) {
+TEST(BOSS, CallUnitigsOneLoop) {
     for (size_t k = 1; k < 20; ++k) {
         BOSS graph(k);
 
@@ -948,14 +949,14 @@ TEST(DBGSuccinct, CallContigsOneLoop) {
         size_t num_sequences = 0;
 
         graph.call_paths([&](const auto &, const auto &) { num_paths++; }, true);
-        graph.call_contigs([&](const auto &) { num_sequences++; });
+        graph.call_unitigs([&](const auto &) { num_sequences++; });
 
         EXPECT_EQ(graph.num_edges(), num_paths);
         EXPECT_EQ(graph.num_edges() - 1, num_sequences);
     }
 }
 
-TEST(DBGSuccinct, CallPathsTwoLoops) {
+TEST(BOSS, CallPathsTwoLoops) {
     for (size_t k = 1; k < 20; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A') });
@@ -974,7 +975,7 @@ TEST(DBGSuccinct, CallPathsTwoLoops) {
     }
 }
 
-TEST(DBGSuccinct, CallContigsTwoLoops) {
+TEST(BOSS, CallUnitigsTwoLoops) {
     for (size_t k = 1; k < 20; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A') });
@@ -986,14 +987,14 @@ TEST(DBGSuccinct, CallContigsTwoLoops) {
         size_t num_sequences = 0;
 
         graph.call_paths([&](const auto &, const auto &) { num_paths++; }, true);
-        graph.call_contigs([&](const auto &) { num_sequences++; });
+        graph.call_unitigs([&](const auto &) { num_sequences++; });
 
         EXPECT_EQ(graph.num_edges(), num_paths);
         EXPECT_EQ(graph.num_edges() - 1, num_sequences);
     }
 }
 
-TEST(DBGSuccinct, CallPathsFourLoops) {
+TEST(BOSS, CallPathsFourLoops) {
     for (size_t k = 1; k < 20; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A'),
@@ -1014,7 +1015,7 @@ TEST(DBGSuccinct, CallPathsFourLoops) {
     }
 }
 
-TEST(DBGSuccinct, CallContigsFourLoops) {
+TEST(BOSS, CallUnitigsFourLoops) {
     for (size_t k = 1; k < 20; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A'),
@@ -1028,14 +1029,14 @@ TEST(DBGSuccinct, CallContigsFourLoops) {
         size_t num_sequences = 0;
 
         graph.call_paths([&](const auto &, const auto &) { num_paths++; }, true);
-        graph.call_contigs([&](const auto &) { num_sequences++; });
+        graph.call_unitigs([&](const auto &) { num_sequences++; });
 
         EXPECT_EQ(graph.num_edges(), num_paths);
         EXPECT_EQ(graph.num_edges() - 1, num_sequences);
     }
 }
 
-TEST(DBGSuccinct, CallPaths) {
+TEST(BOSS, CallPaths) {
     for (size_t k = 1; k < 10; ++k) {
         {
             BOSS graph(k);
@@ -1112,7 +1113,7 @@ TEST(DBGSuccinct, CallPaths) {
     }
 }
 
-TEST(DBGSuccinct, CallContigs) {
+TEST(BOSS, CallUnitigs) {
     for (size_t k = 1; k < 10; ++k) {
         {
             BOSS graph(k);
@@ -1122,7 +1123,7 @@ TEST(DBGSuccinct, CallContigs) {
 
             BOSS reconstructed(k);
 
-            graph.call_contigs([&](const auto &sequence) {
+            graph.call_unitigs([&](const auto &sequence) {
                 reconstructed.add_sequence(sequence);
             });
 
@@ -1137,9 +1138,7 @@ TEST(DBGSuccinct, CallContigs) {
 
             BOSS reconstructed(k);
 
-            graph.call_contigs([&](const auto &sequence) {
-                if (sequence == "CTGA")
-                    std::cout << "CTGA" << std::endl;
+            graph.call_unitigs([&](const auto &sequence) {
                 reconstructed.add_sequence(sequence);
             });
 
@@ -1154,7 +1153,7 @@ TEST(DBGSuccinct, CallContigs) {
 
             BOSS reconstructed(k);
 
-            graph.call_contigs([&](const auto &sequence) {
+            graph.call_unitigs([&](const auto &sequence) {
                 reconstructed.add_sequence(sequence);
             });
 
@@ -1168,7 +1167,7 @@ TEST(DBGSuccinct, CallContigs) {
 
             BOSS reconstructed(k);
 
-            graph.call_contigs([&](const auto &sequence) {
+            graph.call_unitigs([&](const auto &sequence) {
                 reconstructed.add_sequence(sequence);
             });
 
@@ -1182,7 +1181,7 @@ TEST(DBGSuccinct, CallContigs) {
 
             BOSS reconstructed(k);
 
-            graph.call_contigs([&](const auto &sequence) {
+            graph.call_unitigs([&](const auto &sequence) {
                 reconstructed.add_sequence(sequence);
             });
 
@@ -1191,7 +1190,7 @@ TEST(DBGSuccinct, CallContigs) {
     }
 }
 
-TEST(DBGSuccinct, CallContigs1) {
+TEST(BOSS, CallUnitigs1) {
     BOSSConstructor constructor(3);
     constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
                                 "ACTCT" });
@@ -1219,7 +1218,7 @@ TEST(DBGSuccinct, CallContigs1) {
     EXPECT_EQ(contigs.size(), num_contigs);
 }
 
-TEST(DBGSuccinct, CallContigsDisconnected1) {
+TEST(BOSS, CallUnitigsDisconnected1) {
     BOSSConstructor constructor(3);
     constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
                                 "ACTCT",
@@ -1249,7 +1248,7 @@ TEST(DBGSuccinct, CallContigsDisconnected1) {
     EXPECT_EQ(contigs.size(), num_contigs);
 }
 
-TEST(DBGSuccinct, CallContigsDisconnected2) {
+TEST(BOSS, CallUnitigsDisconnected2) {
     BOSSConstructor constructor(3);
     constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
                                 "ACTCT",
@@ -1281,7 +1280,7 @@ TEST(DBGSuccinct, CallContigsDisconnected2) {
     EXPECT_EQ(contigs.size(), num_contigs);
 }
 
-TEST(DBGSuccinct, CallContigsTwoComponents) {
+TEST(BOSS, CallUnitigsTwoComponents) {
     BOSSConstructor constructor(3);
     constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
                                 "ACTCT",
@@ -1316,7 +1315,7 @@ TEST(DBGSuccinct, CallContigsTwoComponents) {
     EXPECT_EQ(contigs.size(), num_contigs);
 }
 
-TEST(DBGSuccinct, CallContigsWithPruning) {
+TEST(BOSS, CallUnitigsWithPruning) {
     BOSSConstructor constructor(4);
     constructor.add_sequences({
         "ACTATAGCTAGTCTATGCGA",
@@ -1342,7 +1341,7 @@ TEST(DBGSuccinct, CallContigsWithPruning) {
             "TCTAG",
         };
         size_t num_contigs = 0;
-        graph.call_contigs(
+        graph.call_unitigs(
             [&](const auto &str) {
                 EXPECT_TRUE(contigs.count(str)) << str;
                 num_contigs++;
@@ -1361,7 +1360,7 @@ TEST(DBGSuccinct, CallContigsWithPruning) {
             "TCTAG",
         };
         size_t num_contigs = 0;
-        graph.call_contigs(
+        graph.call_unitigs(
             [&](const auto &str) {
                 EXPECT_TRUE(contigs.count(str)) << str;
                 num_contigs++;
@@ -1380,7 +1379,7 @@ TEST(DBGSuccinct, CallContigsWithPruning) {
             "TCTAG",
         };
         size_t num_contigs = 0;
-        graph.call_contigs(
+        graph.call_unitigs(
             [&](const auto &str) {
                 EXPECT_TRUE(contigs.count(str)) << str;
                 num_contigs++;
@@ -1399,7 +1398,7 @@ TEST(DBGSuccinct, CallContigsWithPruning) {
             "TCTAG",
         };
         size_t num_contigs = 0;
-        graph.call_contigs(
+        graph.call_unitigs(
             [&](const auto &str) {
                 EXPECT_TRUE(contigs.count(str)) << str;
                 num_contigs++;
@@ -1417,7 +1416,7 @@ TEST(DBGSuccinct, CallContigsWithPruning) {
             "TCTAG",
         };
         size_t num_contigs = 0;
-        graph.call_contigs(
+        graph.call_unitigs(
             [&](const auto &str) {
                 EXPECT_TRUE(contigs.count(str)) << str;
                 num_contigs++;
@@ -1435,7 +1434,7 @@ TEST(DBGSuccinct, CallContigsWithPruning) {
             "TCTAG",
         };
         size_t num_contigs = 0;
-        graph.call_contigs(
+        graph.call_unitigs(
             [&](const auto &str) {
                 EXPECT_TRUE(contigs.count(str)) << str;
                 num_contigs++;
@@ -1445,7 +1444,7 @@ TEST(DBGSuccinct, CallContigsWithPruning) {
     }
 }
 
-TEST(DBGSuccinct, CallEdgesEmptyGraph) {
+TEST(BOSS, CallEdgesEmptyGraph) {
     for (size_t k = 1; k < 30; ++k) {
         BOSS empty(k);
 
@@ -1459,7 +1458,7 @@ TEST(DBGSuccinct, CallEdgesEmptyGraph) {
     }
 }
 
-TEST(DBGSuccinct, CallEdgesTwoLoops) {
+TEST(BOSS, CallEdgesTwoLoops) {
     for (size_t k = 1; k < 20; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A') });
@@ -1476,7 +1475,7 @@ TEST(DBGSuccinct, CallEdgesTwoLoops) {
     }
 }
 
-TEST(DBGSuccinct, CallEdgesFourLoops) {
+TEST(BOSS, CallEdgesFourLoops) {
     for (size_t k = 1; k < 20; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A'),
@@ -1495,7 +1494,7 @@ TEST(DBGSuccinct, CallEdgesFourLoops) {
     }
 }
 
-TEST(DBGSuccinct, CallEdgesFourLoopsDynamic) {
+TEST(BOSS, CallEdgesFourLoopsDynamic) {
     for (size_t k = 1; k < 20; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A'));
@@ -1511,7 +1510,7 @@ TEST(DBGSuccinct, CallEdgesFourLoopsDynamic) {
     }
 }
 
-TEST(DBGSuccinct, CallEdgesTestPath) {
+TEST(BOSS, CallEdgesTestPath) {
     for (size_t k = 1; k < 20; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A') + std::string(k, 'C'));
@@ -1525,7 +1524,7 @@ TEST(DBGSuccinct, CallEdgesTestPath) {
     }
 }
 
-TEST(DBGSuccinct, CallEdgesTestPathACA) {
+TEST(BOSS, CallEdgesTestPathACA) {
     for (size_t k = 1; k < 20; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A')
@@ -1541,7 +1540,7 @@ TEST(DBGSuccinct, CallEdgesTestPathACA) {
     }
 }
 
-TEST(DBGSuccinct, CallEdgesTestPathDisconnected) {
+TEST(BOSS, CallEdgesTestPathDisconnected) {
     for (size_t k = 1; k < 20; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'A'));
@@ -1559,7 +1558,7 @@ TEST(DBGSuccinct, CallEdgesTestPathDisconnected) {
     }
 }
 
-TEST(DBGSuccinct, CallEdgesTestPathDisconnected2) {
+TEST(BOSS, CallEdgesTestPathDisconnected2) {
     for (size_t k = 1; k < 20; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'G'));
@@ -1580,7 +1579,7 @@ TEST(DBGSuccinct, CallEdgesTestPathDisconnected2) {
     }
 }
 
-TEST(DBGSuccinct, CallKmersEmptyGraph) {
+TEST(BOSS, CallKmersEmptyGraph) {
     for (size_t k = 1; k < 30; ++k) {
         BOSS empty(k);
 
@@ -1594,7 +1593,7 @@ TEST(DBGSuccinct, CallKmersEmptyGraph) {
     }
 }
 
-TEST(DBGSuccinct, CallKmersTwoLoops) {
+TEST(BOSS, CallKmersTwoLoops) {
     for (size_t k = 1; k < 20; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A') });
@@ -1611,7 +1610,7 @@ TEST(DBGSuccinct, CallKmersTwoLoops) {
     }
 }
 
-TEST(DBGSuccinct, CallKmersFourLoops) {
+TEST(BOSS, CallKmersFourLoops) {
     for (size_t k = 1; k < 20; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A'),
@@ -1632,7 +1631,7 @@ TEST(DBGSuccinct, CallKmersFourLoops) {
     }
 }
 
-TEST(DBGSuccinct, CallKmersFourLoopsDynamic) {
+TEST(BOSS, CallKmersFourLoopsDynamic) {
     for (size_t k = 1; k < 20; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A'));
@@ -1650,7 +1649,7 @@ TEST(DBGSuccinct, CallKmersFourLoopsDynamic) {
     }
 }
 
-TEST(DBGSuccinct, CallKmersTestPath) {
+TEST(BOSS, CallKmersTestPath) {
     for (size_t k = 1; k < 20; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A') + std::string(k, 'C'));
@@ -1661,7 +1660,7 @@ TEST(DBGSuccinct, CallKmersTestPath) {
     }
 }
 
-TEST(DBGSuccinct, CallKmersTestPathACA) {
+TEST(BOSS, CallKmersTestPathACA) {
     for (size_t k = 1; k < 20; ++k) {
         BOSS graph(k);
         graph.add_sequence(std::string(100, 'A')
@@ -1674,7 +1673,7 @@ TEST(DBGSuccinct, CallKmersTestPathACA) {
     }
 }
 
-TEST(DBGSuccinct, CallKmersTestPathDisconnected) {
+TEST(BOSS, CallKmersTestPathDisconnected) {
     for (size_t k = 1; k < 20; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'A'));
@@ -1689,7 +1688,7 @@ TEST(DBGSuccinct, CallKmersTestPathDisconnected) {
     }
 }
 
-TEST(DBGSuccinct, CallKmersTestPathDisconnected2) {
+TEST(BOSS, CallKmersTestPathDisconnected2) {
     for (size_t k = 1; k < 20; ++k) {
         BOSSConstructor constructor(k);
         constructor.add_sequence(std::string(100, 'G'));
@@ -1719,7 +1718,7 @@ void test_pred_kmer(const BOSS &graph,
         << graph;
 }
 
-TEST(DBGSuccinct, PredKmer) {
+TEST(BOSS, PredKmer) {
     {
         BOSS graph(5);
 
@@ -1794,7 +1793,7 @@ TEST(DBGSuccinct, PredKmer) {
 #endif
 }
 
-TEST(DBGSuccinct, PredKmerRandomTest) {
+TEST(BOSS, PredKmerRandomTest) {
     srand(1);
 
     for (size_t k = 1; k < 8; ++k) {
@@ -1849,7 +1848,7 @@ TEST(DBGSuccinct, PredKmerRandomTest) {
     }
 }
 
-TEST(DBGSuccinct, FindSequence) {
+TEST(BOSS, FindSequence) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS *graph = new BOSS(k);
 
@@ -1957,7 +1956,7 @@ TEST(DBGSuccinct, FindSequence) {
     }
 }
 
-TEST(DBGSuccinct, FindSequenceDBG) {
+TEST(BOSS, FindSequenceDBG) {
     for (size_t k = 1; k < 10; ++k) {
         std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(k)) };
 
@@ -2041,7 +2040,7 @@ TEST(DBGSuccinct, FindSequenceDBG) {
     }
 }
 
-TEST(DBGSuccinct, KmerMappingMode) {
+TEST(BOSS, KmerMappingMode) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
 
@@ -2082,7 +2081,7 @@ TEST(DBGSuccinct, KmerMappingMode) {
     }
 }
 
-TEST(DBGSuccinct, Traversals) {
+TEST(BOSS, Traversals) {
     for (size_t k = 1; k < 10; ++k) {
         auto graph = std::make_unique<BOSS>(k);
 
@@ -2099,572 +2098,13 @@ TEST(DBGSuccinct, Traversals) {
     }
 }
 
-TEST(DBGSuccinct, TraversalsCanonical) {
-    for (size_t k = 2; k <= 10; ++k) {
-        BOSSConstructor constructor(k - 1);
-        constructor.add_sequence(std::string(100, 'A') + std::string(100, 'C'));
-        constructor.add_sequence(std::string(100, 'G') + std::string(100, 'T'));
-        std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(&constructor), true) };
-
-        auto map_to_nodes_sequentially = [&](const auto &seq, auto callback) {
-            graph->map_to_nodes_sequentially(seq.begin(), seq.end(), callback);
-        };
-
-        uint64_t it = 0;
-        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
-        map_to_nodes_sequentially(
-            std::string(k, 'T'),
-            [&](auto i) {
-                EXPECT_NE(i, it);
-            }
-        );
-        graph->map_to_nodes(
-            std::string(k, 'T'),
-            [&](auto i) {
-                EXPECT_EQ(i, it);
-            }
-        );
-
-        uint64_t it2;
-        graph->map_to_nodes(
-            std::string(k - 1, 'A') + "C",
-            [&](auto i) { it2 = i; }
-        );
-        EXPECT_EQ(it, graph->traverse(it, 'A'));
-        EXPECT_EQ(it2, graph->traverse(it, 'C'));
-        EXPECT_EQ(it, graph->traverse_back(it2, 'A'));
-        EXPECT_EQ(DBGSuccinct::npos, graph->traverse(it, 'G'));
-        EXPECT_EQ(DBGSuccinct::npos, graph->traverse_back(it2, 'G'));
-
-        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
-        ASSERT_NE(DBGSuccinct::npos, it);
-        map_to_nodes_sequentially(
-            std::string(k, 'C'),
-            [&](auto i) {
-                EXPECT_EQ(i, it);
-            }
-        );
-        graph->map_to_nodes(
-            std::string(k, 'C'),
-            [&](auto i) {
-                EXPECT_EQ(i, it);
-            }
-        );
-        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
-        ASSERT_NE(DBGSuccinct::npos, it);
-        map_to_nodes_sequentially(
-            std::string(k, 'C'),
-            [&](auto i) {
-                EXPECT_EQ(i, it);
-            }
-        );
-        graph->map_to_nodes(
-            std::string(k, 'C'),
-            [&](auto i) {
-                EXPECT_EQ(i, it);
-            }
-        );
-        map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { it = i; });
-        ASSERT_NE(DBGSuccinct::npos, it);
-        map_to_nodes_sequentially(
-            std::string(k, 'C'),
-            [&](auto i) {
-                EXPECT_NE(i, it);
-            }
-        );
-        graph->map_to_nodes(
-            std::string(k, 'C'),
-            [&](auto i) {
-                EXPECT_NE(i, it);
-            }
-        );
-
-        graph->map_to_nodes(
-            std::string(k - 1, 'G') + "T",
-            [&](auto i) { it2 = i; }
-        );
-        ASSERT_NE(DBGSuccinct::npos, it2);
-        EXPECT_EQ(DBGSuccinct::npos, graph->traverse(it2, 'T'));
-        EXPECT_NE(DBGSuccinct::npos, graph->traverse(it2, 'C'));
-
-        map_to_nodes_sequentially(
-            std::string(k - 1, 'G') + "T",
-            [&](auto i) { it2 = i; }
-        );
-        ASSERT_NE(DBGSuccinct::npos, it2);
-        EXPECT_EQ(DBGSuccinct::npos, graph->traverse(it2, 'A'));
-        EXPECT_EQ(it, graph->traverse(it, 'G'));
-        EXPECT_EQ(it2, graph->traverse(it, 'T'));
-        EXPECT_EQ(it, graph->traverse_back(it2, 'G'));
-    }
-}
-
-TEST(DBGSuccinct, TraversalsDBG) {
-    const auto npos = DeBruijnGraph::npos;
-
-    for (size_t k = 2; k < 11; ++k) {
-        std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(k - 1)) };
-
-        graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
-
-        uint64_t it = 0;
-
-        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
-        ASSERT_TRUE(it != npos);
-
-        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
-        ASSERT_TRUE(it == npos);
-
-        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
-        ASSERT_TRUE(it != npos);
-
-        EXPECT_EQ(it, graph->traverse(it, 'A'));
-
-        ASSERT_TRUE(graph->traverse(it, 'C') != npos);
-        EXPECT_TRUE(graph->traverse(it, 'C') != it);
-
-        EXPECT_EQ(it, graph->traverse_back(graph->traverse(it, 'C'), 'A'));
-
-        EXPECT_EQ(npos, graph->traverse(it, 'G'));
-        EXPECT_EQ(npos, graph->traverse_back(it + 1, 'G'));
-    }
-}
-
-TEST(DBGSuccinct, TraversalsDBGCanonical) {
-    const auto npos = DeBruijnGraph::npos;
-
-    for (size_t k = 2; k < 11; ++k) {
-        BOSSConstructor constructor(k - 1);
-        constructor.add_sequence(std::string(100, 'A') + std::string(100, 'C'));
-        constructor.add_sequence(std::string(100, 'G') + std::string(100, 'T'));
-        std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(&constructor), true) };
-
-        auto map_to_nodes_sequentially = [&](const auto &seq, auto callback) {
-            graph->map_to_nodes_sequentially(seq.begin(), seq.end(), callback);
-        };
-
-        uint64_t it = 0;
-        map_to_nodes_sequentially(std::string(k, 'A'), [&](auto i) { it = i; });
-        ASSERT_NE(npos, it);
-
-        map_to_nodes_sequentially(std::string(k, 'A'), [&](auto i) { it = i; });
-        ASSERT_NE(npos, it);
-
-        EXPECT_EQ(it, graph->traverse(it, 'A'));
-
-        ASSERT_NE(npos, graph->traverse(it, 'C'));
-        EXPECT_NE(it, graph->traverse(it, 'C'));
-
-        EXPECT_EQ(it, graph->traverse_back(graph->traverse(it, 'C'), 'A'));
-
-        EXPECT_EQ(npos, graph->traverse(it, 'G'));
-        EXPECT_EQ(npos, graph->traverse_back(it + 1, 'G'));
-
-        // reverse complement
-        map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { it = i; });
-        ASSERT_NE(npos, it);
-
-        EXPECT_EQ(it, graph->traverse(it, 'G'));
-        ASSERT_NE(npos, graph->traverse(it, 'T'));
-        EXPECT_EQ(it, graph->traverse_back(graph->traverse(it, 'T'), 'G'));
-    }
-}
-
-
-TEST(DBGSuccinct, CallOutgoingEdges) {
-    for (size_t k = 3; k < 11; ++k) {
-        std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(k - 1)) };
-
-        graph->add_sequence(std::string(100, 'A') + std::string(100, 'C')
-                                                  + std::string(k - 1, 'G'));
-
-        uint64_t it = 0;
-
-        // AAA -> AAA
-        // AAA -> AAC
-        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
-        std::set<char> set { 'A', 'C' };
-        graph->call_outgoing_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                EXPECT_EQ(i, graph->traverse(it, c));
-            }
-        );
-        ASSERT_TRUE(set.empty());
-
-        // AAC -> ACC
-        it = graph->traverse(it, 'C');
-        set = { 'C', };
-        graph->call_outgoing_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                EXPECT_EQ(i, graph->traverse(it, c));
-            }
-        );
-        ASSERT_TRUE(set.empty());
-
-        // CCC -> CCC
-        // CCC -> CCG
-        graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
-        set = { 'C', 'G' };
-        graph->call_outgoing_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                EXPECT_EQ(i, graph->traverse(it, c));
-            }
-        );
-        ASSERT_TRUE(set.empty());
-
-        // CCG -> CGG
-        it = graph->traverse(it, 'G');
-        set = { 'G', };
-        graph->call_outgoing_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                EXPECT_EQ(i, graph->traverse(it, c));
-            }
-        );
-        ASSERT_TRUE(set.empty());
-
-        // CGG -> GG$
-        graph->map_to_nodes("C" + std::string(k - 1, 'G'), [&](auto i) { it = i; });
-        set = { '$', };
-        graph->call_outgoing_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                if (c != '$') {
-                    EXPECT_EQ(i, graph->traverse(it, c))
-                        << graph->get_node_sequence(i) << '\n' << c;
-                }
-            }
-        );
-        ASSERT_TRUE(set.empty());
-
-        // GGG does not exist
-        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
-        ASSERT_EQ(DeBruijnGraph::npos, it);
-        // GG$ is mapped to GGN, which does not exist
-        graph->map_to_nodes(std::string(k - 1, 'G') + '$', [&](auto i) { it = i; });
-        ASSERT_EQ(DeBruijnGraph::npos, it);
-
-        // If dummy nodes are not masked, and therefore
-        // represented in DBG, iterate through them as well.
-        // $$$ -> $$$
-        // $$$ -> $$A
-        it = 1;
-        ASSERT_EQ(std::string(k, '$'), graph->get_node_sequence(it));
-        set = { '$', 'A' };
-        graph->call_outgoing_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                if (c != '$') {
-                    EXPECT_EQ(i, graph->traverse(it, c))
-                        << graph->get_node_sequence(i) << '\n' << c;
-                }
-            }
-        );
-        ASSERT_TRUE(set.empty());
-
-
-        // Hide all dummy k-mers
-        dynamic_cast<DBGSuccinct&>(*graph).mask_dummy_kmers(1, false);
-
-        // AAA -> AAA
-        // AAA -> AAC
-        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
-        set = { 'A', 'C' };
-        graph->call_outgoing_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                EXPECT_EQ(i, graph->traverse(it, c));
-            }
-        );
-        ASSERT_TRUE(set.empty());
-
-        // AAC -> ACC
-        it = graph->traverse(it, 'C');
-        set = { 'C', };
-        graph->call_outgoing_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                EXPECT_EQ(i, graph->traverse(it, c));
-            }
-        );
-        ASSERT_TRUE(set.empty());
-
-        // CCC -> CCC
-        // CCC -> CCG
-        graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
-        set = { 'C', 'G' };
-        graph->call_outgoing_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                EXPECT_EQ(i, graph->traverse(it, c));
-            }
-        );
-        ASSERT_TRUE(set.empty());
-
-        // CCG -> CGG
-        it = graph->traverse(it, 'G');
-        set = { 'G', };
-        graph->call_outgoing_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                EXPECT_EQ(i, graph->traverse(it, c));
-            }
-        );
-        ASSERT_TRUE(set.empty());
-
-        // CGG -> {}
-        graph->map_to_nodes("C" + std::string(k - 1, 'G'), [&](auto i) { it = i; });
-        set = {};
-        graph->call_outgoing_kmers(it,
-            [&](auto i, char c) {
-                ASSERT_TRUE(set.count(c))
-                    << k
-                    << "\n" << c
-                    << "\n" << graph->get_node_sequence(it)
-                    << "\n" << graph->get_node_sequence(i);
-                set.erase(c);
-                if (c != '$') {
-                    EXPECT_EQ(i, graph->traverse(it, c))
-                        << graph->get_node_sequence(i) << '\n' << c;
-                }
-            }
-        );
-        ASSERT_TRUE(set.empty());
-
-        // GGG does not exist
-        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
-        ASSERT_EQ(DeBruijnGraph::npos, it);
-        // GG$ is mapped to GGN, which does not exist
-        graph->map_to_nodes(std::string(k - 1, 'G') + '$', [&](auto i) { it = i; });
-        ASSERT_EQ(DeBruijnGraph::npos, it);
-
-        // $$$ is masked and is not accessible
-        ASSERT_TRUE(std::string(k, '$') != graph->get_node_sequence(1));
-    }
-}
-
-TEST(DBGSuccinct, OutgoingAdjacent) {
-    for (size_t k = 2; k < 11; ++k) {
-        std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(k - 1)) };
-
-        graph->add_sequence(std::string(100, 'A') + std::string(100, 'C')
-                                                  + std::string(100, 'G'));
-
-        uint64_t it = 0;
-        std::vector<DBGSuccinct::node_index> adjacent_nodes;
-
-        auto map_to_nodes_sequentially = [&](const auto &seq, auto callback) {
-            graph->map_to_nodes_sequentially(seq.begin(), seq.end(), callback);
-        };
-
-        // AA, AAAAA
-        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
-        map_to_nodes_sequentially(std::string(k, 'A'), [&](auto i) { EXPECT_EQ(it, i); });
-        ASSERT_NE(SequenceGraph::npos, it);
-        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
-        ASSERT_EQ(2u, adjacent_nodes.size());
-        EXPECT_EQ(
-            convert_to_set(std::vector<uint64_t>{ it, graph->traverse(it, 'C') }),
-            convert_to_set(adjacent_nodes)
-        );
-        adjacent_nodes.clear();
-
-        // AC, AAAAC
-        it = graph->traverse(it, 'C');
-        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
-        auto outset = convert_to_set(std::vector<uint64_t>{ graph->traverse(it, 'C') });
-        if (k == 2) {
-            outset.insert(graph->traverse(it, 'G'));
-            ASSERT_EQ(2u, adjacent_nodes.size());
-        } else {
-            ASSERT_EQ(1u, adjacent_nodes.size());
-        }
-
-        EXPECT_EQ(outset, convert_to_set(adjacent_nodes));
-        adjacent_nodes.clear();
-
-        // CC, CCCCC
-        graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
-        map_to_nodes_sequentially(std::string(k, 'C'), [&](auto i) { EXPECT_EQ(it, i); });
-        ASSERT_NE(SequenceGraph::npos, it);
-        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
-        ASSERT_EQ(2u, adjacent_nodes.size());
-        EXPECT_EQ(
-            convert_to_set(std::vector<uint64_t>{
-                it,
-                graph->traverse(it, 'G')
-            }),
-            convert_to_set(adjacent_nodes)
-        );
-        adjacent_nodes.clear();
-
-        // CG, CCCCG
-        it = graph->traverse(it, 'G');
-        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
-        ASSERT_EQ(1u, adjacent_nodes.size());
-        EXPECT_EQ(
-            convert_to_set(std::vector<uint64_t>{ graph->traverse(it, 'G') }),
-            convert_to_set(adjacent_nodes)
-        );
-        adjacent_nodes.clear();
-
-        // GGGGG
-        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
-        map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { EXPECT_EQ(it, i); });
-        ASSERT_NE(SequenceGraph::npos, it);
-        graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
-        ASSERT_EQ(1u, adjacent_nodes.size());
-        EXPECT_EQ(
-            convert_to_set(std::vector<uint64_t>{ graph->traverse(it, 'G') }),
-            convert_to_set(adjacent_nodes)
-        );
-        adjacent_nodes.clear();
-    }
-}
-
-TEST(DBGSuccinct, IncomingAdjacent) {
-    for (size_t k = 2; k < 11; ++k) {
-        std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(k - 1)) };
-
-        graph->add_sequence(std::string(100, 'A') + std::string(100, 'C')
-                                                  + std::string(100, 'G'));
-
-        dynamic_cast<DBGSuccinct&>(*graph).mask_dummy_kmers(1, false);
-
-        uint64_t it = 0;
-        std::vector<DBGSuccinct::node_index> adjacent_nodes;
-
-        auto map_to_nodes_sequentially = [&](const auto &seq, auto callback) {
-            graph->map_to_nodes_sequentially(seq.begin(), seq.end(), callback);
-        };
-
-        // AA, AAAAA
-        graph->map_to_nodes(std::string(k, 'A'), [&](auto i) { it = i; });
-        map_to_nodes_sequentially(std::string(k, 'A'), [&](auto i) { EXPECT_EQ(it, i); });
-        ASSERT_NE(SequenceGraph::npos, it);
-        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
-        ASSERT_EQ(1u, adjacent_nodes.size());
-        EXPECT_EQ(
-            convert_to_set(std::vector<uint64_t>{ it }),
-            convert_to_set(adjacent_nodes)
-        );
-        adjacent_nodes.clear();
-
-        // AC, AAAAC
-        it = graph->traverse(it, 'C');
-        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
-        ASSERT_EQ(1u, adjacent_nodes.size());
-        EXPECT_EQ(
-            convert_to_set(std::vector<uint64_t>{ graph->traverse_back(it, 'A') }),
-            convert_to_set(adjacent_nodes)
-        );
-        adjacent_nodes.clear();
-
-        // CC, CCCCC
-        graph->map_to_nodes(std::string(k, 'C'), [&](auto i) { it = i; });
-        map_to_nodes_sequentially(std::string(k, 'C'), [&](auto i) { EXPECT_EQ(it, i); });
-        ASSERT_NE(SequenceGraph::npos, it);
-        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
-        ASSERT_EQ(2u, adjacent_nodes.size());
-        EXPECT_EQ(
-            convert_to_set(std::vector<uint64_t>{
-                it,
-                graph->traverse_back(it, 'A')
-            }),
-            convert_to_set(adjacent_nodes)
-        );
-        adjacent_nodes.clear();
-
-        // CG, CCCCG
-        it = graph->traverse(it, 'G');
-        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
-        ASSERT_EQ(2u, adjacent_nodes.size());
-        EXPECT_EQ(
-            convert_to_set(std::vector<uint64_t>{
-                graph->traverse_back(it, 'A'),
-                graph->traverse_back(it, 'C')
-            }),
-            convert_to_set(adjacent_nodes)
-        );
-        adjacent_nodes.clear();
-
-        // GG, GGGGG
-        graph->map_to_nodes(std::string(k, 'G'), [&](auto i) { it = i; });
-        map_to_nodes_sequentially(std::string(k, 'G'), [&](auto i) { EXPECT_EQ(it, i); });
-        ASSERT_NE(SequenceGraph::npos, it);
-        graph->adjacent_incoming_nodes(it, &adjacent_nodes);
-        ASSERT_EQ(2u, adjacent_nodes.size());
-        EXPECT_EQ(
-            convert_to_set(std::vector<uint64_t>{
-                it,
-                graph->traverse_back(it, 'C')
-            }),
-            convert_to_set(adjacent_nodes)
-        );
-        adjacent_nodes.clear();
-    }
-}
-
-TEST(DBGSuccinct, map_to_nodes) {
+TEST(BOSS, map_to_nodes) {
     for (size_t k = 1; k < 10; ++k) {
         std::unique_ptr<BOSS> graph { new BOSS(k) };
 
         graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
 
-        std::vector<uint64_t> expected_result {
+        std::vector<DBGSuccinct::node_index> expected_result {
             SequenceGraph::npos, SequenceGraph::npos,
             k + 1, k + 1, k + 1, k + 1
         };
@@ -2687,13 +2127,13 @@ TEST(DBGSuccinct, map_to_nodes) {
     }
 }
 
-TEST(DBGSuccinct, map_to_edges) {
+TEST(BOSS, map_to_edges) {
     for (size_t k = 1; k < 10; ++k) {
         std::unique_ptr<BOSS> graph { new BOSS(k) };
 
         graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
 
-        std::vector<uint64_t> expected_result {
+        std::vector<DBGSuccinct::node_index> expected_result {
             SequenceGraph::npos, SequenceGraph::npos,
             k + 2, k + 2, k + 2
         };
@@ -2716,7 +2156,7 @@ TEST(DBGSuccinct, map_to_edges) {
     }
 }
 
-TEST(DBGSuccinct, map_to_nodes_DBG) {
+TEST(BOSS, map_to_nodes_BOSS_vs_DBG) {
     for (size_t k = 1; k < 10; ++k) {
         std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(k)) };
         std::unique_ptr<BOSS> boss { new BOSS(k) };
@@ -2745,164 +2185,7 @@ TEST(DBGSuccinct, map_to_nodes_DBG) {
     }
 }
 
-TEST(DBGSuccinct, map_to_nodes_DBG_canonical) {
-    for (size_t k = 1; k < 10; ++k) {
-        std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(new BOSS(k)) };
-        std::unique_ptr<DeBruijnGraph> graph_can { new DBGSuccinct(new BOSS(k), true) };
-
-        graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
-        graph->add_sequence(std::string(100, 'G') + std::string(100, 'T'));
-        graph_can->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
-        graph_can->add_sequence(std::string(100, 'G') + std::string(100, 'T'));
-
-        std::string sequence_to_map = std::string(2, 'T')
-                                        + std::string(k + 3, 'A')
-                                        + std::string(2 * k, 'C');
-        auto rev_seq = sequence_to_map;
-        reverse_complement(rev_seq.begin(), rev_seq.end());
-
-        std::vector<uint64_t> indices_forward;
-        graph->map_to_nodes(
-            sequence_to_map,
-            [&](auto i) { indices_forward.push_back(i); }
-        );
-        std::vector<uint64_t> indices_reverse;
-        graph->map_to_nodes(
-            rev_seq,
-            [&](auto i) { indices_reverse.push_back(i); }
-        );
-        std::reverse(indices_reverse.begin(), indices_reverse.end());
-
-        std::vector<uint64_t> indices_canonical;
-        graph_can->map_to_nodes(
-            sequence_to_map,
-            [&](auto i) { indices_canonical.push_back(i); }
-        );
-
-        ASSERT_EQ(indices_forward.size(), indices_reverse.size());
-        ASSERT_EQ(indices_forward.size(), indices_canonical.size());
-
-        for (size_t i = 0; i < indices_forward.size(); ++i) {
-            if (!indices_forward[i]) {
-                EXPECT_EQ(indices_canonical[i], indices_reverse[i]);
-            } else if (!indices_reverse[i]) {
-                EXPECT_EQ(indices_canonical[i], indices_forward[i]);
-            } else {
-                EXPECT_EQ(indices_canonical[i], std::min(indices_forward[i], indices_reverse[i]));
-            }
-        }
-    }
-}
-
-TEST(DBGSuccinct, get_outdegree_single_node) {
-    for (size_t k = 2; k < 10; ++k) {
-        auto graph = std::make_unique<DBGSuccinct>(k);
-        graph->add_sequence(std::string(k - 1, 'A') + 'C');
-        graph->mask_dummy_kmers(1, false);
-        EXPECT_EQ(1ull, graph->num_nodes());
-        EXPECT_EQ(0ull, graph->outdegree(1));
-    }
-}
-
-TEST(DBGSuccinct, get_maximum_outdegree) {
-    for (size_t k = 2; k < 10; ++k) {
-        auto graph = std::make_unique<DBGSuccinct>(k);
-        graph->add_sequence(std::string(k - 1, 'A') + 'A');
-        graph->add_sequence(std::string(k - 1, 'A') + 'C');
-        graph->add_sequence(std::string(k - 1, 'A') + 'G');
-        graph->add_sequence(std::string(k - 1, 'A') + 'T');
-        graph->mask_dummy_kmers(1, false);
-
-        auto max_outdegree_node_index = graph->kmer_to_node(std::string(k, 'A'));
-
-        ASSERT_EQ(4ull, graph->num_nodes());
-        for (size_t i = 1; i <= graph->num_nodes(); ++i) {
-            if (i == max_outdegree_node_index) {
-                EXPECT_EQ(4ull, graph->outdegree(i));
-            } else {
-                EXPECT_EQ(0ull, graph->outdegree(i));
-            }
-        }
-    }
-}
-
-TEST(DBGSuccinct, get_outdegree_loop) {
-    for (size_t k = 2; k < 10; ++k) {
-        auto graph = std::make_unique<DBGSuccinct>(k);
-        graph->add_sequence(std::string(k - 1, 'A') + std::string(k - 1, 'C') +
-                            std::string(k - 1, 'G') + std::string(k, 'T'));
-        graph->add_sequence(std::string(k, 'A'));
-        graph->mask_dummy_kmers(1, false);
-
-        auto loop_node_index = graph->kmer_to_node(std::string(k, 'A'));
-
-        ASSERT_TRUE(graph->num_nodes() > 1);
-        for (size_t i = 1; i <= graph->num_nodes(); ++i) {
-            if (i == loop_node_index) {
-                EXPECT_EQ(2ull, graph->outdegree(i));
-            } else {
-                EXPECT_EQ(1ull, graph->outdegree(i));
-            }
-        }
-    }
-}
-
-TEST(DBGSuccinct, get_indegree_single_node) {
-    for (size_t k = 2; k < 10; ++k) {
-        auto graph = std::make_unique<DBGSuccinct>(k);
-        graph->add_sequence(std::string(k - 1, 'A') + 'C');
-        graph->mask_dummy_kmers(1, false);
-        EXPECT_EQ(1ull, graph->num_nodes());
-        EXPECT_EQ(0ull, graph->indegree(1));
-    }
-}
-
-TEST(DBGSuccinct, get_maximum_indegree) {
-    for (size_t k = 2; k < 10; ++k) {
-        auto graph = std::make_unique<DBGSuccinct>(k);
-        graph->add_sequence('A' + std::string(k - 1, 'A'));
-        graph->add_sequence('C' + std::string(k - 1, 'A'));
-        graph->add_sequence('G' + std::string(k - 1, 'A'));
-        graph->add_sequence('T' + std::string(k - 1, 'A'));
-        graph->mask_dummy_kmers(1, false);
-
-        auto max_indegree_node_index = graph->kmer_to_node(std::string(k, 'A'));
-
-        ASSERT_EQ(4ull, graph->num_nodes());
-        for (size_t i = 1; i <= graph->num_nodes(); ++i) {
-            if (i == max_indegree_node_index) {
-                EXPECT_EQ(4ull, graph->indegree(i));
-            } else {
-                EXPECT_EQ(0ull, graph->indegree(i));
-            }
-        }
-    }
-}
-
-TEST(DBGSuccinct, get_indegree_loop) {
-    for (size_t k = 2; k < 10; ++k) {
-        auto graph = std::make_unique<DBGSuccinct>(k);
-
-        graph->add_sequence(std::string(k, 'A')
-                                + std::string(k - 1, 'C')
-                                + std::string(k - 1, 'G')
-                                + std::string(k, 'T'));
-        graph->mask_dummy_kmers(1, false);
-
-        auto loop_node_index = graph->kmer_to_node(std::string(k, 'T'));
-
-        ASSERT_TRUE(graph->num_nodes() > 1);
-        for (size_t i = 1; i <= graph->num_nodes(); ++i) {
-            if (i == loop_node_index) {
-                EXPECT_EQ(2ull, graph->indegree(i));
-            } else {
-                EXPECT_EQ(1ull, graph->indegree(i));
-            }
-        }
-    }
-}
-
-TEST(DBGSuccinct, get_degree_with_source_dummy) {
+TEST(BOSS, get_degree_with_source_dummy) {
     for (size_t k = 2; k < 10; ++k) {
         auto graph = std::make_unique<DBGSuccinct>(k);
 
@@ -2947,7 +2230,7 @@ TEST(DBGSuccinct, get_degree_with_source_dummy) {
     }
 }
 
-TEST(DBGSuccinct, get_degree_with_source_and_sink_dummy) {
+TEST(BOSS, get_degree_with_source_and_sink_dummy) {
     for (size_t k = 2; k < 10; ++k) {
         auto graph = std::make_unique<DBGSuccinct>(k);
 
@@ -2992,7 +2275,7 @@ TEST(DBGSuccinct, get_degree_with_source_and_sink_dummy) {
     }
 }
 
-TEST(DBGSuccinct, get_node_sequence) {
+TEST(BOSS, get_node_sequence) {
     size_t k = 4;
     std::string reference = "AGCTTCGAGGCCAA";
     std::string query = "AGCT";
@@ -3008,7 +2291,7 @@ TEST(DBGSuccinct, get_node_sequence) {
     EXPECT_EQ(query, mapped_query);
 }
 
-TEST(DBGSuccinct, is_single_outgoing_simple) {
+TEST(BOSS, is_single_outgoing_simple) {
     size_t k = 4;
     std::string reference = "CATC";
 
@@ -3016,7 +2299,7 @@ TEST(DBGSuccinct, is_single_outgoing_simple) {
     graph->add_sequence(reference);
 
     uint64_t single_outgoing_counter = 0;
-    for (uint64_t i = 1; i <= graph->num_nodes(); ++i) {
+    for (DBGSuccinct::node_index i = 1; i <= graph->num_nodes(); ++i) {
         if (graph->outdegree(i) == 1)
             single_outgoing_counter++;
     }
@@ -3025,7 +2308,7 @@ TEST(DBGSuccinct, is_single_outgoing_simple) {
     EXPECT_EQ(reference.size(), single_outgoing_counter);
 }
 
-TEST(DBGSuccinct, is_single_outgoing_for_multiple_valid_edges) {
+TEST(BOSS, is_single_outgoing_for_multiple_valid_edges) {
     size_t k = 4;
     std::string reference = "AGGGGTC";
 
@@ -3033,7 +2316,7 @@ TEST(DBGSuccinct, is_single_outgoing_for_multiple_valid_edges) {
     graph->add_sequence(reference);
 
     uint64_t single_outgoing_counter = 0;
-    for (uint64_t i = 1; i <= graph->num_nodes(); ++i) {
+    for (DBGSuccinct::node_index i = 1; i <= graph->num_nodes(); ++i) {
         if (graph->outdegree(i) == 1)
             single_outgoing_counter++;
     }

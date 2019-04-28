@@ -99,31 +99,69 @@ $exe annotate -i test_graph -o test_annotation --anno-header --header-delimiter 
 $exe stats -a test_annotation
 echo ""
 
-time $exe transform_anno --anno-type column -o test_annotation test_annotation
+time $exe transform_anno --anno-type column -o test_annotation test_annotation.column.annodbg
 $exe stats --anno-type column -a test_annotation
 echo ""
 
-time $exe transform_anno --anno-type row --sparse -o test_annotation test_annotation
+time $exe transform_anno --anno-type row --sparse -o test_annotation test_annotation.column.annodbg
 $exe stats --anno-type row -a test_annotation
 echo ""
 
-time $exe transform_anno --anno-type brwt -o test_annotation test_annotation
+time $exe transform_anno --anno-type brwt -o test_annotation test_annotation.column.annodbg
 $exe stats --anno-type brwt -a test_annotation
 echo ""
 
-time $exe transform_anno --anno-type bin_rel_wt_sdsl -o test_annotation test_annotation
+time $exe transform_anno --anno-type brwt --greedy -o test_annotation_pm test_annotation.column.annodbg
+$exe stats --anno-type brwt -a test_annotation_pm
+echo ""
+
+time $exe transform_anno --anno-type bin_rel_wt_sdsl -o test_annotation test_annotation.column.annodbg
 $exe stats --anno-type bin_rel_wt_sdsl -a test_annotation
 echo ""
 
-time $exe transform_anno --anno-type bin_rel_wt -o test_annotation test_annotation
+time $exe transform_anno --anno-type bin_rel_wt -o test_annotation test_annotation.column.annodbg
 $exe stats --anno-type bin_rel_wt -a test_annotation
 echo ""
 
-time $exe transform_anno --anno-type flat -o test_annotation test_annotation
+time $exe transform_anno --anno-type flat -o test_annotation test_annotation.column.annodbg
 $exe stats --anno-type flat -a test_annotation
 echo ""
 
-time $exe transform_anno --anno-type rbfish -o test_annotation test_annotation
+time $exe transform_anno --anno-type rbfish -o test_annotation test_annotation.column.annodbg
+$exe stats --anno-type rbfish -a test_annotation
+echo ""
+
+
+
+$exe annotate -i test_graph -o test_annotation --anno-type row --anno-header --header-delimiter '|' $file
+$exe stats -a test_annotation.row.annodbg
+echo ""
+
+time $exe transform_anno --anno-type column -o test_annotation test_annotation.row.annodbg
+$exe stats --anno-type column -a test_annotation
+echo ""
+
+time $exe transform_anno --anno-type row --sparse -o test_annotation test_annotation.row.annodbg
+$exe stats --anno-type row -a test_annotation
+echo ""
+
+time $exe transform_anno --anno-type brwt -o test_annotation test_annotation.row.annodbg
+$exe stats --anno-type brwt -a test_annotation
+echo ""
+
+time $exe transform_anno --anno-type bin_rel_wt_sdsl -o test_annotation test_annotation.row.annodbg
+$exe stats --anno-type bin_rel_wt_sdsl -a test_annotation
+echo ""
+
+time $exe transform_anno --anno-type bin_rel_wt -o test_annotation test_annotation.row.annodbg
+$exe stats --anno-type bin_rel_wt -a test_annotation
+echo ""
+
+time $exe transform_anno --anno-type flat -o test_annotation test_annotation.row.annodbg
+$exe stats --anno-type flat -a test_annotation
+echo ""
+
+time $exe transform_anno --anno-type rbfish -o test_annotation test_annotation.row.annodbg
 $exe stats --anno-type rbfish -a test_annotation
 echo ""
 

@@ -125,7 +125,8 @@ DBGBitmapConstructor
         }
 
         chunks.emplace_back();
-        chunks.back().load(chunk_in);
+        if (!chunks.back().load(chunk_in))
+            throw std::ifstream::failure("ERROR: can't read bitmap chunk from " + file);
 
         assert(chunks.empty() || chunks.back().size() == chunks.front().size());
 
@@ -161,6 +162,8 @@ DBGBitmapConstructor
     );
 
     graph->canonical_mode_ = canonical_mode;
+
+    graph->complete_ = false;
 
     assert(!(sdsl::bits::hi(graph->kmers_.size()) % KmerExtractor2Bit::kLogSigma));
 
@@ -206,4 +209,5 @@ void DBGBitmapConstructor::build_graph(DBGBitmap *graph) {
         chunk->size(), chunk->num_set_bits() + 1
     );
     delete chunk;
+    graph->complete_ = false;
 }

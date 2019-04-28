@@ -9,7 +9,7 @@
 
 template <typename BitVector>
 RowConcatenated<BitVector>::
-RowConcatenated(const std::function<void(RowCallback)> &call_rows,
+RowConcatenated(const std::function<void(const RowCallback&)> &call_rows,
                 uint64_t num_columns,
                 uint64_t num_rows,
                 uint64_t num_set_bits)
@@ -65,7 +65,8 @@ bool RowConcatenated<BitVector>::load(std::istream &in) {
     compressed_rows_.reset(new BitVector());
     try {
         num_columns_ = load_number(in);
-        compressed_rows_->load(in);
+        if (!compressed_rows_->load(in))
+            return false;
     } catch (...) {
         return false;
     }

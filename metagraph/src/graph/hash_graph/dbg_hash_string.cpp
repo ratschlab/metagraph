@@ -40,10 +40,11 @@ void DBGHashString::map_to_nodes(const std::string &sequence,
     }
 }
 
-void DBGHashString::map_to_nodes_sequentially(std::string::const_iterator begin,
-                                              std::string::const_iterator end,
-                                              const std::function<void(node_index)> &callback,
-                                              const std::function<bool()> &terminate) const {
+void DBGHashString
+::map_to_nodes_sequentially(std::string::const_iterator begin,
+                            std::string::const_iterator end,
+                            const std::function<void(node_index)> &callback,
+                            const std::function<bool()> &terminate) const {
     for (auto it = begin; it + k_ <= end; ++it) {
         auto node = kmer_to_node(std::string(it, it + k_));
 
@@ -54,21 +55,24 @@ void DBGHashString::map_to_nodes_sequentially(std::string::const_iterator begin,
     }
 }
 
-DBGHashString::node_index DBGHashString::traverse(node_index node, char next_char) const {
+DBGHashString::node_index
+DBGHashString::traverse(node_index node, char next_char) const {
     assert(node);
     auto kmer = node_to_kmer(node).substr(1) + next_char;
     return kmer_to_node(kmer);
 }
 
-DBGHashString::node_index DBGHashString::traverse_back(node_index node, char prev_char) const {
+DBGHashString::node_index
+DBGHashString::traverse_back(node_index node, char prev_char) const {
     assert(node);
     auto kmer = node_to_kmer(node);
     kmer.pop_back();
     return kmer_to_node(std::string(1, prev_char) + kmer);
 }
 
-void DBGHashString::adjacent_outgoing_nodes(node_index node,
-                                            std::vector<node_index> *target_nodes) const {
+void DBGHashString
+::adjacent_outgoing_nodes(node_index node,
+                          std::vector<node_index> *target_nodes) const {
     assert(node);
     assert(target_nodes);
 
@@ -81,8 +85,9 @@ void DBGHashString::adjacent_outgoing_nodes(node_index node,
     }
 }
 
-void DBGHashString::adjacent_incoming_nodes(node_index node,
-                                            std::vector<node_index> *source_nodes) const {
+void DBGHashString
+::adjacent_incoming_nodes(node_index node,
+                          std::vector<node_index> *source_nodes) const {
     assert(node);
     assert(source_nodes);
 
@@ -93,6 +98,35 @@ void DBGHashString::adjacent_incoming_nodes(node_index node,
         auto next = kmer_to_node(std::string(1, c) + suffix);
         if (next != npos)
             source_nodes->push_back(next);
+    }
+}
+
+void DBGHashString
+::call_outgoing_kmers(node_index node,
+                      const OutgoingEdgeCallback &callback) const {
+    assert(node);
+
+    auto prefix = node_to_kmer(node).substr(1);
+
+    for (char c : seq_encoder_.alphabet) {
+        auto next = kmer_to_node(prefix + c);
+        if (next != npos)
+            callback(next, c);
+    }
+}
+
+void DBGHashString
+::call_incoming_kmers(node_index node,
+                      const IncomingEdgeCallback &callback) const {
+    assert(node);
+
+    auto suffix = node_to_kmer(node);
+    suffix.pop_back();
+
+    for (char c : seq_encoder_.alphabet) {
+        auto next = kmer_to_node(std::string(1, c) + suffix);
+        if (next != npos)
+            callback(next, c);
     }
 }
 
@@ -131,7 +165,15 @@ size_t DBGHashString::indegree(node_index node) const {
     return indegree;
 }
 
-DBGHashString::node_index DBGHashString::kmer_to_node(const std::string &kmer) const {
+void DBGHashString
+::call_kmers(const std::function<void(node_index, const std::string&)> &callback) const {
+    for (const auto &kmer : indices_) {
+        callback(kmer.second + 1, kmer.first);
+    }
+}
+
+DBGHashString::node_index
+DBGHashString::kmer_to_node(const std::string &kmer) const {
     if (kmer.length() != k_)
         throw std::runtime_error("Error: incompatible k-mer size");
 
@@ -186,6 +228,24 @@ bool DBGHashString::load(const std::string &filename) {
     std::ifstream in(utils::remove_suffix(filename, kExtension) + kExtension,
                      std::ios::binary);
     return load(in);
+}
+
+bool DBGHashString::operator==(const DeBruijnGraph &other) const {
+    if (!dynamic_cast<const DBGHashString*>(&other)) {
+        throw std::runtime_error("Not implemented");
+        return false;
+    }
+
+    const auto& other_hash = *dynamic_cast<const DBGHashString*>(&other);
+    if (k_ != other_hash.k_)
+        return false;
+
+    for (const auto &kmer : kmers_) {
+        if (other_hash.indices_.find(kmer) == other_hash.indices_.end())
+            return false;
+    }
+
+    return true;
 }
 
 std::string DBGHashString::encode_sequence(const std::string &sequence) const {

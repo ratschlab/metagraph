@@ -75,6 +75,8 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     const auto& data() const { return bitmatrix_; };
 
+    virtual std::unique_ptr<IterateRows> iterator() const override;
+
   private:
     void set(Index i, size_t j, bool value);
     bool is_set(Index i, size_t j) const;
