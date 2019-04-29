@@ -24,6 +24,7 @@
 #include <sdsl/wt_rlmn.hpp>
 #include <sdsl/sd_vector.hpp>
 #include <sdsl/enc_vector.hpp>
+//#define CHECK_CORECTNESS 1
 
 
 template<typename POD>
@@ -358,20 +359,21 @@ public:
         char base;
         while(true) {
             if (node_is_split(node)) {
-                routing_table.print_content(node);
                 base = routing_table.get(node,relative_position);
 
+#if defined(CHECK_CORECTNESS)
                 auto& routing_table_naive = splits.at(node);
                 auto rt_index = routing_table_naive.begin();
                 advance(rt_index,relative_position);
                 char base_check = *rt_index;
                 auto new_relative_position = rank(routing_table_naive,base,relative_position)-1;
-
+#endif
                 relative_position = routing_table.rank(node,relative_position,base);
 
-                //checkers
+#if defined(CHECK_CORECTNESS)
                 assert(base_check == base);
                 assert(relative_position == new_relative_position);
+#endif
 
             }
             else {
@@ -387,9 +389,13 @@ public:
             if (node_is_join(node)) {
                 // todo better name (it is a symbol that determines from which branch we came)
                 auto join_symbol = sequence[kmer_position-1];
+
+#if defined(CHECK_CORECTNESS)
                 auto tv = PathDatabaseBaseline::branch_starting_offset(node,join_symbol);
                 auto cv = incoming_table.branch_offset(node,prev_node);
                 assert(tv==cv);
+#endif
+
                 relative_position += incoming_table.branch_offset(node,prev_node);
             }
         }
