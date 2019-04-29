@@ -52,11 +52,11 @@ struct d_t {
         std::cerr << ' ' <<  x;
         return *this;
     }
-} _d;
+};
 
 
 
-#define D(args ...) { _d, "|", __LINE__, "|", #args, ":", args, "\n"; }
+#define D(args ...) { d_t(), "|", __LINE__, "|", #args, ":", args, "\n"; }
 
 void transform_to_fasta(const string &filename,const vector<string>& reads);
 

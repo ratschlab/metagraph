@@ -225,7 +225,7 @@ TEST(PathDatabase,LongTestCompressedReads) {
 }
 
 TEST(PathDatabase,LongTestBaseline) {
-    long_identity_test<PathDatabaseBaseline>();
+    long_identity_test<PathDatabaseBaseline<>>();
 }
 
 #endif
