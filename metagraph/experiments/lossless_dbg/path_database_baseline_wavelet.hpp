@@ -540,7 +540,7 @@ public:
                 }
                 if (verbosity & STATS_JOINS_HISTOGRAM) {
                     int prev = 0;
-                    int cardinality = incoming_table.size();
+                    int cardinality = incoming_table.size(node);
 //                    for (char c : {'$','A','C','G','T','N'}) {
 //                        int cur = incoming_table.branch_offset(node,c);
 //                        if (cur != prev) {
@@ -562,8 +562,8 @@ public:
                     set<int> diff_symbols;
                     int start = routing_table.offset(node);
                     int i = start;
-                    for (; routing_table[i] != '#'_rc; i++) {
-                        diff_symbols.insert(routing_table[i]);
+                    for (int i=0; i < routing_table.size(node); i++) {
+                        diff_symbols.insert(routing_table.get(node,i));
                     }
                     splits_diff_symbols_histogram[diff_symbols.size()]++;
                     splits_size_histogram[i - start]++;
