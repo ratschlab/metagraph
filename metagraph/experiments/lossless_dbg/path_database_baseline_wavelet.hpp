@@ -191,7 +191,6 @@ public:
                     is_join_node.push_back(0);
                     edge_multiplicity_table_builder.push_back(new_reads);
                 }
-                cout << PathDatabaseBaseline::joins[node] << endl;
                 graph.call_incoming_kmers_mine(node,[&node,&edge_multiplicity_table_builder,
                         &is_join_node,this](node_index prev_node,char c) {
                     auto branch_size = PathDatabaseBaseline::joins[node][c];
