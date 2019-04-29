@@ -119,7 +119,11 @@ class wavelet_tree_dyn : public wavelet_tree {
     sdsl::int_vector<> to_vector() const;
 
   private:
-    dyn::wt_str dwt_;
+    //TODO: try this again after resolution of https://github.com/xxsds/DYNAMIC/issues/11
+    //using dwt_type = dyn::wt_str;
+
+    using dwt_type = dyn::str_check;
+    dwt_type dwt_;
 };
 
 

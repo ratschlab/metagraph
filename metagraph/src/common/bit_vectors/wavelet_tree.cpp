@@ -389,7 +389,7 @@ void wavelet_tree_dyn::remove(uint64_t id) {
 }
 
 uint8_t wavelet_tree_dyn::logsigma() const {
-    return utils::code_length(const_cast<dyn::wt_str&>(dwt_).alphabet_size());
+    return utils::code_length(const_cast<dwt_type&>(dwt_).alphabet_size())-1;
 }
 
 void wavelet_tree_dyn::serialize(std::ostream &out) const {
@@ -406,7 +406,7 @@ bool wavelet_tree_dyn::load(std::istream &in) {
 }
 
 void wavelet_tree_dyn::clear() {
-    dwt_ = decltype(dwt_)(dwt_.alphabet_size());
+    dwt_ = std::move(decltype(dwt_)(dwt_.alphabet_size()));
 }
 
 sdsl::int_vector<> wavelet_tree_dyn::to_vector() const {
