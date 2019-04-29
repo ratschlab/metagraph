@@ -82,7 +82,6 @@ public:
         return size(node); // as 1
     }
     int branch_size_rank(node_index node,int offset) const {
-        // todo: merge with branch_starting_offset
         if (offset < 0) { return 0; }
         int joins_position = joins.select1(node);
         int table_offset = joins.rank0(joins_position);
@@ -90,22 +89,14 @@ public:
     }
 
     int branch_size(node_index node,node_index prev_node) const {
-        // todo: merge with branch_starting_offset
         return branch_size_rank(node,relative_offset(node,prev_node));
     }
 
     int size(node_index node) const {
-        // warning: correct only when N not used
-        // todo: decide on adding also the last symbol
-        // todo: rename
-
-        //todo remove: only to compile the function
-        //branch_size_rank(node,0);
         return joins.select1(node+1)-joins.select1(node)-1;
     }
 
     int graph_branch_id(node_index node,node_index prev_node) const {
-        // graph.call_incoming_kmers(node,[&first_base](node_index node,char edge_label ) { first_base = rc(edge_label);});
         int result;
         int i = 0;
         graph.call_incoming_kmers_mine(node,[&i,&result,&prev_node](node_index node,char base) {
