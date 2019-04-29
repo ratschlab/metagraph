@@ -26,14 +26,14 @@
 using namespace std;
 using alphabets::log2;
 
-
-class PathDatabaseBaselineWaveletDeprecated : public PathDatabaseBaseline {
+using GraphT = DBGSuccinct;
+class PathDatabaseBaselineWaveletDeprecated : public PathDatabaseBaseline<GraphT> {
 public:
     using routing_table_t = vector<char>;
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
-    PathDatabaseBaselineWaveletDeprecated(std::shared_ptr<const DeBruijnGraph> graph) : PathDatabaseBaseline(graph),
+    PathDatabaseBaselineWaveletDeprecated(std::shared_ptr<const GraphT> graph) : PathDatabaseBaseline(graph),
                                                                               routing_table(sizeof(RoutingTableAlphabet))
                                                                               {}
 
@@ -230,7 +230,7 @@ public:
         ifstream joins_file(folder / "joins.bin");
         string graph_filename = folder / "graph.bin";
 
-        auto graph = std::shared_ptr<DeBruijnGraph>{
+        auto graph = std::shared_ptr<GraphT>{
                 new DBGSuccinct(21)
                 };
         graph->load(graph_filename);

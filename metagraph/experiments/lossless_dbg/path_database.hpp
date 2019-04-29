@@ -18,19 +18,19 @@
 
 #include "utilities.hpp"
 
-template <typename _path_id>
+template <typename _path_id,typename GraphCommonT=DeBruijnGraph,typename GraphT=DBGSuccinct>
 class PathDatabase {
   public:
     // convenience constructor
     explicit PathDatabase(const vector<string> &raw_reads,
                     size_t k_kmer = 21 /* default kmer */)
-            : PathDatabase(std::shared_ptr<const DeBruijnGraph> {
-                                new DBGSuccinct(dbg_succ_graph_constructor(raw_reads, k_kmer))
+            : PathDatabase(std::shared_ptr<const GraphCommonT> {
+                                new GraphT(dbg_succ_graph_constructor(raw_reads, k_kmer))
                                 })
                 {}
 
 
-    PathDatabase(std::shared_ptr<const DeBruijnGraph> graph)
+    PathDatabase(std::shared_ptr<const GraphCommonT> graph)
           : graph_(graph) {}
 
      ~PathDatabase() = default;
@@ -75,7 +75,7 @@ class PathDatabase {
     virtual void serialize(const fs::path& folder) const = 0;
 
   protected:
-    std::shared_ptr<const DeBruijnGraph> graph_;
+    std::shared_ptr<const GraphCommonT> graph_;
 
     static DBG_succ* dbg_succ_graph_constructor(const vector<string> &raw_reads,
                                                 size_t k_kmer) {

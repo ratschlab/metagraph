@@ -8,8 +8,11 @@
 #ifndef path_database_baseline_wavelet_hpp
 #define path_database_baseline_wavelet_hpp
 
+#include "graph_patch.hpp"
 #include "path_database.hpp"
 #include "path_database_baseline.hpp"
+#include "cxx-prettyprint.hpp"
+
 #include "utils.hpp"
 #include "utilities.hpp"
 #include <iostream>
@@ -58,45 +61,53 @@ using alphabets::log2;
 
 // todo find a tool that removes this relative namespacing issue
 // say to Mikhail that "de_bruijn_graph" instead of "metagraph/de_bruijn_graph" is the same violation as this
-
-template <typename BitVector=bit_vector_small>
+using default_bit_vector = bit_vector_small;
+template <typename BitVector=default_bit_vector,typename GraphT=DBGSuccinct>
 class IncomingTable {
 public:
-    IncomingTable(const DeBruijnGraph & graph) : graph(graph) {}
+    IncomingTable(const GraphT & graph) : graph(graph) {}
+    using bit_vector_t = BitVector;
     BitVector joins;
     sdsl::enc_vector<> edge_multiplicity_table;
     int branch_offset(node_index node,node_index prev_node) const {
         int branch_offset = relative_offset(node,prev_node);
         int result = 0;
-        for(int i=0;i<branch_offset;branch_offset++) {
-            result += branch_size(node,i);
+        for(int i=0;i<branch_offset;i++) {
+            result += branch_size_rank(node,i);
         }
         return result;
     }
     bool is_join(node_index node) const {
         return size(node); // as 1
     }
+    int branch_size_rank(node_index node,int offset) const {
+        // todo: merge with branch_starting_offset
+        if (offset < 0) { return 0; }
+        int joins_position = joins.select1(node);
+        int table_offset = joins.rank0(joins_position);
+        return edge_multiplicity_table[table_offset+offset];
+    }
 
     int branch_size(node_index node,node_index prev_node) const {
         // todo: merge with branch_starting_offset
-        int joins_position = joins.select(node)+1;
-        int table_offset = joins.rank0(joins_position);
-        int result = 0;
-        return edge_multiplicity_table[table_offset+relative_offset(node,prev_node)];
+        return branch_size_rank(node,relative_offset(node,prev_node));
     }
 
     int size(node_index node) const {
         // warning: correct only when N not used
         // todo: decide on adding also the last symbol
         // todo: rename
-        return joins.select(node+1)-joins.select(node)-1;
+
+        //todo remove: only to compile the function
+        //branch_size_rank(node,0);
+        return joins.select1(node+1)-joins.select1(node)-1;
     }
 
-    int graph_branch_id(node_index node,node_index prev_node) {
+    int graph_branch_id(node_index node,node_index prev_node) const {
         // graph.call_incoming_kmers(node,[&first_base](node_index node,char edge_label ) { first_base = rc(edge_label);});
         int result;
         int i = 0;
-        graph_call_incoming_kmers(node,[&i,&result,&prev_node](node_index node,char base) {
+        graph.call_incoming_kmers_mine(node,[&i,&result,&prev_node](node_index node,char base) {
             if (node==prev_node) {
                 result = i;
             }
@@ -104,11 +115,11 @@ public:
         });
         return result;
     }
-    bool needs_offset(node_index node) {
+    bool needs_offset(node_index node) const {
         return (size(node) > graph.indegree(node));
     }
 
-    int relative_offset(node_index node,node_index prev_node) {
+    int relative_offset(node_index node,node_index prev_node) const {
         bool increment = needs_offset(node);
         int result;
         if (prev_node) {
@@ -120,22 +131,22 @@ public:
         return result + increment;
     }
 
-    const DeBruijnGraph & graph;
+    const GraphT & graph;
 };
 
 
 //template <class Wavelet = sdsl::wt_rlmn<sdsl::sd_vector<>>>
-template<class Wavelet = sdsl::wt_rlmn<>,class BitVector=bit_vector_small>
-class PathDatabaseBaselineWavelet : public PathDatabaseBaseline {
+template<class Wavelet = sdsl::wt_rlmn<>,class BitVector=default_bit_vector,bool check_correctness=false>
+class PathDatabaseBaselineWavelet : public PathDatabaseBaseline<DBGSuccinct> {
 public:
     using routing_table_t = vector<char>;
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
-    PathDatabaseBaselineWavelet(std::shared_ptr<const DeBruijnGraph> graph) : PathDatabaseBaseline(graph),
+    PathDatabaseBaselineWavelet(std::shared_ptr<const DBGSuccinct> graph) : PathDatabaseBaseline(graph),
                                                                               incoming_table(graph)
                                                                               {}
-
+                                                                              
     PathDatabaseBaselineWavelet(const vector<string> &raw_reads,
                                 size_t k_kmer = 21 /* default */) : PathDatabaseBaseline(raw_reads,k_kmer),
                                                                     incoming_table(graph)
@@ -174,14 +185,18 @@ public:
         for(int node=1;node<=graph.num_nodes();node++) {
             is_join_node.push_back(1);
             if (PathDatabaseBaseline::node_is_join(node)) {
-                for(int rc=0;rc<'N'_rc;rc++) { // don't need to store last branch as we only compute prefix sum excluding
-                                               // the branch which we came from (N in this case)
-                    auto branch_size = PathDatabaseBaseline::joins[node][tochar(rc)];
-                    if(branch_size) {
-                        is_join_node.push_back(0);
-                        edge_multiplicity_table_builder.push_back(branch_size);
-                    }
+                auto new_reads = PathDatabaseBaseline::joins[node]['$'];
+                if (new_reads) {
+                    is_join_node.push_back(0);
+                    edge_multiplicity_table_builder.push_back(new_reads);
                 }
+                cout << PathDatabaseBaseline::joins[node] << endl;
+                graph.call_incoming_kmers_mine(node,[&node,&edge_multiplicity_table_builder,
+                        &is_join_node,this](node_index prev_node,char c) {
+                    auto branch_size = PathDatabaseBaseline::joins[node][c];
+                    is_join_node.push_back(0);
+                    edge_multiplicity_table_builder.push_back(branch_size);
+                });
             }
         }
         is_join_node.push_back(1); // to also always end a block with 1
@@ -261,7 +276,7 @@ public:
         return consistent_node;
     }
 
-    void graph_call_incoming_kmers(node_index node,std::function<void(node_index, char)> callback) {
+    void graph_call_incoming_kmers(node_index node,std::function<void(node_index, char)> callback) const {
         for(auto c : "ACGTN"s) {
             auto new_node = graph.traverse_back(node,c);
             if (new_node) {
@@ -343,20 +358,21 @@ public:
         char base;
         while(true) {
             if (node_is_split(node)) {
+                routing_table.print_content(node);
                 base = routing_table.get(node,relative_position);
 
-//                //checkers
-//                auto& routing_table_naive = splits.at(node);
-//                auto rt_index = routing_table_naive.begin();
-//                advance(rt_index,relative_position);
-//                char base_check = *rt_index;
-//                auto new_relative_position = rank(routing_table_naive,tochar(base),relative_position)-1;
-
-//                //checkers
-//                assert(base_check == tochar(base));
-//                assert(rank_of_base == new_relative_position);
+                auto& routing_table_naive = splits.at(node);
+                auto rt_index = routing_table_naive.begin();
+                advance(rt_index,relative_position);
+                char base_check = *rt_index;
+                auto new_relative_position = rank(routing_table_naive,base,relative_position)-1;
 
                 relative_position = routing_table.rank(node,relative_position,base);
+
+                //checkers
+                assert(base_check == base);
+                assert(relative_position == new_relative_position);
+
             }
             else {
                 assert(graph.outdegree(node) == 1);
@@ -371,9 +387,9 @@ public:
             if (node_is_join(node)) {
                 // todo better name (it is a symbol that determines from which branch we came)
                 auto join_symbol = sequence[kmer_position-1];
-//                auto tv = PathDatabaseBaseline::incoming_table.branch_offset(node,join_symbol);
-//                auto cv = incoming_table.branch_offset(node,join_symbol);
-//                assert(tv==cv);
+                auto tv = PathDatabaseBaseline::branch_starting_offset(node,join_symbol);
+                auto cv = incoming_table.branch_offset(node,prev_node);
+                assert(tv==cv);
                 relative_position += incoming_table.branch_offset(node,prev_node);
             }
         }
@@ -405,7 +421,7 @@ public:
         auto new_node = graph.traverse(node,base);
 
         if (node_is_join(new_node)) {
-            return incoming_table.branch_size(new_node,graph_branch_id(node,new_node));
+            return incoming_table.branch_size(new_node,node);
         }
 
         return get_coverage(new_node);
@@ -436,13 +452,13 @@ public:
     }
 
     bool is_valid_path_id(path_id path_id) const {
-        return node_is_join(path_id.first) && path_id.second < incoming_table.branch_size(path_id.first,'$');
+        return node_is_join(path_id.first) && path_id.second < incoming_table.branch_size(path_id.first,0);
     }
 
     int number_of_reads_starting_at_node(node_index node) const {
         int result = 0;
         if (node_is_join(node)) {
-            result = incoming_table.branch_size(node,'$');
+            result = incoming_table.branch_size(node,0);
         }
         return result;
     }
@@ -570,7 +586,7 @@ public:
         if (node_is_join(node)) {
             graph_call_incoming_kmers(node,[&](node_index possible_node,char c) {
                 auto offset = incoming_table.branch_offset(node,possible_node);
-                if (offset <= relative_position && offset > prev_offset) {
+                if (offset <= relative_position && offset >= prev_offset) {
                     prev_node = possible_node;
                     prev_offset = offset;
                 }
@@ -584,11 +600,17 @@ public:
             });
         }
         if (!prev_node) {
+            cout << "N: " << joins.at(node).size() << endl;
+            D(graph.indegree(node));
+            D(incoming_table.size(node));
             assert(is_valid_path_id({node,relative_position}));
             return {node,relative_position};
         }
         assert(prev_node);
-        if (node_is_split(node)) {
+        if (node_is_split(prev_node)) {
+            cout << "XXX" << endl;
+            cout << node_get_last_char(node) << endl;
+            routing_table.print_content(prev_node);
             relative_position = routing_table.select(prev_node,relative_position+1,node_get_last_char(node));// +1 as relative_position is 0-based
         }
         return get_global_path_id(prev_node,relative_position);
@@ -597,7 +619,6 @@ public:
 private:
     RoutingTable<Wavelet> routing_table;
     IncomingTable<BitVector> incoming_table;
-
 };
 
 #endif /* path_database_baseline_hpp */

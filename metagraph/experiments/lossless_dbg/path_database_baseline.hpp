@@ -22,18 +22,24 @@ using namespace std;
 // todo find a tool that removes this relative namespacing issue
 // say to Mikhail that "de_bruijn_graph" instead of "metagraph/de_bruijn_graph" is the same violation as this
 using node_index = DeBruijnGraph::node_index;
-//using path_id = pair<node_index,int>;
 
-class PathDatabaseBaseline : public PathDatabase<pair<node_index,int>> {
+using path_id = pair<node_index,int>;
+
+template<typename GraphT=DBGSuccinct>
+class PathDatabaseBaseline : public PathDatabase<pair<node_index,int>,GraphT,GraphT> {
 public:
     using routing_table_t = vector<char>;
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
-    explicit PathDatabaseBaseline(std::shared_ptr<const DeBruijnGraph> graph) : PathDatabase(graph), graph(*graph_) {}
+    explicit PathDatabaseBaseline(std::shared_ptr<const GraphT> graph) :
+                PathDatabase<pair<node_index,int>,GraphT,GraphT>(graph),
+                graph(*(this->graph_)) {}
 
     explicit PathDatabaseBaseline(const vector<string> &raw_reads,
-                 size_t k_kmer = 21 /* default kmer */) : PathDatabase(raw_reads,k_kmer), graph(*graph_) {}
+                 size_t k_kmer = 21 /* default kmer */) :
+                         PathDatabase<pair<node_index,int>,GraphT,GraphT>(raw_reads,k_kmer),
+                         graph(*(this->graph_)) {}
 
     node_index starting_node(const string& sequence) {
         return graph.kmer_to_node(sequence.substr(0,graph.get_k()));
@@ -183,11 +189,11 @@ public:
 
     std::vector<path_id> get_paths_going_through(const std::string &str) const override {};
 
-    std::vector<path_id> get_paths_going_through(PathDatabase::node_index node) const override {};
+    std::vector<path_id> get_paths_going_through(node_index node) const override {};
 
-    PathDatabase::node_index get_next_node(PathDatabase::node_index node, path_id path) const override {};
+    node_index get_next_node(node_index node, path_id path) const override {};
 
-    PathDatabase::node_index get_next_consistent_node(const std::string &history) const override {};
+    node_index get_next_consistent_node(const std::string &history) const override {};
 
     void serialize(const fs::path& folder) const {};
 
@@ -202,7 +208,7 @@ protected:
     std::set<node_index> additional_joins;
     std::set<node_index> additional_splits;
 
-    const DeBruijnGraph & graph;
+    const GraphT & graph;
 
 };
 

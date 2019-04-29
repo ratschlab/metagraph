@@ -76,7 +76,7 @@ vector<string> reads_for_testing_short = {"ATGCGATCGATATGCGAGA",
                                           "ACTGACGAGACACAGATGC"};
 
 template <typename T>
-void check_compression_decompression(PathDatabase<T>& db,vector<string>& reads) {
+void check_compression_decompression(T& db,vector<string>& reads) {
     auto handles = db.encode(reads);
     vector<string> decompressed_reads;
     decompressed_reads.reserve(handles.size());
@@ -165,12 +165,25 @@ void short_serdes_test() {
     serialization_deserialization_test<T>(reads_for_testing_short,5);
 }
 
+TEST(PathDatabase,IncomingTable) {
+    DBGSuccinct graph = DBGSuccinct(21);
+    IncomingTable table(graph);
+    table.joins = IncomingTable<>::bit_vector_t({1,0,0,1,0,1,1,0,1});
+    vector<int> v = {1,2,3,4};
+    table.edge_multiplicity_table = sdsl::enc_vector<>(v);
+    ASSERT_EQ(table.branch_size_rank(1,0),1);
+    ASSERT_EQ(table.branch_size_rank(1,1),2);
+    ASSERT_EQ(table.branch_size_rank(2,0),3);
+    ASSERT_EQ(table.size(3),0);
+    ASSERT_EQ(table.branch_size_rank(4,0),4);
+}
+
 TEST(PathDatabase,IdentityTestCompressedReads) {
     short_identity_test<PathDatabaseListBC>();
 }
 
 TEST(PathDatabase,IdentityTestPathDatabaseBaseline) {
-    short_identity_test<PathDatabaseBaseline>();
+    short_identity_test<PathDatabaseBaseline<>>();
 }
 
 TEST(PathDatabase,IdentityTestPathDatabaseBaselineWaveletDeprecated) {

@@ -21,11 +21,6 @@ void transform_to_fasta(const string &filename, const vector <string> &reads) {
     myfile.close();
 }
 
-template<typename T>
-d_t &d_t::operator,(const T &first) {
-    std::cerr << ' ' <<  x;
-    return *this;
-}
 
 void write_reads_to_fasta(const vector <string> &reads, const string &filename) {
     transform_to_fasta(filename,reads);

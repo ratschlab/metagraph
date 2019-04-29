@@ -47,12 +47,16 @@ void save_string(const string &to_save,const string &filename);
 //std::istream& deserialize(std::istream& is, std::vector<POD>& v);
 
 struct d_t {
-    template<typename T> d_t & operator,(const T & x);
-};
+    template<typename T>
+    d_t operator,(const T &first) {
+        std::cerr << ' ' <<  x;
+        return *this;
+    }
+} _d;
 
 
 
-#define D(args ...) { d_t, "|", __LINE__, "|", #args, ":", args, "\n"; }
+#define D(args ...) { _d, "|", __LINE__, "|", #args, ":", args, "\n"; }
 
 void transform_to_fasta(const string &filename,const vector<string>& reads);
 
