@@ -9,15 +9,15 @@ using utils::remove_suffix;
 namespace annotate {
 
 template <>
-const std::string RowFlatAnnotator::kFileExtension = kRowPackedExtension;
+const std::string RowFlatAnnotator::kExtension = kRowPackedExtension;
 template <>
-const std::string RainbowfishAnnotator::kFileExtension = kRainbowfishExtension;
+const std::string RainbowfishAnnotator::kExtension = kRainbowfishExtension;
 template <>
-const std::string BRWTCompressed<std::string>::kFileExtension = kBRWTExtension;
+const std::string BRWTCompressed<std::string>::kExtension = kBRWTExtension;
 template <>
-const std::string BinRelWT_sdslAnnotator::kFileExtension = kBinRelWT_sdslExtension;
+const std::string BinRelWT_sdslAnnotator::kExtension = kBinRelWT_sdslExtension;
 template <>
-const std::string BinRelWTAnnotator::kFileExtension = kBinRelWTExtension;
+const std::string BinRelWTAnnotator::kExtension = kBinRelWTExtension;
 
 
 template <class BinaryMatrixType, typename Label>
@@ -97,8 +97,7 @@ template <class BinaryMatrixType, typename Label>
 void
 StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::serialize(const std::string &filename) const {
-    std::ofstream outstream(remove_suffix(filename, kFileExtension)
-                                                         + kFileExtension,
+    std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension,
                             std::ios::binary);
     if (!outstream.good()) {
         throw std::ofstream::failure("Bad stream");
@@ -115,8 +114,7 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
         std::cerr << "Warning: Can't merge static annotators."
                      " Only the first will be loaded." << std::endl;
 
-    std::ifstream instream(remove_suffix(filenames.at(0), kFileExtension)
-                                                            + kFileExtension,
+    std::ifstream instream(remove_suffix(filenames.at(0), kExtension) + kExtension,
                            std::ios::binary);
     if (!instream.good())
         return false;
