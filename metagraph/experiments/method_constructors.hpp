@@ -10,6 +10,7 @@
 #include "vector_row_binmat.hpp"
 #include "partitionings.hpp"
 #include "utils.hpp"
+#include "threading.hpp"
 
 
 template <typename T>
@@ -289,7 +290,7 @@ subsample_rows(const std::vector<std::unique_ptr<BitVector>> &source_columns,
     assert(selector->num_set_bits() == num_selected_rows);
 
     std::vector<std::unique_ptr<bit_vector>> columns(source_columns.size());
-    utils::ThreadPool thread_pool(num_threads);
+    ThreadPool thread_pool(num_threads);
     for (uint64_t i = 0; i < columns.size(); ++i) {
         thread_pool.enqueue(
             [&](auto i, const auto *selector, auto num_selected_rows) {

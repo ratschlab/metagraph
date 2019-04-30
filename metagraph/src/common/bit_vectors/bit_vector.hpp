@@ -11,6 +11,10 @@
 #include "bitmap.hpp"
 
 
+sdsl::bit_vector to_sdsl(const std::vector<bool> &vector);
+sdsl::bit_vector to_sdsl(std::vector<bool>&& vector);
+
+
 class bit_vector : public bitmap {
   public:
     virtual ~bit_vector() {};
@@ -20,19 +24,43 @@ class bit_vector : public bitmap {
     virtual uint64_t rank0(uint64_t id) const;
     // Returns the i-th set bit, starting from 1
     virtual uint64_t select1(uint64_t i) const = 0;
+
+    virtual uint64_t next1(uint64_t id) const = 0;
+    virtual uint64_t prev1(uint64_t id) const = 0;
+
+    virtual void insert_bit(uint64_t id, bool val) = 0;
+    virtual void delete_bit(uint64_t id) = 0;
     virtual void set(uint64_t id, bool val) override = 0;
     // Can be redefined, e.g. without rebalancing
     virtual void setBitQuick(uint64_t id, bool val) { set(id, val); };
+
     virtual bool operator[](uint64_t id) const override = 0;
     virtual uint64_t get_int(uint64_t id, uint32_t width) const override = 0;
-    virtual void insertBit(uint64_t id, bool val) = 0;
-    virtual void deleteBit(uint64_t id) = 0;
+
     virtual bool load(std::istream &in) = 0;
     virtual void serialize(std::ostream &out) const = 0;
+
     virtual uint64_t size() const override = 0;
     virtual uint64_t num_set_bits() const override { return rank1(size() - 1); }
 
-    // FYI: This function invalidates the current object
+    /*
+        Convert vector to other types:
+            - bit_vector_small
+            - bit_vector_smart
+            - bit_vector_dyn
+            - bit_vector_stat
+            - bit_vector_sd
+            - bit_vector_rrr<3>
+            - bit_vector_rrr<8>
+            - bit_vector_rrr<15>
+            - bit_vector_rrr<31>
+            - bit_vector_rrr<63>
+            - bit_vector_rrr<127>
+            - bit_vector_rrr<255>
+            - sdsl::bit_vector
+
+        FYI: This function invalidates the current object
+    */
     template <class Vector>
     Vector convert_to();
 
@@ -41,7 +69,7 @@ class bit_vector : public bitmap {
 
     virtual std::unique_ptr<bit_vector> copy() const = 0;
 
-    virtual std::vector<bool> to_vector() const;
+    virtual sdsl::bit_vector to_vector() const;
 
     template <class Vector>
     void add_to(Vector *other) const;
@@ -55,8 +83,7 @@ std::ostream& operator<<(std::ostream &os, const bit_vector &bv);
 class bit_vector_dyn : public bit_vector {
   public:
     explicit bit_vector_dyn(uint64_t size = 0, bool value = 0);
-    template <class BitVector>
-    explicit bit_vector_dyn(const BitVector &vector);
+    explicit bit_vector_dyn(const sdsl::bit_vector &vector);
     bit_vector_dyn(std::initializer_list<bool> init);
 
     virtual std::unique_ptr<bit_vector> copy() const override;
@@ -64,24 +91,26 @@ class bit_vector_dyn : public bit_vector {
     uint64_t rank1(uint64_t id) const override;
     uint64_t select1(uint64_t id) const override;
 
+    uint64_t next1(uint64_t id) const override;
+    uint64_t prev1(uint64_t id) const override;
+
     void set(uint64_t id, bool val) override;
     void setBitQuick(uint64_t id, bool val) override;
     bool operator[](uint64_t id) const override;
     uint64_t get_int(uint64_t id, uint32_t width) const override;
 
-    void insertBit(uint64_t id, bool val) override;
-    void deleteBit(uint64_t id) override;
+    void insert_bit(uint64_t id, bool val) override;
+    void delete_bit(uint64_t id) override;
 
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
 
-    uint64_t size() const  override { return vector_.size(); }
+    uint64_t size() const override { return vector_.size(); }
+    uint64_t num_set_bits() const override { return vector_.count1(); }
 
     void call_ones(const std::function<void(uint64_t)> &callback) const override;
 
   private:
-    bit_vector_dyn(const std::vector<uint64_t> &bits_packed, size_t num_bits);
-
     libmaus2::bitbtree::BitBTree<6, 64> vector_;
 };
 
@@ -91,7 +120,8 @@ class bit_vector_stat : public bit_vector {
 
   public:
     explicit bit_vector_stat(uint64_t size = 0, bool value = 0);
-    explicit bit_vector_stat(const std::vector<bool> &vector);
+    explicit bit_vector_stat(const sdsl::bit_vector &vector) noexcept
+          : bit_vector_stat(sdsl::bit_vector(vector)) {}
     explicit bit_vector_stat(const bit_vector_stat &other);
     bit_vector_stat(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
                     uint64_t size);
@@ -107,18 +137,23 @@ class bit_vector_stat : public bit_vector {
     uint64_t rank1(uint64_t id) const override;
     uint64_t select1(uint64_t id) const override;
 
+    uint64_t next1(uint64_t id) const override;
+    uint64_t prev1(uint64_t id) const override;
+
     void set(uint64_t id, bool val) override;
     bool operator[](uint64_t id) const override;
     uint64_t get_int(uint64_t id, uint32_t width) const override;
 
-    void insertBit(uint64_t id, bool val) override;
-    void deleteBit(uint64_t id) override;
+    void insert_bit(uint64_t id, bool val) override;
+    void delete_bit(uint64_t id) override;
 
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
 
     uint64_t size() const override { return vector_.size(); }
     uint64_t num_set_bits() const override { return num_set_bits_; }
+
+    sdsl::bit_vector to_vector() const override { return vector_; }
 
     void call_ones(const std::function<void(uint64_t)> &callback) const override;
 
@@ -141,8 +176,6 @@ class bit_vector_stat : public bit_vector {
 class bit_vector_sd : public bit_vector {
   public:
     explicit bit_vector_sd(uint64_t size = 0, bool value = false);
-    template <class BitVector>
-    explicit bit_vector_sd(const BitVector &vector);
     explicit bit_vector_sd(const sdsl::bit_vector &vector);
     explicit bit_vector_sd(const bit_vector_sd &other);
 
@@ -158,21 +191,25 @@ class bit_vector_sd : public bit_vector {
     virtual std::unique_ptr<bit_vector> copy() const override;
 
     uint64_t rank1(uint64_t id) const override;
+    uint64_t select0(uint64_t id) const;
     uint64_t select1(uint64_t id) const override;
+
+    uint64_t next1(uint64_t id) const override;
+    uint64_t prev1(uint64_t id) const override;
 
     void set(uint64_t id, bool val) override;
     bool operator[](uint64_t id) const override;
     uint64_t get_int(uint64_t id, uint32_t width) const override;
 
-    void insertBit(uint64_t id, bool val) override;
-    void deleteBit(uint64_t id) override;
+    void insert_bit(uint64_t id, bool val) override;
+    void delete_bit(uint64_t id) override;
 
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
 
     uint64_t size() const override { return vector_.size(); }
 
-    std::vector<bool> to_vector() const override;
+    sdsl::bit_vector to_vector() const override;
 
     void call_ones(const std::function<void(uint64_t)> &callback) const override;
 
@@ -211,19 +248,22 @@ class bit_vector_rrr : public bit_vector {
     uint64_t select0(uint64_t id) const;
     uint64_t select1(uint64_t id) const override;
 
+    uint64_t next1(uint64_t id) const override;
+    uint64_t prev1(uint64_t id) const override;
+
     void set(uint64_t id, bool val) override;
     bool operator[](uint64_t id) const override;
     uint64_t get_int(uint64_t id, uint32_t width) const override;
 
-    void insertBit(uint64_t id, bool val) override;
-    void deleteBit(uint64_t id) override;
+    void insert_bit(uint64_t id, bool val) override;
+    void delete_bit(uint64_t id) override;
 
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
 
     uint64_t size() const override { return vector_.size(); }
 
-    std::vector<bool> to_vector() const override;
+    sdsl::bit_vector to_vector() const override;
 
     void call_ones(const std::function<void(uint64_t)> &callback) const override;
 
@@ -246,19 +286,22 @@ class bit_vector_adaptive : public bit_vector {
     virtual uint64_t rank1(uint64_t id) const override final;
     virtual uint64_t select1(uint64_t id) const override final;
 
+    virtual uint64_t next1(uint64_t id) const override final;
+    virtual uint64_t prev1(uint64_t id) const override final;
+
     virtual void set(uint64_t id, bool val) override final;
     virtual bool operator[](uint64_t id) const override final;
     virtual uint64_t get_int(uint64_t id, uint32_t width) const override final;
 
-    virtual void insertBit(uint64_t id, bool val) override final;
-    virtual void deleteBit(uint64_t id) override final;
+    virtual void insert_bit(uint64_t id, bool val) override final;
+    virtual void delete_bit(uint64_t id) override final;
 
     virtual bool load(std::istream &in) override final;
     virtual void serialize(std::ostream &out) const override final;
 
     virtual uint64_t size() const override final;
 
-    virtual std::vector<bool> to_vector() const override final;
+    virtual sdsl::bit_vector to_vector() const override final;
 
     template <class T>
     using VoidCall = std::function<void(T)>;
@@ -297,14 +340,14 @@ class bit_vector_adaptive : public bit_vector {
  */
 template <bit_vector_adaptive::DefineRepresentation optimal_representation>
 class bit_vector_adaptive_stat : public bit_vector_adaptive {
+    friend bit_vector;
+
   public:
     explicit bit_vector_adaptive_stat(uint64_t size = 0, bool value = false);
 
     template <class BitVector>
     explicit bit_vector_adaptive_stat(const BitVector &vector)
-      : bit_vector_adaptive_stat(bit_vector_stat(vector).convert_to<sdsl::bit_vector>()) {}
-
-    explicit bit_vector_adaptive_stat(const sdsl::bit_vector &vector);
+      : bit_vector_adaptive_stat(static_cast<bit_vector&&>(bit_vector_stat(vector))) {}
 
     bit_vector_adaptive_stat(const VoidCall<const VoidCall<uint64_t>&> &call_ones,
                              uint64_t size,
@@ -314,6 +357,10 @@ class bit_vector_adaptive_stat : public bit_vector_adaptive {
       : bit_vector_adaptive_stat(sdsl::bit_vector(init)) {}
 
     virtual std::unique_ptr<bit_vector> copy() const override final;
+
+  private:
+    explicit bit_vector_adaptive_stat(const bit_vector &vector);
+    bit_vector_adaptive_stat(bit_vector&& vector);
 };
 
 /**

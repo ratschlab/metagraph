@@ -12,11 +12,8 @@
 template <typename BitVector = bit_vector_sd>
 class RowConcatenated : public BinaryMatrix {
   public:
-    using RowCallback = std::function<void(const std::vector<Column> &)>;
-    using ValueCallback = std::function<void(Row, Column)>;
-
     RowConcatenated() {}
-    RowConcatenated(const std::function<void(RowCallback)> &call_rows,
+    RowConcatenated(const std::function<void(const RowCallback&)> &call_rows,
                     uint64_t num_columns,
                     uint64_t num_rows,
                     uint64_t num_set_bits);

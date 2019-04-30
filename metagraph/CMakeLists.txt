@@ -44,20 +44,13 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     -Wno-unused-function \
     -Wno-old-style-cast \
     -Wno-atomic-alignment \
-    -Wno-unused-parameter \
     -Wno-extra-semi-stmt \
   ")
 endif()
 
 find_package(OpenMP REQUIRED)
-if(NOT TARGET OpenMP::OpenMP_CXX)
-    add_library(OpenMP_TARGET INTERFACE)
-    add_library(OpenMP::OpenMP_CXX ALIAS OpenMP_TARGET)
-    target_compile_options(OpenMP_TARGET INTERFACE ${OpenMP_CXX_FLAGS})
-    find_package(Threads REQUIRED)
-    target_link_libraries(OpenMP_TARGET INTERFACE Threads::Threads)
-    target_link_libraries(OpenMP_TARGET INTERFACE ${OpenMP_CXX_FLAGS})
-endif()
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 
 if(NOT DEFINED WITH_AVX)
 set(WITH_AVX TRUE)
@@ -108,6 +101,17 @@ set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg -g")
 
 # Debug build type
 set(CMAKE_CXX_FLAGS_DEBUG "-O2 -g")
+
+# Link time optimization
+if(LINK_OPT)
+  string(APPEND CMAKE_CXX_FLAGS " -flto")
+  string(APPEND CMAKE_EXE_LINKER_FLAGS " -flto")
+  if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+    set(CMAKE_AR  "gcc-ar")
+    set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> qcs <TARGET> <LINK_FLAGS> <OBJECTS>")
+    set(CMAKE_CXX_ARCHIVE_FINISH   true)
+  endif()
+endif()
 
 # Thread sanitizer build type
 set(CMAKE_CXX_FLAGS_THREADS "-DNDEBUG -O2 -g -fsanitize=thread")
@@ -168,32 +172,37 @@ add_subdirectory(
 
 set(FOLLY_LIBRARIES FOLLY_LIBRARIES-NOTFOUND)
 find_library(FOLLY_LIBRARIES
-  NAMES libfolly.a folly
+  NAMES folly
   HINTS
   ENV LD_LIBRARY_PATH
   PATHS
-  ~/.linuxbrew/lib/
+    ~/.linuxbrew/lib
 )
-
 if(FOLLY_LIBRARIES)
-  find_library(LIBERTY iberty HINTS ENV LD_LIBRARY_PATH PATHS ~/.linuxbrew/lib)
+  string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
+  set(METALIBS ${METALIBS}
+    ${FOLLY_LIBRARIES}
+    -ldouble-conversion
+    -ldl
+    -lboost_regex
+    -lboost_filesystem
+    -lboost_program_options
+  )
+  if(NOT BUILD_STATIC)
+    set(METALIBS ${METALIBS}
+      -lglog
+      -lgflags
+    )
+  endif()
+  find_library(LIBERTY
+    NAMES iberty
+    HINTS
+    ENV LD_LIBRARY_PATH
+    PATHS
+      ~/.linuxbrew/lib
+  )
   if(LIBERTY)
-    # link dynamically
-    message("Linking Folly dynamically")
-    string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
-    set(METALIBS -lfolly -liberty -lglog -lgflags -ldouble-conversion -ldl -lboost_regex -lboost_filesystem -lboost_program_options)
-  else()
-    # check if found folly library is static
-    get_filename_component(FOLLY_FILE ${FOLLY_LIBRARIES} NAME)
-    if(FOLLY_FILE STREQUAL "libfolly.a")
-      # link statically
-      message("Linking Folly statically")
-      string(APPEND CMAKE_CXX_FLAGS " -D_USE_FOLLY")
-      set(METALIBS ${FOLLY_LIBRARIES})
-    else()
-      set(FOLLY_LIBRARIES FOLLY_LIBRARIES-NOTFOUND)
-      message(WARNING "Please rebuild Folly statically.")
-    endif()
+    set(METALIBS ${METALIBS} ${LIBERTY})
   endif()
 else()
   message(WARNING "Folly was not found.\n"
@@ -222,7 +231,6 @@ set(METALIBS ${METALIBS}
   -lbrwt
   -ljsoncpp
   progress_bar
-  OpenMP::OpenMP_CXX
 )
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   set(METALIBS ${METALIBS} -latomic)

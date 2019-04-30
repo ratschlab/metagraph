@@ -6,6 +6,7 @@
 #define private public
 
 #include "dbg_succinct.hpp"
+#include "boss.hpp"
 #include "annotated_dbg.hpp"
 #include "annotate_column_compressed.hpp"
 

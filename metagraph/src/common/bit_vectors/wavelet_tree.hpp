@@ -16,14 +16,23 @@ class wavelet_tree {
     virtual uint64_t rank(uint64_t c, uint64_t i) const = 0;
     virtual uint64_t select(uint64_t c, uint64_t i) const = 0;
     virtual uint64_t operator[](uint64_t id) const = 0;
+
+    // get the position of the next value |var| in subvector [id, ...]
+    virtual uint64_t next(uint64_t id, uint64_t val) const = 0;
+    // get the position of the previous value |var| in subvector [..., id]
+    // if doesn't exist, return size()
+    virtual uint64_t prev(uint64_t id, uint64_t val) const = 0;
+
     virtual void set(uint64_t id, uint64_t val) = 0;
     virtual void insert(uint64_t id, uint64_t val) = 0;
     virtual void remove(uint64_t id) = 0;
+    virtual void clear() = 0;
+
     virtual uint64_t size() const = 0;
     virtual uint8_t logsigma() const = 0;
+
     virtual bool load(std::istream &in) = 0;
     virtual void serialize(std::ostream &out) const = 0;
-    virtual void clear() = 0;
 
     // FYI: This function invalidates the current object
     template <class WaveletTree>
@@ -52,6 +61,9 @@ class wavelet_tree_stat : public wavelet_tree {
     uint64_t rank(uint64_t c, uint64_t i) const;
     uint64_t select(uint64_t c, uint64_t i) const;
     uint64_t operator[](uint64_t id) const;
+
+    uint64_t next(uint64_t id, uint64_t val) const;
+    uint64_t prev(uint64_t id, uint64_t val) const;
 
     void set(uint64_t id, uint64_t val);
     void insert(uint64_t id, uint64_t val);
@@ -94,6 +106,9 @@ class wavelet_tree_dyn : public wavelet_tree {
     uint64_t select(uint64_t c, uint64_t i) const;
     uint64_t operator[](uint64_t id) const;
 
+    uint64_t next(uint64_t id, uint64_t val) const;
+    uint64_t prev(uint64_t id, uint64_t val) const;
+
     void set(uint64_t id, uint64_t val);
     void insert(uint64_t id, uint64_t val);
     void remove(uint64_t id);
@@ -128,6 +143,9 @@ class wavelet_tree_small : public wavelet_tree {
     uint64_t rank(uint64_t c, uint64_t i) const;
     uint64_t select(uint64_t c, uint64_t i) const;
     uint64_t operator[](uint64_t id) const;
+
+    uint64_t next(uint64_t id, uint64_t val) const;
+    uint64_t prev(uint64_t id, uint64_t val) const;
 
     void set(uint64_t id, uint64_t val);
     void insert(uint64_t id, uint64_t val);

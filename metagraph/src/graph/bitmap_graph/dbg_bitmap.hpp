@@ -8,7 +8,7 @@
 #include "bit_vector.hpp"
 
 
-class DBGSDConstructor;
+class DBGBitmapConstructor;
 
 /**
  * Node-centric de Bruijn graph
@@ -16,15 +16,15 @@ class DBGSDConstructor;
  * In canonical mode, for each k-mer in the graph, its
  * reverse complement is stored in the graph as well.
  */
-class DBGSD : public DeBruijnGraph {
-    friend DBGSDConstructor;
+class DBGBitmap : public DeBruijnGraph {
+    friend DBGBitmapConstructor;
 
   public:
     // Initialize complete graph
-    explicit DBGSD(size_t k, bool canonical_mode = false);
+    explicit DBGBitmap(size_t k, bool canonical_mode = false);
 
     // Initialize graph from builder
-    explicit DBGSD(DBGSDConstructor *builder);
+    explicit DBGBitmap(DBGBitmapConstructor *builder);
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
@@ -58,26 +58,9 @@ class DBGSD : public DeBruijnGraph {
     void adjacent_incoming_nodes(node_index node,
                                  std::vector<node_index> *source_nodes) const;
 
-    size_t outdegree(node_index) const {
-        // TODO: Complete outdegree for DBGSD.
-        throw std::runtime_error("Not implemented");
-    }
+    size_t outdegree(node_index node) const;
 
-    size_t indegree(node_index) const {
-        // TODO: Complete outdegree for DBGSD.
-        throw std::runtime_error("Not implemented");
-    }
-
-    template <class... T>
-    using Call = typename std::function<void(T...)>;
-
-    // traverse all nodes in graph
-    void call_kmers(Call<node_index, const std::string&> callback) const;
-
-    // call paths (or simple paths if |split_to_contigs| is true) that cover
-    // exactly all kmers in graph
-    void call_sequences(Call<const std::string&> callback,
-                        bool split_to_contigs = false) const;
+    size_t indegree(node_index node) const;
 
     node_index kmer_to_node(const std::string &kmer) const;
 
@@ -95,12 +78,16 @@ class DBGSD : public DeBruijnGraph {
     bool load(std::istream &in);
     bool load(const std::string &filename);
 
-    bool operator==(const DBGSD &other) const { return equals(other, false); }
-    bool operator!=(const DBGSD &other) const { return !(*this == other); }
+    bool operator==(const DBGBitmap &other) const { return equals(other, false); }
+    bool operator!=(const DBGBitmap &other) const { return !(*this == other); }
 
-    bool equals(const DBGSD &other, bool verbose = false) const;
+    bool operator==(const DeBruijnGraph &other) const;
 
-    friend std::ostream& operator<<(std::ostream &out, const DBGSD &graph);
+    bool equals(const DBGBitmap &other, bool verbose = false) const;
+
+    inline bool is_complete() const { return complete_; }
+
+    friend std::ostream& operator<<(std::ostream &out, const DBGBitmap &graph);
 
     const std::string &alphabet;
 
@@ -121,15 +108,13 @@ class DBGSD : public DeBruijnGraph {
     Kmer node_to_kmer(node_index node) const;
     node_index to_node(const Kmer &kmer) const;
 
-    void call_paths(Call<const std::vector<node_index>,
-                         const std::vector<uint8_t>&> callback,
-                    bool split_to_contigs) const;
-
     size_t k_;
     bool canonical_mode_;
     KmerExtractor2Bit seq_encoder_;
 
     bit_vector_sd kmers_;
+
+    bool complete_ = false;
 
     static constexpr auto kExtension = ".bitmapdbg";
 };

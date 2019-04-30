@@ -9,9 +9,9 @@
 #define protected public
 #define private public
 
-#include "dbg_succinct.hpp"
-#include "dbg_succinct_merge.hpp"
-#include "dbg_succinct_construct.hpp"
+#include "boss.hpp"
+#include "boss_merge.hpp"
+#include "boss_construct.hpp"
 #include "utils.hpp"
 
 const std::string test_data_dir = "../tests/data";
@@ -19,8 +19,8 @@ const std::string test_data_dir = "../tests/data";
 
 TEST(DBGSuccinctMerge, TraversalMergeWithEmpty) {
     for (size_t k = 1; k < 10; ++k) {
-        DBG_succ first(k);
-        DBG_succ second(k);
+        BOSS first(k);
+        BOSS second(k);
         first.add_sequence(std::string(100, 'A'));
         first.merge(second);
         EXPECT_EQ(k + 1, first.num_nodes());
@@ -30,8 +30,8 @@ TEST(DBGSuccinctMerge, TraversalMergeWithEmpty) {
 
 TEST(DBGSuccinctMerge, TraversalMergeEmpty) {
     for (size_t k = 1; k < 10; ++k) {
-        DBG_succ first(k);
-        DBG_succ second(k);
+        BOSS first(k);
+        BOSS second(k);
         second.add_sequence(std::string(100, 'A'));
         first.merge(second);
         EXPECT_EQ(k + 1, first.num_nodes());
@@ -41,7 +41,7 @@ TEST(DBGSuccinctMerge, TraversalMergeEmpty) {
 
 TEST(DBGSuccinctMerge, TraversalMergeEmptyRandomTest) {
     for (size_t k = 1; k < 10; ++k) {
-        DBG_succ random(k);
+        BOSS random(k);
 
         for (size_t p = 0; p < 5; ++p) {
             size_t length = rand() % 10;
@@ -58,7 +58,7 @@ TEST(DBGSuccinctMerge, TraversalMergeEmptyRandomTest) {
             random.add_sequence(sequence, true);
         }
 
-        DBG_succ result(k);
+        BOSS result(k);
         result.merge(random);
 
         EXPECT_EQ(random, result);
@@ -67,8 +67,8 @@ TEST(DBGSuccinctMerge, TraversalMergeEmptyRandomTest) {
 
 TEST(DBGSuccinctMerge, TraversalMergeEqualPaths) {
     for (size_t k = 1; k < 10; ++k) {
-        DBG_succ first(k);
-        DBG_succ second(k);
+        BOSS first(k);
+        BOSS second(k);
         first.add_sequence(std::string(100, 'A'));
         second.add_sequence(std::string(50, 'A'));
         first.merge(second);
@@ -81,8 +81,8 @@ TEST(DBGSuccinctMerge, TraversalMergeEqualPaths) {
 
 TEST(DBGSuccinctMerge, TraversalMergeTwoPaths) {
     for (size_t k = 1; k < 10; ++k) {
-        DBG_succ first(k);
-        DBG_succ second(k);
+        BOSS first(k);
+        BOSS second(k);
         first.add_sequence(std::string(100, 'A'));
         second.add_sequence(std::string(50, 'C'));
         first.merge(second);
@@ -95,8 +95,8 @@ TEST(DBGSuccinctMerge, TraversalMergeTwoPaths) {
 
 TEST(DBGSuccinctMerge, TraversalMergeSinglePathWithTwo) {
     for (size_t k = 1; k < 10; ++k) {
-        DBG_succ first(k);
-        DBG_succ second(k);
+        BOSS first(k);
+        BOSS second(k);
         first.add_sequence(std::string(100, 'A'));
         second.add_sequence(std::string(50, 'C'));
         second.add_sequence(std::string(60, 'G'));
@@ -110,8 +110,8 @@ TEST(DBGSuccinctMerge, TraversalMergeSinglePathWithTwo) {
 
 TEST(DBGSuccinctMerge, TraversalMergeTwoGraphs) {
     for (size_t k = 1; k < 10; ++k) {
-        DBG_succ first(k);
-        DBG_succ second(k);
+        BOSS first(k);
+        BOSS second(k);
         first.add_sequence(std::string(100, 'A'));
         first.add_sequence(std::string(50, 'C'));
         first.add_sequence(std::string(60, 'G'));
@@ -119,7 +119,7 @@ TEST(DBGSuccinctMerge, TraversalMergeTwoGraphs) {
         second.add_sequence("AAACT", true);
         second.add_sequence("AAATG", true);
         second.add_sequence("ACTGA", true);
-        DBG_succ merged(k);
+        BOSS merged(k);
         merged.merge(second);
         merged.merge(first);
         first.merge(second);
@@ -129,22 +129,22 @@ TEST(DBGSuccinctMerge, TraversalMergeTwoGraphs) {
 
 TEST(DBGSuccinctMerge, TraversalMergeDisconnectedGraphs) {
     for (size_t k = 1; k < 10; ++k) {
-        DBGSuccConstructor constructor_first(k);
+        BOSSConstructor constructor_first(k);
         constructor_first.add_sequences({ std::string(100, 'A') });
-        DBG_succ first(&constructor_first);
+        BOSS first(&constructor_first);
         ASSERT_EQ(2u, first.num_edges());
 
-        DBGSuccConstructor constructor_second(k);
+        BOSSConstructor constructor_second(k);
         constructor_second.add_sequences({ std::string(50, 'C'),
                                            std::string(60, 'G') });
-        DBG_succ second(&constructor_second);
+        BOSS second(&constructor_second);
         ASSERT_EQ(3u, second.num_edges());
 
-        DBGSuccConstructor constructor_third(k);
+        BOSSConstructor constructor_third(k);
         constructor_third.add_sequences({ std::string(100, 'A'),
                                           std::string(50, 'C'),
                                           std::string(60, 'G') });
-        DBG_succ result(&constructor_third);
+        BOSS result(&constructor_third);
         ASSERT_EQ(4u, result.num_edges());
 
         first.switch_state(Config::DYN);
@@ -156,18 +156,18 @@ TEST(DBGSuccinctMerge, TraversalMergeDisconnectedGraphs) {
 
 TEST(DBGSuccinctMerge, ParallelMergeEmptyGraphs) {
     for (size_t k = 1; k < 10; ++k) {
-        DBG_succ first(k);
-        DBG_succ second(k);
+        BOSS first(k);
+        BOSS second(k);
 
-        std::vector<const DBG_succ*> graphs = { &first, &second };
+        std::vector<const BOSS*> graphs = { &first, &second };
 
-        DBG_succ *merged = merge::merge(graphs);
+        BOSS *merged = merge::merge(graphs);
 
-        std::unique_ptr<DBG_succ::Chunk> chunk {
+        std::unique_ptr<BOSS::Chunk> chunk {
             merge::merge_blocks_to_chunk(graphs, 0, 1, 1, 1)
         };
         chunk->serialize(test_data_dir + "/1");
-        DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
+        BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
             { test_data_dir + "/1" }
         );
 
@@ -182,20 +182,20 @@ TEST(DBGSuccinctMerge, ParallelMergeEmptyGraphs) {
 
 TEST(DBGSuccinctMerge, ParallelMergeTwoPaths) {
     for (size_t k = 1; k < 10; ++k) {
-        DBG_succ first(k);
-        DBG_succ second(k);
+        BOSS first(k);
+        BOSS second(k);
         first.add_sequence(std::string(100, 'A'));
         second.add_sequence(std::string(50, 'C'));
 
-        std::vector<const DBG_succ*> graphs = { &first, &second };
+        std::vector<const BOSS*> graphs = { &first, &second };
 
-        DBG_succ *merged = merge::merge(graphs);
+        BOSS *merged = merge::merge(graphs);
 
-        std::unique_ptr<DBG_succ::Chunk> chunk {
+        std::unique_ptr<BOSS::Chunk> chunk {
             merge::merge_blocks_to_chunk(graphs, 0, 1, 1, 1)
         };
         chunk->serialize(test_data_dir + "/1");
-        DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
+        BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
             { test_data_dir + "/1" }
         );
 
@@ -210,21 +210,21 @@ TEST(DBGSuccinctMerge, ParallelMergeTwoPaths) {
 
 TEST(DBGSuccinctMerge, ParallelMergeSinglePathWithTwo) {
     for (size_t k = 1; k < 10; ++k) {
-        DBG_succ first(k);
-        DBG_succ second(k);
+        BOSS first(k);
+        BOSS second(k);
         first.add_sequence(std::string(100, 'A'));
         second.add_sequence(std::string(50, 'C'));
         second.add_sequence(std::string(60, 'G'));
 
-        std::vector<const DBG_succ*> graphs = { &first, &second };
+        std::vector<const BOSS*> graphs = { &first, &second };
 
-        DBG_succ *merged = merge::merge(graphs);
+        BOSS *merged = merge::merge(graphs);
 
-        std::unique_ptr<DBG_succ::Chunk> chunk {
+        std::unique_ptr<BOSS::Chunk> chunk {
             merge::merge_blocks_to_chunk(graphs, 0, 1, 1, 1)
         };
         chunk->serialize(test_data_dir + "/1");
-        DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
+        BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
             { test_data_dir + "/1" }
         );
 
@@ -239,9 +239,9 @@ TEST(DBGSuccinctMerge, ParallelMergeSinglePathWithTwo) {
 
 TEST(DBGSuccinctMerge, ParallelMergeThreeGraphs) {
     for (size_t k = 1; k < 10; ++k) {
-        DBG_succ first(k);
-        DBG_succ second(k);
-        DBG_succ third(k);
+        BOSS first(k);
+        BOSS second(k);
+        BOSS third(k);
         first.add_sequence("AAACT", true);
         first.add_sequence("ACTATG", true);
         second.add_sequence(std::string(50, 'C'));
@@ -249,15 +249,15 @@ TEST(DBGSuccinctMerge, ParallelMergeThreeGraphs) {
         third.add_sequence(std::string(60, 'A'));
         third.add_sequence(std::string(60, 'T'));
 
-        std::vector<const DBG_succ*> graphs = { &first, &second, &third };
+        std::vector<const BOSS*> graphs = { &first, &second, &third };
 
-        DBG_succ *merged = merge::merge(graphs);
+        BOSS *merged = merge::merge(graphs);
 
-        std::unique_ptr<DBG_succ::Chunk> chunk {
+        std::unique_ptr<BOSS::Chunk> chunk {
             merge::merge_blocks_to_chunk(graphs, 0, 1, 1, 1)
         };
         chunk->serialize(test_data_dir + "/1");
-        DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
+        BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
             { test_data_dir + "/1" }
         );
 
@@ -273,9 +273,9 @@ TEST(DBGSuccinctMerge, ParallelMergeThreeGraphs) {
 
 TEST(DBGSuccinctMerge, ParallelChunkedMergeThreeGraphs) {
     for (size_t k = 1; k < 10; ++k) {
-        DBG_succ first(k);
-        DBG_succ second(k);
-        DBG_succ third(k);
+        BOSS first(k);
+        BOSS second(k);
+        BOSS third(k);
         first.add_sequence("AAACT", true);
         first.add_sequence("ACTATG", true);
         second.add_sequence(std::string(50, 'C'));
@@ -283,29 +283,29 @@ TEST(DBGSuccinctMerge, ParallelChunkedMergeThreeGraphs) {
         third.add_sequence(std::string(60, 'A'));
         third.add_sequence(std::string(60, 'T'));
 
-        std::vector<const DBG_succ*> graphs = { &first, &second, &third };
+        std::vector<const BOSS*> graphs = { &first, &second, &third };
 
-        DBG_succ *merged = merge::merge(graphs);
+        BOSS *merged = merge::merge(graphs);
 
         {
-            std::unique_ptr<DBG_succ::Chunk> chunk {
+            std::unique_ptr<BOSS::Chunk> chunk {
                 merge::merge_blocks_to_chunk(graphs, 0, 3, 1, 1)
             };
             chunk->serialize(test_data_dir + "/1");
         }
         {
-            std::unique_ptr<DBG_succ::Chunk> chunk {
+            std::unique_ptr<BOSS::Chunk> chunk {
                 merge::merge_blocks_to_chunk(graphs, 1, 3, 1, 1)
             };
             chunk->serialize(test_data_dir + "/2");
         }
         {
-            std::unique_ptr<DBG_succ::Chunk> chunk {
+            std::unique_ptr<BOSS::Chunk> chunk {
                 merge::merge_blocks_to_chunk(graphs, 2, 3, 1, 1)
             };
             chunk->serialize(test_data_dir + "/3");
         }
-        DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
+        BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
             { test_data_dir + "/1",
               test_data_dir + "/2",
               test_data_dir + "/3", }
@@ -323,9 +323,9 @@ TEST(DBGSuccinctMerge, ParallelChunkedMergeThreeGraphs) {
 
 TEST(DBGSuccinctMerge, ParallelDumpedChunkedMergeThreeGraphs) {
     for (size_t k = 1; k < 10; ++k) {
-        DBG_succ first(k);
-        DBG_succ second(k);
-        DBG_succ third(k);
+        BOSS first(k);
+        BOSS second(k);
+        BOSS third(k);
         first.add_sequence("AAACT", true);
         first.add_sequence("ACTATG", true);
         second.add_sequence(std::string(50, 'C'));
@@ -333,9 +333,9 @@ TEST(DBGSuccinctMerge, ParallelDumpedChunkedMergeThreeGraphs) {
         third.add_sequence(std::string(60, 'A'));
         third.add_sequence(std::string(60, 'T'));
 
-        std::vector<const DBG_succ*> graphs = { &first, &second, &third };
+        std::vector<const BOSS*> graphs = { &first, &second, &third };
 
-        DBG_succ *merged = merge::merge(graphs);
+        BOSS *merged = merge::merge(graphs);
         size_t num_chunks = 3;
 
         std::vector<std::string> files;
@@ -349,7 +349,7 @@ TEST(DBGSuccinctMerge, ParallelDumpedChunkedMergeThreeGraphs) {
             delete chunk;
         }
 
-        DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
+        BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
             files
         );
         ASSERT_TRUE(chunked_merged);
@@ -367,10 +367,10 @@ TEST(DBGSuccinctMerge, ParallelDumpedChunkedMergeThreeGraphs) {
 void random_testing_parallel_merge(size_t num_graphs, size_t num_sequences, size_t max_length,
                                    size_t num_threads, size_t num_bins_per_thread) {
     for (size_t k = 1; k < 10; ++k) {
-        std::vector<const DBG_succ*> graphs(num_graphs, NULL);
+        std::vector<const BOSS*> graphs(num_graphs, NULL);
 
         for (size_t i = 0; i < graphs.size(); ++i) {
-            DBG_succ *component = new DBG_succ(k);
+            BOSS *component = new BOSS(k);
 
             for (size_t p = 0; p < num_sequences; ++p) {
                 size_t length = rand() % max_length;
@@ -389,17 +389,17 @@ void random_testing_parallel_merge(size_t num_graphs, size_t num_sequences, size
             graphs[i] = component;
         }
 
-        DBG_succ *merged = merge::merge(graphs);
+        BOSS *merged = merge::merge(graphs);
 
-        std::unique_ptr<DBG_succ::Chunk> chunk {
+        std::unique_ptr<BOSS::Chunk> chunk {
             merge::merge_blocks_to_chunk(graphs, 0, 1, num_threads, num_bins_per_thread)
         };
         chunk->serialize(test_data_dir + "/1");
-        DBG_succ *chunked_merged = DBG_succ::Chunk::build_graph_from_chunks(
+        BOSS *chunked_merged = BOSS::Chunk::build_boss_from_chunks(
             { test_data_dir + "/1" }
         );
 
-        DBG_succ result(k);
+        BOSS result(k);
         for (size_t i = 0; i < graphs.size(); ++i) {
             result.merge(*graphs[i]);
         }

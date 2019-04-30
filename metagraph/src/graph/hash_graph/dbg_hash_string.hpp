@@ -40,15 +40,9 @@ class DBGHashString : public DeBruijnGraph {
                       const std::function<void(node_index)> &callback,
                       const std::function<bool()> &terminate = [](){ return false; }) const;
 
-    void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const {
-        // TODO: Complete call_outgoing_kmers for DBGHashString.
-        throw std::runtime_error("Not implemented");
-    }
+    void call_outgoing_kmers(node_index node, const OutgoingEdgeCallback &callback) const;
 
-    void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const {
-        // TODO: Complete call_incoming_kmers for DBGHashString.
-        throw std::runtime_error("Not implemented");
-    }
+    void call_incoming_kmers(node_index node, const IncomingEdgeCallback &callback) const;
 
     // Traverse the outgoing edge
     node_index traverse(node_index node, char next_char) const;
@@ -67,6 +61,8 @@ class DBGHashString : public DeBruijnGraph {
     size_t outdegree(node_index node) const;
     size_t indegree(node_index node) const;
 
+    void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const;
+
     node_index kmer_to_node(const std::string &kmer) const;
     std::string node_to_kmer(node_index node) const;
 
@@ -82,6 +78,8 @@ class DBGHashString : public DeBruijnGraph {
 
     bool load(std::istream &in);
     bool load(const std::string &filename);
+
+    bool operator==(const DeBruijnGraph &other) const;
 
   private:
     std::string encode_sequence(const std::string &sequence) const;

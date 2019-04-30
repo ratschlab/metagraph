@@ -145,6 +145,4 @@ void call_ones(const sdsl::bit_vector &vector,
 void call_zeros(const sdsl::bit_vector &vector,
                 const std::function<void(uint64_t)> &callback);
 
-uint64_t count_num_set_bits(const sdsl::bit_vector &vector);
-
 #endif // __BITMAP_HPP__

@@ -78,6 +78,22 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     bool load(std::istream &in);
     bool load(const std::string &filename);
 
+    bool operator==(const DeBruijnGraph &other) const {
+        if (!dynamic_cast<const DBGHashOrderedImpl<KMER>*>(&other))
+            throw std::runtime_error("Not implemented");
+
+        const auto& other_hash = *dynamic_cast<const DBGHashOrderedImpl<KMER>*>(&other);
+        if (k_ != other_hash.k_ || canonical_mode_ != other_hash.canonical_mode_)
+            return false;
+
+        for (const auto &kmer : kmers_) {
+            if (other_hash.kmers_.find(kmer) == other_hash.kmers_.end())
+                return false;
+        }
+
+        return true;
+    }
+
   private:
     Vector<Kmer> sequence_to_kmers(const std::string &sequence, bool canonical = false) const {
         return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical);
@@ -107,7 +123,7 @@ void DBGHashOrderedImpl<KMER>::add_sequence(const std::string &sequence,
         auto index_insert = kmers_.insert(kmer);
 
         if (index_insert.second && nodes_inserted)
-            nodes_inserted->insertBit(kmers_.size() - 1, true);
+            nodes_inserted->insert_bit(kmers_.size() - 1, true);
     }
 
     if (!canonical_mode_)
@@ -117,7 +133,7 @@ void DBGHashOrderedImpl<KMER>::add_sequence(const std::string &sequence,
         auto index_insert = kmers_.insert(kmer);
 
         if (index_insert.second && nodes_inserted)
-            nodes_inserted->insertBit(kmers_.size() - 1, true);
+            nodes_inserted->insert_bit(kmers_.size() - 1, true);
     }
 }
 
@@ -375,8 +391,7 @@ bool DBGHashOrdered::load(std::istream &in) {
 
         // the actual value of |canonical| will be set in load
         hash_dbg_ = initialize_graph(k, false);
-        hash_dbg_->load(in);
-        return in.good();
+        return hash_dbg_->load(in) && in.good();
     } catch (...) {
         return false;
     }

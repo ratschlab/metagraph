@@ -22,7 +22,7 @@ class Config {
     bool fasta_anno = false;
     bool to_adj_list = false;
     bool to_fasta = false;
-    bool contigs = false;
+    bool unitigs = false;
     bool count_kmers_query = false;
     bool query_presence = false;
     bool filter_present = false;
@@ -76,6 +76,7 @@ class Config {
     std::string fasta_header_delimiter;
     std::string anno_labels_delimiter = ":";
     std::string annotation_label = "";
+    std::string header = "";
 
     enum IdentityType {
         NO_IDENTITY = -1,
@@ -107,6 +108,7 @@ class Config {
     static StateType string_to_state(const std::string &string);
 
     enum AnnotationType {
+        Invalid = -1,
         ColumnCompressed = 1,
         RowCompressed,
         BRWT,

@@ -5,14 +5,9 @@
 #include <string>
 #include <vector>
 #include <deque>
-#include <thread>
-#include <mutex>
-#include <condition_variable>
-#include <future>
 #include <functional>
 #include <stdexcept>
 #include <queue>
-#include <atomic>
 #include <bitset>
 
 #if _USE_FOLLY
@@ -28,13 +23,14 @@ typedef std::vector<uint32_t> SmallVector;
 #endif
 
 #include "serialization.hpp"
+#include "binary_matrix.hpp"
 
 
 struct SmallVectorHash {
     std::size_t operator()(const SmallVector &vector) const;
 };
 
-class BinaryMatrixRowDynamic;
+class BinaryMatrix;
 
 
 namespace utils {
@@ -93,94 +89,6 @@ namespace utils {
                                              size_t length);
 
     uint32_t code_length(uint64_t a);
-
-
-    void set_num_threads(unsigned int num_threads);
-    unsigned int get_num_threads();
-
-    /**
-     * The code was copied and has been modified from:
-     * https://github.com/progschj/ThreadPool/blob/master/ThreadPool.h
-     */
-    class ThreadPool {
-      public:
-        ThreadPool(size_t num_workers, size_t max_num_tasks = -1);
-
-        template <class F, typename... Args>
-        auto enqueue(F&& f, Args&&... args) -> std::future<decltype(f(args...))> {
-            using return_type = typename std::result_of<F(Args...)>::type;
-            auto task = std::make_shared<std::packaged_task<return_type()>>(
-                std::bind(std::forward<F>(f), std::forward<Args>(args)...)
-            );
-
-            if (!workers.size()) {
-                (*task)();
-                return task->get_future();
-            } else {
-                std::unique_lock<std::mutex> lock(queue_mutex);
-                full_condition.wait(lock, [this]() {
-                    return this->tasks.size() < this->max_num_tasks_;
-                });
-                tasks.emplace([task](){ (*task)(); });
-            }
-            empty_condition.notify_one();
-
-            return task->get_future();
-        }
-
-        void join();
-
-        ~ThreadPool();
-
-      private:
-        void initialize(size_t num_threads);
-
-        std::vector<std::thread> workers;
-        std::queue<std::function<void()>> tasks;
-        size_t max_num_tasks_;
-
-        std::mutex queue_mutex;
-        std::condition_variable empty_condition;
-        std::condition_variable full_condition;
-
-        bool joining_;
-        bool stop_;
-    };
-
-
-    class AsyncActivity {
-      public:
-        template <class F, typename... Args>
-        auto run_async(F&& f, Args&&... args) -> decltype(f(args...)) {
-            {
-                std::unique_lock<std::mutex> lock(mutex_);
-                parallel_jobs_++;
-            }
-            auto result = f(args...);
-            {
-                std::unique_lock<std::mutex> lock(mutex_);
-                parallel_jobs_--;
-            }
-            cond_var_.notify_one();
-            return std::move(result);
-        }
-
-        template <class F, typename... Args>
-        auto run_unique(F&& f, Args&&... args) -> decltype(f(args...)) {
-            std::unique_lock<std::mutex> lock(mutex_);
-            while (parallel_jobs_ > 0) {
-                cond_var_.wait(lock);
-            }
-            return f(args...);
-        }
-
-      private:
-        size_t parallel_jobs_ = 0;
-
-        std::mutex mutex_;
-        std::condition_variable cond_var_;
-    };
-
 
     /** A faster alternative to std::allocator<T>
      *
@@ -333,14 +241,32 @@ namespace utils {
                             std::vector<kmer_label_pair>> index_heap_;
     };
 
-    using SetBitPositions = std::vector<uint64_t>;
-    void call_rows(const std::function<void(const SetBitPositions &)> &callback,
+    class RowsFromColumnsIterator {
+      public:
+        RowsFromColumnsIterator(std::unique_ptr<utils::RowsFromColumnsTransformer> transformer) {
+            transformer_ = std::move(transformer);
+        }
+
+        std::tuple<uint64_t, uint64_t> next_set_bit();
+        uint64_t values_left() { return transformer_->values_left(); };
+
+        std::vector<uint64_t> next_row();
+
+      private:
+        std::unique_ptr<utils::RowsFromColumnsTransformer> transformer_;
+
+        uint64_t i_ = 0;
+        uint64_t row_ = 0;
+        uint64_t column_;
+    };
+
+    void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
                    RowsFromColumnsTransformer&& transformer);
-    void call_rows(const std::function<void(const SetBitPositions &)> &callback,
-                   const BinaryMatrixRowDynamic &row_major_matrix);
+    void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
+                   const BinaryMatrix &row_major_matrix);
 
     template <typename... Args>
-    void call_rows(const std::function<void(const SetBitPositions &)> &callback,
+    void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
                    Args&&... args) {
         call_rows(callback,
                   RowsFromColumnsTransformer(std::forward<Args>(args)...));
@@ -428,6 +354,8 @@ namespace utils {
     std::vector<uint64_t> sample_indexes(uint64_t universe_size,
                                          uint64_t sample_size,
                                          std::mt19937 &gen);
+
+    template<class T> struct dependent_false : std::false_type {};
 
 } // namespace utils
 

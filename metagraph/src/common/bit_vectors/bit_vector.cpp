@@ -9,13 +9,35 @@ const double SD_SMALLER_THAN_RRR_MAX_DENSITY = 0.035;
 const double SD_SMALLER_THAN_STAT_MAX_DENSITY = 0.20;
 const double STAT_SMALLER_THAN_SD_MAX_DENSITY = 0.74;
 
+// TODO: run benchmarks and optimize these parameters
+const size_t MAX_ITER_BIT_VECTOR_STAT = 1000;
+const size_t MAX_ITER_BIT_VECTOR_DYN = 10;
+const size_t MAX_ITER_BIT_VECTOR_SD = 10;
+const size_t MAX_ITER_BIT_VECTOR_RRR = 10;
+
+
+sdsl::bit_vector to_sdsl(const std::vector<bool> &vector) {
+    sdsl::bit_vector result(vector.size(), 0);
+    for (size_t i = 0; i < vector.size(); ++i) {
+        if (vector[i])
+            result[i] = 1;
+    }
+    return result;
+}
+
+sdsl::bit_vector to_sdsl(std::vector<bool>&& vector) {
+    auto result = to_sdsl(vector);
+    vector = std::vector<bool>();
+    return result;
+}
+
 
 uint64_t bit_vector::rank0(uint64_t id) const {
     return std::min(id + 1, size()) - rank1(id);
 }
 
-std::vector<bool> bit_vector::to_vector() const {
-    std::vector<bool> result(size(), false);
+sdsl::bit_vector bit_vector::to_vector() const {
+    sdsl::bit_vector result(size(), false);
     call_ones([&result](auto i) { result[i] = true; });
     return result;
 }
@@ -39,14 +61,15 @@ void bit_vector::add_to(bitmap *other) const {
 
 
 std::ostream& operator<<(std::ostream &os, const bit_vector &bv) {
-    for (bool a : bv.to_vector()) {
-        os << a;
-    }
-    return os;
+    return os << bv.to_vector();
 }
 
 template <class Vector>
 Vector bit_vector::convert_to() {
+    static_assert(!std::is_same<Vector, bit_vector_smart>::value, "");
+    static_assert(!std::is_same<Vector, bit_vector_small>::value, "");
+    static_assert(!std::is_same<Vector, bit_vector_adaptive>::value, "");
+
     if (dynamic_cast<Vector*>(this)) {
         // to the same type, no conversion
         return dynamic_cast<Vector&&>(*this);
@@ -55,22 +78,13 @@ Vector bit_vector::convert_to() {
         // stat -> anything else
         return Vector(std::move(dynamic_cast<bit_vector_stat*>(this)->vector_));
 
-    } else if (dynamic_cast<bit_vector_adaptive*>(this)
-                && dynamic_cast<Vector*>(dynamic_cast<bit_vector_adaptive*>(this)->vector_.get())) {
-        // adaptive(x) -> x
-        return dynamic_cast<Vector&&>(*dynamic_cast<bit_vector_adaptive*>(this)->vector_);
-
-    // TODO: sd -> small if sparse enough
-    // TODO: rrr -> small if dense enough
-
-    // TODO: sd -> smart if sparse enough
-    // TODO: stat -> smart if dense enough
+    } else if (dynamic_cast<bit_vector_adaptive*>(this)) {
+        // adaptive(x) -> anything
+        return dynamic_cast<bit_vector_adaptive*>(this)->vector_->convert_to<Vector>();
 
     } else {
         // anything -> anything (slower: with full reconstruction)
-        sdsl::bit_vector bv(size(), 0);
-        call_ones([&bv](auto i) { bv[i] = true; });
-        return Vector(std::move(bv));
+        return Vector(to_vector());
     }
 }
 template bit_vector_dyn bit_vector::convert_to<bit_vector_dyn>();
@@ -83,12 +97,20 @@ template bit_vector_rrr<31> bit_vector::convert_to<bit_vector_rrr<31>>();
 template bit_vector_rrr<63> bit_vector::convert_to<bit_vector_rrr<63>>();
 template bit_vector_rrr<127> bit_vector::convert_to<bit_vector_rrr<127>>();
 template bit_vector_rrr<255> bit_vector::convert_to<bit_vector_rrr<255>>();
-template bit_vector_small bit_vector::convert_to<bit_vector_small>();
-template bit_vector_smart bit_vector::convert_to<bit_vector_smart>();
 template sdsl::bit_vector bit_vector::convert_to<sdsl::bit_vector>();
+template<> bit_vector_small bit_vector::convert_to() {
+    return bit_vector_small(std::move(*this));
+}
+template<> bit_vector_smart bit_vector::convert_to() {
+    return bit_vector_smart(std::move(*this));
+}
 
 template <class Vector>
 Vector bit_vector::copy_to() const {
+    static_assert(!std::is_same<Vector, bit_vector_smart>::value, "");
+    static_assert(!std::is_same<Vector, bit_vector_small>::value, "");
+    static_assert(!std::is_same<Vector, bit_vector_adaptive>::value, "");
+
     if (dynamic_cast<const Vector*>(this)) {
         // copy to the same type, no conversion
         return Vector(dynamic_cast<const Vector&>(*this));
@@ -98,23 +120,13 @@ Vector bit_vector::copy_to() const {
         auto bv = dynamic_cast<const bit_vector_stat*>(this)->vector_;
         return Vector(std::move(bv));
 
-    } else if (dynamic_cast<const bit_vector_adaptive*>(this)
-                && dynamic_cast<Vector*>(dynamic_cast<const bit_vector_adaptive*>(this)->vector_.get())) {
-        // copy adaptive(x) -> x
-        return Vector(dynamic_cast<const Vector&>(
-                *dynamic_cast<const bit_vector_adaptive*>(this)->vector_
-        ));
-
-    // TODO: copy sd -> small if sparse enough
-    // TODO: copy rrr -> small if dense enough
-
-    // TODO: copy sd -> smart if sparse enough
-    // TODO: copy stat -> smart if dense enough
+    } else if (dynamic_cast<const bit_vector_adaptive*>(this)) {
+        // copy adaptive(x) -> anything
+        return dynamic_cast<const bit_vector_adaptive*>(this)->vector_->copy_to<Vector>();
 
     } else {
-        sdsl::bit_vector bv(size(), 0);
-        call_ones([&bv](auto i) { bv[i] = true; });
-        return Vector(std::move(bv));
+        // anything -> anything (slower: with full reconstruction)
+        return Vector(to_vector());
     }
 }
 template bit_vector_dyn bit_vector::copy_to<bit_vector_dyn>() const;
@@ -127,40 +139,125 @@ template bit_vector_rrr<31> bit_vector::copy_to<bit_vector_rrr<31>>() const;
 template bit_vector_rrr<63> bit_vector::copy_to<bit_vector_rrr<63>>() const;
 template bit_vector_rrr<127> bit_vector::copy_to<bit_vector_rrr<127>>() const;
 template bit_vector_rrr<255> bit_vector::copy_to<bit_vector_rrr<255>>() const;
-template bit_vector_small bit_vector::copy_to<bit_vector_small>() const;
-template bit_vector_smart bit_vector::copy_to<bit_vector_smart>() const;
 template sdsl::bit_vector bit_vector::copy_to<sdsl::bit_vector>() const;
+template<> bit_vector_small bit_vector::copy_to() const {
+    return bit_vector_small(*this);
+}
+template<> bit_vector_smart bit_vector::copy_to() const {
+    return bit_vector_smart(*this);
+}
+
+
+
+// taken from https://github.com/xxsds/sdsl-lite/blob/master/include/sdsl/util.hpp
+// this function has been modified.
+template <class t_int_vec>
+typename t_int_vec::size_type
+next_bit(const t_int_vec &v,
+         uint64_t idx,
+         uint64_t max_steps = std::numeric_limits<uint64_t>::max()) {
+    uint64_t pos  = idx >> 6;
+    uint64_t node = v.data()[pos];
+    node >>= (idx & 0x3F);
+    if (node) {
+        return idx + std::min(max_steps, static_cast<uint64_t>(sdsl::bits::lo(node)));
+    } else {
+        ++pos;
+        uint64_t end = std::min(max_steps, v.bit_size());
+        while ((pos << 6) < end) {
+            if (v.data()[pos]) {
+                return std::min((pos << 6) | sdsl::bits::lo(v.data()[pos]), end);
+            }
+            ++pos;
+        }
+        return end;
+    }
+}
+
+// taken from https://github.com/xxsds/sdsl-lite/blob/master/include/sdsl/util.hpp
+// this function has been modified.
+template <class t_int_vec>
+typename t_int_vec::size_type
+prev_bit(const t_int_vec &v,
+         uint64_t idx,
+         uint64_t max_steps = std::numeric_limits<uint64_t>::max()) {
+    uint64_t pos  = idx >> 6;
+    uint64_t node = v.data()[pos];
+    node <<= 63 - (idx & 0x3F);
+    if (node) {
+        return std::min(idx - std::min(idx, max_steps),
+                        sdsl::bits::hi(node) + (pos << 6) - (63 - (idx & 0x3F)));
+    } else {
+        --pos;
+        uint64_t end = std::min(idx - max_steps, v.bit_size());
+        while ((pos << 6) < end) {
+            if (v.data()[pos]) {
+                return (pos << 6) | sdsl::bits::hi(v.data()[pos]);
+            }
+            --pos;
+        }
+        return end;
+    }
+}
+
+template <typename BitVector>
+inline uint64_t next1(const BitVector &v,
+                      uint64_t pos,
+                      size_t num_steps) {
+    assert(pos < v.size());
+
+    if (v[pos])
+        return pos;
+
+    for (size_t t = 1; t < num_steps; ++t) {
+        if (pos + t == v.size() || v[pos + t])
+            return pos + t;
+    }
+
+    uint64_t rk = v.rank1(pos) + 1;
+    return rk <= v.num_set_bits() ? v.select1(rk) : v.size();
+}
+
+template <typename BitVector>
+inline uint64_t prev1(const BitVector &v,
+                      uint64_t pos,
+                      size_t num_steps) {
+    assert(pos < v.size());
+
+    for (size_t t = 0; t < num_steps; ++t, --pos) {
+        if (v[pos])
+            return pos;
+
+        if (pos == 0)
+            return v.size();
+    }
+
+    uint64_t rk = v.rank1(pos);
+    return rk ? v.select1(rk) : v.size();
+}
 
 
 /////////////////////////////
 // bit_vector_dyn, libmaus //
 /////////////////////////////
 
-template <class BitVector>
-std::vector<uint64_t> pack_bits(const BitVector &v) {
+// repack bits for BitBTree (uses different order)
+std::vector<uint64_t> pack_bits(const sdsl::bit_vector &v) {
     std::vector<uint64_t> bits((v.size() + 63) / 64);
-    for (size_t i = 0; i < v.size(); ++i) {
-        libmaus2::bitio::putBit(bits.data(), i, v[i]);
-    }
+    ::call_ones(v, [&](auto i) {
+        libmaus2::bitio::setBit(bits.data(), i);
+    });
     return bits;
 }
-
-bit_vector_dyn::bit_vector_dyn(const std::vector<uint64_t> &bits_packed,
-                               size_t num_bits)
-      : vector_(num_bits, bits_packed.data()) {}
 
 bit_vector_dyn::bit_vector_dyn(uint64_t size, bool value)
       : vector_(size, value) {}
 
-template <class BitVector>
-bit_vector_dyn::bit_vector_dyn(const BitVector &v)
-      : bit_vector_dyn(pack_bits(v), v.size()) {}
-
-template bit_vector_dyn::bit_vector_dyn(const std::vector<bool> &);
-template bit_vector_dyn::bit_vector_dyn(const sdsl::bit_vector &);
+bit_vector_dyn::bit_vector_dyn(const sdsl::bit_vector &v)
+      : vector_(v.size(), pack_bits(v).data()) {}
 
 bit_vector_dyn::bit_vector_dyn(std::initializer_list<bool> init)
-      : bit_vector_dyn(pack_bits(std::vector<bool>(init)), init.size()) {}
+      : bit_vector_dyn(sdsl::bit_vector(init)) {}
 
 std::unique_ptr<bit_vector> bit_vector_dyn::copy() const {
     return std::make_unique<bit_vector_dyn>(*this);
@@ -173,6 +270,18 @@ uint64_t bit_vector_dyn::rank1(uint64_t id) const {
 uint64_t bit_vector_dyn::select1(uint64_t id) const {
     assert(id > 0 && size() > 0 && id <= rank1(size() - 1));
     return vector_.select1(id - 1);
+}
+
+uint64_t bit_vector_dyn::next1(uint64_t pos) const {
+    assert(pos < size());
+
+    return ::next1(*this, pos, MAX_ITER_BIT_VECTOR_DYN);
+}
+
+uint64_t bit_vector_dyn::prev1(uint64_t pos) const {
+    assert(pos < size());
+
+    return ::prev1(*this, pos, MAX_ITER_BIT_VECTOR_DYN);
 }
 
 void bit_vector_dyn::set(uint64_t id, bool val) {
@@ -198,12 +307,12 @@ uint64_t bit_vector_dyn::get_int(uint64_t id, uint32_t width) const {
     return word;
 }
 
-void bit_vector_dyn::insertBit(uint64_t id, bool val) {
+void bit_vector_dyn::insert_bit(uint64_t id, bool val) {
     assert(id <= size());
     vector_.insertBit(id, val);
 }
 
-void bit_vector_dyn::deleteBit(uint64_t id) {
+void bit_vector_dyn::delete_bit(uint64_t id) {
     assert(id < size());
     vector_.deleteBit(id);
 }
@@ -229,9 +338,9 @@ void bit_vector_dyn::serialize(std::ostream &out) const {
 }
 
 void bit_vector_dyn::call_ones(const std::function<void(uint64_t)> &callback) const {
-    for (uint64_t i = 0; i < vector_.size(); ++i) {
-        if (vector_[i])
-            callback(i);
+    uint64_t i = 0;
+    while (i < size() && (i = next1(i)) < size()) {
+        callback(i++);
     }
 }
 
@@ -244,16 +353,6 @@ bit_vector_stat::bit_vector_stat(uint64_t size, bool value)
       : vector_(size, value) {
     if (value)
         num_set_bits_ = size;
-}
-
-bit_vector_stat::bit_vector_stat(const std::vector<bool> &v)
-      : vector_(v.size(), 0) {
-    for (uint64_t i = 0; i < v.size(); ++i) {
-        if (v[i]) {
-            vector_[i] = 1;
-            num_set_bits_++;
-        }
-    }
 }
 
 bit_vector_stat::bit_vector_stat(const bit_vector_stat &other) {
@@ -274,7 +373,7 @@ bit_vector_stat
 
 bit_vector_stat::bit_vector_stat(sdsl::bit_vector&& vector) noexcept
       : vector_(std::move(vector)),
-        num_set_bits_(count_num_set_bits(vector_)) {}
+        num_set_bits_(sdsl::util::cnt_one_bits(vector_)) {}
 
 bit_vector_stat::bit_vector_stat(bit_vector_stat&& other) noexcept {
     *this = std::move(other);
@@ -330,6 +429,28 @@ uint64_t bit_vector_stat::select1(uint64_t id) const {
     return slct_(id);
 }
 
+uint64_t bit_vector_stat::next1(uint64_t pos) const {
+    assert(pos < size());
+
+    auto next = next_bit(vector_, pos, MAX_ITER_BIT_VECTOR_STAT);
+    if (next < pos + MAX_ITER_BIT_VECTOR_STAT)
+        return next;
+
+    uint64_t rk = rank1(pos) + 1;
+    return rk <= num_set_bits() ? select1(rk) : size();
+}
+
+uint64_t bit_vector_stat::prev1(uint64_t pos) const {
+    assert(pos < size());
+
+    auto next = prev_bit(vector_, pos, MAX_ITER_BIT_VECTOR_STAT);
+    if (next < vector_.size() && next > pos - MAX_ITER_BIT_VECTOR_STAT)
+        return next;
+
+    uint64_t rk = rank1(pos);
+    return rk ? select1(rk) : size();
+}
+
 bool bit_vector_stat::operator[](uint64_t id) const {
     assert(id < size());
     return vector_[id];
@@ -353,7 +474,7 @@ void bit_vector_stat::set(uint64_t id, bool val) {
     requires_update_ = true;
 }
 
-void bit_vector_stat::insertBit(uint64_t id, bool val) {
+void bit_vector_stat::insert_bit(uint64_t id, bool val) {
     assert(id <= size());
 
     if (val)
@@ -366,7 +487,7 @@ void bit_vector_stat::insertBit(uint64_t id, bool val) {
     requires_update_ = true;
 }
 
-void bit_vector_stat::deleteBit(uint64_t id) {
+void bit_vector_stat::delete_bit(uint64_t id) {
     assert(size() > 0);
     assert(id < size());
 
@@ -407,7 +528,7 @@ bool bit_vector_stat::load(std::istream &in) {
                       << " and select support dumped. Reserialize to"
                       << " make the loading faster." << std::endl;
 
-            num_set_bits_ = count_num_set_bits(vector_);
+            num_set_bits_ = sdsl::util::cnt_one_bits(vector_);
             requires_update_ = true;
             init_rs();
         }
@@ -421,14 +542,7 @@ bool bit_vector_stat::load(std::istream &in) {
 }
 
 void bit_vector_stat::call_ones(const std::function<void(uint64_t)> &callback) const {
-    if (num_set_bits_ * 2 < size()) {
-        ::call_ones(vector_, callback);
-    } else {
-        for (uint64_t i = 0; i < vector_.size(); ++i) {
-            if (vector_[i])
-                callback(i);
-        }
-    }
+    ::call_ones(vector_, callback);
 }
 
 void bit_vector_stat::init_rs() {
@@ -460,7 +574,7 @@ bit_vector_sd::bit_vector_sd(uint64_t size, bool value)
 
 bit_vector_sd::bit_vector_sd(const sdsl::bit_vector &vector) {
     // check if it needs to be inverted
-    uint64_t num_set_bits = count_num_set_bits(vector);
+    uint64_t num_set_bits = sdsl::util::cnt_one_bits(vector);
 
     if (num_set_bits <= vector.size() / 2) {
         // vector is sparse, no need to invert
@@ -477,37 +591,6 @@ bit_vector_sd::bit_vector_sd(const sdsl::bit_vector &vector) {
     slct1_ = decltype(slct1_)(&vector_);
     rk1_ = decltype(rk1_)(&vector_);
 }
-
-template <class BitVector>
-bit_vector_sd::bit_vector_sd(const BitVector &vector) {
-    // check if it needs to be inverted
-    uint64_t num_set_bits = std::count(vector.begin(), vector.end(), true);
-
-    if (num_set_bits <= vector.size() / 2) {
-        // vector is sparse, no need to invert
-        sdsl::sd_vector_builder builder(vector.size(), num_set_bits);
-        for (uint64_t i = 0; i < vector.size(); ++i) {
-            if (vector[i])
-                builder.set(i);
-        }
-        vector_ = sdsl::sd_vector<>(builder);
-        inverted_ = false;
-    } else {
-        // invert
-        sdsl::sd_vector_builder builder(vector.size(), vector.size() - num_set_bits);
-        for (uint64_t i = 0; i < vector.size(); ++i) {
-            if (!vector[i])
-                builder.set(i);
-        }
-        vector_ = sdsl::sd_vector<>(builder);
-        inverted_ = true;
-    }
-    slct0_ = decltype(slct0_)(&vector_);
-    slct1_ = decltype(slct1_)(&vector_);
-    rk1_ = decltype(rk1_)(&vector_);
-}
-
-template bit_vector_sd::bit_vector_sd(const std::vector<bool> &);
 
 bit_vector_sd::bit_vector_sd(const bit_vector_sd &other) {
     *this = other;
@@ -587,11 +670,30 @@ uint64_t bit_vector_sd::rank1(uint64_t id) const {
                       : idx - rk1_(idx);
 }
 
+uint64_t bit_vector_sd::select0(uint64_t id) const {
+    assert(id > 0 && size() > 0 && id <= rank0(size() - 1));
+    assert(num_set_bits() == rank1(size() - 1));
+
+    return !inverted_ ? slct0_(id) : slct1_(id);
+}
+
 uint64_t bit_vector_sd::select1(uint64_t id) const {
     assert(id > 0 && size() > 0 && id <= num_set_bits());
     assert(num_set_bits() == rank1(size() - 1));
 
     return !inverted_ ? slct1_(id) : slct0_(id);
+}
+
+uint64_t bit_vector_sd::next1(uint64_t pos) const {
+    assert(pos < size());
+
+    return ::next1(*this, pos, MAX_ITER_BIT_VECTOR_SD);
+}
+
+uint64_t bit_vector_sd::prev1(uint64_t pos) const {
+    assert(pos < size());
+
+    return ::prev1(*this, pos, MAX_ITER_BIT_VECTOR_SD);
 }
 
 void bit_vector_sd::set(uint64_t, bool) {
@@ -610,11 +712,11 @@ uint64_t bit_vector_sd::get_int(uint64_t id, uint32_t width) const {
     return vector_.get_int(id, width);
 }
 
-void bit_vector_sd::insertBit(uint64_t, bool) {
+void bit_vector_sd::insert_bit(uint64_t, bool) {
     throw std::runtime_error("Not supported");
 }
 
-void bit_vector_sd::deleteBit(uint64_t) {
+void bit_vector_sd::delete_bit(uint64_t) {
     throw std::runtime_error("Not supported");
 }
 
@@ -645,8 +747,8 @@ void bit_vector_sd::serialize(std::ostream &out) const {
         throw std::ofstream::failure("Error when dumping bit_vector_sd");
 }
 
-std::vector<bool> bit_vector_sd::to_vector() const {
-    std::vector<bool> vector(size(), inverted_);
+sdsl::bit_vector bit_vector_sd::to_vector() const {
+    sdsl::bit_vector vector(size(), inverted_);
     uint64_t max_rank = rk1_(size());
     for (uint64_t i = 1; i <= max_rank; ++i) {
         vector[slct1_(i)] = !inverted_;
@@ -659,7 +761,7 @@ void bit_vector_sd::call_ones(const std::function<void(uint64_t)> &callback) con
         // sparse
         uint64_t num_ones = num_set_bits();
         for (uint64_t i = 1; i <= num_ones; ++i) {
-            callback(select1(i));
+            callback(slct1_(i));
         }
     } else {
         // dense, vector_ keeps positions of zeros
@@ -755,6 +857,14 @@ uint64_t bit_vector_rrr<log_block_size>::rank1(uint64_t id) const {
 }
 
 template <size_t log_block_size>
+uint64_t bit_vector_rrr<log_block_size>::select0(uint64_t id) const {
+    assert(id > 0 && size() > 0 && id <= size() - num_set_bits());
+    assert(num_set_bits() == rank1(size() - 1));
+
+    return slct0_(id);
+}
+
+template <size_t log_block_size>
 uint64_t bit_vector_rrr<log_block_size>::select1(uint64_t id) const {
     assert(id > 0 && size() > 0 && id <= num_set_bits());
     assert(num_set_bits() == rank1(size() - 1));
@@ -763,11 +873,17 @@ uint64_t bit_vector_rrr<log_block_size>::select1(uint64_t id) const {
 }
 
 template <size_t log_block_size>
-uint64_t bit_vector_rrr<log_block_size>::select0(uint64_t id) const {
-    assert(id > 0 && size() > 0 && id <= size() - num_set_bits());
-    assert(num_set_bits() == rank1(size() - 1));
+uint64_t bit_vector_rrr<log_block_size>::next1(uint64_t pos) const {
+    assert(pos < size());
 
-    return slct0_(id);
+    return ::next1(*this, pos, MAX_ITER_BIT_VECTOR_RRR);
+}
+
+template <size_t log_block_size>
+uint64_t bit_vector_rrr<log_block_size>::prev1(uint64_t pos) const {
+    assert(pos < size());
+
+    return ::prev1(*this, pos, MAX_ITER_BIT_VECTOR_RRR);
 }
 
 template <size_t log_block_size>
@@ -788,12 +904,12 @@ uint64_t bit_vector_rrr<log_block_size>
 }
 
 template <size_t log_block_size>
-void bit_vector_rrr<log_block_size>::insertBit(uint64_t, bool) {
+void bit_vector_rrr<log_block_size>::insert_bit(uint64_t, bool) {
     throw std::runtime_error("Not supported");
 }
 
 template <size_t log_block_size>
-void bit_vector_rrr<log_block_size>::deleteBit(uint64_t) {
+void bit_vector_rrr<log_block_size>::delete_bit(uint64_t) {
     throw std::runtime_error("Not supported");
 }
 
@@ -827,10 +943,10 @@ void bit_vector_rrr<log_block_size>::serialize(std::ostream &out) const {
 }
 
 template <size_t log_block_size>
-std::vector<bool> bit_vector_rrr<log_block_size>::to_vector() const {
+sdsl::bit_vector bit_vector_rrr<log_block_size>::to_vector() const {
     if (2 * num_set_bits() < size()) {
         // sparse
-        std::vector<bool> vector(size(), 0);
+        sdsl::bit_vector vector(size(), 0);
         uint64_t max_rank = rank1(size() - 1);
         for (uint64_t i = 1; i <= max_rank; ++i) {
             vector[slct1_(i)] = 1;
@@ -838,7 +954,7 @@ std::vector<bool> bit_vector_rrr<log_block_size>::to_vector() const {
         return vector;
     } else {
         // dense
-        std::vector<bool> vector(size(), 1);
+        sdsl::bit_vector vector(size(), 1);
         uint64_t max_rank = rank0(size() - 1);
         for (uint64_t i = 1; i <= max_rank; ++i) {
             vector[slct0_(i)] = 0;
@@ -904,6 +1020,14 @@ uint64_t bit_vector_adaptive::select1(uint64_t id) const {
     return vector_->select1(id);
 }
 
+uint64_t bit_vector_adaptive::next1(uint64_t id) const {
+    return vector_->next1(id);
+}
+
+uint64_t bit_vector_adaptive::prev1(uint64_t id) const {
+    return vector_->prev1(id);
+}
+
 void bit_vector_adaptive::set(uint64_t id, bool val) {
     vector_->set(id, val);
 }
@@ -916,21 +1040,21 @@ uint64_t bit_vector_adaptive::get_int(uint64_t id, uint32_t width) const {
     return vector_->get_int(id, width);
 }
 
-void bit_vector_adaptive::insertBit(uint64_t id, bool val) {
+void bit_vector_adaptive::insert_bit(uint64_t id, bool val) {
     assert(id <= size());
-    vector_->insertBit(id, val);
+    vector_->insert_bit(id, val);
 }
 
-void bit_vector_adaptive::deleteBit(uint64_t id) {
+void bit_vector_adaptive::delete_bit(uint64_t id) {
     assert(id < size());
-    vector_->deleteBit(id);
+    vector_->delete_bit(id);
 }
 
 uint64_t bit_vector_adaptive::size() const {
     return vector_->size();
 }
 
-std::vector<bool> bit_vector_adaptive::to_vector() const {
+sdsl::bit_vector bit_vector_adaptive::to_vector() const {
     return vector_->to_vector();
 }
 
@@ -997,18 +1121,32 @@ bit_vector_adaptive_stat<optimal_representation>
 
 template <bit_vector_adaptive::DefineRepresentation optimal_representation>
 bit_vector_adaptive_stat<optimal_representation>
-::bit_vector_adaptive_stat(const sdsl::bit_vector &vector) {
-    uint64_t num_set_bits = sdsl::util::cnt_one_bits(vector);
-
-    switch (optimal_representation(vector.size(), num_set_bits)) {
+::bit_vector_adaptive_stat(const bit_vector &vector) {
+    switch (optimal_representation(vector.size(), vector.num_set_bits())) {
         case SD_VECTOR:
-            vector_.reset(new bit_vector_sd(vector));
+            vector_.reset(new bit_vector_sd(vector.copy_to<bit_vector_sd>()));
             break;
         case RRR_VECTOR:
-            vector_.reset(new bit_vector_rrr<>(vector));
+            vector_.reset(new bit_vector_rrr<>(vector.copy_to<bit_vector_rrr<>>()));
             break;
         case STAT_VECTOR:
-            vector_.reset(new bit_vector_stat(sdsl::bit_vector(vector)));
+            vector_.reset(new bit_vector_stat(vector.copy_to<bit_vector_stat>()));
+            break;
+    }
+}
+
+template <bit_vector_adaptive::DefineRepresentation optimal_representation>
+bit_vector_adaptive_stat<optimal_representation>
+::bit_vector_adaptive_stat(bit_vector&& vector) {
+    switch (optimal_representation(vector.size(), vector.num_set_bits())) {
+        case SD_VECTOR:
+            vector_.reset(new bit_vector_sd(vector.convert_to<bit_vector_sd>()));
+            break;
+        case RRR_VECTOR:
+            vector_.reset(new bit_vector_rrr<>(vector.convert_to<bit_vector_rrr<>>()));
+            break;
+        case STAT_VECTOR:
+            vector_.reset(new bit_vector_stat(vector.convert_to<bit_vector_stat>()));
             break;
     }
 }

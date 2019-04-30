@@ -7,7 +7,16 @@
 #include "utils.hpp"
 
 
+namespace annotate {
+template <typename Label>
+class RowCompressed;
+}
+
+
 class VectorRowBinMat : public BinaryMatrixRowDynamic {
+    template <typename Label>
+    friend class annotate::RowCompressed;
+
   public:
     VectorRowBinMat(uint64_t num_rows = 0) : vector_(num_rows) {}
 
@@ -45,6 +54,22 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
   private:
     uint64_t num_columns_ = 0;
     std::vector<SmallVector> vector_;
+
+    class StreamRows {
+      public:
+        StreamRows(const std::string &filename, size_t offset = 0);
+        // return null after all rows have been called
+        std::vector<Column>* next_row();
+
+      private:
+        std::vector<Column> row_;
+        sdsl::int_vector_buffer<> inbuf_;
+        uint64_t i_ = 0;
+    };
+
+    static void append_matrix(const std::string &filename,
+                              const std::function<void (BinaryMatrix::RowCallback&)> &callback,
+                              uint64_t num_cols);
 };
 
 #endif // __VECTOR_ROW_BINMAT_HPP__

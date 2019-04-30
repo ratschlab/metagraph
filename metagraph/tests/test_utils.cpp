@@ -5,6 +5,7 @@
 
 #include "annotate_column_compressed.hpp"
 #include "utils.hpp"
+#include "threading.hpp"
 #include "bit_vector.hpp"
 
 // Disable death tests
@@ -345,15 +346,15 @@ TEST(seq_equal, basics) {
 }
 
 TEST(ThreadPool, EmptyConstructor) {
-    utils::ThreadPool pool(1);
-    utils::ThreadPool pool2(2);
-    utils::ThreadPool pool4(4);
-    utils::ThreadPool pool20(20);
+    ThreadPool pool(1);
+    ThreadPool pool2(2);
+    ThreadPool pool4(4);
+    ThreadPool pool20(20);
 }
 
 TEST(ThreadPool, EmptyTasks) {
     for (size_t i = 1; i < 20; ++i) {
-        utils::ThreadPool pool(i);
+        ThreadPool pool(i);
         for (size_t t = 0; t < 1000; ++t) {
             pool.enqueue([]() {});
         }
@@ -361,10 +362,10 @@ TEST(ThreadPool, EmptyTasks) {
 }
 
 TEST(ThreadPool, EmptyJoin) {
-    utils::ThreadPool pool(1);
-    utils::ThreadPool pool2(2);
-    utils::ThreadPool pool4(4);
-    utils::ThreadPool pool20(20);
+    ThreadPool pool(1);
+    ThreadPool pool2(2);
+    ThreadPool pool4(4);
+    ThreadPool pool20(20);
     pool.join();
     pool2.join();
     pool4.join();
@@ -380,7 +381,7 @@ TEST(ThreadPool, EmptyJoin) {
 }
 
 TEST(ThreadPool, SingleThread) {
-    utils::ThreadPool pool(1);
+    ThreadPool pool(1);
     std::vector<size_t> result;
     std::mutex mu;
 
@@ -419,7 +420,7 @@ TEST(ThreadPool, SingleThread) {
 }
 
 TEST(ThreadPool, MultiThreadTwo) {
-    utils::ThreadPool pool(2);
+    ThreadPool pool(2);
     size_t num_tasks = 10000;
 
     std::vector<size_t> result;
@@ -442,7 +443,7 @@ TEST(ThreadPool, MultiThreadTwo) {
 }
 
 TEST(ThreadPool, MultiThreadFour) {
-    utils::ThreadPool pool(4);
+    ThreadPool pool(4);
     size_t num_tasks = 10000;
 
     std::vector<size_t> result;
@@ -466,7 +467,7 @@ TEST(ThreadPool, MultiThreadFour) {
 
 TEST(ThreadPool, MultiThread) {
     for (size_t i = 2; i < 20; ++i) {
-        utils::ThreadPool pool(i);
+        ThreadPool pool(i);
         std::vector<size_t> result;
         std::mutex mu;
         for (size_t t = 0; t < 1000; ++t) {
@@ -488,7 +489,7 @@ TEST(ThreadPool, MultiThread) {
 
 TEST(ThreadPool, MultiThreadFuture) {
     for (size_t i = 2; i < 20; ++i) {
-        utils::ThreadPool pool(i);
+        ThreadPool pool(i);
 
         std::vector<std::future<size_t>> result;
         for (size_t t = 0; t < 1000; ++t) {
@@ -505,7 +506,7 @@ TEST(ThreadPool, MultiThreadFuture) {
 TEST(ThreadPool, MultiThreadException) {
     for (size_t i = 2; i < 20; ++i) {
         try {
-            utils::ThreadPool pool(i);
+            ThreadPool pool(i);
 
             std::vector<std::future<size_t>> result;
             for (size_t t = 0; t < 1000; ++t) {
@@ -526,14 +527,14 @@ TEST(ThreadPool, MultiThreadException) {
 }
 
 TEST(ThreadPool, DummyEmptyJoin) {
-    utils::ThreadPool pool(0);
+    ThreadPool pool(0);
     pool.join();
     pool.join();
     pool.join();
 }
 
 TEST(ThreadPool, DummyPoolRun) {
-    utils::ThreadPool pool(0);
+    ThreadPool pool(0);
     std::vector<size_t> result;
     std::mutex mu;
     for (size_t t = 0; t < 1000; ++t) {
@@ -553,7 +554,7 @@ TEST(ThreadPool, DummyPoolRun) {
 }
 
 TEST(ThreadPool, DummyFuture) {
-    utils::ThreadPool pool(0);
+    ThreadPool pool(0);
 
     std::vector<std::future<size_t>> result;
     for (size_t t = 0; t < 1000; ++t) {
@@ -568,7 +569,7 @@ TEST(ThreadPool, DummyFuture) {
 
 
 TEST(AsyncActivity, RunUniqueOnly) {
-    utils::AsyncActivity async;
+    AsyncActivity async;
 
     ASSERT_EQ(1, async.run_unique([](int i) { return i; }, 1));
     ASSERT_EQ('a', async.run_unique([]() { return 'a'; }));
@@ -578,7 +579,7 @@ TEST(AsyncActivity, RunUniqueOnly) {
 }
 
 TEST(AsyncActivity, RunAsyncOnly) {
-    utils::AsyncActivity async;
+    AsyncActivity async;
 
     ASSERT_EQ(1, async.run_async([](int i) { return i; }, 1));
     ASSERT_EQ('a', async.run_async([]() { return 'a'; }));
@@ -588,7 +589,7 @@ TEST(AsyncActivity, RunAsyncOnly) {
 }
 
 TEST(AsyncActivity, RunBoth) {
-    utils::AsyncActivity async;
+    AsyncActivity async;
 
     ASSERT_EQ(1, async.run_async([](int i) { return i; }, 1));
     ASSERT_EQ('a', async.run_async([]() { return 'a'; }));
@@ -604,7 +605,7 @@ TEST(AsyncActivity, RunBoth) {
 }
 
 TEST(AsyncActivity, RunBothParallel) {
-    utils::AsyncActivity async;
+    AsyncActivity async;
 
     std::string result;
 
@@ -697,10 +698,10 @@ TEST(Misc, RemoveSuffix) {
 
 TEST(Vector, ReserveInfinityCheckThrow) {
     Vector<int> vector;
-    EXPECT_THROW(vector.reserve(2llu << 60), std::bad_alloc);
+    EXPECT_THROW(vector.reserve(1llu << 59), std::bad_alloc);
 }
 
 TEST(Vector, ResizeInfinityCheckThrow) {
     Vector<int> vector;
-    EXPECT_THROW(vector.resize(2llu << 60), std::bad_alloc);
+    EXPECT_THROW(vector.resize(1llu << 59), std::bad_alloc);
 }

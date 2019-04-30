@@ -2,8 +2,12 @@
 
 #include <cassert>
 
-typedef libmaus2::bitbtree::BitBTree<6, 64> BitBTree;
+// TODO: run benchmarks and optimize these parameters
+const size_t MAX_ITER_WAVELET_TREE_STAT = 1000;
+const size_t MAX_ITER_WAVELET_TREE_DYN = 10;
+const size_t MAX_ITER_WAVELET_TREE_SMALL = 10;
 
+typedef libmaus2::bitbtree::BitBTree<6, 64> BitBTree;
 
 /////////////////////////////////
 // wavelet_tree shared methods //
@@ -68,6 +72,47 @@ template wavelet_tree_dyn wavelet_tree::convert_to<wavelet_tree_dyn>();
 template wavelet_tree_stat wavelet_tree::convert_to<wavelet_tree_stat>();
 template wavelet_tree_small wavelet_tree::convert_to<wavelet_tree_small>();
 
+
+template <typename BitVector>
+inline uint64_t next(const BitVector &v,
+                     uint64_t pos,
+                     uint64_t value,
+                     size_t num_steps) {
+    assert(pos < v.size());
+
+    if (v[pos] == value)
+        return pos;
+
+    for (size_t t = 1; t < num_steps; ++t) {
+        if (pos + t == v.size() || v[pos + t] == value)
+            return pos + t;
+    }
+
+    uint64_t rk = v.rank(value, pos) + 1;
+    return rk <= v.rank(value, v.size() - 1)
+            ? v.select(value, rk)
+            : v.size();
+}
+
+template <typename BitVector>
+inline uint64_t prev(const BitVector &v,
+                     uint64_t pos,
+                     uint64_t value,
+                     size_t num_steps) {
+    assert(pos < v.size());
+
+    for (size_t t = 0; t < num_steps; ++t, --pos) {
+        if (v[pos] == value)
+            return pos;
+
+        if (pos == 0)
+            return v.size();
+    }
+
+    uint64_t rk = v.rank(value, pos);
+    return rk ? v.select(value, rk)
+              : v.size();
+}
 
 ///////////////////////////////////////////////////////////
 // wavelet_tree_stat sdsl rank/select, int_vector access //
@@ -231,6 +276,18 @@ uint64_t wavelet_tree_stat::operator[](uint64_t id) const {
     return int_vector_[id];
 }
 
+uint64_t wavelet_tree_stat::next(uint64_t pos, uint64_t value) const {
+    assert(pos < size());
+
+    return ::next(*this, pos, value, MAX_ITER_WAVELET_TREE_STAT);
+}
+
+uint64_t wavelet_tree_stat::prev(uint64_t pos, uint64_t value) const {
+    assert(pos < size());
+
+    return ::prev(*this, pos, value, MAX_ITER_WAVELET_TREE_STAT);
+}
+
 void wavelet_tree_stat::clear() {
     int_vector_ = decltype(int_vector_)();
     wwt_ = decltype(wwt_)();
@@ -376,6 +433,18 @@ uint64_t wavelet_tree_dyn::operator[](uint64_t id) const {
     return (*wwt_)[id];
 }
 
+uint64_t wavelet_tree_dyn::next(uint64_t pos, uint64_t value) const {
+    assert(pos < size());
+
+    return ::next(*this, pos, value, MAX_ITER_WAVELET_TREE_DYN);
+}
+
+uint64_t wavelet_tree_dyn::prev(uint64_t pos, uint64_t value) const {
+    assert(pos < size());
+
+    return ::prev(*this, pos, value, MAX_ITER_WAVELET_TREE_DYN);
+}
+
 void wavelet_tree_dyn::set(uint64_t id, uint64_t val) {
     remove(id);
     insert(id, val);
@@ -515,6 +584,18 @@ uint64_t wavelet_tree_small::select(uint64_t c, uint64_t i) const {
 uint64_t wavelet_tree_small::operator[](uint64_t id) const {
     assert(id < size());
     return wwt_[id];
+}
+
+uint64_t wavelet_tree_small::next(uint64_t pos, uint64_t value) const {
+    assert(pos < size());
+
+    return ::next(*this, pos, value, MAX_ITER_WAVELET_TREE_SMALL);
+}
+
+uint64_t wavelet_tree_small::prev(uint64_t pos, uint64_t value) const {
+    assert(pos < size());
+
+    return ::prev(*this, pos, value, MAX_ITER_WAVELET_TREE_SMALL);
 }
 
 void wavelet_tree_small::set(uint64_t, uint64_t) {

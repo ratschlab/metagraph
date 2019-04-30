@@ -19,17 +19,6 @@ std::size_t SmallVectorHash::operator()(const SmallVector &vector) const {
 
 namespace utils {
 
-static unsigned int NUM_THREADS_METAGRAPH_GLOBAL = 1;
-
-
-void set_num_threads(unsigned int num_threads) {
-    NUM_THREADS_METAGRAPH_GLOBAL = std::max(1u, num_threads);
-}
-
-unsigned int get_num_threads() {
-    return NUM_THREADS_METAGRAPH_GLOBAL;
-}
-
 bool ends_with(const std::string &str, const std::string &suffix) {
     auto actual_suffix = str.substr(
         std::max(0, static_cast<int>(str.size())
@@ -152,70 +141,6 @@ std::deque<std::string> generate_strings(const std::string &alphabet,
 uint32_t code_length(uint64_t a) {
     return a ? boost::multiprecision::msb(a) + 1 : 1;
 }
-
-
-ThreadPool::ThreadPool(size_t num_workers, size_t max_num_tasks)
-      : max_num_tasks_(std::min(max_num_tasks, num_workers * 5)), stop_(false) {
-    initialize(num_workers);
-}
-
-void ThreadPool::join() {
-    size_t num_workers = workers.size();
-
-    if (!num_workers) {
-        return;
-    } else {
-        std::lock_guard<std::mutex> lock(queue_mutex);
-        assert(!joining_);
-        joining_ = true;
-    }
-    empty_condition.notify_all();
-
-    for (std::thread &worker : workers) {
-        worker.join();
-    }
-    workers.clear();
-
-    if (!stop_)
-        initialize(num_workers);
-}
-
-ThreadPool::~ThreadPool() {
-    stop_ = true;
-    join();
-}
-
-void ThreadPool::initialize(size_t num_workers) {
-    assert(!stop_);
-    assert(workers.size() == 0);
-    joining_ = false;
-
-    if (!num_workers)
-        return;
-
-    for(size_t i = 0; i < num_workers; ++i) {
-        workers.emplace_back([this]() {
-            while (true) {
-                std::function<void()> task;
-                {
-                    std::unique_lock<std::mutex> lock(this->queue_mutex);
-                    this->empty_condition.wait(lock, [this]() {
-                        return this->joining_ || !this->tasks.empty();
-                    });
-                    if (this->tasks.empty())
-                        return;
-
-                    task = std::move(this->tasks.front());
-                    this->tasks.pop();
-                    full_condition.notify_one();
-                }
-
-                task();
-            }
-        });
-    }
-}
-
 
 // indexes - positions of inserted elements in the final vector
 template <typename Index, class Vector>
@@ -400,8 +325,39 @@ void RowsFromColumnsTransformer::call_next(ValueCallback callback) {
     callback(index.row_id, index.col_id);
 }
 
+std::tuple<uint64_t, uint64_t> RowsFromColumnsIterator::next_set_bit() {
+    uint64_t row;
+    uint64_t column;
+    transformer_->call_next([&](uint64_t row_, uint64_t column_) {
+        row = row_;
+        column = column_;
+    });
+    return std::make_tuple(row, column);
+}
 
-void call_rows(const std::function<void(const SetBitPositions &)> &callback,
+std::vector<uint64_t> RowsFromColumnsIterator::next_row() {
+    std::vector<uint64_t> indices;
+
+    if (i_ > 0 && (row_ == i_)) {
+        indices.push_back(column_);
+    }
+
+    if (!values_left() || row_ > i_) {
+        i_++;
+        return indices;
+    }
+
+    while (values_left()) {
+        std::tie(row_, column_) = next_set_bit();
+        if (row_ != i_)
+            break;
+        indices.push_back(column_);
+    }
+    i_++;
+    return indices;
+}
+
+void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
                RowsFromColumnsTransformer&& transformer) {
     uint64_t cur_row = 0;
     std::vector<uint64_t> indices;
@@ -423,8 +379,8 @@ void call_rows(const std::function<void(const SetBitPositions &)> &callback,
     }
 }
 
-void call_rows(const std::function<void(const SetBitPositions &)> &callback,
-               const BinaryMatrixRowDynamic &row_major_matrix) {
+void call_rows(const std::function<void(const BinaryMatrix::SetBitPositions &)> &callback,
+               const BinaryMatrix &row_major_matrix) {
     const auto num_rows = row_major_matrix.num_rows();
 
     for (size_t i = 0; i < num_rows; ++i) {

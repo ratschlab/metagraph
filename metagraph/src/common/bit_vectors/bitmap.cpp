@@ -11,6 +11,15 @@ const size_t bitmap_adaptive::kRowCutoff = 1'000'000;
 
 void call_ones(const sdsl::bit_vector &vector,
                const std::function<void(uint64_t)> &callback) {
+    if (sdsl::util::cnt_one_bits(vector) > vector.size() / 2) {
+        //TODO: benchmark to check if this actually makes it faster
+        for (uint64_t i = 0; i < vector.size(); ++i) {
+            if (vector[i])
+                callback(i);
+        }
+        return;
+    }
+
     uint64_t j = 64;
     uint64_t i = 0;
     uint64_t word;
@@ -59,19 +68,6 @@ void call_zeros(const sdsl::bit_vector &vector,
         if (!vector[i])
             callback(i);
     }
-}
-
-uint64_t count_num_set_bits(const sdsl::bit_vector &vector) {
-    uint64_t count = 0;
-    uint64_t i = 0;
-    for (; i + 64 <= vector.size(); i += 64) {
-        count += sdsl::bits::cnt(vector.get_int(i));
-    }
-    for (; i < vector.size(); ++i) {
-        if (vector[i])
-            count++;
-    }
-    return count;
 }
 
 
@@ -151,7 +147,7 @@ bitmap_vector
 
 bitmap_vector
 ::bitmap_vector(const sdsl::bit_vector &vector)
-      : num_set_bits_(count_num_set_bits(vector)), bit_vector_(vector) {}
+      : num_set_bits_(sdsl::util::cnt_one_bits(vector)), bit_vector_(vector) {}
 
 bitmap_vector
 ::bitmap_vector(std::initializer_list<bool> init)
@@ -159,7 +155,7 @@ bitmap_vector
 
 bitmap_vector
 ::bitmap_vector(sdsl::bit_vector&& vector) noexcept
-      : num_set_bits_(count_num_set_bits(vector)),
+      : num_set_bits_(sdsl::util::cnt_one_bits(vector)),
         bit_vector_(std::move(vector)) {}
 
 void bitmap_vector::set(uint64_t id, bool val) {

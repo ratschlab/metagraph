@@ -2,6 +2,7 @@
 #define __ANNOTATE_STATIC_HPP__
 
 #include <memory>
+#include <vector>
 
 #include "annotate.hpp"
 
@@ -11,6 +12,7 @@ namespace annotate {
 template <class BinaryMatrixType, typename Label = std::string>
 class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
   public:
+    typedef BinaryMatrixType binary_matrix_type;
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
     using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
 
@@ -52,6 +54,10 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
     LabelEncoder<Label> &label_encoder_ {
         MultiLabelEncoded<uint64_t, Label>::label_encoder_
     };
+
+    virtual std::vector<uint64_t> get_label_indexes(Index i) const override {
+        return matrix_->get_row(i);
+    }
 
     static const std::string kFileExtension;
 };

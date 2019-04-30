@@ -21,7 +21,7 @@ BinRelWT_sdsl
 
     uint64_t index = 0;
 
-    generate_rows([&](const RowSetBits &row_set_bits) {
+    generate_rows([&](const SetBitPositions &row_set_bits) {
         for (const auto &col_index : row_set_bits) {
             assert(col_index < num_columns);
             assert(index < flat.size());
@@ -33,7 +33,8 @@ BinRelWT_sdsl
 
     assert(index == num_relations);
 
-    delimiters_ = bit_vector_stat(std::move(delimiters_vec))
+
+    delimiters_ = bit_vector_stat(to_sdsl(std::move(delimiters_vec)))
                     .convert_to<bit_vector_rrr<>>();
 
     construct_im(wt_, std::move(flat));

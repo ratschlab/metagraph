@@ -1,5 +1,10 @@
 #include "vector_row_binmat.hpp"
 
+#include <cstdio>
+#include <sdsl/int_vector_buffer.hpp>
+
+#include "threading.hpp"
+
 
 bool VectorRowBinMat::get(Row row, Column column) const {
     assert(row < vector_.size());
@@ -27,7 +32,7 @@ void VectorRowBinMat::force_set(Row row, Column column) {
 }
 
 void VectorRowBinMat::standardize_rows() {
-    #pragma omp parallel for num_threads(utils::get_num_threads())
+    #pragma omp parallel for num_threads(get_num_threads())
     for (size_t i = 0; i < vector_.size(); ++i) {
         std::sort(vector_[i].begin(), vector_[i].end());
         vector_[i].erase(std::unique(vector_[i].begin(), vector_[i].end()),
@@ -121,4 +126,72 @@ uint64_t VectorRowBinMat::num_relations() const {
 // matrix density
 double VectorRowBinMat::density() const {
     return static_cast<double>(num_relations()) / num_columns() / num_rows();
+}
+
+VectorRowBinMat::StreamRows::StreamRows(const std::string &filename, size_t offset) {
+    std::ifstream instream(filename, std::ios::binary);
+
+    if (!instream.good() || !instream.seekg(offset).good())
+        throw std::ifstream::failure("Cannot read rows from file " + filename);
+
+    (void)load_number(instream);
+    (void)load_number(instream);
+
+    inbuf_ = sdsl::int_vector_buffer<>(filename,
+                                       std::ios::in | std::ios::binary,
+                                       1024 * 1024,
+                                       0,
+                                       false,
+                                       instream.tellg());
+}
+
+std::vector<VectorRowBinMat::Column>* VectorRowBinMat::StreamRows::next_row() {
+    row_.clear();
+
+    while (i_ < inbuf_.size()) {
+        auto value = inbuf_[i_++];
+        if (value) {
+            row_.push_back(value - 1);
+        } else {
+            return &row_;
+        }
+    }
+    return nullptr;
+}
+
+void VectorRowBinMat::append_matrix(const std::string &filename,
+                                    const std::function<void(BinaryMatrix::RowCallback&)> &call_rows,
+                                    uint64_t num_cols) {
+    std::ofstream outstream(filename, std::ios::binary | std::ios::app);
+
+    uint64_t num_rows = 0;
+
+    // write dummy num_rows value to fill in later
+    const uint64_t header_offs = outstream.tellp();
+    serialize_number(outstream, 0);
+    serialize_number(outstream, num_cols);
+    const uint64_t iv_offs = outstream.tellp();
+    outstream.close();
+
+    {
+        auto outbuf = sdsl::int_vector_buffer<>(filename,
+                                                std::ios::out | std::ios::binary,
+                                                1024 * 1024,
+                                                utils::code_length(num_cols),
+                                                false,
+                                                iv_offs);
+
+        call_rows([&](const std::vector<uint64_t> &row) {
+            for (auto val : row) {
+                outbuf.push_back(val + 1);
+            }
+            outbuf.push_back(0);
+            num_rows++;
+        });
+        outbuf.close();
+    }
+
+    outstream.open(filename, std::ios::in | std::ios::out | std::ios::binary);
+    outstream.seekp(header_offs);
+    serialize_number(outstream, num_rows);
 }

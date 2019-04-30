@@ -5,7 +5,7 @@
 #define private public
 #define protected public
 
-#include "dbg_succinct.hpp"
+#include "boss.hpp"
 #include "kmer_boss.hpp"
 #include "kmer_extractor.hpp"
 #include "utils.hpp"
@@ -21,8 +21,8 @@ std::string kmer_codec(const std::string &test_kmer) {
     std::vector<uint64_t> kmer(test_kmer.size());
     std::transform(test_kmer.begin(), test_kmer.end(), kmer.begin(),
         [](char c) {
-            return c == DBG_succ::kSentinel
-                        ? DBG_succ::kSentinelCode
+            return c == BOSS::kSentinel
+                        ? BOSS::kSentinelCode
                         : KmerExtractor::encode(c);
         }
     );

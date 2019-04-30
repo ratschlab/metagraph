@@ -4,7 +4,6 @@
 #include <ips4o.hpp>
 
 #include "kmer.hpp"
-#include "utils.hpp"
 #include "unix_tools.hpp"
 #include "reads_filtering.hpp"
 #include "reverse_complement.hpp"
@@ -97,10 +96,9 @@ void extend_kmer_storage(const Array &temp_storage,
               kmers->begin() + offset);
 }
 
-typedef std::function<void(const std::string&)> CallbackString;
 
 template <typename KMER, class KmerExtractor>
-void extract_kmers(std::function<void(CallbackString)> generate_reads,
+void extract_kmers(std::function<void(CallString)> generate_reads,
                    size_t k,
                    bool both_strands_mode,
                    Vector<KMER> *kmers,
@@ -199,7 +197,7 @@ void KmerCollector<KMER, KmerExtractor>
 
 template <typename KMER, class KmerExtractor>
 void KmerCollector<KMER, KmerExtractor>
-::add_sequences(const std::function<void(CallbackString)> &generate_sequences) {
+::add_sequences(const std::function<void(CallString)> &generate_sequences) {
     thread_pool_.enqueue(extract_kmers<KMER, Extractor>, generate_sequences,
                          k_, both_strands_mode_, &kmers_,
                          filter_suffix_encoded_,
@@ -213,7 +211,7 @@ void KmerCollector<KMER, KmerExtractor>::release_task_to_pool() {
     current_sequences_storage->swap(sequences_storage_);
 
     thread_pool_.enqueue(extract_kmers<KMER, Extractor>,
-                         [current_sequences_storage](CallbackString callback) {
+                         [current_sequences_storage](CallString callback) {
                              for (auto &&sequence : *current_sequences_storage) {
                                  callback(std::move(sequence));
                              }
@@ -232,7 +230,6 @@ void KmerCollector<KMER, KmerExtractor>::join() {
 
     if (verbose_) {
         std::cout << "Reading data has finished" << std::endl;
-        get_RAM();
         std::cout << "Sorting k-mers and appending succinct"
                   << " representation from current bin...\t" << std::flush;
     }
