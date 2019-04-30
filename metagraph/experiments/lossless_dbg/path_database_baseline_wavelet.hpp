@@ -109,6 +109,7 @@ public:
         });
         return result;
     }
+
     bool has_new_reads(node_index node) const {
         // todo : remove or after the indegree bug is fixed and use assertion
         // assert(!(graph.indegree(node) < 2 and size(node)) or size(node) > graph.indegree(node))
@@ -123,7 +124,7 @@ public:
             result = graph_branch_id(node,prev_node);
         }
         else {
-            result = -1;
+            result = -1; // starting branch is before all other branches
         }
         return result + increment;
     }
@@ -207,10 +208,7 @@ public:
 
 
 
-    node_index get_next_consistent_node(node_index node) {
-        history_t history = get_initial_history(node);
-        return get_next_consistent_node(node,history);
-    }
+
 
     history_t get_initial_history(node_index node) const {
         history_t history = {{0, get_coverage(node)}};
@@ -247,6 +245,11 @@ public:
         return history;
     }
 
+    node_index get_next_consistent_node(node_index node) {
+        history_t history = get_initial_history(node);
+        return get_next_consistent_node(node,history);
+    }
+
     node_index get_next_consistent_node(node_index node,const string& str_history) {
         // consistent node should have score 0 and be the only node to go to
         assert(node == graph.kmer_to_node(str_history.substr(str_history.size()-graph.get_k())));
@@ -272,7 +275,7 @@ public:
         return consistent_node;
     }
 
-    void graph_call_incoming_kmers(node_index node,std::function<void(node_index, char)> callback) const {
+    void graph_call_incoming_kmers(node_index node,const std::function<void(node_index, char)>& callback) const {
         for(auto c : "ACGTN"s) {
             auto new_node = graph.traverse_back(node,c);
             if (new_node) {
@@ -548,20 +551,19 @@ public:
                 }
                 if (verbosity & STATS_SPLITS_HISTOGRAM) {
                     set<int> diff_symbols;
-                    int start = routing_table.offset(node);
-                    int i = start;
                     for (int i=0; i < routing_table.size(node); i++) {
                         diff_symbols.insert(routing_table.get(node,i));
                     }
                     splits_diff_symbols_histogram[diff_symbols.size()]++;
-                    splits_size_histogram[i - start]++;
+                    splits_size_histogram[routing_table.size(node)]++;
                 }
             }
         }
         json result = {{"true_joins", true_joins},
                        {"added_joins", added_joins},
                        {"true_splits", true_splits},
-                       {"added_splits", added_splits}
+                       {"added_splits", added_splits},
+                       {"num_of_nodes", graph.num_nodes()}
                       };
         if (verbosity & STATS_SPLITS_HISTOGRAM) {
             result["splits_diff_symbols_histogram"] = splits_diff_symbols_histogram;
