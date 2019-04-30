@@ -411,8 +411,7 @@ TEST(wavelet_tree_small, Serialization) {
 }
 
 
-//TODO: re-enable when not using dyn::str_check
-TEST(wavelet_tree_dyn, DISABLED_Serialization) {
+TEST(wavelet_tree_dyn, Serialization) {
     std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
                                       0, 1, 2, 0, 3, 2, 1, 1 };
     wavelet_tree *vector = new wavelet_tree_dyn(4, numbers);
