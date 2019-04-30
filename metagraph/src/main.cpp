@@ -940,7 +940,7 @@ int main(int argc, const char *argv[]) {
                 }
 
                 std::unique_ptr<DBGBitmapConstructor> constructor;
-                std::vector<std::unique_ptr<DBGBitmap::Chunk>> chunks;
+                std::vector<std::string> chunks;
 
                 //one pass per suffix
                 for (const std::string &suffix : suffices) {
@@ -966,18 +966,22 @@ int main(int argc, const char *argv[]) {
                         [&](const auto &loop) { constructor->add_sequences(loop); }
                     );
 
-                    chunks.emplace_back(constructor->build_chunk());
+                    std::unique_ptr<DBGBitmap::Chunk> chunk(constructor->build_chunk());
                     if (config->outfbase.size() && config->suffix.size()) {
-                        std::cout << "Graph chunk with " << chunks.back()->num_set_bits()
+                        std::cout << "Graph chunk with " << chunk->num_set_bits()
                                   << " k-mers was built in "
                                   << timer.elapsed() << "sec" << std::endl;
 
                         std::cout << "Serialize the graph chunk for suffix '"
                                   << suffix << "'...\t" << std::flush;
                         timer.reset();
-                        std::ofstream out(config->outfbase + "." + suffix + ".dbgsdchunk");
-                        chunks.back()->serialize(out);
+
+                        const auto chunk_filename = config->outfbase + (suffix.empty() ? "" : "." + suffix) + ".dbgsdchunk";
+                        std::ofstream out(chunk_filename);
+                        chunk->serialize(out);
+
                         std::cout << timer.elapsed() << "sec" << std::endl;
+                        chunks.emplace_back(chunk_filename);
                     }
 
                     if (config->suffix.size())
@@ -985,7 +989,6 @@ int main(int argc, const char *argv[]) {
                 }
 
                 graph.reset(constructor->build_graph_from_chunks(chunks));
-
             } else {
                 //slower method
 
