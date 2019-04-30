@@ -212,7 +212,7 @@ TEST(PathDatabase,ConsistentNode) {
     check_small_get_next_consistent_node<>();
 }
 
-#if defined(__linux__) || true
+#if defined(__linux__) || false
 
 template <typename T>
 void long_identity_test() {
