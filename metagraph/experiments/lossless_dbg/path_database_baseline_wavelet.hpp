@@ -66,7 +66,7 @@ using default_bit_vector = bit_vector_small;
 template <typename BitVector=default_bit_vector,typename GraphT=DBGSuccinct>
 class IncomingTable {
 public:
-    IncomingTable(const GraphT & graph) : graph(graph) {}
+    explicit IncomingTable(const GraphT & graph) : graph(graph) {}
     using bit_vector_t = BitVector;
     BitVector joins;
     sdsl::enc_vector<> edge_multiplicity_table;
@@ -78,9 +78,11 @@ public:
         }
         return result;
     }
+
     bool is_join(node_index node) const {
         return size(node); // as 1
     }
+
     int branch_size_rank(node_index node,int offset) const {
         if (offset < 0) { return 0; }
         int joins_position = joins.select1(node);
@@ -107,12 +109,12 @@ public:
         });
         return result;
     }
-    bool needs_offset(node_index node) const {
-        return (size(node) > graph.indegree(node));
+    bool has_new_reads(node_index node) const {
+        return (size(node) > graph.indegree(node)) or graph.indegree(node) == 1;
     }
 
     int relative_offset(node_index node,node_index prev_node) const {
-        bool increment = needs_offset(node);
+        bool increment = has_new_reads(node);
         int result;
         if (prev_node) {
             result = graph_branch_id(node,prev_node);
@@ -511,7 +513,7 @@ public:
         return db;
     }
 
-    json get_statistics(unsigned int verbosity = 0) const {
+    json get_statistics(unsigned int verbosity = ~0) const {
         int true_joins = 0;
         int added_joins = 0;
         int true_splits = 0;
@@ -531,14 +533,7 @@ public:
                 if (verbosity & STATS_JOINS_HISTOGRAM) {
                     int prev = 0;
                     int cardinality = incoming_table.size(node);
-//                    for (char c : {'$','A','C','G','T','N'}) {
-//                        int cur = incoming_table.branch_offset(node,c);
-//                        if (cur != prev) {
-//                            cardinality++;
-//                        }
-//                    }
-                    joins_diff_symbols_histogram[cardinality]++; // size histogram doesn't have infromation whether N was present
-                                                         // ToDo: fix this
+                    joins_diff_symbols_histogram[cardinality]++;
                 }
             }
             if (node_is_split(node)) {
@@ -596,17 +591,11 @@ public:
             });
         }
         if (!prev_node) {
-            cout << "N: " << joins.at(node).size() << endl;
-            D(graph.indegree(node));
-            D(incoming_table.size(node));
             assert(is_valid_path_id({node,relative_position}));
             return {node,relative_position};
         }
         assert(prev_node);
         if (node_is_split(prev_node)) {
-            cout << "XXX" << endl;
-            cout << node_get_last_char(node) << endl;
-            routing_table.print_content(prev_node);
             relative_position = routing_table.select(prev_node,relative_position+1,node_get_last_char(node));// +1 as relative_position is 0-based
         }
         return get_global_path_id(prev_node,relative_position);
