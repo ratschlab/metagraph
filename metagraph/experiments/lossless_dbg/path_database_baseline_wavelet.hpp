@@ -54,8 +54,8 @@ std::ostream &serialize(std::ostream &os, const vector<POD> &v) {
 #pragma GCC diagnostic ignored "-Wmissing-noreturn"
 #pragma GCC diagnostic ignored "-Wreturn-type"
 
-#define STATS_JOINS_HISTOGRAM (1u << 0)
-#define STATS_SPLITS_HISTOGRAM (1u << 1)
+const unsigned int STATS_JOINS_HISTOGRAM (1u << 0u);
+const unsigned int STATS_SPLITS_HISTOGRAM (1u << 1u);
 
 using namespace std;
 using alphabets::log2;
@@ -519,7 +519,7 @@ public:
         return db;
     }
 
-    json get_statistics(unsigned int verbosity = ~0) const {
+    json get_statistics(unsigned int verbosity = ~0u) const {
         int true_joins = 0;
         int added_joins = 0;
         int true_splits = 0;
@@ -570,7 +570,7 @@ public:
             result["splits_size_histogram"] = splits_size_histogram;
         }
         if (verbosity & STATS_JOINS_HISTOGRAM) {
-            result["splits_diff_symbols_histogram"] = splits_diff_symbols_histogram;
+            result["joins_diff_symbols_histogram"] = joins_diff_symbols_histogram;
         }
         cerr << result.dump(4) << endl;
         return result;
