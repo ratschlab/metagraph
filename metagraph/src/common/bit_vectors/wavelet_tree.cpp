@@ -406,7 +406,7 @@ bool wavelet_tree_dyn::load(std::istream &in) {
 }
 
 void wavelet_tree_dyn::clear() {
-    dwt_ = std::move(decltype(dwt_)(dwt_.alphabet_size()));
+    dwt_ = decltype(dwt_)(dwt_.alphabet_size());
 }
 
 sdsl::int_vector<> wavelet_tree_dyn::to_vector() const {
