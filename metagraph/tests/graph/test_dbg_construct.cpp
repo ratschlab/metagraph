@@ -267,7 +267,7 @@ TYPED_TEST(ExtractKmers, ExtractKmersFromStringWithFilteringTwo) {
             KmerExtractor::sequence_to_kmers(
                 std::string(length, 'N'), k, { 0, 0 }, &result
             );
-            ASSERT_EQ(0u, result.size()) << "k: " << k
+            ASSERT_EQ(1u, result.size()) << "k: " << k
                                          << ", length: " << length;
             result.clear();
             KmerExtractor::sequence_to_kmers(
