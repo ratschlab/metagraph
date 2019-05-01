@@ -45,6 +45,7 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     -Wno-old-style-cast \
     -Wno-atomic-alignment \
     -Wno-extra-semi-stmt \
+	-Wno-unused-parameter \
   ")
 endif()
 
