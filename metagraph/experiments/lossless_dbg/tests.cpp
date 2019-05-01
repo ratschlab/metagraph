@@ -165,6 +165,11 @@ void short_serdes_test() {
     serialization_deserialization_test<T>(reads_for_testing_short,5);
 }
 
+
+TEST(DBGSuccinct,IndegreeIncomingIdentity) {
+    PathDatabasereads_for_testing_short
+}
+
 TEST(PathDatabase,IncomingTable) {
     DBGSuccinct graph = DBGSuccinct(21);
     IncomingTable table(graph);

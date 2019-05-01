@@ -33,6 +33,26 @@ public:
             }
         }
     }
+
+    char get_outgoing_base(node_index node) {
+        char base;
+        assert(outdegree(node) == 1);
+        call_outgoing_kmers(node,[&base](node_index node,char edge_label ) { base = edge_label;});
+        return base;
+    }
+
+    int graph_branch_id(node_index node,node_index prev_node) const {
+        int result;
+        int i = 0;
+        call_incoming_kmers_mine(node,[&i,&result,&prev_node](node_index node,char base) {
+            if (node==prev_node) {
+                result = i;
+            }
+            i++;
+        });
+        return result;
+    }
+
 };
 #define DBGSuccinct BetterDBGSuccinct
 

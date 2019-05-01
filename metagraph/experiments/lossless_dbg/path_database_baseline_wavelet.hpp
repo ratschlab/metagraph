@@ -98,18 +98,6 @@ public:
         return joins.select1(node+1)-joins.select1(node)-1;
     }
 
-    int graph_branch_id(node_index node,node_index prev_node) const {
-        int result;
-        int i = 0;
-        graph.call_incoming_kmers_mine(node,[&i,&result,&prev_node](node_index node,char base) {
-            if (node==prev_node) {
-                result = i;
-            }
-            i++;
-        });
-        return result;
-    }
-
     bool has_new_reads(node_index node) const {
         // todo : remove or after the indegree bug is fixed and use assertion
         // assert(!(graph.indegree(node) < 2 and size(node)) or size(node) > graph.indegree(node))
@@ -121,7 +109,7 @@ public:
         bool increment = has_new_reads(node);
         int result;
         if (prev_node) {
-            result = graph_branch_id(node,prev_node);
+            result = graph.branch_id(node,prev_node);
         }
         else {
             result = -1; // starting branch is before all other branches
@@ -219,12 +207,7 @@ public:
         return range.first >= range.second;
     }
 
-    char graph_get_outgoing_base(node_index node) {
-        char base;
-        assert(graph.outdegree(node) == 1);
-        graph.call_outgoing_kmers(node,[&base](node_index node,char edge_label ) { base = edge_label;});
-        return base;
-    }
+
 
 
     history_t gather_history(const string& str_history) {
@@ -275,15 +258,6 @@ public:
         return consistent_node;
     }
 
-    void graph_call_incoming_kmers(node_index node,const std::function<void(node_index, char)>& callback) const {
-        for(auto c : "ACGTN"s) {
-            auto new_node = graph.traverse_back(node,c);
-            if (new_node) {
-                callback(new_node,c);
-            }
-        }
-    }
-
 
 
     next_nodes_with_extended_info_t get_next_nodes_with_support(node_index node,history_t& history) {
@@ -309,7 +283,7 @@ public:
             }
         }
         else {
-            auto base = graph_get_outgoing_base(node);
+            auto base = graph.get_outgoing_base(node);
             auto new_node = graph.traverse(node,base);
             result[new_node].first = 0;
             result[new_node].second = history;
@@ -580,7 +554,7 @@ public:
         node_index prev_node = 0;
         int prev_offset = 0;
         if (node_is_join(node)) {
-            graph_call_incoming_kmers(node,[&](node_index possible_node,char c) {
+            graph.call_incoming_kmers_mine(node,[&](node_index possible_node,char c) {
                 auto offset = incoming_table.branch_offset(node,possible_node);
                 if (offset <= relative_position && offset >= prev_offset) {
                     prev_node = possible_node;
@@ -591,7 +565,7 @@ public:
         }
         else {
             assert(graph.indegree(node) == 1);
-            graph_call_incoming_kmers(node,[&](node_index possible_node,char c) {
+            graph.call_incoming_kmers_mine(node,[&](node_index possible_node,char c) {
                 prev_node = possible_node;
             });
         }
