@@ -13,7 +13,7 @@
 #include <vector>
 #include <nlohmann/json.hpp>
 #include "sequence_graph.hpp"
-#include "dbg_succinct_construct.hpp"
+#include "boss_construct.hpp"
 #include "dbg_succinct.hpp"
 
 #include "utilities.hpp"
@@ -77,14 +77,14 @@ class PathDatabase {
   protected:
     std::shared_ptr<const GraphCommonT> graph_;
 
-    static DBG_succ* dbg_succ_graph_constructor(const vector<string> &raw_reads,
+    static BOSS* dbg_succ_graph_constructor(const vector<string> &raw_reads,
                                                 size_t k_kmer) {
-        auto graph_constructor = DBGSuccConstructor(k_kmer - 1);// because DBG_succ has smaller kmers
+        auto graph_constructor = BOSSConstructor(k_kmer - 1);// because DBG_succ has smaller kmers
         for(auto &read : raw_reads) {
             assert(read.size() >= k_kmer);
             graph_constructor.add_sequence(read);
         }
-        return new DBG_succ(&graph_constructor);
+        return new BOSS(&graph_constructor);
         //graph = DBGSuccinct(stupid_old_representation);
     }
 };

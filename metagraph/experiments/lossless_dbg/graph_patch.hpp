@@ -41,7 +41,7 @@ public:
         return base;
     }
 
-    int graph_branch_id(node_index node,node_index prev_node) const {
+    int branch_id(node_index node,node_index prev_node) const {
         int result;
         int i = 0;
         call_incoming_kmers_mine(node,[&i,&result,&prev_node](node_index node,char base) {

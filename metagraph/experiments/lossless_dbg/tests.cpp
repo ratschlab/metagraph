@@ -167,7 +167,7 @@ void short_serdes_test() {
 
 
 TEST(DBGSuccinct,IndegreeIncomingIdentity) {
-    PathDatabasereads_for_testing_short
+   // PathDatabasereads_for_testing_short
 }
 
 TEST(PathDatabase,IncomingTable) {

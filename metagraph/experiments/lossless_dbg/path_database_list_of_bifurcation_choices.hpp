@@ -14,7 +14,6 @@
 #include <nlohmann/json.hpp>
 
 #include "dbg_succinct.hpp"
-#include "dbg_succinct_construct.hpp"
 
 #include "path_database.hpp"
 #include "utilities.hpp"
@@ -172,18 +171,6 @@ class PathDatabaseListBC : public PathDatabase<int> {
             read += next_char;
         }
         return read;
-    }
-
-    static DBG_succ* dbg_succ_graph_constructor(const vector<string> &raw_reads,
-                                                size_t k_kmer) {
-        auto graph_constructor = DBGSuccConstructor(k_kmer - 1);// because DBG_succ has smaller kmers
-        cerr << "Starting building the graph" << endl;
-        for(auto &read : raw_reads) {
-            assert(read.size() >= k_kmer);
-            graph_constructor.add_sequence(read);
-        }
-        return new DBG_succ(&graph_constructor);
-        //graph = DBGSuccinct(stupid_old_representation);
     }
 
     void serialize(const fs::path& folder) const {};
