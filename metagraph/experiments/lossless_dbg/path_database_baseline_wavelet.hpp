@@ -100,7 +100,7 @@ public:
 
     bool has_new_reads(node_index node) const {
         // todo : remove or after the indegree bug is fixed and use assertion
-        // assert(!(graph.indegree(node) < 2 and size(node)) or size(node) > graph.indegree(node))
+        assert(!(graph.indegree(node) < 2 and size(node)) or size(node) > graph.indegree(node));
         // indegree smaller than two with nonempty incoming table implies that node has new reads
         return (size(node) > graph.indegree(node)) or (graph.indegree(node) < 2 and size(node));
     }
@@ -186,7 +186,11 @@ public:
         }
         is_join_node.push_back(1); // to also always end a block with 1
         incoming_table.edge_multiplicity_table = sdsl::enc_vector<>(edge_multiplicity_table_builder);
-        incoming_table.joins = BitVector(is_join_node);
+        sdsl::bit_vector temporary_representation(is_join_node.size());
+        for(int i=0;i<is_join_node.size();i++) {
+            temporary_representation[i] = is_join_node[i];
+        }
+        incoming_table.joins = BitVector(temporary_representation);
     }
 
     using range_t = pair<int,int>;

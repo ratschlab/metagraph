@@ -167,7 +167,45 @@ void short_serdes_test() {
 
 
 TEST(DBGSuccinct,IndegreeIncomingIdentity) {
-   // PathDatabasereads_for_testing_short
+   int k_kmer = 5;
+
+    auto graph_constructor = BOSSConstructor(k_kmer - 1);// because DBG_succ has smaller kmers
+    for(auto &read : reads_for_testing_short) {
+        assert(read.size() >= k_kmer);
+        graph_constructor.add_sequence(read);
+    }
+
+    auto graph = DBGSuccinct(new BOSS(&graph_constructor));
+    vector<node_index> incoming;
+    graph.adjacent_incoming_nodes(29,&incoming);
+    D(graph.indegree(29));
+    D(graph.get_node_sequence(29));
+    D(graph.get_node_sequence(incoming[0]));
+    // problem
+    for(int node=1;node<=graph.num_nodes();node++) {
+        int computed_indegree = 0;
+        for(auto c : "ACGTN"s) {
+            auto new_node = graph.traverse_back(node,c);
+            if (new_node) {
+                computed_indegree++;
+            }
+        }
+//        graph.call_incoming_kmers_mine(node,[&computed_indegree](node_index node,char c) { computed_indegree++; });
+        if (graph.indegree(node)!=computed_indegree) {
+            cout << node << endl;
+            cout << graph.get_node_sequence(node) << endl;
+        }
+        vector<node_index> incoming_nodes;
+        graph.adjacent_incoming_nodes(node,&incoming_nodes);
+
+        ASSERT_EQ(graph.indegree(node),computed_indegree);
+
+
+
+        ASSERT_EQ(graph.indegree(node),incoming_nodes.size());
+
+    }
+
 }
 
 TEST(PathDatabase,IncomingTable) {

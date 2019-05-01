@@ -34,7 +34,7 @@ public:
         }
     }
 
-    char get_outgoing_base(node_index node) {
+    char get_outgoing_base(node_index node) const {
         char base;
         assert(outdegree(node) == 1);
         call_outgoing_kmers(node,[&base](node_index node,char edge_label ) { base = edge_label;});

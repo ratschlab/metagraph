@@ -99,7 +99,7 @@ public:
     }
 
     void construct_edge_multiplicity_table() {
-        vector<bool> is_join_node(graph.num_nodes());
+        sdsl::bit_vector is_join_node(graph.num_nodes());
         for(int node=1;node<=graph.num_nodes();node++) {
             is_join_node[node-1] = PathDatabaseBaseline::node_is_join(node);
             if (PathDatabaseBaseline::node_is_join(node)) {
