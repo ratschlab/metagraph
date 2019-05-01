@@ -100,7 +100,7 @@ public:
 
     bool has_new_reads(node_index node) const {
         // todo : remove or after the indegree bug is fixed and use assertion
-        assert(!(graph.indegree(node) < 2 and size(node)) or size(node) > graph.indegree(node));
+        // assert(!(graph.indegree(node) < 2 and size(node)) or size(node) > graph.indegree(node));
         // indegree smaller than two with nonempty incoming table implies that node has new reads
         return (size(node) > graph.indegree(node)) or (graph.indegree(node) < 2 and size(node));
     }

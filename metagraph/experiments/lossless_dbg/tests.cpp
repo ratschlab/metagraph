@@ -180,6 +180,7 @@ TEST(DBGSuccinct,IndegreeIncomingIdentity) {
     graph.adjacent_incoming_nodes(29,&incoming);
     D(graph.indegree(29));
     D(graph.get_node_sequence(29));
+    D(incoming[0]);
     D(graph.get_node_sequence(incoming[0]));
     // problem
     for(int node=1;node<=graph.num_nodes();node++) {
@@ -192,8 +193,8 @@ TEST(DBGSuccinct,IndegreeIncomingIdentity) {
         }
 //        graph.call_incoming_kmers_mine(node,[&computed_indegree](node_index node,char c) { computed_indegree++; });
         if (graph.indegree(node)!=computed_indegree) {
-            cout << node << endl;
-            cout << graph.get_node_sequence(node) << endl;
+            D(node);
+            D(graph.get_node_sequence(node));
         }
         vector<node_index> incoming_nodes;
         graph.adjacent_incoming_nodes(node,&incoming_nodes);
