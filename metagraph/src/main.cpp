@@ -967,7 +967,7 @@ int main(int argc, const char *argv[]) {
                     );
 
                     std::unique_ptr<DBGBitmap::Chunk> chunk(constructor->build_chunk());
-                    if (config->outfbase.size() && config->suffix.size()) {
+                    if (config->outfbase.size()) {
                         std::cout << "Graph chunk with " << chunk->num_set_bits()
                                   << " k-mers was built in "
                                   << timer.elapsed() << "sec" << std::endl;
@@ -976,6 +976,7 @@ int main(int argc, const char *argv[]) {
                                   << suffix << "'...\t" << std::flush;
                         timer.reset();
 
+                        //TODO use utils::join_strings w/ discard_empty_strings = false
                         const auto chunk_filename = config->outfbase + (suffix.empty() ? "" : "." + suffix) + ".dbgsdchunk";
                         std::ofstream out(chunk_filename);
                         chunk->serialize(out);
@@ -988,7 +989,7 @@ int main(int argc, const char *argv[]) {
                         return 0;
                 }
 
-                graph.reset(constructor->build_graph_from_chunks(chunks));
+                graph.reset(constructor->build_graph_from_chunks(chunks, config->canonical, config->verbose));
             } else {
                 //slower method
 

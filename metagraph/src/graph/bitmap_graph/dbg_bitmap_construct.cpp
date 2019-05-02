@@ -1,4 +1,5 @@
 #include "dbg_bitmap_construct.hpp"
+#include <progress_bar.hpp>
 
 
 template <typename KMER>
@@ -103,44 +104,25 @@ DBGBitmap::Chunk* BitmapChunkConstructor<KMER>
 }
 
 DBGBitmap* DBGBitmapConstructor
-::build_graph_from_chunks(const std::vector<std::unique_ptr<DBGBitmap::Chunk>> &chunks,
-                          bool canonical_mode,
-                          bool verbose) {
-    if (chunks.empty())
-        return new DBGBitmap(2);
-
-    uint64_t cumulative_size = 1;
-
-    for (const auto &chunk : chunks) {
-        cumulative_size += chunk->num_set_bits();
-    }
-
-    if (verbose)
-        std::cout << "Cumulative size of chunks: "
-                  << cumulative_size - 1 << std::endl;
-
+::build_graph_from_chunks(const std::function<std::unique_ptr<DBGBitmap::Chunk>(void)> &next_chunk,
+                          uint64_t size,
+                          uint64_t cumulative_size,
+                          bool canonical_mode) {
     std::unique_ptr<DBGBitmap> graph{
         new DBGBitmap(2)
     };
 
     graph->kmers_ = DBGBitmap::Chunk(
         [&](const auto &index_callback) {
+            std::unique_ptr<DBGBitmap::Chunk> chunk;
+
             index_callback(0);
-            for (size_t i = 0; i < chunks.size(); ++i) {
-                if (verbose) {
-                    std::cout << "Chunk "
-                              << i
-                              << " loaded..." << std::flush;
-                }
 
-                chunks[i]->call_ones(index_callback);
-
-                if (verbose) {
-                    std::cout << " concatenated" << std::endl;
-                }
+            while (chunk = next_chunk()) {
+                chunk->call_ones(index_callback);
             }
         },
-        chunks[0]->size(), cumulative_size
+        size, cumulative_size
     );
 
     graph->canonical_mode_ = canonical_mode;
@@ -161,25 +143,57 @@ DBGBitmap* DBGBitmapConstructor
     if (chunk_filenames.empty())
         return new DBGBitmap(2);
 
-    std::vector<std::unique_ptr<DBGBitmap::Chunk>> chunks;
+    uint64_t size = 0;
+    uint64_t cumulative_size = 1;
 
-    for (auto file : chunk_filenames) {
-        file = utils::remove_suffix(file, ".dbgsdchunk") + ".dbgsdchunk";
+    for (size_t i = 0; i < chunk_filenames.size(); ++i) {
+        const auto &chunk_filename = chunk_filenames.at(i);
+        std::unique_ptr<DBGBitmap::Chunk> chunk(new DBGBitmap::Chunk());
 
-        std::ifstream chunk_in(file, std::ios::binary);
+        std::ifstream chunk_in(chunk_filename, std::ios::binary);
+        chunk->load(chunk_in);
 
-        if (!chunk_in.good()) {
-            std::cerr << "ERROR: input file " << file << " corrupted" << std::endl;
-            exit(1);
-        }
+        if (i > 0)
+            assert(chunk->size() == size);
+        else
+            size = chunk->size();
 
-        chunks.emplace_back(new DBGBitmap::Chunk());
-        chunks.back()->load(chunk_in);
-
-        assert(chunks.empty() || chunks.back()->size() == chunks.front()->size());
+        cumulative_size += chunk->num_set_bits();
     }
+    assert(size > 0);
 
-    return build_graph_from_chunks(chunks, canonical_mode, verbose);
+    if (verbose)
+        std::cout << "Cumulative size of chunks: "
+                  << cumulative_size - 1 << std::endl;
+
+    size_t chunk_idx = 0;
+
+    //TODO configure stream for verbose output globally and refactor
+    std::ofstream null_ofstream;
+    ProgressBar progress_bar(chunk_filenames.size(), "Processing chunks", verbose ? std::cout : null_ofstream);
+
+    return build_graph_from_chunks([&]() {
+        if (chunk_idx < chunk_filenames.size()) {
+            auto chunk_filename = chunk_filenames.at(chunk_idx);
+            chunk_filename = utils::remove_suffix(chunk_filename, ".dbgsdchunk") + ".dbgsdchunk";
+
+            std::ifstream chunk_in(chunk_filename, std::ios::binary);
+
+            if (!chunk_in.good()) {
+                std::cerr << "ERROR: input file " << chunk_filename << " corrupted" << std::endl;
+                exit(1);
+            }
+
+            std::unique_ptr<DBGBitmap::Chunk> chunk(new DBGBitmap::Chunk());
+            chunk->load(chunk_in);
+
+            chunk_idx++;
+            ++progress_bar;
+            return std::move(chunk);
+        } else {
+            return std::unique_ptr<DBGBitmap::Chunk>(nullptr);
+        }
+    }, size, cumulative_size, canonical_mode);
 }
 
 IBitmapChunkConstructor*
