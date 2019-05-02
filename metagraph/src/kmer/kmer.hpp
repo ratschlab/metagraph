@@ -49,6 +49,14 @@ class KMer {
 
     inline const WordType& data() const { return seq_; }
 
+    template <typename T>
+    inline static bool match_suffix(const T *kmer, size_t k, const std::vector<T> &suffix) {
+        assert(k > 0);
+        assert(k >= suffix.size());
+        return suffix.empty()
+                || std::equal(suffix.begin(), suffix.end(), kmer + k - suffix.size());
+    }
+
   private:
     static const CharType kFirstCharMask;
     WordType seq_; // kmer sequence
