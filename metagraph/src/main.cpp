@@ -940,7 +940,7 @@ int main(int argc, const char *argv[]) {
                 }
 
                 std::unique_ptr<DBGBitmapConstructor> constructor;
-                std::vector<std::string> chunks;
+                std::vector<std::string> chunk_filenames;
 
                 //one pass per suffix
                 for (const std::string &suffix : suffices) {
@@ -976,20 +976,22 @@ int main(int argc, const char *argv[]) {
                                   << suffix << "'...\t" << std::flush;
                         timer.reset();
 
-                        //TODO use utils::join_strings w/ discard_empty_strings = false
-                        const auto chunk_filename = config->outfbase + (suffix.empty() ? "" : "." + suffix) + ".dbgsdchunk";
-                        std::ofstream out(chunk_filename);
+                        chunk_filenames.push_back(
+                            utils::join_strings({ config->outfbase, suffix, "dbgsdchunk" }, ".")
+                        );
+                        std::ofstream out(chunk_filenames.back());
                         chunk->serialize(out);
 
                         std::cout << timer.elapsed() << "sec" << std::endl;
-                        chunks.emplace_back(chunk_filename);
                     }
 
                     if (config->suffix.size())
                         return 0;
                 }
 
-                graph.reset(constructor->build_graph_from_chunks(chunks, config->canonical, config->verbose));
+                graph.reset(constructor->build_graph_from_chunks(chunk_filenames,
+                                                                 config->canonical,
+                                                                 config->verbose));
             } else {
                 //slower method
 
