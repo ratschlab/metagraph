@@ -1,4 +1,5 @@
 #include "dbg_bitmap_construct.hpp"
+
 #include <progress_bar.hpp>
 
 
@@ -104,7 +105,7 @@ DBGBitmap::Chunk* BitmapChunkConstructor<KMER>
 }
 
 DBGBitmap* DBGBitmapConstructor
-::build_graph_from_chunks(const std::function<std::unique_ptr<DBGBitmap::Chunk>(void)> &next_chunk,
+::build_graph_from_chunks(const std::function<DBGBitmap::Chunk(void)> &next_chunk,
                           uint64_t size,
                           uint64_t cumulative_size,
                           bool canonical_mode) {
@@ -114,12 +115,12 @@ DBGBitmap* DBGBitmapConstructor
 
     graph->kmers_ = DBGBitmap::Chunk(
         [&](const auto &index_callback) {
-            std::unique_ptr<DBGBitmap::Chunk> chunk;
+            DBGBitmap::Chunk chunk;
 
             index_callback(0);
 
-            while (chunk = next_chunk()) {
-                chunk->call_ones(index_callback);
+            while ((chunk = next_chunk()).size()) {
+                chunk.call_ones(index_callback);
             }
         },
         size, cumulative_size
@@ -184,14 +185,14 @@ DBGBitmap* DBGBitmapConstructor
                 exit(1);
             }
 
-            std::unique_ptr<DBGBitmap::Chunk> chunk(new DBGBitmap::Chunk());
-            chunk->load(chunk_in);
+            DBGBitmap::Chunk chunk;
+            chunk.load(chunk_in);
 
             chunk_idx++;
             ++progress_bar;
-            return std::move(chunk);
+            return chunk;
         } else {
-            return std::unique_ptr<DBGBitmap::Chunk>(nullptr);
+            return DBGBitmap::Chunk();
         }
     }, size, cumulative_size, canonical_mode);
 }
