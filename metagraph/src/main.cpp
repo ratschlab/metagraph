@@ -374,18 +374,6 @@ void annotate_coordinates(const std::vector<std::string> &files,
 }
 
 
-/**
- * ACGT, ACG$, ..., $$$$ -- valid
- * AC$T, A$$T, ..., $AAA -- invalid
- */
-bool valid_kmer_suffix(const std::string &suffix) {
-    size_t last = suffix.rfind(BOSS::kSentinel);
-    return last == std::string::npos
-            || suffix.substr(0, last + 1)
-                == std::string(last + 1, BOSS::kSentinel);
-}
-
-
 void execute_query(std::string seq_name,
                    std::string sequence,
                    bool count_labels,
@@ -851,14 +839,11 @@ int main(int argc, const char *argv[]) {
                                                     / std::log2(boss_graph->alph_size - 1))),
                     boss_graph->get_k() - 1
                 );
-                std::deque<std::string> suffices;
+                std::vector<std::string> suffices;
                 if (config->suffix.size()) {
                     suffices = { config->suffix };
                 } else {
-                    suffices = utils::generate_strings(
-                        boss_graph->alphabet,
-                        suffix_len
-                    );
+                    suffices = KmerExtractor::generate_suffixes(suffix_len);
                 }
 
                 BOSS::Chunk graph_data(boss_graph->get_k());
@@ -868,12 +853,7 @@ int main(int argc, const char *argv[]) {
                     timer.reset();
 
                     if (suffix.size() > 0 || suffices.size() > 1) {
-                        if (valid_kmer_suffix(suffix)) {
-                            std::cout << "\nSuffix: " << suffix << std::endl;
-                        } else {
-                            std::cout << "\nSkipping suffix: " << suffix << std::endl;
-                            continue;
-                        }
+                        std::cout << "\nSuffix: " << suffix << std::endl;
                     }
 
                     std::unique_ptr<IBOSSChunkConstructor> constructor(
@@ -929,14 +909,11 @@ int main(int argc, const char *argv[]) {
                                                     / std::log2(sd_graph->alphabet.size()))),
                     sd_graph->get_k()
                 );
-                std::deque<std::string> suffices;
+                std::vector<std::string> suffices;
                 if (config->suffix.size()) {
                     suffices = { config->suffix };
                 } else {
-                    suffices = utils::generate_strings(
-                        sd_graph->alphabet,
-                        suffix_len
-                    );
+                    suffices = KmerExtractor2Bit().generate_suffixes(suffix_len);
                 }
 
                 std::unique_ptr<DBGBitmapConstructor> constructor;
@@ -1594,18 +1571,13 @@ int main(int argc, const char *argv[]) {
             if (!files.size()) {
                 assert(config->infbase.size());
 
-                auto sorted_suffices = utils::generate_strings(
-                    config->graph_type == Config::GraphType::SUCCINCT
-                        ? KmerExtractor().alphabet
-                        : KmerExtractor2Bit().alphabet,
-                    config->suffix_len
-                );
+                const auto sorted_suffices = config->graph_type == Config::GraphType::SUCCINCT
+                        ? KmerExtractor().generate_suffixes(config->suffix_len)
+                        : KmerExtractor2Bit().generate_suffixes(config->suffix_len);
 
                 for (const std::string &suffix : sorted_suffices) {
                     assert(suffix.size() == config->suffix_len);
-
-                    if (valid_kmer_suffix(suffix))
-                        chunk_files.push_back(config->infbase + "." + suffix);
+                    chunk_files.push_back(config->infbase + "." + suffix);
                 }
             }
 

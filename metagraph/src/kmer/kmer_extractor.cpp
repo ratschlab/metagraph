@@ -354,6 +354,22 @@ KmerExtractor::sequence_to_kmers(const std::string&,
                                  bool,
                                  const std::vector<TAlphabet>&);
 
+std::vector<std::string> KmerExtractor::generate_suffixes(size_t len) {
+    std::vector<std::string> valid_suffixes;
+
+    const char sentinel_char = alphabet[0];
+
+    for (auto&& suffix : utils::generate_strings(alphabet, len)) {
+        size_t last = suffix.rfind(sentinel_char);
+        if (last == std::string::npos
+                || suffix.substr(0, last + 1)
+                    == std::string(last + 1, sentinel_char))
+            valid_suffixes.push_back(std::move(suffix));
+    }
+
+    return valid_suffixes;
+}
+
 
 /**
  * KmerExtractor2Bit
@@ -406,6 +422,15 @@ KmerExtractor2BitTDecl(std::string)
 KmerExtractor2BitTDecl(std::string)
 ::reverse_complement(const std::string &sequence) const {
     return decode(extractor::reverse_complement(encode(sequence), complement_code_));
+}
+
+KmerExtractor2BitTDecl(std::vector<std::string>)
+::generate_suffixes(size_t len) const {
+    std::vector<std::string> result;
+    for (auto&& suffix : utils::generate_strings(alphabet, len)) {
+        result.push_back(std::move(suffix));
+    }
+    return result;
 }
 
 /**
