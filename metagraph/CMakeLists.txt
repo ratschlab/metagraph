@@ -22,6 +22,7 @@ add_subdirectory(
 include_directories(
   build/external-libraries/DYNAMIC/sparsepp-prefix
   build/external-libraries/DYNAMIC/sparsepp-prefix/src/sparsepp/sparsepp
+  build/external-libraries/DYNAMIC/bin/sparsepp-prefix/src/sparsepp/sparsepp
   ${INCLUDE_DIRS}
 )
 add_subdirectory(
@@ -163,6 +164,7 @@ include_directories(
   external-libraries/DYNAMIC/include
   external-libraries/DYNAMIC/sparsepp-prefix
   external-libraries/DYNAMIC/sparsepp-prefix/src/sparsepp/sparsepp
+  external-libraries/DYNAMIC/bin/sparsepp-prefix/src/sparsepp/sparsepp
   external-libraries/sdsl-lite/include
   external-libraries/rollinghashcpp
   external-libraries/ips4o
