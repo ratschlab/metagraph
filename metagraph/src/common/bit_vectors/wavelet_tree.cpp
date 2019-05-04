@@ -332,9 +332,6 @@ wavelet_tree_dyn::wavelet_tree_dyn(uint8_t logsigma, const Vector &vector)
         values.push_back(val);
     }
     dwt_.push_many(values);
-    //for (auto val : vector) {
-    //    dwt_.push_back(val);
-    //}
 }
 
 template
