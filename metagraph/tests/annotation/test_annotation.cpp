@@ -278,7 +278,27 @@ TYPED_TEST(AnnotatorPresetTest, HasLabel) {
     EXPECT_FALSE(this->annotation->has_label(4, "Label8"));
 }
 
-TYPED_TEST(AnnotatorPreset2Test, has_labels) {
+TYPED_TEST(AnnotatorPresetTest, HasLabels) {
+    EXPECT_TRUE(this->annotation->has_labels(0, { "Label0", "Label2", "Label8" }));
+    EXPECT_FALSE(this->annotation->has_labels(0, { "Label0", "Label2", "Label8", "Label1" }));
+
+    EXPECT_FALSE(this->annotation->has_labels(1, { "Label0" }));
+
+    EXPECT_TRUE(this->annotation->has_labels(2, { "Label1", "Label2" }));
+    EXPECT_FALSE(this->annotation->has_labels(2, { "Label1", "Label2", "Label0" }));
+
+    EXPECT_TRUE(this->annotation->has_labels(3, { "Label1", "Label2", "Label8" }));
+    EXPECT_FALSE(this->annotation->has_labels(3, { "Label1", "Label2", "Label8", "Label0" }));
+
+    EXPECT_TRUE(this->annotation->has_labels(4, { "Label2" }))
+        << this->annotation->get_labels(4)[0];
+    EXPECT_FALSE(this->annotation->has_labels(4, { "Label2", "Label0" }));
+    EXPECT_FALSE(this->annotation->has_labels(4, { "Label2", "Label0", "Label1" }));
+    EXPECT_FALSE(this->annotation->has_labels(4, { "Label2", "Label0", "Label1", "Label8" }));
+}
+
+
+TYPED_TEST(AnnotatorPreset2Test, has_labels2) {
     EXPECT_FALSE(this->annotation->has_labels(0, { "Label0", "Label1",
                                                    "Label2", "Label4",
                                                    "Label5", "Label8" }));
