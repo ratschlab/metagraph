@@ -174,6 +174,41 @@ TYPED_TEST(Construct, ConstructionShort) {
     }
 }
 
+TYPED_TEST(Construct, ConstructionFromChunks) {
+    for (size_t k = 1; k < kMaxK; k += 6) {
+        BOSS boss_dynamic(k);
+        boss_dynamic.add_sequence(std::string(100, 'A'));
+        boss_dynamic.add_sequence(std::string(100, 'C'));
+        boss_dynamic.add_sequence(std::string(100, 'T') + "A"
+                                        + std::string(100, 'G'));
+
+        for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 5u; ++suffix_len) {
+            BOSS::Chunk graph_data(k);
+
+            for (const std::string &suffix : KmerExtractor::generate_suffixes(suffix_len)) {
+                std::unique_ptr<IBOSSChunkConstructor> constructor(
+                    IBOSSChunkConstructor::initialize(k, false, suffix)
+                );
+
+                constructor->add_sequence(std::string(100, 'A'));
+                constructor->add_sequence(std::string(100, 'C'));
+                constructor->add_sequence(std::string(100, 'T') + "A"
+                                                + std::string(100, 'G'));
+
+                auto next_block = constructor->build_chunk();
+                graph_data.extend(*next_block);
+                delete next_block;
+            }
+
+            BOSS boss;
+            graph_data.initialize_boss(&boss);
+
+            EXPECT_EQ(boss_dynamic, boss);
+        }
+    }
+}
+
+
 using TAlphabet = KmerExtractor::TAlphabet;
 
 TYPED_TEST(ExtractKmers, ExtractKmersFromStringWithoutFiltering) {
@@ -267,7 +302,7 @@ TYPED_TEST(ExtractKmers, ExtractKmersFromStringWithFilteringTwo) {
             KmerExtractor::sequence_to_kmers(
                 std::string(length, 'N'), k, { 0, 0 }, &result
             );
-            ASSERT_EQ(0u, result.size()) << "k: " << k
+            ASSERT_EQ(1u, result.size()) << "k: " << k
                                          << ", length: " << length;
             result.clear();
             KmerExtractor::sequence_to_kmers(

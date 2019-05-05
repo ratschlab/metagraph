@@ -67,8 +67,7 @@ inline void sequence_to_kmers(size_t k,
     assert(seq.size() >= k);
 
     for (size_t i = 0; i + k <= seq.size(); ++i) {
-        if (suffix.empty() || std::equal(suffix.begin(), suffix.end(),
-                                         &seq[i + k - suffix.size()]))
+        if (KMER::match_suffix(&seq[i], k, suffix))
             kmers->emplace_back(&seq[i], k);
     }
 }
@@ -83,15 +82,13 @@ inline void sequence_to_kmers_slide(size_t k,
     assert(seq.size() >= k);
 
     KMER kmer(seq.data(), k);
-    if (suffix.empty() || std::equal(suffix.begin(), suffix.end(),
-                                     &seq[k - suffix.size()]))
+    if (KMER::match_suffix(seq.data(), k, suffix))
         kmers->push_back(kmer);
 
     // add all other kmers
     for (size_t i = k; i < seq.size(); ++i) {
         kmer.to_next(k, seq[i]);
-        if (suffix.empty() || std::equal(suffix.begin(), suffix.end(),
-                                         &seq[i + 1 - suffix.size()]))
+        if (KMER::match_suffix(&seq[i - k + 1], k, suffix))
             kmers->push_back(kmer);
     }
 }
@@ -108,10 +105,9 @@ inline void sequence_to_kmers_canonical(size_t k,
     assert(seq.size() == rev_comp.size());
 
     for (size_t i = 0; i + k <= seq.size(); ++i) {
-        bool suffix_matched_forward = std::equal(suffix.begin(), suffix.end(),
-                                                 &seq[i + k - suffix.size()]);
-        bool suffix_matched_reverse = std::equal(suffix.begin(), suffix.end(),
-                                                 &rev_comp[rev_comp.size() - i - suffix.size()]);
+        bool suffix_matched_forward = KMER::match_suffix(&seq[i], k, suffix);
+        bool suffix_matched_reverse = KMER::match_suffix(&rev_comp[rev_comp.size() - i - k], k, suffix);
+
         if (!suffix_matched_forward && !suffix_matched_reverse)
             continue;
 
@@ -129,18 +125,17 @@ inline void sequence_to_kmers_canonical(size_t k,
 }
 
 template <class KMER, typename TAlphabet>
-inline void push_back_smallest(const KMER &forward_kmer,
-                               const TAlphabet *forward,
-                               const KMER &backward_kmer,
-                               const TAlphabet *backward,
+inline void push_back_smallest(const KMER &kmer_first, const TAlphabet *first,
+                               const KMER &kmer_second, const TAlphabet *second,
+                               size_t k,
                                const std::vector<TAlphabet> &suffix,
                                Vector<KMER> *kmers) {
-    if (forward_kmer <= backward_kmer) {
-        if (suffix.empty() || std::equal(suffix.begin(), suffix.end(), forward))
-            kmers->push_back(forward_kmer);
+    if (kmer_first <= kmer_second) {
+        if (KMER::match_suffix(first, k, suffix))
+            kmers->push_back(kmer_first);
     } else {
-        if (suffix.empty() || std::equal(suffix.begin(), suffix.end(), backward))
-            kmers->push_back(backward_kmer);
+        if (KMER::match_suffix(second, k, suffix))
+            kmers->push_back(kmer_second);
     }
 }
 
@@ -159,17 +154,21 @@ inline void sequence_to_kmers_canonical_slide(size_t k,
     KMER kmer(seq.data(), k);
     KMER rev(&rev_comp[seq.size() - k], k);
 
-    push_back_smallest(kmer, &seq[k - suffix.size()],
-                       rev, &rev_comp[seq.size() - suffix.size()],
+    push_back_smallest(kmer, &seq[0],
+                       rev, &rev_comp[rev_comp.size() - k],
+                       k,
                        suffix, kmers);
 
     // add all other kmers
-    for (size_t i = k, j = seq.size() - k - 1; i < seq.size(); ++i, --j) {
-        kmer.to_next(k, seq[i]);
-        rev.to_prev(k, rev_comp[j]);
+    for (size_t forward_last = k, reverse_first = seq.size() - k - 1;
+                                        forward_last < seq.size();
+                                            ++forward_last, --reverse_first) {
+        kmer.to_next(k, seq[forward_last]);
+        rev.to_prev(k, rev_comp[reverse_first]);
 
-        push_back_smallest(kmer, &seq[i + 1 - suffix.size()],
-                           rev, &rev_comp[j + k - suffix.size()],
+        push_back_smallest(kmer, &seq[forward_last - k + 1],
+                           rev, &rev_comp[reverse_first],
+                           k,
                            suffix, kmers);
     }
 }
@@ -355,6 +354,22 @@ KmerExtractor::sequence_to_kmers(const std::string&,
                                  bool,
                                  const std::vector<TAlphabet>&);
 
+std::vector<std::string> KmerExtractor::generate_suffixes(size_t len) {
+    std::vector<std::string> valid_suffixes;
+
+    const char sentinel_char = alphabet[0];
+
+    for (auto&& suffix : utils::generate_strings(alphabet, len)) {
+        size_t last = suffix.rfind(sentinel_char);
+        if (last == std::string::npos
+                || suffix.substr(0, last + 1)
+                    == std::string(last + 1, sentinel_char))
+            valid_suffixes.push_back(std::move(suffix));
+    }
+
+    return valid_suffixes;
+}
+
 
 /**
  * KmerExtractor2Bit
@@ -407,6 +422,15 @@ KmerExtractor2BitTDecl(std::string)
 KmerExtractor2BitTDecl(std::string)
 ::reverse_complement(const std::string &sequence) const {
     return decode(extractor::reverse_complement(encode(sequence), complement_code_));
+}
+
+KmerExtractor2BitTDecl(std::vector<std::string>)
+::generate_suffixes(size_t len) const {
+    std::vector<std::string> result;
+    for (auto&& suffix : utils::generate_strings(alphabet, len)) {
+        result.push_back(std::move(suffix));
+    }
+    return result;
 }
 
 /**

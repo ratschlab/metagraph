@@ -13,7 +13,8 @@ RowConcatenated(const std::function<void(const RowCallback&)> &call_rows,
                 uint64_t num_columns,
                 uint64_t num_rows,
                 uint64_t num_set_bits)
-      : num_columns_(num_columns) {
+      : num_columns_(num_columns),
+        num_rows_(num_rows) {
     compressed_rows_.reset(new BitVector(
         [&](const std::function<void(uint64_t)> &callback) {
             uint64_t pos = 0;
@@ -29,12 +30,14 @@ RowConcatenated(const std::function<void(const RowCallback&)> &call_rows,
 
 template <typename BitVector>
 bool RowConcatenated<BitVector>::get(Row row, Column column) const {
+    assert(compressed_rows_.get());
     return (*compressed_rows_)[row * num_columns_ + column];
 }
 
 template <typename BitVector>
 std::vector<typename RowConcatenated<BitVector>::Column>
 RowConcatenated<BitVector>::get_row(Row row) const {
+    assert(compressed_rows_.get());
     assert(row * num_columns_ < compressed_rows_->size());
     std::vector<Column> columns;
 
@@ -50,6 +53,7 @@ RowConcatenated<BitVector>::get_row(Row row) const {
 template <typename BitVector>
 std::vector<typename RowConcatenated<BitVector>::Row>
 RowConcatenated<BitVector>::get_column(Column column) const {
+    assert(compressed_rows_.get());
     assert(column < num_columns_);
     std::vector<Row> rows;
 
@@ -67,6 +71,13 @@ bool RowConcatenated<BitVector>::load(std::istream &in) {
         num_columns_ = load_number(in);
         if (!compressed_rows_->load(in))
             return false;
+
+        // backwards compatibility
+        try {
+            num_rows_ = load_number(in);
+        } catch (...) {
+            num_rows_ = compressed_rows_->size() / num_columns_;
+        }
     } catch (...) {
         return false;
     }
@@ -75,8 +86,10 @@ bool RowConcatenated<BitVector>::load(std::istream &in) {
 
 template <typename BitVector>
 void RowConcatenated<BitVector>::serialize(std::ostream &out) const {
+    assert(compressed_rows_.get());
     serialize_number(out, num_columns_);
     compressed_rows_->serialize(out);
+    serialize_number(out, num_rows_);
 }
 
 template class RowConcatenated<bit_vector_sd>;

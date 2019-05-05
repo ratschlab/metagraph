@@ -69,6 +69,13 @@ class KmerExtractor {
     static char decode(TAlphabet c);
     static std::string decode(const std::vector<TAlphabet> &sequence);
 
+    /**
+     * Generate all valid suffixes of the given length
+     * ACGT, ACG$, ..., $$$$ -- valid
+     * AC$T, A$$T, ..., $AAA -- invalid
+     */
+    static std::vector<std::string> generate_suffixes(size_t len);
+
     static const std::string alphabet;
 
   private:
@@ -125,6 +132,8 @@ class KmerExtractor2BitT {
     // map k-mer character to input character
     char decode(TAlphabet c) const;
     std::string decode(const std::vector<TAlphabet> &sequence) const;
+
+    std::vector<std::string> generate_suffixes(size_t len) const;
 
   private:
     const TAlphabet *char_to_code_;

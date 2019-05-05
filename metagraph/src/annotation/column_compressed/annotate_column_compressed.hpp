@@ -29,7 +29,7 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
     using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
 
-    ColumnCompressed(uint64_t num_rows,
+    ColumnCompressed(uint64_t num_rows = 0,
                      size_t num_columns_cached = 1,
                      bool verbose = false);
 

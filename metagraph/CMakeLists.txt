@@ -45,6 +45,7 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     -Wno-old-style-cast \
     -Wno-atomic-alignment \
     -Wno-extra-semi-stmt \
+	-Wno-unused-parameter \
   ")
 endif()
 
@@ -388,6 +389,8 @@ target_link_libraries(unit_tests gtest_main gtest
   metagraph
   ${METALIBS}
 )
+
+target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template)
 
 add_test(NAME unit_tests COMMAND unit_tests)
 

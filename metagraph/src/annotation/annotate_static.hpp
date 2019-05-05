@@ -59,7 +59,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
         return matrix_->get_row(i);
     }
 
-    static const std::string kFileExtension;
+    static const std::string kExtension;
 };
 
 } // namespace annotate

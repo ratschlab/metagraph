@@ -40,7 +40,7 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
     using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
 
-    RowCompressed(uint64_t num_rows, bool sparse = false);
+    RowCompressed(uint64_t num_rows = 0, bool sparse = false);
 
     void set_labels(Index i, const VLabels &labels);
     VLabels get_labels(Index i) const;

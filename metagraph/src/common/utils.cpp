@@ -41,6 +41,7 @@ std::string join_strings(const std::vector<std::string> &strings,
     );
 
     std::string result;
+
     for (; it != strings.end(); ++it) {
         if (it->size() || !discard_empty_strings) {
             result += *it;
