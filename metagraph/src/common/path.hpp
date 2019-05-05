@@ -7,7 +7,10 @@ template <typename NodeType, typename VLabels>
 class Path {
 
   public:
-    Path(std::string::const_iterator query_it) : query_it_(query_it) {
+    Path(std::string::const_iterator query_begin_it,
+         std::string::const_iterator query_it) :
+            query_begin_it_(query_begin_it),
+            query_it_(query_it) {
         score_ = 0.0; }
 
     Path(const Path&) = default;
@@ -25,8 +28,10 @@ class Path {
     }
     // Assume paths are appended on the correct order.
     void append_path(const Path &other, int64_t k) {
+        if (other.size() == 0)
+            return;
         if (nodes_.size() > 0)
-            sequence_ += other.sequence_.substr(k - 2);
+            sequence_ += other.sequence_.substr(k);
         else
             sequence_ = other.sequence_;
         for (auto node : other.nodes_)
@@ -37,8 +42,17 @@ class Path {
                           std::end(other.label_set_));
         query_it_ = other.query_it_;
     }
+    void trim_with_score(uint64_t trim_length, float total_score) {
+        nodes_.resize(nodes_.size() - trim_length);
+        score_ = total_score;
+        query_it_ -= trim_length;
+        sequence_.resize(sequence_.size() - trim_length);
+        // TODO: remove labels from trimmed nodes.
+    }
 
     void update_total_score(float score) { score_ = score; }
+    void set_query_begin_it(std::string::const_iterator query_begin_it) {
+        query_begin_it_ = query_begin_it; }
     void set_query_it(std::string::const_iterator query_it) {
         query_it_ = query_it; }
 
@@ -51,6 +65,7 @@ class Path {
     std::vector<NodeType> get_nodes() const { return nodes_; }
 
     std::string::const_iterator get_query_it() const { return query_it_; }
+    std::string::const_iterator get_query_begin_it() const { return query_begin_it_; }
     std::string get_sequence() const { return sequence_; }
 
     // The paths are sorted in BoundedPriorityQueue in increasing order of score
@@ -64,6 +79,7 @@ class Path {
     float score_;
     std::vector<NodeType> nodes_;
     VLabels label_set_;
+    std::string::const_iterator query_begin_it_;
     std::string::const_iterator query_it_;
     std::string sequence_;
 
