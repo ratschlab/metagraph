@@ -471,15 +471,14 @@ std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
 }
 
 
-std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
-    auto graph_temp = load_critical_dbg(config.infbase);
-
+std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
+                                                       const Config &config) {
     auto annotation_temp = initialize_annotation(
         config.infbase_annotators.size()
             ? config.infbase_annotators.at(0)
             : "",
         config,
-        graph_temp->num_nodes()
+        graph->num_nodes()
     );
     if (config.infbase_annotators.size()
             && !annotation_temp->load(config.infbase_annotators.at(0))) {
@@ -490,7 +489,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
     }
 
     // load graph
-    auto anno_graph = std::make_unique<AnnotatedDBG>(graph_temp,
+    auto anno_graph = std::make_unique<AnnotatedDBG>(std::move(graph),
                                                      std::move(annotation_temp),
                                                      config.parallel);
 
@@ -501,6 +500,10 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
     }
 
     return anno_graph;
+}
+
+std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
+    return initialize_annotated_dbg(load_critical_dbg(config.infbase), config);
 }
 
 
@@ -1347,23 +1350,58 @@ int main(int argc, const char *argv[]) {
         case Config::ANNOTATE: {
             assert(config->infbase_annotators.size() <= 1);
 
-            auto anno_graph = initialize_annotated_dbg(*config);
+            if (!config->separately) {
+                auto anno_graph = initialize_annotated_dbg(*config);
 
-            annotate_data(files,
-                          config->refpath,
-                          anno_graph.get(),
-                          config->reverse,
-                          config->use_kmc,
-                          config->filter_k,
-                          config->max_unreliable_abundance,
-                          config->unreliable_kmers_threshold,
-                          config->filename_anno,
-                          config->fasta_anno,
-                          config->fasta_header_delimiter,
-                          config->anno_labels,
-                          config->verbose);
+                annotate_data(files,
+                              config->refpath,
+                              anno_graph.get(),
+                              config->reverse,
+                              config->use_kmc,
+                              config->filter_k,
+                              config->max_unreliable_abundance,
+                              config->unreliable_kmers_threshold,
+                              config->filename_anno,
+                              config->fasta_anno,
+                              config->fasta_header_delimiter,
+                              config->anno_labels,
+                              config->verbose);
 
-            anno_graph->get_annotation().serialize(config->outfbase);
+                anno_graph->get_annotation().serialize(config->outfbase);
+
+            } else {
+                const auto graph = load_critical_dbg(config->infbase);
+
+                ThreadPool thread_pool(config->parallel);
+
+                // annotate multiple columns in parallel, each in a single thread
+                config->parallel = 1;
+
+                for (const auto &file : files) {
+                    thread_pool.enqueue([](auto graph, auto filename, const Config *config) {
+                            auto anno_graph = initialize_annotated_dbg(graph, *config);
+
+                            annotate_data({ filename },
+                                          config->refpath,
+                                          anno_graph.get(),
+                                          config->reverse,
+                                          config->use_kmc,
+                                          config->filter_k,
+                                          config->max_unreliable_abundance,
+                                          config->unreliable_kmers_threshold,
+                                          config->filename_anno,
+                                          config->fasta_anno,
+                                          config->fasta_header_delimiter,
+                                          config->anno_labels,
+                                          config->verbose);
+                            anno_graph->get_annotation().serialize(filename);
+                        },
+                        graph,
+                        file,
+                        config.get()
+                    );
+                }
+            }
 
             return 0;
         }

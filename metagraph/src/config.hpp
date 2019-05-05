@@ -39,6 +39,7 @@ class Config {
     bool count_dummy = false;
     bool canonical_mode = false;
     bool greedy_brwt = false;
+    bool separately = false;
 
     unsigned int k = 3;
     unsigned int filter_k = 3;

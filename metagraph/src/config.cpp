@@ -148,6 +148,8 @@ Config::Config(int argc, const char *argv[]) {
             fasta_header_delimiter = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "--labels-delimiter")) {
             anno_labels_delimiter = std::string(argv[++i]);
+        } else if (!strcmp(argv[i], "--separately")) {
+            separately = true;
         } else if (!strcmp(argv[i], "--kmer-mapping-mode")) {
             kmer_mapping_mode = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--num-top-labels")) {
@@ -583,6 +585,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t                     \t\t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
             fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate graph [off]\n");
             fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file [<graph_basename>]\n");
+            fprintf(stderr, "\t   --separately \t\tannotate each file independently and dump to the same directory [off]\n");
             fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
             fprintf(stderr, "\t   --filter-abund [INT] \tthreshold for the abundance of reliable k-mers [0]\n");
             fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
