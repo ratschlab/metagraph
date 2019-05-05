@@ -833,17 +833,11 @@ int main(int argc, const char *argv[]) {
                 }
                 //enumerate all suffices
                 assert(boss_graph->alph_size > 1);
-                assert(config->nsplits > 0);
-                size_t suffix_len = std::min(
-                    static_cast<size_t>(std::ceil(std::log2(config->nsplits)
-                                                    / std::log2(boss_graph->alph_size - 1))),
-                    boss_graph->get_k() - 1
-                );
                 std::vector<std::string> suffices;
                 if (config->suffix.size()) {
                     suffices = { config->suffix };
                 } else {
-                    suffices = KmerExtractor::generate_suffixes(suffix_len);
+                    suffices = KmerExtractor::generate_suffixes(config->suffix_len);
                 }
 
                 BOSS::Chunk graph_data(boss_graph->get_k());
@@ -896,6 +890,12 @@ int main(int argc, const char *argv[]) {
                 graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
 
             } else if (config->graph_type == Config::GraphType::BITMAP && !config->dynamic) {
+
+                if (!config->outfbase.size()) {
+                    std::cerr << "Error: No output file provided" << std::endl;
+                    exit(1);
+                }
+
                 auto sd_graph = std::make_unique<DBGBitmap>(config->k);
 
                 if (config->verbose) {
@@ -903,26 +903,21 @@ int main(int argc, const char *argv[]) {
                 }
                 //enumerate all suffices
                 assert(sd_graph->alphabet.size() > 1);
-                assert(config->nsplits > 0);
-                size_t suffix_len = std::min(
-                    static_cast<size_t>(std::ceil(std::log2(config->nsplits)
-                                                    / std::log2(sd_graph->alphabet.size()))),
-                    sd_graph->get_k()
-                );
                 std::vector<std::string> suffices;
                 if (config->suffix.size()) {
                     suffices = { config->suffix };
                 } else {
-                    suffices = KmerExtractor2Bit().generate_suffixes(suffix_len);
+                    suffices = KmerExtractor2Bit().generate_suffixes(config->suffix_len);
                 }
 
                 std::unique_ptr<DBGBitmapConstructor> constructor;
+                std::vector<std::string> chunk_filenames;
 
                 //one pass per suffix
                 for (const std::string &suffix : suffices) {
                     timer.reset();
 
-                    if (suffix.size() > 0 || suffices.size() > 1) {
+                    if (config->verbose && (suffix.size() > 0 || suffices.size() > 1)) {
                         std::cout << "\nSuffix: " << suffix << std::endl;
                     }
 
@@ -942,29 +937,45 @@ int main(int argc, const char *argv[]) {
                         [&](const auto &loop) { constructor->add_sequences(loop); }
                     );
 
-                    if (config->outfbase.size() && config->suffix.size()) {
-                        const DBGBitmap::Chunk* next_block = constructor->build_chunk();
-                        std::cout << "Graph chunk with " << next_block->num_set_bits()
-                                  << " k-mers was built in "
-                                  << timer.elapsed() << "sec" << std::endl;
+                    if (!suffix.size()) {
+                        assert(suffices.size() == 1);
 
-                        std::cout << "Serialize the graph chunk for suffix '"
-                                  << suffix << "'...\t" << std::flush;
-                        timer.reset();
-                        std::ofstream out(config->outfbase + "." + suffix + ".dbgsdchunk");
-                        next_block->serialize(out);
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-                        sd_graph.reset(new DBGBitmap(config->k));
+                        auto bitmap_graph = std::make_unique<DBGBitmap>(config->k);
+                        constructor->build_graph(bitmap_graph.get());
+                        graph.reset(bitmap_graph.release());
+                    } else {
+                        std::unique_ptr<DBGBitmap::Chunk> chunk { constructor->build_chunk() };
+                        if (config->verbose) {
+                            std::cout << "Graph chunk with " << chunk->num_set_bits()
+                                      << " k-mers was built in "
+                                      << timer.elapsed() << "sec" << std::endl;
+
+                            std::cout << "Serialize the graph chunk for suffix '"
+                                      << suffix << "'...\t" << std::flush;
+                        }
+
+                        chunk_filenames.push_back(
+                            utils::join_strings({ config->outfbase, suffix }, ".")
+                                + DBGBitmap::kChunkFileExtension
+                        );
+                        std::ofstream out(chunk_filenames.back(), std::ios::binary);
+                        chunk->serialize(out);
+                        if (config->verbose)
+                            std::cout << timer.elapsed() << "sec" << std::endl;
                     }
 
+                    // only one chunk had to be constructed
                     if (config->suffix.size())
                         return 0;
-
-                    constructor->build_graph(sd_graph.get());
                 }
 
-                graph.reset(sd_graph.release());
-
+                if (suffices.size() > 1) {
+                    assert(chunk_filenames.size());
+                    timer.reset();
+                    graph.reset(constructor->build_graph_from_chunks(chunk_filenames,
+                                                                     config->canonical,
+                                                                     config->verbose));
+                }
             } else {
                 //slower method
 
@@ -1582,7 +1593,9 @@ int main(int argc, const char *argv[]) {
             }
 
             for (auto &filename : chunk_files) {
-                filename = utils::remove_suffix(filename, ".dbgchunk", ".dbgsdchunk");
+                filename = utils::remove_suffix(filename,
+                                                    BOSS::Chunk::kFileExtension,
+                                                    DBGBitmap::kChunkFileExtension);
             }
 
             // collect results on an external merge or construction

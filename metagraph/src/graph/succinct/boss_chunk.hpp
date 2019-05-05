@@ -41,6 +41,8 @@ class BOSS::Chunk {
     build_boss_from_chunks(const std::vector<std::string> &chunk_filenames,
                            bool verbose = false);
 
+    static constexpr auto kFileExtension = ".dbgchunk";
+
   private:
     const size_t alph_size_;
     const size_t bits_per_char_W_;

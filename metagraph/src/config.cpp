@@ -148,8 +148,6 @@ Config::Config(int argc, const char *argv[]) {
             fasta_header_delimiter = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "--labels-delimiter")) {
             anno_labels_delimiter = std::string(argv[++i]);
-        } else if (!strcmp(argv[i], "-s") || !strcmp(argv[i], "--num-splits")) {
-            nsplits = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--kmer-mapping-mode")) {
             kmer_mapping_mode = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--num-top-labels")) {
@@ -226,11 +224,6 @@ Config::Config(int argc, const char *argv[]) {
     }
 
     bool print_usage_and_exit = false;
-
-    if (nsplits == 0) {
-        std::cerr << "Error: Invalid number of splits" << std::endl;
-        print_usage_and_exit = true;
-    }
 
     if (identity != CONCATENATE
             && identity != STATS
@@ -487,7 +480,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
             fprintf(stderr, "\t   --dynamic \t\tuse dynamic build method [off]\n");
             fprintf(stderr, "\t   --suffix \t\tbuild graph chunk only for k-mers with the suffix given [off]\n");
-            fprintf(stderr, "\t-s --num-splits \tdefine the minimum number of bins to split kmers into [1]\n");
+            fprintf(stderr, "\t-l --len-suffix [INT] \tk-mer suffix length for building graph from chunks [0]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case EXTEND: {
