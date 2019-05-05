@@ -56,6 +56,14 @@ class BoundedPriorityQueue : public std::priority_queue<T, Container, Compare> {
         }
     }
 
+    T back() {
+        assert(this->size() > 0);
+        auto mid = std::begin(this->c) + std::floor((this->size() - 1) / 2.0);
+        auto end = std::end(this->c);
+        auto min_element = std::min_element(mid, end);
+        return *(min_element);
+    }
+
   private:
     size_t max_size;
 };

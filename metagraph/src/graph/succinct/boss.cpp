@@ -977,19 +977,22 @@ void BOSS::extend_from_seed(std::string::const_iterator begin,
                                       const std::function<bool()> &terminate,
                                       edge_index seed) const {
     auto edge = seed;
-    if (edge) {
-        // Use the seed hint and begin extention right away.
-        edge = fwd(edge);
-    } else {
+    if (!edge) {
         // Seed is taken from the first k characters.
         std::string seed_str(begin, begin + k_ + 1);
         auto encoded_seed = encode(seed_str);
         edge = map_to_edge(&encoded_seed[0], &encoded_seed[k_ + 1]);
-    }
-    while (!terminate() && edge && begin + k_ != end) {
+        if (!edge || terminate())
+            return;
         callback(edge);
+        begin ++;
+    }
+    while (begin + k_ != end) {
         edge = fwd(edge);
-        edge = pick_edge(edge, get_source_node(edge), encode(*(begin + k_ + 1)));
+        edge = pick_edge(edge, get_source_node(edge), encode(*(begin + k_)));
+        if (!edge || terminate())
+            return;
+        callback(edge);
         begin ++;
     }
 }

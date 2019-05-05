@@ -2390,19 +2390,25 @@ int main(int argc, const char *argv[]) {
                                   << "sec, current mem usage: "
                                   << get_curr_RSS() / (1 << 20) << " MiB"
                                   << std::endl;
-                        std::cout << "Q: " << std::string(read_stream->seq.s) << std::endl
-                                  << "P: " << path.get_sequence()
-                                  << std::endl;
+                        std::cout << "Q: " << std::string(read_stream->seq.s) << "\nP: ";
+                        for (auto partial_path : path)
+                            std::cout << partial_path.get_sequence() << "+";
+                        std::cout << std::endl;
                     }
-                    outstream << "Q: " << std::string(read_stream->seq.s) << std::endl
-                              << "P: " << path.get_sequence()
-                              << std::endl << "With total score " << path.get_total_score() << std::endl;
+                    float total_score = 0;
+                    outstream << "Q: " << std::string(read_stream->seq.s) << "\nP: ";
+                    for (auto partial_path : path) {
+                        outstream << partial_path.get_sequence() << "+";
+                        total_score += partial_path.get_total_score();
+                    }
+                    outstream << std::endl << "With total score " << total_score << std::endl;
                 }, config->reverse,
                     get_filter_filename(file, config->filter_k,
                                         config->min_count - 1,
                                         config->unreliable_kmers_threshold)
                 );
 
+                std::cout << "Number of merged paths = " << aligner.get_num_merge_paths() << std::endl;
                 if (config->verbose) {
                     std::cout << "File processed in "
                               << data_reading_timer.elapsed()
