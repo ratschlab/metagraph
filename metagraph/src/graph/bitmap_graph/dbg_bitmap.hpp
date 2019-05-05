@@ -93,6 +93,8 @@ class DBGBitmap : public DeBruijnGraph {
 
     using Chunk = bit_vector_sd;
 
+    static constexpr auto kChunkFileExtension = ".dbgsdchunk";
+
   private:
     using Kmer = KmerExtractor2Bit::Kmer64;
 

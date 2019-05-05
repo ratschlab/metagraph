@@ -105,13 +105,12 @@ DBGBitmap::Chunk* BitmapChunkConstructor<KMER>
 }
 
 DBGBitmap* DBGBitmapConstructor
-::build_graph_from_chunks(const std::function<DBGBitmap::Chunk(void)> &next_chunk,
-                          uint64_t size,
-                          uint64_t cumulative_size,
+::build_graph_from_chunks(uint64_t size,
+                          uint64_t num_kmers,
+                          const std::function<DBGBitmap::Chunk(void)> &next_chunk,
                           bool canonical_mode) {
-    std::unique_ptr<DBGBitmap> graph{
-        new DBGBitmap(2)
-    };
+    auto graph = std::make_unique<DBGBitmap>(2);
+
 
     graph->kmers_ = DBGBitmap::Chunk(
         [&](const auto &index_callback) {
@@ -123,11 +122,11 @@ DBGBitmap* DBGBitmapConstructor
                 chunk.call_ones(index_callback);
             }
         },
-        size, cumulative_size
+        size,
+        num_kmers
     );
 
     graph->canonical_mode_ = canonical_mode;
-
     graph->complete_ = false;
 
     assert(!(sdsl::bits::hi(graph->kmers_.size()) % KmerExtractor2Bit::kLogSigma));
@@ -154,9 +153,9 @@ DBGBitmap* DBGBitmapConstructor
         std::ifstream chunk_in(chunk_filename, std::ios::binary);
         chunk->load(chunk_in);
 
-        if (i > 0)
-            assert(chunk->size() == size);
-        else
+        assert(!i || chunk->size() == size);
+
+        if (!i)
             size = chunk->size();
 
         cumulative_size += chunk->num_set_bits();
@@ -173,10 +172,16 @@ DBGBitmap* DBGBitmapConstructor
     std::ofstream null_ofstream;
     ProgressBar progress_bar(chunk_filenames.size(), "Processing chunks", verbose ? std::cout : null_ofstream);
 
-    return build_graph_from_chunks([&]() {
-        if (chunk_idx < chunk_filenames.size()) {
+    return build_graph_from_chunks(
+        size,
+        cumulative_size,
+        [&]() {
+            if (chunk_idx >= chunk_filenames.size())
+                return DBGBitmap::Chunk();
+
             auto chunk_filename = chunk_filenames.at(chunk_idx);
-            chunk_filename = utils::remove_suffix(chunk_filename, ".dbgsdchunk") + ".dbgsdchunk";
+            chunk_filename = utils::remove_suffix(chunk_filename, DBGBitmap::kChunkFileExtension)
+                                + DBGBitmap::kChunkFileExtension;
 
             std::ifstream chunk_in(chunk_filename, std::ios::binary);
 
@@ -191,10 +196,9 @@ DBGBitmap* DBGBitmapConstructor
             chunk_idx++;
             ++progress_bar;
             return chunk;
-        } else {
-            return DBGBitmap::Chunk();
-        }
-    }, size, cumulative_size, canonical_mode);
+        },
+        canonical_mode
+    );
 }
 
 IBitmapChunkConstructor*

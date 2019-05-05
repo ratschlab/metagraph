@@ -56,9 +56,9 @@ class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
                                               bool canonical_mode = false,
                                               bool verbose = false);
 
-    static DBGBitmap* build_graph_from_chunks(const std::function<DBGBitmap::Chunk(void)> &next_chunk,
-                                              uint64_t size,
-                                              uint64_t cumulative_size,
+    static DBGBitmap* build_graph_from_chunks(uint64_t size,
+                                              uint64_t num_kmers,
+                                              const std::function<DBGBitmap::Chunk(void)> &next_chunk,
                                               bool canonical_mode = false);
 
   private:

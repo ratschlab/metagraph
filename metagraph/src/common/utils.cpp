@@ -40,7 +40,7 @@ std::string join_strings(const std::vector<std::string> &strings,
         [&](const auto &str) { return !discard_empty_strings || !str.empty(); }
     );
 
-    std::string result = "";
+    std::string result;
     for (; it != strings.end(); ++it) {
         if (it->size() || !discard_empty_strings) {
             result += *it;
