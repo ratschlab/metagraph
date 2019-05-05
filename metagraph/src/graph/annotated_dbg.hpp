@@ -1,6 +1,8 @@
 #ifndef __ANNOTATED_DBG_HPP__
 #define __ANNOTATED_DBG_HPP__
 
+#include <memory>
+
 #include "sequence_graph.hpp"
 #include "annotate.hpp"
 #include "threading.hpp"
@@ -10,8 +12,8 @@ class AnnotatedDBG {
   public:
     typedef annotate::MultiLabelAnnotation<uint64_t, std::string> Annotator;
 
-    AnnotatedDBG(SequenceGraph *dbg,
-                 Annotator *annotation,
+    AnnotatedDBG(std::shared_ptr<SequenceGraph> dbg,
+                 std::unique_ptr<Annotator>&& annotation,
                  size_t num_threads = 0,
                  bool force_fast = false);
 
@@ -46,7 +48,7 @@ class AnnotatedDBG {
     void annotate_sequence_thread_safe(std::string sequence,
                                        std::vector<std::string> labels);
 
-    std::unique_ptr<SequenceGraph> graph_;
+    std::shared_ptr<SequenceGraph> graph_;
     std::unique_ptr<Annotator> annotator_;
 
     ThreadPool thread_pool_;

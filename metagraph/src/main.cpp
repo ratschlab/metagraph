@@ -80,18 +80,18 @@ std::string remove_graph_extension(const std::string &filename) {
 }
 
 template <class Graph = BOSS>
-std::unique_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
+std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
     auto *graph = new Graph(2);
     if (!graph->load(filename)) {
         std::cerr << "ERROR: can't load graph from file " << filename << std::endl;
         delete graph;
         exit(1);
     }
-    return std::unique_ptr<Graph> { graph };
+    return std::shared_ptr<Graph> { graph };
 }
 
 template <class DefaultGraphType = DBGSuccinct>
-std::unique_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
+std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
     auto graph_type = parse_graph_extension(filename);
     switch (graph_type) {
         case Config::GraphType::SUCCINCT:
@@ -490,8 +490,8 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
     }
 
     // load graph
-    auto anno_graph = std::make_unique<AnnotatedDBG>(graph_temp.release(),
-                                                     annotation_temp.release(),
+    auto anno_graph = std::make_unique<AnnotatedDBG>(graph_temp,
+                                                     std::move(annotation_temp),
                                                      config.parallel);
 
     if (!anno_graph->check_compatibility()) {
@@ -1382,12 +1382,10 @@ int main(int argc, const char *argv[]) {
             }
 
             // load graph
-            AnnotatedDBG anno_graph(
-                graph_temp.release(),
-                annotation_temp.release(),
-                config->parallel,
-                config->fast
-            );
+            AnnotatedDBG anno_graph(graph_temp,
+                                    std::move(annotation_temp),
+                                    config->parallel,
+                                    config->fast);
 
             if (!anno_graph.check_compatibility()) {
                 std::cerr << "Error: graph and annotation are not compatible."
@@ -1635,7 +1633,7 @@ int main(int argc, const char *argv[]) {
 
             Timer timer;
 
-            std::vector<std::unique_ptr<DBGSuccinct>> dbg_graphs;
+            std::vector<std::shared_ptr<DBGSuccinct>> dbg_graphs;
             std::vector<const BOSS*> graphs;
 
             config->canonical = true;

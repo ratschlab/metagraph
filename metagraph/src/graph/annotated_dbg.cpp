@@ -3,11 +3,11 @@
 #include "annotate_row_compressed.hpp"
 
 
-AnnotatedDBG::AnnotatedDBG(SequenceGraph *dbg,
-                           Annotator *annotation,
+AnnotatedDBG::AnnotatedDBG(std::shared_ptr<SequenceGraph> dbg,
+                           std::unique_ptr<Annotator>&& annotation,
                            size_t num_threads,
                            bool force_fast)
-      : graph_(dbg), annotator_(annotation),
+      : graph_(dbg), annotator_(std::move(annotation)),
         thread_pool_(num_threads > 1 ? num_threads : 0),
         force_fast_(force_fast) {}
 
