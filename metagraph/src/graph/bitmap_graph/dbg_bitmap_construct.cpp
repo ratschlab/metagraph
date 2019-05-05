@@ -153,10 +153,12 @@ DBGBitmap* DBGBitmapConstructor
         std::ifstream chunk_in(chunk_filename, std::ios::binary);
         chunk->load(chunk_in);
 
-        assert(!i || chunk->size() == size);
-
-        if (!i)
+        if (!i) {
             size = chunk->size();
+        } else if (size != chunk->size()) {
+            std::cerr << "ERROR: inconsistent graph chunks" << std::endl;
+            exit(1);
+        }
 
         cumulative_size += chunk->num_set_bits();
     }
