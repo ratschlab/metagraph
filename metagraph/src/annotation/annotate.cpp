@@ -58,6 +58,16 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
     }
 }
 
+template <typename Label>
+bool LabelEncoder<Label>::label_exists(const Label &label) const {
+    try {
+        encode(label);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
 
 // For each pair (first, second) in the dictionary, renames column |first|
 // to |second| and merges columns with matching names, if supported.

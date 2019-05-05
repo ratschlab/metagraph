@@ -113,6 +113,8 @@ class MultiLabelAnnotation
     virtual size_t num_labels() const = 0;
     virtual uint64_t num_relations() const = 0;
 
+    virtual bool label_exists(const Label &label) const = 0;
+
   protected:
     // TODO: add |min_label_frequency| parameter: return only frequent labels
     virtual std::vector<uint64_t>
@@ -150,6 +152,8 @@ class LabelEncoder {
 
     void clear() { encode_label_.clear(); decode_label_.clear(); }
 
+    bool label_exists(const Label &label) const;
+
   private:
     std::unordered_map<Label, uint64_t> encode_label_;
     std::vector<Label> decode_label_;
@@ -176,7 +180,7 @@ class MultiLabelEncoded
     virtual std::unique_ptr<IterateRows> iterator() const;
     virtual std::vector<uint64_t> get_label_indexes(Index i) const;
 
-    virtual const LabelEncoder<Label>& get_label_encoder() const final { return label_encoder_; };
+    virtual const LabelEncoder<Label>& get_label_encoder() const final { return label_encoder_; }
 
     /******************* General functionality *******************/
 
@@ -193,6 +197,10 @@ class MultiLabelEncoded
     get_top_labels(const std::vector<Index> &indices,
                    size_t num_top = static_cast<size_t>(-1),
                    double min_label_frequency = 0.0) const override final;
+
+    virtual bool label_exists(const Label &label) const override final {
+        return label_encoder_.label_exists(label);
+    }
 
   protected:
     LabelEncoder<Label> label_encoder_;

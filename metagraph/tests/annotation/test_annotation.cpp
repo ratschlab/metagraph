@@ -340,6 +340,38 @@ TYPED_TEST(AnnotatorPreset2Test, has_labels2) {
     EXPECT_TRUE(this->annotation->has_labels(2, {}));
 }
 
+TYPED_TEST(AnnotatorTest, LabelExists) {
+    EXPECT_FALSE(this->annotation->label_exists("Label0"));
+    EXPECT_FALSE(this->annotation->label_exists("Label1"));
+    EXPECT_FALSE(this->annotation->label_exists("Label2"));
+    EXPECT_FALSE(this->annotation->label_exists("Label3"));
+    EXPECT_FALSE(this->annotation->label_exists("Label8"));
+}
+
+TYPED_TEST(AnnotatorPresetTest, LabelExists) {
+    EXPECT_TRUE(this->annotation->label_exists("Label0"));
+    EXPECT_TRUE(this->annotation->label_exists("Label1"));
+    EXPECT_TRUE(this->annotation->label_exists("Label2"));
+    EXPECT_FALSE(this->annotation->label_exists("Label3"));
+    EXPECT_TRUE(this->annotation->label_exists("Label8"));
+}
+
+TYPED_TEST(AnnotatorPreset2Test, LabelExists) {
+    EXPECT_TRUE(this->annotation->label_exists("Label0"));
+    EXPECT_TRUE(this->annotation->label_exists("Label1"));
+    EXPECT_TRUE(this->annotation->label_exists("Label2"));
+    EXPECT_FALSE(this->annotation->label_exists("Label3"));
+    EXPECT_TRUE(this->annotation->label_exists("Label8"));
+}
+
+TYPED_TEST(AnnotatorPreset3Test, LabelExists) {
+    EXPECT_TRUE(this->annotation->label_exists("Label0"));
+    EXPECT_TRUE(this->annotation->label_exists("Label1"));
+    EXPECT_TRUE(this->annotation->label_exists("Label2"));
+    EXPECT_FALSE(this->annotation->label_exists("Label3"));
+    EXPECT_TRUE(this->annotation->label_exists("Label8"));
+}
+
 TYPED_TEST(AnnotatorPresetTest, get_labels) {
     EXPECT_EQ(std::vector<std::string>({}),
               this->annotation->get_labels({}, 1));
