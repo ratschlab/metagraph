@@ -17,18 +17,6 @@ add_subdirectory(
   external-libraries/jsoncpp
 )
 
-#set(INSTALL_DIR "${PROJECT_SOURCE_DIR}/build/external-libraries/DYNAMIC/sparsepp-prefix")
-#message(STATUS "variable is: " ${INSTALL_DIR})
-include_directories(
-  build/external-libraries/DYNAMIC/sparsepp-prefix
-  build/external-libraries/DYNAMIC/sparsepp-prefix/src/sparsepp/sparsepp
-  build/external-libraries/DYNAMIC/bin/sparsepp-prefix/src/sparsepp/sparsepp
-  ${INCLUDE_DIRS}
-)
-add_subdirectory(
-  external-libraries/DYNAMIC
-)
-
 if(NOT CMAKE_DBG_ALPHABET)
   set(CMAKE_DBG_ALPHABET "DNA")
 endif()
@@ -162,15 +150,13 @@ include_directories(
   external-libraries/KMC/kmc_api
   external-libraries/libmaus2/include
   external-libraries/DYNAMIC/include
-  external-libraries/DYNAMIC/sparsepp-prefix
-  external-libraries/DYNAMIC/sparsepp-prefix/src/sparsepp/sparsepp
-  external-libraries/DYNAMIC/bin/sparsepp-prefix/src/sparsepp/sparsepp
   external-libraries/sdsl-lite/include
   external-libraries/rollinghashcpp
   external-libraries/ips4o
   external-libraries/eigen
   external-libraries/caches/include
   external-libraries/sparsepp
+  external-libraries/sparsepp/sparsepp
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/binrel_wt/include
