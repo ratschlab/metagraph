@@ -21,6 +21,8 @@ using json = nlohmann::json;
 #pragma clang diagnostic ignored "-Weverything"
 #pragma clang diagnostic ignored "-Wcomma"
 
+#define MEMOIZE
+
 #include "path_database_baseline_wavelet_deprecated.hpp"
 #include "path_database_baseline_wavelet.hpp"
 #include "samplers.hpp"

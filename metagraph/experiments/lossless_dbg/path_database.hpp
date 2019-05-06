@@ -25,13 +25,15 @@ class PathDatabase {
     explicit PathDatabase(const vector<string> &raw_reads,
                     size_t k_kmer = 21 /* default kmer */)
             : PathDatabase(std::shared_ptr<const GraphCommonT> {
-                                new GraphT(dbg_succ_graph_constructor(raw_reads, k_kmer))
+                                [](GraphT* g){ g->mask_dummy_kmers(1,false); return g; }
+                                (new GraphT(dbg_succ_graph_constructor(raw_reads, k_kmer)))
                                 })
                 {}
 
 
     PathDatabase(std::shared_ptr<const GraphCommonT> graph)
-          : graph_(graph) {}
+          : graph_(graph) {
+    }
 
      ~PathDatabase() = default;
 

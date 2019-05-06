@@ -56,6 +56,14 @@ public:
             additional_joins.insert(starting_node(sequence));
             additional_splits.insert(graph.kmer_to_node(sequence.substr(sequence.length()-graph.get_k())));
         }
+#ifdef MEMOIZE
+        is_split = vector<bool>(graph.num_nodes()+1);
+        is_join = vector<bool>(graph.num_nodes()+1);
+        for (int node=1;node<=graph.num_nodes();node++) {
+            is_split[node] = node_is_split_raw(node);
+            is_join[node] = node_is_join_raw(node);
+        }
+#endif
 
         for(auto& sequence : sequences) {
             int relative_order = route_sequence(sequence);
@@ -123,13 +131,32 @@ public:
         }
         return result;
     }
+#ifdef MEMOIZE
 
+    bool node_is_join_raw(node_index node) const {
+        return graph.indegree(node) > 1 or additional_joins.count(node);
+    }
+
+    bool node_is_split_raw(node_index node) const {
+        return graph.outdegree(node) > 1 or additional_splits.count(node);
+    }
+
+    bool node_is_join(node_index node) const {
+        return is_join[node];
+    }
+
+    bool node_is_split(node_index node) const {
+        return is_split[node];
+    }
+
+#else
     bool node_is_join(node_index node) const {
         return graph.indegree(node) > 1 or additional_joins.count(node);
     }
     bool node_is_split(node_index node) const {
         return graph.outdegree(node) > 1 or additional_splits.count(node);
     }
+#endif
 
     int rank(const routing_table_t& routing_table, char symbol, int position) const {
         assert(position < routing_table.size());
@@ -210,6 +237,10 @@ protected:
 
     const GraphT & graph;
 
+#ifdef MEMOIZE
+    vector<bool> is_join;
+    vector<bool> is_split;
+#endif
 };
 
 #endif /* path_database_baseline_hpp */
