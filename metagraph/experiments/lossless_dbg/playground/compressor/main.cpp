@@ -22,6 +22,7 @@ using json = nlohmann::json;
 #pragma clang diagnostic ignored "-Wcomma"
 
 #define MEMOIZE
+#define ALL_EDGES_COVERED
 
 #include "path_database_baseline_wavelet_deprecated.hpp"
 #include "path_database_baseline_wavelet.hpp"

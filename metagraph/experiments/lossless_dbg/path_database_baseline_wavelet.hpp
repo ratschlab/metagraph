@@ -21,35 +21,14 @@
 #include <map>
 #include "alphabets.hpp"
 #include "routing_table.hpp"
+#include "incoming_table.hpp"
 #include <sdsl/wt_rlmn.hpp>
 #include <sdsl/sd_vector.hpp>
 #include <sdsl/enc_vector.hpp>
 //#define CHECK_CORECTNESS 1
 
 
-template<typename POD>
-std::istream &deserialize(std::istream &is, vector<POD> &v) {
-    static_assert(std::is_trivial<POD>::value && std::is_standard_layout<POD>::value,
-                  "Can only deserialize POD types with this function");
 
-    decltype(v.size()) size;
-    is.read(reinterpret_cast<char*>(&size), sizeof(size));
-    v.resize(size);
-    is.read(reinterpret_cast<char*>(v.data()), v.size() * sizeof(POD));
-    return is;
-}
-
-template<typename POD>
-std::ostream &serialize(std::ostream &os, const vector<POD> &v) {
-    // this only works on built in data types (PODs)
-    static_assert(std::is_trivial<POD>::value && std::is_standard_layout<POD>::value,
-                  "Can only serialize POD types with this function");
-
-    auto size = v.size();
-    os.write(reinterpret_cast<char const*>(&size), sizeof(size));
-    os.write(reinterpret_cast<char const*>(v.data()), v.size() * sizeof(POD));
-    return os;
-}
 
 #pragma GCC diagnostic ignored "-Wmissing-noreturn"
 #pragma GCC diagnostic ignored "-Wreturn-type"
@@ -62,70 +41,13 @@ using alphabets::log2;
 
 // todo find a tool that removes this relative namespacing issue
 // say to Mikhail that "de_bruijn_graph" instead of "metagraph/de_bruijn_graph" is the same violation as this
-using default_bit_vector = bit_vector_small;
-template <typename BitVector=default_bit_vector,typename GraphT=DBGSuccinct>
-class IncomingTable {
-public:
-    explicit IncomingTable(const GraphT & graph) : graph(graph) {}
-    using bit_vector_t = BitVector;
-    BitVector joins;
-    sdsl::enc_vector<> edge_multiplicity_table;
-    int branch_offset(node_index node,node_index prev_node) const {
-        int branch_offset = relative_offset(node,prev_node);
-        int result = 0;
-        for(int i=0;i<branch_offset;i++) {
-            result += branch_size_rank(node,i);
-        }
-        return result;
-    }
-
-    bool is_join(node_index node) const {
-        return size(node); // as 1
-    }
-
-    int branch_size_rank(node_index node,int offset) const {
-        if (offset < 0) { return 0; }
-        int joins_position = joins.select1(node);
-        int table_offset = joins.rank0(joins_position);
-        return edge_multiplicity_table[table_offset+offset];
-    }
-
-    int branch_size(node_index node,node_index prev_node) const {
-        return branch_size_rank(node,relative_offset(node,prev_node));
-    }
-
-    int size(node_index node) const {
-        return joins.select1(node+1)-joins.select1(node)-1;
-    }
-
-    bool has_new_reads(node_index node) const {
-        // todo : remove or after the indegree bug is fixed and use assertion
-        // assert(!(graph.indegree(node) < 2 and size(node)) or size(node) > graph.indegree(node));
-        // indegree smaller than two with nonempty incoming table implies that node has new reads
-        return (size(node) > graph.indegree(node)) or (graph.indegree(node) < 2 and size(node));
-    }
-
-    int relative_offset(node_index node,node_index prev_node) const {
-        bool increment = has_new_reads(node);
-        int result;
-        if (prev_node) {
-            result = graph.branch_id(node,prev_node);
-        }
-        else {
-            result = -1; // starting branch is before all other branches
-        }
-        return result + increment;
-    }
-
-    const GraphT & graph;
-};
 
 
-//template <class Wavelet = sdsl::wt_rlmn<sdsl::sd_vector<>>>
-template<class Wavelet = sdsl::wt_rlmn<>,class BitVector=default_bit_vector,bool check_correctness=false>
+
+//template <class Wavelet = sdsl::wt_rlmn<sdsl::sd_vector<>>
+template<class Wavelet = sdsl::wt_rlmn<>,class BitVector=default_bit_vector>
 class PathDatabaseBaselineWavelet : public PathDatabaseBaseline<DBGSuccinct> {
 public:
-    using routing_table_t = vector<char>;
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
@@ -152,9 +74,10 @@ public:
         vector<char> routing_table_array;
         for(int node=1;node<=graph.num_nodes();node++) {
             routing_table_array.push_back('#');// to always start a block with #
-            if (splits.count(node)) {
-                for(auto& choice : splits[node]) {
-                    routing_table_array.push_back(choice);
+            if (PathDatabaseBaseline::node_is_split(node)) {
+                auto dynamic_table = PathDatabaseBaseline::routing_table;
+                for(int i=0;i<dynamic_table.size(node);i++) {
+                    routing_table_array.push_back(dynamic_table.get(node,i));
                 }
             }
         }
@@ -162,7 +85,6 @@ public:
         //routing_table_array.push_back('\0'); // end of sequence
 
         routing_table = RoutingTable(routing_table_array);
-
     }
 
     void construct_edge_multiplicity_table() {
@@ -176,12 +98,19 @@ public:
                     is_join_node.push_back(0);
                     edge_multiplicity_table_builder.push_back(new_reads);
                 }
+#ifdef ALL_EDGES_COVERED
+                for(auto&[base,branch_size] :  PathDatabaseBaseline::joins[node]) {
+                    is_join_node.push_back(0);
+                    edge_multiplicity_table_builder.push_back(branch_size);
+                }
+#else
                 graph.call_incoming_kmers_mine(node,[&node,&edge_multiplicity_table_builder,
                         &is_join_node,this](node_index prev_node,char c) {
                     auto branch_size = PathDatabaseBaseline::joins[node][c];
                     is_join_node.push_back(0);
                     edge_multiplicity_table_builder.push_back(branch_size);
                 });
+#endif
             }
         }
         is_join_node.push_back(1); // to also always end a block with 1
@@ -198,10 +127,6 @@ public:
     using score_t = int;
     using next_nodes_with_extended_info_t =  map<node_index,pair<score_t,history_t>>;
 
-
-
-
-
     history_t get_initial_history(node_index node) const {
         history_t history = {{0, get_coverage(node)}};
         return history;
@@ -210,9 +135,6 @@ public:
     static bool range_is_empty(range_t range) {
         return range.first >= range.second;
     }
-
-
-
 
     history_t gather_history(const string& str_history) {
         // todo: add function to gather only consistent history (with strong aka first class, 0-th order support),

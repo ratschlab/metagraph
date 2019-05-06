@@ -18,6 +18,7 @@
 #include "path_database_baseline.hpp"
 #include "path_database_baseline_wavelet_deprecated.hpp"
 #include "path_database_baseline_wavelet.hpp"
+#include "incoming_table.hpp"
 #include <filesystem>
 using namespace std;
 namespace fs = std::filesystem;

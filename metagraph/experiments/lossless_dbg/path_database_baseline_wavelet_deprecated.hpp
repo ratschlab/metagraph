@@ -85,9 +85,10 @@ public:
         vector<char> routing_table_array;
         for(int node=1;node<=graph.num_nodes();node++) {
             routing_table_array.push_back('#');
-            if (splits.count(node)) {
-                for(auto& choice : splits[node]) {
-                    routing_table_array.push_back(choice);
+            if (PathDatabaseBaseline::node_is_split(node)) {
+                auto dynamic_table = PathDatabaseBaseline::routing_table;
+                for(int i=0;i<dynamic_table.size(node);i++) {
+                    routing_table_array.push_back(dynamic_table.get(node,i));
                 }
             }
         }

@@ -9,13 +9,12 @@
 #define path_database_baseline_hpp
 
 #include "path_database.hpp"
+#include "dynamic_routing_table.hpp"
 #include "utils.hpp"
 #include <iostream>
 #include <set>
 #include <map>
 
-#pragma GCC diagnostic ignored "-Wmissing-noreturn"
-#pragma GCC diagnostic ignored "-Wreturn-type"
 
 using namespace std;
 
@@ -28,7 +27,6 @@ using path_id = pair<node_index,int>;
 template<typename GraphT=DBGSuccinct>
 class PathDatabaseBaseline : public PathDatabase<pair<node_index,int>,GraphT,GraphT> {
 public:
-    using routing_table_t = vector<char>;
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
@@ -86,27 +84,18 @@ public:
         int kmer_position = 0;
         for(auto& base : sequence.substr(graph.get_k())) {
             if (node_is_split(node)) {
-                auto& routing_table = splits[node];
-                auto rt_index = routing_table.begin();
-                assert(relative_position <= routing_table.size());
-                advance(rt_index,relative_position);
-                routing_table.insert(rt_index,base);
-                relative_position = rank(routing_table,base,relative_position)-1;
+                routing_table.insert(node,relative_position,base);
+                relative_position = routing_table.rank(node,base,relative_position);
             }
             node = graph.traverse(node,base);
             kmer_position++;
             if (node_is_join(node)) {
-                // todo better name (it is a symbol that determines from which branch we came)
                 auto join_symbol = sequence[kmer_position-1];
                 relative_position += branch_starting_offset(node,join_symbol);
                 joins[node][join_symbol]++;
             }
         }
-
-        auto& routing_table = splits[node];
-        auto rt_index = routing_table.begin();
-        advance(rt_index,relative_position);
-        routing_table.insert(rt_index,'$');
+        routing_table.insert(node,relative_position,'$');
 
         return relative_starting_position;
     }
@@ -158,16 +147,6 @@ public:
     }
 #endif
 
-    int rank(const routing_table_t& routing_table, char symbol, int position) const {
-        assert(position < routing_table.size());
-        int result = 0;
-        int i = 0;
-        for(auto it=begin(routing_table);i<=position;it++,i++) {
-            result += *it == symbol;
-        }
-        return result;
-    }
-
     void compress() {
 
     }
@@ -185,19 +164,17 @@ public:
         int relative_position = branch_starting_offset(node,'$') + relative_starting_position;
 
         int kmer_position = 0;
-        char base;
+        char base = '\0';
         while(true) {
             if (node_is_split(node)) {
-                auto& routing_table = splits.at(node);
-                auto rt_index = routing_table.begin();
-                advance(rt_index,relative_position);
-                base = *rt_index;
-                relative_position = rank(routing_table,base,relative_position)-1;
+                base = routing_table.get(node,relative_position);
+                relative_position = routing_table.rank(node,base,relative_position);
             }
             else {
                 assert(graph.outdegree(node) == 1);
                 graph.call_outgoing_kmers(node,[&base](node_index node,char edge_label ) { base = edge_label;});
             }
+            assert(base);
             if (base == '$') break;
             node = graph.traverse(node,base);
             assert(node);
@@ -205,7 +182,6 @@ public:
             sequence.append(1,base); // 1 times base
 
             if (node_is_join(node)) {
-                // todo better name (it is a symbol that determines from which branch we came)
                 auto join_symbol = sequence[kmer_position-1];
                 relative_position += branch_starting_offset(node,join_symbol);
             }
@@ -230,7 +206,7 @@ protected:
     std::map<node_index,map<char,int>> joins;
     // denote where the reads should go ($ATCGN) ($ denodes the end of particular read)
 
-    std::map<node_index,routing_table_t> splits;
+    DynamicRoutingTable routing_table;
 
     std::set<node_index> additional_joins;
     std::set<node_index> additional_splits;

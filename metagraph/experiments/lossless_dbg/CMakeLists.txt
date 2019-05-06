@@ -16,15 +16,13 @@ endif()
 
 add_library(path_encoding
         utilities.cpp
-        path_database_baseline.cpp)
+        )
 
 target_link_libraries(path_encoding metagraph ${METALIBS})
 
 add_executable(tests tests.cpp)
-add_executable(broken_sdsl broken_sdsl.cpp)
 add_executable(path_encoder_toolbox main.cpp)
 
-target_link_libraries(broken_sdsl ${METALIBS})
 target_link_libraries(tests metagraph ${METALIBS} path_encoding gtest gtest_main)
 target_link_libraries(path_encoder_toolbox metagraph ${METALIBS} path_encoding gtest gtest_main )
 
