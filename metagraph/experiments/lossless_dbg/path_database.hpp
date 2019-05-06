@@ -18,20 +18,20 @@
 
 #include "utilities.hpp"
 
-template <typename _path_id,typename GraphCommonT=DeBruijnGraph,typename GraphT=DBGSuccinct>
+template <typename _path_id,typename GraphT=DBGSuccinct>
 class PathDatabase {
   public:
     // convenience constructor
     explicit PathDatabase(const vector<string> &raw_reads,
                     size_t k_kmer = 21 /* default kmer */)
-            : PathDatabase(std::shared_ptr<const GraphCommonT> {
+            : PathDatabase(std::shared_ptr<const GraphT> {
                                 [](GraphT* g){ g->mask_dummy_kmers(1,false); return g; }
                                 (new GraphT(dbg_succ_graph_constructor(raw_reads, k_kmer)))
                                 })
                 {}
 
 
-    PathDatabase(std::shared_ptr<const GraphCommonT> graph)
+    PathDatabase(std::shared_ptr<const GraphT> graph)
           : graph_(graph) {
     }
 
@@ -77,17 +77,16 @@ class PathDatabase {
     virtual void serialize(const fs::path& folder) const = 0;
 
   protected:
-    std::shared_ptr<const GraphCommonT> graph_;
+    std::shared_ptr<const GraphT> graph_;
 
     static BOSS* dbg_succ_graph_constructor(const vector<string> &raw_reads,
                                                 size_t k_kmer) {
-        auto graph_constructor = BOSSConstructor(k_kmer - 1);// because DBG_succ has smaller kmers
+        auto graph_constructor = BOSSConstructor(k_kmer - 1);// because BOSS has smaller kmers
         for(auto &read : raw_reads) {
             assert(read.size() >= k_kmer);
             graph_constructor.add_sequence(read);
         }
         return new BOSS(&graph_constructor);
-        //graph = DBGSuccinct(stupid_old_representation);
     }
 };
 

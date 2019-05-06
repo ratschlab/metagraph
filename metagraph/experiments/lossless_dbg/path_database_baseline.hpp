@@ -25,7 +25,7 @@ using node_index = DeBruijnGraph::node_index;
 using path_id = pair<node_index,int>;
 
 template<typename GraphT=DBGSuccinct>
-class PathDatabaseBaseline : public PathDatabase<pair<node_index,int>,GraphT,GraphT> {
+class PathDatabaseBaseline : public PathDatabase<pair<node_index,int>,GraphT> {
 public:
     // implicit assumptions
     // graph contains all reads
