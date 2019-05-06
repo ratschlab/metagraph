@@ -10,6 +10,7 @@
 
 #include "path_database.hpp"
 #include "dynamic_routing_table.hpp"
+#include "dynamic_incoming_table.hpp"
 #include "utils.hpp"
 #include <iostream>
 #include <set>
@@ -75,13 +76,22 @@ public:
 
     int route_sequence(const string& sequence) {
         auto kmer = sequence.substr(0,graph.get_k());
-        auto node = graph.kmer_to_node(kmer);
+        auto nodes = ; kmer_to_node(kmer);
         // always putting new read above all other reads
-        int relative_starting_position = joins[node]['$'];
-        int relative_position = branch_starting_offset(node,'$') + relative_starting_position;
-        joins[node]['$']++;
+        int relative_position = 0;
 
         int kmer_position = 0;
+        bool first_node = 1;
+        graph.map_to_nodes(sequence,[&kmer_position,&joins](node_index node){
+            if (node_is_join(node)) {
+                auto join_symbol = kmer_position ? sequence[kmer_position-1] : '$';
+                relative_position += incoming_table.branch_offset(node,join_symbol);
+                if (join_symbol == '$') {
+                    relative_position += incoming_table.branch_size(node,'$');
+                }
+                incoming_table.increment(node,join_symbol);
+            }
+        })
         for(auto& base : sequence.substr(graph.get_k())) {
             if (node_is_split(node)) {
                 routing_table.insert(node,relative_position,base);
@@ -89,37 +99,13 @@ public:
             }
             node = graph.traverse(node,base);
             kmer_position++;
-            if (node_is_join(node)) {
-                auto join_symbol = sequence[kmer_position-1];
-                relative_position += branch_starting_offset(node,join_symbol);
-                joins[node][join_symbol]++;
-            }
+
         }
         routing_table.insert(node,relative_position,'$');
 
         return relative_starting_position;
     }
 
-    // returns the number of reads that were already stored and should have lower index
-    int offset_for_symbol(const map<char,int>& join,char symbol) const {
-        int result = 0;
-        for(auto&[base,count] : join) {
-            result += count;
-            if (base >= symbol) break;
-        }
-        return result;
-    }
-
-    int branch_starting_offset(node_index node,char symbol) const {
-        int result = 0;
-        if (joins.count(node)) {
-            for (auto&[base, count] : joins.at(node)) {
-                if (base >= symbol) break;
-                result += count;
-            }
-        }
-        return result;
-    }
 #ifdef MEMOIZE
 
     bool node_is_join_raw(node_index node) const {
@@ -159,9 +145,7 @@ public:
         auto node = path.first;
         auto kmer = graph.get_node_sequence(node);
         string sequence = kmer;
-
-        int relative_starting_position = path.second;
-        int relative_position = branch_starting_offset(node,'$') + relative_starting_position;
+        int relative_position = path.second;
 
         int kmer_position = 0;
         char base = '\0';
@@ -183,7 +167,7 @@ public:
 
             if (node_is_join(node)) {
                 auto join_symbol = sequence[kmer_position-1];
-                relative_position += branch_starting_offset(node,join_symbol);
+                relative_position += incoming_table.branch_offset(node,join_symbol);
             }
         }
 
@@ -203,10 +187,10 @@ public:
 protected:
     // denote how many reads are joining from every branch ($ATCGN) ($ denotes start of a new read)
     int encoded_paths = 0;
-    std::map<node_index,map<char,int>> joins;
     // denote where the reads should go ($ATCGN) ($ denodes the end of particular read)
 
     DynamicRoutingTable routing_table;
+    DynamicIncomingTable incoming_table;
 
     std::set<node_index> additional_joins;
     std::set<node_index> additional_splits;

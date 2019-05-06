@@ -508,7 +508,7 @@ public:
 
 private:
     RoutingTable<Wavelet> routing_table;
-    IncomingTable<BitVector> incoming_table;
+    DynamicIncomingTable<BitVector> incoming_table;
 };
 
 #endif /* path_database_baseline_hpp */

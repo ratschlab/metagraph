@@ -9,9 +9,9 @@
 using default_bit_vector = bit_vector_small;
 
 template <typename BitVector=default_bit_vector,typename GraphT=DBGSuccinct>
-class IncomingTable {
+class DynamicIncomingTable {
 public:
-    explicit IncomingTable(const GraphT & graph) : graph(graph) {}
+    explicit DynamicIncomingTable(const GraphT & graph) : graph(graph) {}
     using bit_vector_t = BitVector;
     BitVector joins;
     sdsl::enc_vector<> edge_multiplicity_table;

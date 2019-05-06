@@ -168,8 +168,8 @@ void short_serdes_test() {
 
 TEST(PathDatabase,IncomingTable) {
     DBGSuccinct graph = DBGSuccinct(21);
-    IncomingTable table(graph);
-    table.joins = IncomingTable<>::bit_vector_t({1,0,0,1,0,1,1,0,1});
+    DynamicIncomingTable table(graph);
+    table.joins = DynamicIncomingTable<>::bit_vector_t({1,0,0,1,0,1,1,0,1});
     vector<int> v = {1,2,3,4};
     table.edge_multiplicity_table = sdsl::enc_vector<>(v);
     ASSERT_EQ(table.branch_size_rank(1,0),1);
