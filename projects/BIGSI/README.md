@@ -44,3 +44,26 @@ for F in {\\\$,A,C,G,T,N}{\\\$,A,C,G,T,N}; do \
                 2>&1 | tee ~/metagenome/data/BIGSI/graph.$F.log"; \
 done
 ```
+
+## Annotate
+```bash
+mkdir temp
+find ~/metagenome/data/BIGSI/ -name "*fasta.gz" > temp/files_to_annotate.txt
+cd temp; split -l 5000 files_to_annotate.txt; cd ..
+
+cd temp
+for list in x*; do
+    bsub -J "annotate_${list}" \
+         -oo ~/metagenome/data/BIGSI/annotate_${list}.lsf \
+         -W 96:00 \
+         -n 15 -R "rusage[mem=23000] span[hosts=1]" \
+        "cat ${list} \
+            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build/metagengraph annotate -v \
+                -i ~/metagenome/data/BIGSI/graph \
+                --parallel 15 \
+                --anno-filename \
+                --separately \
+                2>&1 | tee ~/metagenome/data/BIGSI/annotate_${list}.log"; \
+done
+cd ..
+```
