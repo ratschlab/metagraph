@@ -106,7 +106,7 @@ public:
             if (PathDatabaseBaseline::node_is_join(node)) {
                 for(int rc=0;rc<'N'_rc;rc++) { // don't need to store last branch as we only compute prefix sum excluding
                                                // the branch which we came from (N in this case)
-                    edge_multiplicity_table.push_back(PathDatabaseBaseline::joins[node][tochar(rc)]);
+                    edge_multiplicity_table.push_back(PathDatabaseBaseline::incoming_table.branch_size(node,tochar(rc)));
                 }
             }
         }

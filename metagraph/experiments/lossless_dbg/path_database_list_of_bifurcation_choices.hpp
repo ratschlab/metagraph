@@ -43,7 +43,7 @@ class PathDatabaseListBC : public PathDatabase<int> {
     PathDatabaseListBC(DBGSuccinct *graph,
                     const vector<string> &raw_reads,
                     size_t k_kmer = DEFAULT_K_KMER)
-          : PathDatabase(std::shared_ptr<const DeBruijnGraph> { graph }),
+          : PathDatabase(std::shared_ptr<const DBGSuccinct> { graph }),
             k_kmer_(k_kmer),
             read_length(raw_reads[0].length()) {
     }

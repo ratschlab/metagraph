@@ -53,7 +53,10 @@ public:
     }
 
     int size(node_index node) const {
-        return routing_table.at(node).size();
+        if (routing_table.count(node))
+         return routing_table.at(node).size();
+        else
+            return 0;
     }
 
     string print_content(node_index node) const {

@@ -2,8 +2,8 @@
 // Created by Jan Studený on 2019-05-06.
 //
 
-#ifndef METAGRAPH_INCOMING_TABLE_HPP
-#define METAGRAPH_INCOMING_TABLE_HPP
+#ifndef METAGRAPH_DYNAMIC_INCOMING_TABLE_HPP
+#define METAGRAPH_DYNAMIC_INCOMING_TABLE_HPP
 
 #include <iostream>
 #include <set>
@@ -43,6 +43,9 @@ public:
 
 
     int branch_size(node_index node,edge_identifier_t incoming) const {
+        if (not incoming_table.count(node) or not incoming_table.at(node).count(incoming)) {
+            return 0;
+        }
         return incoming_table.at(node).at(incoming);
     }
 
@@ -68,4 +71,4 @@ public:
 
 
 
-#endif //METAGRAPH_INCOMING_TABLE_HPP
+#endif //METAGRAPH_DYNAMIC_INCOMING_TABLE_HPP

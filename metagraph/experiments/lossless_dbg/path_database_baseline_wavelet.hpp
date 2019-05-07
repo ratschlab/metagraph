@@ -93,7 +93,7 @@ public:
         for(int node=1;node<=graph.num_nodes();node++) {
             is_join_node.push_back(1);
             if (PathDatabaseBaseline::node_is_join(node)) {
-                auto new_reads = PathDatabaseBaseline::joins[node]['$'];
+                auto new_reads = PathDatabaseBaseline::incoming_table.branch_size(node,'$');
                 if (new_reads) {
                     is_join_node.push_back(0);
                     edge_multiplicity_table_builder.push_back(new_reads);
@@ -106,7 +106,7 @@ public:
 #else
                 graph.call_incoming_kmers_mine(node,[&node,&edge_multiplicity_table_builder,
                         &is_join_node,this](node_index prev_node,char c) {
-                    auto branch_size = PathDatabaseBaseline::joins[node][c];
+                    auto branch_size = PathDatabaseBaseline::incoming_table.branch_size(node,c);
                     is_join_node.push_back(0);
                     edge_multiplicity_table_builder.push_back(branch_size);
                 });
@@ -508,7 +508,7 @@ public:
 
 private:
     RoutingTable<Wavelet> routing_table;
-    DynamicIncomingTable<BitVector> incoming_table;
+    IncomingTable<BitVector> incoming_table;
 };
 
 #endif /* path_database_baseline_hpp */

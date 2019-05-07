@@ -32,13 +32,15 @@ public:
     // graph contains all reads
     // sequences are of size at least k
     explicit PathDatabaseBaseline(std::shared_ptr<const GraphT> graph) :
-                PathDatabase<pair<node_index,int>,GraphT,GraphT>(graph),
-                graph(*(this->graph_)) {}
+                PathDatabase<pair<node_index,int>,GraphT>(graph),
+                graph(*(this->graph_)),
+                incoming_table(*(this->graph_)) {}
 
     explicit PathDatabaseBaseline(const vector<string> &raw_reads,
                  size_t k_kmer = 21 /* default kmer */) :
-                         PathDatabase<pair<node_index,int>,GraphT,GraphT>(raw_reads,k_kmer),
-                         graph(*(this->graph_)) {}
+                         PathDatabase<pair<node_index,int>,GraphT>(raw_reads,k_kmer),
+                         graph(*(this->graph_)),
+                         incoming_table(*(this->graph_)) {}
 
     node_index starting_node(const string& sequence) {
         return graph.kmer_to_node(sequence.substr(0,graph.get_k()));
@@ -75,33 +77,30 @@ public:
 
 
     int route_sequence(const string& sequence) {
-        auto kmer = sequence.substr(0,graph.get_k());
-        auto nodes = ; kmer_to_node(kmer);
         // always putting new read above all other reads
         int relative_position = 0;
-
-        int kmer_position = 0;
+        int relative_starting_position = -1;
+        int kmer_left_border = 0;
+        int kmer_right_border = graph.get_k();
         bool first_node = 1;
-        graph.map_to_nodes(sequence,[&kmer_position,&joins](node_index node){
-            if (node_is_join(node)) {
-                auto join_symbol = kmer_position ? sequence[kmer_position-1] : '$';
+        graph.map_to_nodes(sequence,[&](node_index node){
+            if (this->node_is_join(node)) {
+                auto join_symbol = kmer_left_border ? sequence[kmer_left_border-1] : '$';
                 relative_position += incoming_table.branch_offset(node,join_symbol);
                 if (join_symbol == '$') {
-                    relative_position += incoming_table.branch_size(node,'$');
+                    relative_starting_position = incoming_table.branch_size(node,'$');
+                    relative_position += relative_starting_position;
                 }
                 incoming_table.increment(node,join_symbol);
             }
-        })
-        for(auto& base : sequence.substr(graph.get_k())) {
-            if (node_is_split(node)) {
-                routing_table.insert(node,relative_position,base);
-                relative_position = routing_table.rank(node,base,relative_position);
+            if (this->node_is_split(node)) {
+                auto split_symbol = kmer_right_border < sequence.size() ? sequence[kmer_right_border] : '$';
+                routing_table.insert(node,relative_position,split_symbol);
+                relative_position = routing_table.rank(node,split_symbol,relative_position);
             }
-            node = graph.traverse(node,base);
-            kmer_position++;
-
-        }
-        routing_table.insert(node,relative_position,'$');
+            kmer_left_border++;
+            kmer_right_border++;
+        });
 
         return relative_starting_position;
     }
@@ -190,7 +189,7 @@ protected:
     // denote where the reads should go ($ATCGN) ($ denodes the end of particular read)
 
     DynamicRoutingTable routing_table;
-    DynamicIncomingTable incoming_table;
+    DynamicIncomingTable<> incoming_table;
 
     std::set<node_index> additional_joins;
     std::set<node_index> additional_splits;
