@@ -99,9 +99,10 @@ public:
                     edge_multiplicity_table_builder.push_back(new_reads);
                 }
 #ifdef ALL_EDGES_COVERED
-                for(auto& base : "$ACGTN") {
-                    auto branch_size = PathDatabaseBaseline::incoming_table.branch_size(node,c);
+                for(auto& base : "ACGTN") {
+                    auto branch_size = PathDatabaseBaseline::incoming_table.branch_size(node,base);
                     if (branch_size) {
+                        // is an actual edge in a graph (because all edges are covered)
                         is_join_node.push_back(0);
                         edge_multiplicity_table_builder.push_back(branch_size);
                     }
