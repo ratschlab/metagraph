@@ -183,8 +183,7 @@ TEST(dbg_aligner, noise_in_branching_point) {
     EXPECT_EQ(1ull, path.size());
     EXPECT_EQ(query.size() - k + 1, path.front().size());
     EXPECT_EQ(reference_1, path.front().get_sequence());
-    // TODO: Fix mismatch errors in CSSW.
-    EXPECT_EQ((query.size() - 1) * aligner.get_match_score() - 2, path.front().get_total_score());
+    EXPECT_EQ((query.size() - 1) * aligner.get_match_score() - 1, path.front().get_total_score());
 }
 
 TEST(dbg_aligner, large_search_space) {
@@ -222,10 +221,10 @@ TEST(dbg_aligner, large_search_space) {
 
 TEST(dbg_aligner, large_gap) {
     size_t k = 10;
-    std::string reference = "AAAAAAAAAATTTTTTTTTTATATATATATAATTAATTAA";
-    reference +=            "TTTAAATTTAAAAATTTTTCCCCCCCCCCGGGGGGGGGGGCGCGCGCGCGC";
+    std::string reference = "AAAAAAAAAATTTTTTTTTTAAAAATTTTTATATATAATTAATTAA";
+    reference +=            "TTTAAATTTTATTATTAATTAAAATATTTAGGTGTGGGGGGGGGCCCCCCCCCCCGCGCGCGCGC";
     std::string query =     "AAAAAAAAAA";
-    query +=                "GGGGGGGGGG";
+    query +=                "CCCCCCCCCC";
     query +=                "CGCGCGCGCG";
 
     DBGSuccinct* graph = new DBGSuccinct(k);

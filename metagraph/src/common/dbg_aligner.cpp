@@ -72,7 +72,9 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::align(const std::string &sequen
     uint32_t print_frequency = 50;
     std::map<DPAlignmentKey, DPAlignmentValue> dp_alignment;
     BoundedPriorityQueue<AlignedPath> queue(num_top_paths_);
-    queue.push(std::move(AlignedPath(std::begin(sequence), std::begin(sequence))));
+    AlignedPath initial_path(std::begin(sequence), std::begin(sequence));
+    exact_map(initial_path, sequence);
+    queue.push(std::move(initial_path));
     while (!queue.empty()) {
         auto path = std::move(queue.top());
         queue.pop();
@@ -87,17 +89,10 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::align(const std::string &sequen
             partial_paths.push_back(path);
             queue = BoundedPriorityQueue<AlignedPath>(num_top_paths_);
             dp_alignment.clear();
-            path = AlignedPath(path.get_query_begin_it(), path.get_query_it());
+            path = AlignedPath(path.get_query_it() + 1, path.get_query_it() + 1);
         }
 
-        exact_map(path, sequence);
-
-        if (path.get_query_it() + graph_->get_k() > std::end(sequence)) {
-            partial_paths.push_back(path);
-            break;
-        }
-
-        inexact_map(path, std::end(sequence), queue, dp_alignment, sequence);
+        inexact_map(path, queue, dp_alignment, sequence);
 
         if (verbose_ && path.size() % print_frequency == 0) {
             auto shadow_queue(queue);
@@ -150,23 +145,24 @@ void DBGAligner::exact_map(AlignedPath &path, const std::string &sequence) const
 }
 
 void DBGAligner::inexact_map(AlignedPath& path,
-                             std::string::const_iterator end,
                              BoundedPriorityQueue<AlignedPath> &queue,
                              std::map<DPAlignmentKey, DPAlignmentValue> &dp_alignment,
                              const std::string &sequence) const {
-    if (path.get_query_it() + graph_->get_k() > end)
+    if (path.get_query_it() + graph_->get_k() > std::end(sequence))
         return;
     if (path.size() == 0) {
         // To do inexact seeding, a path with incremented query_it is pushed to the queue.
         path.set_query_begin_it(path.get_query_it() + 1);
         path.set_query_it(path.get_query_it() + 1);
+        exact_map(path, sequence);
         queue.push(std::move(path));
         return;
     }
     graph_->call_outgoing_kmers(path.back(), [&](node_index node, char extension) {
         AlignedPath alternative_path(path);
         alternative_path.set_query_it(path.get_query_it());
-        if (alternative_path.get_total_score() > sw_threshold_ * sequence.size()) {
+
+        if (queue.size() > 0 && queue.back() < alternative_path) {
             alternative_path.extend(node, annotator_->get(node), extension,
                 single_char_score(*(alternative_path.get_query_it() +
                     graph_->get_k() - 1), extension));
@@ -175,6 +171,8 @@ void DBGAligner::inexact_map(AlignedPath& path,
             alternative_path.update_total_score(
                 ssw_score(alternative_path));
         }
+        exact_map(alternative_path, sequence);
+
         DPAlignmentKey alternative_key{.node = alternative_path.back(),
                            .query_begin_it = alternative_path.get_query_begin_it(),
                            .query_it = alternative_path.get_query_it()};
@@ -283,4 +281,5 @@ void DBGAligner::trim(AlignedPath &path) const {
     auto trim_length = std::atoi(alignment.cigar_string.substr(num_starting_pos,
                                  alignment.cigar_string.size() - num_starting_pos - 1).c_str());
     path.trim_with_score(trim_length, alignment.sw_score);
+    path.set_cigar(alignment.cigar_string);
 }

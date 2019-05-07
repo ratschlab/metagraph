@@ -2107,7 +2107,7 @@ int main(int argc, const char *argv[]) {
                       << dbg_succinct_graph->get_k() << std::endl;
 
             // TODO: Find the best annotator type and set it.
-            DBGAligner aligner(graph.release(), new annotate::ColumnCompressed<>(/*num_rows=*/1),
+            DBGAligner aligner(graph.release(), new annotate::ColumnCompressed<>(/*num_rows=*/graph->num_nodes() + 1),
                                config->alignment_num_top_paths, config->verbose,
                                config->alignment_sw_threshold);
             Timer timer;

@@ -69,8 +69,7 @@ class DBGAligner : public AnnotatedDBG {
 
     // Align part of a sequence to the graph in the case of no exact map
     // based on internal strategy. Calls callback for every possible alternative path.
-    void inexact_map(AlignedPath &path, std::string::const_iterator end,
-                     BoundedPriorityQueue<AlignedPath> &queue,
+    void inexact_map(AlignedPath &path, BoundedPriorityQueue<AlignedPath> &queue,
                      std::map<DPAlignmentKey, DPAlignmentValue> &dp_alignment,
                      const std::string &sequence) const;
 
