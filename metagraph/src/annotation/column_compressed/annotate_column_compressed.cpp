@@ -139,33 +139,32 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 
     label_encoder_.clear();
 
-    try {
-        for (auto filename : filenames) {
+    std::atomic<bool> error_occurred = false;
+
+    #pragma omp parallel for num_threads(get_num_threads())
+    for (size_t i = 0; i < filenames.size(); ++i) {
+        if (error_occurred)
+            continue;
+
+        try {
+            auto filename = remove_suffix(filenames[i], kExtension) + kExtension;
+
             if (verbose_) {
-                std::cout << "Loading annotations from file "
-                          << remove_suffix(filename, kExtension) + kExtension
-                          << std::endl;
+                std::cout << "Loading annotations from file " + filename + "\n" << std::flush;
             }
 
-            std::ifstream instream(remove_suffix(filename, kExtension) + kExtension,
-                                   std::ios::binary);
+            std::ifstream instream(filename, std::ios::binary);
             if (!instream.good())
-                return false;
+                throw;
 
-            if (filename == filenames.at(0)) {
-                num_rows_ = load_number(instream);
-            } else if (num_rows_ != load_number(instream)) {
-                return false;
-            }
+            const auto num_rows = load_number(instream);
 
             LabelEncoder<Label> label_encoder_load;
             if (!label_encoder_load.load(instream))
-                return false;
+                throw;
 
             // update the existing and add some new columns
             for (size_t c = 0; c < label_encoder_load.size(); ++c) {
-                size_t col = label_encoder_.insert_and_encode(label_encoder_load.decode(c));
-
                 std::unique_ptr<bit_vector> new_column { new bit_vector_smart() };
 
                 auto pos = instream.tellg();
@@ -175,43 +174,58 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 
                     new_column = std::make_unique<bit_vector_sd>();
                     if (!new_column->load(instream))
-                        return false;
+                        throw;
                 }
 
-                if (new_column->size() != num_rows_)
-                    return false;
+                if (new_column->size() != num_rows)
+                    throw;
 
                 if (verbose_) {
                     auto num_set_bits = new_column->num_set_bits();
 
-                    std::cout << "Column <" << label_encoder_load.decode(c)
-                                           << ">, "
-                              << "density: "
-                              << static_cast<double>(num_set_bits) / new_column->size()
-                              << ", set bits: " << num_set_bits << std::endl;
+                    std::cout << "Column <" + label_encoder_load.decode(c) + ">"
+                                + ", density: "
+                                + std::to_string(static_cast<double>(num_set_bits) / new_column->size())
+                                + ", set bits: " + std::to_string(num_set_bits) + "\n" << std::flush;
                 }
 
-                assert(col <= bitmatrix_.size());
-                if (col == bitmatrix_.size()) {
-                    bitmatrix_.emplace_back(std::move(new_column));
-                } else if (!bitmatrix_.at(col).get()) {
-                    bitmatrix_.at(col) = std::move(new_column);
-                } else {
-                    new_column->add_to(static_cast<bitmap*>(&decompress(col)));
+                #pragma omp critical
+                {
+                    size_t col = label_encoder_.insert_and_encode(label_encoder_load.decode(c));
+
+                    // set |num_rows_| with the first column inserted
+                    if (!col)
+                        num_rows_ = num_rows;
+
+                    if (num_rows == num_rows_) {
+                        assert(col <= bitmatrix_.size());
+
+                        if (col == bitmatrix_.size()) {
+                            bitmatrix_.emplace_back(std::move(new_column));
+                        } else if (!bitmatrix_.at(col).get()) {
+                            bitmatrix_.at(col) = std::move(new_column);
+                        } else {
+                            new_column->add_to(static_cast<bitmap*>(&decompress(col)));
+                        }
+                    } else {
+                        error_occurred = true;
+                    }
                 }
             }
+        } catch (...) {
+            error_occurred = true;
         }
-
-        if (verbose_) {
-            std::cout << "Annotation loading finished ("
-                      << bitmatrix_.size() << " columns)" << std::endl;
-        }
-
-        return true;
-
-    } catch (...) {
-        return false;
     }
+
+    if (error_occurred)
+        return false;
+
+    if (verbose_) {
+        std::cout << "Annotation loading finished ("
+                  << bitmatrix_.size() << " columns)" << std::endl;
+    }
+
+    return true;
 }
 
 template <typename Label>
