@@ -99,9 +99,12 @@ public:
                     edge_multiplicity_table_builder.push_back(new_reads);
                 }
 #ifdef ALL_EDGES_COVERED
-                for(auto&[base,branch_size] :  PathDatabaseBaseline::joins[node]) {
-                    is_join_node.push_back(0);
-                    edge_multiplicity_table_builder.push_back(branch_size);
+                for(auto& base : "$ACGTN") {
+                    auto branch_size = PathDatabaseBaseline::incoming_table.branch_size(node,c);
+                    if (branch_size) {
+                        is_join_node.push_back(0);
+                        edge_multiplicity_table_builder.push_back(branch_size);
+                    }
                 }
 #else
                 graph.call_incoming_kmers_mine(node,[&node,&edge_multiplicity_table_builder,
