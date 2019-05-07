@@ -1445,6 +1445,16 @@ int main(int argc, const char *argv[]) {
             return 0;
         }
         case Config::MERGE_ANNOTATIONS: {
+            if (config->anno_type == Config::ColumnCompressed) {
+                annotate::ColumnCompressed<> annotation(0, kNumCachedColumns, config->verbose);
+                if (!annotation.merge_load(files)) {
+                    std::cerr << "ERROR: can't load annotations" << std::endl;
+                    exit(1);
+                }
+                annotation.serialize(config->outfbase);
+                return 0;
+            }
+
             std::vector<std::unique_ptr<Annotator>> annotators;
             std::vector<std::string> stream_files;
 
