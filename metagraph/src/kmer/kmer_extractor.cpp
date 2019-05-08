@@ -445,7 +445,7 @@ KmerExtractor2BitTDecl(template <typename T> void)
     assert(kmers);
     assert(k);
     // suffix does not include the last character
-    assert(suffix.size() < k);
+    assert(suffix.size() <= k);
 
     if (sequence.size() < k)
         return;
