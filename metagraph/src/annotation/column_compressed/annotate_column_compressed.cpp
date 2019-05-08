@@ -155,13 +155,13 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 
             std::ifstream instream(filename, std::ios::binary);
             if (!instream.good())
-                throw;
+                throw std::ifstream::failure("can't open stream");
 
             const auto num_rows = load_number(instream);
 
             LabelEncoder<Label> label_encoder_load;
             if (!label_encoder_load.load(instream))
-                throw;
+                throw std::ifstream::failure("can't load label encoder");
 
             // update the existing and add some new columns
             for (size_t c = 0; c < label_encoder_load.size(); ++c) {
@@ -174,11 +174,11 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 
                     new_column = std::make_unique<bit_vector_sd>();
                     if (!new_column->load(instream))
-                        throw;
+                        throw std::ifstream::failure("can't load next column");
                 }
 
                 if (new_column->size() != num_rows)
-                    throw;
+                    throw std::ifstream::failure("inconsistent column size");
 
                 if (verbose_) {
                     auto num_set_bits = new_column->num_set_bits();

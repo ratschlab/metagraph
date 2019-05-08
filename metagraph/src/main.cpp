@@ -728,7 +728,7 @@ std::string form_client_reply(const std::string &received_message,
                                &errors)) {
                 std::cerr << "Error: bad json file:\n" << errors << std::endl;
                 //TODO: send error message back in a json file
-                throw;
+                throw std::domain_error("bad json received");
             }
         }
 
