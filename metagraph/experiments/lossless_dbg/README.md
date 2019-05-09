@@ -8,7 +8,7 @@ cmake ../../..
 make -j8
 make install # to install path_encoder_toolbox
 ```
-When not installed, executable can be found in `experiments/lossless_dbg/path_encoder_toolbox` and tests in 
+When compiled but not installed, executable can be found in `experiments/lossless_dbg/path_encoder_toolbox` and tests in 
 `experiments/lossless_dbg/tests`.
 
 Building encoder with global metagraph installation:
