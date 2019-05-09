@@ -162,8 +162,8 @@ public:
     node_index get_next_consistent_node(node_index node,const string& str_history) {
         // consistent node should have score 0 and be the only node to go to
         assert(node == graph.kmer_to_node(str_history.substr(str_history.size()-graph.get_k())));
-        auto& history = gather_history(str_history);
-        auto& support = get_next_nodes_with_support(node,history);
+        auto history = gather_history(str_history);
+        auto support = get_next_nodes_with_support(node,history);
         node_index consistent_node = 0;
         for(auto& [next_node,info] : support) {
             auto& [score,history] = info;
