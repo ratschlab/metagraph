@@ -5,7 +5,7 @@ Building encoder as part of the metagraph library:
 mkdir build
 cd build
 cmake ../../..
-make
+make -j8
 make install # to install path_encoder_toolbox
 ```
 When not installed, executable can be found in `experiments/lossless_dbg/path_encoder_toolbox` and tests in 
@@ -16,12 +16,11 @@ Building encoder with global metagraph installation:
 mkdir build
 cd build
 cmake ..
-make
+make -j8
 make install # to install path_encoder_toolbox
 ```
 
 ## Examples
 ```bash
-
 path_encoder_toolbox compress --compressor-type wavelet --statistics statistics.json --input INPUT.fasta --output OUTPUT_FOLDER/
 ```
