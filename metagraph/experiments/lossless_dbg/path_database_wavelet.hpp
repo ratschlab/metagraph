@@ -83,8 +83,6 @@ public:
             }
         }
         routing_table_array.push_back('#'); // to also always end a block with #
-        //routing_table_array.push_back('\0'); // end of sequence
-
         routing_table = RoutingTable(routing_table_array);
     }
 
