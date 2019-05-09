@@ -12,6 +12,7 @@
 #include <sdsl/wt_rlmn.hpp>
 #include <sdsl/sd_vector.hpp>
 #include <sdsl/enc_vector.hpp>
+
 #include "graph_patch.hpp"
 #include "path_database.hpp"
 #include "path_database_dynamic.hpp"

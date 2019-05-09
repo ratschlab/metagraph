@@ -8,13 +8,14 @@
 #ifndef path_database_baseline_hpp
 #define path_database_baseline_hpp
 
+#include <iostream>
+#include <set>
+#include <map>
+
 #include "path_database.hpp"
 #include "dynamic_routing_table.hpp"
 #include "dynamic_incoming_table.hpp"
 #include "utils.hpp"
-#include <iostream>
-#include <set>
-#include <map>
 
 
 using namespace std;

@@ -13,12 +13,14 @@
 #include <sdsl/enc_vector.hpp>
 #include <boost/range/size_type.hpp>
 #include <tsl/hopscotch_map.h>
+
 #include "path_database.hpp"
 #include "path_database_dynamic.hpp"
 #include "utils.hpp"
 #include "utilities.hpp"
 #include "alphabets.hpp"
 #include "dbg_succinct.hpp"
+
 using node_index = SequenceGraph::node_index;
 
 class DynamicRoutingTable {

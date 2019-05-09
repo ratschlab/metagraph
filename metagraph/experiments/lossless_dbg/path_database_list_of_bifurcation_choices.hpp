@@ -14,7 +14,6 @@
 #include <nlohmann/json.hpp>
 
 #include "dbg_succinct.hpp"
-
 #include "path_database.hpp"
 #include "utilities.hpp"
 

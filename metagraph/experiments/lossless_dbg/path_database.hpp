@@ -12,10 +12,10 @@
 #include <filesystem>
 #include <vector>
 #include <nlohmann/json.hpp>
+
 #include "sequence_graph.hpp"
 #include "boss_construct.hpp"
 #include "dbg_succinct.hpp"
-
 #include "utilities.hpp"
 
 template <typename _path_id,typename GraphT=DBGSuccinct>

@@ -8,16 +8,17 @@
 #ifndef path_database_baseline_wavelet_deprecated_hpp
 #define path_database_baseline_wavelet_deprecated_hpp
 
+#include <iostream>
+#include <set>
+#include <map>
+
 #include "path_database.hpp"
 #include "path_database_dynamic.hpp"
 #include "path_database_wavelet.hpp"
 #include "utils.hpp"
-#include "utilities.hpp"
-#include <iostream>
-#include <set>
-#include <map>
 #include "alphabets.hpp"
 #include "routing_table.hpp"
+#include "utilities.hpp"
 
 
 #pragma GCC diagnostic ignored "-Wmissing-noreturn"

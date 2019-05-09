@@ -8,23 +8,24 @@
 #ifndef path_database_baseline_wavelet_hpp
 #define path_database_baseline_wavelet_hpp
 
+#include <iostream>
+#include <set>
+#include <functional>
+#include <map>
+#include <sdsl/wt_rlmn.hpp>
+#include <sdsl/sd_vector.hpp>
+#include <sdsl/enc_vector.hpp>
+
 #include "graph_patch.hpp"
 #include "path_database.hpp"
 #include "path_database_dynamic.hpp"
 #include "cxx-prettyprint.hpp"
 
 #include "utils.hpp"
-#include "utilities.hpp"
-#include <iostream>
-#include <set>
-#include <functional>
-#include <map>
 #include "alphabets.hpp"
 #include "routing_table.hpp"
 #include "incoming_table.hpp"
-#include <sdsl/wt_rlmn.hpp>
-#include <sdsl/sd_vector.hpp>
-#include <sdsl/enc_vector.hpp>
+#include "utilities.hpp"
 //#define CHECK_CORECTNESS 1
 
 #pragma GCC diagnostic ignored "-Wmissing-noreturn"

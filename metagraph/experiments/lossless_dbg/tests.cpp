@@ -9,6 +9,8 @@
 #ifndef tests_h
 #define tests_h
 
+#include <filesystem>
+
 #include <gtest/gtest.h>
 #define private public
 #define protected public
@@ -19,7 +21,6 @@
 #include "path_database_baseline_wavelet_deprecated.hpp"
 #include "path_database_wavelet.hpp"
 #include "incoming_table.hpp"
-#include <filesystem>
 using namespace std;
 namespace fs = std::filesystem;
 //#include "path_database.hpp"

@@ -5,19 +5,20 @@
 #ifndef METAGRAPH_GRAPH_PATCH_HPP
 #define METAGRAPH_GRAPH_PATCH_HPP
 
-#include "path_database.hpp"
-#include "path_database_dynamic.hpp"
-#include "utils.hpp"
-#include "utilities.hpp"
 #include <iostream>
 #include <set>
 #include <functional>
 #include <map>
-#include "alphabets.hpp"
-#include "routing_table.hpp"
 #include <sdsl/wt_rlmn.hpp>
 #include <sdsl/sd_vector.hpp>
 #include <sdsl/enc_vector.hpp>
+
+#include "path_database.hpp"
+#include "path_database_dynamic.hpp"
+#include "utils.hpp"
+#include "utilities.hpp"
+#include "alphabets.hpp"
+#include "routing_table.hpp"
 
 #include "dbg_succinct.hpp"
 

@@ -56,7 +56,7 @@ struct d_t {
 
 
 
-#define D(args ...) { d_t(), "|", __LINE__, "|", #args, ":", args, "\n"; }
+#define PRINT_VAR(args ...) { d_t(), "|", __LINE__, "|", #args, ":", args, "\n"; }
 
 void transform_to_fasta(const string &filename,const vector<string>& reads);
 
