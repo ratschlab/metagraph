@@ -120,6 +120,116 @@ TEST(kmc_parser, ReadKmersMinCountThreshold) {
     }
 }
 
+TEST(kmc_parser, ReadKmersMaxCountThreshold) {
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 1, 1);
+        EXPECT_EQ(0u, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 2, 2);
+        EXPECT_EQ(0u, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 3, 3);
+        EXPECT_EQ(0u, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 3, 1);
+        EXPECT_EQ(0u, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 1000, 5);
+        EXPECT_EQ(0u, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 1, 1000);
+        EXPECT_EQ(469983u, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 2, 1000);
+        EXPECT_EQ(255127u, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 3, 1000);
+        EXPECT_EQ(177441u, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 1000, 1000);
+        EXPECT_EQ(0u, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 1, 2);
+        EXPECT_EQ((469983u - 255127u), kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 2, 3);
+        EXPECT_EQ((255127u - 177441u), kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 1, 3);
+        EXPECT_EQ((469983u - 177441u), kmers.size());
+    }
+}
+
 TEST(kmc_parser, ReadKmersBothStrands) {
     {
         std::unordered_set<std::string> kmers;
@@ -184,5 +294,115 @@ TEST(kmc_parser, ReadKmersBothStrandsMinCountThreshold) {
             kmers.emplace(std::move(string));
         }, 1000);
         EXPECT_EQ(0u, kmers.size());
+    }
+}
+
+TEST(kmc_parser, ReadKmersBothStrandsMaxCountThreshold) {
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBothStrandsBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 1, 1);
+        EXPECT_EQ(0u, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBothStrandsBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 2, 2);
+        EXPECT_EQ(0u, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBothStrandsBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 3, 3);
+        EXPECT_EQ(0u, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBothStrandsBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 3, 1);
+        EXPECT_EQ(0u, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBothStrandsBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 1000, 5);
+        EXPECT_EQ(0u, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBothStrandsBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 1, 1000);
+        EXPECT_EQ(401460u * 2, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBothStrandsBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 2, 1000);
+        EXPECT_EQ(238473u * 2, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBothStrandsBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 3, 1000);
+        EXPECT_EQ(173157u * 2, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBothStrandsBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 1000, 1000);
+        EXPECT_EQ(0u, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBothStrandsBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 1, 2);
+        EXPECT_EQ((401460u - 238473u) * 2, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBothStrandsBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 2, 3);
+        EXPECT_EQ((238473u - 173157u) * 2, kmers.size());
+    }
+
+    {
+        std::unordered_set<std::string> kmers;
+        read_kmers(kTestDumpBothStrandsBasename, [&](std::string&& string) {
+            EXPECT_EQ(11u, string.size());
+            kmers.emplace(std::move(string));
+        }, 1, 3);
+        EXPECT_EQ((401460u - 173157u) * 2, kmers.size());
     }
 }

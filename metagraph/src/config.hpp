@@ -52,7 +52,8 @@ class Config {
     unsigned int frequency = 1;
     unsigned int alignment_length = 0;
     unsigned int memory_available = 0;
-    unsigned int max_unreliable_abundance = 0;
+    unsigned int min_count = 1;
+    unsigned int max_count = std::numeric_limits<unsigned int>::max();
     unsigned int unreliable_kmers_threshold = 0;
     unsigned int num_top_labels = -1;
     unsigned int genome_binsize_anno = 1000;
