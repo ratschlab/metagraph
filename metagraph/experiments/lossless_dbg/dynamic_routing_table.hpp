@@ -27,8 +27,7 @@ class DynamicRoutingTable {
 public:
     DynamicRoutingTable() = default;
     template<class Container>
-    explicit DynamicRoutingTable(const Container& routing_table_array) {
-    }
+    explicit DynamicRoutingTable(const Container& routing_table_array) {}
 
 //    int select(node_index node, int occurrence, char symbol) const {
 //    }
@@ -37,8 +36,8 @@ public:
         assert(position < routing_table.size());
         int result = 0;
         int i = 0;
-        auto& node_entry = routing_table.at(node);
-        for(auto it=begin(node_entry);i<position and it != end(node_entry);it++,i++) {
+        const auto &node_entry = routing_table.at(node);
+        for (auto it = begin(node_entry); i < position and it != end(node_entry); it++, i++) {
             result += *it == symbol;
         }
         return result;
@@ -51,8 +50,8 @@ public:
     void insert(node_index node, int position, char symbol) {
         auto rt_index = routing_table[node].begin();
         assert(position <= size(node));
-        advance(rt_index,position);
-        routing_table[node].insert(rt_index,symbol);
+        advance(rt_index, position);
+        routing_table[node].insert(rt_index, symbol);
     }
 
     int size(node_index node) const {
@@ -72,7 +71,8 @@ public:
         cout << out.str();
         return out.str();
     }
-    tsl::hopscotch_map<node_index,vector<char>> routing_table;
+
+    tsl::hopscotch_map<node_index, vector<char>> routing_table;
     //map<node_index,vector<char>> routing_table;
 
 //    int serialize(std::ostream& out)const {
@@ -80,9 +80,5 @@ public:
 //    int load(std::istream& in) {
 //    }
 };
-
-
-
-
 
 #endif //METAGRAPH_DYNAMIC_ROUTING_TABLE_HPP

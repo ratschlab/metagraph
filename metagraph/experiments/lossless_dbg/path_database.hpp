@@ -18,28 +18,24 @@
 #include "dbg_succinct.hpp"
 #include "utilities.hpp"
 
-template <typename _path_id,typename GraphT=DBGSuccinct>
+template <typename PathID,
+          typename GraphT = DBGSuccinct>
 class PathDatabase {
     // This is an abstract class, for implementation, use PathDatabaseWavelet.
   public:
     // convenience constructor
-    explicit PathDatabase(const vector<string> &raw_reads,
-                    size_t k_kmer = 21 /* default kmer */)
-            : PathDatabase(std::shared_ptr<const GraphT> {
-                                [](GraphT* g){ g->mask_dummy_kmers(1,false); return g; }
-                                (new GraphT(dbg_succ_graph_constructor(raw_reads, k_kmer)))
-                                })
-                {}
-
-
-    PathDatabase(std::shared_ptr<const GraphT> graph)
-          : graph_(graph) {
+    explicit PathDatabase(const vector<string> &filenames, size_t k_kmer = 21) {
+        auto graph = std::make_unique<GraphT>(dbg_succ_graph_constructor(filenames, k_kmer));
+        graph->mask_dummy_kmers(1, false);
+        graph_.reset(graph.release());
     }
 
-     ~PathDatabase() = default;
+    PathDatabase(std::shared_ptr<const GraphT> graph) : graph_(graph) {}
+
+    virtual ~PathDatabase() = default;
 
     using node_index = DeBruijnGraph::node_index;
-    using path_id = _path_id;
+    using path_id = PathID;
 
     // compress a batch of sequences
     virtual std::vector<path_id>
@@ -54,13 +50,13 @@ class PathDatabase {
     virtual std::string decode(path_id path) const = 0;
 
     virtual node_index get_first_node(path_id path) const {
-      auto decoded_path = decode(path);
-      return graph_->kmer_to_node(decoded_path.substr(0,graph_->get_k()));
+        auto decoded_path = decode(path);
+        return graph_->kmer_to_node(decoded_path.substr(0,graph_->get_k()));
     };
 
     virtual node_index get_last_node(path_id path) const {
-      auto decoded_path = decode(path);
-      return graph_->kmer_to_node(decoded_path.substr(decoded_path.size()-graph_->get_k()));
+        auto decoded_path = decode(path);
+        return graph_->kmer_to_node(decoded_path.substr(decoded_path.size()-graph_->get_k()));
     }
 
     // returns ids of all paths that go through sequence |str|
@@ -80,12 +76,21 @@ class PathDatabase {
   protected:
     std::shared_ptr<const GraphT> graph_;
 
-    static BOSS* dbg_succ_graph_constructor(const vector<string> &raw_reads,
-                                                size_t k_kmer) {
+    static BOSS* dbg_succ_graph_constructor(const vector<string> &filenames,
+                                            size_t k_kmer) {
         auto graph_constructor = BOSSConstructor(k_kmer - 1);// because BOSS has smaller kmers
-        for(auto &read : raw_reads) {
-            assert(read.size() >= k_kmer);
-            graph_constructor.add_sequence(read);
+
+        for (const auto &filename : filenames) {
+            read_fasta_file_critical(
+                filename,
+                [&](kseq_t* read) {
+                    if (read->seq.l < k_kmer) {
+                        std::cerr << "Warning: detected read shorter than k. Skipping the read." << std::endl;
+                        return;
+                    }
+                    graph_constructor.add_sequence(read->seq.s);
+                }
+            );
         }
         return new BOSS(&graph_constructor);
     }

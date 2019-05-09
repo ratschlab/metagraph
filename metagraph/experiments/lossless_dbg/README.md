@@ -22,5 +22,5 @@ make install # to install path_encoder_toolbox
 
 ## Examples
 ```bash
-path_encoder_toolbox compress --compressor-type wavelet --statistics statistics.json --input INPUT.fasta --output OUTPUT_FOLDER/
+./path_encoder_toolbox compress --input ../tests/data/transcripts_1000.fa --output ./
 ```

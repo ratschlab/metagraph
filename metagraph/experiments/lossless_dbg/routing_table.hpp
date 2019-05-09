@@ -20,17 +20,22 @@
 
 const char RoutingTableAlphabet[] = {'$','A','C','G','T','N','#','?'};
 // improvement (constexpr use https://github.com/serge-sans-paille/frozen)
-const map<char,int> RoutingTableInverseAlphabet = {{'$',0},{'A',1},{'C',2},{'G',3},{'T',4},{'N',5},{'#',6},{'?',7}};
+// TODO: get rid of std::map
+const map<char, int> RoutingTableInverseAlphabet = {{'$',0},{'A',1},{'C',2},{'G',3},{'T',4},{'N',5},{'#',6},{'?',7}};
 const auto& rte2int = RoutingTableInverseAlphabet;
 
 using routing_character_t = int;
 
-int operator""_rc(char c) {
-    return RoutingTableInverseAlphabet.at(c);
+int rc(char c) {
+    auto it = RoutingTableInverseAlphabet.find(c);
+    if (it != RoutingTableInverseAlphabet.end())
+        return it->second;
+
+    return RoutingTableInverseAlphabet.at('N');
 }
 
-int rc(char c) {
-    return RoutingTableInverseAlphabet.at(c);
+int operator""_rc(char c) {
+    return rc(c);
 }
 
 char tochar(routing_character_t rc) {
@@ -93,9 +98,5 @@ public:
         return routing_table.load(in);
     }
 };
-
-
-
-
 
 #endif //METAGRAPH_ROUTING_TABLE_HPP

@@ -52,11 +52,10 @@ public:
     PathDatabaseWavelet(std::shared_ptr<const DBGSuccinct> graph) : PathDatabaseDynamic(graph),
                                                                               incoming_table(graph)
                                                                               {}
-                                                                              
-    PathDatabaseWavelet(const vector<string> &raw_reads,
-                                size_t k_kmer = 21 /* default */) : PathDatabaseDynamic(raw_reads,k_kmer),
-                                                                    incoming_table(graph)
-                                                                    {}
+
+    PathDatabaseWavelet(const vector<string> &filenames,
+                        size_t k_kmer = 21 /* default */) : PathDatabaseDynamic(filenames,k_kmer),
+                                                            incoming_table(graph) {}
 
 
     std::vector<path_id> encode(const std::vector<std::string> &sequences) override {

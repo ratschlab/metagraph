@@ -28,11 +28,12 @@ template <typename GraphT=DBGSuccinct,typename edge_identifier_t=char>
 class DynamicIncomingTable {
 public:
     explicit DynamicIncomingTable(const GraphT & graph) : graph(graph) {}
-    int branch_offset(node_index node,edge_identifier_t incoming) const {
+
+    int branch_offset(node_index node, edge_identifier_t incoming) const {
         int result = 0;
-        for(auto& base : "$ACGTN") {
+        for (char base : "$ACGTN") {
             if (base < incoming) {
-                result += branch_size(node,base);
+                result += branch_size(node, base);
             }
         }
         return result;
@@ -42,34 +43,52 @@ public:
         return size(node); // as 1
     }
 
-
-    int branch_size(node_index node,edge_identifier_t incoming) const {
-        if (not incoming_table.count(node) or not incoming_table.at(node).count(incoming)) {
+    int branch_size(node_index node, edge_identifier_t incoming) const {
+        auto it = incoming_table.find(node);
+        if (it == incoming_table.end() || !it->second.count(incoming))
             return 0;
-        }
-        return incoming_table.at(node).at(incoming);
+
+        return it->second.at(incoming);
     }
 
     int size(node_index node) const {
         int result = 0;
-        for(auto& base : "$ACGTN") {
+        for(char base : "$ACGTN") {
             result += branch_size(node,base);
         }
         return result;
     }
 
-    void increment(node_index node,edge_identifier_t incoming)  {
+    int branch_offset_and_increment(node_index node,
+                                    edge_identifier_t incoming) {
+        int result = 0;
+
+        auto it = incoming_table.find(node);
+
+        if (it != incoming_table.end()) {
+            const auto &offsets = it->second;
+
+            for (char base : "$ACGTN") {
+                if (base < incoming) {
+                    if (offsets.count(base))
+                        result += offsets.at(base);
+                }
+            }
+        }
+
         incoming_table[node][incoming]++;
+
+        return result;
     }
 
     bool has_new_reads(node_index node) const {
-        return branch_size(node,'$');
+        return branch_size(node, '$');
     }
 
-    std::map<node_index,map<char,int>> incoming_table;
+    // TODO: replace map with array
+    // TODO: replace unordered_map with hopscotch
+    std::unordered_map<node_index, map<char, int>> incoming_table;
     const GraphT & graph;
 };
-
-
 
 #endif //METAGRAPH_DYNAMIC_INCOMING_TABLE_HPP
