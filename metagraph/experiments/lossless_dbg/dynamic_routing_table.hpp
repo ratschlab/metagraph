@@ -69,7 +69,14 @@ public:
         return out.str();
     }
 
+
     tsl::hopscotch_map<node_index, vector<char>> routing_table;
+
+    int new_relative_position(node_index node, int position) {
+        return rank(node,get(node,position),position);
+    }
+
+
     //map<node_index,vector<char>> routing_table;
 
 //    int serialize(std::ostream& out)const {

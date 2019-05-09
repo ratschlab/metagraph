@@ -54,6 +54,13 @@ public:
         return result;
     }
 
+    bool is_join(node_index node) const {
+        return indegree(node) > 1;
+    }
+    bool is_split(node_index node) const {
+        return outdegree(node) > 1;
+    }
+
 };
 #define DBGSuccinct BetterDBGSuccinct
 
