@@ -10,6 +10,9 @@ set(PATH_ENCODER_CURRENT path_encoder_toolbox_v${ENCODER_VERSION})
 #include_directories(${GTEST_INCLUDE_DIR})
 #
 #add_executable(compression_naive_code main.cpp)
+
+set(ROOT_BINARY_DIR ${PROJECT_BINARY_DIR})
+
 project(lossless_dbg)
 if(NOT DEFINED METALIBS)
     set(METALIBS metagraph sdsl maus2 z hts c++fs)
@@ -38,6 +41,9 @@ macro(install_symlink filepath sympath)
 endmacro(install_symlink)
 
 install_symlink(${PATH_ENCODER_CURRENT} path_encoder_toolbox)
+
+file(COPY ${CMAKE_CURRENT_BINARY_DIR}/${PATH_ENCODER_CURRENT} DESTINATION ${ROOT_BINARY_DIR})
+file(COPY ${CMAKE_CURRENT_BINARY_DIR}/path_encoder_toolbox DESTINATION ${ROOT_BINARY_DIR})
 
 install(TARGETS ${PATH_ENCODER_CURRENT} DESTINATION bin)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/path_encoder_toolbox DESTINATION bin)
