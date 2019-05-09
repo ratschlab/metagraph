@@ -74,7 +74,7 @@ public:
 #include <sdsl/enc_vector.hpp>
 #include "graph_patch.hpp"
 #include "path_database.hpp"
-#include "path_database_baseline.hpp"
+#include "path_database_dynamic.hpp"
 #include "cxx-prettyprint.hpp"
 #include "utils.hpp"
 #include "utilities.hpp"

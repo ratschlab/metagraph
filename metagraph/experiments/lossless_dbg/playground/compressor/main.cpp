@@ -25,7 +25,7 @@ using json = nlohmann::json;
 #define ALL_EDGES_COVERED
 
 #include "path_database_baseline_wavelet_deprecated.hpp"
-#include "path_database_baseline_wavelet.hpp"
+#include "path_database_wavelet.hpp"
 #include "samplers.hpp"
 #include "utilities.hpp"
 
@@ -93,7 +93,7 @@ int main(int argc, char *argv[]) {
     auto reads = read_reads_from_fasta(input_filename);
     auto compressor = compressor_type.getValue();
     if (compressor == "wavelet") {
-        auto db = compressReads<PathDatabaseBaselineWavelet<>>(compressedArg, reads);
+        auto db = compressReads<PathDatabaseWavelet<>>(compressedArg, reads);
         if (statisticsArg.isSet()) {
             auto statistics = db.get_statistics();
             save_string(statistics.dump(4),statistics_filename);

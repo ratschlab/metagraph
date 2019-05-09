@@ -13,7 +13,7 @@
 #include <sdsl/enc_vector.hpp>
 #include <boost/range/size_type.hpp>
 #include "path_database.hpp"
-#include "path_database_baseline.hpp"
+#include "path_database_dynamic.hpp"
 #include "utils.hpp"
 #include "utilities.hpp"
 #include "alphabets.hpp"

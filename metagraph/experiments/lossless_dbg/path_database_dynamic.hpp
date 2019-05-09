@@ -26,17 +26,17 @@ using node_index = DeBruijnGraph::node_index;
 using path_id = pair<node_index,int>;
 
 template<typename GraphT=DBGSuccinct>
-class PathDatabaseBaseline : public PathDatabase<pair<node_index,int>,GraphT> {
+class PathDatabaseDynamic : public PathDatabase<pair<node_index,int>,GraphT> {
 public:
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
-    explicit PathDatabaseBaseline(std::shared_ptr<const GraphT> graph) :
+    explicit PathDatabaseDynamic(std::shared_ptr<const GraphT> graph) :
                 PathDatabase<pair<node_index,int>,GraphT>(graph),
                 graph(*(this->graph_)),
                 incoming_table(*(this->graph_)) {}
 
-    explicit PathDatabaseBaseline(const vector<string> &raw_reads,
+    explicit PathDatabaseDynamic(const vector<string> &raw_reads,
                  size_t k_kmer = 21 /* default kmer */) :
                          PathDatabase<pair<node_index,int>,GraphT>(raw_reads,k_kmer),
                          graph(*(this->graph_)),

@@ -14,7 +14,7 @@
 #include <boost/range/size_type.hpp>
 #include <tsl/hopscotch_map.h>
 #include "path_database.hpp"
-#include "path_database_baseline.hpp"
+#include "path_database_dynamic.hpp"
 #include "utils.hpp"
 #include "utilities.hpp"
 #include "alphabets.hpp"

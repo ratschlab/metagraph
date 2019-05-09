@@ -20,6 +20,7 @@
 
 template <typename _path_id,typename GraphT=DBGSuccinct>
 class PathDatabase {
+    // This is an abstract class, for implementation, use PathDatabaseWavelet.
   public:
     // convenience constructor
     explicit PathDatabase(const vector<string> &raw_reads,

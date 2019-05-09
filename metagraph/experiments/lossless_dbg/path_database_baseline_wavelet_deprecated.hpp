@@ -9,8 +9,8 @@
 #define path_database_baseline_wavelet_deprecated_hpp
 
 #include "path_database.hpp"
-#include "path_database_baseline.hpp"
-#include "path_database_baseline_wavelet.hpp"
+#include "path_database_dynamic.hpp"
+#include "path_database_wavelet.hpp"
 #include "utils.hpp"
 #include "utilities.hpp"
 #include <iostream>
@@ -27,25 +27,25 @@ using namespace std;
 using alphabets::log2;
 
 using GraphT = DBGSuccinct;
-class PathDatabaseBaselineWaveletDeprecated : public PathDatabaseBaseline<GraphT> {
+class PathDatabaseBaselineWaveletDeprecated : public PathDatabaseDynamic<GraphT> {
 public:
     using routing_table_t = vector<char>;
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
-    PathDatabaseBaselineWaveletDeprecated(std::shared_ptr<const GraphT> graph) : PathDatabaseBaseline(graph),
+    PathDatabaseBaselineWaveletDeprecated(std::shared_ptr<const GraphT> graph) : PathDatabaseDynamic(graph),
                                                                               routing_table(sizeof(RoutingTableAlphabet))
                                                                               {}
 
     PathDatabaseBaselineWaveletDeprecated(const vector<string> &raw_reads,
-                                size_t k_kmer = 21 /* default */) : PathDatabaseBaseline(raw_reads,k_kmer),
+                                size_t k_kmer = 21 /* default */) : PathDatabaseDynamic(raw_reads,k_kmer),
                                                                     routing_table(sizeof(RoutingTableAlphabet))
                                                                     {}
 
 
     std::vector<path_id> encode(const std::vector<std::string> &sequences) override {
 
-        vector<path_id> encoded = PathDatabaseBaseline::encode(sequences);
+        vector<path_id> encoded = PathDatabaseDynamic::encode(sequences);
             // add additional bifurcation
         construct_routing_table();
         construct_edge_multiplicity_table();
@@ -85,8 +85,8 @@ public:
         vector<char> routing_table_array;
         for(int node=1;node<=graph.num_nodes();node++) {
             routing_table_array.push_back('#');
-            if (PathDatabaseBaseline::node_is_split(node)) {
-                auto dynamic_table = PathDatabaseBaseline::routing_table;
+            if (PathDatabaseDynamic::node_is_split(node)) {
+                auto dynamic_table = PathDatabaseDynamic::routing_table;
                 for(int i=0;i<dynamic_table.size(node);i++) {
                     routing_table_array.push_back(dynamic_table.get(node,i));
                 }
@@ -102,11 +102,11 @@ public:
     void construct_edge_multiplicity_table() {
         sdsl::bit_vector is_join_node(graph.num_nodes());
         for(int node=1;node<=graph.num_nodes();node++) {
-            is_join_node[node-1] = PathDatabaseBaseline::node_is_join(node);
-            if (PathDatabaseBaseline::node_is_join(node)) {
+            is_join_node[node-1] = PathDatabaseDynamic::node_is_join(node);
+            if (PathDatabaseDynamic::node_is_join(node)) {
                 for(int rc=0;rc<'N'_rc;rc++) { // don't need to store last branch as we only compute prefix sum excluding
                                                // the branch which we came from (N in this case)
-                    edge_multiplicity_table.push_back(PathDatabaseBaseline::incoming_table.branch_size(node,tochar(rc)));
+                    edge_multiplicity_table.push_back(PathDatabaseDynamic::incoming_table.branch_size(node,tochar(rc)));
                 }
             }
         }
@@ -159,7 +159,7 @@ public:
             if (node_is_join(node)) {
                 // todo better name (it is a symbol that determines from which branch we came)
                 auto join_symbol = sequence[kmer_position-1];
-//                auto tv = PathDatabaseBaseline::branch_starting_offset(node,join_symbol);
+//                auto tv = PathDatabaseDynamic::branch_starting_offset(node,join_symbol);
 //                auto cv = branch_starting_offset(node,join_symbol);
 //                assert(tv==cv);
                 relative_position += branch_starting_offset(node,join_symbol);

@@ -15,9 +15,9 @@
 #include "utilities.hpp"
 #include "path_database_list_of_bifurcation_choices.hpp"
 #include "samplers.hpp"
-#include "path_database_baseline.hpp"
+#include "path_database_dynamic.hpp"
 #include "path_database_baseline_wavelet_deprecated.hpp"
-#include "path_database_baseline_wavelet.hpp"
+#include "path_database_wavelet.hpp"
 #include "incoming_table.hpp"
 #include <filesystem>
 using namespace std;
@@ -124,13 +124,13 @@ void short_identity_test() {
     check_compression_decompression<T>(reads_for_testing_short,5);
 }
 
-template <class T=PathDatabaseBaselineWavelet<>>
+template <class T=PathDatabaseWavelet<>>
 void check_paths_going_through() {
     auto db = T(reads_for_testing_short,5);
     db.encode(reads_for_testing_short);
     ASSERT_EQ(db.get_paths_going_through(db.graph.kmer_to_node("CATGA")),vector<typename T::path_id>({{db.graph.kmer_to_node("GTACG"),0}}));
 }
-template<typename T=PathDatabaseBaselineWavelet<>>
+template<typename T=PathDatabaseWavelet<>>
 void check_small_get_next_consistent_node() {
     string middle = "ACTGCGT";
     vector<string> reads = {"C" + middle + "T","A" + middle + "G"};
@@ -184,7 +184,7 @@ TEST(PathDatabase,IdentityTestCompressedReads) {
 }
 
 TEST(PathDatabase,IdentityTestPathDatabaseBaseline) {
-    short_identity_test<PathDatabaseBaseline<>>();
+    short_identity_test<PathDatabaseDynamic<>>();
 }
 
 TEST(PathDatabase,IdentityTestPathDatabaseBaselineWaveletDeprecated) {
@@ -192,7 +192,7 @@ TEST(PathDatabase,IdentityTestPathDatabaseBaselineWaveletDeprecated) {
 }
 
 TEST(PathDatabase,IdentityTestPathDatabaseBaselineWavelet) {
-    short_identity_test<PathDatabaseBaselineWavelet<>>();
+    short_identity_test<PathDatabaseWavelet<>>();
 }
 
 TEST(PathDatabase,SerDesTest) {
@@ -200,14 +200,14 @@ TEST(PathDatabase,SerDesTest) {
 }
 
 TEST(PathDatabase,DecodeAllInverse) {
-    short_reads_decode_inverse<PathDatabaseBaselineWavelet<>>();
+    short_reads_decode_inverse<PathDatabaseWavelet<>>();
 }
 
 TEST(PathDatabase,DecodeAll) {
-    short_reads_decode_all<PathDatabaseBaselineWavelet<>>();
+    short_reads_decode_all<PathDatabaseWavelet<>>();
 }
 TEST(PathDatabase,PathsGoingThrough) {
-    check_paths_going_through<PathDatabaseBaselineWavelet<>>();
+    check_paths_going_through<PathDatabaseWavelet<>>();
 }
 TEST(PathDatabase,ConsistentNode) {
     check_small_get_next_consistent_node<>();
@@ -226,7 +226,7 @@ TEST(PathDatabase,LongTestCompressedReads) {
 }
 
 TEST(PathDatabase,LongTestBaseline) {
-    long_identity_test<PathDatabaseBaseline<>>();
+    long_identity_test<PathDatabaseDynamic<>>();
 }
 
 #endif

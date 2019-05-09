@@ -10,7 +10,7 @@
 
 #include "graph_patch.hpp"
 #include "path_database.hpp"
-#include "path_database_baseline.hpp"
+#include "path_database_dynamic.hpp"
 #include "cxx-prettyprint.hpp"
 
 #include "utils.hpp"
@@ -46,27 +46,28 @@ using alphabets::log2;
 
 //template <class Wavelet = sdsl::wt_rlmn<sdsl::sd_vector<>>
 template<class Wavelet = sdsl::wt_rlmn<>,class BitVector=default_bit_vector>
-class PathDatabaseBaselineWavelet : public PathDatabaseBaseline<DBGSuccinct> {
+class PathDatabaseWavelet : public PathDatabaseDynamic<DBGSuccinct> {
 public:
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
-    PathDatabaseBaselineWavelet(std::shared_ptr<const DBGSuccinct> graph) : PathDatabaseBaseline(graph),
+    PathDatabaseWavelet(std::shared_ptr<const DBGSuccinct> graph) : PathDatabaseDynamic(graph),
                                                                               incoming_table(graph)
                                                                               {}
                                                                               
-    PathDatabaseBaselineWavelet(const vector<string> &raw_reads,
-                                size_t k_kmer = 21 /* default */) : PathDatabaseBaseline(raw_reads,k_kmer),
+    PathDatabaseWavelet(const vector<string> &raw_reads,
+                                size_t k_kmer = 21 /* default */) : PathDatabaseDynamic(raw_reads,k_kmer),
                                                                     incoming_table(graph)
                                                                     {}
 
 
     std::vector<path_id> encode(const std::vector<std::string> &sequences) override {
 
-        vector<path_id> encoded = PathDatabaseBaseline::encode(sequences);
-            // add additional bifurcation
+        vector<path_id> encoded = PathDatabaseDynamic::encode(sequences);
+
+        // convert dynamic_(routing_table/incoming_table) to routing_table/incoming_table
         construct_routing_table();
-        construct_edge_multiplicity_table();
+        construct_incoming_table();
         return encoded;
     }
 
@@ -74,8 +75,8 @@ public:
         vector<char> routing_table_array;
         for(int node=1;node<=graph.num_nodes();node++) {
             routing_table_array.push_back('#');// to always start a block with #
-            if (PathDatabaseBaseline::node_is_split(node)) {
-                auto& dynamic_table = PathDatabaseBaseline::routing_table;
+            if (PathDatabaseDynamic::node_is_split(node)) {
+                auto& dynamic_table = PathDatabaseDynamic::routing_table;
                 for(int i=0;i<dynamic_table.size(node);i++) {
                     routing_table_array.push_back(dynamic_table.get(node,i));
                 }
@@ -87,38 +88,38 @@ public:
         routing_table = RoutingTable(routing_table_array);
     }
 
-    void construct_edge_multiplicity_table() {
-        vector<int> edge_multiplicity_table_builder;
+    void construct_incoming_table() {
+        vector<int> incoming_table_builder;
         vector<bool> is_join_node;
         for(int node=1;node<=graph.num_nodes();node++) {
             is_join_node.push_back(1);
-            if (PathDatabaseBaseline::node_is_join(node)) {
-                auto new_reads = PathDatabaseBaseline::incoming_table.branch_size(node,'$');
+            if (PathDatabaseDynamic::node_is_join(node)) {
+                auto new_reads = PathDatabaseDynamic::incoming_table.branch_size(node,'$');
                 if (new_reads) {
                     is_join_node.push_back(0);
-                    edge_multiplicity_table_builder.push_back(new_reads);
+                    incoming_table_builder.push_back(new_reads);
                 }
 #ifdef ALL_EDGES_COVERED
                 for(auto& base : "ACGTN") {
-                    auto branch_size = PathDatabaseBaseline::incoming_table.branch_size(node,base);
+                    auto branch_size = PathDatabaseDynamic::incoming_table.branch_size(node,base);
                     if (branch_size) {
                         // so it is an actual edge in a graph (because all edges are covered)
                         is_join_node.push_back(0);
-                        edge_multiplicity_table_builder.push_back(branch_size);
+                        incoming_table_builder.push_back(branch_size);
                     }
                 }
 #else
-                graph.call_incoming_kmers_mine(node,[&node,&edge_multiplicity_table_builder,
+                graph.call_incoming_kmers_mine(node,[&node,&incoming_table_builder,
                         &is_join_node,this](node_index prev_node,char c) {
-                    auto branch_size = PathDatabaseBaseline::incoming_table.branch_size(node,c);
+                    auto branch_size = PathDatabaseDynamic::incoming_table.branch_size(node,c);
                     is_join_node.push_back(0);
-                    edge_multiplicity_table_builder.push_back(branch_size);
+                    incoming_table_builder.push_back(branch_size);
                 });
 #endif
             }
         }
         is_join_node.push_back(1); // to also always end a block with 1
-        incoming_table.edge_multiplicity_table = sdsl::enc_vector<>(edge_multiplicity_table_builder);
+        incoming_table.edge_multiplicity_table = sdsl::enc_vector<>(incoming_table_builder);
         sdsl::bit_vector temporary_representation(is_join_node.size());
         for(int i=0;i<is_join_node.size();i++) {
             temporary_representation[i] = is_join_node[i];
@@ -254,8 +255,6 @@ public:
         int relative_starting_position = path.second;
         int relative_position = incoming_table.branch_offset(node,0) + relative_starting_position;
 
-
-
         int kmer_position = 0;
         node_index prev_node;
         char base;
@@ -293,7 +292,7 @@ public:
                 auto join_symbol = sequence[kmer_position-1];
 
 #if defined(CHECK_CORECTNESS)
-                auto tv = PathDatabaseBaseline::branch_starting_offset(node,join_symbol);
+                auto tv = PathDatabaseDynamic::branch_starting_offset(node,join_symbol);
                 auto cv = incoming_table.branch_offset(node,prev_node);
                 assert(tv==cv);
 #endif
@@ -406,7 +405,7 @@ public:
         graph.serialize(graph_filename);
     }
 
-    static PathDatabaseBaselineWavelet deserialize(const fs::path& folder) {
+    static PathDatabaseWavelet deserialize(const fs::path& folder) {
         ifstream edge_multiplicity_file(folder / "edge_multiplicity.bin");
         ifstream routing_table_file(folder / "routing_table.bin");
         ifstream joins_file(folder / "joins.bin");
@@ -416,7 +415,7 @@ public:
                 new DBGSuccinct(21)
                 };
         graph->load(graph_filename);
-        auto db = PathDatabaseBaselineWavelet(graph);
+        auto db = PathDatabaseWavelet(graph);
         db.incoming_table.edge_multiplicity_table.load(edge_multiplicity_file);
         db.routing_table.load(routing_table_file);
         db.incoming_table.joins.load(joins_file);

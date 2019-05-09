@@ -6,7 +6,7 @@
 #define METAGRAPH_GRAPH_PATCH_HPP
 
 #include "path_database.hpp"
-#include "path_database_baseline.hpp"
+#include "path_database_dynamic.hpp"
 #include "utils.hpp"
 #include "utilities.hpp"
 #include <iostream>
