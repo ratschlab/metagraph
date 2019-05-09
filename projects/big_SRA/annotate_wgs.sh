@@ -17,7 +17,7 @@ for file in $(cat files_WGS_sorted.txt); do
     continue
   fi
   x=$(basename ${file%.*.*})
-  args="annotate -v --anno-filename -i $graph -o $out_dir/$x --filter-k 20 --filter-abund 30 --filter-thres 4 -p 11 $file"
+  args="annotate -v --anno-filename -i $graph -o $out_dir/$x --filter-k 20 --min-count 31 --filter-thres 4 -p 11 $file"
   job="/usr/bin/time -v $exe $args"
   #$job 2>&1 | tee $log_dir/log_annotate_$x
   bsub -J annotate$x -W 48:00 -n 5 -R "rusage[mem=12000]" -o /dev/null "$job 2>&1 | tee $log_dir/log_annotate_$x"

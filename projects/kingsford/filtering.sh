@@ -51,11 +51,11 @@ else
     /usr/bin/time -v $KMC -k$K -m10 -ci1 -fm -t$num_threads $FILE $FILE.kmc $FILE.cache
     rm -r "$FILE.cache"
 
-    /usr/bin/time -v $exe filter -v -p $num_threads -k $((K-1)) --kmc --filter-abund $cutoff --filter-thres $threshold $FILE
+    /usr/bin/time -v $exe filter -v -p $num_threads -k $((K-1)) --kmc --min-count $((cutoff+1)) --filter-thres $threshold $FILE
 
     rm $FILE.kmc.*
 fi
 
 bsub -J "generate_$(basename $FILE)"_$cutoff -W 48:00 -n 1 -R "rusage[mem=1000]" -o /dev/null \
-  "/usr/bin/time -v $exe filter -v --generate-fastq -k $((K-1)) --filter-abund $cutoff --filter-thres $threshold $FILE"
+  "/usr/bin/time -v $exe filter -v --generate-fastq -k $((K-1)) --min-count $((cutoff+1)) --filter-thres $threshold $FILE"
 

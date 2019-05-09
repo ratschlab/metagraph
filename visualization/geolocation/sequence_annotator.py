@@ -25,7 +25,7 @@ class SequenceAnnotator():
             f_in.flush()
 
             result = subprocess.check_output([
-                    self.executable, 'classify',
+                    self.executable, 'query',
                     '-i', self.graph,
                     '-a', self.annotation,
                     '--count-labels',

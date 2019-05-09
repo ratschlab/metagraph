@@ -17,11 +17,11 @@ for file in $(cat metasub_cured.txt | tail -n +11); do
     continue
   fi
   x=$(basename ${file%.*.*})
-  args="annotate -v --anno-filename -i $graph -o $out_dir/$x --filter-k 20 --filter-abund 1 --filter-thres 4 -p 25 $file"
+  args="annotate -v --anno-filename -i $graph -o $out_dir/$x --filter-k 20 --min-count 2 --filter-thres 4 -p 25 $file"
   job="/usr/bin/time -v $exe $args"
   #$job 2>&1 | tee $log_dir/log_annotate_$x
   bsub -J annotate$x -W 48:00 -n 12 -R "rusage[mem=12000]" -o /dev/null "$job 2>&1 | tee $log_dir/log_annotate_$x"
 done
 
 
-# bsub -J "annotate_metasub[1-2809]%600" -W 96:00 -n 15 -R "rusage[mem=12000]" -o /dev/null "file=\"\$(sed -n \${LSB_JOBINDEX}p metasub_cured.txt)\"; x=\$(basename \${file%.*.*}); gtime -v ~/projects2014-metagenome/metagraph/build/metagengraph_DNA annotate -v --anno-filename -i ~/big_graph/metasub_k31_1_4/graph_metasub_1_4_k31.dbg -o ~/big_graph/metasub_k31_1_4/annotation/\$x --filter-k 20 --filter-abund 1 --filter-thres 4 -p 30 \$file 2>&1 | tee ~/big_graph/metasub_k31_1_4/logs/log_annotate_\$x"
+# bsub -J "annotate_metasub[1-2809]%600" -W 96:00 -n 15 -R "rusage[mem=12000]" -o /dev/null "file=\"\$(sed -n \${LSB_JOBINDEX}p metasub_cured.txt)\"; x=\$(basename \${file%.*.*}); gtime -v ~/projects2014-metagenome/metagraph/build/metagengraph_DNA annotate -v --anno-filename -i ~/big_graph/metasub_k31_1_4/graph_metasub_1_4_k31.dbg -o ~/big_graph/metasub_k31_1_4/annotation/\$x --filter-k 20 --min-count 2 --filter-thres 4 -p 30 \$file 2>&1 | tee ~/big_graph/metasub_k31_1_4/logs/log_annotate_\$x"
