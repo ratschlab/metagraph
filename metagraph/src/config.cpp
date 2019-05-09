@@ -110,7 +110,9 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "-k") || !strcmp(argv[i], "--kmer-length")) {
             k = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--min-count")) {
-            max_unreliable_abundance = std::max(atoi(argv[++i]), 1) - 1;
+            min_count = std::max(atoi(argv[++i]), 1);
+        } else if (!strcmp(argv[i], "--max-count")) {
+            max_count = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--filter-thres")) {
             unreliable_kmers_threshold = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--filter-k")) {
@@ -305,6 +307,11 @@ Config::Config(int argc, const char *argv[]) {
     if (discovery_fraction < 0 || discovery_fraction > 1)
         print_usage_and_exit = true;
 
+    if (min_count >= max_count) {
+        std::cerr << "Error: max-count must be greater than min-count" << std::endl;
+        print_usage(argv[0], identity);
+    }
+
     if (outfbase.size() && !utils::check_if_writable(outfbase)) {
         std::cerr << "Error: Can't write to " << outfbase << std::endl
                   << "Check if the path is correct" << std::endl;
@@ -466,6 +473,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for filter:\n");
             fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC counters\n");
+            fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
             fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
             fprintf(stderr, "\n");
@@ -478,8 +486,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s filter_stats [options] --min-count <cutoff> FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for filter:\n");
-            fprintf(stderr, "\t   --filter-k [INT] \t\tlength of k-mers used for counting and filtering [3]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
+            fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
+            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
         } break;
         case BUILD: {
             fprintf(stderr, "Usage: %s build [options] FILE1 [[FILE2] ...]\n"
@@ -488,6 +496,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for build:\n");
             fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC counters\n");
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
+            fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
             fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
             fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
@@ -512,6 +521,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for extend:\n");
             fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC counters\n");
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
+            fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
             fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
             fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
@@ -591,6 +601,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for annotate:\n");
             fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC counters\n");
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
+            fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
             fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
             fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");

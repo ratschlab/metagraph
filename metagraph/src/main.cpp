@@ -143,7 +143,8 @@ void annotate_data(const std::vector<std::string> &files,
                    bool reverse,
                    bool use_kmc,
                    size_t filter_k,
-                   size_t max_unreliable_abundance,
+                   size_t min_count,
+                   size_t max_count,
                    size_t unreliable_kmers_threshold,
                    bool filename_anno,
                    bool fasta_anno,
@@ -214,7 +215,8 @@ void annotate_data(const std::vector<std::string> &files,
                         std::cout << ", " << timer.elapsed() << "sec" << std::endl;
                     }
                 },
-                max_unreliable_abundance + 1
+                min_count,
+                max_count
             );
         } else if (utils::get_filetype(file) == "FASTA"
                     || utils::get_filetype(file) == "FASTQ") {
@@ -250,7 +252,7 @@ void annotate_data(const std::vector<std::string> &files,
                 reverse,
                 get_filter_filename(
                     file, filter_k,
-                    max_unreliable_abundance,
+                    min_count - 1,
                     unreliable_kmers_threshold
                 )
             );
@@ -658,13 +660,14 @@ void parse_sequences(const std::vector<std::string> &files,
                     }
                     call_read(sequence);
                 },
-                config.max_unreliable_abundance + 1
+                config.min_count,
+                config.max_count
             );
         } else if (utils::get_filetype(files[f]) == "FASTA"
                     || utils::get_filetype(files[f]) == "FASTQ") {
             std::string filter_filename = get_filter_filename(
                 files[f], config.filter_k,
-                config.max_unreliable_abundance,
+                config.min_count - 1,
                 config.unreliable_kmers_threshold
             );
 
@@ -1229,7 +1232,7 @@ int main(int argc, const char *argv[]) {
 
                     },
                     config->filter_k,
-                    config->max_unreliable_abundance,
+                    config->min_count - 1,
                     config->unreliable_kmers_threshold,
                     config->generate_filtered_fasta,
                     config->generate_filtered_fastq);
@@ -1286,7 +1289,7 @@ int main(int argc, const char *argv[]) {
                         serialize_number_vector(outstream, filter, 1);
                     },
                     config->filter_k,
-                    config->max_unreliable_abundance,
+                    config->min_count - 1,
                     config->unreliable_kmers_threshold,
                     config->verbose, config->reverse, config->use_kmc
                 );
@@ -1314,7 +1317,7 @@ int main(int argc, const char *argv[]) {
                 auto filter_filename = get_filter_filename(
                     file,
                     config->filter_k,
-                    config->max_unreliable_abundance,
+                    config->min_count - 1,
                     config->unreliable_kmers_threshold,
                     true
                 );
@@ -1359,7 +1362,8 @@ int main(int argc, const char *argv[]) {
                               config->reverse,
                               config->use_kmc,
                               config->filter_k,
-                              config->max_unreliable_abundance,
+                              config->min_count,
+                              config->max_count,
                               config->unreliable_kmers_threshold,
                               config->filename_anno,
                               config->fasta_anno,
@@ -1387,7 +1391,8 @@ int main(int argc, const char *argv[]) {
                                           config->reverse,
                                           config->use_kmc,
                                           config->filter_k,
-                                          config->max_unreliable_abundance,
+                                          config->min_count,
+                                          config->max_count,
                                           config->unreliable_kmers_threshold,
                                           config->filename_anno,
                                           config->fasta_anno,
@@ -1435,7 +1440,7 @@ int main(int argc, const char *argv[]) {
                                  &anno_graph,
                                  config->reverse,
                                  config->filter_k,
-                                 config->max_unreliable_abundance,
+                                 config->min_count - 1,
                                  config->unreliable_kmers_threshold,
                                  config->genome_binsize_anno,
                                  config->verbose);
@@ -1528,7 +1533,7 @@ int main(int argc, const char *argv[]) {
                     },
                     config->reverse,
                     get_filter_filename(file, config->filter_k,
-                                        config->max_unreliable_abundance,
+                                        config->min_count - 1,
                                         config->unreliable_kmers_threshold)
                 );
                 if (config->verbose) {
@@ -2367,7 +2372,7 @@ int main(int argc, const char *argv[]) {
                     }
                 }, config->reverse,
                     get_filter_filename(file, config->filter_k,
-                                        config->max_unreliable_abundance,
+                                        config->min_count - 1,
                                         config->unreliable_kmers_threshold)
                 );
 

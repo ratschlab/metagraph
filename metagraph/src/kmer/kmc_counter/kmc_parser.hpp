@@ -10,9 +10,12 @@ namespace kmc {
 // Read k-mers from KMC database
 // Retrieve both strands if KMC database stores only canonical k-mers
 // Otherwise, retrieve exactly all k-mers stored in the database
+//  |min_count| -- minimum k-mer abundance (including the value passed)
+//  |max_count| -- maximum k-mer abundance (excluding the value passed)
 void read_kmers(const std::string &kmc_base_filename,
                 const std::function<void(std::string&&)> &callback,
-                uint64_t min_count = 1);
+                uint64_t min_count = 1,
+                uint64_t max_count = -1);
 
 } // namespace kmc
 
