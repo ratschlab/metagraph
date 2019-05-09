@@ -98,7 +98,7 @@ popd
 4. Merge annotations (optional):\
 `./metagengraph merge_anno`
 5. Query annotated graph\
-`./metagengraph classify`
+`./metagengraph query`
 
 ### Example
 ```
@@ -108,7 +108,7 @@ DATA="../tests/data/transcripts_1000.fa"
 
 ./metagengraph annotate -i transcripts_1000 --anno-filename -o transcripts_1000 $DATA
 
-./metagengraph classify -i transcripts_1000 -a transcripts_1000.column.annodbg $DATA
+./metagengraph query -i transcripts_1000 -a transcripts_1000.column.annodbg $DATA
 
 ./metagengraph stats -a transcripts_1000 transcripts_1000
 ```
@@ -154,16 +154,16 @@ K=20
 1) Filter reads
   * using filtering in blocks
 ```bash
-./metagengraph filter -v --parallel 30 -k 20 --filter-abund 3 <DATA_DIR>/*.fasta.gz
+./metagengraph filter -v --parallel 30 -k 20 --min-count 4 <DATA_DIR>/*.fasta.gz
 ```
   * using KMC
 ```bash
 ./KMC/kmc -k21 -m5 -fq -t30 <FILE>.fasta.gz <FILE>.fasta.gz.kmc ./KMC
-./metagengraph filter -v --parallel 30 -k 20 --filter-abund 3 --kmc <FILE>.fasta.gz
+./metagengraph filter -v --parallel 30 -k 20 --min-count 4 --kmc <FILE>.fasta.gz
 ```
 2) Build graph
 ```bash
-./metagengraph build -v --parallel 30 -k 20 --mem-cap-gb 100 --filter-abund 3 \
+./metagengraph build -v --parallel 30 -k 20 --mem-cap-gb 100 --min-count 4 \
                         -o <GRAPH_DIR>/graph \
                         <DATA_DIR>/*.fasta.gz
 ```
@@ -196,10 +196,10 @@ bsub -J StackChunks -W 12:00 -n 30 -R "rusage[mem=15000]" "/usr/bin/time -v \
 
 ### Query graph
 ```bash
-./metagengraph classify -v -i <GRAPH_DIR>/graph.dbg \
-                           -a <GRAPH_DIR>/annotation.column.annodbg \
-                           --discovery-fraction 0.8 --labels-delimiter ", " \
-                           query_seq.fa
+./metagengraph query -v -i <GRAPH_DIR>/graph.dbg \
+                        -a <GRAPH_DIR>/annotation.column.annodbg \
+                        --discovery-fraction 0.8 --labels-delimiter ", " \
+                        query_seq.fa
 ```
 
 ### Get stats

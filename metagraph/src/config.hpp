@@ -96,8 +96,8 @@ class Config {
         TRANSFORM,
         TRANSFORM_ANNOTATION,
         RELAX_BRWT,
-        CLASSIFY,
-        SERVER_CLASSIFY,
+        QUERY,
+        SERVER_QUERY,
     };
     IdentityType identity = NO_IDENTITY;
 

@@ -1492,7 +1492,7 @@ int main(int argc, const char *argv[]) {
 
             return 0;
         }
-        case Config::CLASSIFY: {
+        case Config::QUERY: {
             assert(config->infbase_annotators.size() == 1);
 
             auto anno_graph = initialize_annotated_dbg(*config);
@@ -1550,7 +1550,7 @@ int main(int argc, const char *argv[]) {
 
             return 0;
         }
-        case Config::SERVER_CLASSIFY: {
+        case Config::SERVER_QUERY: {
             assert(config->infbase_annotators.size() == 1);
 
             Timer timer;
