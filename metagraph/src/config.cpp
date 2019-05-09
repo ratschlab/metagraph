@@ -461,6 +461,26 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         case EXPERIMENT: {
             fprintf(stderr, "Usage: %s experiment ???\n\n", prog_name.c_str());
         } break;
+        case FILTER: {
+            fprintf(stderr, "Usage: %s filter [options] --min-count <cutoff> FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for filter:\n");
+            fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC counters\n");
+            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
+            fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
+            fprintf(stderr, "\t   --generate-fasta \twrite filtered reads to disk in FASTA format [off]\n");
+            fprintf(stderr, "\t   --generate-fastq \twrite filtered reads to disk in FASTQ format [off]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+        } break;
+        case FILTER_STATS: {
+            fprintf(stderr, "Usage: %s filter_stats [options] --min-count <cutoff> FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for filter:\n");
+            fprintf(stderr, "\t   --filter-k [INT] \t\tlength of k-mers used for counting and filtering [3]\n");
+            fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
+        } break;
         case BUILD: {
             fprintf(stderr, "Usage: %s build [options] FILE1 [[FILE2] ...]\n"
                             "\tEach input file is given in FASTA, FASTQ, or VCF format.\n\n", prog_name.c_str());
@@ -501,26 +521,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
             // fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
-        case FILTER: {
-            fprintf(stderr, "Usage: %s filter [options] --min-count <cutoff> FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for filter:\n");
-            fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC counters\n");
-            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
-            fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
-            fprintf(stderr, "\n");
-            fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
-            fprintf(stderr, "\t   --generate-fasta \twrite filtered reads to disk in FASTA format [off]\n");
-            fprintf(stderr, "\t   --generate-fastq \twrite filtered reads to disk in FASTQ format [off]\n");
-            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
-        } break;
-        case FILTER_STATS: {
-            fprintf(stderr, "Usage: %s filter_stats [options] --min-count <cutoff> FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for filter:\n");
-            fprintf(stderr, "\t   --filter-k [INT] \t\tlength of k-mers used for counting and filtering [3]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
-        } break;
         case ALIGN: {
             fprintf(stderr, "Usage: %s align -i <GRAPH> [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
 
@@ -559,6 +559,19 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-l --len-suffix [INT] \titerate all possible suffices of the length given [0]\n");
             fprintf(stderr, "\t-c --canonical \t\tcanonical graph mode (e.g. for read sets) [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+        } break;
+        case TRANSFORM: {
+            fprintf(stderr, "Usage: %s transform [options] GRAPH\n\n", prog_name.c_str());
+
+            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
+            fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges [off]\n");
+            fprintf(stderr, "\t   --prune-end [INT] \tprune all dead ends of this length and shorter [0]\n");
+            fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: fast / dynamic / small [fast]\n");
+            fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
+            fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and write to compressed FASTA file [off]\n");
+            fprintf(stderr, "\t   --unitigs \t\textract all unitigs from graph and write to compressed FASTA file [off]\n");
+            fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case STATS: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
@@ -618,6 +631,28 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
+        case TRANSFORM_ANNOTATION: {
+            fprintf(stderr, "Usage: %s transform_anno [options] -o <annotator_basename> ANNOTATOR\n\n", prog_name.c_str());
+
+            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
+            fprintf(stderr, "\t   --rename-cols [STR]\tfile with rules for renaming annotation labels []\n");
+            fprintf(stderr, "\t                      \texample: 'L_1 L_1_renamed\n");
+            fprintf(stderr, "\t                      \t          L_2 L_2_renamed\n");
+            fprintf(stderr, "\t                      \t          L_2 L_2_renamed\n");
+            fprintf(stderr, "\t                      \t          ... ...........'\n");
+            fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation format [column]\n");
+            fprintf(stderr, "\t\t"); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --arity  \t\tarity in the brwt tree [2]\n");
+            fprintf(stderr, "\t   --greedy  \t\tuse greedy column partitioning in brwt construction [off]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+        } break;
+        case RELAX_BRWT: {
+            fprintf(stderr, "Usage: %s relax_brwt [options] -o <annotator_basename> ANNOTATOR\n\n", prog_name.c_str());
+
+            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
+            fprintf(stderr, "\t   --relax-arity [INT] \trelax brwt tree to optimize arity limited to this number [10]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+        } break;
         case QUERY: {
             fprintf(stderr, "Usage: %s query -i <GRAPH> -a <ANNOTATION> [options] FILE1 [[FILE2] ...]\n"
                             "\tEach input file is given in FASTA or FASTQ format.\n\n", prog_name.c_str());
@@ -644,41 +679,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
-        } break;
-        case TRANSFORM: {
-            fprintf(stderr, "Usage: %s transform [options] GRAPH\n\n", prog_name.c_str());
-
-            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
-            fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges [off]\n");
-            fprintf(stderr, "\t   --prune-end [INT] \tprune all dead ends of this length and shorter [0]\n");
-            fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: fast / dynamic / small [fast]\n");
-            fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
-            fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and write to compressed FASTA file [off]\n");
-            fprintf(stderr, "\t   --unitigs \t\textract all unitigs from graph and write to compressed FASTA file [off]\n");
-            fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
-            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
-        } break;
-        case TRANSFORM_ANNOTATION: {
-            fprintf(stderr, "Usage: %s transform_anno [options] -o <annotator_basename> ANNOTATOR\n\n", prog_name.c_str());
-
-            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
-            fprintf(stderr, "\t   --rename-cols [STR]\tfile with rules for renaming annotation labels []\n");
-            fprintf(stderr, "\t                      \texample: 'L_1 L_1_renamed\n");
-            fprintf(stderr, "\t                      \t          L_2 L_2_renamed\n");
-            fprintf(stderr, "\t                      \t          L_2 L_2_renamed\n");
-            fprintf(stderr, "\t                      \t          ... ...........'\n");
-            fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation format [column]\n");
-            fprintf(stderr, "\t\t"); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --arity  \t\tarity in the brwt tree [2]\n");
-            fprintf(stderr, "\t   --greedy  \t\tuse greedy column partitioning in brwt construction [off]\n");
-            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
-        } break;
-        case RELAX_BRWT: {
-            fprintf(stderr, "Usage: %s relax_brwt [options] -o <annotator_basename> ANNOTATOR\n\n", prog_name.c_str());
-
-            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
-            fprintf(stderr, "\t   --relax-arity [INT] \trelax brwt tree to optimize arity limited to this number [10]\n");
-            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
     }
 
