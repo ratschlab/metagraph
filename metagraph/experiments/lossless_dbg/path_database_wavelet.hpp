@@ -27,9 +27,6 @@
 #include <sdsl/enc_vector.hpp>
 //#define CHECK_CORECTNESS 1
 
-
-
-
 #pragma GCC diagnostic ignored "-Wmissing-noreturn"
 #pragma GCC diagnostic ignored "-Wreturn-type"
 
