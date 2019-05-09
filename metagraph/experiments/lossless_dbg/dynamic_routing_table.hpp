@@ -12,6 +12,7 @@
 #include <sdsl/sd_vector.hpp>
 #include <sdsl/enc_vector.hpp>
 #include <boost/range/size_type.hpp>
+#include <tsl/hopscotch_map.h>
 #include "path_database.hpp"
 #include "path_database_baseline.hpp"
 #include "utils.hpp"
@@ -69,8 +70,8 @@ public:
         cout << out.str();
         return out.str();
     }
-
-    map<node_index,vector<char>> routing_table;
+    tsl::hopscotch_map<node_index,vector<char>> routing_table;
+    //map<node_index,vector<char>> routing_table;
 
 //    int serialize(std::ostream& out)const {
 //    }

@@ -75,7 +75,7 @@ public:
         for(int node=1;node<=graph.num_nodes();node++) {
             routing_table_array.push_back('#');// to always start a block with #
             if (PathDatabaseBaseline::node_is_split(node)) {
-                auto dynamic_table = PathDatabaseBaseline::routing_table;
+                auto& dynamic_table = PathDatabaseBaseline::routing_table;
                 for(int i=0;i<dynamic_table.size(node);i++) {
                     routing_table_array.push_back(dynamic_table.get(node,i));
                 }
@@ -102,7 +102,7 @@ public:
                 for(auto& base : "ACGTN") {
                     auto branch_size = PathDatabaseBaseline::incoming_table.branch_size(node,base);
                     if (branch_size) {
-                        // is an actual edge in a graph (because all edges are covered)
+                        // so it is an actual edge in a graph (because all edges are covered)
                         is_join_node.push_back(0);
                         edge_multiplicity_table_builder.push_back(branch_size);
                     }
