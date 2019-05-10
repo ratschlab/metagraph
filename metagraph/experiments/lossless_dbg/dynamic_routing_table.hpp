@@ -35,10 +35,10 @@ public:
     int rank(node_index node, char symbol, int position) const {
         assert(position < routing_table.size());
         int result = 0;
-        int i = 0;
         const auto &node_entry = routing_table.at(node);
-        for (auto it = begin(node_entry); i < position and it != end(node_entry); it++, i++) {
-            result += *it == symbol;
+        assert(position <= node_entry.size());
+        for (size_t i = 0; i < position; ++i) {
+            result += node_entry[i] == symbol;
         }
         return result;
     }
@@ -48,10 +48,7 @@ public:
     }
 
     void insert(node_index node, int position, char symbol) {
-        auto rt_index = routing_table[node].begin();
-        assert(position <= size(node));
-        advance(rt_index, position);
-        routing_table[node].insert(rt_index, symbol);
+        routing_table[node].insert(routing_table[node].begin() + position, symbol);
     }
 
     int size(node_index node) const {

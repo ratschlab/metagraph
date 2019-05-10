@@ -11,11 +11,14 @@
 #include <iostream>
 #include <set>
 #include <map>
+#include <tsl/hopscotch_set.h>
+#include <progress_bar.hpp>
 
 #include "path_database.hpp"
 #include "dynamic_routing_table.hpp"
 #include "dynamic_incoming_table.hpp"
 #include "utils.hpp"
+#include "unix_tools.hpp"
 #include "threading.hpp"
 
 
@@ -47,11 +50,9 @@ public:
 
     virtual ~PathDatabaseDynamic() {}
 
-    node_index starting_node(const string& sequence) {
-        return graph.kmer_to_node(sequence.substr(0, graph.get_k()));
-    }
-
     std::vector<path_id> encode(const std::vector<std::string> &sequences) override {
+        Timer timer;
+
         // improvement
         // - when multiple reads start at a same symbol, sort them so they share longest prefix
         // sort them so we have fixed relative ordering
@@ -65,14 +66,21 @@ public:
         for (size_t i = 0; i < sequences.size(); ++i) {
             const auto &sequence = sequences[i];
             // add additional bifurcation
-            additional_joins_vec[i] = starting_node(sequence);
+            additional_joins_vec[i] = graph.kmer_to_node(
+                sequence.substr(0, graph.get_k())
+            );
             additional_splits_vec[i] = graph.kmer_to_node(
                 sequence.substr(sequence.length() - graph.get_k())
             );
         }
 
-        additional_joins.insert(additional_joins_vec.begin(), additional_joins_vec.end());
-        additional_splits.insert(additional_splits_vec.begin(), additional_splits_vec.end());
+        additional_joins = decltype(additional_joins)(additional_joins_vec.begin(),
+                                                      additional_joins_vec.end());
+        additional_joins_vec = std::vector<node_index>();
+
+        additional_splits = decltype(additional_splits)(additional_splits_vec.begin(),
+                                                        additional_splits_vec.end());
+        additional_splits_vec = std::vector<node_index>();
 
 // Mark split and join-nodes in graph for faster queries and construction
 #ifdef MEMOIZE
@@ -93,54 +101,80 @@ public:
 
         vector<path_id> encoded;
 
+        std::cout << "Finished preprocessing in " << timer.elapsed() << " sec" << std::endl;
+        ProgressBar progress_bar(sequences.size(), "Building dynamic RT and EM");
+
+        const size_t batch_size = std::max(static_cast<size_t>(1),
+                                           static_cast<size_t>(sequences.size() / 200));
+
+        double join_time = 0;
+        double split_time = 0;
+
         #pragma omp parallel for num_threads(get_num_threads())
-        for (size_t i = 0; i < sequences.size(); ++i) {
-            const auto &sequence = sequences[i];
+        for (size_t batch_begin = 0; batch_begin < sequences.size(); batch_begin += batch_size) {
 
-            // always putting new read above all other reads
-            int relative_position = 0;
-            int relative_starting_position = -1;
+            std::vector<std::tuple<node_index, char, char>> bifurcations;
 
-            // TODO: use map_to_nodes_sequentially when implemented
-            std::vector<std::tuple<size_t, node_index, bool, bool>> bifurcations;
-            size_t i = 0;
-            graph.map_to_nodes(sequence, [&](node_index node) {
-                bool is_join = node_is_join(node);
-                bool is_split = node_is_split(node);
-                if (is_join || is_split) {
-                    bifurcations.emplace_back(i, node, is_join, is_split);
-                }
-                i++;
-            });
+            for (size_t i = batch_begin;
+                            i < batch_begin + batch_size && i < sequences.size(); ++i) {
+                const auto &sequence = sequences[i];
+
+                size_t kmer_begin = 0;
+                size_t kmer_end = graph.get_k();
+
+                // TODO: use map_to_nodes_sequentially when implemented
+                graph.map_to_nodes(sequence, [&](node_index node) {
+                    char join_char = node_is_join(node)
+                                        ? (kmer_begin
+                                                ? sequence[kmer_begin - 1]
+                                                : '$')
+                                        : '\0';
+                    char split_char = node_is_split(node)
+                                        ? (kmer_end < sequence.size()
+                                                ? sequence[kmer_end]
+                                                : '$')
+                                        : '\0';
+
+                    if (join_char || split_char) {
+                        bifurcations.emplace_back(node, join_char, split_char);
+                    }
+                    kmer_begin++;
+                    kmer_end++;
+                });
+            }
+
+            int relative_position;
 
             #pragma omp critical
             {
-                for (const auto &[kmer_begin, node, is_join, is_split] : bifurcations) {
-
-                    auto kmer_end = kmer_begin + graph.get_k();
-
-                    if (is_join) {
-                        auto join_symbol = kmer_begin ? sequence[kmer_begin - 1] : '$';
-
+                for (const auto &[node, join_symbol, split_symbol] : bifurcations) {
+                    if (join_symbol) {
+                        timer.reset();
                         if (join_symbol == '$') {
-                            relative_starting_position = incoming_table.branch_size(node, '$');
-                            relative_position += relative_starting_position;
+                            // always putting new read above all other reads
+                            relative_position = incoming_table.branch_size(node, '$');
+                            encoded.emplace_back(node, relative_position);
+                            encoded_paths++;
                         }
-
                         relative_position += incoming_table.branch_offset_and_increment(node, join_symbol);
+                        join_time += timer.elapsed();
                     }
 
-                    if (is_split) {
-                        auto split_symbol = kmer_end < sequence.size() ? sequence[kmer_end] : '$';
+                    if (split_symbol) {
+                        timer.reset();
                         routing_table.insert(node, relative_position, split_symbol);
                         relative_position = routing_table.rank(node, split_symbol, relative_position);
+                        if (split_symbol == '$') {
+                            ++progress_bar;
+                        }
+                        split_time += timer.elapsed();
                     }
                 }
-
-                encoded.emplace_back(starting_node(sequence), relative_starting_position);
-                encoded_paths++;
             }
         }
+
+        std::cout << "\n\nJoin time: " << join_time << " sec"
+                  << "\nSplit time: " << split_time << " sec" << std::endl;
 
         return encoded;
     }
@@ -187,7 +221,7 @@ public:
 
         int kmer_position = 0;
         char base = '\0';
-        while(true) {
+        while (true) {
             if (node_is_split(node)) {
                 base = routing_table.get(node,relative_position);
                 relative_position = routing_table.rank(node,base,relative_position);
@@ -212,13 +246,13 @@ public:
         return sequence;
     }
 
-    std::vector<path_id> get_paths_going_through(const std::string &str) const override {};
+    std::vector<path_id> get_paths_going_through(const std::string &str) const override { throw std::runtime_error("not implemented"); };
 
-    std::vector<path_id> get_paths_going_through(node_index node) const override {};
+    std::vector<path_id> get_paths_going_through(node_index node) const override { throw std::runtime_error("not implemented"); };
 
-    node_index get_next_node(node_index node, path_id path) const override {};
+    node_index get_next_node(node_index node, path_id path) const override { throw std::runtime_error("not implemented"); };
 
-    node_index get_next_consistent_node(const std::string &history) const override {};
+    node_index get_next_consistent_node(const std::string &history) const override { throw std::runtime_error("not implemented"); };
 
     void serialize(const fs::path& folder) const {};
 
@@ -230,8 +264,8 @@ protected:
     DynamicRoutingTable routing_table;
     DynamicIncomingTable<> incoming_table;
 
-    std::set<node_index> additional_joins;
-    std::set<node_index> additional_splits;
+    tsl::hopscotch_set<node_index> additional_joins;
+    tsl::hopscotch_set<node_index> additional_splits;
 
     const GraphT & graph;
 

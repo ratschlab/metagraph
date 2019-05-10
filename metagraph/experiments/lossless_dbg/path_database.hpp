@@ -54,11 +54,6 @@ class PathDatabase {
         return graph_->kmer_to_node(decoded_path.substr(0,graph_->get_k()));
     };
 
-    virtual node_index get_last_node(path_id path) const {
-        auto decoded_path = decode(path);
-        return graph_->kmer_to_node(decoded_path.substr(decoded_path.size()-graph_->get_k()));
-    }
-
     // returns ids of all paths that go through sequence |str|
     virtual std::vector<path_id> get_paths_going_through(const std::string &str) const = 0;
     virtual std::vector<path_id> get_paths_going_through(node_index node) const = 0;

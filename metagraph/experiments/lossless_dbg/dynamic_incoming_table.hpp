@@ -12,6 +12,7 @@
 #include <sdsl/wt_rlmn.hpp>
 #include <sdsl/sd_vector.hpp>
 #include <sdsl/enc_vector.hpp>
+#include <tsl/hopscotch_map.h>
 
 #include "graph_patch.hpp"
 #include "path_database.hpp"
@@ -27,7 +28,7 @@ using default_bit_vector = bit_vector_small;
 template <typename GraphT=DBGSuccinct,typename edge_identifier_t=char>
 class DynamicIncomingTable {
 public:
-    explicit DynamicIncomingTable(const GraphT & graph) : graph(graph) {}
+    explicit DynamicIncomingTable(const GraphT &graph) : graph(graph) {}
 
     int branch_offset(node_index node, edge_identifier_t incoming) const {
         int result = 0;
@@ -74,9 +75,10 @@ public:
                         result += offsets.at(base);
                 }
             }
+            it.value()[incoming]++;
+        } else {
+            incoming_table[node][incoming]++;
         }
-
-        incoming_table[node][incoming]++;
 
         return result;
     }
@@ -86,9 +88,8 @@ public:
     }
 
     // TODO: replace map with array
-    // TODO: replace unordered_map with hopscotch
-    std::unordered_map<node_index, map<char, int>> incoming_table;
-    const GraphT & graph;
+    tsl::hopscotch_map<node_index, map<char, int>> incoming_table;
+    const GraphT &graph;
 };
 
 #endif //METAGRAPH_DYNAMIC_INCOMING_TABLE_HPP
