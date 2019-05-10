@@ -49,14 +49,14 @@ compute_or(const std::vector<std::unique_ptr<bit_vector>> &columns) {
     return vector_or;
 }
 
-sdsl::bit_vector generate_subindex(const sdsl::bit_vector &column,
-                                   const bit_vector &reference) {
+sdsl::bit_vector generate_subindex(const bit_vector &column,
+                                   const sdsl::bit_vector &reference) {
     assert(column.size() == reference.size());
 
-    sdsl::bit_vector subindex(reference.num_set_bits(), false);
+    sdsl::bit_vector subindex(sdsl::util::cnt_one_bits(reference), false);
 
     uint64_t j = 0;
-    reference.call_ones([&](auto i) {
+    call_ones(reference, [&](auto i) {
         if (column[i])
             subindex[j] = true;
 
@@ -79,7 +79,7 @@ BRWTBottomUpBuilder::merge(std::vector<NodeBRWT> &&nodes,
     NodeBRWT parent;
 
     // build the parent aggregated column
-    auto parent_index = std::make_unique<bit_vector_stat>(compute_or(index));
+    sdsl::bit_vector parent_index = compute_or(index);
 
     // initialize child nodes
     for (size_t i = 0; i < nodes.size(); ++i) {
@@ -93,10 +93,7 @@ BRWTBottomUpBuilder::merge(std::vector<NodeBRWT> &&nodes,
 
         // shrink index column
         bit_vector_rrr<> shrinked_index(
-            generate_subindex(
-                index[i]->convert_to<sdsl::bit_vector>(),
-                *parent_index
-            )
+            generate_subindex(std::move(*index[i]), parent_index)
         );
         index[i].reset();
 
@@ -106,7 +103,8 @@ BRWTBottomUpBuilder::merge(std::vector<NodeBRWT> &&nodes,
         );
     }
 
-    return { std::move(parent), std::move(parent_index) };
+    return { std::move(parent),
+                std::make_unique<bit_vector_smart>(std::move(parent_index)) };
 }
 
 template <typename T>
@@ -156,9 +154,7 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
                                 subset(&columns, group));
 
             parent_nodes[g] = std::move(parent.first);
-            parent_columns[g] = std::make_unique<bit_vector_rrr<>>(
-                parent.second->convert_to<bit_vector_rrr<>>()
-            );
+            parent_columns[g] = std::move(parent.second);
 
             #pragma omp critical
             progress_bar += group.size() - 1;
