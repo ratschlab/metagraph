@@ -73,8 +73,8 @@ template wavelet_tree_stat wavelet_tree::convert_to<wavelet_tree_stat>();
 template wavelet_tree_small wavelet_tree::convert_to<wavelet_tree_small>();
 
 
-template <typename BitVector>
-inline uint64_t next(const BitVector &v,
+template <typename Vector>
+inline uint64_t next(const Vector &v,
                      uint64_t pos,
                      uint64_t value,
                      size_t num_steps) {
@@ -94,8 +94,8 @@ inline uint64_t next(const BitVector &v,
             : v.size();
 }
 
-template <typename BitVector>
-inline uint64_t prev(const BitVector &v,
+template <typename Vector>
+inline uint64_t prev(const Vector &v,
                      uint64_t pos,
                      uint64_t value,
                      size_t num_steps) {
@@ -289,7 +289,7 @@ uint64_t wavelet_tree_stat::prev(uint64_t pos, uint64_t value) const {
 }
 
 void wavelet_tree_stat::clear() {
-    int_vector_ = decltype(int_vector_)();
+    int_vector_ = decltype(int_vector_)(0, 0, int_vector_.width());
     wwt_ = decltype(wwt_)();
     requires_update_ = false;
     n_ = 0;

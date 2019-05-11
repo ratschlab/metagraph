@@ -283,6 +283,86 @@ void test_wavelet_tree_ins_del(wavelet_tree *vector, std::vector<uint64_t> *numb
     }
 }
 
+template <class wavelet_tree>
+void test_wavelet_tree_batch_ins_del(wavelet_tree *vector,
+                                     const std::vector<uint64_t> &numbers) {
+    assert(vector);
+
+    vector->clear();
+
+    // insert numbers in the given order
+    for (size_t i = 0; i < numbers.size(); ++i) {
+        vector->insert(i, numbers[i]);
+    }
+    reference_based_test(*vector, numbers);
+
+    vector->clear();
+
+    // insert numbers in reversed order
+    for (auto it = numbers.rbegin(); it != numbers.rend(); ++it) {
+        vector->insert(0, *it);
+    }
+    reference_based_test(*vector, numbers);
+
+    vector->clear();
+
+    // insert reversed numbers, push_back
+    for (auto it = numbers.rbegin(); it != numbers.rend(); ++it) {
+        vector->insert(vector->size(), *it);
+    }
+    // erase all, pop_back
+    while (vector->size()) {
+        vector->remove(vector->size() - 1);
+    }
+    // insert all numbers from the batch, push_back
+    for (auto it = numbers.begin(); it != numbers.end(); ++it) {
+        vector->insert(vector->size(), *it);
+    }
+    reference_based_test(*vector, numbers);
+
+    // insert reversed numbers, push_front
+    for (auto it = numbers.begin(); it != numbers.end(); ++it) {
+        vector->insert(0, *it);
+    }
+    // erase all, pop_back
+    while (vector->size()) {
+        vector->remove(vector->size() - 1);
+    }
+    // insert all numbers from the batch, push_back
+    for (auto it = numbers.begin(); it != numbers.end(); ++it) {
+        vector->insert(vector->size(), *it);
+    }
+    reference_based_test(*vector, numbers);
+
+    // insert reversed numbers, push_back
+    for (auto it = numbers.rbegin(); it != numbers.rend(); ++it) {
+        vector->insert(vector->size(), *it);
+    }
+    // erase all, pop_front
+    while (vector->size()) {
+        vector->remove(0);
+    }
+    // insert all numbers from the batch, push_back
+    for (auto it = numbers.begin(); it != numbers.end(); ++it) {
+        vector->insert(vector->size(), *it);
+    }
+    reference_based_test(*vector, numbers);
+
+    // insert reversed numbers, push_back
+    for (auto it = numbers.rbegin(); it != numbers.rend(); ++it) {
+        vector->insert(vector->size(), *it);
+    }
+    // erase all, pop_back
+    while (vector->size()) {
+        vector->remove(vector->size() - 1);
+    }
+    // insert all numbers from the batch, push_front
+    for (auto it = numbers.rbegin(); it != numbers.rend(); ++it) {
+        vector->insert(0, *it);
+    }
+    reference_based_test(*vector, numbers);
+}
+
 
 TEST(wavelet_tree_stat, InsertDelete) {
     std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
@@ -291,6 +371,19 @@ TEST(wavelet_tree_stat, InsertDelete) {
     ASSERT_TRUE(vector);
 
     test_wavelet_tree_ins_del(vector, &numbers);
+
+    delete vector;
+}
+
+TEST(wavelet_tree_stat, InsertDeleteBatch) {
+    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                      0, 1, 2, 0, 3, 2, 1, 1,
+                                      3, 1, 0, 2, 3, 2, 2, 1,
+                                      3, 2, 1, 2, 3, 3, 3, 0 };
+    wavelet_tree *vector = new wavelet_tree_stat(4);
+    ASSERT_TRUE(vector);
+
+    test_wavelet_tree_batch_ins_del(vector, numbers);
 
     delete vector;
 }
@@ -307,6 +400,19 @@ TEST(wavelet_tree_small, InsertDelete) {
     delete vector;
 }
 
+TEST(wavelet_tree_small, InsertDeleteBatch) {
+    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                      0, 1, 2, 0, 3, 2, 1, 1,
+                                      3, 1, 0, 2, 3, 2, 2, 1,
+                                      3, 2, 1, 2, 3, 3, 3, 0 };
+    wavelet_tree *vector = new wavelet_tree_small(4);
+    ASSERT_TRUE(vector);
+
+    ASSERT_DEATH(test_wavelet_tree_batch_ins_del(vector, numbers), "");
+
+    delete vector;
+}
+
 
 TEST(wavelet_tree_dyn, InsertDelete) {
     std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
@@ -315,6 +421,19 @@ TEST(wavelet_tree_dyn, InsertDelete) {
     ASSERT_TRUE(vector);
 
     test_wavelet_tree_ins_del(vector, &numbers);
+
+    delete vector;
+}
+
+TEST(wavelet_tree_dyn, InsertDeleteBatch) {
+    std::vector<uint64_t> numbers = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                      0, 1, 2, 0, 3, 2, 1, 1,
+                                      3, 1, 0, 2, 3, 2, 2, 1,
+                                      3, 2, 1, 2, 3, 3, 3, 0 };
+    wavelet_tree *vector = new wavelet_tree_dyn(4);
+    ASSERT_TRUE(vector);
+
+    test_wavelet_tree_batch_ins_del(vector, numbers);
 
     delete vector;
 }
