@@ -1437,14 +1437,80 @@ uint64_t BOSS::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
 }
 
 
+//TODO unit test
 // Given an edge list, remove them from the BOSS graph.
-// TODO: fix the implementation (anchoring the isolated nodes)
+// Anchors the isolated nodes.
 void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
     uint64_t shift = 0;
 
+    std::set<node_index> new_tail_nodes;
+    std::set<node_index> new_head_nodes;
+
+    for (edge_index edge : edges) {
+        node_index node = get_source_node(edge);
+
+        edge_index first_outgoing = pred_last(edge) + 1;
+        edge_index last_outgoing = get_last(edge) ? edge : succ_last(edge);
+        uint64_t outdeg = last_outgoing - first_outgoing + 1;
+
+        uint64_t outgoing_delete_count = std::distance(edges.lower_bound(first_outgoing),
+                                                       edges.upper_bound(last_outgoing));
+
+        if (outdeg == outgoing_delete_count) {
+            new_tail_nodes.emplace(node);
+        }
+
+        auto target_edge_id = fwd(edge);
+        auto target_node = get_source_node(target_edge_id);
+        auto indeg = indegree(target_node);
+        uint64_t incoming_delete_count = 0;
+        call_adjacent_incoming_edges(target_edge_id, [&](edge_index adj_incoming_edge_index) {
+            if (edges.find(adj_incoming_edge_index) != edges.end())
+                ++incoming_delete_count;
+        });
+
+        assert(indeg >= incoming_delete_count);
+        if (indeg == incoming_delete_count) {
+            if (new_tail_nodes.find(target_node) == new_tail_nodes.end()) {
+                // node will still exist but all incoming edges deleted, will need to anchor
+                new_head_nodes.emplace(target_node);
+            } else {
+                // node deleted (no incoming or outgoing edges)
+                new_tail_nodes.erase(target_node);
+            }
+        }
+    }
+
+    // create anchors for new head nodes
+    std::set<edge_index> new_ids;
+    for (edge_index edge : new_head_nodes) {
+        auto new_id_shift = std::distance(new_ids.begin(), new_ids.lower_bound(edge));
+        uint64_t edge_id = edge + new_id_shift;
+
+        auto kmer = get_node_seq(edge_id);
+        uint64_t source = 1;
+        kmer.insert(kmer.begin(), k_, kSentinelCode);
+        for (size_t i = 0; i < k_; ++i) {
+            std::vector<edge_index> new_ids_vec;
+            source = append_pos(kmer[i + k_], source, &kmer[i], &new_ids_vec);
+            std::copy(new_ids_vec.begin(),
+                      new_ids_vec.end(),
+                      std::inserter(new_ids, new_ids.end()));
+        }
+    }
+
     for (edge_index edge : edges) {
         assert(edge >= shift);
-        uint64_t edge_id = edge - shift;
+        auto new_id_shift = std::distance(new_ids.begin(), new_ids.lower_bound(edge));
+        uint64_t edge_id = edge - shift + new_id_shift;
+
+        node_index node = get_source_node(edge_id);
+        if (new_tail_nodes.find(node) != new_tail_nodes.end()) {
+            W_->set(edge_id, kSentinelCode);
+            // allow delete other edges for this node
+            new_tail_nodes.erase(node);
+            continue;
+        }
 
         uint64_t d = get_W(edge_id);
         if (d < alph_size) {
@@ -1868,7 +1934,7 @@ void BOSS::call_paths(Call<const std::vector<edge_index>,
             call_paths(i, callback, split_to_contigs, &discovered, &visited, progress_bar);
     }
 
-    // process all the cycles left that have not beed traversed
+    // process all the cycles left that have not been traversed
     for (uint64_t i = 1; i < W_->size(); ++i) {
         if (!visited[i])
             call_paths(i, callback, split_to_contigs, &discovered, &visited, progress_bar);
