@@ -298,16 +298,16 @@ public:
     optional<pair<char,char>> is_weak_split(node_index node) {
         // == is substitution split for now
         map<node_index,vector<char>> joins;
-        graph.get_all_outgoing_kmers(node,[](node_index next_node, char base) {
+        graph.get_all_outgoing_kmers(node,[&](node_index next_node, char base) {
             auto possible_join = first_join(node,graph.get_k());
             if (possible_join) {
-                joins[node_index].push_back(base);
+                joins[next_node].push_back(base);
             }
         });
         for(auto& [join_node,bases] : joins) {
             if (bases.size() > 1) {
                 // currently just randomly pick one;
-                return {bases[0],bases[1]};
+                return {{bases[0],bases[1]}};
             }
         }
         return {};
