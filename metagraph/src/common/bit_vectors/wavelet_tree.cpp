@@ -4,7 +4,7 @@
 
 // TODO: run benchmarks and optimize these parameters
 const size_t MAX_ITER_WAVELET_TREE_STAT = 1000;
-const size_t MAX_ITER_WAVELET_TREE_DYN = 10;
+const size_t MAX_ITER_WAVELET_TREE_DYN = 0;
 const size_t MAX_ITER_WAVELET_TREE_SMALL = 10;
 
 namespace utils {
