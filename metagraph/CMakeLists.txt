@@ -36,9 +36,6 @@ string(APPEND CMAKE_CXX_FLAGS " \
   -Wall -Wextra -Werror \
   -msse4.2 \
   -D_THREAD_SAFE -pthread \
-  -Wno-unused-parameter \
-  -Wno-unused-variable \
-  -Wno-sign-compare \
 ") # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -48,7 +45,6 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     -Wno-old-style-cast \
     -Wno-atomic-alignment \
     -Wno-extra-semi-stmt \
-	-Wno-unused-parameter \
   ")
 endif()
 
