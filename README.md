@@ -57,6 +57,7 @@ export CXX=\"\$(which clang++)\"
 3. install **libmaus2** and **sdsl-lite** in `metagraph/external-libraries/` following the corresponding instructions
 or simply run the following script
 ```bash
+git submodule sync
 git submodule update --init --recursive
 
 pushd metagraph/external-libraries/sdsl-lite
