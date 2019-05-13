@@ -24,8 +24,8 @@ class PathDatabase {
     // This is an abstract class, for implementation, use PathDatabaseWavelet.
   public:
     // convenience constructor
-    explicit PathDatabase(const vector<string> &filenames, size_t k_kmer = 21) {
-        auto graph = std::make_unique<GraphT>(dbg_succ_graph_constructor(filenames, k_kmer));
+    explicit PathDatabase(const vector<string> &reads, size_t k_kmer = 21) {
+        auto graph = std::make_unique<GraphT>(dbg_succ_graph_constructor(reads, k_kmer));
         graph->mask_dummy_kmers(1, false);
         graph_.reset(graph.release());
     }
@@ -71,21 +71,12 @@ class PathDatabase {
   protected:
     std::shared_ptr<const GraphT> graph_;
 
-    static BOSS* dbg_succ_graph_constructor(const vector<string> &filenames,
+    static BOSS* dbg_succ_graph_constructor(const vector<string> &reads,
                                             size_t k_kmer) {
         auto graph_constructor = BOSSConstructor(k_kmer - 1);// because BOSS has smaller kmers
 
-        for (const auto &filename : filenames) {
-            read_fasta_file_critical(
-                filename,
-                [&](kseq_t* read) {
-                    if (read->seq.l < k_kmer) {
-                        std::cerr << "Warning: detected read shorter than k. Skipping the read." << std::endl;
-                        return;
-                    }
-                    graph_constructor.add_sequence(read->seq.s);
-                }
-            );
+        for (const auto &read : reads) {
+                    graph_constructor.add_sequence(read);
         }
         return new BOSS(&graph_constructor);
     }

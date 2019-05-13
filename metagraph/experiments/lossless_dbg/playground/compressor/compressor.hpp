@@ -126,8 +126,7 @@ int main_compressor(int argc, char *argv[]) {
     auto reads = read_reads_from_fasta(input_filename);
     auto compressor = compressor_type.getValue();
     if (compressor == "wavelet") {
-        auto db = compressReads<PathDatabaseWavelet<>>(compressedArg,
-                                                       { input_filename },
+        auto db = compressReadsDeprecated<PathDatabaseWavelet<>>(compressedArg,
                                                        reads);
         if (statisticsArg.isSet()) {
             auto statistics = db.get_statistics();

@@ -102,7 +102,7 @@ public:
         vector<path_id> encoded;
 
         std::cout << "Finished preprocessing in " << timer.elapsed() << " sec" << std::endl;
-        ProgressBar progress_bar(sequences.size(), "Building dynamic RT and EM");
+        ProgressBar progress_bar(sequences.size(), "Building dRT and dEM");
 
         const size_t batch_size = std::max(static_cast<size_t>(1),
                                            static_cast<size_t>(sequences.size() / 200));
