@@ -6,7 +6,7 @@
 #include <atomic>
 
 #include <sdsl/wavelet_trees.hpp>
-#include <libmaus2/bitbtree/bitbtree.hpp>
+#include <dynamic.hpp>
 
 #include "bitmap.hpp"
 
@@ -31,8 +31,6 @@ class bit_vector : public bitmap {
     virtual void insert_bit(uint64_t id, bool val) = 0;
     virtual void delete_bit(uint64_t id) = 0;
     virtual void set(uint64_t id, bool val) override = 0;
-    // Can be redefined, e.g. without rebalancing
-    virtual void setBitQuick(uint64_t id, bool val) { set(id, val); };
 
     virtual bool operator[](uint64_t id) const override = 0;
     virtual uint64_t get_int(uint64_t id, uint32_t width) const override = 0;
@@ -95,7 +93,6 @@ class bit_vector_dyn : public bit_vector {
     uint64_t prev1(uint64_t id) const override;
 
     void set(uint64_t id, bool val) override;
-    void setBitQuick(uint64_t id, bool val) override;
     bool operator[](uint64_t id) const override;
     uint64_t get_int(uint64_t id, uint32_t width) const override;
 
@@ -106,12 +103,11 @@ class bit_vector_dyn : public bit_vector {
     void serialize(std::ostream &out) const override;
 
     uint64_t size() const override { return vector_.size(); }
-    uint64_t num_set_bits() const override { return vector_.count1(); }
 
     void call_ones(const std::function<void(uint64_t)> &callback) const override;
 
   private:
-    libmaus2::bitbtree::BitBTree<6, 64> vector_;
+    dyn::suc_bv vector_;
 };
 
 

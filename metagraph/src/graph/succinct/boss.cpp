@@ -8,6 +8,7 @@
 #include <cstdio>
 
 #include <boost/multiprecision/integer.hpp>
+#include <libmaus2/util/NumberSerialisation.hpp>
 
 #include "boss_construct.hpp"
 #include "serialization.hpp"

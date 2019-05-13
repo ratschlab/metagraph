@@ -249,11 +249,11 @@ void test_bit_vector_set(bit_vector *vector, sdsl::bit_vector *numbers) {
         reference_based_test(*vector, *numbers);
 
         (*numbers)[i] = 1;
-        vector->setBitQuick(i, 1);
+        vector->set(i, 1);
         reference_based_test(*vector, *numbers);
 
         (*numbers)[i] = 0;
-        vector->setBitQuick(i, 0);
+        vector->set(i, 0);
         reference_based_test(*vector, *numbers);
 
         (*numbers)[i] = value;
