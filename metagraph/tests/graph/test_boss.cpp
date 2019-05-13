@@ -2352,3 +2352,68 @@ TEST(BOSS, is_single_outgoing_for_multiple_valid_edges) {
     // and 'GGGG' have a single outgoing edge.
     EXPECT_EQ(reference.size() - 2, single_outgoing_counter);
 }
+
+TEST(BOSS, IndegreeIncomingIdentity) {
+    int k_kmer = 5;
+
+    auto graph_constructor = BOSSConstructor(k_kmer - 1);
+    for (const auto &read : { "ATGCGATCGATATGCGAGA",
+                              "ATGCGATCGAGACTACGAG",
+                              "GTACGATAGACATGACGAG",
+                              "ACTGACGAGACACAGATGC" }) {
+        graph_constructor.add_sequence(read);
+    }
+    DBGSuccinct graph(new BOSS(&graph_constructor));
+    graph.mask_dummy_kmers(1, false);
+
+    for (uint64_t node = 1; node <= graph.num_nodes(); node++) {
+        size_t computed_indegree = 0;
+        for (auto c : {'A', 'C', 'G', 'T', 'N'}) {
+            if (graph.traverse_back(node, c))
+                computed_indegree++;
+        }
+        ASSERT_EQ(graph.indegree(node), computed_indegree);
+
+        std::vector<DBGSuccinct::node_index> incoming_nodes;
+        graph.adjacent_incoming_nodes(node, &incoming_nodes);
+        ASSERT_EQ(graph.indegree(node), incoming_nodes.size());
+    }
+}
+
+TEST(BOSS, EraseEdgesDynSingle) {
+    for (size_t k = 1; k < 40; ++k) {
+        BOSS graph2(k);
+        graph2.add_sequence("AGACACAGT", true);
+        graph2.add_sequence("GACTTGCAG", true);
+        graph2.add_sequence("ACTAGTCAG", true);
+        if (true) {
+            for(uint64_t m = 1; m <= graph2.num_edges(); ++m) {
+                BOSS graph(k);
+                graph.add_sequence("AGACACAGT", true);
+                graph.add_sequence("GACTTGCAG", true);
+                graph.add_sequence("ACTAGTCAG", true);
+                //graph.print_internal_representation();
+                //graph.print();
+                EXPECT_TRUE(graph.is_valid());
+                graph.erase_edges_dyn({m});
+                //graph.print_internal_representation();
+                //graph.print();
+                //std::cout << "m: " << m << std::endl;
+                EXPECT_TRUE(graph.is_valid());
+                //dump unitigs and visualize
+                //std::cout << "viz" << std::endl;
+                //std::cout << k+1 << std::endl;
+                //graph.call_paths([&](const auto &sequence) {
+                //    std::cout << sequence << std::endl;
+                //});
+                graph.call_paths(
+                    [&](const auto &, const auto &seq) {
+                        auto str = graph.decode(seq);
+                        //std::cout << str << std::endl;
+                    },
+                    false
+                );
+            }
+        }
+    }
+}
