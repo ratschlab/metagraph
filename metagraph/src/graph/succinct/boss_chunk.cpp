@@ -85,7 +85,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
     uint64_t cumulative_size = 1;
 
     for (auto file : chunk_filenames) {
-        file = utils::remove_suffix(file, ".dbgchunk") + ".dbgchunk";
+        file = utils::remove_suffix(file, kFileExtension) + kFileExtension;
 
         std::ifstream chunk_in(file, std::ios::binary);
 
@@ -110,8 +110,8 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
         std::cout << "Succinct arrays initialized" << std::endl;
 
     for (size_t i = 0; i < chunk_filenames.size(); ++i) {
-        auto filename = utils::remove_suffix(chunk_filenames[i], ".dbgchunk")
-                                                        + ".dbgchunk";
+        auto filename = utils::remove_suffix(chunk_filenames[i], kFileExtension)
+                                                        + kFileExtension;
         BOSS::Chunk graph_chunk(0);
         if (!graph_chunk.load(filename)) {
             std::cerr << "ERROR: input file "
@@ -178,8 +178,8 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
 
 bool BOSS::Chunk::load(const std::string &infbase) {
     try {
-        std::ifstream instream(utils::remove_suffix(infbase, ".dbgchunk")
-                                                                + ".dbgchunk",
+        std::ifstream instream(utils::remove_suffix(infbase, kFileExtension)
+                                                                + kFileExtension,
                                std::ios::binary);
         W_ = load_number_vector<TAlphabet>(instream);
         last_ = load_number_vector<bool>(instream);
@@ -199,8 +199,8 @@ bool BOSS::Chunk::load(const std::string &infbase) {
 }
 
 void BOSS::Chunk::serialize(const std::string &outbase) const {
-    std::ofstream outstream(utils::remove_suffix(outbase, ".dbgchunk")
-                                                                + ".dbgchunk",
+    std::ofstream outstream(utils::remove_suffix(outbase, kFileExtension)
+                                                                + kFileExtension,
                             std::ios::binary);
     serialize_number_vector(outstream, W_, bits_per_char_W_);
     serialize_number_vector(outstream, last_, 1);

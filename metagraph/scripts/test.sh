@@ -15,7 +15,7 @@ echo ""
 
 $exe annotate -i test_graph.dbg -o test_annotation --anno-header --header-delimiter '|' $file_small
 $exe stats -a test_annotation
-$exe classify -i test_graph -a test_annotation <(cat $file_small | tail -n 200) | tee test_annotation_out.tsv
+$exe query -i test_graph -a test_annotation <(cat $file_small | tail -n 200) | tee test_annotation_out.tsv
 [[ $(awk '{print $1}' test_annotation_out.tsv | wc -w) \
         == $(awk '{print $3}' test_annotation_out.tsv | wc -w) ]] \
     && echo Passed: OK
@@ -27,7 +27,7 @@ echo ""
 
 $exe annotate -i test_graph_canonical.dbg -o test_annotation --anno-header --header-delimiter '|' $file_small
 $exe stats -a test_annotation
-$exe classify -i test_graph_canonical -a test_annotation <(cat $file_small | tail -n 200) | tee test_annotation_out.tsv
+$exe query -i test_graph_canonical -a test_annotation <(cat $file_small | tail -n 200) | tee test_annotation_out.tsv
 [[ $(awk '{print $1}' test_annotation_out.tsv | wc -w) \
         == $(awk '{print $3}' test_annotation_out.tsv | wc -w) ]] \
     && echo Passed: OK
@@ -39,7 +39,7 @@ echo ""
 
 $exe annotate -i test_graph.orhashdbg -o test_annotation --anno-header --header-delimiter '|' $file_small
 $exe stats -a test_annotation
-$exe classify -i test_graph.orhashdbg -a test_annotation <(cat $file_small | tail -n 200) | tee test_annotation_out.tsv
+$exe query -i test_graph.orhashdbg -a test_annotation <(cat $file_small | tail -n 200) | tee test_annotation_out.tsv
 [[ $(awk '{print $1}' test_annotation_out.tsv | wc -w) \
         == $(awk '{print $3}' test_annotation_out.tsv | wc -w) ]] \
     && echo Passed: OK
@@ -51,7 +51,7 @@ echo ""
 
 $exe annotate -i test_graph_canonical.orhashdbg -o test_annotation --anno-header --header-delimiter '|' $file_small
 $exe stats -a test_annotation
-$exe classify -i test_graph_canonical.orhashdbg -a test_annotation <(cat $file_small | tail -n 200) | tee test_annotation_out.tsv
+$exe query -i test_graph_canonical.orhashdbg -a test_annotation <(cat $file_small | tail -n 200) | tee test_annotation_out.tsv
 [[ $(awk '{print $1}' test_annotation_out.tsv | wc -w) \
         == $(awk '{print $3}' test_annotation_out.tsv | wc -w) ]] \
     && echo Passed: OK
@@ -59,7 +59,7 @@ echo ""
 
 $exe annotate -i test_graph.dbg -o test_annotation --anno-header --header-delimiter '|' $file_small
 $exe stats -a test_annotation
-$exe classify -i test_graph -a test_annotation <(cat $file | tail -n 200) | tee test_annotation_out.tsv
+$exe query -i test_graph -a test_annotation <(cat $file | tail -n 200) | tee test_annotation_out.tsv
 [[ $(awk '{print $1}' test_annotation_out.tsv | wc -w) \
         == $(awk '{print $3}' test_annotation_out.tsv | wc -w) ]] \
     && echo Passed: OK
@@ -69,7 +69,7 @@ $exe extend -i test_graph.dbg -a test_annotation -o test_graph $file
 $exe stats test_graph.dbg --count-dummy
 $exe annotate -i test_graph.dbg -a test_graph -o test_annotation --anno-header --header-delimiter '|' $file
 $exe stats -a test_annotation
-$exe classify -i test_graph -a test_annotation <(cat $file | tail -n 200) | tee test_annotation_out.tsv
+$exe query -i test_graph -a test_annotation <(cat $file | tail -n 200) | tee test_annotation_out.tsv
 [[ $(awk '{print $1}' test_annotation_out.tsv | wc -w) \
         == $(awk '{print $3}' test_annotation_out.tsv | wc -w) ]] \
     && echo Passed: OK
@@ -77,7 +77,7 @@ echo ""
 
 $exe annotate -i test_graph.orhashdbg -o test_annotation --anno-header --header-delimiter '|' $file_small
 $exe stats -a test_annotation
-$exe classify -i test_graph.orhashdbg -a test_annotation <(cat $file | tail -n 200) | tee test_annotation_out.tsv
+$exe query -i test_graph.orhashdbg -a test_annotation <(cat $file | tail -n 200) | tee test_annotation_out.tsv
 [[ $(awk '{print $1}' test_annotation_out.tsv | wc -w) \
         == $(awk '{print $3}' test_annotation_out.tsv | wc -w) ]] \
     && echo Passed: OK
@@ -87,7 +87,7 @@ $exe extend -i test_graph.orhashdbg -a test_annotation -o test_graph $file
 $exe stats test_graph.orhashdbg
 $exe annotate -i test_graph.orhashdbg -a test_graph -o test_annotation --anno-header --header-delimiter '|' $file
 $exe stats -a test_annotation
-$exe classify -i test_graph.orhashdbg -a test_annotation <(cat $file | tail -n 200) | tee test_annotation_out.tsv
+$exe query -i test_graph.orhashdbg -a test_annotation <(cat $file | tail -n 200) | tee test_annotation_out.tsv
 [[ $(awk '{print $1}' test_annotation_out.tsv | wc -w) \
         == $(awk '{print $3}' test_annotation_out.tsv | wc -w) ]] \
     && echo Passed: OK

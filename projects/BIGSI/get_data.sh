@@ -35,7 +35,7 @@ while [ $(bjobs | wc -l) -gt 15000 ]; do
   sleep 5
 done
 
-SIZE="$(wc -c $BUFFER/$DUMP | awk '{print int($1 / 10**6 * 3 + 100)}')"
+SIZE="$(wc -c $BUFFER/$DUMP | awk '{print int($1 / 10**6 * 3 + 200)}')"
 
 bsub -J "pull_$DUMP" \
      -oo "${BUFFER}/${DUMP}.lsf" \

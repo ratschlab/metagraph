@@ -41,10 +41,10 @@ Config::Config(int argc, const char *argv[]) {
         identity = ANNOTATE_COORDINATES;
     } else if (!strcmp(argv[1], "merge_anno")) {
         identity = MERGE_ANNOTATIONS;
-    } else if (!strcmp(argv[1], "classify")) {
-        identity = CLASSIFY;
-    } else if (!strcmp(argv[1], "server_classify")) {
-        identity = SERVER_CLASSIFY;
+    } else if (!strcmp(argv[1], "query")) {
+        identity = QUERY;
+    } else if (!strcmp(argv[1], "server_query")) {
+        identity = SERVER_QUERY;
     } else if (!strcmp(argv[1], "transform")) {
         identity = TRANSFORM;
     } else if (!strcmp(argv[1], "transform_anno")) {
@@ -109,8 +109,10 @@ Config::Config(int argc, const char *argv[]) {
             num_bins_per_thread = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-k") || !strcmp(argv[i], "--kmer-length")) {
             k = atoi(argv[++i]);
-        } else if (!strcmp(argv[i], "--filter-abund")) {
-            max_unreliable_abundance = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--min-count")) {
+            min_count = std::max(atoi(argv[++i]), 1);
+        } else if (!strcmp(argv[i], "--max-count")) {
+            max_count = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--filter-thres")) {
             unreliable_kmers_threshold = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--filter-k")) {
@@ -148,8 +150,8 @@ Config::Config(int argc, const char *argv[]) {
             fasta_header_delimiter = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "--labels-delimiter")) {
             anno_labels_delimiter = std::string(argv[++i]);
-        } else if (!strcmp(argv[i], "-s") || !strcmp(argv[i], "--num-splits")) {
-            nsplits = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--separately")) {
+            separately = true;
         } else if (!strcmp(argv[i], "--kmer-mapping-mode")) {
             kmer_mapping_mode = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--num-top-labels")) {
@@ -215,7 +217,7 @@ Config::Config(int argc, const char *argv[]) {
     }
 
     if (!fname.size() && identity != STATS
-                      && identity != SERVER_CLASSIFY
+                      && identity != SERVER_QUERY
                       && !(identity == BUILD && complete)
                       && !(identity == CONCATENATE && !infbase.empty())) {
         std::string line;
@@ -227,14 +229,9 @@ Config::Config(int argc, const char *argv[]) {
 
     bool print_usage_and_exit = false;
 
-    if (nsplits == 0) {
-        std::cerr << "Error: Invalid number of splits" << std::endl;
-        print_usage_and_exit = true;
-    }
-
     if (identity != CONCATENATE
             && identity != STATS
-            && identity != SERVER_CLASSIFY
+            && identity != SERVER_QUERY
             && !(identity == BUILD && complete)
             && !fname.size())
         print_usage_and_exit = true;
@@ -254,7 +251,7 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == ALIGN && infbase.empty())
         print_usage_and_exit = true;
 
-    if ((identity == CLASSIFY || identity == SERVER_CLASSIFY) && infbase.empty())
+    if ((identity == QUERY || identity == SERVER_QUERY) && infbase.empty())
         print_usage_and_exit = true;
 
     if (identity == ANNOTATE && infbase.empty())
@@ -286,7 +283,7 @@ Config::Config(int argc, const char *argv[]) {
     if (identity == MERGE_ANNOTATIONS && outfbase.empty())
         print_usage_and_exit = true;
 
-    if ((identity == CLASSIFY || identity == SERVER_CLASSIFY) && infbase_annotators.size() != 1)
+    if ((identity == QUERY || identity == SERVER_QUERY) && infbase_annotators.size() != 1)
         print_usage_and_exit = true;
 
     if ((identity == TRANSFORM
@@ -309,6 +306,11 @@ Config::Config(int argc, const char *argv[]) {
 
     if (discovery_fraction < 0 || discovery_fraction > 1)
         print_usage_and_exit = true;
+
+    if (min_count >= max_count) {
+        std::cerr << "Error: max-count must be greater than min-count" << std::endl;
+        print_usage(argv[0], identity);
+    }
 
     if (outfbase.size() && !utils::check_if_writable(outfbase)) {
         std::cerr << "Error: Can't write to " << outfbase << std::endl
@@ -411,7 +413,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     fprintf(stderr, "Metagraph: comprehensive metagenome graph representation -- Version 0.1\n\n");
 
     const char annotation_list[] = "('column', 'row', 'bin_rel_wt_sdsl', 'bin_rel_wt', 'flat', 'rbfish', 'brwt')";
-    const char graph_list[] = "('succinct', 'hash', 'hashstr', 'bitmap')";
 
     switch (identity) {
         case NO_IDENTITY: {
@@ -459,83 +460,86 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\trelax_brwt\toptimize the tree structure in brwt annotator\n\n");
 
-            fprintf(stderr, "\tclassify\tannotate sequences from fast[a|q] files\n\n");
-            fprintf(stderr, "\tserver_classify\tannotate received sequences and send annotations back\n\n");
+            fprintf(stderr, "\tquery\tannotate sequences from fast[a|q] files\n\n");
+            fprintf(stderr, "\tserver_query\tannotate received sequences and send annotations back\n\n");
 
             return;
         }
         case EXPERIMENT: {
             fprintf(stderr, "Usage: %s experiment ???\n\n", prog_name.c_str());
         } break;
-        case BUILD: {
-            fprintf(stderr, "Usage: %s build [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for build:\n");
-            fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC database\n");
-            fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence []\n");
-            fprintf(stderr, "\t   --graph [STR] \tgraph representation [succinct]\n");
-            fprintf(stderr, "\t                     \t  "); fprintf(stderr, graph_list); fprintf(stderr, "\n");
-            fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
-            fprintf(stderr, "\t   --complete \t\tconstruct a complete graph (only for Bitmap-graph) [off]\n");
-            fprintf(stderr, "\t   --no-shrink \t\tdo not build mask for dummy k-mers [off]\n");
-            fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
-            fprintf(stderr, "\t   --mem-cap-gb [INT] \tmaximum memory available, in Gb [inf]\n");
-            fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
-            fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
-            fprintf(stderr, "\t   --filter-abund [INT] threshold for the abundance of reliable k-mers [0]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
-            fprintf(stderr, "\t   --dynamic \t\tuse dynamic build method [off]\n");
-            fprintf(stderr, "\t   --suffix \t\tbuild graph chunk only for k-mers with the suffix given [off]\n");
-            fprintf(stderr, "\t-s --num-splits \tdefine the minimum number of bins to split kmers into [1]\n");
-            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
-        } break;
-        case EXTEND: {
-            fprintf(stderr, "Usage: %s extend -i <graph> -o <extended_graph_basename> [options] <FASTQ1> [[FASTQ2] ...]\n\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for extend:\n");
-            fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence []\n");
-            fprintf(stderr, "\t-a --annotator [STR] \tannotator to extend []\n");
-            fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
-            fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
-            fprintf(stderr, "\t   --filter-abund [INT] threshold for the abundance of reliable k-mers [0]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
-            // fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
-        } break;
         case FILTER: {
-            fprintf(stderr, "Usage: %s filter [options] --filter-abund <cutoff> FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s filter [options] --min-count <cutoff> FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for filter:\n");
-            fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
-            fprintf(stderr, "\t   --kmc \t\tuse precomputed KMC database with k-mer counts\n");
-            fprintf(stderr, "\t-r --reverse \t\tadd reverse complement reads [off]\n");
-            fprintf(stderr, "\t   --filter-abund [INT] threshold for the abundance of reliable k-mers [0]\n");
+            fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC counters\n");
+            fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
             fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
-            fprintf(stderr, "\t   --generate-fasta \twrite filtered reads to disk in fasta format [off]\n");
-            fprintf(stderr, "\t   --generate-fastq \twrite filtered reads to disk in fastq format [off]\n");
+            fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
+            fprintf(stderr, "\t   --generate-fasta \twrite filtered reads to disk in FASTA format [off]\n");
+            fprintf(stderr, "\t   --generate-fastq \twrite filtered reads to disk in FASTQ format [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case FILTER_STATS: {
-            fprintf(stderr, "Usage: %s filter_stats [options] --filter-abund <cutoff> FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s filter_stats [options] --min-count <cutoff> FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for filter:\n");
-            fprintf(stderr, "\t   --filter-abund [INT] \tthreshold for the abundance of reliable k-mers [0]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \t\tlength of k-mers used for counting and filtering [3]\n");
+            fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
+            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
+        } break;
+        case BUILD: {
+            fprintf(stderr, "Usage: %s build [options] FILE1 [[FILE2] ...]\n"
+                            "\tEach input file is given in FASTA, FASTQ, or VCF format.\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for build:\n");
+            fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC counters\n");
+            fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
+            fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
+            fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
+            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
+            fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
+            fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr [succinct]\n");
+            fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
+            fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
+            fprintf(stderr, "\t   --complete \t\tconstruct a complete graph (only for Bitmap graph) [off]\n");
+            fprintf(stderr, "\t   --mem-cap-gb [INT] \tpreallocated buffer size in Gb [0]\n");
+            fprintf(stderr, "\t   --dynamic \t\tuse dynamic build method [off]\n");
+            fprintf(stderr, "\t-l --len-suffix [INT] \tk-mer suffix length for building graph from chunks [0]\n");
+            fprintf(stderr, "\t   --suffix \t\tbuild graph chunk only for k-mers with the suffix given [off]\n");
+            fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
+            fprintf(stderr, "\t   --no-shrink \t\tdo not build mask for dummy k-mers (only for Succinct graph) [off]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+        } break;
+        case EXTEND: {
+            fprintf(stderr, "Usage: %s extend -i <GRAPH> -o <extended_graph_basename> [options] FILE1 [[FILE2] ...]\n"
+                            "\tEach input file is given in FASTA, FASTQ, or VCF format.\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for extend:\n");
+            fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC counters\n");
+            fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
+            fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
+            fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
+            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
+            fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
+            fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t-a --annotator [STR] \tannotator to extend []\n");
+            fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
+            // fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case ALIGN: {
-            fprintf(stderr, "Usage: %s align -i <graph_basename> [options] <FASTQ1> [[FASTQ2] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s align -i <GRAPH> [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for align:\n");
-            fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
-            fprintf(stderr, "\t   --filter-abund [INT] \tthreshold for the abundance of reliable k-mers [0]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \t\tlength of k-mers used for counting and filtering [3]\n");
-            fprintf(stderr, "\t   --query-presence\t\ttest sequences for presence [off]\n");
-            fprintf(stderr, "\t   --kmer-mapping-mode\t\tlevel of heuristics to use for unmapped k-mers (0, 1, or 2) [0]\n");
-            fprintf(stderr, "\t   --discovery-fraction [FLOAT]\tfraction of k-mers required to count sequence [1.0]\n");
-            fprintf(stderr, "\t   --filter-present\t\treport only present input sequences [off]\n");
+            fprintf(stderr, "\t-r --reverse \t\t\talign reverse complement sequences as well [off]\n");
+            fprintf(stderr, "\t   --query-presence \t\ttest sequences for presence [off]\n");
+            fprintf(stderr, "\t   --kmer-mapping-mode \t\tlevel of heuristics to use for unmapped k-mers (0, 1, or 2) [0]\n");
+            fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of k-mers required to count sequence [1.0]\n");
+            fprintf(stderr, "\t   --filter-present \t\treport only present input sequences [off]\n");
             fprintf(stderr, "\t   --count-kmers \t\tquery the number of k-mers discovered [off]\n");
             fprintf(stderr, "\t   --align-length [INT]\t\tlength of subsequences to align [k]\n");
             fprintf(stderr, "\t-d --distance [INT] \t\tmax allowed alignment distance [0]\n");
@@ -560,119 +564,83 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s concatenate -o <graph_basename> [options] [[CHUNK] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for merge:\n");
+            fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap [succinct]\n");
             fprintf(stderr, "\t-i --infile-base [STR] \tload graph chunks from files '<infile-base>.<suffix>.dbgchunk' []\n");
             fprintf(stderr, "\t-l --len-suffix [INT] \titerate all possible suffices of the length given [0]\n");
-            fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
-            fprintf(stderr, "\t   --graph [STR] \t\tgraph representation [succinct]\n");
-            fprintf(stderr, "\t                     \t\t  "); fprintf(stderr, graph_list); fprintf(stderr, "\n");
+            fprintf(stderr, "\t-c --canonical \t\tcanonical graph mode (e.g. for read sets) [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+        } break;
+        case TRANSFORM: {
+            fprintf(stderr, "Usage: %s transform [options] GRAPH\n\n", prog_name.c_str());
+
+            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
+            fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges [off]\n");
+            fprintf(stderr, "\t   --prune-end [INT] \tprune all dead ends of this length and shorter [0]\n");
+            fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: fast / dynamic / small [fast]\n");
+            fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
+            fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and write to compressed FASTA file [off]\n");
+            fprintf(stderr, "\t   --unitigs \t\textract all unitigs from graph and write to compressed FASTA file [off]\n");
+            fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case STATS: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for stats:\n");
-            fprintf(stderr, "\t-a --annotator [STR] \tannotator []\n");
-            fprintf(stderr, "\t   --count-dummy \tshow number of dummy source and sink edges [off]\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t   --print-internal \tprint internal graph representation to screen [off]\n");
+            fprintf(stderr, "\t   --count-dummy \tshow number of dummy source and sink edges [off]\n");
+            fprintf(stderr, "\t-a --annotator [STR] \tannotation []\n");
             fprintf(stderr, "\t   --print-col-names \tprint names of the columns in annotation to screen [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case ANNOTATE: {
-            fprintf(stderr, "Usage: %s annotate -i <graph> [options] <PATH1> [[PATH2] ...]\n"
-                            "\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s annotate -i <GRAPH> [options] FILE1 [[FILE2] ...]\n"
+                            "\tEach file is given in FASTA, FASTQ, or VCF format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
-            fprintf(stderr, "\t   --kmc \t\t\tparse k-mers from precomputed KMC database\n");
-            fprintf(stderr, "\t   --reference [STR] \t\tbasename of reference sequence []\n");
-            fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to update []\n");
-            fprintf(stderr, "\t   --anno-type [STR] \t\tinternal annotation representation [column]\n");
-            fprintf(stderr, "\t                     \t\t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate graph [off]\n");
-            fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file [<graph_basename>]\n");
-            fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
-            fprintf(stderr, "\t   --filter-abund [INT] \tthreshold for the abundance of reliable k-mers [0]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \t\tlength of k-mers used for counting and filtering [3]\n");
+            fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC counters\n");
+            fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
+            fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
+            fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
+            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
+            fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
+            fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation representation [column]\n");
+            fprintf(stderr, "\t\t"); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
+            fprintf(stderr, "\t-a --annotator [STR] \tannotator to update []\n");
+            fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
+            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file [<GRAPH>]\n");
+            fprintf(stderr, "\t   --separately \tannotate each file independently and dump to the same directory [off]\n");
+            fprintf(stderr, "\n");
             fprintf(stderr, "\t   --anno-filename \t\tinclude filenames as annotation labels [off]\n");
             fprintf(stderr, "\t   --anno-header \t\textract annotation labels from headers of sequences in files [off]\n");
             fprintf(stderr, "\t   --header-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
             fprintf(stderr, "\t   --anno-label [STR]\t\tadd label to annotation for all sequences from the files passed []\n");
-            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             // fprintf(stderr, "\t   --fast \t\t\tannotate in fast regime (leads to repeated labels and bigger annotation) [off]\n");
         } break;
         case ANNOTATE_COORDINATES: {
-            fprintf(stderr, "Usage: %s coordinate -i <graph> [options] <PATH1> [[PATH2] ...]\n"
-                            "\tEach path is given as file in fasta or fastq format.\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s coordinate -i <GRAPH> [options] FASTA1 [[FASTA2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
+            fprintf(stderr, "\t-r --reverse \t\t\tprocess reverse complement sequences as well [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to update []\n");
-            fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file [<graph_basename>]\n");
-            fprintf(stderr, "\t-r --reverse \t\t\talso annotate reverse complement reads [off]\n");
-            fprintf(stderr, "\t   --filter-abund [INT] \tthreshold for the abundance of reliable k-mers [0]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \t\tlength of k-mers used for counting and filtering [3]\n");
+            fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file [<GRAPH>]\n");
             fprintf(stderr, "\t   --coord-binsize [INT]\tstepsize for k-mer coordinates in input sequences from the fasta files [1000]\n");
-            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\t   --fast \t\t\tannotate in fast regime [off]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case MERGE_ANNOTATIONS: {
-            fprintf(stderr, "Usage: %s merge_anno [options] -o <annotator_basename> <ANNOT1> [[ANNOT2] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s merge_anno [options] -o <annotator_basename> ANNOT1 [[ANNOT2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
-            fprintf(stderr, "\t   --anno-type [STR] \tinternal annotation representation [column]\n");
-            fprintf(stderr, "\t                     \t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation representation [column]\n");
+            fprintf(stderr, "\t\t"); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
             // fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
-            // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
-        } break;
-        case CLASSIFY: {
-            fprintf(stderr, "Usage: %s classify -i <graph> -a <annotator> [options] <FILE1> [[FILE2] ...]\n"
-                            "\tEach file is given in fasta or fastq format.\n\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for classify:\n");
-            fprintf(stderr, "\t-r --reverse \t\t\tclassify reverse complement sequences [off]\n");
-            fprintf(stderr, "\t   --filter-abund [INT] \tthreshold for the abundance of reliable k-mers [0]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] \tmax allowed number of unreliable kmers in reliable reads [0]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \t\tlength of k-mers used for counting and filtering [3]\n");
-            // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
-            fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to extend []\n");
-            fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate graph [off]\n");
-            fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
-            fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
-            fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
-            fprintf(stderr, "\t   --discovery-fraction \tfraction of labeled k-mers required for annotation [1.0]\n");
-            fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
-            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
-            // fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
-        } break;
-        case SERVER_CLASSIFY: {
-            fprintf(stderr, "Usage: %s server_classify -i <graph> -a <annotator> [options]\n\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for classify:\n");
-            // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
-            fprintf(stderr, "\t   --port [INT] \t\tTCP port for incoming connections [5555]\n");
-            fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to extend []\n");
-            fprintf(stderr, "\t   --sparse \t\t\tuse the row-major sparse matrix to annotate graph [off]\n");
-            fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
-            fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
-            fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
-            fprintf(stderr, "\t   --discovery-fraction \tfraction of labeled k-mers required for annotation [1.0]\n");
-            fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
-            fprintf(stderr, "\t-p --parallel [INT] \t\tmaximum number of parallel connections [1]\n");
-            // fprintf(stderr, "\t-d --distance [INT] \tMax allowed alignment distance [0]\n");
-        } break;
-        case TRANSFORM: {
-            fprintf(stderr, "Usage: %s transform [options] GRAPH\n\n", prog_name.c_str());
-
-            fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
-            fprintf(stderr, "\t   --clear-dummy \t\terase all redundant dummy edges [off]\n");
-            fprintf(stderr, "\t   --state [STR] \t\tchange the graph state (either 'fast' or 'dynamic') [fast]\n");
-            fprintf(stderr, "\t   --to-adj-list \t\twrite the adjacency list to file [off]\n");
-            fprintf(stderr, "\t   --to-fasta \t\t\textract sequences from graph and write to compressed fasta file [off]\n");
-            fprintf(stderr, "\t   --unitigs \t\t\textract all simple paths from graph and write to compressed fasta file [off]\n");
-            fprintf(stderr, "\t   --header [STR] \t\theader for sequences in FASTA output [\"\"]\n");
-            fprintf(stderr, "\t   --prune-end [INT] \t\tprune all dead ends not longer than this value [0]\n");
-            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case TRANSFORM_ANNOTATION: {
             fprintf(stderr, "Usage: %s transform_anno [options] -o <annotator_basename> ANNOTATOR\n\n", prog_name.c_str());
@@ -684,7 +652,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t                      \t          L_2 L_2_renamed\n");
             fprintf(stderr, "\t                      \t          ... ...........'\n");
             fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation format [column]\n");
-            fprintf(stderr, "\t                     \t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
+            fprintf(stderr, "\t\t"); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
             fprintf(stderr, "\t   --arity  \t\tarity in the brwt tree [2]\n");
             fprintf(stderr, "\t   --greedy  \t\tuse greedy column partitioning in brwt construction [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
@@ -695,6 +663,33 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --relax-arity [INT] \trelax brwt tree to optimize arity limited to this number [10]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+        } break;
+        case QUERY: {
+            fprintf(stderr, "Usage: %s query -i <GRAPH> -a <ANNOTATION> [options] FILE1 [[FILE2] ...]\n"
+                            "\tEach input file is given in FASTA or FASTQ format.\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for query:\n");
+            fprintf(stderr, "\t-r --reverse \t\tquery reverse complement sequences as well [off]\n");
+            fprintf(stderr, "\t   --sparse \t\tuse row-major sparse matrix for row annotation [off]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
+            fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
+            fprintf(stderr, "\t   --discovery-fraction \tfraction of labeled k-mers required for annotation [1.0]\n");
+            fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
+            fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
+            // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+        } break;
+        case SERVER_QUERY: {
+            fprintf(stderr, "Usage: %s server_query -i <GRAPH> -a <ANNOTATION> [options]\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for server_query:\n");
+            fprintf(stderr, "\t   --port [INT] \tTCP port for incoming connections [5555]\n");
+            fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
+            // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
+            // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
         } break;
     }
 

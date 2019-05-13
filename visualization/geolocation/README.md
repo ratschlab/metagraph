@@ -24,7 +24,7 @@ open world_data.html
 
 1. Run server
 ```
-../../metagraph/build/metagengraph server_classify -i data/test_graph -a data/test_annotation --count-labels
+../../metagraph/build/metagengraph server_query -i data/test_graph -a data/test_annotation --count-labels
 ```
 2. Run client
 ```

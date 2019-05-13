@@ -13,7 +13,7 @@ for file in $(ls /cluster/work/grlab/projects/metagenome/benchmark_kingsford/dat
   #file="/cluster/work/grlab/projects/metagenome/benchmark_kingsford/data_fasta/$x.fasta.gz"
   #ls -lha $file
   x=$(basename ${file%.*.*})
-  args="annotate -v --anno-filename -i $graph -o $out_dir/$x --filter-abund 1 -p 10 $file"
+  args="annotate -v --anno-filename -i $graph -o $out_dir/$x --min-count 2 -p 10 $file"
   job="/usr/bin/time -v $exe $args"
   #$job 2>&1 | tee $log_dir/log_annotate_$x
   bsub -J annotate$x -W 12:00 -n 9 -R "rusage[mem=2500]" "$job 2>&1 | tee $log_dir/log_annotate_$x"

@@ -13,8 +13,8 @@
 
 TEST(AnnotatedDBG, ExtendGraphWithSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
-        AnnotatedDBG anno_graph(new DBGSuccinct(k + 1),
-                                new annotate::ColumnCompressed<>(1));
+        AnnotatedDBG anno_graph(std::make_shared<DBGSuccinct>(k + 1),
+                                std::make_unique<annotate::ColumnCompressed<>>(1));
 
         ASSERT_EQ(anno_graph.get_graph().num_nodes(),
                   anno_graph.get_annotation().num_objects());
@@ -46,13 +46,13 @@ TEST(AnnotatedDBG, ExtendGraphAddPath) {
                                     + std::string(2, 'G')
                                     + std::string(2, 'N');
 
-        auto graph = std::make_unique<DBGSuccinct>(k + 1);
+        auto graph = std::make_shared<DBGSuccinct>(k + 1);
         graph->add_sequence(seq_first);
 
         uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
-            graph.release(),
-            new annotate::ColumnCompressed<>(num_nodes)
+            graph,
+            std::make_unique<annotate::ColumnCompressed<>>(num_nodes)
         );
 
         anno_graph.annotate_sequence(seq_first, { "First" });
@@ -89,13 +89,13 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
                                     + std::string(2, 'N')
                                     + std::string(100, 'A');
 
-        auto graph = std::make_unique<DBGSuccinct>(k + 1);
+        auto graph = std::make_shared<DBGSuccinct>(k + 1);
         graph->add_sequence(seq_first);
 
         uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
-            graph.release(),
-            new annotate::ColumnCompressed<>(num_nodes)
+            graph,
+            std::make_unique<annotate::ColumnCompressed<>>(num_nodes)
         );
 
         anno_graph.annotate_sequence(seq_first, { "First" });
@@ -138,13 +138,13 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
                                     + std::string(2, 'N')
                                     + std::string(100, 'A');
 
-        auto graph = std::make_unique<DBGSuccinct>(k + 1);
+        auto graph = std::make_shared<DBGSuccinct>(k + 1);
         graph->add_sequence(seq_first);
 
         uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
-            graph.release(),
-            new annotate::ColumnCompressed<>(num_nodes)
+            graph,
+            std::make_unique<annotate::ColumnCompressed<>>(num_nodes)
         );
 
         anno_graph.annotate_sequence(seq_first, { "First" });
@@ -189,14 +189,14 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
                                     + std::string(2, 'N')
                                     + std::string(100, 'A');
 
-        auto graph = std::make_unique<DBGSuccinct>(k + 1);
+        auto graph = std::make_shared<DBGSuccinct>(k + 1);
         graph->add_sequence(seq_first);
         graph->mask_dummy_kmers(0, false);
 
         uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
-            graph.release(),
-            new annotate::ColumnCompressed<>(num_nodes)
+            graph,
+            std::make_unique<annotate::ColumnCompressed<>>(num_nodes)
         );
 
         EXPECT_TRUE(anno_graph.get_annotation().num_objects() + k
@@ -247,14 +247,14 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
                                     + std::string(2, 'N')
                                     + std::string(100, 'A');
 
-        auto graph = std::make_unique<DBGSuccinct>(k + 1);
+        auto graph = std::make_shared<DBGSuccinct>(k + 1);
         graph->add_sequence(seq_first);
         graph->mask_dummy_kmers(10, false);
 
         uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
-            graph.release(),
-            new annotate::ColumnCompressed<>(num_nodes),
+            graph,
+            std::make_unique<annotate::ColumnCompressed<>>(num_nodes),
             10
         );
 
@@ -308,14 +308,14 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
                                     + std::string(2, 'N')
                                     + std::string(100, 'A');
 
-        auto graph = std::make_unique<DBGSuccinct>(k + 1);
+        auto graph = std::make_shared<DBGSuccinct>(k + 1);
         graph->add_sequence(seq_first);
         graph->mask_dummy_kmers(0, true);
 
         uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
-            graph.release(),
-            new annotate::ColumnCompressed<>(num_nodes)
+            graph,
+            std::make_unique<annotate::ColumnCompressed<>>(num_nodes)
         );
 
         anno_graph.annotate_sequence(seq_first, { "First" });
@@ -366,14 +366,14 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
                                     + std::string(2, 'N')
                                     + std::string(100, 'A');
 
-        auto graph = std::make_unique<DBGSuccinct>(k + 1);
+        auto graph = std::make_shared<DBGSuccinct>(k + 1);
         graph->add_sequence(seq_first);
         graph->mask_dummy_kmers(10, true);
 
         uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
-            graph.release(),
-            new annotate::ColumnCompressed<>(num_nodes),
+            graph,
+            std::make_unique<annotate::ColumnCompressed<>>(num_nodes),
             10
         );
 

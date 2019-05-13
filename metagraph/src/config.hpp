@@ -39,6 +39,7 @@ class Config {
     bool count_dummy = false;
     bool canonical_mode = false;
     bool greedy_brwt = false;
+    bool separately = false;
 
     unsigned int k = 3;
     unsigned int filter_k = 3;
@@ -49,10 +50,10 @@ class Config {
     unsigned int part_idx = 0;
     unsigned int suffix_len = 0;
     unsigned int frequency = 1;
-    unsigned int nsplits = 1;
     unsigned int alignment_length = 0;
     unsigned int memory_available = 0;
-    unsigned int max_unreliable_abundance = 0;
+    unsigned int min_count = 1;
+    unsigned int max_count = std::numeric_limits<unsigned int>::max();
     unsigned int unreliable_kmers_threshold = 0;
     unsigned int num_top_labels = -1;
     unsigned int genome_binsize_anno = 1000;
@@ -96,8 +97,8 @@ class Config {
         TRANSFORM,
         TRANSFORM_ANNOTATION,
         RELAX_BRWT,
-        CLASSIFY,
-        SERVER_CLASSIFY,
+        QUERY,
+        SERVER_QUERY,
     };
     IdentityType identity = NO_IDENTITY;
 

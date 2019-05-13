@@ -10,7 +10,7 @@ typedef brwt::binary_relation::object_id object_id;
 typedef brwt::binary_relation::label_id label_id;
 
 label_id to_label_id(uint64_t x) {
-    return static_cast<label_id>(x);
+    return static_cast<label_id>(x + 1);
 }
 
 object_id to_object_id(uint64_t x) {
@@ -22,7 +22,7 @@ uint64_t to_index(object_id y) {
 }
 
 uint64_t to_index(label_id y) {
-    return static_cast<uint64_t>(y);
+    return static_cast<uint64_t>(y) - 1;
 }
 
 bool BinRelWT::is_zero_row(Row row) const {
@@ -65,10 +65,8 @@ BinRelWT::BinRelWT(std::vector<std::unique_ptr<bit_vector>>&& columns)
 
             relation_pairs.push_back(std::move(relation));
 
-            max_used_label = std::max(max_used_label,
-                                      static_cast<uint64_t>(j));
-            max_used_object = std::max(max_used_object,
-                                       static_cast<uint64_t>(i));
+            max_used_label = std::max(max_used_label, static_cast<uint64_t>(j));
+            max_used_object = std::max(max_used_object, static_cast<uint64_t>(i));
         });
 
         columns[j].reset();
@@ -119,14 +117,22 @@ std::vector<BinRelWT::Column> BinRelWT::get_row(Row row) const {
     auto last_label = to_label_id(max_used_label);
     auto cur_object = to_object_id(row);
 
-    auto num_relations_in_row = static_cast<uint64_t>(binary_relation_.count_distinct_labels(
-        cur_object, cur_object, first_label, last_label));
+    auto num_relations_in_row = static_cast<uint64_t>(
+        binary_relation_.count_distinct_labels(cur_object,
+                                               cur_object,
+                                               first_label,
+                                               last_label)
+    );
 
     std::vector<Column> relations_in_row;
     relations_in_row.reserve(num_relations_in_row);
     for (uint64_t relation_it = 1; relation_it <= num_relations_in_row; ++relation_it) {
         auto element =
-            binary_relation_.nth_element(cur_object, cur_object, first_label, relation_it, brwt::lab_major);
+            binary_relation_.nth_element(cur_object,
+                                         cur_object,
+                                         first_label,
+                                         relation_it,
+                                         brwt::lab_major);
         assert(element);
         relations_in_row.push_back(to_index(element->label));
     }
@@ -147,7 +153,11 @@ std::vector<BinRelWT::Row> BinRelWT::get_column(Column column) const {
     std::vector<Row> relations_in_column;
     relations_in_column.reserve(num_relations_in_column);
     for (uint64_t relation_it = 1; relation_it <= num_relations_in_column; ++relation_it) {
-        auto element = binary_relation_.nth_element(first_object, last_object, cur_label, relation_it, brwt::lab_major);
+        auto element = binary_relation_.nth_element(first_object,
+                                                    last_object,
+                                                    cur_label,
+                                                    relation_it,
+                                                    brwt::lab_major);
         relations_in_column.push_back(to_index(element->object));
     }
     return relations_in_column;
@@ -161,7 +171,11 @@ bool BinRelWT::get(Row row, Column column) const {
     }
     auto cur_object = to_object_id(row);
     auto cur_label = to_label_id(column);
-    auto first_relation_in_range = binary_relation_.nth_element(cur_object, cur_object, cur_label, 1, brwt::lab_major);
+    auto first_relation_in_range = binary_relation_.nth_element(cur_object,
+                                                                cur_object,
+                                                                cur_label,
+                                                                1,
+                                                                brwt::lab_major);
     return (first_relation_in_range &&
             first_relation_in_range->object == cur_object &&
             first_relation_in_range->label == cur_label);

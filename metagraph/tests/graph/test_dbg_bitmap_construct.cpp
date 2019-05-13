@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string>
 #include <sstream>
+#include <filesystem>
 #include <mutex>
 
 #include <zlib.h>
@@ -141,6 +142,60 @@ TEST(Construct_SD_64, ConstructionEQAppendingCanonical) {
         EXPECT_NE(constructed, appended);
     }
 }
+
+TEST(Construct_SD_64, ConstructionFromChunks) {
+    for (bool canonical : { true, false }) {
+        for (size_t k = 2; k <= kMaxK; k += 6) {
+            std::vector<std::string> input_data = {
+                "ACAGCTAGCTAGCTAGCTAGCTG",
+                "ATATTATAAAAAATTTTAAAAAA",
+                "ATATATTCTCTCTCTCTCATA",
+                "GTGTGTGTGGGGGGCCCTTTTTTCATA",
+                std::string(100, 'A'),
+                std::string(100, 'C')
+            };
+            auto constructor = std::make_unique<DBGBitmapConstructor>(k, canonical);
+            constructor->add_sequences(input_data);
+            DBGBitmap reference(constructor.get());
+
+            for (size_t suffix_len = 0; suffix_len <= k && suffix_len <= 4u; ++suffix_len) {
+                std::vector<std::string> chunk_filenames;
+
+                //one pass per suffix
+                for (const std::string &suffix : KmerExtractor2Bit().generate_suffixes(suffix_len)) {
+                    constructor.reset(new DBGBitmapConstructor(k, canonical, suffix));
+
+                    for (const auto &seq : input_data) {
+                        constructor->add_sequence(seq);
+                    }
+
+                    std::unique_ptr<DBGBitmap::Chunk> chunk { constructor->build_chunk() };
+
+                    chunk_filenames.push_back(
+                        utils::join_strings({ test_data_dir + "/chunks_to_merge", suffix }, ".")
+                            + DBGBitmap::kChunkFileExtension
+                    );
+
+                    std::filesystem::remove(chunk_filenames.back());
+
+                    std::ofstream out(chunk_filenames.back(), std::ios::binary);
+                    chunk->serialize(out);
+                }
+
+                ASSERT_TRUE(chunk_filenames.size());
+
+                std::unique_ptr<DBGBitmap> graph(constructor->build_graph_from_chunks(chunk_filenames, canonical));
+
+                for (const auto &filename : chunk_filenames) {
+                    std::filesystem::remove(filename);
+                }
+
+                EXPECT_EQ(reference, *graph);
+            }
+        }
+    }
+}
+
 
 using TAlphabet = KmerExtractor2Bit::TAlphabet;
 
@@ -532,6 +587,7 @@ TEST(DBGBitmapMergeChunks, DumpedChunked) {
                               + "." + std::to_string(i)
                               + "_" + std::to_string(4)
                               + ".dbgsdchunk");
+            std::filesystem::remove(files.back());
             std::ofstream file(files.back(), std::ios::binary);
             chunk->serialize(file);
             delete chunk;
@@ -589,6 +645,7 @@ TEST(DBGBitmapMergeChunks, DumpedChunkedCanonical) {
                               + "." + std::to_string(i)
                               + "_" + std::to_string(4)
                               + ".dbgsdchunk");
+            std::filesystem::remove(files.back());
             std::ofstream file(files.back(), std::ios::binary);
             chunk->serialize(file);
             delete chunk;
@@ -650,6 +707,7 @@ TEST(DBGBitmapMergeChunks, ParallelDumpedChunked) {
                               + "." + std::to_string(i)
                               + "_" + std::to_string(4)
                               + ".dbgsdchunk");
+            std::filesystem::remove(files.back());
             std::ofstream file(files.back(), std::ios::binary);
             chunk->serialize(file);
             delete chunk;
@@ -712,6 +770,7 @@ TEST(DBGBitmapMergeChunks, ParallelDumpedChunkedCanonical) {
                               + "." + std::to_string(i)
                               + "_" + std::to_string(4)
                               + ".dbgsdchunk");
+            std::filesystem::remove(files.back());
             std::ofstream file(files.back(), std::ios::binary);
             chunk->serialize(file);
             delete chunk;

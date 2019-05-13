@@ -1,5 +1,7 @@
 #include "dbg_bitmap_construct.hpp"
 
+#include <progress_bar.hpp>
+
 
 template <typename KMER>
 class BitmapChunkConstructor : public IBitmapChunkConstructor {
@@ -102,67 +104,29 @@ DBGBitmap::Chunk* BitmapChunkConstructor<KMER>
     return chunk.release();
 }
 
-DBGBitmap*
-DBGBitmapConstructor
-::build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
-                          bool canonical_mode,
-                          bool verbose) {
-    if (!chunk_filenames.size())
-        return new DBGBitmap(2);
+DBGBitmap* DBGBitmapConstructor
+::build_graph_from_chunks(uint64_t size,
+                          uint64_t num_kmers,
+                          const std::function<DBGBitmap::Chunk(void)> &next_chunk,
+                          bool canonical_mode) {
+    auto graph = std::make_unique<DBGBitmap>(2);
 
-    std::vector<DBGBitmap::Chunk> chunks;
-
-    uint64_t cumulative_size = 1;
-
-    for (auto file : chunk_filenames) {
-        file = utils::remove_suffix(file, ".dbgsdchunk") + ".dbgsdchunk";
-
-        std::ifstream chunk_in(file, std::ios::binary);
-
-        if (!chunk_in.good()) {
-            std::cerr << "ERROR: input file " << file << " corrupted" << std::endl;
-            exit(1);
-        }
-
-        chunks.emplace_back();
-        if (!chunks.back().load(chunk_in))
-            throw std::ifstream::failure("ERROR: can't read bitmap chunk from " + file);
-
-        assert(chunks.empty() || chunks.back().size() == chunks.front().size());
-
-        cumulative_size += chunks.back().num_set_bits();
-    }
-
-    if (verbose)
-        std::cout << "Cumulative size of chunks: "
-                  << cumulative_size - 1 << std::endl;
-
-    std::unique_ptr<DBGBitmap> graph{
-        new DBGBitmap(2)
-    };
 
     graph->kmers_ = DBGBitmap::Chunk(
         [&](const auto &index_callback) {
+            DBGBitmap::Chunk chunk;
+
             index_callback(0);
-            for (size_t i = 0; i < chunk_filenames.size(); ++i) {
-                if (verbose) {
-                    std::cout << "Chunk "
-                              << chunk_filenames[i]
-                              << " loaded..." << std::flush;
-                }
 
-                chunks[i].call_ones(index_callback);
-
-                if (verbose) {
-                    std::cout << " concatenated" << std::endl;
-                }
+            while ((chunk = next_chunk()).size()) {
+                chunk.call_ones(index_callback);
             }
         },
-        chunks[0].size(), cumulative_size
+        size,
+        num_kmers
     );
 
     graph->canonical_mode_ = canonical_mode;
-
     graph->complete_ = false;
 
     assert(!(sdsl::bits::hi(graph->kmers_.size()) % KmerExtractor2Bit::kLogSigma));
@@ -170,6 +134,73 @@ DBGBitmapConstructor
     graph->k_ = sdsl::bits::hi(graph->kmers_.size()) / KmerExtractor2Bit::kLogSigma;
 
     return graph.release();
+}
+
+DBGBitmap* DBGBitmapConstructor
+::build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
+                          bool canonical_mode,
+                          bool verbose) {
+    if (chunk_filenames.empty())
+        return new DBGBitmap(2);
+
+    uint64_t size = 0;
+    uint64_t cumulative_size = 1;
+
+    for (size_t i = 0; i < chunk_filenames.size(); ++i) {
+        const auto &chunk_filename = chunk_filenames.at(i);
+        std::unique_ptr<DBGBitmap::Chunk> chunk(new DBGBitmap::Chunk());
+
+        std::ifstream chunk_in(chunk_filename, std::ios::binary);
+        chunk->load(chunk_in);
+
+        if (!i) {
+            size = chunk->size();
+        } else if (size != chunk->size()) {
+            std::cerr << "ERROR: inconsistent graph chunks" << std::endl;
+            exit(1);
+        }
+
+        cumulative_size += chunk->num_set_bits();
+    }
+    assert(size > 0);
+
+    if (verbose)
+        std::cout << "Cumulative size of chunks: "
+                  << cumulative_size - 1 << std::endl;
+
+    size_t chunk_idx = 0;
+
+    //TODO configure stream for verbose output globally and refactor
+    std::ofstream null_ofstream;
+    ProgressBar progress_bar(chunk_filenames.size(), "Processing chunks", verbose ? std::cout : null_ofstream);
+
+    return build_graph_from_chunks(
+        size,
+        cumulative_size,
+        [&]() {
+            if (chunk_idx >= chunk_filenames.size())
+                return DBGBitmap::Chunk();
+
+            auto chunk_filename = chunk_filenames.at(chunk_idx);
+            chunk_filename = utils::remove_suffix(chunk_filename, DBGBitmap::kChunkFileExtension)
+                                + DBGBitmap::kChunkFileExtension;
+
+            std::ifstream chunk_in(chunk_filename, std::ios::binary);
+
+            if (!chunk_in.good()) {
+                std::cerr << "ERROR: input file " << chunk_filename << " corrupted" << std::endl;
+                exit(1);
+            }
+
+            DBGBitmap::Chunk chunk;
+            chunk.load(chunk_in);
+
+            chunk_idx++;
+            ++progress_bar;
+            return chunk;
+        },
+        canonical_mode
+    );
 }
 
 IBitmapChunkConstructor*

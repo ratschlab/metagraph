@@ -80,18 +80,18 @@ std::string remove_graph_extension(const std::string &filename) {
 }
 
 template <class Graph = BOSS>
-std::unique_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
+std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
     auto *graph = new Graph(2);
     if (!graph->load(filename)) {
         std::cerr << "ERROR: can't load graph from file " << filename << std::endl;
         delete graph;
         exit(1);
     }
-    return std::unique_ptr<Graph> { graph };
+    return std::shared_ptr<Graph> { graph };
 }
 
 template <class DefaultGraphType = DBGSuccinct>
-std::unique_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
+std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
     auto graph_type = parse_graph_extension(filename);
     switch (graph_type) {
         case Config::GraphType::SUCCINCT:
@@ -143,7 +143,8 @@ void annotate_data(const std::vector<std::string> &files,
                    bool reverse,
                    bool use_kmc,
                    size_t filter_k,
-                   size_t max_unreliable_abundance,
+                   size_t min_count,
+                   size_t max_count,
                    size_t unreliable_kmers_threshold,
                    bool filename_anno,
                    bool fasta_anno,
@@ -214,7 +215,8 @@ void annotate_data(const std::vector<std::string> &files,
                         std::cout << ", " << timer.elapsed() << "sec" << std::endl;
                     }
                 },
-                max_unreliable_abundance + 1
+                min_count,
+                max_count
             );
         } else if (utils::get_filetype(file) == "FASTA"
                     || utils::get_filetype(file) == "FASTQ") {
@@ -250,7 +252,7 @@ void annotate_data(const std::vector<std::string> &files,
                 reverse,
                 get_filter_filename(
                     file, filter_k,
-                    max_unreliable_abundance,
+                    min_count - 1,
                     unreliable_kmers_threshold
                 )
             );
@@ -374,18 +376,6 @@ void annotate_coordinates(const std::vector<std::string> &files,
 }
 
 
-/**
- * ACGT, ACG$, ..., $$$$ -- valid
- * AC$T, A$$T, ..., $AAA -- invalid
- */
-bool valid_kmer_suffix(const std::string &suffix) {
-    size_t last = suffix.rfind(BOSS::kSentinel);
-    return last == std::string::npos
-            || suffix.substr(0, last + 1)
-                == std::string(last + 1, BOSS::kSentinel);
-}
-
-
 void execute_query(std::string seq_name,
                    std::string sequence,
                    bool count_labels,
@@ -483,15 +473,14 @@ std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
 }
 
 
-std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
-    auto graph_temp = load_critical_dbg(config.infbase);
-
+std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
+                                                       const Config &config) {
     auto annotation_temp = initialize_annotation(
         config.infbase_annotators.size()
             ? config.infbase_annotators.at(0)
             : "",
         config,
-        graph_temp->num_nodes()
+        graph->num_nodes()
     );
     if (config.infbase_annotators.size()
             && !annotation_temp->load(config.infbase_annotators.at(0))) {
@@ -502,8 +491,8 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
     }
 
     // load graph
-    auto anno_graph = std::make_unique<AnnotatedDBG>(graph_temp.release(),
-                                                     annotation_temp.release(),
+    auto anno_graph = std::make_unique<AnnotatedDBG>(std::move(graph),
+                                                     std::move(annotation_temp),
                                                      config.parallel);
 
     if (!anno_graph->check_compatibility()) {
@@ -513,6 +502,10 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
     }
 
     return anno_graph;
+}
+
+std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
+    return initialize_annotated_dbg(load_critical_dbg(config.infbase), config);
 }
 
 
@@ -667,13 +660,14 @@ void parse_sequences(const std::vector<std::string> &files,
                     }
                     call_read(sequence);
                 },
-                config.max_unreliable_abundance + 1
+                config.min_count,
+                config.max_count
             );
         } else if (utils::get_filetype(files[f]) == "FASTA"
                     || utils::get_filetype(files[f]) == "FASTQ") {
             std::string filter_filename = get_filter_filename(
                 files[f], config.filter_k,
-                config.max_unreliable_abundance,
+                config.min_count - 1,
                 config.unreliable_kmers_threshold
             );
 
@@ -737,7 +731,7 @@ std::string form_client_reply(const std::string &received_message,
                                &errors)) {
                 std::cerr << "Error: bad json file:\n" << errors << std::endl;
                 //TODO: send error message back in a json file
-                throw;
+                throw std::domain_error("bad json received");
             }
         }
 
@@ -845,20 +839,11 @@ int main(int argc, const char *argv[]) {
                 }
                 //enumerate all suffices
                 assert(boss_graph->alph_size > 1);
-                assert(config->nsplits > 0);
-                size_t suffix_len = std::min(
-                    static_cast<size_t>(std::ceil(std::log2(config->nsplits)
-                                                    / std::log2(boss_graph->alph_size - 1))),
-                    boss_graph->get_k() - 1
-                );
-                std::deque<std::string> suffices;
+                std::vector<std::string> suffices;
                 if (config->suffix.size()) {
                     suffices = { config->suffix };
                 } else {
-                    suffices = utils::generate_strings(
-                        boss_graph->alphabet,
-                        suffix_len
-                    );
+                    suffices = KmerExtractor::generate_suffixes(config->suffix_len);
                 }
 
                 BOSS::Chunk graph_data(boss_graph->get_k());
@@ -868,12 +853,7 @@ int main(int argc, const char *argv[]) {
                     timer.reset();
 
                     if (suffix.size() > 0 || suffices.size() > 1) {
-                        if (valid_kmer_suffix(suffix)) {
-                            std::cout << "\nSuffix: " << suffix << std::endl;
-                        } else {
-                            std::cout << "\nSkipping suffix: " << suffix << std::endl;
-                            continue;
-                        }
+                        std::cout << "\nSuffix: " << suffix << std::endl;
                     }
 
                     std::unique_ptr<IBOSSChunkConstructor> constructor(
@@ -916,6 +896,12 @@ int main(int argc, const char *argv[]) {
                 graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
 
             } else if (config->graph_type == Config::GraphType::BITMAP && !config->dynamic) {
+
+                if (!config->outfbase.size()) {
+                    std::cerr << "Error: No output file provided" << std::endl;
+                    exit(1);
+                }
+
                 auto sd_graph = std::make_unique<DBGBitmap>(config->k);
 
                 if (config->verbose) {
@@ -923,29 +909,21 @@ int main(int argc, const char *argv[]) {
                 }
                 //enumerate all suffices
                 assert(sd_graph->alphabet.size() > 1);
-                assert(config->nsplits > 0);
-                size_t suffix_len = std::min(
-                    static_cast<size_t>(std::ceil(std::log2(config->nsplits)
-                                                    / std::log2(sd_graph->alphabet.size()))),
-                    sd_graph->get_k()
-                );
-                std::deque<std::string> suffices;
+                std::vector<std::string> suffices;
                 if (config->suffix.size()) {
                     suffices = { config->suffix };
                 } else {
-                    suffices = utils::generate_strings(
-                        sd_graph->alphabet,
-                        suffix_len
-                    );
+                    suffices = KmerExtractor2Bit().generate_suffixes(config->suffix_len);
                 }
 
                 std::unique_ptr<DBGBitmapConstructor> constructor;
+                std::vector<std::string> chunk_filenames;
 
                 //one pass per suffix
                 for (const std::string &suffix : suffices) {
                     timer.reset();
 
-                    if (suffix.size() > 0 || suffices.size() > 1) {
+                    if (config->verbose && (suffix.size() > 0 || suffices.size() > 1)) {
                         std::cout << "\nSuffix: " << suffix << std::endl;
                     }
 
@@ -965,29 +943,45 @@ int main(int argc, const char *argv[]) {
                         [&](const auto &loop) { constructor->add_sequences(loop); }
                     );
 
-                    if (config->outfbase.size() && config->suffix.size()) {
-                        const DBGBitmap::Chunk* next_block = constructor->build_chunk();
-                        std::cout << "Graph chunk with " << next_block->num_set_bits()
-                                  << " k-mers was built in "
-                                  << timer.elapsed() << "sec" << std::endl;
+                    if (!suffix.size()) {
+                        assert(suffices.size() == 1);
 
-                        std::cout << "Serialize the graph chunk for suffix '"
-                                  << suffix << "'...\t" << std::flush;
-                        timer.reset();
-                        std::ofstream out(config->outfbase + "." + suffix + ".dbgsdchunk");
-                        next_block->serialize(out);
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-                        sd_graph.reset(new DBGBitmap(config->k));
+                        auto bitmap_graph = std::make_unique<DBGBitmap>(config->k);
+                        constructor->build_graph(bitmap_graph.get());
+                        graph.reset(bitmap_graph.release());
+                    } else {
+                        std::unique_ptr<DBGBitmap::Chunk> chunk { constructor->build_chunk() };
+                        if (config->verbose) {
+                            std::cout << "Graph chunk with " << chunk->num_set_bits()
+                                      << " k-mers was built in "
+                                      << timer.elapsed() << "sec" << std::endl;
+
+                            std::cout << "Serialize the graph chunk for suffix '"
+                                      << suffix << "'...\t" << std::flush;
+                        }
+
+                        chunk_filenames.push_back(
+                            utils::join_strings({ config->outfbase, suffix }, ".")
+                                + DBGBitmap::kChunkFileExtension
+                        );
+                        std::ofstream out(chunk_filenames.back(), std::ios::binary);
+                        chunk->serialize(out);
+                        if (config->verbose)
+                            std::cout << timer.elapsed() << "sec" << std::endl;
                     }
 
+                    // only one chunk had to be constructed
                     if (config->suffix.size())
                         return 0;
-
-                    constructor->build_graph(sd_graph.get());
                 }
 
-                graph.reset(sd_graph.release());
-
+                if (suffices.size() > 1) {
+                    assert(chunk_filenames.size());
+                    timer.reset();
+                    graph.reset(constructor->build_graph_from_chunks(chunk_filenames,
+                                                                     config->canonical,
+                                                                     config->verbose));
+                }
             } else {
                 //slower method
 
@@ -1238,7 +1232,7 @@ int main(int argc, const char *argv[]) {
 
                     },
                     config->filter_k,
-                    config->max_unreliable_abundance,
+                    config->min_count - 1,
                     config->unreliable_kmers_threshold,
                     config->generate_filtered_fasta,
                     config->generate_filtered_fastq);
@@ -1295,7 +1289,7 @@ int main(int argc, const char *argv[]) {
                         serialize_number_vector(outstream, filter, 1);
                     },
                     config->filter_k,
-                    config->max_unreliable_abundance,
+                    config->min_count - 1,
                     config->unreliable_kmers_threshold,
                     config->verbose, config->reverse, config->use_kmc
                 );
@@ -1323,7 +1317,7 @@ int main(int argc, const char *argv[]) {
                 auto filter_filename = get_filter_filename(
                     file,
                     config->filter_k,
-                    config->max_unreliable_abundance,
+                    config->min_count - 1,
                     config->unreliable_kmers_threshold,
                     true
                 );
@@ -1359,23 +1353,60 @@ int main(int argc, const char *argv[]) {
         case Config::ANNOTATE: {
             assert(config->infbase_annotators.size() <= 1);
 
-            auto anno_graph = initialize_annotated_dbg(*config);
+            if (!config->separately) {
+                auto anno_graph = initialize_annotated_dbg(*config);
 
-            annotate_data(files,
-                          config->refpath,
-                          anno_graph.get(),
-                          config->reverse,
-                          config->use_kmc,
-                          config->filter_k,
-                          config->max_unreliable_abundance,
-                          config->unreliable_kmers_threshold,
-                          config->filename_anno,
-                          config->fasta_anno,
-                          config->fasta_header_delimiter,
-                          config->anno_labels,
-                          config->verbose);
+                annotate_data(files,
+                              config->refpath,
+                              anno_graph.get(),
+                              config->reverse,
+                              config->use_kmc,
+                              config->filter_k,
+                              config->min_count,
+                              config->max_count,
+                              config->unreliable_kmers_threshold,
+                              config->filename_anno,
+                              config->fasta_anno,
+                              config->fasta_header_delimiter,
+                              config->anno_labels,
+                              config->verbose);
 
-            anno_graph->get_annotation().serialize(config->outfbase);
+                anno_graph->get_annotation().serialize(config->outfbase);
+
+            } else {
+                const auto graph = load_critical_dbg(config->infbase);
+
+                ThreadPool thread_pool(config->parallel);
+
+                // annotate multiple columns in parallel, each in a single thread
+                config->parallel = 1;
+
+                for (const auto &file : files) {
+                    thread_pool.enqueue([](auto graph, auto filename, const Config *config) {
+                            auto anno_graph = initialize_annotated_dbg(graph, *config);
+
+                            annotate_data({ filename },
+                                          config->refpath,
+                                          anno_graph.get(),
+                                          config->reverse,
+                                          config->use_kmc,
+                                          config->filter_k,
+                                          config->min_count,
+                                          config->max_count,
+                                          config->unreliable_kmers_threshold,
+                                          config->filename_anno,
+                                          config->fasta_anno,
+                                          config->fasta_header_delimiter,
+                                          config->anno_labels,
+                                          config->verbose);
+                            anno_graph->get_annotation().serialize(filename);
+                        },
+                        graph,
+                        file,
+                        config.get()
+                    );
+                }
+            }
 
             return 0;
         }
@@ -1394,12 +1425,10 @@ int main(int argc, const char *argv[]) {
             }
 
             // load graph
-            AnnotatedDBG anno_graph(
-                graph_temp.release(),
-                annotation_temp.release(),
-                config->parallel,
-                config->fast
-            );
+            AnnotatedDBG anno_graph(graph_temp,
+                                    std::move(annotation_temp),
+                                    config->parallel,
+                                    config->fast);
 
             if (!anno_graph.check_compatibility()) {
                 std::cerr << "Error: graph and annotation are not compatible."
@@ -1411,7 +1440,7 @@ int main(int argc, const char *argv[]) {
                                  &anno_graph,
                                  config->reverse,
                                  config->filter_k,
-                                 config->max_unreliable_abundance,
+                                 config->min_count - 1,
                                  config->unreliable_kmers_threshold,
                                  config->genome_binsize_anno,
                                  config->verbose);
@@ -1421,6 +1450,16 @@ int main(int argc, const char *argv[]) {
             return 0;
         }
         case Config::MERGE_ANNOTATIONS: {
+            if (config->anno_type == Config::ColumnCompressed) {
+                annotate::ColumnCompressed<> annotation(0, kNumCachedColumns, config->verbose);
+                if (!annotation.merge_load(files)) {
+                    std::cerr << "ERROR: can't load annotations" << std::endl;
+                    exit(1);
+                }
+                annotation.serialize(config->outfbase);
+                return 0;
+            }
+
             std::vector<std::unique_ptr<Annotator>> annotators;
             std::vector<std::string> stream_files;
 
@@ -1458,7 +1497,7 @@ int main(int argc, const char *argv[]) {
 
             return 0;
         }
-        case Config::CLASSIFY: {
+        case Config::QUERY: {
             assert(config->infbase_annotators.size() == 1);
 
             auto anno_graph = initialize_annotated_dbg(*config);
@@ -1494,7 +1533,7 @@ int main(int argc, const char *argv[]) {
                     },
                     config->reverse,
                     get_filter_filename(file, config->filter_k,
-                                        config->max_unreliable_abundance,
+                                        config->min_count - 1,
                                         config->unreliable_kmers_threshold)
                 );
                 if (config->verbose) {
@@ -1516,7 +1555,7 @@ int main(int argc, const char *argv[]) {
 
             return 0;
         }
-        case Config::SERVER_CLASSIFY: {
+        case Config::SERVER_QUERY: {
             assert(config->infbase_annotators.size() == 1);
 
             Timer timer;
@@ -1594,23 +1633,20 @@ int main(int argc, const char *argv[]) {
             if (!files.size()) {
                 assert(config->infbase.size());
 
-                auto sorted_suffices = utils::generate_strings(
-                    config->graph_type == Config::GraphType::SUCCINCT
-                        ? KmerExtractor().alphabet
-                        : KmerExtractor2Bit().alphabet,
-                    config->suffix_len
-                );
+                const auto sorted_suffices = config->graph_type == Config::GraphType::SUCCINCT
+                        ? KmerExtractor().generate_suffixes(config->suffix_len)
+                        : KmerExtractor2Bit().generate_suffixes(config->suffix_len);
 
                 for (const std::string &suffix : sorted_suffices) {
                     assert(suffix.size() == config->suffix_len);
-
-                    if (valid_kmer_suffix(suffix))
-                        chunk_files.push_back(config->infbase + "." + suffix);
+                    chunk_files.push_back(config->infbase + "." + suffix);
                 }
             }
 
             for (auto &filename : chunk_files) {
-                filename = utils::remove_suffix(filename, ".dbgchunk", ".dbgsdchunk");
+                filename = utils::remove_suffix(filename,
+                                                    BOSS::Chunk::kFileExtension,
+                                                    DBGBitmap::kChunkFileExtension);
             }
 
             // collect results on an external merge or construction
@@ -1650,7 +1686,7 @@ int main(int argc, const char *argv[]) {
 
             Timer timer;
 
-            std::vector<std::unique_ptr<DBGSuccinct>> dbg_graphs;
+            std::vector<std::shared_ptr<DBGSuccinct>> dbg_graphs;
             std::vector<const BOSS*> graphs;
 
             config->canonical = true;
@@ -2094,9 +2130,10 @@ int main(int argc, const char *argv[]) {
                 uint64_t counter = 0;
                 const auto &dump_sequence = [&](const auto &sequence) {
                     if (!write_fasta(out_fasta_gz,
-                                     (config->header.size()
-                                        ? config->header + "."
-                                        : "") + std::to_string(counter),
+                                     utils::join_strings({ config->header,
+                                                            std::to_string(counter) },
+                                                         ".",
+                                                         true),
                                      sequence)) {
                         std::cerr << "ERROR: Can't write extracted sequences to "
                                   << out_filename << std::endl;
@@ -2335,7 +2372,7 @@ int main(int argc, const char *argv[]) {
                     }
                 }, config->reverse,
                     get_filter_filename(file, config->filter_k,
-                                        config->max_unreliable_abundance,
+                                        config->min_count - 1,
                                         config->unreliable_kmers_threshold)
                 );
 

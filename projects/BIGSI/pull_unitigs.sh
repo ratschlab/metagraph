@@ -24,7 +24,7 @@ if [[ $GRAPH_DUMP == *.bz2 ]]; then
   GRAPH_DUMP="${GRAPH_DUMP%.bz2}"
 fi
 
-SIZE="$(wc -c $GRAPH_DUMP | awk '{print int($1 / 10**6 * 2.5 + 50)}')"
+SIZE="$(wc -c $GRAPH_DUMP | awk '{print int($1 / 10**6 * 2.5 + 150)}')"
 
 if ! $MCCORTEX check -m "${SIZE}MB" "$GRAPH_DUMP"; then
   echo "ERROR: Dump broken $GRAPH_DUMP" >&2

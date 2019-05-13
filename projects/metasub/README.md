@@ -130,7 +130,7 @@ $METAGRAPH transform_anno --rename-cols rename_columns.txt \
 bsub -J metasub_graph_server15 \
     -oo /dev/null \
     -W 240:00 -n 10 -R "rusage[mem=19000] span[hosts=1]" \
-    "$METAGRAPH server_classify \
+    "$METAGRAPH server_query \
         -i graph_15_complete_canonical.bitmapdbg \
         -a metasub_f2_k15_brwt_pm_40_final.brwt.annodbg \
         -p 20 --port 42623 2>&1 \
@@ -141,7 +141,7 @@ bsub -J metasub_graph_server15 \
 bsub -J metasub_graph_server17 \
     -oo /dev/null \
     -W 240:00 -n 10 -R "rusage[mem=61000] span[hosts=1]" \
-    "$METAGRAPH server_classify \
+    "$METAGRAPH server_query \
         -i graph_17_complete_canonical.bitmapdbg \
         -a metasub_f2_k17_brwt_pm_20_final.brwt.annodbg \
         -p 20 --port 42623 2>&1 \
