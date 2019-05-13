@@ -2381,25 +2381,29 @@ TEST(BOSS, IndegreeIncomingIdentity) {
 }
 
 TEST(BOSS, EraseEdgesDynSingle) {
-    for (size_t k = 1; k < 40; ++k) {
+    for (size_t k = 4; k < 40; ++k) {
         BOSS graph2(k);
         graph2.add_sequence("AGACACAGT", true);
         graph2.add_sequence("GACTTGCAG", true);
         graph2.add_sequence("ACTAGTCAG", true);
         if (true) {
-            for(uint64_t m = 1; m <= graph2.num_edges(); ++m) {
+            if (graph2.num_edges() > 2) {
+            for(uint64_t m = 1; m <= graph2.num_edges() - 2; ++m) {
+                //if(m==25 && k==4) {
                 BOSS graph(k);
                 graph.add_sequence("AGACACAGT", true);
                 graph.add_sequence("GACTTGCAG", true);
                 graph.add_sequence("ACTAGTCAG", true);
-                //graph.print_internal_representation();
-                //graph.print();
+                graph.print_internal_representation();
+                graph.print();
                 EXPECT_TRUE(graph.is_valid());
-                graph.erase_edges_dyn({m});
-                //graph.print_internal_representation();
-                //graph.print();
-                //std::cout << "m: " << m << std::endl;
+                graph.erase_edges_dyn({m, m+1, m+2});
+                graph.print_internal_representation();
+                graph.print();
+                std::cout << "m: " << m << std::endl;
                 EXPECT_TRUE(graph.is_valid());
+                if (!graph.is_valid())
+                    exit(1);
                 //dump unitigs and visualize
                 //std::cout << "viz" << std::endl;
                 //std::cout << k+1 << std::endl;
@@ -2409,10 +2413,12 @@ TEST(BOSS, EraseEdgesDynSingle) {
                 graph.call_paths(
                     [&](const auto &, const auto &seq) {
                         auto str = graph.decode(seq);
-                        //std::cout << str << std::endl;
+                        std::cout << str << std::endl;
                     },
                     false
                 );
+                //}
+            }
             }
         }
     }

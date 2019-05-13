@@ -1438,13 +1438,14 @@ uint64_t BOSS::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
 
 
 //TODO unit test
+//TODO return edges deleted
 // Given an edge list, remove them from the BOSS graph.
 // Anchors the isolated nodes.
 void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
     uint64_t shift = 0;
 
     std::set<node_index> new_tail_nodes;
-    std::set<node_index> new_head_nodes;
+    std::map<node_index, std::vector<TAlphabet>> new_head_nodes;
 
     for (edge_index edge : edges) {
         node_index node = get_source_node(edge);
@@ -1473,7 +1474,7 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
         if (indeg == incoming_delete_count) {
             if (new_tail_nodes.find(target_node) == new_tail_nodes.end()) {
                 // node will still exist but all incoming edges deleted, will need to anchor
-                new_head_nodes.emplace(target_node);
+                new_head_nodes.emplace(target_node, get_node_seq(select_last(target_node)));
             } else {
                 // node deleted (no incoming or outgoing edges)
                 new_tail_nodes.erase(target_node);
@@ -1485,14 +1486,9 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
     bit_vector_dyn existing_edges(last_->size(), true);
     bit_vector_dyn cant_delete(last_->size(), false);
     cant_delete.set(select_last(1), true);
-    //TODO something supporting rank0?
     bit_vector_dyn existing_nodes(last_->num_set_bits(), true);
-    bit_vector_dyn new_nodes(last_->num_set_bits(), false);
-    for (node_index node : new_head_nodes) {
-        node_index node_id = existing_nodes.select1(node) + 1;
-        edge_index edge_id = select_last(node_id);
-
-        auto kmer = get_node_seq(edge_id);
+    for (auto& node : new_head_nodes) {
+        auto kmer = node.second;
         uint64_t source = 1;
         kmer.insert(kmer.begin(), k_, kSentinelCode);
         for (size_t i = 0; i < k_; ++i) {
@@ -1502,9 +1498,7 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
             std::for_each(new_ids_vec.begin(), new_ids_vec.end(), [&](auto id){
                 existing_edges.insert_bit(id, false);
                 cant_delete.insert_bit(id, true);
-                auto source_node = get_source_node(id);
-                existing_nodes.insert_bit(source_node, !get_last(id) || !get_last(id - 1));
-                new_nodes.insert_bit(source_node, get_last(id) && !get_last(id - 1));
+                existing_nodes.insert_bit(get_source_node(id), !get_last(id) || !get_last(id - 1));
             });
             cant_delete.set(pred_W(source, kmer[i + k_ + 1]), true);
         }
@@ -1512,11 +1506,10 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
 
     for (edge_index edge : edges) {
         assert(edge >= shift);
-        uint64_t edge_id = existing_edges.select1(edge) + 1 - shift;
+        uint64_t edge_id = existing_edges.select1(edge + 1) - shift;
 
-        if (cant_delete[edge_id]) {
+        if (cant_delete[edge_id])
             continue;
-        }
 
         uint64_t d = get_W(edge_id);
         if (d < alph_size) {
@@ -1534,11 +1527,11 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
         }
 
         node_index node = get_source_node(edge_id);
-        node_index node_id_shift = new_nodes.rank1(edge_id - 1);
-        if (new_tail_nodes.find(node-node_id_shift) != new_tail_nodes.end()) {
+        node_index old_node_id = existing_nodes.rank1(node) - 1;
+        if (new_tail_nodes.find(old_node_id) != new_tail_nodes.end()) {
             W_->set(edge_id, kSentinelCode);
             // allow delete other edges for this node
-            new_tail_nodes.erase(node-node_id_shift);
+            new_tail_nodes.erase(old_node_id);
             continue;
         }
 
@@ -1553,6 +1546,9 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
             last_->delete_bit(edge_id);
         }
         shift++;
+        existing_edges.delete_bit(edge_id);
+        cant_delete.delete_bit(edge_id);
+        existing_nodes.delete_bit(node);
     }
 }
 
