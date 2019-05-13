@@ -789,6 +789,9 @@ node_index BOSS::pred_kmer(const std::vector<TAlphabet> &kmer) const {
  */
 bool BOSS::compare_node_suffix(edge_index first, edge_index second) const {
     for (size_t i = 0; i < k_ - 1; ++i) {
+        if (first == second)
+            return true;
+
         if (get_node_last_value(first) != get_node_last_value(second)) {
             return false;
         }
