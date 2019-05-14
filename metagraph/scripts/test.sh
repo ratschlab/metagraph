@@ -107,12 +107,20 @@ time $exe transform_anno --anno-type row --sparse -o test_annotation test_annota
 $exe stats --anno-type row -a test_annotation
 echo ""
 
-time $exe transform_anno --anno-type brwt -o test_annotation test_annotation.column.annodbg
+time $exe transform_anno -p 4 --anno-type brwt -o test_annotation test_annotation.column.annodbg
 $exe stats --anno-type brwt -a test_annotation
 echo ""
 
-time $exe transform_anno --anno-type brwt --greedy -o test_annotation_pm test_annotation.column.annodbg
+time $exe relax_brwt -p 4 --arity 20 -o test_annotation_relax test_annotation.brwt.annodbg
+$exe stats --anno-type brwt -a test_annotation_relax
+echo ""
+
+time $exe transform_anno -p 4 --anno-type brwt --greedy -o test_annotation_pm test_annotation.column.annodbg
 $exe stats --anno-type brwt -a test_annotation_pm
+echo ""
+
+time $exe relax_brwt -p 4 --arity 20 -o test_annotation_pm_relax test_annotation_pm.brwt.annodbg
+$exe stats --anno-type brwt -a test_annotation_pm_relax
 echo ""
 
 time $exe transform_anno --anno-type bin_rel_wt_sdsl -o test_annotation test_annotation.column.annodbg
