@@ -20,12 +20,17 @@
 #include "utilities.hpp"
 #include "alphabets.hpp"
 #include "dbg_succinct.hpp"
+#include "graph_preprocessor.hpp"
 
 using node_index = SequenceGraph::node_index;
 
 class DynamicRoutingTable {
 public:
     DynamicRoutingTable() = default;
+
+    explicit DynamicRoutingTable(transformations_t transformations) : transformations(transformations) {
+
+    }
     template<class Container>
     explicit DynamicRoutingTable(const Container& routing_table_array) {}
 
@@ -45,6 +50,11 @@ public:
 
     char get(node_index node, int position) const {
         return routing_table.at(node).at(position);
+    }
+
+    char traversed_base(node_index node, int position) const {
+        char base = get(node,position);
+        return transform(node,base);
     }
 
     void insert(node_index node, int position, char symbol) {
@@ -72,11 +82,38 @@ public:
 
     tsl::hopscotch_map<node_index, vector<char>> routing_table;
 
-    int new_relative_position(node_index node, int position) {
-        return rank(node,get(node,position),position);
+    int new_relative_position(node_index node, int position) const {
+        auto base = get(node,position);
+        auto base_rank = rank(node,base,position);
+        if (transformations.count(node)) {
+            auto transformation = transformations.at(node);
+            if (is_affected(transformation,base)) {
+                char opposite = opposite_element(transformation,base);
+                base_rank += rank(node,opposite,position);
+            }
+        }
+        return base_rank;
     }
 
+    char transform(node_index node, char base) const {
+        if (transformations.count(node)) {
+            auto transformation = transformations.at(node);
+            return transform(transformation,base);
+        }
+        return base;
+    }
 
+    static bool is_affected(pair<char,char> transformation, char base) {
+        return transformation.first == base or transformation.second == base;
+    }
+    static char opposite_element(pair<char,char> transformation, char base) {
+        return transformation.first == base ? transformation.second : transformation.first;
+    }
+    static char transform(pair<char,char> transformation, char base) {
+        return transformation.first == base ? transformation.second : base;
+    }
+
+    transformations_t transformations;
     //map<node_index,vector<char>> routing_table;
 
 //    int serialize(std::ostream& out)const {

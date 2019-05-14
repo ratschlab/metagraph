@@ -38,15 +38,15 @@ public:
     // graph contains all reads
     // sequences are of size at least k
     explicit PathDatabaseDynamic(std::shared_ptr<const GraphT> graph) :
-                PathDatabase<pair<node_index,int>,GraphT>(graph),
-                graph(*(this->graph_)),
-                incoming_table(*(this->graph_)) {}
+            PathDatabase<pair<node_index,int>,GraphT>(graph),
+            graph(*(this->graph_)),
+            incoming_table(*(this->graph_)), routing_table(nullptr) {}
 
     explicit PathDatabaseDynamic(const vector<string> &filenames,
                  size_t k_kmer = 21 /* default kmer */) :
-                         PathDatabase<pair<node_index,int>,GraphT>(filenames, k_kmer),
-                         graph(*(this->graph_)),
-                         incoming_table(*(this->graph_)) {}
+            PathDatabase<pair<node_index,int>,GraphT>(filenames, k_kmer),
+            graph(*(this->graph_)),
+            incoming_table(*(this->graph_)), routing_table((new GraphPreprocessor(*(this->graph_)))->find_weak_splits()) {}
 
     virtual ~PathDatabaseDynamic() {}
 
@@ -101,8 +101,10 @@ public:
 
         vector<path_id> encoded;
 
+        vector<string> path_for_sequences(sequences.size());
+
         std::cout << "Finished preprocessing in " << timer.elapsed() << " sec" << std::endl;
-        ProgressBar progress_bar(sequences.size(), "Building dRT and dEM");
+        //ProgressBar progress_bar(sequences.size(), "Building dRT and dEM");
 
         const size_t batch_size = std::max(static_cast<size_t>(1),
                                            static_cast<size_t>(sequences.size() / 200));
@@ -118,21 +120,23 @@ public:
             for (size_t i = batch_begin;
                             i < batch_begin + batch_size && i < sequences.size(); ++i) {
                 const auto &sequence = sequences[i];
+                auto& path_for_sequence = path_for_sequences[i];
+                path_for_sequence = "$" + sequence + "$"; //hopefully copy
+
 
                 size_t kmer_begin = 0;
                 size_t kmer_end = graph.get_k();
 
                 // TODO: use map_to_nodes_sequentially when implemented
                 graph.map_to_nodes(sequence, [&](node_index node) {
+                    path_for_sequence[kmer_end] = routing_table.transform(node, path_for_sequence[kmer_end]);
                     char join_char = node_is_join(node)
                                         ? (kmer_begin
-                                                ? sequence[kmer_begin - 1]
+                                                ? sequence[kmer_begin-1] // -1 because it is not surrounded by dollars
                                                 : '$')
                                         : '\0';
                     char split_char = node_is_split(node)
-                                        ? (kmer_end < sequence.size()
-                                                ? sequence[kmer_end]
-                                                : '$')
+                                        ? path_for_sequence[kmer_end]
                                         : '\0';
 
                     if (join_char || split_char) {
@@ -147,6 +151,7 @@ public:
 
             #pragma omp critical
             {
+                char prev_join = '\0';
                 for (const auto &[node, join_symbol, split_symbol] : bifurcations) {
                     if (join_symbol) {
                         timer.reset();
@@ -163,9 +168,9 @@ public:
                     if (split_symbol) {
                         timer.reset();
                         routing_table.insert(node, relative_position, split_symbol);
-                        relative_position = routing_table.rank(node, split_symbol, relative_position);
+                        relative_position = routing_table.new_relative_position(node, relative_position);
                         if (split_symbol == '$') {
-                            ++progress_bar;
+                            //++progress_bar;
                         }
                         split_time += timer.elapsed();
                     }
@@ -217,28 +222,36 @@ public:
         auto node = path.first;
         auto kmer = graph.get_node_sequence(node);
         string sequence = kmer;
+        string sequence_path = kmer;
         int relative_position = path.second;
 
         int kmer_position = 0;
         char base = '\0';
+        char encoded_base = '\0';
         while (true) {
             if (node_is_split(node)) {
-                base = routing_table.get(node,relative_position);
-                relative_position = routing_table.rank(node,base,relative_position);
+                encoded_base = routing_table.get(node,relative_position); // maybe different
+                base = routing_table.traversed_base(node,relative_position);
+                relative_position = routing_table.new_relative_position(node,relative_position);
+                if (base != encoded_base) {
+                    cout << encoded_base << base << endl;
+                }
             }
             else {
                 assert(graph.outdegree(node) == 1);
                 graph.call_outgoing_kmers(node,[&base](node_index node,char edge_label ) { base = edge_label;});
+                encoded_base = base; // same
             }
             assert(base);
             if (base == '$') break;
             node = graph.traverse(node,base);
             assert(node);
             kmer_position++;
-            sequence.append(1,base); // 1 times base
+            sequence.append(1,encoded_base); // 1 times base
+            sequence_path.append(1,encoded_base); // 1 times base
 
             if (node_is_join(node)) {
-                auto join_symbol = sequence[kmer_position-1];
+                auto join_symbol = sequence_path[kmer_position-1];
                 relative_position += incoming_table.branch_offset(node,join_symbol);
             }
         }
@@ -275,59 +288,7 @@ protected:
 #endif
 };
 
-template<typename Graph>
-class GraphPreprocessor {
-public:
-    const int delay_gap = 0;
-    GraphPreprocessor(const Graph &graph) : graph(graph) {}
 
-    map<node_index,pair<char,char>> find_weak_splits() {
-        // find nodes that will
-        map<node_index,pair<char,char>> result;
-        for(auto node=1;node<=graph.num_nodes();node++) {
-            if (graph.is_split(node)) {
-                auto possible_weak_split = is_weak_split(node);
-                if (possible_weak_split) {
-                    result[node] = *possible_weak_split;
-                }
-            }
-        }
-        return result;
-    }
-
-    optional<pair<char,char>> is_weak_split(node_index node) {
-        // == is substitution split for now
-        map<node_index,vector<char>> joins;
-        graph.get_all_outgoing_kmers(node,[&](node_index next_node, char base) {
-            auto possible_join = first_join(node,graph.get_k());
-            if (possible_join) {
-                joins[next_node].push_back(base);
-            }
-        });
-        for(auto& [join_node,bases] : joins) {
-            if (bases.size() > 1) {
-                // currently just randomly pick one;
-                return {{bases[0],bases[1]}};
-            }
-        }
-        return {};
-    };
-
-    node_index first_join(node_index node, int delay_steps) {
-        if (delay_steps < -delay_gap) {
-            return 0;
-        }
-        if (delay_steps <= 0 and graph.is_join(node)) {
-            return node;
-        }
-        if (graph.is_split(node)) {
-            return 0;
-        }
-        return first_join(graph.traverse(graph.get_outgoing_character(node)),delay_steps-1);
-    }
-    const Graph& graph;
-
-};
 
 
 

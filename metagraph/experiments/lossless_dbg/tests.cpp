@@ -75,6 +75,8 @@ TEST(SamplerTest,SubSample) {
 vector<string> reads_for_testing_short = {"ATGCGATCGATATGCGAGA",
                                           "ATGCGATCGAGACTACGAG",
                                           "GTACGATAGACATGACGAG",
+                                          //"GAGCTCGGGACTTGAATAG",
+                                          //"GAGCTCGAGACTTGAATAG",// as previous with one change
                                           "ACTGACGAGACACAGATGC"};
 
 template <typename T>
@@ -214,6 +216,27 @@ TEST(PathDatabase,ConsistentNode) {
     check_small_get_next_consistent_node<>();
 }
 
+TEST(GraphPreprocessor,WeakSplits) {
+    PathDatabaseWavelet<> pd({"ACTAGGA","ACTCGGA"},3);
+    GraphPreprocessor gp(pd.graph);
+    auto splits = gp.find_weak_splits();
+    ASSERT_EQ(splits.size(),1);
+    for(auto&[node,transformations] : splits) {
+        ASSERT_EQ(node,pd.graph.kmer_to_node("ACT"));
+        ASSERT_EQ(set<char>({'A','C'}),set<char>({transformations.first,transformations.second}));
+    }
+
+}
+
+TEST(PathDatabase,AlternativeRoute) {
+    vector<string> reads= {
+            "GAGCTCGGGACTTGAATAT",
+            "GAGCTCGAGACTTGAATAG"};
+    //check_compression_decompression<PathDatabaseWavelet<>>(reads,5);
+    check_compression_decompression<PathDatabaseDynamic<>>(reads,5);
+
+}
+
 #if defined(__linux__) || false
 
 template <typename T>
@@ -229,6 +252,8 @@ TEST(PathDatabase,LongTestCompressedReads) {
 TEST(PathDatabase,LongTestBaseline) {
     long_identity_test<PathDatabaseDynamic<>>();
 }
+
+
 
 #endif
 
