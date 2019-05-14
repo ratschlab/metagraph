@@ -183,25 +183,35 @@ public:
                     omp_set_lock(&locks[node]);
 #endif
                     if (join_symbol) {
+#ifndef USE_LOCKS
                         timer.reset();
+#endif
                         if (join_symbol == '$') {
                             // always putting new read above all other reads
                             relative_position = incoming_table.branch_size(node, '$');
+#ifndef USE_LOCKS
                             encoded.emplace_back(node, relative_position);
                             encoded_paths++;
+#endif
                         }
                         relative_position += incoming_table.branch_offset_and_increment(node, join_symbol);
+#ifndef USE_LOCKS
                         join_time += timer.elapsed();
+#endif
                     }
 
                     if (split_symbol) {
+#ifndef USE_LOCKS
                         timer.reset();
+#endif
                         routing_table.insert(node, relative_position, split_symbol);
                         relative_position = routing_table.new_relative_position(node, relative_position);
                         if (split_symbol == '$') {
                             //++progress_bar;
                         }
+#ifndef USE_LOCKS
                         split_time += timer.elapsed();
+#endif
                     }
 #ifdef USE_LOCKS
                     omp_unset_lock(&locks[node]);
