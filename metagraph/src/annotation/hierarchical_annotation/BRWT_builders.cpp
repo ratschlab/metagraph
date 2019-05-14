@@ -13,7 +13,7 @@ BRWTBuilder::initialize(NodeBRWT&& node, bit_vector&& nonzero_rows) {
 
     brwt.assignments_ = utils::RangePartition(node.column_arrangement,
                                               node.group_sizes);
-    brwt.nonzero_rows_ = nonzero_rows.convert_to<bit_vector_rrr<>>();
+    brwt.nonzero_rows_ = nonzero_rows.convert_to<bit_vector_small>();
 
     brwt.child_nodes_ = std::move(node.child_nodes);
 
@@ -94,7 +94,7 @@ BRWTBottomUpBuilder::merge(std::vector<NodeBRWT> &&nodes,
                   nodes[i].column_arrangement.end(), 0);
 
         // shrink index column
-        bit_vector_rrr<> shrinked_index(
+        bit_vector_small shrinked_index(
             generate_subindex(std::move(*index[i]), parent_index)
         );
         index[i].reset();
@@ -106,7 +106,7 @@ BRWTBottomUpBuilder::merge(std::vector<NodeBRWT> &&nodes,
     }
 
     return { std::move(parent),
-                std::make_unique<bit_vector_smart>(std::move(parent_index)) };
+                std::make_unique<bit_vector_small>(std::move(parent_index)) };
 }
 
 template <typename T>
@@ -302,7 +302,7 @@ void BRWTOptimizer::reassign(std::unique_ptr<BRWT>&& node,
             child_i++;
         });
 
-        grand_child->nonzero_rows_ = bit_vector_rrr<>(subindex);
+        grand_child->nonzero_rows_ = bit_vector_small(subindex);
 
         parent->group_sizes[offset + i] = grand_child->num_columns();
         parent->child_nodes[offset + i] = std::move(grand_child);
@@ -333,6 +333,17 @@ double bv_space_taken_rrr(uint64_t size,
             + sizeof(bit_vector_rrr<>) * 8;
 }
 
+double bv_space_taken_sd(uint64_t size,
+                         uint64_t num_set_bits) {
+    return std::ceil(log2(size + 1) - log2(num_set_bits + 1) + 3) * num_set_bits
+            + sizeof(bit_vector_sd) * 8;
+}
+
+double bv_space_taken_stat(uint64_t size,
+                           uint64_t /*num_set_bits*/) {
+    return size + sizeof(bit_vector_stat) * 8;
+}
+
 double bv_space_taken(const bit_vector &type,
                       uint64_t size,
                       uint64_t num_set_bits) {
@@ -356,9 +367,21 @@ double bv_space_taken(const bit_vector &type,
     } else if (dynamic_cast<const bit_vector_rrr<255> *>(&type)) {
         return bv_space_taken_rrr(size, num_set_bits, 255);
 
-    } else {
-        throw std::runtime_error("Error: unknown space taken for this bit_vector");
+    } else if (dynamic_cast<const bit_vector_adaptive *>(&type)) {
+
+        switch (dynamic_cast<const bit_vector_adaptive &>(type).representation_tag()) {
+            case bit_vector_adaptive::VectorCode::SD_VECTOR:
+                return bv_space_taken_sd(size, num_set_bits);
+
+            case bit_vector_adaptive::VectorCode::RRR_VECTOR:
+                return bv_space_taken(bit_vector_rrr<>(), size, num_set_bits);
+
+            case bit_vector_adaptive::VectorCode::STAT_VECTOR:
+                return bv_space_taken_stat(size, num_set_bits);
+        }
     }
+
+    throw std::runtime_error("Error: unknown space taken for this bit_vector");
 }
 
 double BRWTOptimizer::pruning_delta(const BRWT &node) {

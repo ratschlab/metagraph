@@ -1065,14 +1065,14 @@ bit_vector_adaptive
 }
 
 bit_vector_adaptive::VectorCode
-bit_vector_adaptive::representation_tag(const bit_vector &vector) {
-    if (dynamic_cast<const bit_vector_sd*>(&vector)) {
+bit_vector_adaptive::representation_tag() const {
+    if (dynamic_cast<const bit_vector_sd*>(vector_.get())) {
         return VectorCode::SD_VECTOR;
 
-    } else if (dynamic_cast<const bit_vector_rrr<>*>(&vector)) {
+    } else if (dynamic_cast<const bit_vector_rrr<>*>(vector_.get())) {
         return VectorCode::RRR_VECTOR;
 
-    } else if (dynamic_cast<const bit_vector_stat*>(&vector)) {
+    } else if (dynamic_cast<const bit_vector_stat*>(vector_.get())) {
         return VectorCode::STAT_VECTOR;
 
     } else {
@@ -1098,7 +1098,7 @@ bool bit_vector_adaptive::load(std::istream &in) {
 }
 
 void bit_vector_adaptive::serialize(std::ostream &out) const {
-    serialize_number(out, representation_tag(*vector_));
+    serialize_number(out, representation_tag());
     vector_->serialize(out);
 }
 

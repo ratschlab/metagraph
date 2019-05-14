@@ -320,7 +320,7 @@ class bit_vector_adaptive : public bit_vector {
     typedef VectorCode (*DefineRepresentation)(uint64_t /* size */,
                                                uint64_t /* num_set_bits */);
 
-    static VectorCode representation_tag(const bit_vector &vector);
+    VectorCode representation_tag() const;
 
   protected:
     bit_vector_adaptive() {}
