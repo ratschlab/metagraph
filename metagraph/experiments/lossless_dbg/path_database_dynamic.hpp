@@ -102,6 +102,20 @@ public:
             }
         }
 #endif
+        //prepare hash maps
+        for (uint64_t node = 0; node <= graph.num_nodes(); node += 8) {
+            for (int i = node; i < node + 8 && i <= graph.num_nodes(); ++i) {
+                if (!i)
+                    continue;
+
+                if (node_is_split(i)) {
+                    routing_table.routing_table[i];
+                }
+                if (node_is_join(i)) {
+                    incoming_table.incoming_table[i];
+                }
+            }
+        }
 
         vector<path_id> encoded;
 
@@ -115,6 +129,7 @@ public:
 
         double join_time = 0;
         double split_time = 0;
+
 #ifdef USE_LOCKS
         vector<omp_lock_t> locks(graph.num_nodes()+1);
         for(int i=0;i<locks.size();i++) {
@@ -160,9 +175,9 @@ public:
             int relative_position = INT_MIN;
 #ifndef USE_LOCKS
             //#pragma omp critical
+            //{
 #endif
-            {
-                char prev_join = '\0';
+
                 for (const auto &[node, join_symbol, split_symbol] : bifurcations) {
 #ifdef USE_LOCKS
                     omp_set_lock(&locks[node]);
@@ -193,7 +208,10 @@ public:
 #endif
                 }
             }
-        }
+#ifndef USE_LOCKS
+        //}
+#endif
+
 #ifdef USE_LOCKS
         for(int i=0;i<locks.size();i++) {
             omp_destroy_lock(&locks[i]);
