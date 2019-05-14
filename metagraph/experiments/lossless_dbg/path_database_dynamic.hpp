@@ -47,7 +47,10 @@ public:
                  size_t k_kmer = 21 /* default kmer */) :
             PathDatabase<pair<node_index,int>,GraphT>(filenames, k_kmer),
             graph(*(this->graph_)),
-            incoming_table(*(this->graph_)), routing_table((new GraphPreprocessor(*(this->graph_)))->find_weak_splits()) {}
+            incoming_table(*(this->graph_)),
+            //routing_table((new GraphPreprocessor(*(this->graph_)))->find_weak_splits())
+            routing_table()
+            {}
 
     virtual ~PathDatabaseDynamic() {}
 
