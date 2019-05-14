@@ -21,6 +21,7 @@
 #include "unix_tools.hpp"
 #include "threading.hpp"
 
+#define USE_LOCKS
 
 // TODO: Never use 'using namespace std;' in .hpp files
 // todo find a tool that removes this relative namespacing issue
@@ -111,10 +112,12 @@ public:
 
         double join_time = 0;
         double split_time = 0;
+#ifdef USE_LOCKS
         vector<omp_lock_t> locks(graph.num_nodes()+1);
         for(int i=0;i<locks.size();i++) {
             omp_init_lock(&locks[i]);
         }
+#endif
 
         #pragma omp parallel for num_threads(get_num_threads())
         for (size_t batch_begin = 0; batch_begin < sequences.size(); batch_begin += batch_size) {
@@ -152,13 +155,15 @@ public:
             }
 
             int relative_position = INT_MIN;
-
-            #pragma omp critical
+#ifndef USE_LOCKS
+            //#pragma omp critical
+#endif
             {
                 char prev_join = '\0';
                 for (const auto &[node, join_symbol, split_symbol] : bifurcations) {
+#ifdef USE_LOCKS
                     omp_set_lock(&locks[node]);
-
+#endif
                     if (join_symbol) {
                         timer.reset();
                         if (join_symbol == '$') {
@@ -180,7 +185,9 @@ public:
                         }
                         split_time += timer.elapsed();
                     }
+#ifdef USE_LOCKS
                     omp_unset_lock(&locks[node]);
+#endif
                 }
             }
         }
