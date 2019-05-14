@@ -111,6 +111,10 @@ public:
 
         double join_time = 0;
         double split_time = 0;
+        vector<omp_lock_t> locks(graph.num_nodes()+1);
+        for(int i=0;i<locks.size();i++) {
+            omp_init_lock(&locks[i]);
+        }
 
         #pragma omp parallel for num_threads(get_num_threads())
         for (size_t batch_begin = 0; batch_begin < sequences.size(); batch_begin += batch_size) {
@@ -129,14 +133,14 @@ public:
 
                 // TODO: use map_to_nodes_sequentially when implemented
                 graph.map_to_nodes(sequence, [&](node_index node) {
-                    path_for_sequence[kmer_end] = routing_table.transform(node, path_for_sequence[kmer_end]);
+                    path_for_sequence[kmer_end+1] = routing_table.transform(node, path_for_sequence[kmer_end+1]);
                     char join_char = node_is_join(node)
-                                        ? (kmer_begin
-                                                ? sequence[kmer_begin-1] // -1 because it is not surrounded by dollars
-                                                : '$')
+                                        ? path_for_sequence[kmer_begin]
                                         : '\0';
                     char split_char = node_is_split(node)
-                                        ? path_for_sequence[kmer_end]
+                                        ? (kmer_end < sequence.size() ?
+                                        sequence[kmer_end] :
+                                        '$')
                                         : '\0';
 
                     if (join_char || split_char) {
@@ -147,12 +151,14 @@ public:
                 });
             }
 
-            int relative_position;
+            int relative_position = INT_MIN;
 
             #pragma omp critical
             {
                 char prev_join = '\0';
                 for (const auto &[node, join_symbol, split_symbol] : bifurcations) {
+                    omp_set_lock(&locks[node]);
+
                     if (join_symbol) {
                         timer.reset();
                         if (join_symbol == '$') {
@@ -174,6 +180,7 @@ public:
                         }
                         split_time += timer.elapsed();
                     }
+                    omp_unset_lock(&locks[node]);
                 }
             }
         }
@@ -248,7 +255,7 @@ public:
             assert(node);
             kmer_position++;
             sequence.append(1,encoded_base); // 1 times base
-            sequence_path.append(1,encoded_base); // 1 times base
+            sequence_path.append(1,base); // 1 times base
 
             if (node_is_join(node)) {
                 auto join_symbol = sequence_path[kmer_position-1];

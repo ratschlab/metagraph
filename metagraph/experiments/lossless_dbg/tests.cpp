@@ -182,6 +182,15 @@ TEST(PathDatabase,IncomingTable) {
     ASSERT_EQ(table.branch_size_rank(4,0),4);
 }
 
+TEST(PathDatabase,AlternativeRoute) {
+    vector<string> reads= {
+            "GAGCTCGGGACTTGAATAT",
+            "GAGCTCGAGACTTGAATAG"};
+    //check_compression_decompression<PathDatabaseWavelet<>>(reads,5);
+    check_compression_decompression<PathDatabaseDynamic<>>(reads,5);
+
+}
+
 TEST(PathDatabase,IdentityTestCompressedReads) {
     short_identity_test<PathDatabaseListBC>();
 }
@@ -228,14 +237,7 @@ TEST(GraphPreprocessor,WeakSplits) {
 
 }
 
-TEST(PathDatabase,AlternativeRoute) {
-    vector<string> reads= {
-            "GAGCTCGGGACTTGAATAT",
-            "GAGCTCGAGACTTGAATAG"};
-    //check_compression_decompression<PathDatabaseWavelet<>>(reads,5);
-    check_compression_decompression<PathDatabaseDynamic<>>(reads,5);
 
-}
 
 #if defined(__linux__) || false
 

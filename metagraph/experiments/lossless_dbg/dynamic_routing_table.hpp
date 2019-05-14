@@ -58,6 +58,7 @@ public:
     }
 
     void insert(node_index node, int position, char symbol) {
+        assert(position <= size(node));
         routing_table[node].insert(routing_table[node].begin() + position, symbol);
     }
 
