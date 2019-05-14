@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.13)
 #project(compression_naive_code)
 #
 set(CMAKE_CXX_STANDARD 17)
-set(ENCODER_VERSION 2)
+set(ENCODER_VERSION 3)
 set(PATH_ENCODER_CURRENT path_encoder_toolbox_v${ENCODER_VERSION})
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++ -lc++fs")
 #enable_testing()

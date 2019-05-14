@@ -8,6 +8,7 @@
 #include <tsl/hopscotch_map.h>
 #include "sequence_graph.hpp"
 
+using node_index = SequenceGraph::node_index;
 
 using transformations_t = tsl::hopscotch_map<node_index,pair<char,char>>;
 
