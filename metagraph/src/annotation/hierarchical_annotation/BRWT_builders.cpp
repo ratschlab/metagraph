@@ -4,6 +4,8 @@
 #include <omp.h>
 #include <progress_bar.hpp>
 
+#include "utils.hpp"
+
 
 BRWT
 BRWTBuilder::initialize(NodeBRWT&& node, bit_vector&& nonzero_rows) {
@@ -134,7 +136,8 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
         nodes[i].group_sizes = { 1 };
     }
 
-    ProgressBar progress_bar(columns.size() - 1, "Building BRWT");
+    ProgressBar progress_bar(columns.size() - 1, "Building BRWT",
+                             std::cerr, !utils::get_verbose());
 
     while (nodes.size() > 1) {
         auto groups = partitioner(columns);
@@ -156,7 +159,6 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
             parent_nodes[g] = std::move(parent.first);
             parent_columns[g] = std::move(parent.second);
 
-            #pragma omp critical
             progress_bar += group.size() - 1;
         }
 
@@ -183,7 +185,8 @@ void BRWTOptimizer::relax(BRWT *brwt_matrix,
             parents.push_front(const_cast<BRWT*>(&node));
     });
 
-    ProgressBar progress_bar(parents.size(), "Optimizing BRWT");
+    ProgressBar progress_bar(parents.size(), "Optimizing BRWT",
+                             std::cerr, !utils::get_verbose());
 
     while (!parents.empty()) {
         auto &parent = *parents.front();
@@ -216,7 +219,6 @@ void BRWTOptimizer::relax(BRWT *brwt_matrix,
         parent = BRWTBuilder::initialize(std::move(updated_parent),
                                          std::move(parent.nonzero_rows_));
 
-        #pragma omp critical
         ++progress_bar;
     }
 }

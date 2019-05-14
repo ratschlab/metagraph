@@ -216,6 +216,8 @@ Config::Config(int argc, const char *argv[]) {
         }
     }
 
+    utils::set_verbose(verbose);
+
     if (!fname.size() && identity != STATS
                       && identity != SERVER_QUERY
                       && !(identity == BUILD && complete)

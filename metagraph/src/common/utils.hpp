@@ -35,6 +35,9 @@ class BinaryMatrix;
 
 namespace utils {
 
+    bool get_verbose();
+    void set_verbose(bool verbose);
+
     bool ends_with(const std::string &str, const std::string &suffix);
 
     std::string remove_suffix(const std::string &str, const std::string &suffix);

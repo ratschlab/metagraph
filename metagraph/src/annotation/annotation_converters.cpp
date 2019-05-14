@@ -31,7 +31,7 @@ convert<RowFlatAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
     uint64_t num_rows = annotator.num_objects();
     uint64_t num_columns = annotator.num_labels();
 
-    ProgressBar progress_bar(num_rows, "Processing rows");
+    ProgressBar progress_bar(num_rows, "Processing rows", std::cerr, !utils::get_verbose());
 
     if (dynamic_cast<VectorRowBinMat*>(annotator.matrix_.get()))
         dynamic_cast<VectorRowBinMat&>(*annotator.matrix_).standardize_rows();
@@ -119,7 +119,7 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
     RowCompressed<Label>::stream_counts(filename, &num_rows, &num_relations);
 
     constexpr size_t num_passes = std::is_same<MatrixType, Rainbowfish>::value ? 2u : 1u;
-    ProgressBar progress_bar(num_rows*num_passes, "Processing rows");
+    ProgressBar progress_bar(num_rows * num_passes, "Processing rows", std::cerr, !utils::get_verbose());
 
     auto callback = [&](auto callback) {
         auto annotator = std::make_unique<typename RowCompressed<Label>::StreamRows>(filename);

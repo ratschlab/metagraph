@@ -19,6 +19,12 @@ std::size_t SmallVectorHash::operator()(const SmallVector &vector) const {
 
 namespace utils {
 
+static bool VERBOSE = false;
+
+bool get_verbose() { return VERBOSE; }
+void set_verbose(bool verbose) { VERBOSE = verbose; }
+
+
 bool ends_with(const std::string &str, const std::string &suffix) {
     auto actual_suffix = str.substr(
         std::max(0, static_cast<int>(str.size())
