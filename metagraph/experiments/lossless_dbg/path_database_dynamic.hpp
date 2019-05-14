@@ -117,7 +117,7 @@ public:
             }
         }
 
-        vector<path_id> encoded;
+        vector<path_id> encoded(sequences.size());
 
         vector<string> path_for_sequences(sequences.size());
 
@@ -138,99 +138,69 @@ public:
 #endif
 
         #pragma omp parallel for num_threads(get_num_threads())
-        for (size_t batch_begin = 0; batch_begin < sequences.size(); batch_begin += batch_size) {
-
+        for (size_t i = 0; i < sequences.size(); i++) {
             std::vector<std::tuple<node_index, char, char>> bifurcations;
 
-            for (size_t i = batch_begin;
-                            i < batch_begin + batch_size && i < sequences.size(); ++i) {
-                const auto &sequence = sequences[i];
-                auto& path_for_sequence = path_for_sequences[i];
-                path_for_sequence = "$" + sequence + "$"; //hopefully copy
+            const auto &sequence = sequences[i];
+            auto &path_for_sequence = path_for_sequences[i];
+            path_for_sequence = "$" + sequence + "$";
 
 
-                size_t kmer_begin = 0;
-                size_t kmer_end = graph.get_k();
+            size_t kmer_begin = 0;
+            size_t kmer_end = graph.get_k();
 
-                // TODO: use map_to_nodes_sequentially when implemented
-                graph.map_to_nodes(sequence, [&](node_index node) {
-                    path_for_sequence[kmer_end+1] = routing_table.transform(node, path_for_sequence[kmer_end+1]);
-                    char join_char = node_is_join(node)
-                                        ? path_for_sequence[kmer_begin]
-                                        : '\0';
-                    char split_char = node_is_split(node)
-                                        ? (kmer_end < sequence.size() ?
-                                        sequence[kmer_end] :
-                                        '$')
-                                        : '\0';
+            // TODO: use map_to_nodes_sequentially when implemented
+            graph.map_to_nodes(sequence, [&](node_index node) {
+                path_for_sequence[kmer_end + 1] = routing_table.transform(node, path_for_sequence[kmer_end + 1]);
+                char join_char = node_is_join(node)
+                                 ? path_for_sequence[kmer_begin]
+                                 : '\0';
+                char split_char = node_is_split(node)
+                                  ? (kmer_end < sequence.size() ?
+                                     sequence[kmer_end] :
+                                     '$')
+                                  : '\0';
 
-                    if (join_char || split_char) {
-                        bifurcations.emplace_back(node, join_char, split_char);
-                    }
-                    kmer_begin++;
-                    kmer_end++;
-                });
-            }
+                if (join_char || split_char) {
+                    bifurcations.emplace_back(node, join_char, split_char);
+                }
+                kmer_begin++;
+                kmer_end++;
+            });
 
             int relative_position = INT_MIN;
-#ifndef USE_LOCKS
-            //#pragma omp critical
-            //{
-#endif
-
-                for (const auto &[node, join_symbol, split_symbol] : bifurcations) {
+            for (const auto &[node, join_symbol, split_symbol] : bifurcations) {
 #ifdef USE_LOCKS
-                    omp_set_lock(&locks[node]);
+                omp_set_lock(&locks[node]);
 #endif
-                    if (join_symbol) {
-#ifndef USE_LOCKS
-                        timer.reset();
-#endif
-                        if (join_symbol == '$') {
-                            // always putting new read above all other reads
-                            relative_position = incoming_table.branch_size(node, '$');
-#ifndef USE_LOCKS
-                            encoded.emplace_back(node, relative_position);
-                            encoded_paths++;
-#endif
-                        }
-                        relative_position += incoming_table.branch_offset_and_increment(node, join_symbol);
-#ifndef USE_LOCKS
-                        join_time += timer.elapsed();
-#endif
+                if (join_symbol) {
+                    if (join_symbol == '$') {
+                        // always putting new read above all other reads
+                        relative_position = incoming_table.branch_size(node, '$');
+                        encoded[i] = {node, relative_position};
                     }
-
-                    if (split_symbol) {
-#ifndef USE_LOCKS
-                        timer.reset();
-#endif
-                        routing_table.insert(node, relative_position, split_symbol);
-                        relative_position = routing_table.new_relative_position(node, relative_position);
-                        if (split_symbol == '$') {
-                            //++progress_bar;
-                        }
-#ifndef USE_LOCKS
-                        split_time += timer.elapsed();
-#endif
-                    }
-#ifdef USE_LOCKS
-                    omp_unset_lock(&locks[node]);
-#endif
+                    relative_position += incoming_table.branch_offset_and_increment(node, join_symbol);
                 }
-            }
-#ifndef USE_LOCKS
-        //}
+
+                if (split_symbol) {
+                    routing_table.insert(node, relative_position, split_symbol);
+                    relative_position = routing_table.new_relative_position(node, relative_position);
+                    if (split_symbol == '$') {
+                        //++progress_bar;
+                    }
+                }
+#ifdef USE_LOCKS
+                omp_unset_lock(&locks[node]);
 #endif
+            }
+        }
 
 #ifdef USE_LOCKS
         for(int i=0;i<locks.size();i++) {
             omp_destroy_lock(&locks[i]);
         }
 #endif
-
-        std::cout << "\n\nJoin time: " << join_time << " sec"
-                  << "\nSplit time: " << split_time << " sec" << std::endl;
-
+        encoded_paths += encoded.size();
         return encoded;
     }
 
