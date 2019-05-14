@@ -6,6 +6,8 @@
 #define METAGRAPH_GRAPH_PREPROCESSOR_HPP
 
 #include <tsl/hopscotch_map.h>
+#include "sequence_graph.hpp"
+
 
 using transformations_t = tsl::hopscotch_map<node_index,pair<char,char>>;
 

@@ -1,3 +1,5 @@
+#include <utility>
+
 //
 // Created by Jan Studený on 2019-04-26.
 //
@@ -28,7 +30,7 @@ class DynamicRoutingTable {
 public:
     DynamicRoutingTable() = default;
 
-    explicit DynamicRoutingTable(transformations_t transformations) : transformations(transformations) {
+    explicit DynamicRoutingTable(transformations_t transformations) : transformations(std::move(transformations)) {
 
     }
     template<class Container>
