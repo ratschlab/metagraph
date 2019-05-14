@@ -48,8 +48,8 @@ public:
             PathDatabase<pair<node_index,int>,GraphT>(filenames, k_kmer),
             graph(*(this->graph_)),
             incoming_table(*(this->graph_)),
-            //routing_table((new GraphPreprocessor(*(this->graph_)))->find_weak_splits())
-            routing_table()
+            routing_table((new GraphPreprocessor(*(this->graph_)))->find_weak_splits())
+            //routing_table()
             {}
 
     virtual ~PathDatabaseDynamic() {}
@@ -119,8 +119,6 @@ public:
 
         vector<path_id> encoded(sequences.size());
 
-        vector<string> path_for_sequences(sequences.size());
-
         std::cout << "Finished preprocessing in " << timer.elapsed() << " sec" << std::endl;
         timer.reset();
         //ProgressBar progress_bar(sequences.size(), "Building dRT and dEM");
@@ -138,13 +136,13 @@ public:
         }
 #endif
 
-        #pragma omp parallel for num_threads(get_num_threads())
+        #pragma omp parallel for num_threads(get_num_threads()) default(none)
         for (size_t i = 0; i < sequences.size(); i++) {
             std::vector<std::tuple<node_index, char, char>> bifurcations;
 
             const auto &sequence = sequences[i];
-            auto &path_for_sequence = path_for_sequences[i];
-            path_for_sequence = "$" + sequence + "$";
+            //auto &path_for_sequence = path_for_sequences[i];
+            auto path_for_sequence = "$"s + sequence + "$"s;
 
 
             size_t kmer_begin = 0;
