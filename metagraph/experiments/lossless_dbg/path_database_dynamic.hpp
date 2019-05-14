@@ -191,6 +191,11 @@ public:
                 }
             }
         }
+#ifdef USE_LOCKS
+        for(int i=0;i<locks.size();i++) {
+            omp_destroy_lock(&locks[i]);
+        }
+#endif
 
         std::cout << "\n\nJoin time: " << join_time << " sec"
                   << "\nSplit time: " << split_time << " sec" << std::endl;
