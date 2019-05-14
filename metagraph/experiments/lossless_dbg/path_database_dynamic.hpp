@@ -122,6 +122,7 @@ public:
         vector<string> path_for_sequences(sequences.size());
 
         std::cout << "Finished preprocessing in " << timer.elapsed() << " sec" << std::endl;
+        timer.reset();
         //ProgressBar progress_bar(sequences.size(), "Building dRT and dEM");
 
         const size_t batch_size = std::max(static_cast<size_t>(1),
@@ -201,6 +202,8 @@ public:
         }
 #endif
         encoded_paths += encoded.size();
+        std::cout << "Finished routing in " << timer.elapsed() << " sec" << std::endl;
+
         return encoded;
     }
 
