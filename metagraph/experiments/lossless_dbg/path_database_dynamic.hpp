@@ -48,8 +48,8 @@ public:
             PathDatabase<pair<node_index,int>,GraphT>(filenames, k_kmer),
             graph(*(this->graph_)),
             incoming_table(*(this->graph_)),
-            routing_table((new GraphPreprocessor(*(this->graph_)))->find_weak_splits())
-            //routing_table()
+            //routing_table((new GraphPreprocessor(*(this->graph_)))->find_weak_splits())
+            routing_table()
             {}
 
     virtual ~PathDatabaseDynamic() {}
@@ -179,7 +179,9 @@ public:
                         encoded[i] = {node, relative_position};
                     }
                     assert(relative_position>=0);
+                    assert(relative_position <= incoming_table.branch_size(node,join_symbol));
                     relative_position += incoming_table.branch_offset_and_increment(node, join_symbol);
+
                 }
                 if (split_symbol) {
                     assert(relative_position>=0);
