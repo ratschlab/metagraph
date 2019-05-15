@@ -329,19 +329,15 @@ double bv_space_taken_rrr(uint64_t size,
                           uint64_t num_set_bits,
                           uint8_t block_size) {
     return logbinomial(size, num_set_bits)
-            + std::ceil(log2(block_size + 1) / block_size) * size
+            + (size + block_size - 1) / block_size * std::ceil(log2(block_size + 1))
             + sizeof(bit_vector_rrr<>) * 8;
 }
 
 double bv_space_taken_sd(uint64_t size,
                          uint64_t num_set_bits) {
+    num_set_bits = std::min(num_set_bits, size - num_set_bits);
     return std::ceil(log2(size + 1) - log2(num_set_bits + 1) + 3) * num_set_bits
             + sizeof(bit_vector_sd) * 8;
-}
-
-double bv_space_taken_stat(uint64_t size,
-                           uint64_t /*num_set_bits*/) {
-    return size + sizeof(bit_vector_stat) * 8;
 }
 
 double bv_space_taken(const bit_vector &type,
@@ -367,18 +363,13 @@ double bv_space_taken(const bit_vector &type,
     } else if (dynamic_cast<const bit_vector_rrr<255> *>(&type)) {
         return bv_space_taken_rrr(size, num_set_bits, 255);
 
-    } else if (dynamic_cast<const bit_vector_adaptive *>(&type)) {
+    } else if (dynamic_cast<const bit_vector_small *>(&type)) {
+        return std::min(bv_space_taken_sd(size, num_set_bits),
+                        bv_space_taken(bit_vector_rrr<>(), size, num_set_bits));
 
-        switch (dynamic_cast<const bit_vector_adaptive &>(type).representation_tag()) {
-            case bit_vector_adaptive::VectorCode::SD_VECTOR:
-                return bv_space_taken_sd(size, num_set_bits);
-
-            case bit_vector_adaptive::VectorCode::RRR_VECTOR:
-                return bv_space_taken(bit_vector_rrr<>(), size, num_set_bits);
-
-            case bit_vector_adaptive::VectorCode::STAT_VECTOR:
-                return bv_space_taken_stat(size, num_set_bits);
-        }
+    } else if (dynamic_cast<const bit_vector_smart *>(&type)) {
+        return std::min(bv_space_taken_sd(size, num_set_bits),
+                        bv_space_taken(bit_vector_stat(), size, num_set_bits));
     }
 
     throw std::runtime_error("Error: unknown space taken for this bit_vector");
