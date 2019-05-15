@@ -232,6 +232,34 @@ TEST(DBGHashString, IncomingAdjacent) {
     }
 }
 
+TEST(DBGHashString, extend_from_seed) {
+    for (size_t k = 2; k < 11; ++k) {
+        DBGHashString graph(k);
+        std::string sequence = "AGCTTCGAAGGCCTT";
+        graph.add_sequence(sequence);
+
+        size_t node_counter = 0;
+        DBGHashString::node_index cur_node = 0;
+        bool termination_condition = true;
+        while (node_counter < sequence.size() - k + 1) {
+            graph.extend_from_seed(std::begin(sequence) + node_counter,
+                 std::end(sequence),
+                 [&](DBGHashString::node_index node) {
+                    ++ node_counter;
+                    cur_node = node;
+                    }, [&]() {
+                        return (node_counter == k/2 && termination_condition); },
+                 cur_node);
+            termination_condition = !termination_condition;
+        }
+        DBGHashString::node_index last_node = graph.kmer_to_node(sequence.substr(sequence.size() - k));
+
+        EXPECT_FALSE(last_node == 0);
+        EXPECT_EQ(last_node, cur_node);
+        EXPECT_EQ(sequence.size() - k + 1, node_counter);
+    }
+}
+
 TEST(DBGHashString, Serialize) {
     {
         DBGHashString graph(20);

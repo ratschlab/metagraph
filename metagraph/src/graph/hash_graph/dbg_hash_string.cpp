@@ -54,6 +54,44 @@ void DBGHashString::map_to_nodes_sequentially(std::string::const_iterator begin,
     }
 }
 
+void DBGHashString::extend_from_seed(std::string::const_iterator begin,
+                                           std::string::const_iterator end,
+                                           const std::function<void(node_index)> &callback,
+                                           const std::function<bool()> &terminate,
+                                           node_index seed) const {
+    auto it = begin;
+    if (it + k_ > end)
+        return;
+    if (seed == npos) {
+        seed = kmer_to_node(std::string(it, it + k_));
+        if (seed == npos || terminate())
+            return;
+        callback(seed);
+        it ++;
+    }
+    // If the seed includes some mis-alignments, return.
+    else if (node_to_kmer(seed).substr(1) != std::string(it, it + k_ - 1)) {
+        return;
+    }
+    while (it + k_ <= end) {
+        auto node = kmer_to_node(std::string(it, it + k_));
+        if (node == npos || terminate())
+            return;
+        callback(node);
+        it ++;
+    }
+}
+
+void DBGHashString::call_outgoing_kmers(node_index node, const OutgoingEdgeCallback &callback) const {
+    assert(node);
+    auto prefix = node_to_kmer(node).substr(1);
+    for (char c : seq_encoder_.alphabet) {
+        auto next = kmer_to_node(prefix + c);
+        if (next != npos)
+            callback(next, c);
+    }
+}
+
 DBGHashString::node_index DBGHashString::traverse(node_index node, char next_char) const {
     assert(node);
     auto kmer = node_to_kmer(node).substr(1) + next_char;

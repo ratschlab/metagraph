@@ -42,7 +42,7 @@ class Path {
     void set_query_it(std::string::const_iterator query_it) {
         query_it_ = query_it; }
     void set_cigar(const std::string& cigar) { cigar_ = cigar; }
-    void set_similar(const bool is_similar) { is_similar_ = is_similar; }
+    void set_similar() { is_similar_ = true; }
 
     NodeType back() const { return nodes_.back(); }
     NodeType last_parent() const { return nodes_.at(nodes_.size() - 1); }

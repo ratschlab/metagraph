@@ -44,13 +44,12 @@ class DBGHashOrdered : public DeBruijnGraph {
     // If seed is npos, perform seeding automatically.
     // Extend until the termination condition is satisfied or reached the end of the query.
     // In canonical mode, non-canonical k-mers are not mapped to canonical ones
-    virtual void extend_from_seed(std::string::const_iterator,
-                                           std::string::const_iterator,
-                                           const std::function<void(node_index)>&,
-                                           const std::function<bool()>&,
-                                           node_index) const {
-        // TODO: Complete extend_from_seed for DBGHashOrdered.
-        throw std::runtime_error("Not implemented");
+    void extend_from_seed(std::string::const_iterator begin,
+                                           std::string::const_iterator end,
+                                           const std::function<void(node_index)> &callback,
+                                           const std::function<bool()> &terminate = [](){ return false; },
+                                           node_index seed = 0) const {
+        hash_dbg_->extend_from_seed(begin, end, callback, terminate, seed);
     }
 
     void call_outgoing_kmers(node_index node,

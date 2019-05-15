@@ -2097,7 +2097,7 @@ int main(int argc, const char *argv[]) {
             assert(config->infbase.size());
             // load graph
             auto graph = load_critical_dbg(config->infbase);
-            DBGSuccinct* dbg_succinct_graph = dynamic_cast<DBGSuccinct*>(graph.get());
+            DBGHashOrdered* dbg_succinct_graph = dynamic_cast<DBGHashOrdered*>(graph.get());
             if (dbg_succinct_graph == nullptr) {
                 std::cout << "Cannot cast to DBGSuccinct for alignment task." << std::endl;
                 return 0;
