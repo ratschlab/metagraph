@@ -4,14 +4,18 @@
 
 #include "boss.hpp"
 #include "dbg_succinct.hpp"
+#include "dbg_hash_string.hpp"
+#include "dbg_hash_ordered.hpp"
 #include "annotate_column_compressed.hpp"
+
+typedef DBGHashOrdered Graph;
 
 TEST(dbg_aligner, align_sequence_too_short) {
     size_t k = 4;
     std::string reference = "CATTT";
     std::string query =     "CAT";
 
-    DBGSuccinct* graph = new DBGSuccinct(k);
+    Graph* graph = new Graph(k);
     graph->add_sequence(reference);
     DBGAligner aligner(graph);
     auto path = aligner.align(query);
@@ -24,7 +28,7 @@ TEST(dbg_aligner, align_single_node) {
     std::string reference = "CAT";
     std::string query =     "CAT";
 
-    DBGSuccinct* graph = new DBGSuccinct(k);
+    Graph* graph = new Graph(k);
     graph->add_sequence(reference);
     DBGAligner aligner(graph);
     auto path = aligner.align(query);
@@ -39,7 +43,7 @@ TEST(dbg_aligner, inexact_seeding) {
     std::string reference = "CATTGTTTT";
     std::string query =     "CCCCTGTTTT";
 
-    DBGSuccinct* graph = new DBGSuccinct(k);
+    Graph* graph = new Graph(k);
     graph->add_sequence(reference);
     DBGAligner aligner (graph);
     auto path = aligner.align(query);
@@ -55,7 +59,7 @@ TEST(dbg_aligner, align_straight) {
     // Query is the same as the reference.
     std::string query =     "AGCTTCGAGGCCAA";
 
-    DBGSuccinct* graph = new DBGSuccinct(k);
+    Graph* graph = new Graph(k);
     graph->add_sequence(reference);
     DBGAligner aligner(graph);
     auto path = aligner.align(query);
@@ -73,7 +77,7 @@ TEST(dbg_aligner, align_ending_branch) {
     // Query is the same as the second reference.
     std::string query =       "AGCTTCGAC";
 
-    DBGSuccinct* graph = new DBGSuccinct(k);
+    Graph* graph = new Graph(k);
     graph->add_sequence(reference_1);
     graph->add_sequence(reference_2);
     DBGAligner aligner(graph);
@@ -91,7 +95,7 @@ TEST(dbg_aligner, align_branch) {
     // Query is the same as the second reference.
     std::string query =       "AGCTTCGACGATTTGTT";
 
-    DBGSuccinct* graph = new DBGSuccinct(k);
+    Graph* graph = new Graph(k);
     graph->add_sequence(reference_1);
     graph->add_sequence(reference_2);
     DBGAligner aligner(graph);
@@ -107,7 +111,7 @@ TEST(dbg_aligner, repetitive_sequence_alignment) {
     std::string reference = "AGGGGGGGGGAAAAGGGGGGG";
     std::string query =       "AGGGGG";
 
-    DBGSuccinct* graph = new DBGSuccinct(k);
+    Graph* graph = new Graph(k);
     graph->add_sequence(reference);
     DBGAligner aligner(graph);
     auto path = aligner.align(query);
@@ -122,7 +126,7 @@ TEST(dbg_aligner, variation) {
     std::string reference = "AGCAACTCGAAA";
     std::string query =     "AGCAATTCGAAA";
 
-    DBGSuccinct* graph = new DBGSuccinct(k);
+    Graph* graph = new Graph(k);
     graph->add_sequence(reference);
     DBGAligner aligner(graph);
     auto path = aligner.align(query);
@@ -138,7 +142,7 @@ TEST(dbg_aligner, variation_in_branching_point) {
     std::string reference_2 = "TTAAGCAAGTCGAAA";
     std::string query =       "TTAAGCAATGGGAAA";
 
-    DBGSuccinct* graph = new DBGSuccinct(k);
+    Graph* graph = new Graph(k);
     graph->add_sequence(reference_1);
     graph->add_sequence(reference_2);
     DBGAligner aligner(graph);
@@ -158,7 +162,7 @@ TEST(dbg_aligner, multiple_variations) {
     std::string reference = "ACGCAACTCTCTGAAC";
     std::string query =     "ACGCAATTCTCTGTAT";
 
-    DBGSuccinct* graph = new DBGSuccinct(k);
+    Graph* graph = new Graph(k);
     graph->add_sequence(reference);
     DBGAligner aligner(graph);
     auto path = aligner.align(query);
@@ -174,7 +178,7 @@ TEST(dbg_aligner, noise_in_branching_point) {
     std::string reference_2 = "AAAATTGGGGG";
     std::string query =       "AAAATTTTTTT";
 
-    DBGSuccinct* graph = new DBGSuccinct(k);
+    Graph* graph = new Graph(k);
     graph->add_sequence(reference_1);
     graph->add_sequence(reference_2);
     DBGAligner aligner(graph);
@@ -204,7 +208,7 @@ TEST(dbg_aligner, large_search_space) {
     for (size_t i = 0; i < unmapped_char_length; i++) {
         query += 'C';
     }
-    DBGSuccinct* graph = new DBGSuccinct(k);
+    Graph* graph = new Graph(k);
     graph->add_sequence(reference);
     DBGAligner aligner (graph);
     auto path = aligner.align(query);
@@ -228,7 +232,7 @@ TEST(dbg_aligner, large_gap) {
     query +=                "CCCCCCCCCC";
     query +=                "CGCGCGCGCG";
 
-    DBGSuccinct* graph = new DBGSuccinct(k);
+    Graph* graph = new Graph(k);
     graph->add_sequence(reference);
     DBGAligner aligner(graph);
     auto path = aligner.align(query);

@@ -180,7 +180,7 @@ void DBGAligner::exact_map(AlignedPath &path, const std::string &sequence,
         }
         else {
             merged_paths_counter_ ++;
-            path.set_similar(true);
+            path.set_similar();
         }},
             [&]() { return (path.get_similar() ||
                         (path.size() > 0 &&
@@ -228,7 +228,7 @@ void DBGAligner::inexact_map(AlignedPath& path,
         }
         else {
             merged_paths_counter_ ++;
-            path.set_similar(true);
+            path.set_similar();
         }
         });
 }
