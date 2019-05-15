@@ -2388,7 +2388,7 @@ TEST(BOSS, EraseEdgesDynSingle) {
         graph2.add_sequence("ACTAGTCAG", true);
         if (true) {
             if (graph2.num_edges() > 2) {
-            for(uint64_t m = 4; m <= graph2.num_edges() - 2; ++m) {
+            for(uint64_t m = 1; m <= graph2.num_edges() - 2; ++m) {
                 //if(m==25 && k==4) {
                 BOSS graph(k);
                 graph.add_sequence("AGACACAGT", true);
