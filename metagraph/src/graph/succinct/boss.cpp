@@ -1498,7 +1498,16 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
             std::for_each(new_ids_vec.begin(), new_ids_vec.end(), [&](auto id){
                 existing_edges.insert_bit(id, false);
                 cant_delete.insert_bit(id, true);
-                existing_nodes.insert_bit(get_source_node(id), !get_last(id) || !get_last(id - 1));
+
+                bool new_node = get_last(id);
+                edge_index other = id - 1;
+                while (new_node && other > 0 && !get_last(other)) {
+                    if (std::find(new_ids_vec.begin(), new_ids_vec.end(), other) == new_ids_vec.end())
+                        new_node = false;
+                    other--;
+                }
+                if (new_node)
+                    existing_nodes.insert_bit(get_source_node(id), false);
             });
             cant_delete.set(pred_W(source, kmer[i + k_ + 1]), true);
         }
@@ -1506,7 +1515,7 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
 
     for (edge_index edge : edges) {
         assert(edge >= shift);
-        uint64_t edge_id = existing_edges.select1(edge + 1) - shift;
+        uint64_t edge_id = existing_edges.select1(edge + 1 - shift);
 
         if (cant_delete[edge_id])
             continue;
@@ -1527,7 +1536,7 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
         }
 
         node_index node = get_source_node(edge_id);
-        node_index old_node_id = existing_nodes.rank1(node) - 1;
+        node_index old_node_id = existing_nodes.rank1(node - 1);
         if (new_tail_nodes.find(old_node_id) != new_tail_nodes.end()) {
             W_->set(edge_id, kSentinelCode);
             // allow delete other edges for this node
@@ -1543,12 +1552,13 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
                               && !get_last(edge_id - 1)) {
             last_->delete_bit(edge_id - 1);
         } else {
+            if (get_last(edge_id))
+                existing_nodes.delete_bit(node);
             last_->delete_bit(edge_id);
         }
         shift++;
         existing_edges.delete_bit(edge_id);
         cant_delete.delete_bit(edge_id);
-        existing_nodes.delete_bit(node);
     }
 }
 
