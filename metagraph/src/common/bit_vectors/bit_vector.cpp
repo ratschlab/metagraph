@@ -1,13 +1,15 @@
 #include "bit_vector.hpp"
 
+#include <cmath>
+#include <type_traits>
 #include <cassert>
 #include <libmaus2/bitio/putBit.hpp>
 
 #include "serialization.hpp"
 
-const double SD_SMALLER_THAN_RRR_MAX_DENSITY = 0.035;
-const double SD_SMALLER_THAN_STAT_MAX_DENSITY = 0.20;
-const double STAT_SMALLER_THAN_SD_MAX_DENSITY = 0.74;
+const double STAT_BITS_PER_BIT_IF_SPARSE = 1.07;
+// TODO: why is this so large? Check the sdsl implementation
+const double STAT_BITS_PER_BIT_IF_DENSE = 1.51;
 
 // TODO: run benchmarks and optimize these parameters
 const size_t MAX_ITER_BIT_VECTOR_STAT = 1000;
@@ -1192,13 +1194,10 @@ bit_vector_adaptive::VectorCode
 smallest_representation(uint64_t size, uint64_t num_set_bits) {
     assert(num_set_bits <= size);
 
-    // TODO: entropy estimate
-    if (num_set_bits < SD_SMALLER_THAN_RRR_MAX_DENSITY * size
-            || num_set_bits > (1 - SD_SMALLER_THAN_RRR_MAX_DENSITY) * size) {
-        return bit_vector_adaptive::VectorCode::SD_VECTOR;
-    } else {
-        return bit_vector_adaptive::VectorCode::RRR_VECTOR;
-    }
+    return predict_size<bit_vector_sd>(size, num_set_bits)
+            < predict_size<bit_vector_rrr<>>(size, num_set_bits)
+                  ? bit_vector_adaptive::VectorCode::SD_VECTOR
+                  : bit_vector_adaptive::VectorCode::RRR_VECTOR;
 }
 
 ////////////////////////////////////////////////
@@ -1209,10 +1208,91 @@ bit_vector_adaptive::VectorCode
 smart_representation(uint64_t size, uint64_t num_set_bits) {
     assert(num_set_bits <= size);
 
-    if (num_set_bits < SD_SMALLER_THAN_STAT_MAX_DENSITY * size
-            || num_set_bits > STAT_SMALLER_THAN_SD_MAX_DENSITY * size) {
-        return bit_vector_adaptive::VectorCode::SD_VECTOR;
-    } else {
-        return bit_vector_adaptive::VectorCode::STAT_VECTOR;
-    }
+    return predict_size<bit_vector_sd>(size, num_set_bits)
+            < predict_size<bit_vector_stat>(size, num_set_bits)
+                  ? bit_vector_adaptive::VectorCode::SD_VECTOR
+                  : bit_vector_adaptive::VectorCode::STAT_VECTOR;
 }
+
+
+double logbinomial(uint64_t n, uint64_t m) {
+    return (lgamma(n + 1)
+                - lgamma(m + 1)
+                - lgamma(n - m + 1)) / log(2);
+}
+
+double entropy(double q) {
+    assert(q >= 0);
+    assert(q <= 1);
+
+    if (q == 0 || q == 1)
+        return 0;
+
+    return q * log2(q) + (1 - q) * log2(1 - q);
+}
+
+// TODO: write unit tests for these. Check if approximately equals to the serialized dumps
+uint64_t bv_space_taken_rrr(uint64_t size, uint64_t num_set_bits, uint8_t block_size) {
+    return std::ceil(logbinomial(size, num_set_bits))
+            + (size + block_size - 1) / block_size * std::ceil(log2(block_size + 1));
+}
+
+uint64_t bv_space_taken_sd(uint64_t size, uint64_t num_set_bits) {
+    num_set_bits = std::min(num_set_bits, size - num_set_bits);
+    return std::ceil((log2(size + 1) - log2(num_set_bits + 1) + 3) * num_set_bits);
+}
+
+uint64_t bv_space_taken_stat(uint64_t size, uint64_t num_set_bits) {
+    return STAT_BITS_PER_BIT_IF_SPARSE * size
+            + (STAT_BITS_PER_BIT_IF_DENSE - STAT_BITS_PER_BIT_IF_SPARSE) * num_set_bits;
+}
+
+template <class VectorType>
+uint64_t predict_size(uint64_t size, uint64_t num_set_bits) {
+    assert(size >= num_set_bits);
+
+    if constexpr(std::is_base_of<bit_vector_stat, VectorType>::value)
+        return bv_space_taken_stat(size, num_set_bits);
+
+    if constexpr(std::is_base_of<bit_vector_sd, VectorType>::value)
+        return bv_space_taken_sd(size, num_set_bits);
+
+    if constexpr(std::is_base_of<bit_vector_rrr<15>, VectorType>::value)
+        return bv_space_taken_rrr(size, num_set_bits, 15);
+
+    if constexpr(std::is_base_of<bit_vector_rrr<31>, VectorType>::value)
+        return bv_space_taken_rrr(size, num_set_bits, 31);
+
+    if constexpr(std::is_base_of<bit_vector_rrr<63>, VectorType>::value)
+        return bv_space_taken_rrr(size, num_set_bits, 63);
+
+    if constexpr(std::is_base_of<bit_vector_rrr<127>, VectorType>::value)
+        return bv_space_taken_rrr(size, num_set_bits, 127);
+
+    if constexpr(std::is_base_of<bit_vector_rrr<255>, VectorType>::value)
+        return bv_space_taken_rrr(size, num_set_bits, 255);
+
+    if constexpr(std::is_base_of<bit_vector_small, VectorType>::value)
+        return std::min(bv_space_taken_sd(size, num_set_bits),
+                        predict_size<bit_vector_rrr<>>(size, num_set_bits));
+
+    if constexpr(std::is_base_of<bit_vector_smart, VectorType>::value)
+        return std::min(bv_space_taken_sd(size, num_set_bits),
+                        predict_size<bit_vector_stat>(size, num_set_bits));
+
+    throw std::runtime_error(std::string("Error: unknown space taken for this bit_vector")
+                                 + typeid(VectorType).name());
+}
+
+// template uint64_t predict_size<bit_vector_dyn>(uint64_t, uint64_t);
+template uint64_t predict_size<bit_vector_stat>(uint64_t, uint64_t);
+template uint64_t predict_size<bit_vector_sd>(uint64_t, uint64_t);
+// template uint64_t predict_size<bit_vector_rrr<3>>(uint64_t, uint64_t);
+// template uint64_t predict_size<bit_vector_rrr<8>>(uint64_t, uint64_t);
+template uint64_t predict_size<bit_vector_rrr<15>>(uint64_t, uint64_t);
+template uint64_t predict_size<bit_vector_rrr<31>>(uint64_t, uint64_t);
+template uint64_t predict_size<bit_vector_rrr<63>>(uint64_t, uint64_t);
+template uint64_t predict_size<bit_vector_rrr<127>>(uint64_t, uint64_t);
+template uint64_t predict_size<bit_vector_rrr<255>>(uint64_t, uint64_t);
+template uint64_t predict_size<bit_vector_small>(uint64_t, uint64_t);
+template uint64_t predict_size<bit_vector_smart>(uint64_t, uint64_t);

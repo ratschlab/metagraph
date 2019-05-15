@@ -385,4 +385,11 @@ smart_representation(uint64_t size, uint64_t num_set_bits);
 
 typedef bit_vector_adaptive_stat<smart_representation> bit_vector_smart;
 
+/**
+ * Predict space taken by the vector with given parameters
+ * In bits.
+ */
+template <class BitVector>
+uint64_t predict_size(uint64_t size, uint64_t num_set_bits);
+
 #endif // __BIT_VECTOR_HPP__

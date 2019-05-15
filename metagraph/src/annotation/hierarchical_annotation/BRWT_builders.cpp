@@ -1,6 +1,5 @@
 #include "BRWT_builders.hpp"
 
-#include <cmath>
 #include <omp.h>
 #include <progress_bar.hpp>
 
@@ -309,72 +308,6 @@ void BRWTOptimizer::reassign(std::unique_ptr<BRWT>&& node,
     }
 }
 
-double logbinomial(uint64_t n, uint64_t m) {
-    return (lgamma(n + 1)
-                - lgamma(m + 1)
-                - lgamma(n - m + 1)) / log(2);
-}
-
-double entropy(double q) {
-    assert(q >= 0);
-    assert(q <= 1);
-
-    if (q == 0 || q == 1)
-        return 0;
-
-    return q * log2(q) + (1 - q) * log2(1 - q);
-}
-
-double bv_space_taken_rrr(uint64_t size,
-                          uint64_t num_set_bits,
-                          uint8_t block_size) {
-    return logbinomial(size, num_set_bits)
-            + (size + block_size - 1) / block_size * std::ceil(log2(block_size + 1))
-            + sizeof(bit_vector_rrr<>) * 8;
-}
-
-double bv_space_taken_sd(uint64_t size,
-                         uint64_t num_set_bits) {
-    num_set_bits = std::min(num_set_bits, size - num_set_bits);
-    return std::ceil(log2(size + 1) - log2(num_set_bits + 1) + 3) * num_set_bits
-            + sizeof(bit_vector_sd) * 8;
-}
-
-double bv_space_taken(const bit_vector &type,
-                      uint64_t size,
-                      uint64_t num_set_bits) {
-    assert(size >= num_set_bits);
-
-    if (dynamic_cast<const bit_vector_stat *>(&type)) {
-        return size + sizeof(bit_vector_stat) * 8;
-
-    } else if (dynamic_cast<const bit_vector_rrr<15> *>(&type)) {
-        return bv_space_taken_rrr(size, num_set_bits, 15);
-
-    } else if (dynamic_cast<const bit_vector_rrr<31> *>(&type)) {
-        return bv_space_taken_rrr(size, num_set_bits, 31);
-
-    } else if (dynamic_cast<const bit_vector_rrr<63> *>(&type)) {
-        return bv_space_taken_rrr(size, num_set_bits, 63);
-
-    } else if (dynamic_cast<const bit_vector_rrr<127> *>(&type)) {
-        return bv_space_taken_rrr(size, num_set_bits, 127);
-
-    } else if (dynamic_cast<const bit_vector_rrr<255> *>(&type)) {
-        return bv_space_taken_rrr(size, num_set_bits, 255);
-
-    } else if (dynamic_cast<const bit_vector_small *>(&type)) {
-        return std::min(bv_space_taken_sd(size, num_set_bits),
-                        bv_space_taken(bit_vector_rrr<>(), size, num_set_bits));
-
-    } else if (dynamic_cast<const bit_vector_smart *>(&type)) {
-        return std::min(bv_space_taken_sd(size, num_set_bits),
-                        bv_space_taken(bit_vector_stat(), size, num_set_bits));
-    }
-
-    throw std::runtime_error("Error: unknown space taken for this bit_vector");
-}
-
 double BRWTOptimizer::pruning_delta(const BRWT &node) {
     assert(node.child_nodes_.size());
 
@@ -388,20 +321,20 @@ double BRWTOptimizer::pruning_delta(const BRWT &node) {
         assert(brwt_child->nonzero_rows_.size() <= node.num_rows());
 
         // updated vector
-        delta += bv_space_taken(brwt_child->nonzero_rows_,
-                                node.num_rows(),
-                                brwt_child->nonzero_rows_.num_set_bits());
+        delta += predict_size<decltype(brwt_child->nonzero_rows_)>(
+                        node.num_rows(),
+                        brwt_child->nonzero_rows_.num_set_bits());
 
         // old index vector
-        delta -= bv_space_taken(brwt_child->nonzero_rows_,
-                                brwt_child->nonzero_rows_.size(),
-                                brwt_child->nonzero_rows_.num_set_bits());
+        delta -= predict_size<decltype(brwt_child->nonzero_rows_)>(
+                        brwt_child->nonzero_rows_.size(),
+                        brwt_child->nonzero_rows_.num_set_bits());
     }
 
     // removed index vector
-    delta -= bv_space_taken(node.nonzero_rows_,
-                            node.nonzero_rows_.size(),
-                            node.nonzero_rows_.num_set_bits());
+    delta -= predict_size<decltype(node.nonzero_rows_)>(
+                    node.nonzero_rows_.size(),
+                    node.nonzero_rows_.num_set_bits());
 
     return delta;
 }
