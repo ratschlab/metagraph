@@ -178,10 +178,11 @@ public:
                         relative_position = incoming_table.branch_size(node, '$');
                         encoded[i] = {node, relative_position};
                     }
+                    assert(relative_position>=0);
                     relative_position += incoming_table.branch_offset_and_increment(node, join_symbol);
                 }
-
                 if (split_symbol) {
+                    assert(relative_position>=0);
                     routing_table.insert(node, relative_position, split_symbol);
                     relative_position = routing_table.new_relative_position(node, relative_position);
                     if (split_symbol == '$') {
