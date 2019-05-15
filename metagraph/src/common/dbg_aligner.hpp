@@ -50,9 +50,10 @@ class DBGAligner : public AnnotatedDBG {
     DBGAligner& operator= (DBGAligner&&) = default;
 
     // Align a sequence to the underlying graph based on the strategy defined in the graph.
-    std::vector<AlignedPath> align(const std::string &sequence) const;
+    std::vector<AlignedPath> align(const std::string &sequence);
 
     float get_match_score() const { return match_score_; }
+    long long get_num_merge_paths() const { return merged_paths_counter_; }
 
   private:
     // Substitution score for each pair of nucleotides.
@@ -66,16 +67,18 @@ class DBGAligner : public AnnotatedDBG {
     float insertion_penalty_;
     float deletion_penalty_;
     StripedSmithWaterman::Aligner cssw_aligner_;
+    long long merged_paths_counter_;
+    size_t k_;
 
     // Align part of a sequence to the graph in the case of no exact map
     // based on internal strategy. Calls callback for every possible alternative path.
     void inexact_map(AlignedPath &path, BoundedPriorityQueue<AlignedPath> &queue,
-                     std::map<DPAlignmentKey, DPAlignmentValue> &dp_alignment,
-                     const std::string &sequence) const;
+                     std::map<DPAlignmentKey, DPAlignmentValue> &dp_alignment);
 
     // Align the path to the graph based on the query until either exact alignment is not
     // possible or there exists a branching point in the graph.
-    void exact_map(AlignedPath &path, const std::string &sequence) const;
+    void exact_map(AlignedPath &path, const std::string &sequence,
+                   std::map<DPAlignmentKey, DPAlignmentValue> &dp_alignment);
 
     // Return the score of substitution. If not in sub_score_ return a fixed maximized score value.
     float single_char_score(char char_in_query, char char_in_graph) const;

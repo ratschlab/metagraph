@@ -952,7 +952,7 @@ void BOSS::extend_from_seed(std::string::const_iterator begin,
         std::string seed_str(begin, begin + k_ + 1);
         auto encoded_seed = encode(seed_str);
         edge = map_to_edge(&encoded_seed[0], &encoded_seed[k_ + 1]);
-        if (terminate() || !edge)
+        if (!edge || terminate())
             return;
         callback(edge);
         begin ++;
@@ -960,7 +960,7 @@ void BOSS::extend_from_seed(std::string::const_iterator begin,
     while (begin + k_ != end) {
         edge = fwd(edge);
         edge = pick_edge(edge, get_source_node(edge), encode(*(begin + k_)));
-        if (terminate() || !edge)
+        if (!edge || terminate())
             return;
         callback(edge);
         begin ++;

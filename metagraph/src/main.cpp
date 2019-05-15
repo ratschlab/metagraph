@@ -2148,6 +2148,7 @@ int main(int argc, const char *argv[]) {
                                         config->unreliable_kmers_threshold)
                 );
 
+                std::cout << "Number of merged paths = " << aligner.get_num_merge_paths() << std::endl;
                 if (config->verbose) {
                     std::cout << "File processed in "
                               << data_reading_timer.elapsed()

@@ -11,7 +11,8 @@ class Path {
          std::string::const_iterator query_it) :
             query_begin_it_(query_begin_it),
             query_it_(query_it) {
-        score_ = 0.0; }
+        score_ = 0.0;
+        is_similar_ = false; }
 
     Path(const Path&) = default;
     Path(Path&&) = default;
@@ -41,6 +42,7 @@ class Path {
     void set_query_it(std::string::const_iterator query_it) {
         query_it_ = query_it; }
     void set_cigar(const std::string& cigar) { cigar_ = cigar; }
+    void set_similar(const bool is_similar) { is_similar_ = is_similar; }
 
     NodeType back() const { return nodes_.back(); }
     NodeType last_parent() const { return nodes_.at(nodes_.size() - 1); }
@@ -53,13 +55,15 @@ class Path {
     std::string::const_iterator get_query_it() const { return query_it_; }
     std::string::const_iterator get_query_begin_it() const { return query_begin_it_; }
     std::string get_sequence() const { return sequence_; }
-    std::string get_cigar() const { return sequence_; }
+    std::string get_cigar() const { return cigar_; }
+    bool get_similar() const { return is_similar_; }
 
     // The paths are sorted in BoundedPriorityQueue in increasing order of score
     // per number of nodes. This gives paths with lower absolute score, but higher
     // score per node to appear at the top of the queue.
     bool operator< (const Path &other) const {
         return (this->score_/this->size() < other.score_/other.size());
+        //return (this->score_ < other.score_);
     }
 
   private:
@@ -70,6 +74,7 @@ class Path {
     std::string::const_iterator query_it_;
     std::string sequence_;
     std::string cigar_;
+    bool is_similar_;
 
     void push_back(NodeType node, const VLabels &labels, float score=0) {
         nodes_.push_back(node);
