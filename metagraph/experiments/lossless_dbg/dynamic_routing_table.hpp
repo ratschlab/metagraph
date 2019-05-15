@@ -39,6 +39,7 @@ public:
 //    int select(node_index node, int occurrence, char symbol) const {
 //    }
 
+    // rank [0..position)
     int rank(node_index node, char symbol, int position) const {
         assert(position < routing_table.size());
         int result = 0;
@@ -116,7 +117,7 @@ public:
         return transformation.first == base ? transformation.second : base;
     }
 
-    transformations_t transformations;
+    const transformations_t transformations;
     //map<node_index,vector<char>> routing_table;
 
 //    int serialize(std::ostream& out)const {

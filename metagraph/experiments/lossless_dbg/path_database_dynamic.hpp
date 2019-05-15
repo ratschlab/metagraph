@@ -142,17 +142,27 @@ public:
 
             const auto &sequence = sequences[i];
             //auto &path_for_sequence = path_for_sequences[i];
-            auto path_for_sequence = "$"s + sequence + "$"s;
+            auto path_for_sequence = sequence;
 
+
+            size_t kmer_end = graph.get_k();
+            graph.map_to_nodes(sequence, [&](node_index node) {
+                if (kmer_end < sequence.size()) {
+                    path_for_sequence[kmer_end] = routing_table.transform(node, path_for_sequence[kmer_end]);
+                }
+                kmer_end++;
+            });
 
             size_t kmer_begin = 0;
-            size_t kmer_end = graph.get_k();
+            kmer_end = graph.get_k();
 
+            vector<node_index> debug_list_of_nodes;
+            vector<int> debug_relative_position_history;
             // TODO: use map_to_nodes_sequentially when implemented
-            graph.map_to_nodes(sequence, [&](node_index node) {
-                path_for_sequence[kmer_end + 1] = routing_table.transform(node, path_for_sequence[kmer_end + 1]);
+            graph.map_to_nodes(path_for_sequence, [&](node_index node) {
+                debug_list_of_nodes.push_back(node);
                 char join_char = node_is_join(node)
-                                 ? path_for_sequence[kmer_begin]
+                                 ? (kmer_begin ? path_for_sequence[kmer_begin-1] : '$')
                                  : '\0';
                 char split_char = node_is_split(node)
                                   ? (kmer_end < sequence.size() ?
@@ -180,12 +190,14 @@ public:
                     }
                     assert(relative_position>=0);
                     assert(relative_position <= incoming_table.branch_size(node,join_symbol));
+                    debug_relative_position_history.push_back(relative_position);
                     relative_position += incoming_table.branch_offset_and_increment(node, join_symbol);
 
                 }
                 if (split_symbol) {
                     assert(relative_position>=0);
                     routing_table.insert(node, relative_position, split_symbol);
+                    debug_relative_position_history.push_back(relative_position);
                     relative_position = routing_table.new_relative_position(node, relative_position);
                     if (split_symbol == '$') {
                         //++progress_bar;
