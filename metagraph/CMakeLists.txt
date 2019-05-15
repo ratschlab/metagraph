@@ -122,7 +122,7 @@ if(LINK_OPT)
 endif()
 
 # Thread sanitizer build type
-#set(CMAKE_CXX_FLAGS_THREADS "-DNDEBUG -O2 -g -fsanitize=thread")
+set(CMAKE_CXX_FLAGS_THREADS "-O2 -g -fsanitize=thread")
 set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 
