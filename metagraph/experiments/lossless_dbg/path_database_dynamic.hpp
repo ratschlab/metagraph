@@ -118,11 +118,9 @@ public:
 
 #ifdef MEMOIZE
         #pragma omp parallel for num_threads(get_num_threads())
-        for (uint64_t node = 0; node <= graph.num_nodes(); node += 8) {
-            for (int i = node; i < node + 8 && i <= graph.num_nodes(); ++i) {
-                assert(is_split[i] == node_is_split_raw(i));
-                assert(is_join[i] == node_is_join_raw(i));
-            }
+        for (node_index node = 1; node <= graph.num_nodes(); node++) {
+            assert(is_split[i] == node_is_split_raw(i));
+            assert(is_join[i] == node_is_join_raw(i));
         }
 #endif
 
