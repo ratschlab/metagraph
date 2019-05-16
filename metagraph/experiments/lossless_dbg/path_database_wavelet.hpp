@@ -69,6 +69,8 @@ public:
     }
 
     void construct_routing_table() {
+        Timer timer;
+        cerr << "Started transforming routing_table.";
         vector<char> routing_table_array;
         for(int node=1;node<=graph.num_nodes();node++) {
             routing_table_array.push_back('#');// to always start a block with #
@@ -81,9 +83,13 @@ public:
         }
         routing_table_array.push_back('#'); // to also always end a block with #
         routing_table = RoutingTable(routing_table_array);
+        statistics["transformation_routing_table_time"] = timer.elapsed();
+        cerr << "Transformation finished in " << statistics["transformation_routing_table_time"] << endl;
     }
 
     void construct_incoming_table() {
+        Timer timer;
+        cerr << "Started transforming incoming_table.";
         vector<int> incoming_table_builder;
         vector<bool> is_join_node;
         for(int node=1;node<=graph.num_nodes();node++) {
@@ -120,6 +126,8 @@ public:
             temporary_representation[i] = is_join_node[i];
         }
         incoming_table.joins = BitVector(temporary_representation);
+        statistics["transformation_incoming_table_time"] = timer.elapsed();
+        cerr << "Transformation finished in " << statistics["transformation_incoming_table_time"] << endl;
     }
 
     using range_t = pair<int,int>;
@@ -418,7 +426,8 @@ public:
     }
 
     json get_statistics(unsigned int verbosity = ~0u) const {
-        json base_class_statistics = PathDatabaseDynamic::get_statistics(verbosity);
+        json result = PathDatabaseDynamic::get_statistics(verbosity);
+        result.update(statistics);
         int true_joins = 0;
         int added_joins = 0;
         int true_splits = 0;
@@ -458,13 +467,13 @@ public:
                 }
             }
         }
-        json result = {{"true_joins", true_joins},
+        json addition = {{"true_joins", true_joins},
                        {"added_joins", added_joins},
                        {"true_splits", true_splits},
                        {"added_splits", added_splits},
                        {"num_of_nodes", graph.num_nodes()}
                       };
-        result.update(base_class_statistics);
+        result.update(addition);
         if (verbosity & STATS_SPLITS_HISTOGRAM) {
             result["splits_diff_symbols_histogram"] = splits_diff_symbols_histogram;
             result["splits_size_histogram"] = splits_size_histogram;
@@ -506,6 +515,7 @@ public:
     }
 
 private:
+    json statistics;
     RoutingTable<Wavelet> routing_table;
     IncomingTable<BitVector> incoming_table;
 };

@@ -18,6 +18,8 @@
 #include "dbg_succinct.hpp"
 #include "utilities.hpp"
 
+using json = nlohmann::json;
+
 template <typename PathID,
           typename GraphT = DBGSuccinct>
 class PathDatabase {
@@ -25,9 +27,14 @@ class PathDatabase {
   public:
     // convenience constructor
     explicit PathDatabase(const vector<string> &reads, size_t k_kmer = 21) {
+        Timer timer;
+        cerr << "Started building the graph" << endl;
         auto graph = std::make_unique<GraphT>(dbg_succ_graph_constructor(reads, k_kmer));
         graph->mask_dummy_kmers(1, false);
         graph_.reset(graph.release());
+        auto elapsed = timer.elapsed();
+        cerr << "Building finished in " << elapsed << " sec." << endl;
+        statistics["graph_build_time"] = elapsed;
     }
 
     PathDatabase(std::shared_ptr<const GraphT> graph) : graph_(graph) {}
@@ -68,18 +75,26 @@ class PathDatabase {
 
     virtual void serialize(const fs::path& folder) const = 0;
 
+    virtual json get_statistics(int verbosity = 0) const {
+        return statistics;
+    }
+
   protected:
     std::shared_ptr<const GraphT> graph_;
 
     static BOSS* dbg_succ_graph_constructor(const vector<string> &reads,
                                             size_t k_kmer) {
+
         auto graph_constructor = BOSSConstructor(k_kmer - 1);// because BOSS has smaller kmers
 
         for (const auto &read : reads) {
                     graph_constructor.add_sequence(read);
         }
-        return new BOSS(&graph_constructor);
+
+        return new BOSS(&graph_constructor);;
     }
+
+    json statistics;
 };
 
 

@@ -56,7 +56,7 @@ public:
 
     std::vector<path_id> encode(const std::vector<std::string> &sequences) override {
         Timer timer;
-
+        cerr << "Started encoding reads" << endl;
         // improvement
         // - when multiple reads start at a same symbol, sort them so they share longest prefix
         // sort them so we have fixed relative ordering
@@ -119,8 +119,8 @@ public:
 
         vector<path_id> encoded(sequences.size());
 
-        preprocessing_time = timer.elapsed();
-        std::cout << "Finished preprocessing in " << preprocessing_time << " sec" << std::endl;
+        statistics["preprocessing_time"] = timer.elapsed();
+        std::cerr << "Finished preprocessing in " << statistics["preprocessing_time"] << " sec" << std::endl;
 
         //ProgressBar progress_bar(sequences.size(), "Building dRT and dEM");
 
@@ -218,8 +218,8 @@ public:
         }
 #endif
         encoded_paths += encoded.size();
-        routing_time = timer.elapsed();
-        std::cout << "Finished routing in " << routing_time << " sec" << std::endl;
+        statistics["routing_time"] = timer.elapsed();
+        std::cerr << "Finished routing in " << statistics["routing_time"] << " sec" << std::endl;
 
         return encoded;
     }
@@ -300,9 +300,8 @@ public:
     }
 
     json get_statistics(unsigned int verbosity = ~0u) const {
-        json result = {{"routing_time", routing_time},
-                       {"preprocessing_time", preprocessing_time},
-        };
+        auto result = PathDatabase<pair<node_index,int>,GraphT>::get_statistics(verbosity);
+        result.update(statistics);
         return result;
     }
 
@@ -317,9 +316,7 @@ public:
     void serialize(const fs::path& folder) const {};
 
 protected:
-    //for statistics
-    double routing_time;
-    double preprocessing_time;
+    json statistics;
 
     // denote how many reads are joining from every branch ($ATCGN) ($ denotes start of a new read)
     int encoded_paths = 0;
