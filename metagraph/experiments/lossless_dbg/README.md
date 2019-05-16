@@ -31,4 +31,5 @@ make install # to install path_encoder_toolbox
 - v1: initial 
 - v2: improved scheme, smaller filesize
 - v3: added parallel building, faster
+- vsara: Initial point of rebasing
 - v4: added option to turn on noise robust mode for smaller size 
