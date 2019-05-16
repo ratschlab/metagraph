@@ -91,7 +91,7 @@ class PathDatabase {
                     graph_constructor.add_sequence(read);
         }
 
-        return new BOSS(&graph_constructor);;
+        return new BOSS(&graph_constructor);
     }
 
     json statistics;
