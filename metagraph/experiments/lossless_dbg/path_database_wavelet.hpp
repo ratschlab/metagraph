@@ -70,7 +70,7 @@ public:
 
     void construct_routing_table() {
         Timer timer;
-        cerr << "Started transforming routing_table.";
+        cerr << "Started transforming routing_table." << endl;
         vector<char> routing_table_array;
         for(int node=1;node<=graph.num_nodes();node++) {
             routing_table_array.push_back('#');// to always start a block with #
@@ -89,7 +89,7 @@ public:
 
     void construct_incoming_table() {
         Timer timer;
-        cerr << "Started transforming incoming_table.";
+        cerr << "Started transforming incoming_table." << endl;
         vector<int> incoming_table_builder;
         vector<bool> is_join_node;
         for(int node=1;node<=graph.num_nodes();node++) {
