@@ -116,6 +116,7 @@ public:
             }
         }
 
+#ifdef MEMOIZE
         #pragma omp parallel for num_threads(get_num_threads())
         for (uint64_t node = 0; node <= graph.num_nodes(); node += 8) {
             for (int i = node; i < node + 8 && i <= graph.num_nodes(); ++i) {
@@ -123,7 +124,7 @@ public:
                 assert(is_join[i] == node_is_join_raw(i));
             }
         }
-
+#endif
 
         vector<path_id> encoded(sequences.size());
 
