@@ -418,6 +418,7 @@ public:
     }
 
     json get_statistics(unsigned int verbosity = ~0u) const {
+        json base_class_statistics = PathDatabaseDynamic::get_statistics(verbosity);
         int true_joins = 0;
         int added_joins = 0;
         int true_splits = 0;
@@ -463,6 +464,7 @@ public:
                        {"added_splits", added_splits},
                        {"num_of_nodes", graph.num_nodes()}
                       };
+        result.update(base_class_statistics);
         if (verbosity & STATS_SPLITS_HISTOGRAM) {
             result["splits_diff_symbols_histogram"] = splits_diff_symbols_histogram;
             result["splits_size_histogram"] = splits_size_histogram;

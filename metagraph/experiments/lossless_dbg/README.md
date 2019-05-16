@@ -24,3 +24,10 @@ make install # to install path_encoder_toolbox
 ```bash
 ./path_encoder_toolbox compress --input ../tests/data/transcripts_1000.fa --output ./
 ```
+
+
+## Versions
+- v1: initial 
+- v2: improved scheme, smaller filesize
+- v3: added parallel building, faster
+- v4: added option to turn on noise robust mode for smaller size 

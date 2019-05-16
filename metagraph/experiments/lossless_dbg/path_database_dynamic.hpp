@@ -119,8 +119,9 @@ public:
 
         vector<path_id> encoded(sequences.size());
 
-        std::cout << "Finished preprocessing in " << timer.elapsed() << " sec" << std::endl;
-        timer.reset();
+        preprocessing_time = timer.elapsed();
+        std::cout << "Finished preprocessing in " << preprocessing_time << " sec" << std::endl;
+
         //ProgressBar progress_bar(sequences.size(), "Building dRT and dEM");
 
         const size_t batch_size = std::max(static_cast<size_t>(1),
@@ -135,6 +136,8 @@ public:
             omp_init_lock(&locks[i]);
         }
 #endif
+
+        timer.reset();
 
         #pragma omp parallel for num_threads(get_num_threads()) //default(none) shared(encoded,locks,routing_table,incoming_table)
         for (size_t i = 0; i < sequences.size(); i++) {
@@ -215,7 +218,8 @@ public:
         }
 #endif
         encoded_paths += encoded.size();
-        std::cout << "Finished routing in " << timer.elapsed() << " sec" << std::endl;
+        routing_time = timer.elapsed();
+        std::cout << "Finished routing in " << routing_time << " sec" << std::endl;
 
         return encoded;
     }
@@ -295,6 +299,14 @@ public:
         return sequence;
     }
 
+    json get_statistics(unsigned int verbosity = ~0u) const {
+        json result = {{"routing_time", routing_time},
+                       {"preprocessing_time", preprocessing_time},
+        };
+        cerr << result.dump(4) << endl;
+        return result;
+    }
+
     std::vector<path_id> get_paths_going_through(const std::string &str) const override { throw std::runtime_error("not implemented"); };
 
     std::vector<path_id> get_paths_going_through(node_index node) const override { throw std::runtime_error("not implemented"); };
@@ -306,6 +318,10 @@ public:
     void serialize(const fs::path& folder) const {};
 
 protected:
+    //for statistics
+    double routing_time;
+    double preprocessing_time;
+
     // denote how many reads are joining from every branch ($ATCGN) ($ denotes start of a new read)
     int encoded_paths = 0;
     // denote where the reads should go ($ATCGN) ($ denodes the end of particular read)
