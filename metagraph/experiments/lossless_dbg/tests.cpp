@@ -236,6 +236,17 @@ TEST(GraphPreprocessor,WeakSplits) {
     }
 
 }
+TEST(PathDatabase,GetStatistics) {
+    vector<string> reads = {"ACTAGGA","ACTCGGA"};
+    PathDatabaseWavelet<> pd(reads,3);
+    pd.encode(reads);
+    auto stats = pd.get_statistics(-1);
+    ASSERT_EQ(stats["num_of_nodes"],8);
+    ASSERT_EQ(stats["true_joins"],1);
+    ASSERT_EQ(stats["true_splits"],1);
+    ASSERT_EQ(stats["added_joins"],1);
+    ASSERT_EQ(stats["added_splits"],1);
+}
 
 
 

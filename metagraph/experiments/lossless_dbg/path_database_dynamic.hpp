@@ -303,7 +303,6 @@ public:
         json result = {{"routing_time", routing_time},
                        {"preprocessing_time", preprocessing_time},
         };
-        cerr << result.dump(4) << endl;
         return result;
     }
 

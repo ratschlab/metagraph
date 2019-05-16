@@ -472,7 +472,6 @@ public:
         if (verbosity & STATS_JOINS_HISTOGRAM) {
             result["joins_diff_symbols_histogram"] = joins_diff_symbols_histogram;
         }
-        cerr << result.dump(4) << endl;
         return result;
     }
 
