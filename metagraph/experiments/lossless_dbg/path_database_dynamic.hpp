@@ -88,15 +88,14 @@ public:
 
 // Mark split and join-nodes in graph for faster queries and construction
 #ifdef MEMOIZE
-        is_split = sdsl::bit_vector(graph.num_nodes() + 1);
-        is_join = sdsl::bit_vector(graph.num_nodes() + 1);
+        is_split = decltype(is_split)(graph.num_nodes() + 1); // bit
+        is_join = decltype(is_join)(graph.num_nodes() + 1);
 
         #pragma omp parallel for num_threads(get_num_threads())
         for (uint64_t node = 0; node <= graph.num_nodes(); node += 8) {
             for (int i = node; i < node + 8 && i <= graph.num_nodes(); ++i) {
                 if (!i)
                     continue;
-
                 is_split[i] = node_is_split_raw(i);
                 is_join[i] = node_is_join_raw(i);
             }
@@ -331,8 +330,8 @@ protected:
     const GraphT & graph;
 
 #ifdef MEMOIZE
-    sdsl::bit_vector is_join;
-    sdsl::bit_vector is_split;
+    vector<char> is_join;
+    vector<char> is_split;
 #endif
 };
 
