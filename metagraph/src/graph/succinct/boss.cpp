@@ -1399,8 +1399,11 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
     W_->insert(sentinel_pos, kSentinelCode);
     last_->insert_bit(sentinel_pos, true);
 
-    if (edges_inserted)
+    if (edges_inserted) {
+        if (edges_inserted->size() && sentinel_pos < edges_inserted->at(0))
+            edges_inserted->at(0)++;
         edges_inserted->push_back(sentinel_pos);
+    }
 
     assert((*W_)[0] == 0);
 
@@ -1443,6 +1446,7 @@ uint64_t BOSS::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
 // Anchors the isolated nodes.
 void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
     uint64_t shift = 0;
+    uint64_t node_shift = 0;
 
     std::set<node_index> new_tail_nodes;
     std::map<node_index, std::vector<TAlphabet>> new_head_nodes;
@@ -1450,16 +1454,16 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
     for (edge_index edge : edges) {
         node_index node = get_source_node(edge);
 
-        edge_index first_outgoing = pred_last(edge) + 1;
-        edge_index last_outgoing = get_last(edge) ? edge : succ_last(edge);
+        edge_index first_outgoing = select_last(node - 1) + 1;
+        edge_index last_outgoing = select_last(node);
         uint64_t outdeg = last_outgoing - first_outgoing + 1;
+        assert(outdeg == outdegree(get_source_node(edge)));
 
         uint64_t outgoing_delete_count = std::distance(edges.lower_bound(first_outgoing),
                                                        edges.upper_bound(last_outgoing));
 
-        if (outdeg == outgoing_delete_count) {
+        if (outdeg == outgoing_delete_count)
             new_tail_nodes.emplace(node);
-        }
 
         auto target_edge_id = fwd(edge);
         auto target_node = get_source_node(target_edge_id);
@@ -1483,8 +1487,8 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
     }
 
     // create anchors for new head nodes
-    bit_vector_dyn existing_edges(last_->size(), true);
-    bit_vector_dyn cant_delete(last_->size(), false);
+    bit_vector_dyn existing_edges(last_->size() - 1, true);
+    bit_vector_dyn cant_delete(last_->size() - 1, false);
     cant_delete.set(select_last(1), true);
     bit_vector_dyn existing_nodes(last_->num_set_bits(), true);
     for (auto& node : new_head_nodes) {
@@ -1493,31 +1497,35 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
         kmer.insert(kmer.begin(), k_, kSentinelCode);
         for (size_t i = 0; i < k_; ++i) {
             std::vector<edge_index> new_ids_vec;
+
+            auto source_node = get_source_node(source);
+            auto source_edge = pick_edge(select_last(source_node), source_node, kmer[i + k_]);
+            if (source_edge)
+                cant_delete.set(source_edge - 1, true);
+
             source = append_pos(kmer[i + k_], source, &kmer[i], &new_ids_vec);
 
-            std::for_each(new_ids_vec.begin(), new_ids_vec.end(), [&](auto id){
-                existing_edges.insert_bit(id, false);
-                cant_delete.insert_bit(id, true);
+            std::sort(new_ids_vec.begin(), new_ids_vec.end());
 
-                bool new_node = get_last(id);
-                edge_index other = id - 1;
-                while (new_node && other > 0 && !get_last(other)) {
-                    if (std::find(new_ids_vec.begin(), new_ids_vec.end(), other) == new_ids_vec.end())
-                        new_node = false;
-                    other--;
-                }
-                if (new_node)
-                    existing_nodes.insert_bit(get_source_node(id), false);
+            std::for_each(new_ids_vec.begin(), new_ids_vec.end(), [&](auto id){
+                existing_edges.insert_bit(id - 1, false);
+                cant_delete.insert_bit(id - 1, true);
+
+                if (is_single_outgoing(id))
+                    existing_nodes.insert_bit(get_source_node(id) - 1, false);
             });
-            cant_delete.set(pred_W(source, kmer[i + k_ + 1]), true);
         }
     }
 
+    assert(last_->num_set_bits() == existing_nodes.size());
+
     for (edge_index edge : edges) {
         assert(edge >= shift);
-        uint64_t edge_id = existing_edges.select1(edge + 1 - shift);
+        assert(last_->num_set_bits() == existing_nodes.size());
+        uint64_t edge_id = existing_edges.select1(edge - shift) + 1;
+        CHECK_INDEX(edge_id);
 
-        if (cant_delete[edge_id])
+        if (cant_delete[edge_id - 1])
             continue;
 
         uint64_t d = get_W(edge_id);
@@ -1536,7 +1544,8 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
         }
 
         node_index node = get_source_node(edge_id);
-        node_index old_node_id = existing_nodes.rank1(node - 1);
+        assert(node <= last_->num_set_bits());
+        node_index old_node_id = existing_nodes.rank1(node - 1) + node_shift;
         if (new_tail_nodes.find(old_node_id) != new_tail_nodes.end()) {
             W_->set(edge_id, kSentinelCode);
             // allow delete other edges for this node
@@ -1544,21 +1553,23 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges) {
             continue;
         }
 
-        W_->remove(edge_id);
         update_F(get_node_last_value(edge_id), -1);
+        W_->remove(edge_id);
         // If the current node has multiple outgoing edges,
         // remove one of the 0s from last instead of 1.
         if (get_last(edge_id) && (edge >= shift + 1)
                               && !get_last(edge_id - 1)) {
             last_->delete_bit(edge_id - 1);
         } else {
-            if (get_last(edge_id))
-                existing_nodes.delete_bit(node);
+            if (get_last(edge_id)) {
+                existing_nodes.delete_bit(node - 1);
+                node_shift++;
+            }
             last_->delete_bit(edge_id);
         }
         shift++;
-        existing_edges.delete_bit(edge_id);
-        cant_delete.delete_bit(edge_id);
+        existing_edges.delete_bit(edge_id - 1);
+        cant_delete.delete_bit(edge_id - 1);
     }
 }
 

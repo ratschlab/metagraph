@@ -2386,40 +2386,51 @@ TEST(BOSS, EraseEdgesDynSingle) {
         graph2.add_sequence("AGACACAGT", true);
         graph2.add_sequence("GACTTGCAG", true);
         graph2.add_sequence("ACTAGTCAG", true);
-        if (true) {
-            if (graph2.num_edges() > 2) {
-            for(uint64_t m = 1; m <= graph2.num_edges() - 2; ++m) {
-                //if(m==25 && k==4) {
-                BOSS graph(k);
-                graph.add_sequence("AGACACAGT", true);
-                graph.add_sequence("GACTTGCAG", true);
-                graph.add_sequence("ACTAGTCAG", true);
-                graph.print_internal_representation();
-                graph.print();
-                EXPECT_TRUE(graph.is_valid());
-                graph.erase_edges_dyn({m, m+1, m+2});
-                graph.print_internal_representation();
-                graph.print();
-                std::cout << "m: " << m << std::endl;
-                EXPECT_TRUE(graph.is_valid());
-                if (!graph.is_valid())
-                    exit(1);
-                //dump unitigs and visualize
-                //std::cout << "viz" << std::endl;
-                //std::cout << k+1 << std::endl;
-                //graph.call_paths([&](const auto &sequence) {
-                //    std::cout << sequence << std::endl;
-                //});
-                graph.call_paths(
-                    [&](const auto &, const auto &seq) {
-                        auto str = graph.decode(seq);
-                        std::cout << str << std::endl;
-                    },
-                    false
-                );
-                //}
+        graph2.add_sequence("ATGCGATCGATATGCGAGA", true);
+        graph2.add_sequence("ATGCGATCGAGACTACGAG", true);
+        graph2.add_sequence("GTACGATAGACATGACGAG", true);
+        graph2.add_sequence("ACTGACGAGACACAGATGC", true);
+        for(size_t n = 1; n < graph2.num_edges(); ++n) {
+        if (graph2.num_edges() > n) {
+        for(BOSS::edge_index m = 1; m <= graph2.num_edges() - n; ++m) {
+            //if(m==18 && k==3) {
+            if(true) {
+            BOSS graph(k);
+            graph.add_sequence("AGACACAGT", true);
+            graph.add_sequence("GACTTGCAG", true);
+            graph.add_sequence("ACTAGTCAG", true);
+            graph.add_sequence("ATGCGATCGATATGCGAGA", true);
+            graph.add_sequence("ATGCGATCGAGACTACGAG", true);
+            graph.add_sequence("GTACGATAGACATGACGAG", true);
+            graph.add_sequence("ACTGACGAGACACAGATGC", true);
+            //graph.print_internal_representation();
+            //graph.print();
+            EXPECT_TRUE(graph.is_valid());
+            auto edges = utils::arange(m, n);
+            std::set<BOSS::edge_index> edges_to_delete(edges.begin(), edges.end());
+            graph.erase_edges_dyn(edges_to_delete);
+            //graph.print_internal_representation();
+            //graph.print();
+            //std::cout << "m: " << m << std::endl;
+            EXPECT_TRUE(graph.is_valid());
+            if (!graph.is_valid())
+                exit(1);
+            //dump unitigs and visualize
+            //std::cout << "viz" << std::endl;
+            //std::cout << k+1 << std::endl;
+            //graph.call_paths([&](const auto &sequence) {
+            //    std::cout << sequence << std::endl;
+            //});
+            graph.call_paths(
+                [&](const auto &, const auto &seq) {
+                    auto str = graph.decode(seq);
+                    //std::cout << str << std::endl;
+                },
+                false
+            );
             }
-            }
+        }
+        }
         }
     }
 }
