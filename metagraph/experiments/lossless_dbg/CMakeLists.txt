@@ -3,7 +3,10 @@ cmake_minimum_required(VERSION 3.13)
 #
 set(CMAKE_CXX_STANDARD 17)
 set(ENCODER_VERSION 3)
+string(TOLOWER ${CMAKE_BUILD_TYPE} TYPE)
 set(PATH_ENCODER_CURRENT path_encoder_toolbox_v${ENCODER_VERSION})
+set(PATH_ENCODER_CURRENT_TYPE ${PATH_ENCODER_CURRENT}_${TYPE})
+
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++ -lc++fs")
 #enable_testing()
 #find_package(GTest REQUIRED)
@@ -26,10 +29,10 @@ add_library(path_encoding
 target_link_libraries(path_encoding metagraph ${METALIBS})
 
 add_executable(tests tests.cpp)
-add_executable(${PATH_ENCODER_CURRENT} main.cpp)
+add_executable(${PATH_ENCODER_CURRENT_TYPE} main.cpp)
 
 target_link_libraries(tests metagraph ${METALIBS} path_encoding gtest gtest_main)
-target_link_libraries(${PATH_ENCODER_CURRENT} metagraph ${METALIBS} path_encoding gtest gtest_main )
+target_link_libraries(${PATH_ENCODER_CURRENT_TYPE} metagraph ${METALIBS} path_encoding gtest gtest_main )
 
 SET(uid 0)
 macro(add_symlink filepath sympath)
@@ -42,11 +45,15 @@ macro(add_symlink filepath sympath)
     )
 endmacro(add_symlink)
 
-add_symlink(${CMAKE_CURRENT_BINARY_DIR}/${PATH_ENCODER_CURRENT} ${ROOT_BINARY_DIR}/path_encoder_toolbox)
-add_symlink(${PATH_ENCODER_CURRENT} path_encoder_toolbox)
+add_symlink(${CMAKE_CURRENT_BINARY_DIR}/${PATH_ENCODER_CURRENT_TYPE} ${ROOT_BINARY_DIR}/path_encoder_toolbox)
+add_symlink(${PATH_ENCODER_CURRENT_TYPE} path_encoder_toolbox)
+add_symlink(${PATH_ENCODER_CURRENT_TYPE} ${PATH_ENCODER_CURRENT})
 
-install(TARGETS ${PATH_ENCODER_CURRENT} DESTINATION bin)
+
+install(TARGETS ${PATH_ENCODER_CURRENT_TYPE} DESTINATION bin)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/path_encoder_toolbox DESTINATION bin)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${PATH_ENCODER_CURRENT} DESTINATION bin)
+
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(/usr/local/include/metagraph)

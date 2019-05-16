@@ -25,6 +25,7 @@ make install # to install path_encoder_toolbox
 ./path_encoder_toolbox compress --input ../tests/data/transcripts_1000.fa --output ./
 ```
 
+## Query functionality
 
 ## Versions
 - v1: initial 
