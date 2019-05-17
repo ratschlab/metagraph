@@ -13,6 +13,7 @@
 #include <map>
 #include <tsl/hopscotch_set.h>
 #include <progress_bar.hpp>
+#include <optional>
 
 #include "path_database.hpp"
 #include "dynamic_routing_table.hpp"
@@ -188,9 +189,13 @@ public:
             });
 
             int relative_position = INT_MIN;
+            optional<omp_lock_t*> prev_pointer;
             for (const auto &[node, join_symbol, split_symbol] : bifurcations) {
 #ifdef USE_LOCKS
                 omp_set_lock(&locks[node]);
+                if (prev_pointer) {
+                    omp_unset_lock(*prev_pointer);
+                }
 #endif
                 if (join_symbol) {
                     if (join_symbol == '$') {
@@ -213,10 +218,9 @@ public:
                         //++progress_bar;
                     }
                 }
-#ifdef USE_LOCKS
-                omp_unset_lock(&locks[node]);
-#endif
+                prev_pointer = &locks[node];
             }
+            omp_unset_lock(*prev_pointer);
         }
 
 #ifdef USE_LOCKS
