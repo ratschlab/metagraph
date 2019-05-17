@@ -85,18 +85,16 @@ DBGBitmapConstructor::DBGBitmapConstructor(size_t k,
 template <typename KMER>
 DBGBitmap::Chunk* BitmapChunkConstructor<KMER>
 ::build_chunk() {
-    kmer_collector_.join();
+    const auto &kmers = kmer_collector_.data();
     std::unique_ptr<DBGBitmap::Chunk> chunk {
         new DBGBitmap::Chunk(
             [&](const auto &index_callback) {
-                kmer_collector_.call_kmers(
-                    [&](const auto &kmer) {
-                        index_callback(typename KMER::WordType(1u) + kmer.data());
-                    }
-                );
+                std::for_each(kmers.begin(), kmers.end(), [&](const KMER &kmer) {
+                    index_callback(typename KMER::WordType(1u) + kmer.data());
+                });
             },
             (1llu << (get_k() * KMER::kBitsPerChar)) + 1,
-            kmer_collector_.size()
+            kmers.size()
         )
     };
     assert(chunk.get());

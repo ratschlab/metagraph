@@ -57,6 +57,26 @@ void erase_redundant_dummy_kmers(Vector<KMER> *kmers) {
     kmers->resize(cur_pos);
 }
 
+template <typename KMER>
+void shrink_kmers(Vector<KMER> *kmers,
+                  size_t num_threads,
+                  bool verbose,
+                  size_t offset) {
+    if (verbose) {
+        std::cout << "Allocated capacity exceeded, filter out non-unique k-mers..."
+                  << std::flush;
+    }
+
+    size_t prev_num_kmers = kmers->size();
+    sort_and_remove_duplicates(kmers, num_threads, offset);
+
+    if (verbose) {
+        std::cout << " done. Number of kmers reduced from " << prev_num_kmers
+                                                  << " to " << kmers->size() << ", "
+                  << (kmers->size() * sizeof(KMER) >> 20) << "Mb" << std::endl;
+    }
+}
+
 // Although this function could be parallelized better,
 // the experiments show it's already fast enough.
 // k is node length
@@ -179,7 +199,7 @@ BOSSChunkConstructor<KMER>
                         memory_preallocated,
                         verbose) {
     if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
-        kmer_collector_.emplace_back(
+        kmer_collector_.data().emplace_back(
             std::vector<KmerExtractor::TAlphabet>(k + 1, BOSS::kSentinelCode)
         );
     }
@@ -252,7 +272,7 @@ BOSS::Chunk* chunk_from_kmers(KmerExtractor::TAlphabet alph_size,
 template <typename KMER>
 BOSS::Chunk* BOSSChunkConstructor<KMER>
 ::build_chunk() {
-    kmer_collector_.join();
+    auto &kmers = kmer_collector_.data();
 
     if (!kmer_collector_.suffix_length()) {
         if (kmer_collector_.verbose()) {
@@ -263,7 +283,7 @@ BOSS::Chunk* BOSSChunkConstructor<KMER>
 
         // kmer_collector stores (BOSS::k_ + 1)-mers
         recover_source_dummy_nodes(kmer_collector_.get_k() - 1,
-                                   &kmer_collector_.data(),
+                                   &kmers,
                                    kmer_collector_.num_threads(),
                                    kmer_collector_.verbose());
 
@@ -275,8 +295,8 @@ BOSS::Chunk* BOSSChunkConstructor<KMER>
     BOSS::Chunk *result = chunk_from_kmers(
         kmer_collector_.alphabet_size(),
         kmer_collector_.get_k() - 1,
-        kmer_collector_.data().data(),
-        kmer_collector_.size()
+        kmers.data(),
+        kmers.size()
     );
 
     kmer_collector_.clear();

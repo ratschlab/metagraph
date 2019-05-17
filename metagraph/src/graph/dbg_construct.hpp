@@ -1,11 +1,9 @@
 #ifndef __DBG_CONSTRUCT_HPP__
 #define __DBG_CONSTRUCT_HPP__
 
-#include <mutex>
-#include <shared_mutex>
-
 #include "kmer_extractor.hpp"
 #include "threading.hpp"
+#include "sorted_set.hpp"
 
 
 typedef std::function<void(const std::string&)> CallString;
@@ -50,8 +48,6 @@ class KmerCollector {
 
     inline size_t get_k() const { return k_; }
 
-    inline size_t size() const { return kmers_.size(); }
-
     inline size_t suffix_length() const { return filter_suffix_encoded_.size(); }
 
     // TODO: another for std::string&& ?
@@ -59,26 +55,9 @@ class KmerCollector {
 
     void add_sequences(const std::function<void(CallString)> &generate_sequences);
 
-    template <typename... Args>
-    inline void emplace_back(Args&&... args) {
-        kmers_.emplace_back(std::forward<Args>(args)...);
-    }
+    inline Vector<KMER>& data() { join(); return kmers_.data(); }
 
-    inline Vector<KMER>& data() { return kmers_; }
-
-    inline void
-    call_kmers(const std::function<void(const KMER&)> &kmer_callback) const {
-        std::for_each(kmers_.begin(), kmers_.end(), kmer_callback);
-    }
-
-    inline void clear() {
-        kmers_.clear();
-        sequences_storage_.clear();
-        stored_sequences_size_ = 0;
-        kmers_.shrink_to_fit();
-    }
-
-    void join();
+    void clear() { join(); kmers_.clear(); }
 
     inline bool verbose() const { return verbose_; }
     inline bool is_both_strands_mode() const { return both_strands_mode_; }
@@ -87,11 +66,10 @@ class KmerCollector {
 
   private:
     void release_task_to_pool();
+    void join();
 
     size_t k_;
-    Vector<KMER> kmers_;
-    mutable std::mutex mutex_resize_;
-    mutable std::shared_timed_mutex mutex_copy_;
+    SortedSet<KMER> kmers_;
 
     size_t num_threads_;
     ThreadPool thread_pool_;
@@ -106,12 +84,6 @@ class KmerCollector {
     bool both_strands_mode_;
 };
 
-
-template <typename KMER>
-void shrink_kmers(Vector<KMER> *kmers,
-                  size_t num_threads,
-                  bool verbose,
-                  size_t offset = 0);
 
 template <class V>
 void sort_and_remove_duplicates(V *array,

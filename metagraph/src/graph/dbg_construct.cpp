@@ -14,21 +14,6 @@ const size_t kMaxKmersChunkSize = 30'000'000;
 
 
 template <class V>
-void try_reserve(V *vector, size_t size, size_t min_size = 0) {
-    size = std::max(size, min_size);
-
-    while (size > min_size) {
-        try {
-            vector->reserve(size);
-            return;
-        } catch (const std::bad_alloc &exception) {
-            size = min_size + (size - min_size) * 2 / 3;
-        }
-    }
-    vector->reserve(min_size);
-}
-
-template <class V>
 void sort_and_remove_duplicates(V *array,
                                 size_t num_threads,
                                 size_t offset) {
@@ -40,73 +25,13 @@ void sort_and_remove_duplicates(V *array,
     array->erase(unique_end, array->end());
 }
 
-template <typename KMER>
-void shrink_kmers(Vector<KMER> *kmers,
-                  size_t num_threads,
-                  bool verbose,
-                  size_t offset) {
-    if (verbose) {
-        std::cout << "Allocated capacity exceeded, filter out non-unique k-mers..."
-                  << std::flush;
-    }
-
-    size_t prev_num_kmers = kmers->size();
-    sort_and_remove_duplicates(kmers, num_threads, offset);
-
-    if (verbose) {
-        std::cout << " done. Number of kmers reduced from " << prev_num_kmers
-                                                  << " to " << kmers->size() << ", "
-                  << (kmers->size() * sizeof(KMER) >> 20) << "Mb" << std::endl;
-    }
-}
-
-template <class Array, class Vector>
-void extend_kmer_storage(const Array &temp_storage,
-                         Vector *kmers,
-                         size_t num_threads,
-                         bool verbose,
-                         std::mutex &mutex_resize,
-                         std::shared_timed_mutex &mutex_copy) {
-    // acquire the mutex to restrict the number of writing threads
-    std::unique_lock<std::mutex> resize_lock(mutex_resize);
-
-    if (kmers->size() + temp_storage.size() > kmers->capacity()) {
-        std::unique_lock<std::shared_timed_mutex> reallocate_lock(mutex_copy);
-
-        shrink_kmers(kmers, num_threads, verbose);
-
-        try {
-            try_reserve(kmers, kmers->size() + kmers->size() / 2,
-                               kmers->size() + temp_storage.size());
-        } catch (const std::bad_alloc &exception) {
-            std::cerr << "ERROR: Can't reallocate. Not enough memory" << std::endl;
-            exit(1);
-        }
-    }
-
-    size_t offset = kmers->size();
-    kmers->resize(kmers->size() + temp_storage.size());
-
-    std::shared_lock<std::shared_timed_mutex> copy_lock(mutex_copy);
-
-    resize_lock.unlock();
-
-    std::copy(temp_storage.begin(),
-              temp_storage.end(),
-              kmers->begin() + offset);
-}
-
 
 template <typename KMER, class KmerExtractor>
 void extract_kmers(std::function<void(CallString)> generate_reads,
                    size_t k,
                    bool both_strands_mode,
-                   Vector<KMER> *kmers,
+                   SortedSet<KMER> *kmers,
                    const std::vector<TAlphabet> &suffix,
-                   size_t num_threads,
-                   bool verbose,
-                   std::mutex &mutex_resize,
-                   std::shared_timed_mutex &mutex_copy,
                    bool remove_redundant = true) {
     static_assert(KMER::kBitsPerChar == KmerExtractor::kLogSigma);
 
@@ -131,8 +56,7 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
         }
 
         if (temp_storage.size() > 0.9 * kMaxKmersChunkSize) {
-            extend_kmer_storage(temp_storage, kmers,
-                                num_threads, verbose, mutex_resize, mutex_copy);
+            kmers->insert(temp_storage.begin(), temp_storage.end());
             temp_storage.resize(0);
         }
     });
@@ -141,8 +65,7 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
         if (remove_redundant) {
             sort_and_remove_duplicates(&temp_storage);
         }
-        extend_kmer_storage(temp_storage, kmers,
-                            num_threads, verbose, mutex_resize, mutex_copy);
+        kmers->insert(temp_storage.begin(), temp_storage.end());
     }
 }
 
@@ -155,6 +78,7 @@ KmerCollector<KMER, KmerExtractor>
                 double memory_preallocated,
                 bool verbose)
       : k_(k),
+        kmers_(num_threads, verbose),
         num_threads_(num_threads),
         thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1,
                      std::max(static_cast<size_t>(1), num_threads_)),
@@ -165,12 +89,12 @@ KmerCollector<KMER, KmerExtractor>
     assert(num_threads_ > 0);
     static_assert(KMER::kBitsPerChar == KmerExtractor::kLogSigma);
 
-    try_reserve(&kmers_, memory_preallocated / sizeof(KMER));
+    kmers_.reserve(memory_preallocated / sizeof(KMER));
     if (verbose_) {
         std::cout << "Preallocated "
-                  << kmers_.capacity() * sizeof(KMER) / (1llu << 30)
+                  << kmers_.data().capacity() * sizeof(KMER) / (1llu << 30)
                   << "Gb for the k-mer storage"
-                  << ", capacity: " << kmers_.capacity() << " k-mers"
+                  << ", capacity: " << kmers_.data().capacity() << " k-mers"
                   << std::endl;
     }
 }
@@ -201,8 +125,7 @@ void KmerCollector<KMER, KmerExtractor>
     thread_pool_.enqueue(extract_kmers<KMER, Extractor>, generate_sequences,
                          k_, both_strands_mode_, &kmers_,
                          filter_suffix_encoded_,
-                         num_threads_, verbose_,
-                         std::ref(mutex_resize_), std::ref(mutex_copy_), true);
+                         true);
 }
 
 template <typename KMER, class KmerExtractor>
@@ -218,8 +141,7 @@ void KmerCollector<KMER, KmerExtractor>::release_task_to_pool() {
                              delete current_sequences_storage;
                          },
                          k_, both_strands_mode_, &kmers_, filter_suffix_encoded_,
-                         num_threads_, verbose_,
-                         std::ref(mutex_resize_), std::ref(mutex_copy_), true);
+                         true);
     stored_sequences_size_ = 0;
 }
 
@@ -227,18 +149,6 @@ template <typename KMER, class KmerExtractor>
 void KmerCollector<KMER, KmerExtractor>::join() {
     release_task_to_pool();
     thread_pool_.join();
-
-    if (verbose_) {
-        std::cout << "Reading data has finished" << std::endl;
-        std::cout << "Sorting k-mers and appending succinct"
-                  << " representation from current bin...\t" << std::flush;
-    }
-    Timer timer;
-
-    sort_and_remove_duplicates(&kmers_, num_threads_);
-
-    if (verbose_)
-        std::cout << timer.elapsed() << "sec" << std::endl;
 }
 
 template class KmerCollector<KmerExtractor::Kmer64, KmerExtractor>;

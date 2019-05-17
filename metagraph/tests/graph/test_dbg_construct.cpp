@@ -367,209 +367,190 @@ template <typename TypeParam, class KmerExtractor>
 void extract_kmers(std::function<void(CallbackString)> generate_reads,
                    size_t k,
                    bool canonical_mode,
-                   Vector<TypeParam> *kmers,
+                   SortedSet<TypeParam> *kmers,
                    const std::vector<TAlphabet> &suffix,
-                   size_t num_threads,
-                   bool verbose,
-                   std::mutex &mutex_resize,
-                   std::shared_timed_mutex &mutex_copy,
                    bool remove_redundant = true);
 
 // TODO: k is node length
 template <typename TypeParam>
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
-                                        Vector<TypeParam> *kmers,
+                                        SortedSet<TypeParam> *kmers,
                                         const std::vector<TAlphabet> &suffix,
-                                        std::mutex &mutex_resize,
-                                        std::shared_timed_mutex &mutex,
                                         bool remove_redundant,
                                         size_t reserved_capacity) {
-    kmers->reserve(reserved_capacity);
+    kmers->try_reserve(reserved_capacity);
     extract_kmers<TypeParam, KmerExtractor>(
         [reads](CallbackString callback) {
-            for (auto &&read : *reads) {
-                callback(std::move(read));
-            }
+            std::for_each(reads->begin(), reads->end(), callback);
         },
-        k, false, kmers, suffix,
-        1, false, std::ref(mutex_resize), std::ref(mutex), remove_redundant
+        k, false, kmers, suffix, remove_redundant
     );
     delete reads;
 }
 
 TYPED_TEST(ExtractKmers, ExtractKmersAppendParallelReserved) {
-    Vector<TypeParam> result;
-    std::mutex mu_resize;
-    std::shared_timed_mutex mu;
+    SortedSet<TypeParam> result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, mu_resize, mu, false, 100'000
+        2, &result, {}, false, 100'000
     );
-    ASSERT_EQ((sequence_size + 1) * 5, result.size());
+    ASSERT_EQ(3u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, mu_resize, mu, false, 100'000
+        2, &result, {}, false, 100'000
     );
-    ASSERT_EQ((sequence_size + 1) * 10, result.size());
+    ASSERT_EQ(3u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, mu_resize, mu, false, 100'000
+        2, &result, {}, false, 100'000
     );
-    ASSERT_EQ((sequence_size + 1) * 15, result.size());
+    ASSERT_EQ(3u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, {}, mu_resize, mu, false, 100'000
+        2, &result, {}, false, 100'000
     );
-    ASSERT_EQ((sequence_size + 1) * 20, result.size());
+    ASSERT_EQ(6u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, { 1, }, mu_resize, mu, false, 100'000
+        2, &result, { 1, }, false, 100'000
     );
-    ASSERT_EQ((sequence_size + 1) * 20, result.size());
+    ASSERT_EQ(6u, result.data().size());
 }
 
 TYPED_TEST(ExtractKmers, ExtractKmersAppendParallel) {
-    Vector<TypeParam> result;
-    std::mutex mu_resize;
-    std::shared_timed_mutex mu;
+    SortedSet<TypeParam> result;
     size_t sequence_size = 500;
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, mu_resize, mu, false, 0
+        2, &result, {}, false, 0
     );
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, mu_resize, mu, false, 0
+        2, &result, {}, false, 0
     );
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'A')),
-        2, &result, {}, mu_resize, mu, false, 0
+        2, &result, {}, false, 0
     );
-    sort_and_remove_duplicates(&result, 1);
-    ASSERT_EQ(3u, result.size());
+    ASSERT_EQ(3u, result.data().size());
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, {}, mu_resize, mu, false, 0
+        2, &result, {}, false, 0
     );
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
-        2, &result, { 1, }, mu_resize, mu, false, 0
+        2, &result, { 1, }, false, 0
     );
-    sort_and_remove_duplicates(&result, 1);
-    ASSERT_EQ(6u, result.size());
+    ASSERT_EQ(6u, result.data().size());
 }
 
 TYPED_TEST(ExtractKmers, ExtractKmersParallelRemoveRedundantReserved) {
-    Vector<TypeParam> result;
-    std::mutex mu_resize;
-    std::shared_timed_mutex mu;
+    SortedSet<TypeParam> result;
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        2, &result, {}, mu_resize, mu, true, 100'000
+        2, &result, {}, true, 100'000
     );
     // $A, AA, A$
-    ASSERT_EQ(3u, result.size());
+    ASSERT_EQ(3u, result.data().size());
 
     result.clear();
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, {}, mu_resize, mu, true, 100'000
+        3, &result, {}, true, 100'000
     );
     // $AA, AAA, AA$
-    ASSERT_EQ(3u, result.size());
+    ASSERT_EQ(3u, result.data().size());
 
     result.clear();
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, { 0 }, mu_resize, mu, true, 100'000
+        3, &result, { 0 }, true, 100'000
     );
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, { 1 }, mu_resize, mu, true, 100'000
+        3, &result, { 1 }, true, 100'000
     );
     // $$A, $AA, AAA, AA$
-    ASSERT_EQ(4u, result.size());
+    ASSERT_EQ(4u, result.data().size());
 
     result.clear();
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        4, &result, {}, mu_resize, mu, true, 100'000
+        4, &result, {}, true, 100'000
     );
     // $AAA, AAAA, AAA$
-    ASSERT_EQ(3u, result.size());
+    ASSERT_EQ(3u, result.data().size());
 
     result.clear();
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        4, &result, { 0 }, mu_resize, mu, true, 100'000
+        4, &result, { 0 }, true, 100'000
     );
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        4, &result, { 1 }, mu_resize, mu, true, 100'000
+        4, &result, { 1 }, true, 100'000
     );
     // $$$A, $$AA, $AAA, AAAA, AAA$
-    ASSERT_EQ(5u, result.size());
+    ASSERT_EQ(5u, result.data().size());
 }
 
 TYPED_TEST(ExtractKmers, ExtractKmersParallelRemoveRedundant) {
-    Vector<TypeParam> result;
-    std::mutex mu_resize;
-    std::shared_timed_mutex mu;
+    SortedSet<TypeParam> result;
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        2, &result, {}, mu_resize, mu, true, 0
+        2, &result, {}, true, 0
     );
     // $A, AA, A$
-    ASSERT_EQ(3u, result.size());
+    ASSERT_EQ(3u, result.data().size());
 
     result.clear();
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, {}, mu_resize, mu, true, 0
+        3, &result, {}, true, 0
     );
     // $AA, AAA, AA$
-    ASSERT_EQ(3u, result.size());
+    ASSERT_EQ(3u, result.data().size());
 
     result.clear();
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, { 0 }, mu_resize, mu, true, 0
+        3, &result, { 0 }, true, 0
     );
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        3, &result, { 1 }, mu_resize, mu, true, 0
+        3, &result, { 1 }, true, 0
     );
     // $$A, $AA, AAA, AA$
-    ASSERT_EQ(4u, result.size());
+    ASSERT_EQ(4u, result.data().size());
 
     result.clear();
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        4, &result, {}, mu_resize, mu, true, 0
+        4, &result, {}, true, 0
     );
     // $AAA, AAAA, AAA$
-    ASSERT_EQ(3u, result.size());
+    ASSERT_EQ(3u, result.data().size());
 
     result.clear();
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        4, &result, { 0 }, mu_resize, mu, true, 0
+        4, &result, { 0 }, true, 0
     );
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(500, 'A')),
-        4, &result, { 1 }, mu_resize, mu, true, 0
+        4, &result, { 1 }, true, 0
     );
     // $$$A, $$AA, $AAA, AAAA, AAA$
-    ASSERT_EQ(5u, result.size());
+    ASSERT_EQ(5u, result.data().size());
 }
