@@ -186,7 +186,7 @@ TEST(dbg_aligner, noise_in_branching_point) {
 
     EXPECT_EQ(1ull, path.size());
     EXPECT_EQ(query.size() - k + 1, path.front().size());
-    EXPECT_EQ(reference_1, path.front().get_sequence())
+    EXPECT_EQ(reference_1, path.front().get_sequence());
     EXPECT_EQ((query.size() - 1) * aligner.get_match_score() - 1, path.front().get_total_score());
     EXPECT_EQ("4=1X6=", path.front().get_cigar());
 }
