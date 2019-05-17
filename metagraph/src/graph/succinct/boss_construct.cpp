@@ -4,6 +4,7 @@
 
 #include "unix_tools.hpp"
 #include "boss_chunk.hpp"
+#include "kmer_collector.hpp"
 
 
 template <typename KMER>

@@ -2,6 +2,8 @@
 
 #include <progress_bar.hpp>
 
+#include "kmer_collector.hpp"
+
 
 template <typename KMER>
 class BitmapChunkConstructor : public IBitmapChunkConstructor {

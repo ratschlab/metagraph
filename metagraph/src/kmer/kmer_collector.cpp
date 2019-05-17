@@ -1,4 +1,4 @@
-#include "dbg_construct.hpp"
+#include "kmer_collector.hpp"
 
 #include <type_traits>
 #include <ips4o.hpp>
@@ -24,6 +24,13 @@ void sort_and_remove_duplicates(V *array,
     auto unique_end = std::unique(array->begin() + offset, array->end());
     array->erase(unique_end, array->end());
 }
+
+template void sort_and_remove_duplicates<Vector<KmerExtractor::Kmer64>>(Vector<KmerExtractor::Kmer64>*, size_t, size_t);
+template void sort_and_remove_duplicates<Vector<KmerExtractor::Kmer128>>(Vector<KmerExtractor::Kmer128>*, size_t, size_t);
+template void sort_and_remove_duplicates<Vector<KmerExtractor::Kmer256>>(Vector<KmerExtractor::Kmer256>*, size_t, size_t);
+template void sort_and_remove_duplicates<Vector<KmerExtractor2Bit::Kmer64>>(Vector<KmerExtractor2Bit::Kmer64>*, size_t, size_t);
+template void sort_and_remove_duplicates<Vector<KmerExtractor2Bit::Kmer128>>(Vector<KmerExtractor2Bit::Kmer128>*, size_t, size_t);
+template void sort_and_remove_duplicates<Vector<KmerExtractor2Bit::Kmer256>>(Vector<KmerExtractor2Bit::Kmer256>*, size_t, size_t);
 
 
 template <typename KMER, class KmerExtractor>

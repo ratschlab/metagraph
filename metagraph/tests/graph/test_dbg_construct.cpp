@@ -15,6 +15,7 @@
 #include "boss_construct.hpp"
 #include "utils.hpp"
 #include "reverse_complement.hpp"
+#include "sorted_set.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 

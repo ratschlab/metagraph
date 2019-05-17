@@ -13,6 +13,7 @@
 #include "serialization.hpp"
 #include "reverse_complement.hpp"
 #include "utils.hpp"
+#include "threading.hpp"
 
 using utils::remove_suffix;
 using TAlphabet = BOSS::TAlphabet;
