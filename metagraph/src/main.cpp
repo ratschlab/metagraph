@@ -639,10 +639,10 @@ void parse_sequences(const std::vector<std::string> &files,
             read_vcf_file_critical(
                 files[f], config.refpath, config.k, NULL,
                 [&](std::string &seq, auto *) {
-                    call_read(seq);
+                    call_read(std::string(seq));
                     if (config.reverse) {
                         reverse_complement(seq.begin(), seq.end());
-                        call_read(seq);
+                        call_read(std::string(seq));
                     }
                 }
             );
@@ -658,7 +658,7 @@ void parse_sequences(const std::vector<std::string> &files,
                                   << std::endl;
                         warning_different_k = true;
                     }
-                    call_read(sequence);
+                    call_read(std::move(sequence));
                 },
                 config.min_count,
                 config.max_count
@@ -868,7 +868,7 @@ int main(int argc, const char *argv[]) {
                     );
 
                     parse_sequences(files, *config, timer,
-                        [&](const auto &read) { constructor->add_sequence(read); },
+                        [&](std::string&& read) { constructor->add_sequence(std::move(read)); },
                         [&](const auto &loop) { constructor->add_sequences(loop); }
                     );
 
@@ -939,7 +939,7 @@ int main(int argc, const char *argv[]) {
                     );
 
                     parse_sequences(files, *config, timer,
-                        [&](const auto &read) { constructor->add_sequence(read); },
+                        [&](std::string&& read) { constructor->add_sequence(std::move(read)); },
                         [&](const auto &loop) { constructor->add_sequences(loop); }
                     );
 
@@ -1011,7 +1011,7 @@ int main(int argc, const char *argv[]) {
                 assert(graph.get());
 
                 parse_sequences(files, *config, timer,
-                    [&graph](const auto &seq) { graph->add_sequence(seq); },
+                    [&graph](std::string&& seq) { graph->add_sequence(seq); },
                     [&graph](const auto &loop) {
                         loop([&graph](const auto &seq) { graph->add_sequence(seq); });
                     }
@@ -1079,7 +1079,7 @@ int main(int argc, const char *argv[]) {
 
             // Insert new k-mers
             parse_sequences(files, *config, timer,
-                [&graph,&inserted_edges](const auto &seq) {
+                [&graph,&inserted_edges](std::string&& seq) {
                     graph->add_sequence(seq, inserted_edges.get());
                 },
                 [&graph,&inserted_edges](const auto &loop) {

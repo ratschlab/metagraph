@@ -108,13 +108,13 @@ KmerCollector<KMER, KmerExtractor>
 
 template <typename KMER, class KmerExtractor>
 void KmerCollector<KMER, KmerExtractor>
-::add_sequence(const std::string &sequence) {
+::add_sequence(std::string&& sequence) {
     if (sequence.size() < k_)
         return;
 
     // put read into temporary storage
     stored_sequences_size_ += sequence.size();
-    sequences_storage_.emplace_back(sequence);
+    sequences_storage_.push_back(std::move(sequence));
 
     if (stored_sequences_size_ < kMaxKmersChunkSize)
         return;

@@ -172,8 +172,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                          double memory_preallocated = 0,
                          bool verbose = false);
 
-    void add_sequence(const std::string &sequence) {
-        kmer_collector_.add_sequence(sequence);
+    void add_sequence(std::string&& sequence) {
+        kmer_collector_.add_sequence(std::move(sequence));
     }
 
     void add_sequences(std::function<void(CallString)> generate_sequences) {

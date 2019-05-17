@@ -167,7 +167,7 @@ TEST(Construct_SD_64, ConstructionFromChunks) {
                     constructor.reset(new DBGBitmapConstructor(k, canonical, suffix));
 
                     for (const auto &seq : input_data) {
-                        constructor->add_sequence(seq);
+                        constructor->add_sequence(std::string(seq));
                     }
 
                     std::unique_ptr<DBGBitmap::Chunk> chunk { constructor->build_chunk() };

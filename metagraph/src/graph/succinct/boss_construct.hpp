@@ -16,7 +16,7 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
                                              double memory_preallocated = 0,
                                              bool verbose = false);
 
-    virtual void add_sequence(const std::string &sequence) = 0;
+    virtual void add_sequence(std::string&& sequence) = 0;
     virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;
 
     virtual BOSS::Chunk* build_chunk() = 0;
@@ -32,8 +32,8 @@ class BOSSConstructor : public IGraphConstructor<BOSS> {
                     double memory_preallocated = 0,
                     bool verbose = false);
 
-    void add_sequence(const std::string &sequence) {
-        constructor_->add_sequence(sequence);
+    void add_sequence(std::string&& sequence) {
+        constructor_->add_sequence(std::move(sequence));
     }
 
     void add_sequences(std::function<void(CallString)> generate_sequences) {
