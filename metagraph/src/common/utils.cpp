@@ -588,11 +588,11 @@ void RangePartition::serialize(std::ostream &out) const {
 
 
 // indexes are distinct and sorted
-std::vector<bool> subvector(const bit_vector &col,
-                            const std::vector<uint64_t> &indexes) {
+sdsl::bit_vector subvector(const bit_vector &col,
+                           const std::vector<uint64_t> &indexes) {
     assert(indexes.size() <= col.size());
 
-    std::vector<bool> shrinked(indexes.size(), 0);
+    sdsl::bit_vector shrinked(indexes.size(), 0);
 
     uint64_t max_rank = col.num_set_bits();
     if (!max_rank)

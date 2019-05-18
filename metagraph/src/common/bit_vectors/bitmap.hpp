@@ -145,4 +145,7 @@ void call_ones(const sdsl::bit_vector &vector,
 void call_zeros(const sdsl::bit_vector &vector,
                 const std::function<void(uint64_t)> &callback);
 
+uint64_t inner_prod(const sdsl::bit_vector &first,
+                    const sdsl::bit_vector &second);
+
 #endif // __BITMAP_HPP__

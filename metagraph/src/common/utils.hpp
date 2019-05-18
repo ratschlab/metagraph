@@ -352,8 +352,8 @@ namespace utils {
 
 
     // indexes are distinct and sorted
-    std::vector<bool> subvector(const bit_vector &col,
-                                const std::vector<uint64_t> &indexes);
+    sdsl::bit_vector subvector(const bit_vector &col,
+                               const std::vector<uint64_t> &indexes);
 
     std::vector<uint64_t> sample_indexes(uint64_t universe_size,
                                          uint64_t sample_size,
