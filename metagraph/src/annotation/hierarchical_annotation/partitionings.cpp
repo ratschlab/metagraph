@@ -19,6 +19,9 @@ get_submatrix(const BRWTBottomUpBuilder::VectorsPtr &columns,
 
     std::vector<sdsl::bit_vector> submatrix(columns.size());
 
+    ProgressBar progress_bar(columns.size(), "Subsampling",
+                             std::cerr, !utils::get_verbose());
+
     #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < columns.size(); ++i) {
         submatrix[i] = utils::subvector(*columns[i], row_indexes);
@@ -28,6 +31,7 @@ get_submatrix(const BRWTBottomUpBuilder::VectorsPtr &columns,
             assert(submatrix[i][j] == (*columns[i])[row_indexes[j]]);
         }
 #endif
+        ++progress_bar;
     }
 
     return submatrix;
@@ -81,7 +85,7 @@ correlation_similarity(const std::vector<sdsl::bit_vector> &cols,
         similarities[j] = std::vector<double>(j, 0.);
     }
 
-    ProgressBar progress_bar(cols.size() * (cols.size() - 1) / 2, "Clustering",
+    ProgressBar progress_bar(cols.size() * (cols.size() - 1) / 2, "Computing correlations",
                              std::cerr, !utils::get_verbose());
 
     #pragma omp parallel for num_threads(num_threads) collapse(2)
@@ -158,12 +162,16 @@ parallel_binary_grouping_greedy(const BRWTBottomUpBuilder::VectorsPtr &columns,
 
     auto similarities = estimate_similarities(columns, num_threads);
 
+    ProgressBar progress_bar(columns.size() * (columns.size() - 1), "Clustering",
+                             std::cerr, !utils::get_verbose());
+
     std::vector<std::tuple<size_t, size_t, uint64_t>> candidates;
     candidates.reserve(columns.size() * (columns.size() - 1) / 2);
 
     for (size_t j = 1; j < similarities.size(); ++j) {
         for (size_t k = 0; k < j; ++k) {
             candidates.emplace_back(j, k, similarities[j][k]);
+            ++progress_bar;
         }
     }
 
@@ -191,6 +199,7 @@ parallel_binary_grouping_greedy(const BRWTBottomUpBuilder::VectorsPtr &columns,
             matched[i] = matched[j] = true;
             partition.push_back({ i, j });
         }
+        ++progress_bar;
     }
 
     for (size_t i = 0; i < columns.size(); ++i) {

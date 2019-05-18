@@ -138,6 +138,9 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
     size_t level = 0;
 
     while (nodes.size() > 1) {
+        if (utils::get_verbose())
+            std::cerr << "BRWT construction: level " << ++level << std::endl;
+
         auto groups = partitioner(columns);
 
         assert(groups.size() > 0);
@@ -146,7 +149,7 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
         std::vector<NodeBRWT> parent_nodes(groups.size());
         std::vector<std::unique_ptr<bit_vector>> parent_columns(groups.size());
 
-        ProgressBar progress_bar(groups.size(), "BRWT level " + std::to_string(level++),
+        ProgressBar progress_bar(groups.size(), "Building BRWT level",
                                  std::cerr, !utils::get_verbose());
 
         #pragma omp parallel for num_threads(num_threads)
