@@ -1,6 +1,7 @@
 #include "partitionings.hpp"
 
 #include <ips4o.hpp>
+#include <progress_bar.hpp>
 
 const uint64_t kNumRowsSampled = 1'000'000;
 
@@ -80,6 +81,9 @@ correlation_similarity(const std::vector<sdsl::bit_vector> &cols,
         similarities[j] = std::vector<double>(j, 0.);
     }
 
+    ProgressBar progress_bar(cols.size() * (cols.size() - 1) / 2, "Clustering",
+                             std::cerr, !utils::get_verbose());
+
     #pragma omp parallel for num_threads(num_threads) collapse(2)
     for (size_t j = 1; j < cols.size(); ++j) {
         for (size_t k = 0; k < cols.size(); ++k) {
@@ -87,6 +91,7 @@ correlation_similarity(const std::vector<sdsl::bit_vector> &cols,
                 continue;
 
             similarities[j][k] = inner_prod(cols[j], cols[k]);
+            ++progress_bar;
         }
     }
 

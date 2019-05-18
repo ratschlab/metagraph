@@ -135,8 +135,7 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
         nodes[i].group_sizes = { 1 };
     }
 
-    ProgressBar progress_bar(columns.size() - 1, "Building BRWT",
-                             std::cerr, !utils::get_verbose());
+    size_t level = 0;
 
     while (nodes.size() > 1) {
         auto groups = partitioner(columns);
@@ -146,6 +145,9 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
 
         std::vector<NodeBRWT> parent_nodes(groups.size());
         std::vector<std::unique_ptr<bit_vector>> parent_columns(groups.size());
+
+        ProgressBar progress_bar(groups.size(), "BRWT level " + std::to_string(level++),
+                                 std::cerr, !utils::get_verbose());
 
         #pragma omp parallel for num_threads(num_threads)
         for (size_t g = 0; g < groups.size(); ++g) {
@@ -158,7 +160,7 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
             parent_nodes[g] = std::move(parent.first);
             parent_columns[g] = std::move(parent.second);
 
-            progress_bar += group.size() - 1;
+            ++progress_bar;
         }
 
         nodes = std::move(parent_nodes);
