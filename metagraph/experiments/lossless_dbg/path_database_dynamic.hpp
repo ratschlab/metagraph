@@ -139,15 +139,17 @@ public:
         double split_time = 0;
 
 #ifdef USE_LOCKS
-        vector<omp_lock_t> locks(graph.num_nodes()+1);
-        for(int i=0;i<locks.size();i++) {
-            omp_init_lock(&locks[i]);
+        vector<omp_lock_t> node_locks(graph.num_nodes()+1);
+        vector<omp_lock_t> outgoing_locks(graph.num_nodes()+1);
+        for(int i=0;i<node_locks.size();i++) {
+            omp_init_lock(&node_locks[i]);
+            omp_init_lock(&outgoing_locks[i]);
         }
 #endif
 
         timer.reset();
 
-        #pragma omp parallel for num_threads(get_num_threads()) //default(none) shared(encoded,locks,routing_table,incoming_table)
+        #pragma omp parallel for num_threads(get_num_threads()) //default(none) shared(encoded,node_locks,routing_table,incoming_table)
         for (size_t i = 0; i < sequences.size(); i++) {
             std::vector<std::tuple<node_index, char, char>> bifurcations;
 
@@ -189,12 +191,12 @@ public:
             });
 
             int relative_position = INT_MIN;
-            optional<omp_lock_t*> prev_pointer;
+            optional<omp_lock_t*> prev_outgoing_lock;
             for (const auto &[node, join_symbol, split_symbol] : bifurcations) {
 #ifdef USE_LOCKS
-                omp_set_lock(&locks[node]);
-                if (prev_pointer) {
-                    omp_unset_lock(*prev_pointer);
+                omp_set_lock(&node_locks[node]);
+                if (prev_outgoing_lock) {
+                    omp_unset_lock(*prev_outgoing_lock);
                 }
 #endif
                 if (join_symbol) {
@@ -209,6 +211,8 @@ public:
                     relative_position += incoming_table.branch_offset_and_increment(node, join_symbol);
 
                 }
+
+
                 if (split_symbol) {
                     assert(relative_position>=0);
                     routing_table.insert(node, relative_position, split_symbol);
@@ -218,14 +222,16 @@ public:
                         //++progress_bar;
                     }
                 }
-                prev_pointer = &locks[node];
+                omp_set_lock(&outgoing_locks[node]);
+                prev_outgoing_lock = &outgoing_locks[node];
+                omp_unset_lock(&node_locks[node]);
             }
-            omp_unset_lock(*prev_pointer);
+            omp_unset_lock(*prev_outgoing_lock);
         }
 
 #ifdef USE_LOCKS
-        for(int i=0;i<locks.size();i++) {
-            omp_destroy_lock(&locks[i]);
+        for(int i=0;i<node_locks.size();i++) {
+            omp_destroy_lock(&node_locks[i]);
         }
 #endif
         encoded_paths += encoded.size();
