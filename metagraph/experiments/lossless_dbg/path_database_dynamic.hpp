@@ -15,7 +15,7 @@
 #include <progress_bar.hpp>
 #include <optional>
 
-#include "path_database.hpp"
+#include "path_database_common.hpp"
 #include "dynamic_routing_table.hpp"
 #include "dynamic_incoming_table.hpp"
 #include "utils.hpp"
@@ -34,23 +34,19 @@ using node_index = DeBruijnGraph::node_index;
 using path_id = pair<node_index,int>;
 
 template<typename GraphT=DBGSuccinct>
-class PathDatabaseDynamic : public PathDatabase<pair<node_index,int>,GraphT> {
+class PathDatabaseDynamic : public PathDatabaseCommon<> {
 public:
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
     explicit PathDatabaseDynamic(std::shared_ptr<const GraphT> graph) :
-            PathDatabase<pair<node_index,int>,GraphT>(graph),
-            graph(*(this->graph_)),
-            incoming_table(*(this->graph_)), routing_table(nullptr) {}
+            PathDatabaseCommon<>(graph)
+                    {}
+
 
     explicit PathDatabaseDynamic(const vector<string> &filenames,
                  size_t k_kmer = 21 /* default kmer */) :
-            PathDatabase<pair<node_index,int>,GraphT>(filenames, k_kmer),
-            graph(*(this->graph_)),
-            incoming_table(*(this->graph_)),
-            //routing_table((new GraphPreprocessor(*(this->graph_)))->find_weak_splits())
-            routing_table()
+            PathDatabaseCommon<>(filenames, k_kmer)
             {}
 
     virtual ~PathDatabaseDynamic() {}
@@ -275,47 +271,6 @@ public:
         return encoded_paths;
     };
 
-    std::string decode(path_id path) const override {
-        auto node = path.first;
-        auto kmer = graph.get_node_sequence(node);
-        string sequence = kmer;
-        string sequence_path = kmer;
-        int relative_position = path.second;
-
-        int kmer_position = 0;
-        char base = '\0';
-        char encoded_base = '\0';
-        while (true) {
-            if (node_is_split(node)) {
-                encoded_base = routing_table.get(node,relative_position); // maybe different
-                base = routing_table.traversed_base(node,relative_position);
-                relative_position = routing_table.new_relative_position(node,relative_position);
-                if (base != encoded_base) {
-                    cout << encoded_base << base << endl;
-                }
-            }
-            else {
-                assert(graph.outdegree(node) == 1);
-                graph.call_outgoing_kmers(node,[&base](node_index node,char edge_label ) { base = edge_label;});
-                encoded_base = base; // same
-            }
-            assert(base);
-            if (base == '$') break;
-            node = graph.traverse(node,base);
-            assert(node);
-            kmer_position++;
-            sequence.append(1,encoded_base); // 1 times base
-            sequence_path.append(1,base); // 1 times base
-
-            if (node_is_join(node)) {
-                auto join_symbol = sequence_path[kmer_position-1];
-                relative_position += incoming_table.branch_offset(node,join_symbol);
-            }
-        }
-
-        return sequence;
-    }
-
     json get_statistics(unsigned int verbosity = ~0u) const {
         auto result = PathDatabase<pair<node_index,int>,GraphT>::get_statistics(verbosity);
         result.update(statistics);
@@ -339,13 +294,9 @@ protected:
     int encoded_paths = 0;
     // denote where the reads should go ($ATCGN) ($ denodes the end of particular read)
 
-    DynamicRoutingTable routing_table;
-    DynamicIncomingTable<> incoming_table;
 
     tsl::hopscotch_set<node_index> additional_joins;
     tsl::hopscotch_set<node_index> additional_splits;
-
-    const GraphT & graph;
 
 #ifdef MEMOIZE
     vector<char> is_join;

@@ -25,9 +25,10 @@
 
 using default_bit_vector = bit_vector_small;
 
-template <typename GraphT=DBGSuccinct,typename edge_identifier_t=char>
+template <typename GraphT=DBGSuccinct,typename _edge_identifier_t=char>
 class DynamicIncomingTable {
 public:
+    using edge_identifier_t = _edge_identifier_t;
     explicit DynamicIncomingTable(const GraphT &graph) : graph(graph) {}
 
     int branch_offset(node_index node, edge_identifier_t incoming) const {

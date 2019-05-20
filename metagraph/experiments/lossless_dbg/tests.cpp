@@ -18,7 +18,6 @@
 #include "path_database_list_of_bifurcation_choices.hpp"
 #include "samplers.hpp"
 #include "path_database_dynamic.hpp"
-#include "path_database_baseline_wavelet_deprecated.hpp"
 #include "path_database_wavelet.hpp"
 #include "incoming_table.hpp"
 using namespace std;
@@ -199,16 +198,8 @@ TEST(PathDatabase,IdentityTestPathDatabaseBaseline) {
     short_identity_test<PathDatabaseDynamic<>>();
 }
 
-TEST(PathDatabase,IdentityTestPathDatabaseBaselineWaveletDeprecated) {
-    short_identity_test<PathDatabaseBaselineWaveletDeprecated>();
-}
-
 TEST(PathDatabase,IdentityTestPathDatabaseBaselineWavelet) {
     short_identity_test<PathDatabaseWavelet<>>();
-}
-
-TEST(PathDatabase,SerDesTest) {
-    short_serdes_test<PathDatabaseBaselineWaveletDeprecated>();
 }
 
 TEST(PathDatabase,DecodeAllInverse) {

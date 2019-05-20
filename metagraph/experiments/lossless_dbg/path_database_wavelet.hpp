@@ -44,23 +44,24 @@ using alphabets::log2;
 
 //template <class Wavelet = sdsl::wt_rlmn<sdsl::sd_vector<>>
 template<class Wavelet = sdsl::wt_rlmn<>,class BitVector=default_bit_vector>
-class PathDatabaseWavelet : public PathDatabaseDynamic<DBGSuccinct> {
+class PathDatabaseWavelet : public PathDatabaseCommon<> {
 public:
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
-    PathDatabaseWavelet(std::shared_ptr<const DBGSuccinct> graph) : PathDatabaseDynamic(graph),
+    PathDatabaseWavelet(std::shared_ptr<const DBGSuccinct> graph) : PathDatabaseCommon(graph),
                                                                               incoming_table(graph)
                                                                               {}
 
     PathDatabaseWavelet(const vector<string> &filenames,
-                        size_t k_kmer = 21 /* default */) : PathDatabaseDynamic(filenames,k_kmer),
+                        size_t k_kmer = 21 /* default */) : PathDatabaseCommon(filenames,k_kmer),
                                                             incoming_table(graph) {}
 
 
-    std::vector<path_id> encode(const std::vector<std::string> &sequences) override {
 
-        vector<path_id> encoded = PathDatabaseDynamic::encode(sequences);
+    std::vector<path_id> encode(const std::vector<std::string> &sequences) override {
+        auto dynamic_path_db = PathDatabaseDynamic(sequences,graph.get_k());
+        auto encoded = dynamic_path_db.encode(sequences);
 
         // convert dynamic_(routing_table/incoming_table) to routing_table/incoming_table
         construct_routing_table();
@@ -68,7 +69,7 @@ public:
         return encoded;
     }
 
-    void construct_routing_table() {
+    void construct_routing_table(PathDatabaseDynamic<>& pd) {
         Timer timer;
         cerr << "Started transforming routing_table." << endl;
         vector<char> routing_table_array;
@@ -87,7 +88,7 @@ public:
         cerr << "Transformation finished in " << statistics["transformation_routing_table_time"] << endl;
     }
 
-    void construct_incoming_table() {
+    void construct_incoming_table(PathDatabaseDynamic<>& pd) {
         Timer timer;
         cerr << "Started transforming incoming_table." << endl;
         vector<int> incoming_table_builder;
