@@ -227,8 +227,7 @@ set(METALIBS ${METALIBS}
   -lKMC
   -lhts -lz -lbz2
   -lmaus2
-  -lsdsl -ldivsufsort -ldivsufsort64
-  -lssl -lcrypto -llzma
+  -lsdsl
   -lbrwt
   -ljsoncpp
   progress_bar
