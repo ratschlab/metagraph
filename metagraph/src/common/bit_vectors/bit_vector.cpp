@@ -18,22 +18,6 @@ const size_t MAX_ITER_BIT_VECTOR_SD = 10;
 const size_t MAX_ITER_BIT_VECTOR_RRR = 10;
 
 
-sdsl::bit_vector to_sdsl(const std::vector<bool> &vector) {
-    sdsl::bit_vector result(vector.size(), 0);
-    for (size_t i = 0; i < vector.size(); ++i) {
-        if (vector[i])
-            result[i] = 1;
-    }
-    return result;
-}
-
-sdsl::bit_vector to_sdsl(std::vector<bool>&& vector) {
-    auto result = to_sdsl(vector);
-    vector = std::vector<bool>();
-    return result;
-}
-
-
 uint64_t bit_vector::rank0(uint64_t id) const {
     return std::min(id + 1, size()) - rank1(id);
 }
@@ -43,24 +27,6 @@ sdsl::bit_vector bit_vector::to_vector() const {
     call_ones([&result](auto i) { result[i] = true; });
     return result;
 }
-
-template <class Vector>
-void bit_vector::add_to(Vector *other) const {
-    assert(other);
-    assert(other->size() == size());
-    call_ones([other](auto i) { (*other)[i] = true; });
-}
-
-template void bit_vector::add_to(sdsl::bit_vector*) const;
-template void bit_vector::add_to(std::vector<bool>*) const;
-
-template <>
-void bit_vector::add_to(bitmap *other) const {
-    assert(other);
-    assert(other->size() == size());
-    call_ones([other](auto i) { other->set(i, true); });
-}
-
 
 std::ostream& operator<<(std::ostream &os, const bit_vector &bv) {
     return os << bv.to_vector();
@@ -339,6 +305,7 @@ void bit_vector_dyn::serialize(std::ostream &out) const {
     vector_.serialise(out);
 }
 
+// TODO: this is slow, replace with rank - select calls
 void bit_vector_dyn::call_ones(const std::function<void(uint64_t)> &callback) const {
     uint64_t i = 0;
     while (i < size() && (i = next1(i)) < size()) {
@@ -541,6 +508,12 @@ bool bit_vector_stat::load(std::istream &in) {
     } catch (...) {
         return false;
     }
+}
+
+void bit_vector_stat::add_to(sdsl::bit_vector *other) const {
+    assert(other);
+    assert(other->size() == size());
+    *other |= vector_;
 }
 
 void bit_vector_stat::call_ones(const std::function<void(uint64_t)> &callback) const {
@@ -1014,58 +987,6 @@ bit_vector_adaptive::operator=(const bit_vector_adaptive &other) {
     return *this;
 }
 
-uint64_t bit_vector_adaptive::rank1(uint64_t id) const {
-    return vector_->rank1(id);
-}
-
-uint64_t bit_vector_adaptive::select1(uint64_t id) const {
-    return vector_->select1(id);
-}
-
-uint64_t bit_vector_adaptive::next1(uint64_t id) const {
-    return vector_->next1(id);
-}
-
-uint64_t bit_vector_adaptive::prev1(uint64_t id) const {
-    return vector_->prev1(id);
-}
-
-void bit_vector_adaptive::set(uint64_t id, bool val) {
-    vector_->set(id, val);
-}
-
-bool bit_vector_adaptive::operator[](uint64_t id) const {
-    return vector_->operator[](id);
-}
-
-uint64_t bit_vector_adaptive::get_int(uint64_t id, uint32_t width) const {
-    return vector_->get_int(id, width);
-}
-
-void bit_vector_adaptive::insert_bit(uint64_t id, bool val) {
-    assert(id <= size());
-    vector_->insert_bit(id, val);
-}
-
-void bit_vector_adaptive::delete_bit(uint64_t id) {
-    assert(id < size());
-    vector_->delete_bit(id);
-}
-
-uint64_t bit_vector_adaptive::size() const {
-    return vector_->size();
-}
-
-sdsl::bit_vector bit_vector_adaptive::to_vector() const {
-    return vector_->to_vector();
-}
-
-void
-bit_vector_adaptive
-::call_ones(const std::function<void(uint64_t)> &callback) const {
-    vector_->call_ones(callback);
-}
-
 bit_vector_adaptive::VectorCode
 bit_vector_adaptive::representation_tag() const {
     if (dynamic_cast<const bit_vector_sd*>(vector_.get())) {
@@ -1104,6 +1025,10 @@ void bit_vector_adaptive::serialize(std::ostream &out) const {
     vector_->serialize(out);
 }
 
+
+////////////////////////////////////////////
+// bit_vector_adaptive_stat               //
+////////////////////////////////////////////
 
 template <bit_vector_adaptive::DefineRepresentation optimal_representation>
 bit_vector_adaptive_stat<optimal_representation>

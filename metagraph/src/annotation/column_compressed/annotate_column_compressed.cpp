@@ -205,7 +205,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                         } else if (!bitmatrix_.at(col).get()) {
                             bitmatrix_.at(col) = std::move(new_column);
                         } else {
-                            new_column->add_to(static_cast<bitmap*>(&decompress(col)));
+                            decompress(col) |= *new_column;
                         }
                     } else {
                         error_occurred = true;
@@ -413,12 +413,12 @@ bitmap_dyn& ColumnCompressed<Label>::decompress(size_t j) {
         if (j == bitmatrix_.size())
             bitmatrix_.emplace_back();
 
-        auto vector = std::make_unique<bitmap_adaptive>(num_rows_, 0);
+        auto *vector = new bitmap_adaptive(num_rows_, 0);
 
         if (bitmatrix_[j].get())
-            bitmatrix_[j]->add_to(static_cast<bitmap*>(vector.get()));
+            *vector |= *bitmatrix_[j];
 
-        cached_columns_.Put(j, vector.release());
+        cached_columns_.Put(j, vector);
         return *cached_columns_.Get(j);
     }
 }
@@ -442,7 +442,7 @@ void ColumnCompressed<Label>
     ThreadPool thread_pool(num_threads);
     for (uint64_t i = 0; i < num_rows_; i += kNumRowsInBlock) {
         thread_pool.enqueue(
-            [this](const auto&... args) { this->add_labels(args...); },
+            [this](auto... args) { this->add_labels(args...); },
             i, std::min(i + kNumRowsInBlock, num_rows_),
             annotator
         );

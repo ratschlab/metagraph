@@ -42,7 +42,7 @@ compute_or(const std::vector<std::unique_ptr<bit_vector>> &columns) {
         assert(col_ptr.get());
         assert(col_ptr->size() == size);
         if (dynamic_cast<bit_vector_stat*>(&(*col_ptr))) {
-            vector_or |= dynamic_cast<bit_vector_stat&>(*col_ptr).get();
+            vector_or |= dynamic_cast<bit_vector_stat&>(*col_ptr).data();
         } else {
             col_ptr->call_ones([&vector_or](auto i) { vector_or[i] = true; });
         }

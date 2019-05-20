@@ -1,8 +1,6 @@
 #ifndef __BITMAP_HPP__
 #define __BITMAP_HPP__
 
-#include <mutex>
-#include <atomic>
 #include <functional>
 #include <memory>
 #include <set>
@@ -10,24 +8,43 @@
 #include <sdsl/int_vector.hpp>
 
 
+sdsl::bit_vector to_sdsl(const std::vector<bool> &vector);
+
+void call_ones(const sdsl::bit_vector &vector,
+               const std::function<void(uint64_t)> &callback);
+
+void call_zeros(const sdsl::bit_vector &vector,
+                const std::function<void(uint64_t)> &callback);
+
+uint64_t inner_prod(const sdsl::bit_vector &first,
+                    const sdsl::bit_vector &second);
+
+
 class bitmap {
   public:
-    virtual ~bitmap() {};
+    virtual ~bitmap() {}
 
     virtual void set(uint64_t id, bool val) = 0;
+
     virtual bool operator[](uint64_t id) const = 0;
     virtual uint64_t get_int(uint64_t id, uint32_t width) const = 0;
+
     virtual uint64_t size() const = 0;
     virtual uint64_t num_set_bits() const = 0;
 
+    virtual void add_to(sdsl::bit_vector *other) const;
     virtual void call_ones(const std::function<void(uint64_t)> &callback) const = 0;
 };
 
 
 class bitmap_dyn : public bitmap {
   public:
+    virtual ~bitmap_dyn() {}
+
     // indexes - positions of newly inserted elements in resulting vector
     virtual void insert_zeros(const std::vector<uint64_t> &indexes) = 0;
+
+    virtual bitmap_dyn& operator|=(const bitmap &other);
 };
 
 
@@ -39,21 +56,21 @@ class bitmap_set : public bitmap_dyn {
     bitmap_set(uint64_t size, std::set<uint64_t>&& bits) noexcept;
     bitmap_set(uint64_t size, std::initializer_list<uint64_t> init);
 
-    void set(uint64_t id, bool val);
-    bool operator[](uint64_t id) const;
-    uint64_t get_int(uint64_t id, uint32_t width) const;
-    void insert_zeros(const std::vector<uint64_t> &pos);
+    virtual void set(uint64_t id, bool val) override;
+    virtual void insert_zeros(const std::vector<uint64_t> &pos) override;
 
-    inline uint64_t size() const { return size_; }
-    inline uint64_t num_set_bits() const { return bits_.size(); }
+    virtual bool operator[](uint64_t id) const override { return bits_.count(id); }
+    virtual uint64_t get_int(uint64_t id, uint32_t width) const override;
 
-    void call_ones(const std::function<void(uint64_t)> &callback) const;
+    virtual uint64_t size() const override { return size_; }
+    virtual uint64_t num_set_bits() const override { return bits_.size(); }
 
-    inline const std::set<uint64_t>& data() const { return bits_; }
-    inline std::set<uint64_t>& data() { return bits_; }
+    virtual void call_ones(const std::function<void(uint64_t)> &callback) const override;
+
+    const std::set<uint64_t>& data() const { return bits_; }
 
   private:
-    size_t size_;
+    uint64_t size_;
     std::set<uint64_t> bits_;
 };
 
@@ -66,21 +83,22 @@ class bitmap_vector : public bitmap_dyn {
     bitmap_vector(sdsl::bit_vector&& vector) noexcept;
     bitmap_vector(std::initializer_list<bool> bitmap);
 
-    void set(uint64_t id, bool val);
-    inline bool operator[](uint64_t id) const { return bit_vector_[id]; }
+    virtual void set(uint64_t id, bool val) override;
+    virtual void insert_zeros(const std::vector<uint64_t> &pos) override;
+    virtual bitmap_vector& operator|=(const bitmap &other) override;
 
-    inline uint64_t get_int(uint64_t id, uint32_t width) const {
+    virtual bool operator[](uint64_t id) const override { return bit_vector_[id]; }
+    virtual uint64_t get_int(uint64_t id, uint32_t width) const override {
         return bit_vector_.get_int(id, width);
     }
-    void insert_zeros(const std::vector<uint64_t> &pos);
 
-    inline uint64_t size() const { return bit_vector_.size(); }
-    inline uint64_t num_set_bits() const { return num_set_bits_; }
+    virtual uint64_t size() const override { return bit_vector_.size(); }
+    virtual uint64_t num_set_bits() const override { return num_set_bits_; }
 
-    void call_ones(const std::function<void(uint64_t)> &callback) const;
+    virtual void add_to(sdsl::bit_vector *other) const override;
+    virtual void call_ones(const std::function<void(uint64_t)> &callback) const override;
 
-    inline const sdsl::bit_vector& data() const { return bit_vector_; }
-    inline sdsl::bit_vector& data() { return bit_vector_; }
+    const sdsl::bit_vector& data() const { return bit_vector_; }
 
   private:
     uint64_t num_set_bits_ = 0;
@@ -100,28 +118,24 @@ class bitmap_adaptive : public bitmap_dyn {
     bitmap_adaptive(uint64_t size, std::set<uint64_t>&& bits) noexcept;
     bitmap_adaptive(uint64_t size, std::initializer_list<uint64_t> bits);
 
-    void set(uint64_t id, bool val);
-    inline bool operator[](uint64_t id) const { return (*bitmap_)[id]; }
+    virtual void set(uint64_t id, bool val) override;
+    virtual void insert_zeros(const std::vector<uint64_t> &pos) override;
+    virtual bitmap_adaptive& operator|=(const bitmap &other) override;
 
-    inline uint64_t get_int(uint64_t id, uint32_t width) const {
+    virtual bool operator[](uint64_t id) const override { return (*bitmap_)[id]; }
+    virtual uint64_t get_int(uint64_t id, uint32_t width) const override {
         return bitmap_->get_int(id, width);
     }
 
-    void insert_zeros(const std::vector<uint64_t> &pos);
+    virtual uint64_t size() const override { return bitmap_->size(); }
+    virtual uint64_t num_set_bits() const override { return bitmap_->num_set_bits(); }
 
-    inline uint64_t size() const { return bitmap_->size(); }
-    inline uint64_t num_set_bits() const { return bitmap_->num_set_bits(); }
-
-    inline void call_ones(const std::function<void(uint64_t)> &callback) const {
+    virtual void add_to(sdsl::bit_vector *other) const override { bitmap_->add_to(other); }
+    virtual void call_ones(const std::function<void(uint64_t)> &callback) const override {
         bitmap_->call_ones(callback);
     }
 
-    inline const bitmap_dyn& data() const {
-        assert(bitmap_.get());
-        return *bitmap_.get();
-    }
-
-    inline bitmap_dyn& data() {
+    const bitmap_dyn& data() const {
         assert(bitmap_.get());
         return *bitmap_.get();
     }
@@ -137,15 +151,5 @@ class bitmap_adaptive : public bitmap_dyn {
     static const size_t kMaxNumIndicesLogRatio;
     static const size_t kNumIndicesMargin;
 };
-
-
-void call_ones(const sdsl::bit_vector &vector,
-               const std::function<void(uint64_t)> &callback);
-
-void call_zeros(const sdsl::bit_vector &vector,
-                const std::function<void(uint64_t)> &callback);
-
-uint64_t inner_prod(const sdsl::bit_vector &first,
-                    const sdsl::bit_vector &second);
 
 #endif // __BITMAP_HPP__
