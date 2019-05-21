@@ -7,14 +7,25 @@
 
 #include <sdsl/int_vector.hpp>
 
+template <class T>
+using VoidCall = std::function<void(T)>;
+
 
 sdsl::bit_vector to_sdsl(const std::vector<bool> &vector);
 
 void call_ones(const sdsl::bit_vector &vector,
-               const std::function<void(uint64_t)> &callback);
+               const VoidCall<uint64_t> &callback);
+
+void call_ones(const sdsl::bit_vector &vector,
+               uint64_t begin, uint64_t end,
+               const VoidCall<uint64_t> &callback);
 
 void call_zeros(const sdsl::bit_vector &vector,
-                const std::function<void(uint64_t)> &callback);
+                const VoidCall<uint64_t> &callback);
+
+void call_zeros(const sdsl::bit_vector &vector,
+                uint64_t begin, uint64_t end,
+                const VoidCall<uint64_t> &callback);
 
 uint64_t inner_prod(const sdsl::bit_vector &first,
                     const sdsl::bit_vector &second);
@@ -33,7 +44,9 @@ class bitmap {
     virtual uint64_t num_set_bits() const = 0;
 
     virtual void add_to(sdsl::bit_vector *other) const;
-    virtual void call_ones(const std::function<void(uint64_t)> &callback) const = 0;
+    virtual void call_ones(const VoidCall<uint64_t> &callback) const;
+    virtual void call_ones_in_range(uint64_t begin, uint64_t end,
+                                    const VoidCall<uint64_t> &callback) const = 0;
 };
 
 
@@ -65,7 +78,8 @@ class bitmap_set : public bitmap_dyn {
     virtual uint64_t size() const override { return size_; }
     virtual uint64_t num_set_bits() const override { return bits_.size(); }
 
-    virtual void call_ones(const std::function<void(uint64_t)> &callback) const override;
+    virtual void call_ones_in_range(uint64_t begin, uint64_t end,
+                                    const VoidCall<uint64_t> &callback) const override;
 
     const std::set<uint64_t>& data() const { return bits_; }
 
@@ -96,7 +110,8 @@ class bitmap_vector : public bitmap_dyn {
     virtual uint64_t num_set_bits() const override { return num_set_bits_; }
 
     virtual void add_to(sdsl::bit_vector *other) const override;
-    virtual void call_ones(const std::function<void(uint64_t)> &callback) const override;
+    virtual void call_ones_in_range(uint64_t begin, uint64_t end,
+                                    const VoidCall<uint64_t> &callback) const override;
 
     const sdsl::bit_vector& data() const { return bit_vector_; }
 
@@ -131,8 +146,9 @@ class bitmap_adaptive : public bitmap_dyn {
     virtual uint64_t num_set_bits() const override { return bitmap_->num_set_bits(); }
 
     virtual void add_to(sdsl::bit_vector *other) const override { bitmap_->add_to(other); }
-    virtual void call_ones(const std::function<void(uint64_t)> &callback) const override {
-        bitmap_->call_ones(callback);
+    virtual void call_ones_in_range(uint64_t begin, uint64_t end,
+                                    const VoidCall<uint64_t> &callback) const override {
+        bitmap_->call_ones_in_range(begin, end, callback);
     }
 
     const bitmap_dyn& data() const {

@@ -458,14 +458,9 @@ void ColumnCompressed<Label>::add_labels(uint64_t begin, uint64_t end,
 
     // TODO: use RowsFromColumnsTransformer
     for (size_t j = 0; j < bitmatrix_.size(); ++j) {
-        uint64_t first = begin == 0
-                            ? 1
-                            : bitmatrix_[j]->rank1(begin - 1) + 1;
-        uint64_t last = bitmatrix_[j]->rank1(end - 1);
-
-        for (uint64_t r = first; r <= last; ++r) {
-            annotator->matrix_->set(bitmatrix_[j]->select1(r), j);
-        }
+        bitmatrix_[j]->call_ones_in_range(begin, end,
+            [&](uint64_t idx) { annotator->matrix_->set(idx, j); }
+        );
     }
 }
 

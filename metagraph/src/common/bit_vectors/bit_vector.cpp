@@ -232,12 +232,17 @@ std::unique_ptr<bit_vector> bit_vector_dyn::copy() const {
 }
 
 uint64_t bit_vector_dyn::rank1(uint64_t id) const {
-    return vector_.rank1(id);
+    return vector_.size() ? vector_.rank1(id) : 0;
 }
 
 uint64_t bit_vector_dyn::select1(uint64_t id) const {
     assert(id > 0 && size() > 0 && id <= rank1(size() - 1));
     return vector_.select1(id - 1);
+}
+
+uint64_t bit_vector_dyn::select0(uint64_t id) const {
+    assert(id > 0 && size() > 0 && id <= rank0(size() - 1));
+    return vector_.select0(id - 1);
 }
 
 uint64_t bit_vector_dyn::next1(uint64_t pos) const {
@@ -305,11 +310,32 @@ void bit_vector_dyn::serialize(std::ostream &out) const {
     vector_.serialise(out);
 }
 
-// TODO: this is slow, replace with rank - select calls
-void bit_vector_dyn::call_ones(const std::function<void(uint64_t)> &callback) const {
-    uint64_t i = 0;
-    while (i < size() && (i = next1(i)) < size()) {
-        callback(i++);
+void bit_vector_dyn::call_ones_in_range(uint64_t begin, uint64_t end,
+                                        const VoidCall<uint64_t> &callback) const {
+    assert(begin <= end);
+    assert(end <= size());
+
+    if (2 * num_set_bits() < size()) {
+        // sparse
+        uint64_t num_ones = end ? rank1(end - 1) : 0;
+        for (uint64_t r = begin ? rank1(begin - 1) + 1 : 1; r <= num_ones; ++r) {
+            callback(select1(r));
+        }
+    } else {
+        // dense
+        uint64_t one_pos = 0;
+        uint64_t zero_pos = 0;
+        uint64_t num_zeros = end ? rank0(end - 1) : 0;
+        for (uint64_t r = begin ? rank0(begin - 1) + 1 : 1; r <= num_zeros; ++r) {
+            zero_pos = select0(r);
+            while (one_pos < zero_pos) {
+                callback(one_pos++);
+            }
+            one_pos++;
+        }
+        while (one_pos < end) {
+            callback(one_pos++);
+        }
     }
 }
 
@@ -329,7 +355,7 @@ bit_vector_stat::bit_vector_stat(const bit_vector_stat &other) {
 }
 
 bit_vector_stat
-::bit_vector_stat(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
+::bit_vector_stat(const std::function<void(const VoidCall<uint64_t>&)> &call_ones,
                   uint64_t size)
       : vector_(size, false),
         num_set_bits_(0) {
@@ -516,8 +542,11 @@ void bit_vector_stat::add_to(sdsl::bit_vector *other) const {
     *other |= vector_;
 }
 
-void bit_vector_stat::call_ones(const std::function<void(uint64_t)> &callback) const {
-    ::call_ones(vector_, callback);
+void bit_vector_stat::call_ones_in_range(uint64_t begin, uint64_t end,
+                                         const VoidCall<uint64_t> &callback) const {
+    assert(begin <= end);
+    assert(end <= size());
+    ::call_ones(vector_, begin, end, callback);
 }
 
 void bit_vector_stat::init_rs() {
@@ -530,7 +559,9 @@ void bit_vector_stat::init_rs() {
     slct_ = sdsl::select_support_mcl<>(&vector_);
 
     requires_update_ = false;
-    assert(num_set_bits_ == rank1(size() - 1));
+
+    assert(num_set_bits_ == (size() ? rank1(size() - 1) : 0));
+    assert(num_set_bits_ == num_set_bits());
 }
 
 
@@ -576,9 +607,9 @@ bit_vector_sd::bit_vector_sd(bit_vector_sd&& other) noexcept {
 }
 
 bit_vector_sd
-::bit_vector_sd(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
-                 uint64_t size,
-                 uint64_t num_set_bits)
+::bit_vector_sd(const std::function<void(const VoidCall<uint64_t>&)> &call_ones,
+                uint64_t size,
+                uint64_t num_set_bits)
       : inverted_(num_set_bits > size / 2) {
     sdsl::sd_vector_builder builder(size,
                                     !inverted_
@@ -731,26 +762,30 @@ sdsl::bit_vector bit_vector_sd::to_vector() const {
     return vector;
 }
 
-void bit_vector_sd::call_ones(const std::function<void(uint64_t)> &callback) const {
+void bit_vector_sd::call_ones_in_range(uint64_t begin, uint64_t end,
+                                       const VoidCall<uint64_t> &callback) const {
+    assert(begin <= end);
+    assert(end <= size());
+
     if (!inverted_) {
         // sparse
-        uint64_t num_ones = num_set_bits();
-        for (uint64_t i = 1; i <= num_ones; ++i) {
+        uint64_t num_ones = rk1_(end);
+        for (uint64_t i = rk1_(begin) + 1; i <= num_ones; ++i) {
             callback(slct1_(i));
         }
     } else {
         // dense, vector_ keeps positions of zeros
         uint64_t one_pos = 0;
         uint64_t zero_pos = 0;
-        uint64_t num_zeros = rk1_(size());
-        for (uint64_t r = 1; r <= num_zeros; ++r) {
+        uint64_t num_zeros = rk1_(end);
+        for (uint64_t r = rk1_(begin) + 1; r <= num_zeros; ++r) {
             zero_pos = slct1_(r);
             while (one_pos < zero_pos) {
                 callback(one_pos++);
             }
             one_pos++;
         }
-        while (one_pos < size()) {
+        while (one_pos < end) {
             callback(one_pos++);
         }
     }
@@ -922,7 +957,7 @@ sdsl::bit_vector bit_vector_rrr<log_block_size>::to_vector() const {
     if (2 * num_set_bits() < size()) {
         // sparse
         sdsl::bit_vector vector(size(), 0);
-        uint64_t max_rank = rank1(size() - 1);
+        uint64_t max_rank = size() ? rank1(size() - 1) : 0;
         for (uint64_t i = 1; i <= max_rank; ++i) {
             vector[slct1_(i)] = 1;
         }
@@ -930,7 +965,7 @@ sdsl::bit_vector bit_vector_rrr<log_block_size>::to_vector() const {
     } else {
         // dense
         sdsl::bit_vector vector(size(), 1);
-        uint64_t max_rank = rank0(size() - 1);
+        uint64_t max_rank = size() ? rank0(size() - 1) : 0;
         for (uint64_t i = 1; i <= max_rank; ++i) {
             vector[slct0_(i)] = 0;
         }
@@ -940,26 +975,30 @@ sdsl::bit_vector bit_vector_rrr<log_block_size>::to_vector() const {
 
 template <size_t log_block_size>
 void bit_vector_rrr<log_block_size>
-::call_ones(const std::function<void(uint64_t)> &callback) const {
+::call_ones_in_range(uint64_t begin, uint64_t end,
+                     const VoidCall<uint64_t> &callback) const {
+    assert(begin <= end);
+    assert(end <= size());
+
     if (2 * num_set_bits() < size()) {
         // sparse
-        uint64_t num_ones = rank1(size() - 1);
-        for (uint64_t i = 1; i <= num_ones; ++i) {
-            callback(select1(i));
+        uint64_t num_ones = end ? rank1(end - 1) : 0;
+        for (uint64_t r = begin ? rank1(begin - 1) + 1 : 1; r <= num_ones; ++r) {
+            callback(select1(r));
         }
     } else {
         // dense
         uint64_t one_pos = 0;
         uint64_t zero_pos = 0;
-        uint64_t num_zeros = rank0(size() - 1);
-        for (uint64_t r = 1; r <= num_zeros; ++r) {
+        uint64_t num_zeros = end ? rank0(end - 1) : 0;
+        for (uint64_t r = begin ? rank0(begin - 1) + 1 : 1; r <= num_zeros; ++r) {
             zero_pos = select0(r);
             while (one_pos < zero_pos) {
                 callback(one_pos++);
             }
             one_pos++;
         }
-        while (one_pos < size()) {
+        while (one_pos < end) {
             callback(one_pos++);
         }
     }

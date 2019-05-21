@@ -67,8 +67,6 @@ class bit_vector : public bitmap {
     virtual std::unique_ptr<bit_vector> copy() const = 0;
 
     virtual sdsl::bit_vector to_vector() const;
-
-    virtual void call_ones(const std::function<void(uint64_t)> &callback) const override = 0;
 };
 
 std::ostream& operator<<(std::ostream &os, const bit_vector &bv);
@@ -84,6 +82,7 @@ class bit_vector_dyn : public bit_vector {
 
     uint64_t rank1(uint64_t id) const override;
     uint64_t select1(uint64_t id) const override;
+    uint64_t select0(uint64_t id) const;
 
     uint64_t next1(uint64_t id) const override;
     uint64_t prev1(uint64_t id) const override;
@@ -102,7 +101,8 @@ class bit_vector_dyn : public bit_vector {
     uint64_t size() const override { return vector_.size(); }
     uint64_t num_set_bits() const override { return vector_.count1(); }
 
-    void call_ones(const std::function<void(uint64_t)> &callback) const override;
+    void call_ones_in_range(uint64_t begin, uint64_t end,
+                            const VoidCall<uint64_t> &callback) const override;
 
   private:
     libmaus2::bitbtree::BitBTree<6, 64> vector_;
@@ -117,7 +117,7 @@ class bit_vector_stat : public bit_vector {
     explicit bit_vector_stat(const sdsl::bit_vector &vector) noexcept
           : bit_vector_stat(sdsl::bit_vector(vector)) {}
     explicit bit_vector_stat(const bit_vector_stat &other);
-    bit_vector_stat(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
+    bit_vector_stat(const std::function<void(const VoidCall<uint64_t>&)> &call_ones,
                     uint64_t size);
     bit_vector_stat(sdsl::bit_vector&& vector) noexcept;
     bit_vector_stat(bit_vector_stat&& other) noexcept;
@@ -151,7 +151,8 @@ class bit_vector_stat : public bit_vector {
 
     virtual void add_to(sdsl::bit_vector *other) const override;
 
-    void call_ones(const std::function<void(uint64_t)> &callback) const override;
+    void call_ones_in_range(uint64_t begin, uint64_t end,
+                            const VoidCall<uint64_t> &callback) const override;
 
     const sdsl::bit_vector& data() const { return vector_; }
 
@@ -177,7 +178,7 @@ class bit_vector_sd : public bit_vector {
 
     bit_vector_sd(bit_vector_sd&& other) noexcept;
     bit_vector_sd(std::initializer_list<bool> init);
-    bit_vector_sd(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
+    bit_vector_sd(const std::function<void(const VoidCall<uint64_t>&)> &call_ones,
                   uint64_t size,
                   uint64_t num_set_bits);
 
@@ -207,7 +208,8 @@ class bit_vector_sd : public bit_vector {
 
     sdsl::bit_vector to_vector() const override;
 
-    void call_ones(const std::function<void(uint64_t)> &callback) const override;
+    void call_ones_in_range(uint64_t begin, uint64_t end,
+                            const VoidCall<uint64_t> &callback) const override;
 
     bool is_inverted() const { return inverted_; }
 
@@ -261,7 +263,8 @@ class bit_vector_rrr : public bit_vector {
 
     sdsl::bit_vector to_vector() const override;
 
-    void call_ones(const std::function<void(uint64_t)> &callback) const override;
+    void call_ones_in_range(uint64_t begin, uint64_t end,
+                            const VoidCall<uint64_t> &callback) const override;
 
     const sdsl::rrr_vector<kBlockSize>& data() const { return vector_; }
 
@@ -301,13 +304,11 @@ class bit_vector_adaptive : public bit_vector {
 
     virtual sdsl::bit_vector to_vector() const override final { return vector_->to_vector(); }
 
-    template <class T>
-    using VoidCall = std::function<void(T)>;
-
     virtual void add_to(sdsl::bit_vector *other) const override final { vector_->add_to(other); }
 
-    virtual void call_ones(const VoidCall<uint64_t> &callback) const override final {
-        vector_->call_ones(callback);
+    virtual void call_ones_in_range(uint64_t begin, uint64_t end,
+                                    const VoidCall<uint64_t> &callback) const override final {
+        vector_->call_ones_in_range(begin, end, callback);
     }
 
     enum VectorCode {

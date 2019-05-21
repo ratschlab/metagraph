@@ -89,6 +89,8 @@ void test_prev(const bit_vector &vector) {
 
 void reference_based_test(const bit_vector &vector,
                           const sdsl::bit_vector &reference) {
+    EXPECT_EQ(reference.size(), vector.size());
+
     size_t max_rank = std::accumulate(reference.begin(), reference.end(), 0u);
 
     ASSERT_DEATH(vector.select1(0), "");
@@ -106,8 +108,10 @@ void reference_based_test(const bit_vector &vector,
         EXPECT_EQ(i, vector.rank1(vector.select1(i)));
     }
 
-    EXPECT_EQ(vector[0], vector.rank1(0));
-    EXPECT_EQ(vector[0], reference[0]);
+    if (vector.size()) {
+        EXPECT_EQ(vector[0], vector.rank1(0));
+        EXPECT_EQ(vector[0], reference[0]);
+    }
 
     for (size_t i = 1; i < vector.size(); ++i) {
         EXPECT_EQ(vector[i], vector.rank1(i) - vector.rank1(i - 1));
@@ -125,12 +129,15 @@ template <class T>
 void test_bit_vector_queries() {
     std::unique_ptr<bit_vector> vector { new T() };
     ASSERT_TRUE(vector);
+    reference_based_test(*vector, sdsl::bit_vector());
 
     vector.reset(new T(0, 1));
     ASSERT_TRUE(vector);
+    reference_based_test(*vector, sdsl::bit_vector());
 
     vector.reset(new T(10, 0));
     ASSERT_TRUE(vector);
+    reference_based_test(*vector, sdsl::bit_vector(10, 0));
     EXPECT_EQ(10u, vector->size());
     for (size_t i = 0; i < vector->size(); ++i) {
         EXPECT_EQ(0, (*vector)[i]);
@@ -144,6 +151,7 @@ void test_bit_vector_queries() {
 
     vector.reset(new T(10, 1));
     ASSERT_TRUE(vector);
+    reference_based_test(*vector, sdsl::bit_vector(10, 1));
     EXPECT_EQ(10u, vector->size());
     for (size_t i = 0; i < vector->size(); ++i) {
         EXPECT_EQ(1, (*vector)[i]);
@@ -203,6 +211,27 @@ TEST(bit_vector_rrr, nonCommonQueries) {
     }
 
     vector.reset(new bit_vector_rrr<>(10, 0));
+    ASSERT_TRUE(vector);
+    EXPECT_EQ(10u, vector->size());
+    for (size_t i = 0; i < vector->size(); ++i) {
+        EXPECT_EQ(0, (*vector)[i]);
+        EXPECT_EQ(i, vector->select0(i + 1));
+        EXPECT_EQ(i + 1, vector->rank0(vector->select0(i + 1)));
+        EXPECT_EQ(i, vector->select0(vector->rank0(i)));
+    }
+}
+
+TEST(bit_vector_dyn, nonCommonQueries) {
+    // Mainly test select0.
+    auto vector = std::make_unique<bit_vector_dyn>(10, 1);
+    ASSERT_TRUE(vector);
+    EXPECT_EQ(10u, vector->size());
+    for (size_t i = 0; i < vector->size(); ++i) {
+        EXPECT_EQ(1, (*vector)[i]);
+        ASSERT_DEATH(vector->select0(i), "");
+    }
+
+    vector.reset(new bit_vector_dyn(10, 0));
     ASSERT_TRUE(vector);
     EXPECT_EQ(10u, vector->size());
     for (size_t i = 0; i < vector->size(); ++i) {

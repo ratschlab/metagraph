@@ -19,20 +19,27 @@ sdsl::bit_vector to_sdsl(const std::vector<bool> &vector) {
 }
 
 void call_ones(const sdsl::bit_vector &vector,
-               const std::function<void(uint64_t)> &callback) {
+               uint64_t begin, uint64_t end,
+               const VoidCall<uint64_t> &callback) {
+    assert(begin <= end);
+    assert(end <= vector.size());
+
     if (sdsl::util::cnt_one_bits(vector) > vector.size() / 2) {
         //TODO: benchmark to check if this actually makes it faster
-        for (uint64_t i = 0; i < vector.size(); ++i) {
+        for (uint64_t i = begin; i < end; ++i) {
             if (vector[i])
                 callback(i);
         }
         return;
     }
 
-    uint64_t j = 64;
-    uint64_t i = 0;
+    uint64_t i = begin;
+    for (; i < end && i & 0x3F; ++i) {
+        if (vector[i])
+            callback(i);
+    }
     uint64_t word;
-    for (; j <= vector.size(); j += 64) {
+    for (uint64_t j = i + 64; j <= end; j += 64) {
         word = vector.get_int(i);
         if (!word) {
             i += 64;
@@ -47,18 +54,30 @@ void call_ones(const sdsl::bit_vector &vector,
                 callback(i);
         }
     }
-    for (; i < vector.size(); ++i) {
+    for (; i < end; ++i) {
         if (vector[i])
             callback(i);
     }
 }
 
+void call_ones(const sdsl::bit_vector &vector,
+               const VoidCall<uint64_t> &callback) {
+    call_ones(vector, 0, vector.size(), callback);
+}
+
 void call_zeros(const sdsl::bit_vector &vector,
-                const std::function<void(uint64_t)> &callback) {
-    uint64_t j = 64;
-    uint64_t i = 0;
+                uint64_t begin, uint64_t end,
+                const VoidCall<uint64_t> &callback) {
+    assert(begin <= end);
+    assert(end <= vector.size());
+
+    uint64_t i = begin;
+    for (; i < end && i & 0x3F; ++i) {
+        if (vector[i])
+            callback(i);
+    }
     uint64_t word;
-    for (; j <= vector.size(); j += 64) {
+    for (uint64_t j = i + 64; j <= end; j += 64) {
         word = ~vector.get_int(i);
         if (!word) {
             i += 64;
@@ -73,10 +92,15 @@ void call_zeros(const sdsl::bit_vector &vector,
                 callback(i);
         }
     }
-    for (; i < vector.size(); ++i) {
+    for (; i < end; ++i) {
         if (!vector[i])
             callback(i);
     }
+}
+
+void call_zeros(const sdsl::bit_vector &vector,
+               const VoidCall<uint64_t> &callback) {
+    call_zeros(vector, 0, vector.size(), callback);
 }
 
 uint64_t inner_prod(const sdsl::bit_vector &first,
@@ -110,6 +134,10 @@ void bitmap::add_to(sdsl::bit_vector *other) const {
     assert(other);
     assert(other->size() == size());
     call_ones([other](auto i) { (*other)[i] = true; });
+}
+
+void bitmap::call_ones(const VoidCall<uint64_t> &callback) const {
+    call_ones_in_range(0, size(), callback);
 }
 
 
@@ -177,8 +205,9 @@ void bitmap_set::insert_zeros(const std::vector<uint64_t> &pos) {
     utils::insert_default_values(pos, &bits_);
 }
 
-void bitmap_set::call_ones(const std::function<void(uint64_t)> &callback) const {
-    std::for_each(bits_.begin(), bits_.end(), callback);
+void bitmap_set::call_ones_in_range(uint64_t begin, uint64_t end,
+                                    const VoidCall<uint64_t> &callback) const {
+    std::for_each(bits_.lower_bound(begin), bits_.lower_bound(end), callback);
 }
 
 
@@ -246,8 +275,9 @@ void bitmap_vector::add_to(sdsl::bit_vector *other) const {
     *other |= bit_vector_;
 }
 
-void bitmap_vector::call_ones(const std::function<void(uint64_t)> &callback) const {
-    ::call_ones(bit_vector_, callback);
+void bitmap_vector::call_ones_in_range(uint64_t begin, uint64_t end,
+                                       const VoidCall<uint64_t> &callback) const {
+    ::call_ones(bit_vector_, begin, end, callback);
 }
 
 
