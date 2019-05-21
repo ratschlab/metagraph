@@ -137,8 +137,7 @@ class BOSS {
                       std::vector<uint64_t> *edges_inserted = NULL);
 
     // Given an edge list, remove them from the graph.
-    // TODO: fix the implementation (anchoring the isolated nodes)
-    void erase_edges_dyn(const std::set<edge_index> &edges);
+    void erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_index> *removed_edges);
 
     /**
      * Traverse the entire dummy subgraph (which is a tree)

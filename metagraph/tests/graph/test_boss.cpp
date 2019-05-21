@@ -2381,7 +2381,8 @@ TEST(BOSS, IndegreeIncomingIdentity) {
 }
 
 TEST(BOSS, EraseEdgesDynSingle) {
-    for (size_t k = 1; k < 40; ++k) {
+for(uint32_t j = 0; j < 1000; ++j) {
+    for (size_t k = 1; k < 8; ++k) {
         BOSS graph2(k);
         graph2.add_sequence("AGACACAGT", true);
         graph2.add_sequence("GACTTGCAG", true);
@@ -2390,9 +2391,14 @@ TEST(BOSS, EraseEdgesDynSingle) {
         graph2.add_sequence("ATGCGATCGAGACTACGAG", true);
         graph2.add_sequence("GTACGATAGACATGACGAG", true);
         graph2.add_sequence("ACTGACGAGACACAGATGC", true);
-        for(size_t n = 1; n < graph2.num_edges(); ++n) {
-        if (graph2.num_edges() > n) {
-        for(BOSS::edge_index m = 1; m <= graph2.num_edges() - n; ++m) {
+        graph2.add_sequence("TTGCGATCGATATGCAACA", true);
+        graph2.add_sequence("TTCCCCTCGAGACTAATCT", true);
+        graph2.add_sequence("GTCCGGTGTGCATAAGAAC", true);
+        graph2.add_sequence("ACTGAGTGGGCACAGATGC", true);
+        //for(size_t n = 1; n < graph2.num_edges(); ++n) {
+        //if (graph2.num_edges() > n) {
+        auto n = graph2.num_edges();
+        for(BOSS::edge_index m = 1; m <= n; ++m) {
             //if(m==18 && k==3) {
             if(true) {
             BOSS graph(k);
@@ -2403,14 +2409,31 @@ TEST(BOSS, EraseEdgesDynSingle) {
             graph.add_sequence("ATGCGATCGAGACTACGAG", true);
             graph.add_sequence("GTACGATAGACATGACGAG", true);
             graph.add_sequence("ACTGACGAGACACAGATGC", true);
-            //graph.print_internal_representation();
-            //graph.print();
+            graph.add_sequence("TTGCGATCGATATGCAACA", true);
+            graph.add_sequence("TTCCCCTCGAGACTAATCT", true);
+            graph.add_sequence("GTCCGGTGTGCATAAGAAC", true);
+            graph.add_sequence("ACTGAGTGGGCACAGATGC", true);
+            graph.print_internal_representation();
+            graph.print();
             EXPECT_TRUE(graph.is_valid());
-            auto edges = utils::arange(m, n);
-            std::set<BOSS::edge_index> edges_to_delete(edges.begin(), edges.end());
-            graph.erase_edges_dyn(edges_to_delete);
-            //graph.print_internal_representation();
-            //graph.print();
+            auto edges = utils::arange(m, n-m+1);
+            //std::set<BOSS::edge_index> edges_to_delete(edges.begin(), edges.end());
+
+            std::random_shuffle(edges.begin(), edges.end());
+
+            std::set<BOSS::edge_index> edges_to_delete;
+            for (BOSS::edge_index i = 0; i < edges.size(); ++i) {
+                std::cout << edges[i] << ",";
+                edges_to_delete.insert(edges[i]);
+            }
+            std::cout << std::endl;
+            std::vector<BOSS::edge_index> removed_edges;
+            graph.erase_edges_dyn(edges_to_delete, &removed_edges);
+            graph.print_internal_representation();
+            graph.print();
+            std::cout << "removed edges: ";
+            std::for_each(removed_edges.begin(), removed_edges.end(), [&](auto edge) { std::cout << edge << ","; assert(edges_to_delete.find(edge) != edges_to_delete.end()); });
+            std::cout << std::endl;
             //std::cout << "m: " << m << std::endl;
             EXPECT_TRUE(graph.is_valid());
             if (!graph.is_valid())
@@ -2430,7 +2453,8 @@ TEST(BOSS, EraseEdgesDynSingle) {
             );
             }
         }
-        }
-        }
+        //}
+        //}
     }
+}
 }
