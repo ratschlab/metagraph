@@ -462,7 +462,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\trelax_brwt\toptimize the tree structure in brwt annotator\n\n");
 
-            fprintf(stderr, "\tquery\tannotate sequences from fast[a|q] files\n\n");
+            fprintf(stderr, "\tquery\t\tannotate sequences from fast[a|q] files\n\n");
             fprintf(stderr, "\tserver_query\tannotate received sequences and send annotations back\n\n");
 
             return;
