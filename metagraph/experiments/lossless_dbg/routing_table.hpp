@@ -107,7 +107,8 @@ public:
     int serialize(std::ostream& out)const {
         return routing_table.serialize(out);
     }
-    int load(std::istream& in) {
+
+    void load(std::istream& in) {
         return routing_table.load(in);
     }
 };

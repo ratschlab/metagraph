@@ -52,7 +52,7 @@ public:
     // graph contains all reads
     // sequences are of size at least k
     PathDatabaseWaveletCore(std::shared_ptr<const DBGSuccinct> graph) : PathDatabaseDynamicCore(graph),
-                                                                              incoming_table(graph)
+                                                                              incoming_table(*graph)
                                                                               {}
 
     PathDatabaseWaveletCore(const vector<string> &filenames,
@@ -185,7 +185,7 @@ public:
         ifstream joins_file(folder / "joins.bin");
         string graph_filename = folder / "graph.bin";
 
-        auto graph = std::shared_ptr<DeBruijnGraph>{
+        auto graph = std::shared_ptr<DBGSuccinct>{
                 new DBGSuccinct(21)
                 };
         graph->load(graph_filename);
@@ -257,7 +257,7 @@ public:
 
 
 
-private:
+//protected:
     json statistics;
     RoutingTable<Wavelet> routing_table;
     IncomingTable<BitVector> incoming_table;

@@ -17,6 +17,8 @@
 #include "boss_construct.hpp"
 #include "utilities.hpp"
 
+#include "graph_patch.hpp"
+
 using json = nlohmann::json;
 
 template <typename PathID,

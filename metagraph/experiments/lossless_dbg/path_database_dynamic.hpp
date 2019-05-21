@@ -41,7 +41,7 @@ public:
     // sequences are of size at least k
     explicit PathDatabaseDynamicCore(std::shared_ptr<const GraphT> graph) :
             graph(*graph),
-            incoming_table(graph)
+            incoming_table(*graph)
             {}
 
 

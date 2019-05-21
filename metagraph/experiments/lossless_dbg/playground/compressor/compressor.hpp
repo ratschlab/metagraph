@@ -24,7 +24,6 @@ using json = nlohmann::json;
 #define MEMOIZE
 #define ALL_EDGES_COVERED
 
-#include "path_database_baseline_wavelet_deprecated.hpp"
 #include "path_database_wavelet.hpp"
 #include "samplers.hpp"
 #include "utilities.hpp"
@@ -109,7 +108,6 @@ int main_compressor(int argc, char *argv[]) {
                                        "int",cmd);
     std::vector<std::string> regimes {
             "wavelet",
-            "wavelet_old",
     };
     ValuesConstraint<std::string> regime_constraint(regimes);
     ValueArg<std::string> compressor_type("c",
@@ -133,10 +131,6 @@ int main_compressor(int argc, char *argv[]) {
             save_string(statistics.dump(4),statistics_filename);
         }
     }
-    else if (compressor == "wavelet_old") {
-        compressReadsDeprecated<PathDatabaseBaselineWaveletDeprecated>(compressedArg, reads);
-    }
-
     return 0;
 }
 

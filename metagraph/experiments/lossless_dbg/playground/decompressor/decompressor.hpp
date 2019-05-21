@@ -21,7 +21,6 @@ using json = nlohmann::json;
 #pragma clang diagnostic ignored "-Weverything"
 #pragma clang diagnostic ignored "-Wcomma"
 
-#include "path_database_baseline_wavelet_deprecated.hpp"
 #include "samplers.hpp"
 #include "utilities.hpp"
 
@@ -58,9 +57,10 @@ int main_decompressor(int argc, char *argv[]) {
     cmd.parse(argc, argv);
     auto input_folder = inputArg.getValue();
     auto output_filename = outputArg.getValue();
-    auto db = PathDatabaseBaselineWaveletDeprecated::deserialize(input_folder);
-    auto reads = db.decode_all_reads();
-    write_reads_to_fasta(reads,output_filename);
+    auto db = PathDatabaseWavelet<>::deserialize(input_folder);
+    //auto reads = db.decode_all_reads();
+    //write_reads_to_fasta(reads,output_filename);
+    throw "Fixme";
 
     return 0;
 }
