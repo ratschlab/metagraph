@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.13)
 #project(compression_naive_code)
 #
 set(CMAKE_CXX_STANDARD 17)
-set(ENCODER_VERSION 3)
+set(ENCODER_VERSION 4)
 string(TOLOWER ${CMAKE_BUILD_TYPE} TYPE)
 set(PATH_ENCODER_CURRENT path_encoder_toolbox_v${ENCODER_VERSION})
 set(PATH_ENCODER_CURRENT_TYPE ${PATH_ENCODER_CURRENT}_${TYPE})
