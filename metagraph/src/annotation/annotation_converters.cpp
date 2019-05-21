@@ -197,6 +197,7 @@ template <class StaticAnnotation, typename Label, class Partitioning>
 typename std::unique_ptr<StaticAnnotation>
 convert_to_BRWT(ColumnCompressed<Label>&& annotator,
                 Partitioning partitioning,
+                size_t num_parallel_nodes,
                 size_t num_threads) {
     annotator.flush();
 
@@ -206,7 +207,10 @@ convert_to_BRWT(ColumnCompressed<Label>&& annotator,
     }
 
     auto matrix = std::make_unique<BRWT>(
-        BRWTBottomUpBuilder::build(std::move(columns), partitioning, num_threads)
+        BRWTBottomUpBuilder::build(std::move(columns),
+                                   partitioning,
+                                   num_parallel_nodes,
+                                   num_threads)
     );
 
     return std::make_unique<StaticAnnotation>(std::move(matrix),
@@ -216,10 +220,12 @@ convert_to_BRWT(ColumnCompressed<Label>&& annotator,
 template <>
 std::unique_ptr<BRWTCompressed<>>
 convert_to_greedy_BRWT<BRWTCompressed<>, std::string>(ColumnCompressed<std::string>&& annotation,
+                                                      size_t num_parallel_nodes,
                                                       size_t num_threads) {
     return convert_to_BRWT<BRWTCompressed<>>(
         std::move(annotation),
         get_parallel_binary_grouping_greedy(num_threads),
+        num_parallel_nodes,
         num_threads
     );
 }
@@ -228,10 +234,12 @@ template <>
 std::unique_ptr<BRWTCompressed<>>
 convert_to_simple_BRWT<BRWTCompressed<>, std::string>(ColumnCompressed<std::string>&& annotation,
                                                       size_t grouping_arity,
+                                                      size_t num_parallel_nodes,
                                                       size_t num_threads) {
     return convert_to_BRWT<BRWTCompressed<>>(
         std::move(annotation),
         BRWTBottomUpBuilder::get_basic_partitioner(grouping_arity),
+        num_parallel_nodes,
         num_threads
     );
 }

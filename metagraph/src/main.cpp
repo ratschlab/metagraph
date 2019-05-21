@@ -2778,10 +2778,12 @@ int main(int argc, const char *argv[]) {
                         auto brwt_annotator = config->greedy_brwt
                             ? annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
                                 std::move(*annotator),
+                                config->parallel_nodes,
                                 config->parallel)
                             : annotate::convert_to_simple_BRWT<annotate::BRWTCompressed<>>(
                                 std::move(*annotator),
                                 config->arity_brwt,
+                                config->parallel_nodes,
                                 config->parallel);
 
                         annotator.reset();

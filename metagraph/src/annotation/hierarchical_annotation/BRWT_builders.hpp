@@ -7,6 +7,7 @@
 
 #include "BRWT.hpp"
 #include "bit_vector.hpp"
+#include "threading.hpp"
 
 
 class BRWTBuilder {
@@ -46,12 +47,14 @@ class BRWTBottomUpBuilder : public BRWTBuilder {
 
     static BRWT build(VectorsPtr&& columns,
                       Partitioner partitioner = get_basic_partitioner(2),
+                      size_t num_nodes_parallel = 1,
                       size_t num_threads = 1);
 
   private:
     static std::pair<NodeBRWT, std::unique_ptr<bit_vector>>
     merge(std::vector<NodeBRWT> &&nodes,
-          std::vector<std::unique_ptr<bit_vector>> &&nonzero_rows);
+          std::vector<std::unique_ptr<bit_vector>> &&nonzero_rows,
+          ThreadPool &thread_pool);
 };
 
 

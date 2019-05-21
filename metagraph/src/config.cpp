@@ -122,6 +122,8 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
             parallel = atoi(get_value(i++));
             set_num_threads(parallel);
+        } else if (!strcmp(argv[i], "--parallel-nodes")) {
+            parallel_nodes = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--parts-total")) {
             parts_total = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--part-idx")) {
@@ -299,6 +301,9 @@ Config::Config(int argc, const char *argv[]) {
             fname.push_back(argv[i]);
         }
     }
+
+    if (parallel_nodes == static_cast<unsigned int>(-1))
+        parallel_nodes = parallel;
 
     if (identity == TRANSFORM && to_fasta)
         identity = ASSEMBLE;
@@ -850,20 +855,22 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         case TRANSFORM_ANNOTATION: {
             fprintf(stderr, "Usage: %s transform_anno -o <annotator_basename> [options] ANNOTATOR\n\n", prog_name.c_str());
 
-            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
-            fprintf(stderr, "\t   --rename-cols [STR]\tfile with rules for renaming annotation labels []\n");
-            fprintf(stderr, "\t                      \texample: 'L_1 L_1_renamed\n");
-            fprintf(stderr, "\t                      \t          L_2 L_2_renamed\n");
-            fprintf(stderr, "\t                      \t          L_2 L_2_renamed\n");
-            fprintf(stderr, "\t                      \t          ... ...........'\n");
+            // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
+            fprintf(stderr, "\t   --rename-cols [STR] \tfile with rules for renaming annotation labels []\n");
+            fprintf(stderr, "\t                       \texample: 'L_1 L_1_renamed\n");
+            fprintf(stderr, "\t                       \t          L_2 L_2_renamed\n");
+            fprintf(stderr, "\t                       \t          L_2 L_2_renamed\n");
+            fprintf(stderr, "\t                       \t          ... ...........'\n");
             fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation format [column]\n");
             fprintf(stderr, "\t\t"); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --arity  \t\tarity in the brwt tree [2]\n");
-            fprintf(stderr, "\t   --greedy  \t\tuse greedy column partitioning in brwt construction [off]\n");
-            fprintf(stderr, "\t   --fast  \t\ttransform annotation in memory without streaming [off]\n");
-            fprintf(stderr, "\t   --dump-raw-anno  \tdump the columns of the annotator as separate binary files [off]\n");
-            fprintf(stderr, "\t   --dump-text-anno  \tdump the columns of the annotator as separate text files [off]\n");
+            fprintf(stderr, "\t   --arity \t\tarity in the brwt tree [2]\n");
+            fprintf(stderr, "\t   --greedy \t\tuse greedy column partitioning in brwt construction [off]\n");
+            fprintf(stderr, "\t   --fast \t\ttransform annotation in memory without streaming [off]\n");
+            fprintf(stderr, "\t   --dump-raw-anno \tdump the columns of the annotator as separate binary files [off]\n");
+            fprintf(stderr, "\t   --dump-text-anno \tdump the columns of the annotator as separate text files [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --parallel-nodes [INT] \tnumber of nodes processed in parallel in brwt tree [n_threads]\n");
         } break;
         case RELAX_BRWT: {
             fprintf(stderr, "Usage: %s relax_brwt -o <annotator_basename> [options] ANNOTATOR\n\n", prog_name.c_str());

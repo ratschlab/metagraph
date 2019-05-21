@@ -24,7 +24,7 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     friend std::unique_ptr<A> convert(ColumnCompressed<L>&&);
 
     template <class A, typename L, class P>
-    friend std::unique_ptr<A> convert_to_BRWT(ColumnCompressed<L>&&, P, size_t);
+    friend std::unique_ptr<A> convert_to_BRWT(ColumnCompressed<L>&&, P, size_t, size_t);
 
   public:
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;

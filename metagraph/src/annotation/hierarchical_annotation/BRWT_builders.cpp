@@ -5,6 +5,10 @@
 
 #include "utils.hpp"
 
+const uint64_t kBlockSize = 1'000'000 / 64 * 64;
+
+// Each block is a multiple of 64 bits for thread safety
+static_assert((kBlockSize % 64) == 0);
 
 BRWT
 BRWTBuilder::initialize(NodeBRWT&& node, bit_vector&& nonzero_rows) {
@@ -32,15 +36,32 @@ BRWTBottomUpBuilder::get_basic_partitioner(size_t arity) {
     };
 }
 
-sdsl::bit_vector
-compute_or(const std::vector<std::unique_ptr<bit_vector>> &columns) {
-    sdsl::bit_vector merged_result = columns.at(0)->to_vector();
+sdsl::bit_vector compute_or(const std::vector<std::unique_ptr<bit_vector>> &columns,
+                            ThreadPool &thread_pool) {
+    uint64_t size = columns.at(0)->size();
 
-    for (size_t i = 1; i < columns.size(); ++i) {
-        assert(columns[i].get());
-        assert(columns[i]->size() == columns.at(0)->size());
-        columns[i]->add_to(&merged_result);
+    sdsl::bit_vector merged_result(size, 0);
+
+    // Each block is a multiple of 64 bits for thread safety
+    assert(!(kBlockSize & 0x3F));
+
+    std::vector<std::future<void>> results;
+
+    for (uint64_t i = 0; i < size; i += kBlockSize) {
+        results.push_back(thread_pool.enqueue([&](uint64_t begin, uint64_t end) {
+            for (const auto &col_ptr : columns) {
+                assert(col_ptr.get());
+                assert(col_ptr->size() == size);
+                col_ptr->call_ones_in_range(
+                    begin, end,
+                    [&merged_result](uint64_t k) { merged_result[k] = true; }
+                );
+            }
+        }, i, std::min(i + kBlockSize, size)));
     }
+
+    std::for_each(results.begin(), results.end(), [](auto &res) { res.wait(); });
+
     return merged_result;
 }
 
@@ -63,7 +84,8 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
 
 std::pair<BRWTBottomUpBuilder::NodeBRWT, std::unique_ptr<bit_vector>>
 BRWTBottomUpBuilder::merge(std::vector<NodeBRWT> &&nodes,
-                           std::vector<std::unique_ptr<bit_vector>> &&index) {
+                           std::vector<std::unique_ptr<bit_vector>> &&index,
+                           ThreadPool &thread_pool) {
     assert(nodes.size());
     assert(nodes.size() == index.size());
 
@@ -73,29 +95,41 @@ BRWTBottomUpBuilder::merge(std::vector<NodeBRWT> &&nodes,
     NodeBRWT parent;
 
     // build the parent aggregated column
-    sdsl::bit_vector parent_index = compute_or(index);
+    sdsl::bit_vector parent_index = compute_or(index, thread_pool);
 
-    // initialize child nodes
     for (size_t i = 0; i < nodes.size(); ++i) {
         // define column assignments for parent
         parent.column_arrangement.insert(parent.column_arrangement.end(),
                                          nodes[i].column_arrangement.begin(),
                                          nodes[i].column_arrangement.end());
         parent.group_sizes.push_back(nodes[i].column_arrangement.size());
-        std::iota(nodes[i].column_arrangement.begin(),
-                  nodes[i].column_arrangement.end(), 0);
-
-        // shrink index column
-        bit_vector_small shrinked_index(
-            generate_subindex(std::move(*index[i]), parent_index)
-        );
-        index[i].reset();
-
-        parent.child_nodes.emplace_back(
-            new BRWT(initialize(std::move(nodes[i]),
-                                std::move(shrinked_index)))
-        );
     }
+
+    // initialize child nodes
+    parent.child_nodes.resize(nodes.size());
+
+    std::vector<std::future<void>> results;
+
+    for (size_t i = 0; i < nodes.size(); ++i) {
+        results.push_back(thread_pool.enqueue([&](size_t i) {
+            std::iota(nodes[i].column_arrangement.begin(),
+                      nodes[i].column_arrangement.end(), 0);
+
+            // shrink index column
+            bit_vector_small shrinked_index(
+                generate_subindex(std::move(*index[i]), parent_index)
+            );
+            index[i].reset();
+
+            parent.child_nodes.at(i).reset(
+                new BRWT(initialize(std::move(nodes[i]),
+                                    std::move(shrinked_index)))
+            );
+
+        }, i));
+    }
+
+    std::for_each(results.begin(), results.end(), [](auto &res) { res.wait(); });
 
     return { std::move(parent),
                 std::make_unique<bit_vector_small>(std::move(parent_index)) };
@@ -116,7 +150,12 @@ std::vector<T> subset(std::vector<T> *vector,
 
 BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
                                 Partitioner partitioner,
+                                size_t num_nodes_parallel,
                                 size_t num_threads) {
+    num_threads = std::max(num_nodes_parallel, num_threads);
+
+    ThreadPool thread_pool(num_threads);
+
     if (!columns.size())
         return BRWT();
 
@@ -145,13 +184,14 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
         ProgressBar progress_bar(groups.size(), "Building BRWT level",
                                  std::cerr, !utils::get_verbose());
 
-        #pragma omp parallel for num_threads(num_threads)
+        #pragma omp parallel for num_threads(num_nodes_parallel) schedule(dynamic)
         for (size_t g = 0; g < groups.size(); ++g) {
             const auto &group = groups[g];
             assert(group.size());
 
             auto parent = merge(subset(&nodes, group),
-                                subset(&columns, group));
+                                subset(&columns, group),
+                                thread_pool);
 
             parent_nodes[g] = std::move(parent.first);
             parent_columns[g] = std::move(parent.second);
@@ -279,7 +319,7 @@ void BRWTOptimizer::reassign(std::unique_ptr<BRWT>&& node,
     parent->group_sizes.resize(parent->group_sizes.size() + node->child_nodes_.size());
     parent->child_nodes.resize(parent->child_nodes.size() + node->child_nodes_.size());
 
-    #pragma omp parallel for num_threads(num_threads)
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t i = 0; i < node->child_nodes_.size(); ++i) {
 
         auto submatrix = std::move(node->child_nodes_[i]);
