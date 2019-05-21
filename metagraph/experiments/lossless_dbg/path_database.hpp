@@ -15,7 +15,6 @@
 
 #include "sequence_graph.hpp"
 #include "boss_construct.hpp"
-#include "dbg_succinct.hpp"
 #include "utilities.hpp"
 
 using json = nlohmann::json;

@@ -185,7 +185,7 @@ TEST(PathDatabase,AlternativeRoute) {
     vector<string> reads= {
             "GAGCTCGGGACTTGAATAT",
             "GAGCTCGAGACTTGAATAG"};
-    //check_compression_decompression<PathDatabaseWavelet<>>(reads,5);
+    check_compression_decompression<PathDatabaseWavelet<>>(reads,5);
     check_compression_decompression<PathDatabaseDynamic<>>(reads,5);
 
 }

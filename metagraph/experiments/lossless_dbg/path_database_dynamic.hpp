@@ -12,7 +12,6 @@
 #include <set>
 #include <map>
 #include <tsl/hopscotch_set.h>
-#include <progress_bar.hpp>
 #include <optional>
 
 #include "decode_enabler.hpp"
@@ -48,8 +47,9 @@ public:
 
     explicit PathDatabaseDynamicCore(const vector<string> &reads,
                  size_t k_kmer = 21 /* default kmer */) :
-            graph(*buildGraph(reads,k_kmer)),
-            incoming_table(graph)
+            graph(*buildGraph(this,reads,k_kmer)),
+            incoming_table(graph),
+            routing_table(graph)
             {}
 
     virtual ~PathDatabaseDynamicCore() {}
@@ -302,16 +302,17 @@ protected:
     DynamicRoutingTable<> routing_table;
     DynamicIncomingTable<> incoming_table;
 
-    static DBGSuccinct* buildGraph(vector<string> reads,int k_kmer) {
+    static DBGSuccinct* buildGraph(PathDatabaseDynamicCore* self,vector<string> reads,int k_kmer) {
         Timer timer;
         cerr << "Started building the graph" << endl;
         auto graph = new DBGSuccinct(dbg_succ_graph_constructor(reads, k_kmer));
         graph->mask_dummy_kmers(1, false);
         auto elapsed = timer.elapsed();
         cerr << "Building finished in " << elapsed << " sec." << endl;
-        //statistics["graph_build_time"] = elapsed;
+        self->statistics["graph_build_time"] = elapsed;
         return graph;
     }
+
     static BOSS* dbg_succ_graph_constructor(const vector<string> &reads,
                                             size_t k_kmer) {
 

@@ -13,13 +13,6 @@
 #include <sdsl/sd_vector.hpp>
 #include <sdsl/enc_vector.hpp>
 
-#include "path_database.hpp"
-#include "path_database_dynamic.hpp"
-#include "utils.hpp"
-#include "utilities.hpp"
-#include "alphabets.hpp"
-#include "routing_table.hpp"
-
 #include "dbg_succinct.hpp"
 
 class BetterDBGSuccinct : public DBGSuccinct {

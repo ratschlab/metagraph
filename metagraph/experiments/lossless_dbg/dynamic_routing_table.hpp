@@ -17,11 +17,11 @@
 #include <tsl/hopscotch_map.h>
 
 #include "path_database.hpp"
+#include "graph_patch.hpp"
 #include "path_database_dynamic.hpp"
 #include "utils.hpp"
 #include "utilities.hpp"
 #include "alphabets.hpp"
-#include "dbg_succinct.hpp"
 #include "graph_preprocessor.hpp"
 #include "routing_table_transformation.hpp"
 
@@ -31,7 +31,7 @@ template<typename DummyT=int>
 class DynamicRoutingTableCore {
 public:
     DynamicRoutingTableCore() = default;
-
+    //DynamicRoutingTableCore(const DBGSuccinct& graph) {}
 
 //    int select(node_index node, int occurrence, char symbol) const {
 //    }
@@ -93,6 +93,7 @@ public:
 
 template <typename DummyT=int>
 class DynamicRoutingTable : public TransformationsEnabler<DynamicRoutingTableCore<DummyT>> {
+    using TransformationsEnabler<DynamicRoutingTableCore<DummyT>>::TransformationsEnabler;
 };
 
 #endif //METAGRAPH_DYNAMIC_ROUTING_TABLE_HPP

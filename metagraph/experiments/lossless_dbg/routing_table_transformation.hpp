@@ -17,21 +17,31 @@
 #include <boost/range/size_type.hpp>
 #include <tsl/hopscotch_map.h>
 
+#include "utils.hpp"
+#include "alphabets.hpp"
+
 #include "path_database.hpp"
 #include "path_database_dynamic.hpp"
-#include "utils.hpp"
 #include "utilities.hpp"
-#include "alphabets.hpp"
-#include "dbg_succinct.hpp"
 #include "graph_preprocessor.hpp"
+#include "graph_patch.hpp"
 
 using node_index = SequenceGraph::node_index;
 
 template<typename RoutingTable>
 class TransformationsEnabler : public RoutingTable {
 public:
+
+    explicit TransformationsEnabler(const DBGSuccinct& graph) {
+        transformations = GraphPreprocessor(graph).find_weak_splits();
+    }
     using RoutingTable::RoutingTable;
 
+//    template <typename Container>
+//    TransformationsEnabler(const DBGSuccinct& graph,const Container& routing_table_array) :
+//                                            RoutingTable(graph,routing_table_array) {
+//        transformations = GraphPreprocessor(graph).find_weak_splits();
+//                                            }
     explicit TransformationsEnabler(transformations_t transformations) : transformations(std::move(transformations)) {
 
     }

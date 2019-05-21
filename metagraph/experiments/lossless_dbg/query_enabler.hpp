@@ -9,7 +9,6 @@
 #include <set>
 #include <map>
 #include <tsl/hopscotch_set.h>
-#include <progress_bar.hpp>
 #include <optional>
 
 #include "path_database.hpp"

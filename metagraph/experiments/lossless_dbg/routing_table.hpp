@@ -12,11 +12,13 @@
 #include <sdsl/sd_vector.hpp>
 #include <sdsl/enc_vector.hpp>
 #include <boost/range/size_type.hpp>
+
+#include "utils.hpp"
+#include "alphabets.hpp"
+
 #include "path_database.hpp"
 #include "path_database_dynamic.hpp"
-#include "utils.hpp"
 #include "utilities.hpp"
-#include "alphabets.hpp"
 #include "routing_table_transformation.hpp"
 
 const char RoutingTableCoreAlphabet[] = {'$','A','C','G','T','N','#','?'};
@@ -48,7 +50,7 @@ class RoutingTableCore {
 public:
     RoutingTableCore() = default;
     template<class Container>
-    explicit RoutingTableCore(const Container& routing_table_array) {
+    explicit RoutingTableCore(const DBGSuccinct& graph,const Container& routing_table_array) {
         sdsl::int_vector<0> routing_table_array_encoded(routing_table_array.size());
         for(int i=0;i<routing_table_array.size();i++) {
             routing_table_array_encoded[i] = RoutingTableCoreInverseAlphabet.at(routing_table_array[i]);

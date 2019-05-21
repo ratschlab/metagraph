@@ -16,17 +16,18 @@
 #include <sdsl/sd_vector.hpp>
 #include <sdsl/enc_vector.hpp>
 
-#include "graph_patch.hpp"
-#include "path_database.hpp"
-#include "path_database_dynamic.hpp"
-#include "cxx-prettyprint.hpp"
-
 #include "utils.hpp"
 #include "alphabets.hpp"
+#include "cxx-prettyprint.hpp"
+
+#include "path_database.hpp"
+#include "path_database_dynamic.hpp"
 #include "routing_table.hpp"
 #include "incoming_table.hpp"
 #include "utilities.hpp"
 #include "query_enabler.hpp"
+
+#include "graph_patch.hpp"
 //#define CHECK_CORECTNESS 1
 
 #pragma GCC diagnostic ignored "-Wmissing-noreturn"
@@ -83,7 +84,8 @@ public:
             }
         }
         routing_table_array.push_back('#'); // to also always end a block with #
-        routing_table = RoutingTable<Wavelet>(routing_table_array);
+        routing_table = decltype(routing_table)(graph,routing_table_array);
+        routing_table.transformations = PathDatabaseDynamicCore::routing_table.transformations;
         statistics["transformation_routing_table_time"] = timer.elapsed();
         cerr << "Transformation finished in " << statistics["transformation_routing_table_time"] << endl;
     }
