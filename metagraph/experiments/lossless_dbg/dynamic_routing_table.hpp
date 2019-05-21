@@ -23,24 +23,21 @@
 #include "alphabets.hpp"
 #include "dbg_succinct.hpp"
 #include "graph_preprocessor.hpp"
+#include "routing_table_transformation.hpp"
 
 using node_index = SequenceGraph::node_index;
 
-class DynamicRoutingTable {
+template<typename DummyT=int>
+class DynamicRoutingTableCore {
 public:
-    DynamicRoutingTable() = default;
+    DynamicRoutingTableCore() = default;
 
-    explicit DynamicRoutingTable(transformations_t transformations) : transformations(std::move(transformations)) {
-
-    }
-    template<class Container>
-    explicit DynamicRoutingTable(const Container& routing_table_array) {}
 
 //    int select(node_index node, int occurrence, char symbol) const {
 //    }
 
     // rank [0..position)
-    int rank(node_index node, char symbol, int position) const {
+    int rank(node_index node, int position, char symbol) const {
         assert(position < routing_table.size());
         int result = 0;
         const auto &node_entry = routing_table.at(node);
@@ -55,10 +52,7 @@ public:
         return routing_table.at(node).at(position);
     }
 
-    char traversed_base(node_index node, int position) const {
-        char base = get(node,position);
-        return transform(node,base);
-    }
+
 
     void insert(node_index node, int position, char symbol) {
         assert(position <= size(node));
@@ -83,47 +77,22 @@ public:
         return out.str();
     }
 
-
-    tsl::hopscotch_map<node_index, vector<char>> routing_table;
+    char traversed_base(node_index node, int position) const {
+        return get(node,position);
+    }
 
     int new_relative_position(node_index node, int position) const {
         auto base = get(node,position);
-        auto base_rank = rank(node,base,position);
-        if (transformations.count(node)) {
-            auto transformation = transformations.at(node);
-            if (is_affected(transformation,base)) {
-                char opposite = opposite_element(transformation,base);
-                base_rank += rank(node,opposite,position);
-            }
-        }
+        auto base_rank = rank(node,position,base);
         return base_rank;
     }
 
-    char transform(node_index node, char base) const {
-        if (transformations.count(node)) {
-            auto transformation = transformations.at(node);
-            return transform(transformation,base);
-        }
-        return base;
-    }
+    tsl::hopscotch_map<node_index, vector<char>> routing_table;
 
-    static bool is_affected(pair<char,char> transformation, char base) {
-        return transformation.first == base or transformation.second == base;
-    }
-    static char opposite_element(pair<char,char> transformation, char base) {
-        return transformation.first == base ? transformation.second : transformation.first;
-    }
-    static char transform(pair<char,char> transformation, char base) {
-        return transformation.first == base ? transformation.second : base;
-    }
+};
 
-    const transformations_t transformations;
-    //map<node_index,vector<char>> routing_table;
-
-//    int serialize(std::ostream& out)const {
-//    }
-//    int load(std::istream& in) {
-//    }
+template <typename DummyT=int>
+class DynamicRoutingTable : public TransformationsEnabler<DynamicRoutingTableCore<DummyT>> {
 };
 
 #endif //METAGRAPH_DYNAMIC_ROUTING_TABLE_HPP

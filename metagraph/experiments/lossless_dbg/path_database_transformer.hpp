@@ -10,16 +10,16 @@
 
 class PathDatabaseTransformer {
 public:
-    PathDatabaseDynamic<>& pd;
+    PathDatabaseDynamicCore<>& pd;
 
-    void freeze(PathDatabaseWavelet<>& frozen, PathDatabaseDynamic<>& ) {
+    void freeze(PathDatabaseWavelet<>& frozen, PathDatabaseDynamicCore<>& ) {
 
     }
     IncomingTable<>
 
 };
 
-PathDatabaseWavelet<> freeze(PathDatabaseDynamic<>& pd) {
+PathDatabaseWavelet<> freeze(PathDatabaseDynamicCore<>& pd) {
 
 }
 

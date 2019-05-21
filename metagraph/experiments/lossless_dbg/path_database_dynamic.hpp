@@ -15,7 +15,7 @@
 #include <progress_bar.hpp>
 #include <optional>
 
-#include "path_database_common.hpp"
+#include "decode_enabler.hpp"
 #include "dynamic_routing_table.hpp"
 #include "dynamic_incoming_table.hpp"
 #include "utils.hpp"
@@ -31,27 +31,30 @@ using namespace std;
 // say to Mikhail that "de_bruijn_graph" instead of "metagraph/de_bruijn_graph" is the same violation as this
 using node_index = DeBruijnGraph::node_index;
 
-using path_id = pair<node_index,int>;
+
 
 template<typename GraphT=DBGSuccinct>
-class PathDatabaseDynamic : public PathDatabaseCommon<> {
+class PathDatabaseDynamicCore {
 public:
+    using path_id = pair<node_index,int>;
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
-    explicit PathDatabaseDynamic(std::shared_ptr<const GraphT> graph) :
-            PathDatabaseCommon<>(graph)
-                    {}
-
-
-    explicit PathDatabaseDynamic(const vector<string> &filenames,
-                 size_t k_kmer = 21 /* default kmer */) :
-            PathDatabaseCommon<>(filenames, k_kmer)
+    explicit PathDatabaseDynamicCore(std::shared_ptr<const GraphT> graph) :
+            graph(*graph),
+            incoming_table(graph)
             {}
 
-    virtual ~PathDatabaseDynamic() {}
 
-    std::vector<path_id> encode(const std::vector<std::string> &sequences) override {
+    explicit PathDatabaseDynamicCore(const vector<string> &reads,
+                 size_t k_kmer = 21 /* default kmer */) :
+            graph(*buildGraph(reads,k_kmer)),
+            incoming_table(graph)
+            {}
+
+    virtual ~PathDatabaseDynamicCore() {}
+
+    std::vector<path_id> encode(const std::vector<std::string> &sequences) {
         Timer timer;
         cerr << "Started encoding reads" << endl;
         // improvement
@@ -267,23 +270,16 @@ public:
 
     }
 
-    size_t num_paths() const override {
+    size_t num_paths() const {
         return encoded_paths;
     };
 
     json get_statistics(unsigned int verbosity = ~0u) const {
-        auto result = PathDatabase<pair<node_index,int>,GraphT>::get_statistics(verbosity);
-        result.update(statistics);
-        return result;
+        //auto result = PathDatabase<pair<node_index,int>,GraphT>::get_statistics(verbosity);
+        //result.update(statistics);
+        //return result;
+        return statistics;
     }
-
-    std::vector<path_id> get_paths_going_through(const std::string &str) const override { throw std::runtime_error("not implemented"); };
-
-    std::vector<path_id> get_paths_going_through(node_index node) const override { throw std::runtime_error("not implemented"); };
-
-    node_index get_next_node(node_index node, path_id path) const override { throw std::runtime_error("not implemented"); };
-
-    node_index get_next_consistent_node(const std::string &history) const override { throw std::runtime_error("not implemented"); };
 
     void serialize(const fs::path& folder) const {};
 
@@ -302,8 +298,38 @@ protected:
     vector<char> is_join;
     vector<char> is_split;
 #endif
+    const GraphT& graph;
+    DynamicRoutingTable<> routing_table;
+    DynamicIncomingTable<> incoming_table;
+
+    static DBGSuccinct* buildGraph(vector<string> reads,int k_kmer) {
+        Timer timer;
+        cerr << "Started building the graph" << endl;
+        auto graph = new DBGSuccinct(dbg_succ_graph_constructor(reads, k_kmer));
+        graph->mask_dummy_kmers(1, false);
+        auto elapsed = timer.elapsed();
+        cerr << "Building finished in " << elapsed << " sec." << endl;
+        //statistics["graph_build_time"] = elapsed;
+        return graph;
+    }
+    static BOSS* dbg_succ_graph_constructor(const vector<string> &reads,
+                                            size_t k_kmer) {
+
+        auto graph_constructor = BOSSConstructor(k_kmer - 1);// because BOSS has smaller kmers
+
+        for (const auto &read : reads) {
+            graph_constructor.add_sequence(read);
+        }
+
+        return new BOSS(&graph_constructor);
+    }
+
 };
 
+template<typename GraphT=DBGSuccinct>
+class PathDatabaseDynamic : public DecodeEnabler<PathDatabaseDynamicCore<GraphT>> {
+    using DecodeEnabler<PathDatabaseDynamicCore<GraphT>>::DecodeEnabler;
+};
 
 
 

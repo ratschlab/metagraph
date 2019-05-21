@@ -17,21 +17,22 @@
 #include "utils.hpp"
 #include "utilities.hpp"
 #include "alphabets.hpp"
+#include "routing_table_transformation.hpp"
 
-const char RoutingTableAlphabet[] = {'$','A','C','G','T','N','#','?'};
+const char RoutingTableCoreAlphabet[] = {'$','A','C','G','T','N','#','?'};
 // improvement (constexpr use https://github.com/serge-sans-paille/frozen)
 // TODO: get rid of std::map
-const map<char, int> RoutingTableInverseAlphabet = {{'$',0},{'A',1},{'C',2},{'G',3},{'T',4},{'N',5},{'#',6},{'?',7}};
-const auto& rte2int = RoutingTableInverseAlphabet;
+const map<char, int> RoutingTableCoreInverseAlphabet = {{'$',0},{'A',1},{'C',2},{'G',3},{'T',4},{'N',5},{'#',6},{'?',7}};
+const auto& rte2int = RoutingTableCoreInverseAlphabet;
 
 using routing_character_t = int;
 
 int rc(char c) {
-    auto it = RoutingTableInverseAlphabet.find(c);
-    if (it != RoutingTableInverseAlphabet.end())
+    auto it = RoutingTableCoreInverseAlphabet.find(c);
+    if (it != RoutingTableCoreInverseAlphabet.end())
         return it->second;
 
-    return RoutingTableInverseAlphabet.at('N');
+    return RoutingTableCoreInverseAlphabet.at('N');
 }
 
 int operator""_rc(char c) {
@@ -39,18 +40,18 @@ int operator""_rc(char c) {
 }
 
 char tochar(routing_character_t rc) {
-    return RoutingTableAlphabet[rc];
+    return RoutingTableCoreAlphabet[rc];
 }
 
 template<class Wavelet = sdsl::wt_rlmn<>>
-class RoutingTable {
+class RoutingTableCore {
 public:
-    RoutingTable() = default;
+    RoutingTableCore() = default;
     template<class Container>
-    explicit RoutingTable(const Container& routing_table_array) {
+    explicit RoutingTableCore(const Container& routing_table_array) {
         sdsl::int_vector<0> routing_table_array_encoded(routing_table_array.size());
         for(int i=0;i<routing_table_array.size();i++) {
-            routing_table_array_encoded[i] = RoutingTableInverseAlphabet.at(routing_table_array[i]);
+            routing_table_array_encoded[i] = RoutingTableCoreInverseAlphabet.at(routing_table_array[i]);
         }
         construct_im(routing_table,routing_table_array_encoded,0);
     }
@@ -90,6 +91,16 @@ public:
         return out.str();
     }
 
+    char traversed_base(node_index node, int position) const {
+        return get(node,position);
+    }
+
+    int new_relative_position(node_index node, int position) const {
+        auto base = get(node,position);
+        auto base_rank = rank(node,position,base);
+        return base_rank;
+    }
+
     Wavelet routing_table;
     int serialize(std::ostream& out)const {
         return routing_table.serialize(out);
@@ -97,6 +108,11 @@ public:
     int load(std::istream& in) {
         return routing_table.load(in);
     }
+};
+
+template <typename Wavelet>
+class RoutingTable : public TransformationsEnabler<RoutingTableCore<Wavelet>> {
+    using TransformationsEnabler<RoutingTableCore<Wavelet>>::TransformationsEnabler;
 };
 
 #endif //METAGRAPH_ROUTING_TABLE_HPP

@@ -11,6 +11,7 @@ using default_bit_vector = bit_vector_small;
 template <typename BitVector=default_bit_vector,typename GraphT=DBGSuccinct>
 class IncomingTable {
 public:
+    using edge_identifier_t = node_index;
     explicit IncomingTable(const GraphT & graph) : graph(graph) {}
     using bit_vector_t = BitVector;
     BitVector joins;
