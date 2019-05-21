@@ -34,20 +34,14 @@ BRWTBottomUpBuilder::get_basic_partitioner(size_t arity) {
 
 sdsl::bit_vector
 compute_or(const std::vector<std::unique_ptr<bit_vector>> &columns) {
-    uint64_t size = columns.at(0)->size();
+    sdsl::bit_vector merged_result = columns.at(0)->to_vector();
 
-    sdsl::bit_vector vector_or(size, false);
-
-    for (const auto &col_ptr : columns) {
-        assert(col_ptr.get());
-        assert(col_ptr->size() == size);
-        if (dynamic_cast<bit_vector_stat*>(&(*col_ptr))) {
-            vector_or |= dynamic_cast<bit_vector_stat&>(*col_ptr).data();
-        } else {
-            col_ptr->call_ones([&vector_or](auto i) { vector_or[i] = true; });
-        }
+    for (size_t i = 1; i < columns.size(); ++i) {
+        assert(columns[i].get());
+        assert(columns[i]->size() == columns.at(0)->size());
+        columns[i]->add_to(&merged_result);
     }
-    return vector_or;
+    return merged_result;
 }
 
 sdsl::bit_vector generate_subindex(const bit_vector &column,
@@ -73,9 +67,8 @@ BRWTBottomUpBuilder::merge(std::vector<NodeBRWT> &&nodes,
     assert(nodes.size());
     assert(nodes.size() == index.size());
 
-    if (nodes.size() == 1) {
+    if (nodes.size() == 1)
         return { std::move(nodes[0]), std::move(index[0]) };
-    }
 
     NodeBRWT parent;
 
