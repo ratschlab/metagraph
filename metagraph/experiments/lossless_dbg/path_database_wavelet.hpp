@@ -198,7 +198,9 @@ public:
 
     json get_statistics(unsigned int verbosity = ~0u) const {
         json result = PathDatabaseDynamicCore::get_statistics(verbosity);
+        json routing_table_stats = routing_table.get_statistics(verbosity);
         result.update(statistics);
+        result.update(routing_table_stats);
         int true_joins = 0;
         int added_joins = 0;
         int true_splits = 0;

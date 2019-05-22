@@ -16,6 +16,7 @@
 #include <sdsl/enc_vector.hpp>
 #include <boost/range/size_type.hpp>
 #include <tsl/hopscotch_map.h>
+#include <nlohmann/json.hpp>
 
 #include "utils.hpp"
 #include "alphabets.hpp"
@@ -27,6 +28,7 @@
 #include "graph_patch.hpp"
 
 using node_index = SequenceGraph::node_index;
+using json = nlohmann::json;
 
 template<typename RoutingTable>
 class TransformationsEnabler : public RoutingTable {
@@ -80,6 +82,9 @@ public:
     }
     static char transform(pair<char,char> transformation, char base) {
         return transformation.first == base ? transformation.second : base;
+    }
+    json get_statistics(int verbosity=0) const {
+        return {{"transformations", transformations.size()}}; 
     }
 
      transformations_t transformations;
