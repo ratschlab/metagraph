@@ -8,6 +8,9 @@
 
 
 template <typename KMER>
+void dont_erase_redundant_dummy_kmers(Vector<KMER> *) {}
+
+template <typename KMER>
 void erase_redundant_dummy_kmers(Vector<KMER> *kmers) {
 
     assert(std::is_sorted(kmers->begin(), kmers->end()));
@@ -58,6 +61,19 @@ void erase_redundant_dummy_kmers(Vector<KMER> *kmers) {
     kmers->resize(cur_pos);
 }
 
+
+template <class V>
+void sort_and_remove_duplicates(V *array,
+                                size_t num_threads,
+                                size_t offset) {
+    ips4o::parallel::sort(array->begin() + offset, array->end(),
+                          std::less<typename V::value_type>(),
+                          num_threads);
+    // remove duplicates
+    auto unique_end = std::unique(array->begin() + offset, array->end());
+    array->erase(unique_end, array->end());
+}
+
 template <typename KMER>
 void shrink_kmers(Vector<KMER> *kmers,
                   size_t num_threads,
@@ -86,8 +102,6 @@ void recover_source_dummy_nodes(size_t k,
                                 Vector<KMER> *kmers,
                                 size_t num_threads,
                                 bool verbose) {
-    erase_redundant_dummy_kmers(kmers);
-
     size_t dummy_begin = kmers->size();
     size_t num_dummy_parent_kmers = 0;
 
@@ -198,7 +212,9 @@ BOSSChunkConstructor<KMER>
                         encode_filter_suffix_boss<KmerExtractor>(filter_suffix),
                         num_threads,
                         memory_preallocated,
-                        verbose) {
+                        verbose,
+                        filter_suffix.empty() ? erase_redundant_dummy_kmers<KMER>
+                                              : dont_erase_redundant_dummy_kmers<KMER>) {
     if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
         kmer_collector_.data().emplace_back(
             std::vector<KmerExtractor::TAlphabet>(k + 1, BOSS::kSentinelCode)

@@ -13,8 +13,10 @@
 template <typename T>
 class SortedSet {
   public:
-    SortedSet(size_t num_threads = 1, bool verbose = false)
-      : num_threads_(num_threads), verbose_(verbose) {}
+    SortedSet(size_t num_threads = 1,
+              bool verbose = false,
+              std::function<void(Vector<T>*)> cleanup = [](Vector<T>*) {})
+      : num_threads_(num_threads), verbose_(verbose), cleanup_(cleanup) {}
 
     ~SortedSet() {}
 
@@ -63,7 +65,7 @@ class SortedSet {
         std::unique_lock<std::shared_timed_mutex> copy_lock(mutex_copy_);
 
         if (sorted_end_ != data_.size()) {
-            sort_and_remove_duplicates();
+            sort_and_remove_duplicates(&data_, num_threads_);
             sorted_end_ = data_.size();
         }
 
@@ -78,6 +80,18 @@ class SortedSet {
         sorted_end_ = 0;
     }
 
+    void sort_and_remove_duplicates(Vector<T> *vector, size_t num_threads) const {
+        assert(vector);
+
+        ips4o::parallel::sort(vector->begin(), vector->end(), std::less<T>(), num_threads);
+
+        // remove duplicates
+        auto unique_end = std::unique(vector->begin(), vector->end());
+        vector->erase(unique_end, vector->end());
+
+        cleanup_(vector);
+    }
+
   private:
     void shrink_data() {
         if (verbose_) {
@@ -86,7 +100,7 @@ class SortedSet {
         }
 
         size_t old_size = data_.size();
-        sort_and_remove_duplicates();
+        sort_and_remove_duplicates(&data_, num_threads_);
         sorted_end_ = data_.size();
 
         if (verbose_) {
@@ -95,13 +109,6 @@ class SortedSet {
                       << ", " << (data_.size() * sizeof(T) >> 20) << "Mb"
                       << std::endl;
         }
-    }
-
-    void sort_and_remove_duplicates() {
-        ips4o::parallel::sort(data_.begin(), data_.end(), std::less<T>(), num_threads_);
-        // remove duplicates
-        auto unique_end = std::unique(data_.begin(), data_.end());
-        data_.erase(unique_end, data_.end());
     }
 
     void try_reserve(size_t size, size_t min_size = 0) {
@@ -121,6 +128,7 @@ class SortedSet {
     Vector<T> data_;
     size_t num_threads_;
     bool verbose_;
+    std::function<void(Vector<T>*)> cleanup_;
 
     // indicate the end of the preprocessed distinct and sorted values
     uint64_t sorted_end_ = 0;

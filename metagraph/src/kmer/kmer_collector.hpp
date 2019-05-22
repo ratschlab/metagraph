@@ -20,7 +20,8 @@ class KmerCollector {
                            Sequence&& filter_suffix_encoded = {},
                            size_t num_threads = 1,
                            double memory_preallocated = 0,
-                           bool verbose = false);
+                           bool verbose = false,
+                           std::function<void(Vector<KMER>*)> cleanup = [](Vector<KMER>*) {});
 
     inline size_t get_k() const { return k_; }
 
@@ -58,11 +59,5 @@ class KmerCollector {
 
     bool both_strands_mode_;
 };
-
-
-template <class V>
-void sort_and_remove_duplicates(V *array,
-                                size_t num_threads = 1,
-                                size_t offset = 0);
 
 #endif // __KMER_COLLECTOR_HPP__

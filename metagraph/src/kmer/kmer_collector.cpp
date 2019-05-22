@@ -13,26 +13,6 @@ using TAlphabet = KmerExtractor::TAlphabet;
 const size_t kMaxKmersChunkSize = 30'000'000;
 
 
-template <class V>
-void sort_and_remove_duplicates(V *array,
-                                size_t num_threads,
-                                size_t offset) {
-    ips4o::parallel::sort(array->begin() + offset, array->end(),
-                          std::less<typename V::value_type>(),
-                          num_threads);
-    // remove duplicates
-    auto unique_end = std::unique(array->begin() + offset, array->end());
-    array->erase(unique_end, array->end());
-}
-
-template void sort_and_remove_duplicates<Vector<KmerExtractor::Kmer64>>(Vector<KmerExtractor::Kmer64>*, size_t, size_t);
-template void sort_and_remove_duplicates<Vector<KmerExtractor::Kmer128>>(Vector<KmerExtractor::Kmer128>*, size_t, size_t);
-template void sort_and_remove_duplicates<Vector<KmerExtractor::Kmer256>>(Vector<KmerExtractor::Kmer256>*, size_t, size_t);
-template void sort_and_remove_duplicates<Vector<KmerExtractor2Bit::Kmer64>>(Vector<KmerExtractor2Bit::Kmer64>*, size_t, size_t);
-template void sort_and_remove_duplicates<Vector<KmerExtractor2Bit::Kmer128>>(Vector<KmerExtractor2Bit::Kmer128>*, size_t, size_t);
-template void sort_and_remove_duplicates<Vector<KmerExtractor2Bit::Kmer256>>(Vector<KmerExtractor2Bit::Kmer256>*, size_t, size_t);
-
-
 template <typename KMER, class KmerExtractor>
 void extract_kmers(std::function<void(CallString)> generate_reads,
                    size_t k,
@@ -59,7 +39,7 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
             return;
 
         if (remove_redundant) {
-            sort_and_remove_duplicates(&temp_storage);
+            kmers->sort_and_remove_duplicates(&temp_storage, 1);
         }
 
         if (temp_storage.size() > 0.9 * kMaxKmersChunkSize) {
@@ -70,7 +50,7 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
 
     if (temp_storage.size()) {
         if (remove_redundant) {
-            sort_and_remove_duplicates(&temp_storage);
+            kmers->sort_and_remove_duplicates(&temp_storage, 1);
         }
         kmers->insert(temp_storage.begin(), temp_storage.end());
     }
@@ -83,9 +63,10 @@ KmerCollector<KMER, KmerExtractor>
                 Sequence&& filter_suffix_encoded,
                 size_t num_threads,
                 double memory_preallocated,
-                bool verbose)
+                bool verbose,
+                std::function<void(Vector<KMER>*)> cleanup)
       : k_(k),
-        kmers_(num_threads, verbose),
+        kmers_(num_threads, verbose, cleanup),
         num_threads_(num_threads),
         thread_pool_(std::max(static_cast<size_t>(1), num_threads_) - 1,
                      std::max(static_cast<size_t>(1), num_threads_)),
