@@ -19,8 +19,12 @@ set(CMAKE_SHARED_LINKER_FLAGS_FASTDEBUG "-g")
 #include_directories(${GTEST_INCLUDE_DIR})
 #
 #add_executable(compression_naive_code main.cpp)
-
-set(ROOT_BINARY_DIR ${PROJECT_BINARY_DIR})
+if(NOT DEFINED PROJECT_BINARY_DIR)
+    set(ROOT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
+else()
+    set(ROOT_BINARY_DIR ${PROJECT_BINARY_DIR})
+endif()
+message("Project binary dir: ${PROJECT_BINARY_DIR}")
 
 project(lossless_dbg)
 if(NOT DEFINED METALIBS)

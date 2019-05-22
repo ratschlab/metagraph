@@ -133,24 +133,13 @@ public:
         cerr << "Transformation finished in " << statistics["transformation_incoming_table_time"] << endl;
     }
 
-    char node_get_last_char(node_index node) const {
-        auto kmer = graph.get_node_sequence(node);
-        return kmer[kmer.size()-1];
-    }
-
-    char node_get_first_char(node_index node) const {
-        auto kmer = graph.get_node_sequence(node);
-        return kmer.front();
-
-    }
 
 
 
 
 
-    bool is_valid_path_id(path_id path_id) const {
-        return node_is_join(path_id.first) && path_id.second < incoming_table.branch_size(path_id.first,0);
-    }
+
+
 
 
     // is join or start of the read

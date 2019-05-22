@@ -46,6 +46,7 @@ public:
     }
 
     int branch_size(node_index node, edge_identifier_t incoming) const {
+        assert(node);
         auto it = incoming_table.find(node);
         if (it == incoming_table.end() || !it->second.count(incoming))
             return 0;
@@ -63,6 +64,14 @@ public:
 
     int branch_offset_and_increment(node_index node,
                                     edge_identifier_t incoming) {
+        assert(node);
+        assert(incoming == '$' or
+               incoming == 'A' or
+               incoming == 'C' or
+               incoming == 'G' or
+               incoming == 'T' or
+               incoming == 'N'
+        );
         int result = 0;
 
         auto it = incoming_table.find(node);
@@ -82,6 +91,16 @@ public:
         }
 
         return result;
+    }
+
+    string print_content(node_index node) const {
+        stringstream out;
+        auto table_size = size(node);
+        for(char c : "$ACGTN") {
+            out << c << ":" << branch_size(node,c) << endl;
+        }
+        cerr << out.str();
+        return out.str();
     }
 
     bool has_new_reads(node_index node) const {

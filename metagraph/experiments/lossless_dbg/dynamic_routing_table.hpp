@@ -36,6 +36,7 @@ public:
 //    int select(node_index node, int occurrence, char symbol) const {
 //    }
 
+protected:
     // rank [0..position)
     int rank(node_index node, int position, char symbol) const {
         assert(position < routing_table.size());
@@ -47,23 +48,25 @@ public:
         }
         return result;
     }
-
+public:
+    int select(node_index node,int rank,char symbol) const {
+        int crank = 1;
+        int i = 0;
+        for(auto& c : routing_table.at(node)) {
+            if (c == symbol) {
+                if (crank == rank) {
+                    return i;
+                }
+                else {
+                    crank++;
+                }
+            }
+            i++;
+        }
+        return INT_MAX;
+    }
     char get(node_index node, int position) const {
         return routing_table.at(node).at(position);
-    }
-
-
-
-    void insert(node_index node, int position, char symbol) {
-        assert(position <= size(node));
-        routing_table[node].insert(routing_table[node].begin() + position, symbol);
-    }
-
-    int size(node_index node) const {
-        if (routing_table.count(node))
-         return routing_table.at(node).size();
-        else
-            return 0;
     }
 
     string print_content(node_index node) const {
@@ -73,7 +76,7 @@ public:
             out << get(node, i);
         }
         out << endl;
-        cout << out.str();
+        cerr << out.str();
         return out.str();
     }
 
@@ -87,6 +90,17 @@ public:
         return base_rank;
     }
 
+    int size(node_index node) const {
+        if (routing_table.count(node))
+            return routing_table.at(node).size();
+        else
+            return 0;
+    }
+
+    void insert(node_index node, int position, char symbol) {
+        assert(position <= size(node));
+        routing_table[node].insert(routing_table[node].begin() + position, symbol);
+    }
     tsl::hopscotch_map<node_index, vector<char>> routing_table;
 
 };

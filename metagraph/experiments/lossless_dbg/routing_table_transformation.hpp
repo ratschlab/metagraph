@@ -27,6 +27,8 @@
 #include "graph_preprocessor.hpp"
 #include "graph_patch.hpp"
 
+bool transform_done = 0;
+
 using node_index = SequenceGraph::node_index;
 using json = nlohmann::json;
 
@@ -60,6 +62,8 @@ public:
             auto transformation = transformations.at(node);
             if (is_affected(transformation,base)) {
                 char opposite = opposite_element(transformation,base);
+                //todo remove
+                assert(!this->rank(node,position,opposite));
                 base_rank += this->rank(node,position,opposite);
             }
         }
@@ -69,6 +73,8 @@ public:
     char transform(node_index node, char base) const {
         if (transformations.count(node)) {
             auto transformation = transformations.at(node);
+            //todo remove
+            //assert(!transform_done or base==transform(transformation,base));
             return transform(transformation,base);
         }
         return base;

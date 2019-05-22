@@ -58,6 +58,8 @@ public:
                 relative_position = this->routing_table.new_relative_position(node,relative_position);
                 if (base != encoded_base) {
                     cout << encoded_base << base << endl;
+                    this->routing_table.print_content(node);
+                    this->incoming_table.print_content(node);
                 }
             }
             else {
@@ -158,6 +160,20 @@ public:
             relative_position = this->routing_table.select(prev_node,relative_position+1,this->node_get_last_char(node));// +1 as relative_position is 0-based
         }
         return get_global_path_id(prev_node,relative_position);
+    }
+
+    bool is_valid_path_id(path_id path_id) const {
+        return this->node_is_join(path_id.first) && path_id.second < this->incoming_table.branch_size(path_id.first,origin_node_symbol);
+    }
+
+    char node_get_last_char(node_index node) const {
+        auto kmer = this->graph.get_node_sequence(node);
+        return kmer[kmer.size()-1];
+    }
+
+    char node_get_first_char(node_index node) const {
+        auto kmer = this->graph.get_node_sequence(node);
+        return kmer.front();
     }
 
 };

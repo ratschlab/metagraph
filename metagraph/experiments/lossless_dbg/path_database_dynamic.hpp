@@ -21,8 +21,6 @@
 #include "unix_tools.hpp"
 #include "threading.hpp"
 
-#define _OPENMP
-
 // TODO: Never use 'using namespace std;' in .hpp files
 // todo find a tool that removes this relative namespacing issue
 using namespace std;
@@ -69,12 +67,14 @@ public:
         #pragma omp parallel for num_threads(get_num_threads())
         for (size_t i = 0; i < sequences.size(); ++i) {
             const auto &sequence = sequences[i];
+            //todo transform sequence here
+            auto transformed_sequence = transform_sequence(sequence);
             // add additional bifurcation
             additional_joins_vec[i] = graph.kmer_to_node(
-                sequence.substr(0, graph.get_k())
+                    transformed_sequence.substr(0, graph.get_k())
             );
             additional_splits_vec[i] = graph.kmer_to_node(
-                sequence.substr(sequence.length() - graph.get_k())
+                    transformed_sequence.substr(sequence.length() - graph.get_k())
             );
         }
 
@@ -148,13 +148,13 @@ public:
 
         timer.reset();
 
-        #pragma omp parallel for num_threads(get_num_threads()) //default(none) shared(encoded,node_locks,routing_table,incoming_table)
+        //#pragma omp parallel for num_threads(get_num_threads()) //default(none) shared(encoded,node_locks,routing_table,incoming_table)
         for (size_t i = 0; i < sequences.size(); i++) {
             std::vector<std::tuple<node_index, char, char>> bifurcations;
 
             const auto &sequence = sequences[i];
             //auto &path_for_sequence = path_for_sequences[i];
-            auto path_for_sequence = sequence;
+            auto path_for_sequence = transform_sequence(sequence);
 
 
             size_t kmer_end = graph.get_k();
@@ -170,15 +170,29 @@ public:
 
             vector<node_index> debug_list_of_nodes;
             vector<int> debug_relative_position_history;
+            bool debug_transformation_used = sequence != path_for_sequence;
             // TODO: use map_to_nodes_sequentially when implemented
             graph.map_to_nodes(path_for_sequence, [&](node_index node) {
+                if (not node) {
+                    auto pn = [&](int offset) {
+                        PRINT_VAR(sequence.substr(offset,graph.get_k()));
+                        PRINT_VAR(graph.kmer_to_node(sequence.substr(offset,graph.get_k())));
+                        PRINT_VAR(path_for_sequence.substr(offset,graph.get_k()));
+                        PRINT_VAR(graph.kmer_to_node(path_for_sequence.substr(offset,graph.get_k())));
+                    };
+                    pn(kmer_begin);
+                    pn(kmer_begin-6);
+                    auto gp = GraphPreprocessor(graph);
+                    PRINT_VAR(bool(gp.is_weak_split(271541)));
+                }
+                assert(node);
                 debug_list_of_nodes.push_back(node);
                 char join_char = node_is_join(node)
                                  ? (kmer_begin ? path_for_sequence[kmer_begin-1] : '$')
                                  : '\0';
                 char split_char = node_is_split(node)
                                   ? (kmer_end < sequence.size() ?
-                                     sequence[kmer_end] :
+                                     path_for_sequence[kmer_end] :
                                      '$')
                                   : '\0';
 
@@ -193,6 +207,7 @@ public:
 #ifdef _OPENMP
             optional<omp_lock_t*> prev_outgoing_lock;
 #endif
+            int debug_bifurcation_idx = 0;
             for (const auto &[node, join_symbol, split_symbol] : bifurcations) {
 #ifdef _OPENMP
                 omp_set_lock(&node_locks[node]);
@@ -207,6 +222,39 @@ public:
                         encoded[i] = {node, relative_position};
                     }
                     assert(relative_position>=0);
+                    if (relative_position > incoming_table.branch_size(node,join_symbol)) {
+                        using TT = DecodeEnabler<PathDatabaseDynamicCore<>>;
+                        auto self = reinterpret_cast<TT*>(this);
+
+                        cerr << "current" << endl;
+                        PRINT_VAR(graph.get_node_sequence(node));
+                        incoming_table.print_content(node);
+                        PRINT_VAR(join_symbol);
+                        cerr << "previous" << endl;
+                        auto& prev_bifurcation = bifurcations[debug_bifurcation_idx-1];
+                        const auto &[prev_node, prev_join_symbol, prev_split_symbol] = prev_bifurcation;
+                        PRINT_VAR(graph.get_node_sequence(prev_node));
+                        if (prev_split_symbol) {
+                            routing_table.print_content(prev_node);
+                            PRINT_VAR(debug_relative_position_history.back());
+                            PRINT_VAR(prev_split_symbol);
+                        }
+                        if (prev_join_symbol) {
+                            incoming_table.print_content(prev_node);
+                            int prev_position = !prev_split_symbol ?
+                                    debug_relative_position_history.back()
+                                    :
+                                    *(debug_relative_position_history.end()-2)
+                                    ;
+                            auto path_id = self->get_global_path_id(prev_node,prev_position-1);
+                            PRINT_VAR(transform_sequence(decode_from_input(sequences,
+                                    {graph.get_node_sequence(path_id.first),path_id.second}
+                                    ,graph.get_k())
+                                    ));
+                            PRINT_VAR(prev_position);
+                            PRINT_VAR(prev_join_symbol);
+                        }
+                    }
                     assert(relative_position <= incoming_table.branch_size(node,join_symbol));
                     debug_relative_position_history.push_back(relative_position);
                     relative_position += incoming_table.branch_offset_and_increment(node, join_symbol);
@@ -228,6 +276,7 @@ public:
                 prev_outgoing_lock = &outgoing_locks[node];
                 omp_unset_lock(&node_locks[node]);
 #endif
+                debug_bifurcation_idx++;
             }
 #ifdef _OPENMP
             omp_unset_lock(*prev_outgoing_lock);
@@ -287,9 +336,25 @@ public:
         return statistics;
     }
 
+
+    //todo put to proper place
+    string transform_sequence(const string& sequence) const {
+        transform_done = 0;
+        string result = sequence;
+        size_t kmer_end = graph.get_k();
+        graph.map_to_nodes(sequence, [&](node_index node) {
+            if (kmer_end < sequence.size()) {
+                result[kmer_end] = routing_table.transform(node, result[kmer_end]);
+            }
+            kmer_end++;
+        });
+        transform_done = 1;
+        return result;
+    }
+
     void serialize(const fs::path& folder) const {};
 
-protected:
+//protected:
     json statistics;
 
     // denote how many reads are joining from every branch ($ATCGN) ($ denotes start of a new read)

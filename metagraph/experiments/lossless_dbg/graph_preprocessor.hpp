@@ -37,7 +37,7 @@ public:
         graph.call_outgoing_kmers(node,[&](node_index next_node, char base) {
             auto possible_join = first_join(next_node,graph.get_k());
             if (possible_join) {
-                joins[node].push_back(base);
+                joins[possible_join].push_back(base);
             }
         });
         for(auto& [join_node,bases] : joins) {
