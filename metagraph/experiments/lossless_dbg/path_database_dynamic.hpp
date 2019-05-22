@@ -21,7 +21,7 @@
 #include "unix_tools.hpp"
 #include "threading.hpp"
 
-#define USE_LOCKS
+#define _OPENMP
 
 // TODO: Never use 'using namespace std;' in .hpp files
 // todo find a tool that removes this relative namespacing issue
@@ -137,7 +137,7 @@ public:
         double join_time = 0;
         double split_time = 0;
 
-#ifdef USE_LOCKS
+#ifdef _OPENMP
         vector<omp_lock_t> node_locks(graph.num_nodes()+1);
         vector<omp_lock_t> outgoing_locks(graph.num_nodes()+1);
         for(int i=0;i<node_locks.size();i++) {
@@ -190,9 +190,11 @@ public:
             });
 
             int relative_position = INT_MIN;
+#ifdef _OPENMP
             optional<omp_lock_t*> prev_outgoing_lock;
+#endif
             for (const auto &[node, join_symbol, split_symbol] : bifurcations) {
-#ifdef USE_LOCKS
+#ifdef _OPENMP
                 omp_set_lock(&node_locks[node]);
                 if (prev_outgoing_lock) {
                     omp_unset_lock(*prev_outgoing_lock);
@@ -221,14 +223,18 @@ public:
                         //++progress_bar;
                     }
                 }
+#ifdef _OPENMP
                 omp_set_lock(&outgoing_locks[node]);
                 prev_outgoing_lock = &outgoing_locks[node];
                 omp_unset_lock(&node_locks[node]);
+#endif
             }
+#ifdef _OPENMP
             omp_unset_lock(*prev_outgoing_lock);
+#endif
         }
 
-#ifdef USE_LOCKS
+#ifdef _OPENMP
         for(int i=0;i<node_locks.size();i++) {
             omp_destroy_lock(&node_locks[i]);
         }
