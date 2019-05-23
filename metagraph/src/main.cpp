@@ -23,6 +23,8 @@
 #include "dbg_bitmap_construct.hpp"
 #include "dbg_succinct.hpp"
 #include "server.hpp"
+#include "masked_graph.hpp"
+#include "annotated_graph_algorithm.hpp"
 
 typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
@@ -510,6 +512,67 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
     return initialize_annotated_dbg(load_critical_dbg(config.infbase), config);
+}
+
+std::unique_ptr<DeBruijnGraph>
+mask_graph(std::shared_ptr<DeBruijnGraph> graph,
+           const AnnotatedDBG &anno_graph,
+           const Config &config) {
+    assert(graph.get() == dynamic_cast<const DeBruijnGraph*>(&anno_graph.get_graph()));
+
+    std::vector<std::string> ingroup, outgroup;
+
+    // Remove non-present labels
+    std::copy_if(config.label_mask_in.begin(),
+                 config.label_mask_in.end(),
+                 std::back_inserter(ingroup),
+                 [&](const auto &label) {
+                     bool exists = anno_graph.label_exists(label);
+                     if (!exists && config.verbose)
+                         std::cout << "Removing mask-in label " << label << std::endl;
+
+                     return exists;
+                 });
+
+    std::copy_if(config.label_mask_out.begin(),
+                 config.label_mask_out.end(),
+                 std::back_inserter(outgroup),
+                 [&](const auto &label) {
+                     bool exists = anno_graph.label_exists(label);
+                     if (!exists && config.verbose)
+                         std::cout << "Removing mask-out label " << label << std::endl;
+
+                     return exists;
+                 });
+
+    if (config.verbose) {
+        std::cout << "Comparing" << std::endl;
+        std::cout << "Ingroup:";
+        for (const auto &in : ingroup) {
+            std::cout << " " << in;
+        }
+        std::cout << std::endl;
+        std::cout << "Outgroup:";
+        for (const auto &out : outgroup) {
+            std::cout << " " << out;
+        }
+        std::cout << std::endl;
+    }
+
+    if (ingroup.empty() && outgroup.empty())
+        return std::unique_ptr<DeBruijnGraph>(new MaskedDeBruijnGraph(graph));
+
+    return std::unique_ptr<DeBruijnGraph>(new MaskedDeBruijnGraph(
+        annotated_graph_algorithm::mask_insignificant_nodes(
+            graph,
+            anno_graph,
+            ingroup, outgroup,
+            [&](auto incount, auto outcount) {
+                return incount == ingroup.size()
+                    && outcount <= config.label_mask_out_fraction * (incount + outcount);
+            }
+        )
+    ));
 }
 
 
@@ -2090,21 +2153,26 @@ int main(int argc, const char *argv[]) {
             if (config->verbose) {
                 std::cout << "Graph loading...\t" << std::flush;
             }
-            auto dbg = load_critical_graph_from_file<DBGSuccinct>(files.at(0));
-            auto *graph = &dbg->get_boss();
+
+            auto graph = load_critical_dbg(files.at(0));
 
             if (config->verbose) {
                 std::cout << timer.elapsed() << "sec" << std::endl;
             }
 
+            auto *dbg_succ = dynamic_cast<DBGSuccinct*>(graph.get());
+
             if (config->clear_dummy) {
+                if (!dbg_succ)
+                    throw std::runtime_error("Only implemented for DBGSuccinct");
+
                 if (config->verbose) {
                     std::cout << "Traverse source dummy edges and remove redundant ones..." << std::endl;
                 }
                 timer.reset();
 
                 // remove redundant dummy edges and mark all other dummy edges
-                dbg->mask_dummy_kmers(config->parallel, true);
+                dbg_succ->mask_dummy_kmers(config->parallel, true);
 
                 if (config->verbose) {
                     std::cout << "Done in " << timer.elapsed() << "sec" << std::endl;
@@ -2113,6 +2181,20 @@ int main(int argc, const char *argv[]) {
             }
 
             if (config->to_fasta) {
+                if (config->infbase_annotators.size()) {
+                    auto anno_graph = initialize_annotated_dbg(graph, *config);
+
+                    if (config->verbose) {
+                        std::cout << "Masking graph...\t" << std::flush;
+                    }
+
+                    graph.reset(mask_graph(graph, *anno_graph, *config).release());
+
+                    if (config->verbose) {
+                        std::cout << timer.elapsed() << "sec" << std::endl;
+                    }
+                }
+
                 if (config->verbose) {
                     std::cout << "Extracting sequences from graph...\t" << std::flush;
                 }
@@ -2162,16 +2244,21 @@ int main(int argc, const char *argv[]) {
                 return 0;
             }
 
+            if (!dbg_succ)
+                throw std::runtime_error("Only implemented for DBGSuccinct");
+
             if (config->to_adj_list) {
                 if (config->verbose) {
                     std::cout << "Converting graph to adjacency list...\t" << std::flush;
                 }
+
+                auto *boss = &dbg_succ->get_boss();
                 timer.reset();
                 if (config->outfbase.size()) {
                     std::ofstream outstream(config->outfbase + ".adjlist");
-                    graph->print_adj_list(outstream);
+                    boss->print_adj_list(outstream);
                 } else {
-                    graph->print_adj_list(std::cout);
+                    boss->print_adj_list(std::cout);
                 }
                 if (config->verbose) {
                     std::cout << timer.elapsed() << "sec" << std::endl;
@@ -2186,7 +2273,7 @@ int main(int argc, const char *argv[]) {
                 timer.reset();
             }
 
-            dbg->switch_state(config->state);
+            dbg_succ->switch_state(config->state);
 
             if (config->verbose) {
                 std::cout << timer.elapsed() << "sec" << std::endl;
@@ -2197,7 +2284,7 @@ int main(int argc, const char *argv[]) {
                     std::cout << "Serializing transformed graph...\t" << std::flush;
                     timer.reset();
                 }
-                dbg->serialize(config->outfbase);
+                dbg_succ->serialize(config->outfbase);
                 if (config->verbose) {
                     std::cout << timer.elapsed() << "sec" << std::endl;
                 }

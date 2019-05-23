@@ -64,10 +64,13 @@ class Config {
     unsigned int port = 5555;
 
     double discovery_fraction = 1.0;
+    double label_mask_out_fraction = 0.0;
 
     std::vector<std::string> fname;
     std::vector<std::string> anno_labels;
     std::vector<std::string> infbase_annotators;
+    std::vector<std::string> label_mask_in;
+    std::vector<std::string> label_mask_out;
     std::vector<bool> use_kmc;
     std::string outfbase;
     std::string infbase;

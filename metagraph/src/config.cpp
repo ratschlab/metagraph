@@ -207,6 +207,12 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             print_usage(argv[0], identity);
             exit(0);
+        } else if (!strcmp(argv[i], "--label-mask-in")) {
+            label_mask_in.emplace_back(argv[++i]);
+        } else if (!strcmp(argv[i], "--label-mask-out")) {
+            label_mask_out.emplace_back(argv[++i]);
+        } else if (!strcmp(argv[i], "--label-mask-out-fraction")) {
+            label_mask_out_fraction = std::stof(argv[++i]);
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
             print_usage(argv[0], identity);
@@ -585,6 +591,12 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --unitigs \t\textract all unitigs from graph and write to compressed FASTA file [off]\n");
             fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation format [column]\n");
+            fprintf(stderr, "\t                     \t  "); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
+            fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to load []\n");
+            fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph\n");
+            fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph\n");
+            fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of all matching mask-in and mask-out labels [0.0]\n");
         } break;
         case STATS: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
