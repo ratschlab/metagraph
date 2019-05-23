@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <unordered_map>
 #include <unordered_set>
+#include <chrono>
 
 #include <boost/multiprecision/integer.hpp>
 
@@ -1445,13 +1446,17 @@ uint64_t BOSS::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
 // Given an edge list, remove them from the BOSS graph.
 // Anchors the isolated nodes.
 void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_index> *removed_edges) {
+    assert(state == Config::DYN);
+
     uint64_t shift = 0;
     uint64_t node_shift = 0;
 
     std::unordered_set<node_index> new_tail_nodes;
     std::unordered_map<node_index, std::vector<TAlphabet>> new_head_nodes;
 
+    auto begin = std::chrono::high_resolution_clock::now();
     for (edge_index current_edge : edges) {
+        CHECK_INDEX(current_edge);
         std::vector current_edges{current_edge};
         edge_index target_edge = fwd(current_edge);
         if (edges.find(target_edge) == edges.end())
@@ -1486,12 +1491,27 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
             }
         }
     }
+    auto end = std::chrono::high_resolution_clock::now();
+    std::cout << "1: " << std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count() << "ns" << std::endl;
 
+    begin = std::chrono::high_resolution_clock::now();
     // create anchors for new head nodes
-    bit_vector_dyn existing_edges(last_->size() - 1, true);
-    bit_vector_dyn cant_delete(last_->size() - 1, false);
-    cant_delete.set(0, true);
-    bit_vector_dyn existing_nodes(last_->num_set_bits(), true);
+    //TODO don't use bitvectors
+    //bit_vector_dyn existing_edges(last_->size() - 1, true);
+    //bit_vector_dyn cant_delete_(last_->size() - 1, false);
+    //cant_delete_.set(0, true);
+    //bit_vector_dyn existing_nodes(last_->num_set_bits(), true);
+    end = std::chrono::high_resolution_clock::now();
+    std::cout << "2: " << std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count() << "ns" << std::endl;
+
+    std::map<edge_index, size_t> inserted_edges;
+    inserted_edges.emplace(0, 0);
+    std::set<edge_index> cant_delete;
+    cant_delete.emplace(1);
+    std::map<edge_index, size_t> inserted_nodes;
+    inserted_nodes.emplace(0, 0);
+
+    begin = std::chrono::high_resolution_clock::now();
     for (auto& node : new_head_nodes) {
         auto kmer = node.second;
         uint64_t source = 1;
@@ -1501,32 +1521,129 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
 
             auto source_node = get_source_node(source);
             auto source_edge = pick_edge(select_last(source_node), source_node, kmer[i + k_]);
-            if (source_edge)
-                cant_delete.set(source_edge - 1, true);
+            //if (source_edge)
+            //    cant_delete_.set(source_edge - 1, true);
+            if (source_edge) {
+                auto prev_insertion_point = inserted_edges.begin();
+                while (true) {
+                    prev_insertion_point++;
+                    if (prev_insertion_point == inserted_edges.end()
+                            || prev_insertion_point->first + prev_insertion_point->second > source_edge) {
+                        prev_insertion_point--;
+                        break;
+                    }
+                }
+
+                auto source_edge_orig_pos = source_edge - prev_insertion_point->second;
+                cant_delete.emplace(source_edge_orig_pos);
+            }
 
             source = append_pos(kmer[i + k_], source, &kmer[i], &new_ids_vec);
 
             std::sort(new_ids_vec.begin(), new_ids_vec.end());
 
-            std::for_each(new_ids_vec.begin(), new_ids_vec.end(), [&](auto id){
-                existing_edges.insert_bit(id - 1, false);
-                cant_delete.insert_bit(id - 1, true);
+            //std::for_each(new_ids_vec.begin(), new_ids_vec.end(), [&](auto id){
+            //    //existing_edges.insert_bit(id - 1, false);
+            //    //cant_delete_.insert_bit(id - 1, true);
 
-                if (is_single_outgoing(id))
-                    existing_nodes.insert_bit(get_source_node(id) - 1, false);
-            });
+            //    //if (is_single_outgoing(id))
+            //    //    existing_nodes.insert_bit(get_source_node(id) - 1, false);
+            //});
+
+            uint64_t new_preceding_nodes = 0;
+            auto prev_node_insertion_point = inserted_nodes.begin();
+            for (auto new_edge : new_ids_vec) {
+                if (!is_single_outgoing(new_edge))
+                    continue;
+
+                auto new_node = get_source_node(new_edge);
+                while (true) {
+                    prev_node_insertion_point++;
+                    if (prev_node_insertion_point == inserted_nodes.end()
+                            || prev_node_insertion_point->first + prev_node_insertion_point->second > new_node) {
+                        prev_node_insertion_point--;
+                        break;
+                    }
+                    prev_node_insertion_point->second += new_preceding_nodes;
+                }
+
+                auto new_node_orig_pos = new_node - prev_node_insertion_point->second;
+                if (new_node_orig_pos == prev_node_insertion_point->first) {
+                    prev_node_insertion_point->second++;
+                } else {
+                    inserted_nodes.emplace(new_node_orig_pos, prev_node_insertion_point->second + 1);
+                    prev_node_insertion_point++;
+                }
+                new_preceding_nodes++;
+            }
+            while (true) {
+                prev_node_insertion_point++;
+                if (prev_node_insertion_point == inserted_nodes.end())
+                    break;
+                prev_node_insertion_point->second += new_preceding_nodes;
+            }
+
+            uint64_t new_preceding_edges = 0;
+            auto prev_insertion_point = inserted_edges.begin();
+            for (auto new_edge : new_ids_vec) {
+                while (true) {
+                    prev_insertion_point++;
+                    if (prev_insertion_point == inserted_edges.end()
+                            || prev_insertion_point->first + prev_insertion_point->second > new_edge) {
+                        prev_insertion_point--;
+                        break;
+                    }
+                    prev_insertion_point->second += new_preceding_edges;
+                }
+
+                auto new_edge_orig_pos = new_edge - prev_insertion_point->second;
+                if (new_edge_orig_pos == prev_insertion_point->first) {
+                    prev_insertion_point->second++;
+                } else {
+                    inserted_edges.emplace(new_edge_orig_pos, prev_insertion_point->second + 1);
+                    prev_insertion_point++;
+                }
+                new_preceding_edges++;
+            }
+            while (true) {
+                prev_insertion_point++;
+                if (prev_insertion_point == inserted_edges.end())
+                    break;
+                prev_insertion_point->second += new_preceding_edges;
+            }
         }
     }
+    end = std::chrono::high_resolution_clock::now();
+    std::cout << "3: " << std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count() << "ns" << std::endl;
 
-    assert(last_->num_set_bits() == existing_nodes.size());
+    //assert(last_->num_set_bits() == existing_nodes.size());
 
+    begin = std::chrono::high_resolution_clock::now();
+    auto prev_insertion_point = inserted_edges.begin();
+    auto prev_node_insertion_point = inserted_nodes.begin();
     for (edge_index edge : edges) {
         assert(edge >= shift);
-        assert(last_->num_set_bits() == existing_nodes.size());
-        uint64_t edge_id = existing_edges.select1(edge - shift) + 1;
+        //assert(last_->num_set_bits() == existing_nodes.size());
+        //edge_index edge_id = existing_edges.select1(edge - shift) + 1;
         CHECK_INDEX(edge_id);
 
-        if (cant_delete[edge_id - 1])
+        while (prev_insertion_point != inserted_edges.end()
+                && prev_insertion_point->first <= edge) {
+            prev_insertion_point++;
+        }
+        prev_insertion_point--;
+        uint64_t edge_id = edge + prev_insertion_point->second - shift;
+        //std::cout << edge_id << ", " << edge_id2 << std::endl;
+        //assert(edge_id==edge_id2);
+        //if(edge_id != edge_id2)
+        //    exit(1);
+
+        //if (cant_delete_[edge_id - 1]) {
+        //    if (cant_delete.find(edge) == cant_delete.end())
+        //        exit(1);
+        //    continue;
+        //}
+        if (cant_delete.find(edge) != cant_delete.end())
             continue;
 
         uint64_t d = get_W(edge_id);
@@ -1546,7 +1663,17 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
 
         node_index node = get_source_node(edge_id);
         assert(node <= last_->num_set_bits());
-        node_index old_node_id = existing_nodes.rank1(node - 1) + node_shift;
+        while (prev_node_insertion_point != inserted_edges.end()
+                && prev_node_insertion_point->first + prev_node_insertion_point->second <= node + node_shift) {
+            prev_node_insertion_point++;
+        }
+        prev_node_insertion_point--;
+        node_index old_node_id = node - prev_node_insertion_point->second + node_shift;
+        //node_index old_node_id = existing_nodes.rank1(node - 1) + node_shift;
+        //if (old_node_id != old_node_id2) {
+        //    std::cout << "old_node_id " << old_node_id << " old_node_id2 " << old_node_id2 << std::endl;
+        //    exit(1);
+        //}
         if (new_tail_nodes.find(old_node_id) != new_tail_nodes.end()) {
             // use this edge to place the sentinel
             W_->set(edge_id, kSentinelCode);
@@ -1564,17 +1691,19 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
             last_->delete_bit(edge_id - 1);
         } else {
             if (get_last(edge_id)) {
-                existing_nodes.delete_bit(node - 1);
+                //existing_nodes.delete_bit(node - 1);
                 node_shift++;
             }
             last_->delete_bit(edge_id);
         }
         shift++;
-        existing_edges.delete_bit(edge_id - 1);
-        cant_delete.delete_bit(edge_id - 1);
+        //existing_edges.delete_bit(edge_id - 1);
+        //cant_delete_.delete_bit(edge_id - 1);
         if (removed_edges)
             removed_edges->push_back(edge);
     }
+    end = std::chrono::high_resolution_clock::now();
+    std::cout << "4: " << std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count() << "ns" << std::endl;
 }
 
 /**

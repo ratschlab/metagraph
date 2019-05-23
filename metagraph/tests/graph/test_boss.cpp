@@ -2,6 +2,7 @@
 #include <string>
 #include <sstream>
 #include <mutex>
+#include <chrono>
 
 #include <zlib.h>
 #include <htslib/kseq.h>
@@ -2457,4 +2458,87 @@ for(uint32_t j = 0; j < 1000; ++j) {
         //}
     }
 }
+}
+
+TEST(BOSS, EraseEdgesDynUnitigs) {
+    for (size_t k = 3; k < 20; ++k) {
+        BOSS graph(k);
+        graph.add_sequence("AGACACAGT", true);
+        graph.add_sequence("GACTTGCAG", true);
+        graph.add_sequence("ACTAGTCAG", true);
+        graph.add_sequence("ATGCGATCGATATGCGAGA", true);
+        graph.add_sequence("ATGCGATCGAGACTACGAG", true);
+        graph.add_sequence("GTACGATAGACATGACGAG", true);
+        graph.add_sequence("ACTGACGAGACACAGATGC", true);
+        graph.add_sequence("TTGCGATCGATATGCAACA", true);
+        graph.add_sequence("TTCCCCTCGAGACTAATCT", true);
+        graph.add_sequence("GTCCGGTGTGCATAAGAAC", true);
+        graph.add_sequence("ACTGAGTGGGCACAGATGC", true);
+
+        // TODO for graph cleaning, store head edges of unitigs to be cleaned, rather than all constituent
+        // edges, and simply retraverse one-by-one as they are being deleted. the subsequent head edges
+        // will need to be shifted according to the previous deletions as it progresses.
+
+        // common interface for edge deletion on all DBG's. one annoyance is that it applies always,
+        // sometimes, always, or never, depending on static vs dynamic capabilities and current state.
+
+        // where to put graph cleaning itself? i guess it will go on SequenceGraph / DBG?
+
+        std::vector<BOSS::edge_index> head_edges;
+        //std::set<BOSS::edge_index> EDGES;
+        graph.call_paths([&](const auto& path, const auto&) {
+            assert(path.size());
+            head_edges.push_back(path.at(0));
+            //for (auto edge : path) {
+            //    EDGES.insert(edge);
+            //}
+        }, true);
+        //auto begin = std::chrono::high_resolution_clock::now();
+        //graph.erase_edges_dyn(EDGES, NULL);
+        //EXPECT_TRUE(graph.is_valid());
+        //auto end = std::chrono::high_resolution_clock::now();
+        //std::cout << "remove: " << std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count() << "ns" << std::endl;
+
+        while (!head_edges.empty()) {
+            auto head_edge = head_edges.back();
+            head_edges.pop_back();
+
+            auto begin = std::chrono::high_resolution_clock::now();
+            std::set<BOSS::edge_index> edges;
+            auto edge = head_edge;
+            do {
+                edges.emplace(edge);
+                if (!graph.is_single_incoming(edge))
+                    break;
+
+                edge = graph.pred_last(graph.fwd(edge) - 1) + 1;
+
+            } while (graph.get_last(edge)
+                    && graph.get_W(edge) != BOSS::kSentinelCode
+                            && edge != head_edge);
+            auto end = std::chrono::high_resolution_clock::now();
+            std::cout << "traverse: " << std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count() << "ns" << std::endl;
+
+            begin = std::chrono::high_resolution_clock::now();
+            std::vector<BOSS::edge_index> removed_edges;
+
+            //std::for_each(edges.begin(), edges.end(), [](auto x){ std::cout << x << ","; });
+            //std::cout << std::endl;
+            graph.erase_edges_dyn(edges, &removed_edges);
+            EXPECT_TRUE(graph.is_valid());
+            end = std::chrono::high_resolution_clock::now();
+            std::cout << "remove:   " << std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count() << "ns" << std::endl;
+
+            begin = std::chrono::high_resolution_clock::now();
+            std::sort(removed_edges.begin(), removed_edges.end());
+            for (auto other_head = head_edges.begin(); other_head != head_edges.end(); ++other_head) {
+                auto preceding_removed_edge = std::lower_bound(removed_edges.begin(),
+                                                               removed_edges.end(),
+                                                               *other_head);
+                *other_head -= preceding_removed_edge - removed_edges.begin();
+            }
+            end = std::chrono::high_resolution_clock::now();
+            std::cout << "shift:    " << std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count() << "ns" << std::endl;
+        }
+    }
 }
