@@ -63,11 +63,6 @@ BOSS::BOSS(BOSSConstructor *builder) : BOSS::BOSS() {
     assert(is_valid());
 }
 
-BOSS::~BOSS() {
-    delete W_;
-    delete last_;
-}
-
 /**
  * Given a pointer to BOSS tables G1 and G2, the function compares their elements to the
  * each other. It will perform an element wise comparison of the arrays W, last and
@@ -222,20 +217,18 @@ bool BOSS::load(std::ifstream &instream) {
             return false;
 
         // load W and last arrays
-        delete W_;
-        delete last_;
         switch (state) {
             case Config::DYN:
-                W_ = new wavelet_tree_dyn(bits_per_char_W_);
-                last_ = new bit_vector_dyn();
+                W_.reset(new wavelet_tree_dyn(bits_per_char_W_));
+                last_.reset(new bit_vector_dyn());
                 break;
             case Config::STAT:
-                W_ = new wavelet_tree_stat(bits_per_char_W_);
-                last_ = new bit_vector_stat();
+                W_.reset(new wavelet_tree_stat(bits_per_char_W_));
+                last_.reset(new bit_vector_stat());
                 break;
             case Config::SMALL:
-                W_ = new wavelet_tree_small(bits_per_char_W_);
-                last_ = new bit_vector_small();
+                W_.reset(new wavelet_tree_small(bits_per_char_W_));
+                last_.reset(new bit_vector_small());
                 break;
         }
         return W_->load(instream) && last_->load(instream);
@@ -1148,14 +1141,10 @@ std::string BOSS::decode(const std::vector<TAlphabet> &sequence) const {
 }
 
 template <class WaveletTree, class BitVector>
-void convert(wavelet_tree **W_, bit_vector **last_) {
-    wavelet_tree *W_new = new WaveletTree((*W_)->convert_to<WaveletTree>());
-    delete *W_;
-    *W_ = W_new;
+void convert(std::unique_ptr<wavelet_tree> *W_, std::unique_ptr<bit_vector> *last_) {
+    W_->reset(new WaveletTree(W_->get()->convert_to<WaveletTree>()));
 
-    bit_vector *last_new = new BitVector((*last_)->convert_to<BitVector>());
-    delete *last_;
-    *last_ = last_new;
+    last_->reset(new BitVector(last_->get()->convert_to<BitVector>()));
 }
 
 void BOSS::switch_state(Config::StateType new_state) {
@@ -1426,8 +1415,7 @@ uint64_t BOSS::erase_edges(const std::vector<bool> &edges_to_remove_mask) {
                 new_last[new_i - 1] = 1;
         }
     }
-    delete last_;
-    last_ = new bit_vector_stat(std::move(new_last));
+    last_.reset(new bit_vector_stat(std::move(new_last)));
 
     // update W
     sdsl::int_vector<> new_W(W_->size() - num_edges_to_remove, 0, bits_per_char_W_);
@@ -1447,8 +1435,7 @@ uint64_t BOSS::erase_edges(const std::vector<bool> &edges_to_remove_mask) {
             first_removed[c % alph_size] = false;
         }
     }
-    delete W_;
-    W_ = new wavelet_tree_stat(bits_per_char_W_, std::move(new_W));
+    W_.reset(new wavelet_tree_stat(bits_per_char_W_, std::move(new_W)));
 
     // update F
     TAlphabet c = 0;

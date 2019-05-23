@@ -58,13 +58,9 @@ void BOSS::Chunk::extend(const BOSS::Chunk &other) {
 }
 
 void BOSS::Chunk::initialize_boss(BOSS *graph) const {
-    assert(graph->W_);
-    delete graph->W_;
-    graph->W_ = new wavelet_tree_stat(bits_per_char_W_, W_);
+    graph->W_.reset(new wavelet_tree_stat(bits_per_char_W_, W_));
 
-    assert(graph->last_);
-    delete graph->last_;
-    graph->last_ = new bit_vector_stat(to_sdsl(last_));
+    graph->last_.reset(new bit_vector_stat(to_sdsl(last_)));
 
     graph->F_ = F_;
 
@@ -158,12 +154,10 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
     assert(last.get());
     assert(F.get());
 
-    delete graph->W_;
-    graph->W_ = new wavelet_tree_stat(W->width(), std::move(*W));
+    graph->W_.reset(new wavelet_tree_stat(W->width(), std::move(*W)));
     W.reset();
 
-    delete graph->last_;
-    graph->last_ = new bit_vector_stat(std::move(*last));
+    graph->last_.reset(new bit_vector_stat(std::move(*last)));
     last.reset();
 
     graph->F_ = std::move(*F);

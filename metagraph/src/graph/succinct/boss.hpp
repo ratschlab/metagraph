@@ -2,6 +2,7 @@
 #define __BOSS_HPP__
 
 #include <type_traits>
+#include <memory>
 
 #include <progress_bar.hpp>
 
@@ -36,7 +37,6 @@ class BOSS {
 
     explicit BOSS(size_t k = 1);
     explicit BOSS(BOSSConstructor *builder);
-    ~BOSS();
 
     /**
      * Check whether BOSS tables store the same data.
@@ -388,11 +388,11 @@ class BOSS {
     // k-mer size
     size_t k_;
     // the bit array indicating the last outgoing edge of a node
-    bit_vector *last_;
+    std::unique_ptr<bit_vector> last_;
     // the offset array to mark the offsets for the last column in the implicit node list
     std::vector<uint64_t> F_;
     // the array containing the edge labels
-    wavelet_tree *W_;
+    std::unique_ptr<wavelet_tree> W_;
 
     Config::StateType state = Config::DYN;
 
