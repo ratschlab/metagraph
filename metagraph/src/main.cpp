@@ -24,6 +24,8 @@
 #include "dbg_succinct.hpp"
 #include "server.hpp"
 #include "weighted_graph.hpp"
+#include "masked_graph.hpp"
+#include "annotated_graph_algorithm.hpp"
 
 typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
@@ -507,6 +509,67 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
     return initialize_annotated_dbg(load_critical_dbg(config.infbase), config);
+}
+
+std::unique_ptr<MaskedDeBruijnGraph>
+mask_graph(const AnnotatedDBG &anno_graph,
+           const Config &config) {
+    auto graph = std::dynamic_pointer_cast<DeBruijnGraph>(anno_graph.get_graph_ptr());
+
+    if (!graph.get())
+        throw std::runtime_error("Masking only supported for DeBruijnGraph");
+
+    std::vector<std::string> mask_in, mask_out;
+
+    // Remove non-present labels
+    std::copy_if(config.label_mask_in.begin(),
+                 config.label_mask_in.end(),
+                 std::back_inserter(mask_in),
+                 [&](const auto &label) {
+                     bool exists = anno_graph.label_exists(label);
+                     if (!exists && config.verbose)
+                         std::cout << "Removing mask-in label " << label << std::endl;
+
+                     return exists;
+                 });
+
+    std::copy_if(config.label_mask_out.begin(),
+                 config.label_mask_out.end(),
+                 std::back_inserter(mask_out),
+                 [&](const auto &label) {
+                     bool exists = anno_graph.label_exists(label);
+                     if (!exists && config.verbose)
+                         std::cout << "Removing mask-out label " << label << std::endl;
+
+                     return exists;
+                 });
+
+    if (config.verbose) {
+        std::cout << "Comparing" << std::endl;
+        std::cout << "Masked in:";
+        for (const auto &in : mask_in) {
+            std::cout << " " << in;
+        }
+        std::cout << std::endl;
+        std::cout << "Masked out:";
+        for (const auto &out : mask_out) {
+            std::cout << " " << out;
+        }
+        std::cout << std::endl;
+    }
+
+    return std::unique_ptr<MaskedDeBruijnGraph>(new MaskedDeBruijnGraph(
+        std::move(graph),
+        annotated_graph_algorithm::mask_nodes_by_label(
+            anno_graph,
+            mask_in, mask_out,
+            [&](auto count_in, auto count_out) {
+                return count_in == mask_in.size()
+                    && count_out
+                        <= config.label_mask_out_fraction * (count_in + count_out);
+            }
+        ).release()
+    ));
 }
 
 
@@ -2114,15 +2177,18 @@ int main(int argc, const char *argv[]) {
             assert(files.size() == 1);
 
             Timer timer;
-            if (config->verbose) {
+            if (config->verbose)
                 std::cout << "Graph loading...\t" << std::flush;
-            }
-            auto dbg = load_critical_graph_from_file<DBGSuccinct>(files.at(0));
-            auto *graph = &dbg->get_boss();
 
-            if (config->verbose) {
+            auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(
+                load_critical_dbg(files.at(0))
+            );
+
+            if (config->verbose)
                 std::cout << timer.elapsed() << "sec" << std::endl;
-            }
+
+            if (!dbg_succ.get())
+                throw std::runtime_error("Only implemented for DBGSuccinct");
 
             if (config->clear_dummy) {
                 if (config->verbose) {
@@ -2131,78 +2197,30 @@ int main(int argc, const char *argv[]) {
                 timer.reset();
 
                 // remove redundant dummy edges and mark all other dummy edges
-                dbg->mask_dummy_kmers(config->parallel, true);
+                dbg_succ->mask_dummy_kmers(config->parallel, true);
 
-                if (config->verbose) {
+                if (config->verbose)
                     std::cout << "Done in " << timer.elapsed() << "sec" << std::endl;
-                }
+
                 timer.reset();
-            }
-
-            if (config->to_fasta) {
-                if (config->verbose) {
-                    std::cout << "Extracting sequences from graph...\t" << std::flush;
-                }
-                timer.reset();
-                if (!config->outfbase.size()) {
-                    std::cerr << "Error: no output file provided" << std::endl;
-                    exit(1);
-                }
-
-                auto out_filename
-                    = utils::remove_suffix(config->outfbase, ".gz", ".fasta")
-                        + ".fasta.gz";
-
-                gzFile out_fasta_gz = gzopen(out_filename.c_str(), "w");
-
-                if (out_fasta_gz == Z_NULL) {
-                    std::cerr << "ERROR: Can't write to " << out_filename << std::endl;
-                    exit(1);
-                }
-
-                uint64_t counter = 0;
-                const auto &dump_sequence = [&](const auto &sequence) {
-                    if (!write_fasta(out_fasta_gz,
-                                     utils::join_strings({ config->header,
-                                                            std::to_string(counter) },
-                                                         ".",
-                                                         true),
-                                     sequence)) {
-                        std::cerr << "ERROR: Can't write extracted sequences to "
-                                  << out_filename << std::endl;
-                        exit(1);
-                    }
-                    counter++;
-                };
-
-                if (config->unitigs || config->pruned_dead_end_size > 0) {
-                    graph->call_unitigs(dump_sequence, config->pruned_dead_end_size);
-                } else {
-                    graph->call_sequences(dump_sequence);
-                }
-
-                gzclose(out_fasta_gz);
-
-                if (config->verbose) {
-                    std::cout << timer.elapsed() << "sec" << std::endl;
-                }
-                return 0;
             }
 
             if (config->to_adj_list) {
-                if (config->verbose) {
+                if (config->verbose)
                     std::cout << "Converting graph to adjacency list...\t" << std::flush;
-                }
+
+                auto *boss = &dbg_succ->get_boss();
                 timer.reset();
                 if (config->outfbase.size()) {
                     std::ofstream outstream(config->outfbase + ".adjlist");
-                    graph->print_adj_list(outstream);
+                    boss->print_adj_list(outstream);
                 } else {
-                    graph->print_adj_list(std::cout);
+                    boss->print_adj_list(std::cout);
                 }
-                if (config->verbose) {
+
+                if (config->verbose)
                     std::cout << timer.elapsed() << "sec" << std::endl;
-                }
+
                 return 0;
             }
 
@@ -2213,22 +2231,96 @@ int main(int argc, const char *argv[]) {
                 timer.reset();
             }
 
-            dbg->switch_state(config->state);
+            dbg_succ->switch_state(config->state);
 
-            if (config->verbose) {
+            if (config->verbose)
                 std::cout << timer.elapsed() << "sec" << std::endl;
-            }
+
 
             if (config->outfbase.size()) {
                 if (config->verbose) {
                     std::cout << "Serializing transformed graph...\t" << std::flush;
                     timer.reset();
                 }
-                dbg->serialize(config->outfbase);
+                dbg_succ->serialize(config->outfbase);
                 if (config->verbose) {
                     std::cout << timer.elapsed() << "sec" << std::endl;
                 }
             }
+
+            return 0;
+        }
+        case Config::ASSEMBLE: {
+            assert(files.size() == 1);
+
+            Timer timer;
+            if (config->verbose)
+                std::cout << "Graph loading...\t" << std::flush;
+
+            auto graph = load_critical_dbg(files.at(0));
+
+            if (config->verbose)
+                std::cout << timer.elapsed() << "sec" << std::endl;
+
+            if (config->infbase_annotators.size()) {
+                auto anno_graph = initialize_annotated_dbg(graph, *config);
+
+                if (config->verbose) {
+                    std::cout << "Masking graph...\t" << std::flush;
+                }
+
+                graph = mask_graph(*anno_graph, *config);
+
+                if (config->verbose) {
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+                }
+            }
+
+            if (config->verbose)
+                std::cout << "Extracting sequences from graph...\t" << std::flush;
+
+            timer.reset();
+            if (!config->outfbase.size()) {
+                std::cerr << "Error: no output file provided" << std::endl;
+                exit(1);
+            }
+
+            auto out_filename
+                = utils::remove_suffix(config->outfbase, ".gz", ".fasta")
+                    + ".fasta.gz";
+
+            gzFile out_fasta_gz = gzopen(out_filename.c_str(), "w");
+
+            if (out_fasta_gz == Z_NULL) {
+                std::cerr << "ERROR: Can't write to " << out_filename << std::endl;
+                exit(1);
+            }
+
+            uint64_t counter = 0;
+            const auto &dump_sequence = [&](const auto &sequence) {
+                if (!write_fasta(out_fasta_gz,
+                                 utils::join_strings({ config->header,
+                                                        std::to_string(counter) },
+                                                     ".",
+                                                     true),
+                                 sequence)) {
+                    std::cerr << "ERROR: Can't write extracted sequences to "
+                              << out_filename << std::endl;
+                    exit(1);
+                }
+                counter++;
+            };
+
+            if (config->unitigs || config->pruned_dead_end_size > 0) {
+                graph->call_unitigs(dump_sequence, config->pruned_dead_end_size);
+            } else {
+                graph->call_sequences(dump_sequence);
+            }
+
+            gzclose(out_fasta_gz);
+
+            if (config->verbose)
+                std::cout << timer.elapsed() << "sec" << std::endl;
 
             return 0;
         }

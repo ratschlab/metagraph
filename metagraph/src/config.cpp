@@ -49,6 +49,8 @@ Config::Config(int argc, const char *argv[]) {
         identity = TRANSFORM;
     } else if (!strcmp(argv[1], "transform_anno")) {
         identity = TRANSFORM_ANNOTATION;
+    } else if (!strcmp(argv[1], "assemble")) {
+        identity = ASSEMBLE;
     } else if (!strcmp(argv[1], "relax_brwt")) {
         identity = RELAX_BRWT;
     } else {
@@ -174,10 +176,7 @@ Config::Config(int argc, const char *argv[]) {
             infbase = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "--to-adj-list")) {
             to_adj_list = true;
-        } else if (!strcmp(argv[i], "--to-fasta")) {
-            to_fasta = true;
         } else if (!strcmp(argv[i], "--unitigs")) {
-            to_fasta = true;
             unitigs = true;
         } else if (!strcmp(argv[i], "--header")) {
             header = std::string(argv[++i]);
@@ -204,6 +203,12 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             print_usage(argv[0], identity);
             exit(0);
+        } else if (!strcmp(argv[i], "--label-mask-in")) {
+            label_mask_in.emplace_back(argv[++i]);
+        } else if (!strcmp(argv[i], "--label-mask-out")) {
+            label_mask_out.emplace_back(argv[++i]);
+        } else if (!strcmp(argv[i], "--label-mask-out-fraction")) {
+            label_mask_out_fraction = std::stof(argv[++i]);
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
             print_usage(argv[0], identity);
@@ -304,6 +309,7 @@ Config::Config(int argc, const char *argv[]) {
 
     if ((identity == TRANSFORM
             || identity == TRANSFORM_ANNOTATION
+            || identity == ASSEMBLE
             || identity == RELAX_BRWT)
                     && fname.size() != 1)
         print_usage_and_exit = true;
@@ -478,6 +484,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\ttransform_anno\tchange representation of the graph annotation\n\n");
 
+            fprintf(stderr, "\tassemble\tgiven a graph, extract sequences from it\n\n");
+
             fprintf(stderr, "\trelax_brwt\toptimize the tree structure in brwt annotator\n\n");
 
             fprintf(stderr, "\tquery\t\tannotate sequences from fast[a|q] files\n\n");
@@ -596,10 +604,23 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --prune-end [INT] \tprune all dead ends of this length and shorter [0]\n");
             fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: fast / faster / dynamic / small [fast]\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
-            fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and write to compressed FASTA file [off]\n");
-            fprintf(stderr, "\t   --unitigs \t\textract all unitigs from graph and write to compressed FASTA file [off]\n");
             fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+        } break;
+        case ASSEMBLE: {
+            fprintf(stderr, "Usage: %s assemble [options] GRAPH\n\n", prog_name.c_str());
+
+            fprintf(stderr, "\t-o --outfile-base [STR] \t\tbasename of output file []\n");
+            fprintf(stderr, "\t   --prune-end [INT] \t\t\tprune all dead ends of this length and shorter [0]\n");
+            fprintf(stderr, "\t   --unitigs \t\t\t\textract all unitigs from graph and write to compressed FASTA file [off]\n");
+            fprintf(stderr, "\t   --header [STR] \t\t\theader for sequences in FASTA output []\n");
+            fprintf(stderr, "\t-p --parallel [INT] \t\t\tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t-a --annotator [STR] \t\t\tannotator to load []\n");
+            fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph\n");
+            fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph\n");
+            fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of\n");
+            fprintf(stderr, "\t                                     \tall matching mask-in and mask-out labels [0.0]\n");
         } break;
         case STATS: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());

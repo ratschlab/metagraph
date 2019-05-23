@@ -21,7 +21,6 @@ class Config {
     bool filename_anno = false;
     bool fasta_anno = false;
     bool to_adj_list = false;
-    bool to_fasta = false;
     bool unitigs = false;
     bool count_kmers = false;
     bool query_presence = false;
@@ -63,10 +62,13 @@ class Config {
     unsigned int port = 5555;
 
     double discovery_fraction = 1.0;
+    double label_mask_out_fraction = 0.0;
 
     std::vector<std::string> fname;
     std::vector<std::string> anno_labels;
     std::vector<std::string> infbase_annotators;
+    std::vector<std::string> label_mask_in;
+    std::vector<std::string> label_mask_out;
     std::string outfbase;
     std::string infbase;
     std::string rename_instructions_file;
@@ -95,6 +97,7 @@ class Config {
         MERGE_ANNOTATIONS,
         TRANSFORM,
         TRANSFORM_ANNOTATION,
+        ASSEMBLE,
         RELAX_BRWT,
         QUERY,
         SERVER_QUERY,
