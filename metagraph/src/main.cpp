@@ -26,6 +26,7 @@
 #include "weighted_graph.hpp"
 #include "masked_graph.hpp"
 #include "annotated_graph_algorithm.hpp"
+#include "taxid_mapper.hpp"
 
 typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
@@ -2516,8 +2517,17 @@ int main(int argc, const char *argv[]) {
         case Config::CALL_VARIANTS: {
             assert(config->infbase_annotators.size() == 1);
 
-            auto anno_graph = initialize_annotated_dbg(*config);
+            std::unique_ptr<TaxIDMapper> taxid_mapper;
+            if (config->taxonomy_map.length()) {
+                taxid_mapper.reset(new TaxIDMapper());
+                std::ifstream taxid_mapper_in(config->taxonomy_map, std::ios::binary);
+                if (!taxid_mapper->load(taxid_mapper_in)) {
+                    std::cerr << "ERROR: failed to read accession2taxid map" << std::endl;
+                    exit(1);
+                }
+            }
 
+            auto anno_graph = initialize_annotated_dbg(*config);
             auto masked_graph = mask_graph(*anno_graph, *config);
 
             if (config->verbose) {
@@ -2554,10 +2564,14 @@ int main(int argc, const char *argv[]) {
 
                     for (const auto &label : labels) {
                         std::cout << first
-                                  << " " << ref
-                                  << " " << var
-                                  << " " << label
-                                  << std::endl;
+                                  << "\t" << ref
+                                  << "\t" << var
+                                  << "\t" << label;
+
+                        if (taxid_mapper.get())
+                            std::cout << "\t" << taxid_mapper->gb_to_taxid(label);
+
+                        std::cout << std::endl;
 
                         num_calls++;
                     }
@@ -2568,8 +2582,12 @@ int main(int argc, const char *argv[]) {
                 std::cout << "Index"
                           << "\t" << "Ref"
                           << "\t" << "Var"
-                          << "\t" << "Label"
-                          << std::endl;
+                          << "\t" << "Label";
+
+                if (taxid_mapper.get())
+                    std::cout << "\t" << "TaxID";
+
+                std::cout << std::endl;
 
                 annotated_graph_algorithm::call_bubbles(*masked_graph,
                                                         *anno_graph,
@@ -2587,8 +2605,12 @@ int main(int argc, const char *argv[]) {
                 std::cout << "Index"
                           << "\t" << "Node"
                           << "\t" << "Edge"
-                          << "\t" << "Label"
-                          << std::endl;
+                          << "\t" << "Label";
+
+                if (taxid_mapper.get())
+                    std::cout << "\t" << "TaxID";
+
+                std::cout << std::endl;
 
                 annotated_graph_algorithm::call_breakpoints(*masked_graph,
                                                             *anno_graph,
@@ -2604,6 +2626,24 @@ int main(int argc, const char *argv[]) {
                 }
             }
 
+            return 0;
+        }
+        case Config::PARSE_TAXONOMY: {
+            TaxIDMapper taxid_mapper;
+            if (config->accession2taxid.length()
+                && !taxid_mapper.parse_accession2taxid(config->accession2taxid)) {
+                std::cerr << "ERROR: failed to read accession2taxid file" << std::endl;
+                exit(1);
+            }
+
+            if (config->taxonomy_nodes.length()
+                && !taxid_mapper.parse_nodes(config->taxonomy_nodes)) {
+                std::cerr << "ERROR: failed to read nodes.dmp file" << std::endl;
+                exit(1);
+            }
+
+            std::ofstream out(config->outfbase + ".taxonomy.map", std::ios::binary);
+            taxid_mapper.serialize(out);
             return 0;
         }
         case Config::NO_IDENTITY: {

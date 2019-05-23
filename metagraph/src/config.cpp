@@ -55,6 +55,8 @@ Config::Config(int argc, const char *argv[]) {
         identity = RELAX_BRWT;
     } else if (!strcmp(argv[1], "call_variants")) {
         identity = CALL_VARIANTS;
+    } else if (!strcmp(argv[1], "parse_taxonomy")) {
+        identity = PARSE_TAXONOMY;
     } else {
         print_usage(argv[0]);
         exit(-1);
@@ -215,6 +217,12 @@ Config::Config(int argc, const char *argv[]) {
             label_filter.emplace_back(argv[++i]);
         } else if (!strcmp(argv[i], "--call-bubbles")) {
             call_bubbles = true;
+        } else if (!strcmp(argv[i], "--accession")) {
+            accession2taxid = std::string(argv[++i]);
+        } else if (!strcmp(argv[i], "--taxonomy")) {
+            taxonomy_nodes = std::string(argv[++i]);
+        } else if (!strcmp(argv[i], "--taxonomy-map")) {
+            taxonomy_map = std::string(argv[++i]);
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
             print_usage(argv[0], identity);
@@ -247,6 +255,7 @@ Config::Config(int argc, const char *argv[]) {
                       && identity != SERVER_QUERY
                       && !(identity == BUILD && complete)
                       && !(identity == CALL_VARIANTS)
+                      && !(identity == PARSE_TAXONOMY)
                       && !(identity == CONCATENATE && !infbase.empty())) {
         std::string line;
         while (std::getline(std::cin, line)) {
@@ -262,6 +271,7 @@ Config::Config(int argc, const char *argv[]) {
             && identity != SERVER_QUERY
             && !(identity == BUILD && complete)
             && !(identity == CALL_VARIANTS)
+            && !(identity == PARSE_TAXONOMY)
             && !fname.size())
         print_usage_and_exit = true;
 
@@ -320,6 +330,10 @@ Config::Config(int argc, const char *argv[]) {
             || identity == ASSEMBLE
             || identity == RELAX_BRWT)
                     && fname.size() != 1)
+        print_usage_and_exit = true;
+
+    if (identity == PARSE_TAXONOMY &&
+        ((accession2taxid == "" && taxonomy_nodes == "") || outfbase == ""))
         print_usage_and_exit = true;
 
     if (identity == TRANSFORM_ANNOTATION && outfbase.empty())
@@ -501,6 +515,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\tcall_variants\tgenerate a masked annotated graph and call variants\n\n");
             fprintf(stderr, "\t\t\trelative to unmasked graph\n\n");
+
+            fprintf(stderr, "\tparse_taxonomy\tgenerate NCBI Accession ID to Taxonomy ID mapper\n\n");
 
             return;
         }
@@ -751,6 +767,15 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t                                     \tall matching mask-in and mask-out labels [0.0]\n");
             fprintf(stderr, "\t   --call-bubbles \t\t\tcall labels from bubbles\n");
             fprintf(stderr, "\t   --label-filter [STR] \t\tdiscard variants with this label\n");
+            fprintf(stderr, "\t   --taxonomy-map \t\t\tfilename of taxonomy map file\n");
+        } break;
+        case PARSE_TAXONOMY: {
+            fprintf(stderr, "Usage: %s parse_taxonomy -o <OUTBASE> [options]\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for parse_taxonomy:\n");
+            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
+            fprintf(stderr, "\t   --accession \t\tfilename of the accession2taxid.gz file\n");
+            fprintf(stderr, "\t   --taxonomy \t\tfilename of the nodes.dmp file\n");
         } break;
     }
 

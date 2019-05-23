@@ -81,6 +81,9 @@ class Config {
     std::string anno_labels_delimiter = ":";
     std::string annotation_label = "";
     std::string header = "";
+    std::string accession2taxid;
+    std::string taxonomy_nodes;
+    std::string taxonomy_map;
 
     enum IdentityType {
         NO_IDENTITY = -1,
@@ -103,7 +106,8 @@ class Config {
         RELAX_BRWT,
         QUERY,
         SERVER_QUERY,
-        CALL_VARIANTS
+        CALL_VARIANTS,
+        PARSE_TAXONOMY
     };
     IdentityType identity = NO_IDENTITY;
 
