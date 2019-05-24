@@ -120,7 +120,13 @@ public:
                     incoming_table_builder.push_back(branch_size);
                 });
 #endif
+        #ifndef FULL_INCOMING_TABLE
+                assert(is_join_node.back() == 0);
+                is_join_node.pop_back();
+                incoming_table_builder.pop_back();
+        #endif
             }
+
         }
         is_join_node.push_back(1); // to also always end a block with 1
         incoming_table.edge_multiplicity_table = sdsl::enc_vector<>(incoming_table_builder);
