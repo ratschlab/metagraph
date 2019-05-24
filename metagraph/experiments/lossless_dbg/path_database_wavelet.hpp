@@ -122,8 +122,10 @@ public:
 #endif
         #ifndef FULL_INCOMING_TABLE
                 assert(is_join_node.back() == 0);
-                is_join_node.pop_back();
-                incoming_table_builder.pop_back();
+                if (*(is_join_node.end()-2) == 0) {
+                    is_join_node.pop_back();
+                    incoming_table_builder.pop_back();
+                }
         #endif
             }
 
