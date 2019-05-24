@@ -13,9 +13,13 @@
 template <typename T>
 class SortedSet {
   public:
+    typedef T key_type;
+    typedef T value_type;
+    typedef Vector<T> storage_type;
+
     SortedSet(size_t num_threads = 1,
               bool verbose = false,
-              std::function<void(Vector<T>*)> cleanup = [](Vector<T>*) {})
+              std::function<void(storage_type*)> cleanup = [](storage_type*) {})
       : num_threads_(num_threads), verbose_(verbose), cleanup_(cleanup) {}
 
     ~SortedSet() {}
@@ -60,7 +64,7 @@ class SortedSet {
         try_reserve(size);
     }
 
-    Vector<T>& data() {
+    storage_type& data() {
         std::unique_lock<std::mutex> resize_lock(mutex_resize_);
         std::unique_lock<std::shared_timed_mutex> copy_lock(mutex_copy_);
 
@@ -76,11 +80,11 @@ class SortedSet {
         std::unique_lock<std::mutex> resize_lock(mutex_resize_);
         std::unique_lock<std::shared_timed_mutex> copy_lock(mutex_copy_);
 
-        data_ = Vector<T>();
+        data_ = storage_type();
         sorted_end_ = 0;
     }
 
-    void sort_and_remove_duplicates(Vector<T> *vector, size_t num_threads) const {
+    void sort_and_remove_duplicates(storage_type *vector, size_t num_threads) const {
         assert(vector);
 
         ips4o::parallel::sort(vector->begin(), vector->end(), std::less<T>(), num_threads);
@@ -125,10 +129,10 @@ class SortedSet {
         data_.reserve(min_size);
     }
 
-    Vector<T> data_;
+    storage_type data_;
     size_t num_threads_;
     bool verbose_;
-    std::function<void(Vector<T>*)> cleanup_;
+    std::function<void(storage_type*)> cleanup_;
 
     // indicate the end of the preprocessed distinct and sorted values
     uint64_t sorted_end_ = 0;

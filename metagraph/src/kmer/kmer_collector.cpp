@@ -56,15 +56,15 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
     }
 }
 
-template <typename KMER, class KmerExtractor>
-KmerCollector<KMER, KmerExtractor>
-::KmerCollector(size_t k,
-                bool both_strands_mode,
-                Sequence&& filter_suffix_encoded,
-                size_t num_threads,
-                double memory_preallocated,
-                bool verbose,
-                std::function<void(Vector<KMER>*)> cleanup)
+template <typename KMER, class KmerExtractor, class Container>
+KmerStorage<KMER, KmerExtractor, Container>
+::KmerStorage(size_t k,
+              bool both_strands_mode,
+              Sequence&& filter_suffix_encoded,
+              size_t num_threads,
+              double memory_preallocated,
+              bool verbose,
+              std::function<void(Data*)> cleanup)
       : k_(k),
         kmers_(num_threads, verbose, cleanup),
         num_threads_(num_threads),
@@ -75,20 +75,19 @@ KmerCollector<KMER, KmerExtractor>
         filter_suffix_encoded_(std::move(filter_suffix_encoded)),
         both_strands_mode_(both_strands_mode) {
     assert(num_threads_ > 0);
-    static_assert(KMER::kBitsPerChar == KmerExtractor::kLogSigma);
 
-    kmers_.reserve(memory_preallocated / sizeof(KMER));
+    kmers_.reserve(memory_preallocated / sizeof(typename Container::value_type));
     if (verbose_) {
         std::cout << "Preallocated "
-                  << kmers_.data().capacity() * sizeof(KMER) / (1llu << 30)
+                  << (kmers_.data().capacity() * sizeof(typename Container::value_type) >> 30)
                   << "Gb for the k-mer storage"
                   << ", capacity: " << kmers_.data().capacity() << " k-mers"
                   << std::endl;
     }
 }
 
-template <typename KMER, class KmerExtractor>
-void KmerCollector<KMER, KmerExtractor>
+template <typename KMER, class KmerExtractor, class Container>
+void KmerStorage<KMER, KmerExtractor, Container>
 ::add_sequence(std::string&& sequence) {
     if (sequence.size() < k_)
         return;
@@ -107,8 +106,8 @@ void KmerCollector<KMER, KmerExtractor>
     assert(!sequences_storage_.size());
 }
 
-template <typename KMER, class KmerExtractor>
-void KmerCollector<KMER, KmerExtractor>
+template <typename KMER, class KmerExtractor, class Container>
+void KmerStorage<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallString)> &generate_sequences) {
     thread_pool_.enqueue(extract_kmers<KMER, Extractor>, generate_sequences,
                          k_, both_strands_mode_, &kmers_,
@@ -116,32 +115,30 @@ void KmerCollector<KMER, KmerExtractor>
                          true);
 }
 
-template <typename KMER, class KmerExtractor>
-void KmerCollector<KMER, KmerExtractor>::release_task_to_pool() {
+template <typename KMER, class KmerExtractor, class Container>
+void KmerStorage<KMER, KmerExtractor, Container>::release_task_to_pool() {
     auto *current_sequences_storage = new std::vector<std::string>();
     current_sequences_storage->swap(sequences_storage_);
 
-    thread_pool_.enqueue(extract_kmers<KMER, Extractor>,
-                         [current_sequences_storage](CallString callback) {
-                             for (auto &&sequence : *current_sequences_storage) {
-                                 callback(std::move(sequence));
-                             }
-                             delete current_sequences_storage;
-                         },
-                         k_, both_strands_mode_, &kmers_, filter_suffix_encoded_,
-                         true);
+    add_sequences([current_sequences_storage](CallString callback) {
+        for (auto &&sequence : *current_sequences_storage) {
+            callback(std::move(sequence));
+        }
+        delete current_sequences_storage;
+    });
+
     stored_sequences_size_ = 0;
 }
 
-template <typename KMER, class KmerExtractor>
-void KmerCollector<KMER, KmerExtractor>::join() {
+template <typename KMER, class KmerExtractor, class Container>
+void KmerStorage<KMER, KmerExtractor, Container>::join() {
     release_task_to_pool();
     thread_pool_.join();
 }
 
-template class KmerCollector<KmerExtractor::Kmer64, KmerExtractor>;
-template class KmerCollector<KmerExtractor::Kmer128, KmerExtractor>;
-template class KmerCollector<KmerExtractor::Kmer256, KmerExtractor>;
-template class KmerCollector<KmerExtractor2Bit::Kmer64, KmerExtractor2Bit>;
-template class KmerCollector<KmerExtractor2Bit::Kmer128, KmerExtractor2Bit>;
-template class KmerCollector<KmerExtractor2Bit::Kmer256, KmerExtractor2Bit>;
+template class KmerStorage<KmerExtractor::Kmer64, KmerExtractor, SortedSet<KmerExtractor::Kmer64>>;
+template class KmerStorage<KmerExtractor::Kmer128, KmerExtractor, SortedSet<KmerExtractor::Kmer128>>;
+template class KmerStorage<KmerExtractor::Kmer256, KmerExtractor, SortedSet<KmerExtractor::Kmer256>>;
+template class KmerStorage<KmerExtractor2Bit::Kmer64, KmerExtractor2Bit, SortedSet<KmerExtractor2Bit::Kmer64>>;
+template class KmerStorage<KmerExtractor2Bit::Kmer128, KmerExtractor2Bit, SortedSet<KmerExtractor2Bit::Kmer128>>;
+template class KmerStorage<KmerExtractor2Bit::Kmer256, KmerExtractor2Bit, SortedSet<KmerExtractor2Bit::Kmer256>>;

@@ -9,19 +9,25 @@
 typedef std::function<void(const std::string&)> CallString;
 
 
-template <typename KMER, class KmerExtractor>
-class KmerCollector {
+template <typename KMER, class KmerExtractor, class Container>
+class KmerStorage {
     using Extractor = KmerExtractor;
     using Sequence = std::vector<typename Extractor::TAlphabet>;
     Extractor kmer_extractor_;
+
+    static_assert(std::is_base_of<typename Container::key_type, KMER>::value);
+    static_assert(KMER::kBitsPerChar == KmerExtractor::kLogSigma);
+
   public:
-    explicit KmerCollector(size_t k,
-                           bool both_strands_mode = false,
-                           Sequence&& filter_suffix_encoded = {},
-                           size_t num_threads = 1,
-                           double memory_preallocated = 0,
-                           bool verbose = false,
-                           std::function<void(Vector<KMER>*)> cleanup = [](Vector<KMER>*) {});
+    using Data = typename Container::storage_type;
+
+    KmerStorage(size_t k,
+                bool both_strands_mode = false,
+                Sequence&& filter_suffix_encoded = {},
+                size_t num_threads = 1,
+                double memory_preallocated = 0,
+                bool verbose = false,
+                std::function<void(Data*)> cleanup = [](Data*) {});
 
     inline size_t get_k() const { return k_; }
 
@@ -31,7 +37,7 @@ class KmerCollector {
 
     void add_sequences(const std::function<void(CallString)> &generate_sequences);
 
-    inline Vector<KMER>& data() { join(); return kmers_.data(); }
+    inline Data& data() { join(); return kmers_.data(); }
 
     void clear() { join(); kmers_.clear(); }
 
@@ -45,7 +51,7 @@ class KmerCollector {
     void join();
 
     size_t k_;
-    SortedSet<KMER> kmers_;
+    Container kmers_;
 
     size_t num_threads_;
     ThreadPool thread_pool_;
@@ -59,5 +65,8 @@ class KmerCollector {
 
     bool both_strands_mode_;
 };
+
+template <typename KMER, class KmerExtractor>
+using KmerCollector = KmerStorage<KMER, KmerExtractor, SortedSet<KMER>>;
 
 #endif // __KMER_COLLECTOR_HPP__
