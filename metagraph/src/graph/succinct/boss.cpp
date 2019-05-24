@@ -1504,6 +1504,7 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
     end = std::chrono::high_resolution_clock::now();
     std::cout << "2: " << std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count() << "ns" << std::endl;
 
+    //TODO use uint64_t?
     std::map<edge_index, size_t> inserted_edges;
     inserted_edges.emplace(0, 0);
     std::set<edge_index> cant_delete;
@@ -1524,18 +1525,36 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
             //if (source_edge)
             //    cant_delete_.set(source_edge - 1, true);
             if (source_edge) {
+                size_t prev_inserted;
                 auto prev_insertion_point = inserted_edges.begin();
                 while (true) {
+                    prev_inserted = prev_insertion_point->second;
                     prev_insertion_point++;
-                    if (prev_insertion_point == inserted_edges.end()
-                            || prev_insertion_point->first + prev_insertion_point->second > source_edge) {
+                    if (prev_insertion_point == inserted_edges.end()) {
                         prev_insertion_point--;
+                        auto source_edge_orig_pos = source_edge - prev_insertion_point->second;
+                        cant_delete.emplace(source_edge_orig_pos);
+                        break;
+                    } else if (prev_insertion_point->first + prev_inserted <= source_edge
+                            && prev_insertion_point->first + prev_insertion_point->second > source_edge) {
+                        break;
+                    } else if (prev_insertion_point->first + prev_insertion_point->second > source_edge + 1) {
+                        prev_insertion_point--;
+                        auto source_edge_orig_pos = source_edge - prev_insertion_point->second;
+                        cant_delete.emplace(source_edge_orig_pos);
                         break;
                     }
                 }
+////////////////
+                //while (true) {
+                //    prev_insertion_point++;
+                //    if (prev_insertion_point == inserted_edges.end()
+                //            || prev_insertion_point->first + prev_insertion_point->second > source_edge) {
+                //        prev_insertion_point--;
+                //        break;
+                //    }
+                //}
 
-                auto source_edge_orig_pos = source_edge - prev_insertion_point->second;
-                cant_delete.emplace(source_edge_orig_pos);
             }
 
             source = append_pos(kmer[i + k_], source, &kmer[i], &new_ids_vec);
@@ -1543,38 +1562,89 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
             std::sort(new_ids_vec.begin(), new_ids_vec.end());
 
             //std::for_each(new_ids_vec.begin(), new_ids_vec.end(), [&](auto id){
-            //    //existing_edges.insert_bit(id - 1, false);
-            //    //cant_delete_.insert_bit(id - 1, true);
+            //    existing_edges.insert_bit(id - 1, false);
+            //    cant_delete_.insert_bit(id - 1, true);
 
-            //    //if (is_single_outgoing(id))
-            //    //    existing_nodes.insert_bit(get_source_node(id) - 1, false);
+            //    if (is_single_outgoing(id))
+            //        existing_nodes.insert_bit(get_source_node(id) - 1, false);
             //});
+
+            //uint64_t new_preceding_nodes = 0;
+            //auto prev_node_insertion_point = inserted_nodes.begin();
+            //for (auto new_edge : new_ids_vec) {
+            //    if (!is_single_outgoing(new_edge))
+            //        continue;
+
+            //    auto new_node = get_source_node(new_edge);
+            //    while (true) {
+            //        prev_node_insertion_point++;
+            //        if (prev_node_insertion_point == inserted_nodes.end()
+            //                || prev_node_insertion_point->first + prev_node_insertion_point->second > new_node) {
+            //            prev_node_insertion_point--;
+            //            break;
+            //        }
+            //        prev_node_insertion_point->second += new_preceding_nodes;
+            //    }
+
+            //    auto new_node_orig_pos = new_node - prev_node_insertion_point->second;
+            //    if (new_node_orig_pos == prev_node_insertion_point->first) {
+            //        prev_node_insertion_point->second++;
+            //    } else {
+            //        inserted_nodes.emplace(new_node_orig_pos, prev_node_insertion_point->second + 1);
+            //        prev_node_insertion_point++;
+            //    }
+            //    new_preceding_nodes++;
+            //}
+            //while (true) {
+            //    prev_node_insertion_point++;
+            //    if (prev_node_insertion_point == inserted_nodes.end())
+            //        break;
+            //    prev_node_insertion_point->second += new_preceding_nodes;
+            //}
 
             uint64_t new_preceding_nodes = 0;
             auto prev_node_insertion_point = inserted_nodes.begin();
             for (auto new_edge : new_ids_vec) {
+                //std::cout << "new_edge " << new_edge << std::endl;
                 if (!is_single_outgoing(new_edge))
                     continue;
 
                 auto new_node = get_source_node(new_edge);
+                size_t prev_inserted;
                 while (true) {
+                    prev_inserted = prev_node_insertion_point->second;
                     prev_node_insertion_point++;
-                    if (prev_node_insertion_point == inserted_nodes.end()
-                            || prev_node_insertion_point->first + prev_node_insertion_point->second > new_node) {
+                    if (prev_node_insertion_point == inserted_nodes.end()) {
+                        prev_node_insertion_point--;
+                        break;
+                    } else if (prev_node_insertion_point->first + prev_inserted <= new_node
+                            && prev_node_insertion_point->first + prev_node_insertion_point->second >= new_node) {
+                        prev_node_insertion_point->second += new_preceding_nodes;
+                        break;
+                    } else if (prev_node_insertion_point->first + prev_node_insertion_point->second > new_node) {
                         prev_node_insertion_point--;
                         break;
                     }
                     prev_node_insertion_point->second += new_preceding_nodes;
                 }
+                //std::cout << "prev_node_insertion_point " << prev_node_insertion_point->first << "," << prev_node_insertion_point->second << std::endl;
+                if (prev_node_insertion_point->first + prev_inserted <= new_node
+                        && prev_node_insertion_point->first + prev_node_insertion_point->second >= new_node) {
+                    prev_node_insertion_point->second++;
+                    new_preceding_nodes++;
+                    //std::for_each(inserted_nodes.begin(), inserted_nodes.end(), [](auto p){ std::cout << p.first << ";" << p.second << std::endl; });
+                    continue;
+                }
 
                 auto new_node_orig_pos = new_node - prev_node_insertion_point->second;
-                if (new_node_orig_pos == prev_node_insertion_point->first) {
-                    prev_node_insertion_point->second++;
-                } else {
+                //if (new_node_orig_pos == prev_node_insertion_point->first) {
+                //    prev_node_insertion_point->second++;
+                //} else {
                     inserted_nodes.emplace(new_node_orig_pos, prev_node_insertion_point->second + 1);
                     prev_node_insertion_point++;
-                }
+                //}
                 new_preceding_nodes++;
+                //std::for_each(inserted_nodes.begin(), inserted_nodes.end(), [](auto p){ std::cout << p.first << "," << p.second << std::endl; });
             }
             while (true) {
                 prev_node_insertion_point++;
@@ -1586,24 +1656,42 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
             uint64_t new_preceding_edges = 0;
             auto prev_insertion_point = inserted_edges.begin();
             for (auto new_edge : new_ids_vec) {
+                //std::cout << "new_edge " << new_edge << std::endl;
+                size_t prev_inserted;
                 while (true) {
+                    prev_inserted = prev_insertion_point->second;
                     prev_insertion_point++;
-                    if (prev_insertion_point == inserted_edges.end()
-                            || prev_insertion_point->first + prev_insertion_point->second > new_edge) {
+                    if (prev_insertion_point == inserted_edges.end()) {
+                        prev_insertion_point--;
+                        break;
+                    } else if (prev_insertion_point->first + prev_inserted <= new_edge
+                            && prev_insertion_point->first + prev_insertion_point->second >= new_edge) {
+                        prev_insertion_point->second += new_preceding_edges;
+                        break;
+                    } else if (prev_insertion_point->first + prev_insertion_point->second > new_edge) {
                         prev_insertion_point--;
                         break;
                     }
                     prev_insertion_point->second += new_preceding_edges;
                 }
-
+                //std::cout << "prev_insertion_point " << prev_insertion_point->first << "," << prev_insertion_point->second << std::endl;
                 auto new_edge_orig_pos = new_edge - prev_insertion_point->second;
-                if (new_edge_orig_pos == prev_insertion_point->first) {
+                if (prev_insertion_point->first + prev_inserted <= new_edge
+                        && prev_insertion_point->first + prev_insertion_point->second >= new_edge) {
                     prev_insertion_point->second++;
-                } else {
+                    new_preceding_edges++;
+                    //std::for_each(inserted_edges.begin(), inserted_edges.end(), [](auto p){ std::cout << p.first << ";" << p.second << std::endl; });
+                    continue;
+                }
+
+                //if (new_edge_orig_pos == prev_insertion_point->first) {
+                //    prev_insertion_point->second++;
+                //} else {
                     inserted_edges.emplace(new_edge_orig_pos, prev_insertion_point->second + 1);
                     prev_insertion_point++;
-                }
+                //}
                 new_preceding_edges++;
+                //std::for_each(inserted_edges.begin(), inserted_edges.end(), [](auto p){ std::cout << p.first << "," << p.second << std::endl; });
             }
             while (true) {
                 prev_insertion_point++;
@@ -1611,6 +1699,8 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
                     break;
                 prev_insertion_point->second += new_preceding_edges;
             }
+            //std::for_each(inserted_edges.begin(), inserted_edges.end(), [](auto p){ std::cout << p.first << "," << p.second << std::endl; });
+            //std::cout << "---" << std::endl;
         }
     }
     end = std::chrono::high_resolution_clock::now();
@@ -1624,8 +1714,7 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
     for (edge_index edge : edges) {
         assert(edge >= shift);
         //assert(last_->num_set_bits() == existing_nodes.size());
-        //edge_index edge_id = existing_edges.select1(edge - shift) + 1;
-        CHECK_INDEX(edge_id);
+        //edge_index edge_id2 = existing_edges.select1(edge - shift) + 1;
 
         while (prev_insertion_point != inserted_edges.end()
                 && prev_insertion_point->first <= edge) {
@@ -1633,18 +1722,36 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
         }
         prev_insertion_point--;
         uint64_t edge_id = edge + prev_insertion_point->second - shift;
-        //std::cout << edge_id << ", " << edge_id2 << std::endl;
+        CHECK_INDEX(edge_id);
+        //std::cout << "existing_edges " << existing_edges << std::endl;
+        //std::for_each(inserted_edges.begin(), inserted_edges.end(), [](auto p){ std::cout << p.first << "," << p.second << std::endl; });
+        //std::cout << "edge " << edge << " shift " << shift << std::endl;
         //assert(edge_id==edge_id2);
-        //if(edge_id != edge_id2)
+        //if(edge_id != edge_id2) {
+        //    std::cout << "edge_id " << edge_id << ", edge_id2 " << edge_id2 << std::endl;
         //    exit(1);
+        //}
 
         //if (cant_delete_[edge_id - 1]) {
-        //    if (cant_delete.find(edge) == cant_delete.end())
+        //    if (cant_delete.find(edge) == cant_delete.end()) {
+        //        std::cout << "not found in cant_delete" << std::endl;
+        //        std::cout << "cant_delete_   " << cant_delete_ << std::endl;
+        //        std::for_each(cant_delete.begin(), cant_delete.end(), [](auto x){ std::cout << x << ","; });
+        //        std::cout << "edge_id " << edge_id << " edge " << edge << std::endl;
         //        exit(1);
+        //    }
         //    continue;
         //}
         if (cant_delete.find(edge) != cant_delete.end())
             continue;
+        //if (cant_delete.find(edge) != cant_delete.end()) {
+        //    std::cout << "edge_id " << edge_id << " cant_delete_[edge_id - 1] " << cant_delete_[edge_id - 1] << std::endl;
+        //    std::cout << "edge " << edge << std::endl;
+        //    std::cout << "cant_delete_ " << cant_delete_ << std::endl;
+        //    std::for_each(cant_delete.begin(), cant_delete.end(), [](auto x){ std::cout << x << ","; });
+        //    std::cout << std::endl;
+        //    exit(1);
+        //}
 
         uint64_t d = get_W(edge_id);
         if (d < alph_size) {
@@ -1669,7 +1776,7 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
         }
         prev_node_insertion_point--;
         node_index old_node_id = node - prev_node_insertion_point->second + node_shift;
-        //node_index old_node_id = existing_nodes.rank1(node - 1) + node_shift;
+        //node_index old_node_id2 = existing_nodes.rank1(node - 1) + node_shift;
         //if (old_node_id != old_node_id2) {
         //    std::cout << "old_node_id " << old_node_id << " old_node_id2 " << old_node_id2 << std::endl;
         //    exit(1);
