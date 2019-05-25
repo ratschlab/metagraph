@@ -21,13 +21,15 @@ class BOSS::Chunk {
           std::vector<uint64_t>&& F);
 
     void push_back(TAlphabet W, TAlphabet F, bool last);
-    TAlphabet get_W_back() const;
-    void alter_W_back(TAlphabet W);
-    void alter_last_back(bool last);
+
+    TAlphabet get_W_back() const { return W_.back(); }
+    void alter_W_back(TAlphabet W) { W_.back() = W; }
+
+    void alter_last_back(bool last) { last_.back() = last; }
 
     void extend(const Chunk &other);
 
-    uint64_t size() const;
+    uint64_t size() const { return W_.size() - 1; }
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;

@@ -33,15 +33,6 @@ void BOSS::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
     last_.push_back(last);
 }
 
-BOSS::Chunk::TAlphabet
-BOSS::Chunk::get_W_back() const { return W_.back(); }
-
-void BOSS::Chunk::alter_W_back(TAlphabet W) { W_.back() = W; }
-
-void BOSS::Chunk::alter_last_back(bool last) { last_.back() = last; }
-
-uint64_t BOSS::Chunk::size() const { return W_.size() - 1; }
-
 void BOSS::Chunk::extend(const BOSS::Chunk &other) {
     assert(k_ == other.k_);
 
