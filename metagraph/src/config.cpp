@@ -676,7 +676,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
             fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
-            fprintf(stderr, "\t   --discovery-fraction \tfraction of labeled k-mers required for annotation [1.0]\n");
+            fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of labeled k-mers required for annotation [1.0]\n");
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
             fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
