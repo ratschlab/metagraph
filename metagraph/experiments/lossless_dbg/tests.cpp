@@ -104,8 +104,8 @@ void check_decompression_inverse(T& db,vector<string>& reads) {
 }
 
 template <typename T>
-void check_compression_decompression(vector<string>& reads, int k_kmer=21) {
-    auto db = T(reads,k_kmer);
+void check_compression_decompression(vector<string>& reads, int kmer_length=21) {
+    auto db = T(reads,kmer_length);
     check_compression_decompression(db,reads);
 }
 
@@ -146,8 +146,8 @@ void check_small_get_next_consistent_node() {
 
 
 template <typename T>
-void serialization_deserialization_test(vector<string>& reads, int k_kmer=21) {
-    auto db = T(reads,k_kmer);
+void serialization_deserialization_test(vector<string>& reads, int kmer_length=21) {
+    auto db = T(reads,kmer_length);
     auto handles = db.encode(reads);
     vector<string> decompressed_reads;
     decompressed_reads.reserve(handles.size());

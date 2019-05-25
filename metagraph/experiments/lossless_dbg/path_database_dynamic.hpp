@@ -44,8 +44,8 @@ public:
 
 
     explicit PathDatabaseDynamicCore(const vector<string> &reads,
-                 size_t k_kmer = 21 /* default kmer */) :
-            graph(*buildGraph(this,reads,k_kmer)),
+                 size_t kmer_length = 21 /* default kmer */) :
+            graph(*buildGraph(this,reads,kmer_length)),
             incoming_table(graph),
             routing_table(graph)
             {}
@@ -373,10 +373,10 @@ public:
     DynamicRoutingTable<> routing_table;
     DynamicIncomingTable<> incoming_table;
 
-    static DBGSuccinct* buildGraph(PathDatabaseDynamicCore* self,vector<string> reads,int k_kmer) {
+    static DBGSuccinct* buildGraph(PathDatabaseDynamicCore* self,vector<string> reads,int kmer_length) {
         Timer timer;
         cerr << "Started building the graph" << endl;
-        auto graph = new DBGSuccinct(dbg_succ_graph_constructor(reads, k_kmer));
+        auto graph = new DBGSuccinct(dbg_succ_graph_constructor(reads, kmer_length));
         graph->mask_dummy_kmers(1, false);
         auto elapsed = timer.elapsed();
         cerr << "Building finished in " << elapsed << " sec." << endl;
@@ -385,9 +385,9 @@ public:
     }
 
     static BOSS* dbg_succ_graph_constructor(const vector<string> &reads,
-                                            size_t k_kmer) {
+                                            size_t kmer_length) {
 
-        auto graph_constructor = BOSSConstructor(k_kmer - 1);// because BOSS has smaller kmers
+        auto graph_constructor = BOSSConstructor(kmer_length - 1);// because BOSS has smaller kmers
 
         for (const auto &read : reads) {
             graph_constructor.add_sequence(read);

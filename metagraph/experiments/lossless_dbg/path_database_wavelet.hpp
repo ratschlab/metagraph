@@ -56,7 +56,7 @@ public:
                                                                               {}
 
     PathDatabaseWaveletCore(const vector<string> &filenames,
-                        size_t k_kmer = 21 /* default */) : PathDatabaseDynamicCore(filenames,k_kmer),
+                        size_t kmer_length = 21 /* default */) : PathDatabaseDynamicCore(filenames,kmer_length),
                                                             incoming_table(graph) {}
 
 

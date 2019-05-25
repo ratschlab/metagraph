@@ -41,15 +41,15 @@ class PathDatabaseListBC : public PathDatabase<int> {
     // Graph |graph| must contain all k-mers from the sequences passed
     PathDatabaseListBC(DBGSuccinct *graph,
                     const vector<string> &raw_reads,
-                    size_t k_kmer = DEFAULT_K_KMER)
+                    size_t kmer_length = DEFAULT_K_KMER)
           : PathDatabase(std::shared_ptr<const DBGSuccinct> { graph }),
-            k_kmer_(k_kmer),
+            kmer_length_(kmer_length),
             read_length(raw_reads[0].length()) {
     }
 
     PathDatabaseListBC(const vector<string> &raw_reads,
-                    size_t k_kmer = DEFAULT_K_KMER)
-          : PathDatabase(raw_reads,k_kmer), k_kmer_(k_kmer),read_length(raw_reads[0].length()) {}
+                    size_t kmer_length = DEFAULT_K_KMER)
+          : PathDatabase(raw_reads,kmer_length), kmer_length_(kmer_length),read_length(raw_reads[0].length()) {}
 
     std::vector<string> get_all_reads() const {
         vector<string> reads;
@@ -123,13 +123,13 @@ class PathDatabaseListBC : public PathDatabase<int> {
     using compressed_read_t = std::pair<kmer_t, edge_choices_t>;
 
     compressed_read_t encode_read(const string &read) const {
-        auto kmer = read.substr(0, k_kmer_);
+        auto kmer = read.substr(0, kmer_length_);
         auto node = graph_->kmer_to_node(kmer);
 
         edge_choices_t edge_choices;
 
         // for all other characters
-        for (char character : read.substr(k_kmer_)) {
+        for (char character : read.substr(kmer_length_)) {
             vector<node_index> outnodes;
             graph_->adjacent_outgoing_nodes(node, &outnodes);
             if (outnodes.size() > 1) {
@@ -177,7 +177,7 @@ class PathDatabaseListBC : public PathDatabase<int> {
 
     std::vector<compressed_read_t> compressed_reads_;
     const int read_length;
-    const int k_kmer_;
+    const int kmer_length_;
 };
 
 #endif //METAGRAPH_PATH_DATABASE_LIST_OF_BIFURCATION_CHOICES_HPP
