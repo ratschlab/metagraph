@@ -60,8 +60,8 @@ Database compressReads(ValueArg<string> &compressedArg,
 
 template<class Database>
 Database compressReadsDeprecated(ValueArg<string> &compressedArg,
-                                 const vector<string> &reads) {
-    auto db = Database(reads);
+                                 const vector<string> &reads,int kmer_length) {
+    auto db = Database(reads,kmer_length);
     db.encode(reads);
 
     if (compressedArg.isSet()) {
@@ -88,6 +88,13 @@ int main_compressor(int argc, char *argv[]) {
                                          true,
                                          "",
                                          "string",cmd);
+    TCLAP::ValueArg<int> kmerLengthArg("k",
+                                       "kmer-length",
+                                       "Length of the kmers for graph construction",
+                                       false,
+                                       1,
+                                       "int",cmd);
+
     TCLAP::ValueArg<std::string> statisticsArg("s",
                                           "statistics",
                                           "Filename of json file that will output statistics about compressed file.",
@@ -106,6 +113,8 @@ int main_compressor(int argc, char *argv[]) {
                                        false,
                                        1,
                                        "int",cmd);
+
+
     std::vector<std::string> regimes {
             "wavelet",
     };
@@ -122,10 +131,11 @@ int main_compressor(int argc, char *argv[]) {
     auto statistics_filename = statisticsArg.getValue();
     // TODO: Don't read all reads to memory
     auto reads = read_reads_from_fasta(input_filename);
+    auto kmer_length = kmerLengthArg.getValue();
     auto compressor = compressor_type.getValue();
     if (compressor == "wavelet") {
         auto db = compressReadsDeprecated<PathDatabaseWavelet<>>(compressedArg,
-                                                       reads);
+                                                       reads,kmer_length);
         if (statisticsArg.isSet()) {
             auto statistics = db.get_statistics();
             save_string(statistics.dump(4),statistics_filename);
