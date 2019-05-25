@@ -13,13 +13,12 @@ class BOSS::Chunk {
     explicit Chunk(size_t k);
 
     /**
-     * Assumes that |W| and |last| have dummy 0 at the first position
+     * Assumes that kmers are distinct and sorted
      */
-    Chunk(size_t k,
-          std::vector<TAlphabet>&& W,
-          std::vector<bool>&& last,
-          std::vector<uint64_t>&& F,
-          sdsl::int_vector<>&& weights = sdsl::int_vector<>());
+    template <typename KMER>
+    Chunk(KmerExtractor::TAlphabet alph_size,
+          size_t k,
+          const Vector<KMER> &kmers);
 
     void push_back(TAlphabet W, TAlphabet F, bool last);
 

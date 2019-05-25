@@ -14,21 +14,71 @@ BOSS::Chunk::Chunk(size_t k)
     assert(alph_size_ * 2 < 1llu << bits_per_char_W_);
 }
 
-BOSS::Chunk::Chunk(size_t k,
-                   std::vector<TAlphabet>&& W,
-                   std::vector<bool>&& last,
-                   std::vector<uint64_t>&& F,
-                   sdsl::int_vector<>&& weights)
+//TODO cleanup
+// k is node length
+template <typename KMER>
+BOSS::Chunk::Chunk(KmerExtractor::TAlphabet alph_size,
+                   size_t k,
+                   const Vector<KMER> &kmers)
       : alph_size_(KmerExtractor::alphabet.size()),
         bits_per_char_W_(boost::multiprecision::msb(alph_size_ - 1) + 2),
-        k_(k), W_(std::move(W)), last_(std::move(last)), F_(std::move(F)),
-        weights_(std::move(weights)) {
-    assert(sizeof(TAlphabet) * 8 >= bits_per_char_W_);
-    assert(alph_size_ * 2 < 1llu << bits_per_char_W_);
-    assert(F_.back() < W_.size());
-    assert(W_.size() == last_.size());
-    assert(weights_.empty() || weights_.size() == W_.size());
+        k_(k), W_(1 + kmers.size()), last_(1 + kmers.size(), 1), F_(alph_size, 0) {
+
+    assert(std::is_sorted(kmers.begin(), kmers.end()));
+
+    // the array containing edge labels
+    W_[0] = 0;
+    // the bit array indicating last outgoing edges for nodes
+    last_[0] = 0;
+    // offsets
+    F_.at(0) = 0;
+
+    size_t curpos = 1;
+    KmerExtractor::TAlphabet lastF = 0;
+
+    for (size_t i = 0; i < kmers.size(); ++i) {
+        KmerExtractor::TAlphabet curW = kmers[i][0];
+        KmerExtractor::TAlphabet curF = kmers[i][k];
+
+        assert(curW < alph_size);
+
+        // check redundancy and set last
+        if (i + 1 < kmers.size() && KMER::compare_suffix(kmers[i], kmers[i + 1])) {
+            // skip redundant dummy edges
+            if (curW == 0 && curF > 0)
+                continue;
+
+            last_[curpos] = 0;
+        }
+        //set W
+        if (i > 0) {
+            for (size_t j = i - 1; KMER::compare_suffix(kmers[i], kmers[j], 1); --j) {
+                if (curW > 0 && kmers[j][0] == curW) {
+                    curW += alph_size;
+                    break;
+                }
+                if (j == 0)
+                    break;
+            }
+        }
+        W_[curpos] = curW;
+
+        while (lastF + 1 < alph_size && curF != lastF) {
+            F_.at(++lastF) = curpos - 1;
+        }
+        curpos++;
+    }
+    while (++lastF < alph_size) {
+        F_.at(lastF) = curpos - 1;
+    }
+
+    W_.resize(curpos);
+    last_.resize(curpos);
 }
+
+template BOSS::Chunk::Chunk(KmerExtractor::TAlphabet, size_t, const Vector<KmerExtractor::Kmer64>&);
+template BOSS::Chunk::Chunk(KmerExtractor::TAlphabet, size_t, const Vector<KmerExtractor::Kmer128>&);
+template BOSS::Chunk::Chunk(KmerExtractor::TAlphabet, size_t, const Vector<KmerExtractor::Kmer256>&);
 
 void BOSS::Chunk::push_back(TAlphabet W, TAlphabet F, bool last) {
     W_.push_back(W);
