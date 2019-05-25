@@ -285,8 +285,7 @@ BOSS::Chunk* chunk_from_kmers(KmerExtractor::TAlphabet alph_size,
 }
 
 template <typename KMER>
-BOSS::Chunk* BOSSChunkConstructor<KMER>
-::build_chunk() {
+BOSS::Chunk* BOSSChunkConstructor<KMER>::build_chunk() {
     auto &kmers = kmer_collector_.data();
 
     if (!kmer_collector_.suffix_length()) {
@@ -314,36 +313,6 @@ BOSS::Chunk* BOSSChunkConstructor<KMER>
     kmer_collector_.clear();
 
     return result;
-}
-
-
-BOSSConstructor::BOSSConstructor(size_t k,
-                                 bool canonical_mode,
-                                 const std::string &filter_suffix,
-                                 size_t num_threads,
-                                 double memory_preallocated,
-                                 bool verbose)
-      : constructor_(IBOSSChunkConstructor::initialize(
-            k,
-            canonical_mode,
-            filter_suffix,
-            num_threads,
-            memory_preallocated,
-            verbose)
-      ) {}
-
-void BOSSConstructor::build_graph(BOSS *graph) {
-    auto chunk = constructor_->build_chunk();
-    // initialize graph from the chunk built
-    chunk->initialize_boss(graph);
-    delete chunk;
-}
-
-BOSS* BOSSConstructor
-::build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
-                          bool verbose) {
-    // TODO: move from chunk to here?
-    return BOSS::Chunk::build_boss_from_chunks(chunk_filenames, verbose);
 }
 
 IBOSSChunkConstructor*

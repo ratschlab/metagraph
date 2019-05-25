@@ -2,7 +2,7 @@
 #define __BOSS_CONSTRUCT_HPP__
 
 #include "dbg_construct.hpp"
-#include "boss.hpp"
+#include "boss_chunk.hpp"
 
 
 class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
@@ -25,12 +25,10 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
 
 class BOSSConstructor : public IGraphConstructor<BOSS> {
   public:
-    BOSSConstructor(size_t k,
-                    bool canonical_mode = false,
-                    const std::string &filter_suffix = "",
-                    size_t num_threads = 1,
-                    double memory_preallocated = 0,
-                    bool verbose = false);
+    // see input arguments in IBOSSChunkConstructor::initialize
+    template <typename... Args>
+    BOSSConstructor(const Args&... args)
+      : constructor_(IBOSSChunkConstructor::initialize(args...)) {}
 
     void add_sequence(std::string&& sequence) {
         constructor_->add_sequence(std::move(sequence));
@@ -46,10 +44,18 @@ class BOSSConstructor : public IGraphConstructor<BOSS> {
         });
     }
 
-    void build_graph(BOSS *graph);
+    void build_graph(BOSS *graph) {
+        auto chunk = constructor_->build_chunk();
+        // initialize graph from the chunk built
+        chunk->initialize_boss(graph);
+        delete chunk;
+    }
 
     static BOSS* build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
-                                         bool verbose = false);
+                                         bool verbose = false) {
+        return BOSS::Chunk::build_boss_from_chunks(chunk_filenames, verbose);
+    }
+
   private:
     std::unique_ptr<IBOSSChunkConstructor> constructor_;
 };
