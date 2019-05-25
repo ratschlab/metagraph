@@ -268,6 +268,100 @@ template
 void load_string_number_map(std::istream &in,
                             spp::sparse_hash_map<std::string, uint32_t> *map);
 
+template <class Map>
+void serialize_number_string_map(std::ostream &out, const Map &map) {
+    serialize_number(out, map.size());
+
+    std::vector<typename Map::key_type> keys;
+    keys.reserve(map.size());
+
+    for (const auto &pair : map) {
+        keys.push_back(pair.first);
+        StringSerialisation::serialiseString(out, pair.second);
+    }
+
+    serialize_number_vector(out, keys);
+}
+
+template
+void serialize_number_string_map(std::ostream &out,
+                                 const std::unordered_map<uint64_t, std::string> &map);
+template
+void serialize_number_string_map(std::ostream &out,
+                                 const std::unordered_map<uint32_t, std::string> &map);
+template
+void serialize_number_string_map(std::ostream &out,
+                                 const tsl::hopscotch_map<uint64_t, std::string> &map);
+template
+void serialize_number_string_map(std::ostream &out,
+                                 const tsl::hopscotch_map<uint32_t, std::string> &map);
+template
+void serialize_number_string_map(std::ostream &out,
+                                 const spp::sparse_hash_map<uint64_t, std::string> &map);
+template
+void serialize_number_string_map(std::ostream &out,
+                                 const spp::sparse_hash_map<uint32_t, std::string> &map);
+
+template <class Map>
+void load_number_string_map(std::istream &in, Map *map) {
+    assert(map);
+    map->clear();
+
+    auto pos = in.tellg();
+
+    try {
+        auto const size = load_number(in);
+
+        std::vector<std::string> values;
+        values.reserve(size);
+
+        for (size_t i = 0; i < size; ++i) {
+            values.push_back(StringSerialisation::deserialiseString(in));
+        }
+
+        if (get_number_vector_size(in) != size)
+            throw std::ifstream::failure("Different number of keys and values");
+
+        auto keys = load_number_vector<typename Map::key_type>(in);
+
+        if (keys.size() != values.size())
+            throw std::ifstream::failure("Different number of keys and values");
+
+        for (size_t i = 0; i < values.size(); ++i) {
+            map->emplace(std::move(keys[i]), std::move(values[i]));
+        }
+    } catch (...) {
+        // backward compatibility
+        in.seekg(pos, in.beg);
+
+        size_t const num = NumberSerialisation::deserialiseNumber(in);
+        for (size_t i = 0; i < num; ++i) {
+            auto key = NumberSerialisation::deserialiseNumber32(in);
+            std::string value = StringSerialisation::deserialiseString(in);
+            map->emplace(std::move(key), std::move(value));
+        }
+    }
+}
+
+template
+void load_number_string_map(std::istream &in,
+                            std::unordered_map<uint64_t, std::string> *map);
+template
+void load_number_string_map(std::istream &in,
+                            std::unordered_map<uint32_t, std::string> *map);
+template
+void load_number_string_map(std::istream &in,
+                            tsl::hopscotch_map<uint64_t, std::string> *map);
+template
+void load_number_string_map(std::istream &in,
+                            tsl::hopscotch_map<uint32_t, std::string> *map);
+template
+void load_number_string_map(std::istream &in,
+                            spp::sparse_hash_map<uint64_t, std::string> *map);
+template
+void load_number_string_map(std::istream &in,
+                            spp::sparse_hash_map<uint32_t, std::string> *map);
+
 
 template <class Set>
 void serialize_set(std::ostream &out, const Set &set) {

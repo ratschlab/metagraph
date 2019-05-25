@@ -44,6 +44,12 @@ void serialize_string_number_map(std::ostream &out, const Map &M);
 template <class Map>
 void load_string_number_map(std::istream &in, Map *map);
 
+template <class Map>
+void serialize_number_string_map(std::ostream &out, const Map &M);
+
+template <class Map>
+void load_number_string_map(std::istream &in, Map *map);
+
 
 template <class Set>
 void serialize_set(std::ostream &out, const Set &set);
