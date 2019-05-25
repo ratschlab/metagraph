@@ -5,6 +5,7 @@
 #include "kmer_collector.hpp"
 #include "threading.hpp"
 #include "sorted_set.hpp"
+#include "sorted_multiset.hpp"
 
 typedef std::function<void(const std::string&)> CallString;
 
@@ -66,7 +67,12 @@ class KmerStorage {
     bool both_strands_mode_;
 };
 
+
 template <typename KMER, class KmerExtractor>
 using KmerCollector = KmerStorage<KMER, KmerExtractor, SortedSet<KMER>>;
+
+template <typename KMER, class KmerExtractor, typename KmerCount = uint8_t>
+using KmerCounter = KmerStorage<KMER, KmerExtractor, SortedMultiset<KMER, KmerCount>>;
+
 
 #endif // __KMER_COLLECTOR_HPP__

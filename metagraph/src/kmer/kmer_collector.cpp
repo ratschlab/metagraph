@@ -56,6 +56,39 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
     }
 }
 
+template <typename KMER, class KmerExtractor, typename KmerCount>
+void count_kmers(std::function<void(CallString)> generate_reads,
+                 size_t k,
+                 bool both_strands_mode,
+                 SortedMultiset<KMER, KmerCount> *kmers,
+                 const std::vector<TAlphabet> &suffix) {
+    static_assert(KMER::kBitsPerChar == KmerExtractor::kLogSigma);
+
+    Vector<KMER> temp_storage;
+    temp_storage.reserve(1.1 * kMaxKmersChunkSize);
+
+    KmerExtractor kmer_extractor;
+
+    generate_reads([&](const std::string &read) {
+        kmer_extractor.sequence_to_kmers(read, k, suffix, &temp_storage);
+        if (both_strands_mode) {
+            auto rev_read = read;
+            reverse_complement(rev_read.begin(), rev_read.end());
+            kmer_extractor.sequence_to_kmers(rev_read, k, suffix, &temp_storage);
+        }
+
+        if (temp_storage.size() > kMaxKmersChunkSize) {
+            kmers->insert(temp_storage.begin(), temp_storage.end());
+            temp_storage.resize(0);
+        }
+    });
+
+    if (temp_storage.size()) {
+        kmers->insert(temp_storage.begin(), temp_storage.end());
+    }
+}
+
+
 template <typename KMER, class KmerExtractor, class Container>
 KmerStorage<KMER, KmerExtractor, Container>
 ::KmerStorage(size_t k,
@@ -109,10 +142,17 @@ void KmerStorage<KMER, KmerExtractor, Container>
 template <typename KMER, class KmerExtractor, class Container>
 void KmerStorage<KMER, KmerExtractor, Container>
 ::add_sequences(const std::function<void(CallString)> &generate_sequences) {
-    thread_pool_.enqueue(extract_kmers<KMER, Extractor>, generate_sequences,
-                         k_, both_strands_mode_, &kmers_,
-                         filter_suffix_encoded_,
-                         true);
+    if constexpr(std::is_base_of<SortedSet<KMER>, Container>::value) {
+        thread_pool_.enqueue(extract_kmers<KMER, Extractor>, generate_sequences,
+                             k_, both_strands_mode_, &kmers_,
+                             filter_suffix_encoded_,
+                             true);
+    } else {
+        thread_pool_.enqueue(count_kmers<KMER, Extractor, typename Container::count_type>,
+                             generate_sequences,
+                             k_, both_strands_mode_, &kmers_,
+                             filter_suffix_encoded_);
+    }
 }
 
 template <typename KMER, class KmerExtractor, class Container>
@@ -142,3 +182,10 @@ template class KmerStorage<KmerExtractor::Kmer256, KmerExtractor, SortedSet<Kmer
 template class KmerStorage<KmerExtractor2Bit::Kmer64, KmerExtractor2Bit, SortedSet<KmerExtractor2Bit::Kmer64>>;
 template class KmerStorage<KmerExtractor2Bit::Kmer128, KmerExtractor2Bit, SortedSet<KmerExtractor2Bit::Kmer128>>;
 template class KmerStorage<KmerExtractor2Bit::Kmer256, KmerExtractor2Bit, SortedSet<KmerExtractor2Bit::Kmer256>>;
+
+template class KmerStorage<KmerExtractor::Kmer64, KmerExtractor, SortedMultiset<KmerExtractor::Kmer64, uint8_t>>;
+template class KmerStorage<KmerExtractor::Kmer128, KmerExtractor, SortedMultiset<KmerExtractor::Kmer128, uint8_t>>;
+template class KmerStorage<KmerExtractor::Kmer256, KmerExtractor, SortedMultiset<KmerExtractor::Kmer256, uint8_t>>;
+template class KmerStorage<KmerExtractor2Bit::Kmer64, KmerExtractor2Bit, SortedMultiset<KmerExtractor2Bit::Kmer64, uint8_t>>;
+template class KmerStorage<KmerExtractor2Bit::Kmer128, KmerExtractor2Bit, SortedMultiset<KmerExtractor2Bit::Kmer128, uint8_t>>;
+template class KmerStorage<KmerExtractor2Bit::Kmer256, KmerExtractor2Bit, SortedMultiset<KmerExtractor2Bit::Kmer256, uint8_t>>;
