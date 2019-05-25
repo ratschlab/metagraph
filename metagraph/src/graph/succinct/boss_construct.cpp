@@ -291,8 +291,8 @@ BOSS::Chunk* BOSSChunkConstructor<KMER>
 
     if (!kmer_collector_.suffix_length()) {
         if (kmer_collector_.verbose()) {
-            std::cout << "Reconstructing all required dummy source k-mers...\t"
-                      << std::flush;
+            std::cout << "Reconstructing all required dummy source k-mers..."
+                      << std::endl;
         }
         Timer timer;
 
@@ -303,7 +303,8 @@ BOSS::Chunk* BOSSChunkConstructor<KMER>
                                    kmer_collector_.verbose());
 
         if (kmer_collector_.verbose())
-            std::cout << timer.elapsed() << "sec" << std::endl;
+            std::cout << "Dummy source k-mers were reconstructed in "
+                      << timer.elapsed() << "sec" << std::endl;
     }
 
     // kmer_collector stores (BOSS::k_ + 1)-mers
