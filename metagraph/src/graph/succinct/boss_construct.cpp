@@ -227,15 +227,14 @@ BOSSChunkConstructor<KMER>
 template <typename KMER>
 BOSS::Chunk* chunk_from_kmers(KmerExtractor::TAlphabet alph_size,
                               size_t k,
-                              const KMER *kmers,
-                              uint64_t num_kmers) {
-    assert(std::is_sorted(kmers, kmers + num_kmers));
+                              const Vector<KMER> &kmers) {
+    assert(std::is_sorted(kmers.begin(), kmers.end()));
 
     // the array containing edge labels
-    std::vector<KmerExtractor::TAlphabet> W(1 + num_kmers);
+    std::vector<KmerExtractor::TAlphabet> W(1 + kmers.size());
     W[0] = 0;
     // the bit array indicating last outgoing edges for nodes
-    std::vector<bool> last(1 + num_kmers, 1);
+    std::vector<bool> last(1 + kmers.size(), 1);
     last[0] = 0;
     // offsets
     std::vector<uint64_t> F(alph_size, 0);
@@ -244,14 +243,14 @@ BOSS::Chunk* chunk_from_kmers(KmerExtractor::TAlphabet alph_size,
     size_t curpos = 1;
     KmerExtractor::TAlphabet lastF = 0;
 
-    for (size_t i = 0; i < num_kmers; ++i) {
+    for (size_t i = 0; i < kmers.size(); ++i) {
         KmerExtractor::TAlphabet curW = kmers[i][0];
         KmerExtractor::TAlphabet curF = kmers[i][k];
 
         assert(curW < alph_size);
 
         // check redundancy and set last
-        if (i + 1 < num_kmers && KMER::compare_suffix(kmers[i], kmers[i + 1])) {
+        if (i + 1 < kmers.size() && KMER::compare_suffix(kmers[i], kmers[i + 1])) {
             // skip redundant dummy edges
             if (curW == 0 && curF > 0)
                 continue;
@@ -309,13 +308,9 @@ BOSS::Chunk* BOSSChunkConstructor<KMER>
     }
 
     // kmer_collector stores (BOSS::k_ + 1)-mers
-    BOSS::Chunk *result = chunk_from_kmers(
-        kmer_collector_.alphabet_size(),
-        kmer_collector_.get_k() - 1,
-        kmers.data(),
-        kmers.size()
-    );
-
+    BOSS::Chunk *result = chunk_from_kmers(kmer_collector_.alphabet_size(),
+                                           kmer_collector_.get_k() - 1,
+                                           kmers);
     kmer_collector_.clear();
 
     return result;
