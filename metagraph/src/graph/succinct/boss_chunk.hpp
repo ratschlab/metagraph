@@ -18,7 +18,8 @@ class BOSS::Chunk {
     Chunk(size_t k,
           std::vector<TAlphabet>&& W,
           std::vector<bool>&& last,
-          std::vector<uint64_t>&& F);
+          std::vector<uint64_t>&& F,
+          sdsl::int_vector<>&& weights = sdsl::int_vector<>());
 
     void push_back(TAlphabet W, TAlphabet F, bool last);
 
@@ -34,16 +35,17 @@ class BOSS::Chunk {
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
 
-    void initialize_boss(BOSS *graph) const;
+    void initialize_boss(BOSS *graph, sdsl::int_vector<> *weights = nullptr);
 
     /**
      * Merge BOSS chunks loaded from the files passed
      */
     static BOSS*
     build_boss_from_chunks(const std::vector<std::string> &chunk_filenames,
-                           bool verbose = false);
+                           bool verbose = false,
+                           sdsl::int_vector<> *weights = nullptr);
 
-    static constexpr auto kFileExtension = ".dbgchunk";
+    static constexpr auto kFileExtension = ".dbg.chunk";
 
   private:
     const size_t alph_size_;
@@ -52,6 +54,7 @@ class BOSS::Chunk {
     std::vector<TAlphabet> W_;
     std::vector<bool> last_;
     std::vector<uint64_t> F_;
+    sdsl::int_vector<> weights_;
 };
 
 
