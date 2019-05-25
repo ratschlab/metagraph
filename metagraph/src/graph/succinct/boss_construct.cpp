@@ -14,51 +14,50 @@ template <typename KMER>
 void erase_redundant_dummy_kmers(Vector<KMER> *kmers) {
 
     assert(std::is_sorted(kmers->begin(), kmers->end()));
+    assert(std::unique(kmers->begin(), kmers->end()) == kmers->end());
 
-    size_t cur_pos = 0;
+    if (kmers->size() < 2)
+        return;
+
+    // last k-mer is never redundant. Start with the next one.
+    uint64_t last = kmers->size() - 1;
 
     KmerExtractor::TAlphabet edge_label, node_last_char;
 
-    for (size_t i = 0; i < kmers->size(); ++i) {
+    std::vector<uint64_t> last_kmer(1llu << KMER::kBitsPerChar, kmers->size());
+
+    last_kmer[kmers->at(last)[0]] = last;
+
+    for (int64_t i = last - 1; i >= 0; --i) {
         const KMER &kmer = kmers->at(i);
         node_last_char = kmer[1];
         edge_label = kmer[0];
 
-        // check if the k-mer isn't dummy
-        if (edge_label && node_last_char) {
-            kmers->at(cur_pos++) = kmer;
-            continue;
+        // assert((edge_label || node_last_char)
+        //             && "dummy k-mer cannot be both source and sink dummy");
+
+        if (!edge_label) {
+            // sink dummy k-mer
+
+            // skip if redundant
+            if (node_last_char && KMER::compare_suffix(kmer, kmers->at(last), 0))
+                continue;
+
+        } else if (!node_last_char) {
+            // source dummy k-mer
+
+            // skip if redundant
+            if (last_kmer[edge_label] < kmers->size()
+                    && KMER::compare_suffix(kmer, kmers->at(last_kmer[edge_label]), 1))
+                continue;
         }
 
-        // skip redundant sink dummy kmers
-        if (node_last_char && !edge_label
-                           && i + 1 < kmers->size()
-                           && KMER::compare_suffix(kmer, kmers->at(i + 1), 0)) {
-            continue;
-        }
-
-        // check if it isn't a source dummy kmer
-        if (!edge_label || node_last_char) {
-            kmers->at(cur_pos++) = kmer;
-            continue;
-        }
-
-        bool redundant = false;
-        for (size_t j = i + 1; j < kmers->size()
-                                && KMER::compare_suffix(kmer, kmers->at(j), 1); ++j) {
-            if (edge_label == kmers->at(j)[0]) {
-                // This source dummy kmer is redundant and has to be erased
-                redundant = true;
-                break;
-            }
-        }
-
-        // keep the dummy kmer in the list if it's not redundant
-        if (!redundant)
-            kmers->at(cur_pos++) = kmer;
+        // the k-mer is either not dummy, or not redundant -> keep the k-mer
+        kmers->at(--last) = kmer;
+        last_kmer[edge_label] = last;
     }
 
-    kmers->resize(cur_pos);
+    kmers->erase(kmers->begin(), kmers->begin() + last);
 }
 
 
