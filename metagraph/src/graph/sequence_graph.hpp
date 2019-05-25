@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <functional>
+#include <iostream>
 
 #include <sdsl/int_vector.hpp>
 
@@ -115,6 +116,11 @@ class DeBruijnGraph : public SequenceGraph {
     virtual bool operator!=(const DeBruijnGraph &other) const { return !operator==(other); }
 
     virtual const std::string& alphabet() const = 0;
+
+    virtual void print(std::ostream &out) const;
+
+    friend std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph);
+
 
   private:
     virtual void call_sequences_from(node_index start,

@@ -305,3 +305,23 @@ void DeBruijnGraph
         }
     }
 }
+
+void DeBruijnGraph::print(std::ostream &out) const {
+    auto vertex_header = std::string("Vertex");
+    vertex_header.resize(get_k(), ' ');
+
+    out << "Index"
+        << "\t" << vertex_header
+        << std::endl;
+
+    call_nodes([&](const auto &index) {
+        out << index
+            << "\t" << get_node_sequence(index)
+            << std::endl;
+    });
+}
+
+std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph) {
+    graph.print(out);
+    return out;
+}

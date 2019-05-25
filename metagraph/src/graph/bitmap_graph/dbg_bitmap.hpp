@@ -91,7 +91,7 @@ class DBGBitmap : public DeBruijnGraph {
 
     const std::string& alphabet() const { return seq_encoder_.alphabet; }
 
-    friend std::ostream& operator<<(std::ostream &out, const DBGBitmap &graph);
+    void print(std::ostream &out) const;
 
     using Chunk = bit_vector_smart;
 
