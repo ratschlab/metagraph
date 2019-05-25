@@ -87,7 +87,7 @@ class DBGBitmap : public DeBruijnGraph {
 
     inline bool is_complete() const { return complete_; }
 
-    friend std::ostream& operator<<(std::ostream &out, const DBGBitmap &graph);
+    void print(std::ostream &out) const;
 
     const std::string &alphabet;
 

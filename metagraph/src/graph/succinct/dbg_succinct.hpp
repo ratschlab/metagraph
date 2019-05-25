@@ -97,6 +97,8 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual bool operator==(const DeBruijnGraph &other) const override final;
 
+    virtual void print(std::ostream &out) const override final;
+
   private:
     void add_seq(const std::string &sequence, bit_vector_dyn *nodes_inserted);
     uint64_t kmer_to_boss_index(node_index kmer_index) const;

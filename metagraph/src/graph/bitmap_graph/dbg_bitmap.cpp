@@ -319,18 +319,24 @@ bool DBGBitmap::equals(const DBGBitmap &other, bool verbose) const {
     return false;
 }
 
-std::ostream& operator<<(std::ostream &out, const DBGBitmap &graph) {
-    out << "k: " << graph.k_ << std::endl
-        << "complete: " << graph.complete_ << std::endl
-        << "canonical: " << graph.canonical_mode_ << std::endl
-        << "nodes:" << std::endl;
-
-    uint64_t nnodes = graph.num_nodes();
-
-    for (size_t node = 1; node <= nnodes; ++node) {
-        auto i = graph.node_to_index(node);
-        if (graph.kmers_[i])
-            out << i << "\t" << graph.get_node_sequence(node) << std::endl;
+void DBGBitmap::print(std::ostream &out) const {
+    if (complete_) {
+        out << "Complete graph" << std::endl;
+        return;
     }
-    return out;
+
+    auto vertex_header = std::string("Vertex");
+    vertex_header.resize(get_k(), ' ');
+
+    out << "Index"
+        << "\t" << "Repr"
+        << "\t" << vertex_header
+        << std::endl;
+
+    uint64_t nnodes = num_nodes();
+    for (size_t node = 1; node <= nnodes; ++node) {
+        out << node << "\t"
+            << node_to_index(node) << "\t"
+            << get_node_sequence(node) << std::endl;
+    }
 }

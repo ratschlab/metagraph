@@ -1792,21 +1792,20 @@ int main(int argc, const char *argv[]) {
 
                 print_stats(*graph);
 
-                if (!dynamic_cast<DBGSuccinct*>(graph.get()))
-                    continue;
+                if (dynamic_cast<DBGSuccinct*>(graph.get())) {
+                    const auto &boss_graph = dynamic_cast<DBGSuccinct&>(*graph).get_boss();
 
-                const auto &boss_graph = dynamic_cast<DBGSuccinct&>(*graph).get_boss();
+                    print_boss_stats(boss_graph,
+                                     config->count_dummy,
+                                     config->parallel,
+                                     config->verbose);
 
-                print_boss_stats(boss_graph,
-                                 config->count_dummy,
-                                 config->parallel,
-                                 config->verbose);
-
-                if (config->print_graph_internal_repr)
-                    boss_graph.print_internal_representation(std::cout);
+                    if (config->print_graph_internal_repr)
+                        boss_graph.print_internal_representation(std::cout);
+                }
 
                 if (config->print_graph)
-                    std::cout << boss_graph;
+                    std::cout << *graph;
             }
 
             for (const auto &file : config->infbase_annotators) {

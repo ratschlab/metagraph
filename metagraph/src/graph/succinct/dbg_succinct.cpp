@@ -267,6 +267,7 @@ void DBGSuccinct
         return;
     }
 
+    // TODO: implement more efficiently
     call_kmers([&](auto i, const auto &kmer) {
         if (stop_early())
             return;
@@ -522,4 +523,40 @@ bool DBGSuccinct::operator==(const DeBruijnGraph &other) const {
 
     throw std::runtime_error("Not implemented");
     return false;
+}
+
+void DBGSuccinct::print(std::ostream &out) const {
+    auto vertex_header = std::string("Vertex");
+    vertex_header.resize(get_k() - 1, ' ');
+
+    out << "BOSS" << "\t" << "L"
+                  << "\t" << vertex_header
+                  << "\t" << "W";
+
+    if (valid_edges_.get())
+        out << "\t" << "Index" << "\t" << "Valid";
+
+    out << std::endl;
+
+    const auto &boss = get_boss();
+
+    uint64_t valid_count = 0;
+
+    for (uint64_t i = 1; i < boss.num_edges(); i++) {
+        out << i << "\t" << boss.get_last(i)
+                 << "\t" << boss.get_node_str(i)
+                 << "\t" << boss.decode(boss.get_W(i))
+                         << (boss.get_W(i) >= boss.alph_size
+                                 ? "-"
+                                 : "");
+
+        if (valid_edges_.get()) {
+            bool valid = (*valid_edges_)[i];
+            valid_count += valid;
+            out << "\t" << (valid ? valid_count : 0)
+                << "\t" << valid;
+        }
+
+        out << std::endl;
+    }
 }
