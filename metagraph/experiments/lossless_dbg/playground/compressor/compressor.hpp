@@ -92,7 +92,7 @@ int main_compressor(int argc, char *argv[]) {
                                        "kmer-length",
                                        "Length of the kmers for graph construction",
                                        false,
-                                       1,
+                                       21,
                                        "int",cmd);
 
     TCLAP::ValueArg<std::string> statisticsArg("s",
