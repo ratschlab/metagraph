@@ -793,7 +793,7 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
         ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
-            convert_to_set(std::vector<DBGSuccinct::node_index>{ it, graph->traverse(it, 'C') }),
+            convert_to_set(std::vector<SequenceGraph::node_index>{ it, graph->traverse(it, 'C') }),
             convert_to_set(adjacent_nodes)
         );
         adjacent_nodes.clear();
@@ -801,7 +801,7 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
         // AC, AAAAC
         it = graph->traverse(it, 'C');
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
-        auto outset = convert_to_set(std::vector<DBGSuccinct::node_index>{ graph->traverse(it, 'C') });
+        auto outset = convert_to_set(std::vector<SequenceGraph::node_index>{ graph->traverse(it, 'C') });
         if (k == 2) {
             outset.insert(graph->traverse(it, 'G'));
             ASSERT_EQ(2u, adjacent_nodes.size());
@@ -819,7 +819,7 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
         ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
-            convert_to_set(std::vector<DBGSuccinct::node_index>{
+            convert_to_set(std::vector<SequenceGraph::node_index>{
                 it,
                 graph->traverse(it, 'G')
             }),
@@ -832,7 +832,7 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
         ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
-            convert_to_set(std::vector<DBGSuccinct::node_index>{ graph->traverse(it, 'G') }),
+            convert_to_set(std::vector<SequenceGraph::node_index>{ graph->traverse(it, 'G') }),
             convert_to_set(adjacent_nodes)
         );
         adjacent_nodes.clear();
@@ -844,7 +844,7 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
         ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
-            convert_to_set(std::vector<DBGSuccinct::node_index>{ graph->traverse(it, 'G') }),
+            convert_to_set(std::vector<SequenceGraph::node_index>{ graph->traverse(it, 'G') }),
             convert_to_set(adjacent_nodes)
         );
         adjacent_nodes.clear();

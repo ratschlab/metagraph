@@ -97,6 +97,8 @@ class DBGHashOrdered : public DeBruijnGraph {
     bool load(std::istream &in);
     bool load(const std::string &filename);
 
+    std::string file_extension() const { return kExtension; }
+
     bool operator==(const DeBruijnGraph &other) const {
         if (!dynamic_cast<const DBGHashOrdered*>(&other)) {
             throw std::runtime_error("Not implemented");

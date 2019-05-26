@@ -189,3 +189,17 @@ template class KmerStorage<KmerExtractor::Kmer256, KmerExtractor, SortedMultiset
 template class KmerStorage<KmerExtractor2Bit::Kmer64, KmerExtractor2Bit, SortedMultiset<KmerExtractor2Bit::Kmer64, uint8_t>>;
 template class KmerStorage<KmerExtractor2Bit::Kmer128, KmerExtractor2Bit, SortedMultiset<KmerExtractor2Bit::Kmer128, uint8_t>>;
 template class KmerStorage<KmerExtractor2Bit::Kmer256, KmerExtractor2Bit, SortedMultiset<KmerExtractor2Bit::Kmer256, uint8_t>>;
+
+template class KmerStorage<KmerExtractor::Kmer64, KmerExtractor, SortedMultiset<KmerExtractor::Kmer64, uint16_t>>;
+template class KmerStorage<KmerExtractor::Kmer128, KmerExtractor, SortedMultiset<KmerExtractor::Kmer128, uint16_t>>;
+template class KmerStorage<KmerExtractor::Kmer256, KmerExtractor, SortedMultiset<KmerExtractor::Kmer256, uint16_t>>;
+template class KmerStorage<KmerExtractor2Bit::Kmer64, KmerExtractor2Bit, SortedMultiset<KmerExtractor2Bit::Kmer64, uint16_t>>;
+template class KmerStorage<KmerExtractor2Bit::Kmer128, KmerExtractor2Bit, SortedMultiset<KmerExtractor2Bit::Kmer128, uint16_t>>;
+template class KmerStorage<KmerExtractor2Bit::Kmer256, KmerExtractor2Bit, SortedMultiset<KmerExtractor2Bit::Kmer256, uint16_t>>;
+
+template class KmerStorage<KmerExtractor::Kmer64, KmerExtractor, SortedMultiset<KmerExtractor::Kmer64, uint32_t>>;
+template class KmerStorage<KmerExtractor::Kmer128, KmerExtractor, SortedMultiset<KmerExtractor::Kmer128, uint32_t>>;
+template class KmerStorage<KmerExtractor::Kmer256, KmerExtractor, SortedMultiset<KmerExtractor::Kmer256, uint32_t>>;
+template class KmerStorage<KmerExtractor2Bit::Kmer64, KmerExtractor2Bit, SortedMultiset<KmerExtractor2Bit::Kmer64, uint32_t>>;
+template class KmerStorage<KmerExtractor2Bit::Kmer128, KmerExtractor2Bit, SortedMultiset<KmerExtractor2Bit::Kmer128, uint32_t>>;
+template class KmerStorage<KmerExtractor2Bit::Kmer256, KmerExtractor2Bit, SortedMultiset<KmerExtractor2Bit::Kmer256, uint32_t>>;

@@ -4,9 +4,7 @@
 #include "sequence_graph.hpp"
 #include "bit_vector.hpp"
 #include "config.hpp"
-
-
-class BOSS;
+#include "boss.hpp"
 
 
 class DBGSuccinct : public DeBruijnGraph {
@@ -83,8 +81,10 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void mask_dummy_kmers(size_t num_threads, bool with_pruning) final;
 
+    virtual bool load_without_mask(const std::string &filename_base) final;
     virtual bool load(const std::string &filename_base) override final;
     virtual void serialize(const std::string &filename_base) const override final;
+    virtual std::string file_extension() const override final { return kExtension; }
 
     virtual void switch_state(Config::StateType new_state) final;
     virtual Config::StateType get_state() const final;

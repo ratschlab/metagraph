@@ -79,6 +79,8 @@ class DBGHashString : public DeBruijnGraph {
     bool load(std::istream &in);
     bool load(const std::string &filename);
 
+    std::string file_extension() const { return kExtension; }
+
     bool operator==(const DeBruijnGraph &other) const;
 
     const std::string& alphabet() const { return seq_encoder_.alphabet; }

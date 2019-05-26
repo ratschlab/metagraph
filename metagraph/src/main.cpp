@@ -23,6 +23,7 @@
 #include "dbg_bitmap_construct.hpp"
 #include "dbg_succinct.hpp"
 #include "server.hpp"
+#include "weighted_graph.hpp"
 
 typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
@@ -578,6 +579,21 @@ void print_stats(const DeBruijnGraph &graph) {
     std::cout << "k: " << graph.get_k() << std::endl;
     std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
     std::cout << "canonical mode: " << (graph.is_canonical_mode() ? "yes" : "no") << std::endl;
+
+    if (dynamic_cast<const WeightedDBG<> *>(&graph)) {
+        const auto &weighted_dbg = dynamic_cast<const WeightedDBG<> &>(graph);
+        double sum_weights = 0;
+        for (uint64_t i = 1; i <= weighted_dbg.num_nodes(); ++i) {
+            sum_weights += weighted_dbg.get_weight(i);
+        }
+        std::cout << "sum weights: " << sum_weights << std::endl;
+
+        for (uint64_t i = 1; i <= weighted_dbg.num_nodes(); ++i) {
+            std::cout << weighted_dbg.get_weight(i) << " ";
+        }
+        std::cout << std::endl;
+    }
+
     std::cout << "========================================================" << std::endl;
 }
 
@@ -891,8 +907,17 @@ int main(int argc, const char *argv[]) {
                     delete next_block;
                 }
 
-                graph_data.initialize_boss(boss_graph.get());
-                graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
+                if (config->count_kmers) {
+                    sdsl::int_vector<> kmer_counts;
+                    graph_data.initialize_boss(boss_graph.get(), &kmer_counts);
+                    graph.reset(new WeightedDBG<>(
+                        std::make_shared<DBGSuccinct>(boss_graph.release(), config->canonical),
+                        std::move(kmer_counts)
+                    ));
+                } else {
+                    graph_data.initialize_boss(boss_graph.get());
+                    graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
+                }
 
             } else if (config->graph_type == Config::GraphType::BITMAP && !config->dynamic) {
 
@@ -1779,6 +1804,17 @@ int main(int argc, const char *argv[]) {
         case Config::STATS: {
             for (const auto &file : files) {
                 auto graph = load_critical_dbg(file);
+                if (config->count_kmers) {
+                    graph = std::make_unique<WeightedDBG<>>(
+                        graph,
+                        sdsl::int_vector<>(graph->num_nodes(), 0, 1)
+                    );
+                    if (!graph->load(file)) {
+                        std::cerr << "Can't load weighted graph from file "
+                                  << file << std::endl;
+                        exit(1);
+                    }
+                }
 
                 std::cout << "Statistics for graph " << file << std::endl;
 

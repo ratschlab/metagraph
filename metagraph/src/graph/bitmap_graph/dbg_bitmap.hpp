@@ -78,6 +78,8 @@ class DBGBitmap : public DeBruijnGraph {
     bool load(std::istream &in);
     bool load(const std::string &filename);
 
+    std::string file_extension() const { return kExtension; }
+
     bool operator==(const DBGBitmap &other) const { return equals(other, false); }
     bool operator!=(const DBGBitmap &other) const { return !(*this == other); }
 

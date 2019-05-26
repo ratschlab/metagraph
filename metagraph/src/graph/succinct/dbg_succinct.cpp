@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <string>
 
-#include "boss.hpp"
 #include "serialization.hpp"
 #include "reverse_complement.hpp"
 #include "utils.hpp"
@@ -329,7 +328,10 @@ uint64_t DBGSuccinct::num_nodes() const {
                 : boss_graph_->num_edges();
 }
 
-bool DBGSuccinct::load(const std::string &filename) {
+bool DBGSuccinct::load_without_mask(const std::string &filename) {
+    // release the old mask
+    valid_edges_.reset();
+
     {
         std::ifstream instream(remove_suffix(filename, kExtension) + kExtension,
                                std::ios::binary);
@@ -344,8 +346,12 @@ bool DBGSuccinct::load(const std::string &filename) {
         }
     }
 
-    // release the old mask
-    valid_edges_.reset();
+    return true;
+}
+
+bool DBGSuccinct::load(const std::string &filename) {
+    if (!load_without_mask(filename))
+        return false;
 
     std::ifstream instream(remove_suffix(filename, kExtension) + kDummyMaskExtension,
                            std::ios::binary);
