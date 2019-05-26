@@ -10,15 +10,20 @@ class BOSS::Chunk {
   public:
     typedef uint8_t TAlphabet;
 
-    explicit Chunk(size_t k);
+    // Aslphabet size without extra characters
+    Chunk(uint64_t alph_size, size_t k);
 
     /**
      * Assumes that kmers are distinct and sorted
      */
-    template <typename KMER>
-    Chunk(KmerExtractor::TAlphabet alph_size,
+    template <typename KMER, typename COUNT>
+    Chunk(uint64_t alph_size,
           size_t k,
-          const Vector<KMER> &kmers);
+          const Vector<std::pair<KMER, COUNT>> &kmers,
+          uint8_t bits_per_count = 8);
+
+    template <typename KMER>
+    Chunk(uint64_t alph_size, size_t k, const Vector<KMER> &kmers);
 
     void push_back(TAlphabet W, TAlphabet F, bool last);
 
@@ -47,8 +52,9 @@ class BOSS::Chunk {
     static constexpr auto kFileExtension = ".dbg.chunk";
 
   private:
-    const size_t alph_size_;
-    const size_t bits_per_char_W_;
+    uint8_t extended_alph_size() const;
+
+    size_t alph_size_;
     size_t k_;
     std::vector<TAlphabet> W_;
     std::vector<bool> last_;

@@ -33,9 +33,17 @@ class BOSSConstructor : public IGraphConstructor<BOSS> {
         delete chunk;
     }
 
+    void build_graph(BOSS *graph, sdsl::int_vector<> *weights) {
+        auto chunk = constructor_->build_chunk();
+        // initialize graph from the chunk built
+        chunk->initialize_boss(graph, weights);
+        delete chunk;
+    }
+
     static BOSS* build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
-                                         bool verbose = false) {
-        return BOSS::Chunk::build_boss_from_chunks(chunk_filenames, verbose);
+                                         bool verbose = false,
+                                         sdsl::int_vector<> *weights = nullptr) {
+        return BOSS::Chunk::build_boss_from_chunks(chunk_filenames, verbose, weights);
     }
 
   private:

@@ -11,6 +11,7 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
 
     static IBOSSChunkConstructor* initialize(size_t k,
                                              bool canonical_mode = false,
+                                             bool count_kmers = false,
                                              const std::string &filter_suffix = "",
                                              size_t num_threads = 1,
                                              double memory_preallocated = 0,

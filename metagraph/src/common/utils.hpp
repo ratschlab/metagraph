@@ -8,6 +8,7 @@
 #include <functional>
 #include <stdexcept>
 #include <queue>
+#include <utility>
 #include <bitset>
 
 #if _USE_FOLLY
@@ -34,6 +35,40 @@ class BinaryMatrix;
 
 
 namespace utils {
+
+    template <typename T>
+    struct is_pair : std::false_type {};
+
+    template <typename T1, typename T2>
+    struct is_pair<std::pair<T1,T2>> : std::true_type {};
+
+    static_assert(is_pair<std::pair<int,size_t>>::value);
+    static_assert(is_pair<std::pair<uint64_t,size_t>>::value);
+
+    static_assert(!is_pair<std::tuple<int,size_t>>::value);
+    static_assert(!is_pair<int>::value);
+
+    template <typename T>
+    struct LessFirst {
+        bool operator()(const T &p1, const T &p2) const {
+            if constexpr(is_pair<T>::value) {
+                return p1.first < p2.first;
+            } else {
+                return p1 < p2;
+            }
+        }
+    };
+
+    template <typename T>
+    struct EqualFirst {
+        bool operator()(const T &p1, const T &p2) const {
+            if constexpr(is_pair<T>::value) {
+                return p1.first == p2.first;
+            } else {
+                return p1 == p2;
+            }
+        }
+    };
 
     bool get_verbose();
     void set_verbose(bool verbose);

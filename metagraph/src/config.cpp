@@ -73,7 +73,7 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "--print-internal")) {
             print_graph_internal_repr = true;
         } else if (!strcmp(argv[i], "--count-kmers")) {
-            count_kmers_query = true;
+            count_kmers = true;
         } else if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--reverse")) {
             reverse = true;
         } else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--canonical")) {
@@ -505,6 +505,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr [succinct]\n");
+            fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
             fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
             fprintf(stderr, "\t   --complete \t\tconstruct a complete graph (only for Bitmap graph) [off]\n");

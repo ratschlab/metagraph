@@ -184,11 +184,11 @@ TYPED_TEST(Construct, ConstructionFromChunks) {
                                         + std::string(100, 'G'));
 
         for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 5u; ++suffix_len) {
-            BOSS::Chunk graph_data(k);
+            BOSS::Chunk graph_data(KmerExtractor::alphabet.size(), k);
 
             for (const std::string &suffix : KmerExtractor::generate_suffixes(suffix_len)) {
                 std::unique_ptr<IBOSSChunkConstructor> constructor(
-                    IBOSSChunkConstructor::initialize(k, false, suffix)
+                    IBOSSChunkConstructor::initialize(k, false, false, suffix)
                 );
 
                 constructor->add_sequence(std::string(100, 'A'));

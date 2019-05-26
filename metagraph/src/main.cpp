@@ -846,7 +846,7 @@ int main(int argc, const char *argv[]) {
                     suffices = KmerExtractor::generate_suffixes(config->suffix_len);
                 }
 
-                BOSS::Chunk graph_data(boss_graph->get_k());
+                BOSS::Chunk graph_data(KmerExtractor::alphabet.size(), boss_graph->get_k());
 
                 //one pass per suffix
                 for (const std::string &suffix : suffices) {
@@ -860,6 +860,7 @@ int main(int argc, const char *argv[]) {
                         IBOSSChunkConstructor::initialize(
                             boss_graph->get_k(),
                             config->canonical,
+                            config->count_kmers,
                             suffix,
                             config->parallel,
                             static_cast<uint64_t>(config->memory_available) << 30,
@@ -2360,7 +2361,7 @@ int main(int argc, const char *argv[]) {
                         return;
                     }
 
-                    if (config->count_kmers_query) {
+                    if (config->count_kmers) {
                         std::cout << num_discovered << "/" << num_kmers << "\n";
                         return;
                     }
