@@ -358,12 +358,11 @@ size_t ColumnCompressed<Label>::num_labels() const {
 
 template <typename Label>
 uint64_t ColumnCompressed<Label>::num_relations() const {
-    flush();
-
-    return std::accumulate(
-        bitmatrix_.begin(), bitmatrix_.end(), uint64_t(0),
-        [](uint64_t v, const auto &c) { return v + c->num_set_bits(); }
-    );
+    uint64_t num_rels = 0;
+    for (size_t i = 0; i < num_labels(); ++i) {
+        num_rels += get_column(i).num_set_bits();
+    }
+    return num_rels;
 }
 
 template <typename Label>
@@ -497,8 +496,6 @@ void ColumnCompressed<Label>::add_labels(uint64_t begin, uint64_t end,
 template <typename Label>
 void ColumnCompressed<Label>
 ::dump_columns(const std::string &prefix) const {
-    flush();
-
     for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
         std::ofstream outstream(remove_suffix(prefix, kExtension)
                 + "." + std::to_string(i)
@@ -507,7 +504,7 @@ void ColumnCompressed<Label>
         if (!outstream.good())
             throw std::ofstream::failure("Bad stream");
 
-        auto &color = *bitmatrix_[i];
+        const auto &color = get_column(i);
 
         serialize_number(outstream, color.num_set_bits());
         color.call_ones([&](const auto &pos) {
