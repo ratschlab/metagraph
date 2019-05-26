@@ -9,13 +9,14 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
   public:
     virtual ~IBOSSChunkConstructor() {}
 
-    static IBOSSChunkConstructor* initialize(size_t k,
-                                             bool canonical_mode = false,
-                                             bool count_kmers = false,
-                                             const std::string &filter_suffix = "",
-                                             size_t num_threads = 1,
-                                             double memory_preallocated = 0,
-                                             bool verbose = false);
+    static std::unique_ptr<IBOSSChunkConstructor>
+    initialize(size_t k,
+               bool canonical_mode = false,
+               bool count_kmers = false,
+               const std::string &filter_suffix = "",
+               size_t num_threads = 1,
+               double memory_preallocated = 0,
+               bool verbose = false);
 
     virtual void add_sequence(std::string&& sequence) = 0;
     virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;

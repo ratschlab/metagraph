@@ -856,16 +856,14 @@ int main(int argc, const char *argv[]) {
                         std::cout << "\nSuffix: " << suffix << std::endl;
                     }
 
-                    std::unique_ptr<IBOSSChunkConstructor> constructor(
-                        IBOSSChunkConstructor::initialize(
-                            boss_graph->get_k(),
-                            config->canonical,
-                            config->count_kmers,
-                            suffix,
-                            config->parallel,
-                            static_cast<uint64_t>(config->memory_available) << 30,
-                            config->verbose
-                        )
+                    auto constructor = IBOSSChunkConstructor::initialize(
+                        boss_graph->get_k(),
+                        config->canonical,
+                        config->count_kmers,
+                        suffix,
+                        config->parallel,
+                        static_cast<uint64_t>(config->memory_available) << 30,
+                        config->verbose
                     );
 
                     parse_sequences(files, *config, timer,
