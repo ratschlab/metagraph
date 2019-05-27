@@ -1452,6 +1452,7 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
     uint64_t node_shift = 0;
 
     std::unordered_set<node_index> new_tail_nodes;
+    std::unordered_set<edge_index> new_tail_edges;
     std::unordered_map<node_index, std::vector<TAlphabet>> new_head_nodes;
 
     for (edge_index current_edge : edges) {
@@ -1485,7 +1486,9 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
                 // new head node
                 new_head_nodes.emplace(node, get_node_seq(select_last(node)));
             } else if (indeg > incoming_delete_count && outdeg == outgoing_delete_count) {
-                // new tail node
+                // assign this edge to new tail node
+                if (new_tail_nodes.find(node) == new_tail_nodes.end())
+                    new_tail_edges.emplace(edge);
                 new_tail_nodes.emplace(node);
             }
         }
@@ -1497,8 +1500,6 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
     inserted_edges.emplace(0, 0);
     std::set<edge_index> cant_delete;
     cant_delete.emplace(1);
-    std::map<edge_index, uint64_t> inserted_nodes;
-    inserted_nodes.emplace(0, 0);
 
     for (auto& node : new_head_nodes) {
         auto kmer = node.second;
@@ -1536,49 +1537,6 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
             source = append_pos(kmer[i + k_], source, &kmer[i], &new_ids_vec);
 
             std::sort(new_ids_vec.begin(), new_ids_vec.end());
-
-            uint64_t new_preceding_nodes = 0;
-            auto prev_node_insertion_point = inserted_nodes.begin();
-            for (auto new_edge : new_ids_vec) {
-                if (!is_single_outgoing(new_edge))
-                    continue;
-
-                auto new_node = get_source_node(new_edge);
-                size_t prev_inserted;
-                while (true) {
-                    prev_inserted = prev_node_insertion_point->second;
-                    prev_node_insertion_point++;
-                    if (prev_node_insertion_point == inserted_nodes.end()) {
-                        prev_node_insertion_point--;
-                        break;
-                    } else if (prev_node_insertion_point->first + prev_inserted <= new_node
-                            && prev_node_insertion_point->first + prev_node_insertion_point->second >= new_node) {
-                        prev_node_insertion_point->second += new_preceding_nodes;
-                        break;
-                    } else if (prev_node_insertion_point->first + prev_node_insertion_point->second > new_node) {
-                        prev_node_insertion_point--;
-                        break;
-                    }
-                    prev_node_insertion_point->second += new_preceding_nodes;
-                }
-                if (prev_node_insertion_point->first + prev_inserted <= new_node
-                        && prev_node_insertion_point->first + prev_node_insertion_point->second >= new_node) {
-                    prev_node_insertion_point->second++;
-                    new_preceding_nodes++;
-                    continue;
-                }
-
-                auto new_node_orig_pos = new_node - prev_node_insertion_point->second;
-                inserted_nodes.emplace(new_node_orig_pos, prev_node_insertion_point->second + 1);
-                prev_node_insertion_point++;
-                new_preceding_nodes++;
-            }
-            while (true) {
-                prev_node_insertion_point++;
-                if (prev_node_insertion_point == inserted_nodes.end())
-                    break;
-                prev_node_insertion_point->second += new_preceding_nodes;
-            }
 
             uint64_t new_preceding_edges = 0;
             auto prev_insertion_point = inserted_edges.begin();
@@ -1623,7 +1581,6 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
     }
 
     auto prev_insertion_point = inserted_edges.begin();
-    auto prev_node_insertion_point = inserted_nodes.begin();
     auto cant_delete_iter = cant_delete.begin();
     for (edge_index edge : edges) {
         assert(edge >= shift);
@@ -1658,20 +1615,9 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
             }
         }
 
-        node_index node = get_source_node(edge_id);
-        assert(node <= last_->num_set_bits());
-        while (prev_node_insertion_point != inserted_edges.end()
-                && prev_node_insertion_point->first + prev_node_insertion_point->second <= node + node_shift) {
-            prev_node_insertion_point++;
-        }
-        prev_node_insertion_point--;
-        node_index old_node_id = node - prev_node_insertion_point->second + node_shift;
-
-        if (new_tail_nodes.find(old_node_id) != new_tail_nodes.end()) {
+        if (new_tail_edges.find(edge) != new_tail_edges.end()) {
             // use this edge to place the sentinel
             W_->set(edge_id, kSentinelCode);
-            // allow deletion of the other edges for this node
-            new_tail_nodes.erase(old_node_id);
             continue;
         }
 
