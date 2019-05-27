@@ -1449,7 +1449,6 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
     assert(state == Config::DYN);
 
     uint64_t shift = 0;
-    uint64_t node_shift = 0;
 
     std::unordered_set<node_index> new_tail_nodes;
     std::unordered_set<edge_index> new_tail_edges;
@@ -1629,8 +1628,6 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
                               && !get_last(edge_id - 1)) {
             last_->delete_bit(edge_id - 1);
         } else {
-            if (get_last(edge_id))
-                node_shift++;
             last_->delete_bit(edge_id);
         }
         shift++;
