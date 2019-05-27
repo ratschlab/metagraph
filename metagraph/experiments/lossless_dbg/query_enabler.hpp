@@ -155,7 +155,12 @@ public:
         auto new_node = this->graph.traverse(node,base);
 
         if (this->node_is_join(new_node)) {
-            return this->incoming_table.branch_size(new_node,node);
+            if (this->incoming_table.has_size(new_node,node)) {
+                return this->incoming_table.branch_size(new_node,node);
+            }
+            else {
+                return get_coverage(new_node) - this->incoming_table.branch_offset(new_node,node);
+            }
         }
 
         return get_coverage(new_node);

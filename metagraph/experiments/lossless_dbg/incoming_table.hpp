@@ -25,6 +25,8 @@ public:
         return result;
     }
 
+
+
     bool is_join(node_index node) const {
         return size(node); // as 1
     }
@@ -33,11 +35,21 @@ public:
         if (offset < 0) { return 0; }
         int joins_position = joins.select1(node);
         int table_offset = joins.rank0(joins_position);
+        assert(offset < size(node));
         return edge_multiplicity_table[table_offset+offset];
     }
 
     int branch_size(node_index node,node_index prev_node) const {
         return branch_size_rank(node,relative_offset(node,prev_node));
+    }
+
+    bool has_size(node_index node,node_index prev_node) const {
+#ifndef FULL_INCOMING_TABLE
+        int branch_offset = relative_offset(node,prev_node);
+        return branch_offset < size(node);
+#else
+        return true;
+#endif
     }
 
     int size(node_index node) const {
@@ -48,7 +60,11 @@ public:
         // todo : remove or after the indegree bug is fixed and use assertion
         // assert(!(graph.indegree(node) < 2 and size(node)) or size(node) > graph.indegree(node));
         // indegree smaller than two with nonempty incoming table implies that node has new reads
+#ifndef FULL_INCOMING_TABLE
+        return size(node) == graph.indegree(node) or (graph.indegree(node) < 2 and size(node));
+#else
         return (size(node) > graph.indegree(node)) or (graph.indegree(node) < 2 and size(node));
+#endif
     }
 
     int relative_offset(node_index node,node_index prev_node) const {
