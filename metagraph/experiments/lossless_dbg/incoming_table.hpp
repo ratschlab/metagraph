@@ -35,6 +35,9 @@ public:
         if (offset < 0) { return 0; }
         int joins_position = joins.select1(node);
         int table_offset = joins.rank0(joins_position);
+        if (offset == size(node)) {
+            return INT_MIN;
+        }
         assert(offset < size(node));
         return edge_multiplicity_table[table_offset+offset];
     }
@@ -83,7 +86,7 @@ public:
         stringstream out;
         auto table_size = size(node);
         for(char c : "$ACGTN") {
-            out << c << ":" << branch_size(node,c) << endl;
+            out << c << ":" << branch_size(node, c) << endl;
         }
         cerr << out.str();
         return out.str();

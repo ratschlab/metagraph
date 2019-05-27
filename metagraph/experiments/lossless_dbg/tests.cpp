@@ -16,7 +16,7 @@
 #define protected public
 
 //#define FULL_INCOMING_TABLE
-#define DISABLE_TRANSFORMATIONS
+//#define DISABLE_TRANSFORMATIONS
 
 #include "utilities.hpp"
 #include "path_database_list_of_bifurcation_choices.hpp"
