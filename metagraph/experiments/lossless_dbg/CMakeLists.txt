@@ -13,6 +13,11 @@ set(PATH_ENCODER_CURRENT_TYPE ${PATH_ENCODER_CURRENT}_${BTYPE})
 set(CMAKE_CXX_FLAGS_FASTDEBUG "-O2 -g")
 set(CMAKE_EXE_LINKER_FLAGS_FASTDEBUG "-g")
 set(CMAKE_SHARED_LINKER_FLAGS_FASTDEBUG "-g")
+
+set(CMAKE_CXX_FLAGS_GPERF "-O2 -g -lprofiler")
+set(CMAKE_EXE_LINKER_FLAGS_GPERF "-g -lprofiler")
+set(CMAKE_SHARED_LINKER_FLAGS_GPERF "-g -lprofiler")
+
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++ -lc++fs")
 #enable_testing()
 #find_package(GTest REQUIRED)

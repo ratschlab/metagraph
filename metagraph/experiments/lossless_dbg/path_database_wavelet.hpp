@@ -121,6 +121,13 @@ public:
                 });
 #endif
         #ifndef FULL_INCOMING_TABLE
+                if (is_join_node.back()) {
+                    PathDatabaseDynamicCore::incoming_table.print_content(node);
+                    PRINT_VAR(PathDatabaseDynamicCore::node_is_join(node));
+        #ifdef MEMOIZE
+                    PRINT_VAR(PathDatabaseDynamicCore::node_is_join_raw(node));
+        #endif
+                }
                 assert(is_join_node.back() == 0);
                 if (*(is_join_node.end()-2) == 0) {
                     is_join_node.pop_back();

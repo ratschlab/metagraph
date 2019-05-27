@@ -14,6 +14,10 @@
 #include <gtest/gtest.h>
 #define private public
 #define protected public
+
+#define FULL_INCOMING_TABLE
+//#define DISABLE_TRANSFORMATIONS
+
 #include "utilities.hpp"
 #include "path_database_list_of_bifurcation_choices.hpp"
 #include "samplers.hpp"
@@ -23,6 +27,8 @@
 using namespace std;
 namespace fs = std::filesystem;
 //#include "path_database.hpp"
+
+
 
 
 const int test_seed = 3424;
@@ -180,15 +186,19 @@ TEST(PathDatabase,IncomingTable) {
     ASSERT_EQ(table.size(3),0);
     ASSERT_EQ(table.branch_size_rank(4,0),4);
 }
+vector<string> alternative_reads= {
+        "GAGCTCGGGACTTGAATAT",
+        "GAGCTCGAGACTTGAATAG"};
+
+TEST(PathDatabase,DynamicAlternativeRoute) {
+    check_compression_decompression<PathDatabaseDynamic<>>(alternative_reads, 5);
+}
 
 TEST(PathDatabase,AlternativeRoute) {
-    vector<string> reads= {
-            "GAGCTCGGGACTTGAATAT",
-            "GAGCTCGAGACTTGAATAG"};
-    check_compression_decompression<PathDatabaseWavelet<>>(reads,5);
-    check_compression_decompression<PathDatabaseDynamic<>>(reads,5);
-
+    check_compression_decompression<PathDatabaseWavelet<>>(alternative_reads,5);
 }
+
+
 
 TEST(PathDatabase,IdentityTestCompressedReads) {
     short_identity_test<PathDatabaseListBC>();
@@ -200,6 +210,10 @@ TEST(PathDatabase,IdentityTestPathDatabaseBaseline) {
 
 TEST(PathDatabase,IdentityTestPathDatabaseBaselineWavelet) {
     short_identity_test<PathDatabaseWavelet<>>();
+}
+
+TEST(PathDatabase,DynamicDecodeAllInverse) {
+    short_reads_decode_inverse<PathDatabaseDynamic<>>();
 }
 
 TEST(PathDatabase,DecodeAllInverse) {

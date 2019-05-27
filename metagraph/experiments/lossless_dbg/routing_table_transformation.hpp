@@ -37,7 +37,9 @@ class TransformationsEnabler : public RoutingTable {
 public:
 
     explicit TransformationsEnabler(const DBGSuccinct& graph) {
+#ifndef DISABLE_TRANSFORMATIONS
         transformations = GraphPreprocessor(graph).find_weak_splits();
+#endif
     }
     using RoutingTable::RoutingTable;
 
@@ -62,8 +64,9 @@ public:
             auto transformation = transformations.at(node);
             if (is_affected(transformation,base)) {
                 char opposite = opposite_element(transformation,base);
-                //todo remove
+#ifdef ASSUME_NO_TRANSFORMATIONS
                 assert(!this->rank(node,position,opposite));
+#endif
                 base_rank += this->rank(node,position,opposite);
             }
         }
@@ -73,8 +76,6 @@ public:
     char transform(node_index node, char base) const {
         if (transformations.count(node)) {
             auto transformation = transformations.at(node);
-            //todo remove
-            //assert(!transform_done or base==transform(transformation,base));
             return transform(transformation,base);
         }
         return base;

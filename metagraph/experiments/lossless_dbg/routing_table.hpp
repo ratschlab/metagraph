@@ -60,9 +60,20 @@ public:
 
     int offset(node_index node) const { return routing_table.select(node, '#'_rc) + 1; }
 
+    int select_unchecked(node_index node, int occurrence, char symbol) const {
+        auto routing_table_block = offset(node);
+        auto occurrences_of_symbol_before_block = routing_table.rank(routing_table_block,rc(symbol));
+        return routing_table.select(occurrences_of_symbol_before_block+occurrence,rc(symbol)) - routing_table_block;
+    }
+
     int select(node_index node, int occurrence, char symbol) const {
         auto routing_table_block = offset(node);
         auto occurrences_of_symbol_before_block = routing_table.rank(routing_table_block,rc(symbol));
+        if (occurrence > rank(node,size(node)+1,symbol)) {
+            PRINT_VAR(node,occurrence,symbol);
+            print_content(node);
+        }
+        assert(occurrence <= rank(node,size(node)+1,symbol));
         return routing_table.select(occurrences_of_symbol_before_block+occurrence,rc(symbol)) - routing_table_block;
     }
 
@@ -79,7 +90,7 @@ public:
     }
 
     int size(node_index node) const {
-        return select(node, 1, '#');
+        return select_unchecked(node, 1, '#');
     }
 
     string print_content(node_index node) const {
@@ -89,7 +100,7 @@ public:
             out << get(node, i);
         }
         out << endl;
-        cout << out.str();
+        cerr << out.str();
         return out.str();
     }
 

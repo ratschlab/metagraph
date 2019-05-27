@@ -124,8 +124,7 @@ public:
     int number_of_reads_ending_at_node(node_index node) const {
         int result = 0;
         if (this->node_is_split(node)) {
-            auto size = this->routing_table.select(node,1,'#');
-            result = this->routing_table.rank(node,size,'$');
+            result = this->routing_table.rank(node,this->routing_table.size(node),'$');
         }
         return result;
     }

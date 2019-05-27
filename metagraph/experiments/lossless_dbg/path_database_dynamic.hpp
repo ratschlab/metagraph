@@ -192,7 +192,7 @@ public:
                                  : '\0';
                 char split_char = node_is_split(node)
                                   ? (kmer_end < sequence.size() ?
-                                     path_for_sequence[kmer_end] :
+                                     sequence[kmer_end] :
                                      '$')
                                   : '\0';
 
