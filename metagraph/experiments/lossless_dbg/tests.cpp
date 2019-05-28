@@ -15,7 +15,7 @@
 #define private public
 #define protected public
 
-//#define FULL_INCOMING_TABLE
+#define FULL_INCOMING_TABLE
 //#define DISABLE_TRANSFORMATIONS
 
 #include "utilities.hpp"

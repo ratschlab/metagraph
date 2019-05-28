@@ -93,55 +93,60 @@ public:
     void construct_incoming_table() {
         Timer timer;
         cerr << "Started transforming incoming_table." << endl;
-        vector<int> incoming_table_builder;
-        vector<bool> is_join_node;
+
+        vector<vector<int>> incoming_table_chunks(graph.num_nodes());
+
+        #pragma omp parallel for num_threads(get_num_threads())
         for(int node=1;node<=graph.num_nodes();node++) {
-            is_join_node.push_back(1);
+            auto& current_chunk = incoming_table_chunks[node-1];
             if (PathDatabaseDynamicCore::node_is_join(node)) {
                 auto new_reads = PathDatabaseDynamicCore::incoming_table.branch_size(node,'$');
                 if (new_reads) {
-                    is_join_node.push_back(0);
-                    incoming_table_builder.push_back(new_reads);
+                    current_chunk.push_back(new_reads);
                 }
 #ifdef ALL_EDGES_COVERED
                 for(auto& base : "ACGTN") {
                     auto branch_size = PathDatabaseDynamicCore::incoming_table.branch_size(node,base);
                     if (branch_size) {
                         // so it is an actual edge in a graph (because all edges are covered)
-                        is_join_node.push_back(0);
-                        incoming_table_builder.push_back(branch_size);
+                        current_chunk.push_back(branch_size);
                     }
                 }
 #else
-                graph.call_incoming_kmers_mine(node,[&node,&incoming_table_builder,
-                        &is_join_node,this](node_index prev_node,char c) {
+                graph.call_incoming_kmers_mine(node,[&node,&current_chunk,this](node_index prev_node,char c) {
                     auto branch_size = PathDatabaseDynamicCore::incoming_table.branch_size(node,c);
-                    is_join_node.push_back(0);
-                    incoming_table_builder.push_back(branch_size);
+                    current_chunk.push_back(branch_size);
                 });
 #endif
+                assert(!current_chunk.empty());
         #ifndef FULL_INCOMING_TABLE
-                if (is_join_node.back()) {
+                if (!current_chunk.empty()) {
                     PathDatabaseDynamicCore::incoming_table.print_content(node);
                     PRINT_VAR(PathDatabaseDynamicCore::node_is_join(node));
         #ifdef MEMOIZE
                     PRINT_VAR(PathDatabaseDynamicCore::node_is_join_raw(node));
         #endif
                 }
-                assert(is_join_node.back() == 0);
-                if (*(is_join_node.end()-2) == 0) {
-                    is_join_node.pop_back();
-                    incoming_table_builder.pop_back();
+                if (current_chunk.size() > 1) {
+                    current_chunk.pop_back();
                 }
         #endif
             }
-
         }
-        is_join_node.push_back(1); // to also always end a block with 1
+        vector<int> incoming_table_builder;
+        vector<bool> delimiter_vector;
+        for(auto& table_chunk : incoming_table_chunks) {
+            delimiter_vector.push_back(true);
+            for(auto& val : table_chunk) {
+                delimiter_vector.push_back(false);
+                incoming_table_builder.push_back(val);
+            }
+        }
+        delimiter_vector.push_back(true);
         incoming_table.edge_multiplicity_table = sdsl::enc_vector<>(incoming_table_builder);
-        sdsl::bit_vector temporary_representation(is_join_node.size());
-        for(int i=0;i<is_join_node.size();i++) {
-            temporary_representation[i] = is_join_node[i];
+        sdsl::bit_vector temporary_representation(delimiter_vector.size());
+        for(int i=0;i<delimiter_vector.size();i++) {
+            temporary_representation[i] = delimiter_vector[i];
         }
         incoming_table.joins = BitVector(temporary_representation);
         statistics["transformation_incoming_table_time"] = timer.elapsed();
