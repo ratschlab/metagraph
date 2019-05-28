@@ -136,7 +136,7 @@ int main_compressor(int argc, char *argv[]) {
 	if (compressor == "wavelet") {
 		std::unique_ptr<PathDatabaseWavelet<>> pd;
 		if (graphArg.isSet()) {
-			auto graph = std::make_shared<DBGSuccinct>();
+			auto graph = std::make_shared<DBGSuccinct>(21);
 			graph->load(graphArg.getValue());
 			pd.reset(new PathDatabaseWavelet<>(graph));
 		} else {
