@@ -141,8 +141,10 @@ int main_compressor(int argc, char *argv[]) {
             pd.reset(new PathDatabaseWavelet<>(graph));
             pd->encode(reads);
         } else {
-        	pd.reset(compressReadsDeprecated<PathDatabaseWavelet<>>(compressedArg,
-                                                       reads,kmer_length));
+        	pd.reset(new PathDatabaseWavelet<>>(
+						compressReadsDeprecated<PathDatabaseWavelet<>>(
+							compressedArg, reads,kmer_length)
+						));
 		}
         if (statisticsArg.isSet()) {
             auto statistics = pd->get_statistics();
