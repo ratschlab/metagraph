@@ -75,12 +75,12 @@ int main_compressor(int argc, char *argv[]) {
     TCLAP::CmdLine cmd("Compress reads",' ', "0.1");
 
     //TODO:
-    //TCLAP::ValueArg<std::string> inputArg("g",
-    //                                      "graph",
-    //                                      "DeBruijnGraph to use as a reference in compression",
-    //                                      true,
-    //                                      "",
-    //                                      "string",cmd);
+    TCLAP::ValueArg<std::string> graphArg("g",
+                                          "graph",
+                                          "DeBruijnGraph to use as a reference in compression",
+                                          true,
+                                          "",
+                                          "string",cmd);
 
     TCLAP::ValueArg<std::string> inputArg("i",
                                          "input",
@@ -134,10 +134,18 @@ int main_compressor(int argc, char *argv[]) {
     auto kmer_length = kmerLengthArg.getValue();
     auto compressor = compressor_type.getValue();
     if (compressor == "wavelet") {
-        auto db = compressReadsDeprecated<PathDatabaseWavelet<>>(compressedArg,
-                                                       reads,kmer_length);
+		std::unique_ptr<PathDatabaseWavelet<>> pd;
+        if (graphArg.isSet()) {
+            auto graph = std::make_shared<DBGSuccinct>();
+            graph->load(graphArg.getValue());
+            pd.reset(new PathDatabaseWavelet<>(graph));
+            pd.encode(reads);
+        } else {
+        	pd.reset(compressReadsDeprecated<PathDatabaseWavelet<>>(compressedArg,
+                                                       reads,kmer_length));
+		}
         if (statisticsArg.isSet()) {
-            auto statistics = db.get_statistics();
+            auto statistics = pd.get_statistics();
             save_string(statistics.dump(4),statistics_filename);
         }
     }
