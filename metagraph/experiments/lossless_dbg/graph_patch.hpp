@@ -54,6 +54,15 @@ public:
         return outdegree(node) > 1;
     }
 
+    int encode(char c) const {
+        if (c == '#') return get_boss().alph_size;
+        return get_boss().encode(c);
+    }
+    char decode(int c) const {
+        if (c == get_boss().alph_size) return '#';
+        return get_boss().decode(c);
+    }
+
 };
 #define DBGSuccinct BetterDBGSuccinct
 

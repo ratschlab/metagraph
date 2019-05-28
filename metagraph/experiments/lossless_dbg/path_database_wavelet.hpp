@@ -52,11 +52,13 @@ public:
     // graph contains all reads
     // sequences are of size at least k
     PathDatabaseWaveletCore(std::shared_ptr<const DBGSuccinct> graph) : PathDatabaseDynamicCore(graph),
-                                                                              incoming_table(*graph)
+                                                                              incoming_table(*graph),
+                                                                              routing_table(*graph)
                                                                               {}
 
     PathDatabaseWaveletCore(const vector<string> &filenames,
                         size_t kmer_length = 21 /* default */) : PathDatabaseDynamicCore(filenames,kmer_length),
+                                                            routing_table(graph),
                                                             incoming_table(graph) {}
 
 
@@ -84,7 +86,7 @@ public:
             }
         }
         routing_table_array.push_back('#'); // to also always end a block with #
-        routing_table = decltype(routing_table)(graph,routing_table_array);
+        routing_table.initialize_content(routing_table_array);
         routing_table.transformations = PathDatabaseDynamicCore::routing_table.transformations;
         statistics["transformation_routing_table_time"] = timer.elapsed();
         cerr << "Transformation finished in " << statistics["transformation_routing_table_time"] << endl;

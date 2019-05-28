@@ -174,6 +174,17 @@ void short_serdes_test() {
     serialization_deserialization_test<T>(reads_for_testing_short,5);
 }
 
+TEST(PathDatabase,RightDecode) {
+    PathDatabaseWavelet<> pd({"ACTAGGA","ACTCGGA"},3);
+    ASSERT_EQ(pd.graph.encode('$'),0);
+    ASSERT_EQ(pd.graph.encode('A'),1);
+    ASSERT_EQ(pd.graph.encode('C'),2);
+    ASSERT_EQ(pd.graph.encode('G'),3);
+    ASSERT_EQ(pd.graph.encode('T'),4);
+    ASSERT_EQ(pd.graph.encode('N'),5);
+    ASSERT_EQ(pd.graph.encode('#'),6);
+}
+
 TEST(PathDatabase,IncomingTable) {
     DBGSuccinct graph = DBGSuccinct(21);
     IncomingTable table(graph);

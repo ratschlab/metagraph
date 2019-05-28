@@ -36,7 +36,7 @@ template<typename RoutingTable>
 class TransformationsEnabler : public RoutingTable {
 public:
 
-    explicit TransformationsEnabler(const DBGSuccinct& graph) {
+    explicit TransformationsEnabler(const DBGSuccinct& graph) : RoutingTable(graph) {
 #ifndef DISABLE_TRANSFORMATIONS
         transformations = GraphPreprocessor(graph).find_weak_splits();
 #endif

@@ -31,7 +31,7 @@ template<typename DummyT=int>
 class DynamicRoutingTableCore {
 public:
     DynamicRoutingTableCore() = default;
-    //DynamicRoutingTableCore(const DBGSuccinct& graph) {}
+    DynamicRoutingTableCore(const DBGSuccinct& graph) {}
 
 //    int select(node_index node, int occurrence, char symbol) const {
 //    }
