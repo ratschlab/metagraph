@@ -120,7 +120,7 @@ public:
 #endif
                 assert(!current_chunk.empty());
         #ifndef FULL_INCOMING_TABLE
-                if (!current_chunk.empty()) {
+                if (current_chunk.empty()) {
                     PathDatabaseDynamicCore::incoming_table.print_content(node);
                     PRINT_VAR(PathDatabaseDynamicCore::node_is_join(node));
         #ifdef MEMOIZE
