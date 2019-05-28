@@ -139,13 +139,13 @@ int main_compressor(int argc, char *argv[]) {
             auto graph = std::make_shared<DBGSuccinct>();
             graph->load(graphArg.getValue());
             pd.reset(new PathDatabaseWavelet<>(graph));
-            pd.encode(reads);
+            pd->encode(reads);
         } else {
         	pd.reset(compressReadsDeprecated<PathDatabaseWavelet<>>(compressedArg,
                                                        reads,kmer_length));
 		}
         if (statisticsArg.isSet()) {
-            auto statistics = pd.get_statistics();
+            auto statistics = pd->get_statistics();
             save_string(statistics.dump(4),statistics_filename);
         }
     }
