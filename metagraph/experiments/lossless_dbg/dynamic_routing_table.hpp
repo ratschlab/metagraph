@@ -39,7 +39,6 @@ public:
 protected:
     // rank [0..position)
     int rank(node_index node, int position, char symbol) const {
-        assert(position < routing_table.size());
         int result = 0;
         const auto &node_entry = routing_table.at(node);
         assert(position <= node_entry.size());
