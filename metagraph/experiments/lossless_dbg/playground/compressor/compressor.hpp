@@ -130,14 +130,20 @@ int main_compressor(int argc, char *argv[]) {
 	auto input_filename = inputArg.getValue();
 	auto statistics_filename = statisticsArg.getValue();
 	// TODO: Don't read all reads to memory
+    Timer read_timer;
+    cerr << "Started loading the reads.";
 	auto reads = read_reads_from_fasta(input_filename);
+    cerr << "Finished loading the reads in " << read_timer.elapsed() << " sec." << endl;
 	auto kmer_length = kmerLengthArg.getValue();
 	auto compressor = compressor_type.getValue();
     auto graph = std::make_shared<DBGSuccinct>(21);
 	if (compressor == "wavelet") {
 		std::unique_ptr<PathDatabaseWavelet<>> pd;
 		if (graphArg.isSet()) {
+		    Timer timer;
+		    cerr << "Started loading the graph";
 			graph->load(graphArg.getValue());
+			cerr << "Finished loading the graph in " << timer.elapsed() << " sec." << endl;
 			pd.reset(new PathDatabaseWavelet<>(graph));
 		} else {
 			pd.reset(new PathDatabaseWavelet<>(reads,kmer_length));
