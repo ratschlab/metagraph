@@ -148,7 +148,7 @@ public:
 
         timer.reset();
 
-        //#pragma omp parallel for num_threads(get_num_threads()) //default(none) shared(encoded,node_locks,routing_table,incoming_table)
+        #pragma omp parallel for num_threads(get_num_threads()) //default(none) shared(encoded,node_locks,routing_table,incoming_table)
         for (size_t i = 0; i < sequences.size(); i++) {
             std::vector<std::tuple<node_index, char, char>> bifurcations;
 
