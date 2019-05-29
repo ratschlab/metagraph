@@ -126,6 +126,7 @@ int main_compressor(int argc, char *argv[]) {
 			"wavelet",
 			&regime_constraint, cmd);
 	cmd.parse(argc, argv);
+    omp_set_num_threads(numThreadsArg.getValue());
 	set_num_threads(numThreadsArg.getValue());
 	auto input_filename = inputArg.getValue();
 	auto statistics_filename = statisticsArg.getValue();
@@ -150,7 +151,6 @@ int main_compressor(int argc, char *argv[]) {
 		}
 		pd->encode(reads);
 		if (compressedArg.isSet()) {
-
 			fs::path compress_folder = compressedArg.getValue();
 			pd->serialize(compress_folder);
 		}

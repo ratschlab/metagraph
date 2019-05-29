@@ -18,16 +18,29 @@ public:
     const int delay_gap = 0;
     GraphPreprocessor(const Graph &graph) : graph(graph) {}
     transformations_t find_weak_splits() {
+        Timer timer;
+        cerr << "Started finding weak splits" << endl;
         // find nodes that will
-        transformations_t result;
+        vector<optional<pair<char,char>>> result_intermediate(graph.num_nodes()+1);
+        #pragma omp parallel for
         for(auto node=1;node<=graph.num_nodes();node++) {
             if (graph.is_split(node)) {
                 auto possible_weak_split = is_weak_split(node);
                 if (possible_weak_split) {
-                    result[node] = *possible_weak_split;
+                    result_intermediate[node] = *possible_weak_split;
                 }
             }
         }
+        transformations_t result;
+        int node = 0;
+        for(auto& pos_transformation : result_intermediate) {
+            if (pos_transformation) {
+                result[node] = *pos_transformation;
+            }
+            node++;
+        }
+        cerr << "Finished finding weak splits in " << timer.elapsed() << " sec." << endl;
+
         return result;
     }
 
