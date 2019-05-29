@@ -131,7 +131,7 @@ int main_compressor(int argc, char *argv[]) {
 	auto statistics_filename = statisticsArg.getValue();
 	// TODO: Don't read all reads to memory
     Timer read_timer;
-    cerr << "Started loading the reads.";
+    cerr << "Started loading the reads." << endl;
 	auto reads = read_reads_from_fasta(input_filename);
     cerr << "Finished loading the reads in " << read_timer.elapsed() << " sec." << endl;
 	auto kmer_length = kmerLengthArg.getValue();
@@ -141,7 +141,7 @@ int main_compressor(int argc, char *argv[]) {
 		std::unique_ptr<PathDatabaseWavelet<>> pd;
 		if (graphArg.isSet()) {
 		    Timer timer;
-		    cerr << "Started loading the graph";
+		    cerr << "Started loading the graph" << endl;
 			graph->load(graphArg.getValue());
 			cerr << "Finished loading the graph in " << timer.elapsed() << " sec." << endl;
 			pd.reset(new PathDatabaseWavelet<>(graph));
@@ -150,6 +150,7 @@ int main_compressor(int argc, char *argv[]) {
 		}
 		pd->encode(reads);
 		if (compressedArg.isSet()) {
+
 			fs::path compress_folder = compressedArg.getValue();
 			pd->serialize(compress_folder);
 		}

@@ -178,7 +178,9 @@ public:
 
 
     void serialize(const fs::path& folder) const {
-        fs::create_directories(folder / "xxx.bin");
+        Timer timer;
+        cerr << "Started serializing the path encoder." << endl;
+        fs::create_directories(folder / "path_encoder.flag");
         ofstream edge_multiplicity_file(folder / "edge_multiplicity.bin", ios_base::trunc | ios_base::out);
         ofstream routing_table_file(folder / "routing_table.bin", ios_base::trunc | ios_base::out);
         ofstream joins_file(folder / "joins.bin", ios_base::trunc | ios_base::out);
@@ -188,6 +190,7 @@ public:
         routing_table.serialize(routing_table_file);
         incoming_table.joins.serialize(joins_file);
         graph.serialize(graph_filename);
+        cerr << "Finished serializing the path encoder in " << timer.elapsed() << " sec." << endl;
     }
 
     static PathDatabaseWaveletCore deserialize(const fs::path& folder) {
