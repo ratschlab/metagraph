@@ -188,6 +188,7 @@ if(FOLLY_LIBRARIES)
     -lboost_regex
     -lboost_filesystem
     -lboost_program_options
+    -lcrypto
   )
   if(NOT BUILD_STATIC)
     set(METALIBS ${METALIBS}
