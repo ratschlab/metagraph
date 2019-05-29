@@ -32,12 +32,24 @@ void reduce_maps(std::map<int, int> &output, std::map<int, int> &input) {
     }
 }
 
+
+string& clamp_alphabet(string& text,const string& alphabet="$ACGTN",char replacement='N') {
+    for(auto& c : text) {
+        if (alphabet.find(c) == string::npos) {
+            c = replacement;
+        }
+    }
+    return text;
+}
+
 vector <string> read_reads_from_fasta(const string &filename) {
     vector<string> result;
     read_fasta_file_critical(
             filename,
             [&](kseq_t* read) {
-                result.push_back(read->seq.s);
+                string read_seq = read->seq.s;
+                clamp_alphabet(read_seq);
+                result.push_back(read_seq);
             });
     return result;
 }

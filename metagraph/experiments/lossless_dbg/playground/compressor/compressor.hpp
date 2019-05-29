@@ -78,7 +78,7 @@ int main_compressor(int argc, char *argv[]) {
 	TCLAP::ValueArg<std::string> graphArg("g",
 			"graph",
 			"DeBruijnGraph to use as a reference in compression",
-			true,
+			false,
 			"",
 			"string",cmd);
 
@@ -133,10 +133,10 @@ int main_compressor(int argc, char *argv[]) {
 	auto reads = read_reads_from_fasta(input_filename);
 	auto kmer_length = kmerLengthArg.getValue();
 	auto compressor = compressor_type.getValue();
+    auto graph = std::make_shared<DBGSuccinct>(21);
 	if (compressor == "wavelet") {
 		std::unique_ptr<PathDatabaseWavelet<>> pd;
 		if (graphArg.isSet()) {
-			auto graph = std::make_shared<DBGSuccinct>(21);
 			graph->load(graphArg.getValue());
 			pd.reset(new PathDatabaseWavelet<>(graph));
 		} else {
