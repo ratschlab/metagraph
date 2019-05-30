@@ -260,6 +260,8 @@ public:
 
                         cerr << "current" << endl;
                         PRINT_VAR(graph.get_node_sequence(node));
+                        PRINT_VAR(node,tid,relative_position,prev_node,traversed_edge);
+                        PRINT_VAR(debug_bifurcation_idx);
                         incoming_table.print_content(node);
                         PRINT_VAR(join_symbol);
                         cerr << "previous" << endl;
