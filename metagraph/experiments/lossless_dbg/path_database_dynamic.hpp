@@ -140,7 +140,7 @@ public:
 #ifdef _OPENMP
         vector<omp_lock_t> node_locks(graph.num_nodes()+1);
         vector<omp_lock_t> outgoing_locks(graph.num_nodes()+1);
-        vector<deque<tuple<int,int,int>> waiting_threads(graph.num_nodes()+1);
+        vector<deque<tuple<int,int,int>>> waiting_threads(graph.num_nodes()+1);
         for(int i=0;i<node_locks.size();i++) {
             omp_init_lock(&node_locks[i]);
             omp_init_lock(&outgoing_locks[i]);
@@ -151,7 +151,7 @@ public:
 
         #pragma omp parallel for num_threads(get_num_threads()) //default(none) shared(encoded,node_locks,routing_table,incoming_table)
         for (size_t i = 0; i < sequences.size(); i++) {
-            int tid = omp_get_thread_num();
+            int tid = omp_get_thread_num() + 1;
             std::vector<std::tuple<node_index, char, char>> bifurcations;
 
             const auto &sequence = sequences[i];
@@ -219,27 +219,32 @@ public:
                     bool first_it = 1;
                     bool me_first = 0;
                     bool was_me = 0;
-                    omp_set_lock(&node_locks[prev_node]);
-                    auto& target_queue = waiting_threads[node];
+                    omp_set_lock(&outgoing_locks[prev_node]);
+                    auto& target_queue = waiting_threads[prev_node];
                     for(auto&[their_thread_id,their_relative_position,their_traversed_edge] : target_queue) {
                         if (tid == their_thread_id) {
                             was_me = 1;
                             if (first_it) {
                                 me_first = 1;
                             }
-                            their_thread_id = INT_MIN;
+                            their_thread_id = -tid;
                         }
-                        if (was_me and their_traversed_edge == traversed_edge and their_relative_position <= relative_position) {
+                        else if (was_me and
+                                their_traversed_edge == traversed_edge and
+                                their_thread_id < 0 and
+                                their_relative_position <= relative_position) {
+                            cerr << target_queue << endl;
+                            PRINT_VAR(tid,node,their_relative_position);
                             relative_position++;
                         }
                         first_it = 0;
                     }
                     if (me_first) {
-                        while (!target_queue.empty() and get<0>(waiting_threads.front()) == INT_MIN) {
+                        while (!target_queue.empty() and get<0>(target_queue.front()) == INT_MIN) {
                             target_queue.pop_front();
                         }
                     }
-                    omp_unset_lock(*prev_outgoing_lock);
+                    omp_unset_lock(&outgoing_locks[prev_node]);
                 }
 #endif
                 if (join_symbol) {
@@ -299,9 +304,11 @@ public:
                 }
 #ifdef _OPENMP
                 traversed_edge = split_symbol ? split_symbol : 'X'; // X as it doesn't matter
-                omp_set_lock(&outgoing_locks[node]);
-                waiting_threads[node].push_back({tid,relative_position,traversed_edge});
-                omp_unset_lock(&outgoing_locks[node]);
+                if (traversed_edge != '$') { // doesn't need any update
+                    omp_set_lock(&outgoing_locks[node]);
+                    waiting_threads[node].push_back({tid, relative_position, traversed_edge});
+                    omp_unset_lock(&outgoing_locks[node]);
+                }
                 omp_unset_lock(&node_locks[node]);
 #endif
                 debug_bifurcation_idx++;
