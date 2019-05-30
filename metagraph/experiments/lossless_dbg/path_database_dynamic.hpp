@@ -219,23 +219,31 @@ public:
                     bool first_it = 1;
                     bool me_first = 0;
                     bool was_me = 0;
+                    int past_offset = 0;
                     omp_set_lock(&outgoing_locks[prev_node]);
                     auto& target_queue = waiting_threads[prev_node];
                     for(auto&[their_thread_id,their_relative_position,their_traversed_edge] : target_queue) {
-                        if (tid == their_thread_id) {
+                        if (was_me) {
+                            if (their_traversed_edge == traversed_edge and
+                                their_thread_id < 0 and
+                                their_relative_position <= relative_position) {
+                                cerr << target_queue << endl;
+                                PRINT_VAR(tid, node, their_relative_position);
+                                relative_position++;
+                            }
+                        }
+                        else if (tid == their_thread_id) {
                             was_me = 1;
                             if (first_it) {
                                 me_first = 1;
                             }
                             their_thread_id = -tid;
-                        }
-                        else if (was_me and
-                                their_traversed_edge == traversed_edge and
-                                their_thread_id < 0 and
+                        }  else {
+                            if (their_traversed_edge == traversed_edge and
+                                their_thread_id > 0 and
                                 their_relative_position <= relative_position) {
-                            cerr << target_queue << endl;
-                            PRINT_VAR(tid,node,their_relative_position);
-                            relative_position++;
+                                past_offset--;
+                            }
                         }
                         first_it = 0;
                     }
@@ -245,6 +253,7 @@ public:
                         }
                     }
                     omp_unset_lock(&outgoing_locks[prev_node]);
+                    relative_position += past_offset;
                 }
 #endif
                 if (join_symbol) {
