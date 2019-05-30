@@ -3,6 +3,8 @@
 #include <string>
 #include <random>
 
+#include "reverse_complement.hpp"
+
 #define NUMERICAL_DIGITS "0123456789"
 
 
@@ -66,6 +68,14 @@ float std_dev(const std::vector<T> &list, T mean) {
 }
 }  // namespace
 
+DBGAligner::AlignedPath DBGAligner::map_to_nodes_forward_reverse_complement(const std::string &sequence) {
+    auto reverse_complement_sequence(sequence);
+    reverse_complement(std::begin(reverse_complement_sequence), std::end(reverse_complement_sequence));
+    auto path = map_to_nodes(sequence);
+    auto reverse_path = map_to_nodes(reverse_complement_sequence);
+    return path.get_total_score() > reverse_path.get_total_score() ? path : reverse_path;
+}
+
 DBGAligner::AlignedPath DBGAligner::map_to_nodes(const std::string &sequence) {
     assert(sequence.size() >= k_);
 
@@ -78,18 +88,26 @@ DBGAligner::AlignedPath DBGAligner::map_to_nodes(const std::string &sequence) {
                   << std::count(std::begin(nodes), std::end(nodes), 0) << std::endl;
     }
 
-    if (nodes.front() == 0) {
-        // TODO: perform inexact mapping.
-    }
+    // TODO: perform inexact seeding.
 
-    auto last_mapped_it = std::find(std::begin(nodes), std::end(nodes), 0) - 1;
+    // If nodes is all 0, return.
+    auto non_zero_it = std::find_if(std::begin(nodes), std::end(nodes),
+                                    [] (node_index node) { return node != 0; });
+    if (non_zero_it == std::end(nodes))
+        return AlignedPath(k_, std::begin(sequence), std::end(sequence));
+    // Adjust nodes and sequence starting positions.
+    auto delta = non_zero_it - std::begin(nodes);
+    auto nodes_begin = std::begin(nodes) + delta;
+    auto sequence_begin = std::begin(sequence) + delta;
+
+    auto last_mapped_it = std::find(nodes_begin, std::end(nodes), 0) - 1;
     auto target_node_it = std::find_if(last_mapped_it + 1, std::end(nodes),
                                        [] (node_index node) { return node != 0; });
-    // Seed the path.
-    AlignedPath stitched_path(k_, std::begin(sequence), std::begin(sequence));
-    stitched_path.seed(nodes[0], {}, graph_->get_node_sequence(nodes[0]), k_ * match_score_);
-    for (auto it = std::begin(nodes) + 1; it <= last_mapped_it; ++it) {
-        stitched_path.extend(*it, {}, *(std::begin(sequence) + (it - std::begin(nodes)) + k_ - 1), match_score_);
+    // Seed the path and extend exactly as much as possible.
+    AlignedPath stitched_path(k_, sequence_begin, sequence_begin);
+    stitched_path.seed(*nodes_begin, {}, graph_->get_node_sequence(*nodes_begin), k_ * match_score_);
+    for (auto it = nodes_begin + 1; it <= last_mapped_it; ++it) {
+        stitched_path.extend(*it, {}, *(sequence_begin + (it - nodes_begin) + k_ - 1), match_score_);
         if (graph_->outdegree(*it) > 1) {
             last_mapped_it = it;
             break;
@@ -97,17 +115,17 @@ DBGAligner::AlignedPath DBGAligner::map_to_nodes(const std::string &sequence) {
     }
     // Aligned kmers with no exact map.
     while (last_mapped_it + 1 != std::end(nodes)) {
-        auto unmapped_string_begin_it = std::begin(sequence) + (last_mapped_it - std::begin(nodes));
+        auto unmapped_string_begin_it = sequence_begin + (last_mapped_it - nodes_begin);
         auto unmapped_string = std::string(unmapped_string_begin_it, std::end(sequence));
 
         auto re_mapped_paths = align(unmapped_string, [&] (node_index node, const std::string::const_iterator& query_it) {
                 // Terminate if an exact mapped kmer with same query_it exists.
                 auto index_in_original_seq = query_it - std::begin(unmapped_string) +
-                                             unmapped_string_begin_it - std::begin(sequence);
+                                             unmapped_string_begin_it - sequence_begin;
                 assert(index_in_original_seq > 0 && index_in_original_seq < nodes.size());
                 // if a node is exactly mapped at the same index (except from the first node or seed), stop exploring the graph.
                 if (nodes[index_in_original_seq] == node && node != 0 && graph_->outdegree(node) <= 1 &&
-                    index_in_original_seq != last_mapped_it - std::begin(nodes)) {
+                    index_in_original_seq != last_mapped_it - nodes_begin) {
                     return true;
                 }
                 return false;
@@ -118,25 +136,24 @@ DBGAligner::AlignedPath DBGAligner::map_to_nodes(const std::string &sequence) {
             int64_t overlap_length = stitched_path.num_kmers_in_query()
                                      - (partial_path.get_query_begin_it() - std::begin(unmapped_string)
                                         + unmapped_string_begin_it - std::begin(sequence));
-            auto updated_score = stitched_path.get_total_score() + partial_path.get_total_score() - overlap_length * match_score_;
+            auto updated_score = overlap_length <= 0 ? 0 :
+                                 stitched_path.get_total_score() + partial_path.get_total_score() - overlap_length * match_score_;
             stitched_path.append_path(partial_path, overlap_length, updated_score);
         }
-        target_node_it = std::begin(nodes) + stitched_path.num_kmers_in_query();
+        target_node_it = nodes_begin + stitched_path.num_kmers_in_query();
         last_mapped_it = std::find(target_node_it + 1, std::end(nodes), 0) - 1;
 
         // Append the exactly mapped regions to the final path.
         for (auto it = target_node_it; it <= last_mapped_it; ++it) {
-            stitched_path.extend(*it, {}, *(std::begin(sequence) + (it - std::begin(nodes)) + k_ - 1), match_score_);
+            stitched_path.extend(*it, {}, *(sequence_begin + (it - nodes_begin) + k_ - 1), match_score_);
             if (graph_->outdegree(*it) > 1) {
                 last_mapped_it = it;
                 break;
             }
         }
-
         target_node_it = std::find_if(last_mapped_it + 1, std::end(nodes),
                                       [] (node_index node) { return node != 0; });
     }
-
     return stitched_path;
 }
 

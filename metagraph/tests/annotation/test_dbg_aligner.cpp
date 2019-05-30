@@ -7,6 +7,7 @@
 #include "dbg_hash_string.hpp"
 #include "dbg_hash_ordered.hpp"
 #include "annotate_column_compressed.hpp"
+#include "reverse_complement.hpp"
 
 typedef DBGSuccinct Graph;
 
@@ -331,8 +332,7 @@ TEST(dbg_aligner, map_to_nodes_delete) {
 TEST(dbg_aligner, map_to_nodes_straight) {
     size_t k = 4;
     std::string reference = "AGCTTCGAGGCCAA";
-    // Query is the same as the reference.
-    std::string query =     "AGCTTCGAGGCCAA";
+    std::string query = reference;
 
     Graph* graph = new Graph(k);
     graph->add_sequence(reference);
@@ -343,4 +343,41 @@ TEST(dbg_aligner, map_to_nodes_straight) {
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(query, path.get_sequence());
     EXPECT_EQ(query.size() * aligner.get_match_score(), path.get_total_score());
+}
+
+TEST(dbg_aligner, map_to_nodes_inexact_seed) {
+    size_t k = 4;
+    std::string reference = "AGCTTCGAGGCCAA";
+    // Query starts with two unmappable kmers.
+    // The rest of the query is the same as the reference.
+    std::string query =     "TT";
+    query += reference;
+
+    Graph* graph = new Graph(k);
+    graph->add_sequence(reference);
+    graph->mask_dummy_kmers(1, false);
+    DBGAligner aligner(graph);
+    auto path = aligner.map_to_nodes(query);
+
+    EXPECT_EQ(query.size() - 2 - k + 1, path.size());
+    EXPECT_EQ(reference, path.get_sequence());
+    EXPECT_EQ(reference.size() * aligner.get_match_score(), path.get_total_score());
+}
+
+TEST(dbg_aligner, map_to_nodes_reverse_complement) {
+    size_t k = 4;
+    std::string reference = "AGCTTCGAGGCCAA";
+    std::string query = reference;
+    std::string rev_comp_query(query);
+    reverse_complement(rev_comp_query.begin(), rev_comp_query.end());
+
+    Graph* graph = new Graph(k);
+    graph->add_sequence(reference);
+    graph->mask_dummy_kmers(1, false);
+    DBGAligner aligner(graph);
+    auto path = aligner.map_to_nodes_forward_reverse_complement(rev_comp_query);
+
+    EXPECT_EQ(rev_comp_query.size() - k + 1, path.size());
+    EXPECT_EQ(query, path.get_sequence());
+    EXPECT_EQ(rev_comp_query.size() * aligner.get_match_score(), path.get_total_score());
 }

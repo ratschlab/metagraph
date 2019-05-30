@@ -56,6 +56,9 @@ class DBGAligner {
     // Align a sequence to the underlying graph using map_to_nodes.
     AlignedPath map_to_nodes(const std::string &sequence);
 
+    // Align to nodes for both sequence and reverse complement sequence and return the higher scoring one.
+    AlignedPath map_to_nodes_forward_reverse_complement(const std::string &sequence);
+
     float get_match_score() const { return match_score_; }
     long long get_num_merge_paths() const { return merged_paths_counter_; }
 
