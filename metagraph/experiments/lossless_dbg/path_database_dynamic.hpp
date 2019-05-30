@@ -240,7 +240,7 @@ public:
                         first_it = 0;
                     }
                     if (me_first) {
-                        while (!target_queue.empty() and get<0>(target_queue.front()) == INT_MIN) {
+                        while (!target_queue.empty() and get<0>(target_queue.front()) < 0) {
                             target_queue.pop_front();
                         }
                     }
