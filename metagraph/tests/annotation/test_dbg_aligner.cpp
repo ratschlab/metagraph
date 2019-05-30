@@ -8,7 +8,7 @@
 #include "dbg_hash_ordered.hpp"
 #include "annotate_column_compressed.hpp"
 
-typedef DBGHashOrdered Graph;
+typedef DBGSuccinct Graph;
 
 TEST(dbg_aligner, align_sequence_too_short) {
     size_t k = 4;
@@ -248,4 +248,99 @@ TEST(dbg_aligner, large_gap) {
     EXPECT_EQ(query.substr(query.size() - 2 * k), path_seq);
     EXPECT_EQ(std::end(query) - 2 * k, path.back().get_query_begin_it());
     EXPECT_EQ(2 * k * aligner.get_match_score(), path.back().get_total_score());
+}
+
+TEST(dbg_aligner, map_to_nodes_multiple_misalignment) {
+    size_t k = 4;
+    std::string reference = "AAAGCGGACCCTTTCCGTTAT";
+    std::string query =     "AAAGGGGACCCTTTTCGTTAT";
+
+    Graph* graph = new Graph(k);
+    graph->add_sequence(reference);
+    graph->mask_dummy_kmers(1, false);
+    DBGAligner aligner(graph);
+    auto path = aligner.map_to_nodes(query);
+
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(reference, path.get_sequence());
+}
+
+TEST(dbg_aligner, map_to_nodes_insert_non_existent) {
+    size_t k = 4;
+    std::string reference = "TTTCCTTGTT";
+    std::string query =     "TTTCACTTGTT";
+
+    Graph* graph = new Graph(k);
+    graph->add_sequence(reference);
+    graph->mask_dummy_kmers(1, false);
+    DBGAligner aligner(graph);
+    auto path = aligner.map_to_nodes(query);
+
+    EXPECT_EQ(reference.size() - k + 1, path.size());
+    EXPECT_EQ(reference, path.get_sequence());
+}
+
+TEST(dbg_aligner, map_to_nodes_insert) {
+    size_t k = 4;
+    // NOTE: very challenging pair of reference and query!
+    // Should keep it as is. Negative overlap.
+    // The problem with graphs.
+    std::string reference = "TTCGGATATGGAC";
+    std::string query =     "TTCGGACTATGGAC";
+
+    Graph* graph = new Graph(k);
+    graph->add_sequence(reference);
+    graph->mask_dummy_kmers(1, false);
+    DBGAligner aligner(graph);
+    auto path = aligner.map_to_nodes(query);
+
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ("TTCGGACTNNGGAC", path.get_sequence());
+}
+
+TEST(dbg_aligner, map_to_nodes_delete) {
+    size_t k = 4;
+    std::string reference = "TTCGATGGC";
+    std::string query =     "TTCGAGGC";
+
+    Graph* graph = new Graph(k);
+    graph->add_sequence(reference);
+    graph->mask_dummy_kmers(1, false);
+    DBGAligner aligner(graph);
+    auto path = aligner.map_to_nodes(query);
+
+    EXPECT_EQ(reference.size() - k + 1, path.size());
+    EXPECT_EQ(reference, path.get_sequence());
+}
+
+//TEST(dbg_aligner, map_to_nodes_gap) {
+//    size_t k = 4;
+//    std::string reference = "TTCGATTATAATTGGCGCC";
+//    std::string query =     "TTCGAGGCGCC";
+//
+//    Graph* graph = new Graph(k);
+//    graph->add_sequence(reference);
+//    graph->mask_dummy_kmers(1, false);
+//    DBGAligner aligner(graph);
+//    auto path = aligner.map_to_nodes(query);
+//
+//    EXPECT_EQ(query.size() - k + 1, path.size());
+//    EXPECT_EQ(query, path.get_sequence());
+//}
+
+TEST(dbg_aligner, map_to_nodes_straight) {
+    size_t k = 4;
+    std::string reference = "AGCTTCGAGGCCAA";
+    // Query is the same as the reference.
+    std::string query =     "AGCTTCGAGGCCAA";
+
+    Graph* graph = new Graph(k);
+    graph->add_sequence(reference);
+    graph->mask_dummy_kmers(1, false);
+    DBGAligner aligner(graph);
+    auto path = aligner.map_to_nodes(query);
+
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(query, path.get_sequence());
+    EXPECT_EQ(query.size() * aligner.get_match_score(), path.get_total_score());
 }

@@ -49,7 +49,12 @@ class DBGAligner {
     DBGAligner& operator= (DBGAligner&&) = default;
 
     // Align a sequence to the underlying graph based on the strategy defined in the graph.
-    std::vector<AlignedPath> align(const std::string &sequence);
+    std::vector<AlignedPath> align(const std::string &sequence,
+        const std::function<bool(node_index, const std::string::const_iterator& query_it)>& terminate
+            = [](node_index, const std::string::const_iterator&) { return false; });
+
+    // Align a sequence to the underlying graph using map_to_nodes.
+    AlignedPath map_to_nodes(const std::string &sequence);
 
     float get_match_score() const { return match_score_; }
     long long get_num_merge_paths() const { return merged_paths_counter_; }
@@ -72,13 +77,17 @@ class DBGAligner {
 
     // Align part of a sequence to the graph in the case of no exact map
     // based on internal strategy. Calls callback for every possible alternative path.
-    void inexact_map(AlignedPath &path, BoundedPriorityQueue<AlignedPath> &queue,
-                     std::map<DPAlignmentKey, DPAlignmentValue> &dp_alignment);
+    bool inexact_map(AlignedPath &path, BoundedPriorityQueue<AlignedPath> &queue,
+                     std::map<DPAlignmentKey, DPAlignmentValue> &dp_alignment,
+                     const std::function<bool(node_index, const std::string::const_iterator& query_it)>& terminate
+                         = [](node_index, const std::string::const_iterator&) { return false; });
 
     // Align the path to the graph based on the query until either exact alignment is not
     // possible or there exists a branching point in the graph.
-    void exact_map(AlignedPath &path, const std::string &sequence,
-                   std::map<DPAlignmentKey, DPAlignmentValue> &dp_alignment);
+    bool exact_map(AlignedPath &path, const std::string &sequence,
+                   std::map<DPAlignmentKey, DPAlignmentValue> &dp_alignment,
+                   const std::function<bool(node_index, const std::string::const_iterator& query_it)>& terminate
+                        = [](node_index, const std::string::const_iterator&) { return false; });
 
     // Return the score of substitution. If not in sub_score_ return a fixed maximized score value.
     float single_char_score(char char_in_query, char char_in_graph) const;

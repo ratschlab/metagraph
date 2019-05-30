@@ -66,7 +66,82 @@ float std_dev(const std::vector<T> &list, T mean) {
 }
 }  // namespace
 
-std::vector<DBGAligner::AlignedPath> DBGAligner::align(const std::string &sequence) {
+DBGAligner::AlignedPath DBGAligner::map_to_nodes(const std::string &sequence) {
+    assert(sequence.size() >= k_);
+
+    std::vector<node_index> nodes;
+    graph_->map_to_nodes(sequence, [&] (node_index node) { nodes.push_back(node); });
+
+    if (verbose_) {
+        std::cout << "Aligning read to reference graph using map_to_nodes." << std::endl;
+        std::cout << "Number of zeros in initial mapping: "
+                  << std::count(std::begin(nodes), std::end(nodes), 0) << std::endl;
+    }
+
+    if (nodes.front() == 0) {
+        // TODO: perform inexact mapping.
+    }
+
+    auto last_mapped_it = std::find(std::begin(nodes), std::end(nodes), 0) - 1;
+    auto target_node_it = std::find_if(last_mapped_it + 1, std::end(nodes),
+                                       [] (node_index node) { return node != 0; });
+    // Seed the path.
+    AlignedPath stitched_path(k_, std::begin(sequence), std::begin(sequence));
+    stitched_path.seed(nodes[0], {}, graph_->get_node_sequence(nodes[0]), k_ * match_score_);
+    for (auto it = std::begin(nodes) + 1; it <= last_mapped_it; ++it) {
+        stitched_path.extend(*it, {}, *(std::begin(sequence) + (it - std::begin(nodes)) + k_ - 1), match_score_);
+        if (graph_->outdegree(*it) > 1) {
+            last_mapped_it = it;
+            break;
+        }
+    }
+    // Aligned kmers with no exact map.
+    while (last_mapped_it + 1 != std::end(nodes)) {
+        auto unmapped_string_begin_it = std::begin(sequence) + (last_mapped_it - std::begin(nodes));
+        auto unmapped_string = std::string(unmapped_string_begin_it, std::end(sequence));
+
+        auto re_mapped_paths = align(unmapped_string, [&] (node_index node, const std::string::const_iterator& query_it) {
+                // Terminate if an exact mapped kmer with same query_it exists.
+                auto index_in_original_seq = query_it - std::begin(unmapped_string) +
+                                             unmapped_string_begin_it - std::begin(sequence);
+                assert(index_in_original_seq > 0 && index_in_original_seq < nodes.size());
+                // if a node is exactly mapped at the same index (except from the first node or seed), stop exploring the graph.
+                if (nodes[index_in_original_seq] == node && node != 0 && graph_->outdegree(node) <= 1 &&
+                    index_in_original_seq != last_mapped_it - std::begin(nodes)) {
+                    return true;
+                }
+                return false;
+            });
+        for (const AlignedPath& partial_path : re_mapped_paths) {
+            // Append a path to the current object. Fills in 0 in case of spaced nodes.
+            // Avoid adding duplicate nodes and chars in case of positive overlap.
+            int64_t overlap_length = stitched_path.num_kmers_in_query()
+                                     - (partial_path.get_query_begin_it() - std::begin(unmapped_string)
+                                        + unmapped_string_begin_it - std::begin(sequence));
+            auto updated_score = stitched_path.get_total_score() + partial_path.get_total_score() - overlap_length * match_score_;
+            stitched_path.append_path(partial_path, overlap_length, updated_score);
+        }
+        target_node_it = std::begin(nodes) + stitched_path.num_kmers_in_query();
+        last_mapped_it = std::find(target_node_it + 1, std::end(nodes), 0) - 1;
+
+        // Append the exactly mapped regions to the final path.
+        for (auto it = target_node_it; it <= last_mapped_it; ++it) {
+            stitched_path.extend(*it, {}, *(std::begin(sequence) + (it - std::begin(nodes)) + k_ - 1), match_score_);
+            if (graph_->outdegree(*it) > 1) {
+                last_mapped_it = it;
+                break;
+            }
+        }
+
+        target_node_it = std::find_if(last_mapped_it + 1, std::end(nodes),
+                                      [] (node_index node) { return node != 0; });
+    }
+
+    return stitched_path;
+}
+
+std::vector<DBGAligner::AlignedPath> DBGAligner::align(const std::string &sequence,
+                                                       const std::function<bool(node_index, const std::string::const_iterator& query_it)>& terminate) {
     if (sequence.size() < k_)
         return std::vector<AlignedPath>();
 
@@ -74,50 +149,37 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::align(const std::string &sequen
     uint32_t print_frequency = 50;
     std::map<DPAlignmentKey, DPAlignmentValue> dp_alignment;
     BoundedPriorityQueue<AlignedPath> queue(num_top_paths_);
-    AlignedPath initial_path(std::begin(sequence), std::begin(sequence));
-    //exact_map(initial_path, sequence);
+    AlignedPath initial_path(k_, std::begin(sequence), std::begin(sequence));
     queue.push(std::move(initial_path));
     while (!queue.empty()) {
         auto path = std::move(queue.top());
         queue.pop();
 
         if (path.get_total_score() < 0) {
-            trim(path);
+            std::cerr << "Trimming and storing partial path\n." << std::endl;
             partial_paths.push_back(path);
             queue = BoundedPriorityQueue<AlignedPath>(num_top_paths_);
             dp_alignment.clear();
-            path = AlignedPath(path.get_query_it() + 1, path.get_query_it() + 1);
+            path = AlignedPath(k_, path.get_query_it() + 1, path.get_query_it() + 1);
         }
 
         if (path.get_query_it() + k_ > std::end(sequence)) {
-            StripedSmithWaterman::Alignment alignment;
-            if (!cssw_align(path, alignment)) {
-                std::cout << "Failure in SSW calculation. Cigar string might be missing."
-                         << " SW score might be not optimum.\n";
-                break;
-            }
-            path.set_cigar(alignment.cigar_string);
             partial_paths.push_back(path);
             break;
         }
 
-        exact_map(path, sequence, dp_alignment);
-
-        if (path.get_query_it() + k_ > std::end(sequence)) {
-            StripedSmithWaterman::Alignment alignment;
-            if (!cssw_align(path, alignment)) {
-                std::cout << "Failure in SSW calculation. Cigar string might be missing."
-                         << " SW score might be not optimum.\n";
-                break;
-            }
-            path.set_cigar(alignment.cigar_string);
+        if (!exact_map(path, sequence, dp_alignment, terminate) || path.get_query_it() + k_ > std::end(sequence)) {
             partial_paths.push_back(path);
             break;
         }
+
         if (path.get_similar())
             continue;
 
-        inexact_map(path, queue, dp_alignment);
+        if (!inexact_map(path, queue, dp_alignment, terminate) || queue.empty()) {
+            partial_paths.push_back(path);
+            break;
+        }
 
         if (verbose_ && path.size() % print_frequency == 0) {
             auto shadow_queue(queue);
@@ -134,31 +196,44 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::align(const std::string &sequen
             std::cout << mean << ", " << std_dev<float>(score_values, mean) << std::endl;
         }
     }
-
     if (partial_paths.empty())
         return std::vector<AlignedPath>();
 
     std::vector<AlignedPath> complete_path;
-    for (auto partial_path = std::begin(partial_paths);
-         partial_path != std::end(partial_paths); ++ partial_path) {
+    for (auto partial_path_it = std::begin(partial_paths);
+         partial_path_it != std::end(partial_paths); ++ partial_path_it) {
         // TODO: Find shortest path between the end node of a partial path
         // and the first node of the next partial path.
-        complete_path.push_back(*partial_path);
+        StripedSmithWaterman::Alignment alignment;
+        if (!cssw_align(*partial_path_it, alignment)) {
+            std::cout << "Failure in SSW calculation. Cigar string might be missing.\n";
+            break;
+        }
+        partial_path_it->set_cigar(alignment.cigar_string);
+        trim(*partial_path_it);
+        complete_path.push_back(*partial_path_it);
     }
+
     // TODO: Stitch partial paths together and return the corresponding path.
     // Insertions is the parts in query that aren't matched and for deletion,
     // we have to find approximation or exact distance using labeling schemes.
     return complete_path;
 }
 
-void DBGAligner::exact_map(AlignedPath &path, const std::string &sequence,
-                             std::map<DPAlignmentKey, DPAlignmentValue> &dp_alignment) {
+bool DBGAligner::exact_map(AlignedPath &path, const std::string &sequence,
+                           std::map<DPAlignmentKey, DPAlignmentValue> &dp_alignment,
+                           const std::function<bool(node_index, const std::string::const_iterator& query_it)>& terminate) {
     node_index seed = path.size() > 0 ? path.back() : graph_->npos;
+    bool continue_alignment = true;
     graph_->extend_from_seed(path.get_query_it(), std::end(sequence),
             [&](node_index node) {
             if (node == graph_->npos)
                 return;
             if (path.size() > 0) {
+                if (terminate(node, path.get_query_it())) {
+                    continue_alignment = false;
+                    return;
+                }
                 path.extend(node, {},
                             *(path.get_query_it() + k_ - 1), match_score_);
             } else {
@@ -180,37 +255,48 @@ void DBGAligner::exact_map(AlignedPath &path, const std::string &sequence,
         }
         else {
             merged_paths_counter_ ++;
+            std::cerr << "Similar path: " << path.get_sequence() << " detected.\n";
             path.set_similar();
         }},
-            [&]() { return (path.get_similar() ||
-                        (path.size() > 0 &&
-                        (graph_->outdegree(path.back()) > 1))); },
+            [&]() { return (path.get_similar() || !continue_alignment ||
+                        (path.size() > 0 && (graph_->outdegree(path.back()) > 1))); },
             seed);
+    return continue_alignment;
 }
 
-void DBGAligner::inexact_map(AlignedPath& path,
+bool DBGAligner::inexact_map(AlignedPath& path,
                              BoundedPriorityQueue<AlignedPath> &queue,
-                             std::map<DPAlignmentKey, DPAlignmentValue> &dp_alignment) {
+                             std::map<DPAlignmentKey, DPAlignmentValue> &dp_alignment,
+                             const std::function<bool(node_index, const std::string::const_iterator& query_it)>& terminate) {
+    bool continue_alignment = true;
     if (path.size() == 0) {
         // To do inexact seeding, a path with incremented query_it is pushed to the queue.
         path.set_query_begin_it(path.get_query_it() + 1);
         path.set_query_it(path.get_query_it() + 1);
         queue.push(std::move(path));
-        return;
+        return continue_alignment;
     }
     graph_->call_outgoing_kmers(path.back(), [&](node_index node, char extension) {
         AlignedPath alternative_path(path);
         alternative_path.set_query_it(path.get_query_it());
 
-        if (queue.size() > 0 && queue.back() < alternative_path) {
-        //if (alternative_path.get_total_score() > sw_threshold_ * path.size()) {
+        if (!continue_alignment || terminate(node, alternative_path.get_query_it())) {
+            continue_alignment = false;
+            return;
+        }
+
+        if (alternative_path.get_total_score() > sw_threshold_ * path.size()) {
             alternative_path.extend(node, {}, extension,
                 single_char_score(*(alternative_path.get_query_it() +
                     k_ - 1), extension));
         } else {
             alternative_path.extend(node, {}, extension);
-            alternative_path.update_total_score(
-                whole_path_score(alternative_path));
+            StripedSmithWaterman::Alignment alignment;
+            if (!cssw_align(alternative_path, alignment))
+                std::cout << "Failure in SSW calculation. Cigar string might be missing.\n";
+            alternative_path.update_total_score(alignment.sw_score);
+
+            alternative_path.set_cigar(alignment.cigar_string);
         }
         // Merge Similar paths.
         DPAlignmentKey alternative_key{.node = alternative_path.back(),
@@ -231,6 +317,7 @@ void DBGAligner::inexact_map(AlignedPath& path,
             path.set_similar();
         }
         });
+    return continue_alignment;
 }
 
 float DBGAligner::single_char_score(char char_in_query, char char_in_graph) const {
@@ -279,19 +366,7 @@ float DBGAligner::ssw_score(const AlignedPath &path) const {
         std::cout << "Failure in SSW calculation. Computing SSW inefficiently.\n";
         return whole_path_score(path);
     }
-    std::string query(path.get_query_begin_it(), path.get_query_it() + k_ - 1);
-
-    // Calculate mismatch score for either X or S in cigar
-    // (mismatched or not counted due to clipping).
-    // TODO: Count mismatches more accurately based on different values in sub_score_.
-    // TODO: Count insertion, deletions based on cigar.
-    float score = sub_score_.at('$').at('$') * alignment.mismatches
-                  + match_score_ *
-                    (alignment.query_end - alignment.query_begin + 1.0)
-                  + sub_score_.at('$').at('$') *
-                    (query.size() - 1.0 - alignment.query_end);
-
-    return score;
+    return alignment.sw_score;
 }
 
 float DBGAligner::whole_path_score(const AlignedPath &path) const {
