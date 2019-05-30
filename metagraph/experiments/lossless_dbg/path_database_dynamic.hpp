@@ -227,8 +227,10 @@ public:
                             if (their_traversed_edge == traversed_edge and
                                 their_thread_id < 0 and
                                 their_relative_position <= relative_position) {
+#ifdef DEBUG_ORDER_CORRECTION
                                 cerr << target_queue << endl;
                                 PRINT_VAR(tid, node, their_relative_position);
+#endif
                                 relative_position++;
                             }
                         }
