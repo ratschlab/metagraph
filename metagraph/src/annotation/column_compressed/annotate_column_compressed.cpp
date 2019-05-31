@@ -113,17 +113,6 @@ bool ColumnCompressed<Label>::has_labels(Index i, const VLabels &labels) const {
 }
 
 template <typename Label>
-uint64_t ColumnCompressed<Label>
-::count_labels(Index i, const VLabels &labels_to_match) const {
-    uint64_t count = 0;
-    for (const auto &label : labels_to_match) {
-        if (has_label(i, label))
-            ++count;
-    }
-    return count;
-}
-
-template <typename Label>
 void ColumnCompressed<Label>::serialize(const std::string &filename) const {
     flush();
 
@@ -250,16 +239,16 @@ void ColumnCompressed<Label>::insert_rows(const std::vector<Index> &rows) {
 
 template <typename Label>
 void ColumnCompressed<Label>
-::call_indices(const Label &label,
-               const std::function<void(const Index&)> callback) const {
-    uint64_t encoding = -1llu;
+::call_objects(const Label &label,
+               std::function<void(Index)> callback) const {
+    size_t col;
     try {
-        encoding = label_encoder_.encode(label);
+        col = label_encoder_.encode(label);
     } catch (...) {
         return;
     }
 
-    get_column(encoding).call_ones(callback);
+    get_column(col).call_ones(callback);
 }
 
 // For each pair (first, second) in the dictionary, renames
@@ -504,10 +493,10 @@ void ColumnCompressed<Label>
         if (!outstream.good())
             throw std::ofstream::failure("Bad stream");
 
-        const auto &color = get_column(i);
+        const auto &column = get_column(i);
 
-        serialize_number(outstream, color.num_set_bits());
-        color.call_ones([&](const auto &pos) {
+        serialize_number(outstream, column.num_set_bits());
+        column.call_ones([&](const auto &pos) {
             serialize_number(outstream, pos);
         });
     }

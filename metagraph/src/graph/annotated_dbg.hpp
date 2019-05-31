@@ -11,17 +11,22 @@
 class AnnotatedDBG {
   public:
     typedef annotate::MultiLabelAnnotation<uint64_t, std::string> Annotator;
+    using node_index = SequenceGraph::node_index;
+    using row_index = Annotator::Index;
 
     AnnotatedDBG(std::shared_ptr<SequenceGraph> dbg,
                  std::unique_ptr<Annotator>&& annotation,
                  size_t num_threads = 0,
                  bool force_fast = false);
 
-    // return labels that occur at least in |presence_ratio| k-mers
-    std::vector<std::string>
-    get_labels(const std::string &sequence, double presence_ratio = 0) const;
+    std::vector<std::string> get_labels(node_index index) const;
 
-    std::vector<std::string> get_labels(const SequenceGraph::node_index &index) const;
+    bool has_label(node_index index,
+                   const std::string &label) const;
+
+    // return labels that occur at least in |presence_ratio| k-mers
+    std::vector<std::string> get_labels(const std::string &sequence,
+                                        double presence_ratio) const;
 
     // return top |num_top_labels| labels with their counts
     std::vector<std::pair<std::string, size_t>>
@@ -29,23 +34,17 @@ class AnnotatedDBG {
                    size_t num_top_labels,
                    double min_label_frequency = 0.0) const;
 
-    bool label_exists(const std::string &label) const;
-
-    bool has_label(const SequenceGraph::node_index &index, const std::string &label) const;
-
-    void call_indices(const std::string &label,
-                      const std::function<void(const SequenceGraph::node_index&)> callback) const;
-
-    uint64_t count_labels(SequenceGraph::node_index index, const std::vector<std::string> &labels_to_match) const;
-
     void annotate_sequence(const std::string &sequence,
                            const std::vector<std::string> &labels);
 
+    void call_annotated_nodes(const std::string &label,
+                              std::function<void(node_index)> callback) const;
+
     void join() { thread_pool_.join(); }
 
-    uint64_t num_anno_rows() const;
+    bool label_exists(const std::string &label) const;
 
-    uint64_t num_nodes() const { return graph_->num_nodes(); }
+    uint64_t num_anno_rows() const;
 
     bool check_compatibility() const;
 
@@ -56,11 +55,11 @@ class AnnotatedDBG {
                                  const bit_vector_dyn &inserted_edges);
 
   private:
-    static Annotator::Index
-    graph_to_anno_index(SequenceGraph::node_index kmer_index);
+    static row_index
+    graph_to_anno_index(node_index kmer_index);
 
-    static SequenceGraph::node_index
-    anno_to_graph_index(Annotator::Index anno_index);
+    static node_index
+    anno_to_graph_index(row_index anno_index);
 
     void annotate_sequence_thread_safe(std::string sequence,
                                        std::vector<std::string> labels);

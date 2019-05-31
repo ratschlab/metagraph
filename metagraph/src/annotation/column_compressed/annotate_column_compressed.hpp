@@ -49,7 +49,6 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     virtual bool has_label(Index i, const Label &label) const override;
     virtual bool has_labels(Index i, const VLabels &labels) const override;
-    virtual uint64_t count_labels(Index i, const VLabels &labels_to_match) const override;
 
     virtual void serialize(const std::string &filename) const override;
     virtual bool merge_load(const std::vector<std::string> &filenames) override;
@@ -68,8 +67,8 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     virtual uint64_t num_objects() const override;
     virtual size_t num_labels() const override;
     virtual uint64_t num_relations() const override;
-    virtual void call_indices(const Label &label,
-                              const std::function<void(const Index&)> callback) const override;
+    virtual void call_objects(const Label &label,
+                              std::function<void(Index)> callback) const override;
 
     void convert_to_row_annotator(RowCompressed<Label> *annotator,
                                   size_t num_threads = 1) const;

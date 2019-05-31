@@ -22,7 +22,6 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
 
     bool has_label(Index i, const Label &label) const override;
     bool has_labels(Index i, const VLabels &labels) const override;
-    uint64_t count_labels(Index i, const VLabels &labels_to_match) const override;
 
     VLabels get_labels(Index i) const override;
     // Get labels that occur at least in |presence_ratio| rows.
@@ -45,8 +44,8 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
 
     const BinaryMatrixType& data() const { return *matrix_; }
 
-    void call_indices(const Label &label,
-                      const std::function<void(const Index&)> callback) const;
+    void call_objects(const Label &label,
+                      std::function<void(Index)> callback) const override;
 
   private:
     std::vector<uint64_t> count_labels(const std::vector<Index> &indices) const override;
