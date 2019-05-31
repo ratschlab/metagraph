@@ -169,10 +169,11 @@ public:
 
             size_t kmer_begin = 0;
             kmer_end = graph.get_k();
-
+#ifdef DEBUG_ADDITIONAL_INFORMATION
             vector<node_index> debug_list_of_nodes;
             vector<int> debug_relative_position_history;
             bool debug_transformation_used = sequence != path_for_sequence;
+#endif
             // TODO: use map_to_nodes_sequentially when implemented
             graph.map_to_nodes(path_for_sequence, [&](node_index node) {
                 if (not node) {
@@ -188,7 +189,9 @@ public:
                     PRINT_VAR(bool(gp.is_weak_split(271541)));
                 }
                 assert(node);
+#ifdef DEBUG_ADDITIONAL_INFORMATION
                 debug_list_of_nodes.push_back(node);
+#endif
                 char join_char = node_is_join(node)
                                  ? (kmer_begin ? path_for_sequence[kmer_begin-1] : '$')
                                  : '\0';
@@ -209,7 +212,9 @@ public:
 #ifdef _OPENMP
             optional<omp_lock_t*> prev_outgoing_lock;
 #endif
+#ifdef DEBUG_ADDITIONAL_INFORMATION
             int debug_bifurcation_idx = 0;
+#endif
             int prev_node = 0;
             char traversed_edge = '\0';
             for (const auto &[node, join_symbol, split_symbol] : bifurcations) {
@@ -272,10 +277,13 @@ public:
                         cerr << "current" << endl;
                         PRINT_VAR(graph.get_node_sequence(node));
                         PRINT_VAR(node,tid,relative_position,prev_node,traversed_edge);
+#ifdef DEBUG_ADDITIONAL_INFORMATION
                         PRINT_VAR(debug_bifurcation_idx);
+#endif
                         incoming_table.print_content(node);
                         PRINT_VAR(join_symbol);
                         cerr << "previous" << endl;
+#ifdef DEBUG_ADDITIONAL_INFORMATION
                         auto& prev_bifurcation = bifurcations[debug_bifurcation_idx-1];
                         const auto &[prev_node_2, prev_join_symbol, prev_split_symbol] = prev_bifurcation;
                         PRINT_VAR(graph.get_node_sequence(prev_node));
@@ -299,9 +307,12 @@ public:
                             PRINT_VAR(prev_position);
                             PRINT_VAR(prev_join_symbol);
                         }
+#endif
                     }
                     assert(relative_position <= incoming_table.branch_size(node,join_symbol));
+#ifdef DEBUG_ADDITIONAL_INFORMATION
                     debug_relative_position_history.push_back(relative_position);
+#endif
                     relative_position += incoming_table.branch_offset_and_increment(node, join_symbol);
                 }
 
@@ -309,7 +320,9 @@ public:
                 if (split_symbol) {
                     assert(relative_position>=0);
                     routing_table.insert(node, relative_position, split_symbol);
+#ifdef DEBUG_ADDITIONAL_INFORMATION
                     debug_relative_position_history.push_back(relative_position);
+#endif
                     relative_position = routing_table.new_relative_position(node, relative_position);
                     if (split_symbol == '$') {
                         //++progress_bar;
@@ -324,7 +337,9 @@ public:
                 }
                 omp_unset_lock(&node_locks[node]);
 #endif
+#ifdef DEBUG_ADDITIONAL_INFORMATION
                 debug_bifurcation_idx++;
+#endif
                 prev_node = node;
             }
         }
