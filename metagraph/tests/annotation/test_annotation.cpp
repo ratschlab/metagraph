@@ -434,92 +434,6 @@ TYPED_TEST(AnnotatorPresetTest, get_labels) {
               convert_to_set(this->annotation->get_labels({ 0, 1, 2, 3, 4 }, 1)));
 }
 
-TYPED_TEST(AnnotatorPresetTest, CountLabels) {
-    EXPECT_EQ(3u, this->annotation->count_labels(0, { "Label0", "Label2", "Label8", "Label1" }));
-    EXPECT_EQ(3u, this->annotation->count_labels(0, { "Label0", "Label2", "Label8" }));
-    EXPECT_EQ(2u, this->annotation->count_labels(0, { "Label0", "Label2", "Label1" }));
-    EXPECT_EQ(2u, this->annotation->count_labels(0, { "Label0", "Label2" }));
-    EXPECT_EQ(1u, this->annotation->count_labels(0, { "Label0", "Label1" }));
-    EXPECT_EQ(1u, this->annotation->count_labels(0, { "Label0" }));
-    EXPECT_EQ(0u, this->annotation->count_labels(0, { "Label1" }));
-    EXPECT_EQ(0u, this->annotation->count_labels(0, { }));
-
-    EXPECT_EQ(0u, this->annotation->count_labels(1, { "Label0" }));
-    EXPECT_EQ(0u, this->annotation->count_labels(1, { }));
-
-    EXPECT_EQ(2u, this->annotation->count_labels(2, { "Label1", "Label2", "Label0" }));
-    EXPECT_EQ(2u, this->annotation->count_labels(2, { "Label1", "Label2" }));
-    EXPECT_EQ(1u, this->annotation->count_labels(2, { "Label1", "Label0" }));
-    EXPECT_EQ(1u, this->annotation->count_labels(2, { "Label1" }));
-    EXPECT_EQ(0u, this->annotation->count_labels(2, { "Label0" }));
-    EXPECT_EQ(0u, this->annotation->count_labels(2, { }));
-
-    EXPECT_EQ(3u, this->annotation->count_labels(3, { "Label1", "Label2", "Label8", "Label0" }));
-    EXPECT_EQ(3u, this->annotation->count_labels(3, { "Label1", "Label2", "Label8" }));
-    EXPECT_EQ(2u, this->annotation->count_labels(3, { "Label1", "Label2", "Label0" }));
-    EXPECT_EQ(2u, this->annotation->count_labels(3, { "Label1", "Label2" }));
-    EXPECT_EQ(1u, this->annotation->count_labels(3, { "Label1", "Label0" }));
-    EXPECT_EQ(1u, this->annotation->count_labels(3, { "Label1" }));
-    EXPECT_EQ(0u, this->annotation->count_labels(3, { "Label0" }));
-    EXPECT_EQ(0u, this->annotation->count_labels(3, { }));
-
-    EXPECT_EQ(1u, this->annotation->count_labels(4, { "Label2", "Label0", "Label1", "Label8" }));
-    EXPECT_EQ(1u, this->annotation->count_labels(4, { "Label2", "Label0", "Label1" }));
-    EXPECT_EQ(1u, this->annotation->count_labels(4, { "Label2", "Label0" }));
-    EXPECT_EQ(1u, this->annotation->count_labels(4, { "Label2" }));
-    EXPECT_EQ(0u, this->annotation->count_labels(4, { "Label0", "Label1", "Label8" }));
-    EXPECT_EQ(0u, this->annotation->count_labels(4, { "Label0", "Label1" }));
-    EXPECT_EQ(0u, this->annotation->count_labels(4, { "Label0" }));
-    EXPECT_EQ(0u, this->annotation->count_labels(4, { "Label1" }));
-}
-
-TYPED_TEST(AnnotatorPreset2Test, CountLabels) {
-    EXPECT_EQ(3u, this->annotation->count_labels(0, { "Label0", "Label1",
-                                                               "Label2", "Label4",
-                                                               "Label5", "Label8" }));
-    EXPECT_EQ(2u, this->annotation->count_labels(0, { "Label1",
-                                                               "Label2", "Label4",
-                                                               "Label5", "Label8" }));
-    EXPECT_EQ(2u, this->annotation->count_labels(0, { "Label0", "Label1",
-                                                               "Label4",
-                                                               "Label5", "Label8" }));
-    EXPECT_EQ(2u, this->annotation->count_labels(0, { "Label0", "Label1",
-                                                               "Label2", "Label4",
-                                                               "Label5" }));
-    EXPECT_EQ(1u, this->annotation->count_labels(0, { "Label1",
-                                                               "Label4",
-                                                               "Label5", "Label8" }));
-    EXPECT_EQ(1u, this->annotation->count_labels(0, { "Label1",
-                                                               "Label2", "Label4",
-                                                               "Label5" }));
-    EXPECT_EQ(1u, this->annotation->count_labels(0, { "Label0", "Label1",
-                                                               "Label4",
-                                                               "Label5" }));
-
-    EXPECT_EQ(0u, this->annotation->count_labels(1, { "Label0", "Label1",
-                                                               "Label2", "Label4",
-                                                               "Label5", "Label8" }));
-    EXPECT_EQ(0u, this->annotation->count_labels(1, { "Label0",
-                                                               "Label2", "Label4",
-                                                               "Label5", "Label8" }));
-    EXPECT_EQ(0u, this->annotation->count_labels(1, { "Label0", "Label2", "Label8" }));
-    EXPECT_EQ(0u, this->annotation->count_labels(1, { "Label0", "Label8" }));
-    EXPECT_EQ(0u, this->annotation->count_labels(1, { "Label2" }));
-    EXPECT_EQ(0u, this->annotation->count_labels(1, { }));
-
-    EXPECT_EQ(2u, this->annotation->count_labels(2, { "Label0", "Label1",
-                                                               "Label2", "Label4",
-                                                               "Label5", "Label8" }));
-    EXPECT_EQ(1u, this->annotation->count_labels(2, { "Label0",
-                                                               "Label2", "Label4",
-                                                               "Label5", "Label8" }));
-    EXPECT_EQ(2u, this->annotation->count_labels(2, { "Label1", "Label2", "Label8" }));
-    EXPECT_EQ(1u, this->annotation->count_labels(2, { "Label1", "Label8" }));
-    EXPECT_EQ(2u, this->annotation->count_labels(2, { "Label1", "Label2" }));
-    EXPECT_EQ(1u, this->annotation->count_labels(2, { "Label2" }));
-    EXPECT_EQ(0u, this->annotation->count_labels(2, { }));
-}
-
 TYPED_TEST(AnnotatorPreset3Test, get_top_labels) {
     typedef std::vector<std::pair<std::string, size_t>> VectorCounts;
     EXPECT_EQ(VectorCounts({}),
@@ -575,7 +489,7 @@ TYPED_TEST(AnnotatorPresetTest, Sparsity) {
 TYPED_TEST(AnnotatorPresetTest, CallIndices) {
     std::vector<typename TypeParam::Index> indices;
 
-    this->annotation->call_indices("Label0",
+    this->annotation->call_objects("Label0",
                                    [&](const auto &i) { indices.push_back(i); });
 
     EXPECT_EQ(1u, indices.size());
@@ -583,7 +497,7 @@ TYPED_TEST(AnnotatorPresetTest, CallIndices) {
               convert_to_set(indices));
     indices.clear();
 
-    this->annotation->call_indices("Label1",
+    this->annotation->call_objects("Label1",
                                    [&](const auto &i) { indices.push_back(i); });
 
     EXPECT_EQ(2u, indices.size());
@@ -591,7 +505,7 @@ TYPED_TEST(AnnotatorPresetTest, CallIndices) {
               convert_to_set(indices));
     indices.clear();
 
-    this->annotation->call_indices("Label2",
+    this->annotation->call_objects("Label2",
                                    [&](const auto &i) { indices.push_back(i); });
 
     EXPECT_EQ(4u, indices.size());
@@ -599,7 +513,7 @@ TYPED_TEST(AnnotatorPresetTest, CallIndices) {
               convert_to_set(indices));
     indices.clear();
 
-    this->annotation->call_indices("Label3",
+    this->annotation->call_objects("Label3",
                                    [&](const auto &i) { indices.push_back(i); });
 
     EXPECT_EQ(0u, indices.size());
@@ -607,7 +521,7 @@ TYPED_TEST(AnnotatorPresetTest, CallIndices) {
               convert_to_set(indices));
     indices.clear();
 
-    this->annotation->call_indices("Label8",
+    this->annotation->call_objects("Label8",
                                    [&](const auto &i) { indices.push_back(i); });
 
     EXPECT_EQ(2u, indices.size());
@@ -619,7 +533,7 @@ TYPED_TEST(AnnotatorPresetTest, CallIndices) {
 TYPED_TEST(AnnotatorPreset2Test, CallIndices) {
     std::vector<typename TypeParam::Index> indices;
 
-    this->annotation->call_indices("Label0",
+    this->annotation->call_objects("Label0",
                                    [&](const auto &i) { indices.push_back(i); });
 
     EXPECT_EQ(1u, indices.size());
@@ -627,7 +541,7 @@ TYPED_TEST(AnnotatorPreset2Test, CallIndices) {
               convert_to_set(indices));
     indices.clear();
 
-    this->annotation->call_indices("Label1",
+    this->annotation->call_objects("Label1",
                                    [&](const auto &i) { indices.push_back(i); });
 
     EXPECT_EQ(1u, indices.size());
@@ -635,7 +549,7 @@ TYPED_TEST(AnnotatorPreset2Test, CallIndices) {
               convert_to_set(indices));
     indices.clear();
 
-    this->annotation->call_indices("Label2",
+    this->annotation->call_objects("Label2",
                                    [&](const auto &i) { indices.push_back(i); });
 
     EXPECT_EQ(2u, indices.size());
@@ -643,7 +557,7 @@ TYPED_TEST(AnnotatorPreset2Test, CallIndices) {
               convert_to_set(indices));
     indices.clear();
 
-    this->annotation->call_indices("Label3",
+    this->annotation->call_objects("Label3",
                                    [&](const auto &i) { indices.push_back(i); });
 
     EXPECT_EQ(0u, indices.size());
@@ -651,7 +565,7 @@ TYPED_TEST(AnnotatorPreset2Test, CallIndices) {
               convert_to_set(indices));
     indices.clear();
 
-    this->annotation->call_indices("Label8",
+    this->annotation->call_objects("Label8",
                                    [&](const auto &i) { indices.push_back(i); });
 
     EXPECT_EQ(2u, indices.size());
@@ -663,7 +577,7 @@ TYPED_TEST(AnnotatorPreset2Test, CallIndices) {
 TYPED_TEST(AnnotatorPreset3Test, CallIndices) {
     std::vector<typename TypeParam::Index> indices;
 
-    this->annotation->call_indices("Label0",
+    this->annotation->call_objects("Label0",
                                    [&](const auto &i) { indices.push_back(i); });
 
     EXPECT_EQ(1u, indices.size());
@@ -671,7 +585,7 @@ TYPED_TEST(AnnotatorPreset3Test, CallIndices) {
               convert_to_set(indices));
     indices.clear();
 
-    this->annotation->call_indices("Label1",
+    this->annotation->call_objects("Label1",
                                    [&](const auto &i) { indices.push_back(i); });
 
     EXPECT_EQ(2u, indices.size());
@@ -679,7 +593,7 @@ TYPED_TEST(AnnotatorPreset3Test, CallIndices) {
               convert_to_set(indices));
     indices.clear();
 
-    this->annotation->call_indices("Label2",
+    this->annotation->call_objects("Label2",
                                    [&](const auto &i) { indices.push_back(i); });
 
     EXPECT_EQ(4u, indices.size());
@@ -687,7 +601,7 @@ TYPED_TEST(AnnotatorPreset3Test, CallIndices) {
               convert_to_set(indices));
     indices.clear();
 
-    this->annotation->call_indices("Label3",
+    this->annotation->call_objects("Label3",
                                    [&](const auto &i) { indices.push_back(i); });
 
     EXPECT_EQ(0u, indices.size());
@@ -695,7 +609,7 @@ TYPED_TEST(AnnotatorPreset3Test, CallIndices) {
               convert_to_set(indices));
     indices.clear();
 
-    this->annotation->call_indices("Label8",
+    this->annotation->call_objects("Label8",
                                    [&](const auto &i) { indices.push_back(i); });
 
     EXPECT_EQ(3u, indices.size());

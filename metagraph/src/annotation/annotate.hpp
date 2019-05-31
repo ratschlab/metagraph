@@ -81,7 +81,6 @@ class MultiLabelAnnotation
 
     virtual bool has_label(Index i, const Label &label) const = 0;
     virtual bool has_labels(Index i, const VLabels &labels) const = 0;
-    virtual uint64_t count_labels(Index i, const VLabels &labels_to_match) const = 0;
 
     virtual void insert_rows(const std::vector<Index> &rows) = 0;
 
@@ -104,8 +103,8 @@ class MultiLabelAnnotation
                    size_t num_top = static_cast<size_t>(-1),
                    double min_label_frequency = 0.0) const = 0;
 
-    virtual void call_indices(const Label &label,
-                              const std::function<void(const Index&)> callback) const = 0;
+    virtual void call_objects(const Label &label,
+                              std::function<void(Index)> callback) const = 0;
 
     /************************* Properties *************************/
 
@@ -114,11 +113,6 @@ class MultiLabelAnnotation
     virtual uint64_t num_relations() const = 0;
 
     virtual bool label_exists(const Label &label) const = 0;
-
-  protected:
-    // TODO: add |min_label_frequency| parameter: return only frequent labels
-    virtual std::vector<uint64_t>
-    count_labels(const std::vector<Index> &indices) const = 0;
 };
 
 
@@ -139,6 +133,11 @@ class LabelEncoder {
     size_t encode(const Label &label) const;
 
     /**
+     * Check if the label has been added to encoder.
+     */
+    bool label_exists(const Label &label) const { return encode_label_.count(label); }
+
+    /**
      * Throws an exception if a bad code is passed.
      */
     const Label& decode(size_t code) const { return decode_label_.at(code); }
@@ -151,8 +150,6 @@ class LabelEncoder {
     void merge(const LabelEncoder<Label> &other);
 
     void clear() { encode_label_.clear(); decode_label_.clear(); }
-
-    bool label_exists(const Label &label) const;
 
   private:
     std::unordered_map<Label, uint64_t> encode_label_;
@@ -203,6 +200,10 @@ class MultiLabelEncoded
     }
 
   protected:
+    // TODO: add |min_label_frequency| parameter: return only frequent labels
+    virtual std::vector<uint64_t>
+    count_labels(const std::vector<Index> &indices) const = 0;
+
     LabelEncoder<Label> label_encoder_;
 };
 

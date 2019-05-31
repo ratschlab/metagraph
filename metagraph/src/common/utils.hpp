@@ -95,27 +95,32 @@ namespace utils {
     uint32_t code_length(uint64_t a);
 
     template <class AIt, class BIt>
-    uint64_t count_intersection(AIt abegin, AIt aend, BIt bbegin, BIt bend) {
+    uint64_t count_intersection(AIt first_begin, AIt first_end,
+                                BIt second_begin, BIt second_end) {
+        assert(std::is_sorted(first_begin, first_end));
+        assert(std::is_sorted(second_begin, second_end));
+        assert(std::set<typename AIt::value_type>(first_begin, first_end).size()
+                    == static_cast<uint64_t>(std::distance(first_begin, first_end)));
+        assert(std::set<typename BIt::value_type>(second_begin, second_end).size()
+                    == static_cast<uint64_t>(std::distance(second_begin, second_end)));
+
         uint64_t count = 0;
-        while (abegin != aend && bbegin != bend) {
-            while (*abegin < *bbegin && abegin != aend) {
-                ++abegin;
-            }
 
-            if (abegin == aend)
+        while (first_begin != first_end && second_begin != second_end) {
+            first_begin = std::lower_bound(first_begin, first_end, *second_begin);
+
+            if (first_begin == first_end)
                 break;
 
-            while (*bbegin < *abegin && bbegin != bend) {
-                ++bbegin;
-            }
+            second_begin = std::lower_bound(second_begin, second_end, *first_begin);
 
-            if (bbegin == bend)
+            if (second_begin == second_end)
                 break;
 
-            if (*abegin == *bbegin) {
+            if (*first_begin == *second_begin) {
                 ++count;
-                ++abegin;
-                ++bbegin;
+                ++first_begin;
+                ++second_begin;
             }
         }
 

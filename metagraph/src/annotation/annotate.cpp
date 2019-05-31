@@ -58,16 +58,6 @@ bool LabelEncoder<std::string>::load(std::istream &instream) {
     }
 }
 
-template <typename Label>
-bool LabelEncoder<Label>::label_exists(const Label &label) const {
-    try {
-        encode(label);
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
 
 // For each pair (first, second) in the dictionary, renames column |first|
 // to |second| and merges columns with matching names, if supported.
@@ -113,7 +103,7 @@ auto MultiLabelEncoded<IndexType, LabelType>
 -> std::vector<std::pair<Label, size_t>> {
     // TODO: use |min_label_frequency|
     // auto counter = count_labels(indices, min_label_frequency);
-    auto counter = this->count_labels(indices);
+    auto counter = count_labels(indices);
 
     const uint64_t min_count = min_label_frequency * indices.size();
 
