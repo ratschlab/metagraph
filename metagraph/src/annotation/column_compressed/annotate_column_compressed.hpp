@@ -39,21 +39,21 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     ~ColumnCompressed();
 
     using MultiLabelEncoded<uint64_t, Label>::set;
-    virtual void set_labels(Index i, const VLabels &labels) override;
-    virtual VLabels get_labels(Index i) const override;
+    void set_labels(Index i, const VLabels &labels) override;
+    VLabels get_labels(Index i) const override;
 
-    virtual void add_label(Index i, const Label &label) override;
-    virtual void add_labels(Index i, const VLabels &labels) override;
-    virtual void add_labels(const std::vector<Index> &indices,
-                            const VLabels &labels) override;
+    void add_label(Index i, const Label &label) override;
+    void add_labels(Index i, const VLabels &labels) override;
+    void add_labels(const std::vector<Index> &indices,
+                    const VLabels &labels) override;
 
-    virtual bool has_label(Index i, const Label &label) const override;
-    virtual bool has_labels(Index i, const VLabels &labels) const override;
+    bool has_label(Index i, const Label &label) const override;
+    bool has_labels(Index i, const VLabels &labels) const override;
 
-    virtual void serialize(const std::string &filename) const override;
-    virtual bool merge_load(const std::vector<std::string> &filenames) override;
+    void serialize(const std::string &filename) const override;
+    bool merge_load(const std::vector<std::string> &filenames) override;
 
-    virtual void insert_rows(const std::vector<Index> &rows) override;
+    void insert_rows(const std::vector<Index> &rows) override;
 
     // For each pair (first, second) in the dictionary, renames
     // column |first| with |second| and merges the columns with matching names.
@@ -61,14 +61,14 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     // Get labels that occur at least in |presence_ratio| rows.
     // If |presence_ratio| = 0, return all occurring labels.
-    virtual VLabels get_labels(const std::vector<Index> &indices,
-                               double presence_ratio) const override;
+    VLabels get_labels(const std::vector<Index> &indices,
+                       double presence_ratio) const override;
 
-    virtual uint64_t num_objects() const override;
-    virtual size_t num_labels() const override;
-    virtual uint64_t num_relations() const override;
-    virtual void call_objects(const Label &label,
-                              std::function<void(Index)> callback) const override;
+    uint64_t num_objects() const override;
+    size_t num_labels() const override;
+    uint64_t num_relations() const override;
+    void call_objects(const Label &label,
+                      std::function<void(Index)> callback) const override;
 
     void convert_to_row_annotator(RowCompressed<Label> *annotator,
                                   size_t num_threads = 1) const;
@@ -77,12 +77,12 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     const auto& data() const { return bitmatrix_; };
 
-    virtual std::unique_ptr<IterateRows> iterator() const override;
+    std::unique_ptr<IterateRows> iterator() const override;
 
   private:
     void set(Index i, size_t j, bool value);
     bool is_set(Index i, size_t j) const;
-    virtual std::vector<uint64_t>
+    std::vector<uint64_t>
     count_labels(const std::vector<Index> &indices) const override;
 
     void add_labels(uint64_t begin, uint64_t end,
