@@ -42,29 +42,50 @@ using alphabets::log2;
 // todo find a tool that removes this relative namespacing issue
 // say to Mikhail that "de_bruijn_graph" instead of "metagraph/de_bruijn_graph" is the same violation as this
 
+template <typename StaticTable>
+class DynamicVersion {
 
+};
+template <>
+class DynamicVersion<RoutingTable<>> {
+public:
+    using Type = DynamicRoutingTable<>;
+};
+template <>
+class DynamicVersion<RoutingTableCore<>> {
+public:
+    using Type = DynamicRoutingTableCore<>;
+};
+template <>
+class DynamicVersion<IncomingTable<>> {
+public:
+    using Type = DynamicIncomingTable<>;
+};
 
 //template <class Wavelet = sdsl::wt_rlmn<sdsl::sd_vector<>>
-template<class Wavelet = sdsl::wt_rlmn<>,class BitVector=default_bit_vector>
-class PathDatabaseWaveletCore : public PathDatabaseDynamicCore<> {
+template<class RoutingTableT = RoutingTable<>,class IncomingTableT=IncomingTable<>>
+class PathDatabaseWaveletCore : public PathDatabaseDynamicCore<DBGSuccinct,typename DynamicVersion<RoutingTableT>::Type,typename DynamicVersion<IncomingTableT>::Type> {
 public:
+    using GT = DBGSuccinct;
+    using DRT = typename DynamicVersion<RoutingTableT>::Type;
+    using DIT = typename DynamicVersion<IncomingTableT>::Type;
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
-    PathDatabaseWaveletCore(std::shared_ptr<const DBGSuccinct> graph) : PathDatabaseDynamicCore(graph),
+    PathDatabaseWaveletCore(std::shared_ptr<const DBGSuccinct> graph) : PathDatabaseDynamicCore<GT,DRT,DIT>(graph),
                                                                               incoming_table(*graph),
                                                                               routing_table(*graph)
                                                                               {}
 
     PathDatabaseWaveletCore(const vector<string> &filenames,
-                        size_t kmer_length = 21 /* default */) : PathDatabaseDynamicCore(filenames,kmer_length),
-                                                            routing_table(graph),
-                                                            incoming_table(graph) {}
+                        size_t kmer_length = 21 /* default */) : PathDatabaseDynamicCore<GT,DRT,DIT>(filenames,kmer_length),
+                                                            routing_table(this->graph),
+                                                            incoming_table(this->graph) {}
 
 
 
     std::vector<path_id> encode(const std::vector<std::string> &sequences) {
-        auto encoded = PathDatabaseDynamicCore::encode(sequences);
+        auto encoded = PathDatabaseDynamicCore<GT,DRT,DIT>::encode(sequences);
 
         // convert dynamic_(routing_table/incoming_table) to routing_table/incoming_table
         construct_routing_table();
@@ -76,10 +97,10 @@ public:
         Timer timer;
         cerr << "Started transforming routing_table." << endl;
         vector<char> routing_table_array;
-        for(int node=1;node<=graph.num_nodes();node++) {
+        for(int node=1;node<=this->graph.num_nodes();node++) {
             routing_table_array.push_back('#');// to always start a block with #
-            if (PathDatabaseDynamicCore::node_is_split(node)) {
-                auto& dynamic_table = PathDatabaseDynamicCore::routing_table;
+            if (PathDatabaseDynamicCore<GT,DRT,DIT>::node_is_split(node)) {
+                auto& dynamic_table = PathDatabaseDynamicCore<GT,DRT,DIT>::routing_table;
                 for(int i=0;i<dynamic_table.size(node);i++) {
                     routing_table_array.push_back(dynamic_table.get(node,i));
                 }
@@ -87,7 +108,9 @@ public:
         }
         routing_table_array.push_back('#'); // to also always end a block with #
         routing_table.initialize_content(routing_table_array);
-        routing_table.transformations = PathDatabaseDynamicCore::routing_table.transformations;
+        if constexpr (std::is_base_of<TransformationsEnabler<RoutingTableCore<>>,RoutingTableT>::value) {
+            routing_table.transformations = PathDatabaseDynamicCore<GT, DRT, DIT>::routing_table.transformations;
+        }
         statistics["transformation_routing_table_time"] = timer.elapsed();
         cerr << "Transformation finished in " << statistics["transformation_routing_table_time"] << endl;
     }
@@ -96,37 +119,37 @@ public:
         Timer timer;
         cerr << "Started transforming incoming_table." << endl;
 
-        vector<vector<int>> incoming_table_chunks(graph.num_nodes());
+        vector<vector<int>> incoming_table_chunks(this->graph.num_nodes());
 
         #pragma omp parallel for num_threads(get_num_threads())
-        for(int node=1;node<=graph.num_nodes();node++) {
+        for(int node=1;node<=this->graph.num_nodes();node++) {
             auto& current_chunk = incoming_table_chunks[node-1];
-            if (PathDatabaseDynamicCore::node_is_join(node)) {
-                auto new_reads = PathDatabaseDynamicCore::incoming_table.branch_size(node,'$');
+            if (PathDatabaseDynamicCore<GT,DRT,DIT>::node_is_join(node)) {
+                auto new_reads = PathDatabaseDynamicCore<GT,DRT,DIT>::incoming_table.branch_size(node,'$');
                 if (new_reads) {
                     current_chunk.push_back(new_reads);
                 }
 #ifdef ALL_EDGES_COVERED
                 for(auto& base : "ACGTN") {
-                    auto branch_size = PathDatabaseDynamicCore::incoming_table.branch_size(node,base);
+                    auto branch_size = PathDatabaseDynamicCore<GT,DRT,DIT>::incoming_table.branch_size(node,base);
                     if (branch_size) {
-                        // so it is an actual edge in a graph (because all edges are covered)
+                        // so it is an actual edge in a this->graph (because all edges are covered)
                         current_chunk.push_back(branch_size);
                     }
                 }
 #else
-                graph.call_incoming_kmers_mine(node,[&node,&current_chunk,this](node_index prev_node,char c) {
-                    auto branch_size = PathDatabaseDynamicCore::incoming_table.branch_size(node,c);
+                this->graph.call_incoming_kmers_mine(node,[&node,&current_chunk,this](node_index prev_node,char c) {
+                    auto branch_size = PathDatabaseDynamicCore<GT,DRT,DIT>::incoming_table.branch_size(node,c);
                     current_chunk.push_back(branch_size);
                 });
 #endif
                 assert(!current_chunk.empty());
         #ifndef FULL_INCOMING_TABLE
                 if (current_chunk.empty()) {
-                    PathDatabaseDynamicCore::incoming_table.print_content(node);
-                    PRINT_VAR(PathDatabaseDynamicCore::node_is_join(node));
+                    PathDatabaseDynamicCore<GT,DRT,DIT>::incoming_table.print_content(node);
+                    PRINT_VAR(PathDatabaseDynamicCore<GT,DRT,DIT>::node_is_join(node));
         #ifdef MEMOIZE
-                    PRINT_VAR(PathDatabaseDynamicCore::node_is_join_raw(node));
+                    PRINT_VAR(PathDatabaseDynamicCore<GT,DRT,DIT>::node_is_join_raw(node));
         #endif
                 }
                 if (current_chunk.size() > 1) {
@@ -150,7 +173,7 @@ public:
         for(int i=0;i<delimiter_vector.size();i++) {
             temporary_representation[i] = delimiter_vector[i];
         }
-        incoming_table.joins = BitVector(temporary_representation);
+        incoming_table.joins = decltype(incoming_table.joins)(temporary_representation);
         statistics["transformation_incoming_table_time"] = timer.elapsed();
         cerr << "Transformation finished in " << statistics["transformation_incoming_table_time"] << endl;
     }
@@ -189,7 +212,7 @@ public:
         incoming_table.edge_multiplicity_table.serialize(edge_multiplicity_file);
         routing_table.serialize(routing_table_file);
         incoming_table.joins.serialize(joins_file);
-        graph.serialize(graph_filename);
+        this->graph.serialize(graph_filename);
         cerr << "Finished serializing the path encoder in " << timer.elapsed() << " sec." << endl;
     }
 
@@ -211,7 +234,7 @@ public:
     }
 
     json get_statistics(unsigned int verbosity = ~0u) const {
-        json result = PathDatabaseDynamicCore::get_statistics(verbosity);
+        json result = PathDatabaseDynamicCore<GT,DRT,DIT>::get_statistics(verbosity);
         json routing_table_stats = routing_table.get_statistics(verbosity);
         result.update(statistics);
         result.update(routing_table_stats);
@@ -223,9 +246,9 @@ public:
         std::map<int, int> splits_size_histogram;
         std::map<int, int> splits_diff_symbols_histogram;
 
-        for (int node = 1; node <= graph.num_nodes();node++) {
+        for (int node = 1; node <= this->graph.num_nodes();node++) {
             if (node_is_join(node)) {
-                if (graph.indegree(node) > 1) {
+                if (this->graph.indegree(node) > 1) {
                     true_joins++;
                 }
                 else {
@@ -238,7 +261,7 @@ public:
                 }
             }
             if (node_is_split(node)) {
-                if (graph.outdegree(node) > 1) {
+                if (this->graph.outdegree(node) > 1) {
                     true_splits++;
                 }
                 else {
@@ -258,7 +281,7 @@ public:
                        {"added_joins", added_joins},
                        {"true_splits", true_splits},
                        {"added_splits", added_splits},
-                       {"num_of_nodes", graph.num_nodes()}
+                       {"num_of_nodes", this->graph.num_nodes()}
                       };
         result.update(addition);
         if (verbosity & STATS_SPLITS_HISTOGRAM) {
@@ -275,14 +298,20 @@ public:
 
 //protected:
     json statistics;
-    RoutingTable<Wavelet> routing_table;
-    IncomingTable<BitVector> incoming_table;
+    RoutingTableT routing_table;
+    IncomingTableT incoming_table;
 
 
 };
-template<class Wavelet = sdsl::wt_rlmn<>,class BitVector=default_bit_vector>
+
+template<typename DummyT=int>
 class PathDatabaseWavelet : public QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<>>> {
     using QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<>>>::QueryEnabler;
+};
+
+template<typename DummyT=int>
+class PathDatabaseWaveletWithtoutTransformation : public QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableCore<>,IncomingTable<>>>> {
+    using QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableCore<>,IncomingTable<>>>>::QueryEnabler;
 };
 
 #endif /* path_database_baseline_hpp */

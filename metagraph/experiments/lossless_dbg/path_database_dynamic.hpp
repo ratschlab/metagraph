@@ -30,7 +30,7 @@ using node_index = DeBruijnGraph::node_index;
 
 
 
-template<typename GraphT=DBGSuccinct>
+template<typename GraphT=DBGSuccinct,typename RoutingTableT=DynamicRoutingTable<>,typename IncomingTableT=DynamicIncomingTable<>>
 class PathDatabaseDynamicCore {
 public:
     using path_id = pair<node_index,int>;
@@ -38,14 +38,16 @@ public:
     // graph contains all reads
     // sequences are of size at least k
     explicit PathDatabaseDynamicCore(std::shared_ptr<const GraphT> graph) :
-            graph(*graph),
+            graph_(graph),
+            graph(*graph_),
             incoming_table(*graph)
             {}
 
 
     explicit PathDatabaseDynamicCore(const vector<string> &reads,
                  size_t kmer_length = 21 /* default kmer */) :
-            graph(*buildGraph(this,reads,kmer_length)),
+            graph_(shared_ptr<const GraphT>(buildGraph(this,reads,kmer_length))),
+            graph(*graph_),
             incoming_table(graph),
             routing_table(graph)
             {}
@@ -155,20 +157,10 @@ public:
             std::vector<std::tuple<node_index, char, char>> bifurcations;
 
             const auto &sequence = sequences[i];
-            //auto &path_for_sequence = path_for_sequences[i];
             auto path_for_sequence = transform_sequence(sequence);
 
-
-            size_t kmer_end = graph.get_k();
-            graph.map_to_nodes(sequence, [&](node_index node) {
-                if (kmer_end < sequence.size()) {
-                    path_for_sequence[kmer_end] = routing_table.transform(node, path_for_sequence[kmer_end]);
-                }
-                kmer_end++;
-            });
-
             size_t kmer_begin = 0;
-            kmer_end = graph.get_k();
+            int kmer_end = graph.get_k();
 #ifdef DEBUG_ADDITIONAL_INFORMATION
             vector<node_index> debug_list_of_nodes;
             vector<int> debug_relative_position_history;
@@ -400,16 +392,16 @@ public:
 
     //todo put to proper place
     string transform_sequence(const string& sequence) const {
-        transform_done = 0;
         string result = sequence;
         size_t kmer_end = graph.get_k();
-        graph.map_to_nodes(sequence, [&](node_index node) {
-            if (kmer_end < sequence.size()) {
-                result[kmer_end] = routing_table.transform(node, result[kmer_end]);
-            }
-            kmer_end++;
-        });
-        transform_done = 1;
+        if constexpr (std::is_base_of<TransformationsEnabler<DynamicRoutingTableCore<>>,RoutingTableT>::value) {
+            graph.map_to_nodes(sequence, [&](node_index node) {
+                if (kmer_end < sequence.size()) {
+                    result[kmer_end] = routing_table.transform(node, result[kmer_end]);
+                }
+                kmer_end++;
+            });
+        }
         return result;
     }
 
@@ -430,9 +422,10 @@ public:
     vector<char> is_join;
     vector<char> is_split;
 #endif
+    std::shared_ptr<const GraphT> graph_;
     const GraphT& graph;
-    DynamicRoutingTable<> routing_table;
-    DynamicIncomingTable<> incoming_table;
+    RoutingTableT routing_table;
+    IncomingTableT incoming_table;
 
     static DBGSuccinct* buildGraph(PathDatabaseDynamicCore* self,vector<string> reads,int kmer_length) {
         Timer timer;

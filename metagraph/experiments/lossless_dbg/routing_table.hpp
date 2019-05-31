@@ -133,11 +133,16 @@ public:
     void load(std::istream& in) {
         return routing_table.load(in);
     }
+
+    json get_statistics(int verbosity=0) const {
+        return {};
+    }
+
     const int delimiter_encoded;
     const DBGSuccinct& graph;
 };
 
-template <typename Wavelet>
+template <typename Wavelet=sdsl::wt_rlmn<>>
 class RoutingTable : public TransformationsEnabler<RoutingTableCore<Wavelet>> {
     using TransformationsEnabler<RoutingTableCore<Wavelet>>::TransformationsEnabler;
 };

@@ -71,6 +71,31 @@ Database compressReadsDeprecated(ValueArg<string> &compressedArg,
 	return db;
 }
 
+template<class DatabaseT>
+void compress_reads(ValueArg<std::string> &graphArg, const ValueArg<std::string> &statisticsArg,
+                    ValueArg<std::string> &compressedArg, const string &statistics_filename,
+                    const vector<string> &reads, int kmer_length, shared_ptr<BetterDBGSuccinct> &graph) {
+    unique_ptr<DatabaseT> pd;
+    if (graphArg.isSet()) {
+        Timer timer;
+        cerr << "Started loading the graph" << endl;
+        graph->load(graphArg.getValue());
+        cerr << "Finished loading the graph in " << timer.elapsed() << " sec." << endl;
+        pd.reset(new DatabaseT(graph));
+    } else {
+        pd.reset(new DatabaseT(reads,kmer_length));
+    }
+    pd->encode(reads);
+    if (compressedArg.isSet()) {
+        fs::path compress_folder = compressedArg.getValue();
+        pd->serialize(compress_folder);
+    }
+    if (statisticsArg.isSet()) {
+        auto statistics = pd->get_statistics();
+        save_string(statistics.dump(4),statistics_filename);
+    }
+}
+
 int main_compressor(int argc, char *argv[]) {
 	TCLAP::CmdLine cmd("Compress reads",' ', "0.1");
 
@@ -81,6 +106,17 @@ int main_compressor(int argc, char *argv[]) {
 			false,
 			"",
 			"string",cmd);
+    std::vector<std::string> rerouting {
+            "yes","no"
+    };
+    ValuesConstraint<std::string> rerouting_constraint(rerouting);
+    TCLAP::ValueArg<std::string> pathReroutingArg("r",
+                                          "path-rerouting",
+                                          "Enable rerouting to improve space efficiency.",
+                                          false,
+                                          "yes",
+                                          &rerouting_constraint,
+                                          cmd);
 
 	TCLAP::ValueArg<std::string> inputArg("i",
 			"input",
@@ -94,7 +130,6 @@ int main_compressor(int argc, char *argv[]) {
 			false,
 			21,
 			"int",cmd);
-
 	TCLAP::ValueArg<std::string> statisticsArg("s",
 			"statistics",
 			"Filename of json file that will output statistics about compressed file.",
@@ -130,6 +165,7 @@ int main_compressor(int argc, char *argv[]) {
 	set_num_threads(numThreadsArg.getValue());
 	auto input_filename = inputArg.getValue();
 	auto statistics_filename = statisticsArg.getValue();
+	bool use_transformations = pathReroutingArg.getValue() == "yes";
 	// TODO: Don't read all reads to memory
     Timer read_timer;
     cerr << "Started loading the reads." << endl;
@@ -139,26 +175,13 @@ int main_compressor(int argc, char *argv[]) {
 	auto compressor = compressor_type.getValue();
     auto graph = std::make_shared<DBGSuccinct>(21);
 	if (compressor == "wavelet") {
-		std::unique_ptr<PathDatabaseWavelet<>> pd;
-		if (graphArg.isSet()) {
-		    Timer timer;
-		    cerr << "Started loading the graph" << endl;
-			graph->load(graphArg.getValue());
-			cerr << "Finished loading the graph in " << timer.elapsed() << " sec." << endl;
-			pd.reset(new PathDatabaseWavelet<>(graph));
-		} else {
-			pd.reset(new PathDatabaseWavelet<>(reads,kmer_length));
-		}
-		pd->encode(reads);
-		if (compressedArg.isSet()) {
-			fs::path compress_folder = compressedArg.getValue();
-			pd->serialize(compress_folder);
-		}
-		if (statisticsArg.isSet()) {
-			auto statistics = pd->get_statistics();
-			save_string(statistics.dump(4),statistics_filename);
-		}
-	}
+	    if (use_transformations) {
+            compress_reads<PathDatabaseWavelet<>>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph);
+        }
+	    else {
+            compress_reads<PathDatabaseWaveletWithtoutTransformation<>>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph);
+	    }
+    }
 	return 0;
 }
 
