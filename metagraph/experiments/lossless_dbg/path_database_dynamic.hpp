@@ -75,10 +75,13 @@ public:
             additional_joins_vec[i] = graph.kmer_to_node(
                     transformed_sequence.substr(0, graph.get_k())
             );
+            assert(additional_joins_vec[i]); // node has to be in graph
             additional_splits_vec[i] = graph.kmer_to_node(
                     transformed_sequence.substr(sequence.length() - graph.get_k())
             );
+            assert(additional_splits_vec[i]); // node has to be in graph
         }
+        cerr << "Finished computing additional splits and joins" << endl;
 
         additional_joins = decltype(additional_joins)(additional_joins_vec.begin(),
                                                       additional_joins_vec.end());
@@ -102,6 +105,8 @@ public:
                 is_join[i] = node_is_join_raw(i);
             }
         }
+        cerr << "Finished memoizing bifurcation nodes" << endl;
+
 #endif
         //prepare hash maps
         for (uint64_t node = 0; node <= graph.num_nodes(); node += 8) {
@@ -117,6 +122,7 @@ public:
                 }
             }
         }
+        std::cerr << "Finished initializing hashmaps."  << std::endl;
 
 #ifdef MEMOIZE
         #pragma omp parallel for num_threads(get_num_threads())
@@ -422,8 +428,8 @@ public:
     tsl::hopscotch_set<node_index> additional_splits;
 
 #ifdef MEMOIZE
-    vector<char> is_join;
-    vector<char> is_split;
+    vector<bool> is_join;
+    vector<bool> is_split;
 #endif
     std::shared_ptr<const GraphT> graph_;
     const GraphT& graph;
