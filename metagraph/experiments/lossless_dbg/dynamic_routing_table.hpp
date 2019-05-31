@@ -80,6 +80,7 @@ public:
     }
 
     char traversed_base(node_index node, int position) const {
+        assert(position >= 0 && "traversing o");
         return get(node,position);
     }
 

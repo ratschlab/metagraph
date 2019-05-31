@@ -133,12 +133,6 @@ public:
 
         //ProgressBar progress_bar(sequences.size(), "Building dRT and dEM");
 
-        const size_t batch_size = std::max(static_cast<size_t>(1),
-                                           static_cast<size_t>(sequences.size() / 200));
-
-        double join_time = 0;
-        double split_time = 0;
-
 #ifdef _OPENMP
         vector<omp_lock_t> node_locks(graph.num_nodes()+1);
         vector<omp_lock_t> outgoing_locks(graph.num_nodes()+1);
@@ -176,9 +170,6 @@ public:
                         PRINT_VAR(graph.kmer_to_node(path_for_sequence.substr(offset,graph.get_k())));
                     };
                     pn(kmer_begin);
-                    pn(kmer_begin-6);
-                    auto gp = GraphPreprocessor(graph);
-                    PRINT_VAR(bool(gp.is_weak_split(271541)));
                 }
                 assert(node);
 #ifdef DEBUG_ADDITIONAL_INFORMATION
@@ -201,9 +192,6 @@ public:
             });
 
             int relative_position = INT_MIN;
-#ifdef _OPENMP
-            optional<omp_lock_t*> prev_outgoing_lock;
-#endif
 #ifdef DEBUG_ADDITIONAL_INFORMATION
             int debug_bifurcation_idx = 0;
 #endif
@@ -217,12 +205,17 @@ public:
                     bool me_first = 0;
                     bool was_me = 0;
                     int past_offset = 0;
+
+                    // todo_wrap in define or better in macro
+                    int debug_my_id = 0;
+                    int debug_idx = 0;
                     omp_set_lock(&outgoing_locks[prev_node]);
                     auto& target_queue = waiting_threads[prev_node];
                     for(auto&[their_thread_id,their_relative_position,their_traversed_edge] : target_queue) {
                         if (was_me) {
+                            // future
                             if (their_traversed_edge == traversed_edge and
-                                their_thread_id < 0 and
+                                their_thread_id < 0 and // job has already finished
                                 their_relative_position <= relative_position) {
 #ifdef DEBUG_ORDER_CORRECTION
                                 cerr << target_queue << endl;
@@ -232,29 +225,39 @@ public:
                             }
                         }
                         else if (tid == their_thread_id) {
+                            debug_my_id = debug_idx;
+                            assert(!was_me); // can appear only once
+                            // present
                             was_me = 1;
                             if (first_it) {
                                 me_first = 1;
                             }
                             their_thread_id = -tid;
                         }  else {
+                            // past
                             if (their_traversed_edge == traversed_edge and
-                                their_thread_id > 0 and
+                                their_thread_id > 0 and// job is waiting
                                 their_relative_position <= relative_position) {
                                 past_offset--;
                             }
                         }
                         first_it = 0;
+                        debug_idx++;
                     }
                     if (me_first) {
                         while (!target_queue.empty() and get<0>(target_queue.front()) < 0) {
                             target_queue.pop_front();
                         }
                     }
-                    omp_unset_lock(&outgoing_locks[prev_node]);
                     relative_position += past_offset;
+                    if (relative_position < 0) {
+                        cerr << target_queue << endl;
+                        PRINT_VAR(tid,node,traversed_edge,debug_my_id);
+                    }
+                    omp_unset_lock(&outgoing_locks[prev_node]);
                 }
 #endif
+
                 if (join_symbol) {
                     if (join_symbol == '$') {
                         // always putting new read above all other reads
