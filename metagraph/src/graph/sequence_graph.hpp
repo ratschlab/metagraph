@@ -113,6 +113,8 @@ class DeBruijnGraph : public SequenceGraph {
     virtual bool operator==(const DeBruijnGraph &other) const;
     virtual bool operator!=(const DeBruijnGraph &other) const { return !operator==(other); }
 
+    virtual const std::string& alphabet() const = 0;
+
   private:
     virtual void call_sequences_from(node_index start,
                                      const std::function<void(const std::string&)> &callback,

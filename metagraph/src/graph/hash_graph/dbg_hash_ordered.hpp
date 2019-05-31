@@ -106,6 +106,8 @@ class DBGHashOrdered : public DeBruijnGraph {
         return *hash_dbg_ == *dynamic_cast<const DBGHashOrdered*>(&other)->hash_dbg_;
     }
 
+    const std::string& alphabet() const { return hash_dbg_->alphabet(); }
+
     static constexpr auto kExtension = ".orhashdbg";
 
     class DBGHashOrderedInterface : public DeBruijnGraph {
@@ -115,6 +117,7 @@ class DBGHashOrdered : public DeBruijnGraph {
         virtual void serialize(const std::string &filename) const = 0;
         virtual bool load(std::istream &in) = 0;
         virtual bool load(const std::string &filename) = 0;
+        const std::string& alphabet() const = 0;
     };
 
   private:

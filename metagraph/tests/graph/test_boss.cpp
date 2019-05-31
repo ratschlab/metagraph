@@ -2104,7 +2104,7 @@ TEST(BOSS, map_to_nodes) {
 
         graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
 
-        std::vector<DBGSuccinct::node_index> expected_result {
+        std::vector<BOSS::node_index> expected_result {
             SequenceGraph::npos, SequenceGraph::npos,
             k + 1, k + 1, k + 1, k + 1
         };
@@ -2133,7 +2133,7 @@ TEST(BOSS, map_to_edges) {
 
         graph->add_sequence(std::string(100, 'A') + std::string(100, 'C'));
 
-        std::vector<DBGSuccinct::node_index> expected_result {
+        std::vector<BOSS::node_index> expected_result {
             SequenceGraph::npos, SequenceGraph::npos,
             k + 2, k + 2, k + 2
         };
@@ -2324,31 +2324,4 @@ TEST(BOSS, is_single_outgoing_for_multiple_valid_edges) {
     // All nodes except the source dummy, the sink dummy, 'AGGG',
     // and 'GGGG' have a single outgoing edge.
     EXPECT_EQ(reference.size() - 2, single_outgoing_counter);
-}
-
-TEST(BOSS, IndegreeIncomingIdentity) {
-    int k_kmer = 5;
-
-    auto graph_constructor = BOSSConstructor(k_kmer - 1);
-    for (const auto &read : { "ATGCGATCGATATGCGAGA",
-                              "ATGCGATCGAGACTACGAG",
-                              "GTACGATAGACATGACGAG",
-                              "ACTGACGAGACACAGATGC" }) {
-        graph_constructor.add_sequence(read);
-    }
-    DBGSuccinct graph(new BOSS(&graph_constructor));
-    graph.mask_dummy_kmers(1, false);
-
-    for (uint64_t node = 1; node <= graph.num_nodes(); node++) {
-        size_t computed_indegree = 0;
-        for (auto c : {'A', 'C', 'G', 'T', 'N'}) {
-            if (graph.traverse_back(node, c))
-                computed_indegree++;
-        }
-        ASSERT_EQ(graph.indegree(node), computed_indegree);
-
-        std::vector<DBGSuccinct::node_index> incoming_nodes;
-        graph.adjacent_incoming_nodes(node, &incoming_nodes);
-        ASSERT_EQ(graph.indegree(node), incoming_nodes.size());
-    }
 }

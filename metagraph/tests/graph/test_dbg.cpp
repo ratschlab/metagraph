@@ -124,6 +124,17 @@ TYPED_TEST(DeBruijnGraphTest, CheckGraph) {
     EXPECT_TRUE(check_graph<TypeParam>("ACGT", false));
 }
 
+TYPED_TEST(DeBruijnGraphTest, Alphabet) {
+    for (size_t k = 2; k <= 10; ++k) {
+        auto graph = build_graph<TypeParam>(k, {});
+        std::set<char> alphabet(graph->alphabet().begin(), graph->alphabet().end());
+        EXPECT_TRUE(alphabet.count('A'));
+        EXPECT_TRUE(alphabet.count('C'));
+        EXPECT_TRUE(alphabet.count('G'));
+        EXPECT_TRUE(alphabet.count('T'));
+    }
+}
+
 TYPED_TEST(DeBruijnGraphTest, AddSequenceSimplePath) {
     for (size_t k = 2; k <= 10; ++k) {
         std::vector<std::string> sequences { std::string(100, 'A') };
@@ -1089,6 +1100,68 @@ TYPED_TEST(DeBruijnGraphTest, get_degree2) {
     }
 }
 
+TYPED_TEST(DeBruijnGraphTest, indegree_identity_incoming_indegree) {
+    for (int k = 2; k < 10; ++k) {
+        auto graph = build_graph<TypeParam>(k, {
+            "ATGCGATCGATATGCGAGA",
+            "ATGCGATCGAGACTACGAG",
+            "GTACGATAGACATGACGAG",
+            "ACTGACGAGACACAGATGC"
+        });
+
+        for (uint64_t node = 1; node <= graph->num_nodes(); node++) {
+            std::vector<DeBruijnGraph::node_index> incoming_nodes;
+            graph->adjacent_incoming_nodes(node, &incoming_nodes);
+            EXPECT_EQ(graph->indegree(node), incoming_nodes.size())
+                << "adjacent_incoming_nodes and indegree are inconsistent for node: " << node;
+        }
+    }
+}
+
+TYPED_TEST(DeBruijnGraphTest, indegree_identity_indegree_traverse_back) {
+    for (int k = 2; k < 10; ++k) {
+        auto graph = build_graph<TypeParam>(k, {
+            "ATGCGATCGATATGCGAGA",
+            "ATGCGATCGAGACTACGAG",
+            "GTACGATAGACATGACGAG",
+            "ACTGACGAGACACAGATGC"
+        });
+
+        for (uint64_t node = 1; node <= graph->num_nodes(); node++) {
+            size_t num_incoming_edges = 0;
+            for (auto c : graph->alphabet()) {
+                if (graph->traverse_back(node, c))
+                    num_incoming_edges++;
+            }
+            EXPECT_EQ(graph->indegree(node), num_incoming_edges)
+                << "traverse_back and indegree are inconsistent for node: " << node;
+        }
+    }
+}
+
+TYPED_TEST(DeBruijnGraphTest, indegree_identity_traverse_back_incoming) {
+    for (int k = 2; k < 10; ++k) {
+        auto graph = build_graph<TypeParam>(k, {
+            "ATGCGATCGATATGCGAGA",
+            "ATGCGATCGAGACTACGAG",
+            "GTACGATAGACATGACGAG",
+            "ACTGACGAGACACAGATGC"
+        });
+
+        for (uint64_t node = 1; node <= graph->num_nodes(); node++) {
+            size_t num_incoming_edges = 0;
+            for (auto c : graph->alphabet()) {
+                if (graph->traverse_back(node, c))
+                    num_incoming_edges++;
+            }
+            std::vector<DeBruijnGraph::node_index> incoming_nodes;
+            graph->adjacent_incoming_nodes(node, &incoming_nodes);
+            EXPECT_EQ(num_incoming_edges, incoming_nodes.size())
+                << "adjacent_incoming_nodes and traverse_back are inconsistent for node: " << node;
+        }
+    }
+}
+
 TYPED_TEST(DeBruijnGraphTest, get_node_sequence) {
     size_t k = 4;
     std::string reference = "AGCTTCGAGGCCAA";
@@ -1132,28 +1205,6 @@ TYPED_TEST(DeBruijnGraphTest, is_single_outgoing_for_multiple_valid_edges) {
     }
 
     EXPECT_EQ(1u, single_outgoing_counter);
-}
-
-TYPED_TEST(DeBruijnGraphTest, IndegreeIncomingIdentity) {
-    int k = 5;
-
-    auto graph = build_graph<TypeParam>(k, { "ATGCGATCGATATGCGAGA",
-                                             "ATGCGATCGAGACTACGAG",
-                                             "GTACGATAGACATGACGAG",
-                                             "ACTGACGAGACACAGATGC" });
-
-    for (DeBruijnGraph::node_index i = 1; i <= graph->num_nodes(); i++) {
-        size_t computed_indegree = 0;
-        for (auto c : {'A', 'C', 'G', 'T'}) {
-            if (graph->traverse_back(i, c))
-                computed_indegree++;
-        }
-        ASSERT_EQ(graph->indegree(i), computed_indegree);
-
-        std::vector<DeBruijnGraph::node_index> incoming_nodes;
-        graph->adjacent_incoming_nodes(i, &incoming_nodes);
-        ASSERT_EQ(graph->indegree(i), incoming_nodes.size());
-    }
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallNodes) {

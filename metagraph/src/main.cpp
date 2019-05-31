@@ -902,13 +902,13 @@ int main(int argc, const char *argv[]) {
                     exit(1);
                 }
 
-                auto sd_graph = std::make_unique<DBGBitmap>(config->k);
+                auto bitmap_graph = std::make_unique<DBGBitmap>(config->k);
 
                 if (config->verbose) {
                     std::cout << "Start reading data and extracting k-mers" << std::endl;
                 }
                 //enumerate all suffices
-                assert(sd_graph->alphabet.size() > 1);
+                assert(bitmap_graph->alphabet().size() > 1);
                 std::vector<std::string> suffices;
                 if (config->suffix.size()) {
                     suffices = { config->suffix };
@@ -929,7 +929,7 @@ int main(int argc, const char *argv[]) {
 
                     constructor.reset(
                         new DBGBitmapConstructor(
-                            sd_graph->get_k(),
+                            bitmap_graph->get_k(),
                             config->canonical,
                             suffix,
                             config->parallel,

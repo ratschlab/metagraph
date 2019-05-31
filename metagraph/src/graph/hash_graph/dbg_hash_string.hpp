@@ -81,6 +81,8 @@ class DBGHashString : public DeBruijnGraph {
 
     bool operator==(const DeBruijnGraph &other) const;
 
+    const std::string& alphabet() const { return seq_encoder_.alphabet; }
+
   private:
     std::string encode_sequence(const std::string &sequence) const;
 

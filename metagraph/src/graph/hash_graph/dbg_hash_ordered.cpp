@@ -94,6 +94,8 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
         return true;
     }
 
+    const std::string& alphabet() const { return seq_encoder_.alphabet; }
+
   private:
     Vector<Kmer> sequence_to_kmers(const std::string &sequence, bool canonical = false) const {
         return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical);

@@ -523,3 +523,7 @@ bool DBGSuccinct::operator==(const DeBruijnGraph &other) const {
     throw std::runtime_error("Not implemented");
     return false;
 }
+
+const std::string& DBGSuccinct::alphabet() const {
+    return boss_graph_->alphabet;
+}

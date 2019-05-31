@@ -85,11 +85,11 @@ class DBGBitmap : public DeBruijnGraph {
 
     bool equals(const DBGBitmap &other, bool verbose = false) const;
 
-    inline bool is_complete() const { return complete_; }
+    bool is_complete() const { return complete_; }
+
+    const std::string& alphabet() const { return seq_encoder_.alphabet; }
 
     friend std::ostream& operator<<(std::ostream &out, const DBGBitmap &graph);
-
-    const std::string &alphabet;
 
     using Chunk = bit_vector_smart;
 
