@@ -56,11 +56,13 @@ public:
                 encoded_base = this->routing_table.get(node,relative_position); // maybe different
                 base = this->routing_table.traversed_base(node,relative_position);
                 relative_position = this->routing_table.new_relative_position(node,relative_position);
+#ifdef DEBUG_ADDITIONAL_INFORMATION
                 if (base != encoded_base) {
                     cout << encoded_base << base << endl;
                     this->routing_table.print_content(node);
                     this->incoming_table.print_content(node);
                 }
+#endif
             }
             else {
                 assert(this->graph.outdegree(node) == 1);

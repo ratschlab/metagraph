@@ -207,6 +207,10 @@ TEST(PathDatabase,DynamicAlternativeRoute) {
 
 TEST(PathDatabase,AlternativeRoute) {
     check_compression_decompression<PathDatabaseWavelet<>>(alternative_reads,5);
+
+}
+TEST(PathDatabase,AlternativeRouteWithoutTransform) {
+    check_compression_decompression<PathDatabaseWaveletWithtoutTransformation<>>(alternative_reads,5);
 }
 
 
