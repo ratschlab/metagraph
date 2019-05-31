@@ -17,7 +17,7 @@ class BoundedPriorityQueue : public std::priority_queue<T, Container, Compare> {
 
     // Push the value in the queue and remove the element with lower priority
     // in case the size of queue was about to exceed max_size.
-    void push(T&& value) {
+    void push(T&& value, std::function<void(T&)>callback = [](T&){}) {
         if (this->size() < max_size) {
             this->std::priority_queue<T, Container, Compare>::push(std::move(value));
         }
@@ -26,6 +26,20 @@ class BoundedPriorityQueue : public std::priority_queue<T, Container, Compare> {
             auto mid = std::begin(this->c) + std::floor((this->size() - 1) / 2.0);
             auto end = std::end(this->c);
             auto min_element = std::min_element(mid, end);
+            // Update the true score of the least scoring element.
+            while (*min_element < value) {
+                callback(*min_element);
+                if (*min_element < value)
+                    break;
+                std::push_heap(std::begin(this->c), min_element + 1, this->comp);
+                auto update_min_element = std::min_element(mid, end);
+                if (update_min_element == min_element)
+                    break;
+                min_element = update_min_element;
+
+            }
+            if (value <= *min_element)
+                callback(value);
             // If the new value has a value greater than the smallest value in the heap,
             // replace it and heapify. Otherwise, the new value is not among the top priority
             // elements. So ignore it.
@@ -37,7 +51,7 @@ class BoundedPriorityQueue : public std::priority_queue<T, Container, Compare> {
     }
     // Push the value in the queue and remove the element with lower priority
     // in case the size of queue was about to exceed max_size.
-    void push(const T& value) {
+    void push(T& value, std::function<void(T&)>callback = [](T&){}) {
         if (this->size() < max_size) {
             this->std::priority_queue<T, Container, Compare>::push(value);
         }
@@ -46,6 +60,20 @@ class BoundedPriorityQueue : public std::priority_queue<T, Container, Compare> {
             auto mid = std::begin(this->c) + std::floor((this->size() - 1) / 2.0);
             auto end = std::end(this->c);
             auto min_element = std::min_element(mid, end);
+            // Update the true score of the least scoring element.
+            while (*min_element < value) {
+                callback(*min_element);
+                if (*min_element < value)
+                    break;
+                std::push_heap(std::begin(this->c), min_element + 1, this->comp);
+                auto update_min_element = std::min_element(mid, end);
+                if (update_min_element == min_element)
+                    break;
+                min_element = update_min_element;
+
+            }
+            if (value <= *min_element)
+                callback(value);
             // If the new value has a value greater than the smallest value in the heap,
             // replace it and heapify. Otherwise, the new value is not among the top priority
             // elements. So ignore it.

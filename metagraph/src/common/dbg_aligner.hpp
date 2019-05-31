@@ -34,13 +34,16 @@ class DBGAligner {
         float score;
     };
 
-    DBGAligner(DeBruijnGraph *graph,
+    DBGAligner(std::shared_ptr<DeBruijnGraph> graph,
                size_t num_top_paths = 10,
+               size_t num_alternative_paths = 1,
                bool verbose = false,
                float sw_threshold = 0.8,
                float re_seeding_threshold = 0.6,
                float insertion_penalty = 3,
-               float deletion_penalty = 3);
+               float deletion_penalty = 3,
+               float gap_openning_penalty = 3,
+               float gap_extension_penalty = 1);
 
     DBGAligner() = delete;
     DBGAligner(const DBGAligner&) = default;
@@ -49,7 +52,8 @@ class DBGAligner {
     DBGAligner& operator= (DBGAligner&&) = default;
 
     // Align a sequence to the underlying graph based on the strategy defined in the graph.
-    std::vector<AlignedPath> align(const std::string &sequence,
+    std::vector<std::vector<AlignedPath>> align(const std::string::const_iterator &sequence_begin,
+        const std::string::const_iterator &sequence_end,
         const std::function<bool(node_index, const std::string::const_iterator& query_it)>& terminate
             = [](node_index, const std::string::const_iterator&) { return false; });
 
@@ -68,12 +72,15 @@ class DBGAligner {
     std::map<char, std::map<char, int8_t>> sub_score_;
     // Maximum number of paths to explore at the same time.
     size_t num_top_paths_;
+    size_t num_alternative_paths_;
     bool verbose_;
     float sw_threshold_;
     float re_seeding_threshold_;
     int8_t match_score_;
     float insertion_penalty_;
     float deletion_penalty_;
+    float gap_openning_penalty_;
+    float gap_extension_penalty_;
     StripedSmithWaterman::Aligner cssw_aligner_;
     long long merged_paths_counter_;
     size_t k_;
@@ -87,7 +94,7 @@ class DBGAligner {
 
     // Align the path to the graph based on the query until either exact alignment is not
     // possible or there exists a branching point in the graph.
-    bool exact_map(AlignedPath &path, const std::string &sequence,
+    bool exact_map(AlignedPath &path, const std::string::const_iterator &sequence_end,
                    std::map<DPAlignmentKey, DPAlignmentValue> &dp_alignment,
                    const std::function<bool(node_index, const std::string::const_iterator& query_it)>& terminate
                         = [](node_index, const std::string::const_iterator&) { return false; });
@@ -97,17 +104,13 @@ class DBGAligner {
 
     // Compute the edit distance between the query sequence and the aligned path
     // according to score parameters in this class.
-    float whole_path_score(const AlignedPath &path) const;
-
-    // Compute the distance between the query sequence and the aligned path sequence
-    // according to the CSSW library.
-    float ssw_score(const AlignedPath &path) const;
+//    void whole_path_score(const AlignedPath &path, GlobalSW& global_sw) const;
 
     // Compute Smith-Waterman score based on CSSW library.
     bool cssw_align(const AlignedPath &path, StripedSmithWaterman::Alignment& alignment) const;
 
     // Trim the path to remove unmapped regions from the tail using CSSW lib clipping.
-    void trim(AlignedPath &path) const;
+    void trim(AlignedPath &path, const StripedSmithWaterman::Alignment& alignment) const;
 };
 
 #endif // __DBG_ALIGNER_HPP__

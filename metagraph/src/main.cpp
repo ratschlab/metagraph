@@ -2358,7 +2358,7 @@ int main(int argc, const char *argv[]) {
             assert(config->infbase.size());
             // load graph
             auto graph = load_critical_dbg(config->infbase);
-            DBGHashOrdered* dbg_succinct_graph = dynamic_cast<DBGHashOrdered*>(graph.get());
+            std::shared_ptr<DBGSuccinct> dbg_succinct_graph = std::dynamic_pointer_cast<DBGSuccinct>(graph);
             if (dbg_succinct_graph == nullptr) {
                 std::cout << "Cannot cast to DBGSuccinct for alignment task." << std::endl;
                 return 0;
@@ -2368,7 +2368,8 @@ int main(int argc, const char *argv[]) {
                       << dbg_succinct_graph->get_k() << std::endl;
 
             // TODO: Find the best annotator type and set it.
-            DBGAligner aligner(graph.get(), config->alignment_num_top_paths,
+            DBGAligner aligner(dbg_succinct_graph, config->alignment_num_top_paths,
+                               /*num_alternative_paths=*/1,
                                config->verbose, config->alignment_sw_threshold);
             Timer timer;
             for (const auto &file : files) {
@@ -2383,20 +2384,22 @@ int main(int argc, const char *argv[]) {
                 Timer data_reading_timer;
 
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-                    auto path = aligner.align(std::string(read_stream->seq.s));
+                    // TODO: Enable reporting alternative paths.
+                    std::string query = read_stream->seq.s;
+                    auto path = aligner.align(std::begin(query), std::end(query)).front();
                     if (config->verbose) {
                         std::cout << "Alignment with DBGAligner processed in "
                                   << timer.elapsed()
                                   << "sec, current mem usage: "
                                   << get_curr_RSS() / (1 << 20) << " MiB"
                                   << std::endl;
-                        std::cout << "Q: " << std::string(read_stream->seq.s) << "\nP: ";
+                        std::cout << "Q: " << query << "\nP: ";
                         for (auto partial_path : path)
                             std::cout << partial_path.get_sequence() << "+";
                         std::cout << std::endl;
                     }
                     float total_score = 0;
-                    outstream << "Q: " << std::string(read_stream->seq.s) << "\nP: ";
+                    outstream << "Q: " << query << "\nP: ";
                     for (auto partial_path : path) {
                         outstream << partial_path.get_sequence() << "+";
                         total_score += partial_path.get_total_score();
