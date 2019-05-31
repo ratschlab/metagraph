@@ -24,7 +24,7 @@ class KMer {
     template <typename T>
     KMer(const std::vector<T> &arr) : KMer(arr, arr.size()) {}
 
-    explicit KMer(WordType &&seq) : seq_(seq) {}
+    explicit KMer(WordType &&seq) noexcept : seq_(seq) {}
     explicit KMer(const WordType &seq) : seq_(seq) {}
 
     // corresponds to the co-lex order of k-mers
