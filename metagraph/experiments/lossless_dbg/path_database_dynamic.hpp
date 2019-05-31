@@ -237,7 +237,7 @@ public:
                             // past
                             if (their_traversed_edge == traversed_edge and
                                 their_thread_id > 0 and// job is waiting
-                                their_relative_position <= relative_position) {
+                                their_relative_position < relative_position) {
                                 past_offset--;
                             }
                         }
