@@ -52,7 +52,6 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     bool has_label(Index i, const Label &label) const;
     bool has_labels(Index i, const VLabels &labels) const;
-    uint64_t count_labels(Index i, const VLabels &labels_to_match) const;
 
     void serialize(const std::string &filename) const;
     bool merge_load(const std::vector<std::string> &filenames);
@@ -104,7 +103,7 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
                            const LabelEncoder<Label> &label_encoder,
                            const std::function<void(BinaryMatrix::RowCallback&)> &call_rows);
 
-    virtual std::vector<uint64_t> get_label_indexes(Index i) const {
+    std::vector<uint64_t> get_label_indexes(Index i) const {
         return matrix_->get_row(i);
     }
 

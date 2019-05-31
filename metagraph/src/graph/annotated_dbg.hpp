@@ -44,8 +44,6 @@ class AnnotatedDBG {
 
     bool label_exists(const std::string &label) const;
 
-    uint64_t num_anno_rows() const;
-
     bool check_compatibility() const;
 
     const SequenceGraph& get_graph() const { return *graph_; }
