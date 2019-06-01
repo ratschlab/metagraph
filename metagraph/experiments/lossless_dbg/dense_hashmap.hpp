@@ -27,21 +27,28 @@ public:
     }
 
     T& operator[](int64_t n) {
-        assert(n < is_element->size());
-        assert((*is_element)[n]);
-        return elements[rank->rank(n)];
+        return elements[underlying_position(n)];
     }
 
     const T& at(int64_t n) const {
+        return elements.at(underlying_position(n));
+    }
+
+    int64_t underlying_position(int64_t n) const {
+        assert(n >= 0);
         assert(n < is_element->size());
         assert((*is_element)[n]);
-        return elements.at(rank->rank(n));
+        return rank->rank(n);
     }
 
     int count(int64_t n) const {
         assert(n < is_element->size());
         return (*is_element)[n];
     }
+    T* ptr_to(int64_t n) {
+        return &elements[underlying_position(n)];
+    }
+
 
     bit_vector * is_element;
     rank_support * rank;

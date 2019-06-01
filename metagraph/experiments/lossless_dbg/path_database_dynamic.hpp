@@ -50,7 +50,8 @@ public:
     explicit PathDatabaseDynamicCore(std::shared_ptr<const GraphT> graph) :
             graph_(graph),
             graph(*graph_),
-            incoming_table(*graph)
+            incoming_table(*graph),
+            routing_table(*graph)
             {}
 
 
@@ -250,7 +251,8 @@ public:
             char traversed_edge = '\0';
             for (const auto &[node, join_symbol, split_symbol] : bifurcations) {
 #ifdef _OPENMP
-                omp_set_lock(&node_locks[node]);
+                auto node_lock = node_locks.ptr_to(node);
+                omp_set_lock(node_lock);
                 if (prev_node) {
                     bool first_it = 1;
                     bool me_first = 0;
@@ -260,7 +262,8 @@ public:
                     // todo_wrap in define or better in macro
                     int debug_my_id = 0;
                     int debug_idx = 0;
-                    omp_set_lock(&outgoing_locks[prev_node]);
+                    auto outgoing_lock = outgoing_locks.ptr_to(prev_node);
+                    omp_set_lock(outgoing_lock);
                     auto& target_queue = waiting_threads[prev_node];
                     for(auto&[their_thread_id,their_relative_position,their_traversed_edge] : target_queue) {
                         if (was_me) {
@@ -305,7 +308,7 @@ public:
                         cerr << target_queue << endl;
                         PRINT_VAR(tid,node,traversed_edge,debug_my_id);
                     }
-                    omp_unset_lock(&outgoing_locks[prev_node]);
+                    omp_unset_lock(outgoing_lock);
                 }
 #endif
 
@@ -377,11 +380,12 @@ public:
 #ifdef _OPENMP
                 traversed_edge = split_symbol ? split_symbol : 'X'; // X as it doesn't matter
                 if (traversed_edge != '$') { // doesn't need any update
-                    omp_set_lock(&outgoing_locks[node]);
+                    auto outgoing_lock = outgoing_locks.ptr_to(node);
+                    omp_set_lock(outgoing_lock);
                     waiting_threads[node].push_back({tid, relative_position, traversed_edge});
-                    omp_unset_lock(&outgoing_locks[node]);
+                    omp_unset_lock(outgoing_lock);
                 }
-                omp_unset_lock(&node_locks[node]);
+                omp_unset_lock(node_lock);
 #endif
 #ifdef DEBUG_ADDITIONAL_INFORMATION
                 debug_bifurcation_idx++;
