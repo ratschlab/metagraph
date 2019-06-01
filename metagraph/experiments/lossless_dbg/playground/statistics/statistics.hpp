@@ -78,7 +78,7 @@ int main_statistics(int argc, char *argv[]) {
                                                true,
                                                "statistics.json",
                                                "string",cmd);
-    TCLAP::ValueArg<unsigned int> verbosityArg("v",
+    TCLAP::ValueArg<sh> verbosityArg("v",
                                                "verbosity",
                                                "Level of detail of the statistics",
                                                false,
