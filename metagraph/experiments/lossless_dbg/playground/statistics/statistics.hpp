@@ -19,14 +19,14 @@ using TCLAP::ValuesConstraint;
 #include "utilities.hpp"
 
 
-#define STATS_INCOMING_HISTOGRAM 1
-#define STATS_OUTGOING_HISTOGRAM 2
+#define STATS_INCOMING_HISTOGRAM 1u
+#define STATS_OUTGOING_HISTOGRAM 2u
 
 using namespace std;
 using namespace nlohmann;
 using namespace std::string_literals;
 
-json get_statistics(DBGSuccinct& graph,int verbosity=~0) {
+json get_statistics(DBGSuccinct& graph, unsigned int verbosity=~0) {
     Timer timer;
     cerr << "Starting computation of graph statistics" << endl;
 
@@ -75,11 +75,11 @@ int main_statistics(int argc, char *argv[]) {
                                                true,
                                                "statistics.json",
                                                "string",cmd);
-    TCLAP::ValueArg<int> verbosityArg("v",
+    TCLAP::ValueArg<unsigned int> verbosityArg("v",
                                                "verbosity",
                                                "Level of detail of the statistics",
                                                false,
-                                               0,
+                                               0u,
                                                "int",cmd);
     cmd.parse(argc, argv);
     auto graph = DBGSuccinct(21);
