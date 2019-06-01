@@ -22,6 +22,9 @@ using TCLAP::ValuesConstraint;
 #define STATS_INCOMING_HISTOGRAM 1u
 #define STATS_OUTGOING_HISTOGRAM 2u
 
+using sh = int;
+#define int long long
+
 using namespace std;
 using namespace nlohmann;
 using namespace std::string_literals;
@@ -89,3 +92,5 @@ int main_statistics(int argc, char *argv[]) {
     save_string(statistics.dump(4),statisticsArg.getValue());
     return 0;
 }
+
+#undef int
