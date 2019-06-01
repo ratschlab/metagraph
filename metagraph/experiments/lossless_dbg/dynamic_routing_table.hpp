@@ -24,6 +24,7 @@
 #include "alphabets.hpp"
 #include "graph_preprocessor.hpp"
 #include "routing_table_transformation.hpp"
+#include "dense_hashmap.hpp"
 
 using node_index = SequenceGraph::node_index;
 
@@ -101,7 +102,7 @@ public:
         assert(position <= size(node));
         routing_table[node].insert(routing_table[node].begin() + position, symbol);
     }
-    tsl::hopscotch_map<node_index, vector<char>> routing_table;
+    DenseHashMap<vector<char>> routing_table;
 
 };
 

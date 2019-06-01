@@ -92,9 +92,9 @@ public:
         additional_splits_vec = std::vector<node_index>();
 
 // Mark split and join-nodes in graph for faster queries and construction
-#ifdef MEMOIZE
         is_split = decltype(is_split)(graph.num_nodes() + 1); // bit
         is_join = decltype(is_join)(graph.num_nodes() + 1);
+        is_bifurcation = decltype(is_join)(graph.num_nodes() + 1);
 
         #pragma omp parallel for num_threads(get_num_threads())
         for (uint64_t node = 0; node <= graph.num_nodes(); node += 8) {
@@ -103,34 +103,26 @@ public:
                     continue;
                 is_split[i] = node_is_split_raw(i);
                 is_join[i] = node_is_join_raw(i);
+                is_bifurcation[i] = is_split[i] || is_join[i];
             }
         }
+
+        rank_is_split = decltype(rank_is_split)(&is_split);
+        rank_is_join = decltype(rank_is_join)(&is_join);
+        rank_is_bifurcation = decltype(rank_is_bifurcation)(&is_bifurcation);
         cerr << "Finished memoizing bifurcation nodes" << endl;
 
-#endif
-        //prepare hash maps
-        for (uint64_t node = 0; node <= graph.num_nodes(); node += 8) {
-            for (int i = node; i < node + 8 && i <= graph.num_nodes(); ++i) {
-                if (!i)
-                    continue;
 
-                if (node_is_split(i)) {
-                    routing_table.routing_table[i];
-                }
-                if (node_is_join(i)) {
-                    incoming_table.incoming_table[i];
-                }
-            }
-        }
+        //prepare hash maps
+        routing_table.routing_table.init(&is_split,&rank_is_split);
         std::cerr << "Finished initializing hashmaps."  << std::endl;
 
-#ifdef MEMOIZE
+
         #pragma omp parallel for num_threads(get_num_threads())
         for (node_index node = 1; node <= graph.num_nodes(); node++) {
             assert(is_split[node] == node_is_split_raw(node));
             assert(is_join[node] == node_is_join_raw(node));
         }
-#endif
 
         vector<path_id> encoded(sequences.size());
 
@@ -140,12 +132,12 @@ public:
         //ProgressBar progress_bar(sequences.size(), "Building dRT and dEM");
 
 #ifdef _OPENMP
-        vector<omp_lock_t> node_locks(graph.num_nodes()+1);
-        vector<omp_lock_t> outgoing_locks(graph.num_nodes()+1);
-        vector<deque<tuple<int,int,int>>> waiting_threads(graph.num_nodes()+1);
-        for(int i=0;i<node_locks.size();i++) {
-            omp_init_lock(&node_locks[i]);
-            omp_init_lock(&outgoing_locks[i]);
+        DenseHashMap<omp_lock_t> node_locks(&is_bifurcation,&rank_is_bifurcation);
+        DenseHashMap<omp_lock_t> outgoing_locks(&is_bifurcation,&rank_is_bifurcation);
+        DenseHashMap<deque<tuple<int,int,int>>> waiting_threads(&is_bifurcation,&rank_is_bifurcation);
+        for(int i=0;i<node_locks.elements.size();i++) {
+            omp_init_lock(&node_locks.elements[i]);
+            omp_init_lock(&outgoing_locks.elements[i]);
         }
 #endif
 
@@ -346,8 +338,9 @@ public:
         }
 
 #ifdef _OPENMP
-        for(int i=0;i<node_locks.size();i++) {
-            omp_destroy_lock(&node_locks[i]);
+        for(int i=0;i<node_locks.elements.size();i++) {
+            omp_destroy_lock(&node_locks.elements[i]);
+            omp_destroy_lock(&outgoing_locks.elements[i]);
         }
 #endif
         encoded_paths += encoded.size();
@@ -357,7 +350,7 @@ public:
         return encoded;
     }
 
-#ifdef MEMOIZE
+
     bool node_is_join_raw(node_index node) const {
         return graph.indegree(node) > 1 or additional_joins.count(node);
     }
@@ -373,15 +366,6 @@ public:
     bool node_is_split(node_index node) const {
         return is_split[node];
     }
-
-#else
-    bool node_is_join(node_index node) const {
-        return graph.indegree(node) > 1 or additional_joins.count(node);
-    }
-    bool node_is_split(node_index node) const {
-        return graph.outdegree(node) > 1 or additional_splits.count(node);
-    }
-#endif
 
     void compress() {
 
@@ -427,10 +411,13 @@ public:
     tsl::hopscotch_set<node_index> additional_joins;
     tsl::hopscotch_set<node_index> additional_splits;
 
-#ifdef MEMOIZE
-    vector<bool> is_join;
-    vector<bool> is_split;
-#endif
+    sdsl::bit_vector is_join;
+    sdsl::bit_vector is_split;
+    sdsl::bit_vector is_bifurcation;
+    decltype(is_join)::rank_1_type rank_is_join;
+    decltype(is_split)::rank_1_type rank_is_split;
+    decltype(is_bifurcation)::rank_1_type rank_is_bifurcation;
+
     std::shared_ptr<const GraphT> graph_;
     const GraphT& graph;
     RoutingTableT routing_table;
