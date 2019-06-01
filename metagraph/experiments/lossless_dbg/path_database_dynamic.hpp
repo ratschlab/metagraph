@@ -28,7 +28,17 @@ using namespace std;
 // say to Mikhail that "de_bruijn_graph" instead of "metagraph/de_bruijn_graph" is the same violation as this
 using node_index = DeBruijnGraph::node_index;
 
+class VerboseTimer {
+public:
+    VerboseTimer(string procedure_name) {
+        cerr << "Started " << procedure_name << endl;
+    }
+    void finished() {
+        cerr << "Finished " << procedure_name << " in " << timer.elapsed() << " sec." << endl;
+    }
 
+    Timer timer;
+};
 
 template<typename GraphT=DBGSuccinct,typename RoutingTableT=DynamicRoutingTable<>,typename IncomingTableT=DynamicIncomingTable<>>
 class PathDatabaseDynamicCore {
@@ -92,6 +102,7 @@ public:
         additional_splits_vec = std::vector<node_index>();
 
 // Mark split and join-nodes in graph for faster queries and construction
+        auto bifurcation_timer = VerboseTimer("construction of bifurcation bit_vectors");
         is_split = decltype(is_split)(graph.num_nodes() + 1); // bit
         is_join = decltype(is_join)(graph.num_nodes() + 1);
         is_bifurcation = decltype(is_join)(graph.num_nodes() + 1);
@@ -110,13 +121,9 @@ public:
         rank_is_split = decltype(rank_is_split)(&is_split);
         rank_is_join = decltype(rank_is_join)(&is_join);
         rank_is_bifurcation = decltype(rank_is_bifurcation)(&is_bifurcation);
-        cerr << "Finished memoizing bifurcation nodes" << endl;
+        bifurcation_timer.finished();
 
-
-        //prepare hash maps
         routing_table.routing_table.init(&is_split,&rank_is_split);
-        std::cerr << "Finished initializing hashmaps."  << std::endl;
-
 
         #pragma omp parallel for num_threads(get_num_threads())
         for (node_index node = 1; node <= graph.num_nodes(); node++) {
@@ -126,8 +133,7 @@ public:
 
         vector<path_id> encoded(sequences.size());
 
-        statistics["preprocessing_time"] = timer.elapsed();
-        std::cerr << "Finished preprocessing in " << statistics["preprocessing_time"] << " sec" << std::endl;
+
 
         //ProgressBar progress_bar(sequences.size(), "Building dRT and dEM");
 
@@ -135,11 +141,16 @@ public:
         DenseHashMap<omp_lock_t> node_locks(&is_bifurcation,&rank_is_bifurcation);
         DenseHashMap<omp_lock_t> outgoing_locks(&is_bifurcation,&rank_is_bifurcation);
         DenseHashMap<deque<tuple<int,int,int>>> waiting_threads(&is_bifurcation,&rank_is_bifurcation);
+        auto lock_init_timer = VerboseTimer("initializing locks");
         for(int i=0;i<node_locks.elements.size();i++) {
             omp_init_lock(&node_locks.elements[i]);
             omp_init_lock(&outgoing_locks.elements[i]);
         }
+        lock_init_timer.finished();
 #endif
+
+        statistics["preprocessing_time"] = timer.elapsed();
+        std::cerr << "Finished preprocessing in " << statistics["preprocessing_time"] << " sec" << std::endl;
 
         timer.reset();
 
