@@ -10,7 +10,7 @@
 #define tests_h
 
 #include <filesystem>
-
+#include <variant>
 #include <gtest/gtest.h>
 #define private public
 #define protected public
@@ -174,6 +174,9 @@ void short_serdes_test() {
     serialization_deserialization_test<T>(reads_for_testing_short,5);
 }
 
+TEST(PathDatabase,DummyTest) {
+    PRINT_VAR(sizeof(variant<vector<char>,wavelet_tree_dyn>));
+}
 TEST(PathDatabase,RightDecode) {
     PathDatabaseWavelet<> pd({"ACTAGGA","ACTCGGA"},3);
     ASSERT_EQ(pd.graph.encode('$'),0);

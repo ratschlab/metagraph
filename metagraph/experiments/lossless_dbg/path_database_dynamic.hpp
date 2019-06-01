@@ -145,6 +145,7 @@ public:
                 assert(!element);
             }
         }
+
         #pragma omp parallel for num_threads(get_num_threads())
         for (node_index node = 1; node <= graph.num_nodes(); node++) {
 
@@ -173,12 +174,21 @@ public:
             omp_init_lock(&outgoing_locks.elements[i]);
         }
         lock_init_timer.finished();
+
 #endif
 
         statistics["preprocessing_time"] = timer.elapsed();
         std::cerr << "Finished preprocessing in " << statistics["preprocessing_time"] << " sec" << std::endl;
 
         timer.reset();
+        cerr << "Cumulative sizes in bytes" << endl;
+        PRINT_VAR(is_join.size()/8);
+        PRINT_VAR(is_split.size()/8);
+        PRINT_VAR(routing_table.routing_table.elements.capacity()*sizeof(typename decltype(routing_table.routing_table.elements)::value_type));
+        PRINT_VAR(incoming_table.incoming_table.elements.capacity()*sizeof(typename decltype(incoming_table.incoming_table.elements)::value_type));
+        PRINT_VAR(node_locks.elements.capacity()*sizeof(typename decltype(node_locks.elements)::value_type));
+        PRINT_VAR(outgoing_locks.elements.capacity()*sizeof(typename decltype(outgoing_locks.elements)::value_type));
+        PRINT_VAR(waiting_threads.elements.capacity()*sizeof(typename decltype(waiting_threads.elements)::value_type));
 
         #pragma omp parallel for num_threads(get_num_threads()) //default(none) shared(encoded,node_locks,routing_table,incoming_table)
         for (size_t i = 0; i < sequences.size(); i++) {
