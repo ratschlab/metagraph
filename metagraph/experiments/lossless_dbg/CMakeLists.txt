@@ -10,9 +10,13 @@ string(TOLOWER ${CMAKE_BUILD_TYPE} BTYPE)
 set(PATH_ENCODER_CURRENT path_encoder_toolbox_v${ENCODER_VERSION})
 set(PATH_ENCODER_CURRENT_TYPE ${PATH_ENCODER_CURRENT}_${BTYPE})
 
-set(CMAKE_CXX_FLAGS_FASTDEBUG "-O2 -g")
+set(CMAKE_CXX_FLAGS_FASTDEBUG "${CMAKE_CXX_FLAGS} -g")
 set(CMAKE_EXE_LINKER_FLAGS_FASTDEBUG "-g")
 set(CMAKE_SHARED_LINKER_FLAGS_FASTDEBUG "-g")
+
+
+## Add profiler into release version
+link_libraries(profiler)
 
 set(CMAKE_CXX_FLAGS_GPERF "-O2 -g -lprofiler")
 set(CMAKE_EXE_LINKER_FLAGS_GPERF "-g -lprofiler")

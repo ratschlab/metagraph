@@ -132,10 +132,21 @@ public:
 
         auto alloc_routing_table = VerboseTimer("allocation of routing table");
         routing_table.routing_table.init(&is_split,&rank_is_split);
-        alloc_routing_table.finished();
+        incoming_table.incoming_table.is_element = &is_join;
+        incoming_table.incoming_table.rank = &rank_is_join;
+        incoming_table.incoming_table.elements = decltype(incoming_table.incoming_table.elements)(
+                                                            rank_is_join(rank_is_join.size()),
+                                                            array<int16_t,6>{});
 
+        alloc_routing_table.finished();
+        for(auto& table : incoming_table.incoming_table.elements) {
+            for(auto& element : table) {
+                assert(!element);
+            }
+        }
         #pragma omp parallel for num_threads(get_num_threads())
         for (node_index node = 1; node <= graph.num_nodes(); node++) {
+
             assert(is_split[node] == node_is_split_raw(node));
             assert(is_join[node] == node_is_join_raw(node));
         }

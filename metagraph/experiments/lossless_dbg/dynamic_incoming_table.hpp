@@ -42,16 +42,17 @@ public:
     }
 
     bool is_join(node_index node) const {
-        return size(node); // as 1
+        return incoming_table.count(node);
     }
 
     int branch_size(node_index node, edge_identifier_t incoming) const {
         assert(node);
-        auto it = incoming_table.find(node);
-        if (it == incoming_table.end() || !it->second.count(incoming))
-            return 0;
-
-        return it->second.at(incoming);
+        int result = 0;
+        int encoded = graph.encode(incoming);
+        if (incoming_table.count(node)) {
+            result = incoming_table.at(node)[encoded];
+        }
+        return result;
     }
 
     int size(node_index node) const {
@@ -73,23 +74,13 @@ public:
                incoming == 'N'
         );
         int result = 0;
-
-        auto it = incoming_table.find(node);
-
-        if (it != incoming_table.end()) {
-            const auto &offsets = it->second;
-
-            for (char base : "$ACGTN") {
-                if (base < incoming) {
-                    if (offsets.count(base))
-                        result += offsets.at(base);
-                }
-            }
-            it.value()[incoming]++;
-        } else {
-            incoming_table[node][incoming]++;
+        int encoded = graph.encode(incoming);
+        auto& array = incoming_table[node];
+        for(auto i=0;i<6;i++) {
+            if (i >= encoded) break;
+            result += array[i];
         }
-
+        array[encoded]++;
         return result;
     }
 
@@ -107,9 +98,10 @@ public:
         return branch_size(node, '$');
     }
 
-    // TODO: replace map with array
-    tsl::hopscotch_map<node_index, map<char, int>> incoming_table;
+    DenseHashMap<array<int16_t,6>> incoming_table;
     const GraphT &graph;
 };
+
+
 
 #endif //METAGRAPH_DYNAMIC_INCOMING_TABLE_HPP

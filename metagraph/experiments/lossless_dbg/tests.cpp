@@ -219,11 +219,11 @@ TEST(PathDatabase,IdentityTestCompressedReads) {
     short_identity_test<PathDatabaseListBC>();
 }
 
-TEST(PathDatabase,IdentityTestPathDatabaseBaseline) {
+TEST(PathDatabase,IdentityTestPathDatabaseDynamic) {
     short_identity_test<PathDatabaseDynamic<>>();
 }
 
-TEST(PathDatabase,IdentityTestPathDatabaseBaselineWavelet) {
+TEST(PathDatabase,IdentityTestPathDatabaseWavelet) {
     short_identity_test<PathDatabaseWavelet<>>();
 }
 
