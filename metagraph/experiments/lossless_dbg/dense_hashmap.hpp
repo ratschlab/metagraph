@@ -26,16 +26,19 @@ public:
     }
 
     T& operator[](int64_t n) {
+        assert(n < is_element->size());
         assert((*is_element)[n]);
         return elements[rank->rank(n)];
     }
 
     const T& at(int64_t n) const {
+        assert(n < is_element->size());
         assert((*is_element)[n]);
         return elements.at(rank->rank(n));
     }
 
     int count(int64_t n) const {
+        assert(n < is_element->size());
         return (*is_element)[n];
     }
 
