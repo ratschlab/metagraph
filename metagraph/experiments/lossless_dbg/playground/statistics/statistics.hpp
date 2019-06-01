@@ -29,9 +29,10 @@ using namespace std::string_literals;
 json get_statistics(DBGSuccinct& graph,int verbosity=~0) {
     json result{{"joins",0},
                 {"splits",0},
-                {"incoming_histogram", {{0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0},{5, 0}}},
-                {"outgoing_histogram", {{0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0},{5, 0}}},
+                //{"incoming_histogram", {{0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0},{5, 0}}},
+                //{"outgoing_histogram", {{0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0},{5, 0}}},
                 {"num_of_nodes",0}};
+    result["num_of_nodes"] = graph.num_nodes();
     for (int node = 1; node <= graph.num_nodes();node++) {
         int indegree = graph.indegree(node);
         int outdegree = graph.outdegree(node);
