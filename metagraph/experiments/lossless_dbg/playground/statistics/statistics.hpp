@@ -27,6 +27,8 @@ using namespace nlohmann;
 using namespace std::string_literals;
 
 json get_statistics(DBGSuccinct& graph,int verbosity=~0) {
+    Timer timer;
+    cerr << "Starting computation of graph statistics" << endl;
     json result{{"joins",0},
                 {"splits",0},
                 {"incoming_histogram", {{0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0},{5, 0}}},
@@ -49,6 +51,7 @@ json get_statistics(DBGSuccinct& graph,int verbosity=~0) {
             result["splits"] = int(result["splits"]) + 1;
         }
     }
+    cerr << "Computation of statistics finished in " << timer.elapsed() << " sec." << endl;
     return result;
 }
 
