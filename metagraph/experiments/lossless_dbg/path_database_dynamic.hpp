@@ -414,9 +414,9 @@ public:
     sdsl::bit_vector is_join;
     sdsl::bit_vector is_split;
     sdsl::bit_vector is_bifurcation;
-    decltype(is_join)::rank_1_type rank_is_join;
-    decltype(is_split)::rank_1_type rank_is_split;
-    decltype(is_bifurcation)::rank_1_type rank_is_bifurcation;
+    typename decltype(is_join)::rank_1_type rank_is_join;
+    typename decltype(is_split)::rank_1_type rank_is_split;
+    typename decltype(is_bifurcation)::rank_1_type rank_is_bifurcation;
 
     std::shared_ptr<const GraphT> graph_;
     const GraphT& graph;
