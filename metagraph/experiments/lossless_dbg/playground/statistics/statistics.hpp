@@ -34,6 +34,7 @@ json get_statistics(DBGSuccinct& graph,int verbosity=~0) {
     int splits = 0;
     int incoming_histogram[6] = {0,0,0,0,0,0};
     int outgoing_histogram[6] = {0,0,0,0,0,0};
+    #pragma omp parallel for reduction(+:joins,splits,incoming_histogram[:6],outgoing_histogram[:6])
     for (int node = 1; node <= graph.num_nodes();node++) {
         int indegree = graph.indegree(node);
         int outdegree = graph.outdegree(node);
