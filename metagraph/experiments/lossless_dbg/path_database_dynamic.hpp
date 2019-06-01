@@ -132,7 +132,13 @@ public:
 
 
         auto alloc_routing_table = VerboseTimer("allocation of routing table");
-        routing_table.routing_table.init(&is_split,&rank_is_split);
+        //routing_table.rrouting_table.init(&is_split,&rank_is_split);
+        routing_table.routing_table.is_element = &is_split;
+        routing_table.routing_table.rank = &rank_is_split;
+        using DynWavelet = typename decltype(routing_table.routing_table.elements)::value_type;
+        routing_table.routing_table.elements = decltype(routing_table.routing_table.elements)(
+                rank_is_split(rank_is_split.size()),
+                DynWavelet(6));
         incoming_table.incoming_table.is_element = &is_join;
         incoming_table.incoming_table.rank = &rank_is_join;
         incoming_table.incoming_table.elements = decltype(incoming_table.incoming_table.elements)(

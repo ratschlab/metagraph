@@ -15,6 +15,7 @@ class DenseHashMap {
 public:
     DenseHashMap() = default;
 
+
     DenseHashMap(bit_vector *isElement,rank_support *rank) {
         init(isElement,rank);
     }
