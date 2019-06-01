@@ -99,10 +99,9 @@ void compress_reads(ValueArg<std::string> &graphArg, const ValueArg<std::string>
 int main_compressor(int argc, char *argv[]) {
 	TCLAP::CmdLine cmd("Compress reads",' ', "0.1");
 
-	//TODO:
 	TCLAP::ValueArg<std::string> graphArg("g",
 			"graph",
-			"DeBruijnGraph to use as a reference in compression",
+			"Graph to use as a reference in compression",
 			false,
 			"",
 			"string",cmd);
@@ -139,7 +138,7 @@ int main_compressor(int argc, char *argv[]) {
 	TCLAP::ValueArg<std::string> compressedArg("o",
 			"output",
 			"Folder where to store the compressed files.",
-			false,
+			true,
 			"",
 			"string",cmd);
 	TCLAP::ValueArg<int> numThreadsArg("p",
