@@ -29,28 +29,33 @@ using namespace std::string_literals;
 json get_statistics(DBGSuccinct& graph,int verbosity=~0) {
     Timer timer;
     cerr << "Starting computation of graph statistics" << endl;
-    json result{{"joins",0},
-                {"splits",0},
-                {"incoming_histogram", {{0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0},{5, 0}}},
-                {"outgoing_histogram", {{0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0},{5, 0}}},
-                {"num_of_nodes",0}};
-    result["num_of_nodes"] = graph.num_nodes();
+
+    int joins = 0;
+    int splits = 0;
+    int incoming_histogram[6] = {0,0,0,0,0,0};
+    int outgoing_histogram[6] = {0,0,0,0,0,0};
     for (int node = 1; node <= graph.num_nodes();node++) {
         int indegree = graph.indegree(node);
         int outdegree = graph.outdegree(node);
         if (verbosity & STATS_INCOMING_HISTOGRAM) {
-            result["incoming_histogram"][indegree] = int(result["incoming_histogram"][indegree]) + 1;
+            incoming_histogram[indegree]++;
         }
         if (verbosity & STATS_OUTGOING_HISTOGRAM) {
-            result["outgoing_histogram"][outdegree] = int(result["outgoing_histogram"][outdegree]) + 1;
+            outgoing_histogram[outdegree]++;
         }
         if (indegree > 1) {
-            result["joins"] = int(result["joins"]) + 1;
+            joins++;
         }
         if (outdegree > 1) {
-            result["splits"] = int(result["splits"]) + 1;
+            splits++;
         }
     }
+    json result{{"joins",joins},
+                {"splits",splits},
+                {"incoming_histogram", incoming_histogram},
+                {"outgoing_histogram", outgoing_histogram},
+                {"num_of_nodes", graph.num_nodes()}
+                };
     cerr << "Computation of statistics finished in " << timer.elapsed() << " sec." << endl;
     return result;
 }
