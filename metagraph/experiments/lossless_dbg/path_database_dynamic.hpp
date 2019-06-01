@@ -30,13 +30,13 @@ using node_index = DeBruijnGraph::node_index;
 
 class VerboseTimer {
 public:
-    VerboseTimer(string procedure_name) {
+    VerboseTimer(string procedure_name) : procedure_name(procedure_name) {
         cerr << "Started " << procedure_name << endl;
     }
     void finished() {
         cerr << "Finished " << procedure_name << " in " << timer.elapsed() << " sec." << endl;
     }
-
+    string procedure_name;
     Timer timer;
 };
 
