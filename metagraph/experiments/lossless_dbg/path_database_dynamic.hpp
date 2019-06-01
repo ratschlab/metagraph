@@ -65,6 +65,7 @@ public:
     virtual ~PathDatabaseDynamicCore() {}
 
     std::vector<path_id> encode(const std::vector<std::string> &sequences) {
+
         Timer timer;
         cerr << "Started encoding reads" << endl;
         // improvement
@@ -121,9 +122,13 @@ public:
         rank_is_split = decltype(rank_is_split)(&is_split);
         rank_is_join = decltype(rank_is_join)(&is_join);
         rank_is_bifurcation = decltype(rank_is_bifurcation)(&is_bifurcation);
+
         bifurcation_timer.finished();
 
+        PRINT_VAR(sizeof(vector<char>));
+        auto alloc_routing_table = VerboseTimer("allocation of routing table");
         routing_table.routing_table.init(&is_split,&rank_is_split);
+        alloc_routing_table.finished();
 
         #pragma omp parallel for num_threads(get_num_threads())
         for (node_index node = 1; node <= graph.num_nodes(); node++) {
@@ -138,9 +143,14 @@ public:
         //ProgressBar progress_bar(sequences.size(), "Building dRT and dEM");
 
 #ifdef _OPENMP
+        PRINT_VAR(sizeof(omp_lock_t));
+        auto alloc_lock_t = VerboseTimer("memory allocation of locks");
         DenseHashMap<omp_lock_t> node_locks(&is_bifurcation,&rank_is_bifurcation);
         DenseHashMap<omp_lock_t> outgoing_locks(&is_bifurcation,&rank_is_bifurcation);
+        alloc_lock_t.finished();
+        auto threads_map_t = VerboseTimer("memory allocation of thread deques");
         DenseHashMap<deque<tuple<int,int,int>>> waiting_threads(&is_bifurcation,&rank_is_bifurcation);
+        threads_map_t.finished();
         auto lock_init_timer = VerboseTimer("initializing locks");
         for(int i=0;i<node_locks.elements.size();i++) {
             omp_init_lock(&node_locks.elements[i]);
