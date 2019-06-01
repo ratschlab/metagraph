@@ -137,7 +137,7 @@ public:
         incoming_table.incoming_table.rank = &rank_is_join;
         incoming_table.incoming_table.elements = decltype(incoming_table.incoming_table.elements)(
                                                             rank_is_join(rank_is_join.size()),
-                                                            decltype(incoming_table.incoming_table.elements)::value_type{});
+                                                            array<int,6>{});
 
         alloc_routing_table.finished();
         for(auto& table : incoming_table.incoming_table.elements) {
