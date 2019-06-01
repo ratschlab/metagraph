@@ -29,7 +29,7 @@ using namespace std::string_literals;
 json get_statistics(DBGSuccinct& graph, unsigned int verbosity=~0) {
     Timer timer;
     cerr << "Starting computation of graph statistics" << endl;
-
+    PRINT_VAR(verbosity,verbosity & STATS_INCOMING_HISTOGRAM,verbosity & STATS_OUTGOING_HISTOGRAM);
     int joins = 0;
     int splits = 0;
     int incoming_histogram[6] = {0,0,0,0,0,0};
