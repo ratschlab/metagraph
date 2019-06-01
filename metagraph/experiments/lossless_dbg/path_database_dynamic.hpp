@@ -65,6 +65,10 @@ public:
     virtual ~PathDatabaseDynamicCore() {}
 
     std::vector<path_id> encode(const std::vector<std::string> &sequences) {
+        // memory expected size
+        PRINT_VAR(sizeof(vector<char>));
+        PRINT_VAR(sizeof(omp_lock_t));
+        PRINT_VAR(sizeof(deque<tuple<int,int,int>>));
 
         Timer timer;
         cerr << "Started encoding reads" << endl;
@@ -125,7 +129,7 @@ public:
 
         bifurcation_timer.finished();
 
-        PRINT_VAR(sizeof(vector<char>));
+
         auto alloc_routing_table = VerboseTimer("allocation of routing table");
         routing_table.routing_table.init(&is_split,&rank_is_split);
         alloc_routing_table.finished();
@@ -143,7 +147,7 @@ public:
         //ProgressBar progress_bar(sequences.size(), "Building dRT and dEM");
 
 #ifdef _OPENMP
-        PRINT_VAR(sizeof(omp_lock_t));
+
         auto alloc_lock_t = VerboseTimer("memory allocation of locks");
         DenseHashMap<omp_lock_t> node_locks(&is_bifurcation,&rank_is_bifurcation);
         DenseHashMap<omp_lock_t> outgoing_locks(&is_bifurcation,&rank_is_bifurcation);
