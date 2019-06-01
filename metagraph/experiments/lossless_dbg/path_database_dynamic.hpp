@@ -81,7 +81,7 @@ public:
         std::vector<node_index> additional_joins_vec(sequences.size());
         std::vector<node_index> additional_splits_vec(sequences.size());
 
-        auto additional_splits_t = VerboseTime("computing additional splits and joins");
+        auto additional_splits_t = VerboseTimer("computing additional splits and joins");
         #pragma omp parallel for num_threads(get_num_threads())
         for (size_t i = 0; i < sequences.size(); ++i) {
             const auto &sequence = sequences[i];
