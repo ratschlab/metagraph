@@ -63,7 +63,7 @@ template <typename T,typename bit_vector=sdsl::bit_vector, typename rank_support
 class ChunkedDenseHashMap : public DenseHashMap<T,bit_vector,rank_support> {
 public:
     ChunkedDenseHashMap() = default;
-    
+
     ChunkedDenseHashMap(bit_vector *isElement,rank_support *rank,T default_element = T(),int chunks=omp_get_num_threads()*100) {
         int total_num_elements = rank->rank(rank->size());
         this->is_element = isElement;
@@ -82,7 +82,7 @@ public:
     }
 
     int64_t chunk(int64_t n) {
-        unchunked_position(n)/divisor;
+        return unchunked_position(n)/divisor;
     }
 
     int64_t position_in_chunk(int64_t n) {
@@ -112,7 +112,7 @@ public:
     T* ptr_to(int64_t n) {
         return &(this->elements[underlying_position(n)]);
     }
-    
+
     int64_t divisor = 0;
 };
 

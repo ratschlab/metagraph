@@ -297,16 +297,18 @@ public:
                         first_it = 0;
                         debug_idx++;
                     }
+                    relative_position += past_offset;
+                    if (relative_position < 0) {
+                        cerr << target_queue << endl;
+                        PRINT_VAR(tid,node,traversed_edge,debug_my_id,past_offset);
+                    }
                     if (me_first) {
                         while (!target_queue.empty() and get<0>(target_queue.front()) < 0) {
                             target_queue.pop_front();
                         }
                     }
-                    relative_position += past_offset;
-                    if (relative_position < 0) {
-                        cerr << target_queue << endl;
-                        PRINT_VAR(tid,node,traversed_edge,debug_my_id);
-                    }
+
+
                     omp_unset_lock(outgoing_lock);
                 }
 #endif
