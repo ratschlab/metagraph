@@ -134,17 +134,16 @@ public:
 
         auto alloc_routing_table = VerboseTimer("allocation of routing table");
         //routing_table.rrouting_table.init(&is_split,&rank_is_split);
-        routing_table.routing_table.is_element = &is_split;
-        routing_table.routing_table.rank = &rank_is_split;
         using DynWavelet = typename decltype(routing_table.routing_table.elements)::value_type;
-        routing_table.routing_table.elements = decltype(routing_table.routing_table.elements)(
-                rank_is_split(rank_is_split.size()),
-                DynWavelet(6));
-        incoming_table.incoming_table.is_element = &is_join;
-        incoming_table.incoming_table.rank = &rank_is_join;
-        incoming_table.incoming_table.elements = decltype(incoming_table.incoming_table.elements)(
-                                                            rank_is_join(rank_is_join.size()),
-                                                            array<int,6>{});
+        if constexpr (is_base_of<wavelet_tree_dyn,DynWavelet>::value) {
+            cerr << "Using Wavelet tree" << endl;
+            routing_table.routing_table = decltype(routing_table.routing_table)(&is_split, &rank_is_split,
+                                                                                DynWavelet(6));
+        }
+        else {
+            routing_table.routing_table = decltype(routing_table.routing_table)(&is_split,&rank_is_split);
+        }
+        incoming_table.incoming_table = decltype(incoming_table.incoming_table)(&is_join,&rank_is_join);
 
         alloc_routing_table.finished();
         for(auto& table : incoming_table.incoming_table.elements) {
