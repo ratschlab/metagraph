@@ -53,19 +53,19 @@ int main_sampler(int argc, char *argv[]) {
                                                  false,
                                                  0.0,
                                                  "double",cmd);
-    TCLAP::ValueArg<int64_t>          read_lengthArg("l",
+    TCLAP::ValueArg<int>          read_lengthArg("l",
                                                  "read-length",
                                                  "Length of individual reads",
                                                  false,
                                                  100,
                                                  "int64_t",cmd);
-    TCLAP::ValueArg<int64_t>          subsampleArg("z",
+    TCLAP::ValueArg<int>          subsampleArg("z",
                                                 "subsample-size",
                                                 "Subsample the reference to 'subsample-size' base pairs.",
                                                 false,
                                                 -1,
                                                 "int64_t",cmd);
-    TCLAP::ValueArg<int64_t>          seedArg("s",
+    TCLAP::ValueArg<int>          seedArg("s",
                                                  "seed",
                                                  "Seed for a random generator",
                                                  false,

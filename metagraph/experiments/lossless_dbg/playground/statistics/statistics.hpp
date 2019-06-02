@@ -26,7 +26,7 @@ using namespace std;
 using namespace nlohmann;
 using namespace std::string_literals;
 
-json get_statistics(DBGSuccinct& graph, unsigned int64_t verbosity=~0) {
+json get_statistics(DBGSuccinct& graph,int64_t verbosity=~0) {
     Timer timer;
     cerr << "Starting computation of graph statistics" << endl;
     PRINT_VAR(verbosity,verbosity & STATS_INCOMING_HISTOGRAM,verbosity & STATS_OUTGOING_HISTOGRAM);
@@ -75,7 +75,7 @@ int main_statistics(int argc, char *argv[]) {
                                                true,
                                                "statistics.json",
                                                "string",cmd);
-    TCLAP::ValueArg<sh> verbosityArg("v",
+    TCLAP::ValueArg<int> verbosityArg("v",
                                                "verbosity",
                                                "Level of detail of the statistics",
                                                false,

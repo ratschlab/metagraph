@@ -123,7 +123,7 @@ int main_compressor(int argc, char *argv[]) {
 			true,
 			"",
 			"string",cmd);
-	TCLAP::ValueArg<int64_t> kmerLengthArg("k",
+	TCLAP::ValueArg<int> kmerLengthArg("k",
 			"kmer-length",
 			"Length of the kmers for graph construction",
 			false,
@@ -141,7 +141,7 @@ int main_compressor(int argc, char *argv[]) {
 			true,
 			"",
 			"string",cmd);
-	TCLAP::ValueArg<int64_t> numThreadsArg("p",
+	TCLAP::ValueArg<int> numThreadsArg("p",
 			"threads",
 			"Number of threads to use for parallel computation.",
 			false,
