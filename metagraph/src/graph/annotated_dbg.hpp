@@ -47,6 +47,7 @@ class AnnotatedDBG {
     bool check_compatibility() const;
 
     const SequenceGraph& get_graph() const { return *graph_; }
+    std::shared_ptr<SequenceGraph> get_graph_ptr() const { return graph_; }
     const Annotator& get_annotation() const { return *annotator_; }
 
     static void insert_zero_rows(Annotator *annotator,
