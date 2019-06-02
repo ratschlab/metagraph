@@ -70,7 +70,7 @@ TEST(SamplerTest,SubSample) {
 }
 
 TEST(RoutingTable,BasicTest) {
-    auto rt = DynamicRoutingTable();
+    //auto rt = DynamicRoutingTable();
 }
 // Depends on large file -> tested and works
 //TEST(CompressingReads,GetChromosomeWorks) {
