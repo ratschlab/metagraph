@@ -442,6 +442,11 @@ const bitmap& ColumnCompressed<Label>::get_column(size_t j) const {
 }
 
 template <typename Label>
+const bitmap& ColumnCompressed<Label>::get_column(const Label &label) const {
+    return get_column(label_encoder_.encode(label));
+}
+
+template <typename Label>
 void ColumnCompressed<Label>
 ::convert_to_row_annotator(RowCompressed<Label> *annotator,
                            size_t num_threads) const {

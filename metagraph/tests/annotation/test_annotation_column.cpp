@@ -60,6 +60,27 @@ TEST(ColumnCompressed, RenameColumnsMergeAll) {
     EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get(4)));
 }
 
+TEST(ColumnCompressed, GetColumn) {
+    annotate::ColumnCompressed<> annotation(5);
+    annotation.add_labels(0, { "Label0", "Label2", "Label8" });
+    annotation.add_labels(2, { "Label1", "Label2" });
+    annotation.add_labels(4, { "Label8" });
+
+    EXPECT_EQ(1u, annotation.get_column("Label0").num_set_bits());
+    EXPECT_TRUE(annotation.get_column("Label0")[0]);
+
+    EXPECT_EQ(1u, annotation.get_column("Label1").num_set_bits());
+    EXPECT_TRUE(annotation.get_column("Label1")[2]);
+
+    EXPECT_EQ(2u, annotation.get_column("Label2").num_set_bits());
+    EXPECT_TRUE(annotation.get_column("Label2")[0]);
+    EXPECT_TRUE(annotation.get_column("Label2")[2]);
+
+    EXPECT_EQ(2u, annotation.get_column("Label8").num_set_bits());
+    EXPECT_TRUE(annotation.get_column("Label8")[0]);
+    EXPECT_TRUE(annotation.get_column("Label8")[4]);
+}
+
 TEST(ColumnCompressed, ToRowAnnotator) {
     {
         annotate::ColumnCompressed<> annotation(0);
