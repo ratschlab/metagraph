@@ -15,7 +15,7 @@ using transformations_t = tsl::hopscotch_map<node_index,pair<char,char>>;
 template<typename Graph>
 class GraphPreprocessor {
 public:
-    const int delay_gap = 0;
+    const int64_t delay_gap = 0;
     GraphPreprocessor(const Graph &graph) : graph(graph) {}
     transformations_t find_weak_splits() {
         Timer timer;
@@ -32,7 +32,7 @@ public:
             }
         }
         transformations_t result;
-        int node = 0;
+        int64_t node = 0;
         for(auto& pos_transformation : result_intermediate) {
             if (pos_transformation) {
                 result[node] = *pos_transformation;
@@ -62,7 +62,7 @@ public:
         return {};
     };
 
-    node_index first_join(node_index node, int delay_steps) {
+    node_index first_join(node_index node, int64_t delay_steps) {
         if (delay_steps < -delay_gap) {
             return 0;
         }

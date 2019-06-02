@@ -90,7 +90,7 @@ public:
     static char transform(pair<char,char> transformation, char base) {
         return transformation.first == base ? transformation.second : base;
     }
-    json get_statistics(int verbosity=0) const {
+    json get_statistics(int64_t verbosity=0) const {
         return {{"transformations", transformations.size()}}; 
     }
 

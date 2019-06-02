@@ -31,8 +31,8 @@ public:
     using edge_identifier_t = _edge_identifier_t;
     explicit DynamicIncomingTable(const GraphT &graph) : graph(graph) {}
 
-    int branch_offset(node_index node, edge_identifier_t incoming) const {
-        int result = 0;
+    int64_t branch_offset(node_index node, edge_identifier_t incoming) const {
+        int64_t result = 0;
         for (char base : "$ACGTN") {
             if (base < incoming) {
                 result += branch_size(node, base);
@@ -45,25 +45,25 @@ public:
         return incoming_table.count(node);
     }
 
-    int branch_size(node_index node, edge_identifier_t incoming) const {
+    int64_t branch_size(node_index node, edge_identifier_t incoming) const {
         assert(node);
-        int result = 0;
-        int encoded = graph.encode(incoming);
+        int64_t result = 0;
+        int64_t encoded = graph.encode(incoming);
         if (incoming_table.count(node)) {
             result = incoming_table.at(node)[encoded];
         }
         return result;
     }
 
-    int size(node_index node) const {
-        int result = 0;
+    int64_t size(node_index node) const {
+        int64_t result = 0;
         for(char base : "$ACGTN") {
             result += branch_size(node,base);
         }
         return result;
     }
 
-    int branch_offset_and_increment(node_index node,
+    int64_t branch_offset_and_increment(node_index node,
                                     edge_identifier_t incoming) {
         assert(node);
         assert(incoming == '$' or
@@ -73,8 +73,8 @@ public:
                incoming == 'T' or
                incoming == 'N'
         );
-        int result = 0;
-        int encoded = graph.encode(incoming);
+        int64_t result = 0;
+        int64_t encoded = graph.encode(incoming);
         auto& array = incoming_table[node];
         for(auto i=0;i<6;i++) {
             if (i >= encoded) break;

@@ -43,7 +43,7 @@ public:
 template<typename GraphT=DBGSuccinct,typename RoutingTableT=DynamicRoutingTable<>,typename IncomingTableT=DynamicIncomingTable<>>
 class PathDatabaseDynamicCore {
 public:
-    using path_id = pair<node_index,int>;
+    using path_id = pair<node_index,int64_t>;
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
@@ -116,7 +116,7 @@ public:
 
         #pragma omp parallel for num_threads(get_num_threads())
         for (uint64_t node = 0; node <= graph.num_nodes(); node += 8) {
-            for (int i = node; i < node + 8 && i <= graph.num_nodes(); ++i) {
+            for (int64_t i = node; i < node + 8 && i <= graph.num_nodes(); ++i) {
                 if (!i)
                     continue;
                 is_split[i] = node_is_split_raw(i);
@@ -172,10 +172,10 @@ public:
         DenseHashMap<omp_lock_t> outgoing_locks(&is_bifurcation,&rank_is_bifurcation);
         alloc_lock_t.finished();
         auto threads_map_t = VerboseTimer("memory allocation of thread deques");
-        DenseHashMap<deque<tuple<int,int,int>>> waiting_threads(&is_bifurcation,&rank_is_bifurcation);
+        DenseHashMap<deque<tuple<int64_t,int64_t,int64_t>>> waiting_threads(&is_bifurcation,&rank_is_bifurcation);
         threads_map_t.finished();
         auto lock_init_timer = VerboseTimer("initializing locks");
-        for(int i=0;i<node_locks.elements.size();i++) {
+        for(int64_t i=0;i<node_locks.elements.size();i++) {
             omp_init_lock(&node_locks.elements[i]);
             omp_init_lock(&outgoing_locks.elements[i]);
         }
@@ -198,23 +198,23 @@ public:
 
         #pragma omp parallel for num_threads(get_num_threads()) //default(none) shared(encoded,node_locks,routing_table,incoming_table)
         for (size_t i = 0; i < sequences.size(); i++) {
-            int tid = omp_get_thread_num() + 1;
+            auto tid = omp_get_thread_num() + 1;
             std::vector<std::tuple<node_index, char, char>> bifurcations;
 
             const auto &sequence = sequences[i];
             auto path_for_sequence = transform_sequence(sequence);
 
             size_t kmer_begin = 0;
-            int kmer_end = graph.get_k();
+            auto kmer_end = graph.get_k();
 #ifdef DEBUG_ADDITIONAL_INFORMATION
             vector<node_index> debug_list_of_nodes;
-            vector<int> debug_relative_position_history;
+            vector<int64_t> debug_relative_position_history;
             bool debug_transformation_used = sequence != path_for_sequence;
 #endif
             // TODO: use map_to_nodes_sequentially when implemented
             graph.map_to_nodes(path_for_sequence, [&](node_index node) {
                 if (not node) {
-                    auto pn = [&](int offset) {
+                    auto pn = [&](int64_t offset) {
                         PRINT_VAR(sequence.substr(offset,graph.get_k()));
                         PRINT_VAR(graph.kmer_to_node(sequence.substr(offset,graph.get_k())));
                         PRINT_VAR(path_for_sequence.substr(offset,graph.get_k()));
@@ -242,11 +242,11 @@ public:
                 kmer_end++;
             });
 
-            int relative_position = INT_MIN;
+            int64_t relative_position = INT_MIN;
 #ifdef DEBUG_ADDITIONAL_INFORMATION
-            int debug_bifurcation_idx = 0;
+            int64_t debug_bifurcation_idx = 0;
 #endif
-            int prev_node = 0;
+            int64_t prev_node = 0;
             char traversed_edge = '\0';
             for (const auto &[node, join_symbol, split_symbol] : bifurcations) {
 #ifdef _OPENMP
@@ -256,11 +256,11 @@ public:
                     bool first_it = 1;
                     bool me_first = 0;
                     bool was_me = 0;
-                    int past_offset = 0;
+                    int64_t past_offset = 0;
 
                     // todo_wrap in define or better in macro
-                    int debug_my_id = 0;
-                    int debug_idx = 0;
+                    int64_t debug_my_id = 0;
+                    int64_t debug_idx = 0;
                     auto outgoing_lock = outgoing_locks.ptr_to(prev_node);
                     omp_set_lock(outgoing_lock);
                     auto& target_queue = waiting_threads[prev_node];
@@ -300,7 +300,7 @@ public:
                     relative_position += past_offset;
                     if (relative_position < 0) {
                         cerr << target_queue << endl;
-                        PRINT_VAR(tid,node,traversed_edge,debug_my_id,past_offset);
+                        PRINT_VAR(tid,node,traversed_edge,debug_my_id,past_offset,relative_position);
                     }
                     if (me_first) {
                         while (!target_queue.empty() and get<0>(target_queue.front()) < 0) {
@@ -344,7 +344,7 @@ public:
                         }
                         if (prev_join_symbol) {
                             incoming_table.print_content(prev_node);
-                            int prev_position = !prev_split_symbol ?
+                            int64_t prev_position = !prev_split_symbol ?
                                     debug_relative_position_history.back()
                                     :
                                     *(debug_relative_position_history.end()-2)
@@ -396,7 +396,7 @@ public:
         }
 
 #ifdef _OPENMP
-        for(int i=0;i<node_locks.elements.size();i++) {
+        for(int64_t i=0;i<node_locks.elements.size();i++) {
             omp_destroy_lock(&node_locks.elements[i]);
             omp_destroy_lock(&outgoing_locks.elements[i]);
         }
@@ -433,7 +433,7 @@ public:
         return encoded_paths;
     };
 
-    json get_statistics(unsigned int verbosity = ~0u) const {
+    json get_statistics(uint64_t verbosity = ~0u) const {
         //auto result = PathDatabase<pair<node_index,int>,GraphT>::get_statistics(verbosity);
         //result.update(statistics);
         //return result;

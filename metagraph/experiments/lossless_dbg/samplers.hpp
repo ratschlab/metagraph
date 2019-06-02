@@ -19,15 +19,15 @@ using namespace std;
 
 class SamplerConvenient {
 public:
-    virtual string sample(int sample_length) = 0;
-    virtual int reference_size() = 0;
-    virtual vector<string> sample_coverage(int sample_length, double coverage) {
-        int count = ceil(reference_size()*coverage/sample_length);
+    virtual string sample(int64_t sample_length) = 0;
+    virtual int64_t reference_size() = 0;
+    virtual vector<string> sample_coverage(int64_t sample_length, double coverage) {
+        int64_t count = ceil(reference_size()*coverage/sample_length);
         return sample(sample_length, count);
     }
-    virtual vector<string> sample(int sample_length, int count) {
+    virtual vector<string> sample(int64_t sample_length, int64_t count) {
         auto res = vector<string>();
-        for(int i=0;i<count;i++) {
+        for(int64_t i=0;i<count;i++) {
             res.push_back(sample(sample_length));
         }
         return res;
@@ -46,17 +46,17 @@ public:
                                                        probability_of_error/3,
                                                        probability_of_error/3}){
     };
-    string sample(int sample_length) override {
+    string sample(int64_t sample_length) override {
         std::uniform_int_distribution<> dis(0, reference.length()-1-sample_length);
         string output = reference.substr(dis(generator),sample_length);
         for(auto& e : output) {
-            map<char,int> to_offset = {{'A',0,},{'C',1},{'G',2},{'T',3}};
+            map<char,int64_t> to_offset = {{'A',0,},{'C',1},{'G',2},{'T',3}};
             char to_char[] = {'A','C','G','T'};
             e = to_char[(to_offset[e] + err(generator)) % 4];
         }
         return output;
     }
-    int reference_size() override {
+    int64_t reference_size() override {
         return reference.size();
     }
 private:
@@ -67,10 +67,10 @@ private:
 };
 class SubSampler : public NoisySampler {
 public:
-    SubSampler(const string& reference, int subsample_size, std::mt19937 generator,double probability_of_error=0) :
+    SubSampler(const string& reference, int64_t subsample_size, std::mt19937 generator,double probability_of_error=0) :
         NoisySampler(reference.substr(
-                std::uniform_int_distribution<>(0,reference.length()-min(subsample_size,(int)reference.length()))(generator),
-                min(subsample_size,(int)reference.length())
+                std::uniform_int_distribution<>(0,reference.length()-min(subsample_size,(int64_t)reference.length()))(generator),
+                min(subsample_size,(int64_t)reference.length())
                 ),
                 generator,
                 probability_of_error)
@@ -79,19 +79,19 @@ public:
 
 class DeterministicSampler : public SamplerConvenient {
 public:
-    DeterministicSampler(vector<string> samples, int reference_size) : _reference_size(reference_size), samples(std::move(samples)) {};
-    string sample(int sample_length) override {
+    DeterministicSampler(vector<string> samples, int64_t reference_size) : _reference_size(reference_size), samples(std::move(samples)) {};
+    string sample(int64_t sample_length) override {
         string sample = samples[current_sample];
         assert(sample_length==sample.length());
         current_sample = (current_sample + 1) % samples.size();
         return sample;
     }
-    int reference_size() override {
+    int64_t reference_size() override {
         return _reference_size;
     }
     vector<string> samples;
-    int _reference_size;
-    int current_sample = 0;
+    int64_t _reference_size;
+    int64_t current_sample = 0;
 };
 
 #endif /* samplers_h */

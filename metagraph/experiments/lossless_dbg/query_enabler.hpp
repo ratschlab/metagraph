@@ -23,9 +23,9 @@ class QueryEnabler : public Database {
 public:
     using Database::Database;
 
-    using range_t = pair<int,int>;
+    using range_t = pair<int64_t,int64_t>;
     using history_t = vector<range_t>;
-    using score_t = int;
+    using score_t = int64_t;
     using next_nodes_with_extended_info_t =  map<node_index,pair<score_t,history_t>>;
 
     history_t get_initial_history(node_index node) const {
@@ -92,7 +92,7 @@ public:
         // todo: merge ranges for successive joining reads
         next_nodes_with_extended_info_t result;
         if (this->node_is_split(node)) {
-            int range_score = 0;
+            int64_t range_score = 0;
             for(auto& range : history) {
                 for(auto& c : "ACGT"s) {
                     range_t new_range;
@@ -137,13 +137,13 @@ public:
         //todo: improve speed by not getting global path for the same reads
         auto coverage = get_coverage(node);
         set<path_id> out;
-        for(int position=0;position<coverage;position++) {
+        for(int64_t position=0;position<coverage;position++) {
             out.insert(this->get_global_path_id(node,position));
         }
         return vector<path_id>(all(out));
     }
 
-    int get_coverage(node_index node) const {
+    int64_t get_coverage(node_index node) const {
         // one can also traverse backwards
         if (this->node_is_split(node)) {
             return this->routing_table.size(node);

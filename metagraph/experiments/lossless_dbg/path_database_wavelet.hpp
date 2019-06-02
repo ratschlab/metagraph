@@ -30,13 +30,12 @@
 #include "graph_patch.hpp"
 //#define CHECK_CORECTNESS 1
 
-#pragma GCC diagnostic ignored "-Wmissing-noreturn"
-#pragma GCC diagnostic ignored "-Wreturn-type"
-
-const unsigned int STATS_JOINS_HISTOGRAM (1u << 0u);
-const unsigned int STATS_SPLITS_HISTOGRAM (1u << 1u);
 
 using namespace std;
+
+const uint64_t STATS_JOINS_HISTOGRAM (1u << 0u);
+const uint64_t STATS_SPLITS_HISTOGRAM (1u << 1u);
+
 using alphabets::log2;
 
 // todo find a tool that removes this relative namespacing issue
@@ -97,11 +96,11 @@ public:
         Timer timer;
         cerr << "Started transforming routing_table." << endl;
         vector<char> routing_table_array;
-        for(int node=1;node<=this->graph.num_nodes();node++) {
+        for(int64_t node=1;node<=this->graph.num_nodes();node++) {
             routing_table_array.push_back('#');// to always start a block with #
             if (PathDatabaseDynamicCore<GT,DRT,DIT>::node_is_split(node)) {
                 auto& dynamic_table = PathDatabaseDynamicCore<GT,DRT,DIT>::routing_table;
-                for(int i=0;i<dynamic_table.size(node);i++) {
+                for(int64_t i=0;i<dynamic_table.size(node);i++) {
                     routing_table_array.push_back(dynamic_table.get(node,i));
                 }
             }
@@ -119,10 +118,10 @@ public:
         Timer timer;
         cerr << "Started transforming incoming_table." << endl;
 
-        vector<vector<int>> incoming_table_chunks(this->graph.num_nodes());
+        vector<vector<int64_t>> incoming_table_chunks(this->graph.num_nodes());
 
         #pragma omp parallel for num_threads(get_num_threads())
-        for(int node=1;node<=this->graph.num_nodes();node++) {
+        for(int64_t node=1;node<=this->graph.num_nodes();node++) {
             auto& current_chunk = incoming_table_chunks[node-1];
             if (PathDatabaseDynamicCore<GT,DRT,DIT>::node_is_join(node)) {
                 auto new_reads = PathDatabaseDynamicCore<GT,DRT,DIT>::incoming_table.branch_size(node,'$');
@@ -158,7 +157,7 @@ public:
         #endif
             }
         }
-        vector<int> incoming_table_builder;
+        vector<int64_t> incoming_table_builder;
         vector<bool> delimiter_vector;
         for(auto& table_chunk : incoming_table_chunks) {
             delimiter_vector.push_back(true);
@@ -170,7 +169,7 @@ public:
         delimiter_vector.push_back(true);
         incoming_table.edge_multiplicity_table = sdsl::enc_vector<>(incoming_table_builder);
         sdsl::bit_vector temporary_representation(delimiter_vector.size());
-        for(int i=0;i<delimiter_vector.size();i++) {
+        for(int64_t i=0;i<delimiter_vector.size();i++) {
             temporary_representation[i] = delimiter_vector[i];
         }
         incoming_table.joins = decltype(incoming_table.joins)(temporary_representation);
@@ -233,20 +232,20 @@ public:
         return db;
     }
 
-    json get_statistics(unsigned int verbosity = ~0u) const {
+    json get_statistics(uint64_t verbosity = ~0u) const {
         json result = PathDatabaseDynamicCore<GT,DRT,DIT>::get_statistics(verbosity);
         json routing_table_stats = routing_table.get_statistics(verbosity);
         result.update(statistics);
         result.update(routing_table_stats);
-        int true_joins = 0;
-        int added_joins = 0;
-        int true_splits = 0;
-        int added_splits = 0;
-        std::map<int, int> joins_diff_symbols_histogram;
-        std::map<int, int> splits_size_histogram;
-        std::map<int, int> splits_diff_symbols_histogram;
+        int64_t true_joins = 0;
+        int64_t added_joins = 0;
+        int64_t true_splits = 0;
+        int64_t added_splits = 0;
+        std::map<int64_t, int64_t> joins_diff_symbols_histogram;
+        std::map<int64_t, int64_t> splits_size_histogram;
+        std::map<int64_t, int64_t> splits_diff_symbols_histogram;
 
-        for (int node = 1; node <= this->graph.num_nodes();node++) {
+        for (int64_t node = 1; node <= this->graph.num_nodes();node++) {
             if (node_is_join(node)) {
                 if (this->graph.indegree(node) > 1) {
                     true_joins++;
@@ -255,8 +254,8 @@ public:
                     added_joins++;
                 }
                 if (verbosity & STATS_JOINS_HISTOGRAM) {
-                    int prev = 0;
-                    int cardinality = incoming_table.size(node);
+                    int64_t prev = 0;
+                    int64_t cardinality = incoming_table.size(node);
                     joins_diff_symbols_histogram[cardinality]++;
                 }
             }
@@ -268,8 +267,8 @@ public:
                     added_splits++;
                 }
                 if (verbosity & STATS_SPLITS_HISTOGRAM) {
-                    set<int> diff_symbols;
-                    for (int i=0; i < routing_table.size(node); i++) {
+                    set<int64_t> diff_symbols;
+                    for (int64_t i=0; i < routing_table.size(node); i++) {
                         diff_symbols.insert(routing_table.get(node,i));
                     }
                     splits_diff_symbols_histogram[diff_symbols.size()]++;
@@ -304,12 +303,12 @@ public:
 
 };
 
-template<typename DummyT=int>
+template<typename DummyT=int64_t>
 class PathDatabaseWavelet : public QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<>>> {
     using QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<>>>::QueryEnabler;
 };
 
-template<typename DummyT=int>
+template<typename DummyT=int64_t>
 class PathDatabaseWaveletWithtoutTransformation : public QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableCore<>,IncomingTable<>>>> {
     using QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableCore<>,IncomingTable<>>>>::QueryEnabler;
 };

@@ -21,29 +21,6 @@
 #include "utilities.hpp"
 #include "routing_table_transformation.hpp"
 
-const char RoutingTableCoreAlphabet[] = {'$','A','C','G','T','N','#','?'};
-// improvement (constexpr use https://github.com/serge-sans-paille/frozen)
-// TODO: get rid of std::map
-const map<char, int> RoutingTableCoreInverseAlphabet = {{'$',0},{'A',1},{'C',2},{'G',3},{'T',4},{'N',5},{'#',6},{'?',7}};
-const auto& rte2int = RoutingTableCoreInverseAlphabet;
-
-using routing_character_t = int;
-
-int rc(char c) {
-    auto it = RoutingTableCoreInverseAlphabet.find(c);
-    if (it != RoutingTableCoreInverseAlphabet.end())
-        return it->second;
-    return RoutingTableCoreInverseAlphabet.at('N');
-}
-
-int operator""_rc(char c) {
-    return rc(c);
-}
-
-char tochar(routing_character_t rc) {
-    return RoutingTableCoreAlphabet[rc];
-}
-
 template<class Wavelet = sdsl::wt_rlmn<>>
 class RoutingTableCore {
 public:
@@ -69,15 +46,15 @@ public:
         initialize_content(routing_table_array);
     }
 
-    int offset(node_index node) const { return routing_table.select(node, delimiter_encoded) + 1; }
+    int64_t offset(node_index node) const { return routing_table.select(node, delimiter_encoded) + 1; }
 
-    int select_unchecked(node_index node, int occurrence, int encoded_symbol) const {
+    int64_t select_unchecked(node_index node, int64_t occurrence, int64_t encoded_symbol) const {
         auto routing_table_block = offset(node);
         auto occurrences_of_symbol_before_block = routing_table.rank(routing_table_block,encoded_symbol);
         return routing_table.select(occurrences_of_symbol_before_block+occurrence,encoded_symbol) - routing_table_block;
     }
 
-    int select(node_index node, int occurrence, char symbol) const {
+    int64_t select(node_index node, int64_t occurrence, char symbol) const {
         auto routing_table_block = offset(node);
         auto occurrences_of_symbol_before_block = routing_table.rank(routing_table_block,graph.encode(symbol));
         if (occurrence > rank(node,size(node)+1,symbol)) {
@@ -88,26 +65,26 @@ public:
         return routing_table.select(occurrences_of_symbol_before_block+occurrence,graph.encode(symbol)) - routing_table_block;
     }
 
-    int rank(node_index node, int position, char symbol) const {
+    int64_t rank(node_index node, int64_t position, char symbol) const {
         auto routing_table_block = offset(node);
         auto absolute_position = routing_table_block+position;
         auto occurrences_of_base_before_block = routing_table.rank(routing_table_block,graph.encode(symbol));
         return routing_table.rank(absolute_position,graph.encode(symbol)) - occurrences_of_base_before_block;
     }
 
-    char get(node_index node, int position) const {
+    char get(node_index node, int64_t position) const {
         auto routing_table_block = offset(node);
-        return tochar(routing_table[routing_table_block+position]);
+        return graph.decode(routing_table[routing_table_block+position]);
     }
 
-    int size(node_index node) const {
+    int64_t size(node_index node) const {
         return select_unchecked(node, 1, delimiter_encoded);
     }
 
     string print_content(node_index node) const {
         stringstream out;
         auto table_size = size(node);
-        for (int i=0;i<table_size;i++) {
+        for (int64_t i=0;i<table_size;i++) {
             out << get(node, i);
         }
         out << endl;
@@ -115,18 +92,18 @@ public:
         return out.str();
     }
 
-    char traversed_base(node_index node, int position) const {
+    char traversed_base(node_index node, int64_t position) const {
         return get(node,position);
     }
 
-    int new_relative_position(node_index node, int position) const {
+    int64_t new_relative_position(node_index node, int64_t position) const {
         auto base = get(node,position);
         auto base_rank = rank(node,position,base);
         return base_rank;
     }
 
     Wavelet routing_table;
-    int serialize(std::ostream& out)const {
+    int64_t serialize(std::ostream& out)const {
         return routing_table.serialize(out);
     }
 
@@ -134,11 +111,11 @@ public:
         return routing_table.load(in);
     }
 
-    json get_statistics(int verbosity=0) const {
+    json get_statistics(int64_t verbosity=0) const {
         return {};
     }
 
-    const int delimiter_encoded;
+    const int64_t delimiter_encoded;
     const DBGSuccinct& graph;
 };
 

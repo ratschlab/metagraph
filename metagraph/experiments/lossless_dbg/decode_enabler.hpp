@@ -27,7 +27,7 @@ using namespace std;
 // say to Mikhail that "de_bruijn_graph" instead of "metagraph/de_bruijn_graph" is the same violation as this
 using node_index = DeBruijnGraph::node_index;
 
-using path_id = pair<node_index,int>;
+using path_id = pair<node_index,int64_t>;
 
 template<typename Database>
 class DecodeEnabler : public Database {
@@ -46,9 +46,9 @@ public:
         auto kmer = this->graph.get_node_sequence(node);
         string sequence = kmer;
         string sequence_path = kmer;
-        int relative_position = path.second;
+        int64_t relative_position = path.second;
 
-        int kmer_position = 0;
+        int64_t kmer_position = 0;
         char base = '\0';
         char encoded_base = '\0';
         while (true) {
@@ -115,25 +115,25 @@ public:
         return reads;
     }
 
-    int number_of_reads_starting_at_node(node_index node) const {
-        int result = 0;
+    int64_t number_of_reads_starting_at_node(node_index node) const {
+        int64_t result = 0;
         if (this->node_is_join(node)) {
             result = this->incoming_table.branch_size(node,origin_node_symbol);
         }
         return result;
     }
 
-    int number_of_reads_ending_at_node(node_index node) const {
-        int result = 0;
+    int64_t number_of_reads_ending_at_node(node_index node) const {
+        int64_t result = 0;
         if (this->node_is_split(node)) {
             result = this->routing_table.rank(node,this->routing_table.size(node),'$');
         }
         return result;
     }
 
-    path_id get_global_path_id(node_index node, int relative_position) const {
+    path_id get_global_path_id(node_index node, int64_t relative_position) const {
         node_index prev_node = 0;
-        int prev_offset = 0;
+        int64_t prev_offset = 0;
         if (this->node_is_join(node)) {
             this->graph.call_incoming_kmers_mine(node,[&](node_index possible_node,char c) {
                 auto offset = use_char ?

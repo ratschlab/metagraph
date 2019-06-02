@@ -76,7 +76,7 @@ class PathDatabase {
 
     virtual void serialize(const fs::path& folder) const = 0;
 
-    virtual json get_statistics(int verbosity = 0) const {
+    virtual json get_statistics(int64_t verbosity = 0) const {
         return statistics;
     }
 

@@ -16,10 +16,10 @@ public:
     using bit_vector_t = BitVector;
     BitVector joins;
     sdsl::enc_vector<> edge_multiplicity_table;
-    int branch_offset(node_index node,node_index prev_node) const {
-        int branch_offset = relative_offset(node,prev_node);
-        int result = 0;
-        for(int i=0;i<branch_offset;i++) {
+    int64_t branch_offset(node_index node,node_index prev_node) const {
+        int64_t branch_offset = relative_offset(node,prev_node);
+        int64_t result = 0;
+        for(int64_t i=0;i<branch_offset;i++) {
             result += branch_size_rank(node,i);
         }
         return result;
@@ -31,10 +31,10 @@ public:
         return size(node); // as 1
     }
 
-    int branch_size_rank(node_index node,int offset) const {
+    int64_t branch_size_rank(node_index node,int64_t offset) const {
         if (offset < 0) { return 0; }
-        int joins_position = joins.select1(node);
-        int table_offset = joins.rank0(joins_position);
+        int64_t joins_position = joins.select1(node);
+        int64_t table_offset = joins.rank0(joins_position);
         if (offset == size(node)) {
             return INT_MIN;
         }
@@ -42,20 +42,20 @@ public:
         return edge_multiplicity_table[table_offset+offset];
     }
 
-    int branch_size(node_index node,node_index prev_node) const {
+    int64_t branch_size(node_index node,node_index prev_node) const {
         return branch_size_rank(node,relative_offset(node,prev_node));
     }
 
     bool has_size(node_index node,node_index prev_node) const {
 #ifndef FULL_INCOMING_TABLE
-        int branch_offset = relative_offset(node,prev_node);
+        int64_t branch_offset = relative_offset(node,prev_node);
         return branch_offset < size(node);
 #else
         return true;
 #endif
     }
 
-    int size(node_index node) const {
+    int64_t size(node_index node) const {
         return joins.select1(node+1)-joins.select1(node)-1;
     }
 
@@ -70,9 +70,9 @@ public:
 #endif
     }
 
-    int relative_offset(node_index node,node_index prev_node) const {
+    int64_t relative_offset(node_index node,node_index prev_node) const {
         bool increment = has_new_reads(node);
-        int result;
+        int64_t result;
         if (prev_node) {
             result = graph.branch_id(node,prev_node);
         }

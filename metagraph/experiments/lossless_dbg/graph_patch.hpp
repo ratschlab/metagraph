@@ -35,9 +35,9 @@ public:
         return base;
     }
 
-    int branch_id(node_index node,node_index prev_node) const {
-        int result = INT_MIN;
-        int i = 0;
+    int64_t branch_id(node_index node,node_index prev_node) const {
+        int64_t result = INT_MIN;
+        int64_t i = 0;
         call_incoming_kmers_mine(node,[&i,&result,&prev_node](node_index node,char base) {
             if (node==prev_node) {
                 result = i;

@@ -100,8 +100,8 @@ inline std::ostream &serialize(std::ostream &os, const vector<POD> &v) {
     return os;
 }
 
-inline string decode_from_input(const vector<string>& input,const pair<string,int>& path_id,int kmer_length) {
-    int current_relative_id = 0;
+inline string decode_from_input(const vector<string>& input,const pair<string,int64_t>& path_id,int64_t kmer_length) {
+    int64_t current_relative_id = 0;
     for(auto& sequence : input) {
         if (sequence.substr(0,kmer_length) == path_id.first) {
             if (current_relative_id == path_id.second) {
