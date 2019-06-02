@@ -424,23 +424,23 @@ std::unique_ptr<Annotator> initialize_annotation(Config::AnnotationType anno_typ
             break;
         }
         case Config::BRWT: {
-            annotation.reset(new annotate::BRWTCompressed<>());
+            annotation.reset(new annotate::BRWTCompressed<>(config.row_cache_size));
             break;
         }
         case Config::BinRelWT_sdsl: {
-            annotation.reset(new annotate::BinRelWT_sdslAnnotator());
+            annotation.reset(new annotate::BinRelWT_sdslAnnotator(config.row_cache_size));
             break;
         }
         case Config::BinRelWT: {
-            annotation.reset(new annotate::BinRelWTAnnotator());
+            annotation.reset(new annotate::BinRelWTAnnotator(config.row_cache_size));
             break;
         }
         case Config::RowFlat: {
-            annotation.reset(new annotate::RowFlatAnnotator());
+            annotation.reset(new annotate::RowFlatAnnotator(config.row_cache_size));
             break;
         }
         case Config::RBFish: {
-            annotation.reset(new annotate::RainbowfishAnnotator());
+            annotation.reset(new annotate::RainbowfishAnnotator(config.row_cache_size));
             break;
         }
     }

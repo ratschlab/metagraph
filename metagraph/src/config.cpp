@@ -67,6 +67,13 @@ Config::Config(int argc, const char *argv[]) {
         exit(-1);
     }
 
+    // set default sizes for row and column cache depending on identity
+    if (identity == QUERY
+            || identity == SERVER_QUERY
+            || identity == CALL_VARIANTS) {
+        row_cache_size = 1000000;
+    }
+
     // parse remaining command line items
     for (int i = 2; i < argc; ++i) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
@@ -199,6 +206,8 @@ Config::Config(int argc, const char *argv[]) {
             arity_brwt = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--relax-arity")) {
             relax_arity_brwt = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--row-cache-size")) {
+            row_cache_size = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             print_usage(argv[0], identity);
             exit(0);
@@ -722,6 +731,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t   --row-cache-size [INT] \tnumber of uncompressed rows to store in the cache [1,000,000]\n");
         } break;
         case SERVER_QUERY: {
             fprintf(stderr, "Usage: %s server_query -i <GRAPH> -a <ANNOTATION> [options]\n\n", prog_name.c_str());
@@ -732,6 +742,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
+            fprintf(stderr, "\t   --row-cache-size [INT] \tnumber of uncompressed rows to store in the cache [1,000,000]\n");
         } break;
         case CALL_VARIANTS: {
             fprintf(stderr, "Usage: %s call_variants -a <annotation> [options]\n", prog_name.c_str());
@@ -745,6 +756,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --call-bubbles \t\t\tcall labels from bubbles\n");
             fprintf(stderr, "\t   --label-filter [STR] \t\tdiscard variants with this label []\n");
             fprintf(stderr, "\t   --taxonomy-map [STR] \t\tfilename of taxonomy map file []\n");
+            fprintf(stderr, "\t   --row-cache-size [INT] \tnumber of uncompressed rows to store in the cache [1,000,000]\n");
         } break;
         case PARSE_TAXONOMY: {
             fprintf(stderr, "Usage: %s parse_taxonomy -o <OUTBASE> [options]\n", prog_name.c_str());
