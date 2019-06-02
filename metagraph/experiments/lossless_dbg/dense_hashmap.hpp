@@ -69,6 +69,7 @@ public:
 
     ChunkedDenseHashMap(bit_vector *isElement,rank_support *rank,int64_t chunks=omp_get_num_threads()*100) {
         int64_t total_num_elements = rank->rank(rank->size());
+        chunks = min(chunks,total_num_elements);
         this->is_element = isElement;
         this->rank = rank;
         divisor = get_divisor(total_num_elements,chunks);

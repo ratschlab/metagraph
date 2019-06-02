@@ -43,7 +43,6 @@ public:
     }
 
     int64_t branch_size(node_index node, edge_identifier_t incoming) const {
-        assert(node);
         int64_t result = 0;
         int64_t encoded = encode(incoming);
         auto it = incoming_table.find(node);
@@ -63,7 +62,6 @@ public:
 
     int64_t branch_offset_and_increment(node_index node,
                                     edge_identifier_t incoming) {
-        assert(node);
         assert(incoming == '$' or
                incoming == 'A' or
                incoming == 'C' or
