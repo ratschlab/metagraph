@@ -121,7 +121,7 @@ inline int8_t encode(char c) {
 inline char decode(int8_t c) {
     if (c == 6) return '#';
     if (c == 0) return '$';
-    return KmerExtractor::encode(c);
+    return KmerExtractor::decode(c);
 }
 
 inline string& clamp_alphabet(string& text,const string& alphabet="$ACGTN",char replacement='N') {

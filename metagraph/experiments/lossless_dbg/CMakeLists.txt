@@ -14,6 +14,7 @@ set(CMAKE_CXX_FLAGS_FASTDEBUG "${CMAKE_CXX_FLAGS} -g")
 set(CMAKE_EXE_LINKER_FLAGS_FASTDEBUG "-g")
 set(CMAKE_SHARED_LINKER_FLAGS_FASTDEBUG "-g")
 
+include_directories(playground/dynamic/include)
 
 ## Add profiler into release version
 link_libraries(profiler)

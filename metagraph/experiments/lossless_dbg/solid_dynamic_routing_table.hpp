@@ -24,38 +24,42 @@ class SolidDynamicRoutingTable {
 public:
     using BaseT = EntryT;
     SolidDynamicRoutingTable(ll size) : routing_table(7) {
-        vector<int8_t> initial_content(size,encode('#'));
-        routing_table = decltype(routing_table)(7,initial_content); 
+        vector<int8_t> initial_content(size+1,encode('#'));
+        for(ll i=0;i<=size;i++) {
+            routing_table.insert(0,encode('#'));
+        }
+
+        //routing_table = decltype(routing_table)(7,initial_content);
     }
 
 //    int64_t select(ll block, int64_t occurrence, char symbol) const {
 //    }
 
 
-    int64_t offset(node_index node) const { return routing_table.select(node, delimiter_encoded) + 1; }
+    int64_t offset(node_index node) const { return routing_table.select( delimiter_encoded,node+1) + 1; }
 
     int64_t select_unchecked(node_index node, int64_t occurrence, int64_t encoded_symbol) const {
         auto routing_table_block = offset(node);
-        auto occurrences_of_symbol_before_block = routing_table.rank(routing_table_block-inclusive,encoded_symbol);
-        return routing_table.select(occurrences_of_symbol_before_block+occurrence,encoded_symbol) - routing_table_block;
+        auto occurrences_of_symbol_before_block = routing_table.rank(encoded_symbol,routing_table_block-inclusive);
+        return routing_table.select(encoded_symbol,occurrences_of_symbol_before_block+occurrence) - routing_table_block;
     }
 
     int64_t select(node_index node, int64_t occurrence, char symbol) const {
         auto routing_table_block = offset(node);
-        auto occurrences_of_symbol_before_block = routing_table.rank(routing_table_block-inclusive,encode(symbol));
+        auto occurrences_of_symbol_before_block = routing_table.rank(encode(symbol),routing_table_block-inclusive);
         if (occurrence > rank(node,size(node)+1,symbol)) {
             PRINT_VAR(node,occurrence,symbol);
             print_content(node);
         }
         assert(occurrence <= rank(node,size(node)+1,symbol));
-        return routing_table.select(occurrences_of_symbol_before_block+occurrence,encode(symbol)) - routing_table_block;
+        return routing_table.select(encode(symbol),occurrences_of_symbol_before_block+occurrence) - routing_table_block;
     }
 
     int64_t rank(node_index node, int64_t position, char symbol) const {
         auto routing_table_block = offset(node);
         auto absolute_position = routing_table_block+position;
-        auto occurrences_of_base_before_block = routing_table.rank(routing_table_block-inclusive,encode(symbol));
-        return routing_table.rank(absolute_position-1,encode(symbol)) - occurrences_of_base_before_block;
+        auto occurrences_of_base_before_block = routing_table.rank(encode(symbol),routing_table_block-inclusive);
+        return routing_table.rank(encode(symbol),absolute_position-1) - occurrences_of_base_before_block;
     }
 
     char get(node_index node, int64_t position) const {
@@ -97,7 +101,7 @@ public:
     // Todo change from magic number to some define elsewhere
     const static int64_t delimiter_encoded = 6;
     const static bool inclusive = true;
-    EntryT routing_table;
+    wavelet_tree_dyn routing_table;
 };
 
 #endif //METAGRAPH_SOLID_DYNAMIC_ROUTING_TABLE_HPP

@@ -70,7 +70,16 @@ TEST(SamplerTest,SubSample) {
 }
 
 TEST(RoutingTable,BasicTest) {
-    //auto rt = DynamicRoutingTable();
+    auto graph = make_shared<DBGSuccinct>(21);
+    auto is_element = sdsl::bit_vector({0,0,1,1});
+    auto rank_is_element = sdsl::bit_vector::rank_1_type(&is_element);
+    auto rt = DynamicRoutingTable<>(graph, &is_element,&rank_is_element,2);
+    //EXPECT_EQ(rt.size(0),0);
+    rt.insert(2,0,'A');
+    //EXPECT_EQ(rt.size(0),0);
+    EXPECT_EQ(rt.size(3),0);
+    EXPECT_EQ(rt.size(2),1);
+    EXPECT_EQ(rt.get(2,0),'A');
 }
 // Depends on large file -> tested and works
 //TEST(CompressingReads,GetChromosomeWorks) {
