@@ -2513,6 +2513,99 @@ int main(int argc, const char *argv[]) {
 
             return 0;
         }
+        case Config::CALL_VARIANTS: {
+            assert(config->infbase_annotators.size() == 1);
+
+            auto anno_graph = initialize_annotated_dbg(*config);
+
+            auto masked_graph = mask_graph(*anno_graph, *config);
+
+            if (config->verbose) {
+                std::cout << "Filter out:";
+                for (const auto &out : config->label_filter) {
+                    std::cout << " " << out;
+                }
+                std::cout << std::endl;
+            }
+
+            std::sort(config->label_filter.begin(), config->label_filter.end());
+
+            ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
+            std::mutex print_label_mutex;
+            std::atomic_uint64_t num_calls = 0;
+
+            auto print_index_ref_var_label =
+                [&](const auto &first, const auto &ref, const auto &var, auto&& labels) {
+                    std::lock_guard<std::mutex> lock(print_label_mutex);
+
+                    std::sort(labels.begin(), labels.end());
+
+                    auto it = config->label_filter.begin();
+                    for (const auto &label : labels) {
+                        while (it != config->label_filter.end() && *it < label)
+                            ++it;
+
+                        if (it == config->label_filter.end())
+                            break;
+
+                        if (*it == label)
+                            return;
+                    }
+
+                    for (const auto &label : labels) {
+                        std::cout << first
+                                  << " " << ref
+                                  << " " << var
+                                  << " " << label
+                                  << std::endl;
+
+                        num_calls++;
+                    }
+
+                };
+
+            if (config->call_bubbles) {
+                std::cout << "Index"
+                          << "\t" << "Ref"
+                          << "\t" << "Var"
+                          << "\t" << "Label"
+                          << std::endl;
+
+                annotated_graph_algorithm::call_bubbles(*masked_graph,
+                                                        *anno_graph,
+                                                        print_index_ref_var_label,
+                                                        &thread_pool);
+                thread_pool.join();
+
+                if (config->verbose) {
+                    std::cout << "# nodes checked: " << masked_graph->num_nodes()
+                              << std::endl
+                              << "# bubbles called: " << num_calls
+                              << std::endl;
+                }
+            } else {
+                std::cout << "Index"
+                          << "\t" << "Node"
+                          << "\t" << "Edge"
+                          << "\t" << "Label"
+                          << std::endl;
+
+                annotated_graph_algorithm::call_breakpoints(*masked_graph,
+                                                            *anno_graph,
+                                                            print_index_ref_var_label,
+                                                            &thread_pool);
+                thread_pool.join();
+
+                if (config->verbose) {
+                    std::cout << "# nodes checked: " << masked_graph->num_nodes()
+                              << std::endl
+                              << "# breakpoints called: " << num_calls
+                              << std::endl;
+                }
+            }
+
+            return 0;
+        }
         case Config::NO_IDENTITY: {
             assert(false);
             break;

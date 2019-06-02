@@ -38,6 +38,7 @@ class Config {
     bool canonical_mode = false;
     bool greedy_brwt = false;
     bool separately = false;
+    bool call_bubbles = false;
 
     unsigned int k = 3;
     unsigned int filter_k = 3;
@@ -69,6 +70,7 @@ class Config {
     std::vector<std::string> infbase_annotators;
     std::vector<std::string> label_mask_in;
     std::vector<std::string> label_mask_out;
+    std::vector<std::string> label_filter;
     std::string outfbase;
     std::string infbase;
     std::string rename_instructions_file;
@@ -101,6 +103,7 @@ class Config {
         RELAX_BRWT,
         QUERY,
         SERVER_QUERY,
+        CALL_VARIANTS
     };
     IdentityType identity = NO_IDENTITY;
 

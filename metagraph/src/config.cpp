@@ -53,6 +53,8 @@ Config::Config(int argc, const char *argv[]) {
         identity = ASSEMBLE;
     } else if (!strcmp(argv[1], "relax_brwt")) {
         identity = RELAX_BRWT;
+    } else if (!strcmp(argv[1], "call_variants")) {
+        identity = CALL_VARIANTS;
     } else {
         print_usage(argv[0]);
         exit(-1);
@@ -209,6 +211,10 @@ Config::Config(int argc, const char *argv[]) {
             label_mask_out.emplace_back(argv[++i]);
         } else if (!strcmp(argv[i], "--label-mask-out-fraction")) {
             label_mask_out_fraction = std::stof(argv[++i]);
+        } else if (!strcmp(argv[i], "--label-filter")) {
+            label_filter.emplace_back(argv[++i]);
+        } else if (!strcmp(argv[i], "--call-bubbles")) {
+            call_bubbles = true;
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
             print_usage(argv[0], identity);
@@ -240,6 +246,7 @@ Config::Config(int argc, const char *argv[]) {
     if (!fname.size() && identity != STATS
                       && identity != SERVER_QUERY
                       && !(identity == BUILD && complete)
+                      && !(identity == CALL_VARIANTS)
                       && !(identity == CONCATENATE && !infbase.empty())) {
         std::string line;
         while (std::getline(std::cin, line)) {
@@ -254,6 +261,7 @@ Config::Config(int argc, const char *argv[]) {
             && identity != STATS
             && identity != SERVER_QUERY
             && !(identity == BUILD && complete)
+            && !(identity == CALL_VARIANTS)
             && !fname.size())
         print_usage_and_exit = true;
 
@@ -490,6 +498,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\tquery\t\tannotate sequences from fast[a|q] files\n\n");
             fprintf(stderr, "\tserver_query\tannotate received sequences and send annotations back\n\n");
+
+            fprintf(stderr, "\tcall_variants\tgenerate a masked annotated graph and call variants\n\n");
+            fprintf(stderr, "\t\t\trelative to unmasked graph\n\n");
 
             return;
         }
@@ -728,6 +739,18 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
+        } break;
+        case CALL_VARIANTS: {
+            fprintf(stderr, "Usage: %s call_variants -a <annotator> [options]\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for call_variants:\n");
+            fprintf(stderr, "\t-a --annotator [STR] \t\t\tannotator to load []\n");
+            fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph\n");
+            fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph\n");
+            fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of\n");
+            fprintf(stderr, "\t                                     \tall matching mask-in and mask-out labels [0.0]\n");
+            fprintf(stderr, "\t   --call-bubbles \t\t\tcall labels from bubbles\n");
+            fprintf(stderr, "\t   --label-filter [STR] \t\tdiscard variants with this label\n");
         } break;
     }
 
