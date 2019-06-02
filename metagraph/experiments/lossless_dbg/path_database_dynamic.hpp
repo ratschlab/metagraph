@@ -69,7 +69,7 @@ public:
         // memory expected size
         PRINT_VAR(sizeof(vector<char>));
         PRINT_VAR(sizeof(omp_lock_t));
-        PRINT_VAR(sizeof(deque<tuple<int,int,int>>));
+        PRINT_VAR(sizeof(deque<tuple<int64_t,int64_t,int64_t>>));
 
         Timer timer;
         cerr << "Started encoding reads" << endl;
@@ -462,7 +462,7 @@ public:
     json statistics;
 
     // denote how many reads are joining from every branch ($ATCGN) ($ denotes start of a new read)
-    int encoded_paths = 0;
+    int64_t encoded_paths = 0;
     // denote where the reads should go ($ATCGN) ($ denodes the end of particular read)
 
 
@@ -481,7 +481,7 @@ public:
     RoutingTableT routing_table;
     IncomingTableT incoming_table;
 
-    static DBGSuccinct* buildGraph(PathDatabaseDynamicCore* self,vector<string> reads,int kmer_length) {
+    static DBGSuccinct* buildGraph(PathDatabaseDynamicCore* self,vector<string> reads,int64_t kmer_length) {
         Timer timer;
         cerr << "Started building the graph" << endl;
         auto graph = new DBGSuccinct(dbg_succ_graph_constructor(reads, kmer_length));

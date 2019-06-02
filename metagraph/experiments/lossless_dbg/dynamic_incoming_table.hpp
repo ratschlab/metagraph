@@ -98,7 +98,7 @@ public:
         return branch_size(node, '$');
     }
 
-    DenseHashMap<array<int,6>> incoming_table;
+    DenseHashMap<array<int32_t,6>> incoming_table;
     const GraphT &graph;
 };
 

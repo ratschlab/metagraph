@@ -26,10 +26,10 @@
 using namespace std;
 using namespace std::string_literals;
 using node_index = SequenceGraph::node_index;
-const int DEFAULT_K_KMER = 21;
+const int64_t DEFAULT_K_KMER = 21;
 
 // Stores reads in a compressed format
-class PathDatabaseListBC : public PathDatabase<int> {
+class PathDatabaseListBC : public PathDatabase<int64_t> {
   public:
     // TODO: read about lvalues, rvalues, etc
     // http://thbecker.net/articles/rvalue_references/section_01.html
@@ -62,7 +62,7 @@ class PathDatabaseListBC : public PathDatabase<int> {
     size_t num_paths() const override { return compressed_reads_.size(); }
 
     json get_statistics() const {
-        std::map<std::string, int> bifurcation_size_histogram;
+        std::map<std::string, int64_t> bifurcation_size_histogram;
         for (const auto &read : compressed_reads_) {
             bifurcation_size_histogram[to_string(read.second.size())]++;
         }
@@ -74,9 +74,9 @@ class PathDatabaseListBC : public PathDatabase<int> {
         return result;
     }
 
-    int compressed_size_without_reference() const {
+    int64_t compressed_size_without_reference() const {
         // returns size in bits
-        int size = 0;
+        int64_t size = 0;
         for(auto &read : compressed_reads_) {
             // *2 for two bit encoding
             size += read.first.size() * 2;
@@ -148,7 +148,7 @@ class PathDatabaseListBC : public PathDatabase<int> {
         string read = starting_kmer;
         char next_char;
         while (read.size() < read_length) {
-            int outgoing_degree = 0;
+            int64_t outgoing_degree = 0;
             graph_->call_outgoing_kmers(node,[&](node_index next_node, char character) {
                 outgoing_degree++;
                 if (outgoing_degree>1) {
@@ -176,8 +176,8 @@ class PathDatabaseListBC : public PathDatabase<int> {
 
 
     std::vector<compressed_read_t> compressed_reads_;
-    const int read_length;
-    const int kmer_length_;
+    const int64_t read_length;
+    const int64_t kmer_length_;
 };
 
 #endif //METAGRAPH_PATH_DATABASE_LIST_OF_BIFURCATION_CHOICES_HPP

@@ -21,7 +21,7 @@ public:
 //        this->
 //    }
     DenseHashMap(bit_vector *isElement,rank_support *rank,T default_element = T()) {
-        int total_num_elements = rank->rank(rank->size());
+        int64_t total_num_elements = rank->rank(rank->size());
         this->is_element = isElement;
         this->rank = rank;
         elements = decltype(elements)(total_num_elements,default_element);
@@ -64,8 +64,8 @@ class ChunkedDenseHashMap : public DenseHashMap<T,bit_vector,rank_support> {
 public:
     ChunkedDenseHashMap() = default;
 
-    ChunkedDenseHashMap(bit_vector *isElement,rank_support *rank,T default_element = T(),int chunks=omp_get_num_threads()*100) {
-        int total_num_elements = rank->rank(rank->size());
+    ChunkedDenseHashMap(bit_vector *isElement,rank_support *rank,T default_element = T(),int64_t chunks=omp_get_num_threads()*100) {
+        int64_t total_num_elements = rank->rank(rank->size());
         this->is_element = isElement;
         this->rank = rank;
         divisor = get_divisor(total_num_elements,chunks);

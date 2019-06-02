@@ -60,7 +60,7 @@ Database compressReads(ValueArg<string> &compressedArg,
 
 template<class Database>
 Database compressReadsDeprecated(ValueArg<string> &compressedArg,
-		const vector<string> &reads,int kmer_length) {
+		const vector<string> &reads,int64_t kmer_length) {
 	auto db = new Database(reads,kmer_length);
 	db.encode(reads);
 
@@ -74,7 +74,7 @@ Database compressReadsDeprecated(ValueArg<string> &compressedArg,
 template<class DatabaseT>
 void compress_reads(ValueArg<std::string> &graphArg, const ValueArg<std::string> &statisticsArg,
                     ValueArg<std::string> &compressedArg, const string &statistics_filename,
-                    const vector<string> &reads, int kmer_length, shared_ptr<BetterDBGSuccinct> &graph) {
+                    const vector<string> &reads, int64_t kmer_length, shared_ptr<BetterDBGSuccinct> &graph) {
     unique_ptr<DatabaseT> pd;
     if (graphArg.isSet()) {
         Timer timer;
@@ -123,12 +123,12 @@ int main_compressor(int argc, char *argv[]) {
 			true,
 			"",
 			"string",cmd);
-	TCLAP::ValueArg<int> kmerLengthArg("k",
+	TCLAP::ValueArg<int64_t> kmerLengthArg("k",
 			"kmer-length",
 			"Length of the kmers for graph construction",
 			false,
 			21,
-			"int",cmd);
+			"int64_t",cmd);
 	TCLAP::ValueArg<std::string> statisticsArg("s",
 			"statistics",
 			"Filename of json file that will output statistics about compressed file.",
@@ -141,12 +141,12 @@ int main_compressor(int argc, char *argv[]) {
 			true,
 			"",
 			"string",cmd);
-	TCLAP::ValueArg<int> numThreadsArg("p",
+	TCLAP::ValueArg<int64_t> numThreadsArg("p",
 			"threads",
 			"Number of threads to use for parallel computation.",
 			false,
 			1,
-			"int",cmd);
+			"int64_t",cmd);
 
 
 	std::vector<std::string> regimes {

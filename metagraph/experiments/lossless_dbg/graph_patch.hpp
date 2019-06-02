@@ -54,12 +54,12 @@ public:
         return outdegree(node) > 1;
     }
 
-    int encode(char c) const {
+    int8_t encode(char c) const {
         if (c == '#') return get_boss().alph_size;
         if (c == '$') return 0;
         return get_boss().encode(c);
     }
-    char decode(int c) const {
+    char decode(int8_t c) const {
         if (c == get_boss().alph_size) return '#';
         if (c == 0) return '$';
         return get_boss().decode(c);

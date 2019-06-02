@@ -18,17 +18,7 @@
 
 using namespace std;
 
-//namespace nlohmann {
-//    template <typename T>
-//    struct adl_serializer<std::map<int, T>> {
-//    static void to_json(json& j, std::unordered_map<int, T> const& map) {
-//        for (auto& [key, value] : map) {
-//            // map int to string
-//            j[std::to_string(key)] = value;
-//        }
-//    }
-//};
-//}
+
 
 #define x first
 #define y second
@@ -63,18 +53,6 @@ void transform_to_fasta(const string &filename,const vector<string>& reads);
 void write_reads_to_fasta(const vector<string>& reads,const string &filename);
 
 vector<string> read_reads_from_fasta(const string &filename);
-
-// openmp reductions
-
-void reduce_maps(\
-                 std::map<int, int>& output, \
-                 std::map<int, int>& input);
-
-//#pragma omp declare reduction(map_reduction : \
-//std::map<int, int> : \
-//reduce_maps(omp_out, omp_in)) \
-//initializer(omp_priv(omp_orig))
-
 
 template<typename POD>
 inline std::istream &deserialize(std::istream &is, vector<POD> &v) {

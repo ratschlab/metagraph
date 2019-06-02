@@ -52,12 +52,12 @@ public:
 
     }
 
-    char traversed_base(node_index node, int position) const {
+    char traversed_base(node_index node, int64_t position) const {
         char base = this->get(node,position);
         return transform(node,base);
     }
 
-    int new_relative_position(node_index node, int position) const {
+    int64_t new_relative_position(node_index node, int64_t position) const {
         auto base = this->get(node,position);
         auto base_rank = this->rank(node,position,base);
         if (transformations.count(node)) {

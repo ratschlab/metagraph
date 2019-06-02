@@ -31,7 +31,7 @@ public:
     template<class Container>
     void initialize_content(const Container& routing_table_array) {
         sdsl::int_vector<0> routing_table_array_encoded(routing_table_array.size());
-        for(int i=0;i<routing_table_array.size();i++) {
+        for(int64_ti=0;i<routing_table_array.size();i++) {
             routing_table_array_encoded[i] = routing_table_array[i] == '#' ? 
                                              delimiter_encoded : 
                                              graph.encode(routing_table_array[i]);

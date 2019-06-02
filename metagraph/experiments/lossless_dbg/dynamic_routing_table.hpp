@@ -96,7 +96,7 @@ class VectorWithRankSupport : public vector<T> {
 public:
     using vector<T>::vector;
     // rank [0..position]
-    int64_t rank(T symbol,int position) const {
+    int64_t rank(T symbol,int64_t position) const {
         int64_t result = 0;
         for (size_t i = 0; i <= position; ++i) {
             result += vector<T>::operator[](i) == symbol;
