@@ -4,6 +4,9 @@
 #include <memory>
 #include <vector>
 
+#include <cache.hpp>
+#include <lru_cache_policy.hpp>
+
 #include "annotate.hpp"
 
 
@@ -16,9 +19,10 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
     using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
 
-    StaticBinRelAnnotator() : matrix_(new BinaryMatrixType()) {}
+    StaticBinRelAnnotator(size_t row_cache_size = 0);
     StaticBinRelAnnotator(std::unique_ptr<BinaryMatrixType>&& matrix,
-                          const LabelEncoder<Label> &label_encoder);
+                          const LabelEncoder<Label> &label_encoder,
+                          size_t row_cache_size = 0);
 
     bool has_label(Index i, const Label &label) const override;
     bool has_labels(Index i, const VLabels &labels) const override;
@@ -43,6 +47,8 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
     void call_objects(const Label &label,
                       std::function<void(Index)> callback) const override;
 
+    void reset_row_cache(size_t size);
+
     std::string file_extension() const override;
 
   private:
@@ -55,6 +61,11 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
     };
 
     std::vector<uint64_t> get_label_indices(Index i) const override;
+
+    typedef caches::fixed_sized_cache<Index,
+                                      std::vector<uint64_t>,
+                                      caches::LRUCachePolicy<Index>> RowCacheType;
+    mutable std::unique_ptr<RowCacheType> cached_rows_;
 
     static const std::string kExtension;
 };

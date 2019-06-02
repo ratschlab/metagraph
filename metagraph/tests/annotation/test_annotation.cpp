@@ -4,16 +4,17 @@
 
 #include "gtest/gtest.h"
 
+#define private public
+
 #include "annotate_column_compressed.hpp"
 #include "annotate_row_compressed.hpp"
 #include "static_annotators_def.hpp"
 #include "annotation_converters.hpp"
 #include "utils.hpp"
+#include "test_matrix_helpers.hpp"
+#include "unix_tools.hpp"
 
-const std::string test_data_dir = "../tests/data";
-const std::string test_dump_basename = test_data_dir + "/dump_test";
-const std::string test_dump_basename_vec_bad = test_dump_basename + "_bad_filename";
-const std::string test_dump_basename_vec_good = test_dump_basename + "_annotation";
+#include "../test_helpers.hpp"
 
 
 template <typename... Args>
@@ -108,6 +109,9 @@ template <typename Annotator>
 class AnnotatorStaticTest : public AnnotatorTest<Annotator> { };
 
 template <typename Annotator>
+class AnnotatorStaticLargeTest : public AnnotatorStaticTest<Annotator> { };
+
+template <typename Annotator>
 class AnnotatorPresetTest : public AnnotatorTest<Annotator> {
   public:
     virtual void SetUp() override {
@@ -163,6 +167,7 @@ typedef ::testing::Types<annotate::BinRelWTAnnotator,
 typedef ::testing::Types<annotate::BinRelWTAnnotator,
                          annotate::BinRelWT_sdslAnnotator,
                          annotate::BRWTCompressed<>> AnnotatorStaticTypes;
+typedef ::testing::Types<annotate::BRWTCompressed<>> AnnotatorStaticLargeTypes;
 typedef ::testing::Types<annotate::ColumnCompressed<>,
                          annotate::RowCompressed<>,
                          RowCompressedParallel<>,
@@ -178,6 +183,7 @@ TYPED_TEST_CASE(AnnotatorPresetTest, AnnotatorTypes);
 TYPED_TEST_CASE(AnnotatorPreset2Test, AnnotatorTypes);
 TYPED_TEST_CASE(AnnotatorPreset3Test, AnnotatorTypes);
 TYPED_TEST_CASE(AnnotatorStaticTest, AnnotatorStaticTypes);
+TYPED_TEST_CASE(AnnotatorStaticLargeTest, AnnotatorStaticLargeTypes);
 TYPED_TEST_CASE(AnnotatorDynamicTest, AnnotatorDynamicTypes);
 TYPED_TEST_CASE(AnnotatorDynamicNoSparseTest, AnnotatorDynamicNoSparseTypes);
 
@@ -1165,3 +1171,97 @@ TYPED_TEST(AnnotatorStaticTest, RenameColumnsMergeAll) {
         ""
     );
 }
+
+TYPED_TEST(AnnotatorStaticLargeTest, CheckCache) {
+    size_t num_rows = 20000;
+    size_t num_columns = 200;
+    BitVectorPtrArray columns, copy;
+    annotate::LabelEncoder label_encoder;
+
+    for (size_t j = 0; j < num_columns; ++j) {
+
+        columns.emplace_back(new bit_vector_stat(num_rows));
+
+        for (size_t i = 0; i < num_rows; ++i) {
+            columns.back()->set(i, (i + 2 * j) % 1000);
+        }
+        copy.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
+
+        label_encoder.insert_and_encode(std::to_string(j));
+    }
+
+    auto annotator = TypeParam(
+        std::make_unique<typename TypeParam::binary_matrix_type>(
+            build_matrix_from_columns<typename TypeParam::binary_matrix_type>(
+                std::move(copy), num_rows
+            )
+        ),
+        label_encoder,
+        1000000
+    );
+
+    std::vector<std::vector<std::string>> rows;
+    for (size_t i = 0; i < num_rows; i += 1000) {
+        rows.emplace_back(annotator.get_labels(i));
+    }
+
+    auto it = rows.begin();
+    for (size_t i = 0; i < num_rows; i += 1000) {
+        ASSERT_NE(rows.end(), it);
+        EXPECT_EQ(*it++, annotator.get_labels(i));
+    }
+}
+
+// This can be run with --gtest_also_run_disabled_tests
+TYPED_TEST(AnnotatorStaticLargeTest, DISABLED_QueryRowsCached_LONG_TEST) {
+    size_t num_rows = 2000000;
+    size_t num_columns = 200;
+    BitVectorPtrArray columns, copy;
+    annotate::LabelEncoder label_encoder;
+
+    for (size_t j = 0; j < num_columns; ++j) {
+
+        columns.emplace_back(new bit_vector_stat(num_rows));
+
+        for (size_t i = 0; i < num_rows; ++i) {
+            columns.back()->set(i, (i + 2 * j) % 1000);
+        }
+        copy.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
+
+        label_encoder.insert_and_encode(std::to_string(j));
+    }
+
+    auto annotator = TypeParam(
+        std::make_unique<typename TypeParam::binary_matrix_type>(
+            build_matrix_from_columns<typename TypeParam::binary_matrix_type>(
+                std::move(copy), num_rows
+            )
+        ),
+        label_encoder
+    );
+
+    for (size_t cache_size : { 0, 1000, 10000, 100000, 1000000, 10000000 }) {
+        annotator.reset_row_cache(cache_size);
+        Timer timer;
+        for (size_t i = 0; i < num_rows; ++i) {
+            annotator.get_labels(i);
+        }
+        TEST_COUT << "Query all rows\t"
+                  << "Cache size:\t" << cache_size << "\t\t"
+                  << "Time:\t" << timer.elapsed();
+    }
+
+    for (size_t cache_size : { 0, 1000, 10000, 100000, 1000000, 10000000 }) {
+        annotator.reset_row_cache(cache_size);
+        Timer timer;
+        for (size_t j = 0; j < 1000; ++j) {
+            for (size_t i = 0; i < num_rows; i += 1000) {
+                annotator.get_labels(i);
+            }
+        }
+        TEST_COUT << "Query some rows repeatedly\t"
+                  << "Cache size:\t" << cache_size << "\t\t"
+                  << "Time:\t" << timer.elapsed();
+    }
+}
+

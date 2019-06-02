@@ -145,13 +145,36 @@ void StaticBinRelAnnotator<BinaryMatrixType, Label>::except_dyn() {
 template <class BinaryMatrixType, typename Label>
 std::vector<uint64_t> StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::get_label_indices(Index i) const {
-    return matrix_->get_row(i);
+    if (cached_rows_.get()) {
+        try {
+            return cached_rows_->Get(i);
+        } catch (...) {
+            auto row = matrix_->get_row(i);
+            cached_rows_->Put(i, row);
+            return row;
+        }
+    } else {
+        return matrix_->get_row(i);
+    }
 }
+
+template <class BinaryMatrixType, typename Label>
+void StaticBinRelAnnotator<BinaryMatrixType, Label>
+::reset_row_cache(size_t size) {
+    cached_rows_.reset(size ? new RowCacheType(size) : nullptr);
+}
+
+template <class BinaryMatrixType, typename Label>
+StaticBinRelAnnotator<BinaryMatrixType, Label>::StaticBinRelAnnotator(size_t row_cache_size)
+      : matrix_(new BinaryMatrixType()),
+        cached_rows_({ row_cache_size ? new RowCacheType(row_cache_size) : nullptr }) {}
 
 template <class BinaryMatrixType, typename Label>
 StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::StaticBinRelAnnotator(std::unique_ptr<BinaryMatrixType>&& matrix,
-                        const LabelEncoder<Label> &label_encoder) {
+                        const LabelEncoder<Label> &label_encoder,
+                        size_t row_cache_size)
+      : cached_rows_({ row_cache_size ? new RowCacheType(row_cache_size) : nullptr }) {
     assert(matrix.get());
     matrix_ = std::move(matrix);
     label_encoder_ = label_encoder;
