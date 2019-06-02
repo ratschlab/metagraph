@@ -72,14 +72,14 @@ public:
     // graph contains all reads
     // sequences are of size at least k
     PathDatabaseWaveletCore(std::shared_ptr<const DBGSuccinct> graph) : PathDatabaseDynamicCore<GT,DRT,DIT>(graph),
-                                                                              incoming_table(*graph),
-                                                                              routing_table(*graph)
+                                                                              incoming_table(this->graph_),
+                                                                              routing_table(this->graph_)
                                                                               {}
 
     PathDatabaseWaveletCore(const vector<string> &filenames,
                         size_t kmer_length = 21 /* default */) : PathDatabaseDynamicCore<GT,DRT,DIT>(filenames,kmer_length),
-                                                            routing_table(this->graph),
-                                                            incoming_table(this->graph) {}
+                                                            routing_table(this->graph_),
+                                                            incoming_table(this->graph_) {}
 
 
 

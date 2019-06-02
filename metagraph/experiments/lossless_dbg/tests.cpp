@@ -69,6 +69,9 @@ TEST(SamplerTest,SubSample) {
     ASSERT_EQ(reads.size(), 2);
 }
 
+TEST(RoutingTable,BasicTest) {
+    auto rt = DynamicRoutingTable();
+}
 // Depends on large file -> tested and works
 //TEST(CompressingReads,GetChromosomeWorks) {
 //    auto chromosome = get_human_chromosome(CHROMOSOME_NUMBER);
@@ -189,8 +192,8 @@ TEST(PathDatabase,RightDecode) {
 }
 
 TEST(PathDatabase,IncomingTable) {
-    DBGSuccinct graph = DBGSuccinct(21);
-    IncomingTable table(graph);
+    auto graph = make_shared<DBGSuccinct>(21);
+    IncomingTable<> table(graph);
     table.joins = IncomingTable<>::bit_vector_t({1,0,0,1,0,1,1,0,1});
     vector<int> v = {1,2,3,4};
     table.edge_multiplicity_table = sdsl::enc_vector<>(v);

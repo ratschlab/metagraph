@@ -12,7 +12,7 @@ template <typename BitVector=default_bit_vector,typename GraphT=DBGSuccinct>
 class IncomingTable {
 public:
     using edge_identifier_t = node_index;
-    explicit IncomingTable(const GraphT & graph) : graph(graph) {}
+    explicit IncomingTable(shared_ptr<const GraphT> graph) : graph(graph) {}
     using bit_vector_t = BitVector;
     BitVector joins;
     sdsl::enc_vector<> edge_multiplicity_table;
@@ -61,12 +61,12 @@ public:
 
     bool has_new_reads(node_index node) const {
         // todo : remove or after the indegree bug is fixed and use assertion
-        // assert(!(graph.indegree(node) < 2 and size(node)) or size(node) > graph.indegree(node));
+        // assert(!(graph->indegree(node) < 2 and size(node)) or size(node) > graph->indegree(node));
         // indegree smaller than two with nonempty incoming table implies that node has new reads
 #ifndef FULL_INCOMING_TABLE
-        return size(node) == graph.indegree(node) or (graph.indegree(node) < 2 and size(node));
+        return size(node) == graph->indegree(node) or (graph->indegree(node) < 2 and size(node));
 #else
-        return (size(node) > graph.indegree(node)) or (graph.indegree(node) < 2 and size(node));
+        return (size(node) > graph->indegree(node)) or (graph->indegree(node) < 2 and size(node));
 #endif
     }
 
@@ -74,7 +74,7 @@ public:
         bool increment = has_new_reads(node);
         int64_t result;
         if (prev_node) {
-            result = graph.branch_id(node,prev_node);
+            result = graph->branch_id(node,prev_node);
         }
         else {
             result = -1; // starting branch is before all other branches
@@ -93,7 +93,7 @@ public:
     }
 
 
-    const GraphT & graph;
+    shared_ptr<const GraphT> graph;
 };
 
 #include <iostream>

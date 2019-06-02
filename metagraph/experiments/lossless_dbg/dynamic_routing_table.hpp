@@ -25,188 +25,74 @@
 #include "graph_preprocessor.hpp"
 #include "routing_table_transformation.hpp"
 #include "dense_hashmap.hpp"
+#include "solid_dynamic_routing_table.hpp"
 
 using node_index = SequenceGraph::node_index;
 
-template <typename... Args>
-void doPrint(std::ostream& out, Args&&... args)
-{
-    ((out << ',' << std::forward<Args>(args)), ...);
-}
-#undef protected
-template <typename Test,typename Reference>
-class IdentityComparator : public Reference {
-public:
-    using Reference::Reference;
-    template<typename ...Args>
-    int64_t rank(Args... args) const {
-        auto target = Reference::rank(args...);
-        auto value = t.rank(args...);
-        if (target != value) {
-            doPrint(cout,args...);
-        }
-        assert(target==value);
-        return target;
-    }
 
-    template<typename ...Args>
-    int64_t size(Args... args) const {
-        auto target = Reference::size(args...);
-        auto value = t.size(args...);
-        if (target != value) {
-            doPrint(cout,args...);
-        }
-        assert(target==value);
-        return target;
-    }
-
-    template<typename ...Args>
-    int64_t select(Args... args) const {
-        auto target = Reference::select(args...);
-        auto value = t.select(args...);
-        if (target != value) {
-            doPrint(cout,args...);
-        }
-        assert(target==value);
-        return target;
-    }
-
-    template<typename ...Args>
-    int64_t operator[](Args... args) const {
-        auto target = Reference::operator[](args...);
-        auto value = t.operator[](args...);
-        if (target != value) {
-            doPrint(cout,args...);
-        }
-        assert(target==value);
-        return target;
-    }
-
-    template<typename ...Args>
-    void insert(Args... args) {
-        Reference::insert(args...);
-        t.insert(args...);
-    }
-
-    Test t;
-};
-
-template <typename T>
-class VectorWithRankSupport : public vector<T> {
-public:
-    using vector<T>::vector;
-    // rank [0..position]
-    int64_t rank(T symbol,int64_t position) const {
-        int64_t result = 0;
-        for (size_t i = 0; i <= position; ++i) {
-            result += vector<T>::operator[](i) == symbol;
-        }
-        return result;
-    }
-
-    int64_t select(T symbol,int64_t rank) const {
-        int64_t crank = 1;
-        int64_t i = 0;
-        for(auto& c : *this) {
-            if (c == symbol) {
-                if (crank == rank) {
-                    return i;
-                }
-                else {
-                    crank++;
-                }
-            }
-            i++;
-        }
-        return INT_MAX;
-    }
-
-    char get(int64_t position) const {
-        return this->at(position);
-    }
-
-    void insert(int64_t position,T symbol) {
-        assert(position <= this->size());
-        vector<T>::insert(this->begin() + position, symbol);
-    }
-};
 
 //template<typename EntryT=wavelet_tree_dyn>
-template <typename EntryT=VectorWithRankSupport<int64_t>>
+template <typename EntryT=SolidDynamicRoutingTable<>,typename BitVector=sdsl::bit_vector,typename RankSupport=typename BitVector::rank_1_type>
 class DynamicRoutingTableCore {
 public:
-    DynamicRoutingTableCore(const DBGSuccinct& graph) : graph(graph) {}
-
-//    int64_t select(node_index node, int64_t occurrence, char symbol) const {
-//    }
-
-    // rank [0..position)
-    int64_t rank(node_index node, int64_t position, char symbol) const {
-        int64_t encoded = graph.encode(symbol);
-        auto &node_entry = routing_table.at(node);
-        int64_t result = 0;
-        assert(position <= node_entry.size());
-        if (position) {
-            result = node_entry.rank(encoded, position - 1);
-        }
-        return result;
-    }
-public:
-    int64_t select(node_index node,int64_t rank,char symbol) const {
-        int64_t encoded = graph.encode(symbol);
-        auto &node_entry = routing_table.at(node);
-        return node_entry.select(encoded,rank);
-    }
-    char get(node_index node, int64_t position) const {
-        auto &node_entry = routing_table.at(node);
-        return graph.decode(node_entry[position]);
+    using BaseT = typename EntryT::BaseT;
+    DynamicRoutingTableCore() = default;
+    DynamicRoutingTableCore(shared_ptr<const DBGSuccinct> graph) : graph(graph) {}
+    DynamicRoutingTableCore(shared_ptr<const DBGSuccinct> graph, BitVector* is_element,RankSupport* rank_element, ll chunks = 1000)
+            : graph(graph), chunks(is_element,rank_element,chunks) {
     }
 
-    string print_content(node_index node) const {
-        stringstream out;
-        auto table_size = size(node);
-        for (int64_t i=0;i<table_size;i++) {
-            out << get(node, i);
-        }
-        out << endl;
-        cerr << out.str();
-        return out.str();
+    ll select(int64_t location, ll occurrence, char symbol) const {
+        auto &chunk = chunks.at(location);
+        return chunk.select(chunks.position_in_chunk(location), occurrence, symbol);
     }
 
-    char traversed_base(node_index node, int64_t position) const {
-        assert(position >= 0 && "traversing o");
-        return get(node,position);
+    ll rank(int64_t location, ll position, char symbol) const {
+        auto &chunk = chunks.at(location);
+        return chunk.rank(chunks.position_in_chunk(location), position, symbol);
     }
 
-    int64_t new_relative_position(node_index node, int64_t position) const {
-        auto base = get(node,position);
-        auto base_rank = rank(node,position,base);
-        return base_rank;
+    char get(int64_t location, ll position) const {
+        auto &chunk = chunks.at(location);
+        return chunk.get(chunks.position_in_chunk(location), position);
     }
 
-    int64_t size(node_index node) const {
-        if (routing_table.count(node))
-            return routing_table.at(node).size();
-        else
-            return 0;
+    ll size(int64_t location) const {
+        auto &chunk = chunks.at(location);
+        return chunk.size(chunks.position_in_chunk(location));
     }
 
-    void insert(node_index node, int64_t position, char symbol) {
-        int64_t encoded = graph.encode(symbol);
-        assert(position <= size(node));
-        routing_table[node].insert(position,encoded);
+    string print_content(int64_t location) {
+        auto &chunk = chunks.at(location);
+        return chunk.print_content(chunks.position_in_chunk(location));
     }
 
-    DenseHashMap<EntryT> routing_table;
-    const DBGSuccinct& graph;
+    char traversed_base(int64_t location, ll position) const {
+        auto &chunk = chunks.at(location);
+        return chunk.traversed_base(chunks.position_in_chunk(location), position);
+    }
+
+    ll new_relative_position(int64_t location, ll position) {
+        auto &chunk = chunks.at(location);
+        return chunk.new_relative_position(chunks.position_in_chunk(location), position);
+    }
+
+    void insert(int64_t location, ll position, char symbol) {
+        auto &chunk = chunks[location];
+        chunk.insert(chunks.position_in_chunk(location), position, symbol);
+    }
+
+
+    ChunkedDenseHashMap<EntryT,BitVector,RankSupport> chunks;
+    shared_ptr<const BetterDBGSuccinct> graph;
 };
 
 
 
 //template <typename EntryT=wavelet_tree_dyn>
-template <typename EntryT=VectorWithRankSupport<int64_t>>
-class DynamicRoutingTable : public TransformationsEnabler<DynamicRoutingTableCore<EntryT>> {
-    using TransformationsEnabler<DynamicRoutingTableCore<EntryT>>::TransformationsEnabler;
+template <typename EntryT=SolidDynamicRoutingTable<>,typename BitVector=sdsl::bit_vector,typename RankSupport=typename BitVector::rank_1_type>
+class DynamicRoutingTable : public TransformationsEnabler<DynamicRoutingTableCore<EntryT,BitVector,RankSupport>> {
+    using TransformationsEnabler<DynamicRoutingTableCore<EntryT,BitVector,RankSupport>>::TransformationsEnabler;
 };
 
 #endif //METAGRAPH_DYNAMIC_ROUTING_TABLE_HPP

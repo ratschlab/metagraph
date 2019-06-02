@@ -14,11 +14,11 @@
 #include <fstream>
 #include <filesystem>
 #include <nlohmann/json.hpp>
+#include "kmer_extractor.hpp"
 #include "sequence_io.hpp"
 
 using namespace std;
-
-
+using ll = long long;
 
 #define x first
 #define y second
@@ -27,8 +27,6 @@ using namespace std;
 namespace fs = std::filesystem;
 
 #define local_file(filename) (fs::path(__FILE__).parent_path() / (filename))
-
-void save_string(const string &to_save,const string &filename);
 
 //template<typename POD>
 //std::ostream& serialize(std::ostream& os, std::vector<POD> const& v);
@@ -47,12 +45,6 @@ struct d_t {
 
 
 #define PRINT_VAR(args ...) { d_t(), "|", __LINE__, "|", #args, ":", args, "\n"; }
-
-void transform_to_fasta(const string &filename,const vector<string>& reads);
-
-void write_reads_to_fasta(const vector<string>& reads,const string &filename);
-
-vector<string> read_reads_from_fasta(const string &filename);
 
 template<typename POD>
 inline std::istream &deserialize(std::istream &is, vector<POD> &v) {
@@ -92,5 +84,127 @@ inline string decode_from_input(const vector<string>& input,const pair<string,in
     }
     return "";
 }
+
+inline void save_string(const string &to_save, const string &filename) {
+    ofstream myfile;
+    myfile.open (filename);
+    myfile << to_save;
+    myfile.close();
+}
+
+inline void transform_to_fasta(const string &filename, const vector <string> &reads) {
+    ofstream myfile;
+    myfile.open (filename);
+    for(auto& read : reads) {
+        myfile << ">" << endl;
+        myfile << read << endl;
+    }
+    myfile.close();
+}
+
+
+inline void write_reads_to_fasta(const vector <string> &reads, const string &filename) {
+    transform_to_fasta(filename,reads);
+}
+
+inline void reduce_maps(std::map<int, int> &output, std::map<int, int> &input) {
+    for (auto& X : input) {
+        output[X.first] += X.second;
+    }
+}
+
+inline int8_t encode(char c) {
+    if (c == '#') return 6;//alphabet_decoder.alph_size;
+    if (c == '$') return 0;
+    return KmerExtractor::encode(c);
+}
+inline char decode(int8_t c) {
+    if (c == 6) return '#';
+    if (c == 0) return '$';
+    return KmerExtractor::encode(c);
+}
+
+inline string& clamp_alphabet(string& text,const string& alphabet="$ACGTN",char replacement='N') {
+    for(auto& c : text) {
+        if (alphabet.find(c) == string::npos) {
+            c = replacement;
+        }
+    }
+    return text;
+}
+
+inline vector <string> read_reads_from_fasta(const string &filename) {
+    vector<string> result;
+    read_fasta_file_critical(
+            filename,
+            [&](kseq_t* read) {
+                string read_seq = read->seq.s;
+                clamp_alphabet(read_seq);
+                result.push_back(read_seq);
+            });
+    return result;
+}
+
+template <typename... Args>
+inline void doPrint(std::ostream& out, Args&&... args)
+{
+    ((out << ',' << std::forward<Args>(args)), ...);
+}
+template <typename Test,typename Reference>
+class IdentityComparator : public Reference {
+public:
+    using Reference::Reference;
+    template<typename ...Args>
+    int64_t rank(Args... args) const {
+        auto target = Reference::rank(args...);
+        auto value = t.rank(args...);
+        if (target != value) {
+            doPrint(cout,args...);
+        }
+        assert(target==value);
+        return target;
+    }
+
+    template<typename ...Args>
+    int64_t size(Args... args) const {
+        auto target = Reference::size(args...);
+        auto value = t.size(args...);
+        if (target != value) {
+            doPrint(cout,args...);
+        }
+        assert(target==value);
+        return target;
+    }
+
+    template<typename ...Args>
+    int64_t select(Args... args) const {
+        auto target = Reference::select(args...);
+        auto value = t.select(args...);
+        if (target != value) {
+            doPrint(cout,args...);
+        }
+        assert(target==value);
+        return target;
+    }
+
+    template<typename ...Args>
+    int64_t operator[](Args... args) const {
+        auto target = Reference::operator[](args...);
+        auto value = t.operator[](args...);
+        if (target != value) {
+            doPrint(cout,args...);
+        }
+        assert(target==value);
+        return target;
+    }
+
+    template<typename ...Args>
+    void insert(Args... args) {
+        Reference::insert(args...);
+        t.insert(args...);
+    }
+
+    Test t;
+};
 
 #endif /* utils_h */

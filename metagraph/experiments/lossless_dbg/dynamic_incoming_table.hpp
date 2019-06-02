@@ -15,93 +15,58 @@
 #include <tsl/hopscotch_map.h>
 
 #include "graph_patch.hpp"
-#include "path_database.hpp"
-#include "path_database_dynamic.hpp"
 #include "cxx-prettyprint.hpp"
 #include "utils.hpp"
 #include "utilities.hpp"
 #include "alphabets.hpp"
-#include "routing_table.hpp"
+#include "solid_dynamic_incoming_table.hpp"
 
 using default_bit_vector = bit_vector_small;
 
-template <typename GraphT=DBGSuccinct,typename _edge_identifier_t=char>
+
+template <typename EntryT=SolidDynamicIncomingTable<>,typename BitVector=sdsl::bit_vector,typename RankSupport=typename BitVector::rank_1_type>
 class DynamicIncomingTable {
 public:
-    using edge_identifier_t = _edge_identifier_t;
-    explicit DynamicIncomingTable(const GraphT &graph) : graph(graph) {}
-
-    int64_t branch_offset(node_index node, edge_identifier_t incoming) const {
-        int64_t result = 0;
-        for (char base : "$ACGTN") {
-            if (base < incoming) {
-                result += branch_size(node, base);
-            }
-        }
-        return result;
+    using edge_identifier_t = char;
+    DynamicIncomingTable() = default;
+    DynamicIncomingTable(shared_ptr<const DBGSuccinct> graph) : graph(graph) {}
+    DynamicIncomingTable(shared_ptr<const DBGSuccinct> graph, BitVector* is_element,RankSupport* rank_element, ll chunks = 1000)
+            : graph(graph), chunks(is_element,rank_element,chunks) {
     }
 
-    bool is_join(node_index node) const {
-        return incoming_table.count(node);
+    bool is_join(int64_t location) const {
+        auto &chunk = chunks.at(location);
+        return chunk.is_join(chunks.position_in_chunk(location));
     }
 
-    int64_t branch_size(node_index node, edge_identifier_t incoming) const {
-        assert(node);
-        int64_t result = 0;
-        int64_t encoded = graph.encode(incoming);
-        if (incoming_table.count(node)) {
-            result = incoming_table.at(node)[encoded];
-        }
-        return result;
+    ll branch_offset(int64_t location, edge_identifier_t incoming) const {
+        auto &chunk = chunks.at(location);
+        return chunk.branch_offset(chunks.position_in_chunk(location), incoming);
+    }
+    
+    ll branch_size(int64_t location, edge_identifier_t incoming) const {
+        auto &chunk = chunks.at(location);
+        return chunk.branch_size(chunks.position_in_chunk(location), incoming);
     }
 
-    int64_t size(node_index node) const {
-        int64_t result = 0;
-        for(char base : "$ACGTN") {
-            result += branch_size(node,base);
-        }
-        return result;
+    ll size(int64_t location) const {
+        auto &chunk = chunks.at(location);
+        return chunk.size(chunks.position_in_chunk(location));
     }
 
-    int64_t branch_offset_and_increment(node_index node,
-                                    edge_identifier_t incoming) {
-        assert(node);
-        assert(incoming == '$' or
-               incoming == 'A' or
-               incoming == 'C' or
-               incoming == 'G' or
-               incoming == 'T' or
-               incoming == 'N'
-        );
-        int64_t result = 0;
-        int64_t encoded = graph.encode(incoming);
-        auto& array = incoming_table[node];
-        for(auto i=0;i<6;i++) {
-            if (i >= encoded) break;
-            result += array[i];
-        }
-        array[encoded]++;
-        return result;
+    ll branch_offset_and_increment(int64_t location, edge_identifier_t incoming) {
+        auto &chunk = chunks[location];
+        return chunk.branch_offset_and_increment(chunks.position_in_chunk(location), incoming);
     }
 
-    string print_content(node_index node) const {
-        stringstream out;
-        auto table_size = size(node);
-        for(char c : "$ACGTN") {
-            out << c << ":" << branch_size(node,c) << endl;
-        }
-        cerr << out.str();
-        return out.str();
+    string print_content(int64_t location) const {
+        auto &chunk = chunks.at(location);
+        return chunk.print_content(chunks.position_in_chunk(location));
     }
 
-    bool has_new_reads(node_index node) const {
-        return branch_size(node, '$');
-    }
-
-    DenseHashMap<array<int32_t,6>> incoming_table;
-    const GraphT &graph;
+    ChunkedDenseHashMap<EntryT,BitVector,RankSupport> chunks;
+    shared_ptr<const BetterDBGSuccinct> graph;
 };
-
 
 
 #endif //METAGRAPH_DYNAMIC_INCOMING_TABLE_HPP

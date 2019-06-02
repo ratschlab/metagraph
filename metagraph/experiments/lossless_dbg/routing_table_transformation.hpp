@@ -36,15 +36,15 @@ template<typename RoutingTable>
 class TransformationsEnabler : public RoutingTable {
 public:
 
-    explicit TransformationsEnabler(const DBGSuccinct& graph) : RoutingTable(graph) {
+    explicit TransformationsEnabler(const shared_ptr<const DBGSuccinct> graph) : RoutingTable(graph) {
 #ifndef DISABLE_TRANSFORMATIONS
-        transformations = GraphPreprocessor(graph).find_weak_splits();
+        transformations = GraphPreprocessor(*graph).find_weak_splits();
 #endif
     }
     using RoutingTable::RoutingTable;
 
 //    template <typename Container>
-//    TransformationsEnabler(const DBGSuccinct& graph,const Container& routing_table_array) :
+//    TransformationsEnabler(const shared_ptr<const DBGSuccinct> graph,const Container& routing_table_array) :
 //                                            RoutingTable(graph,routing_table_array) {
 //        transformations = GraphPreprocessor(graph).find_weak_splits();
 //                                            }

@@ -50,8 +50,8 @@ public:
     explicit PathDatabaseDynamicCore(std::shared_ptr<const GraphT> graph) :
             graph_(graph),
             graph(*graph_),
-            incoming_table(*graph),
-            routing_table(*graph)
+            incoming_table(graph_),
+            routing_table(graph_)
             {}
 
 
@@ -59,8 +59,8 @@ public:
                  size_t kmer_length = 21 /* default kmer */) :
             graph_(shared_ptr<const GraphT>(buildGraph(this,reads,kmer_length))),
             graph(*graph_),
-            incoming_table(graph),
-            routing_table(graph)
+            incoming_table(graph_),
+            routing_table(graph_)
             {}
 
     virtual ~PathDatabaseDynamicCore() {}
@@ -132,25 +132,10 @@ public:
         bifurcation_timer.finished();
 
 
-        auto alloc_routing_table = VerboseTimer("allocation of routing table");
-        //routing_table.rrouting_table.init(&is_split,&rank_is_split);
-        using DynWavelet = typename decltype(routing_table.routing_table.elements)::value_type;
-        if constexpr (is_base_of<wavelet_tree_dyn,DynWavelet>::value) {
-            cerr << "Using Wavelet tree" << endl;
-            routing_table.routing_table = decltype(routing_table.routing_table)(&is_split, &rank_is_split,
-                                                                                DynWavelet(6));
-        }
-        else {
-            routing_table.routing_table = decltype(routing_table.routing_table)(&is_split,&rank_is_split);
-        }
-        incoming_table.incoming_table = decltype(incoming_table.incoming_table)(&is_join,&rank_is_join);
-
+        auto alloc_routing_table = VerboseTimer("allocation of routing & incoming table");
+        routing_table = decltype(routing_table)(graph_,&is_split,&rank_is_split);
+        incoming_table = decltype(incoming_table)(graph_,&is_join,&rank_is_join);
         alloc_routing_table.finished();
-        for(auto& table : incoming_table.incoming_table.elements) {
-            for(auto& element : table) {
-                assert(!element);
-            }
-        }
 
         #pragma omp parallel for num_threads(get_num_threads())
         for (node_index node = 1; node <= graph.num_nodes(); node++) {
@@ -190,11 +175,6 @@ public:
         cerr << "Cumulative sizes in bytes" << endl;
         PRINT_VAR(is_join.size()/8);
         PRINT_VAR(is_split.size()/8);
-        PRINT_VAR(routing_table.routing_table.elements.capacity()*sizeof(typename decltype(routing_table.routing_table.elements)::value_type));
-        PRINT_VAR(incoming_table.incoming_table.elements.capacity()*sizeof(typename decltype(incoming_table.incoming_table.elements)::value_type));
-        PRINT_VAR(node_locks.elements.capacity()*sizeof(typename decltype(node_locks.elements)::value_type));
-        PRINT_VAR(outgoing_locks.elements.capacity()*sizeof(typename decltype(outgoing_locks.elements)::value_type));
-        PRINT_VAR(waiting_threads.elements.capacity()*sizeof(typename decltype(waiting_threads.elements)::value_type));
 
         #pragma omp parallel for num_threads(get_num_threads()) //default(none) shared(encoded,node_locks,routing_table,incoming_table)
         for (size_t i = 0; i < sequences.size(); i++) {

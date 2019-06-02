@@ -24,8 +24,8 @@
 template<class Wavelet = sdsl::wt_rlmn<>>
 class RoutingTableCore {
 public:
-    RoutingTableCore(const DBGSuccinct& graph) :
-        graph(graph), delimiter_encoded(graph.get_boss().alph_size)
+    RoutingTableCore(const shared_ptr<const DBGSuccinct> graph) :
+        graph(graph), delimiter_encoded(graph->get_boss().alph_size)
     {};
 
     template<class Container>
@@ -34,13 +34,13 @@ public:
         for(int64_t i=0;i<routing_table_array.size();i++) {
             routing_table_array_encoded[i] = routing_table_array[i] == '#' ? 
                                              delimiter_encoded : 
-                                             graph.encode(routing_table_array[i]);
+                                             encode(routing_table_array[i]);
         }
         construct_im(routing_table,routing_table_array_encoded,0);
     }
 
     template<class Container>
-    explicit RoutingTableCore(const DBGSuccinct& graph,const Container& routing_table_array) :
+    explicit RoutingTableCore(const shared_ptr<const DBGSuccinct> graph,const Container& routing_table_array) :
         RoutingTableCore(graph)
      {
         initialize_content(routing_table_array);
@@ -56,25 +56,25 @@ public:
 
     int64_t select(node_index node, int64_t occurrence, char symbol) const {
         auto routing_table_block = offset(node);
-        auto occurrences_of_symbol_before_block = routing_table.rank(routing_table_block,graph.encode(symbol));
+        auto occurrences_of_symbol_before_block = routing_table.rank(routing_table_block,encode(symbol));
         if (occurrence > rank(node,size(node)+1,symbol)) {
             PRINT_VAR(node,occurrence,symbol);
             print_content(node);
         }
         assert(occurrence <= rank(node,size(node)+1,symbol));
-        return routing_table.select(occurrences_of_symbol_before_block+occurrence,graph.encode(symbol)) - routing_table_block;
+        return routing_table.select(occurrences_of_symbol_before_block+occurrence,encode(symbol)) - routing_table_block;
     }
 
     int64_t rank(node_index node, int64_t position, char symbol) const {
         auto routing_table_block = offset(node);
         auto absolute_position = routing_table_block+position;
-        auto occurrences_of_base_before_block = routing_table.rank(routing_table_block,graph.encode(symbol));
-        return routing_table.rank(absolute_position,graph.encode(symbol)) - occurrences_of_base_before_block;
+        auto occurrences_of_base_before_block = routing_table.rank(routing_table_block,encode(symbol));
+        return routing_table.rank(absolute_position,encode(symbol)) - occurrences_of_base_before_block;
     }
 
     char get(node_index node, int64_t position) const {
         auto routing_table_block = offset(node);
-        return graph.decode(routing_table[routing_table_block+position]);
+        return decode(routing_table[routing_table_block+position]);
     }
 
     int64_t size(node_index node) const {
@@ -116,7 +116,7 @@ public:
     }
 
     const int64_t delimiter_encoded;
-    const DBGSuccinct& graph;
+    const shared_ptr<const DBGSuccinct> graph;
 };
 
 template <typename Wavelet=sdsl::wt_rlmn<>>

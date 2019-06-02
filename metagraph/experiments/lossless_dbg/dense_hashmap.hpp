@@ -11,9 +11,12 @@
 
 
 
-template <typename T,typename bit_vector=sdsl::bit_vector, typename rank_support=sdsl::rank_support_v<1>>
+template <typename T,typename bit_vector_=sdsl::bit_vector, typename rank_support_=sdsl::rank_support_v<1>>
 class DenseHashMap {
 public:
+    using bit_vector = bit_vector_;
+    using rank_support = rank_support_;
+    using element_type = T;
     DenseHashMap() = default;
 
 //    void operator=(DenseHashMap<T>&& other) {
@@ -64,12 +67,12 @@ class ChunkedDenseHashMap : public DenseHashMap<T,bit_vector,rank_support> {
 public:
     ChunkedDenseHashMap() = default;
 
-    ChunkedDenseHashMap(bit_vector *isElement,rank_support *rank,T default_element = T(),int64_t chunks=omp_get_num_threads()*100) {
+    ChunkedDenseHashMap(bit_vector *isElement,rank_support *rank,int64_t chunks=omp_get_num_threads()*100) {
         int64_t total_num_elements = rank->rank(rank->size());
         this->is_element = isElement;
         this->rank = rank;
         divisor = get_divisor(total_num_elements,chunks);
-        this->elements = decltype(this->elements)(chunks,default_element);
+        this->elements = decltype(this->elements)(chunks,T(divisor));//todo fix that last is not full
     }
 
     static int64_t get_divisor(int64_t num_elements,int64_t chunks) {
@@ -77,15 +80,15 @@ public:
     }
 
 
-    int64_t unchunked_position(int64_t n) {
+    int64_t unchunked_position(int64_t n) const {
         return this->rank->rank(n);
     }
 
-    int64_t chunk(int64_t n) {
+    int64_t chunk(int64_t n) const {
         return unchunked_position(n)/divisor;
     }
 
-    int64_t position_in_chunk(int64_t n) {
+    int64_t position_in_chunk(int64_t n) const {
         return unchunked_position(n) % divisor;
     }
 
