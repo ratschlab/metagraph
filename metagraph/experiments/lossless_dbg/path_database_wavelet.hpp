@@ -71,15 +71,12 @@ public:
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
-    PathDatabaseWaveletCore(std::shared_ptr<const DBGSuccinct> graph) : PathDatabaseDynamicCore<GT,DRT,DIT>(graph),
-                                                                              incoming_table(this->graph_),
-                                                                              routing_table(this->graph_)
+    PathDatabaseWaveletCore(std::shared_ptr<const DBGSuccinct> graph) : PathDatabaseDynamicCore<GT,DRT,DIT>(graph)
                                                                               {}
 
     PathDatabaseWaveletCore(const vector<string> &filenames,
-                        size_t kmer_length = 21 /* default */) : PathDatabaseDynamicCore<GT,DRT,DIT>(filenames,kmer_length),
-                                                            routing_table(this->graph_),
-                                                            incoming_table(this->graph_) {}
+                        size_t kmer_length = 21 /* default */) : PathDatabaseDynamicCore<GT,DRT,DIT>(filenames,kmer_length)
+                                                         {}
 
 
 
@@ -167,12 +164,12 @@ public:
             }
         }
         delimiter_vector.push_back(true);
-        incoming_table.edge_multiplicity_table = sdsl::enc_vector<>(incoming_table_builder);
         sdsl::bit_vector temporary_representation(delimiter_vector.size());
         for(int64_t i=0;i<delimiter_vector.size();i++) {
             temporary_representation[i] = delimiter_vector[i];
         }
-        incoming_table.joins = decltype(incoming_table.joins)(temporary_representation);
+        using joins_type = typename decltype(incoming_table)::BitVector;
+        incoming_table = decltype(incoming_table)(this->graph_,joins_type(temporary_representation),incoming_table_builder);
         statistics["transformation_incoming_table_time"] = timer.elapsed();
         cerr << "Transformation finished in " << statistics["transformation_incoming_table_time"] << endl;
     }

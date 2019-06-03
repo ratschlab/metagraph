@@ -40,15 +40,23 @@ public:
     Timer timer;
 };
 
+struct waiting_thread_info_t {
+    int16_t thread_id;
+    int64_t relative_position;
+    uint64_t node;
+    char traversed_edge;
+    friend ostream& operator<<(ostream& os, const waiting_thread_info_t& dt);
+};
+ostream& operator<<(ostream& os, const waiting_thread_info_t& wt)
+{
+    os << "[tid=" << wt.thread_id << ",rp=" << wt.relative_position << ",node=" << wt.node << ",tedg=" << wt.traversed_edge << "]";
+    return os;
+}
+
 template<typename GraphT=DBGSuccinct,typename RoutingTableT=DynamicRoutingTable<>,typename IncomingTableT=DynamicIncomingTable<>>
 class PathDatabaseDynamicCore {
 public:
-    struct waiting_thread_info_t {
-        int16_t thread_id;
-        int64_t relative_position;
-        uint64_t node;
-        char traversed_edge;
-    };
+
     using path_id = pair<node_index,int64_t>;
     // implicit assumptions
     // graph contains all reads
@@ -57,7 +65,7 @@ public:
             graph_(graph),
             graph(*graph_),
             incoming_table(graph_),
-            routing_table(graph_),
+            routing_table(graph_),// weak
             chunk_size(chunk_size)
             {}
 
@@ -179,7 +187,7 @@ public:
                 kmer_end++;
             });
             auto &[first_node,first_join,first_split] = bifurcations.front();
-            auto &[last_node,last_join,last_split] = bifurcations.front();
+            auto &[last_node,last_join,last_split] = bifurcations.back();
             assert(first_join == '$');
             assert(last_split == '$');
 
@@ -209,7 +217,7 @@ public:
                         encoded[i] = {node, relative_position};
                     }
                     assert(relative_position>=0);
-                    assert(relative_position <= incoming_table.branch_size(node,join_symbol) || [&,node=node,join_symbol=join_symbol]{
+                    assert((relative_position <= incoming_table.branch_size(node,join_symbol) || [&,node=node,join_symbol=join_symbol]{
                         using TT = DecodeEnabler<PathDatabaseDynamicCore<>>;
                         auto self = reinterpret_cast<TT*>(this);
 
@@ -248,7 +256,7 @@ public:
                         }
 #endif
                         return false;
-                    }());
+                    }()));
 
 #ifdef DEBUG_ADDITIONAL_INFORMATION
                     debug_relative_position_history.push_back(relative_position);

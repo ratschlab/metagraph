@@ -14,10 +14,35 @@ set(CMAKE_CXX_FLAGS_FASTDEBUG "${CMAKE_CXX_FLAGS} -g")
 set(CMAKE_EXE_LINKER_FLAGS_FASTDEBUG "-g")
 set(CMAKE_SHARED_LINKER_FLAGS_FASTDEBUG "-g")
 
-include_directories(playground/dynamic/include)
+
 
 ## Add profiler into release version
 link_libraries(profiler)
+
+###
+# dynamic
+###
+
+include(${CMAKE_ROOT}/Modules/ExternalProject.cmake)
+
+# sparsepp
+if(DEFINED USE_DYNAMIC)
+        ExternalProject_Add(sparsepp
+        GIT_REPOSITORY "https://github.com/edawson/sparsepp.git"
+        GIT_TAG "1c5a285e87b2244383efe0398f9992acd61234e9"
+        BUILD_IN_SOURCE TRUE
+        CMAKE_ARGS -DCMAKE_INSTALL_PREFIX:PATH=${INSTALL_DIR} # TODO ADD static build flag
+        UPDATE_COMMAND ""
+        INSTALL_COMMAND ""
+        BUILD_COMMAND ""
+        CONFIGURE_COMMAND "")
+ExternalProject_Get_property(sparsepp INSTALL_DIR)
+set(sparsepp_INCLUDE "${INSTALL_DIR}/src/sparsepp/sparsepp/")
+set(sparsepp_LIB "${INSTALL_DIR}/src/sparsepp/sparsepp/")
+include_directories(${INSTALL_DIR}/src/sparsepp/sparsepp)
+
+include_directories(playground/dynamic/include)
+endif()
 
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++ -lc++fs")
 #enable_testing()
@@ -43,7 +68,12 @@ add_executable(tests tests.cpp)
 add_executable(${PATH_ENCODER_CURRENT_TYPE} main.cpp)
 
 target_link_libraries(tests metagraph ${METALIBS} gtest gtest_main)
+
 target_link_libraries(${PATH_ENCODER_CURRENT_TYPE} metagraph ${METALIBS} gtest gtest_main )
+if(DEFINED USE_DYNAMIC)
+    add_dependencies(tests sparsepp)
+    add_dependencies(${PATH_ENCODER_CURRENT_TYPE} sparsepp)
+endif()
 
 SET(uid 0)
 macro(add_symlink filepath sympath)

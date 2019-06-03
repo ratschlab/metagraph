@@ -6,13 +6,19 @@
 #define METAGRAPH_INCOMING_TABLE_HPP
 
 
+#include <sdsl/enc_vector.hpp>
+
 using default_bit_vector = bit_vector_small;
 
-template <typename BitVector=default_bit_vector,typename GraphT=DBGSuccinct>
+template <typename BitVector_=default_bit_vector,typename GraphT=DBGSuccinct>
 class IncomingTable {
 public:
     using edge_identifier_t = node_index;
-    explicit IncomingTable(shared_ptr<const GraphT> graph) : graph(graph) {}
+    using BitVector = BitVector_;
+    IncomingTable() = default;
+    explicit IncomingTable(shared_ptr<const GraphT> graph, BitVector joins,
+                           sdsl::enc_vector<> edge_multiplicity_table) :
+                                            graph(graph), joins(joins), edge_multiplicity_table(edge_multiplicity_table) {}
     using bit_vector_t = BitVector;
     BitVector joins;
     sdsl::enc_vector<> edge_multiplicity_table;
@@ -91,7 +97,6 @@ public:
         cerr << out.str();
         return out.str();
     }
-
 
     shared_ptr<const GraphT> graph;
 };

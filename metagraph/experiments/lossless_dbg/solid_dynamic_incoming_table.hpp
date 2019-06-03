@@ -26,9 +26,10 @@ template <typename GraphT=DBGSuccinct,typename _edge_identifier_t=char>
 class SolidDynamicIncomingTable {
 public:
     using edge_identifier_t = _edge_identifier_t;
-    explicit SolidDynamicIncomingTable(ll size) {}
+    explicit SolidDynamicIncomingTable(ll size) : total_size(size) {}
 
     int64_t branch_offset(node_index node, edge_identifier_t incoming) const {
+        assert(node < total_size);
         int64_t result = 0;
         for (char base : "$ACGTN") {
             if (base < incoming) {
@@ -39,10 +40,12 @@ public:
     }
 
     bool is_join(node_index node) const {
+        assert(node < total_size);
         return incoming_table.count(node);
     }
 
     int64_t branch_size(node_index node, edge_identifier_t incoming) const {
+        assert(node < total_size);
         int64_t result = 0;
         int64_t encoded = encode(incoming);
         auto it = incoming_table.find(node);
@@ -56,6 +59,7 @@ public:
     }
 
     ll size(node_index node) const {
+        assert(node < total_size);
         ll result = 0;
         for(char base : "$ACGTN") {
             result += branch_size(node,base);
@@ -65,6 +69,7 @@ public:
 
     int64_t branch_offset_and_increment(node_index node,
                                     edge_identifier_t incoming) {
+        assert(node < total_size);
         assert(incoming == '$' or
                incoming == 'A' or
                incoming == 'C' or
@@ -92,7 +97,9 @@ public:
         return result;
     }
 
+
     string print_content(node_index node) const {
+        assert(node < total_size);
         stringstream out;
         auto table_size = size(node);
         for(char c : "$ACGTN") {
@@ -105,7 +112,7 @@ public:
     bool has_new_reads(node_index node) const {
         return branch_size(node, '$');
     }
-
+    int64_t total_size;
     tsl::hopscotch_map<node_index, array<int32_t,6>> incoming_table;
 };
 

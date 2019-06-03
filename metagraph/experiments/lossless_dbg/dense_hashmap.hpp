@@ -67,14 +67,23 @@ class ChunkedDenseHashMap : public DenseHashMap<T,bit_vector,rank_support> {
 public:
     ChunkedDenseHashMap() = default;
 
-    ChunkedDenseHashMap(bit_vector *isElement,rank_support *rank,int64_t chunks=omp_get_num_threads()*100) {
+    ChunkedDenseHashMap(bit_vector *isElement,rank_support *rank,int64_t chunks=1000) {
         int64_t total_num_elements = rank->rank(rank->size());
         chunks = min(chunks,total_num_elements);
         this->is_element = isElement;
         this->rank = rank;
         divisor = get_divisor(total_num_elements,chunks);
+
+
         if constexpr (supply_size) {
+#ifdef TRUST_VECTOR_ALLOCATION
             this->elements = decltype(this->elements)(chunks, T(divisor));//todo fix that last is not full
+#else
+            this->elements.reserve(chunks);
+            for(int i=0;i<chunks;i++) {
+                this->elements.push_back(T(divisor));
+            }
+#endif
         }
         else {
             this->elements = decltype(this->elements)(chunks);

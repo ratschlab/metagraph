@@ -69,6 +69,13 @@ TEST(SamplerTest,SubSample) {
     ASSERT_EQ(reads.size(), 2);
 }
 
+TEST(WaveletTree,BasicTest) {
+    standardized_wavelet_tree wt(7);
+    wt.insert(0,6);
+    wt.insert(0,6);
+    EXPECT_EQ(wt.rank(2,6),2);
+}
+
 TEST(RoutingTable,BasicTest) {
     auto graph = make_shared<DBGSuccinct>(21);
     auto is_element = sdsl::bit_vector({0,0,1,1});
@@ -77,6 +84,10 @@ TEST(RoutingTable,BasicTest) {
     //EXPECT_EQ(rt.size(0),0);
     rt.insert(2,0,'A');
     //EXPECT_EQ(rt.size(0),0);
+    EXPECT_EQ(rt.chunks.elements[0].routing_table[0],encode('#'));
+    EXPECT_EQ(rt.chunks.elements[0].routing_table[1],encode('A'));
+    EXPECT_EQ(rt.chunks.elements[0].routing_table[2],encode('#'));
+    EXPECT_EQ(rt.chunks.elements[0].routing_table.size(),3);
     EXPECT_EQ(rt.size(3),0);
     EXPECT_EQ(rt.size(2),1);
     EXPECT_EQ(rt.get(2,0),'A');
@@ -202,10 +213,8 @@ TEST(PathDatabase,RightDecode) {
 
 TEST(PathDatabase,IncomingTable) {
     auto graph = make_shared<DBGSuccinct>(21);
-    IncomingTable<> table(graph);
-    table.joins = IncomingTable<>::bit_vector_t({1,0,0,1,0,1,1,0,1});
     vector<int> v = {1,2,3,4};
-    table.edge_multiplicity_table = sdsl::enc_vector<>(v);
+    IncomingTable<> table(graph,IncomingTable<>::bit_vector_t({1,0,0,1,0,1,1,0,1}),sdsl::enc_vector<>(v));
     ASSERT_EQ(table.branch_size_rank(1,0),1);
     ASSERT_EQ(table.branch_size_rank(1,1),2);
     ASSERT_EQ(table.branch_size_rank(2,0),3);

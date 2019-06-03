@@ -24,6 +24,7 @@
 template<class Wavelet = sdsl::wt_rlmn<>>
 class RoutingTableCore {
 public:
+    RoutingTableCore() = default;
     RoutingTableCore(const shared_ptr<const DBGSuccinct> graph) :
         graph(graph), delimiter_encoded(graph->get_boss().alph_size)
     {};
@@ -115,7 +116,7 @@ public:
         return {};
     }
 
-    const int64_t delimiter_encoded;
+    const int64_t delimiter_encoded = 6;
     const shared_ptr<const DBGSuccinct> graph;
 };
 
