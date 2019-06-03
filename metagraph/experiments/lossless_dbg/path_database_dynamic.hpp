@@ -209,7 +209,7 @@ public:
                         encoded[i] = {node, relative_position};
                     }
                     assert(relative_position>=0);
-                    assert(relative_position <= incoming_table.branch_size(node,join_symbol) || [&]{
+                    assert(relative_position <= incoming_table.branch_size(node,join_symbol) || [&,node=node,join_symbol=join_symbol]{
                         using TT = DecodeEnabler<PathDatabaseDynamicCore<>>;
                         auto self = reinterpret_cast<TT*>(this);
 
@@ -247,6 +247,7 @@ public:
                             PRINT_VAR(prev_join_symbol);
                         }
 #endif
+                        return false;
                     }());
 
 #ifdef DEBUG_ADDITIONAL_INFORMATION
@@ -346,9 +347,10 @@ public:
             }
             assert(was_me);
             relative_position += past_offset;
-            assert(relative_postion >= 0 || [&](){
+            assert(relative_position >= 0 || [&](){
                 cerr << waiting_queue << endl;
                 PRINT_VAR(tid,traversed_edge,debug_my_id,past_offset,relative_position);
+                return false;
             }());
 
             if (me_first) {
