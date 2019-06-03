@@ -10,7 +10,7 @@ template <typename Weights>
 WeightedDBG<Weights>::WeightedDBG(std::shared_ptr<DeBruijnGraph> graph, Weights&& weights)
       : graph_(std::move(graph)), weights_(std::move(weights)) {
     assert(graph_.get());
-    assert(graph_->num_nodes() == weights_.size());
+    assert(graph_->num_nodes() + 1 == weights_.size());
 }
 
 template <typename Weights>
