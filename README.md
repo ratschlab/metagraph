@@ -61,11 +61,11 @@ git submodule sync
 git submodule update --init --recursive
 
 pushd metagraph/external-libraries/sdsl-lite
-./install.sh $(pwd)
+./install.sh $PWD
 popd
 
 pushd metagraph/external-libraries/libmaus2
-cmake -DCMAKE_INSTALL_PREFIX:PATH=$(pwd) .
+cmake -DCMAKE_INSTALL_PREFIX:PATH=$PWD .
 make -j $(($(getconf _NPROCESSORS_ONLN) - 1))
 make install
 popd
