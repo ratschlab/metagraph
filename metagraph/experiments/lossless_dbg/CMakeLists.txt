@@ -19,10 +19,6 @@ include_directories(playground/dynamic/include)
 ## Add profiler into release version
 link_libraries(profiler)
 
-set(CMAKE_CXX_FLAGS_GPERF "-O2 -g -lprofiler")
-set(CMAKE_EXE_LINKER_FLAGS_GPERF "-g -lprofiler")
-set(CMAKE_SHARED_LINKER_FLAGS_GPERF "-g -lprofiler")
-
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++ -lc++fs")
 #enable_testing()
 #find_package(GTest REQUIRED)

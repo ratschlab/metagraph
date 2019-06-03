@@ -51,7 +51,7 @@ methods = get_versioned_methods(path_encoder_version)
 format = "artificial_chr10-subsample_size-{subsample_size}-read_length-{read_length}-coverage-{coverage}-error-{error}"
 
 rule all:
-input:
+    input:
 
 # rule all:
 #     #input: expand("compressors_results/{compressors}/SRR554369_1/",compressors=config["compressors"])
@@ -74,9 +74,9 @@ def get_folders(wildcards):
 
 localrules: generate_plots
 rule generate_plots:
-input: unpack(get_folders)
-output: "plots/comparison/{version}/{run_id}.html"
-script: "plotting.py"
+    input: unpack(get_folders)
+    output: "plots/comparison/{version}/{run_id}.html"
+    script: "plotting.py"
 
 path_encoder_versions = [f"path_encoder_{version}" for version in ["v3","v4","v5"]]
 
@@ -86,9 +86,9 @@ def get_pe_folders(wildcards):
 
 localrules: generate_pe_plots
 rule generate_pe_plots:
-input: unpack(get_pe_folders)
-output: "plots/pe_comparison/{run_id}.html"
-script: "plotting.py"
+    input: unpack(get_pe_folders)
+    output: "plots/pe_comparison/{run_id}.html"
+    script: "plotting.py"
 
 
 
@@ -102,11 +102,11 @@ def outputs_parameter_range(wildcards):
 
 localrules: benchmark_size_parameter
 rule benchmark_size_parameter:
-input: unpack(outputs_parameter_range)
-output: "plots/pe_parameter_comparison/{version}/{parameter}_{low}_{high}/{run_id}.html"
-params:
-sort = False
-script: "plotting.py"
+    input: unpack(outputs_parameter_range)
+    output: "plots/pe_parameter_comparison/{version}/{parameter}_{low}_{high}/{run_id}.html"
+    params:
+        sort = False
+    script: "plotting.py"
 
 def get_needed_files(wildcards):
     output = {}
@@ -116,73 +116,73 @@ def get_needed_files(wildcards):
 
 localrules: benchmark_parameter
 rule benchmark_parameter:
-input: unpack(get_needed_files)
-output: "plots/benchmarks/{compressor}/{parameter}_{low}_{high}/{run_id}.html"
-script: "plotting_parameter.py"
+    input: unpack(get_needed_files)
+    output: "plots/benchmarks/{compressor}/{parameter}_{low}_{high}/{run_id}.html"
+    script: "plotting_parameter.py"
 
 # ToDo add re.escape to escape the names
 wildcard_constraints:
-version = r'v\d+',
-parameter = '[a-z\-]+',
-value = r'[\w]+',
-gzip_download_run_id = '|'.join(config['samples_fastq_gz']),
-fastq_download_run_id = '|'.join(config['samples_fastq']),
-download_run_id = '|'.join(config['fqsqueezer_samples']),
-sra_download_run_id = '|'.join(config["samples"]),
-parameters = '[^[]+',
-variable_parameters = r'.*\[.*\]'
+    version = r'v\d+',
+    parameter = '[a-z\-]+',
+    value = r'[\w]+',
+    gzip_download_run_id = '|'.join(config['samples_fastq_gz']),
+    fastq_download_run_id = '|'.join(config['samples_fastq']),
+    download_run_id = '|'.join(config['fqsqueezer_samples']),
+    sra_download_run_id = '|'.join(config["samples"]),
+    parameters = '[^[]+',
+    variable_parameters = r'.*\[.*\]'
 
 
 localrules: download_sra
 rule download_sra:
-output: "genomic_data/sra/{sra_download_run_id}.sra"
-shell: lambda wildcards: f"wget {config['samples'][wildcards.sra_download_run_id]}" + " -O {output}"
+    output: "genomic_data/sra/{sra_download_run_id}.sra"
+    shell: lambda wildcards: f"wget {config['samples'][wildcards.sra_download_run_id]}" + " -O {output}"
 
 #"ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR554/SRR554369/SRR554369_2.fastq.gz"
 def download_url(id):
     return f"ftp://ftp.sra.ebi.ac.uk/vol1/fastq/{id[:6]}/{id[:9]}/{id}.fastq.gz"
 
 rule download_raw_run_id:
-output: "genomic_data/fastq/{download_run_id}.fastq.gz"
-params:
-url=lambda wildcards: download_url(wildcards.download_run_id)
-shell: "wget {params.url} -O {output}"
+	output: "genomic_data/fastq/{download_run_id}.fastq.gz"
+	params:
+		url=lambda wildcards: download_url(wildcards.download_run_id)
+	shell: "wget {params.url} -O {output}"
 
 localrules: download_fastq_gz
 rule download_fastq_gz:
-output: "genomic_data/fastq/{gzip_download_run_id}.fastq.gz"
-params:
-url=lambda wildcards: (config['samples_fastq_gz'][wildcards.gzip_download_run_id])
-shell: "wget {params.url} -O {output}"
+	output: "genomic_data/fastq/{gzip_download_run_id}.fastq.gz"
+	params:
+		url=lambda wildcards: (config['samples_fastq_gz'][wildcards.gzip_download_run_id])
+	shell: "wget {params.url} -O {output}"
 
 localrules: gunzip_fastq
 rule gunzip_fastq:
-input: "{file}.fastq.gz"
-output: "{file}.fastq"
-shell: "gzip -d --keep {input}"
+    input: "{file}.fastq.gz"
+    output: "{file}.fastq"
+    shell: "gzip -d --keep {input}"
 
 localrules: download_fastq
 rule download_fastq:
-output: "genomic_data/fastq/{fastq_download_run_id}.fastq"
-params:
-url=lambda wildcards: (config['samples_fastq'][wildcards.fastq_download_run_id])
-shell: "wget {params.url} -O {output}"
+	output: "genomic_data/fastq/{fastq_download_run_id}.fastq"
+	params:
+		url=lambda wildcards: (config['samples_fastq'][wildcards.fastq_download_run_id])
+	shell: "wget {params.url} -O {output}"
 
 localrules: encode_on_human_graph
 rule encode_on_human_graph:
-input: "compressors_results/path_encoder_{version} (graph: genomic_data/human.dbg)/{read_id}"
-output: directory("shortcuts/encoded_on_human/{version}/{read_id}")
-shell:"""
+    input: "compressors_results/path_encoder_{version} (graph: genomic_data/human.dbg)/{read_id}"
+    output: directory("shortcuts/encoded_on_human/{version}/{read_id}")
+    shell:"""
         mkdir -p "$(dirname '{output}')"
         ln -s "$(realpath '{input}')" '{output}'
     """
 
 localrules: encode_build_graph
 rule encode_build_graph:
-input: "genomic_data/graphs/({parameters})/{read_id}.dbg",
-"compressors_results/path_encoder_{version} (graph: genomic_data/graphs/({parameters})/{read_id}.dbg, {parameters})/{read_id}"
-output: directory("shortcuts/encode_build_graph/{version}/({parameters})/{read_id}")
-shell:"""
+    input: "genomic_data/graphs/({parameters})/{read_id}.dbg",
+        "compressors_results/path_encoder_{version} (graph: genomic_data/graphs/({parameters})/{read_id}.dbg, {parameters})/{read_id}"
+    output: directory("shortcuts/encode_build_graph/{version}/({parameters})/{read_id}")
+    shell:"""
         mkdir -p "$(dirname '{output}')"
         ln -s "$(realpath '{input}')" '{output}'
     """
@@ -202,8 +202,8 @@ def download_only_dataset(wildcards):
 
 localrules: download_only_dataset
 rule download_only_dataset:
-input: unpack(download_only_dataset)
-output: "download_dataset/{dataset}/done.txt"
+    input: unpack(download_only_dataset)
+    output: "download_dataset/{dataset}/done.txt"
 
 
 def all_compressed_dataset(wildcards):
@@ -214,40 +214,40 @@ def all_compressed_dataset(wildcards):
 
 localrules: compress_dataset
 rule compress_dataset:
-input: unpack(all_compressed_dataset)
-output: "compress_dataset/{version}/{dataset}/done.txt"
-shell: "touch '{output}'"
+    input: unpack(all_compressed_dataset)
+    output: "compress_dataset/{version}/{dataset}/done.txt"
+    shell: "touch '{output}'"
 
 
 
 localrules: sra_to_fastq
 rule sra_to_fastq:
-input: "genomic_data/sra/{run_id}.sra"
-output: "genomic_data/fastq/{run_id}.fastq"
-shell: "fastq-dump {input} -O fastq"
+    input: "genomic_data/sra/{run_id}.sra"
+    output: "genomic_data/fastq/{run_id}.fastq"
+    shell: "fastq-dump {input} -O fastq"
 
 localrules: generate_fastq
 rule generate_fastq:
-input: "genomic_data/human_chromosome_10_actg_only.fasta"
-output: "genomic_data/fastq/" + format + ".fasta"
-shell: "path_encoder_toolbox sample "
-"--reference {input} "
-"--subsample-size {wildcards.subsample_size} "
-"--read-length {wildcards.read_length} "
-"--coverage {wildcards.coverage} "
-"--error-probability {wildcards.error} "
-"--output {output}"
+    input: "genomic_data/human_chromosome_10_actg_only.fasta"
+    output: "genomic_data/fastq/" + format + ".fasta"
+    shell: "path_encoder_toolbox sample "
+           "--reference {input} "
+           "--subsample-size {wildcards.subsample_size} "
+           "--read-length {wildcards.read_length} "
+           "--coverage {wildcards.coverage} "
+           "--error-probability {wildcards.error} "
+           "--output {output}"
 
 
 rule run_logan:
-input: "genomic_data/fastq/{run_id}.fasta"
-output: directory("compressors_results/logan/{run_id}")
-threads: 8
-resources:
-cores=lambda wildcards,threads: threads//2,
-mem_per_core=get_ram_usage_per_core,
-time=partial(get_time_in_min,speed_in_mbps=5) # initial guess
-shell: """
+    input: "genomic_data/fastq/{run_id}.fasta"
+    output: directory("compressors_results/logan/{run_id}")
+    threads: 8
+    resources:
+        cores=lambda wildcards,threads: threads//2,
+        mem_per_core=get_ram_usage_per_core,
+        time=partial(get_time_in_min,speed_in_mbps=5) # initial guess
+    shell: """
         mkdir -p {output}
         LOGAN IndexAndRoute {threads} {threads} {output}/graph {input}
     """
@@ -269,44 +269,45 @@ def encode_parameters(parameters):
 
 
 rule path_encoder_variable_param_specialization:
-input: unpack(fix_variable_parameters)
-output: directory(var_parameters)
-shell: "mkdir '{output}'"
+    input: unpack(fix_variable_parameters)
+    output: directory(var_parameters)
+    shell: "mkdir '{output}'"
 
 # Todo grab number of threads from parameters
 
 rule path_encoder_param_specialization:
-input: "genomic_data/fastq/{run_id}.fasta"
-benchmark:
-"benchmarks/path_encoder_{version} ({parameters})/{run_id}.tsv"
-output: directory("compressors_results/path_encoder_{version} ({parameters})/{run_id}")
-threads: 30
-priority: 1
-params:
-profiler_file = lambda wildcards: f"profiler/path_encoder_{wildcards.version} ({wildcards.parameters})/{wildcards.run_id}.prof",
-shell_parameters = lambda wildcards,threads: encode_parameters(decode_parameters(wildcards,threads))
-resources:
-cores=lambda wildcards,threads: threads//2,
+    input: "genomic_data/fastq/{run_id}.fasta"
+    benchmark:
+           "benchmarks/path_encoder_{version} ({parameters})/{run_id}.tsv"
+    output: directory("compressors_results/path_encoder_{version} ({parameters})/{run_id}")
+    threads: 30
+    priority: 1
+    log: "logs/path_encoder_{version} ({parameters})/{run_id}.log"
+    params:
+        profiler_file = lambda wildcards: f"profiler/path_encoder_{wildcards.version} ({wildcards.parameters})/{wildcards.run_id}.prof",
+        shell_parameters = lambda wildcards,threads: encode_parameters(decode_parameters(wildcards,threads))
+    resources:
+        cores=lambda wildcards,threads: threads//2,
 #        mem_per_core=partial(get_ram_usage_per_core,multiplier=40),
-mem_per_core=lambda wildcards, threads: 300_000 * 2 // threads,
-time=partial(get_time_in_min,speed_in_mbps=0.7) # 0.8 is more accurate
-shell: """
+        mem_per_core=lambda wildcards, threads: 300_000 * 2 // threads,
+        time=partial(get_time_in_min,speed_in_mbps=0.7) # 0.8 is more accurate
+    shell: """
         mkdir -p '{output}'
         mkdir -p "$(dirname '{params.profiler_file}')"
         CPUPROFILE='{params.profiler_file}' path_encoder_toolbox_{wildcards.version} compress\
                                       --input '{input}' --output '{output}'\
-                                      {params.shell_parameters}
+                                      {params.shell_parameters}  2> >(tee '{log}' >&2)'
     """
 
 
 rule build_graph:
-input: "genomic_data/fastq/{run_id}.fasta"
-output: "genomic_data/graphs/({parameters})/{run_id}.dbg"
-threads: 30
-params:
-shell_parameters = lambda wildcards,threads: encode_parameters(decode_parameters(wildcards,threads,threads_name="parallel")),
-output_base = lambda wildcards,output: str(output).rsplit(".",1)[0]
-shell: "~/projects2014-metagenome/metagraph/build/Release/metagengraph build -v {params.shell_parameters} '{input}' -o '{params.output_base}' {input}"
+    input: "genomic_data/fastq/{run_id}.fasta"
+    output: "genomic_data/graphs/({parameters})/{run_id}.dbg"
+    threads: 30
+    params:
+        shell_parameters = lambda wildcards,threads: encode_parameters(decode_parameters(wildcards,threads,threads_name="parallel")),
+        output_base = lambda wildcards,output: str(output).rsplit(".",1)[0]
+    shell: "~/projects2014-metagenome/metagraph/build/Release/metagengraph build -v {params.shell_parameters} '{input}' -o '{params.output_base}' {input}"
 
 
 # rule path_encoder_default:
@@ -331,30 +332,30 @@ shell: "~/projects2014-metagenome/metagraph/build/Release/metagengraph build -v 
 #     """
 
 rule mccortex:
-input: "genomic_data/fastq/{mc_run_id}.fasta"
-output: directory("compressors_results/mccortex/{mc_run_id}")
-threads: competitiors_threads
-resources:
-cores=lambda wildcards,threads: threads//2,
-mem_per_core=get_ram_usage_per_core,
-time=partial(get_time_in_min,speed_in_mbps=5) # inital guess
-run:
-shell("mkdir -p '{output}'")
-if wildcards.mc_run_id not in ["SRR870667_1","SRR327342_1"]:
-    shell("""
+    input: "genomic_data/fastq/{mc_run_id}.fasta"
+    output: directory("compressors_results/mccortex/{mc_run_id}")
+    threads: competitiors_threads
+    resources:
+        cores=lambda wildcards,threads: threads//2,
+        mem_per_core=get_ram_usage_per_core,
+        time=partial(get_time_in_min,speed_in_mbps=5) # inital guess
+    run:
+        shell("mkdir -p '{output}'")
+        if wildcards.mc_run_id not in ["SRR870667_1","SRR327342_1"]:
+            shell("""
         mccortex31 build --sample {wildcards.mc_run_id} --seq {input} -k 21 {output}/graph.ctx
         mccortex31 thread --seq {input} --out {output}/graph.ctp {output}/graph.ctx
     """)
 
 rule method_gzip:
-input: "compressors_results/{compressor}/{run_id}"
-output: directory("compressors_results/{compressor} [compressor: gzip]/{run_id}")
-threads: competitiors_threads
-resources:
-cores=lambda wildcards,threads: threads//2,
-mem_per_core=get_ram_usage_per_core,
-time=partial(get_time_in_min,speed_in_mbps=10) # inital guess
-shell: """
+    input: "compressors_results/{compressor}/{run_id}"
+    output: directory("compressors_results/{compressor} [compressor: gzip]/{run_id}")
+    threads: competitiors_threads
+    resources:
+        cores=lambda wildcards,threads: threads//2,
+        mem_per_core=get_ram_usage_per_core,
+        time=partial(get_time_in_min,speed_in_mbps=10) # inital guess
+    shell: """
         mkdir -p '{output}'
         cp -r '{input}'/* '{output}' || :
         gzip -r '{output}'
@@ -363,26 +364,26 @@ shell: """
 
 localrules: fastq_to_fasta
 rule fastq_to_fasta:
-input: "genomic_data/fastq/{run_id}.fastq"
-output: "genomic_data/fastq/{run_id}.fasta"
-threads: competitiors_threads
-resources:
-cores=lambda wildcards,threads: threads//2,
-mem_per_core=get_ram_usage_per_core
-shell: "seqtk seq -A '{input}' > '{output}'"
+    input: "genomic_data/fastq/{run_id}.fastq"
+    output: "genomic_data/fastq/{run_id}.fasta"
+    threads: competitiors_threads
+    resources:
+        cores=lambda wildcards,threads: threads//2,
+        mem_per_core=get_ram_usage_per_core
+    shell: "seqtk seq -A '{input}' > '{output}'"
 
 rule run_harc_compress:
-#shadow: "minimal"
-# input: "genomic_data/fastq/{run_id}.fast{suffix,[aq]}"
-input: "genomic_data/fastq/{run_id}.fasta"
-output: "harc/{run_id}.fasta.harc"
-threads: 2
-resources:
-cores=lambda wildcards,threads: threads//2,
-mem_per_core=get_ram_usage_per_core,
-time=partial(get_time_in_min,speed_in_mbps=2) # inital guess
-run:
-shell("""
+    #shadow: "minimal"
+    # input: "genomic_data/fastq/{run_id}.fast{suffix,[aq]}"
+    input: "genomic_data/fastq/{run_id}.fasta"
+    output: "harc/{run_id}.fasta.harc"
+    threads: 2
+    resources:
+        cores=lambda wildcards,threads: threads//2,
+        mem_per_core=get_ram_usage_per_core,
+        time=partial(get_time_in_min,speed_in_mbps=2) # inital guess
+    run:
+        shell("""
         rm -rf genomic_data/fastq/output
         INPUT=$(realpath {input})
         pushd ~/HARC
@@ -390,38 +391,38 @@ shell("""
         popd
         mv {input}.harc $(dirname "{output}")
         """)
-#mv genomic_data/fastq/{wildcards.run_id}.harc $(dirname "{output}")
+        #mv genomic_data/fastq/{wildcards.run_id}.harc $(dirname "{output}")
 
 rule harc_expand_archive:
-input: "harc/{run_id}.fasta.harc"
-output: directory("compressors_results/harc/{run_id}")
-threads: 2
-resources:
-cores=lambda wildcards,threads: threads//2,
-mem_per_core=get_ram_usage_per_core,
-time=partial(get_time_in_min,speed_in_mbps=2) # inital guess
-shell: """
+    input: "harc/{run_id}.fasta.harc"
+    output: directory("compressors_results/harc/{run_id}")
+    threads: 2
+    resources:
+        cores=lambda wildcards,threads: threads//2,
+        mem_per_core=get_ram_usage_per_core,
+        time=partial(get_time_in_min,speed_in_mbps=2) # inital guess
+    shell: """
         mkdir -p {output}
         tar xf {input} -C {output}
     """
 
 rule compress_darrc:
-input: "genomic_data/fastq/{run_id}.fasta"
-output: directory("compressors_results/darrc/{run_id}")
-shadow: "shallow"
-threads: 2
-resources:
-cores=lambda wildcards,threads: threads//2,
-mem_per_core=get_ram_usage_per_core,
-time=partial(get_time_in_min,speed_in_mbps=2) # inital guess
-shell: """
+    input: "genomic_data/fastq/{run_id}.fasta"
+    output: directory("compressors_results/darrc/{run_id}")
+    shadow: "shallow"
+    threads: 2
+    resources:
+        cores=lambda wildcards,threads: threads//2,
+        mem_per_core=get_ram_usage_per_core,
+        time=partial(get_time_in_min,speed_in_mbps=2) # inital guess
+    shell: """
         mkdir -p {output}
         ulimit -n 2048
         darrc -c -1 {input} -g ggg -m sss
         mv ggg.graph.darrc {output}
         mv sss.meta.darrc {output}
     """
-#save_info(output[0],os.path.getsize("ggg.graph.darrc") + os.path.getsize("sss.meta.darrc"))
+		#save_info(output[0],os.path.getsize("ggg.graph.darrc") + os.path.getsize("sss.meta.darrc"))
 #
 # rule compress_minicom:
 # 	input: "fastq/{run_id}.fastq","compressors/minicom"
@@ -433,9 +434,9 @@ shell: """
 #
 #
 rule build_bft:
-output: "tmp/bft_done.txt"
-shadow: "shallow"
-shell: """
+	output: "tmp/bft_done.txt"
+	shadow: "shallow"
+	shell: """
         brew tap traildb/judy
 		brew install jemalloc judy p7zip || true
 		git clone https://github.com/GuillaumeHolley/BloomFilterTrie
@@ -448,10 +449,10 @@ shell: """
         """
 
 rule build_darrc:
-input: "tmp/bft_done.txt"
-output: "/cluster/home/studenyj/bin/darrc"
-shadow: "shallow"
-shell: """
+	input: "tmp/bft_done.txt"
+	output: "/cluster/home/studenyj/bin/darrc"
+	shadow: "shallow"
+	shell: """
 		brew install jemalloc p7zip
 		git clone https://github.com/GuillaumeHolley/DARRC
         cd DARRC
