@@ -62,7 +62,7 @@ public:
     std::vector<T> elements;
 };
 
-template <typename T,typename bit_vector=sdsl::bit_vector, typename rank_support=sdsl::rank_support_v<1>>
+template <typename T,typename bit_vector=sdsl::bit_vector, typename rank_support=sdsl::rank_support_v<1>,bool supply_size=true>
 class ChunkedDenseHashMap : public DenseHashMap<T,bit_vector,rank_support> {
 public:
     ChunkedDenseHashMap() = default;
@@ -73,7 +73,12 @@ public:
         this->is_element = isElement;
         this->rank = rank;
         divisor = get_divisor(total_num_elements,chunks);
-        this->elements = decltype(this->elements)(chunks,T(divisor));//todo fix that last is not full
+        if constexpr (supply_size) {
+            this->elements = decltype(this->elements)(chunks, T(divisor));//todo fix that last is not full
+        }
+        else {
+            this->elements = decltype(this->elements)(chunks);
+        }
     }
 
     static int64_t get_divisor(int64_t num_elements,int64_t chunks) {

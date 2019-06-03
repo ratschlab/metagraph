@@ -19,6 +19,7 @@ fqsqueezer_samples:
   - SRR870667_1
   #- SRR1265495_1
   #- SRR1265496_1
-compressors:
-  - logan
-  - path_encoder
+benchmark_samples:
+  - SRR554369_1
+benchmark_compressors:
+  - path_encoder_v6

@@ -47,9 +47,12 @@ public:
         int64_t encoded = encode(incoming);
         auto it = incoming_table.find(node);
         if (it == incoming_table.end())
-            return 0;
-
-        return it->second.at(encoded);
+            result = 0;
+        else {
+            result = it->second.at(encoded);
+        }
+        assert(result>=0);// todo change if dealing with branches that are skipped
+        return result;
     }
 
     ll size(node_index node) const {
@@ -85,7 +88,7 @@ public:
         } else {
             incoming_table[node][encoded]++;
         }
-
+        assert(result>= 0);
         return result;
     }
 

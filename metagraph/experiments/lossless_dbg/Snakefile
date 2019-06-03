@@ -3,8 +3,11 @@ import json
 import platform
 import warnings
 from common import *
+from collections import namedtuple
+
 import re
 from functools import partial
+
 
 # Warning: requires at least gzip 1.6 --k
 #
@@ -170,18 +173,20 @@ rule download_fastq:
 
 localrules: encode_on_human_graph
 rule encode_on_human_graph:
-    input: "compressors_results/path_encoder_{version} (graph: genomic_data/human.dbg)/{read_id}"
-    output: directory("shortcuts/encoded_on_human/{version}/{read_id}")
+    input: "compressors_results/path_encoder_{version} (graph: genomic_data/human.dbg)/{run_id}"
+    output: directory("shortcuts/encoded_on_human/{version}/{run_id}")
     shell:"""
         mkdir -p "$(dirname '{output}')"
         ln -s "$(realpath '{input}')" '{output}'
     """
 
+def path_encoder_using_graph(wildcards):
+    return f"compressors_results/path_encoder_{wildcards.version} (graph: genomic_data/graphs/({wildcards.parameters})/{wildcards.run_id}.dbg, {wildcards.parameters})/{wildcards.run_id}"
+
 localrules: encode_build_graph
 rule encode_build_graph:
-    input: "genomic_data/graphs/({parameters})/{read_id}.dbg",
-        "compressors_results/path_encoder_{version} (graph: genomic_data/graphs/({parameters})/{read_id}.dbg, {parameters})/{read_id}"
-    output: directory("shortcuts/encode_build_graph/{version}/({parameters})/{read_id}")
+    input: lambda wildcards: ["genomic_data/graphs/({wildcards.parameters})/{run_id}.dbg", path_encoder_using_graph(wildcards)]
+    output: directory("shortcuts/encode_build_graph/{version}/({parameters})/{run_id}")
     shell:"""
         mkdir -p "$(dirname '{output}')"
         ln -s "$(realpath '{input}')" '{output}'
@@ -267,11 +272,28 @@ def decode_parameters(wildcards,threads,threads_name="threads"):
 def encode_parameters(parameters):
     return " ".join([f"--{name} '{value}'" for name, value in parameters.items()])
 
+def get_benchmark_data(wildcards):
+    output = {}
+    Wildcards = namedtuple('Wildcards',['run_id','version','parameters'])
+    for run_id in config["benchmark_samples"]:
+        for method in config["benchmark_compressors"]:
+            if "path_encoder" in method:
+                wildcards = Wildcards(run_id,re.search(pattern=r"_(v\d)",string=method).group(1),"kmer-length: 21")
+                output[method] = path_encoder_using_graph(wildcards)
+            else:
+                output[method] = f"compressors_results/{method}/{run_id}"
+    return output
 
-rule path_encoder_variable_param_specialization:
-    input: unpack(fix_variable_parameters)
-    output: directory(var_parameters)
-    shell: "mkdir '{output}'"
+
+
+localrules: benchmark
+rule benchmark:
+    input: unpack(get_benchmark_data)
+
+# rule path_encoder_variable_param_specialization:
+#     input: unpack(fix_variable_parameters)
+#     output: directory(var_parameters)
+#     shell: "mkdir '{output}'"
 
 # Todo grab number of threads from parameters
 
@@ -296,7 +318,7 @@ rule path_encoder_param_specialization:
         mkdir -p "$(dirname '{params.profiler_file}')"
         CPUPROFILE='{params.profiler_file}' path_encoder_toolbox_{wildcards.version} compress\
                                       --input '{input}' --output '{output}'\
-                                      {params.shell_parameters}  2> >(tee '{log}' >&2)'
+                                      {params.shell_parameters}  2> >(tee '{log}' >&2)
     """
 
 

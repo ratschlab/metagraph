@@ -43,15 +43,22 @@ public:
 template<typename GraphT=DBGSuccinct,typename RoutingTableT=DynamicRoutingTable<>,typename IncomingTableT=DynamicIncomingTable<>>
 class PathDatabaseDynamicCore {
 public:
+    struct waiting_thread_info_t {
+        int16_t thread_id;
+        int64_t relative_position;
+        uint64_t node;
+        char traversed_edge;
+    };
     using path_id = pair<node_index,int64_t>;
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
-    explicit PathDatabaseDynamicCore(std::shared_ptr<const GraphT> graph) :
+    explicit PathDatabaseDynamicCore(std::shared_ptr<const GraphT> graph, int64_t chunk_size=1000) :
             graph_(graph),
             graph(*graph_),
             incoming_table(graph_),
-            routing_table(graph_)
+            routing_table(graph_),
+            chunk_size(chunk_size)
             {}
 
 
@@ -60,10 +67,13 @@ public:
             graph_(shared_ptr<const GraphT>(buildGraph(this,reads,kmer_length))),
             graph(*graph_),
             incoming_table(graph_),
-            routing_table(graph_)
+            routing_table(graph_),
+            chunk_size(1000)
             {}
 
     virtual ~PathDatabaseDynamicCore() {}
+
+
 
     std::vector<path_id> encode(const std::vector<std::string> &sequences) {
         // memory expected size
@@ -77,16 +87,286 @@ public:
         // - when multiple reads start at a same symbol, sort them so they share longest prefix
         // sort them so we have fixed relative ordering
         // probably not need to sort globally as we want only relative ordering
-        // #pragma omp parallel for num_threads(num_threads)
 
-        std::vector<node_index> additional_joins_vec(sequences.size());
-        std::vector<node_index> additional_splits_vec(sequences.size());
+        populate_additional_joins(sequences);
 
+// Mark split and join-nodes in graph for faster queries and construction
+        populate_bifurcation_bitvectors();
+
+        auto alloc_routing_table = VerboseTimer("allocation of routing & incoming table");
+        routing_table = decltype(routing_table)(graph_,&is_split,&rank_is_split,chunk_size);
+        incoming_table = decltype(incoming_table)(graph_,&is_join,&rank_is_join,chunk_size);
+        alloc_routing_table.finished();
+
+        #pragma omp parallel for num_threads(get_num_threads())
+        for (node_index node = 1; node <= graph.num_nodes(); node++) {
+
+            assert(is_split[node] == node_is_split_raw(node));
+            assert(is_join[node] == node_is_join_raw(node));
+        }
+
+        vector<path_id> encoded(sequences.size());
+
+#ifdef _OPENMP
+        auto alloc_lock_t = VerboseTimer("memory allocation of locks");
+
+        ChunkedDenseHashMap<omp_lock_t,decltype(is_bifurcation), decltype(rank_is_bifurcation),false> node_locks(&is_bifurcation,&rank_is_bifurcation,chunk_size);
+        ChunkedDenseHashMap<omp_lock_t,decltype(is_bifurcation), decltype(rank_is_bifurcation),false> outgoing_locks(&is_bifurcation,&rank_is_bifurcation,chunk_size);
+        alloc_lock_t.finished();
+        auto threads_map_t = VerboseTimer("memory allocation of thread deques");
+        ChunkedDenseHashMap<deque<waiting_thread_info_t>,decltype(is_bifurcation), decltype(rank_is_bifurcation),false> waiting_threads(&is_bifurcation,&rank_is_bifurcation,chunk_size);
+        threads_map_t.finished();
+        auto lock_init_timer = VerboseTimer("initializing locks");
+        for(int64_t i=0;i<node_locks.elements.size();i++) {
+            omp_init_lock(&node_locks.elements[i]);
+            omp_init_lock(&outgoing_locks.elements[i]);
+        }
+        lock_init_timer.finished();
+
+#endif
+
+        statistics["preprocessing_time"] = timer.elapsed();
+        std::cerr << "Finished preprocessing in " << statistics["preprocessing_time"] << " sec" << std::endl;
+
+        timer.reset();
+        cerr << "Cumulative sizes in bytes" << endl;
+        PRINT_VAR(is_join.size()/8);
+        PRINT_VAR(is_split.size()/8);
+
+        #pragma omp parallel for num_threads(get_num_threads()) //default(none) shared(encoded,node_locks,routing_table,incoming_table)
+        for (size_t i = 0; i < sequences.size(); i++) {
+            int16_t tid = omp_get_thread_num() + 1;
+            std::vector<std::tuple<node_index, char, char>> bifurcations;
+
+            const auto &sequence = sequences[i];
+            auto path_for_sequence = transform_sequence(sequence);
+
+            size_t kmer_begin = 0;
+            auto kmer_end = graph.get_k();
+#ifdef DEBUG_ADDITIONAL_INFORMATION
+            vector<node_index> debug_list_of_nodes;
+            vector<int64_t> debug_relative_position_history;
+            bool debug_transformation_used = sequence != path_for_sequence;
+#endif
+            // TODO: use map_to_nodes_sequentially when implemented
+            graph.map_to_nodes(path_for_sequence, [&](node_index node) {
+                assert(node || [&](){
+                    auto pn = [&](int64_t offset) {
+                        PRINT_VAR(sequence.substr(offset,graph.get_k()));
+                        PRINT_VAR(graph.kmer_to_node(sequence.substr(offset,graph.get_k())));
+                        PRINT_VAR(path_for_sequence.substr(offset,graph.get_k()));
+                        PRINT_VAR(graph.kmer_to_node(path_for_sequence.substr(offset,graph.get_k())));
+                    };
+                    pn(kmer_begin);
+                    return false; }());
+
+#ifdef DEBUG_ADDITIONAL_INFORMATION
+                debug_list_of_nodes.push_back(node);
+#endif
+                char join_char = node_is_join(node)
+                                 ? (kmer_begin ? path_for_sequence[kmer_begin-1] : '$')
+                                 : '\0';
+                char split_char = node_is_split(node)
+                                  ? (kmer_end < sequence.size() ?
+                                     sequence[kmer_end] :
+                                     '$')
+                                  : '\0';
+
+                if (join_char || split_char) {
+                    bifurcations.emplace_back(node, join_char, split_char);
+                }
+                kmer_begin++;
+                kmer_end++;
+            });
+            auto &[first_node,first_join,first_split] = bifurcations.front();
+            auto &[last_node,last_join,last_split] = bifurcations.front();
+            assert(first_join == '$');
+            assert(last_split == '$');
+
+            int64_t relative_position = INT_MIN;
+#ifdef DEBUG_ADDITIONAL_INFORMATION
+            int64_t debug_bifurcation_idx = 0;
+#endif
+            int64_t previous_node = 0;
+            char traversed_edge = '\0';
+            for (const auto &[node, join_symbol, split_symbol] : bifurcations) {
+                omp_lock_t *node_lock;
+                node_lock = node_locks.ptr_to(node);
+                omp_set_lock(node_lock);
+                if (previous_node) {
+                    auto outgoing_lock = outgoing_locks.ptr_to(previous_node);
+                    omp_set_lock(outgoing_lock);
+                    auto& waiting_queue = waiting_threads[previous_node];
+                    relative_position = update_position_after_wakeup(tid, previous_node, traversed_edge,
+                                                                     waiting_queue, relative_position);
+                    omp_unset_lock(outgoing_lock);
+                }
+
+                if (join_symbol) {
+                    if (join_symbol == '$') {
+                        // always putting new read above all other reads
+                        relative_position = incoming_table.branch_size(node, '$');
+                        encoded[i] = {node, relative_position};
+                    }
+                    assert(relative_position>=0);
+                    assert(relative_position <= incoming_table.branch_size(node,join_symbol) || [&]{
+                        using TT = DecodeEnabler<PathDatabaseDynamicCore<>>;
+                        auto self = reinterpret_cast<TT*>(this);
+
+                        cerr << "current" << endl;
+                        PRINT_VAR(graph.get_node_sequence(node));
+                        PRINT_VAR(node,tid,relative_position,previous_node,traversed_edge);
+#ifdef DEBUG_ADDITIONAL_INFORMATION
+                        PRINT_VAR(debug_bifurcation_idx);
+#endif
+                        incoming_table.print_content(node);
+                        PRINT_VAR(join_symbol);
+                        cerr << "previous" << endl;
+#ifdef DEBUG_ADDITIONAL_INFORMATION
+                        auto& prev_bifurcation = bifurcations[debug_bifurcation_idx-1];
+                        const auto &[previous_node_2, prev_join_symbol, prev_split_symbol] = prev_bifurcation;
+                        PRINT_VAR(graph.get_node_sequence(previous_node));
+                        if (prev_split_symbol) {
+                            routing_table.print_content(previous_node);
+                            PRINT_VAR(debug_relative_position_history.back());
+                            PRINT_VAR(prev_split_symbol);
+                        }
+                        if (prev_join_symbol) {
+                            incoming_table.print_content(previous_node);
+                            int64_t prev_position = !prev_split_symbol ?
+                                                    debug_relative_position_history.back()
+                                                                       :
+                                                    *(debug_relative_position_history.end()-2)
+                            ;
+                            auto path_id = self->get_global_path_id(previous_node,prev_position-1);
+                            PRINT_VAR(transform_sequence(decode_from_input(sequences,
+                                                                           {graph.get_node_sequence(path_id.first),path_id.second}
+                                    ,graph.get_k())
+                            ));
+                            PRINT_VAR(prev_position);
+                            PRINT_VAR(prev_join_symbol);
+                        }
+#endif
+                    }());
+
+#ifdef DEBUG_ADDITIONAL_INFORMATION
+                    debug_relative_position_history.push_back(relative_position);
+#endif
+                    auto lower_routes = incoming_table.branch_offset_and_increment(node, join_symbol);
+                    assert(lower_routes>=0);
+                    relative_position += lower_routes;
+                }
+
+                if (split_symbol) {
+                    assert(relative_position>=0);
+                    routing_table.insert(node, relative_position, split_symbol);
+#ifdef DEBUG_ADDITIONAL_INFORMATION
+                    debug_relative_position_history.push_back(relative_position);
+#endif
+                    relative_position = routing_table.new_relative_position(node, relative_position);
+                }
+#ifdef _OPENMP
+                traversed_edge = split_symbol ? split_symbol : 'X'; // X as it doesn't matter
+                if (traversed_edge != '$') { // doesn't need any update
+                    auto outgoing_lock = outgoing_locks.ptr_to(node);
+                    omp_set_lock(outgoing_lock);
+                    waiting_threads[node].push_back({tid, relative_position, node, traversed_edge});
+                    omp_unset_lock(outgoing_lock);
+                }
+                omp_unset_lock(node_lock);
+#endif
+#ifdef DEBUG_ADDITIONAL_INFORMATION
+                debug_bifurcation_idx++;
+#endif
+                previous_node = node;
+            }
+        }
+
+#ifdef _OPENMP
+        for(int64_t i=0;i<node_locks.elements.size();i++) {
+            omp_destroy_lock(&node_locks.elements[i]);
+            omp_destroy_lock(&outgoing_locks.elements[i]);
+        }
+#endif
+        encoded_paths += encoded.size();
+        statistics["routing_time"] = timer.elapsed();
+        std::cerr << "Finished routing in " << statistics["routing_time"] << " sec" << std::endl;
+
+        return encoded;
+    }
+
+#ifdef _OPENMP
+
+    int64_t update_position_after_wakeup(int tid,
+                                 int64_t previous_node, char traversed_edge,
+                                 deque<waiting_thread_info_t> &waiting_queue,
+                                 int64_t relative_position) const {
+            assert(previous_node);
+            bool first_it = 1;
+            bool me_first = 0;
+            bool was_me = 0;
+            int64_t past_offset = 0;
+            // todo_wrap in define or better in macro
+            int64_t debug_my_id = 0;
+            int64_t debug_idx = 0;
+            for(auto&other : waiting_queue) {
+                if (was_me) {
+                    // future
+                    if (other.node == previous_node and
+                            other.traversed_edge == traversed_edge and
+                            other.thread_id < 0 and // job has already finished
+                            other.relative_position <= relative_position) {
+#ifdef DEBUG_ORDER_CORRECTION
+                        cerr << waiting_queue << endl;
+                        PRINT_VAR(tid, node, other.relative_position);
+#endif
+                        relative_position++;
+                    }
+                }
+                else if (tid == other.thread_id) {
+                    debug_my_id = debug_idx;
+                    assert(!was_me); // can appear only once
+                    // present
+                    was_me = 1;
+                    if (first_it) {
+                        me_first = 1;
+                    }
+                    other.thread_id = -tid;
+                }  else {
+                    // past
+                    if (other.node == previous_node and
+                            other.traversed_edge == traversed_edge and
+                            other.thread_id > 0 and// job is waiting
+                            other.relative_position < relative_position) {
+                            past_offset--;
+                    }
+                }
+                first_it = 0;
+                debug_idx++;
+            }
+            assert(was_me);
+            relative_position += past_offset;
+            assert(relative_postion >= 0 || [&](){
+                cerr << waiting_queue << endl;
+                PRINT_VAR(tid,traversed_edge,debug_my_id,past_offset,relative_position);
+            }());
+
+            if (me_first) {
+                while (!waiting_queue.empty() and waiting_queue.front().thread_id < 0) {
+                    waiting_queue.pop_front();
+                }
+            }
+            return relative_position;
+        }
+#endif
+
+    void populate_additional_joins(const vector<std::string> &sequences) {
         auto additional_splits_t = VerboseTimer("computing additional splits and joins");
+        vector<node_index> additional_joins_vec(sequences.size());
+        vector<node_index> additional_splits_vec(sequences.size());
         #pragma omp parallel for num_threads(get_num_threads())
         for (size_t i = 0; i < sequences.size(); ++i) {
             const auto &sequence = sequences[i];
-            //todo transform sequence here
             auto transformed_sequence = transform_sequence(sequence);
             // add additional bifurcation
             additional_joins_vec[i] = graph.kmer_to_node(
@@ -98,17 +378,16 @@ public:
             );
             assert(additional_splits_vec[i]); // node has to be in graph
         }
-        additional_splits_t.finished();
-
         additional_joins = decltype(additional_joins)(additional_joins_vec.begin(),
                                                       additional_joins_vec.end());
-        additional_joins_vec = std::vector<node_index>();
-
+        additional_joins_vec.clear();
         additional_splits = decltype(additional_splits)(additional_splits_vec.begin(),
                                                         additional_splits_vec.end());
-        additional_splits_vec = std::vector<node_index>();
+        additional_splits_vec.clear();
+        additional_splits_t.finished();
+    }
 
-// Mark split and join-nodes in graph for faster queries and construction
+    void populate_bifurcation_bitvectors() {
         auto bifurcation_timer = VerboseTimer("construction of bifurcation bit_vectors");
         is_split = decltype(is_split)(graph.num_nodes() + 1); // bit
         is_join = decltype(is_join)(graph.num_nodes() + 1);
@@ -130,262 +409,6 @@ public:
         rank_is_bifurcation = decltype(rank_is_bifurcation)(&is_bifurcation);
 
         bifurcation_timer.finished();
-
-
-        auto alloc_routing_table = VerboseTimer("allocation of routing & incoming table");
-        routing_table = decltype(routing_table)(graph_,&is_split,&rank_is_split);
-        incoming_table = decltype(incoming_table)(graph_,&is_join,&rank_is_join);
-        alloc_routing_table.finished();
-
-        #pragma omp parallel for num_threads(get_num_threads())
-        for (node_index node = 1; node <= graph.num_nodes(); node++) {
-
-            assert(is_split[node] == node_is_split_raw(node));
-            assert(is_join[node] == node_is_join_raw(node));
-        }
-
-        vector<path_id> encoded(sequences.size());
-
-
-
-        //ProgressBar progress_bar(sequences.size(), "Building dRT and dEM");
-
-#ifdef _OPENMP
-
-        auto alloc_lock_t = VerboseTimer("memory allocation of locks");
-        DenseHashMap<omp_lock_t> node_locks(&is_bifurcation,&rank_is_bifurcation);
-        DenseHashMap<omp_lock_t> outgoing_locks(&is_bifurcation,&rank_is_bifurcation);
-        alloc_lock_t.finished();
-        auto threads_map_t = VerboseTimer("memory allocation of thread deques");
-        DenseHashMap<deque<tuple<int64_t,int64_t,int64_t>>> waiting_threads(&is_bifurcation,&rank_is_bifurcation);
-        threads_map_t.finished();
-        auto lock_init_timer = VerboseTimer("initializing locks");
-        for(int64_t i=0;i<node_locks.elements.size();i++) {
-            omp_init_lock(&node_locks.elements[i]);
-            omp_init_lock(&outgoing_locks.elements[i]);
-        }
-        lock_init_timer.finished();
-
-#endif
-
-        statistics["preprocessing_time"] = timer.elapsed();
-        std::cerr << "Finished preprocessing in " << statistics["preprocessing_time"] << " sec" << std::endl;
-
-        timer.reset();
-        cerr << "Cumulative sizes in bytes" << endl;
-        PRINT_VAR(is_join.size()/8);
-        PRINT_VAR(is_split.size()/8);
-
-        #pragma omp parallel for num_threads(get_num_threads()) //default(none) shared(encoded,node_locks,routing_table,incoming_table)
-        for (size_t i = 0; i < sequences.size(); i++) {
-            auto tid = omp_get_thread_num() + 1;
-            std::vector<std::tuple<node_index, char, char>> bifurcations;
-
-            const auto &sequence = sequences[i];
-            auto path_for_sequence = transform_sequence(sequence);
-
-            size_t kmer_begin = 0;
-            auto kmer_end = graph.get_k();
-#ifdef DEBUG_ADDITIONAL_INFORMATION
-            vector<node_index> debug_list_of_nodes;
-            vector<int64_t> debug_relative_position_history;
-            bool debug_transformation_used = sequence != path_for_sequence;
-#endif
-            // TODO: use map_to_nodes_sequentially when implemented
-            graph.map_to_nodes(path_for_sequence, [&](node_index node) {
-                if (not node) {
-                    auto pn = [&](int64_t offset) {
-                        PRINT_VAR(sequence.substr(offset,graph.get_k()));
-                        PRINT_VAR(graph.kmer_to_node(sequence.substr(offset,graph.get_k())));
-                        PRINT_VAR(path_for_sequence.substr(offset,graph.get_k()));
-                        PRINT_VAR(graph.kmer_to_node(path_for_sequence.substr(offset,graph.get_k())));
-                    };
-                    pn(kmer_begin);
-                }
-                assert(node);
-#ifdef DEBUG_ADDITIONAL_INFORMATION
-                debug_list_of_nodes.push_back(node);
-#endif
-                char join_char = node_is_join(node)
-                                 ? (kmer_begin ? path_for_sequence[kmer_begin-1] : '$')
-                                 : '\0';
-                char split_char = node_is_split(node)
-                                  ? (kmer_end < sequence.size() ?
-                                     sequence[kmer_end] :
-                                     '$')
-                                  : '\0';
-
-                if (join_char || split_char) {
-                    bifurcations.emplace_back(node, join_char, split_char);
-                }
-                kmer_begin++;
-                kmer_end++;
-            });
-
-            int64_t relative_position = INT_MIN;
-#ifdef DEBUG_ADDITIONAL_INFORMATION
-            int64_t debug_bifurcation_idx = 0;
-#endif
-            int64_t prev_node = 0;
-            char traversed_edge = '\0';
-            for (const auto &[node, join_symbol, split_symbol] : bifurcations) {
-#ifdef _OPENMP
-                auto node_lock = node_locks.ptr_to(node);
-                omp_set_lock(node_lock);
-                if (prev_node) {
-                    bool first_it = 1;
-                    bool me_first = 0;
-                    bool was_me = 0;
-                    int64_t past_offset = 0;
-
-                    // todo_wrap in define or better in macro
-                    int64_t debug_my_id = 0;
-                    int64_t debug_idx = 0;
-                    auto outgoing_lock = outgoing_locks.ptr_to(prev_node);
-                    omp_set_lock(outgoing_lock);
-                    auto& target_queue = waiting_threads[prev_node];
-                    for(auto&[their_thread_id,their_relative_position,their_traversed_edge] : target_queue) {
-                        if (was_me) {
-                            // future
-                            if (their_traversed_edge == traversed_edge and
-                                their_thread_id < 0 and // job has already finished
-                                their_relative_position <= relative_position) {
-#ifdef DEBUG_ORDER_CORRECTION
-                                cerr << target_queue << endl;
-                                PRINT_VAR(tid, node, their_relative_position);
-#endif
-                                relative_position++;
-                            }
-                        }
-                        else if (tid == their_thread_id) {
-                            debug_my_id = debug_idx;
-                            assert(!was_me); // can appear only once
-                            // present
-                            was_me = 1;
-                            if (first_it) {
-                                me_first = 1;
-                            }
-                            their_thread_id = -tid;
-                        }  else {
-                            // past
-                            if (their_traversed_edge == traversed_edge and
-                                their_thread_id > 0 and// job is waiting
-                                their_relative_position < relative_position) {
-                                past_offset--;
-                            }
-                        }
-                        first_it = 0;
-                        debug_idx++;
-                    }
-                    relative_position += past_offset;
-                    if (relative_position < 0) {
-                        cerr << target_queue << endl;
-                        PRINT_VAR(tid,node,traversed_edge,debug_my_id,past_offset,relative_position);
-                    }
-                    if (me_first) {
-                        while (!target_queue.empty() and get<0>(target_queue.front()) < 0) {
-                            target_queue.pop_front();
-                        }
-                    }
-
-
-                    omp_unset_lock(outgoing_lock);
-                }
-#endif
-
-                if (join_symbol) {
-                    if (join_symbol == '$') {
-                        // always putting new read above all other reads
-                        relative_position = incoming_table.branch_size(node, '$');
-                        encoded[i] = {node, relative_position};
-                    }
-                    assert(relative_position>=0);
-                    if (relative_position > incoming_table.branch_size(node,join_symbol)) {
-                        using TT = DecodeEnabler<PathDatabaseDynamicCore<>>;
-                        auto self = reinterpret_cast<TT*>(this);
-
-                        cerr << "current" << endl;
-                        PRINT_VAR(graph.get_node_sequence(node));
-                        PRINT_VAR(node,tid,relative_position,prev_node,traversed_edge);
-#ifdef DEBUG_ADDITIONAL_INFORMATION
-                        PRINT_VAR(debug_bifurcation_idx);
-#endif
-                        incoming_table.print_content(node);
-                        PRINT_VAR(join_symbol);
-                        cerr << "previous" << endl;
-#ifdef DEBUG_ADDITIONAL_INFORMATION
-                        auto& prev_bifurcation = bifurcations[debug_bifurcation_idx-1];
-                        const auto &[prev_node_2, prev_join_symbol, prev_split_symbol] = prev_bifurcation;
-                        PRINT_VAR(graph.get_node_sequence(prev_node));
-                        if (prev_split_symbol) {
-                            routing_table.print_content(prev_node);
-                            PRINT_VAR(debug_relative_position_history.back());
-                            PRINT_VAR(prev_split_symbol);
-                        }
-                        if (prev_join_symbol) {
-                            incoming_table.print_content(prev_node);
-                            int64_t prev_position = !prev_split_symbol ?
-                                    debug_relative_position_history.back()
-                                    :
-                                    *(debug_relative_position_history.end()-2)
-                                    ;
-                            auto path_id = self->get_global_path_id(prev_node,prev_position-1);
-                            PRINT_VAR(transform_sequence(decode_from_input(sequences,
-                                    {graph.get_node_sequence(path_id.first),path_id.second}
-                                    ,graph.get_k())
-                                    ));
-                            PRINT_VAR(prev_position);
-                            PRINT_VAR(prev_join_symbol);
-                        }
-#endif
-                    }
-                    assert(relative_position <= incoming_table.branch_size(node,join_symbol));
-#ifdef DEBUG_ADDITIONAL_INFORMATION
-                    debug_relative_position_history.push_back(relative_position);
-#endif
-                    relative_position += incoming_table.branch_offset_and_increment(node, join_symbol);
-                }
-
-
-                if (split_symbol) {
-                    assert(relative_position>=0);
-                    routing_table.insert(node, relative_position, split_symbol);
-#ifdef DEBUG_ADDITIONAL_INFORMATION
-                    debug_relative_position_history.push_back(relative_position);
-#endif
-                    relative_position = routing_table.new_relative_position(node, relative_position);
-                    if (split_symbol == '$') {
-                        //++progress_bar;
-                    }
-                }
-#ifdef _OPENMP
-                traversed_edge = split_symbol ? split_symbol : 'X'; // X as it doesn't matter
-                if (traversed_edge != '$') { // doesn't need any update
-                    auto outgoing_lock = outgoing_locks.ptr_to(node);
-                    omp_set_lock(outgoing_lock);
-                    waiting_threads[node].push_back({tid, relative_position, traversed_edge});
-                    omp_unset_lock(outgoing_lock);
-                }
-                omp_unset_lock(node_lock);
-#endif
-#ifdef DEBUG_ADDITIONAL_INFORMATION
-                debug_bifurcation_idx++;
-#endif
-                prev_node = node;
-            }
-        }
-
-#ifdef _OPENMP
-        for(int64_t i=0;i<node_locks.elements.size();i++) {
-            omp_destroy_lock(&node_locks.elements[i]);
-            omp_destroy_lock(&outgoing_locks.elements[i]);
-        }
-#endif
-        encoded_paths += encoded.size();
-        statistics["routing_time"] = timer.elapsed();
-        std::cerr << "Finished routing in " << statistics["routing_time"] << " sec" << std::endl;
-
-        return encoded;
     }
 
 
@@ -460,6 +483,7 @@ public:
     const GraphT& graph;
     RoutingTableT routing_table;
     IncomingTableT incoming_table;
+    int64_t chunk_size;
 
     static DBGSuccinct* buildGraph(PathDatabaseDynamicCore* self,vector<string> reads,int64_t kmer_length) {
         Timer timer;
