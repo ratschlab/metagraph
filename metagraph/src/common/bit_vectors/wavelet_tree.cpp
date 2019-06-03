@@ -426,13 +426,14 @@ uint64_t wavelet_tree_dyn::rank(uint64_t c, uint64_t i) const {
 uint64_t wavelet_tree_dyn::select(uint64_t c, uint64_t i) const {
     assert(size() > 0);
     assert((i <= rank(c, size() - 1) || [&](){
-        std::cerr << rank(c,size()-1) << std::endl;
-        std::cerr << size() << std::endl;
-        std::cerr << c << "," << i << std::endl;
+        std::cerr << "c=" << c << ",i=" << i << std::endl;
+        std::cerr << "rank(c,size()-1)=" << rank(c,size()-1) << std::endl;
+        std::cerr << "size()=" << size() << std::endl;
+        std::cerr << "content=[";
         for(auto j = 0;j<size();j++) {
             std::cerr << operator[](j) << ",";
         }
-        std::cerr << std::endl;
+        std::cerr << "]" << std::endl;
         return false;}()));
     assert(i > 0 && size() > 0 && i <= rank(c, size() - 1));
     return wwt_->select(c, i - 1);
