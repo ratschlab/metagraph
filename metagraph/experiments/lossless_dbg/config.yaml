@@ -1,0 +1,24 @@
+samples:
+  ERR431032: "https://sra-download.ncbi.nlm.nih.gov/traces/era10/ERR/ERR431/ERR431032"
+samples_fastq:
+  SMALL: "https://raw.githubusercontent.com/genomegraph/workshop/bff0194081dde2e1260fe528ac1438d9b6cf4672/vg_tutorial/small/x.fa_2.fastq"
+samples_fastq_gz:
+  SRR554369_2: "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR554/SRR554369/SRR554369_2.fastq.gz"
+  SRR8700667_2: "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/SRR870/SRR870667/SRR8700667_2.fastq.gz"
+  ERR174310_1: "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/ERR174/ERR174310/ERR174310_1.fastq.gz "
+  ERR174310_2: "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/ERR174/ERR174310/ERR174310_2.fastq.gz"
+  ERR194146: "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/ERR194/ERR194146/ERR194146.fastq.gz "
+  ERR194146_1: "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/ERR194/ERR194146/ERR194146_1.fastq.gz "
+  ERR194146_2: "ftp://ftp.sra.ebi.ac.uk/vol1/fastq/ERR194/ERR194146/ERR194146_2.fastq.gz"
+fqsqueezer_samples:
+  - ERR532393_1
+  - SRR327342_1
+  - SRR554369_1
+  - SRR635193_1
+  - SRR689233_1
+  - SRR870667_1
+  #- SRR1265495_1
+  #- SRR1265496_1
+compressors:
+  - logan
+  - path_encoder

@@ -47,7 +47,7 @@ add_executable(tests tests.cpp)
 add_executable(${PATH_ENCODER_CURRENT_TYPE} main.cpp)
 
 target_link_libraries(tests metagraph ${METALIBS} gtest gtest_main)
-target_link_libraries(${PATH_ENCODER_CURRENT_TYPE} metagraph ${METALIBS} path_encoding gtest gtest_main )
+target_link_libraries(${PATH_ENCODER_CURRENT_TYPE} metagraph ${METALIBS} gtest gtest_main )
 
 SET(uid 0)
 macro(add_symlink filepath sympath)
