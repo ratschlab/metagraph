@@ -53,11 +53,13 @@ ostream& operator<<(ostream& os, const waiting_thread_info_t& wt)
     os << "[tid=" << wt.thread_id << ",rp=" << wt.relative_position << ",node=" << wt.node << ",tedg=" << wt.traversed_edge << "]";
     return os;
 }
+using DefaultDynamicRoutingTable = DynamicRoutingTable<>;
+using DefaultDynamicIncomingTable = DynamicIncomingTable<>;
 
-template<typename GraphT=DBGSuccinct,typename RoutingTableT=DynamicRoutingTable<>,typename IncomingTableT=DynamicIncomingTable<>>
+template<typename RoutingTableT=DefaultDynamicRoutingTable,typename IncomingTableT=DefaultDynamicIncomingTable>
 class PathDatabaseDynamicCore {
 public:
-
+    using GraphT = DBGSuccinct;
     using path_id = pair<node_index,int64_t>;
     // implicit assumptions
     // graph contains all reads
@@ -521,9 +523,9 @@ public:
 
 };
 
-template<typename GraphT=DBGSuccinct>
-class PathDatabaseDynamic : public DecodeEnabler<PathDatabaseDynamicCore<GraphT>> {
-    using DecodeEnabler<PathDatabaseDynamicCore<GraphT>>::DecodeEnabler;
+template<typename RoutingTableT=DefaultDynamicRoutingTable,typename IncomingTableT=DefaultDynamicIncomingTable>
+class PathDatabaseDynamic : public DecodeEnabler<PathDatabaseDynamicCore<RoutingTableT,IncomingTableT>> {
+    using DecodeEnabler<PathDatabaseDynamicCore<RoutingTableT,IncomingTableT>>::DecodeEnabler;
 };
 
 

@@ -26,6 +26,8 @@ volatile bool always_false = false;
 class standardized_wavelet_tree {
 public:
     explicit standardized_wavelet_tree(uint8_t logsigma) : wt_(logsigma) {}
+    template <class Vector>
+    standardized_wavelet_tree(uint8_t logsigma, const Vector &vector) : wt_(logsigma,vector) {}
 
     uint64_t rank(uint64_t i, uint64_t c) const { return i == 0 ? 0 : wt_.rank(c, i - 1); }
     uint64_t select(uint64_t i, uint64_t c) const { return wt_.select(c,i); }
@@ -65,10 +67,10 @@ public:
             this->print_content();
         }
         vector<int8_t> initial_content(size+1,delimiter_encoded);
-        for(ll i=0;i<=size;i++) {
-            routing_table.insert(0,delimiter_encoded);
-        }
-        //routing_table = decltype(routing_table)(7,initial_content);
+//        for(ll i=0;i<=size;i++) {
+//            routing_table.insert(0,delimiter_encoded);
+//        }
+        routing_table = decltype(routing_table)(7,initial_content);
     }
 
 //    int64_t select(ll block, int64_t occurrence, char symbol) const {
@@ -100,7 +102,7 @@ public:
         auto routing_table_block = offset(node);
         auto absolute_position = routing_table_block+position;
         auto occurrences_of_base_before_block = routing_table.rank(routing_table_block,encode(symbol));
-        return routing_table.rank(absolute_position-1,encode(symbol)) - occurrences_of_base_before_block;
+        return routing_table.rank(absolute_position,encode(symbol)) - occurrences_of_base_before_block;
     }
 
     char get(node_index node, int64_t position) const {

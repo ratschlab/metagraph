@@ -24,6 +24,9 @@
 #include "path_database_dynamic.hpp"
 #include "path_database_wavelet.hpp"
 #include "incoming_table.hpp"
+#include "reference_dynamic_routing_table.hpp"
+#include "reference_dynamic_incoming_table.hpp"
+
 using namespace std;
 namespace fs = std::filesystem;
 //#include "path_database.hpp"
@@ -105,6 +108,8 @@ TEST(RoutingTable,BasicTest) {
 //    EXPECT_EQ(chromosome.length(), 133'797'422);
 //    EXPECT_EQ(chromosome.substr(0,10),"NNNNNNNNNN");
 //}
+
+
 
 
 vector<string> reads_for_testing_short = {"ATGCGATCGATATGCGAGA",
@@ -299,6 +304,14 @@ TEST(PathDatabase,GetStatistics) {
     ASSERT_EQ(stats["added_splits"],1);
 }
 
+
+TEST(PathDatabase,RoutingTableInternal) {
+    short_identity_test<PathDatabaseDynamic<IdentityComparator<DynamicRoutingTableCore<>,ReferenceDynamicRoutingTable<>>,
+                                            IdentityComparator<DynamicIncomingTable<>,ReferenceDynamicIncomingTable<>>
+                                            >
+                                            >();
+
+}
 
 
 #if defined(__linux__) || false

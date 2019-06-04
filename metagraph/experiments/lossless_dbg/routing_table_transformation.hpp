@@ -38,7 +38,7 @@ public:
 
     explicit TransformationsEnabler(const shared_ptr<const DBGSuccinct> graph) : RoutingTable(graph) {
 #ifndef DISABLE_TRANSFORMATIONS
-        transformations = GraphPreprocessor(*graph).find_weak_splits();
+        //transformations = GraphPreprocessor(*graph).find_weak_splits();
 #endif
     }
     using RoutingTable::RoutingTable;

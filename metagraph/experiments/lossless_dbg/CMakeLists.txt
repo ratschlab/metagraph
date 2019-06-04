@@ -100,7 +100,7 @@ endif()
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(/usr/local/include/metagraph)
-#add_subdirectory(playground/compressor)
+add_subdirectory(playground/compressor)
 #add_subdirectory(playground/decompressor)
 #add_subdirectory(playground/sampler)
 #add_subdirectory(playground/tester)

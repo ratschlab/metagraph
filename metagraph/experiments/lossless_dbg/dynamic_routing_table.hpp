@@ -62,7 +62,7 @@ public:
         return chunk.size(chunks.position_in_chunk(location));
     }
 
-    string print_content(int64_t location) {
+    string print_content(int64_t location) const {
         auto &chunk = chunks.at(location);
         return chunk.print_content(chunks.position_in_chunk(location));
     }
@@ -72,7 +72,7 @@ public:
         return chunk.traversed_base(chunks.position_in_chunk(location), position);
     }
 
-    ll new_relative_position(int64_t location, ll position) {
+    ll new_relative_position(int64_t location, ll position) const {
         auto &chunk = chunks.at(location);
         return chunk.new_relative_position(chunks.position_in_chunk(location), position);
     }

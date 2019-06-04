@@ -61,27 +61,28 @@ public:
     using Type = DynamicIncomingTable<>;
 };
 
+using DefaultRoutingTable = RoutingTable<>;
+using DefaultIncomingTable = IncomingTable<>;
 //template <class Wavelet = sdsl::wt_rlmn<sdsl::sd_vector<>>
-template<class RoutingTableT = RoutingTable<>,class IncomingTableT=IncomingTable<>>
-class PathDatabaseWaveletCore : public PathDatabaseDynamicCore<DBGSuccinct,typename DynamicVersion<RoutingTableT>::Type,typename DynamicVersion<IncomingTableT>::Type> {
+template<class RoutingTableT = DefaultRoutingTable,class IncomingTableT=DefaultIncomingTable>
+class PathDatabaseWaveletCore : public PathDatabaseDynamicCore<typename DynamicVersion<RoutingTableT>::Type,typename DynamicVersion<IncomingTableT>::Type> {
 public:
-    using GT = DBGSuccinct;
     using DRT = typename DynamicVersion<RoutingTableT>::Type;
     using DIT = typename DynamicVersion<IncomingTableT>::Type;
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
-    PathDatabaseWaveletCore(std::shared_ptr<const DBGSuccinct> graph) : PathDatabaseDynamicCore<GT,DRT,DIT>(graph)
+    PathDatabaseWaveletCore(std::shared_ptr<const DBGSuccinct> graph) : PathDatabaseDynamicCore<DRT,DIT>(graph)
                                                                               {}
 
     PathDatabaseWaveletCore(const vector<string> &filenames,
-                        size_t kmer_length = 21 /* default */) : PathDatabaseDynamicCore<GT,DRT,DIT>(filenames,kmer_length)
+                        size_t kmer_length = 21 /* default */) : PathDatabaseDynamicCore<DRT,DIT>(filenames,kmer_length)
                                                          {}
 
 
 
     std::vector<path_id> encode(const std::vector<std::string> &sequences) {
-        auto encoded = PathDatabaseDynamicCore<GT,DRT,DIT>::encode(sequences);
+        auto encoded = PathDatabaseDynamicCore<DRT,DIT>::encode(sequences);
 
         // convert dynamic_(routing_table/incoming_table) to routing_table/incoming_table
         construct_routing_table();
@@ -95,8 +96,8 @@ public:
         vector<char> routing_table_array;
         for(int64_t node=1;node<=this->graph.num_nodes();node++) {
             routing_table_array.push_back('#');// to always start a block with #
-            if (PathDatabaseDynamicCore<GT,DRT,DIT>::node_is_split(node)) {
-                auto& dynamic_table = PathDatabaseDynamicCore<GT,DRT,DIT>::routing_table;
+            if (PathDatabaseDynamicCore<DRT,DIT>::node_is_split(node)) {
+                auto& dynamic_table = PathDatabaseDynamicCore<DRT,DIT>::routing_table;
                 for(int64_t i=0;i<dynamic_table.size(node);i++) {
                     routing_table_array.push_back(dynamic_table.get(node,i));
                 }
@@ -105,7 +106,7 @@ public:
         routing_table_array.push_back('#'); // to also always end a block with #
         routing_table.initialize_content(routing_table_array);
         if constexpr (std::is_base_of<TransformationsEnabler<RoutingTableCore<>>,RoutingTableT>::value) {
-            routing_table.transformations = PathDatabaseDynamicCore<GT, DRT, DIT>::routing_table.transformations;
+            routing_table.transformations = PathDatabaseDynamicCore< DRT, DIT>::routing_table.transformations;
         }
         statistics["transformation_routing_table_time"] = timer.elapsed();
         cerr << "Transformation finished in " << statistics["transformation_routing_table_time"] << endl;
@@ -120,14 +121,14 @@ public:
         #pragma omp parallel for num_threads(get_num_threads())
         for(int64_t node=1;node<=this->graph.num_nodes();node++) {
             auto& current_chunk = incoming_table_chunks[node-1];
-            if (PathDatabaseDynamicCore<GT,DRT,DIT>::node_is_join(node)) {
-                auto new_reads = PathDatabaseDynamicCore<GT,DRT,DIT>::incoming_table.branch_size(node,'$');
+            if (PathDatabaseDynamicCore<DRT,DIT>::node_is_join(node)) {
+                auto new_reads = PathDatabaseDynamicCore<DRT,DIT>::incoming_table.branch_size(node,'$');
                 if (new_reads) {
                     current_chunk.push_back(new_reads);
                 }
 #ifdef ALL_EDGES_COVERED
                 for(auto& base : "ACGTN") {
-                    auto branch_size = PathDatabaseDynamicCore<GT,DRT,DIT>::incoming_table.branch_size(node,base);
+                    auto branch_size = PathDatabaseDynamicCore<DRT,DIT>::incoming_table.branch_size(node,base);
                     if (branch_size) {
                         // so it is an actual edge in a this->graph (because all edges are covered)
                         current_chunk.push_back(branch_size);
@@ -135,17 +136,17 @@ public:
                 }
 #else
                 this->graph.call_incoming_kmers_mine(node,[&node,&current_chunk,this](node_index prev_node,char c) {
-                    auto branch_size = PathDatabaseDynamicCore<GT,DRT,DIT>::incoming_table.branch_size(node,c);
+                    auto branch_size = PathDatabaseDynamicCore<DRT,DIT>::incoming_table.branch_size(node,c);
                     current_chunk.push_back(branch_size);
                 });
 #endif
                 assert(!current_chunk.empty());
         #ifndef FULL_INCOMING_TABLE
                 if (current_chunk.empty()) {
-                    PathDatabaseDynamicCore<GT,DRT,DIT>::incoming_table.print_content(node);
-                    PRINT_VAR(PathDatabaseDynamicCore<GT,DRT,DIT>::node_is_join(node));
+                    PathDatabaseDynamicCore<DRT,DIT>::incoming_table.print_content(node);
+                    PRINT_VAR(PathDatabaseDynamicCore<DRT,DIT>::node_is_join(node));
         #ifdef MEMOIZE
-                    PRINT_VAR(PathDatabaseDynamicCore<GT,DRT,DIT>::node_is_join_raw(node));
+                    PRINT_VAR(PathDatabaseDynamicCore<DRT,DIT>::node_is_join_raw(node));
         #endif
                 }
                 if (current_chunk.size() > 1) {
@@ -230,7 +231,7 @@ public:
     }
 
     json get_statistics(uint64_t verbosity = ~0u) const {
-        json result = PathDatabaseDynamicCore<GT,DRT,DIT>::get_statistics(verbosity);
+        json result = PathDatabaseDynamicCore<DRT,DIT>::get_statistics(verbosity);
         json routing_table_stats = routing_table.get_statistics(verbosity);
         result.update(statistics);
         result.update(routing_table_stats);
@@ -300,14 +301,14 @@ public:
 
 };
 
-template<typename DummyT=int64_t>
-class PathDatabaseWavelet : public QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<>>> {
-    using QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<>>>::QueryEnabler;
+template<class RoutingTableT = DefaultRoutingTable,class IncomingTableT=DefaultIncomingTable>
+class PathDatabaseWavelet : public QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableT,IncomingTableT>>> {
+    using QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableT,IncomingTableT>>>::QueryEnabler;
 };
 
 template<typename DummyT=int64_t>
-class PathDatabaseWaveletWithtoutTransformation : public QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableCore<>,IncomingTable<>>>> {
-    using QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableCore<>,IncomingTable<>>>>::QueryEnabler;
+class PathDatabaseWaveletWithtoutTransformation : public QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableCore<>,DefaultIncomingTable>>> {
+    using QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableCore<>,DefaultIncomingTable>>>::QueryEnabler;
 };
 
 #endif /* path_database_baseline_hpp */
