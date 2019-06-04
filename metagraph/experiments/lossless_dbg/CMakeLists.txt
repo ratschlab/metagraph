@@ -16,8 +16,10 @@ set(CMAKE_SHARED_LINKER_FLAGS_FASTDEBUG "-g")
 
 
 
-## Add profiler into release version
+## Add profiler into all versions
+# needs gperftools installed
 link_libraries(profiler)
+link_libraries(tcmalloc)
 
 ###
 # dynamic
@@ -101,6 +103,7 @@ endif()
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 include_directories(/usr/local/include/metagraph)
 add_subdirectory(playground/compressor)
+add_subdirectory(playground/tidbits)
 #add_subdirectory(playground/decompressor)
 #add_subdirectory(playground/sampler)
 #add_subdirectory(playground/tester)
