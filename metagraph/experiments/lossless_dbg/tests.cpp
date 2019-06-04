@@ -70,10 +70,17 @@ TEST(SamplerTest,SubSample) {
 }
 
 TEST(WaveletTree,BasicTest) {
+    wavelet_tree_dyn wt2(7);
+    wt2.insert(0,6);
+    wt2.insert(0,6);
+    EXPECT_EQ(wt2.rank(6,1),2);
+    EXPECT_EQ(wt2.select(6,1),0);
+
     standardized_wavelet_tree wt(7);
     wt.insert(0,6);
     wt.insert(0,6);
     EXPECT_EQ(wt.rank(2,6),2);
+    EXPECT_EQ(wt.select(1,6),0);
 }
 
 TEST(RoutingTable,BasicTest) {

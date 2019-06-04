@@ -7,7 +7,7 @@
 #include <filesystem>
 #include <nlohmann/json.hpp>
 #include <tclap/CmdLine.h>
-#include <filesystem>
+#include <omp.h>
 
 using TCLAP::ValueArg;
 using TCLAP::MultiArg;

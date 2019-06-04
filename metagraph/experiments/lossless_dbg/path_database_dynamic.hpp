@@ -13,6 +13,7 @@
 #include <map>
 #include <tsl/hopscotch_set.h>
 #include <optional>
+#include <omp.h>
 
 #include "decode_enabler.hpp"
 #include "dynamic_routing_table.hpp"

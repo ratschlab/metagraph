@@ -23,21 +23,33 @@
 volatile bool always_false = false;
 
 
-class standardized_wavelet_tree : public wavelet_tree_dyn {
+class standardized_wavelet_tree {
 public:
-    using wavelet_tree_dyn::wavelet_tree_dyn;
+    explicit standardized_wavelet_tree(uint8_t logsigma) : wt_(logsigma) {}
 
-    uint64_t rank(uint64_t i, uint64_t c) const {
-        if (i == 0) {
-            return 0;
-        }
-        return wavelet_tree_dyn::rank(c,i-1);
-    }
+    uint64_t rank(uint64_t i, uint64_t c) const { return i == 0 ? 0 : wt_.rank(c, i - 1); }
+    uint64_t select(uint64_t i, uint64_t c) const { return wt_.select(c,i); }
+    uint64_t operator[](uint64_t id) const { return wt_[id]; }
 
-    uint64_t select(uint64_t i, uint64_t c) const {
-        return wavelet_tree_dyn::select(c,i);
-    }
+    uint64_t next(uint64_t id, uint64_t val) const { return wt_.next(id, val); }
+    uint64_t prev(uint64_t id, uint64_t val) const { return wt_.prev(id, val); }
 
+    void set(uint64_t id, uint64_t val) { wt_.set(id, val); }
+    void insert(uint64_t id, uint64_t val) { wt_.insert(id, val); }
+    void remove(uint64_t id) { wt_.remove(id); }
+
+    uint64_t size() const { return wt_.size(); }
+    uint8_t logsigma() const { return wt_.logsigma(); }
+
+    bool load(std::istream &in) { return wt_.load(in); }
+    void serialize(std::ostream &out) const { wt_.serialize(out); }
+
+    void clear() { wt_.clear(); }
+
+    sdsl::int_vector<> to_vector() const { return wt_.to_vector(); }
+
+private:
+    wavelet_tree_dyn wt_;
 };
 
 //template <typename EntryT=standardized_wavelet_tree>
