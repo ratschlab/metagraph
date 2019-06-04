@@ -7,7 +7,7 @@ const size_t MAX_ITER_WAVELET_TREE_STAT = 1000;
 const size_t MAX_ITER_WAVELET_TREE_DYN = 10;
 const size_t MAX_ITER_WAVELET_TREE_SMALL = 10;
 
-typedef libmaus2::bitbtree::BitBTree<6, 64> BitBTree;
+
 
 /////////////////////////////////
 // wavelet_tree shared methods //
@@ -318,71 +318,8 @@ void wavelet_tree_stat::init_wt() {
 // wavelet_tree_dyn libmaus2 rank/select //
 ///////////////////////////////////////////
 
-template <class Vector>
-BitBTree* initialize_tree(const Vector &vector, uint64_t b) {
-    uint64_t n = vector.size();
-
-    // compute total offsets for the individual bins
-    std::vector<uint64_t> offsets((1ull << (b - 1)) - 1, 0);
-    uint64_t v, m, o;
-    for (uint64_t i = 0; i < n; ++i) {
-        m = (1ull << (b - 1));
-        v = static_cast<uint64_t>(vector[i]);
-        o = 0;
-        for (uint64_t ib = 1; ib < b; ++ib) {
-            bool const bit = m & v;
-            if (!bit) {
-                offsets.at(o) += 1;
-            }
-            o = 2 * o + 1 + bit;
-            m >>= 1;
-        }
-    }
-
-    auto *tmp = new BitBTree(n * b, false);
-    std::vector<uint64_t> upto_offsets((1ull << (b - 1)) - 1, 0);
-
-    uint64_t p, co;
-    bool bit;
-    for (uint64_t i = 0; i < n; ++i) {
-        m = (1ull << (b - 1));
-        v = (uint64_t) vector[i];
-        o = 0;
-        p = i;
-        co = 0;
-        for (uint64_t ib = 0; ib < b - 1; ++ib) {
-            bit = m & v;
-            if (bit) {
-                tmp->setBitQuick(ib * n + p + co, true);
-                co += offsets.at(o);
-                p -= upto_offsets.at(o);
-            } else {
-                p -= (p - upto_offsets.at(o));
-                upto_offsets.at(o) += 1;
-            }
-            //std::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
-            o = 2 * o + 1 + bit;
-            m >>= 1;
-        }
-        bit = m & v;
-        if (bit) {
-            //std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
-            tmp->setBitQuick((b - 1) * n + p + co, true);
-        }
-    }
-
-    return tmp;
-}
-
 wavelet_tree_dyn::wavelet_tree_dyn(uint8_t logsigma)
       : wwt_(new typename decltype(wwt_)::element_type(logsigma)) {}
-
-template <class Vector>
-wavelet_tree_dyn::wavelet_tree_dyn(uint8_t logsigma, const Vector &vector) {
-    wwt_.reset(new typename decltype(wwt_)::element_type(
-        initialize_tree(vector, logsigma), logsigma, vector.size()
-    ));
-}
 
 template
 wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const sdsl::int_vector<> &);
