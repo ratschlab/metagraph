@@ -290,10 +290,10 @@ localrules: benchmark
 rule benchmark:
     input: unpack(get_benchmark_data)
 
-# rule path_encoder_variable_param_specialization:
-#     input: unpack(fix_variable_parameters)
-#     output: directory(var_parameters)
-#     shell: "mkdir '{output}'"
+rule path_encoder_variable_param_specialization:
+    input: unpack(fix_variable_parameters)
+    output: directory(var_parameters)
+    shell: "mkdir '{output}'"
 
 # Todo grab number of threads from parameters
 
