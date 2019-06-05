@@ -157,3 +157,5 @@ iOSInjectionProject/
 # End of https://www.gitignore.io/api/clion,swift
 
 playground/dynamic/
+playground/Jupyter-on-Euler-or-Leonhard-Open/
+playground/openmp/
