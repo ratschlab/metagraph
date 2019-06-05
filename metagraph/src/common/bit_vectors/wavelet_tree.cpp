@@ -330,17 +330,10 @@ wavelet_tree_dyn::wavelet_tree_dyn(uint8_t logsigma, const Vector &vector)
     dwt_.push_many(vector);
 }
 
-template
-wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const sdsl::int_vector<> &);
-
-template
-wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const std::vector<uint8_t> &);
-
-template
-wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const std::vector<int> &);
-
-template
-wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const std::vector<uint64_t> &);
+template wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const sdsl::int_vector<> &);
+template wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const std::vector<uint8_t> &);
+template wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const std::vector<int> &);
+template wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const std::vector<uint64_t> &);
 
 
 uint64_t wavelet_tree_dyn::rank(uint64_t c, uint64_t i) const {
