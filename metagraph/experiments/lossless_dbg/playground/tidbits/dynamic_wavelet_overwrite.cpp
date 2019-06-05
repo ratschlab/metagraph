@@ -5,8 +5,26 @@
 
 using namespace std;
 int main(int argc,char** argv) {
-    vector<int> initial_content(1'000'000,6);
-    vector<wavelet_tree_dyn> size_test(100,wavelet_tree_dyn(3,initial_content));
+    int number_of_wt = 50;
+    int initial_size = 1908;
+    vector<int> initial_content(initial_size,6);
+    vector<wavelet_tree_dyn> size_test(number_of_wt,wavelet_tree_dyn(3,initial_content));
+    #pragma omp parallel for num_threads(5)
+    for(int i=0;i<number_of_wt;i++) {
+        for (int j = 0; j < 2'000'00; j++) {
+            //int pick = rand() % number_of_wt;
+            int pick = i;
+            size_test[pick].insert(rand() % size_test[pick].size(), rand() % 6);
+        }
+    }
+    for(int i=0;i<number_of_wt;i++) {
+        for(int j=0;j<initial_size;j++) {
+            cout << size_test[i].select(6,j+1) << ",";
+        }
+        cout << endl;
+        assert(size_test[i].rank(6,size_test[i].size()-1)==initial_size);
+    }
+
     return 0;
 }
 //
