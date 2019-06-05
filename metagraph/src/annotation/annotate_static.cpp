@@ -160,6 +160,22 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
 }
 
 template <class BinaryMatrixType, typename Label>
+void StaticBinRelAnnotator<BinaryMatrixType, Label>
+::call_objects(const Label &label,
+               std::function<void(Index)> callback) const {
+    uint64_t encoding;
+    try {
+        encoding = label_encoder_.encode(label);
+    } catch (...) {
+        return;
+    }
+
+    for (Index index : matrix_->get_column(encoding)) {
+        callback(index);
+    }
+}
+
+template <class BinaryMatrixType, typename Label>
 void StaticBinRelAnnotator<BinaryMatrixType, Label>::except_dyn() {
     throw std::runtime_error("Dynamic actions are not supported"
                              " in static representation");

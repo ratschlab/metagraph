@@ -56,7 +56,7 @@ class BRWT : public BinaryMatrix {
 
     // assigns columns to the child nodes
     utils::RangePartition assignments_;
-    bit_vector_rrr<> nonzero_rows_;
+    bit_vector_small nonzero_rows_;
     std::vector<std::unique_ptr<BinaryMatrix>> child_nodes_;
 };
 

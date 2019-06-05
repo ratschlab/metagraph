@@ -2,38 +2,18 @@
 #define __BOSS_CONSTRUCT_HPP__
 
 #include "dbg_construct.hpp"
-#include "boss.hpp"
-
-
-class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
-  public:
-    virtual ~IBOSSChunkConstructor() {}
-
-    static IBOSSChunkConstructor* initialize(size_t k,
-                                             bool canonical_mode = false,
-                                             const std::string &filter_suffix = "",
-                                             size_t num_threads = 1,
-                                             double memory_preallocated = 0,
-                                             bool verbose = false);
-
-    virtual void add_sequence(const std::string &sequence) = 0;
-    virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;
-
-    virtual BOSS::Chunk* build_chunk() = 0;
-};
+#include "boss_chunk_construct.hpp"
 
 
 class BOSSConstructor : public IGraphConstructor<BOSS> {
   public:
-    BOSSConstructor(size_t k,
-                    bool canonical_mode = false,
-                    const std::string &filter_suffix = "",
-                    size_t num_threads = 1,
-                    double memory_preallocated = 0,
-                    bool verbose = false);
+    // see input arguments in IBOSSChunkConstructor::initialize
+    template <typename... Args>
+    BOSSConstructor(const Args&... args)
+      : constructor_(IBOSSChunkConstructor::initialize(args...)) {}
 
-    void add_sequence(const std::string &sequence) {
-        constructor_->add_sequence(sequence);
+    void add_sequence(std::string&& sequence) {
+        constructor_->add_sequence(std::move(sequence));
     }
 
     void add_sequences(std::function<void(CallString)> generate_sequences) {
@@ -46,10 +26,26 @@ class BOSSConstructor : public IGraphConstructor<BOSS> {
         });
     }
 
-    void build_graph(BOSS *graph);
+    void build_graph(BOSS *graph) {
+        auto chunk = constructor_->build_chunk();
+        // initialize graph from the chunk built
+        chunk->initialize_boss(graph);
+        delete chunk;
+    }
+
+    void build_graph(BOSS *graph, sdsl::int_vector<> *weights) {
+        auto chunk = constructor_->build_chunk();
+        // initialize graph from the chunk built
+        chunk->initialize_boss(graph, weights);
+        delete chunk;
+    }
 
     static BOSS* build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
-                                         bool verbose = false);
+                                         bool verbose = false,
+                                         sdsl::int_vector<> *weights = nullptr) {
+        return BOSS::Chunk::build_boss_from_chunks(chunk_filenames, verbose, weights);
+    }
+
   private:
     std::unique_ptr<IBOSSChunkConstructor> constructor_;
 };

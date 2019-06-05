@@ -1,4 +1,6 @@
 #include <filesystem>
+#include <thread>
+#include <chrono>
 #include <tclap/CmdLine.h>
 #include <sdsl/rrr_vector.hpp>
 
@@ -8,6 +10,8 @@
 #include "annotate_column_compressed.hpp"
 #include "unix_tools.hpp"
 #include "utils.hpp"
+
+using namespace std::chrono_literals;
 
 using TCLAP::ValueArg;
 using TCLAP::MultiArg;
@@ -28,8 +32,6 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
     DataGenerator generator;
     generator.set_seed(42);
 
-    auto mem_before = get_curr_RSS();
-
     auto other = generator.generate_random_column(n, d)->convert_to<BitVector>();
 
     if (static_cast<int>(other.rank1(1)) < -1
@@ -47,14 +49,40 @@ void test_vector_points(uint64_t n, double d, const std::string &prefix) {
 
     const auto serialized_size = std::filesystem::file_size(path);
 
+    auto mem_before = get_curr_RSS();
+
+    BitVector another;
+
+    std::this_thread::sleep_for(5s);
+
+    std::ifstream in(path, std::ios::binary);
+    another.load(in);
+    in.close();
+
+    if (static_cast<int>(another.rank1(another.size() / 2)) < -1
+            || static_cast<int>(another.rank0(another.size() / 2)) < -1)
+        throw std::runtime_error("Never happends, just initializing the rank support");
+    if (another.num_set_bits() && static_cast<int>(another.select1(1)) < -1)
+        throw std::runtime_error("Never happends, just initializing the select support");
+
+    auto RAM = get_curr_RSS() - mem_before;
+
     std::filesystem::remove(path);
+
+    uint64_t predicted_size;
+    if constexpr(!std::is_base_of<bit_vector_dyn, BitVector>::value) {
+        predicted_size = predict_size<BitVector>(another.size(), another.num_set_bits());
+    } else {
+        predicted_size = 0;
+    }
 
     std::cout << prefix
               << "\t" << n
               << "\t" << d
-              << "\t" << 1. * other.num_set_bits() / other.size()
+              << "\t" << 1. * another.num_set_bits() / another.size()
               << "\t" << 1. * serialized_size * 8 / n
-              << "\t" << get_curr_RSS() - mem_before
+              << "\t" << RAM
+              << "\t" << 1. * predicted_size / another.size()
               << std::endl;
 }
 

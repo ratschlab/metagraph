@@ -89,6 +89,8 @@ void test_prev(const bit_vector &vector) {
 
 void reference_based_test(const bit_vector &vector,
                           const sdsl::bit_vector &reference) {
+    EXPECT_EQ(reference.size(), vector.size());
+
     size_t max_rank = std::accumulate(reference.begin(), reference.end(), 0u);
 
     ASSERT_DEATH(vector.select1(0), "");
@@ -106,8 +108,10 @@ void reference_based_test(const bit_vector &vector,
         EXPECT_EQ(i, vector.rank1(vector.select1(i)));
     }
 
-    EXPECT_EQ(vector[0], vector.rank1(0));
-    EXPECT_EQ(vector[0], reference[0]);
+    if (vector.size()) {
+        EXPECT_EQ(vector[0], vector.rank1(0));
+        EXPECT_EQ(vector[0], reference[0]);
+    }
 
     for (size_t i = 1; i < vector.size(); ++i) {
         EXPECT_EQ(vector[i], vector.rank1(i) - vector.rank1(i - 1));
@@ -125,12 +129,15 @@ template <class T>
 void test_bit_vector_queries() {
     std::unique_ptr<bit_vector> vector { new T() };
     ASSERT_TRUE(vector);
+    reference_based_test(*vector, sdsl::bit_vector());
 
     vector.reset(new T(0, 1));
     ASSERT_TRUE(vector);
+    reference_based_test(*vector, sdsl::bit_vector());
 
     vector.reset(new T(10, 0));
     ASSERT_TRUE(vector);
+    reference_based_test(*vector, sdsl::bit_vector(10, 0));
     EXPECT_EQ(10u, vector->size());
     for (size_t i = 0; i < vector->size(); ++i) {
         EXPECT_EQ(0, (*vector)[i]);
@@ -144,6 +151,7 @@ void test_bit_vector_queries() {
 
     vector.reset(new T(10, 1));
     ASSERT_TRUE(vector);
+    reference_based_test(*vector, sdsl::bit_vector(10, 1));
     EXPECT_EQ(10u, vector->size());
     for (size_t i = 0; i < vector->size(); ++i) {
         EXPECT_EQ(1, (*vector)[i]);
@@ -203,6 +211,27 @@ TEST(bit_vector_rrr, nonCommonQueries) {
     }
 
     vector.reset(new bit_vector_rrr<>(10, 0));
+    ASSERT_TRUE(vector);
+    EXPECT_EQ(10u, vector->size());
+    for (size_t i = 0; i < vector->size(); ++i) {
+        EXPECT_EQ(0, (*vector)[i]);
+        EXPECT_EQ(i, vector->select0(i + 1));
+        EXPECT_EQ(i + 1, vector->rank0(vector->select0(i + 1)));
+        EXPECT_EQ(i, vector->select0(vector->rank0(i)));
+    }
+}
+
+TEST(bit_vector_dyn, nonCommonQueries) {
+    // Mainly test select0.
+    auto vector = std::make_unique<bit_vector_dyn>(10, 1);
+    ASSERT_TRUE(vector);
+    EXPECT_EQ(10u, vector->size());
+    for (size_t i = 0; i < vector->size(); ++i) {
+        EXPECT_EQ(1, (*vector)[i]);
+        ASSERT_DEATH(vector->select0(i), "");
+    }
+
+    vector.reset(new bit_vector_dyn(10, 0));
     ASSERT_TRUE(vector);
     EXPECT_EQ(10u, vector->size());
     for (size_t i = 0; i < vector->size(); ++i) {
@@ -1225,4 +1254,260 @@ TEST(bit_vector, copy_to) {
     test_copy_convert_to< bit_vector_smart, bit_vector_rrr<> >();
     test_copy_convert_to< bit_vector_smart, bit_vector_small >();
     test_copy_convert_to< bit_vector_smart, bit_vector_smart >();
+}
+
+TEST(bit_vector, inner_prod_empty) {
+    sdsl::bit_vector first;
+    sdsl::bit_vector second;
+    EXPECT_EQ(0u, inner_prod(first, second));
+}
+
+TEST(bit_vector, inner_prod_all_zero) {
+    {
+        sdsl::bit_vector first(1, 0);
+        sdsl::bit_vector second(1, 0);
+        EXPECT_EQ(0u, inner_prod(first, second));
+    }
+    {
+        sdsl::bit_vector first(10, 0);
+        sdsl::bit_vector second(10, 0);
+        EXPECT_EQ(0u, inner_prod(first, second));
+    }
+    {
+        sdsl::bit_vector first(999, 0);
+        sdsl::bit_vector second(999, 0);
+        EXPECT_EQ(0u, inner_prod(first, second));
+    }
+    {
+        sdsl::bit_vector first(999999, 0);
+        sdsl::bit_vector second(999999, 0);
+        EXPECT_EQ(0u, inner_prod(first, second));
+    }
+    {
+        sdsl::bit_vector first(99999999, 0);
+        sdsl::bit_vector second(99999999, 0);
+        EXPECT_EQ(0u, inner_prod(first, second));
+    }
+}
+
+TEST(bit_vector, inner_prod_all_ones) {
+    {
+        sdsl::bit_vector first(1, 1);
+        sdsl::bit_vector second(1, 1);
+        EXPECT_EQ(1u, inner_prod(first, second));
+    }
+    {
+        sdsl::bit_vector first(10, 1);
+        sdsl::bit_vector second(10, 1);
+        EXPECT_EQ(10u, inner_prod(first, second));
+    }
+    {
+        sdsl::bit_vector first(999, 1);
+        sdsl::bit_vector second(999, 1);
+        EXPECT_EQ(999u, inner_prod(first, second));
+    }
+    {
+        sdsl::bit_vector first(999999, 1);
+        sdsl::bit_vector second(999999, 1);
+        EXPECT_EQ(999999u, inner_prod(first, second));
+    }
+    {
+        sdsl::bit_vector first(99999999, 1);
+        sdsl::bit_vector second(99999999, 1);
+        EXPECT_EQ(99999999u, inner_prod(first, second));
+    }
+}
+
+TEST(bit_vector, inner_prod_all_ones_offset) {
+    for (size_t size = 0; size < 200; ++size) {
+        sdsl::bit_vector first(size, 1);
+        sdsl::bit_vector second(size, 1);
+        EXPECT_EQ(size, inner_prod(first, second));
+    }
+    for (size_t size = 99999999; size < 99999999 + 200; ++size) {
+        sdsl::bit_vector first(size, 1);
+        sdsl::bit_vector second(size, 1);
+        EXPECT_EQ(size, inner_prod(first, second));
+    }
+}
+
+TEST(bit_vector, inner_prod_same) {
+    {
+        sdsl::bit_vector first(1);
+        sdsl::bit_vector second(1);
+        uint64_t prod = 0;
+        uint64_t bits = 1;
+        for (size_t i = 0; i < (first.size() + 63) >> 6; ++i) {
+            uint64_t val = 18446744073709551557llu + i * 32416189321llu;
+            first.data()[i] = second.data()[i] = val;
+            for (size_t k = 0; k < 64 && bits--; ++k) {
+                prod += val & 1;
+                val >>= 1;
+            }
+        }
+        EXPECT_EQ(prod, inner_prod(first, second));
+    }
+    {
+        sdsl::bit_vector first(10);
+        sdsl::bit_vector second(10);
+        uint64_t prod = 0;
+        uint64_t bits = 10;
+        for (size_t i = 0; i < (first.size() + 63) >> 6; ++i) {
+            uint64_t val = 18446744073709551557llu + i * 32416189321llu;
+            first.data()[i] = second.data()[i] = val;
+            for (size_t k = 0; k < 64 && bits--; ++k) {
+                prod += val & 1;
+                val >>= 1;
+            }
+        }
+        EXPECT_EQ(prod, inner_prod(first, second));
+    }
+    {
+        sdsl::bit_vector first(999);
+        sdsl::bit_vector second(999);
+        uint64_t prod = 0;
+        uint64_t bits = 999;
+        for (size_t i = 0; i < (first.size() + 63) >> 6; ++i) {
+            uint64_t val = 18446744073709551557llu + i * 32416189321llu;
+            first.data()[i] = second.data()[i] = val;
+            for (size_t k = 0; k < 64 && bits--; ++k) {
+                prod += val & 1;
+                val >>= 1;
+            }
+        }
+        EXPECT_EQ(prod, inner_prod(first, second));
+    }
+    {
+        sdsl::bit_vector first(999999);
+        sdsl::bit_vector second(999999);
+        uint64_t prod = 0;
+        uint64_t bits = 999999;
+        for (size_t i = 0; i < (first.size() + 63) >> 6; ++i) {
+            uint64_t val = 18446744073709551557llu + i * 32416189321llu;
+            first.data()[i] = second.data()[i] = val;
+            for (size_t k = 0; k < 64 && bits--; ++k) {
+                prod += val & 1;
+                val >>= 1;
+            }
+        }
+        EXPECT_EQ(prod, inner_prod(first, second));
+    }
+    {
+        sdsl::bit_vector first(99999999);
+        sdsl::bit_vector second(99999999);
+        uint64_t prod = 0;
+        uint64_t bits = 99999999;
+        for (size_t i = 0; i < (first.size() + 63) >> 6; ++i) {
+            uint64_t val = 18446744073709551557llu + i * 32416189321llu;
+            first.data()[i] = second.data()[i] = val;
+            for (size_t k = 0; k < 64 && bits--; ++k) {
+                prod += val & 1;
+                val >>= 1;
+            }
+        }
+        EXPECT_EQ(prod, inner_prod(first, second));
+    }
+    for (size_t size = 0; size < 500; ++size) {
+        sdsl::bit_vector first(size);
+        sdsl::bit_vector second(size);
+        uint64_t prod = 0;
+        uint64_t bits = size;
+        for (size_t i = 0; i < (first.size() + 63) >> 6; ++i) {
+            uint64_t val = 18446744073709551557llu + i * 32416189321llu;
+            first.data()[i] = second.data()[i] = val;
+            for (size_t k = 0; k < 64 && bits--; ++k) {
+                prod += val & 1;
+                val >>= 1;
+            }
+        }
+        EXPECT_EQ(prod, inner_prod(first, second));
+    }
+    for (size_t size = 99999999; size < 9999999 + 200; ++size) {
+        sdsl::bit_vector first(size);
+        sdsl::bit_vector second(size);
+        uint64_t prod = 0;
+        uint64_t bits = size;
+        for (size_t i = 0; i < (first.size() + 63) >> 6; ++i) {
+            uint64_t val = 18446744073709551557llu + i * 32416189321llu;
+            first.data()[i] = second.data()[i] = val;
+            for (size_t k = 0; k < 64 && bits--; ++k) {
+                prod += val & 1;
+                val >>= 1;
+            }
+        }
+        EXPECT_EQ(prod, inner_prod(first, second));
+    }
+}
+
+TEST(bit_vector, inner_prod_disjoint) {
+    {
+        sdsl::bit_vector first(1);
+        sdsl::bit_vector second(1);
+        for (size_t i = 0; i < (first.size() + 63) >> 6; ++i) {
+            uint64_t val = 18446744073709551557llu + i * 32416189321llu;
+            first.data()[i] = val;
+            second.data()[i] = ~val;
+        }
+        EXPECT_EQ(0u, inner_prod(first, second));
+    }
+    {
+        sdsl::bit_vector first(10);
+        sdsl::bit_vector second(10);
+        for (size_t i = 0; i < (first.size() + 63) >> 6; ++i) {
+            uint64_t val = 18446744073709551557llu + i * 32416189321llu;
+            first.data()[i] = val;
+            second.data()[i] = ~val;
+        }
+        EXPECT_EQ(0u, inner_prod(first, second));
+    }
+    {
+        sdsl::bit_vector first(999);
+        sdsl::bit_vector second(999);
+        for (size_t i = 0; i < (first.size() + 63) >> 6; ++i) {
+            uint64_t val = 18446744073709551557llu + i * 32416189321llu;
+            first.data()[i] = val;
+            second.data()[i] = ~val;
+        }
+        EXPECT_EQ(0u, inner_prod(first, second));
+    }
+    {
+        sdsl::bit_vector first(999999);
+        sdsl::bit_vector second(999999);
+        for (size_t i = 0; i < (first.size() + 63) >> 6; ++i) {
+            uint64_t val = 18446744073709551557llu + i * 32416189321llu;
+            first.data()[i] = val;
+            second.data()[i] = ~val;
+        }
+        EXPECT_EQ(0u, inner_prod(first, second));
+    }
+    {
+        sdsl::bit_vector first(99999999);
+        sdsl::bit_vector second(99999999);
+        for (size_t i = 0; i < (first.size() + 63) >> 6; ++i) {
+            uint64_t val = 18446744073709551557llu + i * 32416189321llu;
+            first.data()[i] = val;
+            second.data()[i] = ~val;
+        }
+        EXPECT_EQ(0u, inner_prod(first, second));
+    }
+    for (size_t size = 0; size < 500; ++size) {
+        sdsl::bit_vector first(size);
+        sdsl::bit_vector second(size);
+        for (size_t i = 0; i < (first.size() + 63) >> 6; ++i) {
+            uint64_t val = 18446744073709551557llu + i * 32416189321llu;
+            first.data()[i] = val;
+            second.data()[i] = ~val;
+        }
+        EXPECT_EQ(0u, inner_prod(first, second));
+    }
+    for (size_t size = 99999999; size < 99999999 + 80; ++size) {
+        sdsl::bit_vector first(size);
+        sdsl::bit_vector second(size);
+        for (size_t i = 0; i < (first.size() + 63) >> 6; ++i) {
+            uint64_t val = 18446744073709551557llu + i * 32416189321llu;
+            first.data()[i] = val;
+            second.data()[i] = ~val;
+        }
+        EXPECT_EQ(0u, inner_prod(first, second));
+    }
 }

@@ -109,3 +109,8 @@ size_t get_curr_RSS()
     return (size_t)0L;          /* Unsupported. */
 #endif
 }
+
+
+bool stderr_to_terminal() {
+    return isatty(STDERR_FILENO);
+}

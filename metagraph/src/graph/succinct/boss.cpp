@@ -14,6 +14,7 @@
 #include "serialization.hpp"
 #include "reverse_complement.hpp"
 #include "utils.hpp"
+#include "threading.hpp"
 
 using utils::remove_suffix;
 using TAlphabet = BOSS::TAlphabet;
@@ -1790,16 +1791,17 @@ void BOSS::call_paths(Call<const std::vector<edge_index>,
     // keep track of edges that are already included in covering paths
     std::vector<bool> visited(W_->size(), false);
 
+    ProgressBar progress_bar(W_->size() - 1, "Traverse BOSS", std::cerr, !utils::get_verbose());
     // start at all nodes with more than one outgoing edges
     for (uint64_t i = 1; i < W_->size(); ++i) {
         if (!visited[i] && !is_single_outgoing(i))
-            call_paths(i, callback, split_to_contigs, &discovered, &visited);
+            call_paths(i, callback, split_to_contigs, &discovered, &visited, progress_bar);
     }
 
     // process all the cycles left that have not beed traversed
     for (uint64_t i = 1; i < W_->size(); ++i) {
         if (!visited[i])
-            call_paths(i, callback, split_to_contigs, &discovered, &visited);
+            call_paths(i, callback, split_to_contigs, &discovered, &visited, progress_bar);
     }
 }
 
@@ -1813,7 +1815,8 @@ void BOSS::call_paths(edge_index starting_kmer,
                            const std::vector<TAlphabet>&> callback,
                       bool split_to_contigs,
                       std::vector<bool> *discovered_ptr,
-                      std::vector<bool> *visited_ptr) const {
+                      std::vector<bool> *visited_ptr,
+                      ProgressBar &progress_bar) const {
     assert(discovered_ptr && visited_ptr);
 
     auto &discovered = *discovered_ptr;
@@ -1841,6 +1844,7 @@ void BOSS::call_paths(edge_index starting_kmer,
             sequence.push_back(get_W(edge) % alph_size);
             path.push_back(edge);
             visited[edge] = true;
+            ++progress_bar;
 
             // stop traversing if the next node is a dummy sink
             if (!sequence.back())

@@ -73,7 +73,7 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "--print-internal")) {
             print_graph_internal_repr = true;
         } else if (!strcmp(argv[i], "--count-kmers")) {
-            count_kmers_query = true;
+            count_kmers = true;
         } else if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--reverse")) {
             reverse = true;
         } else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--canonical")) {
@@ -215,6 +215,8 @@ Config::Config(int argc, const char *argv[]) {
             fname.push_back(argv[i]);
         }
     }
+
+    utils::set_verbose(verbose);
 
     if (!fname.size() && identity != STATS
                       && identity != SERVER_QUERY
@@ -460,7 +462,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\trelax_brwt\toptimize the tree structure in brwt annotator\n\n");
 
-            fprintf(stderr, "\tquery\tannotate sequences from fast[a|q] files\n\n");
+            fprintf(stderr, "\tquery\t\tannotate sequences from fast[a|q] files\n\n");
             fprintf(stderr, "\tserver_query\tannotate received sequences and send annotations back\n\n");
 
             return;
@@ -503,6 +505,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr [succinct]\n");
+            fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");
             fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
             fprintf(stderr, "\t-c --canonical \t\tindex only canonical k-mers (e.g. for read sets) [off]\n");
             fprintf(stderr, "\t   --complete \t\tconstruct a complete graph (only for Bitmap graph) [off]\n");
@@ -565,7 +568,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for merge:\n");
             fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap [succinct]\n");
-            fprintf(stderr, "\t-i --infile-base [STR] \tload graph chunks from files '<infile-base>.<suffix>.dbgchunk' []\n");
+            fprintf(stderr, "\t-i --infile-base [STR] \tload graph chunks from files '<infile-base>.<suffix>.<type>.chunk' []\n");
             fprintf(stderr, "\t-l --len-suffix [INT] \titerate all possible suffices of the length given [0]\n");
             fprintf(stderr, "\t-c --canonical \t\tcanonical graph mode (e.g. for read sets) [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
@@ -674,7 +677,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
             fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
-            fprintf(stderr, "\t   --discovery-fraction \tfraction of labeled k-mers required for annotation [1.0]\n");
+            fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of labeled k-mers required for annotation [1.0]\n");
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
             fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");

@@ -10,7 +10,7 @@ testrun*
 *.dbg
 *.annodbg
 *.edgemask
-*.dbgchunk
+*.dbg.chunk
 *.dbgsdchunk
 *.fna
 *.gch

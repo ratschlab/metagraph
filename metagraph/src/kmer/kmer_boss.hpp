@@ -24,7 +24,7 @@ class KMerBOSS {
     template <typename T>
     KMerBOSS(const std::vector<T> &arr) : KMerBOSS(arr, arr.size()) {}
 
-    explicit KMerBOSS(WordType &&seq) : seq_(seq) {}
+    explicit KMerBOSS(WordType &&seq) noexcept : seq_(seq) {}
     explicit KMerBOSS(const WordType &seq) : seq_(seq) {}
 
     // corresponds to the BOSS (co-lex, one-swapped) order of k-mers

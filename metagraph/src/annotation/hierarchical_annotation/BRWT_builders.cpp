@@ -1,8 +1,9 @@
 #include "BRWT_builders.hpp"
 
-#include <cmath>
 #include <omp.h>
 #include <progress_bar.hpp>
+
+#include "utils.hpp"
 
 
 BRWT
@@ -11,7 +12,7 @@ BRWTBuilder::initialize(NodeBRWT&& node, bit_vector&& nonzero_rows) {
 
     brwt.assignments_ = utils::RangePartition(node.column_arrangement,
                                               node.group_sizes);
-    brwt.nonzero_rows_ = nonzero_rows.convert_to<bit_vector_rrr<>>();
+    brwt.nonzero_rows_ = nonzero_rows.convert_to<bit_vector_small>();
 
     brwt.child_nodes_ = std::move(node.child_nodes);
 
@@ -41,7 +42,7 @@ compute_or(const std::vector<std::unique_ptr<bit_vector>> &columns) {
         assert(col_ptr.get());
         assert(col_ptr->size() == size);
         if (dynamic_cast<bit_vector_stat*>(&(*col_ptr))) {
-            vector_or |= dynamic_cast<bit_vector_stat&>(*col_ptr).get();
+            vector_or |= dynamic_cast<bit_vector_stat&>(*col_ptr).data();
         } else {
             col_ptr->call_ones([&vector_or](auto i) { vector_or[i] = true; });
         }
@@ -49,14 +50,14 @@ compute_or(const std::vector<std::unique_ptr<bit_vector>> &columns) {
     return vector_or;
 }
 
-sdsl::bit_vector generate_subindex(const sdsl::bit_vector &column,
-                                   const bit_vector &reference) {
+sdsl::bit_vector generate_subindex(const bit_vector &column,
+                                   const sdsl::bit_vector &reference) {
     assert(column.size() == reference.size());
 
-    sdsl::bit_vector subindex(reference.num_set_bits(), false);
+    sdsl::bit_vector subindex(sdsl::util::cnt_one_bits(reference), false);
 
     uint64_t j = 0;
-    reference.call_ones([&](auto i) {
+    call_ones(reference, [&](auto i) {
         if (column[i])
             subindex[j] = true;
 
@@ -79,7 +80,7 @@ BRWTBottomUpBuilder::merge(std::vector<NodeBRWT> &&nodes,
     NodeBRWT parent;
 
     // build the parent aggregated column
-    auto parent_index = std::make_unique<bit_vector_stat>(compute_or(index));
+    sdsl::bit_vector parent_index = compute_or(index);
 
     // initialize child nodes
     for (size_t i = 0; i < nodes.size(); ++i) {
@@ -92,11 +93,8 @@ BRWTBottomUpBuilder::merge(std::vector<NodeBRWT> &&nodes,
                   nodes[i].column_arrangement.end(), 0);
 
         // shrink index column
-        bit_vector_rrr<> shrinked_index(
-            generate_subindex(
-                index[i]->convert_to<sdsl::bit_vector>(),
-                *parent_index
-            )
+        bit_vector_small shrinked_index(
+            generate_subindex(std::move(*index[i]), parent_index)
         );
         index[i].reset();
 
@@ -106,7 +104,8 @@ BRWTBottomUpBuilder::merge(std::vector<NodeBRWT> &&nodes,
         );
     }
 
-    return { std::move(parent), std::move(parent_index) };
+    return { std::move(parent),
+                std::make_unique<bit_vector_small>(std::move(parent_index)) };
 }
 
 template <typename T>
@@ -136,9 +135,12 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
         nodes[i].group_sizes = { 1 };
     }
 
-    ProgressBar progress_bar(columns.size() - 1, "Building BRWT");
+    size_t level = 0;
 
     while (nodes.size() > 1) {
+        if (utils::get_verbose())
+            std::cerr << "BRWT construction: level " << ++level << std::endl;
+
         auto groups = partitioner(columns);
 
         assert(groups.size() > 0);
@@ -146,6 +148,9 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
 
         std::vector<NodeBRWT> parent_nodes(groups.size());
         std::vector<std::unique_ptr<bit_vector>> parent_columns(groups.size());
+
+        ProgressBar progress_bar(groups.size(), "Building BRWT level",
+                                 std::cerr, !utils::get_verbose());
 
         #pragma omp parallel for num_threads(num_threads)
         for (size_t g = 0; g < groups.size(); ++g) {
@@ -156,12 +161,9 @@ BRWT BRWTBottomUpBuilder::build(VectorsPtr&& columns,
                                 subset(&columns, group));
 
             parent_nodes[g] = std::move(parent.first);
-            parent_columns[g] = std::make_unique<bit_vector_rrr<>>(
-                parent.second->convert_to<bit_vector_rrr<>>()
-            );
+            parent_columns[g] = std::move(parent.second);
 
-            #pragma omp critical
-            progress_bar += group.size() - 1;
+            ++progress_bar;
         }
 
         nodes = std::move(parent_nodes);
@@ -187,7 +189,8 @@ void BRWTOptimizer::relax(BRWT *brwt_matrix,
             parents.push_front(const_cast<BRWT*>(&node));
     });
 
-    ProgressBar progress_bar(parents.size(), "Optimizing BRWT");
+    ProgressBar progress_bar(parents.size(), "Optimizing BRWT",
+                             std::cerr, !utils::get_verbose());
 
     while (!parents.empty()) {
         auto &parent = *parents.front();
@@ -220,7 +223,6 @@ void BRWTOptimizer::relax(BRWT *brwt_matrix,
         parent = BRWTBuilder::initialize(std::move(updated_parent),
                                          std::move(parent.nonzero_rows_));
 
-        #pragma omp critical
         ++progress_bar;
     }
 }
@@ -304,62 +306,10 @@ void BRWTOptimizer::reassign(std::unique_ptr<BRWT>&& node,
             child_i++;
         });
 
-        grand_child->nonzero_rows_ = bit_vector_rrr<>(subindex);
+        grand_child->nonzero_rows_ = bit_vector_small(subindex);
 
         parent->group_sizes[offset + i] = grand_child->num_columns();
         parent->child_nodes[offset + i] = std::move(grand_child);
-    }
-}
-
-double logbinomial(uint64_t n, uint64_t m) {
-    return (lgamma(n + 1)
-                - lgamma(m + 1)
-                - lgamma(n - m + 1)) / log(2);
-}
-
-double entropy(double q) {
-    assert(q >= 0);
-    assert(q <= 1);
-
-    if (q == 0 || q == 1)
-        return 0;
-
-    return q * log2(q) + (1 - q) * log2(1 - q);
-}
-
-double bv_space_taken_rrr(uint64_t size,
-                          uint64_t num_set_bits,
-                          uint8_t block_size) {
-    return logbinomial(size, num_set_bits)
-            + std::ceil(log2(block_size + 1) / block_size) * size
-            + sizeof(bit_vector_rrr<>) * 8;
-}
-
-double bv_space_taken(const bit_vector &type,
-                      uint64_t size,
-                      uint64_t num_set_bits) {
-    assert(size >= num_set_bits);
-
-    if (dynamic_cast<const bit_vector_stat *>(&type)) {
-        return size + sizeof(bit_vector_stat) * 8;
-
-    } else if (dynamic_cast<const bit_vector_rrr<15> *>(&type)) {
-        return bv_space_taken_rrr(size, num_set_bits, 15);
-
-    } else if (dynamic_cast<const bit_vector_rrr<31> *>(&type)) {
-        return bv_space_taken_rrr(size, num_set_bits, 31);
-
-    } else if (dynamic_cast<const bit_vector_rrr<63> *>(&type)) {
-        return bv_space_taken_rrr(size, num_set_bits, 63);
-
-    } else if (dynamic_cast<const bit_vector_rrr<127> *>(&type)) {
-        return bv_space_taken_rrr(size, num_set_bits, 127);
-
-    } else if (dynamic_cast<const bit_vector_rrr<255> *>(&type)) {
-        return bv_space_taken_rrr(size, num_set_bits, 255);
-
-    } else {
-        throw std::runtime_error("Error: unknown space taken for this bit_vector");
     }
 }
 
@@ -376,20 +326,20 @@ double BRWTOptimizer::pruning_delta(const BRWT &node) {
         assert(brwt_child->nonzero_rows_.size() <= node.num_rows());
 
         // updated vector
-        delta += bv_space_taken(brwt_child->nonzero_rows_,
-                                node.num_rows(),
-                                brwt_child->nonzero_rows_.num_set_bits());
+        delta += predict_size<decltype(brwt_child->nonzero_rows_)>(
+                        node.num_rows(),
+                        brwt_child->nonzero_rows_.num_set_bits());
 
         // old index vector
-        delta -= bv_space_taken(brwt_child->nonzero_rows_,
-                                brwt_child->nonzero_rows_.size(),
-                                brwt_child->nonzero_rows_.num_set_bits());
+        delta -= predict_size<decltype(brwt_child->nonzero_rows_)>(
+                        brwt_child->nonzero_rows_.size(),
+                        brwt_child->nonzero_rows_.num_set_bits());
     }
 
     // removed index vector
-    delta -= bv_space_taken(node.nonzero_rows_,
-                            node.nonzero_rows_.size(),
-                            node.nonzero_rows_.num_set_bits());
+    delta -= predict_size<decltype(node.nonzero_rows_)>(
+                    node.nonzero_rows_.size(),
+                    node.nonzero_rows_.num_set_bits());
 
     return delta;
 }

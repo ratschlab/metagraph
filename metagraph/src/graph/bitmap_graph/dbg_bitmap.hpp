@@ -78,6 +78,8 @@ class DBGBitmap : public DeBruijnGraph {
     bool load(std::istream &in);
     bool load(const std::string &filename);
 
+    std::string file_extension() const { return kExtension; }
+
     bool operator==(const DBGBitmap &other) const { return equals(other, false); }
     bool operator!=(const DBGBitmap &other) const { return !(*this == other); }
 
@@ -85,13 +87,13 @@ class DBGBitmap : public DeBruijnGraph {
 
     bool equals(const DBGBitmap &other, bool verbose = false) const;
 
-    inline bool is_complete() const { return complete_; }
+    bool is_complete() const { return complete_; }
+
+    const std::string& alphabet() const { return seq_encoder_.alphabet; }
 
     friend std::ostream& operator<<(std::ostream &out, const DBGBitmap &graph);
 
-    const std::string &alphabet;
-
-    using Chunk = bit_vector_sd;
+    using Chunk = bit_vector_smart;
 
     static constexpr auto kChunkFileExtension = ".dbgsdchunk";
 
@@ -114,7 +116,7 @@ class DBGBitmap : public DeBruijnGraph {
     bool canonical_mode_;
     KmerExtractor2Bit seq_encoder_;
 
-    bit_vector_sd kmers_;
+    bit_vector_smart kmers_;
 
     bool complete_ = false;
 

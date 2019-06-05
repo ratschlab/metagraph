@@ -51,6 +51,7 @@ class SequenceGraph {
 
     virtual bool load(const std::string &filename_base) = 0;
     virtual void serialize(const std::string &filename_base) const = 0;
+    virtual std::string file_extension() const = 0;
 
     // Get string corresponding to |node_index|.
     // Note: Not efficient if sequences in nodes overlap. Use sparingly.
@@ -112,6 +113,8 @@ class DeBruijnGraph : public SequenceGraph {
 
     virtual bool operator==(const DeBruijnGraph &other) const;
     virtual bool operator!=(const DeBruijnGraph &other) const { return !operator==(other); }
+
+    virtual const std::string& alphabet() const = 0;
 
   private:
     virtual void call_sequences_from(node_index start,

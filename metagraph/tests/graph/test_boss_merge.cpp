@@ -17,7 +17,7 @@
 const std::string test_data_dir = "../tests/data";
 
 
-TEST(DBGSuccinctMerge, TraversalMergeWithEmpty) {
+TEST(BOSSMerge, TraversalMergeWithEmpty) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS first(k);
         BOSS second(k);
@@ -28,7 +28,7 @@ TEST(DBGSuccinctMerge, TraversalMergeWithEmpty) {
     }
 }
 
-TEST(DBGSuccinctMerge, TraversalMergeEmpty) {
+TEST(BOSSMerge, TraversalMergeEmpty) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS first(k);
         BOSS second(k);
@@ -39,7 +39,7 @@ TEST(DBGSuccinctMerge, TraversalMergeEmpty) {
     }
 }
 
-TEST(DBGSuccinctMerge, TraversalMergeEmptyRandomTest) {
+TEST(BOSSMerge, TraversalMergeEmptyRandomTest) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS random(k);
 
@@ -65,7 +65,7 @@ TEST(DBGSuccinctMerge, TraversalMergeEmptyRandomTest) {
     }
 }
 
-TEST(DBGSuccinctMerge, TraversalMergeEqualPaths) {
+TEST(BOSSMerge, TraversalMergeEqualPaths) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS first(k);
         BOSS second(k);
@@ -79,7 +79,7 @@ TEST(DBGSuccinctMerge, TraversalMergeEqualPaths) {
     }
 }
 
-TEST(DBGSuccinctMerge, TraversalMergeTwoPaths) {
+TEST(BOSSMerge, TraversalMergeTwoPaths) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS first(k);
         BOSS second(k);
@@ -93,7 +93,7 @@ TEST(DBGSuccinctMerge, TraversalMergeTwoPaths) {
     }
 }
 
-TEST(DBGSuccinctMerge, TraversalMergeSinglePathWithTwo) {
+TEST(BOSSMerge, TraversalMergeSinglePathWithTwo) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS first(k);
         BOSS second(k);
@@ -108,7 +108,7 @@ TEST(DBGSuccinctMerge, TraversalMergeSinglePathWithTwo) {
     }
 }
 
-TEST(DBGSuccinctMerge, TraversalMergeTwoGraphs) {
+TEST(BOSSMerge, TraversalMergeTwoGraphs) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS first(k);
         BOSS second(k);
@@ -127,7 +127,7 @@ TEST(DBGSuccinctMerge, TraversalMergeTwoGraphs) {
     }
 }
 
-TEST(DBGSuccinctMerge, TraversalMergeDisconnectedGraphs) {
+TEST(BOSSMerge, TraversalMergeDisconnectedGraphs) {
     for (size_t k = 1; k < 10; ++k) {
         BOSSConstructor constructor_first(k);
         constructor_first.add_sequences({ std::string(100, 'A') });
@@ -154,7 +154,7 @@ TEST(DBGSuccinctMerge, TraversalMergeDisconnectedGraphs) {
     }
 }
 
-TEST(DBGSuccinctMerge, ParallelMergeEmptyGraphs) {
+TEST(BOSSMerge, ParallelMergeEmptyGraphs) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS first(k);
         BOSS second(k);
@@ -180,7 +180,7 @@ TEST(DBGSuccinctMerge, ParallelMergeEmptyGraphs) {
     }
 }
 
-TEST(DBGSuccinctMerge, ParallelMergeTwoPaths) {
+TEST(BOSSMerge, ParallelMergeTwoPaths) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS first(k);
         BOSS second(k);
@@ -208,7 +208,7 @@ TEST(DBGSuccinctMerge, ParallelMergeTwoPaths) {
     }
 }
 
-TEST(DBGSuccinctMerge, ParallelMergeSinglePathWithTwo) {
+TEST(BOSSMerge, ParallelMergeSinglePathWithTwo) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS first(k);
         BOSS second(k);
@@ -237,7 +237,7 @@ TEST(DBGSuccinctMerge, ParallelMergeSinglePathWithTwo) {
     }
 }
 
-TEST(DBGSuccinctMerge, ParallelMergeThreeGraphs) {
+TEST(BOSSMerge, ParallelMergeThreeGraphs) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS first(k);
         BOSS second(k);
@@ -271,7 +271,7 @@ TEST(DBGSuccinctMerge, ParallelMergeThreeGraphs) {
     }
 }
 
-TEST(DBGSuccinctMerge, ParallelChunkedMergeThreeGraphs) {
+TEST(BOSSMerge, ParallelChunkedMergeThreeGraphs) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS first(k);
         BOSS second(k);
@@ -321,7 +321,7 @@ TEST(DBGSuccinctMerge, ParallelChunkedMergeThreeGraphs) {
     }
 }
 
-TEST(DBGSuccinctMerge, ParallelDumpedChunkedMergeThreeGraphs) {
+TEST(BOSSMerge, ParallelDumpedChunkedMergeThreeGraphs) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS first(k);
         BOSS second(k);
@@ -419,50 +419,50 @@ void random_testing_parallel_merge(size_t num_graphs, size_t num_sequences, size
     }
 }
 
-TEST(DBGSuccinctMerge, ParallelMergeGraphsRandom_1_5_10_1_1) {
+TEST(BOSSMerge, ParallelMergeGraphsRandom_1_5_10_1_1) {
     random_testing_parallel_merge(1, 5, 10, 1, 1);
 }
 
-TEST(DBGSuccinctMerge, ParallelMergeGraphsRandom_1_5_10_1_3) {
+TEST(BOSSMerge, ParallelMergeGraphsRandom_1_5_10_1_3) {
     random_testing_parallel_merge(1, 5, 10, 1, 3);
 }
 
-TEST(DBGSuccinctMerge, ParallelMergeGraphsRandom_1_5_4_1_300) {
+TEST(BOSSMerge, ParallelMergeGraphsRandom_1_5_4_1_300) {
     random_testing_parallel_merge(1, 5, 4, 1, 300);
 }
 
-TEST(DBGSuccinctMerge, ParallelMergeGraphsRandom_3_5_4_1_3) {
+TEST(BOSSMerge, ParallelMergeGraphsRandom_3_5_4_1_3) {
     random_testing_parallel_merge(3, 5, 4, 1, 3);
 }
 
-TEST(DBGSuccinctMerge, ParallelMergeGraphsRandom_3_3_1_1_1) {
+TEST(BOSSMerge, ParallelMergeGraphsRandom_3_3_1_1_1) {
     random_testing_parallel_merge(3, 3, 1, 1, 1);
 }
 
-TEST(DBGSuccinctMerge, ParallelMergeGraphsRandom_5_5_10_1_3) {
+TEST(BOSSMerge, ParallelMergeGraphsRandom_5_5_10_1_3) {
     random_testing_parallel_merge(5, 5, 10, 1, 3);
 }
 
-TEST(DBGSuccinctMerge, ParallelMergeGraphsRandom_15_5_4_1_3) {
+TEST(BOSSMerge, ParallelMergeGraphsRandom_15_5_4_1_3) {
     random_testing_parallel_merge(15, 5, 4, 1, 3);
 }
 
-TEST(DBGSuccinctMerge, ParallelMergeGraphsRandom_15_5_4_20_3) {
+TEST(BOSSMerge, ParallelMergeGraphsRandom_15_5_4_20_3) {
     random_testing_parallel_merge(15, 5, 4, 20, 3);
 }
 
-TEST(DBGSuccinctMerge, ParallelMergeGraphsRandom_15_10_30_20_3) {
+TEST(BOSSMerge, ParallelMergeGraphsRandom_15_10_30_20_3) {
     random_testing_parallel_merge(15, 10, 30, 20, 3);
 }
 
-TEST(DBGSuccinctMerge, ParallelMergeGraphsRandom_15_5_4_40_10) {
+TEST(BOSSMerge, ParallelMergeGraphsRandom_15_5_4_40_10) {
     random_testing_parallel_merge(15, 5, 4, 40, 10);
 }
 
-TEST(DBGSuccinctMerge, ParallelMergeGraphsRandom_15_5_20_39_10) {
+TEST(BOSSMerge, ParallelMergeGraphsRandom_15_5_20_39_10) {
     random_testing_parallel_merge(15, 5, 20, 39, 10);
 }
 
-TEST(DBGSuccinctMerge, ParallelMergeGraphsRandom_20_10_10_40_9) {
+TEST(BOSSMerge, ParallelMergeGraphsRandom_20_10_10_40_9) {
     random_testing_parallel_merge(20, 10, 10, 40, 9);
 }

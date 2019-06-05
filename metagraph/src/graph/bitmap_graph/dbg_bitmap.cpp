@@ -10,17 +10,17 @@
 
 // Assume all k-mers present
 DBGBitmap::DBGBitmap(size_t k, bool canonical_mode)
-      : alphabet(seq_encoder_.alphabet),
-        k_(k),
+      : k_(k),
         canonical_mode_(canonical_mode),
-        kmers_(std::pow(static_cast<long double>(alphabet.size()), k_) + 1, true),
+        seq_encoder_(),
+        kmers_(std::pow(static_cast<long double>(seq_encoder_.alphabet.size()), k_) + 1, true),
         complete_(true) {
     assert(k > 1);
     assert(kmers_.num_set_bits() == kmers_.size());
-    if (k * std::log2(alphabet.size()) >= 64) {
+    if (k * std::log2(alphabet().size()) >= 64) {
         std::cerr << "ERROR: Too large k!"
                   << " Maximum allowed k with this alphabet is "
-                  << static_cast<int>(64. / std::log2(alphabet.size())) - 1 << std::endl;
+                  << static_cast<int>(64. / std::log2(alphabet().size())) - 1 << std::endl;
         exit(1);
     }
 }
@@ -82,7 +82,7 @@ void DBGBitmap::call_outgoing_kmers(node_index node,
                                     const OutgoingEdgeCallback &callback) const {
     const auto &kmer = node_to_kmer(node);
 
-    for (char c : alphabet) {
+    for (char c : alphabet()) {
         auto next_kmer = kmer;
         next_kmer.to_next(k_, seq_encoder_.encode(c));
 
@@ -96,7 +96,7 @@ size_t DBGBitmap::outdegree(node_index node) const {
     size_t outdegree = 0;
     const auto &kmer = node_to_kmer(node);
 
-    for (char c : alphabet) {
+    for (char c : alphabet()) {
         auto next_kmer = kmer;
         next_kmer.to_next(k_, seq_encoder_.encode(c));
 
@@ -112,7 +112,7 @@ void DBGBitmap::call_incoming_kmers(node_index node,
                                     const OutgoingEdgeCallback &callback) const {
     const auto &kmer = node_to_kmer(node);
 
-    for (char c : alphabet) {
+    for (char c : alphabet()) {
         auto next_kmer = kmer;
         next_kmer.to_prev(k_, seq_encoder_.encode(c));
 
@@ -126,7 +126,7 @@ size_t DBGBitmap::indegree(node_index node) const {
     size_t indegree = 0;
     const auto &kmer = node_to_kmer(node);
 
-    for (char c : alphabet) {
+    for (char c : alphabet()) {
         auto next_kmer = kmer;
         next_kmer.to_prev(k_, seq_encoder_.encode(c));
 
@@ -223,7 +223,20 @@ bool DBGBitmap::load(std::istream &in) {
 
     try {
         k_ = load_number(in);
-        kmers_.load(in);
+
+        auto pos = in.tellg();
+
+        if (!kmers_.load(in)) {
+            kmers_ = decltype(kmers_)();
+            // backward compatibility for loading bit_vector_sd
+            in.seekg(pos, in.beg);
+            bit_vector_sd temp_vector;
+            if (!temp_vector.load(in))
+                return false;
+
+            kmers_ = temp_vector.convert_to<bit_vector_smart>();
+        }
+
         if (!in.good())
             return false;
 

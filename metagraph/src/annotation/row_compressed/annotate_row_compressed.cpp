@@ -221,6 +221,22 @@ void RowCompressed<Label>::insert_rows(const std::vector<Index> &rows) {
     matrix_->insert_rows(rows);
 }
 
+template <typename Label>
+void RowCompressed<Label>
+::call_objects(const Label &label,
+               std::function<void(Index)> callback) const {
+    uint64_t col;
+    try {
+        col = label_encoder_.encode(label);
+    } catch (...) {
+        return;
+    }
+
+    for (Index index : matrix_->get_column(col)) {
+        callback(index);
+    }
+}
+
 // Get labels that occur at least in |presence_ratio| rows.
 // If |presence_ratio| = 0, return all occurring labels.
 template <typename Label>

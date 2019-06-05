@@ -45,7 +45,7 @@ build_graph<DBGBitmap>(uint64_t k,
                    bool canonical) {
     DBGBitmapConstructor constructor(k, canonical);
     for (const auto &sequence : sequences) {
-        constructor.add_sequence(sequence);
+        constructor.add_sequence(std::string(sequence));
     }
 
     return std::unique_ptr<DeBruijnGraph>(new DBGBitmap(&constructor));
@@ -58,7 +58,7 @@ build_graph<DBGSuccinct>(uint64_t k,
                          bool canonical) {
     std::unique_ptr<DeBruijnGraph> graph { new DBGSuccinct(k, canonical) };
     for (const auto &sequence : sequences) {
-        graph->add_sequence(sequence);
+        graph->add_sequence(std::string(sequence));
     }
 
     dynamic_cast<DBGSuccinct*>(graph.get())->mask_dummy_kmers(1, false);
@@ -74,7 +74,7 @@ build_graph_batch(uint64_t k,
                   bool canonical) {
     std::unique_ptr<DeBruijnGraph> graph { new Graph(k, canonical) };
     for (const auto &sequence : sequences) {
-        graph->add_sequence(sequence);
+        graph->add_sequence(std::string(sequence));
     }
     return graph;
 }
@@ -86,7 +86,7 @@ build_graph_batch<DBGHashString>(uint64_t k,
                   bool) {
     std::unique_ptr<DeBruijnGraph> graph { new DBGHashString(k) };
     for (const auto &sequence : sequences) {
-        graph->add_sequence(sequence);
+        graph->add_sequence(std::string(sequence));
     }
     return graph;
 }

@@ -9,7 +9,10 @@ AnnotatedDBG::AnnotatedDBG(std::shared_ptr<SequenceGraph> dbg,
                            bool force_fast)
       : graph_(dbg), annotator_(std::move(annotation)),
         thread_pool_(num_threads > 1 ? num_threads : 0),
-        force_fast_(force_fast) {}
+        force_fast_(force_fast) {
+    assert(graph_.get());
+    assert(annotator_.get());
+}
 
 void AnnotatedDBG::insert_zero_rows(Annotator *annotator,
                                     const bit_vector_dyn &inserted_edges) {
@@ -52,7 +55,6 @@ void AnnotatedDBG::annotate_sequence_thread_safe(std::string sequence,
 
 void AnnotatedDBG::annotate_sequence(const std::string &sequence,
                                      const std::vector<std::string> &labels) {
-    assert(graph_.get() && annotator_.get());
     assert(check_compatibility());
 
     thread_pool_.enqueue(
@@ -66,7 +68,6 @@ void AnnotatedDBG::annotate_sequence(const std::string &sequence,
 std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
                                                   double presence_ratio) const {
     assert(presence_ratio >= 0);
-    assert(graph_.get() && annotator_.get());
     assert(check_compatibility());
 
     std::vector<uint64_t> indices;
@@ -96,12 +97,18 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
     }
 }
 
+std::vector<std::string> AnnotatedDBG::get_labels(node_index index) const {
+    assert(check_compatibility());
+    assert(index != SequenceGraph::npos);
+
+    return annotator_->get_labels(graph_to_anno_index(index));
+}
+
 std::vector<std::pair<std::string, size_t>>
 AnnotatedDBG::get_top_labels(const std::string &sequence,
                              size_t num_top_labels,
                              double min_label_frequency) const {
     assert(min_label_frequency >= 0);
-    assert(graph_.get() && annotator_.get());
     assert(check_compatibility());
 
     std::vector<uint64_t> indices;
@@ -129,21 +136,39 @@ AnnotatedDBG::get_top_labels(const std::string &sequence,
     }
 }
 
-uint64_t AnnotatedDBG::num_anno_rows() const {
-    assert(graph_.get() || annotator_.get());
-
-    return annotator_.get()
-            ? annotator_->num_objects()
-            : graph_->num_nodes();
+bool AnnotatedDBG::label_exists(const std::string &label) const {
+    return annotator_->label_exists(label);
 }
 
-AnnotatedDBG::Annotator::Index
-AnnotatedDBG::graph_to_anno_index(SequenceGraph::node_index kmer_index) {
+bool AnnotatedDBG::has_label(node_index index, const std::string &label) const {
+    assert(check_compatibility());
+    assert(index != SequenceGraph::npos);
+
+    return annotator_->has_label(graph_to_anno_index(index), label);
+}
+
+void AnnotatedDBG
+::call_annotated_nodes(const std::string &label,
+                       std::function<void(node_index)> callback) const {
+    assert(check_compatibility());
+
+    annotator_->call_objects(
+        label,
+        [&](row_index index) { callback(anno_to_graph_index(index)); }
+    );
+}
+
+AnnotatedDBG::row_index
+AnnotatedDBG::graph_to_anno_index(node_index kmer_index) {
     assert(kmer_index);
     return kmer_index - 1;
 }
 
+AnnotatedDBG::node_index
+AnnotatedDBG::anno_to_graph_index(row_index anno_index) {
+    return anno_index + 1;
+}
+
 bool AnnotatedDBG::check_compatibility() const {
-    assert(graph_.get() && annotator_.get());
     return graph_->num_nodes() == annotator_->num_objects();
 }

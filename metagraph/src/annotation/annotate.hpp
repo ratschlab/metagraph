@@ -6,6 +6,7 @@
 #include <vector>
 #include <unordered_map>
 #include <memory>
+#include <functional>
 
 
 namespace annotate {
@@ -102,11 +103,16 @@ class MultiLabelAnnotation
                    size_t num_top = static_cast<size_t>(-1),
                    double min_label_frequency = 0.0) const = 0;
 
+    virtual void call_objects(const Label &label,
+                              std::function<void(Index)> callback) const = 0;
+
     /************************* Properties *************************/
 
     virtual uint64_t num_objects() const = 0;
     virtual size_t num_labels() const = 0;
     virtual uint64_t num_relations() const = 0;
+
+    virtual bool label_exists(const Label &label) const = 0;
 };
 
 
@@ -125,6 +131,11 @@ class LabelEncoder {
      * Throw exception if it does not exist.
      */
     size_t encode(const Label &label) const;
+
+    /**
+     * Check if the label has been added to encoder.
+     */
+    bool label_exists(const Label &label) const { return encode_label_.count(label); }
 
     /**
      * Throws an exception if a bad code is passed.
@@ -166,7 +177,7 @@ class MultiLabelEncoded
     virtual std::unique_ptr<IterateRows> iterator() const;
     virtual std::vector<uint64_t> get_label_indexes(Index i) const;
 
-    virtual const LabelEncoder<Label>& get_label_encoder() const final { return label_encoder_; };
+    virtual const LabelEncoder<Label>& get_label_encoder() const final { return label_encoder_; }
 
     /******************* General functionality *******************/
 
@@ -183,6 +194,10 @@ class MultiLabelEncoded
     get_top_labels(const std::vector<Index> &indices,
                    size_t num_top = static_cast<size_t>(-1),
                    double min_label_frequency = 0.0) const override final;
+
+    virtual bool label_exists(const Label &label) const override final {
+        return label_encoder_.label_exists(label);
+    }
 
   protected:
     // TODO: add |min_label_frequency| parameter: return only frequent labels

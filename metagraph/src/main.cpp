@@ -23,6 +23,7 @@
 #include "dbg_bitmap_construct.hpp"
 #include "dbg_succinct.hpp"
 #include "server.hpp"
+#include "weighted_graph.hpp"
 
 typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
@@ -578,6 +579,21 @@ void print_stats(const DeBruijnGraph &graph) {
     std::cout << "k: " << graph.get_k() << std::endl;
     std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
     std::cout << "canonical mode: " << (graph.is_canonical_mode() ? "yes" : "no") << std::endl;
+
+    if (dynamic_cast<const WeightedDBG<> *>(&graph)) {
+        const auto &weighted_dbg = dynamic_cast<const WeightedDBG<> &>(graph);
+        double sum_weights = 0;
+        for (uint64_t i = 1; i <= weighted_dbg.num_nodes(); ++i) {
+            sum_weights += weighted_dbg.get_weight(i);
+        }
+        std::cout << "sum weights: " << sum_weights << std::endl;
+
+        for (uint64_t i = 1; i <= weighted_dbg.num_nodes(); ++i) {
+            std::cout << weighted_dbg.get_weight(i) << " ";
+        }
+        std::cout << std::endl;
+    }
+
     std::cout << "========================================================" << std::endl;
 }
 
@@ -639,10 +655,10 @@ void parse_sequences(const std::vector<std::string> &files,
             read_vcf_file_critical(
                 files[f], config.refpath, config.k, NULL,
                 [&](std::string &seq, auto *) {
-                    call_read(seq);
+                    call_read(std::string(seq));
                     if (config.reverse) {
                         reverse_complement(seq.begin(), seq.end());
-                        call_read(seq);
+                        call_read(std::string(seq));
                     }
                 }
             );
@@ -658,7 +674,7 @@ void parse_sequences(const std::vector<std::string> &files,
                                   << std::endl;
                         warning_different_k = true;
                     }
-                    call_read(sequence);
+                    call_read(std::move(sequence));
                 },
                 config.min_count,
                 config.max_count
@@ -846,7 +862,7 @@ int main(int argc, const char *argv[]) {
                     suffices = KmerExtractor::generate_suffixes(config->suffix_len);
                 }
 
-                BOSS::Chunk graph_data(boss_graph->get_k());
+                BOSS::Chunk graph_data(KmerExtractor::alphabet.size(), boss_graph->get_k());
 
                 //one pass per suffix
                 for (const std::string &suffix : suffices) {
@@ -856,19 +872,18 @@ int main(int argc, const char *argv[]) {
                         std::cout << "\nSuffix: " << suffix << std::endl;
                     }
 
-                    std::unique_ptr<IBOSSChunkConstructor> constructor(
-                        IBOSSChunkConstructor::initialize(
-                            boss_graph->get_k(),
-                            config->canonical,
-                            suffix,
-                            config->parallel,
-                            static_cast<uint64_t>(config->memory_available) << 30,
-                            config->verbose
-                        )
+                    auto constructor = IBOSSChunkConstructor::initialize(
+                        boss_graph->get_k(),
+                        config->canonical,
+                        config->count_kmers,
+                        suffix,
+                        config->parallel,
+                        static_cast<uint64_t>(config->memory_available) << 30,
+                        config->verbose
                     );
 
                     parse_sequences(files, *config, timer,
-                        [&](const auto &read) { constructor->add_sequence(read); },
+                        [&](std::string&& read) { constructor->add_sequence(std::move(read)); },
                         [&](const auto &loop) { constructor->add_sequences(loop); }
                     );
 
@@ -892,8 +907,17 @@ int main(int argc, const char *argv[]) {
                     delete next_block;
                 }
 
-                graph_data.initialize_boss(boss_graph.get());
-                graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
+                if (config->count_kmers) {
+                    sdsl::int_vector<> kmer_counts;
+                    graph_data.initialize_boss(boss_graph.get(), &kmer_counts);
+                    graph.reset(new WeightedDBG<>(
+                        std::make_shared<DBGSuccinct>(boss_graph.release(), config->canonical),
+                        std::move(kmer_counts)
+                    ));
+                } else {
+                    graph_data.initialize_boss(boss_graph.get());
+                    graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
+                }
 
             } else if (config->graph_type == Config::GraphType::BITMAP && !config->dynamic) {
 
@@ -902,13 +926,13 @@ int main(int argc, const char *argv[]) {
                     exit(1);
                 }
 
-                auto sd_graph = std::make_unique<DBGBitmap>(config->k);
+                auto bitmap_graph = std::make_unique<DBGBitmap>(config->k);
 
                 if (config->verbose) {
                     std::cout << "Start reading data and extracting k-mers" << std::endl;
                 }
                 //enumerate all suffices
-                assert(sd_graph->alphabet.size() > 1);
+                assert(bitmap_graph->alphabet().size() > 1);
                 std::vector<std::string> suffices;
                 if (config->suffix.size()) {
                     suffices = { config->suffix };
@@ -929,7 +953,7 @@ int main(int argc, const char *argv[]) {
 
                     constructor.reset(
                         new DBGBitmapConstructor(
-                            sd_graph->get_k(),
+                            bitmap_graph->get_k(),
                             config->canonical,
                             suffix,
                             config->parallel,
@@ -939,7 +963,7 @@ int main(int argc, const char *argv[]) {
                     );
 
                     parse_sequences(files, *config, timer,
-                        [&](const auto &read) { constructor->add_sequence(read); },
+                        [&](std::string&& read) { constructor->add_sequence(std::move(read)); },
                         [&](const auto &loop) { constructor->add_sequences(loop); }
                     );
 
@@ -1011,7 +1035,7 @@ int main(int argc, const char *argv[]) {
                 assert(graph.get());
 
                 parse_sequences(files, *config, timer,
-                    [&graph](const auto &seq) { graph->add_sequence(seq); },
+                    [&graph](std::string&& seq) { graph->add_sequence(seq); },
                     [&graph](const auto &loop) {
                         loop([&graph](const auto &seq) { graph->add_sequence(seq); });
                     }
@@ -1079,7 +1103,7 @@ int main(int argc, const char *argv[]) {
 
             // Insert new k-mers
             parse_sequences(files, *config, timer,
-                [&graph,&inserted_edges](const auto &seq) {
+                [&graph,&inserted_edges](std::string&& seq) {
                     graph->add_sequence(seq, inserted_edges.get());
                 },
                 [&graph,&inserted_edges](const auto &loop) {
@@ -1780,6 +1804,17 @@ int main(int argc, const char *argv[]) {
         case Config::STATS: {
             for (const auto &file : files) {
                 auto graph = load_critical_dbg(file);
+                if (config->count_kmers) {
+                    graph = std::make_unique<WeightedDBG<>>(
+                        graph,
+                        sdsl::int_vector<>(graph->num_nodes(), 0, 1)
+                    );
+                    if (!graph->load(file)) {
+                        std::cerr << "Can't load weighted graph from file "
+                                  << file << std::endl;
+                        exit(1);
+                    }
+                }
 
                 std::cout << "Statistics for graph " << file << std::endl;
 
@@ -2360,7 +2395,7 @@ int main(int argc, const char *argv[]) {
                         return;
                     }
 
-                    if (config->count_kmers_query) {
+                    if (config->count_kmers) {
                         std::cout << num_discovered << "/" << num_kmers << "\n";
                         return;
                     }

@@ -16,7 +16,7 @@ class IBitmapChunkConstructor : public IGraphChunkConstructor<DBGBitmap::Chunk> 
                                                double memory_preallocated = 0,
                                                bool verbose = false);
 
-    virtual void add_sequence(const std::string &sequence) = 0;
+    virtual void add_sequence(std::string&& sequence) = 0;
     virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;
 
     virtual DBGBitmap::Chunk* build_chunk() = 0;
@@ -35,8 +35,8 @@ class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
                          double memory_preallocated = 0,
                          bool verbose = false);
 
-    void add_sequence(const std::string &sequence) {
-        constructor_->add_sequence(sequence);
+    void add_sequence(std::string&& sequence) {
+        constructor_->add_sequence(std::move(sequence));
     }
 
     void add_sequences(const std::vector<std::string> &sequences) {

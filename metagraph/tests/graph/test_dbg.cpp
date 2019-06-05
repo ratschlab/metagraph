@@ -124,6 +124,17 @@ TYPED_TEST(DeBruijnGraphTest, CheckGraph) {
     EXPECT_TRUE(check_graph<TypeParam>("ACGT", false));
 }
 
+TYPED_TEST(DeBruijnGraphTest, Alphabet) {
+    for (size_t k = 2; k <= 10; ++k) {
+        auto graph = build_graph<TypeParam>(k, {});
+        std::set<char> alphabet(graph->alphabet().begin(), graph->alphabet().end());
+        EXPECT_TRUE(alphabet.count('A'));
+        EXPECT_TRUE(alphabet.count('C'));
+        EXPECT_TRUE(alphabet.count('G'));
+        EXPECT_TRUE(alphabet.count('T'));
+    }
+}
+
 TYPED_TEST(DeBruijnGraphTest, AddSequenceSimplePath) {
     for (size_t k = 2; k <= 10; ++k) {
         std::vector<std::string> sequences { std::string(100, 'A') };
@@ -782,7 +793,7 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
         ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
-            convert_to_set(std::vector<DBGSuccinct::node_index>{ it, graph->traverse(it, 'C') }),
+            convert_to_set(std::vector<SequenceGraph::node_index>{ it, graph->traverse(it, 'C') }),
             convert_to_set(adjacent_nodes)
         );
         adjacent_nodes.clear();
@@ -790,7 +801,7 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
         // AC, AAAAC
         it = graph->traverse(it, 'C');
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
-        auto outset = convert_to_set(std::vector<DBGSuccinct::node_index>{ graph->traverse(it, 'C') });
+        auto outset = convert_to_set(std::vector<SequenceGraph::node_index>{ graph->traverse(it, 'C') });
         if (k == 2) {
             outset.insert(graph->traverse(it, 'G'));
             ASSERT_EQ(2u, adjacent_nodes.size());
@@ -808,7 +819,7 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
         ASSERT_EQ(2u, adjacent_nodes.size());
         EXPECT_EQ(
-            convert_to_set(std::vector<DBGSuccinct::node_index>{
+            convert_to_set(std::vector<SequenceGraph::node_index>{
                 it,
                 graph->traverse(it, 'G')
             }),
@@ -821,7 +832,7 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
         ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
-            convert_to_set(std::vector<DBGSuccinct::node_index>{ graph->traverse(it, 'G') }),
+            convert_to_set(std::vector<SequenceGraph::node_index>{ graph->traverse(it, 'G') }),
             convert_to_set(adjacent_nodes)
         );
         adjacent_nodes.clear();
@@ -833,7 +844,7 @@ TYPED_TEST(DeBruijnGraphTest, OutgoingAdjacent) {
         graph->adjacent_outgoing_nodes(it, &adjacent_nodes);
         ASSERT_EQ(1u, adjacent_nodes.size());
         EXPECT_EQ(
-            convert_to_set(std::vector<DBGSuccinct::node_index>{ graph->traverse(it, 'G') }),
+            convert_to_set(std::vector<SequenceGraph::node_index>{ graph->traverse(it, 'G') }),
             convert_to_set(adjacent_nodes)
         );
         adjacent_nodes.clear();
@@ -1089,6 +1100,68 @@ TYPED_TEST(DeBruijnGraphTest, get_degree2) {
     }
 }
 
+TYPED_TEST(DeBruijnGraphTest, indegree_identity_incoming_indegree) {
+    for (int k = 2; k < 10; ++k) {
+        auto graph = build_graph<TypeParam>(k, {
+            "ATGCGATCGATATGCGAGA",
+            "ATGCGATCGAGACTACGAG",
+            "GTACGATAGACATGACGAG",
+            "ACTGACGAGACACAGATGC"
+        });
+
+        for (uint64_t node = 1; node <= graph->num_nodes(); node++) {
+            std::vector<DeBruijnGraph::node_index> incoming_nodes;
+            graph->adjacent_incoming_nodes(node, &incoming_nodes);
+            EXPECT_EQ(graph->indegree(node), incoming_nodes.size())
+                << "adjacent_incoming_nodes and indegree are inconsistent for node: " << node;
+        }
+    }
+}
+
+TYPED_TEST(DeBruijnGraphTest, indegree_identity_indegree_traverse_back) {
+    for (int k = 2; k < 10; ++k) {
+        auto graph = build_graph<TypeParam>(k, {
+            "ATGCGATCGATATGCGAGA",
+            "ATGCGATCGAGACTACGAG",
+            "GTACGATAGACATGACGAG",
+            "ACTGACGAGACACAGATGC"
+        });
+
+        for (uint64_t node = 1; node <= graph->num_nodes(); node++) {
+            size_t num_incoming_edges = 0;
+            for (auto c : graph->alphabet()) {
+                if (graph->traverse_back(node, c))
+                    num_incoming_edges++;
+            }
+            EXPECT_EQ(graph->indegree(node), num_incoming_edges)
+                << "traverse_back and indegree are inconsistent for node: " << node;
+        }
+    }
+}
+
+TYPED_TEST(DeBruijnGraphTest, indegree_identity_traverse_back_incoming) {
+    for (int k = 2; k < 10; ++k) {
+        auto graph = build_graph<TypeParam>(k, {
+            "ATGCGATCGATATGCGAGA",
+            "ATGCGATCGAGACTACGAG",
+            "GTACGATAGACATGACGAG",
+            "ACTGACGAGACACAGATGC"
+        });
+
+        for (uint64_t node = 1; node <= graph->num_nodes(); node++) {
+            size_t num_incoming_edges = 0;
+            for (auto c : graph->alphabet()) {
+                if (graph->traverse_back(node, c))
+                    num_incoming_edges++;
+            }
+            std::vector<DeBruijnGraph::node_index> incoming_nodes;
+            graph->adjacent_incoming_nodes(node, &incoming_nodes);
+            EXPECT_EQ(num_incoming_edges, incoming_nodes.size())
+                << "adjacent_incoming_nodes and traverse_back are inconsistent for node: " << node;
+        }
+    }
+}
+
 TYPED_TEST(DeBruijnGraphTest, get_node_sequence) {
     size_t k = 4;
     std::string reference = "AGCTTCGAGGCCAA";
@@ -1132,4 +1205,26 @@ TYPED_TEST(DeBruijnGraphTest, is_single_outgoing_for_multiple_valid_edges) {
     }
 
     EXPECT_EQ(1u, single_outgoing_counter);
+}
+
+TYPED_TEST(DeBruijnGraphTest, CallNodes) {
+    for (size_t k = 2; k < 10; ++k) {
+        auto graph = build_graph<TypeParam>(k, {
+            std::string(k, 'A')
+                + std::string(k - 1, 'C')
+                + std::string(k - 1, 'G')
+                + std::string(k, 'T')
+        });
+
+        std::vector<DeBruijnGraph::node_index> nodes;
+        graph->call_nodes([&](const auto &index) { nodes.push_back(index);});
+        EXPECT_EQ(graph->num_nodes(), nodes.size());
+
+        std::sort(nodes.begin(), nodes.end());
+
+        size_t i = 1;
+        for (const auto &index : nodes) {
+            EXPECT_EQ(i++, index);
+        }
+    }
 }

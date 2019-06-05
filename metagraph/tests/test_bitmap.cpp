@@ -6,6 +6,7 @@
 #define private public
 
 #include "bitmap.hpp"
+#include "bit_vector.hpp"
 #include "threading.hpp"
 
 // Disable death tests
@@ -22,27 +23,68 @@ const std::string test_dump_basename = test_data_dir + "/bitmap_dump_test";
 
 
 void reference_based_test(const bitmap &vector,
-                          const std::vector<bool> &reference) {
+                          const sdsl::bit_vector &reference) {
     ASSERT_DEATH(vector[vector.size()], "");
     ASSERT_DEATH(vector[vector.size() + 1], "");
 
-    sdsl::bit_vector reference_sdsl(reference.size(), false);
-    for (size_t i = 0; i < vector.size(); ++i) {
-        EXPECT_EQ(vector[i], reference[i]);
-        if (reference[i])
-            reference_sdsl[i] = true;
-    }
+    EXPECT_EQ(reference.size(), vector.size());
+    EXPECT_EQ(sdsl::util::cnt_one_bits(reference), vector.num_set_bits());
 
     size_t i = 0;
     for (; i + 64 <= vector.size(); i += 64) {
-        EXPECT_EQ(reference_sdsl.get_int(i), vector.get_int(i, 64));
+        EXPECT_EQ(reference.get_int(i), vector.get_int(i, 64));
     }
     if (i < vector.size()) {
         EXPECT_EQ(
-            reference_sdsl.get_int(i, vector.size() - i),
+            reference.get_int(i, vector.size() - i),
             vector.get_int(i, vector.size() - i)
         );
     }
+
+    {
+        sdsl::bit_vector copy(vector.size(), 0);
+        vector.call_ones([&](auto i) { copy[i] = true; });
+
+        EXPECT_EQ(reference, copy);
+    }
+    {
+        sdsl::bit_vector copy(vector.size(), 0);
+        vector.add_to(&copy);
+
+        EXPECT_EQ(reference, copy);
+    }
+    {
+        sdsl::bit_vector copy(vector.size(), 0);
+        bitmap_set other(vector.size(), 0);
+
+        other |= vector;
+        other.add_to(&copy);
+
+        EXPECT_EQ(reference, copy);
+    }
+    {
+        sdsl::bit_vector copy(vector.size(), 0);
+        bitmap_vector other(vector.size(), 0);
+
+        other |= vector;
+        other.add_to(&copy);
+
+        EXPECT_EQ(reference, copy);
+    }
+    {
+        sdsl::bit_vector copy(vector.size(), 0);
+        bitmap_adaptive other(vector.size(), 0);
+
+        other |= vector;
+        other.add_to(&copy);
+
+        EXPECT_EQ(reference, copy);
+    }
+}
+
+void reference_based_test(const bitmap &vector,
+                          const std::vector<bool> &reference) {
+    reference_based_test(vector, to_sdsl(reference));
 }
 
 
@@ -156,19 +198,19 @@ TEST(bitmap_adaptive, set_bits) {
 }
 
 
-TEST(bitmap_vector, ConcurrentReading) {
+TEST(bitmap_set, concurrent_reading) {
     ThreadPool thread_pool(3);
-    bitmap_vector vector(10'000'000, false);
+    bitmap_set vector(100'000, false);
 
     std::vector<bool> bits;
 
-    for (size_t i = 0; i < 10'000'000; ++i) {
+    for (size_t i = 0; i < vector.size(); ++i) {
         bits.push_back((i + (i * i) % 31) % 2);
         if (bits.back())
             vector.set(i, true);
     }
 
-    std::vector<uint64_t> indices(10'000'000);
+    std::vector<uint64_t> indices(vector.size());
     std::iota(indices.begin(), indices.end(), 0);
 
     std::mt19937 g(1);
@@ -183,6 +225,174 @@ TEST(bitmap_vector, ConcurrentReading) {
     }
 
     thread_pool.join();
+}
+
+TEST(bitmap_vector, concurrent_reading) {
+    ThreadPool thread_pool(3);
+    bitmap_vector vector(100'000, false);
+
+    std::vector<bool> bits;
+
+    for (size_t i = 0; i < vector.size(); ++i) {
+        bits.push_back((i + (i * i) % 31) % 2);
+        if (bits.back())
+            vector.set(i, true);
+    }
+
+    std::vector<uint64_t> indices(vector.size());
+    std::iota(indices.begin(), indices.end(), 0);
+
+    std::mt19937 g(1);
+    std::shuffle(indices.begin(), indices.end(), g);
+
+    reference_based_test(vector, bits);
+
+    for (auto i : indices) {
+        thread_pool.enqueue([&](auto i) {
+            ASSERT_EQ(bits[i], vector[i]);
+        }, i);
+    }
+
+    thread_pool.join();
+}
+
+TEST(bitmap_adaptive, concurrent_reading) {
+    ThreadPool thread_pool(3);
+    bitmap_adaptive vector(100'000, false);
+
+    std::vector<bool> bits;
+
+    for (size_t i = 0; i < vector.size(); ++i) {
+        bits.push_back((i + (i * i) % 31) % 2);
+        if (bits.back())
+            vector.set(i, true);
+    }
+
+    std::vector<uint64_t> indices(vector.size());
+    std::iota(indices.begin(), indices.end(), 0);
+
+    std::mt19937 g(1);
+    std::shuffle(indices.begin(), indices.end(), g);
+
+    reference_based_test(vector, bits);
+
+    for (auto i : indices) {
+        thread_pool.enqueue([&](auto i) {
+            ASSERT_EQ(bits[i], vector[i]);
+        }, i);
+    }
+
+    thread_pool.join();
+}
+
+TEST(bitmap_adaptive, concurrent_reading_all_zero) {
+    ThreadPool thread_pool(3);
+    bitmap_adaptive vector(100'000, false);
+
+    std::vector<bool> bits(vector.size(), false);
+
+    std::vector<uint64_t> indices(vector.size());
+    std::iota(indices.begin(), indices.end(), 0);
+
+    std::mt19937 g(1);
+    std::shuffle(indices.begin(), indices.end(), g);
+
+    reference_based_test(vector, bits);
+
+    for (auto i : indices) {
+        thread_pool.enqueue([&](auto i) {
+            ASSERT_EQ(bits[i], vector[i]);
+        }, i);
+    }
+
+    thread_pool.join();
+}
+
+TEST(bitmap_adaptive, concurrent_reading_all_ones) {
+    ThreadPool thread_pool(3);
+    bitmap_adaptive vector(100'000, true);
+
+    std::vector<bool> bits(vector.size(), true);
+
+    std::vector<uint64_t> indices(vector.size());
+    std::iota(indices.begin(), indices.end(), 0);
+
+    std::mt19937 g(1);
+    std::shuffle(indices.begin(), indices.end(), g);
+
+    reference_based_test(vector, bits);
+
+    for (auto i : indices) {
+        thread_pool.enqueue([&](auto i) {
+            ASSERT_EQ(bits[i], vector[i]);
+        }, i);
+    }
+
+    thread_pool.join();
+}
+
+template <class Bitmap, class BitVector>
+void test_operator_OR() {
+    sdsl::bit_vector init(100'000, true);
+    init[0] = false;
+    init[init.size() / 3] = false;
+    init[2 * init.size() / 3] = false;
+
+    Bitmap vector(init.size(), false);
+
+    BitVector other(init);
+
+    vector |= other;
+
+    reference_based_test(vector, other.to_vector());
+}
+
+TEST(bitmap_set, or_with_stat) {
+    test_operator_OR<bitmap_set, bit_vector_stat>();
+}
+TEST(bitmap_set, or_with_dyn) {
+    test_operator_OR<bitmap_set, bit_vector_dyn>();
+}
+TEST(bitmap_set, or_with_sd) {
+    test_operator_OR<bitmap_set, bit_vector_sd>();
+}
+TEST(bitmap_set, or_with_smart) {
+    test_operator_OR<bitmap_set, bit_vector_smart>();
+}
+TEST(bitmap_set, or_with_small) {
+    test_operator_OR<bitmap_set, bit_vector_small>();
+}
+
+TEST(bitmap_vector, or_with_stat) {
+    test_operator_OR<bitmap_vector, bit_vector_stat>();
+}
+TEST(bitmap_vector, or_with_dyn) {
+    test_operator_OR<bitmap_vector, bit_vector_dyn>();
+}
+TEST(bitmap_vector, or_with_sd) {
+    test_operator_OR<bitmap_vector, bit_vector_sd>();
+}
+TEST(bitmap_vector, or_with_smart) {
+    test_operator_OR<bitmap_vector, bit_vector_smart>();
+}
+TEST(bitmap_vector, or_with_small) {
+    test_operator_OR<bitmap_vector, bit_vector_small>();
+}
+
+TEST(bitmap_adaptive, or_with_stat) {
+    test_operator_OR<bitmap_adaptive, bit_vector_stat>();
+}
+TEST(bitmap_adaptive, or_with_dyn) {
+    test_operator_OR<bitmap_adaptive, bit_vector_dyn>();
+}
+TEST(bitmap_adaptive, or_with_sd) {
+    test_operator_OR<bitmap_adaptive, bit_vector_sd>();
+}
+TEST(bitmap_adaptive, or_with_smart) {
+    test_operator_OR<bitmap_adaptive, bit_vector_smart>();
+}
+TEST(bitmap_adaptive, or_with_small) {
+    test_operator_OR<bitmap_adaptive, bit_vector_small>();
 }
 
 
@@ -304,26 +514,22 @@ TEST(bitmap_adaptive, switch_type) {
     uint64_t i = 0;
 
     // start as vector
-    EXPECT_EQ(
-        true,
-        static_cast<bool>(dynamic_cast<bitmap_vector*>(&bm.data()))
-    ) << bm.size() << " " << i << " " << bm.num_set_bits();
+    EXPECT_TRUE(dynamic_cast<const bitmap_vector*>(&bm.data()))
+        << bm.size() << " " << i << " " << bm.num_set_bits();
 
     for (; i + 1 < (bm.size() >> bitmap_adaptive::kMaxNumIndicesLogRatio); ++i) {
         bm.set(i, true);
-        EXPECT_EQ(
-            true,
-            static_cast<bool>(dynamic_cast<bitmap_vector*>(&bm.data()))
-        ) << bm.size() << " " << i << " " << bm.num_set_bits();
+        EXPECT_TRUE(dynamic_cast<const bitmap_vector*>(&bm.data()))
+            << bm.size() << " " << i << " " << bm.num_set_bits();
     }
 
     // too many bits set to switch back to set after increasing size
     bm.insert_zeros({ bm.size() - 1 });
-    EXPECT_EQ(true, static_cast<bool>(dynamic_cast<bitmap_vector*>(&bm.data())))
+    EXPECT_TRUE(dynamic_cast<const bitmap_vector*>(&bm.data()))
         << bm.size() << " " << i << " " << bm.num_set_bits();
 
     bm.insert_zeros({ bm.size() - 1 });
-    EXPECT_EQ(true, static_cast<bool>(dynamic_cast<bitmap_vector*>(&bm.data())))
+    EXPECT_TRUE(dynamic_cast<const bitmap_vector*>(&bm.data()))
         << bm.size() << " " << i << " " << bm.num_set_bits();
 
     // start unsetting bits
@@ -333,33 +539,25 @@ TEST(bitmap_adaptive, switch_type) {
                 + bitmap_adaptive::kNumIndicesMargin)); --i) {
         ASSERT_LT(0u, i);
         bm.set(i, false);
-        EXPECT_EQ(
-            true,
-            static_cast<bool>(dynamic_cast<bitmap_vector*>(&bm.data()))
-        ) << bm.size() << " " << i << " " << bm.num_set_bits();
+        EXPECT_TRUE(dynamic_cast<const bitmap_vector*>(&bm.data()))
+            << bm.size() << " " << i << " " << bm.num_set_bits();
     }
 
     // switch to set
     bm.set(i, false);
-    EXPECT_EQ(
-        true,
-        static_cast<bool>(dynamic_cast<bitmap_set*>(&bm.data()))
-    ) << bm.size() << " " << i << " " << bm.num_set_bits();
+    EXPECT_TRUE(dynamic_cast<const bitmap_set*>(&bm.data()))
+        << bm.size() << " " << i << " " << bm.num_set_bits();
 
     // start resetting bits back to 1
     for (; bm.num_set_bits() + 1
             < (bm.size() >> bitmap_adaptive::kMaxNumIndicesLogRatio); ++i) {
         bm.set(i, true);
-        EXPECT_EQ(
-            true,
-            static_cast<bool>(dynamic_cast<bitmap_set*>(&bm.data()))
-        ) << bm.size() << " " << i << " " << bm.num_set_bits();
+        EXPECT_TRUE(dynamic_cast<const bitmap_set*>(&bm.data()))
+            << bm.size() << " " << i << " " << bm.num_set_bits();
     }
 
     //switch back to vector
     bm.set(i, true);
-    EXPECT_EQ(
-        true,
-        static_cast<bool>(dynamic_cast<bitmap_vector*>(&bm.data()))
-    ) << bm.size() << " " << i << " " << bm.num_set_bits();
+    EXPECT_TRUE(dynamic_cast<const bitmap_vector*>(&bm.data()))
+        << bm.size() << " " << i << " " << bm.num_set_bits();
 }

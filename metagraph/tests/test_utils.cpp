@@ -730,6 +730,72 @@ TEST(Misc, RemoveSuffix) {
     EXPECT_EQ("acb.cde.efg", utils::remove_suffix("acb.cde.efg", "Aacb.cde.efg"));
 }
 
+TEST(Misc, CountIntersectionEmpty) {
+    {
+        std::vector<int> first;
+        std::vector<int> second;
+        EXPECT_EQ(0u, utils::count_intersection(first.begin(), first.end(),
+                                                second.begin(), second.end()));
+    }
+    {
+        std::vector<int> first { 1, 2, 3, 4, 5 };
+        std::vector<int> second;
+        EXPECT_EQ(0u, utils::count_intersection(first.begin(), first.end(),
+                                                second.begin(), second.end()));
+    }
+    {
+        std::vector<int> first;
+        std::vector<int> second { 1, 2, 3, 4, 5 };
+        EXPECT_EQ(0u, utils::count_intersection(first.begin(), first.end(),
+                                                second.begin(), second.end()));
+    }
+    {
+        std::vector<int> first { 1, 2, 3, 4, 5 };
+        std::vector<int> second { -5, -4, -3, -2, -1 };
+        EXPECT_EQ(0u, utils::count_intersection(first.begin(), first.end(),
+                                                second.begin(), second.end()));
+    }
+    {
+        std::vector<int> first { -1000 };
+        std::vector<int> second { 1000 };
+        EXPECT_EQ(0u, utils::count_intersection(first.begin(), first.end(),
+                                                second.begin(), second.end()));
+    }
+}
+
+TEST(Misc, CountIntersection) {
+    {
+        std::vector<int> first { 1, 2, 3, 4, 5 };
+        std::vector<int> second { 1, 2, 3, 4, 5 };
+        EXPECT_EQ(5u, utils::count_intersection(first.begin(), first.end(),
+                                                second.begin(), second.end()));
+    }
+    {
+        std::vector<int> first { 1, 2, 3, 4, 5 };
+        std::vector<int> second { 0, 1, 2, 3, 4, 5, 6 };
+        EXPECT_EQ(5u, utils::count_intersection(first.begin(), first.end(),
+                                                second.begin(), second.end()));
+    }
+    {
+        std::vector<int> first { 1, 2, 3, 4, 5, 6 };
+        std::vector<int> second { 0, 1, 2, 3, 4, 5 };
+        EXPECT_EQ(5u, utils::count_intersection(first.begin(), first.end(),
+                                                second.begin(), second.end()));
+    }
+    {
+        std::vector<int> first { 0, 1, 2, 3, 4, 5 };
+        std::vector<int> second { -5, -4, -3, -2, -1, 0 };
+        EXPECT_EQ(1u, utils::count_intersection(first.begin(), first.end(),
+                                                second.begin(), second.end()));
+    }
+    {
+        std::vector<int> first { 0, 1000000 };
+        std::vector<int> second { -1000000, 0, 1000000 };
+        EXPECT_EQ(2u, utils::count_intersection(first.begin(), first.end(),
+                                                second.begin(), second.end()));
+    }
+}
+
 TEST(Vector, ReserveInfinityCheckThrow) {
     Vector<int> vector;
     EXPECT_THROW(vector.reserve(1llu << 59), std::bad_alloc);

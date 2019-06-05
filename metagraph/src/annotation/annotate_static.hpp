@@ -44,6 +44,9 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
 
     const BinaryMatrixType& data() const { return *matrix_; }
 
+    void call_objects(const Label &label,
+                      std::function<void(Index)> callback) const override;
+
   private:
     std::vector<uint64_t> count_labels(const std::vector<Index> &indices) const override;
 
@@ -55,7 +58,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
         MultiLabelEncoded<uint64_t, Label>::label_encoder_
     };
 
-    virtual std::vector<uint64_t> get_label_indexes(Index i) const override {
+    std::vector<uint64_t> get_label_indexes(Index i) const override {
         return matrix_->get_row(i);
     }
 

@@ -3,6 +3,8 @@
 
 #include <type_traits>
 
+#include <progress_bar.hpp>
+
 #include "sequence_graph.hpp"
 #include "datatypes.hpp"
 #include "config.hpp"
@@ -428,7 +430,8 @@ class BOSS {
                          const std::vector<TAlphabet>&> callback,
                     bool split_to_contigs,
                     std::vector<bool> *discovered_ptr,
-                    std::vector<bool> *visited_ptr) const;
+                    std::vector<bool> *visited_ptr,
+                    ProgressBar &progress_bar) const;
 
     /**
      * This function gets two edge indices and returns if their source

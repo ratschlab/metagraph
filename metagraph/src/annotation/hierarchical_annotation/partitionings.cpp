@@ -1,11 +1,12 @@
 #include "partitionings.hpp"
 
-#include <omp.h>
+#include <ips4o.hpp>
+#include <progress_bar.hpp>
 
 const uint64_t kNumRowsSampled = 1'000'000;
 
 
-std::vector<std::vector<bool>>
+std::vector<sdsl::bit_vector>
 get_submatrix(const BRWTBottomUpBuilder::VectorsPtr &columns,
               const std::vector<uint64_t> &row_indexes,
               size_t num_threads) {
@@ -16,7 +17,10 @@ get_submatrix(const BRWTBottomUpBuilder::VectorsPtr &columns,
 
     assert(row_indexes.size() <= columns[0]->size());
 
-    std::vector<std::vector<bool>> submatrix(columns.size());
+    std::vector<sdsl::bit_vector> submatrix(columns.size());
+
+    ProgressBar progress_bar(columns.size(), "Subsampling",
+                             std::cerr, !utils::get_verbose());
 
     #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < columns.size(); ++i) {
@@ -27,13 +31,14 @@ get_submatrix(const BRWTBottomUpBuilder::VectorsPtr &columns,
             assert(submatrix[i][j] == (*columns[i])[row_indexes[j]]);
         }
 #endif
+        ++progress_bar;
     }
 
     return submatrix;
 }
 
 // returns shrinked columns
-std::vector<std::vector<bool>>
+std::vector<sdsl::bit_vector>
 random_submatrix(const BRWTBottomUpBuilder::VectorsPtr &columns,
                  uint64_t num_rows_sampled,
                  int seed,
@@ -63,41 +68,34 @@ random_submatrix(const BRWTBottomUpBuilder::VectorsPtr &columns,
 // input: columns
 // output: partition, for instance -- a set of column pairs
 std::vector<BRWTBottomUpBuilder::Column>
-column_arrangement(const BRWTBottomUpBuilder::VectorsPtr &vectors) {
+inverted_arrangement(const BRWTBottomUpBuilder::VectorsPtr &vectors) {
     auto init_arrangement
             = utils::arange<BRWTBottomUpBuilder::Column>(0, vectors.size());
 
-    // TODO: your favorite column arrangement
-    return std::vector<BRWTBottomUpBuilder::Column>(
-        init_arrangement.rbegin(),
-        init_arrangement.rend()
-    );
+    return { init_arrangement.rbegin(), init_arrangement.rend() };
 }
 
 std::vector<std::vector<double>>
-correlation_similarity(const std::vector<std::vector<bool>> &cols,
+correlation_similarity(const std::vector<sdsl::bit_vector> &cols,
                        size_t num_threads) {
     std::vector<std::vector<double>> similarities(cols.size());
 
     #pragma omp parallel for num_threads(num_threads)
     for (size_t j = 1; j < cols.size(); ++j) {
-
-        std::vector<uint64_t> set_bit_positions;
-        set_bit_positions.reserve(cols.size());
-
-        for (size_t i = 0; i < cols[j].size(); i++) {
-            if (cols[j][i])
-                set_bit_positions.push_back(i);
-        }
-
         similarities[j] = std::vector<double>(j, 0.);
+    }
 
-        for (size_t k = 0; k < j; ++k) {
-            for (uint64_t set_bit_pos : set_bit_positions) {
-                if (cols[k][set_bit_pos]) {
-                    similarities[j][k] += 1;
-                }
-            }
+    ProgressBar progress_bar(cols.size() * (cols.size() - 1) / 2, "Computing correlations",
+                             std::cerr, !utils::get_verbose());
+
+    #pragma omp parallel for num_threads(num_threads) collapse(2)
+    for (size_t j = 1; j < cols.size(); ++j) {
+        for (size_t k = 0; k < cols.size(); ++k) {
+            if (k >= j)
+                continue;
+
+            similarities[j][k] = inner_prod(cols[j], cols[k]);
+            ++progress_bar;
         }
     }
 
@@ -105,23 +103,23 @@ correlation_similarity(const std::vector<std::vector<bool>> &cols,
 }
 
 std::vector<std::vector<double>>
-jaccard_similarity(const std::vector<std::vector<bool>> &cols,
+jaccard_similarity(const std::vector<sdsl::bit_vector> &cols,
                    size_t num_threads) {
     std::vector<uint64_t> num_set_bits(cols.size(), 0);
 
     #pragma omp parallel for num_threads(num_threads)
     for (size_t j = 0; j < cols.size(); ++j) {
-        for (size_t i = 0; i < cols[j].size(); i++) {
-            if (cols[j][i])
-                num_set_bits[j]++;
-        }
+        num_set_bits[j] = sdsl::util::cnt_one_bits(cols[j]);
     }
 
     auto similarities = correlation_similarity(cols, num_threads);
 
-    #pragma omp parallel for num_threads(num_threads)
+    #pragma omp parallel for num_threads(num_threads) collapse(2)
     for (size_t j = 0; j < cols.size(); ++j) {
-        for (size_t k = 0; k < j; ++k) {
+        for (size_t k = 0; k < cols.size(); ++k) {
+            if (k >= j)
+                continue;
+
             similarities[j][k] /= (num_set_bits[j]
                                     + num_set_bits[k]
                                     - similarities[j][k]);
@@ -164,24 +162,29 @@ parallel_binary_grouping_greedy(const BRWTBottomUpBuilder::VectorsPtr &columns,
 
     auto similarities = estimate_similarities(columns, num_threads);
 
+    ProgressBar progress_bar(columns.size() * (columns.size() - 1), "Clustering",
+                             std::cerr, !utils::get_verbose());
+
     std::vector<std::tuple<size_t, size_t, uint64_t>> candidates;
     candidates.reserve(columns.size() * (columns.size() - 1) / 2);
 
     for (size_t j = 1; j < similarities.size(); ++j) {
         for (size_t k = 0; k < j; ++k) {
             candidates.emplace_back(j, k, similarities[j][k]);
+            ++progress_bar;
         }
     }
 
     // pick either a pair of the most similar columns,
     // or pair closest in the initial arrangement
-    std::sort(candidates.begin(), candidates.end(),
+    ips4o::parallel::sort(candidates.begin(), candidates.end(),
         [](const auto &first_pair, const auto &second_pair) {
               return std::get<2>(first_pair) > std::get<2>(second_pair)
                 || (std::get<2>(first_pair) == std::get<2>(second_pair)
                         && dist(std::get<0>(first_pair), std::get<1>(first_pair))
                             < dist(std::get<0>(second_pair), std::get<1>(second_pair)));
-        }
+        },
+        num_threads
     );
 
     BRWTBottomUpBuilder::Partition partition;
@@ -196,6 +199,7 @@ parallel_binary_grouping_greedy(const BRWTBottomUpBuilder::VectorsPtr &columns,
             matched[i] = matched[j] = true;
             partition.push_back({ i, j });
         }
+        ++progress_bar;
     }
 
     for (size_t i = 0; i < columns.size(); ++i) {

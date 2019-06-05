@@ -278,7 +278,27 @@ TYPED_TEST(AnnotatorPresetTest, HasLabel) {
     EXPECT_FALSE(this->annotation->has_label(4, "Label8"));
 }
 
-TYPED_TEST(AnnotatorPreset2Test, has_labels) {
+TYPED_TEST(AnnotatorPresetTest, HasLabels) {
+    EXPECT_TRUE(this->annotation->has_labels(0, { "Label0", "Label2", "Label8" }));
+    EXPECT_FALSE(this->annotation->has_labels(0, { "Label0", "Label2", "Label8", "Label1" }));
+
+    EXPECT_FALSE(this->annotation->has_labels(1, { "Label0" }));
+
+    EXPECT_TRUE(this->annotation->has_labels(2, { "Label1", "Label2" }));
+    EXPECT_FALSE(this->annotation->has_labels(2, { "Label1", "Label2", "Label0" }));
+
+    EXPECT_TRUE(this->annotation->has_labels(3, { "Label1", "Label2", "Label8" }));
+    EXPECT_FALSE(this->annotation->has_labels(3, { "Label1", "Label2", "Label8", "Label0" }));
+
+    EXPECT_TRUE(this->annotation->has_labels(4, { "Label2" }))
+        << this->annotation->get_labels(4)[0];
+    EXPECT_FALSE(this->annotation->has_labels(4, { "Label2", "Label0" }));
+    EXPECT_FALSE(this->annotation->has_labels(4, { "Label2", "Label0", "Label1" }));
+    EXPECT_FALSE(this->annotation->has_labels(4, { "Label2", "Label0", "Label1", "Label8" }));
+}
+
+
+TYPED_TEST(AnnotatorPreset2Test, has_labels2) {
     EXPECT_FALSE(this->annotation->has_labels(0, { "Label0", "Label1",
                                                    "Label2", "Label4",
                                                    "Label5", "Label8" }));
@@ -318,6 +338,38 @@ TYPED_TEST(AnnotatorPreset2Test, has_labels) {
     EXPECT_TRUE(this->annotation->has_labels(2, { "Label1", "Label2" }));
     EXPECT_TRUE(this->annotation->has_labels(2, { "Label2" }));
     EXPECT_TRUE(this->annotation->has_labels(2, {}));
+}
+
+TYPED_TEST(AnnotatorTest, LabelExists) {
+    EXPECT_FALSE(this->annotation->label_exists("Label0"));
+    EXPECT_FALSE(this->annotation->label_exists("Label1"));
+    EXPECT_FALSE(this->annotation->label_exists("Label2"));
+    EXPECT_FALSE(this->annotation->label_exists("Label3"));
+    EXPECT_FALSE(this->annotation->label_exists("Label8"));
+}
+
+TYPED_TEST(AnnotatorPresetTest, LabelExists) {
+    EXPECT_TRUE(this->annotation->label_exists("Label0"));
+    EXPECT_TRUE(this->annotation->label_exists("Label1"));
+    EXPECT_TRUE(this->annotation->label_exists("Label2"));
+    EXPECT_FALSE(this->annotation->label_exists("Label3"));
+    EXPECT_TRUE(this->annotation->label_exists("Label8"));
+}
+
+TYPED_TEST(AnnotatorPreset2Test, LabelExists) {
+    EXPECT_TRUE(this->annotation->label_exists("Label0"));
+    EXPECT_TRUE(this->annotation->label_exists("Label1"));
+    EXPECT_TRUE(this->annotation->label_exists("Label2"));
+    EXPECT_FALSE(this->annotation->label_exists("Label3"));
+    EXPECT_TRUE(this->annotation->label_exists("Label8"));
+}
+
+TYPED_TEST(AnnotatorPreset3Test, LabelExists) {
+    EXPECT_TRUE(this->annotation->label_exists("Label0"));
+    EXPECT_TRUE(this->annotation->label_exists("Label1"));
+    EXPECT_TRUE(this->annotation->label_exists("Label2"));
+    EXPECT_FALSE(this->annotation->label_exists("Label3"));
+    EXPECT_TRUE(this->annotation->label_exists("Label8"));
 }
 
 TYPED_TEST(AnnotatorPresetTest, get_labels) {
@@ -432,6 +484,138 @@ TYPED_TEST(AnnotatorPresetTest, Sparsity) {
     EXPECT_EQ(1 - static_cast<double>(this->annotation->num_relations())
                                           / this->annotation->num_objects()
                                           / this->annotation->num_labels(), 0.55);
+}
+
+TYPED_TEST(AnnotatorPresetTest, CallIndices) {
+    std::vector<typename TypeParam::Index> indices;
+
+    this->annotation->call_objects("Label0",
+                                   [&](const auto &i) { indices.push_back(i); });
+
+    EXPECT_EQ(1u, indices.size());
+    EXPECT_EQ(convert_to_set<typename TypeParam::Index>({0u}),
+              convert_to_set(indices));
+    indices.clear();
+
+    this->annotation->call_objects("Label1",
+                                   [&](const auto &i) { indices.push_back(i); });
+
+    EXPECT_EQ(2u, indices.size());
+    EXPECT_EQ(convert_to_set<typename TypeParam::Index>({2u, 3u}),
+              convert_to_set(indices));
+    indices.clear();
+
+    this->annotation->call_objects("Label2",
+                                   [&](const auto &i) { indices.push_back(i); });
+
+    EXPECT_EQ(4u, indices.size());
+    EXPECT_EQ(convert_to_set<typename TypeParam::Index>({0u, 2u, 3u, 4u}),
+              convert_to_set(indices));
+    indices.clear();
+
+    this->annotation->call_objects("Label3",
+                                   [&](const auto &i) { indices.push_back(i); });
+
+    EXPECT_EQ(0u, indices.size());
+    EXPECT_EQ(convert_to_set<typename TypeParam::Index>({}),
+              convert_to_set(indices));
+    indices.clear();
+
+    this->annotation->call_objects("Label8",
+                                   [&](const auto &i) { indices.push_back(i); });
+
+    EXPECT_EQ(2u, indices.size());
+    EXPECT_EQ(convert_to_set<typename TypeParam::Index>({0u, 3u}),
+              convert_to_set(indices));
+    indices.clear();
+}
+
+TYPED_TEST(AnnotatorPreset2Test, CallIndices) {
+    std::vector<typename TypeParam::Index> indices;
+
+    this->annotation->call_objects("Label0",
+                                   [&](const auto &i) { indices.push_back(i); });
+
+    EXPECT_EQ(1u, indices.size());
+    EXPECT_EQ(convert_to_set<typename TypeParam::Index>({0u}),
+              convert_to_set(indices));
+    indices.clear();
+
+    this->annotation->call_objects("Label1",
+                                   [&](const auto &i) { indices.push_back(i); });
+
+    EXPECT_EQ(1u, indices.size());
+    EXPECT_EQ(convert_to_set<typename TypeParam::Index>({2u}),
+              convert_to_set(indices));
+    indices.clear();
+
+    this->annotation->call_objects("Label2",
+                                   [&](const auto &i) { indices.push_back(i); });
+
+    EXPECT_EQ(2u, indices.size());
+    EXPECT_EQ(convert_to_set<typename TypeParam::Index>({0u, 2u}),
+              convert_to_set(indices));
+    indices.clear();
+
+    this->annotation->call_objects("Label3",
+                                   [&](const auto &i) { indices.push_back(i); });
+
+    EXPECT_EQ(0u, indices.size());
+    EXPECT_EQ(convert_to_set<typename TypeParam::Index>({}),
+              convert_to_set(indices));
+    indices.clear();
+
+    this->annotation->call_objects("Label8",
+                                   [&](const auto &i) { indices.push_back(i); });
+
+    EXPECT_EQ(2u, indices.size());
+    EXPECT_EQ(convert_to_set<typename TypeParam::Index>({0u, 4u}),
+              convert_to_set(indices));
+    indices.clear();
+}
+
+TYPED_TEST(AnnotatorPreset3Test, CallIndices) {
+    std::vector<typename TypeParam::Index> indices;
+
+    this->annotation->call_objects("Label0",
+                                   [&](const auto &i) { indices.push_back(i); });
+
+    EXPECT_EQ(1u, indices.size());
+    EXPECT_EQ(convert_to_set<typename TypeParam::Index>({0u}),
+              convert_to_set(indices));
+    indices.clear();
+
+    this->annotation->call_objects("Label1",
+                                   [&](const auto &i) { indices.push_back(i); });
+
+    EXPECT_EQ(2u, indices.size());
+    EXPECT_EQ(convert_to_set<typename TypeParam::Index>({2u, 3u}),
+              convert_to_set(indices));
+    indices.clear();
+
+    this->annotation->call_objects("Label2",
+                                   [&](const auto &i) { indices.push_back(i); });
+
+    EXPECT_EQ(4u, indices.size());
+    EXPECT_EQ(convert_to_set<typename TypeParam::Index>({0u, 2u, 3u, 4u}),
+              convert_to_set(indices));
+    indices.clear();
+
+    this->annotation->call_objects("Label3",
+                                   [&](const auto &i) { indices.push_back(i); });
+
+    EXPECT_EQ(0u, indices.size());
+    EXPECT_EQ(convert_to_set<typename TypeParam::Index>({}),
+              convert_to_set(indices));
+    indices.clear();
+
+    this->annotation->call_objects("Label8",
+                                   [&](const auto &i) { indices.push_back(i); });
+
+    EXPECT_EQ(3u, indices.size());
+    EXPECT_EQ(convert_to_set<typename TypeParam::Index>({0u, 3u, 4u}),
+              convert_to_set(indices));
+    indices.clear();
 }
 
 TYPED_TEST(AnnotatorDynamicTest, add_label) {

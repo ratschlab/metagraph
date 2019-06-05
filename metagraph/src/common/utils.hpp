@@ -8,6 +8,7 @@
 #include <functional>
 #include <stdexcept>
 #include <queue>
+#include <utility>
 #include <bitset>
 
 #if _USE_FOLLY
@@ -34,6 +35,43 @@ class BinaryMatrix;
 
 
 namespace utils {
+
+    template <typename T>
+    struct is_pair : std::false_type {};
+
+    template <typename T1, typename T2>
+    struct is_pair<std::pair<T1,T2>> : std::true_type {};
+
+    static_assert(is_pair<std::pair<int,size_t>>::value);
+    static_assert(is_pair<std::pair<uint64_t,size_t>>::value);
+
+    static_assert(!is_pair<std::tuple<int,size_t>>::value);
+    static_assert(!is_pair<int>::value);
+
+    template <typename T>
+    struct LessFirst {
+        bool operator()(const T &p1, const T &p2) const {
+            if constexpr(is_pair<T>::value) {
+                return p1.first < p2.first;
+            } else {
+                return p1 < p2;
+            }
+        }
+    };
+
+    template <typename T>
+    struct EqualFirst {
+        bool operator()(const T &p1, const T &p2) const {
+            if constexpr(is_pair<T>::value) {
+                return p1.first == p2.first;
+            } else {
+                return p1 == p2;
+            }
+        }
+    };
+
+    bool get_verbose();
+    void set_verbose(bool verbose);
 
     bool ends_with(const std::string &str, const std::string &suffix);
 
@@ -90,6 +128,39 @@ namespace utils {
                                              size_t length);
 
     uint32_t code_length(uint64_t a);
+
+    template <class AIt, class BIt>
+    uint64_t count_intersection(AIt first_begin, AIt first_end,
+                                BIt second_begin, BIt second_end) {
+        assert(std::is_sorted(first_begin, first_end));
+        assert(std::is_sorted(second_begin, second_end));
+        assert(std::set<typename AIt::value_type>(first_begin, first_end).size()
+                    == static_cast<uint64_t>(std::distance(first_begin, first_end)));
+        assert(std::set<typename BIt::value_type>(second_begin, second_end).size()
+                    == static_cast<uint64_t>(std::distance(second_begin, second_end)));
+
+        uint64_t count = 0;
+
+        while (first_begin != first_end && second_begin != second_end) {
+            first_begin = std::lower_bound(first_begin, first_end, *second_begin);
+
+            if (first_begin == first_end)
+                break;
+
+            second_begin = std::lower_bound(second_begin, second_end, *first_begin);
+
+            if (second_begin == second_end)
+                break;
+
+            if (*first_begin == *second_begin) {
+                ++count;
+                ++first_begin;
+                ++second_begin;
+            }
+        }
+
+        return count;
+    }
 
     /** A faster alternative to std::allocator<T>
      *
@@ -349,8 +420,8 @@ namespace utils {
 
 
     // indexes are distinct and sorted
-    std::vector<bool> subvector(const bit_vector &col,
-                                const std::vector<uint64_t> &indexes);
+    sdsl::bit_vector subvector(const bit_vector &col,
+                               const std::vector<uint64_t> &indexes);
 
     std::vector<uint64_t> sample_indexes(uint64_t universe_size,
                                          uint64_t sample_size,

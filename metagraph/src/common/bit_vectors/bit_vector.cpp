@@ -1,34 +1,20 @@
 #include "bit_vector.hpp"
 
+#include <cmath>
+#include <type_traits>
 #include <cassert>
 
 #include "serialization.hpp"
 
-const double SD_SMALLER_THAN_RRR_MAX_DENSITY = 0.035;
-const double SD_SMALLER_THAN_STAT_MAX_DENSITY = 0.20;
-const double STAT_SMALLER_THAN_SD_MAX_DENSITY = 0.74;
+const double STAT_BITS_PER_BIT_IF_SPARSE = 1.07;
+// TODO: why is this so large? Check the sdsl implementation
+const double STAT_BITS_PER_BIT_IF_DENSE = 1.51;
 
 // TODO: run benchmarks and optimize these parameters
 const size_t MAX_ITER_BIT_VECTOR_STAT = 1000;
 const size_t MAX_ITER_BIT_VECTOR_DYN = 0;
 const size_t MAX_ITER_BIT_VECTOR_SD = 10;
 const size_t MAX_ITER_BIT_VECTOR_RRR = 10;
-
-
-sdsl::bit_vector to_sdsl(const std::vector<bool> &vector) {
-    sdsl::bit_vector result(vector.size(), 0);
-    for (size_t i = 0; i < vector.size(); ++i) {
-        if (vector[i])
-            result[i] = 1;
-    }
-    return result;
-}
-
-sdsl::bit_vector to_sdsl(std::vector<bool>&& vector) {
-    auto result = to_sdsl(vector);
-    vector = std::vector<bool>();
-    return result;
-}
 
 
 uint64_t bit_vector::rank0(uint64_t id) const {
@@ -40,24 +26,6 @@ sdsl::bit_vector bit_vector::to_vector() const {
     call_ones([&result](auto i) { result[i] = true; });
     return result;
 }
-
-template <class Vector>
-void bit_vector::add_to(Vector *other) const {
-    assert(other);
-    assert(other->size() == size());
-    call_ones([other](auto i) { (*other)[i] = true; });
-}
-
-template void bit_vector::add_to(sdsl::bit_vector*) const;
-template void bit_vector::add_to(std::vector<bool>*) const;
-
-template <>
-void bit_vector::add_to(bitmap *other) const {
-    assert(other);
-    assert(other->size() == size());
-    call_ones([other](auto i) { other->set(i, true); });
-}
-
 
 std::ostream& operator<<(std::ostream &os, const bit_vector &bv) {
     return os << bv.to_vector();
@@ -274,6 +242,11 @@ uint64_t bit_vector_dyn::select1(uint64_t id) const {
     return vector_.select1(id - 1);
 }
 
+uint64_t bit_vector_dyn::select0(uint64_t id) const {
+    assert(id > 0 && size() > 0 && id <= rank0(size() - 1));
+    return vector_.select0(id - 1);
+}
+
 uint64_t bit_vector_dyn::next1(uint64_t pos) const {
     assert(pos < size());
 
@@ -335,10 +308,32 @@ void bit_vector_dyn::serialize(std::ostream &out) const {
     vector_.serialize(out);
 }
 
-void bit_vector_dyn::call_ones(const std::function<void(uint64_t)> &callback) const {
-    uint64_t i = 0;
-    while (i < size() && (i = next1(i)) < size()) {
-        callback(i++);
+void bit_vector_dyn::call_ones_in_range(uint64_t begin, uint64_t end,
+                                        const VoidCall<uint64_t> &callback) const {
+    assert(begin <= end);
+    assert(end <= size());
+
+    if (2 * num_set_bits() < size()) {
+        // sparse
+        uint64_t num_ones = end ? rank1(end - 1) : 0;
+        for (uint64_t r = begin ? rank1(begin - 1) + 1 : 1; r <= num_ones; ++r) {
+            callback(select1(r));
+        }
+    } else {
+        // dense
+        uint64_t one_pos = 0;
+        uint64_t zero_pos = 0;
+        uint64_t num_zeros = end ? rank0(end - 1) : 0;
+        for (uint64_t r = begin ? rank0(begin - 1) + 1 : 1; r <= num_zeros; ++r) {
+            zero_pos = select0(r);
+            while (one_pos < zero_pos) {
+                callback(one_pos++);
+            }
+            one_pos++;
+        }
+        while (one_pos < end) {
+            callback(one_pos++);
+        }
     }
 }
 
@@ -358,7 +353,7 @@ bit_vector_stat::bit_vector_stat(const bit_vector_stat &other) {
 }
 
 bit_vector_stat
-::bit_vector_stat(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
+::bit_vector_stat(const std::function<void(const VoidCall<uint64_t>&)> &call_ones,
                   uint64_t size)
       : vector_(size, false),
         num_set_bits_(0) {
@@ -539,8 +534,17 @@ bool bit_vector_stat::load(std::istream &in) {
     }
 }
 
-void bit_vector_stat::call_ones(const std::function<void(uint64_t)> &callback) const {
-    ::call_ones(vector_, callback);
+void bit_vector_stat::add_to(sdsl::bit_vector *other) const {
+    assert(other);
+    assert(other->size() == size());
+    *other |= vector_;
+}
+
+void bit_vector_stat::call_ones_in_range(uint64_t begin, uint64_t end,
+                                         const VoidCall<uint64_t> &callback) const {
+    assert(begin <= end);
+    assert(end <= size());
+    ::call_ones(vector_, begin, end, callback);
 }
 
 void bit_vector_stat::init_rs() {
@@ -553,7 +557,9 @@ void bit_vector_stat::init_rs() {
     slct_ = sdsl::select_support_mcl<>(&vector_);
 
     requires_update_ = false;
-    assert(num_set_bits_ == rank1(size() - 1));
+
+    assert(num_set_bits_ == (size() ? rank1(size() - 1) : 0));
+    assert(num_set_bits_ == num_set_bits());
 }
 
 
@@ -599,9 +605,9 @@ bit_vector_sd::bit_vector_sd(bit_vector_sd&& other) noexcept {
 }
 
 bit_vector_sd
-::bit_vector_sd(const std::function<void(const std::function<void(uint64_t)>&)> &call_ones,
-                 uint64_t size,
-                 uint64_t num_set_bits)
+::bit_vector_sd(const std::function<void(const VoidCall<uint64_t>&)> &call_ones,
+                uint64_t size,
+                uint64_t num_set_bits)
       : inverted_(num_set_bits > size / 2) {
     sdsl::sd_vector_builder builder(size,
                                     !inverted_
@@ -754,26 +760,30 @@ sdsl::bit_vector bit_vector_sd::to_vector() const {
     return vector;
 }
 
-void bit_vector_sd::call_ones(const std::function<void(uint64_t)> &callback) const {
+void bit_vector_sd::call_ones_in_range(uint64_t begin, uint64_t end,
+                                       const VoidCall<uint64_t> &callback) const {
+    assert(begin <= end);
+    assert(end <= size());
+
     if (!inverted_) {
         // sparse
-        uint64_t num_ones = num_set_bits();
-        for (uint64_t i = 1; i <= num_ones; ++i) {
+        uint64_t num_ones = rk1_(end);
+        for (uint64_t i = rk1_(begin) + 1; i <= num_ones; ++i) {
             callback(slct1_(i));
         }
     } else {
         // dense, vector_ keeps positions of zeros
         uint64_t one_pos = 0;
         uint64_t zero_pos = 0;
-        uint64_t num_zeros = rk1_(size());
-        for (uint64_t r = 1; r <= num_zeros; ++r) {
+        uint64_t num_zeros = rk1_(end);
+        for (uint64_t r = rk1_(begin) + 1; r <= num_zeros; ++r) {
             zero_pos = slct1_(r);
             while (one_pos < zero_pos) {
                 callback(one_pos++);
             }
             one_pos++;
         }
-        while (one_pos < size()) {
+        while (one_pos < end) {
             callback(one_pos++);
         }
     }
@@ -945,7 +955,7 @@ sdsl::bit_vector bit_vector_rrr<log_block_size>::to_vector() const {
     if (2 * num_set_bits() < size()) {
         // sparse
         sdsl::bit_vector vector(size(), 0);
-        uint64_t max_rank = rank1(size() - 1);
+        uint64_t max_rank = size() ? rank1(size() - 1) : 0;
         for (uint64_t i = 1; i <= max_rank; ++i) {
             vector[slct1_(i)] = 1;
         }
@@ -953,7 +963,7 @@ sdsl::bit_vector bit_vector_rrr<log_block_size>::to_vector() const {
     } else {
         // dense
         sdsl::bit_vector vector(size(), 1);
-        uint64_t max_rank = rank0(size() - 1);
+        uint64_t max_rank = size() ? rank0(size() - 1) : 0;
         for (uint64_t i = 1; i <= max_rank; ++i) {
             vector[slct0_(i)] = 0;
         }
@@ -963,26 +973,30 @@ sdsl::bit_vector bit_vector_rrr<log_block_size>::to_vector() const {
 
 template <size_t log_block_size>
 void bit_vector_rrr<log_block_size>
-::call_ones(const std::function<void(uint64_t)> &callback) const {
+::call_ones_in_range(uint64_t begin, uint64_t end,
+                     const VoidCall<uint64_t> &callback) const {
+    assert(begin <= end);
+    assert(end <= size());
+
     if (2 * num_set_bits() < size()) {
         // sparse
-        uint64_t num_ones = rank1(size() - 1);
-        for (uint64_t i = 1; i <= num_ones; ++i) {
-            callback(select1(i));
+        uint64_t num_ones = end ? rank1(end - 1) : 0;
+        for (uint64_t r = begin ? rank1(begin - 1) + 1 : 1; r <= num_ones; ++r) {
+            callback(select1(r));
         }
     } else {
         // dense
         uint64_t one_pos = 0;
         uint64_t zero_pos = 0;
-        uint64_t num_zeros = rank0(size() - 1);
-        for (uint64_t r = 1; r <= num_zeros; ++r) {
+        uint64_t num_zeros = end ? rank0(end - 1) : 0;
+        for (uint64_t r = begin ? rank0(begin - 1) + 1 : 1; r <= num_zeros; ++r) {
             zero_pos = select0(r);
             while (one_pos < zero_pos) {
                 callback(one_pos++);
             }
             one_pos++;
         }
-        while (one_pos < size()) {
+        while (one_pos < end) {
             callback(one_pos++);
         }
     }
@@ -1010,67 +1024,15 @@ bit_vector_adaptive::operator=(const bit_vector_adaptive &other) {
     return *this;
 }
 
-uint64_t bit_vector_adaptive::rank1(uint64_t id) const {
-    return vector_->rank1(id);
-}
-
-uint64_t bit_vector_adaptive::select1(uint64_t id) const {
-    return vector_->select1(id);
-}
-
-uint64_t bit_vector_adaptive::next1(uint64_t id) const {
-    return vector_->next1(id);
-}
-
-uint64_t bit_vector_adaptive::prev1(uint64_t id) const {
-    return vector_->prev1(id);
-}
-
-void bit_vector_adaptive::set(uint64_t id, bool val) {
-    vector_->set(id, val);
-}
-
-bool bit_vector_adaptive::operator[](uint64_t id) const {
-    return vector_->operator[](id);
-}
-
-uint64_t bit_vector_adaptive::get_int(uint64_t id, uint32_t width) const {
-    return vector_->get_int(id, width);
-}
-
-void bit_vector_adaptive::insert_bit(uint64_t id, bool val) {
-    assert(id <= size());
-    vector_->insert_bit(id, val);
-}
-
-void bit_vector_adaptive::delete_bit(uint64_t id) {
-    assert(id < size());
-    vector_->delete_bit(id);
-}
-
-uint64_t bit_vector_adaptive::size() const {
-    return vector_->size();
-}
-
-sdsl::bit_vector bit_vector_adaptive::to_vector() const {
-    return vector_->to_vector();
-}
-
-void
-bit_vector_adaptive
-::call_ones(const std::function<void(uint64_t)> &callback) const {
-    vector_->call_ones(callback);
-}
-
 bit_vector_adaptive::VectorCode
-bit_vector_adaptive::representation_tag(const bit_vector &vector) {
-    if (dynamic_cast<const bit_vector_sd*>(&vector)) {
+bit_vector_adaptive::representation_tag() const {
+    if (dynamic_cast<const bit_vector_sd*>(vector_.get())) {
         return VectorCode::SD_VECTOR;
 
-    } else if (dynamic_cast<const bit_vector_rrr<>*>(&vector)) {
+    } else if (dynamic_cast<const bit_vector_rrr<>*>(vector_.get())) {
         return VectorCode::RRR_VECTOR;
 
-    } else if (dynamic_cast<const bit_vector_stat*>(&vector)) {
+    } else if (dynamic_cast<const bit_vector_stat*>(vector_.get())) {
         return VectorCode::STAT_VECTOR;
 
     } else {
@@ -1096,10 +1058,14 @@ bool bit_vector_adaptive::load(std::istream &in) {
 }
 
 void bit_vector_adaptive::serialize(std::ostream &out) const {
-    serialize_number(out, representation_tag(*vector_));
+    serialize_number(out, representation_tag());
     vector_->serialize(out);
 }
 
+
+////////////////////////////////////////////
+// bit_vector_adaptive_stat               //
+////////////////////////////////////////////
 
 template <bit_vector_adaptive::DefineRepresentation optimal_representation>
 bit_vector_adaptive_stat<optimal_representation>
@@ -1190,13 +1156,10 @@ bit_vector_adaptive::VectorCode
 smallest_representation(uint64_t size, uint64_t num_set_bits) {
     assert(num_set_bits <= size);
 
-    // TODO: entropy estimate
-    if (num_set_bits < SD_SMALLER_THAN_RRR_MAX_DENSITY * size
-            || num_set_bits > (1 - SD_SMALLER_THAN_RRR_MAX_DENSITY) * size) {
-        return bit_vector_adaptive::VectorCode::SD_VECTOR;
-    } else {
-        return bit_vector_adaptive::VectorCode::RRR_VECTOR;
-    }
+    return predict_size<bit_vector_sd>(size, num_set_bits)
+            < predict_size<bit_vector_rrr<>>(size, num_set_bits)
+                  ? bit_vector_adaptive::VectorCode::SD_VECTOR
+                  : bit_vector_adaptive::VectorCode::RRR_VECTOR;
 }
 
 ////////////////////////////////////////////////
@@ -1207,10 +1170,91 @@ bit_vector_adaptive::VectorCode
 smart_representation(uint64_t size, uint64_t num_set_bits) {
     assert(num_set_bits <= size);
 
-    if (num_set_bits < SD_SMALLER_THAN_STAT_MAX_DENSITY * size
-            || num_set_bits > STAT_SMALLER_THAN_SD_MAX_DENSITY * size) {
-        return bit_vector_adaptive::VectorCode::SD_VECTOR;
-    } else {
-        return bit_vector_adaptive::VectorCode::STAT_VECTOR;
-    }
+    return predict_size<bit_vector_sd>(size, num_set_bits)
+            < predict_size<bit_vector_stat>(size, num_set_bits)
+                  ? bit_vector_adaptive::VectorCode::SD_VECTOR
+                  : bit_vector_adaptive::VectorCode::STAT_VECTOR;
 }
+
+
+double logbinomial(uint64_t n, uint64_t m) {
+    return (lgamma(n + 1)
+                - lgamma(m + 1)
+                - lgamma(n - m + 1)) / log(2);
+}
+
+double entropy(double q) {
+    assert(q >= 0);
+    assert(q <= 1);
+
+    if (q == 0 || q == 1)
+        return 0;
+
+    return q * log2(q) + (1 - q) * log2(1 - q);
+}
+
+// TODO: write unit tests for these. Check if approximately equals to the serialized dumps
+uint64_t bv_space_taken_rrr(uint64_t size, uint64_t num_set_bits, uint8_t block_size) {
+    return std::ceil(logbinomial(size, num_set_bits))
+            + (size + block_size - 1) / block_size * std::ceil(log2(block_size + 1));
+}
+
+uint64_t bv_space_taken_sd(uint64_t size, uint64_t num_set_bits) {
+    num_set_bits = std::min(num_set_bits, size - num_set_bits);
+    return std::ceil((log2(size + 1) - log2(num_set_bits + 1) + 3) * num_set_bits);
+}
+
+uint64_t bv_space_taken_stat(uint64_t size, uint64_t num_set_bits) {
+    return STAT_BITS_PER_BIT_IF_SPARSE * size
+            + (STAT_BITS_PER_BIT_IF_DENSE - STAT_BITS_PER_BIT_IF_SPARSE) * num_set_bits;
+}
+
+template <class VectorType>
+uint64_t predict_size(uint64_t size, uint64_t num_set_bits) {
+    assert(size >= num_set_bits);
+
+    if constexpr(std::is_base_of<bit_vector_stat, VectorType>::value)
+        return bv_space_taken_stat(size, num_set_bits);
+
+    if constexpr(std::is_base_of<bit_vector_sd, VectorType>::value)
+        return bv_space_taken_sd(size, num_set_bits);
+
+    if constexpr(std::is_base_of<bit_vector_rrr<15>, VectorType>::value)
+        return bv_space_taken_rrr(size, num_set_bits, 15);
+
+    if constexpr(std::is_base_of<bit_vector_rrr<31>, VectorType>::value)
+        return bv_space_taken_rrr(size, num_set_bits, 31);
+
+    if constexpr(std::is_base_of<bit_vector_rrr<63>, VectorType>::value)
+        return bv_space_taken_rrr(size, num_set_bits, 63);
+
+    if constexpr(std::is_base_of<bit_vector_rrr<127>, VectorType>::value)
+        return bv_space_taken_rrr(size, num_set_bits, 127);
+
+    if constexpr(std::is_base_of<bit_vector_rrr<255>, VectorType>::value)
+        return bv_space_taken_rrr(size, num_set_bits, 255);
+
+    if constexpr(std::is_base_of<bit_vector_small, VectorType>::value)
+        return std::min(bv_space_taken_sd(size, num_set_bits),
+                        predict_size<bit_vector_rrr<>>(size, num_set_bits));
+
+    if constexpr(std::is_base_of<bit_vector_smart, VectorType>::value)
+        return std::min(bv_space_taken_sd(size, num_set_bits),
+                        predict_size<bit_vector_stat>(size, num_set_bits));
+
+    throw std::runtime_error(std::string("Error: unknown space taken for this bit_vector")
+                                 + typeid(VectorType).name());
+}
+
+// template uint64_t predict_size<bit_vector_dyn>(uint64_t, uint64_t);
+template uint64_t predict_size<bit_vector_stat>(uint64_t, uint64_t);
+template uint64_t predict_size<bit_vector_sd>(uint64_t, uint64_t);
+// template uint64_t predict_size<bit_vector_rrr<3>>(uint64_t, uint64_t);
+// template uint64_t predict_size<bit_vector_rrr<8>>(uint64_t, uint64_t);
+template uint64_t predict_size<bit_vector_rrr<15>>(uint64_t, uint64_t);
+template uint64_t predict_size<bit_vector_rrr<31>>(uint64_t, uint64_t);
+template uint64_t predict_size<bit_vector_rrr<63>>(uint64_t, uint64_t);
+template uint64_t predict_size<bit_vector_rrr<127>>(uint64_t, uint64_t);
+template uint64_t predict_size<bit_vector_rrr<255>>(uint64_t, uint64_t);
+template uint64_t predict_size<bit_vector_small>(uint64_t, uint64_t);
+template uint64_t predict_size<bit_vector_smart>(uint64_t, uint64_t);

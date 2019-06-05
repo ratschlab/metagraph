@@ -63,6 +63,9 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     VLabels get_labels(const std::vector<Index> &indices,
                        double presence_ratio) const;
 
+    void call_objects(const Label &label,
+                      std::function<void(Index)> callback) const;
+
     uint64_t num_objects() const;
     size_t num_labels() const;
     uint64_t num_relations() const;
@@ -100,7 +103,7 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
                            const LabelEncoder<Label> &label_encoder,
                            const std::function<void(BinaryMatrix::RowCallback&)> &call_rows);
 
-    virtual std::vector<uint64_t> get_label_indexes(Index i) const {
+    std::vector<uint64_t> get_label_indexes(Index i) const {
         return matrix_->get_row(i);
     }
 
