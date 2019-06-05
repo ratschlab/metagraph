@@ -84,7 +84,9 @@ public:
     int64_t select_unchecked(node_index node, int64_t occurrence, int64_t encoded_symbol) const {
         auto routing_table_block = offset(node);
         auto occurrences_of_symbol_before_block = routing_table.rank(routing_table_block,encoded_symbol);
-        return routing_table.select(occurrences_of_symbol_before_block+occurrence,encoded_symbol) - routing_table_block;
+        auto result = routing_table.select(occurrences_of_symbol_before_block+occurrence,encoded_symbol) - routing_table_block;
+        assert(result>=0);
+        return result;
     }
 
     int64_t select(node_index node, int64_t occurrence, char symbol) const {
@@ -147,7 +149,8 @@ public:
 
     void insert(ll block, int64_t position, char symbol) {
         int64_t encoded = encode(symbol);
-        assert(position <= size(block));
+        int64_t block_size = size(block);
+        assert((position <= block_size || [&](){ PRINT_VAR(block,position,symbol,block_size,encoded,symbol); return false; }()));
         routing_table.insert(offset(block)+position,encoded);
     }
 

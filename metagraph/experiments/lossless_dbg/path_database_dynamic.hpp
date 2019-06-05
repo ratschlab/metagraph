@@ -106,8 +106,10 @@ public:
         populate_bifurcation_bitvectors();
 
         auto alloc_routing_table = VerboseTimer("allocation of routing & incoming table");
-        routing_table = decltype(routing_table)(graph_,&is_split,&rank_is_split,chunk_size);
-        incoming_table = decltype(incoming_table)(graph_,&is_join,&rank_is_join,chunk_size);
+        //routing_table = decltype(routing_table)(graph_,&is_split,&rank_is_split,chunk_size);
+        //incoming_table = decltype(incoming_table)(graph_,&is_join,&rank_is_join,chunk_size);
+        routing_table = decltype(routing_table)(graph_,&is_bifurcation,&rank_is_bifurcation,chunk_size);
+        incoming_table = decltype(incoming_table)(graph_,&is_bifurcation,&rank_is_bifurcation,chunk_size);
         alloc_routing_table.finished();
 
         #pragma omp parallel for num_threads(get_num_threads())
