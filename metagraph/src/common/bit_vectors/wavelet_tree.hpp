@@ -6,7 +6,7 @@
 #include <atomic>
 
 #include <sdsl/wavelet_trees.hpp>
-#include <libmaus2/wavelet/DynamicWaveletTree.hpp>
+#include <dynamic.hpp>
 
 
 class wavelet_tree {
@@ -17,9 +17,9 @@ class wavelet_tree {
     virtual uint64_t select(uint64_t c, uint64_t i) const = 0;
     virtual uint64_t operator[](uint64_t id) const = 0;
 
-    // get the position of the next value |var| in subvector [id, ...]
+    // get the position of the next value |val| in subvector [id, ...]
     virtual uint64_t next(uint64_t id, uint64_t val) const = 0;
-    // get the position of the previous value |var| in subvector [..., id]
+    // get the position of the previous value |val| in subvector [..., id]
     // if doesn't exist, return size()
     virtual uint64_t prev(uint64_t id, uint64_t val) const = 0;
 
@@ -89,78 +89,13 @@ class wavelet_tree_stat : public wavelet_tree {
     uint64_t n_;
 };
 
-typedef libmaus2::bitbtree::BitBTree<6, 64> BitBTree;
-template <class Vector>
-inline BitBTree*  initialize_tree(const Vector &vector, uint64_t b) {
-    uint64_t n = vector.size();
-
-    // compute total offsets for the individual bins
-    std::vector<uint64_t> offsets((1ull << (b - 1)) - 1, 0);
-    uint64_t v, m, o;
-    for (uint64_t i = 0; i < n; ++i) {
-        m = (1ull << (b - 1));
-        v = static_cast<uint64_t>(vector[i]);
-        o = 0;
-        for (uint64_t ib = 1; ib < b; ++ib) {
-            bool const bit = m & v;
-            if (!bit) {
-                offsets.at(o) += 1;
-            }
-            o = 2 * o + 1 + bit;
-            m >>= 1;
-        }
-    }
-
-    auto *tmp = new BitBTree(n * b, false);
-    std::vector<uint64_t> upto_offsets((1ull << (b - 1)) - 1, 0);
-
-    uint64_t p, co;
-    bool bit;
-    for (uint64_t i = 0; i < n; ++i) {
-        m = (1ull << (b - 1));
-        v = (uint64_t) vector[i];
-        o = 0;
-        p = i;
-        co = 0;
-        for (uint64_t ib = 0; ib < b - 1; ++ib) {
-            bit = m & v;
-            if (bit) {
-                tmp->setBitQuick(ib * n + p + co, true);
-                co += offsets.at(o);
-                p -= upto_offsets.at(o);
-            } else {
-                p -= (p - upto_offsets.at(o));
-                upto_offsets.at(o) += 1;
-            }
-            //std::cerr << "o: " << o << " offset[o]: " << offsets.at(o) << std::endl;
-            o = 2 * o + 1 + bit;
-            m >>= 1;
-        }
-        bit = m & v;
-        if (bit) {
-            //std::cerr << "b - 1: " << b - 1 << " n: " << n << " p: " << p << " co: " << co << std::endl;
-            tmp->setBitQuick((b - 1) * n + p + co, true);
-        }
-    }
-
-    return tmp;
-}
 
 class wavelet_tree_dyn : public wavelet_tree {
   public:
     explicit wavelet_tree_dyn(uint8_t logsigma);
 
     template <class Vector>
-    wavelet_tree_dyn(uint8_t logsigma, const Vector &vector) {
-        wwt_.reset(new typename decltype(wwt_)::element_type(
-                initialize_tree(vector, logsigma), logsigma, vector.size()
-        ));
-    }
-
-    wavelet_tree_dyn(const wavelet_tree_dyn &other);
-    wavelet_tree_dyn(wavelet_tree_dyn&& other);
-    wavelet_tree_dyn& operator=(const wavelet_tree_dyn &other);
-    wavelet_tree_dyn& operator=(wavelet_tree_dyn&& other);
+    wavelet_tree_dyn(uint8_t logsigma, const Vector &vector);
 
     uint64_t rank(uint64_t c, uint64_t i) const;
     uint64_t select(uint64_t c, uint64_t i) const;
@@ -173,8 +108,8 @@ class wavelet_tree_dyn : public wavelet_tree {
     void insert(uint64_t id, uint64_t val);
     void remove(uint64_t id);
 
-    uint64_t size() const { return wwt_->size(); }
-    uint8_t logsigma() const { return wwt_->b; }
+    uint64_t size() const { return dwt_.size(); }
+    uint8_t logsigma() const;
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
@@ -184,7 +119,8 @@ class wavelet_tree_dyn : public wavelet_tree {
     sdsl::int_vector<> to_vector() const;
 
   private:
-    std::unique_ptr<libmaus2::wavelet::DynamicWaveletTree<6, 64>> wwt_;
+    using dwt_type = dyn::wt_str;
+    dwt_type dwt_;
 };
 
 

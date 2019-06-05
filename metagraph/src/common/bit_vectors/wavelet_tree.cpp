@@ -4,9 +4,12 @@
 
 // TODO: run benchmarks and optimize these parameters
 const size_t MAX_ITER_WAVELET_TREE_STAT = 1000;
-const size_t MAX_ITER_WAVELET_TREE_DYN = 10;
+const size_t MAX_ITER_WAVELET_TREE_DYN = 0;
 const size_t MAX_ITER_WAVELET_TREE_SMALL = 10;
 
+namespace utils {
+    uint32_t code_length(uint64_t a);
+}
 
 
 /////////////////////////////////
@@ -314,12 +317,18 @@ void wavelet_tree_stat::init_wt() {
 }
 
 
-///////////////////////////////////////////
-// wavelet_tree_dyn libmaus2 rank/select //
-///////////////////////////////////////////
+////////////////////////////////////////////////
+// wavelet_tree_dyn xxsds/DYNAMIC rank/select //
+////////////////////////////////////////////////
 
 wavelet_tree_dyn::wavelet_tree_dyn(uint8_t logsigma)
-      : wwt_(new typename decltype(wwt_)::element_type(logsigma)) {}
+      : dwt_(1ull << logsigma) {}
+
+template <class Vector>
+wavelet_tree_dyn::wavelet_tree_dyn(uint8_t logsigma, const Vector &vector)
+      : dwt_(1ull << logsigma) {
+    dwt_.push_many(vector);
+}
 
 template
 wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const sdsl::int_vector<> &);
@@ -333,30 +342,10 @@ wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const std::vector<int> &);
 template
 wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const std::vector<uint64_t> &);
 
-wavelet_tree_dyn::wavelet_tree_dyn(const wavelet_tree_dyn &other) {
-    *this = other;
-}
-
-wavelet_tree_dyn::wavelet_tree_dyn(wavelet_tree_dyn&& other) {
-    *this = std::move(other);
-}
-
-// TODO: copy constructor not defined in libmaus2
-wavelet_tree_dyn& wavelet_tree_dyn::operator=(const wavelet_tree_dyn &other) {
-    wwt_.reset(new typename decltype(wwt_)::element_type(
-        initialize_tree(*other.wwt_, other.wwt_->b), other.wwt_->b, other.size()
-    ));
-    return *this;
-}
-
-wavelet_tree_dyn& wavelet_tree_dyn::operator=(wavelet_tree_dyn&& other) {
-    wwt_ = std::move(other.wwt_);
-    return *this;
-}
 
 uint64_t wavelet_tree_dyn::rank(uint64_t c, uint64_t i) const {
     return size() > 0
-            ? wwt_->rank(c, std::min(i, size() - 1))
+            ? dwt_.rank(std::min(i + 1, size()), c)
             : 0;
 }
 
@@ -373,12 +362,12 @@ uint64_t wavelet_tree_dyn::select(uint64_t c, uint64_t i) const {
         std::cerr << "]" << std::endl;
         return false;}()));
     assert(i > 0 && size() > 0 && i <= rank(c, size() - 1));
-    return wwt_->select(c, i - 1);
+    return dwt_.select(i - 1, c);
 }
 
 uint64_t wavelet_tree_dyn::operator[](uint64_t id) const {
     assert(id < size());
-    return (*wwt_)[id];
+    return dwt_.at(id);
 }
 
 uint64_t wavelet_tree_dyn::next(uint64_t pos, uint64_t value) const {
@@ -400,16 +389,20 @@ void wavelet_tree_dyn::set(uint64_t id, uint64_t val) {
 
 void wavelet_tree_dyn::insert(uint64_t id, uint64_t val) {
     assert(id <= size());
-    wwt_->insert(val, id);
+    dwt_.insert(id, val);
 }
 
 void wavelet_tree_dyn::remove(uint64_t id) {
     assert(id < size());
-    wwt_->remove(id);
+    dwt_.remove(id);
+}
+
+uint8_t wavelet_tree_dyn::logsigma() const {
+    return utils::code_length(const_cast<dwt_type&>(dwt_).alphabet_size())-1;
 }
 
 void wavelet_tree_dyn::serialize(std::ostream &out) const {
-    wwt_->serialise(out);
+    dwt_.serialize(out);
 }
 
 bool wavelet_tree_dyn::load(std::istream &in) {
@@ -417,76 +410,18 @@ bool wavelet_tree_dyn::load(std::istream &in) {
         return false;
 
     //TODO: catch reading errors
-    wwt_.reset(new libmaus2::wavelet::DynamicWaveletTree<6, 64>(in));
-    return true;
+    dwt_.load(in);
+    return in.good();
 }
 
 void wavelet_tree_dyn::clear() {
-    wwt_.reset(new libmaus2::wavelet::DynamicWaveletTree<6, 64>(wwt_->b));
+    dwt_ = decltype(dwt_)(dwt_.alphabet_size());
 }
 
 sdsl::int_vector<> wavelet_tree_dyn::to_vector() const {
-    size_t b = wwt_->b;
-    size_t n = size();
-
-    std::vector<uint64_t> offsets(1ull << b, 0);
-    std::queue<uint64_t> blocks;
-    std::queue<uint64_t> new_blocks;
-
-    blocks.push(n);
-
-    size_t pos = 0;
-    uint64_t o = 0;
-
-    for (size_t ib = 0; ib < b; ++ib) {
-        while (!blocks.empty()) {
-            uint64_t cnt = blocks.front();
-            blocks.pop();
-            uint64_t epos = pos + cnt;
-            for ( ; pos < epos; ++pos) {
-                offsets.at(o) += !wwt_->R->operator[](pos);
-            }
-            if (ib < b - 1) {
-                new_blocks.push(offsets.at(o));
-                new_blocks.push(cnt - offsets.at(o));
-            }
-            o++;
-        }
-        if (ib < b - 1)
-            blocks.swap(new_blocks);
-    }
-    //std::cerr << "R size: " << R->size() << std::endl;
-
-    sdsl::int_vector<> vector(n, 0, wwt_->b);
-
-    bool bit;
-    std::vector<uint64_t> upto_offsets((1ull << (b - 1)) - 1, 0);
-    uint64_t p, co, v, m;
-    for (size_t i = 0; i < n; ++i) {
-        m = 1ull << (b - 1);
-        //v = (uint64_t) vector.at(i);
-        v = 0;
-        o = 0;
-        p = i;
-        co = 0;
-        for (size_t ib = 0; ib < b - 1; ++ib) {
-            bit = wwt_->R->operator[](ib * n + p + co);
-            if (bit) {
-                v |= m;
-                co += offsets.at(o);
-                p -= upto_offsets.at(o);
-            } else {
-                p -= (p - upto_offsets.at(o));
-                upto_offsets.at(o) += 1;
-            }
-            o = 2 * o + 1 + bit;
-            m >>= 1;
-        }
-        bit = wwt_->R->operator[]((b - 1) * n + p + co);
-        if (bit) {
-            v |= m;
-        }
-        vector[i] = v;
+    sdsl::int_vector<> vector(dwt_.size(), 0, logsigma());
+    for(size_t i = 0; i < vector.size(); ++i) {
+        vector[i] = dwt_.at(i);
     }
     return vector;
 }
