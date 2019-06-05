@@ -21,5 +21,7 @@ fqsqueezer_samples:
   #- SRR1265496_1
 benchmark_samples:
   - SRR554369_1
+  - SRR327342_1
 benchmark_compressors:
-  - path_encoder_v6
+  #- path_encoder_v6
+  - path_encoder_v5
