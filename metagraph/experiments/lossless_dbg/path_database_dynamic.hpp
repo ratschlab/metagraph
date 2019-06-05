@@ -509,18 +509,6 @@ public:
         return graph;
     }
 
-    static BOSS* dbg_succ_graph_constructor(const vector<string> &reads,
-                                            size_t kmer_length) {
-
-        auto graph_constructor = BOSSConstructor(kmer_length - 1);// because BOSS has smaller kmers
-
-        for (const auto &read : reads) {
-            graph_constructor.add_sequence(read);
-        }
-
-        return new BOSS(&graph_constructor);
-    }
-
 };
 
 template<typename RoutingTableT=DefaultDynamicRoutingTable,typename IncomingTableT=DefaultDynamicIncomingTable>

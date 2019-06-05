@@ -14,6 +14,8 @@
 #include <fstream>
 #include <filesystem>
 #include <nlohmann/json.hpp>
+#include "boss_construct.hpp"
+#include "boss.hpp"
 #include "kmer_extractor.hpp"
 #include "sequence_io.hpp"
 
@@ -438,5 +440,15 @@ public:
 
     Test t;
 };
+
+inline BOSS* dbg_succ_graph_constructor(const vector<string> &reads,
+                                        size_t kmer_length) {
+
+    auto graph_constructor = BOSSConstructor(kmer_length - 1);// because BOSS has smaller kmers
+
+    graph_constructor.add_sequences(reads);
+
+    return new BOSS(&graph_constructor);
+}
 
 #endif /* utils_h */
