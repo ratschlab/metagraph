@@ -308,6 +308,7 @@ rule path_encoder_param_specialization:
     params:
         profiler_file = lambda wildcards: f"profiler/path_encoder_{wildcards.version} ({wildcards.parameters})/{wildcards.run_id}.prof",
         shell_parameters = lambda wildcards,threads: encode_parameters(decode_parameters(wildcards,threads))
+        statistics = lambda wildcards: f"statistics/path_encoder_{wildcards.version} ({wildcards.parameters})/{wildcards.run_id}.json",
     resources:
         cores=lambda wildcards,threads: threads//2,
 #        mem_per_core=partial(get_ram_usage_per_core,multiplier=40),
@@ -316,8 +317,10 @@ rule path_encoder_param_specialization:
     shell: """
         mkdir -p '{output}'
         mkdir -p "$(dirname '{params.profiler_file}')"
+        mkdir -p "$(dirname '{params.statistics}')"
         CPUPROFILE='{params.profiler_file}' path_encoder_toolbox_{wildcards.version} compress\
                                       --input '{input}' --output '{output}'\
+                                      --statistics '{params.statistics}'\
                                       {params.shell_parameters}  2> >(tee '{log}' >&2)
     """
 
