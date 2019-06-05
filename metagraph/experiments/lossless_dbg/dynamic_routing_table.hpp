@@ -29,8 +29,6 @@
 
 using node_index = SequenceGraph::node_index;
 
-
-
 //template<typename EntryT=wavelet_tree_dyn>
 template <typename EntryT=SolidDynamicRoutingTable<>,typename BitVector=sdsl::bit_vector,typename RankSupport=typename BitVector::rank_1_type>
 class DynamicRoutingTableCore {
@@ -38,7 +36,7 @@ public:
     using BaseT = typename EntryT::BaseT;
     DynamicRoutingTableCore() = default;
     DynamicRoutingTableCore(shared_ptr<const DBGSuccinct> graph) : graph(graph) {}
-    DynamicRoutingTableCore(shared_ptr<const DBGSuccinct> graph, BitVector* is_element,RankSupport* rank_element, ll chunks = 1000)
+    DynamicRoutingTableCore(shared_ptr<const DBGSuccinct> graph, BitVector* is_element,RankSupport* rank_element, ll chunks = DefaultChunks)
             : graph(graph), chunks(is_element,rank_element,chunks) {
     }
 

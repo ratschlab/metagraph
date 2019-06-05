@@ -24,7 +24,7 @@ public:
     ReferenceDynamicRoutingTable(shared_ptr<const DBGSuccinct> graph) {}
 
     template<typename MockA,typename MockB> // TODO rename MockA to decl...bit_vector
-    ReferenceDynamicRoutingTable(shared_ptr<const DBGSuccinct> graph, MockA* is_element,MockB* rank_element, ll chunks = 1000) : routing_table(is_element,rank_element) {
+    ReferenceDynamicRoutingTable(shared_ptr<const DBGSuccinct> graph, MockA* is_element,MockB* rank_element, ll chunks = DefaultChunks) : routing_table(is_element,rank_element) {
 
     }
 

@@ -30,7 +30,7 @@ public:
     using edge_identifier_t = char;
     DynamicIncomingTable() = default;
     DynamicIncomingTable(shared_ptr<const DBGSuccinct> graph) : graph(graph) {}
-    DynamicIncomingTable(shared_ptr<const DBGSuccinct> graph, BitVector* is_element,RankSupport* rank_element, ll chunks = 1000)
+    DynamicIncomingTable(shared_ptr<const DBGSuccinct> graph, BitVector* is_element,RankSupport* rank_element, ll chunks = DefaultChunks)
             : graph(graph), chunks(is_element,rank_element,chunks) {
     }
 

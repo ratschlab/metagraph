@@ -56,6 +56,7 @@ ostream& operator<<(ostream& os, const waiting_thread_info_t& wt)
 using DefaultDynamicRoutingTable = DynamicRoutingTable<>;
 using DefaultDynamicIncomingTable = DynamicIncomingTable<>;
 
+
 template<typename RoutingTableT=DefaultDynamicRoutingTable,typename IncomingTableT=DefaultDynamicIncomingTable>
 class PathDatabaseDynamicCore {
 public:
@@ -64,7 +65,7 @@ public:
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
-    explicit PathDatabaseDynamicCore(std::shared_ptr<const GraphT> graph, int64_t chunk_size=1000) :
+    explicit PathDatabaseDynamicCore(std::shared_ptr<const GraphT> graph, int64_t chunk_size=DefaultChunks) :
             graph_(graph),
             graph(*graph_),
             incoming_table(graph_),
@@ -79,7 +80,7 @@ public:
             graph(*graph_),
             incoming_table(graph_),
             routing_table(graph_),
-            chunk_size(1000)
+            chunk_size(DefaultChunks)
             {}
 
     virtual ~PathDatabaseDynamicCore() {}

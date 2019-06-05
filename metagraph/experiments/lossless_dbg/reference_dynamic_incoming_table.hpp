@@ -27,7 +27,7 @@ public:
     explicit ReferenceDynamicIncomingTable(shared_ptr<const GraphT> graph) {}
 
     template<typename MockA,typename MockB> // TODO rename MockA to decl...bit_vector
-    ReferenceDynamicIncomingTable(shared_ptr<const DBGSuccinct> graph, MockA* is_element,MockB* rank_element, ll chunks = 1000) : incoming_table(is_element,rank_element) {}
+    ReferenceDynamicIncomingTable(shared_ptr<const DBGSuccinct> graph, MockA* is_element,MockB* rank_element, ll chunks = DefaultChunks) : incoming_table(is_element,rank_element) {}
 
 
     int branch_offset(node_index node, edge_identifier_t incoming) const {
