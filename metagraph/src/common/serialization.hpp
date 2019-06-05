@@ -28,34 +28,34 @@ void serialize_number_vector(std::ostream &out,
 uint64_t get_number_vector_size(std::istream &in);
 
 template <typename T>
-std::vector<T> load_number_vector(std::istream &in);
+bool load_number_vector(std::istream &in, std::vector<T> *vector);
 
 
 template <class Map>
 void serialize_number_number_map(std::ostream &out, const Map &map);
 
 template <class Map>
-void load_number_number_map(std::istream &in, Map *map);
+bool load_number_number_map(std::istream &in, Map *map);
 
 
 template <class Map>
 void serialize_string_number_map(std::ostream &out, const Map &M);
 
 template <class Map>
-void load_string_number_map(std::istream &in, Map *map);
+bool load_string_number_map(std::istream &in, Map *map);
 
 template <class Map>
 void serialize_number_string_map(std::ostream &out, const Map &M);
 
 template <class Map>
-void load_number_string_map(std::istream &in, Map *map);
+bool load_number_string_map(std::istream &in, Map *map);
 
 
 template <class Set>
 void serialize_set(std::ostream &out, const Set &set);
 
 template <class Set>
-void load_set(std::istream &in, Set *set);
+bool load_set(std::istream &in, Set *set);
 
 
 /** Vector streaming

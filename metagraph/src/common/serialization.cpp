@@ -30,9 +30,9 @@ void serialize_number(std::ostream &out, uint64_t number) {
 }
 
 uint64_t load_number(std::istream &in) {
-    if (!in.good()) {
+    if (!in.good())
         throw std::ifstream::failure("Bad stream");
-    }
+
     return NumberSerialisation::deserialiseNumber(in);
 }
 
@@ -40,9 +40,9 @@ template <typename T>
 void serialize_number_vector(std::ostream &out,
                              const std::vector<T> &vector,
                              size_t bits_per_number) {
-    if (!out.good()) {
+    if (!out.good())
         throw std::ofstream::failure("Bad stream");
-    }
+
     sdsl::int_vector<> int_vector(vector.size(), 0, bits_per_number);
     for (size_t i = 0; i < vector.size(); ++i) {
         int_vector[i] = vector[i];
@@ -83,23 +83,28 @@ uint64_t get_number_vector_size(std::istream &in) {
 }
 
 template <typename T>
-std::vector<T> load_number_vector(std::istream &in) {
+bool load_number_vector(std::istream &in, std::vector<T> *vector) {
+    assert(vector);
+
     if (!in.good()) {
-        throw std::ifstream::failure("Bad stream");
+        std::cerr << "Bad stream" << std::endl;
+        return false;
     }
+
     try {
         sdsl::int_vector<> int_vector;
         int_vector.load(in);
-        return std::vector<T>(int_vector.begin(), int_vector.end());
+        vector->assign(int_vector.begin(), int_vector.end());
+        return true;
     } catch (...) {
-        throw std::ifstream::failure("Bad stream");
+        return false;
     }
 }
 
-template std::vector<uint64_t> load_number_vector<uint64_t>(std::istream &in);
-template std::vector<uint32_t> load_number_vector<uint32_t>(std::istream &in);
-template std::vector<uint8_t> load_number_vector<uint8_t>(std::istream &in);
-template std::vector<bool> load_number_vector<bool>(std::istream &in);
+template bool load_number_vector<uint64_t>(std::istream &in, std::vector<uint64_t> *);
+template bool load_number_vector<uint32_t>(std::istream &in, std::vector<uint32_t> *);
+template bool load_number_vector<uint8_t>(std::istream &in, std::vector<uint8_t> *);
+template bool load_number_vector<bool>(std::istream &in, std::vector<bool> *);
 
 
 template <class Map>
@@ -139,38 +144,51 @@ void serialize_number_number_map(std::ostream &out,
                                  const std::unordered_map<uint32_t, uint32_t> &map);
 
 template <class Map>
-void load_number_number_map(std::istream &in, Map *map) {
+bool load_number_number_map(std::istream &in, Map *map) {
     assert(map);
     map->clear();
 
-    auto keys = load_number_vector<typename Map::key_type>(in);
-    auto values = load_number_vector<typename Map::mapped_type>(in);
+    std::vector<typename Map::key_type> keys;
+    if (!load_number_vector(in, &keys)) {
+        std::cerr << "Failed to load map keys" << std::endl;
+        return false;
+    }
 
-    if (keys.size() != values.size())
-        throw std::ifstream::failure("Different number of keys and values");
+    std::vector<typename Map::mapped_type> values;
+    if (!load_number_vector(in, &values)) {
+        std::cerr << "Failed to load map values" << std::endl;
+        return false;
+    }
+
+    if (keys.size() != values.size()) {
+        std::cerr << "Different number of keys and values" << std::endl;
+        return false;
+    }
 
     for (size_t i = 0; i < keys.size(); ++i) {
         map->emplace(keys[i], values[i]);
     }
+
+    return true;
 }
 
 template
-void load_number_number_map(std::istream &in,
+bool load_number_number_map(std::istream &in,
                             std::map<uint64_t, uint64_t> *map);
 template
-void load_number_number_map(std::istream &in,
+bool load_number_number_map(std::istream &in,
                             std::map<uint64_t, uint32_t> *map);
 template
-void load_number_number_map(std::istream &in,
+bool load_number_number_map(std::istream &in,
                             std::map<uint32_t, uint32_t> *map);
 template
-void load_number_number_map(std::istream &in,
+bool load_number_number_map(std::istream &in,
                             std::unordered_map<uint64_t, uint64_t> *map);
 template
-void load_number_number_map(std::istream &in,
+bool load_number_number_map(std::istream &in,
                             std::unordered_map<uint64_t, uint32_t> *map);
 template
-void load_number_number_map(std::istream &in,
+bool load_number_number_map(std::istream &in,
                             std::unordered_map<uint32_t, uint32_t> *map);
 
 
@@ -209,10 +227,11 @@ void serialize_string_number_map(std::ostream &out,
                                  const spp::sparse_hash_map<std::string, uint32_t> &map);
 
 template <class Map>
-void load_string_number_map(std::istream &in, Map *map) {
+bool load_string_number_map(std::istream &in, Map *map) {
     assert(map);
     map->clear();
 
+    // save for the backwards compatibility case
     auto pos = in.tellg();
 
     try {
@@ -221,14 +240,20 @@ void load_string_number_map(std::istream &in, Map *map) {
         std::vector<std::string> keys;
         keys.reserve(size);
 
-        for (size_t i = 0; i < size; ++i) {
-            keys.push_back(StringSerialisation::deserialiseString(in));
+        try {
+            for (size_t i = 0; i < size; ++i) {
+                keys.push_back(StringSerialisation::deserialiseString(in));
+            }
+        } catch (...) {
+            return false;
         }
 
         if (get_number_vector_size(in) != size)
             throw std::ifstream::failure("Different number of keys and values");
 
-        auto values = load_number_vector<typename Map::mapped_type>(in);
+        std::vector<typename Map::mapped_type> values;
+        if (!load_number_vector(in, &values))
+            throw std::ifstream::failure("Failed to read map values");
 
         if (keys.size() != values.size())
             throw std::ifstream::failure("Different number of keys and values");
@@ -240,32 +265,38 @@ void load_string_number_map(std::istream &in, Map *map) {
         // backward compatibility
         in.seekg(pos, in.beg);
 
-        size_t const num = NumberSerialisation::deserialiseNumber(in);
-        for (size_t i = 0; i < num; ++i) {
-            std::string key = StringSerialisation::deserialiseString(in);
-            auto value = NumberSerialisation::deserialiseNumber32(in);
-            map->emplace(std::move(key), std::move(value));
+        try {
+            size_t const num = NumberSerialisation::deserialiseNumber(in);
+            for (size_t i = 0; i < num; ++i) {
+                std::string key = StringSerialisation::deserialiseString(in);
+                auto value = NumberSerialisation::deserialiseNumber32(in);
+                map->emplace(std::move(key), std::move(value));
+            }
+        } catch (...) {
+            return false;
         }
     }
+
+    return true;
 }
 
 template
-void load_string_number_map(std::istream &in,
+bool load_string_number_map(std::istream &in,
                             std::unordered_map<std::string, uint64_t> *map);
 template
-void load_string_number_map(std::istream &in,
+bool load_string_number_map(std::istream &in,
                             std::unordered_map<std::string, uint32_t> *map);
 template
-void load_string_number_map(std::istream &in,
+bool load_string_number_map(std::istream &in,
                             tsl::hopscotch_map<std::string, uint64_t> *map);
 template
-void load_string_number_map(std::istream &in,
+bool load_string_number_map(std::istream &in,
                             tsl::hopscotch_map<std::string, uint32_t> *map);
 template
-void load_string_number_map(std::istream &in,
+bool load_string_number_map(std::istream &in,
                             spp::sparse_hash_map<std::string, uint64_t> *map);
 template
-void load_string_number_map(std::istream &in,
+bool load_string_number_map(std::istream &in,
                             spp::sparse_hash_map<std::string, uint32_t> *map);
 
 template <class Map>
@@ -303,10 +334,11 @@ void serialize_number_string_map(std::ostream &out,
                                  const spp::sparse_hash_map<uint32_t, std::string> &map);
 
 template <class Map>
-void load_number_string_map(std::istream &in, Map *map) {
+bool load_number_string_map(std::istream &in, Map *map) {
     assert(map);
     map->clear();
 
+    // save for the backwards compatibility case
     auto pos = in.tellg();
 
     try {
@@ -322,7 +354,9 @@ void load_number_string_map(std::istream &in, Map *map) {
         if (get_number_vector_size(in) != size)
             throw std::ifstream::failure("Different number of keys and values");
 
-        auto keys = load_number_vector<typename Map::key_type>(in);
+        std::vector<typename Map::key_type> keys;
+        if (!load_number_vector(in, &keys))
+            throw std::ifstream::failure("Failed to read map keys");
 
         if (keys.size() != values.size())
             throw std::ifstream::failure("Different number of keys and values");
@@ -334,32 +368,38 @@ void load_number_string_map(std::istream &in, Map *map) {
         // backward compatibility
         in.seekg(pos, in.beg);
 
-        size_t const num = NumberSerialisation::deserialiseNumber(in);
-        for (size_t i = 0; i < num; ++i) {
-            auto key = NumberSerialisation::deserialiseNumber32(in);
-            std::string value = StringSerialisation::deserialiseString(in);
-            map->emplace(std::move(key), std::move(value));
+        try {
+            size_t const num = NumberSerialisation::deserialiseNumber(in);
+            for (size_t i = 0; i < num; ++i) {
+                auto key = NumberSerialisation::deserialiseNumber32(in);
+                std::string value = StringSerialisation::deserialiseString(in);
+                map->emplace(std::move(key), std::move(value));
+            }
+        } catch (...) {
+            return false;
         }
     }
+
+    return true;
 }
 
 template
-void load_number_string_map(std::istream &in,
+bool load_number_string_map(std::istream &in,
                             std::unordered_map<uint64_t, std::string> *map);
 template
-void load_number_string_map(std::istream &in,
+bool load_number_string_map(std::istream &in,
                             std::unordered_map<uint32_t, std::string> *map);
 template
-void load_number_string_map(std::istream &in,
+bool load_number_string_map(std::istream &in,
                             tsl::hopscotch_map<uint64_t, std::string> *map);
 template
-void load_number_string_map(std::istream &in,
+bool load_number_string_map(std::istream &in,
                             tsl::hopscotch_map<uint32_t, std::string> *map);
 template
-void load_number_string_map(std::istream &in,
+bool load_number_string_map(std::istream &in,
                             spp::sparse_hash_map<uint64_t, std::string> *map);
 template
-void load_number_string_map(std::istream &in,
+bool load_number_string_map(std::istream &in,
                             spp::sparse_hash_map<uint32_t, std::string> *map);
 
 
@@ -376,7 +416,7 @@ template void serialize_set(std::ostream &out,
                             const OrderedSet<std::string> &set);
 
 template <class Set>
-void load_set(std::istream &in, Set *set) {
+bool load_set(std::istream &in, Set *set) {
     assert(set);
     set->clear();
 
@@ -384,12 +424,18 @@ void load_set(std::istream &in, Set *set) {
     set->reserve(size + 1);
     set->rehash(size + 1);
 
-    for (size_t i = 0; i < size; ++i) {
-        set->insert(StringSerialisation::deserialiseString(in));
+    try {
+        for (size_t i = 0; i < size; ++i) {
+            set->insert(StringSerialisation::deserialiseString(in));
+        }
+    } catch (...) {
+        return false;
     }
+
+    return true;
 }
 
-template void load_set(std::istream &in, OrderedSet<std::string> *set);
+template bool load_set(std::istream &in, OrderedSet<std::string> *set);
 
 
 VectorFileStream::VectorFileStream(const std::string &file)

@@ -571,15 +571,12 @@ bool RangePartition::load(std::istream &in) {
     if (!in.good())
         return false;
 
-    try {
-        partition_.assign(load_number(in), {});
-        for (auto &group : partition_) {
-            group = load_number_vector<T>(in);
-        }
-        return initialize_groups_and_ranks();
-    } catch (...) {
-        return false;
+    partition_.assign(load_number(in), {});
+    for (auto &group : partition_) {
+        if (!load_number_vector(in, &group))
+            return false;
     }
+    return initialize_groups_and_ranks();
 }
 
 void RangePartition::serialize(std::ostream &out) const {

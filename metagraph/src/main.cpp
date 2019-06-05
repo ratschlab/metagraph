@@ -1411,28 +1411,28 @@ int main(int argc, const char *argv[]) {
                 );
 
                 std::ifstream instream(filter_filename, std::ios::binary);
-                try {
-                    auto filter = load_number_vector<bool>(instream);
-                    size_t num_remaining = std::count(filter.begin(), filter.end(), true);
-
-                    if (config->verbose) {
-                        std::cout << "Statistics for filter file " << filter_filename << "\n"
-                                  << "Total reads: " << filter.size() << "\n"
-                                  << "Remaining reads: " << num_remaining << "\n"
-                                  << "Remaining ratio: "
-                                  << static_cast<double>(num_remaining) / filter.size()
-                                  << std::endl;
-                    } else {
-                        std::cout << filter_filename << "\t"
-                                  << filter.size() << "\t"
-                                  << num_remaining << "\t"
-                                  << static_cast<double>(num_remaining) / filter.size()
-                                  << std::endl;
-                    }
-                } catch (...) {
+                std::vector<bool> filter;
+                if (!load_number_vector(instream, &filter)) {
                     std::cerr << "ERROR: Filter file " << filter_filename
                               << " is corrupted" << std::endl;
                     exit(1);
+                }
+
+                size_t num_remaining = std::count(filter.begin(), filter.end(), true);
+
+                if (config->verbose) {
+                    std::cout << "Statistics for filter file " << filter_filename << "\n"
+                              << "Total reads: " << filter.size() << "\n"
+                              << "Remaining reads: " << num_remaining << "\n"
+                              << "Remaining ratio: "
+                              << static_cast<double>(num_remaining) / filter.size()
+                              << std::endl;
+                } else {
+                    std::cout << filter_filename << "\t"
+                              << filter.size() << "\t"
+                              << num_remaining << "\t"
+                              << static_cast<double>(num_remaining) / filter.size()
+                              << std::endl;
                 }
             }
 
