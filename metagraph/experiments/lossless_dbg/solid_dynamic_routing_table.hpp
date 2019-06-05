@@ -66,7 +66,7 @@ public:
         if (always_false) {
             this->print_content();
         }
-        vector<int8_t> initial_content(size+1,delimiter_encoded);
+        vector<uint8_t> initial_content(size+1, delimiter_encoded);
 //        for(ll i=0;i<=size;i++) {
 //            routing_table.insert(0,delimiter_encoded);
 //        }
