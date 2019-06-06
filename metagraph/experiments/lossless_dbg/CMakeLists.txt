@@ -18,8 +18,6 @@ set(CMAKE_SHARED_LINKER_FLAGS_FASTDEBUG "-g")
 
 ## Add profiler into all versions
 # needs gperftools installed
-link_libraries(profiler)
-link_libraries(tcmalloc)
 
 ###
 # dynamic
