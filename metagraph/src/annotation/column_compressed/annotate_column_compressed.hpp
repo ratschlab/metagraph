@@ -4,6 +4,7 @@
 
 #include <cache.hpp>
 #include <lru_cache_policy.hpp>
+#include <progress_bar.hpp>
 
 #include "annotate.hpp"
 #include "bit_vector.hpp"
@@ -89,7 +90,8 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     count_labels(const std::vector<Index> &indices) const override;
 
     void add_labels(uint64_t begin, uint64_t end,
-                    RowCompressed<Label> *annotator) const;
+                    RowCompressed<Label> *annotator,
+                    ProgressBar *progress_bar) const;
     void release();
     void flush() const;
     void flush(size_t j, const bitmap &annotation_curr);

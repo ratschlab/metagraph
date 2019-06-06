@@ -3,7 +3,6 @@
 #include <string>
 #include <algorithm>
 #include <stdexcept>
-#include <progress_bar.hpp>
 
 #include "serialization.hpp"
 #include "utils.hpp"
@@ -497,11 +496,13 @@ void ColumnCompressed<Label>
 
     flush();
 
+    ProgressBar progress_bar(num_rows_, "Processed rows", std::cerr, !utils::get_verbose());
+
     annotator->reinitialize(num_rows_);
     annotator->label_encoder_ = label_encoder_;
 
     if (num_threads <= 1) {
-        add_labels(0, num_rows_, annotator);
+        add_labels(0, num_rows_, annotator, &progress_bar);
         return;
     }
 
@@ -510,7 +511,8 @@ void ColumnCompressed<Label>
         thread_pool.enqueue(
             [this](auto... args) { this->add_labels(args...); },
             i, std::min(i + kNumRowsInBlock, num_rows_),
-            annotator
+            annotator,
+            &progress_bar
         );
     }
     thread_pool.join();
@@ -518,7 +520,8 @@ void ColumnCompressed<Label>
 
 template <typename Label>
 void ColumnCompressed<Label>::add_labels(uint64_t begin, uint64_t end,
-                                         RowCompressed<Label> *annotator) const {
+                                         RowCompressed<Label> *annotator,
+                                         ProgressBar *progress_bar) const {
     assert(begin <= end);
     assert(end <= annotator->matrix_->num_rows());
 
@@ -528,6 +531,8 @@ void ColumnCompressed<Label>::add_labels(uint64_t begin, uint64_t end,
             [&](uint64_t idx) { annotator->matrix_->set(idx, j); }
         );
     }
+    if (progress_bar)
+        *progress_bar += end - begin;
 }
 
 template <typename Label>
