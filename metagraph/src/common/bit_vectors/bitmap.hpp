@@ -168,4 +168,33 @@ class bitmap_adaptive : public bitmap_dyn {
     static const size_t kNumIndicesMargin;
 };
 
+class bitmap_lazy : public bitmap {
+  public:
+    typedef std::function<bool(uint64_t)> BoolCallback;
+
+    explicit bitmap_lazy(size_t size = 0, bool value = false);
+
+    bitmap_lazy(BoolCallback callback,
+                size_t size = -1,
+                size_t num_set_bits = -1) noexcept;
+
+    void set(uint64_t, bool) {
+        throw std::runtime_error("Not implemented.");
+    }
+
+    bool operator[](uint64_t id) const { return in_bitmap_(id); }
+    uint64_t get_int(uint64_t id, uint32_t width) const;
+
+    uint64_t size() const;
+    uint64_t num_set_bits() const;
+
+    void call_ones_in_range(uint64_t begin, uint64_t end,
+                            const VoidCall<uint64_t> &callback) const;
+
+  private:
+    BoolCallback in_bitmap_;
+    size_t size_;
+    size_t num_set_bits_;
+};
+
 #endif // __BITMAP_HPP__
