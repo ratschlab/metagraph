@@ -21,8 +21,6 @@
 #include "utils.hpp"
 #include "alphabets.hpp"
 
-#include "path_database.hpp"
-#include "path_database_dynamic.hpp"
 #include "utilities.hpp"
 #include "graph_preprocessor.hpp"
 #include "graph_patch.hpp"

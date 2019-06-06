@@ -62,7 +62,7 @@ public:
     std::vector<T> elements;
 };
 
-const int DefaultChunks = 10;
+const int DefaultChunks = 100;
 template <typename T,typename bit_vector=sdsl::bit_vector, typename rank_support=sdsl::rank_support_v<1>,bool supply_size=true>
 class ChunkedDenseHashMap : public DenseHashMap<T,bit_vector,rank_support> {
 public:

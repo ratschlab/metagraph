@@ -16,10 +16,9 @@
 #include "utils.hpp"
 #include "alphabets.hpp"
 
-#include "path_database.hpp"
-#include "path_database_dynamic.hpp"
 #include "utilities.hpp"
 #include "routing_table_transformation.hpp"
+
 
 template<class Wavelet = sdsl::wt_rlmn<>>
 class RoutingTableCore {
@@ -121,8 +120,6 @@ public:
 };
 
 template <typename Wavelet=sdsl::wt_rlmn<>>
-class RoutingTable : public TransformationsEnabler<RoutingTableCore<Wavelet>> {
-    using TransformationsEnabler<RoutingTableCore<Wavelet>>::TransformationsEnabler;
-};
+using RoutingTable = TransformationsEnabler<RoutingTableCore<Wavelet>>;
 
 #endif //METAGRAPH_ROUTING_TABLE_HPP

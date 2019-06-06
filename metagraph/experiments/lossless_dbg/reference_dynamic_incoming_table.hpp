@@ -8,17 +8,7 @@
 // Created by Jan Studený on 2019-06-04.
 //
 
-#include "reference_dynamic_routing_table.hpp"
-#include "incoming_table.hpp"
-#include "path_database_wavelet.hpp"
-#include "path_database_dynamic.hpp"
-#include "samplers.hpp"
-#include "path_database_list_of_bifurcation_choices.hpp"
 #include "utilities.hpp"
-#include <gtest/gtest.h>
-#include <variant>
-#include <filesystem>
-#include "reference_dynamic_incoming_table.hpp"
 
 template <typename GraphT=DBGSuccinct,typename _edge_identifier_t=char>
 class ReferenceDynamicIncomingTable {

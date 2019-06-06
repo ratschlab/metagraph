@@ -5,16 +5,9 @@
 #ifndef METAGRAPH_REFERENCE_DYNAMIC_ROUTING_TABLE_HPP
 #define METAGRAPH_REFERENCE_DYNAMIC_ROUTING_TABLE_HPP
 
-#include "incoming_table.hpp"
-#include "path_database_wavelet.hpp"
-#include "path_database_dynamic.hpp"
-#include "samplers.hpp"
-#include "path_database_list_of_bifurcation_choices.hpp"
 #include "utilities.hpp"
-#include <gtest/gtest.h>
 #include <variant>
 #include <filesystem>
-#include "reference_dynamic_routing_table.hpp"
 
 // Verified implementation of routing table (to test against)
 template<typename DummyT=int>

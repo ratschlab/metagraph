@@ -19,6 +19,7 @@
 #include "dynamic_routing_table.hpp"
 #include "dynamic_incoming_table.hpp"
 #include "utils.hpp"
+#include "utilities.hpp"
 #include "unix_tools.hpp"
 #include "threading.hpp"
 
@@ -34,8 +35,10 @@ public:
     VerboseTimer(string procedure_name) : procedure_name(procedure_name) {
         cerr << "Started " << procedure_name << endl;
     }
-    void finished() {
-        cerr << "Finished " << procedure_name << " in " << timer.elapsed() << " sec." << endl;
+    double finished() {
+        double elapsed = timer.elapsed();
+        cerr << "Finished " << procedure_name << " in " << elapsed << " sec." << endl;
+        return elapsed;
     }
     string procedure_name;
     Timer timer;
@@ -55,6 +58,7 @@ ostream& operator<<(ostream& os, const waiting_thread_info_t& wt)
 }
 using DefaultDynamicRoutingTable = DynamicRoutingTable<>;
 using DefaultDynamicIncomingTable = DynamicIncomingTable<>;
+CREATE_MEMBER_CHECK(transformations);
 
 
 template<typename RoutingTableT=DefaultDynamicRoutingTable,typename IncomingTableT=DefaultDynamicIncomingTable>
@@ -88,19 +92,21 @@ public:
 
 
     std::vector<path_id> encode(const std::vector<std::string> &sequences) {
-        // memory expected size
-        PRINT_VAR(sizeof(vector<char>));
-        PRINT_VAR(sizeof(omp_lock_t));
-        PRINT_VAR(sizeof(deque<tuple<int64_t,int64_t,int64_t>>));
-
-        Timer timer;
-        cerr << "Started encoding reads" << endl;
+        VerboseTimer encoding_timer("encoding reads");
+        VerboseTimer preprocessing_timer("preprocessing step");
         // improvement
         // - when multiple reads start at a same symbol, sort them so they share longest prefix
         // sort them so we have fixed relative ordering
         // probably not need to sort globally as we want only relative ordering
 
-        populate_additional_joins(sequences);
+        vector<string> transformed_sequences(sequences.size());
+
+        #pragma omp parallel for
+        for (ll i = 0; i < sequences.size();i++) {
+            transformed_sequences[i] = transform_sequence(sequences[i]);
+        }
+
+        populate_additional_joins(transformed_sequences);
 
 // Mark split and join-nodes in graph for faster queries and construction
         populate_bifurcation_bitvectors();
@@ -114,7 +120,6 @@ public:
 
         #pragma omp parallel for num_threads(get_num_threads())
         for (node_index node = 1; node <= graph.num_nodes(); node++) {
-
             assert(is_split[node] == node_is_split_raw(node));
             assert(is_join[node] == node_is_join_raw(node));
         }
@@ -139,13 +144,12 @@ public:
 
 #endif
 
-        statistics["preprocessing_time"] = timer.elapsed();
-        std::cerr << "Finished preprocessing in " << statistics["preprocessing_time"] << " sec" << std::endl;
+        statistics["preprocessing_time"] = preprocessing_timer.finished();
 
-        timer.reset();
         cerr << "Cumulative sizes in bytes" << endl;
         PRINT_VAR(is_join.size()/8);
         PRINT_VAR(is_split.size()/8);
+        VerboseTimer routing_timer("routing step");
 
         #pragma omp parallel for num_threads(get_num_threads()) //default(none) shared(encoded,node_locks,routing_table,incoming_table)
         for (size_t i = 0; i < sequences.size(); i++) {
@@ -153,7 +157,7 @@ public:
             std::vector<std::tuple<node_index, char, char>> bifurcations;
 
             const auto &sequence = sequences[i];
-            auto path_for_sequence = transform_sequence(sequence);
+            const auto& path_for_sequence = transformed_sequences[i];
 
             size_t kmer_begin = 0;
             auto kmer_end = graph.get_k();
@@ -192,6 +196,7 @@ public:
                 kmer_begin++;
                 kmer_end++;
             });
+
             auto &[first_node,first_join,first_split] = bifurcations.front();
             auto &[last_node,last_join,last_split] = bifurcations.back();
             assert(first_join == '$');
@@ -226,41 +231,9 @@ public:
                     assert((relative_position <= incoming_table.branch_size(node,join_symbol) || [&,node=node,join_symbol=join_symbol]{
                         using TT = DecodeEnabler<PathDatabaseDynamicCore<>>;
                         auto self = reinterpret_cast<TT*>(this);
-
                         cerr << "current" << endl;
                         PRINT_VAR(graph.get_node_sequence(node));
                         PRINT_VAR(node,tid,relative_position,previous_node,traversed_edge);
-#ifdef DEBUG_ADDITIONAL_INFORMATION
-                        PRINT_VAR(debug_bifurcation_idx);
-#endif
-                        incoming_table.print_content(node);
-                        PRINT_VAR(join_symbol);
-                        cerr << "previous" << endl;
-#ifdef DEBUG_ADDITIONAL_INFORMATION
-                        auto& prev_bifurcation = bifurcations[debug_bifurcation_idx-1];
-                        const auto &[previous_node_2, prev_join_symbol, prev_split_symbol] = prev_bifurcation;
-                        PRINT_VAR(graph.get_node_sequence(previous_node));
-                        if (prev_split_symbol) {
-                            routing_table.print_content(previous_node);
-                            PRINT_VAR(debug_relative_position_history.back());
-                            PRINT_VAR(prev_split_symbol);
-                        }
-                        if (prev_join_symbol) {
-                            incoming_table.print_content(previous_node);
-                            int64_t prev_position = !prev_split_symbol ?
-                                                    debug_relative_position_history.back()
-                                                                       :
-                                                    *(debug_relative_position_history.end()-2)
-                            ;
-                            auto path_id = self->get_global_path_id(previous_node,prev_position-1);
-                            PRINT_VAR(transform_sequence(decode_from_input(sequences,
-                                                                           {graph.get_node_sequence(path_id.first),path_id.second}
-                                    ,graph.get_k())
-                            ));
-                            PRINT_VAR(prev_position);
-                            PRINT_VAR(prev_join_symbol);
-                        }
-#endif
                         return false;
                     }()));
 
@@ -304,8 +277,8 @@ public:
         }
 #endif
         encoded_paths += encoded.size();
-        statistics["routing_time"] = timer.elapsed();
-        std::cerr << "Finished routing in " << statistics["routing_time"] << " sec" << std::endl;
+        statistics["routing_time"] = routing_timer.finished();
+        encoding_timer.finished();
 
         return encoded;
     }
@@ -376,21 +349,20 @@ public:
         }
 #endif
 
-    void populate_additional_joins(const vector<std::string> &sequences) {
+    void populate_additional_joins(const vector<std::string> &transformed_sequences) {
         auto additional_splits_t = VerboseTimer("computing additional splits and joins");
-        vector<node_index> additional_joins_vec(sequences.size());
-        vector<node_index> additional_splits_vec(sequences.size());
+        vector<node_index> additional_joins_vec(transformed_sequences.size());
+        vector<node_index> additional_splits_vec(transformed_sequences.size());
         #pragma omp parallel for num_threads(get_num_threads())
-        for (size_t i = 0; i < sequences.size(); ++i) {
-            const auto &sequence = sequences[i];
-            auto transformed_sequence = transform_sequence(sequence);
+        for (size_t i = 0; i < transformed_sequences.size(); ++i) {
+            auto& transformed_sequence = transformed_sequences[i];
             // add additional bifurcation
             additional_joins_vec[i] = graph.kmer_to_node(
                     transformed_sequence.substr(0, graph.get_k())
             );
             assert(additional_joins_vec[i]); // node has to be in graph
             additional_splits_vec[i] = graph.kmer_to_node(
-                    transformed_sequence.substr(sequence.length() - graph.get_k())
+                    transformed_sequence.substr(transformed_sequence.length() - graph.get_k())
             );
             assert(additional_splits_vec[i]); // node has to be in graph
         }
@@ -464,6 +436,7 @@ public:
     string transform_sequence(const string& sequence) const {
         string result = sequence;
         size_t kmer_end = graph.get_k();
+        static_assert(has_member_transformations<RoutingTableT>::value == std::is_base_of<TransformationsEnabler<DynamicRoutingTableCore<>>,RoutingTableT>::value);
         if constexpr (std::is_base_of<TransformationsEnabler<DynamicRoutingTableCore<>>,RoutingTableT>::value) {
             graph.map_to_nodes(sequence, [&](node_index node) {
                 if (kmer_end < sequence.size()) {

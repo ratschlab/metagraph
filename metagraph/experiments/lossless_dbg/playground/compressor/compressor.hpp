@@ -17,23 +17,17 @@ using TCLAP::ValuesConstraint;
 
 using json = nlohmann::json;
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Weverything"
-#pragma clang diagnostic ignored "-Wcomma"
 
 #define MEMOIZE
 //#define ALL_EDGES_COVERED
 
 #include "path_database_wavelet.hpp"
+#include "path_database_dynamic.hpp"
+#include "reference_dynamic_incoming_table.hpp"
+#include "reference_dynamic_routing_table.hpp"
 #include "samplers.hpp"
 #include "utilities.hpp"
 #include "threading.hpp"
-
-
-#pragma clang diagnostic pop
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wconversion"
 
 
 
@@ -71,20 +65,18 @@ Database compressReadsDeprecated(ValueArg<string> &compressedArg,
 	return db;
 }
 
+
+
 template<class DatabaseT>
-void compress_reads(ValueArg<std::string> &graphArg, const ValueArg<std::string> &statisticsArg,
+void compress_store_reads(ValueArg<std::string> &graphArg, const ValueArg<std::string> &statisticsArg,
                     ValueArg<std::string> &compressedArg, const string &statistics_filename,
-                    const vector<string> &reads, int64_t kmer_length, shared_ptr<BetterDBGSuccinct> &graph) {
+                    const vector<string> &reads, int64_t kmer_length, shared_ptr<BetterDBGSuccinct> &graph, int chunks) {
     unique_ptr<DatabaseT> pd;
-    if (graphArg.isSet()) {
         Timer timer;
         cerr << "Started loading the graph" << endl;
         graph->load(graphArg.getValue());
         cerr << "Finished loading the graph in " << timer.elapsed() << " sec." << endl;
-        pd.reset(new DatabaseT(graph));
-    } else {
-        pd.reset(new DatabaseT(reads,kmer_length));
-    }
+        pd.reset(new DatabaseT(graph,chunks));
     pd->encode(reads);
     if (compressedArg.isSet()) {
         fs::path compress_folder = compressedArg.getValue();
@@ -94,6 +86,23 @@ void compress_reads(ValueArg<std::string> &graphArg, const ValueArg<std::string>
         auto statistics = pd->get_statistics();
         save_string(statistics.dump(4),statistics_filename);
     }
+}
+
+template<class DatabaseT>
+void compress_reads(ValueArg<std::string> &graphArg, const ValueArg<std::string> &statisticsArg,
+					const string &statistics_filename,
+					const vector<string> &reads, int64_t kmer_length, shared_ptr<BetterDBGSuccinct> &graph) {
+	unique_ptr<DatabaseT> pd;
+		Timer timer;
+		cerr << "Started loading the graph" << endl;
+		graph->load(graphArg.getValue());
+		cerr << "Finished loading the graph in " << timer.elapsed() << " sec." << endl;
+		pd.reset(new DatabaseT(graph));
+	pd->encode(reads);
+	if (statisticsArg.isSet()) {
+		auto statistics = pd->get_statistics();
+		save_string(statistics.dump(4),statistics_filename);
+	}
 }
 
 int main_compressor(int argc, char *argv[]) {
@@ -122,31 +131,37 @@ int main_compressor(int argc, char *argv[]) {
 			"FASTA/Q file that should be compressed",
 			true,
 			"",
-			"string",cmd);
+			"filename",cmd);
 	TCLAP::ValueArg<int> kmerLengthArg("k",
 			"kmer-length",
 			"Length of the kmers for graph construction",
 			false,
 			21,
-			"int64_t",cmd);
+			"int",cmd);
 	TCLAP::ValueArg<std::string> statisticsArg("s",
 			"statistics",
 			"Filename of json file that will output statistics about compressed file.",
 			false,
 			"statistics.json",
-			"string",cmd);
+        "filename",cmd);
 	TCLAP::ValueArg<std::string> compressedArg("o",
 			"output",
 			"Folder where to store the compressed files.",
-			true,
+			false,
 			"",
-			"string",cmd);
+			"filename",cmd);
 	TCLAP::ValueArg<int> numThreadsArg("p",
 			"threads",
 			"Number of threads to use for parallel computation.",
 			false,
 			1,
-			"int64_t",cmd);
+			"int",cmd);
+	TCLAP::ValueArg<int> chunksArg("u",
+									   "chunks",
+									   "Number of chunks for routing and incoming table (less chunks decreases memory consumption but increases compression time) Value 1 to disables chunking.",
+									   false,
+									   DefaultChunks,
+									   "int",cmd);
 
 
 	std::vector<std::string> regimes {
@@ -172,13 +187,25 @@ int main_compressor(int argc, char *argv[]) {
     cerr << "Finished loading the reads in " << read_timer.elapsed() << " sec." << endl;
 	auto kmer_length = kmerLengthArg.getValue();
 	auto compressor = compressor_type.getValue();
+	auto chunks = chunksArg.getValue();
     auto graph = std::make_shared<DBGSuccinct>(21);
 	if (compressor == "wavelet") {
 	    if (use_transformations) {
-            compress_reads<PathDatabaseWavelet<>>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph);
+	    	if (chunks > 1) {
+				compress_store_reads<PathDatabaseWavelet<>>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph, chunks);
+	    	}
+            else {
+            	throw "Using transformation is not implemented yet";
+            }
         }
 	    else {
-            compress_reads<PathDatabaseWaveletWithtoutTransformation<>>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph);
+	    	if (chunks > 1) {
+				compress_store_reads<PathDatabaseWaveletWithtoutTransformation<>>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph, chunks);
+	    	}
+			else {
+				if (compressedArg.isSet()) { cerr << "!!! Warning : only constructing the transformation, not saving it !!!" << endl; }
+				compress_reads<PathDatabaseDynamic<ReferenceDynamicRoutingTable<>,ReferenceDynamicIncomingTable<>>>(graphArg, statisticsArg, statistics_filename, reads, kmer_length, graph);
+			}
 	    }
     }
 	return 0;

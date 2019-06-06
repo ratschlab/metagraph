@@ -89,8 +89,6 @@ public:
 
 //template <typename EntryT=wavelet_tree_dyn>
 template <typename EntryT=SolidDynamicRoutingTable<>,typename BitVector=sdsl::bit_vector,typename RankSupport=typename BitVector::rank_1_type>
-class DynamicRoutingTable : public TransformationsEnabler<DynamicRoutingTableCore<EntryT,BitVector,RankSupport>> {
-    using TransformationsEnabler<DynamicRoutingTableCore<EntryT,BitVector,RankSupport>>::TransformationsEnabler;
-};
+using DynamicRoutingTable = TransformationsEnabler<DynamicRoutingTableCore<EntryT,BitVector,RankSupport>>;
 
 #endif //METAGRAPH_DYNAMIC_ROUTING_TABLE_HPP

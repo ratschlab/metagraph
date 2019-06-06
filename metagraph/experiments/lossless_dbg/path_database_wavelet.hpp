@@ -72,7 +72,7 @@ public:
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k
-    PathDatabaseWaveletCore(std::shared_ptr<const DBGSuccinct> graph) : PathDatabaseDynamicCore<DRT,DIT>(graph)
+    PathDatabaseWaveletCore(std::shared_ptr<const DBGSuccinct> graph,int chunks=DefaultChunks) : PathDatabaseDynamicCore<DRT,DIT>(graph,chunks)
                                                                               {}
 
     PathDatabaseWaveletCore(const vector<string> &filenames,
@@ -302,13 +302,9 @@ public:
 };
 
 template<class RoutingTableT = DefaultRoutingTable,class IncomingTableT=DefaultIncomingTable>
-class PathDatabaseWavelet : public QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableT,IncomingTableT>>> {
-    using QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableT,IncomingTableT>>>::QueryEnabler;
-};
+using PathDatabaseWavelet = QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableT,IncomingTableT>>>;
 
 template<typename DummyT=int64_t>
-class PathDatabaseWaveletWithtoutTransformation : public QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableCore<>,DefaultIncomingTable>>> {
-    using QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableCore<>,DefaultIncomingTable>>>::QueryEnabler;
-};
+using PathDatabaseWaveletWithtoutTransformation = QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableCore<>,DefaultIncomingTable>>>;
 
 #endif /* path_database_baseline_hpp */
