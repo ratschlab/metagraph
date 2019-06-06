@@ -235,9 +235,7 @@ public:
         json routing_table_stats = routing_table.get_statistics(verbosity);
         result.update(statistics);
         result.update(routing_table_stats);
-        int64_t true_joins = 0;
         int64_t added_joins = 0;
-        int64_t true_splits = 0;
         int64_t added_splits = 0;
         std::map<int64_t, int64_t> joins_diff_symbols_histogram;
         std::map<int64_t, int64_t> splits_size_histogram;
@@ -245,44 +243,36 @@ public:
 
         for (int64_t node = 1; node <= this->graph.num_nodes();node++) {
             if (node_is_join(node)) {
-                if (this->graph.indegree(node) > 1) {
-                    true_joins++;
-                }
-                else {
+                if (this->graph.indegree(node) <= 1) {
                     added_joins++;
                 }
                 if (verbosity & STATS_JOINS_HISTOGRAM) {
-                    int64_t prev = 0;
                     int64_t cardinality = incoming_table.size(node);
                     joins_diff_symbols_histogram[cardinality]++;
                 }
             }
             if (node_is_split(node)) {
-                if (this->graph.outdegree(node) > 1) {
-                    true_splits++;
-                }
-                else {
+                if (this->graph.outdegree(node) <= 1) {
                     added_splits++;
                 }
                 if (verbosity & STATS_SPLITS_HISTOGRAM) {
-                    set<int64_t> diff_symbols;
-                    for (int64_t i=0; i < routing_table.size(node); i++) {
-                        diff_symbols.insert(routing_table.get(node,i));
-                    }
-                    splits_diff_symbols_histogram[diff_symbols.size()]++;
+                    //set<int64_t> diff_symbols;
+                    //for (int64_t i=0; i < routing_table.size(node); i++) {
+                    //    diff_symbols.insert(routing_table.get(node,i));
+                    //}
+                    //splits_diff_symbols_histogram[diff_symbols.size()]++;
                     splits_size_histogram[routing_table.size(node)]++;
                 }
             }
         }
-        json addition = {{"true_joins", true_joins},
+        json addition = {
                        {"added_joins", added_joins},
-                       {"true_splits", true_splits},
                        {"added_splits", added_splits},
                        {"num_of_nodes", this->graph.num_nodes()}
                       };
         result.update(addition);
         if (verbosity & STATS_SPLITS_HISTOGRAM) {
-            result["splits_diff_symbols_histogram"] = splits_diff_symbols_histogram;
+            //result["splits_diff_symbols_histogram"] = splits_diff_symbols_histogram;
             result["splits_size_histogram"] = splits_size_histogram;
         }
         if (verbosity & STATS_JOINS_HISTOGRAM) {

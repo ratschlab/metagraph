@@ -112,7 +112,7 @@ public:
     }
 
     json get_statistics(int64_t verbosity=0) const {
-        return {};
+        return {{"dummy", "true"}}; // throws exception if updating with empty value
     }
 
     const int64_t delimiter_encoded = 6;
