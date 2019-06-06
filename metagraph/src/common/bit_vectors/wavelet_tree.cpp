@@ -327,7 +327,7 @@ wavelet_tree_dyn::wavelet_tree_dyn(uint8_t logsigma)
 template <class Vector>
 wavelet_tree_dyn::wavelet_tree_dyn(uint8_t logsigma, const Vector &vector)
       : dwt_(1ull << logsigma) {
-    dwt_.push_many(vector);
+    dwt_.push_many(1ull << logsigma, vector);
 }
 
 template wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const sdsl::int_vector<> &);
