@@ -2094,25 +2094,10 @@ int main(int argc, const char *argv[]) {
                         break;
                     }
                     case Config::RowCompressed: {
-                        annotate::RowCompressed<> row_annotator(0);
-                        annotator->convert_to_row_annotator(&row_annotator,
-                                                            config->parallel);
-                        annotator.reset();
-
+                        annotator->convert_to_row_annotator(config->outfbase);
                         if (config->verbose) {
-                            std::cout << "Annotation converted in "
+                            std::cout << "Annotation converted and serialized in "
                                       << timer.elapsed() << "sec" << std::endl;
-                        }
-
-                        if (config->verbose) {
-                            std::cout << "Serializing to " << config->outfbase
-                                      << "...\t" << std::flush;
-                        }
-
-                        row_annotator.serialize(config->outfbase);
-
-                        if (config->verbose) {
-                            std::cout << timer.elapsed() << "sec" << std::endl;
                         }
                         break;
                     }

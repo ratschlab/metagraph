@@ -3,6 +3,7 @@
 #include <string>
 #include <algorithm>
 #include <stdexcept>
+#include <progress_bar.hpp>
 
 #include "serialization.hpp"
 #include "utils.hpp"
@@ -444,6 +445,48 @@ const bitmap& ColumnCompressed<Label>::get_column(size_t j) const {
 template <typename Label>
 const bitmap& ColumnCompressed<Label>::get_column(const Label &label) const {
     return get_column(label_encoder_.encode(label));
+}
+
+template <typename Label>
+void ColumnCompressed<Label>
+::convert_to_row_annotator(const std::string &outfbase) const {
+    flush();
+
+    ProgressBar progress_bar(num_rows_, "Serialized rows", std::cerr, !utils::get_verbose());
+
+    RowCompressed<Label>::write_rows(
+        outfbase,
+        label_encoder_,
+        [&](BinaryMatrix::RowCallback write_row) {
+
+            #pragma omp parallel for ordered num_threads(get_num_threads())
+            for (uint64_t i = 0; i < num_rows_; i += kNumRowsInBlock) {
+
+                uint64_t begin = i;
+                uint64_t end = std::min(i + kNumRowsInBlock, num_rows_);
+
+                std::vector<std::vector<uint64_t>> rows(end - begin);
+
+                assert(begin <= end);
+                assert(end <= num_rows_);
+
+                // TODO: use RowsFromColumnsTransformer
+                for (size_t j = 0; j < bitmatrix_.size(); ++j) {
+                    bitmatrix_[j]->call_ones_in_range(begin, end,
+                        [&](uint64_t idx) { rows[idx - begin].push_back(j); }
+                    );
+                }
+
+                #pragma omp ordered
+                {
+                    for (const auto &row : rows) {
+                        write_row(row);
+                        ++progress_bar;
+                    }
+                }
+            }
+        }
+    );
 }
 
 template <typename Label>
