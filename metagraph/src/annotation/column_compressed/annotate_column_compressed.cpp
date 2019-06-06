@@ -12,7 +12,7 @@
 
 using utils::remove_suffix;
 
-size_t kNumRowsInBlock = 5'000'000;
+size_t kNumRowsInBlock = 50'000;
 
 
 namespace annotate {
@@ -459,7 +459,7 @@ void ColumnCompressed<Label>
         label_encoder_,
         [&](BinaryMatrix::RowCallback write_row) {
 
-            #pragma omp parallel for ordered num_threads(get_num_threads())
+            #pragma omp parallel for ordered schedule(dynamic) num_threads(get_num_threads())
             for (uint64_t i = 0; i < num_rows_; i += kNumRowsInBlock) {
 
                 uint64_t begin = i;
