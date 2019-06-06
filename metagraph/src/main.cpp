@@ -74,8 +74,11 @@ Config::AnnotationType parse_annotation_extension(const std::string &filename) {
 
     } else if (utils::ends_with(filename, annotate::kRainbowfishExtension)) {
         return Config::AnnotationType::RBFish;
+
     } else {
-        return Config::AnnotationType::Invalid;
+        std::cerr << "Error: unknown annotation format in "
+                  << filename << std::endl;
+        exit(1);
     }
 }
 
@@ -430,9 +433,6 @@ std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
 
     Config::AnnotationType anno_type = parse_annotation_extension(filename);
 
-    if (anno_type == Config::AnnotationType::Invalid)
-        anno_type = config.anno_type;
-
     switch (anno_type) {
         case Config::ColumnCompressed: {
             annotation.reset(
@@ -464,10 +464,6 @@ std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
         }
         case Config::RBFish: {
             annotation.reset(new annotate::RainbowfishAnnotator());
-            break;
-        }
-        case Config::Invalid: {
-            throw std::runtime_error("Unknown annotator");
             break;
         }
     }
@@ -1949,88 +1945,178 @@ int main(int argc, const char *argv[]) {
 
             Timer timer;
 
-            const Config::AnnotationType anno_file_type = parse_annotation_extension(files.at(0));
+            /********************************************************/
+            /***************** rename column labels *****************/
+            /********************************************************/
 
-            std::unique_ptr<Annotator> annotation;
-
-            if (anno_file_type != Config::RowCompressed || config->rename_instructions_file.size()) {
-                // Load annotation from disk
-
-                annotation = initialize_annotation(files.at(0), *config);
+            if (config->rename_instructions_file.size()) {
+                auto annotation = initialize_annotation(files.at(0), *config);
 
                 if (config->verbose)
-                    std::cout << "Loading annotator...\t" << std::flush;
+                    std::cout << "Loading annotation..." << std::endl;
 
+                // Load annotation from disk
                 if (!annotation->load(files.at(0))) {
                     std::cerr << "ERROR: can't load annotation from file "
                               << files.at(0) << std::endl;
                     exit(1);
                 }
+                if (config->verbose) {
+                    std::cout << "Annotation loaded in "
+                              << timer.elapsed() << "sec" << std::endl;
+                }
+
                 if (config->verbose)
-                    std::cout << timer.elapsed() << "sec" << std::endl;
+                    std::cout << "Renaming...\t" << std::flush;
 
-                if (config->rename_instructions_file.size()) {
-                    if (config->verbose)
-                        std::cout << "Renaming...\t" << std::flush;
-
-                    std::unordered_map<std::string, std::string> dict;
-                    std::ifstream instream(config->rename_instructions_file);
-                    if (!instream.is_open()) {
-                        std::cerr << "ERROR: Can't open file "
+                std::unordered_map<std::string, std::string> dict;
+                std::ifstream instream(config->rename_instructions_file);
+                if (!instream.is_open()) {
+                    std::cerr << "ERROR: Can't open file "
+                              << config->rename_instructions_file << std::endl;
+                    exit(1);
+                }
+                std::string old_name;
+                std::string new_name;
+                while (instream.good() && !(instream >> old_name).eof()) {
+                    instream >> new_name;
+                    if (instream.fail() || instream.eof()) {
+                        std::cerr << "ERROR: wrong format of the rules for"
+                                  << " renaming annotation columns passed in file "
                                   << config->rename_instructions_file << std::endl;
                         exit(1);
                     }
-                    std::string old_name;
-                    std::string new_name;
-                    while (instream.good() && !(instream >> old_name).eof()) {
-                        instream >> new_name;
-                        if (instream.fail() || instream.eof()) {
-                            std::cerr << "ERROR: wrong format of the rules for"
-                                      << " renaming annotation columns passed in file "
-                                      << config->rename_instructions_file << std::endl;
-                            exit(1);
-                        }
-                        dict[old_name] = new_name;
-                    }
-                    //TODO: could be made to work with streaming
-                    annotation->rename_labels(dict);
-
-                    annotation->serialize(config->outfbase);
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-
-                    return 0;
+                    dict[old_name] = new_name;
                 }
+                //TODO: could be made to work with streaming
+                annotation->rename_labels(dict);
+
+                annotation->serialize(config->outfbase);
+                if (config->verbose)
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+
+                return 0;
             }
 
-            // TODO: clean this stuff up, simplify logic and move to annotation_converters.hpp/cpp
-            if (anno_file_type == Config::ColumnCompressed) {
+            /********************************************************/
+            /****************** convert annotation ******************/
+            /********************************************************/
+
+            const Config::AnnotationType input_anno_type
+                = parse_annotation_extension(files.at(0));
+
+            if (config->anno_type == input_anno_type) {
+                std::cerr << "Skipping conversion: same input and target type: "
+                          << Config::annotype_to_string(Config::RowCompressed)
+                          << std::endl;
+                exit(1);
+            }
+
+            if (config->verbose) {
+                std::cout << "Converting to " << Config::annotype_to_string(config->anno_type)
+                          << " annotator..." << std::endl;
+            }
+
+            if (input_anno_type == Config::RowCompressed) {
+
+                std::unique_ptr<const Annotator> target_annotator;
+
+                switch (config->anno_type) {
+                    case Config::RowFlat: {
+                        auto annotator = annotate::convert<annotate::RowFlatAnnotator>(files.at(0));
+                        target_annotator = std::move(annotator);
+                        break;
+                    }
+                    case Config::RBFish: {
+                        auto annotator = annotate::convert<annotate::RainbowfishAnnotator>(files.at(0));
+                        target_annotator = std::move(annotator);
+                        break;
+                    }
+                    case Config::BinRelWT_sdsl: {
+                        auto annotator = annotate::convert<annotate::BinRelWT_sdslAnnotator>(files.at(0));
+                        target_annotator = std::move(annotator);
+                        break;
+                    }
+                    case Config::BinRelWT: {
+                        auto annotator = annotate::convert<annotate::BinRelWTAnnotator>(files.at(0));
+                        target_annotator = std::move(annotator);
+                        break;
+                    }
+                    default:
+                        std::cerr << "Error: Streaming conversion from RowCompressed annotation"
+                                  << " is not implemented for the requested target type: "
+                                  << Config::annotype_to_string(config->anno_type)
+                                  << std::endl;
+                        exit(1);
+                }
+
+                if (config->verbose) {
+                    std::cout << "Annotation converted in "
+                              << timer.elapsed() << "sec" << std::endl;
+                }
+
+                if (config->verbose) {
+                    std::cout << "Serializing to " << config->outfbase
+                              << "...\t" << std::flush;
+                }
+
+                target_annotator->serialize(config->outfbase);
+
+                if (config->verbose) {
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+                }
+
+            } else if (input_anno_type == Config::ColumnCompressed) {
+                auto annotation = initialize_annotation(files.at(0), *config);
+
+                if (config->verbose)
+                    std::cout << "Loading annotation..." << std::endl;
+
+                // Load annotation from disk
+                if (!annotation->load(files.at(0))) {
+                    std::cerr << "ERROR: can't load annotation from file "
+                              << files.at(0) << std::endl;
+                    exit(1);
+                }
+                if (config->verbose) {
+                    std::cout << "Annotation loaded in "
+                              << timer.elapsed() << "sec" << std::endl;
+                }
+
                 std::unique_ptr<annotate::ColumnCompressed<>> annotator {
                     dynamic_cast<annotate::ColumnCompressed<> *>(annotation.release())
                 };
                 assert(annotator.get());
 
                 switch (config->anno_type) {
-                    case Config::ColumnCompressed:
+                    case Config::ColumnCompressed: {
+                        assert(false);
                         break;
+                    }
                     case Config::RowCompressed: {
-                        if (config->verbose)
-                            std::cout << "Converting...\t" << std::flush;
-
                         annotate::RowCompressed<> row_annotator(0);
                         annotator->convert_to_row_annotator(&row_annotator,
                                                             config->parallel);
                         annotator.reset();
 
+                        if (config->verbose) {
+                            std::cout << "Annotation converted in "
+                                      << timer.elapsed() << "sec" << std::endl;
+                        }
+
+                        if (config->verbose) {
+                            std::cout << "Serializing to " << config->outfbase
+                                      << "...\t" << std::flush;
+                        }
+
                         row_annotator.serialize(config->outfbase);
-                        if (config->verbose)
+
+                        if (config->verbose) {
                             std::cout << timer.elapsed() << "sec" << std::endl;
+                        }
                         break;
                     }
                     case Config::BRWT: {
-                        if (config->verbose)
-                            std::cout << "Converting...\t" << std::flush;
-
                         auto brwt_annotator = config->greedy_brwt
                             ? annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
                                 std::move(*annotator),
@@ -2042,9 +2128,21 @@ int main(int argc, const char *argv[]) {
 
                         annotator.reset();
 
+                        if (config->verbose) {
+                            std::cout << "Annotation converted in "
+                                      << timer.elapsed() << "sec" << std::endl;
+                        }
+
+                        if (config->verbose) {
+                            std::cout << "Serializing to " << config->outfbase
+                                      << "...\t" << std::flush;
+                        }
+
                         brwt_annotator->serialize(config->outfbase);
-                        if (config->verbose)
+
+                        if (config->verbose) {
                             std::cout << timer.elapsed() << "sec" << std::endl;
+                        }
                         break;
                     }
                     case Config::BinRelWT_sdsl: {
@@ -2063,110 +2161,13 @@ int main(int argc, const char *argv[]) {
                         convert<annotate::RainbowfishAnnotator>(std::move(annotator), *config, timer);
                         break;
                     }
-                    case Config::Invalid: {
-                        throw std::runtime_error("Unknown annotator");
-                        break;
-                    }
-                }
-
-            } else if (anno_file_type == Config::RowCompressed) {
-
-                if (annotation.get()) {
-                    // not streaming because labels were renamed
-                    std::unique_ptr<annotate::RowCompressed<>> annotator {
-                        dynamic_cast<annotate::RowCompressed<> *>(annotation.release())
-                    };
-
-                    switch (config->anno_type) {
-                        case Config::RowCompressed: {
-                            break;
-                        }
-                        case Config::BinRelWT_sdsl: {
-                            convert<annotate::BinRelWT_sdslAnnotator>(std::move(annotator), *config, timer);
-                            break;
-                        }
-                        case Config::BinRelWT: {
-                            convert<annotate::BinRelWTAnnotator>(std::move(annotator), *config, timer);
-                            break;
-                        }
-                        case Config::RowFlat: {
-                            convert<annotate::RowFlatAnnotator>(std::move(annotator), *config, timer);
-                            break;
-                        }
-                        case Config::RBFish: {
-                            convert<annotate::RainbowfishAnnotator>(std::move(annotator), *config, timer);
-                            break;
-                        }
-                        default:
-                            std::cerr << "Error: Conversion to other representation"
-                                      << " is implemented only for ColumnCompressed annotation."
-                                      << std::endl;
-                            exit(1);
-                    }
-                } else {
-                    // streaming input
-
-                    if (config->anno_type == Config::RowCompressed) {
-                        std::cerr << "Skipping conversion: same input and target type: "
-                                  << Config::annotype_to_string(Config::RowCompressed)
-                                  << std::endl;
-                        exit(1);
-                    }
-
-                    if (config->verbose)
-                        std::cout << "Converting to " << Config::annotype_to_string(config->anno_type)
-                                  << " annotator...\t" << std::flush;
-
-                    std::unique_ptr<const Annotator> target_annotator;
-
-                    switch (config->anno_type) {
-                        case Config::RowFlat: {
-                            auto annotator = annotate::convert<annotate::RowFlatAnnotator>(files.at(0));
-                            target_annotator = std::move(annotator);
-                            break;
-                        }
-                        case Config::RBFish: {
-                            auto annotator = annotate::convert<annotate::RainbowfishAnnotator>(files.at(0));
-                            target_annotator = std::move(annotator);
-                            break;
-                        }
-                        case Config::BinRelWT_sdsl: {
-                            auto annotator = annotate::convert<annotate::BinRelWT_sdslAnnotator>(files.at(0));
-                            target_annotator = std::move(annotator);
-                            break;
-                        }
-                        case Config::BinRelWT: {
-                            auto annotator = annotate::convert<annotate::BinRelWTAnnotator>(files.at(0));
-                            target_annotator = std::move(annotator);
-                            break;
-                        }
-                        default:
-                            std::cerr << "Error: Streaming conversion from RowCompressed annotation"
-                                      << " is not implemented for the requested target type: "
-                                      << Config::annotype_to_string(config->anno_type)
-                                      << std::endl;
-                            exit(1);
-                    }
-
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-
-                    if (config->verbose)
-                        std::cout << "Serializing to " << config->outfbase
-                                  << "...\t" << std::flush;
-
-                    target_annotator->serialize(config->outfbase);
-
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-
                 }
 
             } else {
-                //TODO: error message is wrong?
-                std::cerr << "Error: Conversion to other representation"
-                          << " is implemented only for ColumnCompressed annotation."
-                          << std::endl;
+                std::cerr << "Error: Conversion to other representations"
+                          << " is not implemented for "
+                          << Config::annotype_to_string(input_anno_type)
+                          << " annotator." << std::endl;
                 exit(1);
             }
 
