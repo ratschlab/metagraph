@@ -73,7 +73,6 @@ void read_fasta_file_critical(gzFile input_p,
     std::vector<bool> filter;
     if (filter_filename.size()) {
         std::ifstream instream(filter_filename, std::ios::binary);
-        std::vector<bool> filter;
 
         if (!load_number_vector(instream, &filter)) {
             std::cerr << "ERROR: Filter file " << filter_filename
