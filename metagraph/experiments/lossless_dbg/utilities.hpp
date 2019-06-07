@@ -125,13 +125,12 @@ inline char decode(int8_t c) {
     if (c == 0) return '$';
     return KmerExtractor::decode(c);
 }
-// sanitize alphabet
+
 inline string& clamp_alphabet(string& text,const string& alphabet="$ACGTN",char replacement='N') {
     for(auto& c : text) {
-        c = KmerExtractor::decode(KmerExtractor::encode(c));
-//        if (alphabet.find(c) == string::npos) {
-//            c = replacement;
-//        }
+        if (alphabet.find(c) == string::npos) {
+            c = replacement;
+        }
     }
     return text;
 }
