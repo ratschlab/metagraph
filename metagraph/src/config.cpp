@@ -327,7 +327,7 @@ Config::Config(int argc, const char *argv[]) {
         print_usage_and_exit = true;
 
     if (identity == PARSE_TAXONOMY &&
-        ((accession2taxid == "" && taxonomy_nodes == "") || outfbase == ""))
+            ((accession2taxid == "" && taxonomy_nodes == "") || outfbase == ""))
         print_usage_and_exit = true;
 
     if (identity == TRANSFORM_ANNOTATION && outfbase.empty())
@@ -507,7 +507,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\tquery\t\tannotate sequences from fast[a|q] files\n\n");
             fprintf(stderr, "\tserver_query\tannotate received sequences and send annotations back\n\n");
 
-            fprintf(stderr, "\tcall_variants\tgenerate a masked annotated graph and call variants\n\n");
+            fprintf(stderr, "\tcall_variants\tgenerate a masked annotated graph and call variants\n");
             fprintf(stderr, "\t\t\trelative to unmasked graph\n\n");
 
             fprintf(stderr, "\tparse_taxonomy\tgenerate NCBI Accession ID to Taxonomy ID mapper\n\n");
@@ -755,21 +755,23 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for call_variants:\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\t\tannotator to load []\n");
-            fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph\n");
-            fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph []\n");
+            fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph []\n");
             fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of\n");
             fprintf(stderr, "\t                                     \tall matching mask-in and mask-out labels [0.0]\n");
+            fprintf(stderr, "\n");
             fprintf(stderr, "\t   --call-bubbles \t\t\tcall labels from bubbles\n");
-            fprintf(stderr, "\t   --label-filter [STR] \t\tdiscard variants with this label\n");
-            fprintf(stderr, "\t   --taxonomy-map \t\t\tfilename of taxonomy map file\n");
+            fprintf(stderr, "\t   --label-filter [STR] \t\tdiscard variants with this label []\n");
+            fprintf(stderr, "\t   --taxonomy-map [STR] \t\tfilename of taxonomy map file []\n");
         } break;
         case PARSE_TAXONOMY: {
             fprintf(stderr, "Usage: %s parse_taxonomy -o <OUTBASE> [options]\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for parse_taxonomy:\n");
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
-            fprintf(stderr, "\t   --accession \t\tfilename of the accession2taxid.gz file\n");
-            fprintf(stderr, "\t   --taxonomy \t\tfilename of the nodes.dmp file\n");
+            fprintf(stderr, "\t   --accession [STR] \tfilename of the accession2taxid.gz file []\n");
+            fprintf(stderr, "\t   --taxonomy [STR] \tfilename of the nodes.dmp file []\n");
         } break;
     }
 

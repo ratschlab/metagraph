@@ -36,7 +36,9 @@ build_graph<DBGHashString>(uint64_t k,
     return graph;
 }
 
-template std::shared_ptr<DeBruijnGraph> build_graph<DBGHashOrdered>(uint64_t, const std::vector<std::string> &, bool);
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph<DBGHashOrdered>(uint64_t, const std::vector<std::string> &, bool);
 
 template <>
 std::shared_ptr<DeBruijnGraph>
@@ -91,7 +93,9 @@ build_graph_batch<DBGHashString>(uint64_t k,
     return graph;
 }
 
-template std::shared_ptr<DeBruijnGraph> build_graph_batch<DBGHashOrdered>(uint64_t, const std::vector<std::string> &, bool);
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph_batch<DBGHashOrdered>(uint64_t, const std::vector<std::string> &, bool);
 
 template <>
 std::shared_ptr<DeBruijnGraph>
@@ -118,17 +122,29 @@ build_graph_batch<DBGSuccinct>(uint64_t k,
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph_iterative(uint64_t k,
-                      const std::function<void(const std::function<void(const std::string&)>)> &generate,
+                      std::function<void(std::function<void(const std::string&)>)> generate,
                       bool canonical) {
     std::vector<std::string> sequences;
     generate([&](const auto &sequence) { sequences.push_back(sequence); });
     return build_graph_batch<Graph>(k, sequences, canonical);
 }
 
-template std::shared_ptr<DeBruijnGraph> build_graph_iterative<DBGHashOrdered>(uint64_t, const std::function<void(const std::function<void(const std::string&)>)> &, bool);
-template std::shared_ptr<DeBruijnGraph> build_graph_iterative<DBGHashString>(uint64_t, const std::function<void(const std::function<void(const std::string&)>)> &, bool);
-template std::shared_ptr<DeBruijnGraph> build_graph_iterative<DBGBitmap>(uint64_t, const std::function<void(const std::function<void(const std::string&)>)> &, bool);
-template std::shared_ptr<DeBruijnGraph> build_graph_iterative<DBGSuccinct>(uint64_t, const std::function<void(const std::function<void(const std::string&)>)> &, bool);
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph_iterative<DBGHashOrdered>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
+
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph_iterative<DBGHashString>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
+
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph_iterative<DBGBitmap>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
+
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph_iterative<DBGSuccinct>(uint64_t, std::function<void(std::function<void(const std::string&)>)>, bool);
+
 
 
 template <class Graph>

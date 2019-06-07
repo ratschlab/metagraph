@@ -29,7 +29,7 @@ build_graph_batch(uint64_t k,
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph_iterative(uint64_t k,
-                      const std::function<void(const std::function<void(const std::string&)>)> &generate,
+                      std::function<void(std::function<void(const std::string&)>)> generate,
                       bool canonical = false);
 
 template <class Graph>
