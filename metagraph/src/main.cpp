@@ -193,11 +193,10 @@ void annotate_data(const std::vector<std::string> &files,
                 }
             );
         } else if (utils::get_filetype(file) == "KMC") {
-            const auto file_trim = utils::remove_suffix(file, ".kmc");
             std::vector<std::string> labels;
 
             if (filename_anno) {
-                labels.push_back(file_trim);
+                labels.push_back(file);
             }
 
             for (const auto &label : anno_labels) {
@@ -205,7 +204,7 @@ void annotate_data(const std::vector<std::string> &files,
             }
 
             kmc::read_kmers(
-                file_trim,
+                file,
                 [&](std::string&& sequence) {
                     anno_graph->annotate_sequence(std::move(sequence), labels);
 
@@ -727,10 +726,9 @@ void parse_sequences(const std::vector<std::string> &files,
                 }
             );
         } else if (utils::get_filetype(file) == "KMC") {
-            auto file_trim = utils::remove_suffix(file, ".kmc");
             bool warning_different_k = false;
             kmc::read_kmers(
-                file_trim,
+                file,
                 [&](std::string&& sequence) {
                     if (!warning_different_k && sequence.size() != config.k) {
                         std::cerr << "Warning: k-mers parsed from KMC database "

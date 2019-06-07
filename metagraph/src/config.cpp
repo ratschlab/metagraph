@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <iostream>
+#include <unordered_set>
 
 #include "utils.hpp"
 #include "threading.hpp"
@@ -234,19 +235,12 @@ Config::Config(int argc, const char *argv[]) {
 
     // given kmc_pre and kmc_suf pair, only include one
     // this still allows for the same file to be included multiple times
-    std::sort(fname.begin(), fname.end());
+    std::unordered_set<std::string> kmc_file_set;
+
     for (auto it = fname.begin(); it != fname.end(); ++it) {
-        if (utils::get_filetype(*it) == "KMC_PRE") {
-            *it = utils::remove_suffix(*it, "_pre");
-            assert(utils::get_filetype(*it) == "KMC");
-        } else if (utils::get_filetype(*it) == "KMC_SUF") {
-            *it = utils::remove_suffix(*it, "_suf");
-            assert(utils::get_filetype(*it) == "KMC");
-            if (it != fname.begin()
-                  && *it == *std::prev(it)) {
-                fname.erase(it--);
-            }
-        }
+        if (utils::get_filetype(*it) == "KMC"
+                && !kmc_file_set.insert(utils::remove_suffix(*it, ".kmc_pre", ".kmc_suf")).second)
+            fname.erase(it--);
     }
 
     utils::set_verbose(verbose);
