@@ -38,8 +38,7 @@ class DBGAligner {
                size_t num_top_paths = 10,
                size_t num_alternative_paths = 1,
                bool verbose = false,
-               float sw_threshold = 0.8,
-               float re_seeding_threshold = 0.6,
+               bool discard_similar_paths = false,
                float insertion_penalty = 3,
                float deletion_penalty = 3,
                float gap_openning_penalty = 3,
@@ -74,8 +73,7 @@ class DBGAligner {
     size_t num_top_paths_;
     size_t num_alternative_paths_;
     bool verbose_;
-    float sw_threshold_;
-    float re_seeding_threshold_;
+    bool discard_similar_paths_;
     int8_t match_score_;
     float insertion_penalty_;
     float deletion_penalty_;
@@ -106,8 +104,8 @@ class DBGAligner {
     // according to score parameters in this class.
 //    void whole_path_score(const AlignedPath &path, GlobalSW& global_sw) const;
 
-    // Compute Smith-Waterman score based on CSSW library.
-    bool cssw_align(const AlignedPath &path, StripedSmithWaterman::Alignment& alignment) const;
+    // Compute Smith-Waterman score based on CSSW library and set cigar and score in path accordingly.
+    bool cssw_align(AlignedPath &path, StripedSmithWaterman::Alignment& alignment) const;
 
     // Trim the path to remove unmapped regions from the tail using CSSW lib clipping.
     void trim(AlignedPath &path, const StripedSmithWaterman::Alignment& alignment) const;

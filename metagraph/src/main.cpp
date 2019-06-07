@@ -2370,7 +2370,7 @@ int main(int argc, const char *argv[]) {
             // TODO: Find the best annotator type and set it.
             DBGAligner aligner(dbg_succinct_graph, config->alignment_num_top_paths,
                                /*num_alternative_paths=*/1,
-                               config->verbose, config->alignment_sw_threshold);
+                               config->verbose, config->discard_similar_paths);
             Timer timer;
             for (const auto &file : files) {
                 std::cout << "Align sequences from file " << file << std::endl;
@@ -2386,25 +2386,18 @@ int main(int argc, const char *argv[]) {
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                     // TODO: Enable reporting alternative paths.
                     std::string query = read_stream->seq.s;
-                    auto path = aligner.align(std::begin(query), std::end(query)).front();
+                    auto path = aligner.map_to_nodes_forward_reverse_complement(query);
                     if (config->verbose) {
                         std::cout << "Alignment with DBGAligner processed in "
                                   << timer.elapsed()
                                   << "sec, current mem usage: "
                                   << get_curr_RSS() / (1 << 20) << " MiB"
                                   << std::endl;
-                        std::cout << "Q: " << query << "\nP: ";
-                        for (auto partial_path : path)
-                            std::cout << partial_path.get_sequence() << "+";
-                        std::cout << std::endl;
+                        std::cout << "Q: " << query << "\nP: " << path.get_sequence() << std::endl;
                     }
-                    float total_score = 0;
-                    outstream << "Q: " << query << "\nP: ";
-                    for (auto partial_path : path) {
-                        outstream << partial_path.get_sequence() << "+";
-                        total_score += partial_path.get_total_score();
-                    }
-                    outstream << std::endl << "With total score " << total_score << std::endl;
+                    outstream << "Q: " << query << "\nP: " << path.get_sequence() << std::endl
+                              << "With total score " << path.get_total_score()
+                              << " and cigar " << path.get_cigar() << std::endl;
                 }, config->reverse,
                     get_filter_filename(file, config->filter_k,
                                         config->min_count - 1,

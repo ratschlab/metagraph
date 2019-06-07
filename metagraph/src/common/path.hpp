@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <iostream>
 
+#include "ssw_cpp.h"
+
 template <typename NodeType, typename VLabels>
 class Path {
 
@@ -32,17 +34,15 @@ class Path {
     }
     void extend(NodeType node, const VLabels &labels, char extention, float score=0) {
         push_back(node, labels, score);
-        //In case of a match:
-        if (score > 0) {
+        //In case of a match, increment the counter.
+        if (score > 0)
             num_matches_ += 1;
-        } else {
-            is_score_updated_ = false;
-        }
+        is_score_updated_ = false;
         sequence_ += extention;
     }
     // Append a path to the current object. Fills in 0 in case of spaced nodes.
     // Avoid adding duplicate nodes and chars in case of positive overlap.
-    void append_path(const Path& path, int64_t overlap_length, uint64_t score) {
+    void append_path(const Path& path, int64_t overlap_length, float score) {
         assert(path.nodes_.size() - overlap_length >= 0);
         // TODO: Properly close the gap.
         // Example test case in dbg_aligner.map_to_nodes_jump and dbg_aligner.map_to_nodes_insert.
@@ -64,22 +64,24 @@ class Path {
         nodes_.resize(nodes_.size() - path_trim_length);
     }
 
-    void update_total_score(float score) { score_ = score; is_score_updated_ = true; }
     void set_query_begin_it(std::string::const_iterator query_begin_it) {
         query_begin_it_ = query_begin_it; }
     void set_query_it(std::string::const_iterator query_it) {
         query_it_ = query_it; }
-    void set_cigar(const std::string& cigar) {
-        cigar_ = cigar;
+    void update_alignment(const StripedSmithWaterman::Alignment& alignment) {
+        alignment_ = alignment;
+        score_ = alignment.sw_score;
+        is_score_updated_ = true;
+        cigar_ = alignment.cigar_string;
         // Extracting the number of matches.
+        num_matches_ = 0;
         std::regex match_regex("[0-9]+[M=]");
         std::smatch match;
-        uint64_t match_counter = 0;
             std::string cigar_cpy = cigar_;
             while (std::regex_search(cigar_cpy, match, match_regex)) {
                 std::string position_str = match.str();
                 position_str.pop_back();
-                match_counter += atoi(position_str.c_str());
+                num_matches_ += atoi(position_str.c_str());
                 cigar_cpy = match.suffix();
             }
     }
@@ -101,22 +103,19 @@ class Path {
     std::string get_sequence() const { return sequence_; }
     std::string get_query_sequence() const { return std::string(query_begin_it_, query_it_ + k_ - 1); }
     std::string get_cigar() const { return cigar_; }
+    uint64_t get_num_matches() const { return num_matches_; }
     bool get_similar() const { return is_similar_; }
     bool is_score_updated() const { return is_score_updated_; }
+    StripedSmithWaterman::Alignment get_alignment() { return alignment_; }
     // The paths are sorted in BoundedPriorityQueue in increasing order of score
     // per number of nodes. This gives paths with lower absolute score, but higher
     // score per node to appear at the top of the queue.
     bool operator< (const Path &other) const {
-        return ((this->num_matches_ + this->score_)/this->size() < (other.num_matches_ + other.score_)/other.size());
+        //return ((this->num_matches_ + this->score_)/this->size() < (other.num_matches_ + other.score_)/other.size());
         //return (this->num_matches_/this->size() < other.num_matches_/other.size());
         //return (this->score_/this->size() < other.score_/other.size());
         //return (this->score_ < other.score_);
-    }
-    bool operator<= (const Path &other) const {
-        return (this->operator<(other) ||
-                (this->score_ == other.score_ &&
-                 this->num_matches_ == other.num_matches_ &&
-                 this->size() == other.size()));
+        return (this->score_ + this->num_matches_ < other.score_ + other.num_matches_);
     }
 
   private:
@@ -131,6 +130,7 @@ class Path {
     bool is_similar_;
     uint64_t num_matches_;
     bool is_score_updated_;
+    StripedSmithWaterman::Alignment alignment_;
 
     void push_back(NodeType node, const VLabels &labels, float score=0) {
         nodes_.push_back(node);

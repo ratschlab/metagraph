@@ -144,8 +144,6 @@ Config::Config(int argc, const char *argv[]) {
             alignment_length = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--align-num-paths")) {
             alignment_num_top_paths = atoi(argv[++i]);
-        } else if (!strcmp(argv[i], "--align-sw-threshold")) {
-            alignment_sw_threshold = std::stof(argv[++i]);
         } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
             frequency = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--distance")) {
@@ -160,6 +158,8 @@ Config::Config(int argc, const char *argv[]) {
             anno_labels_delimiter = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "--separately")) {
             separately = true;
+        } else if (!strcmp(argv[i], "--discard-similar-paths")) {
+            discard_similar_paths = true;
         } else if (!strcmp(argv[i], "--kmer-mapping-mode")) {
             kmer_mapping_mode = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--num-top-labels")) {
@@ -353,8 +353,6 @@ Config::Config(int argc, const char *argv[]) {
         std::cerr << "Error: max-count must be greater than min-count" << std::endl;
         print_usage(argv[0], identity);
     }
-    if (alignment_sw_threshold < 0 || alignment_sw_threshold > 1)
-        print_usage_and_exit = true;
 
     if (outfbase.size() && !utils::check_if_writable(outfbase)) {
         std::cerr << "Error: Can't write to " << outfbase << std::endl
@@ -598,7 +596,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --count-kmers \t\tquery the number of k-mers discovered [off]\n");
             fprintf(stderr, "\t   --align-length [INT]\t\tlength of subsequences to align [k]\n");
             fprintf(stderr, "\t   --align-num-paths [INT]\t\tnumber of parallel paths to explore at any point [10]\n");
-            fprintf(stderr, "\t   --align-sw-threshold [FLOAT]\t\tthreshold proportion to the path length to determine if Smith Waterman should be computed for a path. [0.1]\n");
+            fprintf(stderr, "\t   --discard-similar-paths \t\tearly discard any path if a similar path with higher score was observed before. Similar paths that begin from same node, diverge and meet again such as two paths with a SNP in same location and meet before and after the SNP. [off]\n");
             fprintf(stderr, "\t-d --distance [INT] \t\tmax allowed alignment distance [0]\n");
         } break;
         case COMPARE: {

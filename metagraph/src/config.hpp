@@ -39,6 +39,7 @@ class Config {
     bool greedy_brwt = false;
     bool separately = false;
     bool call_bubbles = false;
+    bool discard_similar_paths = false;
 
     unsigned int k = 3;
     unsigned int filter_k = 3;
@@ -65,7 +66,6 @@ class Config {
 
     double discovery_fraction = 1.0;
     double label_mask_out_fraction = 0.0;
-    double alignment_sw_threshold = 0.8;
 
     std::vector<std::string> fname;
     std::vector<std::string> anno_labels;
