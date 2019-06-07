@@ -65,50 +65,41 @@ void DeBruijnGraph
     std::stack<std::tuple<node_index, node_index, std::string, char>> paths;
     std::vector<std::pair<node_index, char>> targets;
 
-    // linear paths first
-    call_nodes(
-        [&](const auto &start) {
-            if (visited[start] || indegree(start))
-                return;
-
+    // first, process start nodes (without incoming edges)
+    call_nodes([&](const auto &start) {
+        if (!visited[start] && !indegree(start)) {
             call_sequences_from(start,
                                 callback,
                                 &visited,
                                 &discovered,
                                 &paths,
                                 &targets);
-            }
-    );
+        }
+    });
 
-    // then branch points
-    call_nodes(
-        [&](const auto &start) {
-            if (visited[start] || outdegree(start) == 1)
-                return;
-
+    // then forks
+    call_nodes([&](const auto &start) {
+        if (!visited[start] && outdegree(start) > 1) {
             call_sequences_from(start,
                                 callback,
                                 &visited,
                                 &discovered,
                                 &paths,
                                 &targets);
-            }
-    );
+        }
+    });
 
     // then the rest of the cycles
-    call_nodes(
-        [&](const auto &start) {
-            if (visited[start])
-                return;
-
+    call_nodes([&](const auto &start) {
+        if (!visited[start]) {
             call_sequences_from(start,
                                 callback,
                                 &visited,
                                 &discovered,
                                 &paths,
                                 &targets);
-            }
-    );
+        }
+    });
 }
 
 void DeBruijnGraph
@@ -120,12 +111,9 @@ void DeBruijnGraph
     std::stack<std::tuple<node_index, node_index, std::string, char>> paths;
     std::vector<std::pair<node_index, char>> targets;
 
-    // linear paths first
-    call_nodes(
-        [&](const auto &start) {
-            if (visited[start] || indegree(start))
-                return;
-
+    // first, process start nodes (without incoming edges)
+    call_nodes([&](const auto &start) {
+        if (!visited[start] && !indegree(start)) {
             call_sequences_from(start,
                                 callback,
                                 &visited,
@@ -134,15 +122,12 @@ void DeBruijnGraph
                                 &targets,
                                 true,
                                 max_pruned_dead_end_size);
-            }
-    );
+        }
+    });
 
-    // then branch points
-    call_nodes(
-        [&](const auto &start) {
-            if (visited[start] || outdegree(start) == 1)
-                return;
-
+    // then forks
+    call_nodes([&](const auto &start) {
+        if (!visited[start] && outdegree(start) > 1) {
             call_sequences_from(start,
                                 callback,
                                 &visited,
@@ -151,15 +136,12 @@ void DeBruijnGraph
                                 &targets,
                                 true,
                                 max_pruned_dead_end_size);
-            }
-    );
+        }
+    });
 
     // then the rest of the cycles
-    call_nodes(
-        [&](const auto &start) {
-            if (visited[start])
-                return;
-
+    call_nodes([&](const auto &start) {
+        if (!visited[start]) {
             call_sequences_from(start,
                                 callback,
                                 &visited,
@@ -168,8 +150,8 @@ void DeBruijnGraph
                                 &targets,
                                 true,
                                 max_pruned_dead_end_size);
-            }
-    );
+        }
+    });
 }
 
 
