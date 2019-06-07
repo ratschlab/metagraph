@@ -629,11 +629,12 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case ASSEMBLE: {
-            fprintf(stderr, "Usage: %s assemble [options] GRAPH\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s assemble [options] GRAPH\n"
+                            "\tAssemble contigs from de Bruijn graph and dump to compressed FASTA file.\n\n", prog_name.c_str());
 
             fprintf(stderr, "\t-o --outfile-base [STR] \t\tbasename of output file []\n");
             fprintf(stderr, "\t   --prune-end [INT] \t\t\tprune all dead ends of this length and shorter [0]\n");
-            fprintf(stderr, "\t   --unitigs \t\t\t\textract all unitigs from graph and write to compressed FASTA file [off]\n");
+            fprintf(stderr, "\t   --unitigs \t\t\t\textract unitigs [off]\n");
             fprintf(stderr, "\t   --header [STR] \t\t\theader for sequences in FASTA output []\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\t\tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");

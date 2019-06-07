@@ -558,7 +558,7 @@ mask_graph(const AnnotatedDBG &anno_graph,
         std::cout << std::endl;
     }
 
-    return std::unique_ptr<MaskedDeBruijnGraph>(new MaskedDeBruijnGraph(
+    return std::make_unique<MaskedDeBruijnGraph>(
         std::move(graph),
         annotated_graph_algorithm::mask_nodes_by_label(
             anno_graph,
@@ -569,7 +569,7 @@ mask_graph(const AnnotatedDBG &anno_graph,
                         <= config.label_mask_out_fraction * (count_in + count_out);
             }
         ).release()
-    ));
+    );
 }
 
 

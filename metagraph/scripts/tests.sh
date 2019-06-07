@@ -72,7 +72,7 @@ echo "~~~~~~~~~~~~~~~ Extract contigs  ~~~~~~~~~~~~~~~~"
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 $time $(
 for x in $DATA_PATH/*.dbg; do
-    $exe transform --to-fasta -o ${x%.dbg}.contigs $x
+    $exe assemble -o ${x%.dbg}.contigs $x
 done
 )
 
