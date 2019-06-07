@@ -25,8 +25,8 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsNoMask) {
                 [&](const auto &callback) { graph.call_sequences(callback); }
             ));
             EXPECT_EQ(graph, reconstructed)
-                << *dynamic_cast<TypeParam*>(graph.get_graph_ptr().get()) << std::endl
-                << *dynamic_cast<TypeParam*>(reconstructed.get_graph_ptr().get());
+                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
+                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
         }
         {
             MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, { "AGACACTGA"
@@ -38,8 +38,8 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsNoMask) {
                 [&](const auto &callback) { graph.call_sequences(callback); }
             ));
             EXPECT_EQ(graph, reconstructed)
-                << *dynamic_cast<TypeParam*>(graph.get_graph_ptr().get()) << std::endl
-                << *dynamic_cast<TypeParam*>(reconstructed.get_graph_ptr().get());
+                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
+                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
         }
         {
             MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, { "AGACACAGT"
@@ -51,8 +51,8 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsNoMask) {
                 [&](const auto &callback) { graph.call_sequences(callback); }
             ));
             EXPECT_EQ(graph, reconstructed)
-                << *dynamic_cast<TypeParam*>(graph.get_graph_ptr().get()) << std::endl
-                << *dynamic_cast<TypeParam*>(reconstructed.get_graph_ptr().get());
+                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
+                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
         }
         {
             MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, { "AAACTCGTAGC",
@@ -63,8 +63,8 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsNoMask) {
                 [&](const auto &callback) { graph.call_sequences(callback); }
             ));
             EXPECT_EQ(graph, reconstructed)
-                << *dynamic_cast<TypeParam*>(graph.get_graph_ptr().get()) << std::endl
-                << *dynamic_cast<TypeParam*>(reconstructed.get_graph_ptr().get());
+                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
+                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
         }
         {
             MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, { "AAACT",
@@ -75,8 +75,8 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsNoMask) {
                 [&](const auto &callback) { graph.call_sequences(callback); }
             ));
             EXPECT_EQ(graph, reconstructed)
-                << *dynamic_cast<TypeParam*>(graph.get_graph_ptr().get()) << std::endl
-                << *dynamic_cast<TypeParam*>(reconstructed.get_graph_ptr().get());
+                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
+                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
         }
     }
 }
@@ -92,8 +92,8 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsNoMask) {
                 [&](const auto &callback) { graph.call_unitigs(callback); }
             ));
             EXPECT_EQ(graph, reconstructed)
-                << *dynamic_cast<TypeParam*>(graph.get_graph_ptr().get()) << std::endl
-                << *dynamic_cast<TypeParam*>(reconstructed.get_graph_ptr().get());
+                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
+                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
         }
         {
             MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, { "AGACACTGA"
@@ -105,8 +105,8 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsNoMask) {
                 [&](const auto &callback) { graph.call_unitigs(callback); }
             ));
             EXPECT_EQ(graph, reconstructed)
-                << *dynamic_cast<TypeParam*>(graph.get_graph_ptr().get()) << std::endl
-                << *dynamic_cast<TypeParam*>(reconstructed.get_graph_ptr().get());
+                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
+                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
         }
         {
             MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, { "AGACACAGT"
@@ -118,8 +118,8 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsNoMask) {
                 [&](const auto &callback) { graph.call_unitigs(callback); }
             ));
             EXPECT_EQ(graph, reconstructed)
-                << *dynamic_cast<TypeParam*>(graph.get_graph_ptr().get()) << std::endl
-                << *dynamic_cast<TypeParam*>(reconstructed.get_graph_ptr().get());
+                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
+                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
         }
         {
             MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, { "AAACTCGTAGC",
@@ -130,8 +130,8 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsNoMask) {
                 [&](const auto &callback) { graph.call_unitigs(callback); }
             ));
             EXPECT_EQ(graph, reconstructed)
-                << *dynamic_cast<TypeParam*>(graph.get_graph_ptr().get()) << std::endl
-                << *dynamic_cast<TypeParam*>(reconstructed.get_graph_ptr().get());
+                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
+                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
         }
         {
             MaskedDeBruijnGraph graph(build_graph_batch<TypeParam>(k, { "AAACT",
@@ -142,8 +142,8 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsNoMask) {
                 [&](const auto &callback) { graph.call_unitigs(callback); }
             ));
             EXPECT_EQ(graph, reconstructed)
-                << *dynamic_cast<TypeParam*>(graph.get_graph_ptr().get()) << std::endl
-                << *dynamic_cast<TypeParam*>(reconstructed.get_graph_ptr().get());
+                << dynamic_cast<const TypeParam&>(*graph.get_graph_ptr()) << std::endl
+                << dynamic_cast<const TypeParam&>(*reconstructed.get_graph_ptr());
         }
     }
 }

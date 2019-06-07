@@ -7,7 +7,7 @@
 
 
 MaskedDeBruijnGraph
-::MaskedDeBruijnGraph(std::shared_ptr<DeBruijnGraph> graph, bitmap *mask)
+::MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph, bitmap *mask)
       : graph_(graph),
         is_target_mask_(mask) {
     if (!is_target_mask_.get())
@@ -22,7 +22,7 @@ MaskedDeBruijnGraph
 }
 
 MaskedDeBruijnGraph
-::MaskedDeBruijnGraph(std::shared_ptr<DeBruijnGraph> graph,
+::MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
                       std::function<bool(const DeBruijnGraph::node_index&)>&& callback,
                       size_t num_set_bits)
       : MaskedDeBruijnGraph(graph,

@@ -1,8 +1,6 @@
 #include "annotated_dbg.hpp"
 
 #include "annotate_row_compressed.hpp"
-#include "annotate_column_compressed.hpp"
-#include "static_annotators_def.hpp"
 
 
 AnnotatedDBG::AnnotatedDBG(std::shared_ptr<SequenceGraph> dbg,
@@ -14,16 +12,6 @@ AnnotatedDBG::AnnotatedDBG(std::shared_ptr<SequenceGraph> dbg,
         force_fast_(force_fast) {
     assert(graph_.get());
     assert(annotator_.get());
-}
-
-AnnotatedDBG& AnnotatedDBG::operator=(AnnotatedDBG&& other) noexcept {
-    thread_pool_.join();
-    other.thread_pool_.join();
-
-    graph_ = other.graph_;
-    annotator_.reset(other.annotator_.release());
-    force_fast_ = other.force_fast_;
-    return *this;
 }
 
 void AnnotatedDBG::insert_zero_rows(Annotator *annotator,

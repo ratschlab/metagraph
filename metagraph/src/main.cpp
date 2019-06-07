@@ -514,7 +514,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
 std::unique_ptr<MaskedDeBruijnGraph>
 mask_graph(const AnnotatedDBG &anno_graph,
            const Config &config) {
-    auto graph = std::dynamic_pointer_cast<DeBruijnGraph>(anno_graph.get_graph_ptr());
+    auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
 
     if (!graph.get())
         throw std::runtime_error("Masking only supported for DeBruijnGraph");

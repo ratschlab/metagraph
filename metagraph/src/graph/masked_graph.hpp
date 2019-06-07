@@ -11,9 +11,9 @@
 
 class MaskedDeBruijnGraph : public DeBruijnGraph {
   public:
-    MaskedDeBruijnGraph(std::shared_ptr<DeBruijnGraph> graph, bitmap *mask = nullptr);
+    MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph, bitmap *mask = nullptr);
 
-    MaskedDeBruijnGraph(std::shared_ptr<DeBruijnGraph> graph,
+    MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
                         std::function<bool(const DeBruijnGraph::node_index&)>&& callback,
                         size_t num_set_bits = -1);
 
@@ -77,7 +77,7 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
                const std::function<bool()> &stop_early = [](){ return false; }) const final;
 
     virtual const DeBruijnGraph& get_graph() const { return *graph_; }
-    std::shared_ptr<DeBruijnGraph> get_graph_ptr() const { return graph_; }
+    std::shared_ptr<const DeBruijnGraph> get_graph_ptr() const { return graph_; }
 
     virtual uint64_t unmasked_outdegree(node_index node) const;
 
@@ -95,7 +95,7 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     virtual const bitmap* get_mask() const { return is_target_mask_.get(); }
 
   private:
-    std::shared_ptr<DeBruijnGraph> graph_;
+    std::shared_ptr<const DeBruijnGraph> graph_;
     std::unique_ptr<bitmap> is_target_mask_;
 };
 

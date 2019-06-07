@@ -1,5 +1,8 @@
 #include "gtest/gtest.h"
 
+#define protected public
+#define private public
+
 #include "dbg_succinct.hpp"
 #include "boss.hpp"
 #include "boss_construct.hpp"
@@ -41,12 +44,12 @@ build_anno_graph(uint64_t k,
     }
 
     if (!std::is_same<Annotation, annotate::ColumnCompressed<>>::value)
-        *anno_graph = AnnotatedDBG(
-            anno_graph->get_graph_ptr(),
+        anno_graph = std::make_unique<AnnotatedDBG>(
+            std::move(anno_graph->graph_),
             std::unique_ptr<AnnotatedDBG::Annotator>(
                 annotate::convert<Annotation>(
-                    std::move(*dynamic_cast<annotate::ColumnCompressed<>*>(
-                        &anno_graph->get_annotation()
+                    std::move(dynamic_cast<annotate::ColumnCompressed<>&>(
+                        *anno_graph->annotator_
                     )
                 )).release()
             )
@@ -59,7 +62,7 @@ MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
                                        const std::vector<std::string> &ingroup,
                                        const std::vector<std::string> &outgroup) {
     return MaskedDeBruijnGraph(
-        std::static_pointer_cast<DeBruijnGraph>(anno_graph.get_graph_ptr()),
+        std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
         annotated_graph_algorithm::mask_nodes_by_label(
             anno_graph,
             ingroup, outgroup,

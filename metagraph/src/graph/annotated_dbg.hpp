@@ -19,8 +19,6 @@ class AnnotatedDBG {
                  size_t num_threads = 0,
                  bool force_fast = false);
 
-    AnnotatedDBG& operator=(AnnotatedDBG&& other) noexcept;
-
     std::vector<std::string> get_labels(node_index index) const;
 
     bool has_label(node_index index,
@@ -49,11 +47,9 @@ class AnnotatedDBG {
     bool check_compatibility() const;
 
     const SequenceGraph& get_graph() const { return *graph_; }
-    SequenceGraph& get_graph() { return *graph_; }
-    std::shared_ptr<SequenceGraph> get_graph_ptr() const { return graph_; }
+    std::shared_ptr<const SequenceGraph> get_graph_ptr() const { return graph_; }
 
     const Annotator& get_annotation() const { return *annotator_; }
-    Annotator& get_annotation() { return *annotator_; }
 
     static void insert_zero_rows(Annotator *annotator,
                                  const bit_vector_dyn &inserted_edges);
