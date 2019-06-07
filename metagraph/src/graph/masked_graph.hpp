@@ -74,7 +74,7 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
 
     virtual void
     call_nodes(const std::function<void(const node_index&)> &callback,
-               const std::function<bool()> &stop_early = [](){ return false; }) const override final;
+               const std::function<bool()> &stop_early = [](){ return false; }) const final;
 
     virtual const DeBruijnGraph& get_graph() const { return *graph_; }
     std::shared_ptr<DeBruijnGraph> get_graph_ptr() const { return graph_; }
