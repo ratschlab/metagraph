@@ -8,6 +8,8 @@
 #include <sdsl/wavelet_trees.hpp>
 #include <libmaus2/wavelet/DynamicWaveletTree.hpp>
 
+#include "bit_vector.hpp"
+
 
 class wavelet_tree {
   public:
@@ -54,9 +56,9 @@ class wavelet_tree_stat : public wavelet_tree {
     wavelet_tree_stat(uint8_t logsigma, sdsl::wt_huff<>&& wwt);
 
     wavelet_tree_stat(const wavelet_tree_stat &other);
-    wavelet_tree_stat(wavelet_tree_stat&& other);
+    wavelet_tree_stat(wavelet_tree_stat&& other) noexcept;
     wavelet_tree_stat& operator=(const wavelet_tree_stat &other);
-    wavelet_tree_stat& operator=(wavelet_tree_stat&& other);
+    wavelet_tree_stat& operator=(wavelet_tree_stat&& other) noexcept;
 
     uint64_t rank(uint64_t c, uint64_t i) const;
     uint64_t select(uint64_t c, uint64_t i) const;
@@ -90,6 +92,44 @@ class wavelet_tree_stat : public wavelet_tree {
 };
 
 
+// FYI: this, in fact, isn't a wavelet tree
+class wavelet_tree_fast : public wavelet_tree {
+    friend wavelet_tree;
+
+  public:
+    explicit wavelet_tree_fast(uint8_t logsigma,
+                               uint64_t size = 0, uint64_t value = 0);
+    template <class Vector>
+    wavelet_tree_fast(uint8_t logsigma, const Vector &vector);
+
+    uint64_t rank(uint64_t c, uint64_t i) const;
+    uint64_t select(uint64_t c, uint64_t i) const;
+    uint64_t operator[](uint64_t id) const;
+
+    uint64_t next(uint64_t id, uint64_t val) const;
+    uint64_t prev(uint64_t id, uint64_t val) const;
+
+    void set(uint64_t id, uint64_t val);
+    void insert(uint64_t id, uint64_t val);
+    void remove(uint64_t id);
+
+    uint64_t size() const { return int_vector_.size(); }
+    uint8_t logsigma() const { return int_vector_.width(); }
+
+    bool load(std::istream &in);
+    void serialize(std::ostream &out) const;
+
+    void clear();
+
+    sdsl::int_vector<> to_vector() const { return int_vector_; }
+    const sdsl::int_vector<>& get_vector() const { return int_vector_; }
+
+  private:
+    sdsl::int_vector<> int_vector_;
+    std::vector<bit_vector_stat> bitmaps_;
+};
+
+
 class wavelet_tree_dyn : public wavelet_tree {
   public:
     explicit wavelet_tree_dyn(uint8_t logsigma);
@@ -98,9 +138,9 @@ class wavelet_tree_dyn : public wavelet_tree {
     wavelet_tree_dyn(uint8_t logsigma, const Vector &vector);
 
     wavelet_tree_dyn(const wavelet_tree_dyn &other);
-    wavelet_tree_dyn(wavelet_tree_dyn&& other);
+    wavelet_tree_dyn(wavelet_tree_dyn&& other) noexcept;
     wavelet_tree_dyn& operator=(const wavelet_tree_dyn &other);
-    wavelet_tree_dyn& operator=(wavelet_tree_dyn&& other);
+    wavelet_tree_dyn& operator=(wavelet_tree_dyn&& other) noexcept;
 
     uint64_t rank(uint64_t c, uint64_t i) const;
     uint64_t select(uint64_t c, uint64_t i) const;

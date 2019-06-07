@@ -335,6 +335,8 @@ std::string Config::state_to_string(StateType state) {
             return "dynamic";
         case SMALL:
             return "small";
+        case FAST:
+            return "faster";
         default:
             assert(false);
             return "Never happens";
@@ -348,6 +350,8 @@ Config::StateType Config::string_to_state(const std::string &string) {
         return StateType::DYN;
     } else if (string == "small") {
         return StateType::SMALL;
+    } else if (string == "faster") {
+        return StateType::FAST;
     } else {
         throw std::runtime_error("Error: unknown graph state");
     }
@@ -579,7 +583,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges [off]\n");
             fprintf(stderr, "\t   --prune-end [INT] \tprune all dead ends of this length and shorter [0]\n");
-            fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: fast / dynamic / small [fast]\n");
+            fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: fast / faster / dynamic / small [fast]\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and write to compressed FASTA file [off]\n");
             fprintf(stderr, "\t   --unitigs \t\textract all unitigs from graph and write to compressed FASTA file [off]\n");
