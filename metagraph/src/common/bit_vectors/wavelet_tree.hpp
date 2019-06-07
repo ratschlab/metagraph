@@ -92,6 +92,7 @@ class wavelet_tree_stat : public wavelet_tree {
 };
 
 
+// FYI: this, in fact, isn't a wavelet tree
 class wavelet_tree_fast : public wavelet_tree {
     friend wavelet_tree;
 
@@ -121,6 +122,7 @@ class wavelet_tree_fast : public wavelet_tree {
     void clear();
 
     sdsl::int_vector<> to_vector() const { return int_vector_; }
+    const sdsl::int_vector<>& get_vector() const { return int_vector_; }
 
   private:
     sdsl::int_vector<> int_vector_;
