@@ -100,7 +100,7 @@ set(CMAKE_EXE_LINKER_FLAGS_PROFILE "-pg -g")
 set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg -g")
 
 # Debug build type
-set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g3 -ggdb")
+set(CMAKE_CXX_FLAGS_DEBUG "-O2 -g")
 
 # Link time optimization
 if(LINK_OPT)
@@ -153,7 +153,6 @@ include_directories(
   external-libraries/eigen
   external-libraries/caches/include
   external-libraries/sparsepp
-  external-libraries/sparsepp/sparsepp
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/binrel_wt/include
