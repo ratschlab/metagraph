@@ -111,7 +111,7 @@ void reference_based_test(const wavelet_tree &vector,
     auto int_vector = vector.to_vector();
     ASSERT_TRUE(std::equal(int_vector.begin(), int_vector.end(), reference.begin()));
 
-    for (uint64_t c = 0; c < (1 << vector.logsigma()); ++c) {
+    for (uint64_t c = 0; c < (uint64_t(1) << vector.logsigma()); ++c) {
         uint64_t max_rank = std::count(reference.begin(), reference.end(), c);
 
         ASSERT_DEATH(vector.select(c, 0), "");
