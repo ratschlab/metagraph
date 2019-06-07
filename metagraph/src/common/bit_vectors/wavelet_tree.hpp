@@ -119,7 +119,7 @@ class wavelet_tree_dyn : public wavelet_tree {
     sdsl::int_vector<> to_vector() const;
 
   private:
-    using dwt_type = dyn::wt_str;
+    using dwt_type = dyn::rle_str;
     dwt_type dwt_;
 };
 

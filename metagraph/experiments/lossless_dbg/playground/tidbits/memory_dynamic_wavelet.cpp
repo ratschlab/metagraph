@@ -5,10 +5,11 @@
 
 using namespace std;
 int main(int argc,char** argv) {
-    vector<int> initial_content(1'000'000,6);
-    vector<wavelet_tree_dyn> size_test(100,wavelet_tree_dyn(3,initial_content));
+    vector<int> initial_content(100'000'000,7);
+    vector<wavelet_tree_dyn> size_test(10,wavelet_tree_dyn(3,initial_content));
     return 0;
 }
+
 //
 //Starting tracking the heap
 //Dumping heap profile to /media/studenyj/Linux/wavelet.hprof.0001.heap (128 MB currently in use)
