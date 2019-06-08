@@ -170,30 +170,24 @@ void annotate_data(const std::vector<std::string> &files,
         }
         // read files
         if (utils::get_filetype(file) == "VCF") {
-            std::vector<std::string> variant_labels;
-
-            read_vcf_file_critical(
+            read_vcf_file_with_annotations_critical(
                 file,
                 ref_sequence_path,
                 dynamic_cast<const DeBruijnGraph &>(anno_graph->get_graph()).get_k(),
-                &variant_labels,
-                [&](std::string &seq, std::vector<std::string> *variant_labels) {
-                    assert(variant_labels);
+                [&](auto&& seq, const auto &variant_labels) {
+                    std::vector<std::string> labels(variant_labels.begin(),
+                                                    variant_labels.end());
 
                     if (filename_anno)
-                        variant_labels->push_back(file);
+                        labels.push_back(file);
 
                     for (const auto &label : anno_labels) {
-                        variant_labels->push_back(label);
+                        labels.push_back(label);
                     }
 
-                    anno_graph->annotate_sequence(seq, *variant_labels);
-                    if (reverse) {
-                        reverse_complement(seq.begin(), seq.end());
-                        anno_graph->annotate_sequence(seq, *variant_labels);
-                    }
-                    variant_labels->clear();
-                }
+                    anno_graph->annotate_sequence(seq, labels);
+                },
+                reverse
             );
         } else if (utils::get_filetype(file) == "KMC") {
             std::vector<std::string> labels;
@@ -709,17 +703,11 @@ void parse_sequences(const std::vector<std::string> &files,
         Timer data_reading_timer;
 
         if (utils::get_filetype(file) == "VCF") {
-            //assume VCF contains no noise
-            read_vcf_file_critical(
-                file, config.refpath, config.k, NULL,
-                [&](std::string &seq, auto *) {
-                    call_read(std::string(seq));
-                    if (config.reverse) {
-                        reverse_complement(seq.begin(), seq.end());
-                        call_read(std::string(seq));
-                    }
-                }
-            );
+            read_vcf_file_critical(file,
+                                   config.refpath,
+                                   config.k,
+                                   call_read,
+                                   config.reverse);
         } else if (utils::get_filetype(file) == "KMC") {
             bool warning_different_k = false;
             kmc::read_kmers(

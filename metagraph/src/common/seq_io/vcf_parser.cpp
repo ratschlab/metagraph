@@ -1,156 +1,174 @@
 #include "vcf_parser.hpp"
 
+#include <fstream>
+#include <memory>
+#include <filesystem>
+
 
 static char passfilt[] = "PASS";
 
 
-vcf_parser::~vcf_parser() {
-    if (sw_)
-        bcf_sweep_destroy(sw_);
-    if (reference_)
-        fai_destroy(reference_);
+VCFParser::~VCFParser() {
+    bcf_sweep_destroy(sw_);
+    fai_destroy(reference_);
 }
 
-bool vcf_parser::init(const std::string &reference_file,
-                      const std::string &vcf_file, int k) {
-    assert(!reference_ && "Not initialized");
+VCFParser::VCFParser(const std::string &reference_file,
+                     const std::string &vcf_file,
+                     int k)
+      : k_(k) {
+    if (!std::filesystem::exists(reference_file))
+        throw std::runtime_error("Failed to load reference file. Not found");
 
-    if (!(reference_ = fai_load(reference_file.c_str()))) {
-        fprintf(stderr, "Failed to read reference\n");
-        return false;
-    }
+    if (!std::filesystem::exists(vcf_file))
+        throw std::runtime_error("Failed to load VCF. Not found");
 
-    if (!(sw_ = bcf_sweep_init(vcf_file.c_str()))) {
-        fprintf(stderr, "Failed to read VCF\n");
-        return false;
-    }
+    if (!(reference_ = fai_load(reference_file.c_str())))
+        throw std::ifstream::failure("Failed to read reference");
 
-    k_ = k;
+    if (!(sw_ = bcf_sweep_init(vcf_file.c_str())))
+        throw std::ifstream::failure("Failed to read VCF");
 
     hdr_ = bcf_sweep_hdr(sw_);
 
-    if (!read_next_line()) {
-        fprintf(stderr, "Empty VCF file\n");
-        return false;
-    }
+    read_next_line();
 
     int nseq = 0;
+
+    // this is easier to read than the equivalent unique_ptr code
     auto **seq_names = bcf_hdr_seqnames(hdr_, &nseq);
     seq_names_.assign(seq_names, seq_names + nseq);
     free(seq_names);
-
-    return true;
 }
 
-void vcf_parser::print_line() {
-    if (!rec_)
-        return;
-
-    fprintf(stdout, "%s\t%d\t%d\t%d\t%d",
-            hdr_->id[BCF_DT_CTG][rec_->rid].key, //contig name
-            hdr_->id[BCF_DT_CTG][rec_->rid].val->info[0], //contig length
-            rec_->rid, //contig id
-            rec_->pos + 1, //1-based coordinate
-            rec_->n_allele //number of alleles
-    );
+void VCFParser::print_line(std::ostream &out) {
+    if (rec_) {
+        out << hdr_->id[BCF_DT_CTG][rec_->rid].key << "\t"          //contig name
+            << hdr_->id[BCF_DT_CTG][rec_->rid].val->info[0] << "\t" //contig length
+            << rec_->rid << "\t"                                    //contig id
+            << rec_->pos + 1 << "\t"                                //1-based coordinate
+            << rec_->n_allele;                                      //number of alleles
+    }
 }
 
-bool vcf_parser::get_seq(const std::vector<std::string> &annots,
-                         std::vector<std::string> *annotation) {
+void VCFParser::call_sequences(std::function<void(std::string&&)> callback,
+                               std::function<bool()> terminate) {
     while (rec_) {
-        curi++;
-        if (curi >= rec_->n_allele || !bcf_has_filter(hdr_, rec_, passfilt)) {
+        current_line_++;
+        if (current_line_ >= rec_->n_allele || !bcf_has_filter(hdr_, rec_, passfilt)) {
             read_next_line();
             continue;
         }
-        std::string curalt;
-        if (rec_->d.allele[curi][0] == '<') {
+
+        if (rec_->d.allele[current_line_][0] == '<') {
+            std::string variant;
             //if this is of the form <CN#>, then it's a copy number variation
             //otherwise, crash
-            if (rec_->d.allele[curi][1] != 'C' || rec_->d.allele[curi][2] != 'N') {
+            if (rec_->d.allele[current_line_][1] != 'C'
+                    || rec_->d.allele[current_line_][2] != 'N') {
                 //TODO: HANDLE RETROTRANSPOSONS PROPERLY
                 fprintf(stderr, "Can't handle this type of variant, skipping: %s\n",
-                                rec_->d.allele[curi]);
+                                rec_->d.allele[current_line_]);
                 read_next_line();
                 continue;
                 //exit(1);
             }
             //replace <CN#> with # copies of the ref allele
+            //fprintf(stderr, "%s\n", rec_->d.allele[current_line_]);
+            rec_->d.allele[current_line_][strlen(rec_->d.allele[current_line_]) - 1] = 0;
             //fprintf(stderr, "%s\n", rec_->d.allele[curi]);
-            rec_->d.allele[curi][strlen(rec_->d.allele[curi]) - 1] = 0;
-            //fprintf(stderr, "%s\n", rec_->d.allele[curi]);
-            size_t cn = atol(rec_->d.allele[curi] + 3);
+            size_t cn = atol(rec_->d.allele[current_line_] + 3);
 
+            // TODO: better way to do this
             while (cn--) {
-                curalt += rec_->d.allele[0];
+                variant += rec_->d.allele[0];
             }
-            //fprintf(stderr, "\n%u\n%s\n%s\n", cn, rec_->d.allele[0], curalt);
+
+            callback(prefix_ + variant + suffix_);
+            //fprintf(stderr, "\n%u\n%s\n%s\n", cn, rec_->d.allele[0], variant);
         } else {
-            curalt = rec_->d.allele[curi];
+            callback(prefix_ + rec_->d.allele[current_line_] + suffix_);
         }
 
-        //construct sequence
-        seq = kmer1_ + curalt + kmer3_;
-        if (!annotation)
-            return true;
-
-        //annotation is a bit vector indicating inclusion in the different ethnic groups
-        //the first bit is always 1. if not, then the file is done and no sequence was output
-        //TODO: check if these annots are part of the INFO, if not, check genotypes
-        //ngt = bcf_get_genotypes(sr->readers[0].header, line0, &gt_arr, &ngt_arr); //get genotypes
-        //annot=1;
-        annotation->emplace_back(seq_names_[rec_->rid]);
-        for (const auto &annot : annots) {
-            bcf_info_t *curinfo = bcf_get_info(hdr_, rec_, annot.c_str());
-            if (curinfo && curinfo->v1.i) {
-                annotation->emplace_back(annot);
-            }
-        }
-
-        if ((bcf_get_fmt(hdr_, rec_, "GT"))) {
-            int32_t *gt_arr = NULL, ngt_arr = 0;
-            int ngt = bcf_get_genotypes(hdr_, rec_, &gt_arr, &ngt_arr);
-            int nsmpl = bcf_hdr_nsamples(hdr_);
-            int ploidy = ngt / nsmpl;
-            for (int i = 0; i < nsmpl; ++i) {
-                int cur = 0;
-                for (int j = 0; j < ploidy; ++j) {
-                    cur |= gt_arr[i * ploidy + j];
-                }
-                if ((cur & 5) == 5) {
-                    //at least one parent has this allele
-                    annotation->emplace_back(hdr_->samples[i]);
-                }
-            }
-            if (gt_arr)
-                free(gt_arr);
-        }
-
-        return true;
+        if (terminate())
+            return;
     }
-    return false;
 }
 
-bool vcf_parser::read_next_line() {
+void VCFParser
+::call_annotated_sequences(std::function<void(std::string&&,
+                                              const std::vector<std::string>&)> callback,
+                           const std::vector<std::string> &annots,
+                           std::function<bool()> terminate) {
+    call_sequences(
+        [&](auto&& sequence) {
+            parse_annotation_from_vcf(annots);
+            callback(std::move(sequence), annotation_);
+        },
+        terminate
+    );
+}
+
+//annotation is a bit vector indicating inclusion in the different ethnic groups
+//the first bit is always 1. if not, then the file is done and no sequence was output
+//TODO: check if these annots are part of the INFO, if not, check genotypes
+//ngt = bcf_get_genotypes(sr->readers[0].header, line0, &gt_arr, &ngt_arr); //get genotypes
+//annot=1;
+void VCFParser::parse_annotation_from_vcf(const std::vector<std::string> &annots) {
+    annotation_.clear();
+    annotation_.emplace_back(seq_names_.at(rec_->rid));
+    for (const auto &annot : annots) {
+        bcf_info_t *curinfo = bcf_get_info(hdr_, rec_, annot.c_str());
+        if (curinfo && curinfo->v1.i) {
+            annotation_.emplace_back(annot);
+        }
+    }
+
+    if ((bcf_get_fmt(hdr_, rec_, "GT"))) {
+        int32_t *gt_arr = NULL, ngt_arr = 0;
+        int ngt = bcf_get_genotypes(hdr_, rec_, &gt_arr, &ngt_arr);
+        int nsmpl = bcf_hdr_nsamples(hdr_);
+        int ploidy = ngt / nsmpl;
+        for (int i = 0; i < nsmpl; ++i) {
+            int cur = 0;
+            for (int j = 0; j < ploidy; ++j) {
+                cur |= gt_arr[i * ploidy + j];
+            }
+            if ((cur & 5) == 5) {
+                //at least one parent has this allele
+                annotation_.emplace_back(hdr_->samples[i]);
+            }
+        }
+        if (gt_arr)
+            free(gt_arr);
+    }
+}
+
+bool VCFParser::read_next_line() {
     if (!(rec_ = bcf_sweep_fwd(sw_)))
         return false;
 
-    curi = 0;
+    current_line_ = 0;
     bcf_unpack(rec_, BCF_UN_FLT);
 
     uint32_t ref_callele_l = strlen(rec_->d.allele[0]);
+
     int len;
     auto first = faidx_fetch_seq(reference_,
-                               hdr_->id[BCF_DT_CTG][rec_->rid].key,
-                               rec_->pos - k_,
-                               rec_->pos - 1, &len);
-    kmer1_.assign(first, len);
+                                 hdr_->id[BCF_DT_CTG][rec_->rid].key,
+                                 rec_->pos - k_,
+                                 rec_->pos - 1,
+                                 &len);
+    prefix_.assign(first, len);
     free(first);
+
     auto second = faidx_fetch_seq(reference_,
-                               hdr_->id[BCF_DT_CTG][rec_->rid].key,
-                               rec_->pos + ref_callele_l,
-                               rec_->pos + ref_callele_l - 1 + k_, &len);
-    kmer3_.assign(second, len);
+                                  hdr_->id[BCF_DT_CTG][rec_->rid].key,
+                                  rec_->pos + ref_callele_l,
+                                  rec_->pos + ref_callele_l - 1 + k_,
+                                  &len);
+    suffix_.assign(second, len);
     free(second);
+
     return true;
 }

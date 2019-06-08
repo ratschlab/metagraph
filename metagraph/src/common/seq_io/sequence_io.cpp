@@ -170,25 +170,51 @@ void read_fasta_from_string(const std::string &fasta_flat,
 void read_vcf_file_critical(const std::string &filename,
                             const std::string &ref_filename,
                             size_t k,
-                            std::vector<std::string> *annotation,
-                            std::function<void(std::string &,
-                                               std::vector<std::string> *)> callback) {
+                            std::function<void(std::string&&)> callback,
+                            bool with_reverse) {
+    VCFParser vcf(ref_filename, filename, k);
+
+    if (with_reverse) {
+        vcf.call_sequences(
+            [&](auto&& sequence) {
+                callback(std::string(sequence.begin(), sequence.end()));
+                reverse_complement(sequence.begin(), sequence.end());
+                callback(std::move(sequence));
+            }
+        );
+    } else {
+        vcf.call_sequences(callback);
+    }
+}
+
+void read_vcf_file_with_annotations_critical(
+      const std::string &filename,
+      const std::string &ref_filename,
+      size_t k,
+      std::function<void(std::string&&,
+                         const std::vector<std::string>&)> callback,
+      bool with_reverse
+    ) {
     //TODO: make this a configurable option
     //default list of tokens to extract as annotations
     //TODO: extract these guys directly from vcf parsed
     const std::vector<std::string> annots = {
-      "AC_AFR", "AC_EAS", "AC_AMR", "AC_ASJ",
-      "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"
+        "AC_AFR", "AC_EAS", "AC_AMR", "AC_ASJ",
+        "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"
     };
 
-    vcf_parser vcf;
-    if (!vcf.init(ref_filename, filename, k)) {
-        std::cerr << "ERROR reading VCF " << filename << std::endl;
-        exit(1);
-    }
-    size_t seq_count = 0;
-    while (vcf.get_seq(annots, annotation)) {
-        callback(vcf.seq, annotation);
-        seq_count++;
+    VCFParser vcf(ref_filename, filename, k);
+
+    if (with_reverse) {
+        vcf.call_annotated_sequences(
+            [&](auto&& sequence, const auto &annotation) {
+                callback(std::string(sequence.begin(), sequence.end()), annotation);
+                reverse_complement(sequence.begin(), sequence.end());
+                callback(std::move(sequence), annotation);
+            },
+            annots
+        );
+    } else {
+        vcf.call_annotated_sequences(callback, annots);
     }
 }

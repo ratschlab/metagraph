@@ -28,9 +28,15 @@ void read_fasta_file_critical(const std::string &filename,
 void read_vcf_file_critical(const std::string &filename,
                             const std::string &ref_filename,
                             size_t k,
-                            std::vector<std::string> *annotation,
-                            std::function<void(std::string&,
-                                               std::vector<std::string>*)> callback);
+                            std::function<void(std::string&&)> callback,
+                            bool with_reverse = false);
+
+void read_vcf_file_with_annotations_critical(const std::string &filename,
+                                             const std::string &ref_filename,
+                                             size_t k,
+                                             std::function<void(std::string&&,
+                                                                const std::vector<std::string>&)> callback,
+                                             bool with_reverse = false);
 
 void read_fasta_from_string(const std::string &fasta_flat,
                             std::function<void(kseq_t*)> callback,
