@@ -38,8 +38,7 @@ TEST(dbg_aligner, align_single_node) {
     auto path = alt_paths.front();
 
     EXPECT_EQ(1ull, path.size());
-    EXPECT_EQ(1ull, path.front().size());
-    EXPECT_EQ("CAT", path.front().get_sequence());
+    EXPECT_EQ("CAT", path.get_sequence());
 }
 
 TEST(dbg_aligner, inexact_seeding) {
@@ -55,9 +54,8 @@ TEST(dbg_aligner, inexact_seeding) {
     EXPECT_EQ(1ull, alt_paths.size());
     auto path = alt_paths.front();
 
-    EXPECT_EQ(1ull, path.size());
-    EXPECT_EQ(4ull, path.front().size());
-    EXPECT_EQ("TGTTTT", path.front().get_sequence());
+    EXPECT_EQ(4ull, path.size());
+    EXPECT_EQ("TGTTTT", path.get_sequence());
 }
 
 TEST(dbg_aligner, align_straight) {
@@ -73,18 +71,16 @@ TEST(dbg_aligner, align_straight) {
     EXPECT_EQ(1ull, alt_paths.size());
     auto path = alt_paths.front();
 
-    EXPECT_EQ(1ull, path.size());
-    EXPECT_EQ(query.size() - k + 1, path.front().size());
-    EXPECT_EQ(query, path.front().get_sequence());
-    EXPECT_EQ(query.size() * aligner.get_match_score(), path.front().get_total_score());
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(query, path.get_sequence());
+    EXPECT_EQ(query.size() * aligner.get_match_score(), path.get_total_score());
 }
 
 TEST(dbg_aligner, align_ending_branch) {
     size_t k = 4;
     std::string reference_1 = "AGCTTCGAA";
     std::string reference_2 = "AGCTTCGAC";
-    // Query is the same as the second reference.
-    std::string query =       "AGCTTCGAC";
+    std::string query = reference_2;
 
     auto graph = std::make_shared<Graph>(k);
     graph->add_sequence(reference_1);
@@ -95,9 +91,8 @@ TEST(dbg_aligner, align_ending_branch) {
     EXPECT_EQ(1ull, alt_paths.size());
     auto path = alt_paths.front();
 
-    EXPECT_EQ(1ull, path.size());
-    EXPECT_EQ(query.size() - k + 1, path.front().size());
-    EXPECT_EQ(query, path.front().get_sequence());
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(query, path.get_sequence());
 }
 
 TEST(dbg_aligner, align_branch) {
@@ -115,9 +110,8 @@ TEST(dbg_aligner, align_branch) {
     EXPECT_EQ(1ull, alt_paths.size());
     auto path = alt_paths.front();
 
-    EXPECT_EQ(1ull, path.size());
-    EXPECT_EQ(query.size() - k + 1, path.front().size());
-    EXPECT_EQ(query, path.front().get_sequence());
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(query, path.get_sequence());
 }
 
 TEST(dbg_aligner, repetitive_sequence_alignment) {
@@ -133,9 +127,8 @@ TEST(dbg_aligner, repetitive_sequence_alignment) {
     EXPECT_EQ(1ull, alt_paths.size());
     auto path = alt_paths.front();
 
-    EXPECT_EQ(1ull, path.size());
-    EXPECT_EQ(query.size() - k + 1, path.front().size());
-    EXPECT_EQ(query, path.front().get_sequence());
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(query, path.get_sequence());
 }
 
 TEST(dbg_aligner, variation) {
@@ -151,9 +144,8 @@ TEST(dbg_aligner, variation) {
     EXPECT_EQ(1ull, alt_paths.size());
     auto path = alt_paths.front();
 
-    EXPECT_EQ(1ull, path.size());
-    EXPECT_EQ(query.size() - k + 1, path.front().size());
-    EXPECT_EQ(reference, path.front().get_sequence());
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(reference, path.get_sequence());
 }
 
 TEST(dbg_aligner, variation_in_branching_point) {
@@ -171,11 +163,10 @@ TEST(dbg_aligner, variation_in_branching_point) {
     EXPECT_EQ(1ull, alt_paths.size());
     auto path = alt_paths.front();
 
-    EXPECT_EQ(1ull, path.size());
-    EXPECT_EQ(query.size() - k + 1, path.front().size());
-    EXPECT_TRUE(path.front().get_sequence().compare(reference_1) == 0 ||
-                path.front().get_sequence().compare(reference_2) == 0)
-        << "Path: " << path.front().get_sequence() << std::endl
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_TRUE(path.get_sequence().compare(reference_1) == 0 ||
+                path.get_sequence().compare(reference_2) == 0)
+        << "Path: " << path.get_sequence() << std::endl
         << "Ref1: " << reference_1 << std::endl
         << "Ref2: " << reference_2 << std::endl;
 }
@@ -193,9 +184,8 @@ TEST(dbg_aligner, multiple_variations) {
     EXPECT_EQ(1ull, alt_paths.size());
     auto path = alt_paths.front();
 
-    EXPECT_EQ(1ull, path.size());
-    EXPECT_EQ(query.size() - k + 1, path.front().size());
-    EXPECT_EQ(reference, path.front().get_sequence());
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(reference, path.get_sequence());
 }
 
 TEST(dbg_aligner, noise_in_branching_point) {
@@ -213,11 +203,10 @@ TEST(dbg_aligner, noise_in_branching_point) {
     EXPECT_EQ(1ull, alt_paths.size());
     auto path = alt_paths.front();
 
-    EXPECT_EQ(1ull, path.size());
-    EXPECT_EQ(query.size() - k + 1, path.front().size());
-    EXPECT_EQ(reference_1, path.front().get_sequence());
-    EXPECT_EQ((query.size() - 1) * aligner.get_match_score() - 1, path.front().get_total_score());
-    EXPECT_EQ("4=1X6=", path.front().get_cigar());
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(reference_1, path.get_sequence());
+    EXPECT_EQ((query.size() - 1) * aligner.get_match_score() - 1, path.get_total_score());
+    EXPECT_EQ("4=1X6=", path.get_cigar());
 }
 
 TEST(dbg_aligner, alternative_path_basic) {
@@ -238,13 +227,11 @@ TEST(dbg_aligner, alternative_path_basic) {
 
     EXPECT_EQ(max_num_alternative_paths, alt_paths.size());
 
-    size_t min_expected_score = (query.size() - 4) * aligner.get_match_score();
-    for (size_t i = 0; i < alt_paths.size(); ++i) {
-        auto path = alt_paths[i];
-        EXPECT_TRUE(path.front().get_total_score() >= min_expected_score);
-        std::cerr << "i: " << i << " score: " << path.front().get_total_score()
-            << " path sequence: " << path.front().get_sequence() << std::endl;
-    }
+    // TODO: how to test alternative paths?
+//    for (size_t i = 0; i < alt_paths.size(); ++i) {
+//        auto path = alt_paths[i];
+//        EXPECT_TRUE(path.get_total_score() >= min_expected_score);
+//    }
 }
 
 TEST(dbg_aligner, large_search_space) {
@@ -275,41 +262,10 @@ TEST(dbg_aligner, large_search_space) {
     std::string aligned_query(query);
     std::replace(aligned_query.begin(), aligned_query.end(), 'C' , 'T');
 
-    EXPECT_EQ(2ull, path.size());
-    EXPECT_EQ(1ull, path.front().size());
-    EXPECT_EQ("AAA", path.front().get_sequence());
-    EXPECT_EQ(k * aligner.get_match_score(), path.front().get_total_score());
-    EXPECT_EQ(0ull, path.back().size());
-    EXPECT_EQ("", path.back().get_sequence());
-}
-
-TEST(dbg_aligner, large_gap) {
-    size_t k = 10;
-    std::string reference = "AAAAAAAAAA" "TTTTTTTTTTAAAAATTTTTATATATAATTAATTAA";
-    reference +=            "TTTAAATTTTATTATTAATTAAAATATTTAGGTGTGGGGGGGGG" "CCCCCCCCCC" "CGCGCGCGCGC";
-    std::string query =     "AAAAAAAAAA";
-    query +=                "CCCCCCCCCC";
-    query +=                "CGCGCGCGCG";
-
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference);
-    DBGAligner aligner(graph);
-    auto alt_paths = aligner.align(std::begin(query), std::end(query));
-
-    EXPECT_EQ(1ull, alt_paths.size());
-    auto path = alt_paths.front();
-
-    EXPECT_EQ(2ull, path.size());
-
-    auto path_seq = path.front().get_sequence();
-    EXPECT_EQ(query.substr(0, k), path_seq);
-    EXPECT_EQ(std::begin(query), path.front().get_query_begin_it());
-    EXPECT_EQ(k * aligner.get_match_score(), path.front().get_total_score());
-
-    path_seq = path.back().get_sequence();
-    EXPECT_EQ(query.substr(query.size() - 2 * k), path_seq);
-    EXPECT_EQ(std::end(query) - 2 * k, path.back().get_query_begin_it());
-    EXPECT_EQ(2 * k * aligner.get_match_score(), path.back().get_total_score());
+    EXPECT_EQ(1ull, path.size());
+    EXPECT_EQ("AAA", path.get_sequence());
+    EXPECT_EQ(k * aligner.get_match_score(), path.get_total_score());
+//    EXPECT_EQ("", path.back().get_sequence());
 }
 
 TEST(dbg_aligner, map_to_nodes_multiple_misalignment) {
@@ -342,23 +298,19 @@ TEST(dbg_aligner, map_to_nodes_insert_non_existent) {
     EXPECT_EQ(reference, path.get_sequence());
 }
 
-TEST(dbg_aligner, map_to_nodes_insert) {
-    size_t k = 4;
-    // NOTE: very challenging pair of reference and query!
-    // Should keep it as is. Negative overlap.
-    // The problem with graphs.
-    std::string reference = "TTCGGA"     "TATGGAC";
-    std::string query =     "TTCGGA" "C" "TATGGAC";
-
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference);
-    graph->mask_dummy_kmers(1, false);
-    DBGAligner aligner(graph);
-    auto path = aligner.map_to_nodes(query);
-
-    EXPECT_EQ(query.size() - k + 1, path.size());
-    EXPECT_EQ("TTCGGACTNNGGAC", path.get_sequence());
-}
+//TEST(dbg_aligner, map_to_nodes_inverse_stitching) {
+//    size_t k = 4;
+//    std::string reference = "TTCGGA"     "TATGGAC";
+//    std::string query =     "TTCGGA" "C" "TATGGAC";
+//
+//    auto graph = std::make_shared<Graph>(k);
+//    graph->add_sequence(reference);
+//    graph->mask_dummy_kmers(1, false);
+//    DBGAligner aligner(graph);
+//    auto path = aligner.map_to_nodes(query);
+//
+//    EXPECT_EQ(reference, path.get_sequence());
+//}
 
 TEST(dbg_aligner, map_to_nodes_delete) {
     size_t k = 4;
@@ -410,8 +362,6 @@ TEST(dbg_aligner, map_to_nodes_straight) {
 TEST(dbg_aligner, map_to_nodes_inexact_seed) {
     size_t k = 4;
     std::string reference = "AGCTTCGAGGCCAA";
-    // Query starts with two unmappable kmers.
-    // The rest of the query is the same as the reference.
     std::string query =     "TT";
     query += reference;
 

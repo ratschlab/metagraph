@@ -13,14 +13,33 @@ class Path {
 
   public:
     Path(uint64_t k, std::string::const_iterator query_begin_it,
-         std::string::const_iterator query_it) :
+         std::string::const_iterator query_it,
+         uint8_t prioritizing_function_code) :
             k_(k),
             query_begin_it_(query_begin_it),
             query_it_(query_it) {
         score_ = 0.0;
         num_matches_ = 0;
         is_similar_ = false;
-        is_score_updated_ = false; }
+        is_score_updated_ = false;
+
+        assert(prioritizing_function_code >= 0 && prioritizing_function_code <= 2);
+        switch (prioritizing_function_code) {
+            case 0:
+                prioritizing_function = total_score_less_than;
+                break;
+            case 1:
+                prioritizing_function = normalized_score_less_than;
+                break;
+            case 2:
+                prioritizing_function = num_matches_less_than;
+                break;
+            default:
+                std::cout << "Warning: Prioritizing function is not set properly in path construction."
+                          << std::endl << "Setting it to default (total score comparison)." << std::endl;
+                prioritizing_function = total_score_less_than;
+            }
+        }
 
     Path(const Path&) = default;
     Path(Path&&) = default;
@@ -43,13 +62,8 @@ class Path {
     // Append a path to the current object. Fills in 0 in case of spaced nodes.
     // Avoid adding duplicate nodes and chars in case of positive overlap.
     void append_path(const Path& path, int64_t overlap_length, float score) {
-        assert(path.nodes_.size() - overlap_length >= 0);
-        // TODO: Properly close the gap.
-        // Example test case in dbg_aligner.map_to_nodes_jump and dbg_aligner.map_to_nodes_insert.
-        while (overlap_length < 0) {
-            extend(0, {}, 'N', 0);
-            ++ overlap_length;
-        }
+        assert(path.nodes_.size() > overlap_length);
+        assert(overlap_length >= 0);
         nodes_.insert(std::end(nodes_), std::begin(path.nodes_) + overlap_length, std::end(path.nodes_));
         sequence_ += path.sequence_.substr(k_ - 1 + overlap_length);
         label_set_.insert(std::end(label_set_), std::begin(path.label_set_),
@@ -107,15 +121,9 @@ class Path {
     bool get_similar() const { return is_similar_; }
     bool is_score_updated() const { return is_score_updated_; }
     StripedSmithWaterman::Alignment get_alignment() { return alignment_; }
-    // The paths are sorted in BoundedPriorityQueue in increasing order of score
-    // per number of nodes. This gives paths with lower absolute score, but higher
-    // score per node to appear at the top of the queue.
+
     bool operator< (const Path &other) const {
-        //return ((this->num_matches_ + this->score_)/this->size() < (other.num_matches_ + other.score_)/other.size());
-        //return (this->num_matches_/this->size() < other.num_matches_/other.size());
-        //return (this->score_/this->size() < other.score_/other.size());
-        //return (this->score_ < other.score_);
-        return (this->score_ + this->num_matches_ < other.score_ + other.num_matches_);
+        return prioritizing_function(*this, other);
     }
 
   private:
@@ -131,6 +139,7 @@ class Path {
     uint64_t num_matches_;
     bool is_score_updated_;
     StripedSmithWaterman::Alignment alignment_;
+    std::function<bool(const Path&, const Path&)> prioritizing_function;
 
     void push_back(NodeType node, const VLabels &labels, float score=0) {
         nodes_.push_back(node);
@@ -139,6 +148,14 @@ class Path {
                           std::end(labels));
         ++ query_it_;
     }
+
+    // Functions to Prioritize paths.
+    static bool total_score_less_than (const Path& first, const Path& second) {
+        return (first.score_ < second.score_); }
+    static bool normalized_score_less_than (const Path& first, const Path& second) {
+        return (first.score_/float(first.size()) < second.score_/float(second.size())); }
+    static bool num_matches_less_than (const Path& first, const Path& second) {
+        return (first.num_matches_ < second.num_matches_); }
 
 };
 

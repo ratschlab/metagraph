@@ -37,6 +37,7 @@ class DBGAligner {
     DBGAligner(std::shared_ptr<DeBruijnGraph> graph,
                size_t num_top_paths = 10,
                size_t num_alternative_paths = 1,
+               uint8_t path_comparison_code = 0,
                bool verbose = false,
                bool discard_similar_paths = false,
                float insertion_penalty = 3,
@@ -51,7 +52,7 @@ class DBGAligner {
     DBGAligner& operator= (DBGAligner&&) = default;
 
     // Align a sequence to the underlying graph based on the strategy defined in the graph.
-    std::vector<std::vector<AlignedPath>> align(const std::string::const_iterator &sequence_begin,
+    std::vector<AlignedPath> align(const std::string::const_iterator &sequence_begin,
         const std::string::const_iterator &sequence_end,
         const std::function<bool(node_index, const std::string::const_iterator& query_it)>& terminate
             = [](node_index, const std::string::const_iterator&) { return false; });
@@ -72,6 +73,7 @@ class DBGAligner {
     // Maximum number of paths to explore at the same time.
     size_t num_top_paths_;
     size_t num_alternative_paths_;
+    uint8_t path_comparison_code_;
     bool verbose_;
     bool discard_similar_paths_;
     int8_t match_score_;

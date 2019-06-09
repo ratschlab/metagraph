@@ -144,6 +144,8 @@ Config::Config(int argc, const char *argv[]) {
             alignment_length = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--align-num-paths")) {
             alignment_num_top_paths = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--align-path-comparison-function")) {
+            aligner_path_comparison_code = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
             frequency = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--distance")) {
@@ -596,6 +598,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --count-kmers \t\tquery the number of k-mers discovered [off]\n");
             fprintf(stderr, "\t   --align-length [INT]\t\tlength of subsequences to align [k]\n");
             fprintf(stderr, "\t   --align-num-paths [INT]\t\tnumber of parallel paths to explore at any point [10]\n");
+            fprintf(stderr, "\t   --align-path-comparison-function [INT]\t\tthe function to compare paths while aligning. Set to 0, 1 or to for total path score, normalized path score and number of exactly mapped basepairs comparison respectively [0]\n");
             fprintf(stderr, "\t   --discard-similar-paths \t\tearly discard any path if a similar path with higher score was observed before. Similar paths that begin from same node, diverge and meet again such as two paths with a SNP in same location and meet before and after the SNP. [off]\n");
             fprintf(stderr, "\t-d --distance [INT] \t\tmax allowed alignment distance [0]\n");
         } break;

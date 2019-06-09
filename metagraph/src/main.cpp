@@ -862,7 +862,6 @@ std::string form_client_reply(const std::string &received_message,
     }
 }
 
-
 int main(int argc, const char *argv[]) {
     std::unique_ptr<Config> config { new Config(argc, argv) };
 
@@ -2367,9 +2366,8 @@ int main(int argc, const char *argv[]) {
             std::cout << "Align sequences against the de Bruijn graph with k="
                       << dbg_succinct_graph->get_k() << std::endl;
 
-            // TODO: Find the best annotator type and set it.
             DBGAligner aligner(dbg_succinct_graph, config->alignment_num_top_paths,
-                               /*num_alternative_paths=*/1,
+                               /*num_alternative_paths=*/1, config->aligner_path_comparison_code,
                                config->verbose, config->discard_similar_paths);
             Timer timer;
             for (const auto &file : files) {
@@ -2381,6 +2379,7 @@ int main(int argc, const char *argv[]) {
                     std::cout << "Error: Cannot open file " << alignment_output_file << std::endl;
                     exit(1);
                 }
+                outstream << "#Alignments are reported in one line (tab separated): query string, aligned path string, total score, and cigar.\n";
                 Timer data_reading_timer;
 
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
@@ -2395,9 +2394,9 @@ int main(int argc, const char *argv[]) {
                                   << std::endl;
                         std::cout << "Q: " << query << "\nP: " << path.get_sequence() << std::endl;
                     }
-                    outstream << "Q: " << query << "\nP: " << path.get_sequence() << std::endl
-                              << "With total score " << path.get_total_score()
-                              << " and cigar " << path.get_cigar() << std::endl;
+                    outstream << query << "\t" << path.get_sequence()
+                              << "\t" << path.get_total_score()
+                              << "\t" << path.get_cigar() << std::endl;
                 }, config->reverse,
                     get_filter_filename(file, config->filter_k,
                                         config->min_count - 1,

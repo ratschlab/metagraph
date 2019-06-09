@@ -41,6 +41,8 @@ class Config {
     bool call_bubbles = false;
     bool discard_similar_paths = false;
 
+    uint8_t aligner_path_comparison_code = 0;
+
     unsigned int k = 3;
     unsigned int filter_k = 3;
     unsigned int distance = 0;
