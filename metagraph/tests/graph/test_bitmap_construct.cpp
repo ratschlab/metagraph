@@ -37,7 +37,7 @@ const int kMaxK = sizeof(KMER) * 8 / KmerExtractor2Bit::bits_per_char - 1;
 const KmerExtractor2Bit kmer_extractor;
 
 
-TEST(Construct_SD_64, ConstructionNEAppendingSimplePath) {
+TEST(DBGBitmapConstruct, ConstructionNEAppendingSimplePath) {
     for (size_t k = 2; k <= kMaxK; ++k) {
         DBGBitmapConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A') });
@@ -51,7 +51,7 @@ TEST(Construct_SD_64, ConstructionNEAppendingSimplePath) {
     }
 }
 
-TEST(Construct_SD_64, ConstructionNEAppendingTwoPaths) {
+TEST(DBGBitmapConstruct, ConstructionNEAppendingTwoPaths) {
     for (size_t k = 2; k <= kMaxK; ++k) {
         DBGBitmapConstructor constructor(k);
         constructor.add_sequences({ std::string(100, 'A'),
@@ -69,7 +69,7 @@ TEST(Construct_SD_64, ConstructionNEAppendingTwoPaths) {
 
 // TODO
 /*
-TEST(Construct_SD_64, ConstructionLowerCase) {
+TEST(DBGBitmapConstruct, ConstructionLowerCase) {
     for (size_t k = 2; k <= kMaxK; ++k) {
         DBGBitmapConstructor constructor_first(k);
         constructor_first.add_sequences({ std::string(100, 'A'),
@@ -90,7 +90,7 @@ TEST(Construct_SD_64, ConstructionLowerCase) {
 }
 */
 
-TEST(Construct_SD_64, ConstructionEQAppending) {
+TEST(DBGBitmapConstruct, ConstructionEQAppending) {
     for (size_t k = 2; k <= kMaxK; ++k) {
         std::vector<std::string> input_data = {
             "ACAGCTAGCTAGCTAGCTAGCTG",
@@ -115,7 +115,7 @@ TEST(Construct_SD_64, ConstructionEQAppending) {
     }
 }
 
-TEST(Construct_SD_64, ConstructionEQAppendingCanonical) {
+TEST(DBGBitmapConstruct, ConstructionEQAppendingCanonical) {
     for (size_t k = 2; k <= kMaxK; ++k) {
         std::vector<std::string> input_data = {
             "ACAGCTAGCTAGCTAGCTAGCTG",
@@ -144,7 +144,7 @@ TEST(Construct_SD_64, ConstructionEQAppendingCanonical) {
     }
 }
 
-TEST(Construct_SD_64, ConstructionFromChunks) {
+TEST(DBGBitmapConstruct, ConstructionFromChunks) {
     for (bool canonical : { true, false }) {
         for (size_t k = 2; k <= kMaxK; k += 6) {
             std::vector<std::string> input_data = {
@@ -198,165 +198,21 @@ TEST(Construct_SD_64, ConstructionFromChunks) {
 }
 
 
-using TAlphabet = KmerExtractor2Bit::TAlphabet;
-
-TEST(ExtractKmersPacked_64, ExtractKmersFromStringWithoutFiltering) {
-    for (size_t k = 2; k <= kMaxK; ++k) {
-        Vector<KMER> result;
-
-        // NNN -> $NNN$
-        for (size_t length = 0; length < k; ++length) {
-            kmer_extractor.sequence_to_kmers(
-                std::string(length, 'T'), k, {}, &result
-            );
-            ASSERT_TRUE(result.empty()) << "k: " << k
-                                        << ", length: " << length;
-        }
-
-        for (size_t length = k; length < 500; ++length) {
-            result.clear();
-            kmer_extractor.sequence_to_kmers(
-                std::string(length, 'T'), k, {}, &result
-            );
-            ASSERT_EQ(length - k + 1, result.size()) << "k: " << k
-                                                     << ", length: " << length;
-        }
-    }
-}
-
-TEST(ExtractKmersPacked_64, ExtractKmersFromStringWithFilteringOne) {
-    std::vector<TAlphabet> suffix = { 0 };
-
-    for (size_t k = 2; k <= kMaxK; ++k) {
-        Vector<KMER> result;
-
-        for (size_t length = 0; length < k; ++length) {
-            kmer_extractor.sequence_to_kmers(
-                std::string(length, 'T'), k, suffix, &result
-            );
-            ASSERT_TRUE(result.empty());
-        }
-
-        for (size_t length = k; length < 500; ++length) {
-            result.clear();
-            kmer_extractor.sequence_to_kmers(
-                std::string(length, 'T'), k, suffix, &result
-            );
-            ASSERT_TRUE(result.empty());
-        }
-    }
-
-    suffix.assign({ kmer_extractor.encode('T') });
-    for (size_t k = 2; k <= kMaxK; ++k) {
-        Vector<KMER> result;
-
-        for (size_t length = 0; length < k; ++length) {
-            kmer_extractor.sequence_to_kmers(
-                std::string(length, 'T'), k, suffix, &result
-            );
-            ASSERT_TRUE(result.empty());
-        }
-
-        for (size_t length = k; length < 500; ++length) {
-            result.clear();
-            kmer_extractor.sequence_to_kmers(
-                std::string(length, 'T'), k, suffix, &result
-            );
-            ASSERT_EQ(length - k + 1, result.size()) << "k: " << k
-                                                     << ", length: " << length;
-        }
-    }
-}
-
-
-TEST(ExtractKmersPacked_64, ExtractKmersFromStringWithFilteringTwo) {
-    for (size_t k = 3; k <= kMaxK; ++k) {
-        Vector<KMER> result;
-
-        for (size_t length = 0; length < k; ++length) {
-            kmer_extractor.sequence_to_kmers(
-                std::string(length, 'T'), k, kmer_extractor.encode("TT"), &result
-            );
-            ASSERT_TRUE(result.empty()) << "k: " << k
-                                        << ", length: " << length;
-        }
-
-        for (size_t length = k; length < 200; ++length) {
-            result.clear();
-            kmer_extractor.sequence_to_kmers(
-                std::string(length, 'T'), k, { 0, 0 }, &result
-            );
-            ASSERT_EQ(0u, result.size()) << "k: " << k
-                                         << ", length: " << length;
-            result.clear();
-            kmer_extractor.sequence_to_kmers(
-                std::string(length, 'T'), k, { 0, kmer_extractor.encode('T') }, &result
-            );
-            ASSERT_EQ(0u, result.size()) << "k: " << k
-                                         << ", length: " << length;
-            result.clear();
-            kmer_extractor.sequence_to_kmers(
-                std::string(length, 'T'), k, kmer_extractor.encode("TT"), &result
-            );
-
-            ASSERT_EQ(length - k + 1, result.size()) << "k: " << k
-                                                     << ", length: " << length;
-        }
-
-        result.clear();
-
-        for (size_t length = 0; length < k; ++length) {
-            kmer_extractor.sequence_to_kmers(
-                std::string(length, 'T'), k, kmer_extractor.encode("TA"), &result
-            );
-            ASSERT_TRUE(result.empty());
-        }
-
-        for (size_t length = k; length < 200; ++length) {
-            result.clear();
-
-            std::string sequence(length, 'T');
-            sequence[k - 1] = 'A';
-
-            kmer_extractor.sequence_to_kmers(
-                sequence, k, kmer_extractor.encode("TA"), &result
-            );
-            ASSERT_EQ(1u, result.size()) << "k: " << k
-                                         << ", length: " << length;
-        }
-    }
-}
-
-TEST(ExtractKmersPacked_64, ExtractKmersFromStringAppend) {
-    Vector<KMER> result;
-
-    kmer_extractor.sequence_to_kmers(
-        std::string(500, 'A'), 2, {}, &result
-    );
-    ASSERT_EQ(499u, result.size());
-
-    kmer_extractor.sequence_to_kmers(
-        std::string(500, 'A'), 2, {}, &result
-    );
-    ASSERT_EQ(499u * 2, result.size());
-}
-
-
 typedef std::function<void(const std::string&)> CallbackString;
 
-template <typename KMER, class KmerExtractor2Bit>
+template <typename KMER, class KmerExtractor>
 void extract_kmers(std::function<void(CallbackString)> generate_reads,
                    size_t k,
                    bool canonical_mode,
                    SortedSet<KMER> *kmers,
-                   const std::vector<TAlphabet> &suffix,
+                   const std::vector<typename KmerExtractor::TAlphabet> &suffix,
                    bool remove_redundant = true);
 
 // TODO: k is node length
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
                                         SortedSet<KMER> *kmers,
-                                        const std::vector<TAlphabet> &suffix,
+                                        const std::vector<KmerExtractor2Bit::TAlphabet> &suffix,
                                         bool remove_redundant,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
@@ -369,7 +225,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
     delete reads;
 }
 
-TEST(ExtractKmersPacked_64, ExtractKmersAppendParallelReserved) {
+TEST(CollectKmers2Bit, ExtractKmersAppendParallelReserved) {
     SortedSet<KMER> result;
     size_t sequence_size = 500;
 
@@ -416,7 +272,7 @@ TEST(ExtractKmersPacked_64, ExtractKmersAppendParallelReserved) {
     EXPECT_EQ(2u, result.data().size());
 }
 
-TEST(ExtractKmersPacked_64, ExtractKmersAppendParallel) {
+TEST(CollectKmers2Bit, ExtractKmersAppendParallel) {
     SortedSet<KMER> result;
     size_t sequence_size = 500;
 
@@ -460,7 +316,7 @@ TEST(ExtractKmersPacked_64, ExtractKmersAppendParallel) {
     // #endif
 }
 
-TEST(ExtractKmersPacked_64, ExtractKmersParallelRemoveRedundantReserved) {
+TEST(CollectKmers2Bit, ExtractKmersParallelRemoveRedundantReserved) {
     SortedSet<KMER> result;
 
     sequence_to_kmers_parallel_wrapper(
@@ -506,7 +362,7 @@ TEST(ExtractKmersPacked_64, ExtractKmersParallelRemoveRedundantReserved) {
     ASSERT_EQ(1u, result.data().size());
 }
 
-TEST(ExtractKmersPacked_64, ExtractKmersParallelRemoveRedundant) {
+TEST(CollectKmers2Bit, ExtractKmersParallelRemoveRedundant) {
     SortedSet<KMER> result;
 
     sequence_to_kmers_parallel_wrapper(

@@ -8,8 +8,6 @@
 #include "reads_filtering.hpp"
 #include "reverse_complement.hpp"
 
-using TAlphabet = KmerExtractor::TAlphabet;
-
 const size_t kMaxKmersChunkSize = 30'000'000;
 
 
@@ -18,7 +16,7 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
                    size_t k,
                    bool both_strands_mode,
                    SortedSet<KMER> *kmers,
-                   const std::vector<TAlphabet> &suffix,
+                   const std::vector<typename KmerExtractor::TAlphabet> &suffix,
                    bool remove_redundant = true) {
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
 
@@ -61,7 +59,7 @@ void count_kmers(std::function<void(CallString)> generate_reads,
                  size_t k,
                  bool both_strands_mode,
                  SortedMultiset<KMER, KmerCount> *kmers,
-                 const std::vector<TAlphabet> &suffix) {
+                 const std::vector<typename KmerExtractor::TAlphabet> &suffix) {
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
 
     Vector<KMER> temp_storage;
