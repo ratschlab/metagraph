@@ -534,7 +534,6 @@ mask_graph(const AnnotatedDBG &anno_graph,
                  });
 
     if (config.verbose) {
-        std::cout << "Comparing" << std::endl;
         std::cout << "Masked in:";
         for (const auto &in : mask_in) {
             std::cout << " " << in;
@@ -552,10 +551,13 @@ mask_graph(const AnnotatedDBG &anno_graph,
         annotated_graph_algorithm::mask_nodes_by_label(
             anno_graph,
             mask_in, mask_out,
-            [&](auto count_in, auto count_out) {
-                return count_in == mask_in.size()
-                    && count_out
-                        <= config.label_mask_out_fraction * (count_in + count_out);
+            [&](UInt64Callback counter_in, UInt64Callback counter_out) {
+                auto count_in = counter_in();
+                if (count_in != mask_in.size())
+                    return false;
+
+                auto count_out = counter_out();
+                return count_out <= config.label_mask_out_fraction * (count_in + count_out);
             }
         ).release()
     );

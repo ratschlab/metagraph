@@ -10,6 +10,8 @@
 #include "threading.hpp"
 
 
+typedef std::function<uint64_t()> UInt64Callback;
+
 namespace annotated_graph_algorithm {
 
 std::unique_ptr<bitmap>
@@ -17,6 +19,13 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const std::vector<AnnotatedDBG::Annotator::Label> &mask_in,
                     const std::vector<AnnotatedDBG::Annotator::Label> &mask_out,
                     const std::function<bool(uint64_t, uint64_t)> &keep_node);
+
+// Allows for lazy evaluation of the counts passed to keep_node
+std::unique_ptr<bitmap>
+mask_nodes_by_label(const AnnotatedDBG &anno_graph,
+                    const std::vector<AnnotatedDBG::Annotator::Label> &mask_in,
+                    const std::vector<AnnotatedDBG::Annotator::Label> &mask_out,
+                    const std::function<bool(UInt64Callback, UInt64Callback)> &keep_node);
 
 template <class Index, class VLabels>
 using IndexRefVarLabelCallback = std::function<void(const Index&,

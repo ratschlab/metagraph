@@ -74,6 +74,27 @@ MaskedDeBruijnGraph build_masked_graph(const AnnotatedDBG &anno_graph,
     );
 }
 
+MaskedDeBruijnGraph build_masked_graph_lazy(const AnnotatedDBG &anno_graph,
+                                            const std::vector<std::string> &ingroup,
+                                            const std::vector<std::string> &outgroup) {
+    return MaskedDeBruijnGraph(
+        std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()),
+        annotated_graph_algorithm::mask_nodes_by_label(
+            anno_graph,
+            ingroup, outgroup,
+            [&](UInt64Callback incounter, UInt64Callback outcounter) {
+                uint64_t incount = incounter();
+                if (incount != ingroup.size())
+                    return false;
+
+                uint64_t outcount = outcounter();
+                return outcount <= cutoff * (incount + outcount);
+            }
+        ).release()
+    );
+}
+
+
 
 template <class Graph, class Annotation = annotate::ColumnCompressed<>>
 void test_call_significant_indices() {
@@ -110,6 +131,42 @@ void test_call_significant_indices() {
     }
 }
 
+template <class Graph, class Annotation = annotate::ColumnCompressed<>>
+void test_call_significant_indices_lazy() {
+    const std::vector<std::string> ingroup { "B", "C" };
+    const std::vector<std::string> outgroup { "A" };
+
+    for (size_t k = 3; k < 15; ++k) {
+        const std::vector<std::string> sequences {
+            std::string("T") + std::string(k - 1, 'A') + "T",
+            std::string("T") + std::string(k - 1, 'A') + "C",
+            std::string("T") + std::string(k - 1, 'A') + "C",
+            std::string("T") + std::string(k - 1, 'A') + "C",
+            std::string("T") + std::string(k - 1, 'A') + "G"
+        };
+        const std::vector<std::string> labels { "A", "B", "C", "D", "E" };
+
+        auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
+
+        std::unordered_set<std::string> obs_labels;
+        const std::unordered_set<std::string> ref { "B", "C", "D" };
+
+        auto masked_dbg = build_masked_graph_lazy(*anno_graph, ingroup, outgroup);
+        EXPECT_EQ(anno_graph->get_graph().num_nodes(), masked_dbg.num_nodes());
+
+        masked_dbg.call_nodes(
+            [&](const auto &index) {
+                auto cur_labels = anno_graph->get_labels(index);
+
+                obs_labels.insert(cur_labels.begin(), cur_labels.end());
+            }
+        );
+
+        EXPECT_EQ(ref, obs_labels) << k;
+    }
+}
+
+
 
 template <typename Graph>
 class MaskedDeBruijnGraphAlgorithm : public DeBruijnGraphTest<Graph> {};
@@ -119,6 +176,11 @@ TYPED_TEST_CASE(MaskedDeBruijnGraphAlgorithm, GraphTypes);
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, CallSignificantIndices) {
     test_call_significant_indices<TypeParam>();
     test_call_significant_indices<TypeParam, annotate::RowFlatAnnotator>();
+}
+
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, CallSignificantIndicesLazy) {
+    test_call_significant_indices_lazy<TypeParam>();
+    test_call_significant_indices_lazy<TypeParam, annotate::RowFlatAnnotator>();
 }
 
 bool all_mapped_match_first(const SequenceGraph &graph,

@@ -26,6 +26,21 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const std::vector<AnnotatedDBG::Annotator::Label> &mask_in,
                     const std::vector<AnnotatedDBG::Annotator::Label> &mask_out,
                     const std::function<bool(uint64_t, uint64_t)> &keep_node) {
+    return mask_nodes_by_label(
+        anno_graph,
+        mask_in,
+        mask_out,
+        [&](UInt64Callback call_in, UInt64Callback call_out) {
+            return keep_node(call_in(), call_out());
+        }
+    );
+}
+
+std::unique_ptr<bitmap>
+mask_nodes_by_label(const AnnotatedDBG &anno_graph,
+                    const std::vector<AnnotatedDBG::Annotator::Label> &mask_in,
+                    const std::vector<AnnotatedDBG::Annotator::Label> &mask_out,
+                    const std::function<bool(UInt64Callback, UInt64Callback)> &keep_node) {
     if (!anno_graph.get_graph().num_nodes())
         return {};
 
@@ -82,16 +97,16 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         for (size_t i = 1; i < counts.size(); ++i) {
             size_t count = counts[i];
 
-            size_t count_in = (count & int_mask)
-                + count_node_labels(anno_graph, i, mask_in_dense);
-
-            size_t count_out = (count >> width)
-                + count_node_labels(anno_graph, i, mask_out_dense);
-
-            if (!count_in && !count_out)
-                continue;
-
-            if (keep_node(count_in, count_out))
+            if (keep_node(
+                    [&]() {
+                        return (count & int_mask)
+                            + count_node_labels(anno_graph, i, mask_in_dense);
+                    },
+                    [&]() {
+                        return (count >> width)
+                            + count_node_labels(anno_graph, i, mask_out_dense);
+                    }
+                ))
                 mask->set(i, true);
         }
     } else {
@@ -118,10 +133,8 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
         for (size_t i = 1; i < counts.size(); ++i) {
             size_t count = counts[i];
-            if (!count)
-                continue;
-
-            if (keep_node(count & int_mask, count >> width))
+            if (keep_node([&]() { return count & int_mask; },
+                          [&]() { return count >> width; }))
                 mask->set(i, true);
         }
     }
