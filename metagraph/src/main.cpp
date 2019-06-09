@@ -431,7 +431,9 @@ std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
                                                  uint64_t num_rows = 0) {
     std::unique_ptr<Annotator> annotation;
 
-    Config::AnnotationType anno_type = parse_annotation_extension(filename);
+    Config::AnnotationType anno_type = filename.size()
+        ? parse_annotation_extension(filename)
+        : config.anno_type;
 
     switch (anno_type) {
         case Config::ColumnCompressed: {

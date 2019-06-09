@@ -190,8 +190,9 @@ bsub -J StackChunks -W 12:00 -n 30 -R "rusage[mem=15000]" "/usr/bin/time -v \
 
 ### Annotate graph
 ```bash
-./metagengraph annotate -v --row-annotator --fasta-anno \
+./metagengraph annotate -v --fasta-anno \
                            -i primates.dbg \
+                           -o primates \
                            ~/fasta_zurich/refs_chimpanzee_primates.fa
 ```
 
