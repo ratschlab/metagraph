@@ -402,6 +402,10 @@ class BOSS {
      */
     void update_F(TAlphabet c, int value);
 
+    void add_sequence(std::vector<TAlphabet>&& sequence,
+                      bool try_extend = false,
+                      std::vector<uint64_t> *edges_inserted = NULL);
+
     /**
      * Given a character c and an edge index, this function
      * creates an outgoing edge from the same source node with
@@ -491,6 +495,10 @@ class BOSS {
 
         assert(end > begin);
         assert(end <= begin + k_);
+
+        // check if all characters belong to the alphabet
+        if (std::any_of(begin, end, [&](TAlphabet c) { return c >= alph_size; }))
+            return std::make_pair(0, 0);
 
         // get first
         TAlphabet s = *begin;

@@ -23,6 +23,10 @@ build_graph(uint64_t k,
     return graph;
 }
 
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph<DBGHashOrdered>(uint64_t, const std::vector<std::string> &, bool);
+
 template <>
 std::shared_ptr<DeBruijnGraph>
 build_graph<DBGHashString>(uint64_t k,
@@ -36,15 +40,11 @@ build_graph<DBGHashString>(uint64_t k,
     return graph;
 }
 
-template
-std::shared_ptr<DeBruijnGraph>
-build_graph<DBGHashOrdered>(uint64_t, const std::vector<std::string> &, bool);
-
 template <>
 std::shared_ptr<DeBruijnGraph>
 build_graph<DBGBitmap>(uint64_t k,
-                   const std::vector<std::string> &sequences,
-                   bool canonical) {
+                       const std::vector<std::string> &sequences,
+                       bool canonical) {
     DBGBitmapConstructor constructor(k, canonical);
     for (const auto &sequence : sequences) {
         constructor.add_sequence(std::string(sequence));
@@ -81,11 +81,15 @@ build_graph_batch(uint64_t k,
     return graph;
 }
 
+template
+std::shared_ptr<DeBruijnGraph>
+build_graph_batch<DBGHashOrdered>(uint64_t, const std::vector<std::string> &, bool);
+
 template <>
 std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGHashString>(uint64_t k,
-                  const std::vector<std::string> &sequences,
-                  bool) {
+                                 const std::vector<std::string> &sequences,
+                                 bool) {
     std::shared_ptr<DeBruijnGraph> graph { new DBGHashString(k) };
     for (const auto &sequence : sequences) {
         graph->add_sequence(std::string(sequence));
@@ -93,15 +97,11 @@ build_graph_batch<DBGHashString>(uint64_t k,
     return graph;
 }
 
-template
-std::shared_ptr<DeBruijnGraph>
-build_graph_batch<DBGHashOrdered>(uint64_t, const std::vector<std::string> &, bool);
-
 template <>
 std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGBitmap>(uint64_t k,
-                         const std::vector<std::string> &sequences,
-                         bool canonical) {
+                             const std::vector<std::string> &sequences,
+                             bool canonical) {
     DBGBitmapConstructor constructor(k, canonical);
     constructor.add_sequences(sequences);
     return std::shared_ptr<DeBruijnGraph>(new DBGBitmap(&constructor));
@@ -154,7 +154,7 @@ bool check_graph(const std::string &alphabet, bool canonical) {
     for (size_t i = 0; i < 100; ++i) {
         std::string seq(1'000, 'A');
         for (size_t j = 0; j < seq.size(); ++j) {
-            seq[j] = alphabet[(i * i + j + 17 * j * j) % 5];
+            seq[j] = alphabet[(i * i + j + 17 * j * j) % alphabet.size()];
         }
         sequences.push_back(seq);
     }

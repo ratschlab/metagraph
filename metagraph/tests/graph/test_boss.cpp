@@ -103,7 +103,7 @@ TEST(BOSS, GraphDefaultConstructor) {
     });
 }
 
-#if _DNA_GRAPH
+#if _DNA5_GRAPH
 TEST(BOSS, EmptyGraph) {
     BOSS *graph = new BOSS(3);
     test_graph(graph, "01", { 0, 0 }, "0 1 1 1 1 1 ");
@@ -178,13 +178,13 @@ TEST(BOSS, SmallGraphTraversal) {
             uint64_t node_idx = graph->rank_last(i - 1) + 1;
 
             EXPECT_EQ(outgoing_edges[i],
-                graph->select_last(graph->outgoing(node_idx, graph->get_W(i)))
+                graph->select_last(graph->outgoing(node_idx, graph->get_W(i) % graph->alph_size))
             ) << "Edge index: " << i << "\n"
-              << "Outgoing: " << graph->outgoing(node_idx, graph->get_W(i)) << "\n"
+              << "Outgoing: " << graph->outgoing(node_idx, graph->get_W(i) % graph->alph_size) << "\n"
               << *graph;
 
             EXPECT_EQ(node_idx,
-                graph->incoming(graph->outgoing(node_idx, graph->get_W(i)),
+                graph->incoming(graph->outgoing(node_idx, graph->get_W(i) % graph->alph_size),
                                 graph->get_minus_k_value(i, graph->get_k() - 1).first)
             );
             for (int c = 0; c < graph->alph_size; ++c) {
@@ -245,7 +245,7 @@ TEST(BOSS, AddSequenceSimplePath) {
 TEST(BOSS, CountDummyEdgesSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
-        graph.add_sequence(std::string(100, 'A') + 'N');
+        graph.add_sequence(std::string(100, 'A') + 'G');
         EXPECT_EQ(2u, graph.num_edges()
                         - graph.mark_sink_dummy_edges()
                         - graph.mark_source_dummy_edges()) << graph;
@@ -255,7 +255,7 @@ TEST(BOSS, CountDummyEdgesSimplePath) {
 TEST(BOSS, CountDummyEdgesSimplePathParallel) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
-        graph.add_sequence(std::string(100, 'A') + 'N');
+        graph.add_sequence(std::string(100, 'A') + 'G');
         EXPECT_EQ(2u, graph.num_edges()
                         - graph.mark_sink_dummy_edges()
                         - graph.mark_source_dummy_edges(NULL, 10)) << graph;
@@ -265,7 +265,7 @@ TEST(BOSS, CountDummyEdgesSimplePathParallel) {
 TEST(BOSS, CountDummyEdgesTwoPaths) {
     for (size_t k = 1; k < 40; ++k) {
         BOSS graph(k);
-        graph.add_sequence(std::string(100, 'A') + 'N');
+        graph.add_sequence(std::string(100, 'A') + 'G');
         graph.add_sequence(std::string(100, 'C') + 'T');
         EXPECT_EQ(4u, graph.num_edges()
                         - graph.mark_sink_dummy_edges()
@@ -276,7 +276,7 @@ TEST(BOSS, CountDummyEdgesTwoPaths) {
 TEST(BOSS, CountDummyEdgesTwoPathsParallel) {
     for (size_t k = 1; k < 40; ++k) {
         BOSS graph(k);
-        graph.add_sequence(std::string(100, 'A') + 'N');
+        graph.add_sequence(std::string(100, 'A') + 'G');
         graph.add_sequence(std::string(100, 'C') + 'T');
         EXPECT_EQ(4u, graph.num_edges()
                         - graph.mark_sink_dummy_edges()
@@ -287,7 +287,7 @@ TEST(BOSS, CountDummyEdgesTwoPathsParallel) {
 TEST(BOSS, MarkDummySinkEdgesSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
-        graph.add_sequence(std::string(100, 'A') + 'N');
+        graph.add_sequence(std::string(100, 'A') + 'G');
         std::vector<bool> sink_nodes(graph.num_edges() + 1);
         sink_nodes.back() = true;
         std::vector<bool> sink_nodes_result(graph.num_edges() + 1, false);
@@ -299,7 +299,7 @@ TEST(BOSS, MarkDummySinkEdgesSimplePath) {
 TEST(BOSS, MarkDummySinkEdgesTwoPaths) {
     for (size_t k = 1; k < 10; ++k) {
         BOSS graph(k);
-        graph.add_sequence(std::string(100, 'A') + 'N');
+        graph.add_sequence(std::string(100, 'A') + 'T');
         graph.add_sequence(std::string(100, 'A') + 'G');
         std::vector<bool> sink_nodes(graph.num_edges() + 1);
         sink_nodes[sink_nodes.size() - 2] = true;
@@ -795,7 +795,11 @@ TEST(BOSS, NonASCIIStrings) {
         "АСАСАСАСАСАСА"
     });
     BOSS graph(&constructor_first);
+#if _DNA_GRAPH
+    ASSERT_EQ(1u, graph.num_edges()) << graph;
+#else
     ASSERT_EQ(2u, graph.num_edges()) << graph;
+#endif
 }
 
 TEST(BOSS, AddSequence) {
@@ -821,6 +825,7 @@ TEST(BOSS, AddSequence) {
         EXPECT_EQ(6u, graph.num_nodes());
         EXPECT_EQ(8u, graph.num_edges());
     }
+#ifndef _DNA_GRAPH
     {
         BOSS graph(4);
         graph.add_sequence("AGACN");
@@ -829,6 +834,7 @@ TEST(BOSS, AddSequence) {
         EXPECT_EQ(15u, graph.num_nodes());
         EXPECT_EQ(18u, graph.num_edges());
     }
+#endif
 }
 
 TEST(BOSS, AppendSequence) {
@@ -847,6 +853,7 @@ TEST(BOSS, AppendSequence) {
         EXPECT_EQ(7u, graph.num_nodes());
         EXPECT_EQ(8u, graph.num_edges());
     }
+#ifndef _DNA_GRAPH
     {
         BOSS graph(4);
         graph.add_sequence("AGACN", true);
@@ -855,6 +862,7 @@ TEST(BOSS, AppendSequence) {
         EXPECT_EQ(15u, graph.num_nodes());
         EXPECT_EQ(18u, graph.num_edges());
     }
+#endif
     {
         BOSS graph(3);
         graph.add_sequence("AAACT", true);
@@ -1248,6 +1256,7 @@ TEST(BOSS, CallUnitigsDisconnected1) {
     EXPECT_EQ(contigs.size(), num_contigs);
 }
 
+#ifndef _DNA_GRAPH
 TEST(BOSS, CallUnitigsDisconnected2) {
     BOSSConstructor constructor(3);
     constructor.add_sequences({ "ACTAGCTAGCTAGCTAGCTAGC",
@@ -1314,6 +1323,7 @@ TEST(BOSS, CallUnitigsTwoComponents) {
 
     EXPECT_EQ(contigs.size(), num_contigs);
 }
+#endif
 
 TEST(BOSS, CallUnitigsWithPruning) {
     BOSSConstructor constructor(4);
@@ -1326,6 +1336,7 @@ TEST(BOSS, CallUnitigsWithPruning) {
     });
     BOSS graph(&constructor);
 
+#ifndef _DNA_GRAPH
     {
         std::set<std::string> contigs {
             "ACTAT",
@@ -1349,12 +1360,17 @@ TEST(BOSS, CallUnitigsWithPruning) {
         );
         EXPECT_EQ(contigs.size(), num_contigs);
     }
+#endif
     {
         std::set<std::string> contigs {
             "CTATGCGA",
             "CTATAGCT",
+#if _DNA_GRAPH
+            "AGCTAG",
+#else
             "AGCTA",
             "GCTAG",
+#endif
             "CTAGTCTA",
             "TCTAT",
             "TCTAG",
@@ -1372,8 +1388,12 @@ TEST(BOSS, CallUnitigsWithPruning) {
         std::set<std::string> contigs {
             "CTATGCGA",
             "CTATAGCT",
+#if _DNA_GRAPH
+            "AGCTAG",
+#else
             "AGCTA",
             "GCTAG",
+#endif
             "CTAGTCTA",
             "TCTAT",
             "TCTAG",
@@ -1391,8 +1411,12 @@ TEST(BOSS, CallUnitigsWithPruning) {
         std::set<std::string> contigs {
             "CTATGCGA",
             "CTATAGCT",
+#if _DNA_GRAPH
+            "AGCTAG",
+#else
             "AGCTA",
             "GCTAG",
+#endif
             "CTAGTCTA",
             "TCTAT",
             "TCTAG",
@@ -1409,8 +1433,12 @@ TEST(BOSS, CallUnitigsWithPruning) {
     {
         std::set<std::string> contigs {
             "CTATAGCT",
+#if _DNA_GRAPH
+            "AGCTAG",
+#else
             "AGCTA",
             "GCTAG",
+#endif
             "CTAGTCTA",
             "TCTAT",
             "TCTAG",
@@ -1427,8 +1455,12 @@ TEST(BOSS, CallUnitigsWithPruning) {
     {
         std::set<std::string> contigs {
             "CTATAGCT",
+#if _DNA_GRAPH
+            "AGCTAG",
+#else
             "AGCTA",
             "GCTAG",
+#endif
             "CTAGTCTA",
             "TCTAT",
             "TCTAG",

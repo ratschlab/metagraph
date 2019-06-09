@@ -21,14 +21,14 @@ class KmerExtractor {
     static constexpr size_t bits_per_char = alphabets::kBOSSBitsPerCharProtein;
     #elif _DNA_CASE_SENSITIVE_GRAPH
     static constexpr size_t bits_per_char = alphabets::kBOSSBitsPerCharDNACaseSent;
+    #elif _DNA5_GRAPH
+    static constexpr size_t bits_per_char = alphabets::kBOSSBitsPerCharDNA5;
     #elif _DNA_GRAPH
     static constexpr size_t bits_per_char = alphabets::kBOSSBitsPerCharDNA;
-    #elif _DNA4_GRAPH
-    static constexpr size_t bits_per_char = alphabets::kBOSSBitsPerCharDNA4;
     #else
     static_assert(false,
         "Define an alphabet: either "
-        "_DNA4_GRAPH, _DNA_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+        "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
     );
     #endif
 
@@ -100,9 +100,9 @@ class KmerExtractor2BitT {
     typedef Kmer<sdsl::uint128_t> Kmer128;
     typedef Kmer<sdsl::uint256_t> Kmer256;
 
-    KmerExtractor2BitT(const char Alphabet[] = alphabets::kAlphabetDNA4,
-                       const uint8_t CharToCode[128] = alphabets::kCharToDNA4,
-                       const std::vector<uint8_t> &complement_code = alphabets::kCanonicalMapDNA4);
+    KmerExtractor2BitT(const char Alphabet[] = alphabets::kAlphabetDNA,
+                       const uint8_t CharToCode[128] = alphabets::kCharToDNA,
+                       const std::vector<uint8_t> &complement_code = alphabets::kCanonicalMapDNA);
 
     /**
      * Break the sequence into kmers and add them to the kmer storage.
@@ -140,8 +140,6 @@ class KmerExtractor2BitT {
     const std::vector<TAlphabet> complement_code_;
 };
 
-
-typedef KmerExtractor2BitT<alphabets::kBitsPerCharDNA4> KmerExtractor2Bit;
-
+typedef KmerExtractor2BitT<alphabets::kBitsPerCharDNA> KmerExtractor2Bit;
 
 #endif // __KMER_EXTRACTOR_HPP__

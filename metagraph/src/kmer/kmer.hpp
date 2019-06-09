@@ -84,6 +84,7 @@ KMer<G, L>::KMer(const V &arr, size_t k) : seq_(0) {
 
 template <typename G, int L>
 void KMer<G, L>::to_next(size_t k, CharType edge_label) {
+    assert(static_cast<uint64_t>(edge_label) <= kFirstCharMask);
     seq_ = seq_ >> kBitsPerChar;
     seq_ |= WordType(edge_label) << static_cast<int>(kBitsPerChar * (k - 1));
 }

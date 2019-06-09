@@ -78,7 +78,7 @@ void DBGHashString
 
     auto prefix = node_to_kmer(node).substr(1);
 
-    for (char c : seq_encoder_.alphabet) {
+    for (char c : alphabet_) {
         auto next = kmer_to_node(prefix + c);
         if (next != npos)
             target_nodes->push_back(next);
@@ -94,7 +94,7 @@ void DBGHashString
     auto suffix = node_to_kmer(node);
     suffix.pop_back();
 
-    for (char c : seq_encoder_.alphabet) {
+    for (char c : alphabet_) {
         auto next = kmer_to_node(std::string(1, c) + suffix);
         if (next != npos)
             source_nodes->push_back(next);
@@ -108,7 +108,7 @@ void DBGHashString
 
     auto prefix = node_to_kmer(node).substr(1);
 
-    for (char c : seq_encoder_.alphabet) {
+    for (char c : alphabet_) {
         auto next = kmer_to_node(prefix + c);
         if (next != npos)
             callback(next, c);
@@ -123,7 +123,7 @@ void DBGHashString
     auto suffix = node_to_kmer(node);
     suffix.pop_back();
 
-    for (char c : seq_encoder_.alphabet) {
+    for (char c : alphabet_) {
         auto next = kmer_to_node(std::string(1, c) + suffix);
         if (next != npos)
             callback(next, c);
@@ -138,7 +138,7 @@ size_t DBGHashString::outdegree(node_index node) const {
     auto next = node_to_kmer(node).substr(1);
     next.push_back('\0');
 
-    for (char c : seq_encoder_.alphabet) {
+    for (char c : alphabet_) {
         next.back() = c;
 
         if (kmer_to_node(next) != npos)
@@ -156,7 +156,7 @@ size_t DBGHashString::indegree(node_index node) const {
     next.pop_back();
     next.insert(0, 1, '\0');
 
-    for (char c : seq_encoder_.alphabet) {
+    for (char c : alphabet_) {
         next.front() = c;
 
         if (kmer_to_node(next) != npos)
@@ -252,7 +252,7 @@ std::string DBGHashString::encode_sequence(const std::string &sequence) const {
     std::string result = sequence;
 
     for (char &c : result) {
-        if (seq_encoder_.alphabet.find(c) == std::string::npos)
+        if (alphabet_.find(c) == std::string::npos)
             c = 'N';
     }
     return result;

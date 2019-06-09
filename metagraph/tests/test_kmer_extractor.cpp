@@ -7,13 +7,6 @@
 #include "utils.hpp"
 #include "reverse_complement.hpp"
 
-// Disable death tests
-#ifndef _DEATH_TEST
-#ifdef ASSERT_DEATH
-#undef ASSERT_DEATH
-#define ASSERT_DEATH(a, b) (void)0
-#endif
-#endif
 
 template <typename Kmer>
 class ExtractKmers2Bit : public ::testing::Test { };
@@ -35,12 +28,7 @@ TEST(KmerExtractor2Bit, encode_decode) {
     EXPECT_EQ('C', encoder.decode(encoder.encode('C')));
     EXPECT_EQ('G', encoder.decode(encoder.encode('G')));
     EXPECT_EQ('T', encoder.decode(encoder.encode('T')));
-    // #if _DNA4_GRAPH
-        // N->A in 2Bit mode
-        EXPECT_EQ('A', encoder.decode(encoder.encode('N')));
-    // #else
-    //     EXPECT_EQ('N', encoder.decode(encoder.encode('N')));
-    // #endif
+    ASSERT_THROW(encoder.decode(encoder.encode('N')), std::exception);
 }
 
 KmerExtractor2Bit::Kmer64 to_kmer(const KmerExtractor2Bit &encoder,
@@ -53,7 +41,6 @@ KmerExtractor2Bit::Kmer64 to_kmer(const KmerExtractor2Bit &encoder,
 TEST(KmerExtractor2Bit, encode_decode_kmer) {
     KmerExtractor2Bit encoder;
     std::string kmer;
-    std::string expected;
 
     kmer = "ACGT";
     EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
@@ -65,52 +52,48 @@ TEST(KmerExtractor2Bit, encode_decode_kmer) {
     EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
 
     kmer = "ANANANANANA";
-    // #if _DNA4_GRAPH
-        expected = std::string("AAAAAAAAAAA");
-    // #else
-    //     expected = std::string("ANANANANANA");
-    // #endif
-    EXPECT_EQ(expected,
-              encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
+    ASSERT_THROW(encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length()), std::exception);
 
     kmer = "ANANATANANA";
-    // #if _DNA4_GRAPH
-        expected = std::string("AAAAATAAAAA");
-    // #else
-    //     expected = std::string("ANANATANANA");
-    // #endif
-    EXPECT_EQ(expected,
-              encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
+    ASSERT_THROW(encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length()), std::exception);
 
     kmer = "ANANANANGNT";
-    // #if _DNA4_GRAPH
-        expected = std::string("AAAAAAAAGAT");
-    // #else
-    //     expected = std::string("ANANANANGNT");
-    // #endif
-    EXPECT_EQ(expected,
-              encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
+    ASSERT_THROW(encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length()), std::exception);
 }
 
 TEST(KmerExtractor2Bit, encode_decode_string) {
     KmerExtractor2Bit encoder;
-    std::string sequence = "AAGGCAGCCTACNCCCTCTG";
+    std::string first_part = "AAGGCAGCCTAC";
+    std::string last_part = "CCCTCTG";
+    std::string sequence = first_part + 'N' + last_part;
     for (uint64_t k = 2; k <= sequence.length(); ++k) {
         Vector<KmerExtractor2Bit::Kmer256> kmers;
 
         encoder.sequence_to_kmers(sequence, k, {}, &kmers);
+        ASSERT_EQ(k <= last_part.size()
+                    ? sequence.size() - 2 * k + 1
+                    : (k <= first_part.size() ? first_part.size() - k + 1 : 0),
+                  kmers.size()) << k;
         EXPECT_EQ(kmers, encoder.sequence_to_kmers<KmerExtractor2Bit::Kmer256>(sequence, k));
-        ASSERT_LT(0u, kmers.size());
+
+        if (!kmers.size())
+            continue;
 
         std::string reconstructed = encoder.kmer_to_sequence(kmers[0], k);
-        for (uint64_t i = 1; i < kmers.size(); ++i) {
+        uint64_t i;
+        for (i = 1; i < first_part.size() - k + 1; ++i) {
             reconstructed.push_back(encoder.kmer_to_sequence(kmers[i], k)[k - 1]);
         }
-        // #if _DNA4_GRAPH
-            EXPECT_EQ(std::string("AAGGCAGCCTACACCCTCTG"), reconstructed);
-        // #else
-        //     EXPECT_EQ(std::string("AAGGCAGCCTACNCCCTCTG"), reconstructed);
-        // #endif
+        EXPECT_EQ(first_part, reconstructed);
+
+        if (k > last_part.size())
+            continue;
+
+        reconstructed = encoder.kmer_to_sequence(kmers[i], k);
+        while (++i < kmers.size()) {
+            reconstructed.push_back(encoder.kmer_to_sequence(kmers[i], k)[k - 1]);
+        }
+        EXPECT_EQ(last_part, reconstructed);
     }
 }
 

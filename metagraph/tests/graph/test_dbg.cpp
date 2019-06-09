@@ -146,8 +146,13 @@ TYPED_TEST(DeBruijnGraphTest, TestNonASCIIStrings) {
                                          "АСАСАСАСАСАСА",
                                          "плохая строка",
                                          "АСАСАСАСАСАСА" };
-    EXPECT_EQ(1u, build_graph<TypeParam>(6, sequences)->num_nodes());
-    EXPECT_EQ(1u, build_graph_batch<TypeParam>(6, sequences)->num_nodes());
+    if (TypeParam(2).alphabet().find('N') == std::string::npos) {
+        EXPECT_EQ(0u, build_graph<TypeParam>(6, sequences)->num_nodes());
+        EXPECT_EQ(0u, build_graph_batch<TypeParam>(6, sequences)->num_nodes());
+    } else {
+        EXPECT_EQ(1u, build_graph<TypeParam>(6, sequences)->num_nodes());
+        EXPECT_EQ(1u, build_graph_batch<TypeParam>(6, sequences)->num_nodes());
+    }
 }
 
 TYPED_TEST(DeBruijnGraphTest, AddSequences) {

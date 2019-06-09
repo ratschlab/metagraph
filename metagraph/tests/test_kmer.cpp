@@ -116,10 +116,10 @@ TEST(Kmer, UpdateKmerLong) {
 }
 
 TEST(Kmer, UpdateKmerVsConstruct) {
-    std::string long_seq0 = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAN";
+    std::string long_seq0 = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAA";
     long_seq0.resize(std::min(kSizeOfKmer * 8 / kBitsPerChar,
                               long_seq0.size()));
-    std::string long_seq1 =  "AGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAANT";
+    std::string long_seq1 =  "AGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAT";
     long_seq1.resize(std::min(kSizeOfKmer * 8 / kBitsPerChar,
                               long_seq0.size()));
     auto seq0 = kmer_extractor.encode(long_seq0);
@@ -139,46 +139,25 @@ TEST(Kmer, UpdateKmerVsConstruct) {
 }
 
 TEST(Kmer, InvertibleEndDol) {
-// #if _DNA4_GRAPH
-    test_kmer_packed_codec_64("ATG$", "ATGA");
-// #elif _PROTEIN_GRAPH
-//     test_kmer_packed_codec_64("ATG$", "ATGX");
-// #else
-//     test_kmer_packed_codec_64("ATG$", "ATGN");
-// #endif
+    ASSERT_DEATH(test_kmer_packed_codec_64("ATG$", "ATGA"), "");
 }
 
 TEST(Kmer, InvertibleStartDol) {
-// #if _DNA4_GRAPH
-    test_kmer_packed_codec_64("$ATGG", "AATGG");
-// #elif _PROTEIN_GRAPH
-//     test_kmer_packed_codec_64("$ATGG", "XATGG");
-// #else
-//     test_kmer_packed_codec_64("$ATGG", "NATGG");
-// #endif
+    ASSERT_DEATH(test_kmer_packed_codec_64("$ATGG", "AATGG"), "");
 }
 
 TEST(Kmer, InvertibleBothDol) {
-// #if _DNA4_GRAPH
-    test_kmer_packed_codec_64("$ATG$", "AATGA");
-// #elif _PROTEIN_GRAPH
-//     test_kmer_packed_codec_64("$ATG$", "XATGX");
-// #else
-//     test_kmer_packed_codec_64("$ATG$", "NATGN");
-// #endif
+    ASSERT_DEATH(test_kmer_packed_codec_64("$ATG$", "AATGA"), "");
 }
 
 TEST(Kmer, InvalidChars) {
-// #if _DNA4_GRAPH
-    test_kmer_packed_codec_64("ATGH", "ATGA");
-    test_kmer_packed_codec_64("ATGЯ", "ATGAA");
-// #elif _PROTEIN_GRAPH
-//     test_kmer_packed_codec_64("ATGH", "ATGH");
-//     test_kmer_packed_codec_64("ATGЯ", "ATGXX");
-// #else
-//     test_kmer_packed_codec_64("ATGH", "ATGN");
-//     test_kmer_packed_codec_64("ATGЯ", "ATGNN");
-// #endif
+    KMER kmer(kmer_extractor.encode("ATGC"));
+
+    ASSERT_DEATH(test_kmer_packed_codec_64("ATGH", "ATGA"), "");
+    ASSERT_DEATH(test_kmer_packed_codec_64("ATGЯ", "ATGAA"), "");
+
+    ASSERT_DEATH(kmer.to_next(4, kmer_extractor.encode('N')), "");
+    ASSERT_DEATH(kmer.to_next(4, kmer_extractor.encode("Я")[0]), "");
 }
 
 void test_kmer_packed_less_64(const std::string &k1,
@@ -219,11 +198,7 @@ TEST(Kmer, TestPrint) {
     ss << kmer;
     std::string out;
     ss >> out;
-// #if _DNA4_GRAPH
     EXPECT_EQ("0000000000000000000000000000000000000000000000005555555555555555", out);
-// #elif _DNA_GRAPH
-//     EXPECT_EQ("0000000000000000000000000000000000000000000000001249249249249249", out);
-// #endif
 }
 
 

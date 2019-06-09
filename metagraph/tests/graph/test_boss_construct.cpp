@@ -300,13 +300,21 @@ TYPED_TEST(CollectKmers, CollectKmersAppendParallelReserved) {
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
         2, &result, {}, false, 100'000
     );
+#if _DNA_GRAPH
+    ASSERT_EQ(3u, result.data().size());
+#else
     ASSERT_EQ(6u, result.data().size());
+#endif
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
         2, &result, { 1, }, false, 100'000
     );
+#if _DNA_GRAPH
+    ASSERT_EQ(3u, result.data().size());
+#else
     ASSERT_EQ(6u, result.data().size());
+#endif
 }
 
 TYPED_TEST(CollectKmers, CollectKmersAppendParallel) {
@@ -335,7 +343,11 @@ TYPED_TEST(CollectKmers, CollectKmersAppendParallel) {
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
         2, &result, { 1, }, false, 0
     );
+#if _DNA_GRAPH
+    ASSERT_EQ(3u, result.data().size());
+#else
     ASSERT_EQ(6u, result.data().size());
+#endif
 }
 
 TYPED_TEST(CollectKmers, CollectKmersParallelRemoveRedundantReserved) {

@@ -54,7 +54,7 @@ static_assert(kBOSSSigmaDNACaseSent > 1llu << (kBOSSBitsPerCharDNACaseSent - 1))
 
 
 //for DNA and RNA (U <-> T) alphabets
-constexpr char kBOSSAlphabetDNA[] = "$ACGTN";
+constexpr char kBOSSAlphabetDNA[] = "$ACGT";
 constexpr uint8_t kBOSSSigmaDNA = sizeof(kBOSSAlphabetDNA) - 1;
 constexpr uint8_t kBOSSBitsPerCharDNA = log2(kBOSSSigmaDNA - 1) + 1;
 constexpr uint8_t kBOSSCharToDNA[128] = {
@@ -71,24 +71,11 @@ const std::vector<uint8_t> kBOSSCanonicalMapDNA = { 0, 4, 3, 2, 1, 5 };
 static_assert(kBOSSSigmaDNA <= 1llu << kBOSSBitsPerCharDNA);
 static_assert(kBOSSSigmaDNA > 1llu << (kBOSSBitsPerCharDNA - 1));
 
-
-//for DNA and RNA (U <-> T) alphabets
-constexpr char kBOSSAlphabetDNA4[] = "$ACGT";
-constexpr uint8_t kBOSSSigmaDNA4 = sizeof(kBOSSAlphabetDNA4) - 1;
-constexpr uint8_t kBOSSBitsPerCharDNA4 = log2(kBOSSSigmaDNA4 - 1) + 1;
-constexpr uint8_t kBOSSCharToDNA4[128] = {
-    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,
-    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,
-    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,
-    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,
-    1, 1, 1, 2,  1, 1, 1, 3,  1, 1, 1, 1,  1, 1, 1, 1,
-    1, 1, 1, 1,  4, 4, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,
-    1, 1, 1, 2,  1, 1, 1, 3,  1, 1, 1, 1,  1, 1, 1, 1,
-    1, 1, 1, 1,  4, 4, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1
-};
-const std::vector<uint8_t> kBOSSCanonicalMapDNA4 = { 0, 4, 3, 2, 1 };
-static_assert(kBOSSSigmaDNA4 <= 1llu << kBOSSBitsPerCharDNA4);
-static_assert(kBOSSSigmaDNA4 > 1llu << (kBOSSBitsPerCharDNA4 - 1));
+constexpr char kBOSSAlphabetDNA5[] = "$ACGTN";
+constexpr uint8_t kBOSSSigmaDNA5 = sizeof(kBOSSAlphabetDNA5) - 1;
+constexpr uint8_t kBOSSBitsPerCharDNA5 = log2(kBOSSSigmaDNA5 - 1) + 1;
+static_assert(kBOSSSigmaDNA5 <= 1llu << kBOSSBitsPerCharDNA5);
+static_assert(kBOSSSigmaDNA5 > 1llu << (kBOSSBitsPerCharDNA5 - 1));
 
 
 
@@ -130,7 +117,7 @@ static_assert(kSigmaDNACaseSent > 1llu << (kBitsPerCharDNACaseSent - 1));
 
 
 //for DNA and RNA (U <-> T) alphabets
-constexpr char kAlphabetDNA[] = "ACGTN";
+constexpr char kAlphabetDNA[] = "ACGT";
 constexpr uint8_t kSigmaDNA = sizeof(kAlphabetDNA) - 1;
 constexpr uint8_t kBitsPerCharDNA = log2(kSigmaDNA - 1) + 1;
 constexpr uint8_t kCharToDNA[128] = {
@@ -147,25 +134,11 @@ const std::vector<uint8_t> kCanonicalMapDNA = { 3, 2, 1, 0, 4 };
 static_assert(kSigmaDNA <= 1llu << kBitsPerCharDNA);
 static_assert(kSigmaDNA > 1llu << (kBitsPerCharDNA - 1));
 
-
-//for DNA and RNA (U <-> T) alphabets
-constexpr char kAlphabetDNA4[] = "ACGT";
-constexpr uint8_t kSigmaDNA4 = sizeof(kAlphabetDNA4) - 1;
-constexpr uint8_t kBitsPerCharDNA4 = log2(kSigmaDNA4 - 1) + 1;
-constexpr uint8_t kCharToDNA4[128] = {
-    0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
-    0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
-    0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
-    0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
-    0, 0, 0, 1,  0, 0, 0, 2,  0, 0, 0, 0,  0, 0, 0, 0,
-    0, 0, 0, 0,  3, 3, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
-    0, 0, 0, 1,  0, 0, 0, 2,  0, 0, 0, 0,  0, 0, 0, 0,
-    0, 0, 0, 0,  3, 3, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0
-};
-const std::vector<uint8_t> kCanonicalMapDNA4 = { 3, 2, 1, 0 };
-static_assert(kSigmaDNA4 <= 1llu << kBitsPerCharDNA4);
-static_assert(kSigmaDNA4 > 1llu << (kBitsPerCharDNA4 - 1));
-
+constexpr char kAlphabetDNA5[] = "ACGTN";
+constexpr uint8_t kSigmaDNA5 = sizeof(kAlphabetDNA) - 1;
+constexpr uint8_t kBitsPerCharDNA5 = log2(kSigmaDNA - 1) + 1;
+static_assert(kSigmaDNA5 <= 1llu << kBitsPerCharDNA5);
+static_assert(kSigmaDNA5 > 1llu << (kBitsPerCharDNA5 - 1));
 
 } // namespace alphabets
 
