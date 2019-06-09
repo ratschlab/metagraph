@@ -146,11 +146,11 @@ template <typename... Args>
 std::vector<bool> count_kmers_and_filter_reads(std::vector<std::string> *reads,
                                                size_t k,
                                                Args&... args) {
-    if ((k + 1) * KmerExtractor::kLogSigma <= 64) {
+    if ((k + 1) * KmerExtractor::bits_per_char <= 64) {
         return count_kmers_and_filter_reads_templated<KmerExtractor::Kmer64>(
             reads, k, args...
         );
-    } else if ((k + 1) * KmerExtractor::kLogSigma <= 128) {
+    } else if ((k + 1) * KmerExtractor::bits_per_char <= 128) {
         return count_kmers_and_filter_reads_templated<KmerExtractor::Kmer128>(
             reads, k, args...
         );

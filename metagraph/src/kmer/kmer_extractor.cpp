@@ -238,12 +238,12 @@ inline void sequence_to_kmers(const std::vector<TAlphabet> &seq,
     );
 #endif
 
-static_assert(KmerExtractor::kLogSigma <= sizeof(KmerExtractor::TAlphabet) * 8,
+static_assert(KmerExtractor::bits_per_char <= sizeof(KmerExtractor::TAlphabet) * 8,
               "Choose type for TAlphabet properly");
 
 
 KmerExtractor::KmerExtractor() {
-    assert(alphabet.size() <= (1llu << kLogSigma));
+    assert(alphabet.size() <= (1llu << bits_per_char));
 }
 
 KmerExtractor::TAlphabet KmerExtractor::encode(char s) {
@@ -386,10 +386,10 @@ KmerExtractor2BitTDecl()
       : alphabet(alph),
         char_to_code_(char_to_code),
         complement_code_(complement_code) {
-    static_assert(kLogSigma <= sizeof(TAlphabet) * 8,
+    static_assert(bits_per_char <= sizeof(TAlphabet) * 8,
                   "Choose type for TAlphabet properly");
 
-    assert(alphabet.size() <= (1llu << kLogSigma));
+    assert(alphabet.size() <= (1llu << bits_per_char));
 }
 
 KmerExtractor2BitTDecl(KmerExtractor::TAlphabet)
@@ -472,7 +472,7 @@ KmerExtractor2BitTDecl(template <typename KMER> Vector<KMER>)
     return kmers;
 }
 
-template class KmerExtractor2BitT<alphabets::kLogSigmaDNA4>;
+template class KmerExtractor2BitT<alphabets::kBitsPerCharDNA4>;
 
 #define ExplicitInstantiation_sequence_to_kmers(T) \
 template \

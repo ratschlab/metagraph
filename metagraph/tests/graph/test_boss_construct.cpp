@@ -29,14 +29,14 @@ class BOSSConstruct : public ::testing::Test { };
 template <typename Kmer>
 class CollectKmers : public ::testing::Test { };
 
-typedef ::testing::Types<KMerBOSS<uint64_t, KmerExtractor::kLogSigma>,
-                         KMerBOSS<sdsl::uint128_t, KmerExtractor::kLogSigma>,
-                         KMerBOSS<sdsl::uint256_t, KmerExtractor::kLogSigma>> KmerTypes;
+typedef ::testing::Types<KMerBOSS<uint64_t, KmerExtractor::bits_per_char>,
+                         KMerBOSS<sdsl::uint128_t, KmerExtractor::bits_per_char>,
+                         KMerBOSS<sdsl::uint256_t, KmerExtractor::bits_per_char>> KmerTypes;
 
 TYPED_TEST_CASE(BOSSConstruct, KmerTypes);
 TYPED_TEST_CASE(CollectKmers, KmerTypes);
 
-#define kMaxK ( sizeof(TypeParam) * 8 / KmerExtractor::kLogSigma )
+#define kMaxK ( sizeof(TypeParam) * 8 / KmerExtractor::bits_per_char )
 
 
 TYPED_TEST(BOSSConstruct, ConstructionEQAppendingSimplePath) {

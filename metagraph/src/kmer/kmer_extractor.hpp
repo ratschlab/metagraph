@@ -18,13 +18,13 @@ class KmerExtractor {
   public:
 
     #if _PROTEIN_GRAPH
-    static constexpr size_t kLogSigma = 5;
+    static constexpr size_t bits_per_char = alphabets::kBOSSBitsPerCharProtein;
     #elif _DNA_CASE_SENSITIVE_GRAPH
-    static constexpr size_t kLogSigma = 4;
+    static constexpr size_t bits_per_char = alphabets::kBOSSBitsPerCharDNACaseSent;
     #elif _DNA_GRAPH
-    static constexpr size_t kLogSigma = 3;
+    static constexpr size_t bits_per_char = alphabets::kBOSSBitsPerCharDNA;
     #elif _DNA4_GRAPH
-    static constexpr size_t kLogSigma = 3;
+    static constexpr size_t bits_per_char = alphabets::kBOSSBitsPerCharDNA4;
     #else
     static_assert(false,
         "Define an alphabet: either "
@@ -32,9 +32,9 @@ class KmerExtractor {
     );
     #endif
 
-    typedef KMerBOSS<uint64_t, kLogSigma> Kmer64;
-    typedef KMerBOSS<sdsl::uint128_t, kLogSigma> Kmer128;
-    typedef KMerBOSS<sdsl::uint256_t, kLogSigma> Kmer256;
+    typedef KMerBOSS<uint64_t, bits_per_char> Kmer64;
+    typedef KMerBOSS<sdsl::uint128_t, bits_per_char> Kmer128;
+    typedef KMerBOSS<sdsl::uint256_t, bits_per_char> Kmer256;
 
     // alphabet for k-mer representation
     typedef uint8_t TAlphabet;
@@ -83,18 +83,18 @@ class KmerExtractor {
 };
 
 
-template <const uint8_t LogSigma>
+template <const uint8_t BitsPerChar>
 class KmerExtractor2BitT {
   public:
     // alphabet for k-mer representation
     typedef uint8_t TAlphabet;
 
-    static constexpr uint8_t kLogSigma = LogSigma;
+    static constexpr uint8_t bits_per_char = BitsPerChar;
     const std::string alphabet;
 
     // k-mer
     template <class T>
-    using Kmer = KMer<T, kLogSigma>;
+    using Kmer = KMer<T, bits_per_char>;
 
     typedef Kmer<uint64_t> Kmer64;
     typedef Kmer<sdsl::uint128_t> Kmer128;
@@ -141,7 +141,7 @@ class KmerExtractor2BitT {
 };
 
 
-typedef KmerExtractor2BitT<alphabets::kLogSigmaDNA4> KmerExtractor2Bit;
+typedef KmerExtractor2BitT<alphabets::kBitsPerCharDNA4> KmerExtractor2Bit;
 
 
 #endif // __KMER_EXTRACTOR_HPP__

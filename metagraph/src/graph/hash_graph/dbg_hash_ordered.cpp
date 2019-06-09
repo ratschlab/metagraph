@@ -365,11 +365,11 @@ KMER DBGHashOrderedImpl<KMER>::get_kmer(node_index node) const {
 
 std::unique_ptr<DBGHashOrdered::DBGHashOrderedInterface>
 DBGHashOrdered::initialize_graph(size_t k, bool canonical_mode) {
-    if (k * KmerExtractor2Bit::kLogSigma <= 64) {
+    if (k * KmerExtractor2Bit::bits_per_char <= 64) {
         return std::make_unique<DBGHashOrderedImpl<KmerExtractor2Bit::Kmer64>>(
             k, canonical_mode
         );
-    } else if (k * KmerExtractor2Bit::kLogSigma <= 128) {
+    } else if (k * KmerExtractor2Bit::bits_per_char <= 128) {
         return std::make_unique<DBGHashOrderedImpl<KmerExtractor2Bit::Kmer128>>(
             k, canonical_mode
         );

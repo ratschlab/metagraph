@@ -20,7 +20,7 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
                    SortedSet<KMER> *kmers,
                    const std::vector<TAlphabet> &suffix,
                    bool remove_redundant = true) {
-    static_assert(KMER::kBitsPerChar == KmerExtractor::kLogSigma);
+    static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
 
     Vector<KMER> temp_storage;
     temp_storage.reserve(1.1 * kMaxKmersChunkSize);
@@ -62,7 +62,7 @@ void count_kmers(std::function<void(CallString)> generate_reads,
                  bool both_strands_mode,
                  SortedMultiset<KMER, KmerCount> *kmers,
                  const std::vector<TAlphabet> &suffix) {
-    static_assert(KMER::kBitsPerChar == KmerExtractor::kLogSigma);
+    static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
 
     Vector<KMER> temp_storage;
     temp_storage.reserve(1.1 * kMaxKmersChunkSize);

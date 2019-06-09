@@ -127,7 +127,7 @@ namespace utils {
     std::deque<std::string> generate_strings(const std::string &alphabet,
                                              size_t length);
 
-    uint32_t code_length(uint64_t a);
+    inline uint32_t code_length(uint64_t x) { return sdsl::bits::hi(x) + 1; }
 
     template <class AIt, class BIt>
     uint64_t count_intersection(AIt first_begin, AIt first_end,
