@@ -446,5 +446,9 @@ TYPED_TEST(CountKmers, CountKmersAppendParallel) {
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
         2, &result, { 1, }, 0
     );
+#if _DNA_GRAPH
+    ASSERT_EQ(3u, result.data().size());
+#else
     ASSERT_EQ(6u, result.data().size());
+#endif
 }

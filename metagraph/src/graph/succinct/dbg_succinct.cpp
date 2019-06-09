@@ -79,7 +79,7 @@ void DBGSuccinct::call_outgoing_kmers(node_index node,
 
         auto next = boss_to_kmer_index(i);
         if (next != npos)
-            callback(next, boss_graph_->decode(boss_graph_->get_W(i)));
+            callback(next, boss_graph_->decode(boss_graph_->get_W(i) % boss_graph_->alph_size));
     }
 }
 
@@ -166,7 +166,7 @@ std::string DBGSuccinct::get_node_sequence(node_index node) const {
     auto boss_edge = kmer_to_boss_index(node);
 
     return boss_graph_->get_node_str(boss_edge)
-            + boss_graph_->decode(boss_graph_->get_W(boss_edge));
+            + boss_graph_->decode(boss_graph_->get_W(boss_edge) % boss_graph_->alph_size);
 }
 
 // Traverse graph mapping sequence to the graph nodes
@@ -248,7 +248,7 @@ void DBGSuccinct
 
             auto node = boss_to_kmer_index(index);
             if (node != npos)
-                callback(node, seq + boss_graph_->decode(cur_W));
+                callback(node, seq + boss_graph_->decode(cur_W % boss_graph_->alph_size));
         } while (!boss_graph_->get_last(--index));
     });
 }
@@ -575,7 +575,7 @@ void DBGSuccinct::print(std::ostream &out) const {
     for (uint64_t i = 1; i < boss.num_edges(); i++) {
         out << i << "\t" << boss.get_last(i)
                  << "\t" << boss.get_node_str(i)
-                 << "\t" << boss.decode(boss.get_W(i))
+                 << "\t" << boss.decode(boss.get_W(i) % boss.alph_size)
                          << (boss.get_W(i) >= boss.alph_size
                                  ? "-"
                                  : "");

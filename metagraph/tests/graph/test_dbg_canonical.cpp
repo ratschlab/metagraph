@@ -10,7 +10,9 @@ const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 
 template <typename Graph>
 class DeBruijnGraphCanonicalTest : public DeBruijnGraphTest<Graph> { };
-typedef ::testing::Types<DBGBitmap, DBGHashOrdered, DBGSuccinct> CanonicalGraphTypes;
+typedef ::testing::Types<DBGBitmap,
+                         DBGHashOrdered,
+                         DBGSuccinct> CanonicalGraphTypes;
 TYPED_TEST_CASE(DeBruijnGraphCanonicalTest, CanonicalGraphTypes);
 
 template <typename Graph>

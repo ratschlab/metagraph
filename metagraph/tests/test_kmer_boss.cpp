@@ -222,10 +222,10 @@ TYPED_TEST(KmerBOSS, UpdateKmerLong) {
 }
 
 TYPED_TEST(KmerBOSS, UpdateKmerVsConstruct) {
-    std::string long_seq0 = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAN";
+    std::string long_seq0 = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAA";
     long_seq0.resize(std::min(kSizeOfKmer * 8 / kBitsPerChar,
                               long_seq0.size()));
-    std::string long_seq1 =  "AGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAANT";
+    std::string long_seq1 =  "AGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAT";
     long_seq1.resize(std::min(kSizeOfKmer * 8 / kBitsPerChar,
                               long_seq0.size()));
     auto seq0 = KmerExtractor::encode(long_seq0);
@@ -256,15 +256,15 @@ TYPED_TEST(KmerBOSS, InvertibleBothDol) {
 }
 
 TYPED_TEST(KmerBOSS, InvalidChars) {
-#if _DNA_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
+#if _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
     test_kmer_codec<TypeParam>("ATGH", "ATGN");
     test_kmer_codec<TypeParam>("ATGЯ", "ATGNN");
 #elif _PROTEIN_GRAPH
     test_kmer_codec<TypeParam>("ATGH", "ATGH");
     test_kmer_codec<TypeParam>("ATGЯ", "ATGXX");
-#elif _DNA4_GRAPH
-    test_kmer_codec<TypeParam>("ATGH", "ATGA");
-    test_kmer_codec<TypeParam>("ATGЯ", "ATGAA");
+#elif _DNA_GRAPH
+    ASSERT_DEATH(test_kmer_codec<TypeParam>("ATGH", "ATGN"), "");
+    ASSERT_DEATH(test_kmer_codec<TypeParam>("ATGЯ", "ATGNN"), "");
 #else
     static_assert(false,
         "Add a unit test for checking behavior with invalid characters"
@@ -375,9 +375,7 @@ TEST(KmerBOSS, TestPrint64) {
     ss << kmer;
     std::string out;
     ss >> out;
-#if _DNA4_GRAPH
-    EXPECT_EQ("0000000000000000000000000000000000000000000000001249249249249249", out);
-#elif _DNA_GRAPH
+#if _DNA_GRAPH || _DNA5_GRAPH
     EXPECT_EQ("0000000000000000000000000000000000000000000000001249249249249249", out);
 #endif
 }
@@ -389,9 +387,7 @@ TEST(KmerBOSS, TestPrint128) {
     ss << kmer;
     std::string out;
     ss >> out;
-#if _DNA4_GRAPH
-    EXPECT_EQ("0000000000000000000000000000000009249249249249249249249249249249", out);
-#elif _DNA_GRAPH
+#if _DNA_GRAPH || _DNA5_GRAPH
     EXPECT_EQ("0000000000000000000000000000000009249249249249249249249249249249", out);
 #endif
 }
@@ -403,9 +399,7 @@ TEST(KmerBOSS, TestPrint256) {
     ss << kmer;
     std::string out;
     ss >> out;
-#if _DNA4_GRAPH
-    EXPECT_EQ("1249249249249249249249249249249249249249249249249249249249249249", out);
-#elif _DNA_GRAPH
+#if _DNA_GRAPH || _DNA5_GRAPH
     EXPECT_EQ("1249249249249249249249249249249249249249249249249249249249249249", out);
 #endif
 }

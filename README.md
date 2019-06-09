@@ -87,7 +87,7 @@ popd
 - `-DPYTHON_INTERFACE=[ON|OFF]` -- compile python interface (requires shared libraries, `OFF` by default)
 - `-DBUILD_KMC=[ON|OFF]` -- compile the KMC executable (`ON` by default)
 - `-DWITH_AVX=[ON|OFF]` -- compile with support for the avx instructions (`ON` by default)
-- `-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA4|DNA_CASE_SENSITIVE]` -- alphabet to use (`DNA` by default)
+- `-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA5|DNA_CASE_SENSITIVE]` -- alphabet to use (`DNA` by default)
 
 ## Typical workflow
 1. Build de Bruijn graph from Fasta files, FastQ files, or [KMC k-mer counters](https://github.com/refresh-bio/KMC/):\
