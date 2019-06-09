@@ -539,7 +539,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         } break;
         case BUILD: {
             fprintf(stderr, "Usage: %s build [options] FILE1 [[FILE2] ...]\n"
-                            "\tEach input file is given in FASTA, FASTQ, or VCF format.\n\n", prog_name.c_str());
+                            "\tEach input file is given in FASTA, FASTQ, or VCF format.\n"
+                            "\tNote that VCF files must be in plain text or bgzip format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for build:\n");
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
@@ -564,7 +565,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         } break;
         case EXTEND: {
             fprintf(stderr, "Usage: %s extend -i <GRAPH> -o <extended_graph_basename> [options] FILE1 [[FILE2] ...]\n"
-                            "\tEach input file is given in FASTA, FASTQ, or VCF format.\n\n", prog_name.c_str());
+                            "\tEach input file is given in FASTA, FASTQ, or VCF format.\n"
+                            "\tNote that VCF files must be in plain text or bgzip format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for extend:\n");
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
@@ -657,7 +659,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         } break;
         case ANNOTATE: {
             fprintf(stderr, "Usage: %s annotate -i <GRAPH> [options] FILE1 [[FILE2] ...]\n"
-                            "\tEach file is given in FASTA, FASTQ, or VCF format.\n\n", prog_name.c_str());
+                            "\tEach file is given in FASTA, FASTQ, or VCF format.\n"
+                            "\tNote that VCF files must be in plain text or bgzip format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");

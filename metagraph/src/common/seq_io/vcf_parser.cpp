@@ -27,9 +27,12 @@ VCFParser::VCFParser(const std::string &reference_file,
         throw std::ifstream::failure("Failed to read reference");
 
     if (!(sw_ = bcf_sweep_init(vcf_file.c_str())))
-        throw std::ifstream::failure("Failed to read VCF");
+        throw std::ifstream::failure("Failed to initialize VCF");
 
-    hdr_ = bcf_sweep_hdr(sw_);
+    if (!(hdr_ = bcf_sweep_hdr(sw_)))
+        throw std::runtime_error(
+            "Failed to read VCF. If it is gzipped, recompress with bgzip"
+        );
 
     read_next_line();
 

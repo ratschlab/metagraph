@@ -7,6 +7,8 @@
 const std::string test_data_dir = "../tests/data/";
 const std::string ref_file = test_data_dir + "test_vcfparse.fa";
 const std::string vcf_file1 = test_data_dir + "test_vcfparse_1.vcf";
+const std::string vcf_file1_bad = test_data_dir + "test_vcfparse_1.bad.vcf.gz";
+const std::string vcf_file1_good = test_data_dir + "test_vcfparse_1.good.vcf.gz";
 const std::string vcf_file2 = test_data_dir + "test_vcfparse_2.vcf";
 
 const std::vector<std::string> annots = {
@@ -97,6 +99,26 @@ TEST(VCFParse, TestKmerInfoCopyNumber) {
         { "TGCCCGC", { "test", "AC_AMR" } },
         { "TGCTTCGC", { "test" } },
         { "TGCTTTTCGC", { "test" } }
+    }, obs;
+
+    vcf.call_annotated_sequences(
+        [&](auto&& seq, const auto &annotation) {
+            obs.emplace(std::move(seq),
+                        std::multiset<std::string>(annotation.begin(), annotation.end()));
+        },
+        annots
+    );
+    EXPECT_EQ(ref, obs);
+}
+
+TEST(VCFParse, TestKmerGZIP) {
+    EXPECT_THROW(VCFParser(ref_file, vcf_file1_bad, 16), std::runtime_error);
+}
+
+TEST(VCFParse, TestKmerBGZIP) {
+    VCFParser vcf(ref_file, vcf_file1_good, 16);
+    std::multiset<std::pair<std::string, std::multiset<std::string>>> ref {
+        { "ATGCGCGCGCGCTCTCGCGCA", { "test", "A", "B", "C" } }
     }, obs;
 
     vcf.call_annotated_sequences(
