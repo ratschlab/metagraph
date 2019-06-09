@@ -111,7 +111,7 @@ DATA="../tests/data/transcripts_1000.fa"
 
 ./metagengraph query -i transcripts_1000 -a transcripts_1000.column.annodbg $DATA
 
-./metagengraph stats -a transcripts_1000 transcripts_1000
+./metagengraph stats -a transcripts_1000.column.annodbg transcripts_1000
 ```
 
 For real examples, see [scripts](./metagraph/scripts).
@@ -190,7 +190,7 @@ bsub -J StackChunks -W 12:00 -n 30 -R "rusage[mem=15000]" "/usr/bin/time -v \
 
 ### Annotate graph
 ```bash
-./metagengraph annotate -v --fasta-anno \
+./metagengraph annotate -v --anno-type row --fasta-anno \
                            -i primates.dbg \
                            -o primates \
                            ~/fasta_zurich/refs_chimpanzee_primates.fa

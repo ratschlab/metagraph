@@ -67,7 +67,7 @@ echo ""
 
 $exe extend -i test_graph.dbg -a test_annotation.column.annodbg -o test_graph $file
 $exe stats test_graph.dbg --count-dummy
-$exe annotate -i test_graph.dbg -a test_graph -o test_annotation --anno-header --header-delimiter '|' $file
+$exe annotate -i test_graph.dbg -a test_graph.column.annodbg -o test_annotation --anno-header --header-delimiter '|' $file
 $exe stats -a test_annotation.column.annodbg
 $exe query -i test_graph -a test_annotation.column.annodbg <(cat $file | tail -n 200) | tee test_annotation_out.tsv
 [[ $(awk '{print $1}' test_annotation_out.tsv | wc -w) \
@@ -85,7 +85,7 @@ echo ""
 
 $exe extend -i test_graph.orhashdbg -a test_annotation.column.annodbg -o test_graph $file
 $exe stats test_graph.orhashdbg
-$exe annotate -i test_graph.orhashdbg -a test_graph -o test_annotation --anno-header --header-delimiter '|' $file
+$exe annotate -i test_graph.orhashdbg -a test_graph.column.annodbg -o test_annotation --anno-header --header-delimiter '|' $file
 $exe stats -a test_annotation.column.annodbg
 $exe query -i test_graph.orhashdbg -a test_annotation.column.annodbg <(cat $file | tail -n 200) | tee test_annotation_out.tsv
 [[ $(awk '{print $1}' test_annotation_out.tsv | wc -w) \

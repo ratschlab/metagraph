@@ -53,7 +53,7 @@ Config::GraphType parse_graph_extension(const std::string &filename) {
     }
 }
 
-Config::AnnotationType parse_annotation_extension(const std::string &filename) {
+Config::AnnotationType parse_annotation_type(const std::string &filename) {
     if (utils::ends_with(filename, annotate::kColumnAnnotatorExtension)) {
         return Config::AnnotationType::ColumnCompressed;
 
@@ -426,14 +426,10 @@ void execute_query(std::string seq_name,
 }
 
 
-std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
+std::unique_ptr<Annotator> initialize_annotation(Config::AnnotationType anno_type,
                                                  const Config &config,
-                                                 uint64_t num_rows = 0) {
+                                                 uint64_t num_rows) {
     std::unique_ptr<Annotator> annotation;
-
-    Config::AnnotationType anno_type = filename.size()
-        ? parse_annotation_extension(filename)
-        : config.anno_type;
 
     switch (anno_type) {
         case Config::ColumnCompressed: {
@@ -473,16 +469,17 @@ std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
     return annotation;
 }
 
+std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
+                                                 const Config &config) {
+    return initialize_annotation(parse_annotation_type(filename), config, 0);
+}
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
                                                        const Config &config) {
-    auto annotation_temp = initialize_annotation(
-        config.infbase_annotators.size()
-            ? config.infbase_annotators.at(0)
-            : "",
-        config,
-        graph->num_nodes()
-    );
+    auto annotation_temp = config.infbase_annotators.size()
+            ? initialize_annotation(parse_annotation_type(config.infbase_annotators.at(0)), config, 0)
+            : initialize_annotation(config.anno_type, config, graph->num_nodes());
+
     if (config.infbase_annotators.size()
             && !annotation_temp->load(config.infbase_annotators.at(0))) {
         std::cerr << "ERROR: can't load annotations for graph "
@@ -1547,7 +1544,7 @@ int main(int argc, const char *argv[]) {
             std::vector<std::string> stream_files;
 
             for (const auto &filename : files) {
-                auto anno_file_type = parse_annotation_extension(filename);
+                auto anno_file_type = parse_annotation_type(filename);
                 if (anno_file_type == Config::AnnotationType::RowCompressed) {
                     stream_files.push_back(filename);
                 } else {
@@ -2005,7 +2002,7 @@ int main(int argc, const char *argv[]) {
             /********************************************************/
 
             const Config::AnnotationType input_anno_type
-                = parse_annotation_extension(files.at(0));
+                = parse_annotation_type(files.at(0));
 
             if (config->anno_type == input_anno_type) {
                 std::cerr << "Skipping conversion: same input and target type: "
