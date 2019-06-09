@@ -110,7 +110,7 @@ TYPED_TEST(KmerTest, nucleotide_alphabet_pack) {
 }
 
 //typedef uint64_t KMerBaseType;
-const size_t kBitsPerChar = KmerExtractor::kLogSigma;
+const size_t kBitsPerChar = KmerExtractor::bits_per_char;
 
 template <typename TypeParam>
 using KMER = KMerBOSS<TypeParam, kBitsPerChar>;

@@ -6,7 +6,6 @@
 #include <cstdlib>
 #include <filesystem>
 
-#include <boost/multiprecision/integer.hpp>
 #include <boost/functional/hash/hash.hpp>
 
 #include "binary_matrix.hpp"
@@ -155,10 +154,6 @@ std::deque<std::string> generate_strings(const std::string &alphabet,
     }
     assert(suffices.size() == std::pow(alphabet.size(), length));
     return suffices;
-}
-
-uint32_t code_length(uint64_t a) {
-    return a ? boost::multiprecision::msb(a) + 1 : 1;
 }
 
 // indexes - positions of inserted elements in the final vector

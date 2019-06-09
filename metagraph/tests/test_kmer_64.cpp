@@ -11,7 +11,7 @@
 #include "utils.hpp"
 
 typedef uint64_t KMerPackedBaseType;
-const size_t kBitsPerChar = KmerExtractor2Bit::kLogSigma;
+const size_t kBitsPerChar = KmerExtractor2Bit::bits_per_char;
 typedef KMer<KMerPackedBaseType, kBitsPerChar> KMER;
 const size_t kSizeOfKmer = sizeof(KMerPackedBaseType);
 
@@ -27,9 +27,9 @@ std::string kmer_packed_codec(const std::string &test_kmer) {
     return KMER(kmer).to_string(test_kmer.length(), kmer_extractor.alphabet);
 }
 
-template std::string kmer_packed_codec<KMer<uint64_t, KmerExtractor2Bit::kLogSigma>>(const std::string &test_kmer);
-template std::string kmer_packed_codec<KMer<sdsl::uint256_t, KmerExtractor2Bit::kLogSigma>>(const std::string &test_kmer);
-template std::string kmer_packed_codec<KMer<sdsl::uint128_t, KmerExtractor2Bit::kLogSigma>>(const std::string &test_kmer);
+template std::string kmer_packed_codec<KMer<uint64_t, KmerExtractor2Bit::bits_per_char>>(const std::string &test_kmer);
+template std::string kmer_packed_codec<KMer<sdsl::uint256_t, KmerExtractor2Bit::bits_per_char>>(const std::string &test_kmer);
+template std::string kmer_packed_codec<KMer<sdsl::uint128_t, KmerExtractor2Bit::bits_per_char>>(const std::string &test_kmer);
 
 std::string kmer_packed_codec_64(const std::string &test_kmer) {
     return kmer_packed_codec<KMER>(test_kmer);

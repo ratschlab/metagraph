@@ -344,13 +344,13 @@ IBOSSChunkConstructor
     using Extractor = KmerExtractor;
 
     if (count_kmers) {
-        if ((k + 1) * Extractor::kLogSigma <= 64) {
+        if ((k + 1) * Extractor::bits_per_char <= 64) {
             return std::unique_ptr<IBOSSChunkConstructor>(
                 new WeightedBOSSChunkConstructor<typename Extractor::Kmer64>(
                     k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
                 )
             );
-        } else if ((k + 1) * Extractor::kLogSigma <= 128) {
+        } else if ((k + 1) * Extractor::bits_per_char <= 128) {
             return std::unique_ptr<IBOSSChunkConstructor>(
                 new WeightedBOSSChunkConstructor<typename Extractor::Kmer128>(
                     k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
@@ -364,13 +364,13 @@ IBOSSChunkConstructor
             );
         }
     } else {
-        if ((k + 1) * Extractor::kLogSigma <= 64) {
+        if ((k + 1) * Extractor::bits_per_char <= 64) {
             return std::unique_ptr<IBOSSChunkConstructor>(
                 new BOSSChunkConstructor<typename Extractor::Kmer64>(
                     k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
                 )
             );
-        } else if ((k + 1) * Extractor::kLogSigma <= 128) {
+        } else if ((k + 1) * Extractor::bits_per_char <= 128) {
             return std::unique_ptr<IBOSSChunkConstructor>(
                 new BOSSChunkConstructor<typename Extractor::Kmer128>(
                     k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
