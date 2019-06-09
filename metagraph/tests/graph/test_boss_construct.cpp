@@ -246,8 +246,6 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunksParallel) {
 }
 
 
-using TAlphabet = KmerExtractor::TAlphabet;
-
 typedef std::function<void(const std::string&)> CallbackString;
 
 template <typename TypeParam, class KmerExtractor>
@@ -255,7 +253,7 @@ void extract_kmers(std::function<void(CallbackString)> generate_reads,
                    size_t k,
                    bool canonical_mode,
                    SortedSet<TypeParam> *kmers,
-                   const std::vector<TAlphabet> &suffix,
+                   const std::vector<typename KmerExtractor::TAlphabet> &suffix,
                    bool remove_redundant = true);
 
 // TODO: k is node length
@@ -263,7 +261,7 @@ template <typename TypeParam>
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
                                         SortedSet<TypeParam> *kmers,
-                                        const std::vector<TAlphabet> &suffix,
+                                        const std::vector<KmerExtractor::TAlphabet> &suffix,
                                         bool remove_redundant,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);

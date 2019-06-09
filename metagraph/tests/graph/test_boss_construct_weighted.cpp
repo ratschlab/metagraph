@@ -246,8 +246,6 @@ TYPED_TEST(WeightedBOSSConstruct, ConstructionFromChunksParallel) {
 }
 
 
-using TAlphabet = KmerExtractor::TAlphabet;
-
 typedef std::function<void(const std::string&)> CallbackString;
 
 template <typename KMER, class KmerExtractor, typename KmerCount>
@@ -255,14 +253,14 @@ void count_kmers(std::function<void(CallString)> generate_reads,
                  size_t k,
                  bool both_strands_mode,
                  SortedMultiset<KMER, KmerCount> *kmers,
-                 const std::vector<TAlphabet> &suffix);
+                 const std::vector<typename KmerExtractor::TAlphabet> &suffix);
 
 // TODO: k is node length
 template <typename TypeParam, typename KmerCount>
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
                                         SortedMultiset<TypeParam, KmerCount> *kmers,
-                                        const std::vector<TAlphabet> &suffix,
+                                        const std::vector<KmerExtractor::TAlphabet> &suffix,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
     count_kmers<TypeParam, KmerExtractor, KmerCount>(
