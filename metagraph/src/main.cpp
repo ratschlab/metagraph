@@ -2559,20 +2559,24 @@ int main(int argc, const char *argv[]) {
                             return;
                     }
 
-                    for (const auto &label : labels) {
-                        std::cout << first
-                                  << "\t" << ref
-                                  << "\t" << var
-                                  << "\t" << label;
+                    num_calls += labels.size();
 
-                        if (taxid_mapper.get())
-                            std::cout << "\t" << taxid_mapper->gb_to_taxid(label);
+                    std::cout << first
+                              << "\t" << ref
+                              << "\t" << var
+                              << "\t" << utils::join_strings(labels, ",");
 
-                        std::cout << std::endl;
+                    if (taxid_mapper.get()) {
+                        std::transform(
+                            labels.begin(), labels.end(),
+                            labels.begin(),
+                            [&](auto &label) { return taxid_mapper->gb_to_taxid(label); }
+                        );
 
-                        num_calls++;
+                        std::cout << "\t" << utils::join_strings(labels, ",");
                     }
 
+                    std::cout << std::endl;
                 };
 
             if (config->call_bubbles) {
