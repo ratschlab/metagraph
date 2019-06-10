@@ -19,7 +19,7 @@ uint64_t count_node_labels(const AnnotatedDBG &anno_graph,
 }
 
 // TODO: optimize this
-constexpr double density_cutoff = 0.1;
+constexpr double density_cutoff = 0.05;
 
 std::unique_ptr<bitmap>
 mask_nodes_by_label(const AnnotatedDBG &anno_graph,
