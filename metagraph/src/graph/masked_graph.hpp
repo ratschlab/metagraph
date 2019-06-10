@@ -80,6 +80,7 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     std::shared_ptr<const DeBruijnGraph> get_graph_ptr() const { return graph_; }
 
     virtual uint64_t unmasked_outdegree(node_index node) const;
+    virtual uint64_t unmasked_indegree(node_index node) const;
 
     virtual inline bool in_graph(node_index node) const {
         return node == DeBruijnGraph::npos || !is_target_mask_.get()

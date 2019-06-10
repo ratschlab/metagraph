@@ -115,6 +115,11 @@ uint64_t MaskedDeBruijnGraph
     return graph_->outdegree(node);
 }
 
+uint64_t MaskedDeBruijnGraph
+::unmasked_indegree(node_index node) const {
+    return graph_->indegree(node);
+}
+
 void MaskedDeBruijnGraph
 ::call_nodes(const std::function<void(const node_index&)> &callback,
              const std::function<bool()> &stop_early) const {

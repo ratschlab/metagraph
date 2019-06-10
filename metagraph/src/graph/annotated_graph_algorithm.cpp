@@ -144,7 +144,8 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
 void call_outgoing_nmers(const DeBruijnGraph &graph,
                          DeBruijnGraph::node_index node,
-                         const std::function<void(const std::string&)> &callback,
+                         std::function<void(const std::string&,
+                                            DeBruijnGraph::node_index)> callback,
                          size_t n) {
     if (!n)
         return;
@@ -174,7 +175,7 @@ void call_outgoing_nmers(const DeBruijnGraph &graph,
                 break;
         }
         if (path.second.size() == path_length)
-            callback(path.second);
+            callback(path.second, path.first);
     }
 }
 
@@ -295,16 +296,18 @@ void call_bubbles(const MaskedDeBruijnGraph &masked_graph,
                 call_outgoing_nmers(
                     masked_graph,
                     index,
-                    [&](const auto &sequence) {
-                        thread_pool->enqueue(process_path, index, sequence);
+                    [&](const auto &sequence, auto last_node) {
+                        if (masked_graph.unmasked_indegree(last_node) > 1)
+                            thread_pool->enqueue(process_path, index, sequence);
                     },
                     path_length
                 );
             } else {
                 call_outgoing_nmers(masked_graph,
                                     index,
-                                    [&](const auto &sequence) {
-                                        process_path(index, sequence);
+                                    [&](const auto &sequence, auto last_node) {
+                                        if (masked_graph.unmasked_indegree(last_node) > 1)
+                                            process_path(index, sequence);
                                     },
                                     path_length);
             }
