@@ -218,8 +218,10 @@ bool BOSS::load(std::ifstream &instream) {
         k_ = load_number(instream);
         state = static_cast<Config::StateType>(load_number(instream));
 
-        if (F_.size() != alph_size)
+        if (F_.size() != alph_size) {
+            std::cerr << "ERROR: failed to load F vector, incompatible size" << std::endl;
             return false;
+        }
 
         // load W and last arrays
         delete W_;
@@ -242,7 +244,17 @@ bool BOSS::load(std::ifstream &instream) {
                 last_ = new bit_vector_small();
                 break;
         }
-        return W_->load(instream) && last_->load(instream);
+        if (!W_->load(instream)) {
+            std::cerr << "ERROR: failed to load W vector" << std::endl;
+            return false;
+        }
+
+        if (!last_->load(instream)) {
+            std::cerr << "ERROR: failed to load L vector" << std::endl;
+            return false;
+        }
+
+        return true;
     } catch (const std::bad_alloc &exception) {
         std::cerr << "ERROR: Not enough memory to load the BOSS table." << std::endl;
         return false;
