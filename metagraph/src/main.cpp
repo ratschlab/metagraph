@@ -1583,6 +1583,75 @@ int main(int argc, const char *argv[]) {
 
             return 0;
         }
+        case Config::CLEAN: {
+            assert(files.size() == 1);
+            assert(config->outfbase.size());
+
+            Timer timer;
+            if (config->verbose)
+                std::cout << "Graph loading...\t" << std::flush;
+
+            auto weighted_graph = std::make_shared<WeightedDBG<>>(
+                std::make_shared<DBGSuccinct>(2)
+            );
+            if (!weighted_graph->load(files.at(0))) {
+                std::cerr << "ERROR: Cannot load succinct weighted graph from "
+                          << files.at(0) << std::endl;
+                exit(1);
+            }
+
+            if (config->verbose)
+                std::cout << timer.elapsed() << "sec" << std::endl;
+
+            auto subgraph = std::make_unique<MaskedDeBruijnGraph>(
+                weighted_graph,
+                [&](auto i) { return weighted_graph->get_weight(i) >= config->min_count
+                                    && weighted_graph->get_weight(i) <= config->max_count; }
+            );
+
+            if (config->verbose)
+                std::cout << "Extracting sequences from subgraph...\t" << std::flush;
+
+            timer.reset();
+
+            auto out_filename
+                = utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz";
+
+            gzFile out_fasta_gz = gzopen(out_filename.c_str(), "w");
+
+            if (out_fasta_gz == Z_NULL) {
+                std::cerr << "ERROR: Can't write to " << out_filename << std::endl;
+                exit(1);
+            }
+
+            uint64_t counter = 0;
+            const auto &dump_sequence = [&](const auto &sequence) {
+                if (!write_fasta(out_fasta_gz,
+                                 utils::join_strings({ config->header,
+                                                        std::to_string(counter) },
+                                                     ".",
+                                                     true),
+                                 sequence)) {
+                    std::cerr << "ERROR: Can't write extracted sequences to "
+                              << out_filename << std::endl;
+                    exit(1);
+                }
+                counter++;
+            };
+
+            if (config->unitigs || config->pruned_dead_end_size > 0) {
+                subgraph->call_unitigs(dump_sequence, config->pruned_dead_end_size);
+            } else {
+                subgraph->call_sequences(dump_sequence);
+            }
+
+            gzclose(out_fasta_gz);
+
+            if (config->verbose)
+                std::cout << timer.elapsed() << "sec" << std::endl;
+
+            return 0;
+        }
         case Config::STATS: {
             for (const auto &file : files) {
                 auto graph = load_critical_dbg(file);
@@ -1909,6 +1978,7 @@ int main(int argc, const char *argv[]) {
         }
         case Config::TRANSFORM: {
             assert(files.size() == 1);
+            assert(config->outfbase.size());
 
             Timer timer;
             if (config->verbose)
@@ -1945,12 +2015,9 @@ int main(int argc, const char *argv[]) {
 
                 auto *boss = &dbg_succ->get_boss();
                 timer.reset();
-                if (config->outfbase.size()) {
-                    std::ofstream outstream(config->outfbase + ".adjlist");
-                    boss->print_adj_list(outstream);
-                } else {
-                    boss->print_adj_list(std::cout);
-                }
+
+                std::ofstream outstream(config->outfbase + ".adjlist");
+                boss->print_adj_list(outstream);
 
                 if (config->verbose)
                     std::cout << timer.elapsed() << "sec" << std::endl;
@@ -1970,22 +2037,20 @@ int main(int argc, const char *argv[]) {
             if (config->verbose)
                 std::cout << timer.elapsed() << "sec" << std::endl;
 
-
-            if (config->outfbase.size()) {
-                if (config->verbose) {
-                    std::cout << "Serializing transformed graph...\t" << std::flush;
-                    timer.reset();
-                }
-                dbg_succ->serialize(config->outfbase);
-                if (config->verbose) {
-                    std::cout << timer.elapsed() << "sec" << std::endl;
-                }
+            if (config->verbose) {
+                std::cout << "Serializing transformed graph...\t" << std::flush;
+                timer.reset();
+            }
+            dbg_succ->serialize(config->outfbase);
+            if (config->verbose) {
+                std::cout << timer.elapsed() << "sec" << std::endl;
             }
 
             return 0;
         }
         case Config::ASSEMBLE: {
             assert(files.size() == 1);
+            assert(config->outfbase.size());
 
             Timer timer;
             if (config->verbose)
@@ -2014,10 +2079,6 @@ int main(int argc, const char *argv[]) {
                 std::cout << "Extracting sequences from graph...\t" << std::flush;
 
             timer.reset();
-            if (!config->outfbase.size()) {
-                std::cerr << "Error: no output file provided" << std::endl;
-                exit(1);
-            }
 
             auto out_filename
                 = utils::remove_suffix(config->outfbase, ".gz", ".fasta")
@@ -2060,6 +2121,7 @@ int main(int argc, const char *argv[]) {
         }
         case Config::RELAX_BRWT: {
             assert(files.size() == 1);
+            assert(config->outfbase.size());
 
             Timer timer;
 

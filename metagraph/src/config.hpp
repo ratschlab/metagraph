@@ -84,6 +84,7 @@ class Config {
     enum IdentityType {
         NO_IDENTITY = -1,
         BUILD = 1,
+        CLEAN,
         EXTEND,
         EXPERIMENT,
         MERGE,

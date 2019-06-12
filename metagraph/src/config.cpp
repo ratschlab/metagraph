@@ -18,6 +18,8 @@ Config::Config(int argc, const char *argv[]) {
     // parse identity from first command line argument
     if (!strcmp(argv[1], "build")) {
         identity = BUILD;
+    } else if (!strcmp(argv[1], "clean")) {
+        identity = CLEAN;
     } else if (!strcmp(argv[1], "merge")) {
         identity = MERGE;
     } else if (!strcmp(argv[1], "extend")) {
@@ -263,9 +265,6 @@ Config::Config(int argc, const char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if (identity == CONCATENATE && outfbase.empty())
-        print_usage_and_exit = true;
-
     if (identity == ALIGN && infbase.empty())
         print_usage_and_exit = true;
 
@@ -295,33 +294,37 @@ Config::Config(int argc, const char *argv[]) {
             && outfbase.empty())
         outfbase = utils::remove_suffix(infbase, ".orhashdbg", ".bitmapdbg", ".dbg");
 
-    if (identity == EXTEND && (outfbase.empty() || infbase.empty()))
-        print_usage_and_exit = true;
-
-    if (identity == MERGE_ANNOTATIONS && outfbase.empty())
+    if (identity == EXTEND && infbase.empty())
         print_usage_and_exit = true;
 
     if ((identity == QUERY || identity == SERVER_QUERY) && infbase_annotators.size() != 1)
         print_usage_and_exit = true;
 
     if ((identity == TRANSFORM
+            || identity == CLEAN
             || identity == TRANSFORM_ANNOTATION
             || identity == ASSEMBLE
             || identity == RELAX_BRWT)
                     && fname.size() != 1)
         print_usage_and_exit = true;
 
+    if ((identity == TRANSFORM
+            || identity == CONCATENATE
+            || identity == EXTEND
+            || identity == MERGE
+            || identity == CLEAN
+            || identity == TRANSFORM_ANNOTATION
+            || identity == MERGE_ANNOTATIONS
+            || identity == ASSEMBLE
+            || identity == RELAX_BRWT)
+                    && outfbase.empty())
+        print_usage_and_exit = true;
+
     if (identity == PARSE_TAXONOMY &&
             ((accession2taxid == "" && taxonomy_nodes == "") || outfbase == ""))
         print_usage_and_exit = true;
 
-    if (identity == TRANSFORM_ANNOTATION && outfbase.empty())
-        print_usage_and_exit = true;
-
     if (identity == MERGE && fname.size() < 2)
-        print_usage_and_exit = true;
-
-    if (identity == MERGE && outfbase.empty())
         print_usage_and_exit = true;
 
     if (identity == COMPARE && fname.size() != 2)
@@ -451,6 +454,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats or integrate sequence\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats into a given graph\n\n");
 
+            fprintf(stderr, "\tclean\t\tclean an existing graph and extract sequences from it\n");
+            fprintf(stderr, "\t\t\tin fast[a|q] formats\n\n");
+
             fprintf(stderr, "\textend\t\textend an existing graph with new sequences from\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats or integrate sequence\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats\n\n");
@@ -521,6 +527,18 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --no-shrink \t\tdo not build mask for dummy k-mers (only for Succinct graph) [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
+        case CLEAN: {
+            fprintf(stderr, "Usage: %s clean -o <outfile-base> [options] GRAPH.\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for build:\n");
+            fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
+            fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
+            fprintf(stderr, "\t   --prune-end [INT] \tprune all dead ends of this length and shorter [0]\n");
+            fprintf(stderr, "\n");
+            // fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
+            fprintf(stderr, "\t   --unitigs \t\textract unitigs [off]\n");
+            // fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+        } break;
         case EXTEND: {
             fprintf(stderr, "Usage: %s extend -i <GRAPH> -o <extended_graph_basename> [options] FILE1 [[FILE2] ...]\n"
                             "\tEach input file is given in FASTA, FASTQ, or VCF format.\n"
@@ -576,9 +594,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case TRANSFORM: {
-            fprintf(stderr, "Usage: %s transform [options] GRAPH\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s transform -o <outfile-base> [options] GRAPH\n\n", prog_name.c_str());
 
-            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
+            // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges [off]\n");
             fprintf(stderr, "\t   --prune-end [INT] \tprune all dead ends of this length and shorter [0]\n");
             fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: fast / faster / dynamic / small [fast]\n");
@@ -587,10 +605,10 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case ASSEMBLE: {
-            fprintf(stderr, "Usage: %s assemble [options] GRAPH\n"
+            fprintf(stderr, "Usage: %s assemble -o <outfile-base> [options] GRAPH\n"
                             "\tAssemble contigs from de Bruijn graph and dump to compressed FASTA file.\n\n", prog_name.c_str());
 
-            fprintf(stderr, "\t-o --outfile-base [STR] \t\tbasename of output file []\n");
+            // fprintf(stderr, "\t-o --outfile-base [STR] \t\tbasename of output file []\n");
             fprintf(stderr, "\t   --prune-end [INT] \t\t\tprune all dead ends of this length and shorter [0]\n");
             fprintf(stderr, "\t   --unitigs \t\t\t\textract unitigs [off]\n");
             fprintf(stderr, "\t   --header [STR] \t\t\theader for sequences in FASTA output []\n");
@@ -650,7 +668,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case MERGE_ANNOTATIONS: {
-            fprintf(stderr, "Usage: %s merge_anno [options] -o <annotator_basename> ANNOT1 [[ANNOT2] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s merge_anno -o <annotator_basename> [options] ANNOT1 [[ANNOT2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
             fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation representation [column]\n");
@@ -659,7 +677,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case TRANSFORM_ANNOTATION: {
-            fprintf(stderr, "Usage: %s transform_anno [options] -o <annotator_basename> ANNOTATOR\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s transform_anno -o <annotator_basename> [options] ANNOTATOR\n\n", prog_name.c_str());
 
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --rename-cols [STR]\tfile with rules for renaming annotation labels []\n");
@@ -675,7 +693,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case RELAX_BRWT: {
-            fprintf(stderr, "Usage: %s relax_brwt [options] -o <annotator_basename> ANNOTATOR\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s relax_brwt -o <annotator_basename> [options] ANNOTATOR\n\n", prog_name.c_str());
 
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --relax-arity [INT] \trelax brwt tree to optimize arity limited to this number [10]\n");
