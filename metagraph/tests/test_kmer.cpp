@@ -10,55 +10,58 @@
 
 #include "kmer.hpp"
 #include "kmer_extractor.hpp"
+#include "test_kmer_helpers.hpp"
 
 
 typedef uint8_t TAlphabet;
 
-typedef uint64_t KMerBaseType;
 const size_t kBitsPerChar = KmerExtractor2Bit::bits_per_char;
-typedef KMer<KMerBaseType, kBitsPerChar> KMER;
-const size_t kSizeOfKmer = sizeof(KMerBaseType);
 
 const KmerExtractor2Bit kmer_extractor;
 
 
-template <typename KMER>
+template <typename IntType>
 std::string kmer_packed_codec(const std::string &test_kmer) {
-    std::vector<uint64_t> kmer(test_kmer.size());
+    std::vector<TAlphabet> kmer(test_kmer.size());
     std::transform(test_kmer.begin(), test_kmer.end(), kmer.begin(),
         [](char c) { return kmer_extractor.encode(c); }
     );
-    return KMER(kmer).to_string(test_kmer.length(), kmer_extractor.alphabet);
+    return KMer<IntType, kBitsPerChar>(kmer).to_string(test_kmer.length(),
+                                                       kmer_extractor.alphabet);
 }
 
-std::string kmer_packed_codec_64(const std::string &test_kmer) {
-    return kmer_packed_codec<KMER>(test_kmer);
-}
-
-void test_kmer_packed_codec_64(const std::string &test_kmer,
-                              const std::string &test_compare_kmer) {
+template <typename IntType>
+void test_kmer_packed_codec(const std::string &test_kmer,
+                            const std::string &test_compare_kmer) {
     ASSERT_EQ(test_kmer.length(), test_compare_kmer.length());
-    ASSERT_EQ(test_compare_kmer.length(), kmer_packed_codec_64(test_kmer).length());
-    EXPECT_EQ(test_compare_kmer, kmer_packed_codec_64(test_kmer));
+    ASSERT_EQ(test_compare_kmer.length(), kmer_packed_codec<IntType>(test_kmer).length());
+    EXPECT_EQ(test_compare_kmer, kmer_packed_codec<IntType>(test_kmer));
 }
 
-TEST(Kmer, Invertible) {
-    test_kmer_packed_codec_64("ATGG", "ATGG");
+template <class IntType>
+class Kmer : public ::testing::Test { };
+typedef ::testing::Types<uint64_t,
+                         sdsl::uint128_t,
+                         sdsl::uint256_t> IntTypes;
+TYPED_TEST_CASE(Kmer, IntTypes);
+
+TYPED_TEST(Kmer, Invertible) {
+    test_kmer_packed_codec<TypeParam>("ATGG", "ATGG");
 }
 
-TEST(Kmer, BitShiftBuild) {
+TYPED_TEST(Kmer, BitShiftBuild) {
     std::string long_seq = "ATGCCTGA";
-    while (long_seq.length() < kSizeOfKmer * 8 / kBitsPerChar) {
+    while (long_seq.length() < sizeof(TypeParam) * 8 / kBitsPerChar) {
         long_seq += long_seq;
     }
-    long_seq = long_seq.substr(0, kSizeOfKmer * 8 / kBitsPerChar);
+    long_seq = long_seq.substr(0, sizeof(TypeParam) * 8 / kBitsPerChar);
     //test bit shifting
-    KMER kmer_builtup(0u);
+    KMer<TypeParam, kBitsPerChar> kmer_builtup(0u);
     size_t k = 0;
     //ASSERT_EQ(k, kmer_builtup.get_k());
     ASSERT_EQ(k * kBitsPerChar, sdsl::bits::hi(kmer_builtup.seq_));
     for (int i = long_seq.length() - 1; i >= 0; --i) {
-        kmer_builtup.seq_ = kmer_builtup.seq_ << kBitsPerChar;
+        left_shift(&kmer_builtup.seq_, kBitsPerChar);
         kmer_builtup.seq_ |= kmer_extractor.encode(long_seq[i]);
         ++k;
     }
@@ -66,15 +69,15 @@ TEST(Kmer, BitShiftBuild) {
                                              kmer_extractor.alphabet);
     ASSERT_EQ(long_seq, dec);
 
-    test_kmer_packed_codec_64(long_seq, long_seq);
+    test_kmer_packed_codec<TypeParam>(long_seq, long_seq);
 }
 
-TEST(Kmer, UpdateKmer) {
-    KMER kmer[2] = {
-        KMER(kmer_extractor.encode("ATGC")),
-        KMER(kmer_extractor.encode("TGCT"))
+TYPED_TEST(Kmer, UpdateKmer) {
+    KMer<TypeParam, kBitsPerChar> kmer[2] = {
+        KMer<TypeParam, kBitsPerChar>(kmer_extractor.encode("ATGC")),
+        KMer<TypeParam, kBitsPerChar>(kmer_extractor.encode("TGCT"))
     };
-    KMER updated = kmer[0];
+    KMer<TypeParam, kBitsPerChar> updated = kmer[0];
     updated.to_next(4, kmer_extractor.encode('T'));
     EXPECT_EQ(kmer[1], updated);
     auto prev = kmer[1];
@@ -82,10 +85,10 @@ TEST(Kmer, UpdateKmer) {
     EXPECT_EQ(kmer[0], prev);
 }
 
-TEST(Kmer, NextPrevKmer) {
-    KMER kmer[2] = {
-        KMER(kmer_extractor.encode("ATGC")),
-        KMER(kmer_extractor.encode("TGCT"))
+TYPED_TEST(Kmer, NextPrevKmer) {
+    KMer<TypeParam, kBitsPerChar> kmer[2] = {
+        KMer<TypeParam, kBitsPerChar>(kmer_extractor.encode("ATGC")),
+        KMer<TypeParam, kBitsPerChar>(kmer_extractor.encode("TGCT"))
     };
 
     auto prev = kmer[1];
@@ -95,17 +98,17 @@ TEST(Kmer, NextPrevKmer) {
     EXPECT_EQ(kmer[1], kmer[0]);
 }
 
-TEST(Kmer, UpdateKmerLong) {
+TYPED_TEST(Kmer, UpdateKmerLong) {
     std::string long_seq = "ATGCCTGA";
-    while (long_seq.length() < kSizeOfKmer * 8 / kBitsPerChar) {
+    while (long_seq.length() < sizeof(TypeParam) * 8 / kBitsPerChar) {
         long_seq += long_seq;
     }
-    long_seq = long_seq.substr(0, kSizeOfKmer * 8 / kBitsPerChar);
+    long_seq = long_seq.substr(0, sizeof(TypeParam) * 8 / kBitsPerChar);
     std::string long_seq_alt(long_seq.substr(1));
     long_seq_alt.push_back('T');
-    KMER kmer[2] = {
-        KMER(kmer_extractor.encode(long_seq)),
-        KMER(kmer_extractor.encode(long_seq_alt))
+    KMer<TypeParam, kBitsPerChar> kmer[2] = {
+        KMer<TypeParam, kBitsPerChar>(kmer_extractor.encode(long_seq)),
+        KMer<TypeParam, kBitsPerChar>(kmer_extractor.encode(long_seq_alt))
     };
 
     kmer[0].to_next(long_seq.length(), kmer_extractor.encode('T'));
@@ -115,15 +118,15 @@ TEST(Kmer, UpdateKmerLong) {
               kmer[0].to_string(long_seq.length(), kmer_extractor.alphabet));
 }
 
-TEST(Kmer, UpdateKmerVsConstruct) {
+TYPED_TEST(Kmer, UpdateKmerVsConstruct) {
     std::string long_seq0 = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAA";
-    long_seq0.resize(std::min(kSizeOfKmer * 8 / kBitsPerChar,
+    long_seq0.resize(std::min(sizeof(TypeParam) * 8 / kBitsPerChar,
                               long_seq0.size()));
     std::string long_seq1 =  "AGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAT";
-    long_seq1.resize(std::min(kSizeOfKmer * 8 / kBitsPerChar,
+    long_seq1.resize(std::min(sizeof(TypeParam) * 8 / kBitsPerChar,
                               long_seq0.size()));
     auto seq0 = kmer_extractor.encode(long_seq0);
-    KMER kmer0(seq0.begin(), seq0.size());
+    KMer<TypeParam, kBitsPerChar> kmer0(seq0.begin(), seq0.size());
 
     kmer0.to_next(long_seq0.length(), kmer_extractor.encode(long_seq1.back()));
 
@@ -132,73 +135,94 @@ TEST(Kmer, UpdateKmerVsConstruct) {
     EXPECT_EQ(long_seq1, reconst_seq1);
 
     seq0.emplace_back(kmer_extractor.encode(long_seq1.back()));
-    KMER kmer1(seq0.begin() + 1, seq0.size() - 1);
+    KMer<TypeParam, kBitsPerChar> kmer1(seq0.begin() + 1, seq0.size() - 1);
     std::string reconst_seq2 = kmer1.to_string(long_seq1.length(),
                                                kmer_extractor.alphabet);
     EXPECT_EQ(long_seq1, reconst_seq2);
 }
 
-TEST(Kmer, InvertibleEndDol) {
-    ASSERT_DEATH(test_kmer_packed_codec_64("ATG$", "ATGA"), "");
+TYPED_TEST(Kmer, InvertibleEndDol) {
+    ASSERT_DEATH(test_kmer_packed_codec<TypeParam>("ATG$", "ATGA"), "");
 }
 
-TEST(Kmer, InvertibleStartDol) {
-    ASSERT_DEATH(test_kmer_packed_codec_64("$ATGG", "AATGG"), "");
+TYPED_TEST(Kmer, InvertibleStartDol) {
+    ASSERT_DEATH(test_kmer_packed_codec<TypeParam>("$ATGG", "AATGG"), "");
 }
 
-TEST(Kmer, InvertibleBothDol) {
-    ASSERT_DEATH(test_kmer_packed_codec_64("$ATG$", "AATGA"), "");
+TYPED_TEST(Kmer, InvertibleBothDol) {
+    ASSERT_DEATH(test_kmer_packed_codec<TypeParam>("$ATG$", "AATGA"), "");
 }
 
-TEST(Kmer, InvalidChars) {
-    KMER kmer(kmer_extractor.encode("ATGC"));
+TYPED_TEST(Kmer, InvalidChars) {
+    KMer<TypeParam, kBitsPerChar> kmer(kmer_extractor.encode("ATGC"));
 
-    ASSERT_DEATH(test_kmer_packed_codec_64("ATGH", "ATGA"), "");
-    ASSERT_DEATH(test_kmer_packed_codec_64("ATGЯ", "ATGAA"), "");
+    ASSERT_DEATH(test_kmer_packed_codec<TypeParam>("ATGH", "ATGA"), "");
+    ASSERT_DEATH(test_kmer_packed_codec<TypeParam>("ATGЯ", "ATGAA"), "");
 
     ASSERT_DEATH(kmer.to_next(4, kmer_extractor.encode('N')), "");
     ASSERT_DEATH(kmer.to_next(4, kmer_extractor.encode("Я")[0]), "");
 }
 
-void test_kmer_packed_less_64(const std::string &k1,
-                              const std::string &k2, bool truth) {
-    KMER kmer[2] = {
-        KMER(kmer_extractor.encode(k1)),
-        KMER(kmer_extractor.encode(k2))
+template <typename IntType>
+void test_kmer_packed_less(const std::string &k1,
+                           const std::string &k2, bool truth) {
+    KMer<IntType, kBitsPerChar> kmer[2] = {
+        KMer<IntType, kBitsPerChar>(kmer_extractor.encode(k1)),
+        KMer<IntType, kBitsPerChar>(kmer_extractor.encode(k2))
     };
     ASSERT_EQ(truth, kmer[0] < kmer[1]);
 }
 
-TEST(Kmer, LessEdge) {
-    test_kmer_packed_less_64("ATGC", "ATGG", true);
+TYPED_TEST(Kmer, LessEdge) {
+    test_kmer_packed_less<TypeParam>("ATGC", "ATGG", true);
 }
 
-TEST(Kmer, Less) {
-    test_kmer_packed_less_64("ACTG", "GCTG", true);
+TYPED_TEST(Kmer, Less) {
+    test_kmer_packed_less<TypeParam>("ACTG", "GCTG", true);
 }
 
-TEST(Kmer, LessLong) {
-    test_kmer_packed_less_64(
-        std::string(kSizeOfKmer * 8 / kBitsPerChar - 1, 'A') +  "C",
-        std::string(kSizeOfKmer * 8 / kBitsPerChar - 1, 'A') +  "T",
+TYPED_TEST(Kmer, LessLong) {
+    test_kmer_packed_less<TypeParam>(
+        std::string(sizeof(TypeParam) * 8 / kBitsPerChar - 1, 'A') +  "C",
+        std::string(sizeof(TypeParam) * 8 / kBitsPerChar - 1, 'A') +  "T",
         true
     );
 
-    test_kmer_packed_less_64(
-        std::string(kSizeOfKmer * 8 / kBitsPerChar - 2, 'A') + "CA",
-        std::string(kSizeOfKmer * 8 / kBitsPerChar - 2, 'A') + "TA",
+    test_kmer_packed_less<TypeParam>(
+        std::string(sizeof(TypeParam) * 8 / kBitsPerChar - 2, 'A') + "CA",
+        std::string(sizeof(TypeParam) * 8 / kBitsPerChar - 2, 'A') + "TA",
         true
     );
 }
 
-TEST(Kmer, TestPrint) {
-    size_t size = sizeof(KMerBaseType) * 8 / kBitsPerChar;
-    KMER kmer(std::vector<uint64_t>(size, 1), size);
+TEST(Kmer, TestPrint64) {
+    size_t size = sizeof(uint64_t) * 8 / kBitsPerChar;
+    KMer<uint64_t, kBitsPerChar> kmer(std::vector<uint64_t>(size, 1), size);
     std::stringstream ss;
     ss << kmer;
     std::string out;
     ss >> out;
     EXPECT_EQ("0000000000000000000000000000000000000000000000005555555555555555", out);
+}
+
+TEST(Kmer, TestPrint128) {
+    size_t size = sizeof(sdsl::uint128_t) * 8 / kBitsPerChar;
+    KMer<sdsl::uint128_t, kBitsPerChar> kmer(std::vector<uint64_t>(size, 1), size);
+    std::stringstream ss;
+    ss << kmer;
+    std::string out;
+    ss >> out;
+    EXPECT_EQ("0000000000000000000000000000000055555555555555555555555555555555", out);
+}
+
+TEST(Kmer, TestPrint256) {
+    size_t size = sizeof(sdsl::uint256_t) * 8 / kBitsPerChar;
+    KMer<sdsl::uint256_t, kBitsPerChar> kmer(std::vector<uint64_t>(size, 1), size);
+    std::stringstream ss;
+    ss << kmer;
+    std::string out;
+    ss >> out;
+    EXPECT_EQ("5555555555555555555555555555555555555555555555555555555555555555", out);
 }
 
 
@@ -259,32 +283,12 @@ void test_kmer_codec(const std::string &sequence,
     }
 }
 
-TEST(Kmer, nucleotide_alphabet_pack_6_2Bit) {
+TYPED_TEST(Kmer, nucleotide_alphabet_pack_6_2Bit) {
     const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAA";
-    test_kmer_codec<uint64_t, 2>(sequence, encode, decode<uint64_t, 2>);
+    test_kmer_codec<TypeParam, 2>(sequence, encode, decode<TypeParam, 2>);
 }
 
-TEST(Kmer, nucleotide_alphabet_pack_128_2Bit) {
+TYPED_TEST(Kmer, nucleotide_alphabet_pack_6) {
     const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAA";
-    test_kmer_codec<sdsl::uint128_t, 2>(sequence, encode, decode<sdsl::uint128_t, 2>);
-}
-
-TEST(Kmer, nucleotide_alphabet_pack_256_2Bit) {
-    const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAA";
-    test_kmer_codec<sdsl::uint256_t, 2>(sequence, encode, decode<sdsl::uint256_t, 2>);
-}
-
-TEST(Kmer, nucleotide_alphabet_pack_6) {
-    const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAA";
-    test_kmer_codec<uint64_t, 3>(sequence, encode, decode<uint64_t, 3>);
-}
-
-TEST(Kmer, nucleotide_alphabet_pack_128) {
-    const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAA";
-    test_kmer_codec<sdsl::uint128_t, 3>(sequence, encode, decode<sdsl::uint128_t, 3>);
-}
-
-TEST(Kmer, nucleotide_alphabet_pack_256) {
-    const std::string sequence = "AAGGCAGCCTACCCCTCTGTCTCCACCTTTGAGAAACACTCATCCTCAGGCCATGCAGTGGAAA";
-    test_kmer_codec<sdsl::uint256_t, 3>(sequence, encode, decode<sdsl::uint256_t, 3>);
+    test_kmer_codec<TypeParam, 3>(sequence, encode, decode<TypeParam, 3>);
 }

@@ -10,6 +10,7 @@
 
 #include "kmer_boss.hpp"
 #include "kmer_extractor.hpp"
+#include "test_kmer_helpers.hpp"
 
 
 template <typename T>
@@ -140,17 +141,6 @@ void test_kmer_codec(const std::string &test_kmer,
 
 TYPED_TEST(KmerBOSS, Invertible) {
     test_kmer_codec<TypeParam>("ATGG", "ATGG");
-}
-
-
-template <typename TypeParam>
-void left_shift(TypeParam *num, size_t bits) {
-    (*num) = num->operator<<(bits);
-}
-
-template<>
-void left_shift(uint64_t *num, size_t bits) {
-    (*num) = (*num) << bits;
 }
 
 TYPED_TEST(KmerBOSS, BitShiftBuild) {
