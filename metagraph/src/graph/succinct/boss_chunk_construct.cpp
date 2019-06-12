@@ -260,6 +260,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         return result;
     }
 
+    uint64_t get_k() const { return kmer_collector_.get_k() - 1; }
+
     KmerCollector<KMER, KmerExtractor> kmer_collector_;
 };
 
@@ -327,6 +329,8 @@ class WeightedBOSSChunkConstructor : public IBOSSChunkConstructor {
 
         return result;
     }
+
+    uint64_t get_k() const { return kmer_counter_.get_k() - 1; }
 
     KmerCounter<KMER, KmerExtractor, COUNT> kmer_counter_;
 };

@@ -83,6 +83,8 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     const bitmap& get_column(const Label &label) const;
 
+    std::string file_extension() const override { return kExtension; }
+
   private:
     void set(Index i, size_t j, bool value);
     bool is_set(Index i, size_t j) const;

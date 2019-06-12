@@ -113,6 +113,8 @@ class MultiLabelAnnotation
     virtual uint64_t num_relations() const = 0;
 
     virtual bool label_exists(const Label &label) const = 0;
+
+    virtual std::string file_extension() const = 0;
 };
 
 
@@ -198,6 +200,8 @@ class MultiLabelEncoded
     virtual bool label_exists(const Label &label) const override final {
         return label_encoder_.label_exists(label);
     }
+
+    virtual std::string file_extension() const override = 0;
 
   protected:
     // TODO: add |min_label_frequency| parameter: return only frequent labels

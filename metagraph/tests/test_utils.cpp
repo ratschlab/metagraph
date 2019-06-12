@@ -1,9 +1,6 @@
 #include "gtest/gtest.h"
 #include "test_helpers.hpp"
 
-#define private public
-#define protected public
-
 #include "annotate_column_compressed.hpp"
 #include "utils.hpp"
 #include "threading.hpp"

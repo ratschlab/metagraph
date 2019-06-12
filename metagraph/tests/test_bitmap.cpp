@@ -3,12 +3,11 @@
 #include "gtest/gtest.h"
 #include "test_helpers.hpp"
 
-#define protected public
-#define private public
+#include "threading.hpp"
 
+#define private public
 #include "bitmap.hpp"
 #include "bit_vector.hpp"
-#include "threading.hpp"
 
 
 const std::string test_data_dir = "../tests/data";
@@ -519,7 +518,7 @@ TYPED_TEST(BitmapTest, call_ones_sparse_set) {
     }
 }
 
-TEST(bitmap_adaptive, switch_type) {
+TEST(BitmapAdaptiveTest, switch_type) {
     bitmap_adaptive bm(bitmap_adaptive::kRowCutoff - 2);
 
     uint64_t i = 0;

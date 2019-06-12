@@ -1,8 +1,5 @@
 #include "gtest/gtest.h"
 
-#define private public
-#define protected public
-
 #include "kmer_extractor.hpp"
 #include "utils.hpp"
 #include "reverse_complement.hpp"

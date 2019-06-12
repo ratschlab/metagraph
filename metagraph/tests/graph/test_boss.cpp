@@ -7,9 +7,6 @@
 #include <htslib/kseq.h>
 #include "gtest/gtest.h"
 
-#define protected public
-#define private public
-
 #include "dbg_succinct.hpp"
 #include "boss.hpp"
 #include "boss_construct.hpp"
@@ -29,18 +26,18 @@ void test_graph(BOSS *graph, const std::string &last,
                              const std::vector<uint64_t> &W,
                              const std::string &F,
                              Config::StateType state) {
-    Config::StateType old_state = graph->state;
+    Config::StateType old_state = graph->get_state();
     graph->switch_state(state);
 
     std::ostringstream ostr;
 
-    ostr << *graph->last_;
+    ostr << graph->get_last();
     EXPECT_EQ(last, ostr.str()) << "state: " << state
                                 << ", old state: " << old_state;
 
-    for (size_t i = 1; i < graph->last_->size(); ++i) {
-        EXPECT_EQ((*graph->last_)[i], graph->get_last(i));
-        EXPECT_EQ((*graph->W_)[i], graph->get_W(i));
+    for (size_t i = 1; i < graph->get_last().size(); ++i) {
+        EXPECT_EQ((graph->get_last())[i], graph->get_last(i));
+        EXPECT_EQ((graph->get_W())[i], graph->get_W(i));
 
         auto last_outgoing = graph->succ_last(i);
         graph->call_adjacent_incoming_edges(i, [&](auto incoming) {
@@ -51,7 +48,7 @@ void test_graph(BOSS *graph, const std::string &last,
     ostr.clear();
     ostr.str("");
 
-    auto W_vector = graph->W_->to_vector();
+    auto W_vector = graph->get_W().to_vector();
     EXPECT_EQ(W, std::vector<uint64_t>(W_vector.begin(), W_vector.end()))
         << "state: " << state
         << ", old state: " << old_state;
@@ -59,8 +56,8 @@ void test_graph(BOSS *graph, const std::string &last,
     ostr.clear();
     ostr.str("");
 
-    for (size_t i = 0; i < graph->F_.size(); ++i) {
-        ostr << graph->F_[i] << " ";
+    for (size_t i = 0; i < graph->get_F().size(); ++i) {
+        ostr << graph->get_F()[i] << " ";
     }
     EXPECT_EQ(F, ostr.str()) << "state: " << state
                              << ", old state: " << old_state;

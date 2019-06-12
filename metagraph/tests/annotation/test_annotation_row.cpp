@@ -2,17 +2,15 @@
 
 #include "gtest/gtest.h"
 
-#define protected public
-#define private public
-
-#include "annotate_row_compressed.hpp"
 #include "utils.hpp"
+
+#define private public
+#include "annotate_row_compressed.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";
 const std::string test_dump_basename_vec_bad = test_dump_basename + "_bad_filename";
 const std::string test_dump_basename_vec_good = test_dump_basename + "_row_compressed";
-
 
 
 TEST(RowCompressed, load_label_encoder) {
@@ -103,14 +101,14 @@ TEST(RowCompressed, SerializationExtension) {
         annotation.set_labels(4, { "Label8" });
 
         annotation.serialize(test_dump_basename_vec_good
-                                        + annotate::RowCompressed<>::kExtension);
+                                        + annotation.file_extension());
     }
     {
         annotate::RowCompressed<> annotation(5, false);
         ASSERT_FALSE(annotation.load(test_dump_basename_vec_bad
-                                        + annotate::RowCompressed<>::kExtension));
+                                        + annotation.file_extension()));
         ASSERT_TRUE(annotation.load(test_dump_basename_vec_good
-                                        + annotate::RowCompressed<>::kExtension));
+                                        + annotation.file_extension()));
 
         EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }),
                   convert_to_set(annotation.get(0)));

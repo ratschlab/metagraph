@@ -290,6 +290,8 @@ class BOSS {
      */
     bool get_last(uint64_t i) const { return (*last_)[i]; }
 
+    const bit_vector& get_last() const { return *last_; }
+
     /**
      * Uses the object's array last and a position and
      * returns the number of set bits up to that postion.
@@ -350,6 +352,7 @@ class BOSS {
      * The index is over the alphabet!
      */
     uint64_t get_F(TAlphabet k) const { return F_.at(k); }
+    const std::vector<uint64_t>& get_F() const { return F_; }
 
     /**
      * This functions gets a position i reflecting the r-th occurence of the corresponding

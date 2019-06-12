@@ -161,7 +161,7 @@ annotate::MultiLabelEncoded<uint64_t, std::string> *ConvertFromColumnCompressed:
 TEST_F(ConvertFromColumnCompressed, to_BinRelWT) {
     annotation = annotate::convert<annotate::BinRelWTAnnotator>(
         std::move(*initial_annotation)
-    ).release();;
+    ).release();
 }
 
 // TEST(ConvertFromColumnCompressedEmpty, to_BinRelWT_sdsl) {
@@ -177,7 +177,7 @@ TEST_F(ConvertFromColumnCompressed, to_BinRelWT) {
 TEST_F(ConvertFromColumnCompressed, to_BinRelWT_sdsl) {
     annotation = annotate::convert<annotate::BinRelWT_sdslAnnotator>(
         std::move(*initial_annotation)
-    ).release();;
+    ).release();
 }
 
 // TEST(ConvertFromColumnCompressedEmpty, to_RowFlat) {
@@ -193,7 +193,7 @@ TEST_F(ConvertFromColumnCompressed, to_BinRelWT_sdsl) {
 TEST_F(ConvertFromColumnCompressed, to_RowFlat) {
     annotation = annotate::convert<annotate::RowFlatAnnotator>(
         std::move(*initial_annotation)
-    ).release();;
+    ).release();
 }
 
 // TEST(ConvertFromColumnCompressedEmpty, to_Rainbowfish) {
@@ -209,7 +209,7 @@ TEST_F(ConvertFromColumnCompressed, to_RowFlat) {
 TEST_F(ConvertFromColumnCompressed, to_RainbowfishAnnotator) {
     annotation = annotate::convert<annotate::RainbowfishAnnotator>(
         std::move(*initial_annotation)
-    ).release();;
+    ).release();
 }
 
 // TEST(ConvertFromColumnCompressedEmpty, to_GreedyBRWT) {
@@ -242,7 +242,7 @@ TEST(ConvertFromRowCompressedEmpty, to_BinRelWT) {
 TEST_F(ConvertFromRowCompressed, to_BinRelWT) {
     annotation = annotate::convert<annotate::BinRelWTAnnotator>(
         std::move(*initial_annotation)
-    ).release();;
+    ).release();
 }
 
 TEST(ConvertFromRowCompressedEmpty, to_BinRelWT_sdsl) {
@@ -258,7 +258,7 @@ TEST(ConvertFromRowCompressedEmpty, to_BinRelWT_sdsl) {
 TEST_F(ConvertFromRowCompressed, to_BinRelWT_sdsl) {
     annotation = annotate::convert<annotate::BinRelWT_sdslAnnotator>(
         std::move(*initial_annotation)
-    ).release();;
+    ).release();
 }
 
 // TEST(ConvertFromRowCompressedEmpty, to_RowFlat) {
@@ -274,7 +274,7 @@ TEST_F(ConvertFromRowCompressed, to_BinRelWT_sdsl) {
 TEST_F(ConvertFromRowCompressed, to_RowFlat) {
     annotation = annotate::convert<annotate::RowFlatAnnotator>(
         std::move(*initial_annotation)
-    ).release();;
+    ).release();
 }
 
 TEST_F(ConvertFromRowCompressed, stream_to_RowFlat) {
@@ -309,7 +309,7 @@ TEST_F(ConvertFromRowCompressed, stream_to_RowFlat2) {
 TEST_F(ConvertFromRowCompressed, to_RainbowfishAnnotator) {
     annotation = annotate::convert<annotate::RainbowfishAnnotator>(
         std::move(*initial_annotation)
-    ).release();;
+    ).release();
 }
 
 // TEST(ConvertFromRowCompressedEmpty, to_GreedyBRWT) {
