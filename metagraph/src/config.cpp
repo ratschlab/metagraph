@@ -28,10 +28,6 @@ Config::Config(int argc, const char *argv[]) {
         identity = COMPARE;
     } else if (!strcmp(argv[1], "align")) {
         identity = ALIGN;
-    } else if (!strcmp(argv[1], "filter")) {
-        identity = FILTER;
-    } else if (!strcmp(argv[1], "filter_stats")) {
-        identity = FILTER_STATS;
     } else if (!strcmp(argv[1], "experiment")) {
         identity = EXPERIMENT;
     } else if (!strcmp(argv[1], "stats")) {
@@ -120,18 +116,10 @@ Config::Config(int argc, const char *argv[]) {
             min_count = std::max(atoi(argv[++i]), 1);
         } else if (!strcmp(argv[i], "--max-count")) {
             max_count = atoi(argv[++i]);
-        } else if (!strcmp(argv[i], "--filter-thres")) {
-            unreliable_kmers_threshold = atoi(argv[++i]);
-        } else if (!strcmp(argv[i], "--filter-k")) {
-            filter_k = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
             memory_available = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--dump-raw-anno")) {
             dump_raw_anno = true;
-        } else if (!strcmp(argv[i], "--generate-fasta")) {
-            generate_filtered_fasta = true;
-        } else if (!strcmp(argv[i], "--generate-fastq")) {
-            generate_filtered_fastq = true;
         } else if (!strcmp(argv[i], "--discovery-fraction")) {
             discovery_fraction = std::stof(argv[++i]);
         } else if (!strcmp(argv[i], "--query-presence")) {
@@ -277,9 +265,6 @@ Config::Config(int argc, const char *argv[]) {
 
     if (identity == CONCATENATE && outfbase.empty())
         print_usage_and_exit = true;
-
-    if (identity == FILTER)
-        filter_k = k;
 
     if (identity == ALIGN && infbase.empty())
         print_usage_and_exit = true;
@@ -462,9 +447,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available commands:\n");
 
-            fprintf(stderr, "\tfilter\t\tfilter out reads with rare k-mers and dump\n");
-            fprintf(stderr, "\t\t\tfilters to disk\n\n");
-
             fprintf(stderr, "\tbuild\t\tconstruct a graph object from input sequence\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats or integrate sequence\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats into a given graph\n\n");
@@ -485,8 +467,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t\t\tto graph\n\n");
 
             fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s)\n\n");
-
-            fprintf(stderr, "\tfilter_stats\tget statistics for filters\n\n");
 
             fprintf(stderr, "\tannotate\tgiven a graph and a fast[a|q] file, annotate\n");
             fprintf(stderr, "\t\t\tthe respective kmers\n\n");
@@ -517,26 +497,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         case EXPERIMENT: {
             fprintf(stderr, "Usage: %s experiment ???\n\n", prog_name.c_str());
         } break;
-        case FILTER: {
-            fprintf(stderr, "Usage: %s filter [options] --min-count <cutoff> FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for filter:\n");
-            fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
-            fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
-            fprintf(stderr, "\n");
-            fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
-            fprintf(stderr, "\t   --generate-fasta \twrite filtered reads to disk in FASTA format [off]\n");
-            fprintf(stderr, "\t   --generate-fastq \twrite filtered reads to disk in FASTQ format [off]\n");
-            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
-        } break;
-        case FILTER_STATS: {
-            fprintf(stderr, "Usage: %s filter_stats [options] --min-count <cutoff> FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for filter:\n");
-            fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
-        } break;
         case BUILD: {
             fprintf(stderr, "Usage: %s build [options] FILE1 [[FILE2] ...]\n"
                             "\tEach input file is given in FASTA, FASTQ, or VCF format.\n"
@@ -545,8 +505,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for build:\n");
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
             fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
             fprintf(stderr, "\n");
@@ -571,8 +529,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for extend:\n");
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
             fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
             fprintf(stderr, "\n");
@@ -665,8 +621,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for annotate:\n");
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
             fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
             fprintf(stderr, "\n");

@@ -143,30 +143,12 @@ done
 ./metagengraph concatenate -l 2 -i <GRAPH_DIR>/graph -o <GRAPH_DIR>/graph
 ```
 
-#### Build with filtering k-mers using KMC
+#### Build from k-mers filtered with KMC
 ```bash
 CUTOFF=5
 K=20
 ./KMC/kmc -ci$CUTOFF -t30 -k$K -m5 -fq -b <FILE>.fasta.gz <FILE>.kmc_$CUTOFF ./KMC
 ./metagengraph build -v -p 30 -k $K --mem-cap-gb 10 --kmc -o graph <FILE>.kmc_$CUTOFF
-```
-
-#### Build from filtered reads
-1) Filter reads
-  * using filtering in blocks
-```bash
-./metagengraph filter -v --parallel 30 -k 20 --min-count 4 <DATA_DIR>/*.fasta.gz
-```
-  * using KMC
-```bash
-./KMC/kmc -k21 -m5 -fq -t30 <FILE>.fasta.gz <FILE>.fasta.gz.kmc ./KMC
-./metagengraph filter -v --parallel 30 -k 20 --min-count 4 --kmc <FILE>.fasta.gz
-```
-2) Build graph
-```bash
-./metagengraph build -v --parallel 30 -k 20 --mem-cap-gb 100 --min-count 4 \
-                        -o <GRAPH_DIR>/graph \
-                        <DATA_DIR>/*.fasta.gz
 ```
 
 #### Distributed build

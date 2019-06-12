@@ -3,7 +3,6 @@
 #include "unix_tools.hpp"
 #include "config.hpp"
 #include "sequence_io.hpp"
-#include "reads_filtering.hpp"
 #include "boss_construct.hpp"
 #include "boss_chunk.hpp"
 #include "boss_merge.hpp"
@@ -29,8 +28,6 @@
 #include "taxid_mapper.hpp"
 
 typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
-
-const size_t kMaxNumParallelReadFiles = 5;
 
 const size_t kNumCachedColumns = 10;
 
@@ -120,38 +117,12 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
     exit(1);
 }
 
-std::string get_filter_filename(std::string filename,
-                                size_t k,
-                                size_t max_unreliable_abundance,
-                                size_t unreliable_kmers_threshold,
-                                bool critical = true) {
-    filename = filename + ".filter_k" + std::to_string(k)
-                        + "_s" + std::to_string(max_unreliable_abundance)
-                        + (max_unreliable_abundance
-                             ? std::string("_")
-                                + std::to_string(unreliable_kmers_threshold)
-                             : "");
-    if (!critical || std::ifstream(filename).good()) {
-        return filename;
-    } else if (max_unreliable_abundance == 0) {
-        return "";
-    }
-
-    std::cerr << "ERROR: read filter "
-              << filename << " does not exist."
-              << " Filter reads first." << std::endl;
-    exit(1);
-}
-
-
 void annotate_data(const std::vector<std::string> &files,
                    const std::string &ref_sequence_path,
                    AnnotatedDBG *anno_graph,
                    bool reverse,
-                   size_t filter_k,
                    size_t min_count,
                    size_t max_count,
-                   size_t unreliable_kmers_threshold,
                    bool filename_anno,
                    bool fasta_anno,
                    const std::string &fasta_header_delimiter,
@@ -249,12 +220,7 @@ void annotate_data(const std::vector<std::string> &files,
                         std::cout << ", " << timer.elapsed() << "sec" << std::endl;
                     }
                 },
-                reverse,
-                get_filter_filename(
-                    file, filter_k,
-                    min_count - 1,
-                    unreliable_kmers_threshold
-                )
+                reverse
             );
         } else {
             std::cerr << "ERROR: Filetype unknown for file "
@@ -280,9 +246,6 @@ void annotate_data(const std::vector<std::string> &files,
 void annotate_coordinates(const std::vector<std::string> &files,
                           AnnotatedDBG *anno_graph,
                           bool reverse,
-                          size_t filter_k,
-                          size_t max_unreliable_abundance,
-                          size_t unreliable_kmers_threshold,
                           size_t genome_bin_size,
                           bool verbose) {
     size_t total_seqs = 0;
@@ -348,12 +311,7 @@ void annotate_coordinates(const std::vector<std::string> &files,
                     if (reverse)
                         forward_strand = !forward_strand;
                 },
-                reverse,
-                get_filter_filename(
-                    file, filter_k,
-                    max_unreliable_abundance,
-                    unreliable_kmers_threshold
-                )
+                reverse
             );
         } else {
             std::cerr << "ERROR: the type of file "
@@ -729,12 +687,6 @@ void parse_sequences(const std::vector<std::string> &files,
             );
         } else if (utils::get_filetype(file) == "FASTA"
                     || utils::get_filetype(file) == "FASTQ") {
-            std::string filter_filename = get_filter_filename(
-                file, config.filter_k,
-                config.min_count - 1,
-                config.unreliable_kmers_threshold
-            );
-
             if (files.size() >= config.parallel) {
                 auto reverse = config.reverse;
                 auto file_copy = file;
@@ -745,13 +697,13 @@ void parse_sequences(const std::vector<std::string> &files,
                     read_fasta_file_critical(file_copy, [=](kseq_t *read_stream) {
                         // add read to the graph constructor as a callback
                         callback(read_stream->seq.s);
-                    }, reverse, filter_filename);
+                    }, reverse);
                 });
             } else {
                 read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                     // add read to the graph constructor as a callback
                     call_read(read_stream->seq.s);
-                }, config.reverse, filter_filename);
+                }, config.reverse);
             }
         } else {
             std::cerr << "ERROR: Filetype unknown for file "
@@ -1216,212 +1168,6 @@ int main(int argc, const char *argv[]) {
 
             return 0;
         }
-        case Config::FILTER: {
-            if (config->verbose) {
-                std::cout << "Filter out reads with rare k-mers" << std::endl;
-                std::cout << "Start reading data and extracting k-mers" << std::endl;
-            }
-
-            ThreadPool thread_pool_files(kMaxNumParallelReadFiles);
-            ThreadPool thread_pool(std::max(1u, config->parallel) - 1,
-                                   std::max(1u, config->parallel));
-            Timer timer;
-
-            // iterate over input files
-            for (const auto &file : files) {
-                if (utils::get_filetype(file) != "FASTA"
-                        && utils::get_filetype(file) != "FASTQ") {
-                    std::cerr << "ERROR: Filetype unknown for file "
-                              << file << std::endl;
-                    exit(1);
-                }
-
-                Timer data_reading_timer;
-
-                if (config->generate_filtered_fasta || config->generate_filtered_fastq) {
-                    thread_pool.enqueue([=](size_t k,
-                                            size_t max_unreliable_abundance,
-                                            size_t unreliable_kmers_threshold,
-                                            bool out_fasta,
-                                            bool out_fastq) {
-                        assert(out_fasta || out_fastq);
-
-                        auto filter_filename = get_filter_filename(
-                            file, k, max_unreliable_abundance, unreliable_kmers_threshold
-                        );
-
-                        std::string filtered_reads_fasta = get_filter_filename(
-                            utils::remove_suffix(file, ".gz", ".fasta", ".fastq"),
-                            k, max_unreliable_abundance, unreliable_kmers_threshold, false
-                        ) + ".fasta.gz";
-                        std::string filtered_reads_fastq = get_filter_filename(
-                            utils::remove_suffix(file, ".gz", ".fasta", ".fastq"),
-                            k, max_unreliable_abundance, unreliable_kmers_threshold, false
-                        ) + ".fastq.gz";
-
-                        gzFile out_fasta_gz = Z_NULL;
-                        gzFile out_fastq_gz = Z_NULL;
-
-                        if (out_fasta) {
-                            out_fasta_gz = gzopen(filtered_reads_fasta.c_str(), "w");
-                            if (out_fasta_gz == Z_NULL) {
-                                std::cerr << "ERROR: Can't write to "
-                                          << filtered_reads_fasta << std::endl;
-                                exit(1);
-                            }
-                        }
-                        if (out_fastq) {
-                            out_fastq_gz = gzopen(filtered_reads_fastq.c_str(), "w");
-                            if (out_fastq_gz == Z_NULL) {
-                                std::cerr << "ERROR: Can't write to "
-                                          << filtered_reads_fastq << std::endl;
-                                exit(1);
-                            }
-                        }
-
-                        read_fasta_file_critical(file,
-                            [&](kseq_t *read_stream) {
-                                if (out_fasta_gz != Z_NULL
-                                        && !write_fasta(out_fasta_gz, *read_stream)) {
-                                    std::cerr << "ERROR: Can't write filtered reads to "
-                                              << filtered_reads_fasta << std::endl;
-                                    exit(1);
-                                }
-                                if (out_fastq_gz != Z_NULL
-                                        && !write_fastq(out_fastq_gz, *read_stream)) {
-                                    std::cerr << "ERROR: Can't write filtered reads to "
-                                              << filtered_reads_fastq << std::endl;
-                                    exit(1);
-                                }
-                            },
-                            false, filter_filename
-                        );
-
-                        if (out_fasta_gz != Z_NULL)
-                            gzclose(out_fasta_gz);
-                        if (out_fastq_gz != Z_NULL)
-                            gzclose(out_fastq_gz);
-
-                    },
-                    config->filter_k,
-                    config->min_count - 1,
-                    config->unreliable_kmers_threshold,
-                    config->generate_filtered_fasta,
-                    config->generate_filtered_fastq);
-
-                    if (config->verbose) {
-                        std::cout << "File processed in "
-                                  << data_reading_timer.elapsed()
-                                  << "sec, current mem usage: "
-                                  << (get_curr_RSS() >> 20) << " MiB"
-                                  << ", total time: " << timer.elapsed()
-                                  << "sec" << std::endl;
-                    }
-
-                    continue;
-                }
-
-                auto *thread_pool_ptr = &thread_pool;
-                // capture all required values by copying to be able
-                // to run task from other threads
-                thread_pool_files.enqueue([=](size_t k,
-                                              size_t max_unreliable_abundance,
-                                              size_t unreliable_kmers_threshold,
-                                              bool verbose,
-                                              bool reverse) {
-                        // compute read filter, bit vector indicating filtered reads
-                        std::vector<bool> filter = filter_reads([=](auto callback) {
-                                read_fasta_file_critical(file, [=](kseq_t *read_stream) {
-                                    // add read to the graph constructor as a callback
-                                    callback(read_stream->seq.s);
-                                }, reverse);
-                            },
-                            k, max_unreliable_abundance, unreliable_kmers_threshold,
-                            verbose, thread_pool_ptr,
-                            (utils::get_filetype(file) == "KMC"
-                                && max_unreliable_abundance) ? file : ""
-                        );
-                        if (reverse) {
-                            assert(filter.size() % 2 == 0);
-
-                            std::vector<bool> forward_filter(filter.size() / 2);
-                            for (size_t i = 0; i < forward_filter.size(); ++i) {
-                                forward_filter[i] = filter[i * 2] | filter[i * 2 + 1];
-                            }
-                            filter.swap(forward_filter);
-                        }
-
-                        // dump filter
-                        std::ofstream outstream(
-                            get_filter_filename(
-                                file, k, max_unreliable_abundance, unreliable_kmers_threshold, false
-                            ),
-                            std::ios::binary
-                        );
-                        serialize_number_vector(outstream, filter, 1);
-                    },
-                    config->filter_k,
-                    config->min_count - 1,
-                    config->unreliable_kmers_threshold,
-                    config->verbose, config->reverse
-                );
-
-                if (config->verbose) {
-                    std::cout << "File processed in "
-                              << data_reading_timer.elapsed()
-                              << "sec, current mem usage: "
-                              << (get_curr_RSS() >> 20) << " MiB"
-                              << ", total time: " << timer.elapsed()
-                              << "sec" << std::endl;
-                }
-            }
-            thread_pool_files.join();
-            thread_pool.join();
-
-            return 0;
-        }
-        case Config::FILTER_STATS: {
-            if (!config->verbose) {
-                std::cout << "File\tTotalReads\tRemainingReads\tRemainingRatio" << std::endl;
-            }
-
-            for (const auto &file : files) {
-                auto filter_filename = get_filter_filename(
-                    file,
-                    config->filter_k,
-                    config->min_count - 1,
-                    config->unreliable_kmers_threshold,
-                    true
-                );
-
-                std::ifstream instream(filter_filename, std::ios::binary);
-                std::vector<bool> filter;
-                if (!load_number_vector(instream, &filter)) {
-                    std::cerr << "ERROR: Filter file " << filter_filename
-                              << " is corrupted" << std::endl;
-                    exit(1);
-                }
-
-                size_t num_remaining = std::count(filter.begin(), filter.end(), true);
-
-                if (config->verbose) {
-                    std::cout << "Statistics for filter file " << filter_filename << "\n"
-                              << "Total reads: " << filter.size() << "\n"
-                              << "Remaining reads: " << num_remaining << "\n"
-                              << "Remaining ratio: "
-                              << static_cast<double>(num_remaining) / filter.size()
-                              << std::endl;
-                } else {
-                    std::cout << filter_filename << "\t"
-                              << filter.size() << "\t"
-                              << num_remaining << "\t"
-                              << static_cast<double>(num_remaining) / filter.size()
-                              << std::endl;
-                }
-            }
-
-            return 0;
-        }
         case Config::ANNOTATE: {
             assert(config->infbase_annotators.size() <= 1);
 
@@ -1432,10 +1178,8 @@ int main(int argc, const char *argv[]) {
                               config->refpath,
                               anno_graph.get(),
                               config->reverse,
-                              config->filter_k,
                               config->min_count,
                               config->max_count,
-                              config->unreliable_kmers_threshold,
                               config->filename_anno,
                               config->fasta_anno,
                               config->fasta_header_delimiter,
@@ -1460,10 +1204,8 @@ int main(int argc, const char *argv[]) {
                                           config->refpath,
                                           anno_graph.get(),
                                           config->reverse,
-                                          config->filter_k,
                                           config->min_count,
                                           config->max_count,
-                                          config->unreliable_kmers_threshold,
                                           config->filename_anno,
                                           config->fasta_anno,
                                           config->fasta_header_delimiter,
@@ -1509,9 +1251,6 @@ int main(int argc, const char *argv[]) {
             annotate_coordinates(files,
                                  &anno_graph,
                                  config->reverse,
-                                 config->filter_k,
-                                 config->min_count - 1,
-                                 config->unreliable_kmers_threshold,
                                  config->genome_binsize_anno,
                                  config->verbose);
 
@@ -1601,10 +1340,7 @@ int main(int argc, const char *argv[]) {
                             std::ref(std::cout)
                         );
                     },
-                    config->reverse,
-                    get_filter_filename(file, config->filter_k,
-                                        config->min_count - 1,
-                                        config->unreliable_kmers_threshold)
+                    config->reverse
                 );
                 if (config->verbose) {
                     std::cout << "Finished extracting sequences from file " << file
@@ -2493,11 +2229,7 @@ int main(int argc, const char *argv[]) {
                         std::cout << std::string(read_stream->seq.s + i, config->alignment_length);
                         std::cout << ": " << graphindices[i] << "\n";
                     }
-                }, config->reverse,
-                    get_filter_filename(file, config->filter_k,
-                                        config->min_count - 1,
-                                        config->unreliable_kmers_threshold)
-                );
+                }, config->reverse);
 
                 if (config->verbose) {
                     std::cout << "File processed in "

@@ -68,18 +68,7 @@ bool write_fastq(gzFile gz_out, const kseq_t &kseq) {
 
 void read_fasta_file_critical(gzFile input_p,
                               std::function<void(kseq_t*)> callback,
-                              bool with_reverse,
-                              const std::string &filter_filename) {
-    std::vector<bool> filter;
-    if (filter_filename.size()) {
-        std::ifstream instream(filter_filename, std::ios::binary);
-
-        if (!load_number_vector(instream, &filter)) {
-            std::cerr << "ERROR: Filter file " << filter_filename
-                      << " is corrupted" << std::endl;
-            exit(1);
-        }
-    }
+                              bool with_reverse) {
     size_t seq_count = 0;
 
     if (input_p == Z_NULL) {
@@ -94,26 +83,13 @@ void read_fasta_file_critical(gzFile input_p,
     }
 
     while (kseq_read(read_stream) >= 0) {
-        if (filter_filename.size() && filter.size() <= seq_count) {
-            std::cerr << "ERROR: Filter file " << filter_filename
-                      << " has fewer sequences" << std::endl;
-            exit(1);
-        }
-
-        if (!filter_filename.size() || filter[seq_count]) {
+        callback(read_stream);
+        if (with_reverse) {
+            reverse_complement(read_stream->seq);
             callback(read_stream);
-            if (with_reverse) {
-                reverse_complement(read_stream->seq);
-                callback(read_stream);
-            }
         }
 
         seq_count++;
-    }
-    if (filter_filename.size() && filter.size() != seq_count) {
-        std::cerr << "ERROR: Filter file " << filter_filename
-                  << " has more sequences" << std::endl;
-        exit(1);
     }
 
     kseq_destroy(read_stream);
@@ -121,15 +97,14 @@ void read_fasta_file_critical(gzFile input_p,
 
 void read_fasta_file_critical(const std::string &filename,
                               std::function<void(kseq_t*)> callback,
-                              bool with_reverse,
-                              const std::string &filter_filename) {
+                              bool with_reverse) {
     gzFile input_p = gzopen(filename.c_str(), "r");
     if (input_p == Z_NULL) {
         std::cerr << "ERROR: Cannot read file " << filename << std::endl;
         exit(1);
     }
 
-    read_fasta_file_critical(input_p, callback, with_reverse, filter_filename);
+    read_fasta_file_critical(input_p, callback, with_reverse);
 
     gzclose(input_p);
 }
@@ -160,7 +135,7 @@ void read_fasta_from_string(const std::string &fasta_flat,
         exit(1);
     }
 
-    read_fasta_file_critical(input_p, callback, with_reverse, "");
+    read_fasta_file_critical(input_p, callback, with_reverse);
 
     gzclose(input_p);
     close(p[0]);

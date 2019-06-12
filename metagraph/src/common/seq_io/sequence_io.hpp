@@ -22,8 +22,7 @@ bool write_fastq(gzFile gz_out, const kseq_t &kseq);
 
 void read_fasta_file_critical(const std::string &filename,
                               std::function<void(kseq_t*)> callback,
-                              bool with_reverse = false,
-                              const std::string &filter_filename = "");
+                              bool with_reverse = false);
 
 void read_vcf_file_critical(const std::string &filename,
                             const std::string &ref_filename,

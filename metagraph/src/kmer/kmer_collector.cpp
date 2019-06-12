@@ -5,7 +5,6 @@
 
 #include "kmer.hpp"
 #include "unix_tools.hpp"
-#include "reads_filtering.hpp"
 #include "reverse_complement.hpp"
 
 const size_t kMaxKmersChunkSize = 30'000'000;
