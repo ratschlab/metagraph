@@ -1589,7 +1589,7 @@ int main(int argc, const char *argv[]) {
                 if (config->count_kmers) {
                     graph = std::make_unique<WeightedDBG<>>(
                         graph,
-                        sdsl::int_vector<>(graph->num_nodes(), 0, 1)
+                        sdsl::int_vector<>(graph->num_nodes() + 1, 0, 1)
                     );
                     if (!graph->load(file)) {
                         std::cerr << "Can't load weighted graph from file "

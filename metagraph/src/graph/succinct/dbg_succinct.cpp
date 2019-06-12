@@ -70,6 +70,10 @@ void DBGSuccinct::call_outgoing_kmers(node_index node,
 
     auto boss_edge = kmer_to_boss_index(node);
 
+    // no outgoing edges from the sink dummy nodes
+    if (!boss_graph_->get_W(boss_edge))
+        return;
+
     auto last = boss_graph_->fwd(boss_edge);
     auto first = boss_graph_->pred_last(last - 1) + 1;
 
@@ -89,6 +93,10 @@ void DBGSuccinct::adjacent_outgoing_nodes(node_index node,
     assert(target_nodes);
 
     auto boss_edge = kmer_to_boss_index(node);
+
+    // no outgoing edges from the sink dummy nodes
+    if (!boss_graph_->get_W(boss_edge))
+        return;
 
     auto last = boss_graph_->fwd(boss_edge);
     auto first = boss_graph_->pred_last(last - 1) + 1;

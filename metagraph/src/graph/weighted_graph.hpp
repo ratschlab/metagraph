@@ -12,6 +12,8 @@ class WeightedDBG : public DeBruijnGraph {
 
     WeightedDBG(std::shared_ptr<DeBruijnGraph> graph, Weights&& weights);
 
+    WeightedDBG(std::shared_ptr<DeBruijnGraph> graph);
+
     virtual ~WeightedDBG() {}
 
     /**

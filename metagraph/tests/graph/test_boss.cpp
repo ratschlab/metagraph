@@ -192,11 +192,9 @@ TEST(BOSS, SmallGraphTraversal) {
                     );
                 }
             }
-        }
 
-        //test FM index property
-        EXPECT_TRUE(graph->get_last(graph->fwd(i)));
-        if (graph->get_W(i)) {
+            //test FM index property
+            EXPECT_TRUE(graph->get_last(graph->fwd(i)));
             EXPECT_EQ(graph->get_W(i) % graph->alph_size,
                       graph->get_node_last_value(graph->fwd(i)));
         }

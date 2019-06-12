@@ -14,15 +14,21 @@ WeightedDBG<Weights>::WeightedDBG(std::shared_ptr<DeBruijnGraph> graph, Weights&
 }
 
 template <typename Weights>
+WeightedDBG<Weights>::WeightedDBG(std::shared_ptr<DeBruijnGraph> graph)
+      : graph_(std::move(graph)), weights_(Weights()) {
+    assert(graph_.get());
+}
+
+template <typename Weights>
 bool WeightedDBG<Weights>::load(const std::string &filename) {
     assert(graph_.get());
 
-    if (dynamic_cast<DBGSuccinct*>(graph_.get())
-            && !dynamic_cast<DBGSuccinct&>(*graph_).load_without_mask(filename))
+    if (dynamic_cast<DBGSuccinct*>(graph_.get())) {
+        if (!dynamic_cast<DBGSuccinct&>(*graph_).load_without_mask(filename))
+            return false;
+    } else if (!graph_->load(filename)) {
         return false;
-
-    if (!graph_->load(filename))
-        return false;
+    }
 
     try {
         std::ifstream instream(utils::remove_suffix(filename, graph_->file_extension())
@@ -30,7 +36,7 @@ bool WeightedDBG<Weights>::load(const std::string &filename) {
                                     + kWeightsExtension,
                                std::ios::binary);
         weights_.load(instream);
-        return graph_->num_nodes() == weights_.size();
+        return graph_->num_nodes() + 1 == weights_.size();
     } catch (...) {
         std::cerr << "ERROR: Cannot load graph weights from file "
                   << filename + kWeightsExtension << std::endl;

@@ -383,6 +383,7 @@ uint64_t BOSS::fwd(uint64_t i) const {
 
     // get value of W at position i
     TAlphabet c = get_W(i) % alph_size;
+    assert(i == 1 || c != kSentinelCode);
     // get the offset for position c
     uint64_t o = F_[c];
     // get the rank of c in W at position i
