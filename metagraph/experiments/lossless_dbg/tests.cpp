@@ -16,7 +16,8 @@
 #define protected public
 
 #define FULL_INCOMING_TABLE
-//#define DISABLE_TRANSFORMATIONS
+#define DISABLE_TRANSFORMATIONS
+// todo use transformations
 
 #include "utilities.hpp"
 #include "path_database_list_of_bifurcation_choices.hpp"
@@ -298,8 +299,6 @@ TEST(PathDatabase,GetStatistics) {
     pd.encode(reads);
     auto stats = pd.get_statistics(-1);
     ASSERT_EQ(stats["num_of_nodes"],8);
-    ASSERT_EQ(stats["true_joins"],1);
-    ASSERT_EQ(stats["true_splits"],1);
     ASSERT_EQ(stats["added_joins"],1);
     ASSERT_EQ(stats["added_splits"],1);
 }

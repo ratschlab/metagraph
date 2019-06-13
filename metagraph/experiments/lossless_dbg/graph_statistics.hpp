@@ -9,6 +9,8 @@
 #define STATS_OUTGOING_HISTOGRAM 2u
 #include <nlohmann/json.hpp>
 #include "graph_patch.hpp"
+#include "utilities.hpp"
+#include "unix_tools.hpp"
 
 using namespace std;
 using namespace nlohmann;

@@ -44,18 +44,22 @@ public:
     Timer timer;
 };
 
-struct waiting_thread_info_t {
-    int16_t thread_id;
-    int64_t relative_position;
-    uint64_t node;
-    char traversed_edge;
-    friend ostream& operator<<(ostream& os, const waiting_thread_info_t& dt);
+
+struct exit_barrier_element_t {
+    int64_t relative_position = 0;
+    uint64_t node = 0;
+    char traversed_edge = 0;
+    friend ostream& operator<<(ostream& os, const exit_barrier_element_t& dt);
 };
-ostream& operator<<(ostream& os, const waiting_thread_info_t& wt)
+
+ostream& operator<<(ostream& os, const exit_barrier_element_t& wt)
 {
-    os << "[tid=" << wt.thread_id << ",rp=" << wt.relative_position << ",node=" << wt.node << ",tedg=" << wt.traversed_edge << "]";
+    os << ",rp=" << wt.relative_position << ",node=" << wt.node << ",tedg=" << wt.traversed_edge << "]";
     return os;
 }
+using exit_barrier_t = vector<exit_barrier_element_t>;
+
+
 using DefaultDynamicRoutingTable = DynamicRoutingTable<>;
 using DefaultDynamicIncomingTable = DynamicIncomingTable<>;
 CREATE_MEMBER_CHECK(transformations);
@@ -99,11 +103,19 @@ public:
         // sort them so we have fixed relative ordering
         // probably not need to sort globally as we want only relative ordering
 
-        vector<string> transformed_sequences(sequences.size());
+        // use std::conditional<has transformations,vector<string>&,vector<string>> transformed_sequences = transformed_sequences;
+        // problem is that transform_sequence will additionally copy & replace it so we are getting additional overhead
+//        vector<string> transformed_sequences = sequences;
 
-        #pragma omp parallel for
-        for (ll i = 0; i < sequences.size();i++) {
-            transformed_sequences[i] = transform_sequence(sequences[i]);
+        //decide if the transformed sequences will be different or not and either copy or point to original sequences.
+        typename std::conditional<has_member_transformations<RoutingTableT>::value,
+                         vector<string>,
+                         const vector<string>&>::type transformed_sequences = sequences;
+        if constexpr (has_member_transformations<RoutingTableT>::value) {
+            #pragma omp parallel for
+            for (ll i = 0; i < sequences.size(); i++) {
+                transform_sequence_inplace(transformed_sequences[i]);
+            }
         }
 
         populate_additional_joins(transformed_sequences);
@@ -112,8 +124,6 @@ public:
         populate_bifurcation_bitvectors();
 
         auto alloc_routing_table = VerboseTimer("allocation of routing & incoming table");
-        //routing_table = decltype(routing_table)(graph_,&is_split,&rank_is_split,chunk_size);
-        //incoming_table = decltype(incoming_table)(graph_,&is_join,&rank_is_join,chunk_size);
         routing_table = decltype(routing_table)(graph_,&is_bifurcation,&rank_is_bifurcation,chunk_size);
         incoming_table = decltype(incoming_table)(graph_,&is_bifurcation,&rank_is_bifurcation,chunk_size);
         alloc_routing_table.finished();
@@ -130,15 +140,20 @@ public:
         auto alloc_lock_t = VerboseTimer("memory allocation of locks");
 
         ChunkedDenseHashMap<omp_lock_t,decltype(is_bifurcation), decltype(rank_is_bifurcation),false> node_locks(&is_bifurcation,&rank_is_bifurcation,chunk_size);
-        ChunkedDenseHashMap<omp_lock_t,decltype(is_bifurcation), decltype(rank_is_bifurcation),false> outgoing_locks(&is_bifurcation,&rank_is_bifurcation,chunk_size);
+        ChunkedDenseHashMap<omp_lock_t,decltype(is_bifurcation), decltype(rank_is_bifurcation),false> exit_barrier_locks(&is_bifurcation,&rank_is_bifurcation,chunk_size);
         alloc_lock_t.finished();
-        auto threads_map_t = VerboseTimer("memory allocation of thread deques");
-        ChunkedDenseHashMap<deque<waiting_thread_info_t>,decltype(is_bifurcation), decltype(rank_is_bifurcation),false> waiting_threads(&is_bifurcation,&rank_is_bifurcation,chunk_size);
+        auto threads_map_t = VerboseTimer("memory allocation of exit barriers");
+        // deques typically have large minimal memory cost; a deque holding just one element has to allocate its full internal array (e.g. 8 times the object size on 64-bit libstdc++; 16 times the object size or 4096 bytes, whichever is larger, on 64-bit libc++).
+        ChunkedDenseHashMap<exit_barrier_t,decltype(is_bifurcation), decltype(rank_is_bifurcation),false> exit_barriers(&is_bifurcation, &rank_is_bifurcation, chunk_size);
         threads_map_t.finished();
-        auto lock_init_timer = VerboseTimer("initializing locks");
+        auto lock_init_timer = VerboseTimer("initializing locks & barriers");
         for(int64_t i=0;i<node_locks.elements.size();i++) {
             omp_init_lock(&node_locks.elements[i]);
-            omp_init_lock(&outgoing_locks.elements[i]);
+            omp_init_lock(&exit_barrier_locks.elements[i]);
+        }
+        for(int64_t i=0;i<exit_barriers.elements.size();i++) {
+            using BarrierT = typename decltype(exit_barriers)::element_type;
+            exit_barriers.elements[i] = BarrierT(omp_get_num_threads(),{0});
         }
         lock_init_timer.finished();
 
@@ -153,7 +168,7 @@ public:
 
         #pragma omp parallel for num_threads(get_num_threads()) //default(none) shared(encoded,node_locks,routing_table,incoming_table)
         for (size_t i = 0; i < sequences.size(); i++) {
-            int16_t tid = omp_get_thread_num() + 1;
+            int16_t tid = omp_get_thread_num();
             std::vector<std::tuple<node_index, char, char>> bifurcations;
 
             const auto &sequence = sequences[i];
@@ -213,12 +228,15 @@ public:
                 node_lock = node_locks.ptr_to(node);
                 omp_set_lock(node_lock);
                 if (previous_node) {
-                    auto outgoing_lock = outgoing_locks.ptr_to(previous_node);
-                    omp_set_lock(outgoing_lock);
-                    auto& waiting_queue = waiting_threads[previous_node];
-                    relative_position = update_position_after_wakeup(tid, previous_node, traversed_edge,
-                                                                     waiting_queue, relative_position);
-                    omp_unset_lock(outgoing_lock);
+                    auto exit_barrier_lock = exit_barrier_locks.ptr_to(previous_node);
+                    omp_set_lock(exit_barrier_lock);
+
+                    auto& exit_barrier = exit_barriers[previous_node];
+                    auto& myself = exit_barrier[tid];
+                    relative_position = update_myself_after_wakeup(tid,exit_barrier);
+                    // remove myself after wakeup
+                    myself.node = 0;
+                    omp_unset_lock(exit_barrier_lock);
                 }
 
                 if (join_symbol) {
@@ -256,10 +274,16 @@ public:
 #ifdef _OPENMP
                 traversed_edge = split_symbol ? split_symbol : 'X'; // X as it doesn't matter
                 if (traversed_edge != '$') { // doesn't need any update
-                    auto outgoing_lock = outgoing_locks.ptr_to(node);
-                    omp_set_lock(outgoing_lock);
-                    waiting_threads[node].push_back({tid, relative_position, node, traversed_edge});
-                    omp_unset_lock(outgoing_lock);
+                    auto exit_barrier_lock = exit_barrier_locks.ptr_to(node);
+                    omp_set_lock(exit_barrier_lock);
+                    // add myself before sleep
+                    auto& exit_barrier = exit_barriers[node];
+                    auto& myself = exit_barrier[tid];
+                    myself.node = node;
+                    myself.traversed_edge = traversed_edge;
+                    myself.relative_position = relative_position;
+                    update_others_before_sleep(tid,exit_barrier);
+                    omp_unset_lock(exit_barrier_lock);
                 }
                 omp_unset_lock(node_lock);
 #endif
@@ -273,7 +297,7 @@ public:
 #ifdef _OPENMP
         for(int64_t i=0;i<node_locks.elements.size();i++) {
             omp_destroy_lock(&node_locks.elements[i]);
-            omp_destroy_lock(&outgoing_locks.elements[i]);
+            omp_destroy_lock(&exit_barrier_locks.elements[i]);
         }
 #endif
         encoded_paths += encoded.size();
@@ -285,67 +309,35 @@ public:
 
 #ifdef _OPENMP
 
-    int64_t update_position_after_wakeup(int tid,
-                                 int64_t previous_node, char traversed_edge,
-                                 deque<waiting_thread_info_t> &waiting_queue,
-                                 int64_t relative_position) const {
-            assert(previous_node);
-            bool first_it = 1;
-            bool me_first = 0;
-            bool was_me = 0;
-            int64_t past_offset = 0;
-            // todo_wrap in define or better in macro
-            int64_t debug_my_id = 0;
-            int64_t debug_idx = 0;
-            for(auto&other : waiting_queue) {
-                if (was_me) {
-                    // future
-                    if (other.node == previous_node and
-                            other.traversed_edge == traversed_edge and
-                            other.thread_id < 0 and // job has already finished
-                            other.relative_position <= relative_position) {
-#ifdef DEBUG_ORDER_CORRECTION
-                        cerr << waiting_queue << endl;
-                        PRINT_VAR(tid, node, other.relative_position);
-#endif
-                        relative_position++;
-                    }
-                }
-                else if (tid == other.thread_id) {
-                    debug_my_id = debug_idx;
-                    assert(!was_me); // can appear only once
-                    // present
-                    was_me = 1;
-                    if (first_it) {
-                        me_first = 1;
-                    }
-                    other.thread_id = -tid;
-                }  else {
-                    // past
-                    if (other.node == previous_node and
-                            other.traversed_edge == traversed_edge and
-                            other.thread_id > 0 and// job is waiting
-                            other.relative_position < relative_position) {
-                            past_offset--;
-                    }
-                }
-                first_it = 0;
-                debug_idx++;
+    void update_others_before_sleep(int tid,
+                                    exit_barrier_t &exit_barrier) const {
+        auto& myself = exit_barrier[tid];
+        for(int i=0;i<exit_barrier.size();i++) {
+            auto& other = exit_barrier[i];
+            if (i == tid) continue;
+            if (other.node == myself.node and
+                other.traversed_edge == myself.traversed_edge and
+                other.relative_position >= myself.relative_position) {
+                other.relative_position++;// I am below other
             }
-            assert(was_me);
-            relative_position += past_offset;
-            assert(relative_position >= 0 || [&](){
-                cerr << waiting_queue << endl;
-                PRINT_VAR(tid,traversed_edge,debug_my_id,past_offset,relative_position);
-                return false;
-            }());
+        }
+    }
 
-            if (me_first) {
-                while (!waiting_queue.empty() and waiting_queue.front().thread_id < 0) {
-                    waiting_queue.pop_front();
-                }
+    int64_t update_myself_after_wakeup(int tid,
+                                       exit_barrier_t &exit_barrier) const {
+        auto& myself = exit_barrier[tid];
+        int offset_change = 0;
+        for(int i=0;i<exit_barrier.size();i++) {
+            auto& other = exit_barrier[i];
+            if (i == tid) continue;
+            if (other.node == myself.node and
+                other.traversed_edge == myself.traversed_edge and
+                other.relative_position < myself.relative_position) {
+                offset_change--;// Other is below me
             }
-            return relative_position;
+        }
+        assert(myself.relative_position + offset_change >= 0);
+        return myself.relative_position + offset_change;
         }
 #endif
 
@@ -446,6 +438,19 @@ public:
             });
         }
         return result;
+    }
+
+    void transform_sequence_inplace(string& sequence) const {
+        size_t kmer_end = graph.get_k();
+        static_assert(has_member_transformations<RoutingTableT>::value == std::is_base_of<TransformationsEnabler<DynamicRoutingTableCore<>>,RoutingTableT>::value);
+        if constexpr (std::is_base_of<TransformationsEnabler<DynamicRoutingTableCore<>>,RoutingTableT>::value) {
+            graph.map_to_nodes(sequence, [&](node_index node) {
+                if (kmer_end < sequence.size()) {
+                    sequence[kmer_end] = routing_table.transform(node, sequence[kmer_end]);
+                }
+                kmer_end++;
+            });
+        }
     }
 
     void serialize(const fs::path& folder) const {};
