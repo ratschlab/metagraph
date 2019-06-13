@@ -125,8 +125,8 @@ TEST(DBGBitmapComplete, InsertSequence) {
     {
         DBGBitmap graph(20, false);
 
-        ASSERT_DEATH(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "");
-        ASSERT_DEATH(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), "");
+        ASSERT_THROW(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), std::runtime_error);
+        ASSERT_THROW(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), std::runtime_error);
 
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
         EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
@@ -139,8 +139,8 @@ TEST(DBGBitmapComplete, InsertSequence) {
     {
         DBGBitmap graph(20, true);
 
-        ASSERT_DEATH(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "");
-        ASSERT_DEATH(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), "");
+        ASSERT_THROW(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), std::runtime_error);
+        ASSERT_THROW(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), std::runtime_error);
 
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
         EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
@@ -155,12 +155,12 @@ TEST(DBGBitmapComplete, ReverseComplement) {
     {
         DBGBitmap graph(20, false);
 
-        ASSERT_DEATH(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "");
+        ASSERT_THROW(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), std::runtime_error);
 
         //uint64_t num_nodes = graph.num_nodes();
-        ASSERT_DEATH(graph.add_sequence("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"), "");
+        ASSERT_THROW(graph.add_sequence("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"), std::runtime_error);
 
-        ASSERT_DEATH(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), "");
+        ASSERT_THROW(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), std::runtime_error);
 
 
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
@@ -174,12 +174,12 @@ TEST(DBGBitmapComplete, ReverseComplement) {
     {
         DBGBitmap graph(20, true);
 
-        ASSERT_DEATH(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "");
+        ASSERT_THROW(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), std::runtime_error);
 
         //uint64_t num_nodes = graph.num_nodes();
-        ASSERT_DEATH(graph.add_sequence("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"), "");
+        ASSERT_THROW(graph.add_sequence("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"), std::runtime_error);
 
-        ASSERT_DEATH(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), "");
+        ASSERT_THROW(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), std::runtime_error);
 
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
         EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
@@ -201,7 +201,7 @@ TEST(DBGBitmapComplete, CheckGraph) {
             for (size_t j = 0; j < seq.size(); ++j) {
                 seq[j] = alphabet[(i * i + j + 17 * j * j) % 5];
             }
-            ASSERT_DEATH(graph.add_sequence(seq), "");
+            ASSERT_THROW(graph.add_sequence(seq), std::runtime_error);
         }
 
         for (DBGBitmap::node_index i = 1; i <= 1000; ++i) {
@@ -222,7 +222,7 @@ TEST(DBGBitmapComplete, CheckGraph) {
             for (size_t j = 0; j < seq.size(); ++j) {
                 seq[j] = alphabet[(i * i + j + 17 * j * j) % 5];
             }
-            ASSERT_DEATH(graph.add_sequence(seq), "");
+            ASSERT_THROW(graph.add_sequence(seq), std::runtime_error);
         }
 
         for (DBGBitmap::node_index i = 1; i <= 1000; ++i) {
@@ -238,8 +238,8 @@ TEST(DBGBitmapComplete, Serialize) {
     {
         DBGBitmap graph(20, false);
 
-        ASSERT_DEATH(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "");
-        ASSERT_DEATH(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), "");
+        ASSERT_THROW(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), std::runtime_error);
+        ASSERT_THROW(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), std::runtime_error);
 
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
         EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
@@ -269,8 +269,8 @@ TEST(DBGBitmapComplete, Serialize) {
     {
         DBGBitmap graph(20, true);
 
-        ASSERT_DEATH(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), "");
-        ASSERT_DEATH(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), "");
+        ASSERT_THROW(graph.add_sequence("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), std::runtime_error);
+        ASSERT_THROW(graph.add_sequence("CATGTACTAGCTGATCGTAGCTAGCTAGC"), std::runtime_error);
 
         EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
         EXPECT_TRUE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));

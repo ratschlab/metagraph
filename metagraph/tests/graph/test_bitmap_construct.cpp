@@ -45,7 +45,7 @@ TEST(DBGBitmapConstruct, ConstructionNEAppendingSimplePath) {
         EXPECT_EQ(1u, constructed.num_nodes());
 
         DBGBitmap appended(k);
-        ASSERT_DEATH(appended.add_sequence(std::string(100, 'A')), "");
+        ASSERT_THROW(appended.add_sequence(std::string(100, 'A')), std::runtime_error);
 
         ASSERT_NE(constructed, appended);
     }
@@ -60,8 +60,8 @@ TEST(DBGBitmapConstruct, ConstructionNEAppendingTwoPaths) {
         EXPECT_EQ(2u, constructed.num_nodes());
 
         DBGBitmap appended(k);
-        ASSERT_DEATH(appended.add_sequence(std::string(100, 'A')), "");
-        ASSERT_DEATH(appended.add_sequence(std::string(50, 'C')), "");
+        ASSERT_THROW(appended.add_sequence(std::string(100, 'A')), std::runtime_error);
+        ASSERT_THROW(appended.add_sequence(std::string(50, 'C')), std::runtime_error);
 
         ASSERT_NE(constructed, appended);
     }
