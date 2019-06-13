@@ -74,7 +74,9 @@ void compress_store_reads(ValueArg<std::string> &graphArg, const ValueArg<std::s
     unique_ptr<DatabaseT> pd;
         Timer timer;
         cerr << "Started loading the graph" << endl;
-        graph->load(graphArg.getValue());
+        if (not graph->load(graphArg.getValue())) {
+            throw "Error loading graph";
+        }
         cerr << "Finished loading the graph in " << timer.elapsed() << " sec." << endl;
         pd.reset(new DatabaseT(graph,chunks));
     pd->encode(reads);
