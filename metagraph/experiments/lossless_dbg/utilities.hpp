@@ -226,6 +226,7 @@ public:
     template<typename ...Args>
     IdentityComparator(Args... args) : Reference(args...), t(args...) {}
 
+    virtual ~IdentityComparator() {}
 
     CREATE_MEMBER_CHECK(offset);
     template<typename ...Args>
@@ -440,7 +441,7 @@ public:
 
     CREATE_MEMBER_CHECK(exit);
     template<typename ...Args>
-    int64_t exit(Args... args) const {
+    int64_t exit(Args... args) {
         if constexpr (has_member_exit<Reference>::value) {
             auto target = Reference::exit(args...);
             auto value = t.exit(args...);

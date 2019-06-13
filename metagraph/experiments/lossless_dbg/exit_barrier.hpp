@@ -25,7 +25,7 @@ ostream& operator<<(ostream& os, const exit_barrier_element_t& wt)
 }
 using exit_barrier_t = vector<exit_barrier_element_t>;
 
-template <typename BitVector,typename RankSupport>
+template <typename BitVector=sdsl::bit_vector,typename RankSupport=sdsl::rank_support_v<1>>
 class ExitBarrier {
 public:
     ExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chunk_size=DefaultChunks) :
@@ -70,7 +70,7 @@ public:
         omp_unset_lock(exit_barrier_lock);
     }
 
-    void update_others_before_sleep(exit_barrier_t &exit_barrier, int tid) const {
+    void update_others_before_sleep(exit_barrier_t &exit_barrier, int tid) {
         auto& myself = exit_barrier[tid];
         for(int i=0;i<exit_barrier.size();i++) {
             auto& other = exit_barrier[i];
@@ -83,7 +83,7 @@ public:
         }
     }
 
-    int64_t update_myself_after_wakeup(exit_barrier_t &exit_barrier,int tid) const {
+    int64_t update_myself_after_wakeup(exit_barrier_t &exit_barrier,int tid) {
         auto& myself = exit_barrier[tid];
         int offset_change = 0;
         for(int i=0;i<exit_barrier.size();i++) {
@@ -114,8 +114,9 @@ ostream& operator<<(ostream& os, const waiting_thread_info_t& wt)
     return os;
 }
 
-template <typename BitVector,typename RankSupport>
+template <typename BitVector=sdsl::bit_vector,typename RankSupport=sdsl::rank_support_v<1>>
 class ReferenceExitBarrier {
+public:
 ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chunk_size=DefaultChunks) :
         waiting_threads(is_element,rank_is_element,chunk_size), waiting_queue_locks(is_element, rank_is_element, chunk_size) {
     for(int64_t i=0;i<waiting_threads.elements.size();i++) {
@@ -138,7 +139,7 @@ ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chun
         auto& waiting_queue = waiting_threads[node];
         waiting_thread_info_t myself;
         for(auto&other : waiting_queue) {
-            if (other.tid == tid) {
+            if (other.thread_id == tid) {
                 myself = other;
             }
         }
@@ -150,7 +151,7 @@ ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chun
     void enter(int64_t node, char traversed_edge, int64_t relative_position, int tid) {
         tid++;
         auto waiting_queue_lock = waiting_queue_locks.ptr_to(node);
-        waiting_threads[node].push_back({tid, relative_position, node, traversed_edge});
+        waiting_threads[node].push_back({(int16_t)tid, relative_position, node, traversed_edge});
         omp_unset_lock(waiting_queue_lock);
     }
 
@@ -158,7 +159,7 @@ ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chun
     int64_t update_myself_after_wakeup(int tid,
                                        int64_t previous_node, char traversed_edge,
                                        deque<waiting_thread_info_t> &waiting_queue,
-                                       int64_t relative_position) const {
+                                       int64_t relative_position) {
         assert(previous_node);
         bool first_it = 1;
         bool me_first = 0;

@@ -313,7 +313,7 @@ TEST(PathDatabase,RoutingTableInternal) {
 }
 
 
-#if defined(__linux__) || false
+#if false
 
 template <typename T>
 void long_identity_test() {
