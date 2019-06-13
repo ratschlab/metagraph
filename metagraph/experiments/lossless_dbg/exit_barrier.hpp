@@ -12,9 +12,9 @@ using namespace std;
 #define METAGRAPH_waiting_queue_HPP
 
 struct exit_barrier_element_t {
-    int64_t relative_position = 0;
-    uint64_t node = 0;
-    char traversed_edge = 0;
+    int64_t relative_position;
+    uint64_t node;
+    char traversed_edge;
     friend ostream& operator<<(ostream& os, const exit_barrier_element_t& dt);
 };
 
@@ -72,29 +72,39 @@ public:
 
     void update_others_before_sleep(exit_barrier_t &exit_barrier, int tid) {
         auto& myself = exit_barrier[tid];
-
+        #pragma omp simd
         for(int i=0;i<exit_barrier.size();i++) {
             auto& other = exit_barrier[i];
-            if (i == tid) continue;
-            if (other.node == myself.node and
-                other.traversed_edge == myself.traversed_edge and
-                other.relative_position >= myself.relative_position) {
-                other.relative_position++;// I am below other
-            }
+//            if (i == tid) continue;
+//            if (other.node == myself.node and
+//                other.traversed_edge == myself.traversed_edge and
+//                other.relative_position >= myself.relative_position) {
+//                other.relative_position++;// I am below other
+//            }
+            // vectorized version
+            other.relative_position += other.node == myself.node and
+                                       other.traversed_edge == myself.traversed_edge and
+                                       other.relative_position >= myself.relative_position  and
+                                       i != tid;
         }
     }
 
     int64_t update_myself_after_wakeup(exit_barrier_t &exit_barrier,int tid) {
         auto& myself = exit_barrier[tid];
         int offset_change = 0;
+        #pragma omp simd reduction(+:offset_change)
         for(int i=0;i<exit_barrier.size();i++) {
             auto& other = exit_barrier[i];
-            if (i == tid) continue;
-            if (other.node == myself.node and
+//            if (i == tid) continue;
+//            if (other.node == myself.node and
+//                other.traversed_edge == myself.traversed_edge and
+//                other.relative_position < myself.relative_position) {
+//                offset_change--;// Other is below me
+//            }
+            offset_change -= other.node == myself.node and
                 other.traversed_edge == myself.traversed_edge and
-                other.relative_position < myself.relative_position) {
-                offset_change--;// Other is below me
-            }
+                other.relative_position < myself.relative_position and
+                i != tid;
         }
         assert(myself.relative_position + offset_change >= 0);
         return myself.relative_position + offset_change;
