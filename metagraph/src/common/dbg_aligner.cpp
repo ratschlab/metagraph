@@ -380,7 +380,6 @@ bool DBGAligner::inexact_map(AlignedPath& path,
             continue_alignment = false;
             return;
         }
-        // TODO: call whole_path_score here if use_cssw_lib is false (and in other places).
         // Approximate Smith-Waterman score by assuming either match/mismatch for the next character.
         if (use_cssw_lib_) {
         alternative_path.extend(node, {}, extension,
@@ -467,20 +466,29 @@ void DBGAligner::whole_path_score(AlignedPath& path, SWDpCell& optimum_alignment
 //    std::cerr << "whole path loss for path: " << path_sequence
 //              << " sequence: " << query_sequence << std::endl;
     // Keep only two rows of the table at a time to save space.
-    std::vector<SWDpCell> alignment_prev_row(path_sequence.size() + 1, SWDpCell{});
-    std::vector<SWDpCell> alignment_cur_row(path_sequence.size() + 1, SWDpCell{});
+    std::vector<SWDpCell> sw_prev_row(path_sequence.size() + 1, SWDpCell{});
+    std::vector<SWDpCell> sw_cur_row(path_sequence.size() + 1, SWDpCell{});
     // Keep the last column in path to continue
     // filling the table when path grows from that column.
-    std::vector<SWDpCell> alignment_last_column(query_sequence.size() + 1);
+    std::vector<SWDpCell> sw_last_column(query_sequence.size() + 1);
     // TODO: Store last row and last column in the path.
-    // TODO: Compute clipping in the end based on cigar.
-    for (size_t i = 1; i <= query_sequence.size(); ++i) {
-        std::swap(alignment_prev_row, alignment_cur_row);
-        for (size_t j = 1; j <= path_sequence.size(); ++j) {
+    for (uint64_t i = 1; i <= query_sequence.size(); ++i) {
+        size_t j = 1;
+        std::swap(sw_prev_row, sw_cur_row);
+        auto stored_last_column = path.get_sw_last_column();
+        if (i < stored_last_column.size()) {
+            j = stored_last_column.size() - 1;
+            sw_cur_row[j] = stored_last_column[i];
+            j++ ;
+        } else if (i == stored_last_column.size()) {
+            for (size_t k = 0; k < stored_last_column.size(); ++k)
+                sw_prev_row[k] = stored_last_column[k];
+        }
+        for (; j <= path_sequence.size(); ++j) {
             std::vector<SWDpCell> options;
 
             // Option for insertion operation
-            auto parent_cell_for_in_op = alignment_prev_row[j];
+            auto parent_cell_for_in_op = sw_prev_row[j];
             SWDpCell new_cell_option_for_in_op;
             new_cell_option_for_in_op.cigar = parent_cell_for_in_op.cigar;
             new_cell_option_for_in_op.cigar.append(Cigar::Operator::INSERTION);
@@ -492,7 +500,7 @@ void DBGAligner::whole_path_score(AlignedPath& path, SWDpCell& optimum_alignment
             options.push_back(std::move(new_cell_option_for_in_op));
 
             // Option for deletion operation
-            auto parent_cell_for_del_op = alignment_cur_row[j-1];
+            auto parent_cell_for_del_op = sw_cur_row[j-1];
             SWDpCell new_cell_option_for_del_op;
             new_cell_option_for_del_op.cigar = parent_cell_for_del_op.cigar;
             new_cell_option_for_del_op.cigar.append(Cigar::Operator::DELETION);
@@ -504,7 +512,7 @@ void DBGAligner::whole_path_score(AlignedPath& path, SWDpCell& optimum_alignment
             options.push_back(std::move(new_cell_option_for_del_op));
 
             // Option for match/mismatch operation
-            auto parent_cell_for_sub_op = alignment_prev_row[j-1];
+            auto parent_cell_for_sub_op = sw_prev_row[j-1];
             auto match_mismatch_score = single_char_score(query_sequence[i-1], path_sequence[j-1]);
             SWDpCell new_cell_option_for_sub_op =
                 {.score = parent_cell_for_sub_op.score + match_mismatch_score,
@@ -523,17 +531,18 @@ void DBGAligner::whole_path_score(AlignedPath& path, SWDpCell& optimum_alignment
 //                << options[1].cigar.to_string() << ", " << options[1].score << "|"
 //                << options[2].cigar.to_string() << ", " << options[2].score << std::endl;
             auto max_option = std::max_element(std::begin(options), std::end(options));
-            alignment_cur_row[j] = {.score = max_option->score,
+            sw_cur_row[j] = {.score = max_option->score,
                                     .cigar = max_option->cigar};
-//            std::cerr << "max: " << alignment_cur_row[j].cigar.to_string() << ", " << alignment_cur_row[j].score << std::endl;
+//            std::cerr << "max: " << sw_cur_row[j].cigar.to_string() << ", " << sw_cur_row[j].score << std::endl;
         }
-        alignment_last_column[i] = alignment_cur_row.back();
+        sw_last_column[i] = sw_cur_row.back();
     }
-    // Last row has just been swapped to alignment_prev_row.
-    optimum_alignment = alignment_cur_row[path_sequence.size()];
+    // Last row has just been swapped to sw_prev_row.
+    optimum_alignment = sw_cur_row[path_sequence.size()];
 //    std::cerr << "optimum_alignment with score " << optimum_alignment.score << " and cigar: " << optimum_alignment.cigar.to_string() << std::endl;
     auto updated_score_delta = optimum_alignment.cigar.clip(gap_opening_penalty_, gap_extension_penalty_, -1 * mm_transition_, -1 * mm_transversion_);
     optimum_alignment.score += updated_score_delta;
+    path.store_sw_intermediate_info(std::move(sw_cur_row), std::move(sw_last_column));
 //    std::cerr << "score of optimum alinment after clipping: " << optimum_alignment.score << std::endl;
 }
 
@@ -552,75 +561,4 @@ void DBGAligner::trim(AlignedPath &path) const {
         query_trim_length += atoi(position_str.c_str());
     }
     path.trim(query_trim_length, path_trim_length);
-}
-
-uint64_t Cigar::clip(uint64_t gap_opening_penalty, uint64_t gap_extension_penalty,
-              uint64_t mismatch_penalty_transition, uint64_t mismatch_penalty_transversion) {
-    query_begin_ = 0;
-    ref_begin_ = 0;
-    query_end_ = 0;
-    ref_end_ = 0;
-    int64_t updated_score_delta = 0;
-    // Detect mismatches, insertions and deletions from the beginning
-    // and adjust cigar, query and ref begin values.
-    for (auto cigar_op = std::begin(cigar_);
-         cigar_op != std::end(cigar_)
-            && cigar_op->first != Operator::MATCH
-            && cigar_op->first != Operator::CLIPPED; ++ cigar_op) {
-        if (cigar_op->first == Operator::INSERTION) {
-            cigar_op->first = CLIPPED;
-            updated_score_delta += gap_opening_penalty + gap_extension_penalty * (cigar_op->second - 1);
-            query_begin_ += cigar_op->second;
-        } else if (cigar_op->first == Operator::MISMATCH_TRANSITION) {
-            cigar_op->first = CLIPPED;
-            updated_score_delta += mismatch_penalty_transition * cigar_op->second;
-            query_begin_ += cigar_op->second;
-            ref_begin_ += cigar_op->second;
-        } else if (cigar_op->first == Operator::MISMATCH_TRANSVERSION) {
-            cigar_op->first = CLIPPED;
-            updated_score_delta += mismatch_penalty_transversion * cigar_op->second;
-            query_begin_ += cigar_op->second;
-            ref_begin_ += cigar_op->second;
-        } else if (cigar_op->first == Operator::DELETION) {
-            updated_score_delta += gap_opening_penalty + gap_extension_penalty * (cigar_op->second - 1);
-            ref_begin_ += cigar_op->second;
-        }
-    }
-    // Detect mismatches, insertions and deletions from the end
-    // and adjust cigar, query and ref end values.
-    for (auto cigar_op = std::end(cigar_) - 1;
-             cigar_op != std::begin(cigar_)
-                && cigar_op->first != Operator::MATCH
-                && cigar_op->first != Operator::CLIPPED; -- cigar_op) {
-        if (cigar_op->first == Operator::INSERTION) {
-            cigar_op->first = CLIPPED;
-            updated_score_delta += gap_opening_penalty + gap_extension_penalty * (cigar_op->second - 1);
-            query_end_ += cigar_op->second;
-        } else if (cigar_op->first == Operator::MISMATCH_TRANSITION) {
-            cigar_op->first = CLIPPED;
-            updated_score_delta += mismatch_penalty_transition * cigar_op->second;
-            query_end_ += cigar_op->second;
-            ref_end_ += cigar_op->second;
-        } else if (cigar_op->first == Operator::MISMATCH_TRANSVERSION) {
-            cigar_op->first = CLIPPED;
-            updated_score_delta += mismatch_penalty_transversion * cigar_op->second;
-            query_end_ += cigar_op->second;
-            ref_end_ += cigar_op->second;
-        } else if (cigar_op->first == Operator::DELETION) {
-            updated_score_delta += gap_opening_penalty + gap_extension_penalty * (cigar_op->second - 1);
-            ref_end_ += cigar_op->second;
-        }
-    }
-    // In case of adjacent clipped operations in cigar, merge them.
-    for (auto cigar_op = std::begin(cigar_);
-             cigar_op < std::end(cigar_) - 1; ++ cigar_op) {
-        if (cigar_op->first == Operator::CLIPPED
-                && (cigar_op + 1)->first == Operator::CLIPPED) {
-            cigar_op->second += (cigar_op + 1)->second;
-            cigar_op = cigar_.erase(cigar_op + 1) - 2;
-        }
-    }
-//    std::cerr << "Updated score delta: " << updated_score_delta
-//              << " for cigar: " << to_string() << std::endl;
-    return updated_score_delta;
 }

@@ -7,6 +7,7 @@
 #include <iostream>
 
 #include "ssw_cpp.h"
+#include "aligner_helper.hpp"
 
 template <typename NodeType, typename VLabels>
 class Path {
@@ -81,6 +82,8 @@ class Path {
         query_it_ -= query_trim_length;
         sequence_.resize(sequence_.size() - path_trim_length);
         nodes_.resize(nodes_.size() - path_trim_length);
+        sw_last_row_.resize(sw_last_row_.size() - path_trim_length);
+        sw_last_column_.resize(sw_last_column_.size() - query_trim_length);
     }
 
     void set_query_begin_it(std::string::const_iterator query_begin_it) {
@@ -105,6 +108,13 @@ class Path {
             }
     }
 
+    void store_sw_intermediate_info(std::vector<SWDpCell>&& sw_last_row, std::vector<SWDpCell>&& sw_last_column) {
+        sw_last_row_ = std::move(sw_last_row);
+        sw_last_column_ = std::move(sw_last_column);
+    }
+
+    std::vector<SWDpCell> get_sw_last_column() const { return sw_last_column_; }
+    std::vector<SWDpCell> get_sw_last_row() const { return sw_last_row_; }
     void set_similar() { is_similar_ = true; }
     NodeType back() const { return nodes_.back(); }
     NodeType front() const { return nodes_.front(); }
@@ -144,6 +154,10 @@ class Path {
     uint64_t num_matches_;
     bool is_score_updated_;
     StripedSmithWaterman::Alignment alignment_;
+    // Store intermediate values in Smith-Waterman table to save computations
+    // when Smith-Waterman is called multiple times.
+    std::vector<SWDpCell> sw_last_row_;
+    std::vector<SWDpCell> sw_last_column_;
     std::function<bool(const Path&, const Path&)> prioritizing_function;
 
     void push_back(NodeType node, const VLabels &labels, float score=0) {
