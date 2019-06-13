@@ -66,11 +66,6 @@ string(APPEND CMAKE_CXX_FLAGS " -D_USE_MMAP")
 set(METALIBS ${METALIBS} -lboost_iostreams)
 endif()
 
-if(WITH_DEATH_TESTS)
-message(STATUS "Enabling death tests in gtest")
-string(APPEND CMAKE_CXX_FLAGS " -D_DEATH_TEST")
-endif()
-
 #-------------------
 # KMC k-mer counter
 #-------------------
@@ -364,6 +359,16 @@ add_subdirectory(
 )
 endif()
 
+if(NOT DEFINED DEATH_TEST)
+set(DEATH_TEST)
+endif()
+if(DEATH_TEST)
+set(DEATH_TEST_FLAG "")
+else()
+message(STATUS "Disabling death tests in gtest")
+set(DEATH_TEST_FLAG -D_NO_DEATH_TEST)
+endif()
+
 file(GLOB unit_tests_files
   "tests/*.cpp"
   "tests/*/*.cpp"
@@ -390,7 +395,7 @@ target_link_libraries(unit_tests gtest_main gtest
   ${METALIBS}
 )
 
-target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template)
+target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template ${DEATH_TEST_FLAG})
 
 add_test(NAME unit_tests COMMAND unit_tests)
 

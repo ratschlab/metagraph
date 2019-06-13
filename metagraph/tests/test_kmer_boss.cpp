@@ -1,4 +1,5 @@
 #include "gtest/gtest.h"
+#include "test_helpers.hpp"
 
 #include <vector>
 #include <functional>

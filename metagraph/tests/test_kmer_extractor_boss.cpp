@@ -1,4 +1,5 @@
 #include "gtest/gtest.h"
+#include "test_helpers.hpp"
 
 #define private public
 #define protected public
@@ -7,13 +8,6 @@
 #include "utils.hpp"
 #include "reverse_complement.hpp"
 
-// Disable death tests
-#ifndef _DEATH_TEST
-#ifdef EXPECT_DEATH
-#undef EXPECT_DEATH
-#define EXPECT_DEATH(a, b) (void)0
-#endif
-#endif
 
 template <typename Kmer>
 class ExtractKmers : public ::testing::Test { };

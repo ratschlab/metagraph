@@ -7,14 +7,8 @@
 #include <zlib.h>
 #include <htslib/kseq.h>
 #include "gtest/gtest.h"
+#include "../test_helpers.hpp"
 
-// Disable death tests
-#ifndef _DEATH_TEST
-#ifdef ASSERT_DEATH
-#undef ASSERT_DEATH
-#define ASSERT_DEATH(a, b) (void)0
-#endif
-#endif
 
 #define protected public
 #define private public
