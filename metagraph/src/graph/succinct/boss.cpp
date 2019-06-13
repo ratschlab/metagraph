@@ -1280,15 +1280,17 @@ void BOSS::add_sequence(const std::string &seq,
 
     auto sequence = encode(seq);
 
-    TAlphabet *begin_segm = sequence.data();
-    TAlphabet *end_segm = sequence.data();
-    TAlphabet *end = sequence.data() + sequence.size();
+    TAlphabet * __restrict begin_segm = sequence.data();
+    TAlphabet * __restrict end_segm = sequence.data();
+    TAlphabet * __restrict end = sequence.data() + sequence.size();
 
     do {
-        while (end_segm < end && *end_segm < alph_size) {
-            ++end_segm;
-        }
+        assert(end >= end_segm);
+        end_segm = std::find_if(end_segm, end,
+            [&](auto c) { return c >= alph_size; }
+        );
         if (begin_segm + k_ + 1 <= end_segm) {
+            // TODO: find a way to avoid copying here
             add_sequence(std::vector<TAlphabet>(begin_segm, end_segm),
                          try_extend, edges_inserted);
         }
