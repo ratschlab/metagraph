@@ -72,6 +72,7 @@ public:
 
     void update_others_before_sleep(exit_barrier_t &exit_barrier, int tid) {
         auto& myself = exit_barrier[tid];
+
         for(int i=0;i<exit_barrier.size();i++) {
             auto& other = exit_barrier[i];
             if (i == tid) continue;
