@@ -438,6 +438,39 @@ public:
         }
     }
 
+    CREATE_MEMBER_CHECK(exit);
+    template<typename ...Args>
+    int64_t exit(Args... args) const {
+        if constexpr (has_member_exit<Reference>::value) {
+            auto target = Reference::exit(args...);
+            auto value = t.exit(args...);
+            if (target != value) {
+                doPrint(cout,target,value,args...);
+            }
+            assert(target==value);
+            return target;
+        }
+        else {
+            throw "Can't call function exit";
+        }
+    }
+
+
+
+
+    CREATE_MEMBER_CHECK(enter);
+    template<typename ...Args>
+    void enter(Args... args) {
+        if constexpr (has_member_enter<Reference>::value) {
+            Reference::enter(args...);
+            t.enter(args...);
+        }
+        else {
+            throw "Can't call function enter";
+        }
+    }
+
+
     Test t;
 };
 
