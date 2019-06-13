@@ -16,6 +16,7 @@
 #include <omp.h>
 
 #include "decode_enabler.hpp"
+#include "exit_barrier.hpp"
 #include "dynamic_routing_table.hpp"
 #include "dynamic_incoming_table.hpp"
 #include "utils.hpp"
@@ -43,21 +44,6 @@ public:
     string procedure_name;
     Timer timer;
 };
-
-
-struct exit_barrier_element_t {
-    int64_t relative_position = 0;
-    uint64_t node = 0;
-    char traversed_edge = 0;
-    friend ostream& operator<<(ostream& os, const exit_barrier_element_t& dt);
-};
-
-ostream& operator<<(ostream& os, const exit_barrier_element_t& wt)
-{
-    os << ",rp=" << wt.relative_position << ",node=" << wt.node << ",tedg=" << wt.traversed_edge << "]";
-    return os;
-}
-using exit_barrier_t = vector<exit_barrier_element_t>;
 
 
 using DefaultDynamicRoutingTable = DynamicRoutingTable<>;
@@ -140,21 +126,17 @@ public:
         auto alloc_lock_t = VerboseTimer("memory allocation of locks");
 
         ChunkedDenseHashMap<omp_lock_t,decltype(is_bifurcation), decltype(rank_is_bifurcation),false> node_locks(&is_bifurcation,&rank_is_bifurcation,chunk_size);
-        ChunkedDenseHashMap<omp_lock_t,decltype(is_bifurcation), decltype(rank_is_bifurcation),false> exit_barrier_locks(&is_bifurcation,&rank_is_bifurcation,chunk_size);
         alloc_lock_t.finished();
         auto threads_map_t = VerboseTimer("memory allocation of exit barriers");
-        // deques typically have large minimal memory cost; a deque holding just one element has to allocate its full internal array (e.g. 8 times the object size on 64-bit libstdc++; 16 times the object size or 4096 bytes, whichever is larger, on 64-bit libc++).
-        ChunkedDenseHashMap<exit_barrier_t,decltype(is_bifurcation), decltype(rank_is_bifurcation),false> exit_barriers(&is_bifurcation, &rank_is_bifurcation, chunk_size);
+        auto exit_barrier = ExitBarrier(&is_bifurcation,&rank_is_bifurcation,chunk_size);
+
         threads_map_t.finished();
         auto lock_init_timer = VerboseTimer("initializing locks & barriers");
         for(int64_t i=0;i<node_locks.elements.size();i++) {
             omp_init_lock(&node_locks.elements[i]);
-            omp_init_lock(&exit_barrier_locks.elements[i]);
+
         }
-        for(int64_t i=0;i<exit_barriers.elements.size();i++) {
-            using BarrierT = typename decltype(exit_barriers)::element_type;
-            exit_barriers.elements[i] = BarrierT(omp_get_num_threads(),{0});
-        }
+
         lock_init_timer.finished();
 
 #endif
@@ -228,15 +210,7 @@ public:
                 node_lock = node_locks.ptr_to(node);
                 omp_set_lock(node_lock);
                 if (previous_node) {
-                    auto exit_barrier_lock = exit_barrier_locks.ptr_to(previous_node);
-                    omp_set_lock(exit_barrier_lock);
-
-                    auto& exit_barrier = exit_barriers[previous_node];
-                    auto& myself = exit_barrier[tid];
-                    relative_position = update_myself_after_wakeup(tid,exit_barrier);
-                    // remove myself after wakeup
-                    myself.node = 0;
-                    omp_unset_lock(exit_barrier_lock);
+                    exit_barrier.exit(previous_node,tid);
                 }
 
                 if (join_symbol) {
@@ -274,16 +248,7 @@ public:
 #ifdef _OPENMP
                 traversed_edge = split_symbol ? split_symbol : 'X'; // X as it doesn't matter
                 if (traversed_edge != '$') { // doesn't need any update
-                    auto exit_barrier_lock = exit_barrier_locks.ptr_to(node);
-                    omp_set_lock(exit_barrier_lock);
-                    // add myself before sleep
-                    auto& exit_barrier = exit_barriers[node];
-                    auto& myself = exit_barrier[tid];
-                    myself.node = node;
-                    myself.traversed_edge = traversed_edge;
-                    myself.relative_position = relative_position;
-                    update_others_before_sleep(tid,exit_barrier);
-                    omp_unset_lock(exit_barrier_lock);
+                    exit_barrier.enter(node,traversed_edge,relative_position,tid);
                 }
                 omp_unset_lock(node_lock);
 #endif
@@ -297,7 +262,7 @@ public:
 #ifdef _OPENMP
         for(int64_t i=0;i<node_locks.elements.size();i++) {
             omp_destroy_lock(&node_locks.elements[i]);
-            omp_destroy_lock(&exit_barrier_locks.elements[i]);
+
         }
 #endif
         encoded_paths += encoded.size();
@@ -309,36 +274,7 @@ public:
 
 #ifdef _OPENMP
 
-    void update_others_before_sleep(int tid,
-                                    exit_barrier_t &exit_barrier) const {
-        auto& myself = exit_barrier[tid];
-        for(int i=0;i<exit_barrier.size();i++) {
-            auto& other = exit_barrier[i];
-            if (i == tid) continue;
-            if (other.node == myself.node and
-                other.traversed_edge == myself.traversed_edge and
-                other.relative_position >= myself.relative_position) {
-                other.relative_position++;// I am below other
-            }
-        }
-    }
 
-    int64_t update_myself_after_wakeup(int tid,
-                                       exit_barrier_t &exit_barrier) const {
-        auto& myself = exit_barrier[tid];
-        int offset_change = 0;
-        for(int i=0;i<exit_barrier.size();i++) {
-            auto& other = exit_barrier[i];
-            if (i == tid) continue;
-            if (other.node == myself.node and
-                other.traversed_edge == myself.traversed_edge and
-                other.relative_position < myself.relative_position) {
-                offset_change--;// Other is below me
-            }
-        }
-        assert(myself.relative_position + offset_change >= 0);
-        return myself.relative_position + offset_change;
-        }
 #endif
 
     void populate_additional_joins(const vector<std::string> &transformed_sequences) {
