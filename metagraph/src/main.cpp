@@ -2368,7 +2368,7 @@ int main(int argc, const char *argv[]) {
 
             DBGAligner aligner(dbg_succinct_graph, config->alignment_num_top_paths,
                                /*num_alternative_paths=*/1, config->aligner_path_comparison_code,
-                               config->verbose, config->discard_similar_paths);
+                               config->verbose, config->discard_similar_paths, config->align_using_cssw_library);
             Timer timer;
             for (const auto &file : files) {
                 std::cout << "Align sequences from file " << file << std::endl;

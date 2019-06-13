@@ -197,10 +197,12 @@ TEST(dbg_aligner, noise_in_branching_point) {
     auto graph = std::make_shared<Graph>(k);
     graph->add_sequence(reference_1);
     graph->add_sequence(reference_2);
-    DBGAligner aligner(graph);
+    DBGAligner aligner(graph,
+            /*num_top_paths =*/ 10,
+            /*num_alternative_paths =*/ 2);
     auto alt_paths = aligner.align(std::begin(query), std::end(query));
 
-    EXPECT_EQ(1ull, alt_paths.size());
+    EXPECT_TRUE(alt_paths.size() > 0);
     auto path = alt_paths.front();
 
     EXPECT_EQ(query.size() - k + 1, path.size());
@@ -264,6 +266,7 @@ TEST(dbg_aligner, large_search_space) {
 
     EXPECT_EQ(1ull, path.size());
     EXPECT_EQ("AAA", path.get_sequence());
+    EXPECT_EQ("3=", path.get_cigar().substr(0, 2));
     EXPECT_EQ(k * aligner.get_match_score(), path.get_total_score());
 //    EXPECT_EQ("", path.back().get_sequence());
 }

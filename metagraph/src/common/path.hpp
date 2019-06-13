@@ -62,6 +62,7 @@ class Path {
     // Append a path to the current object. Fills in 0 in case of spaced nodes.
     // Avoid adding duplicate nodes and chars in case of positive overlap.
     void append_path(const Path& path, int64_t overlap_length, float score) {
+        is_score_updated_ = false;
         assert(path.nodes_.size() > overlap_length);
         assert(overlap_length >= 0);
         nodes_.insert(std::end(nodes_), std::begin(path.nodes_) + overlap_length, std::end(path.nodes_));
@@ -73,6 +74,10 @@ class Path {
     }
     // Note: Assume score is updated by user accordingly.
     void trim(uint64_t query_trim_length, uint64_t path_trim_length) {
+        auto last_op_ind = cigar_.find_last_of("MX=ID");
+        if (last_op_ind != std::string::npos)
+            cigar_ = cigar_.substr(0, last_op_ind + 1);
+
         query_it_ -= query_trim_length;
         sequence_.resize(sequence_.size() - path_trim_length);
         nodes_.resize(nodes_.size() - path_trim_length);
@@ -99,8 +104,8 @@ class Path {
                 cigar_cpy = match.suffix();
             }
     }
-    void set_similar() { is_similar_ = true; }
 
+    void set_similar() { is_similar_ = true; }
     NodeType back() const { return nodes_.back(); }
     NodeType front() const { return nodes_.front(); }
     NodeType last_parent() const { return nodes_.at(nodes_.size() - 1); }

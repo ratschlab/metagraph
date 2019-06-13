@@ -40,6 +40,7 @@ class Config {
     bool separately = false;
     bool call_bubbles = false;
     bool discard_similar_paths = false;
+    bool align_using_cssw_library = false;
 
     uint8_t aligner_path_comparison_code = 0;
 

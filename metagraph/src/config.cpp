@@ -162,6 +162,8 @@ Config::Config(int argc, const char *argv[]) {
             separately = true;
         } else if (!strcmp(argv[i], "--discard-similar-paths")) {
             discard_similar_paths = true;
+        } else if (!strcmp(argv[i], "--align-using-cssw-library")) {
+            align_using_cssw_library = true;
         } else if (!strcmp(argv[i], "--kmer-mapping-mode")) {
             kmer_mapping_mode = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--num-top-labels")) {
@@ -600,6 +602,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-num-paths [INT]\t\tnumber of parallel paths to explore at any point [10]\n");
             fprintf(stderr, "\t   --align-path-comparison-function [INT]\t\tthe function to compare paths while aligning. Set to 0, 1 or to for total path score, normalized path score and number of exactly mapped basepairs comparison respectively [0]\n");
             fprintf(stderr, "\t   --discard-similar-paths \t\tearly discard any path if a similar path with higher score was observed before. Similar paths that begin from same node, diverge and meet again such as two paths with a SNP in same location and meet before and after the SNP. [off]\n");
+            fprintf(stderr, "\t   --align-using-cssw-library \t\tuse cssw library for Smith Waterman algorithm score computation. [off]\n");
+            fprintf(stderr, "\t-d --distance [INT] \t\tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\t-d --distance [INT] \t\tmax allowed alignment distance [0]\n");
         } break;
         case COMPARE: {

@@ -9,29 +9,32 @@ typedef std::pair<uint64_t, std::vector<DBGAligner::AlignedPath>::iterator> Scor
 
 DBGAligner::DBGAligner(std::shared_ptr<DeBruijnGraph> graph, size_t num_top_paths,
                        size_t num_alternative_paths, uint8_t path_comparison_code,
-                       bool verbose, bool discard_similar_paths,
+                       bool verbose, bool discard_similar_paths, bool use_cssw_lib,
                        float insertion_penalty, float deletion_penalty,
-                       float gap_openning_penalty, float gap_extension_penalty) :
+                       float gap_opening_penalty, float gap_extension_penalty) :
                             graph_(graph),
                             num_top_paths_(num_top_paths),
                             num_alternative_paths_(num_alternative_paths),
                             path_comparison_code_(path_comparison_code), verbose_(verbose),
                             discard_similar_paths_(discard_similar_paths),
+                            use_cssw_lib_(use_cssw_lib),
                             insertion_penalty_(insertion_penalty),
                             deletion_penalty_(deletion_penalty),
-                            gap_openning_penalty_(gap_openning_penalty),
+                            gap_opening_penalty_(gap_opening_penalty),
                             gap_extension_penalty_(gap_extension_penalty),
                             merged_paths_counter_(0) {
     match_score_ = 2;
+    mm_transition_ = -1;
+    mm_transversion_ = -2;
     k_ = graph_->get_k();
     // Substitution score for each pair of nucleotides.
     // Transition and transversion mutations have different score values.
     sub_score_ = {
-        {'a', {{'a', match_score_}, {'t', -2}, {'c', -2}, {'g', -1}}},
-        {'g', {{'g', match_score_}, {'t', -2}, {'c', -2}, {'a', -1}}},
-        {'c', {{'c', match_score_}, {'a', -2}, {'g', -2}, {'t', -1}}},
-        {'t', {{'t', match_score_}, {'a', -2}, {'g', -2}, {'c', -1}}},
-        {'$', {{'$', -2}}}};
+        {'a', {{'a', match_score_}, {'t', mm_transversion_}, {'c', mm_transversion_}, {'g', mm_transition_}}},
+        {'g', {{'g', match_score_}, {'t', mm_transversion_}, {'c', mm_transversion_}, {'a', mm_transition_}}},
+        {'c', {{'c', match_score_}, {'a', mm_transversion_}, {'g', mm_transversion_}, {'t', mm_transition_}}},
+        {'t', {{'t', match_score_}, {'a', mm_transversion_}, {'g', mm_transversion_}, {'c', mm_transition_}}},
+        {'$', {{'$', mm_transversion_}}}};
 
     // score for the following chars respectively:
     // A  C  G  T   N (or other ambiguous code)
@@ -57,18 +60,8 @@ DBGAligner::DBGAligner(std::shared_ptr<DeBruijnGraph> graph, size_t num_top_path
     4, 4, 4, 4,  3, 0, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4};
 
     cssw_aligner_.ReBuild(cssw_score_matrix_, 5, cssw_translation_matrix_, 128);
-    cssw_aligner_.SetGapPenalty(std::abs(gap_openning_penalty_), std::abs(gap_extension_penalty_));
+    cssw_aligner_.SetGapPenalty(std::abs(gap_opening_penalty_), std::abs(gap_extension_penalty_));
 }
-
-namespace { // Helper function.
-template <typename T>
-float std_dev(const std::vector<T> &list, T mean) {
-    float std_dev = 0;
-    for (auto it = list.begin(); it != list.end(); ++it)
-        std_dev += std::pow((*it) - mean, 2.0);
-    return std::pow(std_dev / list.size(), 0.5);
-}
-}  // namespace
 
 DBGAligner::AlignedPath DBGAligner::map_to_nodes_forward_reverse_complement(const std::string &sequence) {
     auto reverse_complement_sequence(sequence);
@@ -138,7 +131,7 @@ DBGAligner::AlignedPath DBGAligner::map_to_nodes(const std::string &sequence) {
 //        std::cerr << "Calling align for seq of length " << std::end(sequence) - unmapped_string_begin_it << std::endl;
 //        std::cerr << "First node index " << *(unmapped_string_begin_it - sequence_begin + nodes_begin) << std::endl;
 //        std::cerr << "First node index kmer" << graph_->get_node_sequence(*(unmapped_string_begin_it - sequence_begin + nodes_begin)) << std::endl;
-//        std::cerr << std::string(unmapped_string_begin_it, end(sequence)) << std::endl;
+//        std::cerr << "Calling align for " << std::string(unmapped_string_begin_it, end(sequence)) << std::endl;
         auto re_mapped_paths = align(unmapped_string_begin_it, std::end(sequence),
                                      [&] (node_index node,
                                           const std::string::const_iterator& query_it) {
@@ -150,6 +143,7 @@ DBGAligner::AlignedPath DBGAligner::map_to_nodes(const std::string &sequence) {
                 if (nodes[index_in_original_seq] == node && node != 0 &&
                     graph_->outdegree(node) <= 1 &&
                     index_in_original_seq != last_mapped_it - nodes_begin) {
+//                    std::cerr << "Terminating align for " << graph_->get_node_sequence(node) << std::endl;
                     return true;
                 }
                 return false;
@@ -163,7 +157,7 @@ DBGAligner::AlignedPath DBGAligner::map_to_nodes(const std::string &sequence) {
             // Negative overlap is a sign of a gap in query.
             int64_t overlap_length = stitched_path.num_kmers_in_query()
                                      - (alternative_partial_path.get_query_begin_it() - sequence_begin);
-            auto updated_score = stitched_path.get_total_score()
+            int64_t updated_score = stitched_path.get_total_score()
                                  + alternative_partial_path.get_total_score()
                                  - overlap_length * match_score_;
 
@@ -173,11 +167,8 @@ DBGAligner::AlignedPath DBGAligner::map_to_nodes(const std::string &sequence) {
                 // re_mapped_path.
                 auto next_kmer_it = stitched_path.get_query_it() - overlap_length;
 
-                StripedSmithWaterman::Alignment alignment;
-                if (!cssw_align(stitched_path, alignment)) {
-                    std::cout << "Failure in SSW calculation. Cigar string might be missing.\n";
-                }
-                trim(stitched_path, alignment);
+                smith_waterman_score(stitched_path);
+                trim(stitched_path);
                 alternative_paths.push(std::move(stitched_path));
 
                 stitched_path = AlignedPath(k_, next_kmer_it, next_kmer_it, path_comparison_code_);
@@ -195,17 +186,14 @@ DBGAligner::AlignedPath DBGAligner::map_to_nodes(const std::string &sequence) {
         // If re_mapped_path wasn't able to fill in all the zeros in nodes, report a partial path
         // and continue from the next exact map.
         if (*target_node_it == 0) {
-            std::cerr << "Gap after re_mapping" << std::endl;
+//            std::cerr << "Gap after re_mapping" << std::endl;
 
-            StripedSmithWaterman::Alignment alignment;
-            if (!cssw_align(stitched_path, alignment)) {
-                std::cout << "Failure in SSW calculation. Cigar string might be missing.\n";
-            }
-            trim(stitched_path, alignment);
-//            std::cout << "stitched_path:" << stitched_path.get_sequence() << std::endl;
-//            std::cout << "stitched_path it: " << stitched_path.get_query_it() - stitched_path.get_query_begin_it() << std::endl;
+//            std::cerr << "stitched_path:" << stitched_path.get_sequence() << std::endl;
+//            std::cerr << "stitched_path it: " << stitched_path.get_query_it() - stitched_path.get_query_begin_it() << std::endl;
 //            for (auto nodes_it = nodes.begin(); nodes_it != nodes.end(); ++ nodes_it)
-//                std::cout << *nodes_it << std::endl;
+//                std::cerr << *nodes_it << std::endl;
+            smith_waterman_score(stitched_path);
+            trim(stitched_path);
             alternative_paths.push(std::move(stitched_path));
 
             auto non_zero_target_node_it = std::find_if(target_node_it + 1, std::end(nodes),
@@ -236,16 +224,13 @@ DBGAligner::AlignedPath DBGAligner::map_to_nodes(const std::string &sequence) {
             }
         }
 
-//        std::cerr << "stitched after exact nodes " << stitched_path.get_sequence() << std::endl;
+//    std::cerr << "stitched after exact nodes " << stitched_path.get_sequence() << std::endl;
         // Update last_mapped_it, target_node_it to point to the beginning and end of the inexactly mapped region.
         target_node_it = std::find_if(last_mapped_it + 1, std::end(nodes),
                                       [] (node_index node) { return node != 0; });
     }
-    StripedSmithWaterman::Alignment alignment;
-    if (!cssw_align(stitched_path, alignment)) {
-        std::cout << "Failure in SSW calculation. Cigar string might be missing.\n";
-    }
-    trim(stitched_path, alignment);
+    smith_waterman_score(stitched_path);
+    trim(stitched_path);
     alternative_paths.push(std::move(stitched_path));
     return alternative_paths.top();
 }
@@ -256,7 +241,7 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::align(const std::string::const_
         return std::vector<AlignedPath>();
 
     std::map<DPAlignmentKey, DPAlignmentValue> dp_alignment;
-    std::vector<AlignedPath> alternative_paths;
+    BoundedPriorityQueue<AlignedPath> alternative_paths(num_alternative_paths_);
 
     BoundedPriorityQueue<AlignedPath> queue(num_top_paths_);
     AlignedPath path(k_, sequence_begin, sequence_begin, path_comparison_code_);
@@ -275,21 +260,30 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::align(const std::string::const_
 //        }
 
         if (path.get_query_it() + k_ > sequence_end) {
-            if (path.size() != 0)
-                alternative_paths.push_back(path);
+            if (path.size() != 0) {
+                smith_waterman_score(path);
+                trim(path);
+                alternative_paths.push(path);
+            }
             continue;
         }
 //        std::cerr << "calling exact map" << std::endl;
 
         if (!exact_map(path, sequence_end, dp_alignment, terminate)) {
-            if (path.size() != 0)
-                alternative_paths.push_back(path);
+            if (path.size() != 0) {
+                smith_waterman_score(path);
+                trim(path);
+                alternative_paths.push(path);
+            }
             break;
         }
 
         if (path.get_query_it() + k_ > sequence_end) {
-            if (path.size() != 0)
-                alternative_paths.push_back(path);
+            if (path.size() != 0) {
+                smith_waterman_score(path);
+                trim(path);
+                alternative_paths.push(path);
+            }
             continue;
         }
 
@@ -299,22 +293,20 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::align(const std::string::const_
 //        std::cerr << "calling inexact map" << std::endl;
 
         if (!inexact_map(path, queue, dp_alignment, terminate) || queue.empty()) {
-            if (path.size() != 0)
-                alternative_paths.push_back(path);
+            if (path.size() != 0) {
+                smith_waterman_score(path);
+                trim(path);
+                alternative_paths.push(path);
+            }
             break;
         }
     }
-    
-    for (auto alternative_path_it = std::begin(alternative_paths);
-            alternative_path_it != std::end(alternative_paths); ++ alternative_path_it) {
-        StripedSmithWaterman::Alignment alignment;
-        if (!cssw_align(*alternative_path_it, alignment)) {
-            std::cout << "Failure in SSW calculation. Cigar string might be missing.\n";
-            break;
-        }
-        trim(*alternative_path_it, alignment);
+    std::vector<AlignedPath> alternative_paths_vec;
+    while(!alternative_paths.empty()) {
+        alternative_paths_vec.push_back(std::move(alternative_paths.top()));
+        alternative_paths.pop();
     }
-    return alternative_paths;
+    return alternative_paths_vec;
 }
 
 bool DBGAligner::exact_map(AlignedPath &path, const std::string::const_iterator &sequence_end,
@@ -388,10 +380,16 @@ bool DBGAligner::inexact_map(AlignedPath& path,
             continue_alignment = false;
             return;
         }
+        // TODO: call whole_path_score here if use_cssw_lib is false (and in other places).
         // Approximate Smith-Waterman score by assuming either match/mismatch for the next character.
+        if (use_cssw_lib_) {
         alternative_path.extend(node, {}, extension,
             single_char_score(*(alternative_path.get_query_it() +
                 k_ - 1), extension));
+        } else {
+            alternative_path.extend(node, {}, extension);
+            smith_waterman_score(alternative_path);
+        }
         // Merge Similar paths.
         if (discard_similar_paths_) {
             DPAlignmentKey alternative_key{.node = alternative_path.back(),
@@ -419,7 +417,7 @@ bool DBGAligner::inexact_map(AlignedPath& path,
     return continue_alignment;
 }
 
-float DBGAligner::single_char_score(char char_in_query, char char_in_graph) const {
+int8_t DBGAligner::single_char_score(char char_in_query, char char_in_graph) const {
     try {
         return sub_score_.at(std::tolower(char_in_query)).at(std::tolower(char_in_graph));
     }
@@ -428,66 +426,122 @@ float DBGAligner::single_char_score(char char_in_query, char char_in_graph) cons
     }
 }
 
-bool DBGAligner::cssw_align(AlignedPath &path, StripedSmithWaterman::Alignment& alignment) const {
-    if (path.is_score_updated()) {
-        alignment = path.get_alignment();
+bool DBGAligner::smith_waterman_score(AlignedPath &path) const {
+    if (path.is_score_updated())
+        return true;
+
+    StripedSmithWaterman::Alignment alignment;
+    // Calculate and set the alignment properties according to the whole_path_score function.
+    if (!use_cssw_lib_) {
+        SWDpCell optimum_alignment;
+        whole_path_score(path, optimum_alignment);
+        alignment.cigar_string = optimum_alignment.cigar.to_string();
+        if (optimum_alignment.score < 0)
+            std::cerr << "Warning: Negative Smith Waterman score!" << std::endl;
+        alignment.sw_score = std::max(optimum_alignment.score, 0ll);
+        alignment.ref_begin = optimum_alignment.cigar.get_ref_begin();
+        alignment.query_begin = optimum_alignment.cigar.get_query_begin();
+        alignment.ref_end = path.get_sequence().size() - 1 - optimum_alignment.cigar.get_ref_end();
+        alignment.query_end = path.get_query_sequence().size() - 1 - optimum_alignment.cigar.get_ref_end();
+        path.update_alignment(alignment);
         return true;
     }
 
     auto ref = path.get_sequence();
     std::string query(path.get_query_begin_it(), path.get_query_it() + k_ - 1);
-
     int32_t maskLen = strlen(query.c_str()) / 2;
     maskLen = maskLen < 15 ? 15 : maskLen;
-
     StripedSmithWaterman::Filter filter;
-    if (!cssw_aligner_.Align(query.c_str(), ref.c_str(), ref.size(), filter, &alignment, maskLen))
+    if (!cssw_aligner_.Align(query.c_str(), ref.c_str(), ref.size(), filter, &alignment, maskLen)){
+        std::cout << "Failure in SSW calculation. Cigar string might be missing.\n";
         return false;
+    }
 
     path.update_alignment(alignment);
-
     return true;
 }
 
-//void DBGAligner::whole_path_score(const AlignedPath &path, GlobalSW& global_sw) const {
-//    auto path_sequence = path.get_sequence();
-//    std::string query_sequence(path.get_query_begin_it(), path.get_query_it() + k_ - 1);
-//    SWDpCell alignment_score[query_sequence.size() + 1][path_sequence.size() + 1] = {};
-//    for (size_t i = 1; i <= query_sequence.size(); ++i) {
-//        for (size_t j = 1; j <= path_sequence.size(); ++j) {
-//            std::vector<SWDpCell> options = {
-//                {.value = alignment_score[i-1][j-1] + single_char_score(query_sequence[i-1], path_sequence[j-1]),
-//                 .parent_row = i-1,
-//                 .parent_column = j-1},
-//                {.value = alignment_score[i][j-1] - insertion_penalty_,
-//                 .parent_row = i,
-//                 .parent_column = j-1},
-//                {.value = alignment_score[i-1][j] - deletion_penalty_,
-//                 .parent_row = i-1,
-//                 .parent_column = j};
-//            auto max_valued_option = std::max(options);
-//            alignment_score[i][j] = {.value = max_valued_option.value,
-//                                     .parent_row = max_valued_option.parent_row,
-//                                     .parent_column = max_valued_option.parent_column};
-//        }
-//    }
-//    auto last_i = query_sequence.size();
-//    auto last_j = path_sequence.size();
-//    auto optimum_alignment_cell = alignment_score[last_i][last_j];
-//    global_sw.value = optimum_alignment_cell.value;
-//    while (optimum_alignment_cell.parent_row >= 0 &&
-//           optimum_alignment_cell.parent_column >= 0) {
-//        optimum_alignment_cell =
-//            alignment_score[optimum_alignment_cell.parent_row]
-//                           [optimum_alignment_cell.parent_column];
-//    }
-//}
+void DBGAligner::whole_path_score(AlignedPath& path, SWDpCell& optimum_alignment) const {
+    auto path_sequence = path.get_sequence();
+    std::string query_sequence(path.get_query_begin_it(), path.get_query_it() + k_ - 1);
+//    std::cerr << "whole path loss for path: " << path_sequence
+//              << " sequence: " << query_sequence << std::endl;
+    // Keep only two rows of the table at a time to save space.
+    std::vector<SWDpCell> alignment_prev_row(path_sequence.size() + 1, SWDpCell{});
+    std::vector<SWDpCell> alignment_cur_row(path_sequence.size() + 1, SWDpCell{});
+    // Keep the last column in path to continue
+    // filling the table when path grows from that column.
+    std::vector<SWDpCell> alignment_last_column(query_sequence.size() + 1);
+    // TODO: Store last row and last column in the path.
+    // TODO: Compute clipping in the end based on cigar.
+    for (size_t i = 1; i <= query_sequence.size(); ++i) {
+        std::swap(alignment_prev_row, alignment_cur_row);
+        for (size_t j = 1; j <= path_sequence.size(); ++j) {
+            std::vector<SWDpCell> options;
+
+            // Option for insertion operation
+            auto parent_cell_for_in_op = alignment_prev_row[j];
+            SWDpCell new_cell_option_for_in_op;
+            new_cell_option_for_in_op.cigar = parent_cell_for_in_op.cigar;
+            new_cell_option_for_in_op.cigar.append(Cigar::Operator::INSERTION);
+            if (parent_cell_for_in_op.cigar.size() == 0
+                || parent_cell_for_in_op.cigar.back() != Cigar::Operator::INSERTION) // Gap opening
+                new_cell_option_for_in_op.score = parent_cell_for_in_op.score - gap_opening_penalty_;
+            else // Gap extension
+                new_cell_option_for_in_op.score = parent_cell_for_in_op.score - gap_extension_penalty_;
+            options.push_back(std::move(new_cell_option_for_in_op));
+
+            // Option for deletion operation
+            auto parent_cell_for_del_op = alignment_cur_row[j-1];
+            SWDpCell new_cell_option_for_del_op;
+            new_cell_option_for_del_op.cigar = parent_cell_for_del_op.cigar;
+            new_cell_option_for_del_op.cigar.append(Cigar::Operator::DELETION);
+            if (parent_cell_for_del_op.cigar.size() == 0
+                || parent_cell_for_del_op.cigar.back() != Cigar::Operator::DELETION) // Gap opening
+                new_cell_option_for_del_op.score = parent_cell_for_del_op.score - gap_opening_penalty_;
+            else // Gap extension
+                new_cell_option_for_del_op.score = parent_cell_for_del_op.score - gap_extension_penalty_;
+            options.push_back(std::move(new_cell_option_for_del_op));
+
+            // Option for match/mismatch operation
+            auto parent_cell_for_sub_op = alignment_prev_row[j-1];
+            auto match_mismatch_score = single_char_score(query_sequence[i-1], path_sequence[j-1]);
+            SWDpCell new_cell_option_for_sub_op =
+                {.score = parent_cell_for_sub_op.score + match_mismatch_score,
+                 .cigar = parent_cell_for_sub_op.cigar};
+            if (match_mismatch_score > 0) // Match
+                new_cell_option_for_sub_op.cigar.append(Cigar::Operator::MATCH);
+            else if (match_mismatch_score == -1) // Mismatch with transition mutation
+                new_cell_option_for_sub_op.cigar.append(Cigar::Operator::MISMATCH_TRANSITION);
+            else // Mismatch with tranversion mutation
+                new_cell_option_for_sub_op.cigar.append(Cigar::Operator::MISMATCH_TRANSVERSION);
+            options.push_back(std::move(new_cell_option_for_sub_op));
+
+//            std::cerr << "i = " << i << ", j = " << j << " q: " << query_sequence << ", p: " << path_sequence
+//                << " char in q and p: " << query_sequence[i-1] << " " << path_sequence[j-1] << std::endl
+//                << "Options(cigar, score): " << options[0].cigar.to_string() << ", " << options[0].score << "|"
+//                << options[1].cigar.to_string() << ", " << options[1].score << "|"
+//                << options[2].cigar.to_string() << ", " << options[2].score << std::endl;
+            auto max_option = std::max_element(std::begin(options), std::end(options));
+            alignment_cur_row[j] = {.score = max_option->score,
+                                    .cigar = max_option->cigar};
+//            std::cerr << "max: " << alignment_cur_row[j].cigar.to_string() << ", " << alignment_cur_row[j].score << std::endl;
+        }
+        alignment_last_column[i] = alignment_cur_row.back();
+    }
+    // Last row has just been swapped to alignment_prev_row.
+    optimum_alignment = alignment_cur_row[path_sequence.size()];
+//    std::cerr << "optimum_alignment with score " << optimum_alignment.score << " and cigar: " << optimum_alignment.cigar.to_string() << std::endl;
+    auto updated_score_delta = optimum_alignment.cigar.clip(gap_opening_penalty_, gap_extension_penalty_, -1 * mm_transition_, -1 * mm_transversion_);
+    optimum_alignment.score += updated_score_delta;
+//    std::cerr << "score of optimum alinment after clipping: " << optimum_alignment.score << std::endl;
+}
 
 // Note: Assume Cigar is updated.
-void DBGAligner::trim(AlignedPath &path, const StripedSmithWaterman::Alignment& alignment) const {
+void DBGAligner::trim(AlignedPath &path) const {
     auto cigar = path.get_cigar();
     // Trim path if reference end in cigar is not according to reference end in path.
-    uint64_t path_trim_length = path.get_sequence().size() - alignment.ref_end - 1;
+    uint64_t path_trim_length = path.get_sequence().size() - path.get_alignment().ref_end - 1;
     // Trim query if marked by S in cigar.
     uint64_t query_trim_length = 0;
     if (cigar.back() == 'S') {
@@ -498,4 +552,75 @@ void DBGAligner::trim(AlignedPath &path, const StripedSmithWaterman::Alignment& 
         query_trim_length += atoi(position_str.c_str());
     }
     path.trim(query_trim_length, path_trim_length);
+}
+
+uint64_t Cigar::clip(uint64_t gap_opening_penalty, uint64_t gap_extension_penalty,
+              uint64_t mismatch_penalty_transition, uint64_t mismatch_penalty_transversion) {
+    query_begin_ = 0;
+    ref_begin_ = 0;
+    query_end_ = 0;
+    ref_end_ = 0;
+    int64_t updated_score_delta = 0;
+    // Detect mismatches, insertions and deletions from the beginning
+    // and adjust cigar, query and ref begin values.
+    for (auto cigar_op = std::begin(cigar_);
+         cigar_op != std::end(cigar_)
+            && cigar_op->first != Operator::MATCH
+            && cigar_op->first != Operator::CLIPPED; ++ cigar_op) {
+        if (cigar_op->first == Operator::INSERTION) {
+            cigar_op->first = CLIPPED;
+            updated_score_delta += gap_opening_penalty + gap_extension_penalty * (cigar_op->second - 1);
+            query_begin_ += cigar_op->second;
+        } else if (cigar_op->first == Operator::MISMATCH_TRANSITION) {
+            cigar_op->first = CLIPPED;
+            updated_score_delta += mismatch_penalty_transition * cigar_op->second;
+            query_begin_ += cigar_op->second;
+            ref_begin_ += cigar_op->second;
+        } else if (cigar_op->first == Operator::MISMATCH_TRANSVERSION) {
+            cigar_op->first = CLIPPED;
+            updated_score_delta += mismatch_penalty_transversion * cigar_op->second;
+            query_begin_ += cigar_op->second;
+            ref_begin_ += cigar_op->second;
+        } else if (cigar_op->first == Operator::DELETION) {
+            updated_score_delta += gap_opening_penalty + gap_extension_penalty * (cigar_op->second - 1);
+            ref_begin_ += cigar_op->second;
+        }
+    }
+    // Detect mismatches, insertions and deletions from the end
+    // and adjust cigar, query and ref end values.
+    for (auto cigar_op = std::end(cigar_) - 1;
+             cigar_op != std::begin(cigar_)
+                && cigar_op->first != Operator::MATCH
+                && cigar_op->first != Operator::CLIPPED; -- cigar_op) {
+        if (cigar_op->first == Operator::INSERTION) {
+            cigar_op->first = CLIPPED;
+            updated_score_delta += gap_opening_penalty + gap_extension_penalty * (cigar_op->second - 1);
+            query_end_ += cigar_op->second;
+        } else if (cigar_op->first == Operator::MISMATCH_TRANSITION) {
+            cigar_op->first = CLIPPED;
+            updated_score_delta += mismatch_penalty_transition * cigar_op->second;
+            query_end_ += cigar_op->second;
+            ref_end_ += cigar_op->second;
+        } else if (cigar_op->first == Operator::MISMATCH_TRANSVERSION) {
+            cigar_op->first = CLIPPED;
+            updated_score_delta += mismatch_penalty_transversion * cigar_op->second;
+            query_end_ += cigar_op->second;
+            ref_end_ += cigar_op->second;
+        } else if (cigar_op->first == Operator::DELETION) {
+            updated_score_delta += gap_opening_penalty + gap_extension_penalty * (cigar_op->second - 1);
+            ref_end_ += cigar_op->second;
+        }
+    }
+    // In case of adjacent clipped operations in cigar, merge them.
+    for (auto cigar_op = std::begin(cigar_);
+             cigar_op < std::end(cigar_) - 1; ++ cigar_op) {
+        if (cigar_op->first == Operator::CLIPPED
+                && (cigar_op + 1)->first == Operator::CLIPPED) {
+            cigar_op->second += (cigar_op + 1)->second;
+            cigar_op = cigar_.erase(cigar_op + 1) - 2;
+        }
+    }
+//    std::cerr << "Updated score delta: " << updated_score_delta
+//              << " for cigar: " << to_string() << std::endl;
+    return updated_score_delta;
 }
