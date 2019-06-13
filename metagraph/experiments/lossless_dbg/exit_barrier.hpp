@@ -32,7 +32,7 @@ public:
         exit_barriers(is_element,rank_is_element,chunk_size), exit_barrier_locks(is_element, rank_is_element, chunk_size) {
         for(int64_t i=0;i<exit_barriers.elements.size();i++) {
             using BarrierT = typename decltype(exit_barriers)::element_type;
-            exit_barriers.elements[i] = BarrierT(omp_get_num_threads(),{0});
+            exit_barriers.elements[i] = BarrierT(get_num_threads(),{0});
             omp_init_lock(&exit_barrier_locks.elements[i]);
         }
     }
@@ -120,8 +120,6 @@ public:
 ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chunk_size=DefaultChunks) :
         waiting_threads(is_element,rank_is_element,chunk_size), waiting_queue_locks(is_element, rank_is_element, chunk_size) {
     for(int64_t i=0;i<waiting_threads.elements.size();i++) {
-        using BarrierT = typename decltype(waiting_threads)::element_type;
-        waiting_threads.elements[i] = BarrierT(omp_get_num_threads(),{0});
         omp_init_lock(&waiting_queue_locks.elements[i]);
     }
 }
@@ -151,6 +149,7 @@ ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chun
     void enter(int64_t node, char traversed_edge, int64_t relative_position, int tid) {
         tid++;
         auto waiting_queue_lock = waiting_queue_locks.ptr_to(node);
+        omp_set_lock(waiting_queue_lock);
         waiting_threads[node].push_back({(int16_t)tid, relative_position, node, traversed_edge});
         omp_unset_lock(waiting_queue_lock);
     }

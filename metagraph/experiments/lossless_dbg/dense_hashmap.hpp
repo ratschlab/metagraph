@@ -78,14 +78,7 @@ public:
 
 
         if constexpr (supply_size) {
-#ifdef TRUST_VECTOR_ALLOCATION
             this->elements = decltype(this->elements)(chunks, T(divisor));//todo fix that last is not full
-#else
-            this->elements.reserve(chunks);
-            for(int i=0;i<chunks;i++) {
-                this->elements.push_back(T(divisor));
-            }
-#endif
         }
         else {
             this->elements = decltype(this->elements)(chunks);

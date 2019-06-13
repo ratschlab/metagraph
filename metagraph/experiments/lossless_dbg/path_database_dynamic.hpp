@@ -128,13 +128,15 @@ public:
         ChunkedDenseHashMap<omp_lock_t,decltype(is_bifurcation), decltype(rank_is_bifurcation),false> node_locks(&is_bifurcation,&rank_is_bifurcation,chunk_size);
         alloc_lock_t.finished();
         auto threads_map_t = VerboseTimer("memory allocation of exit barriers");
-        auto exit_barrier = IdentityComparator<ExitBarrier<>,ReferenceExitBarrier<>>(&is_bifurcation,&rank_is_bifurcation,chunk_size);
+        //using Barrier = ReferenceExitBarrier<>;
+        //using Barrier = IdentityComparator<ExitBarrier<>,ReferenceExitBarrier<>>;
+        using Barrier = ExitBarrier<>;
+        auto exit_barrier = Barrier(&is_bifurcation,&rank_is_bifurcation,chunk_size);
 
         threads_map_t.finished();
         auto lock_init_timer = VerboseTimer("initializing locks & barriers");
         for(int64_t i=0;i<node_locks.elements.size();i++) {
             omp_init_lock(&node_locks.elements[i]);
-
         }
 
         lock_init_timer.finished();
