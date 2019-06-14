@@ -32,9 +32,10 @@ inline TAlphabet encode(char s, const TAlphabet kCharToNucleotide[]) {
 }
 
 template <typename TAlphabet>
-inline std::vector<TAlphabet> encode(std::string::const_iterator __restrict begin,
-                                     std::string::const_iterator __restrict end,
+inline std::vector<TAlphabet> encode(std::string::const_iterator begin,
+                                     std::string::const_iterator end,
                                      const TAlphabet kCharToNucleotide[]) {
+    assert(begin <= end);
     std::vector<TAlphabet> seq_encoded(end - begin, 0);
     std::transform(begin, end, seq_encoded.begin(),
         [&](char c) { return encode(c, kCharToNucleotide); }
@@ -44,8 +45,8 @@ inline std::vector<TAlphabet> encode(std::string::const_iterator __restrict begi
 
 template <typename TAlphabet>
 std::vector<TAlphabet>
-inline reverse_complement(const TAlphabet * __restrict begin,
-                          const TAlphabet * __restrict end,
+inline reverse_complement(const TAlphabet *begin,
+                          const TAlphabet *end,
                           const std::vector<uint8_t> &canonical_map) {
     assert(end >= begin);
     std::vector<TAlphabet> rev_comp(end - begin);
@@ -60,8 +61,8 @@ inline reverse_complement(const TAlphabet * __restrict begin,
  */
 
 template <class KMER, typename TAlphabet>
-inline void __sequence_to_kmers(const TAlphabet * __restrict begin,
-                                const TAlphabet * __restrict end,
+inline void __sequence_to_kmers(const TAlphabet *begin,
+                                const TAlphabet *end,
                                 size_t k,
                                 const std::vector<TAlphabet> &suffix,
                                 Vector<KMER> *kmers) {
@@ -70,15 +71,15 @@ inline void __sequence_to_kmers(const TAlphabet * __restrict begin,
     // done to ensure that begin + k doesn't overflow
     assert(k <= static_cast<size_t>(end - begin));
 
-    for (auto it = begin; it + k <= end; ++it) {
-        if (KMER::match_suffix(it, k, suffix))
-            kmers->emplace_back(it, k);
+    for (auto kmer_begin = begin; kmer_begin + k <= end; ++kmer_begin) {
+        if (KMER::match_suffix(kmer_begin, k, suffix))
+            kmers->emplace_back(kmer_begin, k);
     }
 }
 
 template <class KMER, typename TAlphabet>
-inline void __sequence_to_kmers_slide(const TAlphabet * __restrict begin,
-                                      const TAlphabet * __restrict end,
+inline void __sequence_to_kmers_slide(const TAlphabet *begin,
+                                      const TAlphabet *end,
                                       size_t k,
                                       const std::vector<TAlphabet> &suffix,
                                       Vector<KMER> *kmers) {
@@ -93,35 +94,31 @@ inline void __sequence_to_kmers_slide(const TAlphabet * __restrict begin,
         kmers->push_back(kmer);
 
     // add all other kmers
-    for (auto it = begin + 1; it + k <= end; ++it) {
-        kmer.to_next(k, *(it + (k - 1)));
-        if (KMER::match_suffix(it, k, suffix))
+    for (auto kmer_begin = begin + 1; kmer_begin + k <= end; ++kmer_begin) {
+        kmer.to_next(k, kmer_begin[k - 1]);
+        if (KMER::match_suffix(kmer_begin, k, suffix))
             kmers->push_back(kmer);
     }
 }
 
 // extract canonical (lexicographically smallest) k-mers
 template <class KMER, typename TAlphabet>
-inline void __sequence_to_kmers_canonical(const TAlphabet * __restrict begin,
-                                          const TAlphabet * __restrict end,
+inline void __sequence_to_kmers_canonical(const TAlphabet *seq,
                                           const std::vector<TAlphabet> &rev_comp,
                                           size_t k,
                                           const std::vector<TAlphabet> &suffix,
                                           Vector<KMER> *kmers) {
     assert(kmers);
-    assert(end - begin);
-    assert(rev_comp.size() == static_cast<size_t>(end - begin));
-    assert(k <= rev_comp.size());
-    std::ignore = end;
+    assert(rev_comp.size() >= k);
 
     for (size_t i = 0; i + k <= rev_comp.size(); ++i) {
-        bool suffix_matched_forward = KMER::match_suffix(begin + i, k, suffix);
+        bool suffix_matched_forward = KMER::match_suffix(seq + i, k, suffix);
         bool suffix_matched_reverse = KMER::match_suffix(&rev_comp[rev_comp.size() - i - k], k, suffix);
 
         if (!suffix_matched_forward && !suffix_matched_reverse)
             continue;
 
-        KMER forward(begin + i, k);
+        KMER forward(seq + i, k);
         KMER reverse(&rev_comp[rev_comp.size() - i - k], k);
 
         if (forward <= reverse) {
@@ -136,9 +133,9 @@ inline void __sequence_to_kmers_canonical(const TAlphabet * __restrict begin,
 
 template <class KMER, typename TAlphabet>
 inline void __push_back_smallest(const KMER &kmer_first,
-                                 const TAlphabet * __restrict first,
+                                 const TAlphabet *first,
                                  const KMER &kmer_second,
-                                 const TAlphabet * __restrict second,
+                                 const TAlphabet *second,
                                  size_t k,
                                  const std::vector<TAlphabet> &suffix,
                                  Vector<KMER> *kmers) {
@@ -153,23 +150,19 @@ inline void __push_back_smallest(const KMER &kmer_first,
 
 // extract canonical (lexicographically smallest) k-mers
 template <class KMER, typename TAlphabet>
-inline void __sequence_to_kmers_canonical_slide(const TAlphabet * __restrict begin,
-                                                const TAlphabet * __restrict end,
+inline void __sequence_to_kmers_canonical_slide(const TAlphabet *seq,
                                                 const std::vector<TAlphabet> &rev_comp,
                                                 size_t k,
                                                 const std::vector<TAlphabet> &suffix,
                                                 Vector<KMER> *kmers) {
     assert(kmers);
-    assert(end - begin);
-    assert(rev_comp.size() == static_cast<size_t>(end - begin));
-    assert(k <= rev_comp.size());
-    std::ignore = end;
+    assert(rev_comp.size() >= k);
 
     // initialize and add the first kmer from sequence
-    KMER kmer(begin, k);
+    KMER kmer(seq, k);
     KMER rev(&rev_comp[rev_comp.size() - k], k);
 
-    __push_back_smallest(kmer, begin,
+    __push_back_smallest(kmer, seq,
                          rev, &rev_comp[rev_comp.size() - k],
                          k,
                          suffix, kmers);
@@ -179,10 +172,10 @@ inline void __sequence_to_kmers_canonical_slide(const TAlphabet * __restrict beg
                 reverse_first = rev_comp.size() - k - 1;
                                         forward_last < rev_comp.size();
                                             ++forward_last, --reverse_first) {
-        kmer.to_next(k, begin[forward_last]);
+        kmer.to_next(k, seq[forward_last]);
         rev.to_prev(k, rev_comp[reverse_first]);
 
-        __push_back_smallest(kmer, begin + forward_last - (k - 1),
+        __push_back_smallest(kmer, seq + forward_last - (k - 1),
                              rev, &rev_comp[reverse_first],
                              k,
                              suffix, kmers);
@@ -195,8 +188,8 @@ inline void __sequence_to_kmers_canonical_slide(const TAlphabet * __restrict beg
  */
 
 template <class KMER, typename TAlphabet>
-inline void sequence_to_kmers(const TAlphabet * __restrict begin,
-                              const TAlphabet * __restrict end,
+inline void sequence_to_kmers(const TAlphabet *begin,
+                              const TAlphabet *end,
                               size_t k,
                               const std::vector<TAlphabet> &suffix,
                               Vector<KMER> *kmers,
@@ -220,10 +213,12 @@ inline void sequence_to_kmers(const TAlphabet * __restrict begin,
         }
     } else {
         auto rev_comp = reverse_complement(begin, end, canonical_map);
+        assert(rev_comp.size() == static_cast<size_t>(end - begin));
+
         if (suffix.size() > 1) {
-            __sequence_to_kmers_canonical(begin, end, rev_comp, k, suffix, kmers);
+            __sequence_to_kmers_canonical(begin, rev_comp, k, suffix, kmers);
         } else {
-            __sequence_to_kmers_canonical_slide(begin, end, rev_comp, k, suffix, kmers);
+            __sequence_to_kmers_canonical_slide(begin, rev_comp, k, suffix, kmers);
         }
     }
 }
@@ -309,9 +304,9 @@ void KmerExtractor::sequence_to_kmers(const std::string &sequence,
         [](char c) { return encode(c); }
     );
 
-    TAlphabet * __restrict begin_segm = seq.data();
-    TAlphabet * __restrict end_segm = seq.data() + dummy_prefix_size;
-    TAlphabet * __restrict end = seq.data() + seq.size();
+    TAlphabet *begin_segm = seq.data();
+    TAlphabet *end_segm = seq.data() + dummy_prefix_size;
+    TAlphabet *end = seq.data() + seq.size();
 
     while (begin_segm + dummy_prefix_size + k + 1 <= end) {
         assert(end >= end_segm);
@@ -491,15 +486,16 @@ KmerExtractor2BitTDecl(template <typename T> void)
 
     auto seq = encode(sequence);
 
-    TAlphabet * __restrict begin_segm = seq.data();
-    TAlphabet * __restrict end_segm = seq.data();
-    TAlphabet * __restrict end = seq.data() + seq.size();
+    TAlphabet *begin_segm = seq.data();
+    TAlphabet *end_segm;
+    TAlphabet *end = seq.data() + seq.size();
 
-    do {
-        assert(end >= end_segm);
-        end_segm = std::find_if(end_segm, end,
+    while (begin_segm + k <= end) {
+
+        end_segm = std::find_if(begin_segm, end,
             [&](auto c) { return c >= alphabet.size(); }
         );
+
         if (begin_segm + k <= end_segm) {
             extractor::sequence_to_kmers(
                 begin_segm, end_segm, k, suffix, kmers,
@@ -507,8 +503,9 @@ KmerExtractor2BitTDecl(template <typename T> void)
                                : std::vector<TAlphabet>()
             );
         }
-        begin_segm = ++end_segm;
-    } while (begin_segm + k <= end);
+
+        begin_segm = end_segm + 1;
+    }
 }
 
 KmerExtractor2BitTDecl(template <typename KMER> Vector<KMER>)

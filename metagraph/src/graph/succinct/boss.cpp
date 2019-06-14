@@ -1288,8 +1288,7 @@ void BOSS::add_sequence(const std::string &seq,
     TAlphabet *end_segm;
     TAlphabet *end = sequence.data() + sequence.size();
 
-    do {
-        assert(end >= begin_segm);
+    while (begin_segm + k_ < end) {
 
         end_segm = std::find_if(begin_segm, end,
             [&](auto c) { return c >= alph_size; }
@@ -1315,8 +1314,7 @@ void BOSS::add_sequence(const std::string &seq,
         }
 
         begin_segm = end_segm + 1;
-
-    } while (begin_segm + k_ < end);
+    }
 }
 
 /**
