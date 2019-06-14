@@ -730,8 +730,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s call_variants -a <annotation> [options]\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for call_variants:\n");
-            fprintf(stderr, "\t-a --annotator [STR] \t\t\tannotator to load []\n");
-            fprintf(stderr, "\n");
             fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph []\n");
             fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph []\n");
             fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of\n");
