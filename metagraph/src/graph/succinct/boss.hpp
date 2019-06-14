@@ -405,10 +405,6 @@ class BOSS {
      */
     void update_F(TAlphabet c, int value);
 
-    void add_sequence(std::vector<TAlphabet>&& sequence,
-                      bool try_extend = false,
-                      std::vector<uint64_t> *edges_inserted = NULL);
-
     /**
      * Given a character c and an edge index, this function
      * creates an outgoing edge from the same source node with

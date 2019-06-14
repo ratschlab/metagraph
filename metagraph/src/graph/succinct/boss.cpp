@@ -1278,50 +1278,45 @@ void BOSS::add_sequence(const std::string &seq,
     if (seq.size() < k_ + 1)
         return;
 
-    auto sequence = encode(seq);
+    // prepend k buffer characters, in case we need to start with dummy node
+    std::vector<TAlphabet> sequence(seq.size() + k_);
+    std::transform(seq.begin(), seq.end(), sequence.begin() + k_,
+        [this](char c) { return this->encode(c); }
+    );
 
-    TAlphabet * __restrict begin_segm = sequence.data();
-    TAlphabet * __restrict end_segm = sequence.data();
-    TAlphabet * __restrict end = sequence.data() + sequence.size();
+    TAlphabet *begin_segm = sequence.data() + k_;
+    TAlphabet *end_segm;
+    TAlphabet *end = sequence.data() + sequence.size();
 
     do {
-        assert(end >= end_segm);
-        end_segm = std::find_if(end_segm, end,
+        assert(end >= begin_segm);
+
+        end_segm = std::find_if(begin_segm, end,
             [&](auto c) { return c >= alph_size; }
         );
-        if (begin_segm + k_ + 1 <= end_segm) {
-            // TODO: find a way to avoid copying here
-            add_sequence(std::vector<TAlphabet>(begin_segm, end_segm),
-                         try_extend, edges_inserted);
-        }
-        begin_segm = ++end_segm;
-    } while (end_segm < end);
-}
 
-void BOSS::add_sequence(std::vector<TAlphabet>&& sequence,
-                        bool try_extend,
-                        std::vector<uint64_t> *edges_inserted) {
-    assert(sequence.size() >= k_ + 1);
+        if (begin_segm + k_ < end_segm) {
 
-    uint64_t source;
+            uint64_t source;
 
-    if (!try_extend || !(source = index(sequence.data(), sequence.data() + k_))) {
-        sequence.insert(sequence.begin(), k_, kSentinelCode);
-        source = 1; // the dummy source node
-    }
+            if (!try_extend || !(source = index(begin_segm, begin_segm + k_))) {
+                // start insertion from the main dummy source node
+                begin_segm -= k_;
+                std::fill(begin_segm, begin_segm + k_, kSentinelCode);
+                source = 1; // the dummy source node
+            }
 
-    for (size_t i = 0; i < sequence.size() - k_; ++i) {
-        // print the process
-        if (i > 0 && i % 1'000 == 0) {
-            verbose_cout(".");
-            if (i % 10'000 == 0)
-                verbose_cout(i, " - edges ", num_edges(), " / nodes ", num_nodes(), "\n");
+            while (begin_segm + k_ < end_segm) {
+                source = append_pos(begin_segm[k_], source, begin_segm, edges_inserted);
+                begin_segm++;
+            }
+
+            verbose_cout("edges ", num_edges(), " / nodes ", num_nodes(), "\n");
         }
 
-        source = append_pos(sequence[i + k_], source, &sequence[i], edges_inserted);
-    }
+        begin_segm = end_segm + 1;
 
-    verbose_cout("edges ", num_edges(), " / nodes ", num_nodes(), "\n");
+    } while (begin_segm + k_ < end);
 }
 
 /**
