@@ -253,11 +253,6 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::align(const std::string::const_
 //        std::cerr << "popping path (#matches, size, seq) : " << path.get_num_matches()
 //                  << " " << path.size() + k_ - 1
 //                  << " " << path.get_sequence() << std::endl;
-        // Early cutoff if the top path has poor alignment.
-//        if (path.size() > 10 && 2 * path.get_num_matches() < path.size() + k_ - 1) {
-//            alternative_paths.push_back(path);
-//            break;
-//        }
 
         if (path.get_query_it() + k_ > sequence_end) {
             if (path.size() != 0) {

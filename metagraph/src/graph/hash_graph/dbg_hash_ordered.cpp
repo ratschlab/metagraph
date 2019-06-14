@@ -40,17 +40,6 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
                                    const std::function<void(node_index)> &callback,
                                    const std::function<bool()> &terminate = [](){ return false; }) const;
 
-    // Perform extension on a provided seed based on the string iterator.
-    // If seed is npos, perform seeding automatically.
-    // Extend until the termination condition is satisfied or reached the end of the query.
-    // In canonical mode, non-canonical k-mers are not mapped to canonical ones
-    void extend_from_seed(std::string::const_iterator begin,
-                                           std::string::const_iterator end,
-                                           const std::function<void(node_index)> &callback,
-                                           const std::function<bool()> &terminate
-                                                = [](){ return false; },
-                                           node_index seed = 0) const;
-
     void call_outgoing_kmers(node_index node,
                              const OutgoingEdgeCallback &callback) const;
 
@@ -183,36 +172,6 @@ void DBGHashOrderedImpl<KMER>::map_to_nodes(const std::string &sequence,
 
         if (terminate())
             return;
-    }
-}
-
-template <typename KMER>
-void DBGHashOrderedImpl<KMER>::extend_from_seed(std::string::const_iterator begin,
-                                           std::string::const_iterator end,
-                                           const std::function<void(node_index)> &callback,
-                                           const std::function<bool()> &terminate,
-                                           node_index seed) const {
-    auto it = begin;
-    if (it + k_ > end)
-        return;
-    if (seed == npos) {
-        seed = kmer_to_node(std::string(it, it + k_));
-        if (seed == npos || terminate())
-            return;
-        callback(seed);
-        it ++;
-    }
-    // If the seed includes some mis-alignments, return.
-    else if (get_node_sequence(seed).substr(1) != std::string(it, it + k_ - 1)) {
-        return;
-    }
-    auto kmers = sequence_to_kmers(std::string(it, end), canonical_mode_);
-    for (const auto &kmer : kmers) {
-        auto node = get_index(kmer);
-        if (node == npos || terminate())
-            return;
-        callback(node);
-        it ++;
     }
 }
 

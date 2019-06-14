@@ -8,29 +8,31 @@
 #include "dbg_hash_ordered.hpp"
 #include "annotate_column_compressed.hpp"
 #include "reverse_complement.hpp"
+#include "../graph/test_dbg_helpers.hpp"
 
-typedef DBGSuccinct Graph;
+template <typename Graph>
+class DBGAlignerTest : public DeBruijnGraphTest<Graph> {};
 
-TEST(dbg_aligner, align_sequence_too_short) {
+TYPED_TEST_CASE(DBGAlignerTest, GraphTypes);
+
+TYPED_TEST(DBGAlignerTest, align_sequence_too_short) {
     size_t k = 4;
     std::string reference = "CATTT";
     std::string query =     "CAT";
 
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference);
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
     auto path = aligner.align(std::begin(query), std::end(query));
 
     EXPECT_EQ(0ull, path.size());
 }
 
-TEST(dbg_aligner, align_single_node) {
+TYPED_TEST(DBGAlignerTest, align_single_node) {
     size_t k = 3;
     std::string reference = "CAT";
     std::string query =     "CAT";
 
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference);
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
     auto alt_paths = aligner.align(std::begin(query), std::end(query));
 
@@ -41,13 +43,12 @@ TEST(dbg_aligner, align_single_node) {
     EXPECT_EQ("CAT", path.get_sequence());
 }
 
-TEST(dbg_aligner, inexact_seeding) {
+TYPED_TEST(DBGAlignerTest, inexact_seeding) {
     size_t k = 3;
     std::string reference = "CAT"  "TGTTTT";
     std::string query =     "CCCC" "TGTTTT";
 
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference);
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner (graph);
     auto alt_paths = aligner.align(std::begin(query), std::end(query));
 
@@ -58,13 +59,12 @@ TEST(dbg_aligner, inexact_seeding) {
     EXPECT_EQ("TGTTTT", path.get_sequence());
 }
 
-TEST(dbg_aligner, align_straight) {
+TYPED_TEST(DBGAlignerTest, align_straight) {
     size_t k = 4;
     std::string reference = "AGCTTCGAGGCCAA";
     std::string query = reference;
 
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference);
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
     auto alt_paths = aligner.align(std::begin(query), std::end(query));
 
@@ -76,15 +76,13 @@ TEST(dbg_aligner, align_straight) {
     EXPECT_EQ(query.size() * aligner.get_match_score(), path.get_total_score());
 }
 
-TEST(dbg_aligner, align_ending_branch) {
+TYPED_TEST(DBGAlignerTest, align_ending_branch) {
     size_t k = 4;
     std::string reference_1 = "AGCTTCGAA";
     std::string reference_2 = "AGCTTCGAC";
     std::string query = reference_2;
 
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference_1);
-    graph->add_sequence(reference_2);
+    auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
     DBGAligner aligner(graph);
     auto alt_paths = aligner.align(std::begin(query), std::end(query));
 
@@ -95,15 +93,13 @@ TEST(dbg_aligner, align_ending_branch) {
     EXPECT_EQ(query, path.get_sequence());
 }
 
-TEST(dbg_aligner, align_branch) {
+TYPED_TEST(DBGAlignerTest, align_branch) {
     size_t k = 4;
     std::string reference_1 = "AGCTTCGA" "AT" "ATTTGTT";
     std::string reference_2 = "AGCTTCGA" "CG" "ATTTGTT";
     std::string query = reference_2;
 
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference_1);
-    graph->add_sequence(reference_2);
+    auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
     DBGAligner aligner(graph);
     auto alt_paths = aligner.align(std::begin(query), std::end(query));
 
@@ -114,13 +110,12 @@ TEST(dbg_aligner, align_branch) {
     EXPECT_EQ(query, path.get_sequence());
 }
 
-TEST(dbg_aligner, repetitive_sequence_alignment) {
+TYPED_TEST(DBGAlignerTest, repetitive_sequence_alignment) {
     size_t k = 3;
     std::string reference = "AGGGGGGGGGAAAAGGGGGGG";
     std::string query =       "AGGGGG";
 
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference);
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
     auto alt_paths = aligner.align(std::begin(query), std::end(query));
 
@@ -131,13 +126,12 @@ TEST(dbg_aligner, repetitive_sequence_alignment) {
     EXPECT_EQ(query, path.get_sequence());
 }
 
-TEST(dbg_aligner, variation) {
+TYPED_TEST(DBGAlignerTest, variation) {
     size_t k = 4;
     std::string reference = "AGCAA" "C" "TCGAAA";
     std::string query =     "AGCAA" "T" "TCGAAA";
 
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference);
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
     auto alt_paths = aligner.align(std::begin(query), std::end(query));
 
@@ -148,15 +142,13 @@ TEST(dbg_aligner, variation) {
     EXPECT_EQ(reference, path.get_sequence());
 }
 
-TEST(dbg_aligner, variation_in_branching_point) {
+TYPED_TEST(DBGAlignerTest, variation_in_branching_point) {
     size_t k = 4;
     std::string reference_1 = "TTAAGCAA" "CTCGAAA";
     std::string reference_2 = "TTAAGCAA" "GTCGAAA";
     std::string query =       "TTAAGCAA" "TGGGAAA";
 
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference_1);
-    graph->add_sequence(reference_2);
+    auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
     DBGAligner aligner(graph);
     auto alt_paths = aligner.align(std::begin(query), std::end(query));
 
@@ -171,13 +163,12 @@ TEST(dbg_aligner, variation_in_branching_point) {
         << "Ref2: " << reference_2 << std::endl;
 }
 
-TEST(dbg_aligner, multiple_variations) {
+TYPED_TEST(DBGAlignerTest, multiple_variations) {
     size_t k = 4;
     std::string reference = "ACGCAA" "C" "TCTCTG" "A" "A" "C" "TTGT";
     std::string query =     "ACGCAA" "T" "TCTCTG" "T" "A" "T" "TTGT";
 
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference);
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
     auto alt_paths = aligner.align(std::begin(query), std::end(query));
 
@@ -188,15 +179,13 @@ TEST(dbg_aligner, multiple_variations) {
     EXPECT_EQ(reference, path.get_sequence());
 }
 
-TEST(dbg_aligner, noise_in_branching_point) {
+TYPED_TEST(DBGAlignerTest, noise_in_branching_point) {
     size_t k = 4;
     std::string reference_1 = "AAAA" "CTTTTTT";
     std::string reference_2 = "AAAA" "TTGGGGG";
     std::string query =       "AAAA" "TTTTTTT";
 
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference_1);
-    graph->add_sequence(reference_2);
+    auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
     DBGAligner aligner(graph,
             /*num_top_paths =*/ 10,
             /*num_alternative_paths =*/ 2);
@@ -211,7 +200,7 @@ TEST(dbg_aligner, noise_in_branching_point) {
     EXPECT_EQ("4=1X6=", path.get_cigar());
 }
 
-TEST(dbg_aligner, alternative_path_basic) {
+TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
     size_t k = 4;
     std::vector<std::string> references = {"ACAA" "TTTT" "TTTT",
                                            "ACAA" "TTTT" "TGTT",
@@ -219,9 +208,7 @@ TEST(dbg_aligner, alternative_path_basic) {
                                            "ACAA" "GTTT" "TGTT"};
     std::string query =                    "ACAA" "CTTT" "TCTT";
 
-    auto graph = std::make_shared<Graph>(k);
-    for (auto reference : references)
-        graph->add_sequence(reference);
+    auto graph = build_graph_batch<TypeParam>(k, references);
 
     size_t max_num_alternative_paths = 4;
     DBGAligner aligner(graph, 10, max_num_alternative_paths);
@@ -236,7 +223,7 @@ TEST(dbg_aligner, alternative_path_basic) {
 //    }
 }
 
-TEST(dbg_aligner, large_search_space) {
+TYPED_TEST(DBGAlignerTest, large_search_space) {
     size_t k = 3;
     std::string reference = "";
     auto alphabet = {'A', 'G', 'T'};
@@ -253,8 +240,7 @@ TEST(dbg_aligner, large_search_space) {
     for (size_t i = 0; i < unmapped_char_length; i++) {
         query += 'C';
     }
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference);
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner (graph);
     auto alt_paths = aligner.align(std::begin(query), std::end(query));
 
@@ -271,14 +257,12 @@ TEST(dbg_aligner, large_search_space) {
 //    EXPECT_EQ("", path.back().get_sequence());
 }
 
-TEST(dbg_aligner, map_to_nodes_multiple_misalignment) {
+TYPED_TEST(DBGAlignerTest, map_to_nodes_multiple_misalignment) {
     size_t k = 4;
     std::string reference = "AAAG" "C" "GGACCCTTT" "C" "CGTTAT";
     std::string query =     "AAAG" "G" "GGACCCTTT" "T" "CGTTAT";
 
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference);
-    graph->mask_dummy_kmers(1, false);
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
     auto path = aligner.map_to_nodes(query);
 
@@ -286,14 +270,12 @@ TEST(dbg_aligner, map_to_nodes_multiple_misalignment) {
     EXPECT_EQ(reference, path.get_sequence());
 }
 
-TEST(dbg_aligner, map_to_nodes_insert_non_existent) {
+TYPED_TEST(DBGAlignerTest, map_to_nodes_insert_non_existent) {
     size_t k = 4;
     std::string reference = "TTTCC"     "TTGTT";
     std::string query =     "TTTCC" "A" "TTGTT";
 
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference);
-    graph->mask_dummy_kmers(1, false);
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
     auto path = aligner.map_to_nodes(query);
 
@@ -301,28 +283,24 @@ TEST(dbg_aligner, map_to_nodes_insert_non_existent) {
     EXPECT_EQ(reference, path.get_sequence());
 }
 
-//TEST(dbg_aligner, map_to_nodes_inverse_stitching) {
+//TYPED_TEST(DBGAlignerTest, map_to_nodes_inverse_stitching) {
 //    size_t k = 4;
 //    std::string reference = "TTCGGA"     "TATGGAC";
 //    std::string query =     "TTCGGA" "C" "TATGGAC";
 //
-//    auto graph = std::make_shared<Graph>(k);
-//    graph->add_sequence(reference);
-//    graph->mask_dummy_kmers(1, false);
+//    auto graph = build_graph_batch<TypeParam>(k, { reference });
 //    DBGAligner aligner(graph);
 //    auto path = aligner.map_to_nodes(query);
 //
 //    EXPECT_EQ(reference, path.get_sequence());
 //}
 
-TEST(dbg_aligner, map_to_nodes_delete) {
+TYPED_TEST(DBGAlignerTest, map_to_nodes_delete) {
     size_t k = 4;
     std::string reference = "TTCGA" "T" "TGGC";
     std::string query =     "TTCGA"     "TGGC";
 
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference);
-    graph->mask_dummy_kmers(1, false);
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
     auto path = aligner.map_to_nodes(query);
 
@@ -330,14 +308,12 @@ TEST(dbg_aligner, map_to_nodes_delete) {
     EXPECT_EQ(reference, path.get_sequence());
 }
 
-TEST(dbg_aligner, map_to_nodes_gap) {
+TYPED_TEST(DBGAlignerTest, map_to_nodes_gap) {
     size_t k = 4;
     std::string reference = "TTTCTGTATA" "CCTT" "GGCGCTCTC";
     std::string query =     "TTTCTGTATA"        "GGCGCTCTC";
 
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference);
-    graph->mask_dummy_kmers(1, false);
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
     auto path = aligner.map_to_nodes(query);
 
@@ -346,14 +322,12 @@ TEST(dbg_aligner, map_to_nodes_gap) {
     EXPECT_EQ("10=4D9=", path.get_cigar());
 }
 
-TEST(dbg_aligner, map_to_nodes_straight) {
+TYPED_TEST(DBGAlignerTest, map_to_nodes_straight) {
     size_t k = 4;
     std::string reference = "AGCTTCGAGGCCAA";
     std::string query = reference;
 
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference);
-    graph->mask_dummy_kmers(1, false);
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
     auto path = aligner.map_to_nodes(query);
 
@@ -362,15 +336,13 @@ TEST(dbg_aligner, map_to_nodes_straight) {
     EXPECT_EQ(query.size() * aligner.get_match_score(), path.get_total_score());
 }
 
-TEST(dbg_aligner, map_to_nodes_inexact_seed) {
+TYPED_TEST(DBGAlignerTest, map_to_nodes_inexact_seed) {
     size_t k = 4;
     std::string reference = "AGCTTCGAGGCCAA";
     std::string query =     "TT";
     query += reference;
 
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference);
-    graph->mask_dummy_kmers(1, false);
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
     auto path = aligner.map_to_nodes(query);
 
@@ -379,16 +351,14 @@ TEST(dbg_aligner, map_to_nodes_inexact_seed) {
     EXPECT_EQ(reference.size() * aligner.get_match_score(), path.get_total_score());
 }
 
-TEST(dbg_aligner, map_to_nodes_reverse_complement) {
+TYPED_TEST(DBGAlignerTest, map_to_nodes_reverse_complement) {
     size_t k = 4;
     std::string reference = "AGCTTCGAGGCCAA";
     std::string query = reference;
     std::string rev_comp_query(query);
     reverse_complement(rev_comp_query.begin(), rev_comp_query.end());
 
-    auto graph = std::make_shared<Graph>(k);
-    graph->add_sequence(reference);
-    graph->mask_dummy_kmers(1, false);
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
     auto path = aligner.map_to_nodes_forward_reverse_complement(rev_comp_query);
 

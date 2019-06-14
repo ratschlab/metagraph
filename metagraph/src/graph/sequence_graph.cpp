@@ -47,6 +47,32 @@ bool DeBruijnGraph::operator==(const DeBruijnGraph &) const {
     return false;
 }
 
+void DeBruijnGraph::extend_from_seed(std::string::const_iterator begin,
+                                       std::string::const_iterator end,
+                                       const std::function<void(node_index)> &callback,
+                                       const std::function<bool()> &terminate,
+                                       node_index seed) const {
+    if (begin + get_k() > end)
+        return;
+    if (seed == npos) {
+        // Seed is taken from the first k characters.
+        seed = kmer_to_node(std::string(begin, begin + get_k()));
+        if (seed == npos || terminate())
+            return;
+        callback(seed);
+        begin ++;
+    }
+    while (begin + get_k() - 1 != end) {
+        if (terminate())
+            return;
+        seed = traverse(seed, *(begin + get_k() - 1));
+        if (seed == npos)
+            return;
+        callback(seed);
+        begin ++;
+    }
+}
+
 void DeBruijnGraph::call_nodes(const std::function<void(const node_index&)> &callback,
                                const std::function<bool()> &stop_early) const {
     auto nnodes = num_nodes();

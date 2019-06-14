@@ -67,10 +67,15 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void call_nodes(const std::function<void(const node_index&)> &callback,
                             const std::function<bool()> &stop_early = [](){ return false; }) const override final;
+
     // Perform extension on a provided seed based on the string iterator.
-    // If seed is npos, perform seeding automatically.
+    // If seed is npos, perform seeding automatically, otherwise, begin should point
+    // to the first character of the k-mer right after the seed.
     // Extend until the termination condition is satisfied or reached the end of the query.
-    // In canonical mode, non-canonical k-mers are not mapped to canonical ones.
+    // Terminate function is called prior to callback for any node.
+    // In case the character from string doesn't map any possible extension in the graph,
+    // returns without callback on npos.
+    // In canonical mode, non-canonical k-mers are not mapped to canonical ones
     virtual void extend_from_seed(std::string::const_iterator begin,
                                            std::string::const_iterator end,
                                            const std::function<void(node_index)> &callback,
