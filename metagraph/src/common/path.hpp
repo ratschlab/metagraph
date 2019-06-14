@@ -82,8 +82,11 @@ class Path {
         query_it_ -= query_trim_length;
         sequence_.resize(sequence_.size() - path_trim_length);
         nodes_.resize(nodes_.size() - path_trim_length);
-        sw_last_row_.resize(sw_last_row_.size() - path_trim_length);
-        sw_last_column_.resize(sw_last_column_.size() - query_trim_length);
+        if (sw_last_row_.size() >= path_trim_length
+                && sw_last_column_.size() >= query_trim_length) {
+            sw_last_row_.resize(sw_last_row_.size() - path_trim_length);
+            sw_last_column_.resize(sw_last_column_.size() - query_trim_length);
+        }
     }
 
     void set_query_begin_it(std::string::const_iterator query_begin_it) {

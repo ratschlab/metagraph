@@ -432,7 +432,7 @@ bool DBGAligner::smith_waterman_score(AlignedPath &path) const {
         alignment.cigar_string = optimum_alignment.cigar.to_string();
         if (optimum_alignment.score < 0)
             std::cerr << "Warning: Negative Smith Waterman score!" << std::endl;
-        alignment.sw_score = std::max(optimum_alignment.score, 0ll);
+        alignment.sw_score = std::max(unsigned(optimum_alignment.score), 0u);
         alignment.ref_begin = optimum_alignment.cigar.get_ref_begin();
         alignment.query_begin = optimum_alignment.cigar.get_query_begin();
         alignment.ref_end = path.get_sequence().size() - 1 - optimum_alignment.cigar.get_ref_end();
