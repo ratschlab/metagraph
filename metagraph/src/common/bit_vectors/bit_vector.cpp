@@ -407,7 +407,7 @@ std::unique_ptr<bit_vector> bit_vector_stat::copy() const {
 
 uint64_t bit_vector_stat::rank1(uint64_t id) const {
     if (requires_update_)
-        const_cast<bit_vector_stat*>(this)->init_rs();
+        init_rs();
     //the rank method in SDSL does not include id in the count
     return rk_(id >= this->size() ? this->size() : id + 1);
 }
@@ -416,7 +416,7 @@ uint64_t bit_vector_stat::select1(uint64_t id) const {
     assert(id > 0 && size() > 0);
 
     if (requires_update_)
-        const_cast<bit_vector_stat*>(this)->init_rs();
+        init_rs();
 
     assert(id <= num_set_bits_);
     return slct_(id);
@@ -497,7 +497,7 @@ void bit_vector_stat::serialize(std::ostream &out) const {
     vector_.serialize(out);
 
     if (requires_update_)
-        const_cast<bit_vector_stat*>(this)->init_rs();
+        init_rs();
 
     serialize_number(out, num_set_bits_);
     rk_.serialize(out);
@@ -547,7 +547,7 @@ void bit_vector_stat::call_ones_in_range(uint64_t begin, uint64_t end,
     ::call_ones(vector_, begin, end, callback);
 }
 
-void bit_vector_stat::init_rs() {
+void bit_vector_stat::init_rs() const {
     std::unique_lock<std::mutex> lock(mu_);
 
     if (!requires_update_)

@@ -209,7 +209,7 @@ bool wavelet_tree_stat::load(std::istream &in) {
 
 void wavelet_tree_stat::serialize(std::ostream &out) const {
     if (requires_update_)
-        const_cast<wavelet_tree_stat*>(this)->init_wt();
+        init_wt();
 
     int_vector_.serialize(out);
     wwt_.serialize(out);
@@ -261,7 +261,7 @@ void wavelet_tree_stat::remove(uint64_t id) {
 
 uint64_t wavelet_tree_stat::rank(uint64_t c, uint64_t i) const {
     if (requires_update_)
-        const_cast<wavelet_tree_stat*>(this)->init_wt();
+        init_wt();
 
     return wwt_.rank(std::min(i + 1, size()), c);
 }
@@ -270,7 +270,7 @@ uint64_t wavelet_tree_stat::select(uint64_t c, uint64_t i) const {
     assert(i > 0 && size() > 0);
 
     if (requires_update_)
-        const_cast<wavelet_tree_stat*>(this)->init_wt();
+        init_wt();
 
     assert(i <= rank(c, size() - 1));
     return wwt_.select(i, c);
@@ -306,7 +306,7 @@ sdsl::int_vector<> wavelet_tree_stat::to_vector() const {
     return vector;
 }
 
-void wavelet_tree_stat::init_wt() {
+void wavelet_tree_stat::init_wt() const {
     std::unique_lock<std::mutex> lock(mu_);
 
     if (!requires_update_)

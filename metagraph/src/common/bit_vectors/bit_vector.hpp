@@ -153,16 +153,16 @@ class bit_vector_stat : public bit_vector {
     const sdsl::bit_vector& data() const { return vector_; }
 
   private:
-    void init_rs();
+    void init_rs() const;
 
     sdsl::bit_vector vector_;
     uint64_t num_set_bits_ = 0;
 
     // maintain rank/select operations
-    sdsl::rank_support_v5<> rk_;
-    sdsl::select_support_mcl<> slct_;
-    std::atomic_bool requires_update_ { true };
-    std::mutex mu_;
+    mutable sdsl::rank_support_v5<> rk_;
+    mutable sdsl::select_support_mcl<> slct_;
+    mutable std::atomic_bool requires_update_ { true };
+    mutable std::mutex mu_;
 };
 
 
