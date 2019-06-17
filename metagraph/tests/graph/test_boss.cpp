@@ -2,7 +2,6 @@
 #include <string>
 #include <sstream>
 #include <mutex>
-#include <chrono>
 
 #include <zlib.h>
 #include <htslib/kseq.h>
@@ -2382,85 +2381,81 @@ TEST(BOSS, IndegreeIncomingIdentity) {
 }
 
 TEST(BOSS, EraseEdgesDynSingle) {
-for(uint32_t j = 0; j < 1000; ++j) {
-    for (size_t k = 1; k < 8; ++k) {
-        BOSS graph2(k);
-        graph2.add_sequence("AGACACAGT", true);
-        graph2.add_sequence("GACTTGCAG", true);
-        graph2.add_sequence("ACTAGTCAG", true);
-        graph2.add_sequence("ATGCGATCGATATGCGAGA", true);
-        graph2.add_sequence("ATGCGATCGAGACTACGAG", true);
-        graph2.add_sequence("GTACGATAGACATGACGAG", true);
-        graph2.add_sequence("ACTGACGAGACACAGATGC", true);
-        graph2.add_sequence("TTGCGATCGATATGCAACA", true);
-        graph2.add_sequence("TTCCCCTCGAGACTAATCT", true);
-        graph2.add_sequence("GTCCGGTGTGCATAAGAAC", true);
-        graph2.add_sequence("ACTGAGTGGGCACAGATGC", true);
-        //for(size_t n = 1; n < graph2.num_edges(); ++n) {
-        //if (graph2.num_edges() > n) {
-        auto n = graph2.num_edges();
-        for(BOSS::edge_index m = 1; m <= n; ++m) {
-            //if(m==18 && k==3) {
-            if(true) {
-            BOSS graph(k);
-            graph.add_sequence("AGACACAGT", true);
-            graph.add_sequence("GACTTGCAG", true);
-            graph.add_sequence("ACTAGTCAG", true);
-            graph.add_sequence("ATGCGATCGATATGCGAGA", true);
-            graph.add_sequence("ATGCGATCGAGACTACGAG", true);
-            graph.add_sequence("GTACGATAGACATGACGAG", true);
-            graph.add_sequence("ACTGACGAGACACAGATGC", true);
-            graph.add_sequence("TTGCGATCGATATGCAACA", true);
-            graph.add_sequence("TTCCCCTCGAGACTAATCT", true);
-            graph.add_sequence("GTCCGGTGTGCATAAGAAC", true);
-            graph.add_sequence("ACTGAGTGGGCACAGATGC", true);
-            graph.print_internal_representation();
-            graph.print();
-            EXPECT_TRUE(graph.is_valid());
-            auto edges = utils::arange(m, n-m+1);
-            //std::set<BOSS::edge_index> edges_to_delete(edges.begin(), edges.end());
 
-            std::random_shuffle(edges.begin(), edges.end());
+    const size_t k = 3;
 
-            std::set<BOSS::edge_index> edges_to_delete;
-            for (BOSS::edge_index i = 0; i < edges.size(); ++i) {
-                std::cout << edges[i] << ",";
-                edges_to_delete.insert(edges[i]);
-            }
-            std::cout << std::endl;
-            std::vector<BOSS::edge_index> removed_edges;
-            graph.erase_edges_dyn(edges_to_delete, &removed_edges);
-            graph.print_internal_representation();
-            graph.print();
-            std::cout << "removed edges: ";
-            std::for_each(removed_edges.begin(), removed_edges.end(), [&](auto edge) { std::cout << edge << ","; assert(edges_to_delete.find(edge) != edges_to_delete.end()); });
-            std::cout << std::endl;
-            //std::cout << "m: " << m << std::endl;
-            EXPECT_TRUE(graph.is_valid());
-            if (!graph.is_valid())
-                exit(1);
-            //dump unitigs and visualize
-            //std::cout << "viz" << std::endl;
-            //std::cout << k+1 << std::endl;
-            //graph.call_paths([&](const auto &sequence) {
-            //    std::cout << sequence << std::endl;
-            //});
-            graph.call_paths(
-                [&](const auto &, const auto &seq) {
-                    auto str = graph.decode(seq);
-                    //std::cout << str << std::endl;
-                },
-                false
-            );
-            }
-        }
-        //}
-        //}
+    BOSS graph(k);
+    graph.add_sequence("ATGCGATCGATATGCGAGA", true);
+    graph.add_sequence("ATGCGATCGAGACTACGAG", true);
+    graph.add_sequence("GTACGATAGACATGACGAG", true);
+    graph.add_sequence("ACTGACGAGACACAGATGC", true);
+    graph.add_sequence("TTGCGATCGATATGCAACA", true);
+    graph.add_sequence("TTCCCCTCGAGACTAATCT", true);
+    graph.add_sequence("GTCCGGTGTGCATAAGAAC", true);
+    graph.add_sequence("ACTGAGTGGGCACAGATGC", true);
+
+    std::set<BOSS::edge_index> edges_to_delete;
+    std::set<BOSS::edge_index> expected_kept_edges;
+
+    // will result in "AAC" becoming a new tail edge
+    edges_to_delete.emplace(graph.map_to_edges("AACA")[0]);
+
+    // try to delete an existing tail dummy edge, should have no effect
+    auto seq_encoded = graph.encode("TCT$");
+    seq_encoded[3] = BOSS::kSentinelCode;
+    auto edge = graph.map_to_edge(seq_encoded.begin(), seq_encoded.end());
+    edges_to_delete.emplace(edge);
+    expected_kept_edges.emplace(edge);
+
+    // try to delete a necessary head/origin dummy edge
+    seq_encoded = graph.encode("$$TT");
+    seq_encoded[0] = BOSS::kSentinelCode;
+    seq_encoded[1] = BOSS::kSentinelCode;
+    edge = graph.map_to_edge(seq_encoded.begin(), seq_encoded.end());
+    edges_to_delete.emplace(edge);
+    expected_kept_edges.emplace(edge);
+
+    // delete some edges to cause new head nodes and make some old dummy edges unnecessary
+    edges_to_delete.emplace(graph.map_to_edges("GTCC")[0]);
+    edges_to_delete.emplace(graph.map_to_edges("GTAC")[0]);
+
+    // delete one of those unnecessary dummy edges
+    seq_encoded = graph.encode("$GTC");
+    seq_encoded[0] = BOSS::kSentinelCode;
+    edges_to_delete.emplace(graph.map_to_edge(seq_encoded.begin(), seq_encoded.end()));
+
+    // try to delete root node
+    edges_to_delete.emplace(1);
+    expected_kept_edges.emplace(1);
+
+    // delete some normal (non-dummy) edges to make "GCA" a new head node
+    edges_to_delete.emplace(graph.map_to_edges("TGCA")[0]);
+    edges_to_delete.emplace(graph.map_to_edges("GGCA")[0]);
+
+    // delete some edges which will not cause new tail/head nodes
+    edges_to_delete.emplace(graph.map_to_edges("TCCC")[0]); // CCC has incoming self-edge
+    edges_to_delete.emplace(graph.map_to_edges("CTAA")[0]);
+    edges_to_delete.emplace(graph.map_to_edges("AGAT")[0]);
+    edges_to_delete.emplace(graph.map_to_edges("GATG")[0]);
+    edges_to_delete.emplace(graph.map_to_edges("GTGC")[0]);
+
+    // remove two edges which individually would lead to new tail/head, but together do not
+    edges_to_delete.emplace(graph.map_to_edges("TGTG")[0]);
+    edges_to_delete.emplace(graph.map_to_edges("GTGT")[0]);
+
+    std::vector<BOSS::edge_index> removed_edges;
+    graph.erase_edges_dyn(edges_to_delete, &removed_edges);
+
+    EXPECT_TRUE(graph.is_valid());
+
+    for (auto removed_edge : removed_edges) {
+        EXPECT_TRUE(expected_kept_edges.find(removed_edge) == expected_kept_edges.end());
     }
-}
 }
 
 TEST(BOSS, EraseEdgesDynUnitigs) {
+    // test of efficient removal of unitigs one at a time
+
     for (size_t k = 3; k < 20; ++k) {
         BOSS graph(k);
         graph.add_sequence("AGACACAGT", true);
@@ -2475,35 +2470,18 @@ TEST(BOSS, EraseEdgesDynUnitigs) {
         graph.add_sequence("GTCCGGTGTGCATAAGAAC", true);
         graph.add_sequence("ACTGAGTGGGCACAGATGC", true);
 
-        // TODO for graph cleaning, store head edges of unitigs to be cleaned, rather than all constituent
-        // edges, and simply retraverse one-by-one as they are being deleted. the subsequent head edges
-        // will need to be shifted according to the previous deletions as it progresses.
-
-        // common interface for edge deletion on all DBG's. one annoyance is that it applies always,
-        // sometimes, always, or never, depending on static vs dynamic capabilities and current state.
-
-        // where to put graph cleaning itself? i guess it will go on SequenceGraph / DBG?
-
+        // find heads of unitigs
         std::vector<BOSS::edge_index> head_edges;
-        //std::set<BOSS::edge_index> EDGES;
         graph.call_paths([&](const auto& path, const auto&) {
             assert(path.size());
             head_edges.push_back(path.at(0));
-            //for (auto edge : path) {
-            //    EDGES.insert(edge);
-            //}
         }, true);
-        //auto begin = std::chrono::high_resolution_clock::now();
-        //graph.erase_edges_dyn(EDGES, NULL);
-        //EXPECT_TRUE(graph.is_valid());
-        //auto end = std::chrono::high_resolution_clock::now();
-        //std::cout << "remove: " << std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count() << "ns" << std::endl;
 
         while (!head_edges.empty()) {
+            // re-traverse unitig from head and collect edges to delete
             auto head_edge = head_edges.back();
             head_edges.pop_back();
 
-            auto begin = std::chrono::high_resolution_clock::now();
             std::set<BOSS::edge_index> edges;
             auto edge = head_edge;
             do {
@@ -2516,20 +2494,14 @@ TEST(BOSS, EraseEdgesDynUnitigs) {
             } while (graph.get_last(edge)
                     && graph.get_W(edge) != BOSS::kSentinelCode
                             && edge != head_edge);
-            auto end = std::chrono::high_resolution_clock::now();
-            std::cout << "traverse: " << std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count() << "ns" << std::endl;
 
-            begin = std::chrono::high_resolution_clock::now();
             std::vector<BOSS::edge_index> removed_edges;
 
-            //std::for_each(edges.begin(), edges.end(), [](auto x){ std::cout << x << ","; });
-            //std::cout << std::endl;
+            // delete the unitig
             graph.erase_edges_dyn(edges, &removed_edges);
             EXPECT_TRUE(graph.is_valid());
-            end = std::chrono::high_resolution_clock::now();
-            std::cout << "remove:   " << std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count() << "ns" << std::endl;
 
-            begin = std::chrono::high_resolution_clock::now();
+            // adjust saved unitig head indexes affected by the deletion
             std::sort(removed_edges.begin(), removed_edges.end());
             for (auto other_head = head_edges.begin(); other_head != head_edges.end(); ++other_head) {
                 auto preceding_removed_edge = std::lower_bound(removed_edges.begin(),
@@ -2537,8 +2509,6 @@ TEST(BOSS, EraseEdgesDynUnitigs) {
                                                                *other_head);
                 *other_head -= preceding_removed_edge - removed_edges.begin();
             }
-            end = std::chrono::high_resolution_clock::now();
-            std::cout << "shift:    " << std::chrono::duration_cast<std::chrono::nanoseconds>(end-begin).count() << "ns" << std::endl;
         }
     }
 }

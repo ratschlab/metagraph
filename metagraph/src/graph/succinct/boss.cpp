@@ -7,7 +7,6 @@
 #include <cstdio>
 #include <unordered_map>
 #include <unordered_set>
-#include <chrono>
 
 #include <boost/multiprecision/integer.hpp>
 
@@ -1442,7 +1441,6 @@ uint64_t BOSS::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
 }
 
 
-//TODO unit test
 // Given an edge list, remove them from the BOSS graph.
 // Anchors the isolated nodes.
 void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_index> *removed_edges) {
@@ -1453,6 +1451,10 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
     std::unordered_set<node_index> new_tail_nodes;
     std::unordered_set<edge_index> new_tail_edges;
     std::unordered_map<node_index, std::vector<TAlphabet>> new_head_nodes;
+
+    std::set<edge_index> cant_delete; // some of the edges in `edges` could be dummy edges which are needed for anchoring;
+                                      // record their original indexes so that their deletion can be skipped. 
+    cant_delete.emplace(1);
 
     for (edge_index current_edge : edges) {
         CHECK_INDEX(current_edge);
@@ -1473,9 +1475,10 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
                                                            edges.upper_bound(last_outgoing));
 
 
-            auto indeg = indegree(node);
+            uint64_t indeg = 0;
             uint64_t incoming_delete_count = 0;
             call_adjacent_incoming_edges(edge, [&](edge_index adj_incoming_edge_index) {
+                ++indeg;
                 if (edges.find(adj_incoming_edge_index) != edges.end())
                     ++incoming_delete_count;
             });
@@ -1485,6 +1488,11 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
                 // new head node
                 new_head_nodes.emplace(node, get_node_seq(select_last(node)));
             } else if (indeg > incoming_delete_count && outdeg == outgoing_delete_count) {
+                if (get_W(edge) == kSentinelCode) {
+                    // already a tail node
+                    cant_delete.emplace(edge);
+                    continue;
+                }
                 // assign this edge to new tail node
                 if (new_tail_nodes.find(node) == new_tail_nodes.end())
                     new_tail_edges.emplace(edge);
@@ -1493,12 +1501,14 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
         }
     }
 
-    // create anchors for new head nodes
+    // create anchors for new head nodes. keep track of which edges were added during this so we
+    // can map back to the original edge indexes later.
 
-    std::map<edge_index, uint64_t> inserted_edges;
+    // TODO: use some sort of generic sparse bitvector for `inserted_edges`
+    //   rather than maintaining this data-structure inline
+
+    std::map<edge_index, uint64_t> inserted_edges; // original edge index -> number of new edges inserted before that position (inclusive)
     inserted_edges.emplace(0, 0);
-    std::set<edge_index> cant_delete;
-    cant_delete.emplace(1);
 
     for (auto& node : new_head_nodes) {
         auto kmer = node.second;
@@ -1511,6 +1521,7 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
             auto source_edge = pick_edge(select_last(source_node), source_node, kmer[i + k_]);
 
             if (source_edge) {
+                // map source edge index back to its original index (prior to any insertions) and add to `cant_delete`
                 size_t prev_inserted;
                 auto prev_insertion_point = inserted_edges.begin();
                 while (true) {
@@ -1537,6 +1548,7 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
 
             std::sort(new_ids_vec.begin(), new_ids_vec.end());
 
+            // update `inserted_edges` with new edges created by `append_pos`
             uint64_t new_preceding_edges = 0;
             auto prev_insertion_point = inserted_edges.begin();
             for (auto new_edge : new_ids_vec) {
@@ -1599,6 +1611,9 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
         if(*cant_delete_iter == edge)
             continue;
 
+        if (removed_edges)
+            removed_edges->push_back(edge);
+
         uint64_t d = get_W(edge_id);
         if (d < alph_size) {
             //fix W array
@@ -1631,8 +1646,6 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
             last_->delete_bit(edge_id);
         }
         shift++;
-        if (removed_edges)
-            removed_edges->push_back(edge);
     }
 }
 
