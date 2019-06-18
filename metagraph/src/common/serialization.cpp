@@ -4,7 +4,6 @@
 #include <map>
 #include <unordered_map>
 
-#include <sparsepp/spp.h>
 #include <tsl/hopscotch_map.h>
 #include <tsl/ordered_set.h>
 #include <libmaus2/util/NumberSerialisation.hpp>
@@ -219,12 +218,6 @@ void serialize_string_number_map(std::ostream &out,
 template
 void serialize_string_number_map(std::ostream &out,
                                  const tsl::hopscotch_map<std::string, uint32_t> &map);
-template
-void serialize_string_number_map(std::ostream &out,
-                                 const spp::sparse_hash_map<std::string, uint64_t> &map);
-template
-void serialize_string_number_map(std::ostream &out,
-                                 const spp::sparse_hash_map<std::string, uint32_t> &map);
 
 template <class Map>
 bool load_string_number_map(std::istream &in, Map *map) {
@@ -292,12 +285,6 @@ bool load_string_number_map(std::istream &in,
 template
 bool load_string_number_map(std::istream &in,
                             tsl::hopscotch_map<std::string, uint32_t> *map);
-template
-bool load_string_number_map(std::istream &in,
-                            spp::sparse_hash_map<std::string, uint64_t> *map);
-template
-bool load_string_number_map(std::istream &in,
-                            spp::sparse_hash_map<std::string, uint32_t> *map);
 
 template <class Map>
 void serialize_number_string_map(std::ostream &out, const Map &map) {
@@ -326,12 +313,6 @@ void serialize_number_string_map(std::ostream &out,
 template
 void serialize_number_string_map(std::ostream &out,
                                  const tsl::hopscotch_map<uint32_t, std::string> &map);
-template
-void serialize_number_string_map(std::ostream &out,
-                                 const spp::sparse_hash_map<uint64_t, std::string> &map);
-template
-void serialize_number_string_map(std::ostream &out,
-                                 const spp::sparse_hash_map<uint32_t, std::string> &map);
 
 template <class Map>
 bool load_number_string_map(std::istream &in, Map *map) {
@@ -395,12 +376,6 @@ bool load_number_string_map(std::istream &in,
 template
 bool load_number_string_map(std::istream &in,
                             tsl::hopscotch_map<uint32_t, std::string> *map);
-template
-bool load_number_string_map(std::istream &in,
-                            spp::sparse_hash_map<uint64_t, std::string> *map);
-template
-bool load_number_string_map(std::istream &in,
-                            spp::sparse_hash_map<uint32_t, std::string> *map);
 
 
 template <class Set>
