@@ -1,8 +1,7 @@
 #include "aligner_helper.hpp"
 
 
-
-std::string Cigar::to_string() {
+std::string Cigar::to_string() const {
     std::string str = "";
     for (auto cigar_part = std::begin(cigar_);
          cigar_part != std::end(cigar_); ++ cigar_part) {
@@ -21,6 +20,7 @@ void Cigar::append(const Operator& op) {
 
 uint64_t Cigar::clip(uint64_t gap_opening_penalty, uint64_t gap_extension_penalty,
           uint64_t mismatch_penalty_transition, uint64_t mismatch_penalty_transversion) {
+    assert(cigar_.size() == 0);
     query_begin_ = 0;
     ref_begin_ = 0;
     query_end_ = 0;

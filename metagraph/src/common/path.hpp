@@ -23,6 +23,8 @@ class Path {
         num_matches_ = 0;
         is_similar_ = false;
         is_score_updated_ = false;
+        sw_num_rows_stored_ = 0;
+        sw_num_cols_stored_ = 0;
 
         assert(prioritizing_function_code >= 0 && prioritizing_function_code <= 2);
         switch (prioritizing_function_code) {
@@ -49,6 +51,7 @@ class Path {
 
     void seed(NodeType node, const VLabels &labels, std::string sequence, float score=0) {
         push_back(node, labels, score);
+        is_score_updated_ = false;
         num_matches_ += sequence.size();
         sequence_ += sequence;
     }
@@ -72,6 +75,9 @@ class Path {
                           std::end(path.label_set_));
         query_it_ = path.query_it_;
         score_ = score;
+        // Reset Smith-Waterman dynamic programming table intermediate values when the path is trimmed.
+        sw_num_rows_stored_ = 0;
+        sw_num_cols_stored_ = 0;
     }
     // Note: Assume score is updated by user accordingly.
     void trim(uint64_t query_trim_length, uint64_t path_trim_length) {
@@ -82,11 +88,9 @@ class Path {
         query_it_ -= query_trim_length;
         sequence_.resize(sequence_.size() - path_trim_length);
         nodes_.resize(nodes_.size() - path_trim_length);
-        if (sw_last_row_.size() >= path_trim_length
-                && sw_last_column_.size() >= query_trim_length) {
-            sw_last_row_.resize(sw_last_row_.size() - path_trim_length);
-            sw_last_column_.resize(sw_last_column_.size() - query_trim_length);
-        }
+        // Reset Smith-Waterman dynamic programming table intermediate values when the path is trimmed.
+        sw_num_rows_stored_ = 0;
+        sw_num_cols_stored_ = 0;
     }
 
     void set_query_begin_it(std::string::const_iterator query_begin_it) {
@@ -111,13 +115,28 @@ class Path {
             }
     }
 
-    void store_sw_intermediate_info(std::vector<SWDpCell>&& sw_last_row, std::vector<SWDpCell>&& sw_last_column) {
-        sw_last_row_ = std::move(sw_last_row);
-        sw_last_column_ = std::move(sw_last_column);
+    void store_sw_intermediate_info(std::vector<SWDpCell>::const_iterator sw_last_row_begin, size_t num_cols_stored,
+                                    std::vector<SWDpCell>::const_iterator sw_last_column_begin, size_t num_rows_stored) {
+        assert(num_rows_stored < sw_last_column.size());
+        assert(num_cols_stored < sw_last_row.size());
+
+        if (sw_last_row_.size() < num_cols_stored)
+            sw_last_row_.resize(2 * num_cols_stored);
+        if (sw_last_column_.size() < num_rows_stored)
+            sw_last_column_.resize(2 * num_rows_stored);
+
+        std::copy(sw_last_row_begin, sw_last_row_begin + num_cols_stored, std::begin(sw_last_row_));
+        std::copy(sw_last_column_begin, sw_last_column_begin + num_rows_stored, std::begin(sw_last_column_));
+
+        sw_num_rows_stored_ = num_rows_stored;
+        sw_num_cols_stored_ = num_cols_stored;
     }
 
-    std::vector<SWDpCell> get_sw_last_column() const { return sw_last_column_; }
-    std::vector<SWDpCell> get_sw_last_row() const { return sw_last_row_; }
+    SWDpCell get_sw_last_column(size_t i) const { return sw_last_column_[i]; }
+    SWDpCell get_sw_last_row(size_t i) const { return sw_last_row_[i]; }
+    std::vector<SWDpCell>::const_iterator get_sw_last_row_it() const { return std::begin(sw_last_row_); }
+    size_t get_sw_num_rows_stored() const { return sw_num_rows_stored_; }
+    size_t get_sw_num_cols_stored() const { return sw_num_cols_stored_; }
     void set_similar() { is_similar_ = true; }
     NodeType back() const { return nodes_.back(); }
     NodeType front() const { return nodes_.front(); }
@@ -161,6 +180,9 @@ class Path {
     // when Smith-Waterman is called multiple times.
     std::vector<SWDpCell> sw_last_row_;
     std::vector<SWDpCell> sw_last_column_;
+    size_t sw_num_rows_stored_;
+    size_t sw_num_cols_stored_;
+
     std::function<bool(const Path&, const Path&)> prioritizing_function;
 
     void push_back(NodeType node, const VLabels &labels, float score=0) {

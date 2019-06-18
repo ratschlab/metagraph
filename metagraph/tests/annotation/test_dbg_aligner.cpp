@@ -22,7 +22,7 @@ TYPED_TEST(DBGAlignerTest, align_sequence_too_short) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
-    auto path = aligner.align(std::begin(query), std::end(query));
+    auto path = aligner.align_by_graph_exploration(std::begin(query), std::end(query));
 
     EXPECT_EQ(0ull, path.size());
 }
@@ -34,7 +34,7 @@ TYPED_TEST(DBGAlignerTest, align_single_node) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
-    auto alt_paths = aligner.align(std::begin(query), std::end(query));
+    auto alt_paths = aligner.align_by_graph_exploration(std::begin(query), std::end(query));
 
     EXPECT_EQ(1ull, alt_paths.size());
     auto path = alt_paths.front();
@@ -50,7 +50,7 @@ TYPED_TEST(DBGAlignerTest, inexact_seeding) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner (graph);
-    auto alt_paths = aligner.align(std::begin(query), std::end(query));
+    auto alt_paths = aligner.align_by_graph_exploration(std::begin(query), std::end(query));
 
     EXPECT_EQ(1ull, alt_paths.size());
     auto path = alt_paths.front();
@@ -66,7 +66,7 @@ TYPED_TEST(DBGAlignerTest, align_straight) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
-    auto alt_paths = aligner.align(std::begin(query), std::end(query));
+    auto alt_paths = aligner.align_by_graph_exploration(std::begin(query), std::end(query));
 
     EXPECT_EQ(1ull, alt_paths.size());
     auto path = alt_paths.front();
@@ -84,7 +84,7 @@ TYPED_TEST(DBGAlignerTest, align_ending_branch) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
     DBGAligner aligner(graph);
-    auto alt_paths = aligner.align(std::begin(query), std::end(query));
+    auto alt_paths = aligner.align_by_graph_exploration(std::begin(query), std::end(query));
 
     EXPECT_EQ(1ull, alt_paths.size());
     auto path = alt_paths.front();
@@ -101,7 +101,7 @@ TYPED_TEST(DBGAlignerTest, align_branch) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
     DBGAligner aligner(graph);
-    auto alt_paths = aligner.align(std::begin(query), std::end(query));
+    auto alt_paths = aligner.align_by_graph_exploration(std::begin(query), std::end(query));
 
     EXPECT_EQ(1ull, alt_paths.size());
     auto path = alt_paths.front();
@@ -117,7 +117,7 @@ TYPED_TEST(DBGAlignerTest, repetitive_sequence_alignment) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
-    auto alt_paths = aligner.align(std::begin(query), std::end(query));
+    auto alt_paths = aligner.align_by_graph_exploration(std::begin(query), std::end(query));
 
     EXPECT_EQ(1ull, alt_paths.size());
     auto path = alt_paths.front();
@@ -133,7 +133,7 @@ TYPED_TEST(DBGAlignerTest, variation) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
-    auto alt_paths = aligner.align(std::begin(query), std::end(query));
+    auto alt_paths = aligner.align_by_graph_exploration(std::begin(query), std::end(query));
 
     EXPECT_EQ(1ull, alt_paths.size());
     auto path = alt_paths.front();
@@ -150,7 +150,7 @@ TYPED_TEST(DBGAlignerTest, variation_in_branching_point) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
     DBGAligner aligner(graph);
-    auto alt_paths = aligner.align(std::begin(query), std::end(query));
+    auto alt_paths = aligner.align_by_graph_exploration(std::begin(query), std::end(query));
 
     EXPECT_EQ(1ull, alt_paths.size());
     auto path = alt_paths.front();
@@ -170,7 +170,7 @@ TYPED_TEST(DBGAlignerTest, multiple_variations) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
-    auto alt_paths = aligner.align(std::begin(query), std::end(query));
+    auto alt_paths = aligner.align_by_graph_exploration(std::begin(query), std::end(query));
 
     EXPECT_EQ(1ull, alt_paths.size());
     auto path = alt_paths.front();
@@ -189,7 +189,7 @@ TYPED_TEST(DBGAlignerTest, noise_in_branching_point) {
     DBGAligner aligner(graph,
             /*num_top_paths =*/ 10,
             /*num_alternative_paths =*/ 2);
-    auto alt_paths = aligner.align(std::begin(query), std::end(query));
+    auto alt_paths = aligner.align_by_graph_exploration(std::begin(query), std::end(query));
 
     EXPECT_TRUE(alt_paths.size() > 0);
     auto path = alt_paths.front();
@@ -212,7 +212,7 @@ TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
 
     size_t max_num_alternative_paths = 4;
     DBGAligner aligner(graph, 10, max_num_alternative_paths);
-    auto alt_paths = aligner.align(std::begin(query), std::end(query));
+    auto alt_paths = aligner.align_by_graph_exploration(std::begin(query), std::end(query));
 
     EXPECT_EQ(max_num_alternative_paths, alt_paths.size());
 
@@ -223,39 +223,39 @@ TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
 //    }
 }
 
-TYPED_TEST(DBGAlignerTest, large_search_space) {
-    size_t k = 3;
-    std::string reference = "";
-    auto alphabet = {'A', 'G', 'T'};
-    for (auto first_letter : alphabet) {
-        for (auto second_letter : alphabet) {
-            for (auto third_letter : alphabet) {
-                reference = reference + first_letter +
-                            second_letter + third_letter;
-            }
-        }
-    }
-    std::string query = "AAA";
-    uint64_t unmapped_char_length = 100;
-    for (size_t i = 0; i < unmapped_char_length; i++) {
-        query += 'C';
-    }
-    auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAligner aligner (graph);
-    auto alt_paths = aligner.align(std::begin(query), std::end(query));
-
-    EXPECT_EQ(1ull, alt_paths.size());
-    auto path = alt_paths.front();
-
-    std::string aligned_query(query);
-    std::replace(aligned_query.begin(), aligned_query.end(), 'C' , 'T');
-
-    EXPECT_EQ(1ull, path.size());
-    EXPECT_EQ("AAA", path.get_sequence());
-    EXPECT_EQ("3=", path.get_cigar().substr(0, 2));
-    EXPECT_EQ(k * aligner.get_match_score(), path.get_total_score());
-//    EXPECT_EQ("", path.back().get_sequence());
-}
+//TYPED_TEST(DBGAlignerTest, large_search_space) {
+//    size_t k = 3;
+//    std::string reference = "";
+//    auto alphabet = {'A', 'G', 'T'};
+//    for (auto first_letter : alphabet) {
+//        for (auto second_letter : alphabet) {
+//            for (auto third_letter : alphabet) {
+//                reference = reference + first_letter +
+//                            second_letter + third_letter;
+//            }
+//        }
+//    }
+//    std::string query = "AAA";
+//    uint64_t unmapped_char_length = 100;
+//    for (size_t i = 0; i < unmapped_char_length; i++) {
+//        query += 'C';
+//    }
+//    auto graph = build_graph_batch<TypeParam>(k, { reference });
+//    DBGAligner aligner (graph);
+//    auto alt_paths = aligner.align_by_graph_exploration(std::begin(query), std::end(query));
+//
+//    EXPECT_EQ(1ull, alt_paths.size());
+//    auto path = alt_paths.front();
+//
+//    std::string aligned_query(query);
+//    std::replace(aligned_query.begin(), aligned_query.end(), 'C' , 'T');
+//
+//    EXPECT_EQ(1ull, path.size());
+//    EXPECT_EQ("AAA", path.get_sequence());
+//    EXPECT_EQ("3=", path.get_cigar().substr(0, 2));
+//    EXPECT_EQ(k * aligner.get_match_score(), path.get_total_score());
+////    EXPECT_EQ("", path.back().get_sequence());
+//}
 
 TYPED_TEST(DBGAlignerTest, map_to_nodes_multiple_misalignment) {
     size_t k = 4;
@@ -264,7 +264,10 @@ TYPED_TEST(DBGAlignerTest, map_to_nodes_multiple_misalignment) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
-    auto path = aligner.map_to_nodes(query);
+    auto paths = aligner.map_to_nodes(query);
+
+    EXPECT_EQ(1ull, paths.size());
+    auto path = paths.front();
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
@@ -277,7 +280,10 @@ TYPED_TEST(DBGAlignerTest, map_to_nodes_insert_non_existent) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
-    auto path = aligner.map_to_nodes(query);
+    auto paths = aligner.map_to_nodes(query);
+
+    EXPECT_EQ(1ull, paths.size());
+    auto path = paths.front();
 
     EXPECT_EQ(reference.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
@@ -290,7 +296,10 @@ TYPED_TEST(DBGAlignerTest, map_to_nodes_insert_non_existent) {
 //
 //    auto graph = build_graph_batch<TypeParam>(k, { reference });
 //    DBGAligner aligner(graph);
-//    auto path = aligner.map_to_nodes(query);
+//    auto paths = aligner.map_to_nodes(query);
+//
+//    EXPECT_EQ(1ull, paths.size());
+//    auto path = paths.front();
 //
 //    EXPECT_EQ(reference, path.get_sequence());
 //}
@@ -302,7 +311,10 @@ TYPED_TEST(DBGAlignerTest, map_to_nodes_delete) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
-    auto path = aligner.map_to_nodes(query);
+    auto paths = aligner.map_to_nodes(query);
+
+    EXPECT_EQ(1ull, paths.size());
+    auto path = paths.front();
 
     EXPECT_EQ(reference.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
@@ -315,7 +327,10 @@ TYPED_TEST(DBGAlignerTest, map_to_nodes_gap) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
-    auto path = aligner.map_to_nodes(query);
+    auto paths = aligner.map_to_nodes(query);
+
+    EXPECT_EQ(1ull, paths.size());
+    auto path = paths.front();
 
     EXPECT_EQ(reference.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
@@ -329,7 +344,10 @@ TYPED_TEST(DBGAlignerTest, map_to_nodes_straight) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
-    auto path = aligner.map_to_nodes(query);
+    auto paths = aligner.map_to_nodes(query);
+
+    EXPECT_EQ(1ull, paths.size());
+    auto path = paths.front();
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(query, path.get_sequence());
@@ -344,7 +362,10 @@ TYPED_TEST(DBGAlignerTest, map_to_nodes_inexact_seed) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
-    auto path = aligner.map_to_nodes(query);
+    auto paths = aligner.map_to_nodes(query);
+
+    EXPECT_EQ(1ull, paths.size());
+    auto path = paths.front();
 
     EXPECT_EQ(query.size() - 2 - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());

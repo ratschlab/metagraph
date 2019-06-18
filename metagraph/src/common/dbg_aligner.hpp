@@ -57,13 +57,13 @@ class DBGAligner {
     };
 
     // Align a sequence to the underlying graph based on the strategy defined in the graph.
-    std::vector<AlignedPath> align(const std::string::const_iterator &sequence_begin,
+    std::vector<AlignedPath> align_by_graph_exploration(const std::string::const_iterator &sequence_begin,
         const std::string::const_iterator &sequence_end,
         const std::function<bool(node_index, const std::string::const_iterator& query_it)>& terminate
             = [](node_index, const std::string::const_iterator&) { return false; });
 
     // Align a sequence to the underlying graph using map_to_nodes.
-    AlignedPath map_to_nodes(const std::string &sequence);
+    std::vector<AlignedPath> map_to_nodes(const std::string &sequence);
 
     // Align to nodes for both sequence and reverse complement sequence and return the higher scoring one.
     AlignedPath map_to_nodes_forward_reverse_complement(const std::string &sequence);
@@ -80,18 +80,31 @@ class DBGAligner {
     // Maximum number of paths to explore at the same time.
     size_t num_top_paths_;
     size_t num_alternative_paths_;
+
     uint8_t path_comparison_code_;
     bool verbose_;
     bool discard_similar_paths_;
     bool use_cssw_lib_;
+
     int8_t match_score_;
     float insertion_penalty_;
     float deletion_penalty_;
     float gap_opening_penalty_;
     float gap_extension_penalty_;
+
     StripedSmithWaterman::Aligner cssw_aligner_;
+
     long long merged_paths_counter_;
     size_t k_;
+
+    // Smith-Waterman method related fields.
+    // Keep only two rows of the table at a time to save space.
+    std::vector<SWDpCell>* sw_prev_row_;
+    std::vector<SWDpCell>* sw_cur_row_;
+    // Keep the last column in path to continue
+    // filling the table when path grows from that column.
+    std::vector<SWDpCell> sw_last_column_;
+
 
     // Align part of a sequence to the graph in the case of no exact map
     // based on internal strategy. Calls callback for every possible alternative path.
@@ -112,11 +125,15 @@ class DBGAligner {
 
     // Compute the edit distance between the query sequence and the aligned path
     // according to score parameters in this class.
-    void whole_path_score(AlignedPath& path, SWDpCell& global_sw) const;
+    void smith_waterman_core(AlignedPath& path, SWDpCell& global_sw);
+
+    // Perform one dynamic programming step consisting of making a choice among insertion, deletion, map and mismatch
+    // for a single cell in the dynamic programming table.
+    void smith_waterman_dp_step(size_t i, size_t j, const std::string& path_sequence, const std::string& query_sequence);
 
     // Compute Smith-Waterman score based on either CSSW library or our implementation
     // and set cigar and score in path accordingly.
-    bool smith_waterman_score(AlignedPath &path) const;
+    bool smith_waterman_score(AlignedPath &path);
 
     // Trim the path to remove unmapped regions from the tail using CSSW lib clipping.
     void trim(AlignedPath &path) const;

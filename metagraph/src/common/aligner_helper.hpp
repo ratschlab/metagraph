@@ -6,8 +6,8 @@
 #include <cassert>
 
 class Cigar {
-  public:
 
+  public:
     enum Operator {
         MATCH,
         MISMATCH_TRANSITION,
@@ -16,14 +16,18 @@ class Cigar {
         DELETION,
         CLIPPED };
 
-    size_t size() { return cigar_.size(); }
-    Operator back() { return cigar_.back().first; }
+    Cigar() {
+        cigar_.reserve(10);
+    }
+
+    size_t size() const { return cigar_.size(); }
+    Operator back() const { return cigar_.back().first; }
     uint64_t get_ref_begin() const { return ref_begin_; }
     uint64_t get_ref_end() const { return ref_end_; }
     uint64_t get_query_begin() const { return query_begin_; }
     uint64_t get_query_end() const { return query_end_; }
 
-    std::string to_string();
+    std::string to_string() const;
 
     void append(const Operator& op);
 
