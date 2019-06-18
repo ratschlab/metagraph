@@ -7,6 +7,9 @@
 #include <htslib/kseq.h>
 #include "gtest/gtest.h"
 
+#define private public
+#define protected public
+
 #include "dbg_succinct.hpp"
 #include "boss.hpp"
 #include "boss_construct.hpp"

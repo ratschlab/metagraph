@@ -1275,7 +1275,7 @@ void BOSS::print_adj_list(std::ostream &os) const {
 // add a full sequence to the graph
 void BOSS::add_sequence(const std::string &seq,
                         bool try_extend,
-                        std::vector<uint64_t> *edges_inserted) {
+                        std::vector<edge_index> *edges_inserted) {
     if (seq.size() < k_ + 1)
         return;
 
@@ -1299,10 +1299,10 @@ void BOSS::add_sequence(const std::string &seq,
 
 void BOSS::add_sequence(std::vector<TAlphabet>&& sequence,
                         bool try_extend,
-                        std::vector<uint64_t> *edges_inserted) {
+                        std::vector<edge_index> *edges_inserted) {
     assert(sequence.size() >= k_ + 1);
 
-    uint64_t source;
+    edge_index source;
 
     if (!try_extend || !(source = index(sequence.data(), sequence.data() + k_))) {
         sequence.insert(sequence.begin(), k_, kSentinelCode);
