@@ -39,15 +39,16 @@ typedef IndexRefVarLabelCallback<MaskedDeBruijnGraph::node_index,
 
 void call_bubbles(const MaskedDeBruijnGraph &masked_graph,
                   const AnnotatedDBG &anno_graph,
-                  const AnnotatedDBGIndexRefVarLabelsCallback &callback,
+                  AnnotatedDBGIndexRefVarLabelsCallback callback,
                   ThreadPool *thread_pool = nullptr,
-                  const std::function<bool()> &terminate = []() { return false; });
+                  std::function<bool()> terminate = []() { return false; });
 
 void call_breakpoints(const MaskedDeBruijnGraph &masked_graph,
                       const AnnotatedDBG &anno_graph,
-                      const AnnotatedDBGIndexRefVarLabelsCallback &callback,
+                      AnnotatedDBGIndexRefVarLabelsCallback callback,
                       ThreadPool *thread_pool = nullptr,
-                      const std::function<bool()> &terminate = []() { return false; });
+                      std::function<bool()> terminate = []() { return false; });
+
 
 } // namespace annotated_graph_algorithm
 
