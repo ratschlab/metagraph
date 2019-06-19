@@ -67,8 +67,8 @@ class Path {
     // Avoid adding duplicate nodes and chars in case of positive overlap.
     void append_path(const Path& path, int64_t overlap_length, float score) {
         is_score_updated_ = false;
-        assert(path.nodes_.size() > overlap_length);
         assert(overlap_length >= 0);
+        assert(path.nodes_.size() >= unsigned(overlap_length));
         nodes_.insert(std::end(nodes_), std::begin(path.nodes_) + overlap_length, std::end(path.nodes_));
         sequence_ += path.sequence_.substr(k_ - 1 + overlap_length);
         label_set_.insert(std::end(label_set_), std::begin(path.label_set_),
@@ -117,9 +117,6 @@ class Path {
 
     void store_sw_intermediate_info(std::vector<SWDpCell>::const_iterator sw_last_row_begin, size_t num_cols_stored,
                                     std::vector<SWDpCell>::const_iterator sw_last_column_begin, size_t num_rows_stored) {
-        assert(num_rows_stored < sw_last_column.size());
-        assert(num_cols_stored < sw_last_row.size());
-
         if (sw_last_row_.size() < num_cols_stored)
             sw_last_row_.resize(2 * num_cols_stored);
         if (sw_last_column_.size() < num_rows_stored)

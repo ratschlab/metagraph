@@ -20,7 +20,8 @@ void Cigar::append(const Operator& op) {
 
 uint64_t Cigar::clip(uint64_t gap_opening_penalty, uint64_t gap_extension_penalty,
           uint64_t mismatch_penalty_transition, uint64_t mismatch_penalty_transversion) {
-    assert(cigar_.size() == 0);
+    if (cigar_.size() == 0)
+        return 0;
     query_begin_ = 0;
     ref_begin_ = 0;
     query_end_ = 0;

@@ -198,7 +198,8 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::map_to_nodes(const std::string 
                                graph_->get_node_sequence(*non_zero_target_node_it),
                                k_ * match_score_);
 
-            target_node_it = non_zero_target_node_it + 1;
+            target_node_it = std::find_if(non_zero_target_node_it + 1, std::end(nodes),
+                                      [] (node_index node) { return node != 0; });
             last_mapped_it = std::find(std::min(target_node_it + 1, std::end(nodes)), std::end(nodes), 0) - 1;
         }
 //        std::cerr << "Stitched after filling remaining gaps from re-mapped " << stitched_path.get_sequence() << std::endl;
