@@ -203,6 +203,7 @@ call_paths_from_branch(const MaskedDeBruijnGraph &masked_graph,
                 callback(std::get<0>(path),
                          std::get<1>(path),
                          std::move(std::get<2>(path)));
+
                 if (terminate())
                     break;
             }
@@ -263,7 +264,7 @@ void call_bubbles_from_path(const MaskedDeBruijnGraph &foreground,
                             NodeIndex first,
                             std::string seq,
                             AnnotatedDBGIndexSeqLabelsCallback callback,
-                            std::function<bool()> &terminate) {
+                            std::function<bool()> terminate) {
     if (foreground.get_graph_ptr() != background.get_graph_ptr())
         throw std::runtime_error("ERROR: bubble calling in matching graphs not implemented");
 
@@ -296,23 +297,9 @@ void call_bubbles_from_path(const MaskedDeBruijnGraph &foreground,
             if (in_foreground || !in_background)
                 return;
 
-            auto count_labels = anno_graph.get_top_labels(
-                seq,
-                anno_graph.get_annotation().num_labels(),
-                1.0
-            );
-
-            if (count_labels.size()) {
-                std::vector<std::string> labels;
-                labels.reserve(count_labels.size());
-
-                std::transform(std::make_move_iterator(count_labels.begin()),
-                               std::make_move_iterator(count_labels.end()),
-                               std::back_inserter(labels),
-                               [&](auto&& pair) { return std::move(pair.first); });
-
+            auto labels = anno_graph.get_labels(seq, 1.0);
+            if (labels.size())
                 callback(first, seq, std::move(labels));
-            }
         }
     );
 }
