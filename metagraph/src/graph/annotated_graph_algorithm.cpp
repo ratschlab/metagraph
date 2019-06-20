@@ -2,6 +2,8 @@
 
 #include "annotate_column_compressed.hpp"
 #include "utils.hpp"
+#include "progress_bar.hpp"
+#include "int_vector.hpp"
 
 namespace annotated_graph_algorithm {
 
@@ -54,16 +56,17 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     // store counts interleaved
     size_t width = utils::code_length(std::max(mask_in.size(), mask_out.size()));
     size_t int_mask = (size_t(1) << width) - 1;
+
     sdsl::int_vector<> counts(mask->size(), 0, width * 2);
 
     const auto *columns = dynamic_cast<const annotate::ColumnCompressed<>*>(
         &anno_graph.get_annotation()
     );
 
+    std::vector<AnnotatedDBG::Annotator::Label> mask_in_dense, mask_out_dense;
+
     if (columns) {
         // Pick how to query annotation based on column density
-
-        std::vector<AnnotatedDBG::Annotator::Label> mask_in_dense, mask_out_dense;
         size_t density_cutoff_count = mask->size() * density_cutoff;
 
         for (const auto &label_in : mask_in) {
@@ -94,21 +97,6 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         counts.width(width * 2);
         assert(counts.size() == mask->size());
 
-        for (size_t i = 1; i < counts.size(); ++i) {
-            size_t count = counts[i];
-
-            if (keep_node(
-                    [&]() {
-                        return (count & int_mask)
-                            + count_node_labels(anno_graph, i, mask_in_dense);
-                    },
-                    [&]() {
-                        return (count >> width)
-                            + count_node_labels(anno_graph, i, mask_out_dense);
-                    }
-                ))
-                mask->set(i, true);
-        }
     } else {
         // TODO: make this more efficient for row-major annotations
         for (const auto &label_in : mask_in) {
@@ -131,11 +119,40 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         counts.width(width * 2);
         assert(counts.size() == mask->size());
 
+    }
+
+    if (utils::get_verbose())
+        std::cerr << "Generating mask" << std::endl;
+
+    if (mask_in_dense.empty() && mask_out_dense.empty()) {
+        call_nonzeros(counts,
+            [&](auto i, auto count) {
+                if (keep_node([&]() { return count & int_mask; },
+                              [&]() { return count >> width; }))
+                    mask->set(i, true);
+            }
+        );
+    } else {
+        ProgressBar progress_bar(counts.size() / 64000,
+                                 "Generating mask",
+                                 std::cerr,
+                                 !utils::get_verbose());
         for (size_t i = 1; i < counts.size(); ++i) {
-            size_t count = counts[i];
-            if (keep_node([&]() { return count & int_mask; },
-                          [&]() { return count >> width; }))
+            auto count = counts[i];
+            if (keep_node(
+                    [&]() {
+                        return (count & int_mask)
+                            + count_node_labels(anno_graph, i, mask_in_dense);
+                    },
+                    [&]() {
+                        return (count >> width)
+                            + count_node_labels(anno_graph, i, mask_out_dense);
+                    }
+                ))
                 mask->set(i, true);
+
+            if (i % 64000 == 0)
+                ++progress_bar;
         }
     }
 
