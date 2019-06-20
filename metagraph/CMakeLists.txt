@@ -360,7 +360,7 @@ add_subdirectory(
 endif()
 
 if(NOT DEFINED DEATH_TEST)
-set(DEATH_TEST)
+set(DEATH_TEST TRUE)
 endif()
 if(DEATH_TEST)
 set(DEATH_TEST_FLAG "")
