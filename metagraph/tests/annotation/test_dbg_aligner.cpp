@@ -44,9 +44,9 @@ TYPED_TEST(DBGAlignerTest, align_single_node) {
 }
 
 TYPED_TEST(DBGAlignerTest, inexact_seeding) {
-    size_t k = 3;
-    std::string reference = "CAT"  "TGTTTT";
-    std::string query =     "CCCC" "TGTTTT";
+    size_t k = 4;
+    std::string reference = "GGCC" "TGTTTG";
+    std::string query =     "ACCC" "TGTTTG";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner (graph);
@@ -55,8 +55,8 @@ TYPED_TEST(DBGAlignerTest, inexact_seeding) {
     EXPECT_EQ(1ull, alt_paths.size());
     auto path = alt_paths.front();
 
-    EXPECT_EQ(4ull, path.size());
-    EXPECT_EQ("TGTTTT", path.get_sequence());
+    EXPECT_EQ(7ull, path.size());
+    EXPECT_EQ(reference, path.get_sequence());
 }
 
 TYPED_TEST(DBGAlignerTest, align_straight) {
@@ -356,9 +356,8 @@ TYPED_TEST(DBGAlignerTest, map_to_nodes_straight) {
 
 TYPED_TEST(DBGAlignerTest, map_to_nodes_inexact_seed) {
     size_t k = 4;
-    std::string reference = "AGCTTCGAGGCCAA";
-    std::string query =     "TT";
-    query += reference;
+    std::string reference = "AAA" "AGCTTCGAGGCCAA";
+    std::string query =      "TT" "AGCTTCGAGGCCAA";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
@@ -367,9 +366,26 @@ TYPED_TEST(DBGAlignerTest, map_to_nodes_inexact_seed) {
     EXPECT_EQ(1ull, paths.size());
     auto path = paths.front();
 
-    EXPECT_EQ(query.size() - 2 - k + 1, path.size());
-    EXPECT_EQ(reference, path.get_sequence());
-    EXPECT_EQ(reference.size() * aligner.get_match_score(), path.get_total_score());
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(reference.substr(1), path.get_sequence());
+    EXPECT_EQ("14=", path.get_cigar());
+}
+
+TYPED_TEST(DBGAlignerTest, map_to_nodes_inexact_seed_snp) {
+    size_t k = 7;
+    std::string reference = "AAAAGCTT" "TCGAGGCCAA";
+    std::string query =        "ACCTT" "TCGAGGCCAA";
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAligner aligner(graph);
+    auto paths = aligner.map_to_nodes(query);
+
+    EXPECT_EQ(1ull, paths.size());
+    auto path = paths.front();
+
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(reference.substr(3), path.get_sequence());
+    EXPECT_EQ("13=", path.get_cigar());
 }
 
 TYPED_TEST(DBGAlignerTest, map_to_nodes_reverse_complement) {

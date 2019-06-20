@@ -83,6 +83,12 @@ class DBGSuccinct : public DeBruijnGraph {
                                                         = [](){ return false; },
                                            node_index seed = npos) const override final;
 
+    virtual void suffix_seeding(std::string::const_iterator begin,
+                                           std::string::const_iterator end,
+                                           const std::function<void(node_index)>& callback,
+                                           const std::function<bool()>& terminate
+                                                        = [](){ return false; }) const override final;
+
     virtual void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const override final;
 
     virtual void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const override final {

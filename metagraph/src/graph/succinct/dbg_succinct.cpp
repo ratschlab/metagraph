@@ -197,6 +197,26 @@ void DBGSuccinct::extend_from_seed(std::string::const_iterator begin,
                     callback(boss_to_kmer_index(i)); }, terminate, kmer_to_boss_index(seed));
 }
 
+void DBGSuccinct::suffix_seeding(std::string::const_iterator begin,
+                                           std::string::const_iterator end,
+                                           const std::function<void(node_index)>& callback,
+                                           const std::function<bool()>& terminate) const {
+    assert(end > begin);
+    std::string short_seed(begin, end);
+    auto encoded_short_seed = boss_graph_->encode(short_seed);
+    auto boss_index_range = boss_graph_->index_range(std::begin(encoded_short_seed), std::end(encoded_short_seed));
+    if (boss_index_range.first == 0 || boss_index_range.second == 0)
+        return;
+    for (auto boss_index_range_it = boss_index_range.first;
+         boss_index_range_it <= boss_index_range.second && !terminate();
+         ++ boss_index_range_it) {
+        boss_graph_->call_adjacent_incoming_edges(boss_index_range_it,
+                [&](BOSS::edge_index incoming_edge_idx) {
+                auto kmer_index = boss_to_kmer_index(incoming_edge_idx);
+                if (kmer_index != npos) callback(kmer_index); });
+    }
+}
+
 // Map sequence k-mers to the canonical graph nodes
 // and run callback for each node until the termination condition is satisfied
 void DBGSuccinct::map_to_nodes(const std::string &sequence,

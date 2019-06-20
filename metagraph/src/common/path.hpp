@@ -66,9 +66,13 @@ class Path {
     // Append a path to the current object. Fills in 0 in case of spaced nodes.
     // Avoid adding duplicate nodes and chars in case of positive overlap.
     void append_path(const Path& path, int64_t overlap_length, float score) {
-        is_score_updated_ = false;
         assert(overlap_length >= 0);
         assert(path.nodes_.size() >= unsigned(overlap_length));
+
+        if (size() == 0) {
+            this->seed(path.front(), {}, path.sequence_.substr(0, k_));
+            overlap_length += 1;
+        }
         nodes_.insert(std::end(nodes_), std::begin(path.nodes_) + overlap_length, std::end(path.nodes_));
         sequence_ += path.sequence_.substr(k_ - 1 + overlap_length);
         label_set_.insert(std::end(label_set_), std::begin(path.label_set_),
@@ -78,6 +82,8 @@ class Path {
         // Reset Smith-Waterman dynamic programming table intermediate values when the path is trimmed.
         sw_num_rows_stored_ = 0;
         sw_num_cols_stored_ = 0;
+
+        is_score_updated_ = false;
     }
     // Note: Assume score is updated by user accordingly.
     void trim(uint64_t query_trim_length, uint64_t path_trim_length) {

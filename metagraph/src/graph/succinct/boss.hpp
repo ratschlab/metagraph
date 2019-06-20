@@ -496,6 +496,8 @@ class BOSS {
         return index_range(begin, end).second;
     }
 
+  public:
+
     /**
      * Given a node label str, this function returns the index range
      * of nodes sharing the suffix str, if no such range exists, the pair
@@ -550,6 +552,8 @@ class BOSS {
         assert(rl <= ru);
         return std::make_pair(rl, ru);
     }
+
+  private:
 
     // TODO: revise the implementation, write unit tests
     std::vector<HitInfo> index_fuzzy(const std::string &str,

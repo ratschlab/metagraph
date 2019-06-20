@@ -97,6 +97,13 @@ class DeBruijnGraph : public SequenceGraph {
                                                         = [](){ return false; },
                                            node_index seed = npos) const;
 
+    virtual void suffix_seeding(std::string::const_iterator,
+                                           std::string::const_iterator,
+                                           const std::function<void(node_index)>&,
+                                           const std::function<bool()>&) const {
+            throw std::runtime_error("Not implemented");
+    }
+
     // TODO: move to graph_algorithm.hpp
     virtual void call_sequences(const std::function<void(const std::string&)> &callback) const;
     virtual void call_unitigs(const std::function<void(const std::string&)> &callback,
