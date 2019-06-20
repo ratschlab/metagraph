@@ -68,6 +68,18 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override final;
 
+
+    // Find a maximal suffix of the string delimited by begin and end such that
+    // a range of nodes matches it, and call all nodes. If more than max_num_allowed_matches
+    // are found, or if the length of the maximal suffix is less than min_match_length,
+    // return without calling.
+    template <class StringIt>
+    void call_nodes_with_suffix(StringIt begin,
+                                StringIt end,
+                                const std::function<void(node_index, uint64_t /* match length */)>& callback,
+                                size_t min_match_length = 1,
+                                size_t max_num_allowed_matches = std::numeric_limits<size_t>::max()) const;
+
     virtual void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const override final;
 
     virtual void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const override final;

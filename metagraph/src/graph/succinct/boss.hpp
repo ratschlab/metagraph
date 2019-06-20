@@ -376,6 +376,67 @@ class BOSS {
     TAlphabet encode(char s) const;
     std::vector<TAlphabet> encode(const std::string &sequence) const;
 
+    /**
+     * Given iterators to an input sequence, this function finds the index range
+     * of nodes with the maximal length suffix matching a prefix of the sequence.
+     * The tuple includes the indices of the boundary nodes (inclusive) and an
+     * iterator to the first character in the input not matched (end if the full
+     * sequence matched). If a match is not found, it returns std::make_tuple(0, 0, begin)
+     */
+    template <typename RandomAccessIt>
+    std::tuple<edge_index, edge_index, RandomAccessIt>
+    index_range(RandomAccessIt begin, RandomAccessIt end) const {
+        static_assert(std::is_same<TAlphabet&, decltype(*begin)>::value,
+                      "Only encoded sequences can be queried");
+
+        assert(end >= begin);
+        assert(end <= begin + k_);
+
+        if (begin == end)
+            return std::make_tuple(edge_index(1), edge_index(1), begin);
+
+        // check if all characters belong to the alphabet
+        if (std::any_of(begin, end, [&](TAlphabet c) { return c >= alph_size; }))
+            return std::make_tuple(edge_index(0), edge_index(0), begin);
+
+        // get first
+        TAlphabet s = *begin;
+
+        // initial range
+        edge_index rl = F_.at(s) + 1 < W_->size()
+                        ? succ_last(F_.at(s) + 1)
+                        : W_->size(); // lower bound
+        edge_index ru = s < F_.size() - 1
+                        ? F_.at(s + 1)
+                        : W_->size() - 1; // upper bound
+        if (rl > ru)
+            return std::make_tuple(edge_index(0), edge_index(0), begin);
+
+        auto it = begin + 1;
+        // update range iteratively while scanning through s
+        for (; it != end; ++it) {
+            s = *it;
+
+            // Include the head of the first node with the given suffix.
+            rl = pred_last(rl - 1) + 1;
+
+            // Tighten the range including all edges where
+            // the source nodes have the given suffix.
+            uint64_t rk_rl = rank_W(rl - 1, s) + 1;
+            uint64_t rk_ru = rank_W(ru, s);
+            if (rk_rl > rk_ru)
+                return std::make_tuple(rl, ru, it);
+
+            uint64_t offset = rank_last(F_[s]);
+
+            // select the index of the position in last that is rank many positions after offset
+            ru = select_last(offset + rk_ru);
+            rl = select_last(offset + rk_rl);
+        }
+        assert(rl <= ru);
+        return std::make_tuple(rl, ru, it);
+    }
+
     const TAlphabet alph_size;
     const std::string &alphabet;
 
@@ -479,62 +540,9 @@ class BOSS {
 
         assert(begin + k_ == end);
 
-        return index_range(begin, end).second;
-    }
+        auto match = index_range(begin, end);
 
-    /**
-     * Given a node label str, this function returns the index range
-     * of nodes sharing the suffix str, if no such range exists, the pair
-     * (0, 0) is returnd.
-     */
-    template <typename RandomAccessIt>
-    std::pair<uint64_t, uint64_t> index_range(RandomAccessIt begin,
-                                              RandomAccessIt end) const {
-        static_assert(std::is_same<TAlphabet&, decltype(*begin)>::value,
-                      "Only encoded sequences can be queried");
-
-        assert(end > begin);
-        assert(end <= begin + k_);
-
-        // check if all characters belong to the alphabet
-        if (std::any_of(begin, end, [&](TAlphabet c) { return c >= alph_size; }))
-            return std::make_pair(0, 0);
-
-        // get first
-        TAlphabet s = *begin;
-
-        // initial range
-        edge_index rl = F_.at(s) + 1 < W_->size()
-                        ? succ_last(F_.at(s) + 1)
-                        : W_->size(); // lower bound
-        edge_index ru = s < F_.size() - 1
-                        ? F_.at(s + 1)
-                        : W_->size() - 1; // upper bound
-        if (rl > ru)
-            return std::make_pair(0, 0);
-
-        // update range iteratively while scanning through s
-        for (auto it = ++begin; it != end; ++it) {
-            s = *it;
-
-            // Include the head of the first node with the given suffix.
-            rl = pred_last(rl - 1) + 1;
-
-            // Tighten the range including all edges where
-            // the source nodes have the given suffix.
-            uint64_t rk_rl = rank_W(rl - 1, s) + 1;
-            uint64_t rk_ru = rank_W(ru, s);
-            if (rk_rl > rk_ru)
-                return std::make_pair(0, 0);
-
-            uint64_t offset = rank_last(F_[s]);
-
-            // select the index of the position in last that is rank many positions after offset
-            ru = select_last(offset + rk_ru);
-            rl = select_last(offset + rk_rl);
-        }
-        assert(rl <= ru);
-        return std::make_pair(rl, ru);
+        return std::get<2>(match) == end ? std::get<1>(match) : 0;
     }
 
     // TODO: revise the implementation, write unit tests

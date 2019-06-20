@@ -919,8 +919,8 @@ std::vector<node_index> BOSS::map_to_nodes(const std::string &sequence,
     std::vector<node_index> indices;
 
     for (size_t i = 0; i + kmer_size <= seq_encoded.size(); ++i) {
-        edge_index edge = index_range(seq_encoded.data() + i,
-                                      seq_encoded.data() + i + kmer_size).second;
+        edge_index edge = index(seq_encoded.data() + i,
+                                seq_encoded.data() + i + kmer_size);
         node_index node = edge ? get_source_node(edge) : npos;
         indices.push_back(node);
 
