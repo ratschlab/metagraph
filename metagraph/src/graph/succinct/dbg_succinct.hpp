@@ -67,10 +67,7 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const override final;
 
-    virtual void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const override final {
-        // TODO: Implement
-        throw std::runtime_error("Not implemented");
-    }
+    virtual void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const override final;
 
     virtual size_t outdegree(node_index node) const override final;
     virtual size_t indegree(node_index node) const override final;
