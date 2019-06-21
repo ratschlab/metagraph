@@ -105,6 +105,11 @@ class DBGAligner {
     // filling the table when path grows from that column.
     std::vector<SWDpCell> sw_last_column_;
 
+    // Seed the paths. In case of no exact seed, run suffix seeding. To find the size of suffix to seed based on,
+    // Perform binary search and report a value of suffix seeding lead to more than 0, but limited number of seeds.
+    // If too many seeds are extractable, it is possible that some seeds are discarded which leads to possible poor alignment.
+    void suffix_seed(BoundedPriorityQueue<AlignedPath>& queue, const std::string::const_iterator &sequence_begin,
+                     const std::string::const_iterator &sequence_end) const;
 
     // Align part of a sequence to the graph in the case of no exact map
     // based on internal strategy. Calls callback for every possible alternative path.

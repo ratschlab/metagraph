@@ -79,7 +79,6 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::map_to_nodes(const std::string 
     std::vector<node_index> nodes;
     graph_->map_to_nodes(sequence, [&] (node_index node) { nodes.push_back(node); });
 
-
     auto nodes_begin = std::begin(nodes);
     auto sequence_begin = std::begin(sequence);
     auto nodes_end = std::end(nodes);
@@ -110,8 +109,6 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::map_to_nodes(const std::string 
         auto unmapped_string_begin_it = sequence_begin + (last_mapped_it - nodes_begin);
         // Explore to find alignments.
 //        std::cerr << "Calling align for seq of length " << std::end(sequence) - unmapped_string_begin_it << std::endl;
-//        std::cerr << "First node index " << *(unmapped_string_begin_it - sequence_begin + nodes_begin) << std::endl;
-//        std::cerr << "First node index kmer" << graph_->get_node_sequence(*(unmapped_string_begin_it - sequence_begin + nodes_begin)) << std::endl;
 //        std::cerr << "Calling align for " << std::string(unmapped_string_begin_it, end(sequence)) << std::endl;
         auto re_mapped_paths = align_by_graph_exploration(unmapped_string_begin_it, std::end(sequence),
                                      [&] (node_index node,
@@ -124,7 +121,6 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::map_to_nodes(const std::string 
                 if (nodes[index_in_original_seq] == node && node != 0 &&
                     graph_->outdegree(node) <= 1 &&
                     index_in_original_seq != last_mapped_it - nodes_begin) {
-//                    std::cerr << "Terminating align for " << graph_->get_node_sequence(node) << std::endl;
                     return true;
                 }
                 return false;
@@ -212,6 +208,60 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::map_to_nodes(const std::string 
     return alternative_paths_vec;
 }
 
+void DBGAligner::suffix_seed(BoundedPriorityQueue<AlignedPath>& queue,
+                             const std::string::const_iterator &sequence_begin,
+                             const std::string::const_iterator &sequence_end) const {
+
+    AlignedPath path(k_, sequence_begin, sequence_begin, path_comparison_code_);
+
+    // TODO: perform inexact seeding in case of DBGs other than BOSS by skipping ahead.
+    auto seed = graph_->kmer_to_node(std::string(sequence_begin, sequence_begin + k_));
+    if (seed != graph_->npos) {
+        path.seed(seed, {}, graph_->get_node_sequence(seed));
+        queue.push(std::move(path));
+        return;
+    }
+    // Inexact seeding.
+    auto begin = path.get_query_begin_it();
+    // A while loop helps to pick a starting position where there aren't too many suffix seeds found.
+    // Too many suffix seeds are expensive to explore and may lead to discarding desirable seeds incorrectly.
+    while (begin < sequence_end) {
+        size_t k_for_seeding_l = 1;
+        size_t k_for_seeding_r = k_;
+//        std::cerr << "inexact seeding " << std::endl;
+
+        // Perform binary search to find the maximum k_for_seeding for which a seed can be found.
+        while (k_for_seeding_l + 1 < k_for_seeding_r) {
+            size_t k_for_seeding_m = (k_for_seeding_l + k_for_seeding_r) / 2;
+            bool seed_found = false;
+            graph_->suffix_seeding(begin + k_ - k_for_seeding_m, begin + k_,
+                    [&] (node_index) { seed_found = true; },
+                    [&] () { return seed_found; });
+            if (seed_found)
+                k_for_seeding_l = k_for_seeding_m;
+            else
+                k_for_seeding_r = k_for_seeding_m;
+        }
+        // Seed by suffix with the k values searched before.
+        size_t suffix_seed_counter = 0;
+        graph_->suffix_seeding(begin + k_ - k_for_seeding_l, begin + k_, [&] (node_index node) {
+            auto alternative_path(path);
+//            std::cerr << "seeding alternative: " << graph_->get_node_sequence(node) << std::endl;
+            alternative_path.seed(node, {}, graph_->get_node_sequence(node));
+            queue.push(std::move(alternative_path));
+            suffix_seed_counter ++;
+            }, [&](){ return suffix_seed_counter >= num_top_paths_; });
+        // If at most num_top_paths_ number of seeds were found, end this loop and start extending the seeds.
+        // TODO: When should we interpret the number of extracted suffixes as enough?
+        if (suffix_seed_counter < num_top_paths_/2 && suffix_seed_counter > 0)
+            return;
+//        std::cerr << "Continue alignment with l and r: " << k_for_seeding_l << ", " << k_for_seeding_r << std::endl;
+        begin += k_ - k_for_seeding_r + 1;
+        queue = BoundedPriorityQueue<AlignedPath>(num_top_paths_);
+    }
+    std::cout << "Warning! path is not seeded properly" << std::endl;
+}
+
 std::vector<DBGAligner::AlignedPath> DBGAligner::align_by_graph_exploration(const std::string::const_iterator &sequence_begin, const std::string::const_iterator &sequence_end,
                                                        const std::function<bool(node_index, const std::string::const_iterator& query_it)>& terminate) {
     if (sequence_begin + k_ > sequence_end)
@@ -223,34 +273,7 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::align_by_graph_exploration(cons
     BoundedPriorityQueue<AlignedPath> queue(num_top_paths_);
     AlignedPath path(k_, sequence_begin, sequence_begin, path_comparison_code_);
 
-    if (graph_->kmer_to_node(std::string(sequence_begin, sequence_begin + k_)) != 0) {
-        queue.push(path);
-    } else { // Inexact seeding.
-        auto begin = path.get_query_begin_it();
-        size_t k_for_seeding_l = 1;
-        size_t k_for_seeding_r = k_ - 1;
-
-        // Perform binary search to find the maximum k_for_seeding for which a seed can be found.
-        while (k_for_seeding_l + 1 < k_for_seeding_r) {
-            size_t k_for_seeding_m = (k_for_seeding_l + k_for_seeding_r) / 2;
-            bool seed_found = false;
-            graph_->suffix_seeding(begin + k_for_seeding_m, begin + k_,
-                    [&] (node_index) { seed_found = true; },
-                    [&] () { return seed_found; });
-            if (seed_found)
-                k_for_seeding_l = k_for_seeding_m;
-            else
-                k_for_seeding_r = k_for_seeding_m;
-        }
-        // Seed by suffix with the k values searched before.
-        graph_->suffix_seeding(begin + k_for_seeding_l, begin + k_, [&] (node_index node) {
-            auto alternative_path(path);
-//            std::cerr << "seeding alternative: " << graph_->get_node_sequence(node) << std::endl;
-            alternative_path.seed(node, {}, graph_->get_node_sequence(node));
-            queue.push(std::move(alternative_path));
-            }, [](){ return false; });
-    }
-
+    suffix_seed(queue, sequence_begin, sequence_end);
     // Graph exploration process.
     while (!queue.empty() && alternative_paths.size() < num_alternative_paths_) {
         path = std::move(queue.top());

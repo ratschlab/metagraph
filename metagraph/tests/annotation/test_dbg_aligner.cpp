@@ -43,12 +43,13 @@ TYPED_TEST(DBGAlignerTest, align_single_node) {
     EXPECT_EQ("CAT", path.get_sequence());
 }
 
-TYPED_TEST(DBGAlignerTest, inexact_seeding) {
+TEST(DBGAlignerTest, inexact_seeding) {
     size_t k = 4;
     std::string reference = "GGCC" "TGTTTG";
     std::string query =     "ACCC" "TGTTTG";
 
-    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    auto graph = std::make_shared<DBGSuccinct>(k);
+    graph->add_sequence(reference);
     DBGAligner aligner (graph);
     auto alt_paths = aligner.align_by_graph_exploration(std::begin(query), std::end(query));
 
@@ -354,12 +355,13 @@ TYPED_TEST(DBGAlignerTest, map_to_nodes_straight) {
     EXPECT_EQ(query.size() * aligner.get_match_score(), path.get_total_score());
 }
 
-TYPED_TEST(DBGAlignerTest, map_to_nodes_inexact_seed) {
+TEST(DBGAlignerTest, map_to_nodes_inexact_seed) {
     size_t k = 4;
     std::string reference = "AAA" "AGCTTCGAGGCCAA";
     std::string query =      "TT" "AGCTTCGAGGCCAA";
 
-    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    auto graph = std::make_shared<DBGSuccinct>(k);
+    graph->add_sequence(reference);
     DBGAligner aligner(graph);
     auto paths = aligner.map_to_nodes(query);
 
@@ -371,12 +373,13 @@ TYPED_TEST(DBGAlignerTest, map_to_nodes_inexact_seed) {
     EXPECT_EQ("14=", path.get_cigar());
 }
 
-TYPED_TEST(DBGAlignerTest, map_to_nodes_inexact_seed_snp) {
+TEST(DBGAlignerTest, map_to_nodes_inexact_seed_snp) {
     size_t k = 7;
     std::string reference = "AAAAGCTT" "TCGAGGCCAA";
     std::string query =        "ACCTT" "TCGAGGCCAA";
 
-    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    auto graph = std::make_shared<DBGSuccinct>(k);
+    graph->add_sequence(reference);
     DBGAligner aligner(graph);
     auto paths = aligner.map_to_nodes(query);
 
@@ -387,15 +390,17 @@ TYPED_TEST(DBGAlignerTest, map_to_nodes_inexact_seed_snp) {
     EXPECT_EQ(reference.substr(3), path.get_sequence());
     EXPECT_EQ("13=", path.get_cigar());
 }
-
-TYPED_TEST(DBGAlignerTest, map_to_nodes_reverse_complement) {
+// TODO: Back to typed test when inexact seeding with graphs other than BOSS is handled.
+TEST(DBGAlignerTest, map_to_nodes_reverse_complement) {
     size_t k = 4;
     std::string reference = "AGCTTCGAGGCCAA";
     std::string query = reference;
     std::string rev_comp_query(query);
     reverse_complement(rev_comp_query.begin(), rev_comp_query.end());
 
-    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    auto graph = std::make_shared<DBGSuccinct>(k);
+    graph->add_sequence(reference);
+    graph->mask_dummy_kmers(1, false);
     DBGAligner aligner(graph);
     auto path = aligner.map_to_nodes_forward_reverse_complement(rev_comp_query);
 
