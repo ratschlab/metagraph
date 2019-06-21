@@ -97,6 +97,7 @@ std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename
 template <class DefaultGraphType = DBGSuccinct>
 std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
     auto graph_type = parse_graph_extension(filename);
+    //TODO: need a way to instantiate and load weighted version of each graph type, without doubling the cases of this switch statement
     switch (graph_type) {
         case Config::GraphType::SUCCINCT:
             return load_critical_graph_from_file<DBGSuccinct>(filename);
@@ -592,16 +593,16 @@ void print_stats(const DeBruijnGraph &graph) {
     std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
     std::cout << "canonical mode: " << (graph.is_canonical_mode() ? "yes" : "no") << std::endl;
 
-    if (dynamic_cast<const WeightedDBG<> *>(&graph)) {
-        const auto &weighted_dbg = dynamic_cast<const WeightedDBG<> &>(graph);
+    if (dynamic_cast<const Weighted<>*>(&graph)) {
+        const auto &weighted = dynamic_cast<const Weighted<>&>(graph);
         double sum_weights = 0;
-        for (uint64_t i = 1; i <= weighted_dbg.num_nodes(); ++i) {
-            sum_weights += weighted_dbg.get_weight(i);
+        for (uint64_t i = 1; i <= weighted.num_weights(); ++i) {
+            sum_weights += weighted.get_weight(i);
         }
         std::cout << "sum weights: " << sum_weights << std::endl;
 
-        for (uint64_t i = 1; i <= weighted_dbg.num_nodes(); ++i) {
-            std::cout << weighted_dbg.get_weight(i) << " ";
+        for (uint64_t i = 1; i <= weighted.num_weights(); ++i) {
+            std::cout << weighted.get_weight(i) << " ";
         }
         std::cout << std::endl;
     }
@@ -910,10 +911,12 @@ int main(int argc, const char *argv[]) {
                 if (config->count_kmers) {
                     sdsl::int_vector<> kmer_counts;
                     graph_data.initialize_boss(boss_graph.get(), &kmer_counts);
-                    graph.reset(new WeightedDBG<>(
-                        std::make_shared<DBGSuccinct>(boss_graph.release(), config->canonical),
-                        std::move(kmer_counts)
-                    ));
+                    auto weighted_graph = std::make_unique<WeightedDBGSuccinct>(
+                        boss_graph.release(),
+                        config->canonical
+                    );
+                    weighted_graph->set_weights(kmer_counts);
+                    graph.reset(weighted_graph.release());
                 } else {
                     graph_data.initialize_boss(boss_graph.get());
                     graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
@@ -1591,9 +1594,7 @@ int main(int argc, const char *argv[]) {
             if (config->verbose)
                 std::cout << "Graph loading...\t" << std::flush;
 
-            auto weighted_graph = std::make_shared<WeightedDBG<>>(
-                std::make_shared<DBGSuccinct>(2)
-            );
+            auto weighted_graph = std::make_shared<WeightedDBGSuccinct>(2);
             if (!weighted_graph->load(files.at(0))) {
                 std::cerr << "ERROR: Cannot load succinct weighted graph from "
                           << files.at(0) << std::endl;
@@ -1654,17 +1655,18 @@ int main(int argc, const char *argv[]) {
         }
         case Config::STATS: {
             for (const auto &file : files) {
-                auto graph = load_critical_dbg(file);
+                std::shared_ptr<DeBruijnGraph> graph;
+
+                //TODO: either document flag in usage, or infer weighted by presence of .weights file
                 if (config->count_kmers) {
-                    graph = std::make_unique<WeightedDBG<>>(
-                        graph,
-                        sdsl::int_vector<>(graph->num_nodes() + 1, 0, 1)
-                    );
+                    graph = std::make_shared<WeightedDBGSuccinct>(2);
                     if (!graph->load(file)) {
                         std::cerr << "Can't load weighted graph from file "
                                   << file << std::endl;
                         exit(1);
                     }
+                } else {
+                    graph = load_critical_dbg(file);
                 }
 
                 std::cout << "Statistics for graph " << file << std::endl;
