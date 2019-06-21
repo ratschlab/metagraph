@@ -2389,7 +2389,9 @@ int main(int argc, const char *argv[]) {
                         std::transform(
                             labels.begin(), labels.end(),
                             labels.begin(),
-                            [&](auto &label) { return taxid_mapper->gb_to_taxid(label); }
+                            [&](const auto &label) {
+                                return std::to_string(taxid_mapper->gb_to_taxid(label));
+                            }
                         );
 
                         std::cout << "\t" << utils::join_strings(labels, ",");
