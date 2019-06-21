@@ -2,116 +2,48 @@
 #define __WEIGHTED_GRAPH_HPP__
 
 #include "sequence_graph.hpp"
-
+#include "dbg_succinct.hpp"
 
 template <typename Weights = sdsl::int_vector<>>
-class WeightedDBG : public DeBruijnGraph {
+class Weighted {
   public:
     using weight = typename Weights::value_type;
     using node_index = typename DeBruijnGraph::node_index;
 
-    WeightedDBG(std::shared_ptr<DeBruijnGraph> graph, Weights&& weights);
+    virtual uint64_t num_weights() const = 0;
+    virtual void set_weights(const Weights &weights) = 0;
+    virtual weight get_weight(node_index i) const = 0;
+};
 
-    WeightedDBG(std::shared_ptr<DeBruijnGraph> graph);
 
-    virtual ~WeightedDBG() {}
+template <class T, typename Weights = sdsl::int_vector<>>
+class WeightedMixin : public T, public Weighted<Weights> {
 
-    /**
-     * Weight functions
-     */
+    //TODO: better if WeightedMixin<DeBruijnGraph> were possible
+    static_assert(std::is_base_of<DeBruijnGraph, T>::value);
+    static_assert(!std::is_same<DeBruijnGraph, T>::value);
 
-    // virtual void set_weights() { weights_ = std::move(weights); }
-    virtual weight get_weight(node_index i) const { return weights_[i]; }
+    using T::T;
 
-    /**
-     * Graph functions
-     */
+  public:
 
-    virtual size_t get_k() const { return graph_->get_k(); }
+    using W = Weighted<Weights>;
+    using typename W::weight;
+    using typename W::node_index;
 
-    virtual bool is_canonical_mode() const { return graph_->is_canonical_mode(); }
-
-    // Traverse the outgoing edge
-    virtual node_index traverse(node_index node, char next_char) const {
-        return graph_->traverse(node, next_char);
-    }
-    // Traverse the incoming edge
-    virtual node_index traverse_back(node_index node, char prev_char) const {
-        return graph_->traverse_back(node, prev_char);
-    }
-
-    // Traverse graph mapping sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied.
-    // Guarantees that nodes are called in the same order as the input sequence.
-    // In canonical mode, non-canonical k-mers are not mapped to canonical ones
-    virtual void map_to_nodes_sequentially(std::string::const_iterator begin,
-                                           std::string::const_iterator end,
-                                           const std::function<void(node_index)> &callback,
-                                           const std::function<bool()> &terminate) const {
-        graph_->map_to_nodes_sequentially(begin, end, callback, terminate);
-    }
-
-    virtual size_t outdegree(node_index node) const { return graph_->outdegree(node); }
-    virtual size_t indegree(node_index node) const { return graph_->indegree(node); }
-
-    virtual void call_outgoing_kmers(node_index kmer,
-                                     const OutgoingEdgeCallback &callback) const {
-        graph_->call_outgoing_kmers(kmer, callback);
-    }
-
-    virtual void call_incoming_kmers(node_index kmer,
-                                     const IncomingEdgeCallback &callback) const {
-        graph_->call_incoming_kmers(kmer, callback);
-    }
-
-    // Insert sequence to graph and mask the inserted nodes if |nodes_inserted|
-    // is passed. If passed, |nodes_inserted| must have length equal
-    // to the number of nodes in graph.
-    virtual void add_sequence(const std::string & /* sequence */,
-                              bit_vector_dyn * /* nodes_inserted */) {
-        throw std::runtime_error("Not implemented");
-    }
-
-    // Traverse graph mapping sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied
-    virtual void map_to_nodes(const std::string &sequence,
-                              const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate = [](){ return false; }) const {
-        graph_->map_to_nodes(sequence, callback, terminate);
-    }
-
-    // Given a node index and a pointer to a vector of node indices, iterates
-    // over all the outgoing edges and pushes back indices of their target nodes.
-    virtual void adjacent_outgoing_nodes(node_index node,
-                                         std::vector<node_index> *target_nodes) const {
-        graph_->adjacent_outgoing_nodes(node, target_nodes);
-    }
-    // Given a node index and a pointer to a vector of node indices, iterates
-    // over all the incoming edges and pushes back indices of their source nodes.
-    virtual void adjacent_incoming_nodes(node_index node,
-                                         std::vector<node_index> *source_nodes) const {
-        graph_->adjacent_incoming_nodes(node, source_nodes);
-    }
-
-    virtual uint64_t num_nodes() const { return graph_->num_nodes(); }
-
-    // Get string corresponding to |node_index|.
-    // Note: Not efficient if sequences in nodes overlap. Use sparingly.
-    virtual std::string get_node_sequence(node_index node) const {
-        return graph_->get_node_sequence(node);
-    }
+    virtual uint64_t num_weights() const { return T::num_nodes(); };
+    virtual void set_weights(const Weights &weights) { weights_ = std::move(weights); };
+    virtual weight get_weight(node_index i) const { return weights_[i]; };
 
     virtual bool load(const std::string &filename_base);
     virtual void serialize(const std::string &filename_base) const;
-    virtual std::string file_extension() const { return graph_->file_extension(); }
-
-    virtual const std::string& alphabet() const { return graph_->alphabet(); }
 
   private:
-    std::shared_ptr<DeBruijnGraph> graph_;
     Weights weights_;
 
     static constexpr auto kWeightsExtension = ".weights";
 };
+
+typedef WeightedMixin<DBGSuccinct> WeightedDBGSuccinct;
 
 #endif // __WEIGHTED_GRAPH_HPP__
