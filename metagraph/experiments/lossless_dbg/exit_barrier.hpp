@@ -11,70 +11,89 @@ using namespace std;
 #ifndef METAGRAPH_waiting_queue_HPP
 #define METAGRAPH_waiting_queue_HPP
 
-struct exit_barrier_element_t {
-    int64_t relative_position;
-    uint64_t node;
-    char traversed_edge;
-    friend ostream& operator<<(ostream& os, const exit_barrier_element_t& dt);
-};
-
-ostream& operator<<(ostream& os, const exit_barrier_element_t& wt)
-{
-    os << ",rp=" << wt.relative_position << ",node=" << wt.node << ",tedg=" << wt.traversed_edge << "]";
-    return os;
-}
-using exit_barrier_t = vector<exit_barrier_element_t>;
+//struct exit_barrier_element_t {
+//    int64_t relative_position;
+//    uint64_t edge;// node + last 8 bits is traversed edge
+//    friend ostream& operator<<(ostream& os, const exit_barrier_element_t& dt);
+//};
+#define edges first
+#define relative_positions second
+constexpr int max_threads = 32;
+using exit_barrier_t = pair<array<uint64_t,max_threads>,array<uint32_t,max_threads>>;
 
 template <typename BitVector=sdsl::bit_vector,typename RankSupport=sdsl::rank_support_v<1>>
 class ExitBarrier {
 public:
     ExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chunk_size=DefaultChunks) :
-        exit_barriers(is_element,rank_is_element,chunk_size), exit_barrier_locks(is_element, rank_is_element, chunk_size) {
+        exit_barriers(is_element,rank_is_element,chunk_size)
+#ifndef DISABLE_PARALELIZATION
+        , exit_barrier_locks(is_element, rank_is_element, chunk_size)
+#endif
+        {
         for(int64_t i=0;i<exit_barriers.elements.size();i++) {
             using BarrierT = typename decltype(exit_barriers)::element_type;
-            exit_barriers.elements[i] = BarrierT(get_num_threads(),{0});
+            //exit_barriers.elements[i] = BarrierT(get_num_threads(),{0});
+            exit_barriers.elements[i] = {{0},{0}};
+#ifndef DISABLE_PARALELIZATION
             omp_init_lock(&exit_barrier_locks.elements[i]);
+#endif
         }
     }
     ~ExitBarrier(){
         for(int64_t i=0;i<exit_barriers.elements.size();i++) {
+#ifndef DISABLE_PARALELIZATION
             omp_destroy_lock(&exit_barrier_locks.elements[i]);
+#endif
         }
     }
 
     ChunkedDenseHashMap<exit_barrier_t,BitVector, RankSupport,false> exit_barriers;
+#ifndef DISABLE_PARALELIZATION
     ChunkedDenseHashMap<omp_lock_t,BitVector,RankSupport,false> exit_barrier_locks;
+#endif
 
-    int64_t exit(int64_t node, int tid) {
+    int64_t exit(uint64_t node, int tid) {
+#ifndef DISABLE_PARALELIZATION
         auto exit_barrier_lock = exit_barrier_locks.ptr_to(node);
         omp_set_lock(exit_barrier_lock);
+#endif
         auto& exit_barrier = exit_barriers[node];
-        auto& myself = exit_barrier[tid];
+        auto& my_edge = exit_barrier.edges[tid];
         auto result = update_myself_after_wakeup(exit_barrier,tid);
         // remove myself after wakeup
-        myself.node = 0;
+        my_edge = 0;
+        #ifndef DISABLE_PARALELIZATION
         omp_unset_lock(exit_barrier_lock);
+        #endif
         return result;
     }
 
-    void enter(int64_t node, char traversed_edge, int64_t relative_position, int tid) {
+    void enter(uint64_t node, char traversed_edge, int64_t relative_position, int tid) {
+        #ifndef DISABLE_PARALELIZATION
         auto exit_barrier_lock = exit_barrier_locks.ptr_to(node);
         omp_set_lock(exit_barrier_lock);
+#endif
         // add myself before sleep
         auto& exit_barrier = exit_barriers[node];
-        auto& myself = exit_barrier[tid];
-        myself.node = node;
-        myself.traversed_edge = traversed_edge;
-        myself.relative_position = relative_position;
+        auto& stored_edge = exit_barrier.edges[tid];
+        auto& stored_relative_position = exit_barrier.relative_positions[tid];
+        stored_edge = node & (((uint64_t)traversed_edge)<<(7*8));
+        stored_relative_position = relative_position;
         update_others_before_sleep(exit_barrier,tid);
+        #ifndef DISABLE_PARALELIZATION
         omp_unset_lock(exit_barrier_lock);
+#endif
     }
 
     void update_others_before_sleep(exit_barrier_t &exit_barrier, int tid) {
-        auto& myself = exit_barrier[tid];
+        auto my_edge = exit_barrier.edges[tid];
+        auto my_relative_position = exit_barrier.relative_positions[tid];
+#ifndef DISABLE_PARALELIZATION
         #pragma omp simd
-        for(int i=0;i<exit_barrier.size();i++) {
-            auto& other = exit_barrier[i];
+#endif
+        for(int i=0;i<max_threads;i++) {
+            auto& other_edge = exit_barrier.edges[i];
+            auto& other_relative_position = exit_barrier.relative_positions[i];
 //            if (i == tid) continue;
 //            if (other.node == myself.node and
 //                other.traversed_edge == myself.traversed_edge and
@@ -82,32 +101,34 @@ public:
 //                other.relative_position++;// I am below other
 //            }
             // vectorized version
-            other.relative_position += other.node == myself.node and
-                                       other.traversed_edge == myself.traversed_edge and
-                                       other.relative_position >= myself.relative_position  and
+            other_relative_position += other_edge == my_edge and
+                    other_relative_position >= my_relative_position and
                                        i != tid;
         }
     }
 
     int64_t update_myself_after_wakeup(exit_barrier_t &exit_barrier,int tid) {
-        auto& myself = exit_barrier[tid];
+        auto my_edge = exit_barrier.edges[tid];
+        auto my_relative_position = exit_barrier.relative_positions[tid];
         int offset_change = 0;
+#ifndef DISABLE_PARALELIZATION
         #pragma omp simd reduction(+:offset_change)
-        for(int i=0;i<exit_barrier.size();i++) {
-            auto& other = exit_barrier[i];
+#endif
+        for(int i=0;i<max_threads;i++) {
+            auto& other_edge = exit_barrier.edges[i];
+            auto& other_relative_position = exit_barrier.relative_positions[i];
 //            if (i == tid) continue;
 //            if (other.node == myself.node and
 //                other.traversed_edge == myself.traversed_edge and
 //                other.relative_position < myself.relative_position) {
 //                offset_change--;// Other is below me
 //            }
-            offset_change -= other.node == myself.node and
-                other.traversed_edge == myself.traversed_edge and
-                other.relative_position < myself.relative_position and
+            offset_change -= other_edge == my_edge and
+                    other_relative_position < my_relative_position and
                 i != tid;
         }
-        assert(myself.relative_position + offset_change >= 0);
-        return myself.relative_position + offset_change;
+        assert(my_relative_position + offset_change >= 0);
+        return my_relative_position + offset_change;
     }
 
 };

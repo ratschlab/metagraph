@@ -20,6 +20,7 @@ using json = nlohmann::json;
 
 #define MEMOIZE
 //#define ALL_EDGES_COVERED
+#define DISABLE_PARALELIZATION
 
 #include "path_database_wavelet.hpp"
 #include "path_database_dynamic.hpp"

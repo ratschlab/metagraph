@@ -122,26 +122,30 @@ public:
 
         vector<path_id> encoded(sequences.size());
 
-#ifdef _OPENMP
-        auto alloc_lock_t = VerboseTimer("memory allocation of locks");
+#ifndef DISABLE_PARALELIZATION
 
+        auto alloc_lock_t = VerboseTimer("memory allocation of locks");
         ChunkedDenseHashMap<omp_lock_t,decltype(is_bifurcation), decltype(rank_is_bifurcation),false> node_locks(&is_bifurcation,&rank_is_bifurcation,chunk_size);
         alloc_lock_t.finished();
-        auto threads_map_t = VerboseTimer("memory allocation of exit barriers");
+
         //using Barrier = ReferenceExitBarrier<>;
         //using Barrier = IdentityComparator<ExitBarrier<>,ReferenceExitBarrier<>>;
-        using Barrier = ExitBarrier<>;
-        auto exit_barrier = Barrier(&is_bifurcation,&rank_is_bifurcation,chunk_size);
 
-        threads_map_t.finished();
+
+
+
         auto lock_init_timer = VerboseTimer("initializing locks & barriers");
         for(int64_t i=0;i<node_locks.elements.size();i++) {
             omp_init_lock(&node_locks.elements[i]);
         }
-
         lock_init_timer.finished();
 
 #endif
+        auto threads_map_t = VerboseTimer("memory allocation of exit barriers");
+        using Barrier = ExitBarrier<>;
+        auto exit_barrier = Barrier(&is_bifurcation,&rank_is_bifurcation,chunk_size);
+        threads_map_t.finished();
+
 
         statistics["preprocessing_time"] = preprocessing_timer.finished();
 
@@ -149,8 +153,9 @@ public:
         PRINT_VAR(is_join.size()/8);
         PRINT_VAR(is_split.size()/8);
         VerboseTimer routing_timer("routing step");
-
+#ifndef DISABLE_PARALELIZATION
         #pragma omp parallel for num_threads(get_num_threads()) //default(none) shared(encoded,node_locks,routing_table,incoming_table)
+#endif
         for (size_t i = 0; i < sequences.size(); i++) {
             int16_t tid = omp_get_thread_num();
             std::vector<std::tuple<node_index, char, char>> bifurcations;
@@ -208,9 +213,11 @@ public:
             int64_t previous_node = 0;
             char traversed_edge = '\0';
             for (const auto &[node, join_symbol, split_symbol] : bifurcations) {
+#ifndef DISABLE_PARALELIZATION
                 omp_lock_t *node_lock;
                 node_lock = node_locks.ptr_to(node);
                 omp_set_lock(node_lock);
+#endif
                 if (previous_node) {
                     exit_barrier.exit(previous_node,tid);
                 }
@@ -247,11 +254,11 @@ public:
 #endif
                     relative_position = routing_table.new_relative_position(node, relative_position);
                 }
-#ifdef _OPENMP
                 traversed_edge = split_symbol ? split_symbol : 'X'; // X as it doesn't matter
                 if (traversed_edge != '$') { // doesn't need any update
                     exit_barrier.enter(node,traversed_edge,relative_position,tid);
                 }
+#ifndef DISABLE_PARALELIZATION
                 omp_unset_lock(node_lock);
 #endif
 #ifdef DEBUG_ADDITIONAL_INFORMATION
@@ -261,7 +268,7 @@ public:
             }
         }
 
-#ifdef _OPENMP
+#ifndef DISABLE_PARALELIZATION
         for(int64_t i=0;i<node_locks.elements.size();i++) {
             omp_destroy_lock(&node_locks.elements[i]);
 
@@ -274,7 +281,7 @@ public:
         return encoded;
     }
 
-#ifdef _OPENMP
+#ifndef DISABLE_PARALELIZATION
 
 
 #endif

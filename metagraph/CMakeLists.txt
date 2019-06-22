@@ -347,6 +347,8 @@ file(GLOB header_files
 
 install(TARGETS metagraph DESTINATION lib)
 install(FILES ${header_files} DESTINATION include/metagraph)
+install(TARGETS metagengraph DESTINATION bin)
+# install also metagengraph
 
 #-------------------
 # Unit Tests
