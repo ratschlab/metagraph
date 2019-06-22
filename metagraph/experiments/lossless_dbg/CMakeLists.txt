@@ -17,6 +17,10 @@ set(CMAKE_SHARED_LINKER_FLAGS_FASTDEBUG "-g")
 
 
 ## Add profiler into all versions
+find_library(PROFILER_LIB profiler)
+if(PROFILER_LIB)
+    link_libraries(profiler)
+endif()
 
 ## Useful for profiling
 # needs gperftools installed
