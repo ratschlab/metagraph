@@ -14,24 +14,26 @@
 #include "ssw_cpp.h"
 #include "aligner_helper.hpp"
 
+struct DBGAlignerConfig {
+   size_t num_top_paths = 10;
+   size_t num_alternative_paths = 1;
+   uint8_t path_comparison_code = 0;
+   bool verbose = false;
+   bool discard_similar_paths = false;
+   bool use_cssw_lib = false;
+   size_t sw_threshold_for_stitched_path = 200;
+   float insertion_penalty = 3;
+   float deletion_penalty = 3;
+   float gap_opening_penalty = 3;
+   float gap_extension_penalty = 1;
+};
 
 class DBGAligner {
   public:
     typedef DeBruijnGraph::node_index node_index;
     typedef Path<node_index, AnnotatedDBG::Annotator::VLabels> AlignedPath;
 
-
-    DBGAligner(std::shared_ptr<DeBruijnGraph> graph,
-               size_t num_top_paths = 10,
-               size_t num_alternative_paths = 1,
-               uint8_t path_comparison_code = 0,
-               bool verbose = false,
-               bool discard_similar_paths = false,
-               bool use_cssw_lib = false,
-               float insertion_penalty = 3,
-               float deletion_penalty = 3,
-               float gap_opening_penalty = 3,
-               float gap_extension_penalty = 1);
+    DBGAligner(std::shared_ptr<DeBruijnGraph> graph, DBGAlignerConfig dbg_aligner_config = default_config);
 
     DBGAligner() = delete;
     DBGAligner(const DBGAligner&) = default;
@@ -59,11 +61,13 @@ class DBGAligner {
     // Align a sequence to the underlying graph based on the strategy defined in the graph.
     std::vector<AlignedPath> align_by_graph_exploration(const std::string::const_iterator &sequence_begin,
         const std::string::const_iterator &sequence_end,
-        const std::function<bool(node_index, const std::string::const_iterator& query_it)>& terminate
+        const std::function<bool (AlignedPath&)>& early_discard_path = [](AlignedPath&) { return false; },
+        const std::function<bool(node_index, const std::string::const_iterator& query_it)>& terminate_mapping
             = [](node_index, const std::string::const_iterator&) { return false; });
 
     // Align a sequence to the underlying graph using map_to_nodes.
-    std::vector<AlignedPath> map_to_nodes(const std::string &sequence);
+    bool map_to_nodes(const std::string &sequence, std::vector<AlignedPath>& alternative_paths,
+                      int64_t alternative_alignment_score = 0);
 
     // Align to nodes for both sequence and reverse complement sequence and return the higher scoring one.
     AlignedPath map_to_nodes_forward_reverse_complement(const std::string &sequence);
@@ -73,6 +77,20 @@ class DBGAligner {
 
   private:
     std::shared_ptr<DeBruijnGraph> graph_;
+
+   constexpr static DBGAlignerConfig default_config = {
+    .num_top_paths = 10,
+    .num_alternative_paths = 1,
+    .path_comparison_code = 0,
+    .verbose = false,
+    .discard_similar_paths = false,
+    .use_cssw_lib = false,
+    .sw_threshold_for_stitched_path = 200,
+    .insertion_penalty = 3,
+    .deletion_penalty = 3,
+    .gap_opening_penalty = 3,
+    .gap_extension_penalty = 1};
+
     // Substitution score for each pair of nucleotides.
     std::map<char, std::map<char, int8_t>> sub_score_;
     int8_t mm_transition_;
@@ -85,6 +103,7 @@ class DBGAligner {
     bool verbose_;
     bool discard_similar_paths_;
     bool use_cssw_lib_;
+    size_t sw_threshold_for_stitched_path_;
 
     int8_t match_score_;
     float insertion_penalty_;

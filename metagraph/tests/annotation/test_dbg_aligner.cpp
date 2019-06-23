@@ -187,9 +187,9 @@ TYPED_TEST(DBGAlignerTest, noise_in_branching_point) {
     std::string query =       "AAAA" "TTTTTTT";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
-    DBGAligner aligner(graph,
-            /*num_top_paths =*/ 10,
-            /*num_alternative_paths =*/ 2);
+    DBGAlignerConfig config;
+    config.num_alternative_paths = 2;
+    DBGAligner aligner(graph, config);
     auto alt_paths = aligner.align_by_graph_exploration(std::begin(query), std::end(query));
 
     EXPECT_TRUE(alt_paths.size() > 0);
@@ -212,7 +212,9 @@ TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
     auto graph = build_graph_batch<TypeParam>(k, references);
 
     size_t max_num_alternative_paths = 4;
-    DBGAligner aligner(graph, 10, max_num_alternative_paths);
+    DBGAlignerConfig config;
+    config.num_alternative_paths = max_num_alternative_paths;
+    DBGAligner aligner(graph, config);
     auto alt_paths = aligner.align_by_graph_exploration(std::begin(query), std::end(query));
 
     EXPECT_EQ(max_num_alternative_paths, alt_paths.size());
@@ -265,7 +267,8 @@ TYPED_TEST(DBGAlignerTest, map_to_nodes_multiple_misalignment) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
-    auto paths = aligner.map_to_nodes(query);
+    std::vector<DBGAligner::AlignedPath> paths;
+    aligner.map_to_nodes(query, paths);
 
     EXPECT_EQ(1ull, paths.size());
     auto path = paths.front();
@@ -281,7 +284,8 @@ TYPED_TEST(DBGAlignerTest, map_to_nodes_insert_non_existent) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
-    auto paths = aligner.map_to_nodes(query);
+    std::vector<DBGAligner::AlignedPath> paths;
+    aligner.map_to_nodes(query, paths);
 
     EXPECT_EQ(1ull, paths.size());
     auto path = paths.front();
@@ -312,7 +316,8 @@ TYPED_TEST(DBGAlignerTest, map_to_nodes_delete) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
-    auto paths = aligner.map_to_nodes(query);
+    std::vector<DBGAligner::AlignedPath> paths;
+    aligner.map_to_nodes(query, paths);
 
     EXPECT_EQ(1ull, paths.size());
     auto path = paths.front();
@@ -328,7 +333,8 @@ TYPED_TEST(DBGAlignerTest, map_to_nodes_gap) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
-    auto paths = aligner.map_to_nodes(query);
+    std::vector<DBGAligner::AlignedPath> paths;
+    aligner.map_to_nodes(query, paths);
 
     EXPECT_EQ(1ull, paths.size());
     auto path = paths.front();
@@ -345,7 +351,8 @@ TYPED_TEST(DBGAlignerTest, map_to_nodes_straight) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
-    auto paths = aligner.map_to_nodes(query);
+    std::vector<DBGAligner::AlignedPath> paths;
+    aligner.map_to_nodes(query, paths);
 
     EXPECT_EQ(1ull, paths.size());
     auto path = paths.front();
@@ -363,14 +370,15 @@ TEST(DBGAlignerTest, map_to_nodes_inexact_seed) {
     auto graph = std::make_shared<DBGSuccinct>(k);
     graph->add_sequence(reference);
     DBGAligner aligner(graph);
-    auto paths = aligner.map_to_nodes(query);
+    std::vector<DBGAligner::AlignedPath> paths;
+    aligner.map_to_nodes(query, paths);
 
     EXPECT_EQ(1ull, paths.size());
     auto path = paths.front();
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference.substr(1), path.get_sequence());
-    EXPECT_EQ("14=", path.get_cigar());
+    EXPECT_EQ("2S14=", path.get_cigar());
 }
 
 TEST(DBGAlignerTest, map_to_nodes_inexact_seed_snp) {
@@ -381,14 +389,15 @@ TEST(DBGAlignerTest, map_to_nodes_inexact_seed_snp) {
     auto graph = std::make_shared<DBGSuccinct>(k);
     graph->add_sequence(reference);
     DBGAligner aligner(graph);
-    auto paths = aligner.map_to_nodes(query);
+    std::vector<DBGAligner::AlignedPath> paths;
+    aligner.map_to_nodes(query, paths);
 
     EXPECT_EQ(1ull, paths.size());
     auto path = paths.front();
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference.substr(3), path.get_sequence());
-    EXPECT_EQ("13=", path.get_cigar());
+    EXPECT_EQ("1=1X13=", path.get_cigar());
 }
 // TODO: Back to typed test when inexact seeding with graphs other than BOSS is handled.
 TEST(DBGAlignerTest, map_to_nodes_reverse_complement) {

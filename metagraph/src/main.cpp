@@ -2365,10 +2365,15 @@ int main(int argc, const char *argv[]) {
 
             std::cout << "Align sequences against the de Bruijn graph with k="
                       << dbg_succinct_graph->get_k() << std::endl;
+            // Set configuration values.
+            DBGAlignerConfig aligner_config;
+            aligner_config.num_top_paths = config->alignment_num_top_paths;
+            aligner_config.path_comparison_code = config->aligner_path_comparison_code;
+            aligner_config.verbose = config->verbose;
+            aligner_config.discard_similar_paths = config->discard_similar_paths;
+            aligner_config.use_cssw_lib = config->align_using_cssw_library;
 
-            DBGAligner aligner(dbg_succinct_graph, config->alignment_num_top_paths,
-                               /*num_alternative_paths=*/1, config->aligner_path_comparison_code,
-                               config->verbose, config->discard_similar_paths, config->align_using_cssw_library);
+            DBGAligner aligner(dbg_succinct_graph, aligner_config);
             Timer timer;
             for (const auto &file : files) {
                 std::cout << "Align sequences from file " << file << std::endl;
