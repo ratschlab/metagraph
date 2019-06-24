@@ -47,7 +47,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
     void call_objects(const Label &label,
                       std::function<void(Index)> callback) const override;
 
-    std::string file_extension() const override { return kExtension; }
+    std::string file_extension() const override;
 
   private:
     std::vector<uint64_t> count_labels(const std::vector<Index> &indices) const override;
