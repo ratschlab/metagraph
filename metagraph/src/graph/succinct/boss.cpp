@@ -1443,7 +1443,8 @@ uint64_t BOSS::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
 
 // Given an edge list, remove them from the BOSS graph.
 // Anchors the isolated nodes.
-void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_index> *removed_edges) {
+void BOSS::erase_edges_dyn(const std::set<edge_index> &edges,
+                           std::vector<edge_index> *removed_edges) {
     assert(state == Config::DYN);
 
     uint64_t shift = 0;
@@ -1452,51 +1453,53 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
     std::unordered_set<edge_index> new_tail_edges;
     std::unordered_map<node_index, std::vector<TAlphabet>> new_head_nodes;
 
-    std::set<edge_index> cant_delete; // some of the edges in `edges` could be dummy edges which are needed for anchoring;
-                                      // record their original indexes so that their deletion can be skipped. 
-    cant_delete.emplace(1);
+    // some of the edges in `edges` could be dummy edges which are needed for anchoring;
+    // record their original indexes so that their deletion can be skipped.
+    std::set<edge_index> cant_delete = { 1 };
 
-    for (edge_index current_edge : edges) {
+    for (auto current_edge : edges) {
         CHECK_INDEX(current_edge);
-        std::vector current_edges{current_edge};
-        edge_index target_edge = fwd(current_edge);
-        if (edges.find(target_edge) == edges.end())
-            current_edges.push_back(target_edge);
 
-        for(edge_index edge : current_edges) {
+        // a batch of edges (single edge / connected subgraph)
+        std::vector<edge_index> current_edges { current_edge };
+
+        edge_index target_edge;
+        if (get_W(current_edge) != kSentinelCode
+                && !edges.count((target_edge = fwd(current_edge)))) {
+            current_edges.push_back(target_edge);
+        }
+
+        for (edge_index edge : current_edges) {
             node_index node = get_source_node(edge);
 
             edge_index first_outgoing = select_last(node - 1) + 1;
             edge_index last_outgoing = select_last(node);
-            uint64_t outdeg = last_outgoing - first_outgoing + 1;
-            assert(outdeg == outdegree(node));
-
-            uint64_t outgoing_delete_count = std::distance(edges.lower_bound(first_outgoing),
-                                                           edges.upper_bound(last_outgoing));
-
-
-            uint64_t indeg = 0;
-            uint64_t incoming_delete_count = 0;
+            assert(outdegree(node) == last_outgoing - first_outgoing + 1);
+            bool outgoing_left = outdegree(node)
+                                    - std::distance(edges.lower_bound(first_outgoing),
+                                                    edges.upper_bound(last_outgoing));
+            uint64_t incoming_left = 0;
             call_adjacent_incoming_edges(edge, [&](edge_index adj_incoming_edge_index) {
-                ++indeg;
-                if (edges.find(adj_incoming_edge_index) != edges.end())
-                    ++incoming_delete_count;
+                if (!edges.count(adj_incoming_edge_index))
+                    incoming_left++;
             });
 
-            assert(indeg >= incoming_delete_count);
-            if (indeg == incoming_delete_count && outdeg > outgoing_delete_count) {
+            if (!incoming_left && outgoing_left) {
+
                 // new head node
                 new_head_nodes.emplace(node, get_node_seq(select_last(node)));
-            } else if (indeg > incoming_delete_count && outdeg == outgoing_delete_count) {
+
+            } else if (incoming_left && !outgoing_left) {
+
                 if (get_W(edge) == kSentinelCode) {
                     // already a tail node
                     cant_delete.emplace(edge);
                     continue;
                 }
+
                 // assign this edge to new tail node
-                if (new_tail_nodes.find(node) == new_tail_nodes.end())
+                if (new_tail_nodes.emplace(node).second)
                     new_tail_edges.emplace(edge);
-                new_tail_nodes.emplace(node);
             }
         }
     }
@@ -1507,10 +1510,11 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
     // TODO: use some sort of generic sparse bitvector for `inserted_edges`
     //   rather than maintaining this data-structure inline
 
-    std::map<edge_index, uint64_t> inserted_edges; // original edge index -> number of new edges inserted before that position (inclusive)
+    // original edge index -> number of new edges inserted before that position (inclusive)
+    std::map<edge_index, uint64_t> inserted_edges;
     inserted_edges.emplace(0, 0);
 
-    for (auto& node : new_head_nodes) {
+    for (const auto &node : new_head_nodes) {
         auto kmer = node.second;
         uint64_t source = 1;
         kmer.insert(kmer.begin(), k_, kSentinelCode);
@@ -1608,7 +1612,7 @@ void BOSS::erase_edges_dyn(const std::set<edge_index> &edges, std::vector<edge_i
                 && *cant_delete_iter < edge) {
             cant_delete_iter++;
         }
-        if(*cant_delete_iter == edge)
+        if (*cant_delete_iter == edge)
             continue;
 
         if (removed_edges)

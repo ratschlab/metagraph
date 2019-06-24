@@ -2489,14 +2489,10 @@ TEST(BOSS, EraseEdgesDynUnitigs) {
             auto edge = head_edge;
             do {
                 edges.emplace(edge);
-                if (!graph.is_single_incoming(edge))
-                    break;
-
-                edge = graph.pred_last(graph.fwd(edge) - 1) + 1;
-
-            } while (graph.get_last(edge)
-                    && graph.get_W(edge) != BOSS::kSentinelCode
-                            && edge != head_edge);
+            } while (graph.is_single_incoming(edge)
+                        && graph.get_last(edge)
+                        && graph.get_W(edge) != BOSS::kSentinelCode
+                        && (edge = graph.pred_last(graph.fwd(edge) - 1) + 1) != head_edge);
 
             std::vector<BOSS::edge_index> removed_edges;
 
