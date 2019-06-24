@@ -26,6 +26,7 @@
 #include "masked_graph.hpp"
 #include "annotated_graph_algorithm.hpp"
 #include "taxid_mapper.hpp"
+#include <typeinfo>
 
 typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
@@ -79,13 +80,30 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     }
 }
 
+bool graph_has_weights_file(const std::string &filename) {
+    std::ifstream f(filename + ".weights");
+    return f.good();
+}
+
 std::string remove_graph_extension(const std::string &filename) {
     return utils::remove_suffix(filename, ".dbg", ".orhashdbg", ".bitmapdbg");
 }
 
 template <class Graph = BOSS>
 std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
-    auto *graph = new Graph(2);
+    Graph *graph;
+    // TODO what if there were multiple graph mixins and any number of them could be present?
+    // how could they be dynamically composed?
+    if constexpr (!std::is_base_of<DeBruijnGraph, Graph>::value
+                  || std::is_same<DeBruijnGraph, Graph>::value) {
+        graph = new Graph(2);
+    } else {
+        if (graph_has_weights_file(filename)) {
+            graph = new WeightedMixin<Graph>(2);
+        } else {
+            graph = new Graph(2);
+        }
+    }
     if (!graph->load(filename)) {
         std::cerr << "ERROR: can't load graph from file " << filename << std::endl;
         delete graph;
@@ -97,7 +115,6 @@ std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename
 template <class DefaultGraphType = DBGSuccinct>
 std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
     auto graph_type = parse_graph_extension(filename);
-    //TODO: need a way to instantiate and load weighted version of each graph type, without doubling the cases of this switch statement
     switch (graph_type) {
         case Config::GraphType::SUCCINCT:
             return load_critical_graph_from_file<DBGSuccinct>(filename);
@@ -593,8 +610,8 @@ void print_stats(const DeBruijnGraph &graph) {
     std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
     std::cout << "canonical mode: " << (graph.is_canonical_mode() ? "yes" : "no") << std::endl;
 
-    if (dynamic_cast<const Weighted<>*>(&graph)) {
-        const auto &weighted = dynamic_cast<const Weighted<>&>(graph);
+    if (dynamic_cast<const IWeighted<>*>(&graph)) {
+        const auto &weighted = dynamic_cast<const IWeighted<>&>(graph);
         double sum_weights = 0;
         for (uint64_t i = 1; i <= weighted.num_weights(); ++i) {
             sum_weights += weighted.get_weight(i);
@@ -1594,18 +1611,21 @@ int main(int argc, const char *argv[]) {
             if (config->verbose)
                 std::cout << "Graph loading...\t" << std::flush;
 
-            auto weighted_graph = std::make_shared<WeightedDBGSuccinct>(2);
-            if (!weighted_graph->load(files.at(0))) {
-                std::cerr << "ERROR: Cannot load succinct weighted graph from "
+            auto graph = load_critical_dbg(files.at(0));
+            const IWeighted<> *weighted_graph;
+            if (!dynamic_cast<const IWeighted<>*>(graph.get())) {
+                std::cerr << "ERROR: Cannot load weighted graph from "
                           << files.at(0) << std::endl;
                 exit(1);
+            } else {
+                weighted_graph = dynamic_cast<const IWeighted<>*>(graph.get());
             }
 
             if (config->verbose)
                 std::cout << timer.elapsed() << "sec" << std::endl;
 
             auto subgraph = std::make_unique<MaskedDeBruijnGraph>(
-                weighted_graph,
+                graph,
                 [&](auto i) { return weighted_graph->get_weight(i) >= config->min_count
                                     && weighted_graph->get_weight(i) <= config->max_count; }
             );
@@ -1657,17 +1677,7 @@ int main(int argc, const char *argv[]) {
             for (const auto &file : files) {
                 std::shared_ptr<DeBruijnGraph> graph;
 
-                //TODO: either document flag in usage, or infer weighted by presence of .weights file
-                if (config->count_kmers) {
-                    graph = std::make_shared<WeightedDBGSuccinct>(2);
-                    if (!graph->load(file)) {
-                        std::cerr << "Can't load weighted graph from file "
-                                  << file << std::endl;
-                        exit(1);
-                    }
-                } else {
-                    graph = load_critical_dbg(file);
-                }
+                graph = load_critical_dbg(file);
 
                 std::cout << "Statistics for graph " << file << std::endl;
 

@@ -19,11 +19,10 @@ bool WeightedMixin<T, Weights>::load(const std::string &filename) {
 
     try {
         std::ifstream instream(utils::remove_suffix(filename, T::file_extension())
-                                    + T::file_extension()
                                     + kWeightsExtension,
                                std::ios::binary);
-        weights_.load(instream);
-        return T::num_nodes() + 1 == weights_.size();
+        this->weights_.load(instream);
+        return T::num_nodes() + 1 == this->weights_.size();
     } catch (...) {
         std::cerr << "ERROR: Cannot load graph weights from file "
                   << filename + kWeightsExtension << std::endl;
@@ -38,11 +37,10 @@ void WeightedMixin<T, Weights>::serialize(const std::string &filename) const {
     T::serialize(filename);
 
     std::ofstream outstream(utils::remove_suffix(filename, T::file_extension())
-                                + T::file_extension()
                                 + kWeightsExtension,
                             std::ios::binary);
 
-    weights_.serialize(outstream);
+    this->weights_.serialize(outstream);
 }
 
 
