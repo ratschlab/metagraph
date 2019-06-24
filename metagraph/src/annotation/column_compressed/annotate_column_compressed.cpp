@@ -71,6 +71,43 @@ ColumnCompressed<Label>::get_labels(Index i) const {
 }
 
 template <typename Label>
+std::vector<uint64_t> ColumnCompressed<Label>::get_label_indices(Index i) const {
+    assert(i < num_rows_);
+
+    std::vector<uint64_t> label_indices;
+    for (size_t j = 0; j < num_labels(); ++j) {
+        if (is_set(i, j))
+            label_indices.push_back(j);
+    }
+    return label_indices;
+}
+
+template <typename Label>
+void ColumnCompressed<Label>
+::call_rows(const std::vector<Index> &indices,
+            std::function<void(std::vector<uint64_t>&&)> row_callback,
+            std::function<bool()> terminate) const {
+    std::vector<std::vector<uint64_t>> rows(indices.size());
+    for (auto &row : rows) {
+        row.reserve(label_encoder_.size());
+    }
+
+    for (size_t j = 0; j < label_encoder_.size(); ++j) {
+        for (size_t ii = 0; ii < indices.size(); ++ii) {
+            if (is_set(indices[ii], j))
+                rows[ii].push_back(j);
+        }
+    }
+
+    for (auto&& row : rows) {
+        if (terminate())
+            break;
+
+        row_callback(std::move(row));
+    }
+}
+
+template <typename Label>
 void ColumnCompressed<Label>::add_label(Index i, const Label &label) {
     assert(i < num_rows_);
 
@@ -299,41 +336,6 @@ void ColumnCompressed<Label>
     }
 }
 
-// Get labels that occur at least in |presence_ratio| rows.
-// If |presence_ratio| = 0, return all occurring labels.
-template <typename Label>
-typename ColumnCompressed<Label>::VLabels
-ColumnCompressed<Label>::get_labels(const std::vector<Index> &indices,
-                                    double presence_ratio) const {
-    assert(presence_ratio >= 0 && presence_ratio <= 1);
-
-    const size_t min_labels_discovered =
-                        presence_ratio == 0
-                            ? 1
-                            : std::ceil(indices.size() * presence_ratio);
-    const size_t max_labels_missing = indices.size() - min_labels_discovered;
-
-    VLabels filtered_labels;
-
-    for (size_t j = 0; j < bitmatrix_.size(); ++j) {
-        uint64_t discovered = 0;
-        uint64_t missing = 0;
-
-        for (Index i : indices) {
-            if (is_set(i, j)) {
-                if (++discovered >= min_labels_discovered) {
-                    filtered_labels.push_back(label_encoder_.decode(j));
-                    break;
-                }
-            } else if (++missing > max_labels_missing) {
-                break;
-            }
-        }
-    }
-
-    return filtered_labels;
-}
-
 template <typename Label>
 uint64_t ColumnCompressed<Label>::num_objects() const {
     return num_rows_;
@@ -364,21 +366,6 @@ void ColumnCompressed<Label>::set(Index i, size_t j, bool value) {
 template <typename Label>
 bool ColumnCompressed<Label>::is_set(Index i, size_t j) const {
     return get_column(j)[i];
-}
-
-template <typename Label>
-std::vector<uint64_t>
-ColumnCompressed<Label>::count_labels(const std::vector<Index> &indices) const {
-    std::vector<uint64_t> counter(num_labels(), 0);
-
-    for (size_t j = 0; j < num_labels(); ++j) {
-        for (Index i : indices) {
-            if (is_set(i, j))
-                counter[j]++;
-        }
-    }
-
-    return counter;
 }
 
 template <typename Label>

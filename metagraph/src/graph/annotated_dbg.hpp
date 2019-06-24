@@ -64,6 +64,12 @@ class AnnotatedDBG {
     void annotate_sequence_thread_safe(std::string sequence,
                                        std::vector<std::string> labels);
 
+    std::vector<std::pair<std::string, size_t>>
+    get_labels(const std::string &sequence,
+               std::function<bool(uint64_t, uint64_t)> start,
+               std::function<bool(const std::vector<std::pair<std::string, size_t>>&)> terminate
+                   = [](const auto&) { return false; }) const;
+
     std::shared_ptr<SequenceGraph> graph_;
     std::unique_ptr<Annotator> annotator_;
 

@@ -90,18 +90,13 @@ class MultiLabelAnnotation
 
     /*********************** Special queries **********************/
 
-    // Get labels that occur at least in |presence_ratio| rows.
-    // If |presence_ratio| = 0, return all occurring labels.
-    virtual VLabels get_labels(const std::vector<Index> &indices,
-                               double presence_ratio) const = 0;
+    // For each Index in indices, call row_callback on the vector of its
+    // corresponding label indices. Terminate early if terminate returns true.
+    virtual void call_rows(const std::vector<Index> &indices,
+                           std::function<void(std::vector<uint64_t>&&)> row_callback,
+                           std::function<bool()> terminate = []() { return false; }) const = 0;
 
-    // Count all labels collected from the given rows
-    // and return top |num_top| with the their counts.
-    // Skip labels with count frequency smaller than |min_label_frequency|.
-    virtual std::vector<std::pair<Label, size_t>>
-    get_top_labels(const std::vector<Index> &indices,
-                   size_t num_top = static_cast<size_t>(-1),
-                   double min_label_frequency = 0.0) const = 0;
+    virtual void call_labels(std::function<void(const Label&)> callback) const = 0;
 
     virtual void call_objects(const Label &label,
                               std::function<void(Index)> callback) const = 0;
@@ -177,7 +172,7 @@ class MultiLabelEncoded
     virtual ~MultiLabelEncoded() {}
 
     virtual std::unique_ptr<IterateRows> iterator() const;
-    virtual std::vector<uint64_t> get_label_indexes(Index i) const;
+    virtual std::vector<uint64_t> get_label_indices(Index i) const = 0;
 
     virtual const LabelEncoder<Label>& get_label_encoder() const final { return label_encoder_; }
 
@@ -189,25 +184,25 @@ class MultiLabelEncoded
 
     /*********************** Special queries **********************/
 
-    // Count all labels collected from the given rows
-    // and return top |num_top| with the their counts.
-    // Skip labels with count frequency smaller than |min_label_frequency|.
-    virtual std::vector<std::pair<Label, size_t>>
-    get_top_labels(const std::vector<Index> &indices,
-                   size_t num_top = static_cast<size_t>(-1),
-                   double min_label_frequency = 0.0) const override final;
+    // For each Index in indices, call row_callback on the vector of its
+    // corresponding label indices. Terminate early if terminate returns true.
+    virtual void call_rows(const std::vector<Index> &indices,
+                           std::function<void(std::vector<uint64_t>&&)> row_callback,
+                           std::function<bool()> terminate = []() { return false; }) const override;
 
     virtual bool label_exists(const Label &label) const override final {
         return label_encoder_.label_exists(label);
     }
 
+    virtual void call_labels(std::function<void(const Label&)> callback) const override final {
+        for (size_t i = 0; i < label_encoder_.size(); ++i) {
+            callback(label_encoder_.decode(i));
+        }
+    }
+
     virtual std::string file_extension() const override = 0;
 
   protected:
-    // TODO: add |min_label_frequency| parameter: return only frequent labels
-    virtual std::vector<uint64_t>
-    count_labels(const std::vector<Index> &indices) const = 0;
-
     LabelEncoder<Label> label_encoder_;
 };
 
