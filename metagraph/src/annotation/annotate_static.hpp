@@ -24,10 +24,6 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
     bool has_labels(Index i, const VLabels &labels) const override;
 
     VLabels get_labels(Index i) const override;
-    // Get labels that occur at least in |presence_ratio| rows.
-    // If |presence_ratio| = 0, return all occurring labels.
-    VLabels get_labels(const std::vector<Index> &indices,
-                       double presence_ratio) const override;
 
     void serialize(const std::string &filename) const override;
     bool merge_load(const std::vector<std::string> &filenames) override;
@@ -50,8 +46,6 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
     std::string file_extension() const override;
 
   private:
-    std::vector<uint64_t> count_labels(const std::vector<Index> &indices) const override;
-
     void except_dyn();
 
     std::unique_ptr<BinaryMatrixType> matrix_;
@@ -60,9 +54,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
         MultiLabelEncoded<uint64_t, Label>::label_encoder_
     };
 
-    std::vector<uint64_t> get_label_indexes(Index i) const override {
-        return matrix_->get_row(i);
-    }
+    std::vector<uint64_t> get_label_indices(Index i) const override;
 
     static const std::string kExtension;
 };

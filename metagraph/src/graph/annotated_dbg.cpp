@@ -65,38 +65,6 @@ void AnnotatedDBG::annotate_sequence(const std::string &sequence,
     );
 }
 
-std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
-                                                  double presence_ratio) const {
-    assert(presence_ratio >= 0);
-    assert(check_compatibility());
-
-    std::vector<uint64_t> indices;
-    size_t num_missing_kmers = 0;
-
-    graph_->map_to_nodes(sequence, [&](uint64_t i) {
-        if (i > 0) {
-            indices.push_back(graph_to_anno_index(i));
-        } else {
-            num_missing_kmers++;
-        }
-    });
-
-    // presence_ratio = num_present / all
-    // new_presence_ratio = num_present / (all - missing)
-    if (indices.size() > 0
-        && indices.size()
-            >= presence_ratio * (indices.size() + num_missing_kmers)) {
-        return annotator_->get_labels(
-            indices,
-            presence_ratio
-                * (indices.size() + num_missing_kmers)
-                / indices.size()
-        );
-    } else {
-        return {};
-    }
-}
-
 std::vector<std::string> AnnotatedDBG::get_labels(node_index index) const {
     assert(check_compatibility());
     assert(index != SequenceGraph::npos);
@@ -105,35 +73,129 @@ std::vector<std::string> AnnotatedDBG::get_labels(node_index index) const {
 }
 
 std::vector<std::pair<std::string, size_t>>
-AnnotatedDBG::get_top_labels(const std::string &sequence,
-                             size_t num_top_labels,
-                             double min_label_frequency) const {
-    assert(min_label_frequency >= 0);
+AnnotatedDBG
+::get_labels(const std::string &sequence,
+             std::function<bool(uint64_t, uint64_t)> start,
+             std::function<bool(const std::vector<std::pair<std::string,
+                                                            size_t>>&)> terminate) const {
     assert(check_compatibility());
 
-    std::vector<uint64_t> indices;
+    std::unordered_map<uint64_t, uint64_t> index_counts;
+    size_t num_present_kmers = 0;
     size_t num_missing_kmers = 0;
 
     graph_->map_to_nodes(sequence, [&](uint64_t i) {
         if (i > 0) {
-            indices.push_back(graph_to_anno_index(i));
+            index_counts[graph_to_anno_index(i)]++;
+            num_present_kmers++;
         } else {
             num_missing_kmers++;
         }
     });
 
-    if (indices.size() > 0
-        && indices.size()
-            >= min_label_frequency * (indices.size() + num_missing_kmers)) {
-
-        return annotator_->get_top_labels(indices, num_top_labels,
-            min_label_frequency
-                * (indices.size() + num_missing_kmers)
-                / indices.size()
-        );
-    } else {
+    if (!start(num_present_kmers, num_missing_kmers))
         return {};
+
+    std::vector<uint64_t> indices;
+    indices.reserve(index_counts.size());
+    std::transform(index_counts.begin(), index_counts.end(),
+                   std::back_inserter(indices),
+                   [](const auto &pair) { return pair.first; });
+
+    std::vector<std::pair<std::string, size_t>> label_counts;
+    label_counts.reserve(annotator_->num_labels());
+    annotator_->call_labels([&](const auto &label) {
+        label_counts.emplace_back(label, 0);
+    });
+
+    auto it = index_counts.begin();
+    annotator_->call_rows(
+        indices,
+        [&](auto&& label_indices) {
+            assert(it != index_counts.end());
+
+            for (auto j : label_indices) {
+                label_counts[j].second += it->second;
+            }
+
+            ++it;
+        },
+        [&]() { return terminate(label_counts); }
+    );
+
+    return label_counts;
+}
+
+std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
+                                                  double presence_ratio) const {
+    assert(presence_ratio >= 0.);
+    assert(presence_ratio <= 1.);
+
+    uint64_t min_count = 0;
+    auto label_counts = get_labels(
+        sequence,
+        [&](auto num_present_kmers, auto num_missing_kmers) {
+            min_count = std::max(1.0,
+                                 std::ceil(presence_ratio
+                                     * (num_present_kmers + num_missing_kmers)));
+            return num_present_kmers >= min_count;
+        },
+        [&](const auto &label_counts) {
+            return std::all_of(label_counts.begin(), label_counts.end(),
+                               [&](const auto &pair) {
+                                   return pair.second >= min_count;
+                               });
+        }
+    );
+
+    std::vector<std::string> labels;
+    for (auto&& pair : label_counts) {
+        if (pair.second >= min_count) {
+            labels.emplace_back(std::move(pair.first));
+        }
     }
+
+    return labels;
+}
+
+std::vector<std::pair<std::string, size_t>>
+AnnotatedDBG::get_top_labels(const std::string &sequence,
+                             size_t num_top_labels,
+                             double min_label_frequency) const {
+    assert(min_label_frequency >= 0.);
+    assert(min_label_frequency <= 1.);
+
+    if (!num_top_labels)
+        return {};
+
+    uint64_t min_count = 0;
+    auto label_counts = get_labels(
+        sequence,
+        [&](auto num_present_kmers, auto num_missing_kmers) {
+            min_count = std::max(1.0,
+                                 std::ceil(min_label_frequency
+                                     * (num_present_kmers + num_missing_kmers)));
+            return num_present_kmers >= min_count;
+        }
+    );
+
+    std::sort(label_counts.begin(), label_counts.end(),
+              [](const auto &first, const auto &second) {
+                  return first.second > second.second;
+              });
+
+    // remove labels which don't meet num_top_labels and min_label_frequency criteria
+    label_counts.erase(std::find_if(label_counts.begin(),
+                                    num_top_labels < label_counts.size()
+                                        ? label_counts.begin() + num_top_labels
+                                        : label_counts.end(),
+                                    [&](const auto &pair) {
+                                        return pair.second < min_count;
+                                    }),
+                       label_counts.end());
+    label_counts.shrink_to_fit();
+
+    return label_counts;
 }
 
 bool AnnotatedDBG::label_exists(const std::string &label) const {

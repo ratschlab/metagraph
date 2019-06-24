@@ -51,7 +51,7 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
         return false;
     }
     std::set<size_t> encoded_labels;
-    for (auto col : matrix_->get_row(i)) {
+    for (auto col : get_label_indices(i)) {
         encoded_labels.insert(col);
     }
     return std::includes(encoded_labels.begin(), encoded_labels.end(),
@@ -64,37 +64,10 @@ auto StaticBinRelAnnotator<BinaryMatrixType, Label>::get_labels(Index i) const
     assert(i < num_objects());
 
     VLabels labels;
-    for (auto col : matrix_->get_row(i)) {
+    for (auto col : get_label_indices(i)) {
         labels.push_back(label_encoder_.decode(col));
     }
     return labels;
-}
-
-// Get labels that occur at least in |presence_ratio| rows.
-// If |presence_ratio| = 0, return all occurring labels.
-template <class BinaryMatrixType, typename Label>
-auto
-StaticBinRelAnnotator<BinaryMatrixType, Label>
-::get_labels(const std::vector<Index> &indices,
-             double presence_ratio) const -> VLabels {
-    assert(presence_ratio >= 0 && presence_ratio <= 1);
-
-    const size_t min_labels_discovered =
-                        presence_ratio == 0
-                            ? 1
-                            : std::ceil(indices.size() * presence_ratio);
-    // const size_t max_labels_missing = indices.size() - min_labels_discovered;
-
-    auto counts = count_labels(indices);
-
-    VLabels filtered_labels;
-
-    for (size_t i = 0; i < counts.size(); ++i) {
-        if (counts[i] && counts[i] >= min_labels_discovered)
-            filtered_labels.push_back(label_encoder_.decode(i));
-    }
-
-    return filtered_labels;
 }
 
 template <class BinaryMatrixType, typename Label>
@@ -147,22 +120,6 @@ uint64_t StaticBinRelAnnotator<BinaryMatrixType, Label>::num_relations() const {
     return matrix_->num_relations();
 }
 
-// Count all labels collected from the given rows.
-template <class BinaryMatrixType, typename Label>
-std::vector<uint64_t>
-StaticBinRelAnnotator<BinaryMatrixType, Label>
-::count_labels(const std::vector<Index> &indices) const {
-    std::vector<uint64_t> counter(num_labels(), 0);
-
-    for (Index i : indices) {
-        for (auto col : matrix_->get_row(i)) {
-            counter[col]++;
-        }
-    }
-
-    return counter;
-}
-
 template <class BinaryMatrixType, typename Label>
 void StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::call_objects(const Label &label,
@@ -183,6 +140,12 @@ template <class BinaryMatrixType, typename Label>
 void StaticBinRelAnnotator<BinaryMatrixType, Label>::except_dyn() {
     throw std::runtime_error("Dynamic actions are not supported"
                              " in static representation");
+}
+
+template <class BinaryMatrixType, typename Label>
+std::vector<uint64_t> StaticBinRelAnnotator<BinaryMatrixType, Label>
+::get_label_indices(Index i) const {
+    return matrix_->get_row(i);
 }
 
 template <class BinaryMatrixType, typename Label>

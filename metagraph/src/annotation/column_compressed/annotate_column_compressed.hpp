@@ -60,16 +60,17 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     // column |first| with |second| and merges the columns with matching names.
     void rename_labels(const std::unordered_map<Label, Label> &dict) override;
 
-    // Get labels that occur at least in |presence_ratio| rows.
-    // If |presence_ratio| = 0, return all occurring labels.
-    VLabels get_labels(const std::vector<Index> &indices,
-                       double presence_ratio) const override;
-
     uint64_t num_objects() const override;
     size_t num_labels() const override;
     uint64_t num_relations() const override;
     void call_objects(const Label &label,
                       std::function<void(Index)> callback) const override;
+
+    // For each Index in indices, call row_callback on the vector of its
+    // corresponding label indices. Terminate early if terminate returns true.
+    void call_rows(const std::vector<Index> &indices,
+                   std::function<void(std::vector<uint64_t>&&)> row_callback,
+                   std::function<bool()> terminate = []() { return false; }) const override;
 
     void convert_to_row_annotator(const std::string &outfbase) const;
     void convert_to_row_annotator(RowCompressed<Label> *annotator,
@@ -88,8 +89,6 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
   private:
     void set(Index i, size_t j, bool value);
     bool is_set(Index i, size_t j) const;
-    std::vector<uint64_t>
-    count_labels(const std::vector<Index> &indices) const override;
 
     void add_labels(uint64_t begin, uint64_t end,
                     RowCompressed<Label> *annotator,
@@ -99,6 +98,8 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     void flush(size_t j, const bitmap &annotation_curr);
     bitmap_dyn& decompress(size_t j);
     const bitmap& get_column(size_t j) const;
+
+    std::vector<uint64_t> get_label_indices(Index i) const override;
 
     uint64_t num_rows_;
 
