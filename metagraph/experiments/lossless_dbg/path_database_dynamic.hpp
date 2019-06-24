@@ -248,11 +248,11 @@ public:
 
                 if (split_symbol) {
                     assert(relative_position>=0);
-                    routing_table.insert(node, relative_position, split_symbol);
+                    auto block_offset = routing_table.insert(node, relative_position, split_symbol);
 #ifdef DEBUG_ADDITIONAL_INFORMATION
                     debug_relative_position_history.push_back(relative_position);
 #endif
-                    relative_position = routing_table.new_relative_position(node, relative_position);
+                    relative_position = routing_table.new_relative_position(node, relative_position, block_offset);
                 }
                 traversed_edge = split_symbol ? split_symbol : 'X'; // X as it doesn't matter
                 if (traversed_edge != '$') { // doesn't need any update

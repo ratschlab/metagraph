@@ -45,9 +45,20 @@ public:
         return chunk.select(chunks.position_in_chunk(location), occurrence, symbol);
     }
 
+    ll rank(int64_t location, ll position, char symbol, ll hint_block_offset) const {
+        auto &chunk = chunks.at(location);
+        return chunk.rank(chunks.position_in_chunk(location), position, symbol, hint_block_offset);
+    }
+
     ll rank(int64_t location, ll position, char symbol) const {
         auto &chunk = chunks.at(location);
         return chunk.rank(chunks.position_in_chunk(location), position, symbol);
+    }
+
+
+    char get(int64_t location, ll position, ll hint_block_offset) const {
+        auto &chunk = chunks.at(location);
+        return chunk.get(chunks.position_in_chunk(location), position, hint_block_offset);
     }
 
     char get(int64_t location, ll position) const {
@@ -75,9 +86,14 @@ public:
         return chunk.new_relative_position(chunks.position_in_chunk(location), position);
     }
 
-    void insert(int64_t location, ll position, char symbol) {
+    ll new_relative_position(int64_t location, ll position, ll hint_block_offset) const {
+        auto &chunk = chunks.at(location);
+        return chunk.new_relative_position(chunks.position_in_chunk(location), position, hint_block_offset);
+    }
+
+    ll insert(int64_t location, ll position, char symbol) {
         auto &chunk = chunks[location];
-        chunk.insert(chunks.position_in_chunk(location), position, symbol);
+        return chunk.insert(chunks.position_in_chunk(location), position, symbol);
     }
 
 

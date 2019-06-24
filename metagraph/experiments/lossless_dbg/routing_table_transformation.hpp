@@ -55,6 +55,7 @@ public:
         return transform(node,base);
     }
 
+//TODO: Merge with hinted version
     int64_t new_relative_position(node_index node, int64_t position) const {
         auto base = this->get(node,position);
         auto base_rank = this->rank(node,position,base);
@@ -66,6 +67,22 @@ public:
                 assert(!this->rank(node,position,opposite));
 #endif
                 base_rank += this->rank(node,position,opposite);
+            }
+        }
+        return base_rank;
+    }
+
+    int64_t new_relative_position(node_index node, int64_t position, ll hint_block_offset) const {
+        auto base = this->get(node,position,hint_block_offset);
+        auto base_rank = this->rank(node,position,base,hint_block_offset);
+        if (transformations.count(node)) {
+            auto transformation = transformations.at(node);
+            if (is_affected(transformation,base)) {
+                char opposite = opposite_element(transformation,base);
+#ifdef ASSUME_NO_TRANSFORMATIONS
+                assert(!this->rank(node,position,opposite));
+#endif
+                base_rank += this->rank(node,position,opposite,hint_block_offset);
             }
         }
         return base_rank;

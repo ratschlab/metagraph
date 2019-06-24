@@ -6,6 +6,7 @@
 using namespace std;
 int main(int argc,char** argv) {
     vector<int> initial_content(1'000'000,6);
+    cout << sizeof(wavelet_tree_dyn) << endl;
     vector<wavelet_tree_dyn> size_test(100,wavelet_tree_dyn(3,initial_content));
     return 0;
 }

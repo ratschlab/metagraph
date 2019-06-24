@@ -18,6 +18,7 @@
 #include "utils.hpp"
 #include "utilities.hpp"
 #include "alphabets.hpp"
+#include "wavelet_tree.hpp"
 //#include "dynamic.hpp"
 
 volatile bool always_false = false;
@@ -92,24 +93,31 @@ public:
     int64_t select(node_index node, int64_t occurrence, char symbol) const {
         auto routing_table_block = offset(node);
         auto occurrences_of_symbol_before_block = routing_table.rank(routing_table_block,encode(symbol));
-        if (occurrence > rank(node,size(node)+1,symbol)) {
+        assert((occurrence <= rank(node,size(node)+1,symbol) || [&](){
             PRINT_VAR(node,occurrence,symbol);
             print_content(node);
-        }
-        assert(occurrence <= rank(node,size(node)+1,symbol));
+            return false; }()) );
         return routing_table.select(occurrences_of_symbol_before_block+occurrence,encode(symbol)) - routing_table_block;
     }
 
-    int64_t rank(node_index node, int64_t position, char symbol) const {
-        auto routing_table_block = offset(node);
-        auto absolute_position = routing_table_block+position;
-        auto occurrences_of_base_before_block = routing_table.rank(routing_table_block,encode(symbol));
+    int64_t rank(node_index node, int64_t position, char symbol, ll hint_block_offset) const {
+        assert(hint_block_offset == offset(node));
+        auto absolute_position = hint_block_offset+position;
+        auto occurrences_of_base_before_block = routing_table.rank(hint_block_offset,encode(symbol));
         return routing_table.rank(absolute_position,encode(symbol)) - occurrences_of_base_before_block;
     }
 
+    int64_t rank(node_index node, int64_t position, char symbol) const {
+        return rank(node,position,symbol,offset(node));
+    }
+
+    char get(node_index node, int64_t position, ll hint_block_offset) const {
+        assert(offset(node) == hint_block_offset);
+        return decode(routing_table[hint_block_offset+position]);
+    }
+
     char get(node_index node, int64_t position) const {
-        auto routing_table_block = offset(node);
-        return decode(routing_table[routing_table_block+position]);
+        return get(node,position,offset(node));
     }
 
     int64_t size(node_index node) const {
@@ -141,17 +149,22 @@ public:
         return get(node,position);
     }
 
-    int64_t new_relative_position(node_index node, int64_t position) const {
-        auto base = get(node,position);
-        auto base_rank = rank(node,position,base);
+    int64_t new_relative_position(node_index node, int64_t position, int hint_block_offset) const {
+        auto base = get(node,position,hint_block_offset);
+        auto base_rank = rank(node,position,base,hint_block_offset);
         return base_rank;
     }
 
-    void insert(ll block, int64_t position, char symbol) {
+    int64_t new_relative_position(node_index node, int64_t position) const {
+        return new_relative_position(node,position,offset(node));
+    }
+
+    ll insert(ll block, int64_t position, char symbol) {
         int64_t encoded = encode(symbol);
-        int64_t block_size = size(block);
-        assert((position <= block_size || [&](){ PRINT_VAR(block,position,symbol,block_size,encoded,symbol); return false; }()));
-        routing_table.insert(offset(block)+position,encoded);
+        assert((position <= size(block) || [&](){ PRINT_VAR(block,position,symbol,size(block),encoded,symbol); return false; }()));
+        auto block_offset = offset(block);
+        routing_table.insert(block_offset+position,encoded);
+        return block_offset;
     }
 
     // Todo change from magic number to some define elsewhere

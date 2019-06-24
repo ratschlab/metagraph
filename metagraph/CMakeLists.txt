@@ -102,10 +102,16 @@ endif()
 
 
 # Profile build type
-set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O1 -g")
-set(CMAKE_EXE_LINKER_FLAGS_PROFILE "-pg -g")
-set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg -g")
-
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  # Clang on mac doesn't support -pg
+  set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS} -DNDEBUG -O3 -march=native -g")
+  set(CMAKE_EXE_LINKER_FLAGS_PROFILE "-g")
+  set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-g")
+else()
+  set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O1 -g")
+  set(CMAKE_EXE_LINKER_FLAGS_PROFILE "-pg -g")
+  set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg -g")
+endif()
 # Debug build type
 #set(CMAKE_CXX_FLAGS_DEBUG "-O3 -g3 -ggdb")
 

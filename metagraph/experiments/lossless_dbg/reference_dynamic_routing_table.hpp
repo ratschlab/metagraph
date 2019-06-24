@@ -79,6 +79,10 @@ public:
         return base_rank;
     }
 
+    int new_relative_position(node_index node, int position, ll hint_block_offset) const {
+        return new_relative_position(node,position);
+    }
+
     int size(node_index node) const {
         if (routing_table.count(node))
             return routing_table.at(node).size();
@@ -86,9 +90,10 @@ public:
             return 0;
     }
 
-    void insert(node_index node, int position, char symbol) {
+    ll insert(node_index node, int position, char symbol) {
         assert(position <= size(node));
         routing_table[node].insert(routing_table[node].begin() + position, symbol);
+        return -1;
     }
     DenseHashMap<vector<char>> routing_table;
 };
