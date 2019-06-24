@@ -94,6 +94,7 @@ public:
         Timer timer;
         cerr << "Started transforming routing_table." << endl;
         vector<char> routing_table_array;
+        #pragma omp parallel for reduction(append: routing_table_array)
         for(int64_t node=1;node<=this->graph.num_nodes();node++) {
             routing_table_array.push_back('#');// to always start a block with #
             if (PathDatabaseDynamicCore<DRT,DIT>::node_is_split(node)) {

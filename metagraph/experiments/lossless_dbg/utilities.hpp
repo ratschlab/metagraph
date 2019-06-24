@@ -115,6 +115,20 @@ inline void reduce_maps(std::map<int, int> &output, std::map<int, int> &input) {
     }
 }
 
+template <typename T>
+inline void append_vectors(std::vector<T>& output,std::vector<T>& input)
+{
+    output.insert(output.end(),begin(input),end(input));
+}
+
+#pragma omp declare reduction(append : \
+    std::vector<char> : \
+    append_vectors(omp_out, omp_in))
+
+#pragma omp declare reduction(append : \
+    std::vector<int64_t> : \
+    append_vectors(omp_out, omp_in))
+
 inline int8_t encode(char c) {
     if (c == '#') return 6;//alphabet_decoder.alph_size;
     if (c == '$') return 0;
