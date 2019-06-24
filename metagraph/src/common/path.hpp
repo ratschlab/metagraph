@@ -72,9 +72,11 @@ class Path {
         if (size() == 0) {
             this->seed(path.front(), {}, path.sequence_.substr(0, k_));
             overlap_length += 1;
+            update_alignment(path.alignment_);
         }
         nodes_.insert(std::end(nodes_), std::begin(path.nodes_) + overlap_length, std::end(path.nodes_));
         sequence_ += path.sequence_.substr(k_ - 1 + overlap_length);
+        alignment_.ref_end += path.size() - overlap_length;
         label_set_.insert(std::end(label_set_), std::begin(path.label_set_),
                           std::end(path.label_set_));
         query_it_ = path.query_it_;

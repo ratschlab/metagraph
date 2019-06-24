@@ -160,6 +160,7 @@ bool DBGAligner::map_to_nodes(const std::string &sequence,
                                  - overlap_length * match_score_;
             // This case shouldn't normally happen.
             if (overlap_length < 0) {
+                stitched_path = AlignedPath(k_, sequence_begin, sequence_begin, path_comparison_code_);
                 std::cerr << "Negative overlap when appending a re_mapped path" << std::endl;
             }
             stitched_path.append_path(alternative_partial_path, overlap_length, updated_score);
@@ -199,7 +200,8 @@ bool DBGAligner::map_to_nodes(const std::string &sequence,
                                       [] (node_index node) { return node != 0; });
             last_mapped_it = std::find(std::min(target_node_it + 1, nodes_end), nodes_end, 0) - 1;
         }
-//        std::cerr << "Stitched after filling remaining gaps from re-mapped " << stitched_path.get_sequence() << std::endl;
+//        std::cerr << "Stitched after filling remaining gaps from re-mapped " << stitched_path.get_sequence()
+//                      << " cigar " << stitched_path.get_cigar() << std::endl;
         if (last_mapped_it == nodes_end || target_node_it == nodes_end)
             break;
 //        std::cerr << "appending exactly_mapped regions" << std::endl;
@@ -211,12 +213,16 @@ bool DBGAligner::map_to_nodes(const std::string &sequence,
                 break;
             }
         }
-//        std::cerr << "stitched after exact nodes " << stitched_path.get_sequence() << std::endl;
+//        std::cerr << "stitched after exact nodes " << stitched_path.get_sequence()
+//                      << " cigar " << stitched_path.get_cigar() << std::endl;
         // Update last_mapped_it, target_node_it to point to the beginning and end of the inexactly mapped region.
         target_node_it = std::find_if(last_mapped_it + 1, nodes_end,
                                       [] (node_index node) { return node != 0; });
 //        std::cerr << "target it in nodes vector: " << target_node_it - nodes_begin << std::endl;
     }
+
+    if (stitched_path.size() == 0)
+        return false;
 
     if (stitched_path.size() < sw_threshold_for_stitched_path_) {
         smith_waterman_score(stitched_path);
@@ -494,6 +500,9 @@ bool DBGAligner::smith_waterman_score(AlignedPath &path) {
         alignment.ref_end = path.get_sequence().size() - 1 - optimum_alignment.cigar.get_ref_end();
         alignment.query_end = path.get_query_sequence().size() - 1 - optimum_alignment.cigar.get_ref_end();
         path.update_alignment(alignment);
+//        std::cerr << "path " << path.get_sequence() << ", cigar: " << path.get_cigar()
+//                  << ", size " << path.get_sequence().size() << ", ref_end: " << alignment.ref_end
+ //                 << ", query_end: " << alignment.query_end << std::endl;
         return true;
     }
 
