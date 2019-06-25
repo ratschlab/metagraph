@@ -161,7 +161,7 @@ int main_compressor(int argc, char *argv[]) {
 			"int",cmd);
 	TCLAP::ValueArg<int> chunksArg("u",
 									   "chunks",
-									   "Number of chunks for routing and incoming table (less chunks decreases memory consumption but increases compression time) Value 1 to disables chunking.",
+									   "Number of chunks for routing and incoming table (less chunks decreases memory consumption but increases compression time) -1 = inf disables chunking.",
 									   false,
 									   DefaultChunks,
 									   "int",cmd);
@@ -194,7 +194,7 @@ int main_compressor(int argc, char *argv[]) {
     auto graph = std::make_shared<DBGSuccinct>(21);
 	if (compressor == "wavelet") {
 	    if (use_transformations) {
-	    	if (chunks > 1) {
+	    	if (chunks > 0) {
 				compress_store_reads<PathDatabaseWavelet<>>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph, chunks);
 	    	}
             else {
@@ -202,7 +202,7 @@ int main_compressor(int argc, char *argv[]) {
             }
         }
 	    else {
-	    	if (chunks > 1) {
+	    	if (chunks > 0) {
 				compress_store_reads<PathDatabaseWaveletWithtoutTransformation<>>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph, chunks);
 	    	}
 			else {
