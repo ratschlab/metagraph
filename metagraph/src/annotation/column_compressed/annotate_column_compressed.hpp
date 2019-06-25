@@ -49,6 +49,12 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
                     const VLabels &labels) override;
 
     bool has_label(Index i, const Label &label) const override;
+
+    bool call_indices_until(const std::vector<Index> &indices,
+                            const Label &label,
+                            std::function<void(Index)> index_callback,
+                            std::function<bool()> finished = []() { return false; }) const override;
+
     bool has_labels(Index i, const VLabels &labels) const override;
 
     void serialize(const std::string &filename) const override;

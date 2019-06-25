@@ -140,6 +140,29 @@ bool ColumnCompressed<Label>::has_label(Index i, const Label &label) const {
 }
 
 template <typename Label>
+bool ColumnCompressed<Label>
+::call_indices_until(const std::vector<Index> &indices,
+                     const Label &label,
+                     std::function<void(Index)> index_callback,
+                     std::function<bool()> finished) const {
+    try {
+        auto encoding = label_encoder_.encode(label);
+        for (Index i : indices) {
+            if (finished())
+                return true;
+
+            if (is_set(i, encoding))
+                index_callback(i);
+        }
+
+        if (finished())
+            return true;
+    } catch (...) { }
+
+    return false;
+}
+
+template <typename Label>
 bool ColumnCompressed<Label>::has_labels(Index i, const VLabels &labels) const {
     for (const auto &label : labels) {
         if (!has_label(i, label))
