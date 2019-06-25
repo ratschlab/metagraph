@@ -1,3 +1,5 @@
+#pragma clang diagnostic push
+#pragma ide diagnostic ignored "openmp-use-default-none"
 //
 //  path_database_baseline.hpp
 //  PathDatabase
@@ -117,31 +119,40 @@ public:
         Timer timer;
         cerr << "Started transforming incoming_table." << endl;
 
-        vector<vector<int64_t>> incoming_table_chunks(this->graph.num_nodes());
+        vector<int64_t> incoming_table_builder;
+        vector<bool> delimiter_vector;
 
-        #pragma omp parallel for num_threads(get_num_threads())
+
+        #pragma omp parallel for reduction(append: incoming_table_builder, delimiter_vector)
         for(int64_t node=1;node<=this->graph.num_nodes();node++) {
-            auto& current_chunk = incoming_table_chunks[node-1];
+            delimiter_vector.push_back(true);
             if (PathDatabaseDynamicCore<DRT,DIT>::node_is_join(node)) {
                 auto new_reads = PathDatabaseDynamicCore<DRT,DIT>::incoming_table.branch_size(node,'$');
+                int current_table_size = 0;
                 if (new_reads) {
-                    current_chunk.push_back(new_reads);
+                    incoming_table_builder.push_back(new_reads);
+                    current_table_size++;
+                    delimiter_vector.push_back(false);
                 }
 #ifdef ALL_EDGES_COVERED
                 for(auto& base : "ACGTN") {
                     auto branch_size = PathDatabaseDynamicCore<DRT,DIT>::incoming_table.branch_size(node,base);
                     if (branch_size) {
                         // so it is an actual edge in a this->graph (because all edges are covered)
-                        current_chunk.push_back(branch_size);
+                        incoming_table_builder.push_back(branch_size);
+                        current_table_size++;
+                        delimiter_vector.push_back(false);
                     }
                 }
 #else
-                this->graph.call_incoming_kmers_mine(node,[&node,&current_chunk,this](node_index prev_node,char c) {
+                this->graph.call_incoming_kmers_mine(node,[&,this](node_index prev_node,char c) {
                     auto branch_size = PathDatabaseDynamicCore<DRT,DIT>::incoming_table.branch_size(node,c);
-                    current_chunk.push_back(branch_size);
+                    incoming_table_builder.push_back(branch_size);
+                    current_table_size++;
+                    delimiter_vector.push_back(false);
                 });
 #endif
-                assert(!current_chunk.empty());
+                assert(current_table_size>0);
         #ifndef FULL_INCOMING_TABLE
                 if (current_chunk.empty()) {
                     PathDatabaseDynamicCore<DRT,DIT>::incoming_table.print_content(node);
@@ -150,24 +161,15 @@ public:
                     PRINT_VAR(PathDatabaseDynamicCore<DRT,DIT>::node_is_join_raw(node));
         #endif
                 }
-                if (current_chunk.size() > 1) {
+                if (current_table_size > 1) {
                     current_chunk.pop_back();
                 }
         #endif
             }
         }
-        vector<int64_t> incoming_table_builder;
-        vector<bool> delimiter_vector;
-        for(auto& table_chunk : incoming_table_chunks) {
-            delimiter_vector.push_back(true);
-            for(auto& val : table_chunk) {
-                delimiter_vector.push_back(false);
-                incoming_table_builder.push_back(val);
-            }
-        }
         delimiter_vector.push_back(true);
         sdsl::bit_vector temporary_representation(delimiter_vector.size());
-        for(int64_t i=0;i<delimiter_vector.size();i++) {
+        for(int64_t i=0; i <delimiter_vector.size();i++) {
             temporary_representation[i] = delimiter_vector[i];
         }
         using joins_type = typename decltype(incoming_table)::BitVector;
@@ -299,3 +301,5 @@ template<typename DummyT=int64_t>
 using PathDatabaseWaveletWithtoutTransformation = QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableCore<>,DefaultIncomingTable>>>;
 
 #endif /* path_database_baseline_hpp */
+
+#pragma clang diagnostic pop

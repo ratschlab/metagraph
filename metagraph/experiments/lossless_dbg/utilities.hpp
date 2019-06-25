@@ -129,6 +129,10 @@ inline void append_vectors(std::vector<T>& output,std::vector<T>& input)
     std::vector<int64_t> : \
     append_vectors(omp_out, omp_in))
 
+#pragma omp declare reduction(append : \
+    std::vector<bool> : \
+    append_vectors(omp_out, omp_in))
+
 inline int8_t encode(char c) {
     if (c == '#') return 6;//alphabet_decoder.alph_size;
     if (c == '$') return 0;
