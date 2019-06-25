@@ -324,7 +324,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
             exit(1);
 
         } else if (weights && weights->width() != graph_chunk.weights_.width()) {
-            std::cerr << "ERROR: trying to concatenate chunks with incostistent weights"
+            std::cerr << "ERROR: trying to concatenate chunks with inconsistent weights"
                       << std::endl;
             exit(1);
         }

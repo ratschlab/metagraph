@@ -3,6 +3,9 @@
 
 #include "sequence_graph.hpp"
 #include "dbg_succinct.hpp"
+#include "dbg_hash_ordered.hpp"
+#include "dbg_hash_string.hpp"
+#include "dbg_bitmap.hpp"
 
 
 template <typename Weights = sdsl::int_vector<>>
@@ -56,5 +59,8 @@ class WeightedMixin : public Weighted<T, Weights> {
 
 typedef WeightedMixin<DeBruijnGraph> WeightedDBG;
 typedef WeightedMixin<DBGSuccinct> WeightedDBGSuccinct;
+typedef WeightedMixin<DBGHashOrdered> WeightedDBGHashOrdered;
+typedef WeightedMixin<DBGHashString> WeightedDBGHashString;
+typedef WeightedMixin<DBGBitmap> WeightedDBGBitmap;
 
 #endif // __WEIGHTED_GRAPH_HPP__
