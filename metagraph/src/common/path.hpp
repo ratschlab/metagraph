@@ -89,6 +89,10 @@ class Path {
     }
     // Note: Assume score is updated by user accordingly.
     void trim(uint64_t query_trim_length, uint64_t path_trim_length) {
+        // If k is large compared to path_trim_length, trimming is not possible.
+        if (nodes_.size() < path_trim_length) {
+            return;
+        }
         auto last_op_ind = cigar_.find_last_of("MX=ID");
         if (last_op_ind != std::string::npos)
             cigar_ = cigar_.substr(0, last_op_ind + 1);
@@ -145,7 +149,6 @@ class Path {
     void set_similar() { is_similar_ = true; }
     NodeType back() const { return nodes_.back(); }
     NodeType front() const { return nodes_.front(); }
-    NodeType last_parent() const { return nodes_.at(nodes_.size() - 1); }
     size_t size() const { return nodes_.size(); }
     size_t query_size() const { return query_it_ - query_begin_it_ + k_ - 1; }
     size_t num_kmers_in_query() const { return query_it_ - query_begin_it_; }

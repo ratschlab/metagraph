@@ -100,7 +100,8 @@ class DeBruijnGraph : public SequenceGraph {
     virtual void suffix_seeding(std::string::const_iterator,
                                            std::string::const_iterator,
                                            const std::function<void(node_index)>&,
-                                           const std::function<bool()>&) const {
+                                           const std::function<bool()>&
+                                                        = [](){ return false; }) const {
             throw std::runtime_error("Not implemented");
     }
 

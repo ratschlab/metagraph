@@ -92,7 +92,8 @@ class DBGAligner {
     .gap_extension_penalty = 1};
 
     // Substitution score for each pair of nucleotides.
-    std::map<char, std::map<char, int8_t>> sub_score_;
+    //std::map<char, std::map<char, int8_t>> sub_score_;
+    int8_t score_matrix_[128][128];
     int8_t mm_transition_;
     int8_t mm_transversion_;
     // Maximum number of paths to explore at the same time.
@@ -161,6 +162,9 @@ class DBGAligner {
 
     // Trim the path to remove unmapped regions from the tail using CSSW lib clipping.
     void trim(AlignedPath &path) const;
+
+    // Fill the score matrix with total number of num_elements cells in the matrix.
+    void fill_score_matrix(size_t num_elements);
 };
 
 #endif // __DBG_ALIGNER_HPP__

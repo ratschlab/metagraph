@@ -29,21 +29,16 @@ DBGAligner::DBGAligner(std::shared_ptr<DeBruijnGraph> graph, DBGAlignerConfig db
     sw_cur_row_ = new std::vector<SWDpCell>(100);
     // Substitution score for each pair of nucleotides.
     // Transition and transversion mutations have different score values.
-    sub_score_ = {
-        {'a', {{'a', match_score_}, {'t', mm_transversion_}, {'c', mm_transversion_}, {'g', mm_transition_}}},
-        {'g', {{'g', match_score_}, {'t', mm_transversion_}, {'c', mm_transversion_}, {'a', mm_transition_}}},
-        {'c', {{'c', match_score_}, {'a', mm_transversion_}, {'g', mm_transversion_}, {'t', mm_transition_}}},
-        {'t', {{'t', match_score_}, {'a', mm_transversion_}, {'g', mm_transversion_}, {'c', mm_transition_}}},
-        {'$', {{'$', mm_transversion_}}}};
+    fill_score_matrix(128*128);
 
     // score for the following chars respectively:
     // A  C  G  T   N (or other ambiguous code)
     int8_t cssw_score_matrix_[5*5] = {
-    sub_score_['a']['a'], sub_score_['a']['c'], sub_score_['a']['g'], sub_score_['a']['t'], sub_score_['$']['$'],
-    sub_score_['c']['a'], sub_score_['c']['c'], sub_score_['c']['g'], sub_score_['c']['t'], sub_score_['$']['$'],
-    sub_score_['g']['a'], sub_score_['g']['c'], sub_score_['g']['g'], sub_score_['g']['t'], sub_score_['$']['$'],
-    sub_score_['t']['a'], sub_score_['t']['c'], sub_score_['t']['g'], sub_score_['t']['t'], sub_score_['$']['$'],
-    sub_score_['$']['$'], sub_score_['$']['$'], sub_score_['$']['$'], sub_score_['$']['$'], sub_score_['$']['$']};
+    score_matrix_['a']['a'], score_matrix_['a']['c'], score_matrix_['a']['g'], score_matrix_['a']['t'], score_matrix_['$']['$'],
+    score_matrix_['c']['a'], score_matrix_['c']['c'], score_matrix_['c']['g'], score_matrix_['c']['t'], score_matrix_['$']['$'],
+    score_matrix_['g']['a'], score_matrix_['g']['c'], score_matrix_['g']['g'], score_matrix_['g']['t'], score_matrix_['$']['$'],
+    score_matrix_['t']['a'], score_matrix_['t']['c'], score_matrix_['t']['g'], score_matrix_['t']['t'], score_matrix_['$']['$'],
+    score_matrix_['$']['$'], score_matrix_['$']['$'], score_matrix_['$']['$'], score_matrix_['$']['$'], score_matrix_['$']['$']};
 
     int8_t cssw_translation_matrix_[128] = {
     4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,
@@ -95,6 +90,10 @@ bool DBGAligner::map_to_nodes(const std::string &sequence,
     target_node_it = std::find_if(last_mapped_it + 1, nodes_end,
                                        [] (DBGAligner::node_index node) { return node != 0; });
 
+    // If no kmer has mapped.
+//    if (std::find_if(nodes_begin, nodes_end, [] (DBGAligner::node_index node) { return node != 0; }) == nodes_end) {
+//        std::cerr << "No kmer not mapped for " << sequence << std::endl;
+//    }
     // Seed the path and extend exactly as long as there is no branching points
     // and nodes are exactly mapped.
     AlignedPath stitched_path(k_, sequence_begin, sequence_begin, path_comparison_code_);
@@ -108,15 +107,16 @@ bool DBGAligner::map_to_nodes(const std::string &sequence,
             }
         }
     }
+//    else {
+//        std::cerr << "First kmer not mapped for " << sequence << std::endl;
+//    }
 
     BoundedPriorityQueue<AlignedPath> alternative_paths(num_alternative_paths_);
 //    std::cerr << "map_to_nodes called for " << sequence << std::endl;
-//              << " non-exact mapped part length: " <<nodes_end - last_mapped_it << std::endl;
     // Continue alignment and fill in the zeros in nodes.
     while (last_mapped_it + 1 < nodes_end) {
         auto unmapped_string_begin_it = sequence_begin + (last_mapped_it - nodes_begin);
         // Explore to find alignments.
-//        std::cerr << "Calling align for seq of length " << std::end(sequence) - unmapped_string_begin_it << std::endl;
 //        std::cerr << "Calling align for " << std::string(unmapped_string_begin_it, end(sequence)) << std::endl;
         auto re_mapped_paths = align_by_graph_exploration(unmapped_string_begin_it, std::end(sequence),
                                      [&] (AlignedPath& path) {
@@ -162,6 +162,7 @@ bool DBGAligner::map_to_nodes(const std::string &sequence,
             if (overlap_length < 0) {
                 stitched_path = AlignedPath(k_, sequence_begin, sequence_begin, path_comparison_code_);
                 std::cerr << "Negative overlap when appending a re_mapped path" << std::endl;
+                break;
             }
             stitched_path.append_path(alternative_partial_path, overlap_length, updated_score);
             target_node_it = nodes_begin + stitched_path.num_kmers_in_query() + stitched_path_offset;
@@ -179,6 +180,10 @@ bool DBGAligner::map_to_nodes(const std::string &sequence,
             alternative_paths.push(std::move(stitched_path));
             stitched_path = path_before_graph_exploration;
         }
+        if (stitched_path.size() == 0) {
+            std::cerr << "Terminating early because of negative overlap when appending a re_mapped path" << std::endl;
+            break;
+        }
         // Skip the remainder of the zero region and adjust last_mapped_it and target_node_it accordingly.
         // Reset stitched_path to start at the first exactly mapped after the current kmer.
         if (*target_node_it == 0) {
@@ -186,10 +191,7 @@ bool DBGAligner::map_to_nodes(const std::string &sequence,
                                       [] (node_index node) { return node != 0; });
             if (non_zero_target_node_it == nodes_end)
                 break;
-//            std::cout << "target it in nodes vector: " << target_node_it - nodes_begin << std::endl;
-//            std::cout << "non_zero target it in nodes vector: " << non_zero_target_node_it - nodes_begin << std::endl;
             auto next_kmer_it = non_zero_target_node_it - nodes_begin + sequence_begin;
-//            std::cout << "next_kmer ind: " << next_kmer_it - sequence_begin << std::endl;
             // first exact mapped kmer is added to the path as seed.
             stitched_path = AlignedPath(k_, next_kmer_it, next_kmer_it, path_comparison_code_);
             stitched_path.seed(*non_zero_target_node_it, {},
@@ -297,12 +299,13 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::align_by_graph_exploration(
 //        std::cerr << "calling inexact map" << std::endl;
 
         if (!inexact_map(path, queue, dp_alignment, terminate_mapping) || queue.empty()) {
+//            std::cerr << "Aligning and trim after inexact map: " << path.get_sequence() << " " << path.get_cigar() << std::endl;
             if (path.size() != 0) {
                 smith_waterman_score(path);
                 trim(path);
                 alternative_paths.push(path);
             }
-//            std::cerr << "Aligned and trim after inexact map: " << path.get_sequence() << std::endl;
+//            std::cerr << "Aligning and trim after inexact map: " << path.get_sequence() << " " << path.get_cigar() << std::endl;
             break;
         }
     }
@@ -333,8 +336,8 @@ void DBGAligner::suffix_seed(BoundedPriorityQueue<AlignedPath>& queue,
     auto begin = sequence_begin;
     // A while loop helps to pick a starting position where there aren't too many suffix seeds found.
     // Too many suffix seeds are expensive to explore and may lead to discarding desirable seeds incorrectly.
-    while (begin < sequence_end) {
-        size_t k_for_seeding_l = 1;
+    while (begin + k_ < sequence_end) {
+        size_t k_for_seeding_l = k_ > 12 ? 12 : 1;
         size_t k_for_seeding_r = k_;
 //        std::cerr << "inexact seeding " << std::endl;
 
@@ -350,24 +353,19 @@ void DBGAligner::suffix_seed(BoundedPriorityQueue<AlignedPath>& queue,
             else
                 k_for_seeding_r = k_for_seeding_m;
         }
-        // Seed by suffix with the k values searched before.
-        size_t suffix_seed_counter = 0;
+        // Seed by suffix with the k range after the binary search.
         graph_->suffix_seeding(begin + k_ - k_for_seeding_l, begin + k_, [&] (node_index node) {
             auto alternative_path(path);
 //            std::cerr << "seeding alternative: " << graph_->get_node_sequence(node) << std::endl;
             alternative_path.seed(node, {}, graph_->get_node_sequence(node));
             queue.push(std::move(alternative_path));
-            suffix_seed_counter ++;
-            }, [&](){ return suffix_seed_counter >= num_top_paths_; });
-        // If at most num_top_paths_ number of seeds were found, end this loop and start extending the seeds.
-        // TODO: When should we interpret the number of extracted suffixes as enough?
-        if (suffix_seed_counter < num_top_paths_/2 && suffix_seed_counter > 0)
+            });
+        if (queue.size() > 0)
             return;
 //        std::cerr << "Continue alignment with l and r: " << k_for_seeding_l << ", " << k_for_seeding_r << std::endl;
         begin += k_ - k_for_seeding_r + 1;
-        queue = BoundedPriorityQueue<AlignedPath>(num_top_paths_);
     }
-    std::cout << "Warning! path is not seeded properly" << std::endl;
+    std::cout << "Warning! no seed found for path" << std::endl;
 }
 
 bool DBGAligner::exact_map(AlignedPath &path, const std::string::const_iterator &sequence_end,
@@ -474,12 +472,7 @@ bool DBGAligner::inexact_map(AlignedPath& path,
 }
 
 int8_t DBGAligner::single_char_score(char char_in_query, char char_in_graph) const {
-    try {
-        return sub_score_.at(std::tolower(char_in_query)).at(std::tolower(char_in_graph));
-    }
-    catch (const std::out_of_range&) {
-        return sub_score_.at('$').at('$');
-    }
+    return score_matrix_[int8_t(char_in_query)][int8_t(char_in_graph)];
 }
 
 bool DBGAligner::smith_waterman_score(AlignedPath &path) {
@@ -491,14 +484,22 @@ bool DBGAligner::smith_waterman_score(AlignedPath &path) {
     if (!use_cssw_lib_) {
         SWDpCell optimum_alignment;
         smith_waterman_core(path, optimum_alignment);
-        alignment.cigar_string = optimum_alignment.cigar.to_string();
-        if (optimum_alignment.score < 0)
+        if (optimum_alignment.score >= 0) {
+            alignment.cigar_string = optimum_alignment.cigar.to_string();
+            alignment.sw_score = optimum_alignment.score;
+            alignment.ref_begin = optimum_alignment.cigar.get_ref_begin();
+            alignment.query_begin = optimum_alignment.cigar.get_query_begin();
+            alignment.ref_end = path.get_sequence().size() - 1 - optimum_alignment.cigar.get_ref_end();
+            alignment.query_end = path.get_query_sequence().size() - 1 - optimum_alignment.cigar.get_ref_end();
+        } else {
             std::cerr << "Warning: Negative Smith Waterman score!" << std::endl;
-        alignment.sw_score = std::max(unsigned(optimum_alignment.score), 0u);
-        alignment.ref_begin = optimum_alignment.cigar.get_ref_begin();
-        alignment.query_begin = optimum_alignment.cigar.get_query_begin();
-        alignment.ref_end = path.get_sequence().size() - 1 - optimum_alignment.cigar.get_ref_end();
-        alignment.query_end = path.get_query_sequence().size() - 1 - optimum_alignment.cigar.get_ref_end();
+            alignment.cigar_string = "";
+            alignment.sw_score = 0u;
+            alignment.ref_begin = optimum_alignment.cigar.get_ref_begin();
+            alignment.query_begin = optimum_alignment.cigar.get_query_begin();
+            alignment.ref_end = path.get_sequence().size() - 1;
+            alignment.query_end = path.get_query_sequence().size() - 1;
+        }
         path.update_alignment(alignment);
 //        std::cerr << "path " << path.get_sequence() << ", cigar: " << path.get_cigar()
 //                  << ", size " << path.get_sequence().size() << ", ref_end: " << alignment.ref_end
@@ -632,4 +633,30 @@ void DBGAligner::trim(AlignedPath &path) const {
         query_trim_length += atoi(position_str.c_str());
     }
     path.trim(query_trim_length, path_trim_length);
+}
+
+void DBGAligner::fill_score_matrix(size_t num_elements) {
+    std::fill_n(&(score_matrix_[0][0]), num_elements, std::min(mm_transversion_, mm_transition_));
+    // Match scores
+    score_matrix_['a']['a'] = score_matrix_['A']['a'] = score_matrix_['a']['A'] = score_matrix_['A']['A'] = match_score_;
+    score_matrix_['c']['c'] = score_matrix_['C']['c'] = score_matrix_['c']['C'] = score_matrix_['C']['C'] = match_score_;
+    score_matrix_['g']['g'] = score_matrix_['G']['g'] = score_matrix_['g']['G'] = score_matrix_['G']['G'] = match_score_;
+    score_matrix_['t']['t'] = score_matrix_['T']['t'] = score_matrix_['t']['T'] = score_matrix_['T']['T'] = match_score_;
+    // Mismatch transition scores
+    score_matrix_['a']['g'] = score_matrix_['A']['g'] = score_matrix_['a']['G'] = score_matrix_['A']['G'] = mm_transition_;
+    score_matrix_['g']['a'] = score_matrix_['G']['a'] = score_matrix_['g']['A'] = score_matrix_['G']['A'] = mm_transition_;
+    score_matrix_['c']['t'] = score_matrix_['C']['t'] = score_matrix_['c']['T'] = score_matrix_['C']['T'] = mm_transition_;
+    score_matrix_['t']['c'] = score_matrix_['T']['c'] = score_matrix_['t']['C'] = score_matrix_['T']['C'] = mm_transition_;
+    // Mismatch transversion scores
+    score_matrix_['a']['c'] = score_matrix_['A']['c'] = score_matrix_['a']['C'] = score_matrix_['A']['C'] = mm_transversion_;
+    score_matrix_['a']['t'] = score_matrix_['A']['t'] = score_matrix_['a']['T'] = score_matrix_['A']['T'] = mm_transversion_;
+
+    score_matrix_['g']['c'] = score_matrix_['G']['c'] = score_matrix_['g']['C'] = score_matrix_['G']['C'] = mm_transversion_;
+    score_matrix_['g']['t'] = score_matrix_['G']['t'] = score_matrix_['g']['T'] = score_matrix_['G']['T'] = mm_transversion_;
+
+    score_matrix_['c']['a'] = score_matrix_['C']['a'] = score_matrix_['c']['A'] = score_matrix_['C']['A'] = mm_transversion_;
+    score_matrix_['c']['g'] = score_matrix_['C']['g'] = score_matrix_['c']['G'] = score_matrix_['C']['G'] = mm_transversion_;
+
+    score_matrix_['t']['a'] = score_matrix_['T']['a'] = score_matrix_['t']['A'] = score_matrix_['T']['A'] = mm_transversion_;
+    score_matrix_['t']['g'] = score_matrix_['T']['g'] = score_matrix_['t']['G'] = score_matrix_['T']['G'] = mm_transversion_;
 }
