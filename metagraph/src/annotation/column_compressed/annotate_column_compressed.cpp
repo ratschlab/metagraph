@@ -63,9 +63,8 @@ ColumnCompressed<Label>::get_labels(Index i) const {
     assert(i < num_rows_);
 
     VLabels labels;
-    for (size_t j = 0; j < num_labels(); ++j) {
-        if (is_set(i, j))
-            labels.push_back(label_encoder_.decode(j));
+    for (auto label_index : get_label_indices(i)) {
+        labels.push_back(label_encoder_.decode(label_index));
     }
     return labels;
 }
