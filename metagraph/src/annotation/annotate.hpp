@@ -82,6 +82,13 @@ class MultiLabelAnnotation
     virtual bool has_label(Index i, const Label &label) const = 0;
     virtual bool has_labels(Index i, const VLabels &labels) const = 0;
 
+    // For each index i in indices, check of i has the label. Return
+    // true if the finished callback evaluates true during execution.
+    virtual bool call_indices_until(const std::vector<Index> &indices,
+                                    const Label &label,
+                                    std::function<void(Index)> index_callback,
+                                    std::function<bool()> finished = []() { return false; }) const = 0;
+
     virtual void insert_rows(const std::vector<Index> &rows) = 0;
 
     // For each pair (L, L') in the dictionary, replaces label |L| with |L'|
@@ -199,6 +206,13 @@ class MultiLabelEncoded
             callback(label_encoder_.decode(i));
         }
     }
+
+    // For each index i in indices, check of i has the label. Return
+    // true if the finished callback evaluates true during execution.
+    virtual bool call_indices_until(const std::vector<Index> &indices,
+                                    const Label &label,
+                                    std::function<void(Index)> index_callback,
+                                    std::function<bool()> finished = []() { return false; }) const override;
 
     virtual std::string file_extension() const override = 0;
 

@@ -158,6 +158,29 @@ std::vector<uint64_t> StaticBinRelAnnotator<BinaryMatrixType, Label>
     }
 }
 
+// For each index i in indices, check of i has the label. Return
+// true if the finished callback evaluates true during execution.
+template <class BinaryMatrixType, typename Label>
+bool StaticBinRelAnnotator<BinaryMatrixType, Label>
+::call_indices_until(const std::vector<Index> &indices,
+                     const Label &label,
+                     std::function<void(Index)> index_callback,
+                     std::function<bool()> finished) const {
+    auto column = matrix_->get_column(label_encoder_.encode(label));
+
+    std::unordered_set<Index> column_set(column.begin(), column.end());
+    for (Index i : indices) {
+        if (column_set.find(i) != column_set.end()) {
+            index_callback(i);
+
+            if (finished())
+                return true;
+        }
+    }
+
+    return false;
+}
+
 template <class BinaryMatrixType, typename Label>
 void StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::reset_row_cache(size_t size) {

@@ -105,6 +105,25 @@ void MultiLabelEncoded<IndexType, LabelType>
     }
 }
 
+// For each index i in indices, check of i has the label. Return
+// true if the finished callback evaluates true during execution.
+template <typename IndexType, typename LabelType>
+bool MultiLabelEncoded<IndexType, LabelType>
+::call_indices_until(const std::vector<Index> &indices,
+                     const Label &label,
+                     std::function<void(Index)> index_callback,
+                     std::function<bool()> finished) const {
+    for (Index i : indices) {
+        if (finished())
+            return true;
+
+        if (this->has_label(i, label))
+            index_callback(i);
+    }
+
+    return finished();
+}
+
 template <typename Annotator>
 class IterateRowsByIndex : public IterateRows {
   public:
