@@ -19,6 +19,7 @@ bool WeightedMixin<T, Weights>::load(const std::string &filename) {
 
     try {
         std::ifstream instream(utils::remove_suffix(filename, T::file_extension())
+                                    + T::file_extension()
                                     + kWeightsExtension,
                                std::ios::binary);
         this->weights_.load(instream);
@@ -37,6 +38,7 @@ void WeightedMixin<T, Weights>::serialize(const std::string &filename) const {
     T::serialize(filename);
 
     std::ofstream outstream(utils::remove_suffix(filename, T::file_extension())
+                                + T::file_extension()
                                 + kWeightsExtension,
                             std::ios::binary);
 

@@ -92,6 +92,7 @@ std::string remove_graph_extension(const std::string &filename) {
 template <class Graph = BOSS>
 std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
     Graph *graph;
+
     // TODO What if there were many graph mixins and any number of them could be present?
     //   Consider an Entity Component System or boost.mixin (options for runtime/dynamic mixin)
     if constexpr (!std::is_base_of<DeBruijnGraph, Graph>::value
@@ -105,7 +106,6 @@ std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename
         }
     }
     if (!graph->load(filename)) {
-        // TODO improve error message
         std::cerr << "ERROR: can't load graph from file " << filename << std::endl;
         delete graph;
         exit(1);
@@ -130,7 +130,8 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
             return load_critical_graph_from_file<DBGBitmap>(filename);
 
         case Config::GraphType::INVALID:
-            return load_critical_graph_from_file<DefaultGraphType>(filename);
+            std::cerr << "ERROR: can't load graph from file, needs valid file extension ('" << filename << "' given)" << std::endl;
+            exit(1);
     }
     assert(false);
     exit(1);
