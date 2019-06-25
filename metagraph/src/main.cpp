@@ -92,8 +92,8 @@ std::string remove_graph_extension(const std::string &filename) {
 template <class Graph = BOSS>
 std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
     Graph *graph;
-    // TODO what if there were multiple graph mixins and any number of them could be present?
-    // how could they be dynamically composed?
+    // TODO What if there were many graph mixins and any number of them could be present?
+    //   Consider an Entity Component System or boost.mixin (options for runtime/dynamic mixin)
     if constexpr (!std::is_base_of<DeBruijnGraph, Graph>::value
                   || std::is_same<DeBruijnGraph, Graph>::value) {
         graph = new Graph(2);
@@ -105,6 +105,7 @@ std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename
         }
     }
     if (!graph->load(filename)) {
+        // TODO improve error message
         std::cerr << "ERROR: can't load graph from file " << filename << std::endl;
         delete graph;
         exit(1);
@@ -855,6 +856,13 @@ int main(int argc, const char *argv[]) {
                           << config->k << std::endl;
 
             Timer timer;
+
+            if (config->count_kmers &&
+                    !(config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic)) {
+                std::cerr << "Error: Only static succinct graph can be built"
+                          << " with kmer counting" << std::endl;
+                exit(1);
+            }
 
             if (config->complete) {
                 if (config->graph_type != Config::GraphType::BITMAP) {
@@ -1613,12 +1621,10 @@ int main(int argc, const char *argv[]) {
 
             auto graph = load_critical_dbg(files.at(0));
             const IWeighted<> *weighted_graph;
-            if (!dynamic_cast<const IWeighted<>*>(graph.get())) {
+            if (!(weighted_graph = dynamic_cast<const IWeighted<>*>(graph.get()))) {
                 std::cerr << "ERROR: Cannot load weighted graph from "
                           << files.at(0) << std::endl;
                 exit(1);
-            } else {
-                weighted_graph = dynamic_cast<const IWeighted<>*>(graph.get());
             }
 
             if (config->verbose)
@@ -2294,7 +2300,7 @@ int main(int argc, const char *argv[]) {
                     }
 
                     if (config->count_kmers) {
-                        std::cout << num_discovered << "/" << num_kmers << "\n";
+                        std::cout << "Kmer counts: " << num_discovered << "/" << num_kmers << " (discovered/total)" << "\n";
                         return;
                     }
 
