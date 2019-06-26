@@ -93,14 +93,18 @@ template <class Graph = BOSS>
 std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
     Graph *graph;
 
-    // TODO What if there were many graph mixins and any number of them could be present?
-    //   Consider an Entity Component System or boost.mixin (options for runtime/dynamic mixin)
-    if constexpr (!std::is_base_of<DeBruijnGraph, Graph>::value
-                  || std::is_same<DeBruijnGraph, Graph>::value) {
+    if constexpr(std::is_same<BOSS, Graph>::value) {
         graph = new Graph(2);
+
+    } else if constexpr(!std::is_base_of<DeBruijnGraph, Graph>::value) {
+        // TODO What if there were many graph mixins and any number of them could be present?
+        //   Consider an Entity Component System or boost.mixin (options for runtime/dynamic mixin)
+        static_assert(std::is_base_of<IWeighted<DeBruijnGraph::node_index>, Graph>::value);
+        graph = new Graph(2);
+
     } else {
         if (graph_has_weights_file(filename)) {
-            graph = new WeightedMixin<Graph>(2);
+            graph = new WeightedDBG<Graph>(2);
         } else {
             graph = new Graph(2);
         }
@@ -130,7 +134,9 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
             return load_critical_graph_from_file<DBGBitmap>(filename);
 
         case Config::GraphType::INVALID:
-            std::cerr << "ERROR: can't load graph from file, needs valid file extension ('" << filename << "' given)" << std::endl;
+            std::cerr << "ERROR: can't load graph from file '"
+                      << filename
+                      << "', needs valid file extension" << std::endl;
             exit(1);
     }
     assert(false);
@@ -612,15 +618,15 @@ void print_stats(const DeBruijnGraph &graph) {
     std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
     std::cout << "canonical mode: " << (graph.is_canonical_mode() ? "yes" : "no") << std::endl;
 
-    if (dynamic_cast<const IWeighted<>*>(&graph)) {
-        const auto &weighted = dynamic_cast<const IWeighted<>&>(graph);
+    if (dynamic_cast<const IWeighted<DeBruijnGraph::node_index>*>(&graph)) {
+        const auto &weighted = dynamic_cast<const IWeighted<DeBruijnGraph::node_index>&>(graph);
         double sum_weights = 0;
-        for (uint64_t i = 1; i <= weighted.num_weights(); ++i) {
+        for (uint64_t i = 1; i <= graph.num_nodes(); ++i) {
             sum_weights += weighted.get_weight(i);
         }
         std::cout << "sum weights: " << sum_weights << std::endl;
 
-        for (uint64_t i = 1; i <= weighted.num_weights(); ++i) {
+        for (uint64_t i = 1; i <= graph.num_nodes(); ++i) {
             std::cout << weighted.get_weight(i) << " ";
         }
         std::cout << std::endl;
@@ -941,7 +947,7 @@ int main(int argc, const char *argv[]) {
                         boss_graph.release(),
                         config->canonical
                     );
-                    weighted_graph->set_weights(kmer_counts);
+                    weighted_graph->set_weights(std::move(kmer_counts));
                     graph.reset(weighted_graph.release());
                 } else {
                     graph_data.initialize_boss(boss_graph.get());
@@ -1621,8 +1627,8 @@ int main(int argc, const char *argv[]) {
                 std::cout << "Graph loading...\t" << std::flush;
 
             auto graph = load_critical_dbg(files.at(0));
-            const IWeighted<> *weighted_graph;
-            if (!(weighted_graph = dynamic_cast<const IWeighted<>*>(graph.get()))) {
+            const IWeighted<DeBruijnGraph::node_index> *weighted_graph;
+            if (!(weighted_graph = dynamic_cast<const IWeighted<DeBruijnGraph::node_index>*>(graph.get()))) {
                 std::cerr << "ERROR: Cannot load weighted graph from "
                           << files.at(0) << std::endl;
                 exit(1);
@@ -2301,7 +2307,7 @@ int main(int argc, const char *argv[]) {
                     }
 
                     if (config->count_kmers) {
-                        std::cout << "Kmer counts: " << num_discovered << "/" << num_kmers << " (discovered/total)" << "\n";
+                        std::cout << "Kmers matched (discovered/total): " << num_discovered << "/" << num_kmers << "\n";
                         return;
                     }
 
