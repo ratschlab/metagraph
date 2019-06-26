@@ -223,6 +223,44 @@ inline void sequence_to_kmers(const TAlphabet *begin,
     }
 }
 
+template <typename TAlphabet>
+inline sdsl::bit_vector valid_kmers(const std::string &sequence,
+                                    size_t k,
+                                    const std::string &alphabet,
+                                    std::function<TAlphabet(char)> encode) {
+    if (sequence.size() < k)
+        return sdsl::bit_vector();
+
+    sdsl::bit_vector valid(sequence.size() - k + 1);
+
+    auto is_valid = [&](char c) { return encode(c) >= alphabet.size(); };
+    uint64_t invalid_counter = std::count_if(sequence.begin(),
+                                             sequence.begin() + k,
+                                             is_valid);
+    auto it = valid.begin();
+    *it++ = !invalid_counter;
+
+    for (auto jt = sequence.begin() + k; jt != sequence.end(); ++jt) {
+        if (is_valid(*jt))
+            invalid_counter++;
+
+        if (is_valid(*(jt - k))) {
+            assert(invalid_counter);
+            invalid_counter--;
+        }
+
+        assert(it != valid.end());
+        if (!invalid_counter)
+            *it = true;
+
+        ++it;
+    }
+
+    assert(it == valid.end());
+
+    return valid;
+}
+
 } // namespace extractor
 
 
@@ -276,6 +314,15 @@ KmerExtractor::encode(const std::string &sequence) {
 
 std::string KmerExtractor::decode(const std::vector<TAlphabet> &sequence) {
     return extractor::decode(sequence, alphabet);
+}
+
+sdsl::bit_vector KmerExtractor::valid_kmers(const std::string &sequence, size_t k) {
+    auto valid = extractor::valid_kmers<TAlphabet>(
+        sequence, k, alphabet,
+        [&](char c) -> TAlphabet { return encode(c); }
+    );
+
+    return valid;
 }
 
 /**
@@ -465,6 +512,16 @@ KmerExtractor2BitTDecl(std::vector<std::string>)
         result.push_back(std::move(suffix));
     }
     return result;
+}
+
+KmerExtractor2BitTDecl(sdsl::bit_vector)
+::valid_kmers(const std::string &sequence, size_t k) const {
+    auto valid = extractor::valid_kmers<TAlphabet>(
+        sequence, k, alphabet,
+        [&](char c) -> TAlphabet { return encode(c); }
+    );
+
+    return valid;
 }
 
 /**

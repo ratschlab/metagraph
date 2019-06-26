@@ -67,6 +67,8 @@ TEST(KmerExtractor2Bit, encode_decode_string) {
         Vector<KmerExtractor2Bit::Kmer256> kmers;
 
         encoder.sequence_to_kmers(sequence, k, {}, &kmers);
+        auto valid = encoder.valid_kmers(sequence, k);
+        EXPECT_EQ(kmers.size(), sdsl::util::cnt_one_bits(valid));
         ASSERT_EQ(k <= last_part.size()
                     ? sequence.size() - 2 * k + 1
                     : (k <= first_part.size() ? first_part.size() - k + 1 : 0),
@@ -76,20 +78,32 @@ TEST(KmerExtractor2Bit, encode_decode_string) {
         if (!kmers.size())
             continue;
 
+        EXPECT_TRUE(valid[0]);
         std::string reconstructed = encoder.kmer_to_sequence(kmers[0], k);
         uint64_t i;
         for (i = 1; i < first_part.size() - k + 1; ++i) {
             reconstructed.push_back(encoder.kmer_to_sequence(kmers[i], k)[k - 1]);
+            ASSERT_GT(valid.size(), i);
+            EXPECT_TRUE(valid[i]);
         }
         EXPECT_EQ(first_part, reconstructed);
 
         if (k > last_part.size())
             continue;
 
+        for (uint64_t j = 0; j < k; ++j) {
+            ASSERT_GT(valid.size(), i + j);
+            EXPECT_FALSE(valid[i + j]);
+        }
+
         reconstructed = encoder.kmer_to_sequence(kmers[i], k);
+        EXPECT_TRUE(valid[i + k]);
         while (++i < kmers.size()) {
             reconstructed.push_back(encoder.kmer_to_sequence(kmers[i], k)[k - 1]);
+            ASSERT_GT(valid.size(), i + k);
+            EXPECT_TRUE(valid[i + k]);
         }
+        EXPECT_EQ(valid.size(), i + k);
         EXPECT_EQ(last_part, reconstructed);
     }
 }
