@@ -104,7 +104,7 @@ endif()
 # Profile build type
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   # Clang on mac doesn't support -pg
-  set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS} -DNDEBUG -O3 -march=native -g")
+  set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_PROFILE} ${CMAKE_CXX_FLAGS} -DNDEBUG -O3 -march=native -g")
   set(CMAKE_EXE_LINKER_FLAGS_PROFILE "-g")
   set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-g")
 else()

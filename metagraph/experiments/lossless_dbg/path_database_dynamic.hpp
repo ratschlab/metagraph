@@ -180,7 +180,7 @@ public:
                         PRINT_VAR(graph.kmer_to_node(path_for_sequence.substr(offset,graph.get_k())));
                     };
                     pn(kmer_begin);
-                    return false; }());
+                    return false; }() && "sequence doesn't represent walk");
 
 #ifdef DEBUG_ADDITIONAL_INFORMATION
                 debug_list_of_nodes.push_back(node);

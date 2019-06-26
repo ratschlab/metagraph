@@ -30,7 +30,7 @@ public:
 
     template<class Container>
     void initialize_content(const Container& routing_table_array) {
-        sdsl::int_vector<0> routing_table_array_encoded(routing_table_array.size());
+        sdsl::int_vector<3> routing_table_array_encoded(routing_table_array.size());
         for(int64_t i=0;i<routing_table_array.size();i++) {
             routing_table_array_encoded[i] = routing_table_array[i] == '#' ? 
                                              delimiter_encoded : 

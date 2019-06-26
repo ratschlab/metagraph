@@ -152,17 +152,19 @@ public:
                     delimiter_vector.push_back(false);
                 });
 #endif
-                assert(current_table_size>0);
-        #ifndef FULL_INCOMING_TABLE
-                if (current_chunk.empty()) {
+                assert((current_table_size>0 || [&](){
                     PathDatabaseDynamicCore<DRT,DIT>::incoming_table.print_content(node);
                     PRINT_VAR(PathDatabaseDynamicCore<DRT,DIT>::node_is_join(node));
-        #ifdef MEMOIZE
+#ifdef MEMOIZE
                     PRINT_VAR(PathDatabaseDynamicCore<DRT,DIT>::node_is_join_raw(node));
-        #endif
-                }
+#endif
+                    return false;
+                }()));
+
+
+#ifndef FULL_INCOMING_TABLE
                 if (current_table_size > 1) {
-                    current_chunk.pop_back();
+                    incoming_table_builder.pop_back();
                 }
         #endif
             }

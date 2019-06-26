@@ -17,13 +17,19 @@ if(PROFILER_LIB)
     link_libraries(profiler)
 endif()
 
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_PROFILE} -fno-inline-functions")
+else()
+    set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_PROFILE} -fno-inline")
+endif()
+
 ## Useful for profiling
 # needs gperftools installed
 # -fopt-info-loop		Prints optimizations during compile
 # -fno-tree-vectorize 	Prevent strange errors due to misalignment
 # -fno-ipa-sra 			Prevent .isra merged functions which make profiling difficult
-# -fno-inline			Prevent inlined functions which make profiling difficult
-# -fno-inline-functions	Prevent inlined functions which make profiling difficult
+# -fno-inline	GCC		Prevent inlined functions which make profiling difficult
+# -fno-inline-functions Clang	Prevent inlined functions which make profiling difficult
 
 #CFLAGS=-std=gnu99 -pedantic -pedantic-errors -Wall -Werror -Wshadow -O3 -g -fno-tree-vectorize -fno-ipa-sra -fno-inline-functions -fno-inline
 #CFLAGS=-std=gnu99 -pedantic -pedantic-errors -Wall -Werror -Wshadow -Wdisabled-optimization -O3 -g -fno-tree-vectorize
