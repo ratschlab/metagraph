@@ -46,13 +46,8 @@ void DBGHashString::add_sequence(const std::string &sequence,
 void DBGHashString::map_to_nodes(const std::string &sequence,
                                  const std::function<void(node_index)> &callback,
                                  const std::function<bool()> &terminate) const {
-    for (size_t i = 0; i + k_ <= sequence.size(); ++i) {
-        auto node = kmer_to_node(std::string(&sequence[i], &sequence[i + k_]));
-
-        callback(node);
-
-        if (terminate())
-            return;
+    for (size_t i = 0; i + k_ <= sequence.size() && !terminate(); ++i) {
+        callback(kmer_to_node(std::string(&sequence[i], &sequence[i + k_])));
     }
 }
 
@@ -61,13 +56,8 @@ void DBGHashString
                             std::string::const_iterator end,
                             const std::function<void(node_index)> &callback,
                             const std::function<bool()> &terminate) const {
-    for (auto it = begin; it + k_ <= end; ++it) {
-        auto node = kmer_to_node(std::string(it, it + k_));
-
-        callback(node);
-
-        if (terminate())
-            return;
+    for (auto it = begin; it + k_ <= end && !terminate(); ++it) {
+        callback(kmer_to_node(std::string(it, it + k_)));
     }
 }
 

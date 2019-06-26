@@ -56,7 +56,7 @@ void VCFParser::print_line(std::ostream &out) {
 
 void VCFParser::call_sequences(std::function<void(std::string&&)> callback,
                                std::function<bool()> terminate) {
-    while (rec_) {
+    while (rec_ && !terminate()) {
         current_line_++;
         if (current_line_ >= rec_->n_allele || !bcf_has_filter(hdr_, rec_, passfilt)) {
             read_next_line();
@@ -92,9 +92,6 @@ void VCFParser::call_sequences(std::function<void(std::string&&)> callback,
         } else {
             callback(prefix_ + rec_->d.allele[current_line_] + suffix_);
         }
-
-        if (terminate())
-            return;
     }
 }
 

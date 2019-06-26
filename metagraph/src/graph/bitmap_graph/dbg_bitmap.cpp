@@ -36,12 +36,20 @@ DBGBitmap::DBGBitmap(DBGBitmapConstructor *builder) : DBGBitmap(2) {
 void DBGBitmap::map_to_nodes(const std::string &sequence,
                              const std::function<void(node_index)> &callback,
                              const std::function<bool()> &terminate) const {
-    for (const auto &kmer : sequence_to_kmers(sequence, canonical_mode_)) {
-        callback(to_node(kmer));
-
+    auto kmers = sequence_to_kmers(sequence, canonical_mode_);
+    auto it = kmers.begin();
+    for (bool is_valid : seq_encoder_.valid_kmers(sequence, k_)) {
         if (terminate())
             return;
+
+        if (is_valid) {
+            assert(it != kmers.end());
+            callback(to_node(*it++));
+        } else {
+            callback(npos);
+        }
     }
+    assert(it == kmers.end());
 }
 
 // Traverse graph mapping sequence to the graph nodes
@@ -52,12 +60,21 @@ void DBGBitmap::map_to_nodes_sequentially(std::string::const_iterator begin,
                                           std::string::const_iterator end,
                                           const std::function<void(node_index)> &callback,
                                           const std::function<bool()> &terminate) const {
-    for (const auto &kmer : sequence_to_kmers(std::string(begin, end))) {
-        callback(to_node(kmer));
-
+    std::string sequence(begin, end);
+    auto kmers = sequence_to_kmers(sequence);
+    auto it = kmers.begin();
+    for (bool is_valid : seq_encoder_.valid_kmers(sequence, k_)) {
         if (terminate())
             return;
+
+        if (is_valid) {
+            assert(it != kmers.end());
+            callback(to_node(*it++));
+        } else {
+            callback(npos);
+        }
     }
+    assert(it == kmers.end());
 }
 
 DBGBitmap::node_index
