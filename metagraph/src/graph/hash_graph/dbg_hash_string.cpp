@@ -5,24 +5,40 @@
 #include "serialization.hpp"
 #include "bit_vector.hpp"
 #include "utils.hpp"
+#include "alphabets.hpp"
 
+
+#if _PROTEIN_GRAPH
+    const std::string DBGHashString::alphabet_ = alphabets::kAlphabetProtein;
+#elif _DNA_CASE_SENSITIVE_GRAPH
+    const std::string DBGHashString::alphabet_ = alphabets::kAlphabetDNACaseSent;
+#elif _DNA5_GRAPH
+    const std::string DBGHashString::alphabet_ = alphabets::kAlphabetDNA5;
+#elif _DNA_GRAPH
+    const std::string DBGHashString::alphabet_ = alphabets::kAlphabetDNA;
+#else
+    static_assert(false,
+        "Define an alphabet: either "
+        "_DNA_GRAPH, _DNA5_GRAPH, _PROTEIN_GRAPH, or _DNA_CASE_SENSITIVE_GRAPH."
+    );
+#endif
 
 void DBGHashString::add_sequence(const std::string &sequence,
                                  bit_vector_dyn *nodes_inserted) {
     assert(!nodes_inserted || nodes_inserted->size() == num_nodes());
 
-    auto seq_encoded = encode_sequence(sequence);
+    for (const auto &seq_encoded : encode_sequence(sequence)) {
+        if (sequence.size() < k_)
+            continue;
 
-    if (sequence.size() < k_)
-        return;
-
-    for (size_t i = 0; i + k_ - 1 < seq_encoded.size(); ++i) {
-        auto index_insert = indices_.emplace(seq_encoded.substr(i, k_),
-                                             kmers_.size());
-        if (index_insert.second) {
-            kmers_.push_back(index_insert.first->first);
-            if (nodes_inserted)
-                nodes_inserted->insert_bit(kmers_.size() - 1, true);
+        for (size_t i = 0; i + k_ - 1 < seq_encoded.size(); ++i) {
+            auto index_insert = indices_.emplace(seq_encoded.substr(i, k_),
+                                                 kmers_.size());
+            if (index_insert.second) {
+                kmers_.push_back(index_insert.first->first);
+                if (nodes_inserted)
+                    nodes_inserted->insert_bit(kmers_.size() - 1, true);
+            }
         }
     }
 }
@@ -248,12 +264,35 @@ bool DBGHashString::operator==(const DeBruijnGraph &other) const {
     return true;
 }
 
-std::string DBGHashString::encode_sequence(const std::string &sequence) const {
-    std::string result = sequence;
+std::vector<std::string> DBGHashString::encode_sequence(const std::string &sequence) const {
+    std::vector<std::string> results;
 
-    for (char &c : result) {
-        if (alphabet_.find(c) == std::string::npos)
-            c = 'N';
-    }
-    return result;
+    #if _DNA_GRAPH
+        auto it = sequence.begin();
+        while (it != sequence.end()) {
+            auto jt = std::find_if(it, sequence.end(),
+                                   [&](char c) {
+                                       return alphabet_.find(c) == std::string::npos;
+                                   });
+            if (jt != it)
+                results.emplace_back(it, jt);
+
+            if (jt == sequence.end())
+                break;
+
+            it = std::next(jt);
+        }
+    #else
+        results.push_back(sequence);
+
+        std::replace_if(results[0].begin(), results[0].end(),
+                        [&](char c) {
+                            return alphabet_.find(c) == std::string::npos;
+                        },
+                        'N');
+    #endif
+
+    return results;
 }
+
+const std::string& DBGHashString::alphabet() const { return alphabet_; }
