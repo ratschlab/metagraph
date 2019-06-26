@@ -70,7 +70,7 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     size_t num_labels() const;
     uint64_t num_relations() const;
 
-    std::string file_extension() const override { return kExtension; }
+    std::string file_extension() const { return kExtension; }
 
   private:
     void reinitialize(uint64_t num_rows);

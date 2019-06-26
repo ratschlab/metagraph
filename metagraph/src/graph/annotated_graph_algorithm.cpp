@@ -320,7 +320,7 @@ void call_bubbles(const MaskedDeBruijnGraph &masked_graph,
                     || masked_graph.unmasked_indegree(last) <= 1)
                 return;
 
-            auto process_path = [&, first, last, sequence]() {
+            auto process_path = [&,first,sequence]() {
                 call_bubbles_from_path(
                     masked_graph,
                     MaskedDeBruijnGraph(masked_graph.get_graph_ptr()),
