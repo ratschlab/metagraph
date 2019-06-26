@@ -150,7 +150,7 @@ build_graph_iterative<DBGSuccinct>(uint64_t, std::function<void(std::function<vo
 
 
 template <class Graph>
-bool check_graph(const std::string &alphabet, bool canonical) {
+bool check_graph(const std::string &alphabet, bool canonical, bool check_sequence) {
     std::vector<std::string> sequences;
 
     for (size_t i = 0; i < 100; ++i) {
@@ -169,10 +169,27 @@ bool check_graph(const std::string &alphabet, bool canonical) {
             return false;
     }
 
+    if (!check_sequence)
+        return true;
+
+    for (const auto &seq : sequences) {
+        bool stop = false;
+        graph->map_to_nodes(
+            seq,
+            [&](const auto &i) {
+                stop = !i || graph->kmer_to_node(graph->get_node_sequence(i)) != i;
+            },
+            [&]() { return stop; }
+        );
+
+        if (stop)
+            return false;
+    }
+
     return true;
 }
 
-template bool check_graph<DBGSuccinct>(const std::string &, bool);
-template bool check_graph<DBGBitmap>(const std::string &, bool);
-template bool check_graph<DBGHashOrdered>(const std::string &, bool);
-template bool check_graph<DBGHashString>(const std::string &, bool);
+template bool check_graph<DBGSuccinct>(const std::string &, bool, bool);
+template bool check_graph<DBGBitmap>(const std::string &, bool, bool);
+template bool check_graph<DBGHashOrdered>(const std::string &, bool, bool);
+template bool check_graph<DBGHashString>(const std::string &, bool, bool);

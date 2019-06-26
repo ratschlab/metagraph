@@ -885,13 +885,10 @@ void BOSS::map_to_nodes(const std::string &sequence,
                         const std::function<bool()> &terminate) const {
     auto seq_encoded = encode(sequence);
 
-    for (size_t i = 0; i + k_ - 1 < seq_encoded.size(); ++i) {
+    for (size_t i = 0; i + k_ - 1 < seq_encoded.size() && !terminate(); ++i) {
         auto node = map_to_node(&seq_encoded[i], &seq_encoded[i + k_]);
 
         callback(node);
-
-        if (terminate())
-            return;
 
         if (!node)
             continue;
@@ -901,10 +898,10 @@ void BOSS::map_to_nodes(const std::string &sequence,
             if (!node)
                 break;
 
-            callback(node);
-
             if (terminate())
                 return;
+
+            callback(node);
 
             i++;
         }
@@ -955,22 +952,19 @@ void BOSS::map_to_edges(const std::string &sequence,
                         const std::function<bool()> &terminate) const {
     auto seq_encoded = encode(sequence);
 
-    for (size_t i = 0; i + k_ + 1 <= seq_encoded.size(); ++i) {
+    for (size_t i = 0; i + k_ + 1 <= seq_encoded.size() && !terminate(); ++i) {
         auto edge = map_to_edge(&seq_encoded[i], &seq_encoded[i + k_ + 1]);
 
         callback(edge);
-
-        if (terminate())
-            return;
 
         while (edge && i + k_ + 1 < seq_encoded.size()) {
             edge = fwd(edge);
             edge = pick_edge(edge, get_source_node(edge), seq_encoded[i + k_ + 1]);
 
-            callback(edge);
-
             if (terminate())
                 return;
+
+            callback(edge);
 
             i++;
         }

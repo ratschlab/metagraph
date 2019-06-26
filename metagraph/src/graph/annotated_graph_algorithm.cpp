@@ -149,6 +149,7 @@ call_paths_from_branch(const MaskedDeBruijnGraph &masked_graph,
                        std::function<bool()> terminate = []() { return false; }) {
     bit_vector_stat visited(masked_graph.num_nodes() + 1, false);
 
+    bool stop = false;
     masked_graph.call_nodes(
         [&](auto start) {
             if (visited[start] || masked_graph.unmasked_outdegree(start) <= 1)
@@ -159,7 +160,9 @@ call_paths_from_branch(const MaskedDeBruijnGraph &masked_graph,
             auto node_seq = masked_graph.get_node_sequence(start);
 
             if (stop_path(start, start, node_seq)) {
-                callback(start, start, std::move(node_seq));
+                if (!(stop = terminate()))
+                    callback(start, start, std::move(node_seq));
+
                 return;
             }
 
@@ -200,15 +203,16 @@ call_paths_from_branch(const MaskedDeBruijnGraph &masked_graph,
                         break;
                 }
 
-                callback(std::get<0>(path),
-                         std::get<1>(path),
-                         std::move(std::get<2>(path)));
-
-                if (terminate())
+                if (!(stop = terminate())) {
+                    callback(std::get<0>(path),
+                             std::get<1>(path),
+                             std::move(std::get<2>(path)));
+                } else {
                     break;
+                }
             }
         },
-        terminate
+        [&]() { return stop; }
     );
 }
 
@@ -223,6 +227,7 @@ void call_breakpoints(const MaskedDeBruijnGraph &masked_graph,
 
     thread_pool = nullptr;
 
+    bool stop = false;
     call_paths_from_branch(masked_graph,
         [&](auto first, auto, auto&& sequence) {
             MaskedDeBruijnGraph background(
@@ -236,14 +241,18 @@ void call_breakpoints(const MaskedDeBruijnGraph &masked_graph,
             background.call_outgoing_kmers(
                 first,
                 [&](const auto &next_index, char c) {
-                    callback(first,
-                             std::move(sequence), std::string(1, c),
-                             anno_graph.get_labels(next_index));
+                    if (stop)
+                        return;
+
+                    if (!(stop = terminate()))
+                        callback(first,
+                                 std::move(sequence), std::string(1, c),
+                                 anno_graph.get_labels(next_index));
                 }
             );
         },
         [&](auto, auto, const auto&) { return true; },
-        terminate
+        [&]() { return stop; }
     );
 
     if (thread_pool)
@@ -271,10 +280,11 @@ void call_bubbles_from_path(const MaskedDeBruijnGraph &foreground,
     assert(seq.length() == foreground.get_k() * 2 + 1);
 
     char ref = seq[foreground.get_k()];
+    bool stop = false;
     background.call_outgoing_kmers(
         first,
         [&](auto, char c) {
-            if (terminate())
+            if (stop)
                 return;
 
             if (c == ref)
@@ -298,7 +308,7 @@ void call_bubbles_from_path(const MaskedDeBruijnGraph &foreground,
                 return;
 
             auto labels = anno_graph.get_labels(seq, 1.0);
-            if (labels.size())
+            if (labels.size() && !(stop = terminate()))
                 callback(first, seq, std::move(labels));
         }
     );
