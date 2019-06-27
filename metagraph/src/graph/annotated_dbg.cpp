@@ -1,6 +1,7 @@
 #include "annotated_dbg.hpp"
 
 #include "annotate_row_compressed.hpp"
+#include "annotate_column_compressed.hpp"
 
 
 AnnotatedDBG::AnnotatedDBG(std::shared_ptr<SequenceGraph> dbg,
@@ -104,24 +105,42 @@ AnnotatedDBG
 
     std::vector<std::pair<std::string, size_t>> label_counts;
     label_counts.reserve(annotator_->num_labels());
-    annotator_->call_labels([&](const auto &label) {
-        label_counts.emplace_back(label, 0);
-    });
 
-    auto it = index_counts.begin();
-    annotator_->call_rows(
-        indices,
-        [&](auto&& label_indices) {
-            assert(it != index_counts.end());
+    if (dynamic_cast<annotate::ColumnCompressed<>*>(annotator_.get())) {
+        // Iterate by column instead of by row for column-major annotators
+        annotator_->call_labels([&](const auto &label) {
+            label_counts.emplace_back(label, 0);
+            annotator_->call_indices_until(
+                indices,
+                label,
+                [&](auto i) {
+                    auto it = index_counts.find(i);
+                    assert(it != index_counts.end());
+                    label_counts.back().second += it->second;
+                },
+                [&]() { return terminate(label_counts); }
+            );
+        });
+    } else {
+        annotator_->call_labels([&](const auto &label) {
+            label_counts.emplace_back(label, 0);
+        });
 
-            for (auto j : label_indices) {
-                label_counts[j].second += it->second;
-            }
+        auto it = index_counts.begin();
+        annotator_->call_rows(
+            indices,
+            [&](auto&& label_indices) {
+                assert(it != index_counts.end());
 
-            ++it;
-        },
-        [&]() { return terminate(label_counts); }
-    );
+                for (auto j : label_indices) {
+                    label_counts[j].second += it->second;
+                }
+
+                ++it;
+            },
+            [&]() { return terminate(label_counts); }
+        );
+    }
 
     return label_counts;
 }
@@ -132,6 +151,22 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
     assert(presence_ratio <= 1.);
 
     uint64_t min_count = 0;
+
+    std::function<bool(const std::vector<std::pair<std::string, size_t>>&)> terminate;
+    if (dynamic_cast<annotate::ColumnCompressed<>*>(annotator_.get())) {
+        terminate = [&](const auto &label_counts) {
+            return label_counts.back().second >= min_count;
+        };
+    } else {
+        terminate = [&](const auto &label_counts) {
+            assert(label_counts.size() == annotator_->num_labels());
+            return std::all_of(label_counts.begin(), label_counts.end(),
+                               [&](const auto &pair) {
+                                   return pair.second >= min_count;
+                               });
+        };
+    }
+
     auto label_counts = get_labels(
         sequence,
         [&](auto num_present_kmers, auto num_missing_kmers) {
@@ -140,19 +175,13 @@ std::vector<std::string> AnnotatedDBG::get_labels(const std::string &sequence,
                                      * (num_present_kmers + num_missing_kmers)));
             return num_present_kmers >= min_count;
         },
-        [&](const auto &label_counts) {
-            return std::all_of(label_counts.begin(), label_counts.end(),
-                               [&](const auto &pair) {
-                                   return pair.second >= min_count;
-                               });
-        }
+        terminate
     );
 
     std::vector<std::string> labels;
     for (auto&& pair : label_counts) {
-        if (pair.second >= min_count) {
+        if (pair.second >= min_count)
             labels.emplace_back(std::move(pair.first));
-        }
     }
 
     return labels;
