@@ -1647,7 +1647,7 @@ int main(int argc, const char *argv[]) {
             );
 
             if (config->verbose)
-                std::cout << "Extracting sequences from subgraph...\t" << std::flush;
+                std::cout << "Extracting sequences from subgraph..." << std::endl;
 
             timer.reset();
 
@@ -1690,6 +1690,10 @@ int main(int argc, const char *argv[]) {
                 if (config->min_tip_size < 1)
                     config->min_tip_size = 1;
 
+                if (config->verbose)
+                    std::cout << "Threshold for median k-mer abundance in unitigs: "
+                              << config->min_unitig_median_kmer_abundance << std::endl;
+
                 subgraph->call_unitigs(
                     [&](const auto &sequence) {
                         if (!is_unreliable_unitig(sequence, *graph, *node_weights,
@@ -1709,7 +1713,8 @@ int main(int argc, const char *argv[]) {
             gzclose(out_fasta_gz);
 
             if (config->verbose)
-                std::cout << timer.elapsed() << "sec" << std::endl;
+                std::cout << "Graph cleaning finished in "
+                          << timer.elapsed() << "sec" << std::endl;
 
             return 0;
         }
