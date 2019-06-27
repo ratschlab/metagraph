@@ -21,6 +21,7 @@
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
 #include "dbg_succinct.hpp"
+#include "graph_cleaning.hpp"
 #include "server.hpp"
 #include "weighted_graph.hpp"
 #include "masked_graph.hpp"
@@ -1629,8 +1630,8 @@ int main(int argc, const char *argv[]) {
                 std::cout << "Graph loading...\t" << std::flush;
 
             auto graph = load_critical_dbg(files.at(0));
-            const IWeighted<DeBruijnGraph::node_index> *weighted_graph;
-            if (!(weighted_graph = dynamic_cast<const IWeighted<DeBruijnGraph::node_index>*>(graph.get()))) {
+            const IWeighted<DeBruijnGraph::node_index> *node_weights;
+            if (!(node_weights = dynamic_cast<const IWeighted<DeBruijnGraph::node_index>*>(graph.get()))) {
                 std::cerr << "ERROR: Cannot load weighted graph from "
                           << files.at(0) << std::endl;
                 exit(1);
@@ -1641,8 +1642,8 @@ int main(int argc, const char *argv[]) {
 
             auto subgraph = std::make_unique<MaskedDeBruijnGraph>(
                 graph,
-                [&](auto i) { return weighted_graph->get_weight(i) >= config->min_count
-                                    && weighted_graph->get_weight(i) <= config->max_count; }
+                [&](auto i) { return node_weights->get_weight(i) >= config->min_count
+                                    && node_weights->get_weight(i) <= config->max_count; }
             );
 
             if (config->verbose)
@@ -1675,8 +1676,32 @@ int main(int argc, const char *argv[]) {
                 counter++;
             };
 
-            if (config->unitigs || config->pruned_dead_end_size > 0) {
-                subgraph->call_unitigs(dump_sequence, config->pruned_dead_end_size);
+            if (config->min_tip_size > 1
+                    || config->min_unitig_median_kmer_abundance != 1) {
+
+                if (config->min_unitig_median_kmer_abundance == 0) {
+                    config->min_unitig_median_kmer_abundance
+                        = estimate_min_kmer_abundance(subgraph->get_mask(), *node_weights,
+                                                      config->fallback_abundance_cutoff);
+                }
+
+                assert(subgraph->num_nodes() == graph->num_nodes());
+
+                if (config->min_tip_size < 1)
+                    config->min_tip_size = 1;
+
+                subgraph->call_unitigs(
+                    [&](const auto &sequence) {
+                        if (!is_unreliable_unitig(sequence, *graph, *node_weights,
+                                                  config->min_unitig_median_kmer_abundance))
+                            dump_sequence(sequence);
+                    },
+                    config->min_tip_size - 1
+                );
+
+            } else if (config->unitigs) {
+                subgraph->call_unitigs(dump_sequence);
+
             } else {
                 subgraph->call_sequences(dump_sequence);
             }
@@ -2133,8 +2158,8 @@ int main(int argc, const char *argv[]) {
                 counter++;
             };
 
-            if (config->unitigs || config->pruned_dead_end_size > 0) {
-                graph->call_unitigs(dump_sequence, config->pruned_dead_end_size);
+            if (config->unitigs || config->min_tip_size > 1) {
+                graph->call_unitigs(dump_sequence, config->min_tip_size - 1);
             } else {
                 graph->call_sequences(dump_sequence);
             }

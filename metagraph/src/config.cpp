@@ -175,8 +175,12 @@ Config::Config(int argc, const char *argv[]) {
             unitigs = true;
         } else if (!strcmp(argv[i], "--header")) {
             header = std::string(argv[++i]);
-        } else if (!strcmp(argv[i], "--prune-end")) {
-            pruned_dead_end_size = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--prune-tips")) {
+            min_tip_size = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--prune-unitigs")) {
+            min_unitig_median_kmer_abundance = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--fallback")) {
+            fallback_abundance_cutoff = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--count-dummy")) {
             count_dummy = true;
         } else if (!strcmp(argv[i], "--clear-dummy")) {
@@ -531,12 +535,15 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s clean -o <outfile-base> [options] GRAPH.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for build:\n");
-            fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
-            fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
-            fprintf(stderr, "\t   --prune-end [INT] \tprune all dead ends of this length and shorter [0]\n");
-            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --min-count [INT] \t\tmin k-mer abundance, including [1]\n");
+            fprintf(stderr, "\t   --max-count [INT] \t\tmax k-mer abundance, excluding [inf]\n");
+            fprintf(stderr, "\t   --prune-tips [INT] \t\tprune all dead ends shorter than this value [1]\n");
+            fprintf(stderr, "\t   --prune-unitigs [INT] \tprune all unitigs with median k-mer counts smaller than\n"
+                            "\t                         \t\tthis value (0: auto) [1]\n");
+            fprintf(stderr, "\t   --fallback [INT] \t\tfallback threshold if the automatic one cannot be determined [1]\n");
+            // fprintf(stderr, "\n");
             // fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
-            fprintf(stderr, "\t   --unitigs \t\textract unitigs [off]\n");
+            fprintf(stderr, "\t   --unitigs \t\t\textract unitigs instead of contigs [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case EXTEND: {
@@ -598,7 +605,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges [off]\n");
-            fprintf(stderr, "\t   --prune-end [INT] \tprune all dead ends of this length and shorter [0]\n");
+            fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends of this length and shorter [0]\n");
             fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: fast / faster / dynamic / small [fast]\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
             fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
@@ -609,7 +616,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                             "\tAssemble contigs from de Bruijn graph and dump to compressed FASTA file.\n\n", prog_name.c_str());
 
             // fprintf(stderr, "\t-o --outfile-base [STR] \t\tbasename of output file []\n");
-            fprintf(stderr, "\t   --prune-end [INT] \t\t\tprune all dead ends of this length and shorter [0]\n");
+            fprintf(stderr, "\t   --prune-tips [INT] \t\t\tprune all dead ends of this length and shorter [0]\n");
             fprintf(stderr, "\t   --unitigs \t\t\t\textract unitigs [off]\n");
             fprintf(stderr, "\t   --header [STR] \t\t\theader for sequences in FASTA output []\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\t\tuse multiple threads for computation [1]\n");
