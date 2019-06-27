@@ -92,7 +92,7 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
 
     virtual void set_mask(bitmap *mask) { is_target_mask_.reset(mask); }
 
-    virtual const bitmap* get_mask() const { return is_target_mask_.get(); }
+    virtual const bitmap& get_mask() const { return *is_target_mask_; }
 
   private:
     std::shared_ptr<const DeBruijnGraph> graph_;
