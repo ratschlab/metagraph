@@ -33,6 +33,9 @@ class IWeightedDBG : public DBG,
     virtual void set_weights(Weights&& weights) { weights_ = std::move(weights); };
     virtual weight get_weight(node_index i) const { return weights_[i]; };
 
+    virtual bool load(const std::string &filename_base) = 0;
+    virtual void serialize(const std::string &filename_base) const = 0;
+
   protected:
     Weights weights_;
 };
