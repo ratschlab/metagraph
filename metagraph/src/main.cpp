@@ -1630,8 +1630,8 @@ int main(int argc, const char *argv[]) {
                 std::cout << "Graph loading...\t" << std::flush;
 
             auto graph = load_critical_dbg(files.at(0));
-            const IWeighted<DeBruijnGraph::node_index> *node_weights;
-            if (!(node_weights = dynamic_cast<const IWeighted<DeBruijnGraph::node_index>*>(graph.get()))) {
+            auto node_weights = std::dynamic_pointer_cast<const IWeighted<DeBruijnGraph::node_index>>(graph);
+            if (!node_weights.get()) {
                 std::cerr << "ERROR: Cannot load weighted graph from "
                           << files.at(0) << std::endl;
                 exit(1);
@@ -1645,6 +1645,13 @@ int main(int argc, const char *argv[]) {
                 [&](auto i) { return node_weights->get_weight(i) >= config->min_count
                                     && node_weights->get_weight(i) <= config->max_count; }
             );
+
+            // TODO: fix unitig extraction from subgraph in order for this
+            // to work properly when k-mers are filtered
+            const DeBruijnGraph &graph_with_unitigs
+                = config->min_count > 1
+                    || config->max_count < std::numeric_limits<unsigned int>::max()
+                ? *subgraph : *graph;
 
             if (config->verbose)
                 std::cout << "Extracting sequences from subgraph..." << std::endl;
@@ -1694,7 +1701,8 @@ int main(int argc, const char *argv[]) {
                     std::cout << "Threshold for median k-mer abundance in unitigs: "
                               << config->min_unitig_median_kmer_abundance << std::endl;
 
-                subgraph->call_unitigs(
+                // subgraph->call_unitigs(
+                graph_with_unitigs.call_unitigs(
                     [&](const auto &sequence) {
                         if (!is_unreliable_unitig(sequence, *graph, *node_weights,
                                                   config->min_unitig_median_kmer_abundance))
@@ -1704,10 +1712,12 @@ int main(int argc, const char *argv[]) {
                 );
 
             } else if (config->unitigs) {
-                subgraph->call_unitigs(dump_sequence);
+                // subgraph->call_unitigs(dump_sequence);
+                graph_with_unitigs.call_unitigs(dump_sequence);
 
             } else {
-                subgraph->call_sequences(dump_sequence);
+                // subgraph->call_sequences(dump_sequence);
+                graph_with_unitigs.call_sequences(dump_sequence);
             }
 
             gzclose(out_fasta_gz);
