@@ -169,6 +169,7 @@ int main_compressor(int argc, char *argv[]) {
 
 	std::vector<std::string> regimes {
 		"wavelet",
+		"wavelet_debug",
 	};
 	ValuesConstraint<std::string> regime_constraint(regimes);
 	ValueArg<std::string> compressor_type("c",
@@ -192,6 +193,15 @@ int main_compressor(int argc, char *argv[]) {
 	auto compressor = compressor_type.getValue();
 	auto chunks = chunksArg.getValue();
     auto graph = std::make_shared<DBGSuccinct>(21);
+    if (compressor == "wavelet_debug") {
+        compress_store_reads<PathDatabaseDynamicCore<
+                DynamicRoutingTable<>,
+                DynamicIncomingTable<>,
+                //IdentityComparator<DynamicRoutingTable<>,ReferenceDynamicRoutingTable<>>,
+                //IdentityComparator<DynamicIncomingTable<>,ReferenceDynamicIncomingTable<>>,
+                IdentityComparator<ExitBarrier<>,ReferenceExitBarrier<>>
+                >>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph, chunks);
+    }
 	if (compressor == "wavelet") {
 	    if (use_transformations) {
 	    	if (chunks > 0) {
