@@ -52,7 +52,7 @@ size_t MaskedDeBruijnGraph::outdegree(node_index node) const {
 
 size_t MaskedDeBruijnGraph::indegree(node_index node) const {
     std::vector<node_index> incoming;
-    adjacent_outgoing_nodes(node, &incoming);
+    adjacent_incoming_nodes(node, &incoming);
     return std::count_if(incoming.begin(), incoming.end(),
                          [&](const auto &index) { return in_graph(index); });
 }
@@ -121,12 +121,12 @@ uint64_t MaskedDeBruijnGraph
 }
 
 void MaskedDeBruijnGraph
-::call_nodes(const std::function<void(const node_index&)> &callback,
+::call_nodes(const std::function<void(node_index)> &callback,
              const std::function<bool()> &stop_early) const {
     assert(is_target_mask_.get());
 
     is_target_mask_->call_ones(
-        [&](const auto &index) {
+        [&](auto index) {
             if (!stop_early())
                 callback(index);
         }

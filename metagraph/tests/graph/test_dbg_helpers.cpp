@@ -163,23 +163,13 @@ bool check_graph(const std::string &alphabet, bool canonical) {
 
     auto graph = build_graph<Graph>(20, sequences, canonical);
 
-    auto it = DeBruijnGraph::npos;
-    graph->call_nodes(
-        [&](const auto &i) { it = i; },
-        [&]() {
-            if (it == DeBruijnGraph::npos)
-                return false;
-
-            if (it != graph->kmer_to_node(graph->get_node_sequence(it))) {
-                it = DeBruijnGraph::npos;
-                return true;
-            }
-
+    const auto nnodes = graph->num_nodes();
+    for (DeBruijnGraph::node_index i = 1; i <= nnodes; ++i) {
+        if (graph->kmer_to_node(graph->get_node_sequence(i)) != i)
             return false;
-        }
-    );
+    }
 
-    return it != DeBruijnGraph::npos;
+    return true;
 }
 
 template bool check_graph<DBGSuccinct>(const std::string &, bool);

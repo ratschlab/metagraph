@@ -261,29 +261,6 @@ void DBGSuccinct
     });
 }
 
-void DBGSuccinct
-::call_nodes(const std::function<void(const node_index&)> &callback,
-             const std::function<bool()> &stop_early) const {
-    auto nnodes = num_nodes();
-    if (!canonical_mode_) {
-        for (node_index i = 1; i <= nnodes; ++i) {
-            callback(i);
-            if (stop_early())
-                return;
-        }
-        return;
-    }
-
-    // TODO: implement more efficiently
-    call_kmers([&](auto i, const auto &kmer) {
-        if (stop_early())
-            return;
-
-        if (i == kmer_to_node(kmer))
-            callback(i);
-    });
-}
-
 size_t DBGSuccinct::outdegree(node_index node) const {
     assert(node);
 

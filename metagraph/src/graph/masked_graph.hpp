@@ -72,9 +72,8 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     virtual size_t outdegree(node_index node) const;
     virtual size_t indegree(node_index) const;
 
-    virtual void
-    call_nodes(const std::function<void(const node_index&)> &callback,
-               const std::function<bool()> &stop_early = [](){ return false; }) const final;
+    virtual void call_nodes(const std::function<void(node_index)> &callback,
+                            const std::function<bool()> &stop_early = [](){ return false; }) const;
 
     virtual const DeBruijnGraph& get_graph() const { return *graph_; }
     std::shared_ptr<const DeBruijnGraph> get_graph_ptr() const { return graph_; }

@@ -65,9 +65,6 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override final;
 
-    virtual void call_nodes(const std::function<void(const node_index&)> &callback,
-                            const std::function<bool()> &stop_early = [](){ return false; }) const override final;
-
     virtual void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const override final;
 
     virtual void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const override final {
