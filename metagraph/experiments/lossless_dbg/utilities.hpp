@@ -430,10 +430,11 @@ public:
 
     CREATE_MEMBER_CHECK(insert);
     template<typename ...Args>
-    void insert(Args... args) {
+    int64_t insert(Args... args) {
         if constexpr (has_member_insert<Reference>::value) {
             Reference::insert(args...);
-            t.insert(args...);
+            auto result = t.insert(args...);
+            return result;
         }
         else {
             throw "Can't call function insert";

@@ -195,10 +195,8 @@ int main_compressor(int argc, char *argv[]) {
     auto graph = std::make_shared<DBGSuccinct>(21);
     if (compressor == "wavelet_debug") {
         compress_store_reads<PathDatabaseDynamicCore<
-                DynamicRoutingTable<>,
-                DynamicIncomingTable<>,
-                //IdentityComparator<DynamicRoutingTable<>,ReferenceDynamicRoutingTable<>>,
-                //IdentityComparator<DynamicIncomingTable<>,ReferenceDynamicIncomingTable<>>,
+                IdentityComparator<DynamicRoutingTable<>,ReferenceDynamicRoutingTable<>>,
+                IdentityComparator<DynamicIncomingTable<>,ReferenceDynamicIncomingTable<>>,
                 IdentityComparator<ExitBarrier<>,ReferenceExitBarrier<>>
                 >>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph, chunks);
     }
