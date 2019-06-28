@@ -30,6 +30,9 @@ public:
         , exit_barrier_locks(is_element, rank_is_element, chunk_size)
 #endif
         {
+        if (get_num_threads() > max_threads) {
+            throw "Implementation doesn't work with more than "s + to_string(max_threads) + " threads"s;
+        }
         for(int64_t i=0;i<exit_barriers.elements.size();i++) {
             using BarrierT = typename decltype(exit_barriers)::element_type;
             //exit_barriers.elements[i] = BarrierT(get_num_threads(),{0});
@@ -59,6 +62,7 @@ public:
 #endif
         auto& exit_barrier = exit_barriers[node];
         auto& my_edge = exit_barrier.edges[tid];
+        assert(my_edge);
         auto result = update_myself_after_wakeup(exit_barrier,tid);
         // remove myself after wakeup
         my_edge = 0;
@@ -77,7 +81,7 @@ public:
         auto& exit_barrier = exit_barriers[node];
         auto& stored_edge = exit_barrier.edges[tid];
         auto& stored_relative_position = exit_barrier.relative_positions[tid];
-        stored_edge = node & (((uint64_t)traversed_edge)<<(7*8));
+        stored_edge = node | (((uint64_t)traversed_edge)<<(7*8));
         stored_relative_position = relative_position;
         update_others_before_sleep(exit_barrier,tid);
         #ifndef DISABLE_PARALELIZATION
@@ -88,9 +92,7 @@ public:
     void update_others_before_sleep(exit_barrier_t &exit_barrier, int tid) {
         auto my_edge = exit_barrier.edges[tid];
         auto my_relative_position = exit_barrier.relative_positions[tid];
-#ifndef DISABLE_PARALELIZATION
-        #pragma omp simd
-#endif
+
         for(int i=0;i<max_threads;i++) {
             auto& other_edge = exit_barrier.edges[i];
             auto& other_relative_position = exit_barrier.relative_positions[i];
@@ -111,9 +113,7 @@ public:
         auto my_edge = exit_barrier.edges[tid];
         auto my_relative_position = exit_barrier.relative_positions[tid];
         int offset_change = 0;
-#ifndef DISABLE_PARALELIZATION
-        #pragma omp simd reduction(+:offset_change)
-#endif
+
         for(int i=0;i<max_threads;i++) {
             auto& other_edge = exit_barrier.edges[i];
             auto& other_relative_position = exit_barrier.relative_positions[i];
@@ -129,6 +129,10 @@ public:
         }
         assert(my_relative_position + offset_change >= 0);
         return my_relative_position + offset_change;
+    }
+
+    void print_content(uint64_t node, uint64_t tid) {
+        cout << exit_barriers[node] << endl;
     }
 
 };
@@ -248,6 +252,10 @@ ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chun
             }
         }
         return relative_position;
+    }
+
+    void print_content(uint64_t node, uint64_t tid) {
+        cout << waiting_threads[node] << endl;
     }
 
     ChunkedDenseHashMap<deque<waiting_thread_info_t>,BitVector, RankSupport,false> waiting_threads;

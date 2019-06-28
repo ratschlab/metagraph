@@ -464,7 +464,10 @@ public:
             auto target = Reference::exit(args...);
             auto value = t.exit(args...);
             if (target != value) {
+                Reference::print_content(args...);
+                t.print_content(args...);
                 doPrint(cout,target,value,args...);
+
             }
             assert(target==value);
             return target;

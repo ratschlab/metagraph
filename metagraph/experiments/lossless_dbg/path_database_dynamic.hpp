@@ -129,8 +129,8 @@ public:
         alloc_lock_t.finished();
 
         //using Barrier = ReferenceExitBarrier<>;
-        using Barrier = IdentityComparator<ExitBarrier<>,ReferenceExitBarrier<>>;
-        //using Barrier = ExitBarrier<>;
+        //using Barrier = IdentityComparator<ExitBarrier<>,ReferenceExitBarrier<>>;
+        using Barrier = ExitBarrier<>;
 
 
 
