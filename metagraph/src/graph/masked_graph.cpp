@@ -45,14 +45,14 @@ MaskedDeBruijnGraph::node_index MaskedDeBruijnGraph
 
 size_t MaskedDeBruijnGraph::outdegree(node_index node) const {
     std::vector<node_index> outgoing;
-    adjacent_outgoing_nodes(node, &outgoing);
+    graph_->adjacent_outgoing_nodes(node, &outgoing);
     return std::count_if(outgoing.begin(), outgoing.end(),
                          [&](const auto &index) { return in_graph(index); });
 }
 
 size_t MaskedDeBruijnGraph::indegree(node_index node) const {
     std::vector<node_index> incoming;
-    adjacent_incoming_nodes(node, &incoming);
+    graph_->adjacent_incoming_nodes(node, &incoming);
     return std::count_if(incoming.begin(), incoming.end(),
                          [&](const auto &index) { return in_graph(index); });
 }

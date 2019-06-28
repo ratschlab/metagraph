@@ -2,6 +2,8 @@
 
 #include "test_dbg_helpers.hpp"
 
+#include <set>
+
 #include "dbg_succinct.hpp"
 #include "boss.hpp"
 #include "dbg_hash_string.hpp"
@@ -676,6 +678,129 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallContigsMaskPath) {
                 rec_nodes.insert(reconstructed.get_node_sequence(index));
             });
             EXPECT_EQ(called_nodes, rec_nodes);
+        }
+    }
+}
+
+TYPED_TEST(MaskedDeBruijnGraphTest, CheckNodes) {
+    for (size_t k = 3; k <= 10; ++k) {
+        std::vector<std::string> sequences { "ATGCAGTACTCAG",
+                                             "ATGCAGTACTGAG",
+                                             "GGGGGGGGGGGGG" };
+        auto full_graph = build_graph_batch<TypeParam>(k, sequences);
+
+        for (const auto &sequence : sequences) {
+            std::unique_ptr<bit_vector> mask(
+                new bit_vector_stat(full_graph->num_nodes() + 1, true)
+            );
+            mask->set(DeBruijnGraph::npos, false);
+            std::set<std::string> erased;
+            full_graph->map_to_nodes(
+                sequence,
+                [&](const auto &index) {
+                    erased.insert(full_graph->get_node_sequence(index));
+                    mask->set(index, false);
+                }
+            );
+
+            MaskedDeBruijnGraph graph(full_graph, mask.release());
+
+            std::multiset<MaskedDeBruijnGraph::node_index> nodes;
+            graph.call_nodes([&](const auto &node) { nodes.insert(node); });
+
+            std::multiset<MaskedDeBruijnGraph::node_index> ref_nodes;
+            for (size_t i = 1; i <= full_graph->num_nodes(); ++i) {
+                if (graph.in_graph(i))
+                    ref_nodes.insert(i);
+            }
+
+            EXPECT_EQ(ref_nodes, nodes);
+        }
+    }
+}
+
+TYPED_TEST(MaskedDeBruijnGraphTest, CheckOutgoingNodes) {
+    for (size_t k = 3; k <= 10; ++k) {
+        std::vector<std::string> sequences { "ATGCAGTACTCAG",
+                                             "ATGCAGTACTGAG",
+                                             "GGGGGGGGGGGGG" };
+        auto full_graph = build_graph_batch<TypeParam>(k, sequences);
+
+        for (const auto &sequence : sequences) {
+            std::unique_ptr<bit_vector> mask(
+                new bit_vector_stat(full_graph->num_nodes() + 1, true)
+            );
+            mask->set(DeBruijnGraph::npos, false);
+            std::set<std::string> erased;
+            full_graph->map_to_nodes(
+                sequence,
+                [&](const auto &index) {
+                    erased.insert(full_graph->get_node_sequence(index));
+                    mask->set(index, false);
+                }
+            );
+
+            MaskedDeBruijnGraph graph(full_graph, mask.release());
+
+            graph.call_nodes(
+                [&](const auto &node) {
+                    std::vector<MaskedDeBruijnGraph::node_index> outnodes;
+                    graph.adjacent_outgoing_nodes(node, &outnodes);
+                    EXPECT_EQ(outnodes.size(), graph.outdegree(node));
+                    std::vector<MaskedDeBruijnGraph::node_index> outnodes_full;
+                    full_graph->adjacent_outgoing_nodes(node, &outnodes_full);
+                    outnodes_full.erase(std::remove_if(outnodes_full.begin(),
+                                                       outnodes_full.end(),
+                                                       [&](auto i) {
+                                                           return !graph.in_graph(i);
+                                                       }),
+                                        outnodes_full.end());
+                    EXPECT_EQ(convert_to_set(outnodes_full), convert_to_set(outnodes));
+                }
+            );
+        }
+    }
+}
+
+TYPED_TEST(MaskedDeBruijnGraphTest, CheckIncomingNodes) {
+    for (size_t k = 3; k <= 10; ++k) {
+        std::vector<std::string> sequences { "ATGCAGTACTCAG",
+                                             "ATGCAGTACTGAG",
+                                             "GGGGGGGGGGGGG" };
+        auto full_graph = build_graph_batch<TypeParam>(k, sequences);
+
+        for (const auto &sequence : sequences) {
+            std::unique_ptr<bit_vector> mask(
+                new bit_vector_stat(full_graph->num_nodes() + 1, true)
+            );
+            mask->set(DeBruijnGraph::npos, false);
+            std::set<std::string> erased;
+            full_graph->map_to_nodes(
+                sequence,
+                [&](const auto &index) {
+                    erased.insert(full_graph->get_node_sequence(index));
+                    mask->set(index, false);
+                }
+            );
+
+            MaskedDeBruijnGraph graph(full_graph, mask.release());
+
+            graph.call_nodes(
+                [&](const auto &node) {
+                    std::vector<MaskedDeBruijnGraph::node_index> innodes;
+                    graph.adjacent_incoming_nodes(node, &innodes);
+                    EXPECT_EQ(innodes.size(), graph.indegree(node));
+                    std::vector<MaskedDeBruijnGraph::node_index> innodes_full;
+                    full_graph->adjacent_incoming_nodes(node, &innodes_full);
+                    innodes_full.erase(std::remove_if(innodes_full.begin(),
+                                                      innodes_full.end(),
+                                                      [&](auto i) {
+                                                          return !graph.in_graph(i);
+                                                      }),
+                                        innodes_full.end());
+                    EXPECT_EQ(convert_to_set(innodes_full), convert_to_set(innodes));
+                }
+            );
         }
     }
 }
