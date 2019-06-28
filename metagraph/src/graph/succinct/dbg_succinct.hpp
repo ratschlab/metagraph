@@ -6,9 +6,12 @@
 #include "config.hpp"
 #include "boss.hpp"
 
+class MaskedDeBruijnGraph;
 
 class DBGSuccinct : public DeBruijnGraph {
   public:
+    friend MaskedDeBruijnGraph;
+
     explicit DBGSuccinct(size_t k, bool canonical_mode = false);
     explicit DBGSuccinct(BOSS *boss_graph, bool canonical_mode = false);
 
