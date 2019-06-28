@@ -129,8 +129,8 @@ public:
         alloc_lock_t.finished();
 
         //using Barrier = ReferenceExitBarrier<>;
-        //using Barrier = IdentityComparator<ExitBarrier<>,ReferenceExitBarrier<>>;
-
+        using Barrier = IdentityComparator<ExitBarrier<>,ReferenceExitBarrier<>>;
+        //using Barrier = ExitBarrier<>;
 
 
 
@@ -142,7 +142,7 @@ public:
 
 #endif
         auto threads_map_t = VerboseTimer("memory allocation of exit barriers");
-        using Barrier = ExitBarrier<>;
+
         auto exit_barrier = Barrier(&is_bifurcation,&rank_is_bifurcation,chunk_size);
         threads_map_t.finished();
 
