@@ -626,10 +626,12 @@ void print_stats(const DeBruijnGraph &graph) {
         }
         std::cout << "sum weights: " << sum_weights << std::endl;
 
-        for (uint64_t i = 1; i <= graph.num_nodes(); ++i) {
-            std::cout << weighted.get_weight(i) << " ";
+        if (utils::get_verbose()) {
+            for (uint64_t i = 1; i <= graph.num_nodes(); ++i) {
+                std::cout << weighted.get_weight(i) << " ";
+            }
+            std::cout << std::endl;
         }
-        std::cout << std::endl;
     }
 
     std::cout << "========================================================" << std::endl;
