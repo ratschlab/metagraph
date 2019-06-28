@@ -120,11 +120,15 @@ class DBGHashOrdered : public DeBruijnGraph {
         virtual bool load(std::istream &in) = 0;
         virtual bool load(const std::string &filename) = 0;
         const std::string& alphabet() const = 0;
+        virtual void call_start_nodes(const std::function<void(node_index)> &callback) const = 0;
     };
 
   private:
     static std::unique_ptr<DBGHashOrderedInterface>
     initialize_graph(size_t k, bool canonical_mode);
+    void call_start_nodes(const std::function<void(node_index)> &callback) const {
+        return hash_dbg_->call_start_nodes(callback);
+    }
 
     std::unique_ptr<DBGHashOrderedInterface> hash_dbg_;
 };

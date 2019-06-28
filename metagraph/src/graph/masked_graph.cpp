@@ -121,6 +121,31 @@ void MaskedDeBruijnGraph
     );
 }
 
+void MaskedDeBruijnGraph
+::call_start_nodes(const std::function<void(node_index)> &callback) const {
+    const auto *succ = dynamic_cast<const DBGSuccinct*>(graph_.get());
+    if (succ) {
+        sdsl::bit_vector checked(graph_->num_nodes() + 1, false);
+        succ->call_start_nodes(
+            [&](const auto &i) {
+                if (in_graph(i)) {
+                    callback(i);
+                    checked[i] = true;
+                }
+            }
+        );
+        call_nodes([&](const auto &i) {
+            if (!checked[i] && !indegree(i))
+                callback(i);
+        });
+    } else {
+        call_nodes([&](const auto &i) {
+            if (!indegree(i))
+                callback(i);
+        });
+    }
+}
+
 uint64_t MaskedDeBruijnGraph
 ::unmasked_outdegree(node_index node) const {
     return graph_->outdegree(node);

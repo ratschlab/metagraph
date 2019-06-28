@@ -108,6 +108,8 @@ class BOSS {
     // traverse all nodes in graph except for the dummy source of sink ones
     void call_kmers(Call<node_index, const std::string&> callback) const;
 
+    void call_start_edges(Call<edge_index> callback) const;
+
     void call_edges(Call<edge_index, const std::vector<TAlphabet>&> callback) const;
 
     // call paths (or simple paths if |split_to_contigs| is true) that cover

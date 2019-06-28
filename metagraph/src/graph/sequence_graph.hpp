@@ -122,6 +122,9 @@ class DeBruijnGraph : public SequenceGraph {
     virtual void print(std::ostream &out) const;
 
     friend std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph);
+
+  private:
+    virtual void call_start_nodes(const std::function<void(node_index)> &callback) const = 0;
 };
 
 #endif // __SEQUENCE_GRAPH_HPP__

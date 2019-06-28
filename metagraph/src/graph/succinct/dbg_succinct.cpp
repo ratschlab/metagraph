@@ -261,6 +261,16 @@ void DBGSuccinct
     });
 }
 
+void DBGSuccinct
+::call_start_nodes(const std::function<void(node_index)> &callback) const {
+    boss_graph_->call_start_edges([&](auto boss_edge) {
+        auto index = boss_to_kmer_index(boss_edge);
+        assert(index != npos);
+        assert(!indegree(index));
+        callback(index);
+    });
+}
+
 size_t DBGSuccinct::outdegree(node_index node) const {
     assert(node);
 

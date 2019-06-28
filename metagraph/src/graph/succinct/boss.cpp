@@ -1845,6 +1845,33 @@ void BOSS::merge(const BOSS &other) {
     });
 }
 
+void BOSS::call_start_edges(Call<edge_index> callback) const {
+    std::stack<std::pair<edge_index, size_t>> edges;
+
+    auto last = succ_last(1);
+    for (size_t i = 2; i <= last; ++i) {
+        edges.emplace(i, 1);
+    }
+
+    while (edges.size()) {
+        auto edge = edges.top();
+        edges.pop();
+
+        if (edge.second == k_ + 1) {
+            if (is_single_incoming(bwd(edge.first)))
+                callback(edge.first);
+
+            continue;
+        }
+
+        auto last = fwd(edge.first);
+        auto first = pred_last(last - 1) + 1;
+        for (auto i = first; i <= last; ++i) {
+            edges.emplace(i, edge.second + 1);
+        }
+    }
+}
+
 /**
  * Traverse graph and extract directed paths covering the graph
  * edge, edge -> edge, edge -> ... -> edge, ... (k+1 - mer, k+...+1 - mer, ...)
@@ -1858,16 +1885,54 @@ void BOSS::call_paths(Call<const std::vector<edge_index>,
     std::vector<bool> visited(W_->size(), false);
 
     ProgressBar progress_bar(W_->size() - 1, "Traverse BOSS", std::cerr, !utils::get_verbose());
-    // start at all nodes with more than one outgoing edges
-    for (uint64_t i = 1; i < W_->size(); ++i) {
-        if (!visited[i] && !is_single_outgoing(i))
-            call_paths(i, callback, split_to_contigs, &discovered, &visited, progress_bar);
+
+    auto callback_from = [&](uint64_t start) {
+        call_paths(start,
+                   callback,
+                   split_to_contigs,
+                   &discovered,
+                   &visited,
+                   progress_bar);
+    };
+
+    // process start nodes first
+    //
+    //  .____
+    //
+    callback_from(1);
+
+    auto last_source = succ_last(1);
+    for (uint64_t i = 2; i <= last_source; ++i) {
+        callback_from(i);
+    }
+
+    last_source++;
+
+    // then merges
+    //  ____.____
+    //  ___/
+    //
+    for (uint64_t i = last_source; i < W_->size(); ++i) {
+        if (!visited[i] && is_single_outgoing(i) && !is_single_incoming(bwd(i)))
+            callback_from(i);
+    }
+
+    // then forks
+    //  ____.____
+    //       \___
+    //
+    for (uint64_t i = last_source; i < W_->size(); ++i) {
+        if (!is_single_outgoing(i)) {
+            auto start = fwd(i);
+            if (!visited[start] && is_single_outgoing(start))
+                callback_from(start);
+        }
     }
 
     // process all the cycles left that have not beed traversed
-    for (uint64_t i = 1; i < W_->size(); ++i) {
+    for (uint64_t i = last_source; i < W_->size(); ++i) {
         if (!visited[i])
-            call_paths(i, callback, split_to_contigs, &discovered, &visited, progress_bar);
+            callback_from(i);
     }
 }
 
@@ -1905,6 +1970,7 @@ void BOSS::call_paths(edge_index starting_kmer,
         // the first edge that has been already visited
         while (!visited[edge]) {
             assert(edge > 0 && discovered[edge]);
+
 
             // visit the edge
             sequence.push_back(get_W(edge) % alph_size);
@@ -1985,28 +2051,43 @@ void BOSS::call_unitigs(Call<const std::string&> callback,
 
         assert(path.size());
 
-        for (TAlphabet c : path) {
-            if (c != kSentinelCode) {
-                sequence.push_back(BOSS::decode(c));
-            }
-        }
+        auto begin = std::find_if(path.begin(), path.end(),
+                                  [&](auto i) { return i != kSentinelCode; });
+        auto end = path.back() == kSentinelCode ? path.end() - 1 : path.end();
+
+        if (begin > end)
+            return;
+
+        std::transform(begin, end, std::back_inserter(sequence),
+                       [&](auto c) -> char { return BOSS::decode(c % alph_size); });
 
         if (sequence.size() <= k_)
             return;
 
-        if ((path.front() != kSentinelCode && path.back() != kSentinelCode)
-                // ceck if long
-                || sequence.size() >= k_ + min_tip_size
-                // check if not a source tip
-                || (path.front() == kSentinelCode
-                        && path.back() != kSentinelCode
-                        && !is_single_outgoing(fwd(edges.back())))
-                // check if not a sink tip
-                || (path.back() == kSentinelCode
-                        && path.front() != kSentinelCode
-                        && !is_single_incoming(bwd(edges.front()))))
+        if (sequence.size() >= k_ + min_tip_size) {
+            // long tip
             callback(sequence);
+            return;
+        }
 
+        if (begin != path.begin() && end != path.end())
+            return;
+
+        if (end != path.end() || !get_W(fwd(edges.back()))) {
+            // outdegree == 0
+            if (!is_single_incoming(bwd(edges.front()))) {
+                // indegree > 1
+                callback(sequence);
+            }
+
+            return;
+        }
+
+        if (!is_single_outgoing(fwd(edges.back())) // outdegree > 1
+                // outdegree == 1 && indegree >= 1
+                || get_minus_k_value(edges.front(), k_).first) {
+            callback(sequence);
+        }
     }, true);
 }
 

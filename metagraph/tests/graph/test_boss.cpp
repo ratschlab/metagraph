@@ -1412,6 +1412,70 @@ TEST(BOSS, CallUnitigsWithPruning) {
     }
 }
 
+TEST(BOSS, CallUnitigsCheckDegree) {
+    std::vector<std::string> sequences {
+        "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGG",
+        "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGC",
+        "CCAAAATGAAACCTTCAGTTTTAACTCTTAATCAGACATAACTGGAAAA",
+        "CCGAACTAGTGAAACTGCAACAGACATACGCTGCTCTGAACTCTAAGGC",
+        "CCAGGTGCAGGGTGGACTCTTTCTGGATGTTGTAGTCAGACAGGGTGCG",
+        "ATCGGAAGAGCACACGTCTGAACTCCAGACACTAAGGCATCTCGTATGC",
+        "CGGAGGGAAAAATATTTACACAGAGTAGGAGACAAATTGGCTGAAAAGC",
+        "CCAGAGTCTCGTTCGTTATCGGAATTAACCAGACAAATCGCTCCACCAA"
+    };
+
+    BOSSConstructor constructor(8);
+    constructor.add_sequences(sequences);
+    BOSS graph(&constructor);
+    ASSERT_EQ(8u, graph.get_k());
+
+    std::multiset<std::string> unitigs {
+        "AGACAAATCGCTCCACCAA",
+        "AGACAAATTGGCTGAAAAGC",
+        "ATCGGAAGAGCACACGTCTGAACT",
+        "CAGACATAACTGGAAAA",
+        "CAGACATACGCTGCTCTGAACT",
+        "CCAAAATGAAACCTTCAGTTTTAACTCTTAATCAGACATA",
+        "CCAGAGTCTCGTTCGTTATCGGAATTAACCAGACAAAT",
+        "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCG",
+        "CCAGGTGCAGGGTGGACTCTTTCTGGATGTTGTAGTCAGACAGGGTGCG",
+        "CCGAACTAGTGAAACTGCAACAGACATA",
+        "CGGAGGGAAAAATATTTACACAGAGTAGGAGACAAAT",
+        "CTGAACTCCAGACACTAAGGCATCTCGTATGC",
+        "CTGAACTCTAAGGC",
+        "TCTGAACTC"
+    };
+
+    std::multiset<std::string> obs_unitigs;
+    graph.call_unitigs([&](const auto &unitig) { obs_unitigs.insert(unitig); }, 2);
+
+    EXPECT_EQ(unitigs, obs_unitigs);
+}
+
+TEST(BOSS, CallUnitigsIndegreeFirstNodeIsZero) {
+    std::vector<std::string> sequences {
+        "AGAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
+        "AGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCAGGTGTGGTGAC",
+        "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAATTAG"
+    };
+
+    BOSSConstructor constructor(30);
+    constructor.add_sequences(sequences);
+    BOSS graph(&constructor);
+    ASSERT_EQ(30u, graph.get_k());
+
+    std::multiset<std::string> unitigs {
+        "GAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
+        "AGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCAGGTGTGGTGAC",
+        "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAAT"
+    };
+
+    std::multiset<std::string> obs_unitigs;
+    graph.call_unitigs([&](const auto &unitig) { obs_unitigs.insert(unitig); }, 2);
+
+    EXPECT_EQ(unitigs, obs_unitigs);
+}
+
 TEST(BOSS, CallEdgesEmptyGraph) {
     for (size_t k = 1; k < 30; ++k) {
         BOSS empty(k);
