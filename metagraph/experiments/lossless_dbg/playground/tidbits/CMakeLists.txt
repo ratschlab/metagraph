@@ -12,3 +12,6 @@ add_symlink(${CMAKE_CURRENT_BINARY_DIR}/visualize_routing_table ${ROOT_BINARY_DI
 add_executable(dump_routing_table dump_routing_table.cpp)
 target_link_libraries(dump_routing_table metagraph ${METALIBS})
 add_symlink(${CMAKE_CURRENT_BINARY_DIR}/dump_routing_table ${ROOT_BINARY_DIR}/dump_routing_table)
+add_executable(sdsl_array_small sdsl_array_small.cpp)
+target_link_libraries(sdsl_array_small metagraph ${METALIBS})
+add_symlink(${CMAKE_CURRENT_BINARY_DIR}/sdsl_array_small ${ROOT_BINARY_DIR}/sdsl_array_small)

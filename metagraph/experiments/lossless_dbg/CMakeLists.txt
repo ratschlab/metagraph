@@ -11,6 +11,8 @@ set(PATH_ENCODER_CURRENT path_encoder_toolbox_v${ENCODER_VERSION})
 set(PATH_ENCODER_CURRENT_TYPE ${PATH_ENCODER_CURRENT}_${BTYPE})
 
 
+#set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -march=native")
+
 ## Add profiler into all versions
 find_library(PROFILER_LIB profiler)
 if(PROFILER_LIB)
