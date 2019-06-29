@@ -1324,27 +1324,18 @@ TEST(BOSS, CallUnitigsWithPruning) {
     BOSSConstructor constructor(4);
     constructor.add_sequences({
         "ACTATAGCTAGTCTATGCGA",
-        "ACTATAGCTAGTCTAG",
-        "ACTATAGCTAN",
+        "ACTATAGCTAGTCTAA",
+        "ACTATAGCTA",
         "ACTATAGCTT",
-        "ACTATT",
+        "ACTATC",
     });
     BOSS graph(&constructor);
+    ASSERT_EQ(4u, graph.get_k());
 
-#ifndef _DNA_GRAPH
+    // BOSS constructs unitigs from its edges as k-mers
     {
         std::set<std::string> contigs {
-            "ACTAT",
-            "CTATT",
-            "CTATGCGA",
-            "CTATAGCT",
-            "AGCTT",
-            "AGCTA",
-            "GCTAN",
-            "GCTAG",
-            "CTAGTCTA",
-            "TCTAT",
-            "TCTAG",
+            "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTT", "AGCTAGTCTA", "TCTAA", "TCTAT"
         };
         size_t num_contigs = 0;
         graph.call_unitigs(
@@ -1354,23 +1345,7 @@ TEST(BOSS, CallUnitigsWithPruning) {
             }
         );
         EXPECT_EQ(contigs.size(), num_contigs);
-    }
-#endif
-    {
-        std::set<std::string> contigs {
-            "CTATGCGA",
-            "CTATAGCT",
-#if _DNA_GRAPH
-            "AGCTAG",
-#else
-            "AGCTA",
-            "GCTAG",
-#endif
-            "CTAGTCTA",
-            "TCTAT",
-            "TCTAG",
-        };
-        size_t num_contigs = 0;
+        num_contigs = 0;
         graph.call_unitigs(
             [&](const auto &str) {
                 EXPECT_TRUE(contigs.count(str)) << str;
@@ -1381,17 +1356,7 @@ TEST(BOSS, CallUnitigsWithPruning) {
     }
     {
         std::set<std::string> contigs {
-            "CTATGCGA",
-            "CTATAGCT",
-#if _DNA_GRAPH
-            "AGCTAG",
-#else
-            "AGCTA",
-            "GCTAG",
-#endif
-            "CTAGTCTA",
-            "TCTAT",
-            "TCTAG",
+            "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
         };
         size_t num_contigs = 0;
         graph.call_unitigs(
@@ -1404,17 +1369,7 @@ TEST(BOSS, CallUnitigsWithPruning) {
     }
     {
         std::set<std::string> contigs {
-            "CTATGCGA",
-            "CTATAGCT",
-#if _DNA_GRAPH
-            "AGCTAG",
-#else
-            "AGCTA",
-            "GCTAG",
-#endif
-            "CTAGTCTA",
-            "TCTAT",
-            "TCTAG",
+            "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
         };
         size_t num_contigs = 0;
         graph.call_unitigs(
@@ -1427,16 +1382,7 @@ TEST(BOSS, CallUnitigsWithPruning) {
     }
     {
         std::set<std::string> contigs {
-            "CTATAGCT",
-#if _DNA_GRAPH
-            "AGCTAG",
-#else
-            "AGCTA",
-            "GCTAG",
-#endif
-            "CTAGTCTA",
-            "TCTAT",
-            "TCTAG",
+            "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
         };
         size_t num_contigs = 0;
         graph.call_unitigs(
@@ -1449,16 +1395,7 @@ TEST(BOSS, CallUnitigsWithPruning) {
     }
     {
         std::set<std::string> contigs {
-            "CTATAGCT",
-#if _DNA_GRAPH
-            "AGCTAG",
-#else
-            "AGCTA",
-            "GCTAG",
-#endif
-            "CTAGTCTA",
-            "TCTAT",
-            "TCTAG",
+            "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
         };
         size_t num_contigs = 0;
         graph.call_unitigs(
@@ -1467,6 +1404,19 @@ TEST(BOSS, CallUnitigsWithPruning) {
                 num_contigs++;
             }
         , 5);
+        EXPECT_EQ(contigs.size(), num_contigs);
+    }
+    {
+        std::set<std::string> contigs {
+            "ACTAT", "CTATC", "CTATGCGA", "CTATAGCT", "AGCTAGTCTA", "TCTAT"
+        };
+        size_t num_contigs = 0;
+        graph.call_unitigs(
+            [&](const auto &str) {
+                EXPECT_TRUE(contigs.count(str)) << str;
+                num_contigs++;
+            }
+        , 6);
         EXPECT_EQ(contigs.size(), num_contigs);
     }
 }
