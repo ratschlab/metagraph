@@ -235,12 +235,14 @@ public:
                         PRINT_VAR(graph.get_node_sequence(node));
                         PRINT_VAR(node,tid,relative_position,previous_node,traversed_edge);
                         #ifdef DEBUG_ADDITIONAL_INFORMATION
-                                                //PRINT_VAR(debug_bifurcation_idx);
+                                                PRINT_VAR(debug_bifurcation_idx);
                         #endif
                                                 PRINT_VAR("current incoming table");
                                                 incoming_table.print_content(node);
                                                 PRINT_VAR(join_symbol);
                                                 cerr << "previous" << endl;
+                                                PRINT_VAR("exit barrier");
+                                                exit_barrier.print_content(previous_node);
                         #ifdef DEBUG_ADDITIONAL_INFORMATION
                                                 auto& prev_bifurcation = bifurcations[debug_bifurcation_idx-1];
                                                 const auto &[previous_node_2, prev_join_symbol, prev_split_symbol] = prev_bifurcation;
@@ -250,7 +252,7 @@ public:
                                                     routing_table.print_content(previous_node);
                                                     PRINT_VAR(debug_relative_position_history.back());
                                                     PRINT_VAR(prev_split_symbol);
-                                                    PRINT_VAR(exit_barrier.print_content(previous_node));
+
                                                 }
                                                 if (prev_join_symbol) {
                                                     PRINT_VAR("previous incoming table");
