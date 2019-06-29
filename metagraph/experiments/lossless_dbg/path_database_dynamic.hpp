@@ -247,6 +247,9 @@ public:
                                                 auto& prev_bifurcation = bifurcations[debug_bifurcation_idx-1];
                                                 const auto &[previous_node_2, prev_join_symbol, prev_split_symbol] = prev_bifurcation;
                                                 PRINT_VAR(graph.get_node_sequence(previous_node));
+                                                if (debug_bifurcation_idx > 0) {
+                                                    PRINT_VAR(debug_relative_position_history.back());
+                                                }
                                                 if (prev_split_symbol) {
                                                     PRINT_VAR("previous routing table");
                                                     routing_table.print_content(previous_node);
@@ -262,13 +265,13 @@ public:
                                                                                                :
                                                                             *(debug_relative_position_history.end()-2)
                                                     ;
+                                                    PRINT_VAR(prev_position);
+                                                    PRINT_VAR(prev_join_symbol);
                                                     auto path_id = self->get_global_path_id(previous_node,prev_position-1);
                                                     PRINT_VAR(transform_sequence(decode_from_input(sequences,
                                                                                                    {graph.get_node_sequence(path_id.first),path_id.second}
                                                             ,graph.get_k())
                                                     ));
-                                                    PRINT_VAR(prev_position);
-                                                    PRINT_VAR(prev_join_symbol);
                                                 }
                         #endif
                         return false;
