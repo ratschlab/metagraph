@@ -2,12 +2,14 @@
 
 #include <cassert>
 
+typedef DeBruijnGraph::node_index node_index;
 
-DeBruijnGraph::node_index DeBruijnGraph::kmer_to_node(const char *begin) const {
+
+node_index DeBruijnGraph::kmer_to_node(const char *begin) const {
     return kmer_to_node(std::string(begin, get_k()));
 }
 
-DeBruijnGraph::node_index DeBruijnGraph::kmer_to_node(const std::string &kmer) const {
+node_index DeBruijnGraph::kmer_to_node(const std::string &kmer) const {
     assert(kmer.size() == get_k());
 
     node_index node = npos;
@@ -57,31 +59,32 @@ void DeBruijnGraph::call_nodes(const std::function<void(node_index)> &callback,
 }
 
 void call_sequences_from(const DeBruijnGraph &graph,
-                         DeBruijnGraph::node_index start,
+                         node_index start,
                          const std::function<void(const std::string&)> &callback,
                          sdsl::bit_vector *visited,
                          sdsl::bit_vector *discovered,
-                         std::stack<std::tuple<DeBruijnGraph::node_index, DeBruijnGraph::node_index, std::string, char>> *paths,
-                         std::vector<std::pair<DeBruijnGraph::node_index, char>> *targets,
-                         bool split_to_contigs = false,
-                         uint64_t max_pruned_dead_end_size = 0) {
+                         bool call_unitigs = false,
+                         uint64_t min_tip_size = 0) {
+    assert((min_tip_size <= 1 || call_unitigs)
+                && "tip pruning works only for unitig extraction");
     assert(visited);
     assert(discovered);
-    assert(paths);
-    assert(targets);
     assert(!(*visited)[start]);
+
+    std::stack<std::tuple<node_index, std::string, char>> paths;
+    std::vector<std::pair<node_index, char>> targets;
 
     (*discovered)[start] = true;
     auto cur_node_seq = graph.get_node_sequence(start);
-    paths->emplace(start,
-                   start,
-                   cur_node_seq.substr(0, graph.get_k() - 1),
-                   cur_node_seq.back());
+    paths.emplace(start,
+                  cur_node_seq.substr(0, graph.get_k() - 1),
+                  cur_node_seq.back());
 
     // keep traversing until we have worked off all branches from the queue
-    while (paths->size()) {
-        auto [first, node, sequence, next_char] = std::move(paths->top());
-        paths->pop();
+    while (paths.size()) {
+        auto [node, sequence, next_char] = std::move(paths.top());
+        paths.pop();
+        start = node;
 
         // traverse simple path until we reach its tail or
         // the first edge that has been already visited
@@ -93,32 +96,33 @@ void call_sequences_from(const DeBruijnGraph &graph,
             assert(sequence.length() >= graph.get_k());
             (*visited)[node] = true;
 
-            targets->clear();
+            targets.clear();
             graph.call_outgoing_kmers(node,
-                [&](const auto &next, char c) { targets->emplace_back(next, c); }
+                [&](const auto &next, char c) { targets.emplace_back(next, c); }
             );
 
-            if (targets->empty())
+            if (targets.empty())
                 break;
 
-            bool continue_traversal = !split_to_contigs || graph.indegree(node) == 1;
-
-            if (continue_traversal && targets->size() == 1) {
-                std::tie(node, next_char) = (*targets)[0];
+            if (targets.size() == 1
+                    && (!call_unitigs || graph.indegree(targets[0].first) == 1)) {
+                std::tie(node, next_char) = targets[0];
                 (*discovered)[node] = true;
                 continue;
             }
 
             auto new_seq = sequence.substr(sequence.length() - graph.get_k() + 1);
-            DeBruijnGraph::node_index next_node = DeBruijnGraph::npos;
-            for (const auto& [next, c] : *targets) {
-                if (next_node == DeBruijnGraph::npos && !split_to_contigs && !(*visited)[next]) {
+            node_index next_node = DeBruijnGraph::npos;
+            //  _____.___
+            //      \.___
+            for (const auto& [next, c] : targets) {
+                if (next_node == DeBruijnGraph::npos && !call_unitigs && !(*visited)[next]) {
                     (*discovered)[next] = true;
                     next_node = next;
                     next_char = c;
                 } else if (!(*discovered)[next]) {
                     (*discovered)[next] = true;
-                    paths->emplace(node, next, new_seq, c);
+                    paths.emplace(next, new_seq, c);
                 }
             }
 
@@ -127,11 +131,13 @@ void call_sequences_from(const DeBruijnGraph &graph,
 
             node = next_node;
         }
+
         if (sequence.size() >= graph.get_k()
-              && (!split_to_contigs
-              || graph.indegree(first)
-              || graph.outdegree(node)
-              || sequence.size() >= graph.get_k() + max_pruned_dead_end_size)) {
+              && (!call_unitigs
+                  // check if not short
+                  || sequence.size() >= graph.get_k() + min_tip_size - 1
+                  // check if not tip
+                  || graph.indegree(start) + graph.outdegree(node) >= 2)) {
             callback(sequence);
         }
     }
@@ -141,8 +147,6 @@ void DeBruijnGraph
 ::call_sequences(const std::function<void(const std::string&)> &callback) const {
     sdsl::bit_vector discovered(num_nodes() + 1, false);
     sdsl::bit_vector visited(num_nodes() + 1, false);
-    std::stack<std::tuple<node_index, node_index, std::string, char>> paths;
-    std::vector<std::pair<node_index, char>> targets;
 
     // first, process start nodes (without incoming edges)
     call_nodes([&](const auto &start) {
@@ -151,9 +155,7 @@ void DeBruijnGraph
                                 start,
                                 callback,
                                 &visited,
-                                &discovered,
-                                &paths,
-                                &targets);
+                                &discovered);
         }
     });
 
@@ -164,9 +166,7 @@ void DeBruijnGraph
                                 start,
                                 callback,
                                 &visited,
-                                &discovered,
-                                &paths,
-                                &targets);
+                                &discovered);
         }
     });
 
@@ -177,16 +177,14 @@ void DeBruijnGraph
                                 start,
                                 callback,
                                 &visited,
-                                &discovered,
-                                &paths,
-                                &targets);
+                                &discovered);
         }
     });
 }
 
 void DeBruijnGraph
 ::call_unitigs(const std::function<void(const std::string&)> &callback,
-               size_t max_pruned_dead_end_size) const {
+               size_t min_tip_size) const {
     sdsl::bit_vector discovered(num_nodes() + 1, false);
     sdsl::bit_vector visited(num_nodes() + 1, false);
     std::stack<std::tuple<node_index, node_index, std::string, char>> paths;
@@ -200,25 +198,43 @@ void DeBruijnGraph
                                 callback,
                                 &visited,
                                 &discovered,
-                                &paths,
-                                &targets,
                                 true,
-                                max_pruned_dead_end_size);
+                                min_tip_size);
         }
     });
 
-    // then forks
+    // then merges
+    //  ____.____
+    //  ___/
+    //
     call_nodes([&](const auto &start) {
-        if (!visited[start] && outdegree(start) > 1) {
+        if (!visited[start] && indegree(start) > 1) {
             call_sequences_from(*this,
                                 start,
                                 callback,
                                 &visited,
                                 &discovered,
-                                &paths,
-                                &targets,
                                 true,
-                                max_pruned_dead_end_size);
+                                min_tip_size);
+        }
+    });
+
+    // then forks
+    //  ____.____
+    //       \___
+    //
+    call_nodes([&](const auto &start) {
+        if (!visited[start] && outdegree(start) > 1) {
+            call_outgoing_kmers(start, [&](node_index next, char) {
+                if (!visited[next])
+                    call_sequences_from(*this,
+                                        next,
+                                        callback,
+                                        &visited,
+                                        &discovered,
+                                        true,
+                                        min_tip_size);
+            });
         }
     });
 
@@ -230,10 +246,8 @@ void DeBruijnGraph
                                 callback,
                                 &visited,
                                 &discovered,
-                                &paths,
-                                &targets,
                                 true,
-                                max_pruned_dead_end_size);
+                                min_tip_size);
         }
     });
 }

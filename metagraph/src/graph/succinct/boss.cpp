@@ -1981,10 +1981,10 @@ void BOSS::call_sequences(Call<const std::string&> callback) const {
 }
 
 void BOSS::call_unitigs(Call<const std::string&> callback,
-                        size_t max_pruned_dead_end_size) const {
+                        size_t min_tip_size) const {
     std::string sequence;
 
-    call_paths([&](const auto&, const auto &path) {
+    call_paths([&](const auto &edges, const auto &path) {
         sequence.clear();
 
         assert(path.size());
@@ -1999,7 +1999,16 @@ void BOSS::call_unitigs(Call<const std::string&> callback,
             return;
 
         if ((path.front() != kSentinelCode && path.back() != kSentinelCode)
-                || sequence.size() > k_ + max_pruned_dead_end_size)
+                // ceck if long
+                || sequence.size() >= k_ + min_tip_size
+                // check if not a source tip
+                || (path.front() == kSentinelCode
+                        && path.back() != kSentinelCode
+                        && !is_single_outgoing(fwd(edges.back())))
+                // check if not a sink tip
+                || (path.back() == kSentinelCode
+                        && path.front() != kSentinelCode
+                        && !is_single_incoming(bwd(edges.front()))))
             callback(sequence);
 
     }, true);

@@ -85,8 +85,12 @@ class DeBruijnGraph : public SequenceGraph {
 
     // TODO: move to graph_algorithm.hpp
     virtual void call_sequences(const std::function<void(const std::string&)> &callback) const;
+    /**
+     * Call all unitigs except short tips.
+     * Def. Tips are the unitigs with InDegree(first) + OutDegree(last) < 2.
+     */
     virtual void call_unitigs(const std::function<void(const std::string&)> &callback,
-                              size_t max_pruned_dead_end_size = 0) const;
+                              size_t min_tip_size = 1) const;
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const;
     virtual void call_nodes(const std::function<void(node_index)> &callback,
                             const std::function<bool()> &stop_early = [](){ return false; }) const;

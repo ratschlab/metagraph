@@ -1683,6 +1683,12 @@ int main(int argc, const char *argv[]) {
                 counter++;
             };
 
+            // TODO: if DBGSuccinct is used, make sure it doesn't contain
+            // any redundant dummy k-mers. Otherwise, it will split
+            // the unitigs and the result will be incorrect.
+            // TODO: Alternatively, double check implementation of call_unitigs in BOSS
+            // and make it call proper unitigs even if it contains redundant dummy k-mers.
+
             if (config->min_tip_size > 1
                     || config->min_unitig_median_kmer_abundance != 1) {
 
@@ -1693,9 +1699,6 @@ int main(int argc, const char *argv[]) {
                 }
 
                 assert(subgraph->num_nodes() == graph->num_nodes());
-
-                if (config->min_tip_size < 1)
-                    config->min_tip_size = 1;
 
                 if (config->verbose)
                     std::cout << "Threshold for median k-mer abundance in unitigs: "
@@ -1708,7 +1711,7 @@ int main(int argc, const char *argv[]) {
                                                   config->min_unitig_median_kmer_abundance))
                             dump_sequence(sequence);
                     },
-                    config->min_tip_size - 1
+                    config->min_tip_size
                 );
 
             } else if (config->unitigs) {
@@ -2174,7 +2177,7 @@ int main(int argc, const char *argv[]) {
             };
 
             if (config->unitigs || config->min_tip_size > 1) {
-                graph->call_unitigs(dump_sequence, config->min_tip_size - 1);
+                graph->call_unitigs(dump_sequence, config->min_tip_size);
             } else {
                 graph->call_sequences(dump_sequence);
             }
