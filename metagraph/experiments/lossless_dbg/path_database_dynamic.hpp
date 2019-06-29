@@ -237,6 +237,7 @@ public:
                         #ifdef DEBUG_ADDITIONAL_INFORMATION
                                                 PRINT_VAR(debug_bifurcation_idx);
                         #endif
+                                                PRINT_VAR("current incoming table");
                                                 incoming_table.print_content(node);
                                                 PRINT_VAR(join_symbol);
                                                 cerr << "previous" << endl;
@@ -245,11 +246,13 @@ public:
                                                 const auto &[previous_node_2, prev_join_symbol, prev_split_symbol] = prev_bifurcation;
                                                 PRINT_VAR(graph.get_node_sequence(previous_node));
                                                 if (prev_split_symbol) {
+                                                    PRINT_VAR("previous routing table");
                                                     routing_table.print_content(previous_node);
                                                     PRINT_VAR(debug_relative_position_history.back());
                                                     PRINT_VAR(prev_split_symbol);
                                                 }
                                                 if (prev_join_symbol) {
+                                                    PRINT_VAR("previous incoming table");
                                                     incoming_table.print_content(previous_node);
                                                     int64_t prev_position = !prev_split_symbol ?
                                                                             debug_relative_position_history.back()
