@@ -23,6 +23,8 @@ else()
     set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_PROFILE} -fno-inline")
 endif()
 
+set(CMAKE_CXX_FLAGS_VERBOSEDEBUG "${CMAKE_CXX_FLAGS} -DDEBUG_ADDITIONAL_INFORMATION")
+
 ## Useful for profiling
 # needs gperftools installed
 # -fopt-info-loop		Prints optimizations during compile

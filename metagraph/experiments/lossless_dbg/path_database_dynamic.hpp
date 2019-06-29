@@ -231,8 +231,40 @@ public:
                         using TT = DecodeEnabler<PathDatabaseDynamicCore<>>;
                         auto self = reinterpret_cast<TT*>(this);
                         cerr << "current" << endl;
+                        PRINT_VAR(relative_position,incoming_table.branch_size(node,join_symbol));
                         PRINT_VAR(graph.get_node_sequence(node));
                         PRINT_VAR(node,tid,relative_position,previous_node,traversed_edge);
+                        #ifdef DEBUG_ADDITIONAL_INFORMATION
+                                                PRINT_VAR(debug_bifurcation_idx);
+                        #endif
+                                                incoming_table.print_content(node);
+                                                PRINT_VAR(join_symbol);
+                                                cerr << "previous" << endl;
+                        #ifdef DEBUG_ADDITIONAL_INFORMATION
+                                                auto& prev_bifurcation = bifurcations[debug_bifurcation_idx-1];
+                                                const auto &[previous_node_2, prev_join_symbol, prev_split_symbol] = prev_bifurcation;
+                                                PRINT_VAR(graph.get_node_sequence(previous_node));
+                                                if (prev_split_symbol) {
+                                                    routing_table.print_content(previous_node);
+                                                    PRINT_VAR(debug_relative_position_history.back());
+                                                    PRINT_VAR(prev_split_symbol);
+                                                }
+                                                if (prev_join_symbol) {
+                                                    incoming_table.print_content(previous_node);
+                                                    int64_t prev_position = !prev_split_symbol ?
+                                                                            debug_relative_position_history.back()
+                                                                                               :
+                                                                            *(debug_relative_position_history.end()-2)
+                                                    ;
+                                                    auto path_id = self->get_global_path_id(previous_node,prev_position-1);
+                                                    PRINT_VAR(transform_sequence(decode_from_input(sequences,
+                                                                                                   {graph.get_node_sequence(path_id.first),path_id.second}
+                                                            ,graph.get_k())
+                                                    ));
+                                                    PRINT_VAR(prev_position);
+                                                    PRINT_VAR(prev_join_symbol);
+                                                }
+                        #endif
                         return false;
                     }()));
 

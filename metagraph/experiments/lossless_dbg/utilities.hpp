@@ -461,6 +461,7 @@ public:
     CREATE_MEMBER_CHECK(exit);
     template<typename ...Args>
     int64_t exit(Args... args) {
+        // not thread safe, needs additional lock here
         if constexpr (has_member_exit<Reference>::value) {
             auto target = Reference::exit(args...);
             auto value = t.exit(args...);
@@ -484,6 +485,7 @@ public:
     CREATE_MEMBER_CHECK(enter);
     template<typename ...Args>
     void enter(Args... args) {
+        // not thread safe, needs additional lock here
         if constexpr (has_member_enter<Reference>::value) {
             Reference::enter(args...);
             t.enter(args...);

@@ -36,9 +36,6 @@ public:
     using edge_id_t = typename decltype(Database::incoming_table)::edge_identifier_t;
     static constexpr bool use_char = is_same<edge_id_t,char>::value;
     static constexpr edge_id_t origin_node_symbol = use_char ? '$' : 0;
-    // implicit assumptions
-    // graph contains all reads
-    // sequences are of size at least k
 
     std::string decode(path_id path) const {
         auto prev_node = 0;
