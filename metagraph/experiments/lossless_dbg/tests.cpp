@@ -244,6 +244,15 @@ TEST(ExitBarrier,Counting) {
     ASSERT_EQ(0,eb.exit(1,1));
 }
 
+TEST(ExitBarrier,Counting2) {
+    auto is_element = sdsl::bit_vector({0,1,1,1});
+    auto rank_is_element = sdsl::bit_vector::rank_1_type(&is_element);
+    ExitBarrier<> eb(&is_element,&rank_is_element);
+    eb.enter(1,'A',0,0);
+    eb.enter(1,'A',0,1);
+    ASSERT_EQ(0,eb.exit(1,0));
+}
+
 vector<string> alternative_reads= {
         "GAGCTCGGGACTTGAATAT",
         "GAGCTCGAGACTTGAATAG"};
