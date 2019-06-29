@@ -234,6 +234,16 @@ TEST(PathDatabase,IncomingTable) {
     ASSERT_EQ(table.size(3),0);
     ASSERT_EQ(table.branch_size_rank(4,0),4);
 }
+
+TEST(ExitBarrier,Counting) {
+    auto is_element = sdsl::bit_vector({0,1,1,1});
+    auto rank_is_element = sdsl::bit_vector::rank_1_type(&is_element);
+    ExitBarrier<> eb(&is_element,&rank_is_element);
+    eb.enter(1,'A',0,0);
+    eb.enter(1,'A',1,1);
+    ASSERT_EQ(0,eb.exit(1,1));
+}
+
 vector<string> alternative_reads= {
         "GAGCTCGGGACTTGAATAT",
         "GAGCTCGAGACTTGAATAG"};

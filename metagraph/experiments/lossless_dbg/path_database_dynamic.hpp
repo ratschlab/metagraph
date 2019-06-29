@@ -235,7 +235,7 @@ public:
                         PRINT_VAR(graph.get_node_sequence(node));
                         PRINT_VAR(node,tid,relative_position,previous_node,traversed_edge);
                         #ifdef DEBUG_ADDITIONAL_INFORMATION
-                                                PRINT_VAR(debug_bifurcation_idx);
+                                                //PRINT_VAR(debug_bifurcation_idx);
                         #endif
                                                 PRINT_VAR("current incoming table");
                                                 incoming_table.print_content(node);
