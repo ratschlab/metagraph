@@ -250,6 +250,7 @@ public:
                                                     routing_table.print_content(previous_node);
                                                     PRINT_VAR(debug_relative_position_history.back());
                                                     PRINT_VAR(prev_split_symbol);
+                                                    PRINT_VAR(exit_barrier.print_content(previous_node));
                                                 }
                                                 if (prev_join_symbol) {
                                                     PRINT_VAR("previous incoming table");

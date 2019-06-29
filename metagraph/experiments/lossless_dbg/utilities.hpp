@@ -495,6 +495,19 @@ public:
         }
     }
 
+    CREATE_MEMBER_CHECK(print_content);
+    template<typename ...Args>
+    void print_content(Args... args) {
+        // not thread safe, needs additional lock here
+        if constexpr (has_member_print_content<Reference>::value) {
+            Reference::print_content(args...);
+            t.print_content(args...);
+        }
+        else {
+            throw "Can't call function print_content";
+        }
+    }
+
 
     Test t;
 };

@@ -131,7 +131,7 @@ public:
         return my_relative_position + offset_change;
     }
 
-    void print_content(uint64_t node, uint64_t tid) {
+    void print_content(uint64_t node, uint64_t tid=0) {
         cout << exit_barriers[node] << endl;
     }
 
@@ -254,7 +254,7 @@ ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chun
         return relative_position;
     }
 
-    void print_content(uint64_t node, uint64_t tid) {
+    void print_content(uint64_t node, uint64_t tid=0) {
         cout << waiting_threads[node] << endl;
     }
 
