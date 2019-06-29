@@ -217,7 +217,7 @@ public:
                 omp_set_lock(node_lock);
 #endif
                 if (previous_node) {
-                    exit_barrier.exit(previous_node,tid);
+                    relative_position = exit_barrier.exit(previous_node,tid);
                 }
 
                 if (join_symbol) {
