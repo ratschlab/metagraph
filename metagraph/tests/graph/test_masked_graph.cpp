@@ -652,6 +652,11 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallContigsMaskPath) {
 
             MaskedDeBruijnGraph graph(full_graph, mask.release());
 
+            graph.map_to_nodes(
+                sequence,
+                [&](const auto &index) { EXPECT_EQ(DeBruijnGraph::npos, index); }
+            );
+
             MaskedDeBruijnGraph reconstructed(build_graph_iterative<TypeParam>(
                 k,
                 [&](const auto &callback) { graph.call_sequences(callback); }
