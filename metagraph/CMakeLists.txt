@@ -12,6 +12,8 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "RELEASE")
 endif()
 
+string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE)
+
 set(JSONCPP_WITH_TESTS FALSE)
 add_subdirectory(
   external-libraries/jsoncpp
@@ -360,13 +362,13 @@ add_subdirectory(
 endif()
 
 if(NOT DEFINED DEATH_TEST)
-set(DEATH_TEST TRUE)
+  set(DEATH_TEST TRUE)
 endif()
-if(DEATH_TEST)
-set(DEATH_TEST_FLAG "")
+if(DEATH_TEST AND ${CMAKE_BUILD_TYPE} MATCHES DEBUG)
+  set(DEATH_TEST_FLAG "")
 else()
-message(STATUS "Disabling death tests in gtest")
-set(DEATH_TEST_FLAG -D_NO_DEATH_TEST)
+  message(STATUS "Disabling death tests in gtest")
+  set(DEATH_TEST_FLAG -D_NO_DEATH_TEST)
 endif()
 
 file(GLOB unit_tests_files

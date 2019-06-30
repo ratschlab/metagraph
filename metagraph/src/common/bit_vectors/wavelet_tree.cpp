@@ -604,14 +604,17 @@ uint64_t wavelet_tree_small::prev(uint64_t pos, uint64_t value) const {
 }
 
 void wavelet_tree_small::set(uint64_t, uint64_t) {
+    assert(false);
     throw std::runtime_error("Not supported");
 }
 
 void wavelet_tree_small::insert(uint64_t, uint64_t) {
+    assert(false);
     throw std::runtime_error("Not supported");
 }
 
 void wavelet_tree_small::remove(uint64_t) {
+    assert(false);
     throw std::runtime_error("Not supported");
 }
 
