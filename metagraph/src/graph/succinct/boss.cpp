@@ -1995,7 +1995,7 @@ void BOSS::call_unitigs(Call<const std::string&> callback,
             }
         }
 
-        if (!sequence.size())
+        if (sequence.size() <= k_)
             return;
 
         if ((path.front() != kSentinelCode && path.back() != kSentinelCode)

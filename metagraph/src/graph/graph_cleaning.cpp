@@ -9,6 +9,8 @@ bool is_unreliable_unitig(const std::string &sequence,
                           const DeBruijnGraph &graph,
                           const IWeighted<DeBruijnGraph::node_index> &node_weights,
                           uint64_t min_median_abundance) {
+    assert(sequence.size() >= graph.get_k());
+
     if (min_median_abundance <= 1)
         return false;
 

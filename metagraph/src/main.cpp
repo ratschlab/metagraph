@@ -1630,28 +1630,34 @@ int main(int argc, const char *argv[]) {
                 std::cout << "Graph loading...\t" << std::flush;
 
             auto graph = load_critical_dbg(files.at(0));
+
             auto node_weights = std::dynamic_pointer_cast<const IWeighted<DeBruijnGraph::node_index>>(graph);
-            if (!node_weights.get()) {
-                std::cerr << "ERROR: Cannot load weighted graph from "
-                          << files.at(0) << std::endl;
-                exit(1);
+            std::unique_ptr<MaskedDeBruijnGraph> subgraph;
+
+            // TODO: fix unitig extraction from subgraph in order for this
+            // to work properly when k-mers are filtered
+            const DeBruijnGraph *graph_with_unitigs = graph.get();
+
+            if (config->min_count > 1
+                    || config->max_count < std::numeric_limits<unsigned int>::max()
+                    || config->min_unitig_median_kmer_abundance != 1) {
+
+                if (!node_weights.get()) {
+                    std::cerr << "ERROR: Cannot load weighted graph from "
+                              << files.at(0) << std::endl;
+                    exit(1);
+                }
+
+                subgraph.reset(new MaskedDeBruijnGraph(graph,
+                    [&](auto i) { return node_weights->get_weight(i) >= config->min_count
+                                        && node_weights->get_weight(i) <= config->max_count; }
+                ));
+
+                graph_with_unitigs = subgraph.get();
             }
 
             if (config->verbose)
                 std::cout << timer.elapsed() << "sec" << std::endl;
-
-            auto subgraph = std::make_unique<MaskedDeBruijnGraph>(
-                graph,
-                [&](auto i) { return node_weights->get_weight(i) >= config->min_count
-                                    && node_weights->get_weight(i) <= config->max_count; }
-            );
-
-            // TODO: fix unitig extraction from subgraph in order for this
-            // to work properly when k-mers are filtered
-            const DeBruijnGraph &graph_with_unitigs
-                = config->min_count > 1
-                    || config->max_count < std::numeric_limits<unsigned int>::max()
-                ? *subgraph : *graph;
 
             if (config->verbose)
                 std::cout << "Extracting sequences from subgraph..." << std::endl;
@@ -1689,8 +1695,9 @@ int main(int argc, const char *argv[]) {
             // TODO: Alternatively, double check implementation of call_unitigs in BOSS
             // and make it call proper unitigs even if it contains redundant dummy k-mers.
 
-            if (config->min_tip_size > 1
-                    || config->min_unitig_median_kmer_abundance != 1) {
+            if (config->min_unitig_median_kmer_abundance != 1) {
+
+                assert(node_weights.get());
 
                 if (config->min_unitig_median_kmer_abundance == 0) {
                     config->min_unitig_median_kmer_abundance
@@ -1705,7 +1712,7 @@ int main(int argc, const char *argv[]) {
                               << config->min_unitig_median_kmer_abundance << std::endl;
 
                 // subgraph->call_unitigs(
-                graph_with_unitigs.call_unitigs(
+                graph_with_unitigs->call_unitigs(
                     [&](const auto &sequence) {
                         if (!is_unreliable_unitig(sequence, *graph, *node_weights,
                                                   config->min_unitig_median_kmer_abundance))
@@ -1716,11 +1723,11 @@ int main(int argc, const char *argv[]) {
 
             } else if (config->unitigs) {
                 // subgraph->call_unitigs(dump_sequence);
-                graph_with_unitigs.call_unitigs(dump_sequence);
+                graph_with_unitigs->call_unitigs(dump_sequence, config->min_tip_size);
 
             } else {
                 // subgraph->call_sequences(dump_sequence);
-                graph_with_unitigs.call_sequences(dump_sequence);
+                graph_with_unitigs->call_sequences(dump_sequence);
             }
 
             gzclose(out_fasta_gz);
