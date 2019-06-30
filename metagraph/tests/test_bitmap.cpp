@@ -16,9 +16,6 @@ const std::string test_dump_basename = test_data_dir + "/bitmap_dump_test";
 
 void reference_based_test(const bitmap &vector,
                           const sdsl::bit_vector &reference) {
-    ASSERT_DEATH(vector[vector.size()], "");
-    ASSERT_DEATH(vector[vector.size() + 1], "");
-
     EXPECT_EQ(reference.size(), vector.size());
     EXPECT_EQ(sdsl::util::cnt_one_bits(reference), vector.num_set_bits());
 
