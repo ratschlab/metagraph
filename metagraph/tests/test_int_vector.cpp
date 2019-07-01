@@ -27,7 +27,8 @@ TEST(IntVector, DISABLED_call_nonzeros_all_set_LONG_TEST) {
                     EXPECT_LE(begin, i);
                     EXPECT_GT(end, i);
                     EXPECT_EQ(it++, i);
-                    EXPECT_EQ((1llu << w) - 1, count);
+                    EXPECT_EQ(w < 64 ? (1llu << w) - 1 : static_cast<size_t>(-1),
+                              count);
                     EXPECT_EQ(vector[i], count);
                 });
                 EXPECT_EQ(it, end);
