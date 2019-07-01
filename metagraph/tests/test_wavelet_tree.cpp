@@ -304,7 +304,9 @@ void test_wavelet_tree_batch_ins_del(wavelet_tree *vector,
 
     // insert numbers in the given order
     for (size_t i = 0; i < numbers.size(); ++i) {
+        ASSERT_EQ(i, vector->size());
         vector->insert(i, numbers[i]);
+        ASSERT_EQ(i + 1, vector->size());
     }
     reference_based_test(*vector, numbers);
 
@@ -730,6 +732,24 @@ TEST(wavelet_tree_dyn, BeyondTheDNA) {
                                       0, 1, 2, 0, 3, 2, 1, 1 };
     wavelet_tree_dyn vector(7, numbers);
     EXPECT_EQ(numbers, to_std_vector(vector.to_vector()));
+}
+
+TEST(wavelet_tree_stat, initialize_large) {
+    vector<int> initial_content(1'000'000, 6);
+    wavelet_tree_stat vector(3, initial_content);
+    EXPECT_EQ(initial_content.size(), vector.size());
+}
+
+TEST(wavelet_tree_dyn, initialize_large) {
+    vector<int> initial_content(1'000'000, 6);
+    wavelet_tree_dyn vector(3, initial_content);
+    EXPECT_EQ(initial_content.size(), vector.size());
+}
+
+TEST(wavelet_tree_small, initialize_large) {
+    vector<int> initial_content(1'000'000, 6);
+    wavelet_tree_small vector(3, initial_content);
+    EXPECT_EQ(initial_content.size(), vector.size());
 }
 
 

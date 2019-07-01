@@ -47,7 +47,6 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     -Wno-old-style-cast \
     -Wno-atomic-alignment \
     -Wno-extra-semi-stmt \
-	-Wno-unused-parameter \
   ")
 endif()
 
@@ -93,7 +92,7 @@ endif()
 
 
 # Profile build type
-set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O3 -g")
+set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O1 -g")
 set(CMAKE_EXE_LINKER_FLAGS_PROFILE "-pg -g")
 set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg -g")
 
@@ -144,6 +143,7 @@ SUBDIRLIST(INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src")
 include_directories(
   external-libraries/KMC/kmc_api
   external-libraries/libmaus2/include
+  external-libraries/DYNAMIC/include
   external-libraries/sdsl-lite/include
   external-libraries/rollinghashcpp
   external-libraries/ips4o

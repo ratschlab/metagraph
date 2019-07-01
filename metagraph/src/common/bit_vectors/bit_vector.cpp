@@ -3,7 +3,6 @@
 #include <cmath>
 #include <type_traits>
 #include <cassert>
-#include <libmaus2/bitio/putBit.hpp>
 
 #include "serialization.hpp"
 
@@ -13,7 +12,7 @@ const double STAT_BITS_PER_BIT_IF_DENSE = 1.51;
 
 // TODO: run benchmarks and optimize these parameters
 const size_t MAX_ITER_BIT_VECTOR_STAT = 1000;
-const size_t MAX_ITER_BIT_VECTOR_DYN = 10;
+const size_t MAX_ITER_BIT_VECTOR_DYN = 0;
 const size_t MAX_ITER_BIT_VECTOR_SD = 10;
 const size_t MAX_ITER_BIT_VECTOR_RRR = 10;
 
@@ -206,23 +205,26 @@ inline uint64_t prev1(const BitVector &v,
 
 
 /////////////////////////////
-// bit_vector_dyn, libmaus //
+// bit_vector_dyn, DYNAMIC //
 /////////////////////////////
 
-// repack bits for BitBTree (uses different order)
-std::vector<uint64_t> pack_bits(const sdsl::bit_vector &v) {
-    std::vector<uint64_t> bits((v.size() + 63) / 64);
-    ::call_ones(v, [&](auto i) {
-        libmaus2::bitio::setBit(bits.data(), i);
-    });
-    return bits;
+bit_vector_dyn::bit_vector_dyn(uint64_t size, bool value) {
+    uint64_t i;
+    for (i = 0; i + 64 <= size; i += 64) {
+        vector_.push_word(value ? ~uint64_t(0) : 0, 64);
+    }
+    if (i < size)
+        vector_.push_word(value ? (uint64_t(1) << (size - i)) - 1 : 0, size - i);
 }
 
-bit_vector_dyn::bit_vector_dyn(uint64_t size, bool value)
-      : vector_(size, value) {}
-
-bit_vector_dyn::bit_vector_dyn(const sdsl::bit_vector &v)
-      : vector_(v.size(), pack_bits(v).data()) {}
+bit_vector_dyn::bit_vector_dyn(const sdsl::bit_vector &v) {
+    uint64_t i;
+    for (i = 0; i + 64 <= v.size(); i += 64) {
+        vector_.push_word(v.get_int(i, 64), 64);
+    }
+    if (i < v.size())
+        vector_.push_word(v.get_int(i, v.size() - i), v.size() - i);
+}
 
 bit_vector_dyn::bit_vector_dyn(std::initializer_list<bool> init)
       : bit_vector_dyn(sdsl::bit_vector(init)) {}
@@ -232,7 +234,7 @@ std::unique_ptr<bit_vector> bit_vector_dyn::copy() const {
 }
 
 uint64_t bit_vector_dyn::rank1(uint64_t id) const {
-    return vector_.size() ? vector_.rank1(id) : 0;
+    return vector_.rank1(std::min(id + 1, size()));
 }
 
 uint64_t bit_vector_dyn::select1(uint64_t id) const {
@@ -261,13 +263,9 @@ void bit_vector_dyn::set(uint64_t id, bool val) {
     vector_.set(id, val);
 }
 
-void bit_vector_dyn::setBitQuick(uint64_t id, bool val) {
-    vector_.setBitQuick(id, val);
-}
-
 bool bit_vector_dyn::operator[](uint64_t id) const {
     assert(id < size());
-    return vector_[id];
+    return vector_.at(id);
 }
 
 uint64_t bit_vector_dyn::get_int(uint64_t id, uint32_t width) const {
@@ -275,19 +273,19 @@ uint64_t bit_vector_dyn::get_int(uint64_t id, uint32_t width) const {
     uint64_t pos = id + width - 1;
     uint64_t word = 0;
     while (pos >= id) {
-        word = (word << 1) + vector_[pos--];
+        word = (word << 1) + vector_.at(pos--);
     }
     return word;
 }
 
 void bit_vector_dyn::insert_bit(uint64_t id, bool val) {
     assert(id <= size());
-    vector_.insertBit(id, val);
+    vector_.insert(id, val);
 }
 
 void bit_vector_dyn::delete_bit(uint64_t id) {
     assert(id < size());
-    vector_.deleteBit(id);
+    vector_.remove(id);
 }
 
 bool bit_vector_dyn::load(std::istream &in) {
@@ -296,7 +294,7 @@ bool bit_vector_dyn::load(std::istream &in) {
 
     try {
         //TODO: catch reading errors
-        vector_.deserialise(in);
+        vector_.load(in);
         return true;
     } catch (const std::bad_alloc &exception) {
         std::cerr << "ERROR: Not enough memory to load bit_vector_sd." << std::endl;
@@ -307,7 +305,7 @@ bool bit_vector_dyn::load(std::istream &in) {
 }
 
 void bit_vector_dyn::serialize(std::ostream &out) const {
-    vector_.serialise(out);
+    vector_.serialize(out);
 }
 
 void bit_vector_dyn::call_ones_in_range(uint64_t begin, uint64_t end,
