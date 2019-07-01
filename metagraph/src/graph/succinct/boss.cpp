@@ -145,14 +145,14 @@ bool BOSS::operator==(const BOSS &other) const {
         do {
             first_node = get_node_str(i);
             first_last = get_last(i);
-            first_label = decode(get_W(i));
+            first_label = decode(get_W(i) % alph_size);
             i++;
         } while (first_node.find(kSentinel) != std::string::npos && i < W_->size());
 
         do {
             second_node = other.get_node_str(j);
             second_last = other.get_last(j);
-            second_label = decode(other.get_W(j));
+            second_label = decode(other.get_W(j) % alph_size);
             j++;
         } while (second_node.find(kSentinel) != std::string::npos && j < other.W_->size());
 
@@ -219,8 +219,10 @@ bool BOSS::load(std::ifstream &instream) {
         k_ = load_number(instream);
         state = static_cast<Config::StateType>(load_number(instream));
 
-        if (F_.size() != alph_size)
+        if (F_.size() != alph_size) {
+            std::cerr << "ERROR: failed to load F vector, incompatible size" << std::endl;
             return false;
+        }
 
         // load W and last arrays
         delete W_;
@@ -234,12 +236,26 @@ bool BOSS::load(std::ifstream &instream) {
                 W_ = new wavelet_tree_stat(bits_per_char_W_);
                 last_ = new bit_vector_stat();
                 break;
+            case Config::FAST:
+                W_ = new wavelet_tree_fast(bits_per_char_W_);
+                last_ = new bit_vector_stat();
+                break;
             case Config::SMALL:
                 W_ = new wavelet_tree_small(bits_per_char_W_);
                 last_ = new bit_vector_small();
                 break;
         }
-        return W_->load(instream) && last_->load(instream);
+        if (!W_->load(instream)) {
+            std::cerr << "ERROR: failed to load W vector" << std::endl;
+            return false;
+        }
+
+        if (!last_->load(instream)) {
+            std::cerr << "ERROR: failed to load L vector" << std::endl;
+            return false;
+        }
+
+        return true;
     } catch (const std::bad_alloc &exception) {
         std::cerr << "ERROR: Not enough memory to load the BOSS table." << std::endl;
         return false;
@@ -368,6 +384,7 @@ uint64_t BOSS::fwd(uint64_t i) const {
 
     // get value of W at position i
     TAlphabet c = get_W(i) % alph_size;
+    assert(i == 1 || c != kSentinelCode);
     // get the offset for position c
     uint64_t o = F_[c];
     // get the rank of c in W at position i
@@ -430,7 +447,12 @@ edge_index BOSS::outgoing_edge_idx(node_index i, TAlphabet c) const {
 edge_index BOSS::pick_edge(edge_index edge, node_index node, TAlphabet c) const {
     CHECK_INDEX(edge);
     CHECK_NODE(node);
-    assert(c < alph_size);
+
+    assert(c <= alph_size);
+
+    if (c == alph_size)
+        return npos;
+
     assert(get_source_node(edge) == node);
 
     uint64_t j = pred_W(edge, c);
@@ -451,7 +473,10 @@ edge_index BOSS::pick_edge(edge_index edge, node_index node, TAlphabet c) const 
 node_index BOSS::outgoing(node_index i, TAlphabet c) const {
     CHECK_NODE(i);
 
-    c %= alph_size;
+    assert(c <= alph_size);
+
+    if (c == alph_size)
+        return npos;
 
     edge_index j = outgoing_edge_idx(i, c);
     if (j == npos)
@@ -479,7 +504,10 @@ node_index BOSS::incoming(node_index i, TAlphabet c) const {
         }
     }
 
-    c %= alph_size;
+    assert(c <= alph_size);
+
+    if (c == alph_size)
+        return npos;
 
     // check if the first incoming edge has label `c`
     edge_index edge = select_last(i);
@@ -566,7 +594,10 @@ bool BOSS::is_single_incoming(edge_index i) const {
     CHECK_INDEX(i);
 
     TAlphabet c = get_W(i);
-    if (c >= alph_size)
+
+    assert(c != alph_size);
+
+    if (c > alph_size)
         return false;
 
     // start from the next edge
@@ -756,7 +787,15 @@ node_index BOSS::pred_kmer(const std::vector<TAlphabet> &kmer) const {
     // update range iteratively while scanning through s
     while (++kmer_it != kmer.end()) {
         TAlphabet s = *kmer_it;
-        assert(s < alph_size);
+        assert(s <= alph_size);
+
+        // invalid character that does not belong to the alphabet
+        // assume |s| greater than all characters
+        if (s == alph_size) {
+            last_ = W_->size() - 1;
+            shift = 0;
+            continue;
+        }
 
         uint64_t last_target = std::max(pred_W(last_, s),
                                         pred_W(last_, s + alph_size));
@@ -1124,7 +1163,7 @@ void BOSS::update_F(TAlphabet c, int value) {
 
 TAlphabet BOSS::encode(char s) const {
     assert(kmer_extractor_.encode(kSentinel) != kSentinelCode);
-    assert(kmer_extractor_.encode(kSentinel) != kSentinelCode + alph_size);
+    assert(kmer_extractor_.encode(s) <= alph_size);
     return kmer_extractor_.encode(s);
 }
 
@@ -1137,8 +1176,8 @@ std::vector<TAlphabet> BOSS::encode(const std::string &sequence) const {
 
 char BOSS::decode(TAlphabet c) const {
     assert(kmer_extractor_.alphabet[kSentinelCode] == kSentinel);
-    assert(c < 2 * alph_size);
-    return kmer_extractor_.decode(c % alph_size);
+    assert(c < alph_size);
+    return kmer_extractor_.decode(c);
 }
 
 std::string BOSS::decode(const std::vector<TAlphabet> &sequence) const {
@@ -1174,6 +1213,10 @@ void BOSS::switch_state(Config::StateType new_state) {
             convert<wavelet_tree_small, bit_vector_small>(&W_, &last_);
             break;
         }
+        case Config::FAST: {
+            convert<wavelet_tree_fast, bit_vector_stat>(&W_, &last_);
+            break;
+        }
         case Config::DYN: {
             convert<wavelet_tree_dyn, bit_vector_dyn>(&W_, &last_);
             break;
@@ -1205,10 +1248,11 @@ void BOSS::print(std::ostream &os) const {
                   << "\t" << "W" << std::endl;
 
     for (uint64_t i = 1; i < W_->size(); i++) {
+        assert(get_W(i) != alph_size);
         os << i << "\t" << get_last(i)
                 << "\t" << get_node_str(i)
-                << "\t" << decode(get_W(i))
-                        << (get_W(i) >= alph_size
+                << "\t" << decode(get_W(i) % alph_size)
+                        << (get_W(i) > alph_size
                                 ? "-"
                                 : "")
                         << std::endl;
@@ -1229,32 +1273,49 @@ void BOSS::print_adj_list(std::ostream &os) const {
 ///////////////
 
 // add a full sequence to the graph
-void BOSS::add_sequence(const std::string &seq, bool try_extend,
+void BOSS::add_sequence(const std::string &seq,
+                        bool try_extend,
                         std::vector<uint64_t> *edges_inserted) {
     if (seq.size() < k_ + 1)
         return;
 
-    auto sequence = encode(seq);
+    // prepend k buffer characters, in case we need to start with dummy node
+    std::vector<TAlphabet> sequence(seq.size() + k_);
+    std::transform(seq.begin(), seq.end(), sequence.begin() + k_,
+        [this](char c) { return this->encode(c); }
+    );
 
-    uint64_t source;
+    TAlphabet *begin_segm = sequence.data() + k_;
+    TAlphabet *end_segm;
+    TAlphabet *end = sequence.data() + sequence.size();
 
-    if (!try_extend || !(source = index(sequence.data(), sequence.data() + k_))) {
-        sequence.insert(sequence.begin(), k_, kSentinelCode);
-        source = 1; // the dummy source node
-    }
+    while (begin_segm + k_ < end) {
 
-    for (size_t i = 0; i < sequence.size() - k_; ++i) {
-        // print the process
-        if (i > 0 && i % 1'000 == 0) {
-            verbose_cout(".");
-            if (i % 10'000 == 0)
-                verbose_cout(i, " - edges ", num_edges(), " / nodes ", num_nodes(), "\n");
+        end_segm = std::find_if(begin_segm, end,
+            [&](auto c) { return c >= alph_size; }
+        );
+
+        if (begin_segm + k_ < end_segm) {
+
+            uint64_t source;
+
+            if (!try_extend || !(source = index(begin_segm, begin_segm + k_))) {
+                // start insertion from the main dummy source node
+                begin_segm -= k_;
+                std::fill(begin_segm, begin_segm + k_, kSentinelCode);
+                source = 1; // the dummy source node
+            }
+
+            while (begin_segm + k_ < end_segm) {
+                source = append_pos(begin_segm[k_], source, begin_segm, edges_inserted);
+                begin_segm++;
+            }
+
+            verbose_cout("edges ", num_edges(), " / nodes ", num_nodes(), "\n");
         }
 
-        source = append_pos(sequence[i + k_], source, &sequence[i], edges_inserted);
+        begin_segm = end_segm + 1;
     }
-
-    verbose_cout("edges ", num_edges(), " / nodes ", num_nodes(), "\n");
 }
 
 /**
@@ -1269,6 +1330,7 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
     assert(source_node_kmer);
     assert(std::vector<TAlphabet>(source_node_kmer, source_node_kmer + k_)
                                                 == get_node_seq(source_node));
+    assert(c < alph_size);
 
     // get range of identical nodes (without W) pos current end position
     uint64_t begin = pred_last(source_node - 1) + 1;
@@ -1343,6 +1405,9 @@ edge_index BOSS::append_pos(TAlphabet c, edge_index source_node,
 
 
 uint64_t BOSS::insert_edge(TAlphabet c, uint64_t begin, uint64_t end) {
+    assert(c != alph_size);
+    assert(c < 2 * alph_size);
+
     if (begin > 1 && get_W(begin) == kSentinelCode) {
         // the source node is the dead-end with outgoing sentinel
         // replace this sentinel with the proper label
@@ -1440,7 +1505,8 @@ uint64_t BOSS::erase_edges(const std::vector<bool> &edges_to_remove_mask) {
             if (c < alph_size)
                 first_removed[c] = true;
         } else {
-            if (c >= alph_size && first_removed[c % alph_size]) {
+            assert(c != alph_size);
+            if (c > alph_size && first_removed[c % alph_size]) {
                 new_W[new_i++] = c % alph_size;
             } else {
                 new_W[new_i++] = c;
@@ -1911,10 +1977,10 @@ void BOSS::call_sequences(Call<const std::string&> callback) const {
 }
 
 void BOSS::call_unitigs(Call<const std::string&> callback,
-                        size_t max_pruned_dead_end_size) const {
+                        size_t min_tip_size) const {
     std::string sequence;
 
-    call_paths([&](const auto&, const auto &path) {
+    call_paths([&](const auto &edges, const auto &path) {
         sequence.clear();
 
         assert(path.size());
@@ -1925,11 +1991,20 @@ void BOSS::call_unitigs(Call<const std::string&> callback,
             }
         }
 
-        if (!sequence.size())
+        if (sequence.size() <= k_)
             return;
 
         if ((path.front() != kSentinelCode && path.back() != kSentinelCode)
-                || sequence.size() > k_ + max_pruned_dead_end_size)
+                // ceck if long
+                || sequence.size() >= k_ + min_tip_size
+                // check if not a source tip
+                || (path.front() == kSentinelCode
+                        && path.back() != kSentinelCode
+                        && !is_single_outgoing(fwd(edges.back())))
+                // check if not a sink tip
+                || (path.back() == kSentinelCode
+                        && path.front() != kSentinelCode
+                        && !is_single_incoming(bwd(edges.front()))))
             callback(sequence);
 
     }, true);
@@ -2023,13 +2098,16 @@ bool BOSS::is_valid() const {
     assert(get_W(1) == kSentinelCode && "First kmer must be dummy");
 
     for (uint64_t i = 1; i < W_->size(); i++) {
-        if (get_node_last_value(i) >= alph_size || get_W(i) >= 2 * alph_size)
+        if (get_node_last_value(i) >= alph_size
+                || get_W(i) == alph_size
+                || get_W(i) >= 2 * alph_size)
             return false;
 
         auto index_pred = bwd(i);
         if (index_pred < 1
                 || index_pred >= W_->size()
                 || get_node_last_value(index_pred) >= alph_size
+                || get_W(index_pred) == alph_size
                 || get_W(index_pred) >= 2 * alph_size)
             return false;
     }

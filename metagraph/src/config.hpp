@@ -21,7 +21,6 @@ class Config {
     bool filename_anno = false;
     bool fasta_anno = false;
     bool to_adj_list = false;
-    bool to_fasta = false;
     bool unitigs = false;
     bool count_kmers = false;
     bool query_presence = false;
@@ -31,18 +30,15 @@ class Config {
     bool fast = false;
     bool count_labels = false;
     bool suppress_unlabeled = false;
-    bool generate_filtered_fasta = false;
-    bool generate_filtered_fastq = false;
-    bool use_kmc = false;
     bool internal = false;
     bool clear_dummy = false;
     bool count_dummy = false;
     bool canonical_mode = false;
     bool greedy_brwt = false;
     bool separately = false;
+    bool call_bubbles = false;
 
     unsigned int k = 3;
-    unsigned int filter_k = 3;
     unsigned int distance = 0;
     unsigned int parallel = 1;
     unsigned int num_bins_per_thread = 1;
@@ -54,20 +50,25 @@ class Config {
     unsigned int memory_available = 0;
     unsigned int min_count = 1;
     unsigned int max_count = std::numeric_limits<unsigned int>::max();
-    unsigned int unreliable_kmers_threshold = 0;
     unsigned int num_top_labels = -1;
     unsigned int genome_binsize_anno = 1000;
     unsigned int kmer_mapping_mode = 0;
     unsigned int arity_brwt = 2;
     unsigned int relax_arity_brwt = 10;
-    unsigned int pruned_dead_end_size = 0;
+    unsigned int min_tip_size = 1;
+    unsigned int min_unitig_median_kmer_abundance = 1;
+    unsigned int fallback_abundance_cutoff = 1;
     unsigned int port = 5555;
 
     double discovery_fraction = 1.0;
+    double label_mask_out_fraction = 0.0;
 
     std::vector<std::string> fname;
     std::vector<std::string> anno_labels;
     std::vector<std::string> infbase_annotators;
+    std::vector<std::string> label_mask_in;
+    std::vector<std::string> label_mask_out;
+    std::vector<std::string> label_filter;
     std::string outfbase;
     std::string infbase;
     std::string rename_instructions_file;
@@ -78,13 +79,15 @@ class Config {
     std::string anno_labels_delimiter = ":";
     std::string annotation_label = "";
     std::string header = "";
+    std::string accession2taxid;
+    std::string taxonomy_nodes;
+    std::string taxonomy_map;
 
     enum IdentityType {
         NO_IDENTITY = -1,
         BUILD = 1,
+        CLEAN,
         EXTEND,
-        FILTER,
-        FILTER_STATS,
         EXPERIMENT,
         MERGE,
         CONCATENATE,
@@ -96,20 +99,22 @@ class Config {
         MERGE_ANNOTATIONS,
         TRANSFORM,
         TRANSFORM_ANNOTATION,
+        ASSEMBLE,
         RELAX_BRWT,
         QUERY,
         SERVER_QUERY,
+        CALL_VARIANTS,
+        PARSE_TAXONOMY
     };
     IdentityType identity = NO_IDENTITY;
 
-    enum StateType { STAT = 1, DYN, SMALL };
+    enum StateType { STAT = 1, DYN, SMALL, FAST };
     StateType state = STAT;
 
     static std::string state_to_string(StateType state);
     static StateType string_to_state(const std::string &string);
 
     enum AnnotationType {
-        Invalid = -1,
         ColumnCompressed = 1,
         RowCompressed,
         BRWT,

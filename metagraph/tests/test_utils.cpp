@@ -1,20 +1,11 @@
 #include "gtest/gtest.h"
-
-#define private public
-#define protected public
+#include "test_helpers.hpp"
 
 #include "annotate_column_compressed.hpp"
 #include "utils.hpp"
 #include "threading.hpp"
 #include "bit_vector.hpp"
 
-// Disable death tests
-#ifndef _DEATH_TEST
-#ifdef EXPECT_DEATH
-#undef EXPECT_DEATH
-#define EXPECT_DEATH(a, b) (void)0
-#endif
-#endif
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test";

@@ -79,7 +79,7 @@ class AsyncActivity {
             parallel_jobs_--;
         }
         cond_var_.notify_one();
-        return std::move(result);
+        return result;
     }
 
     template <class F, typename... Args>

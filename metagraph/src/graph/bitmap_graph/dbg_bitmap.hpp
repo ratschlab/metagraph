@@ -26,6 +26,10 @@ class DBGBitmap : public DeBruijnGraph {
     // Initialize graph from builder
     explicit DBGBitmap(DBGBitmapConstructor *builder);
 
+    void add_sequence(const std::string &, bit_vector_dyn * = nullptr) {
+        throw std::runtime_error("Not implemented");
+    }
+
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
     void map_to_nodes(const std::string &sequence,
@@ -91,7 +95,7 @@ class DBGBitmap : public DeBruijnGraph {
 
     const std::string& alphabet() const { return seq_encoder_.alphabet; }
 
-    friend std::ostream& operator<<(std::ostream &out, const DBGBitmap &graph);
+    void print(std::ostream &out) const;
 
     using Chunk = bit_vector_smart;
 
@@ -99,11 +103,6 @@ class DBGBitmap : public DeBruijnGraph {
 
   private:
     using Kmer = KmerExtractor2Bit::Kmer64;
-
-    void add_sequence(const std::string &,
-                      bit_vector_dyn *) {
-        throw std::runtime_error("Not implemented");
-    }
 
     Vector<Kmer> sequence_to_kmers(const std::string &sequence,
                                    bool canonical = false) const;

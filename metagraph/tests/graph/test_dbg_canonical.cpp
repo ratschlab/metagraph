@@ -1,12 +1,6 @@
 #include "gtest/gtest.h"
 
 #include "test_dbg_helpers.hpp"
-#include "test_dbg_helpers.hpp"
-#include "dbg_succinct.hpp"
-#include "boss.hpp"
-#include "dbg_hash_string.hpp"
-#include "dbg_hash_ordered.hpp"
-#include "dbg_bitmap.hpp"
 #include "utils.hpp"
 #include "reverse_complement.hpp"
 
@@ -15,12 +9,14 @@ const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 
 
 template <typename Graph>
-class DeBruijnGraphCanonicalTest : public ::testing::Test { };
-typedef ::testing::Types<DBGBitmap, DBGHashOrdered, DBGSuccinct> CanonicalGraphTypes;
+class DeBruijnGraphCanonicalTest : public DeBruijnGraphTest<Graph> { };
+typedef ::testing::Types<DBGBitmap,
+                         DBGHashOrdered,
+                         DBGSuccinct> CanonicalGraphTypes;
 TYPED_TEST_CASE(DeBruijnGraphCanonicalTest, CanonicalGraphTypes);
 
 template <typename Graph>
-class DeBruijnGraphWithNTest : public ::testing::Test { };
+class DeBruijnGraphWithNTest : public DeBruijnGraphTest<Graph> { };
 typedef ::testing::Types<DBGBitmap, DBGHashOrdered> NoNGraphTypes;
 TYPED_TEST_CASE(DeBruijnGraphWithNTest, NoNGraphTypes);
 

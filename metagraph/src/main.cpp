@@ -3,7 +3,6 @@
 #include "unix_tools.hpp"
 #include "config.hpp"
 #include "sequence_io.hpp"
-#include "reads_filtering.hpp"
 #include "boss_construct.hpp"
 #include "boss_chunk.hpp"
 #include "boss_merge.hpp"
@@ -22,12 +21,15 @@
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
 #include "dbg_succinct.hpp"
+#include "graph_cleaning.hpp"
 #include "server.hpp"
 #include "weighted_graph.hpp"
+#include "masked_graph.hpp"
+#include "annotated_graph_algorithm.hpp"
+#include "taxid_mapper.hpp"
+#include <typeinfo>
 
 typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
-
-const size_t kMaxNumParallelReadFiles = 5;
 
 const size_t kNumCachedColumns = 10;
 
@@ -50,7 +52,7 @@ Config::GraphType parse_graph_extension(const std::string &filename) {
     }
 }
 
-Config::AnnotationType parse_annotation_extension(const std::string &filename) {
+Config::AnnotationType parse_annotation_type(const std::string &filename) {
     if (utils::ends_with(filename, annotate::kColumnAnnotatorExtension)) {
         return Config::AnnotationType::ColumnCompressed;
 
@@ -71,9 +73,17 @@ Config::AnnotationType parse_annotation_extension(const std::string &filename) {
 
     } else if (utils::ends_with(filename, annotate::kRainbowfishExtension)) {
         return Config::AnnotationType::RBFish;
+
     } else {
-        return Config::AnnotationType::Invalid;
+        std::cerr << "Error: unknown annotation format in "
+                  << filename << std::endl;
+        exit(1);
     }
+}
+
+bool graph_has_weights_file(const std::string &filename) {
+    std::ifstream f(filename + ".weights");
+    return f.good();
 }
 
 std::string remove_graph_extension(const std::string &filename) {
@@ -82,7 +92,24 @@ std::string remove_graph_extension(const std::string &filename) {
 
 template <class Graph = BOSS>
 std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
-    auto *graph = new Graph(2);
+    Graph *graph;
+
+    if constexpr(std::is_same<BOSS, Graph>::value) {
+        graph = new Graph(2);
+
+    } else if constexpr(!std::is_base_of<DeBruijnGraph, Graph>::value) {
+        // TODO What if there were many graph mixins and any number of them could be present?
+        //   Consider an Entity Component System or boost.mixin (options for runtime/dynamic mixin)
+        static_assert(std::is_base_of<IWeighted<DeBruijnGraph::node_index>, Graph>::value);
+        graph = new Graph(2);
+
+    } else {
+        if (graph_has_weights_file(filename)) {
+            graph = new WeightedDBG<Graph>(2);
+        } else {
+            graph = new Graph(2);
+        }
+    }
     if (!graph->load(filename)) {
         std::cerr << "ERROR: can't load graph from file " << filename << std::endl;
         delete graph;
@@ -108,45 +135,21 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
             return load_critical_graph_from_file<DBGBitmap>(filename);
 
         case Config::GraphType::INVALID:
-            return load_critical_graph_from_file<DefaultGraphType>(filename);
+            std::cerr << "ERROR: can't load graph from file '"
+                      << filename
+                      << "', needs valid file extension" << std::endl;
+            exit(1);
     }
     assert(false);
     exit(1);
 }
 
-std::string get_filter_filename(std::string filename,
-                                size_t k,
-                                size_t max_unreliable_abundance,
-                                size_t unreliable_kmers_threshold,
-                                bool critical = true) {
-    filename = filename + ".filter_k" + std::to_string(k)
-                        + "_s" + std::to_string(max_unreliable_abundance)
-                        + (max_unreliable_abundance
-                             ? std::string("_")
-                                + std::to_string(unreliable_kmers_threshold)
-                             : "");
-    if (!critical || std::ifstream(filename).good()) {
-        return filename;
-    } else if (max_unreliable_abundance == 0) {
-        return "";
-    }
-
-    std::cerr << "ERROR: read filter "
-              << filename << " does not exist."
-              << " Filter reads first." << std::endl;
-    exit(1);
-}
-
-
 void annotate_data(const std::vector<std::string> &files,
                    const std::string &ref_sequence_path,
                    AnnotatedDBG *anno_graph,
                    bool reverse,
-                   bool use_kmc,
-                   size_t filter_k,
                    size_t min_count,
                    size_t max_count,
-                   size_t unreliable_kmers_threshold,
                    bool filename_anno,
                    bool fasta_anno,
                    const std::string &fasta_header_delimiter,
@@ -165,32 +168,26 @@ void annotate_data(const std::vector<std::string> &files,
         }
         // read files
         if (utils::get_filetype(file) == "VCF") {
-            std::vector<std::string> variant_labels;
-
-            read_vcf_file_critical(
+            read_vcf_file_with_annotations_critical(
                 file,
                 ref_sequence_path,
                 dynamic_cast<const DeBruijnGraph &>(anno_graph->get_graph()).get_k(),
-                &variant_labels,
-                [&](std::string &seq, std::vector<std::string> *variant_labels) {
-                    assert(variant_labels);
+                [&](auto&& seq, const auto &variant_labels) {
+                    std::vector<std::string> labels(variant_labels.begin(),
+                                                    variant_labels.end());
 
                     if (filename_anno)
-                        variant_labels->push_back(file);
+                        labels.push_back(file);
 
                     for (const auto &label : anno_labels) {
-                        variant_labels->push_back(label);
+                        labels.push_back(label);
                     }
 
-                    anno_graph->annotate_sequence(seq, *variant_labels);
-                    if (reverse) {
-                        reverse_complement(seq.begin(), seq.end());
-                        anno_graph->annotate_sequence(seq, *variant_labels);
-                    }
-                    variant_labels->clear();
-                }
+                    anno_graph->annotate_sequence(seq, labels);
+                },
+                reverse
             );
-        } else if (use_kmc) {
+        } else if (utils::get_filetype(file) == "KMC") {
             std::vector<std::string> labels;
 
             if (filename_anno) {
@@ -250,12 +247,7 @@ void annotate_data(const std::vector<std::string> &files,
                         std::cout << ", " << timer.elapsed() << "sec" << std::endl;
                     }
                 },
-                reverse,
-                get_filter_filename(
-                    file, filter_k,
-                    min_count - 1,
-                    unreliable_kmers_threshold
-                )
+                reverse
             );
         } else {
             std::cerr << "ERROR: Filetype unknown for file "
@@ -281,9 +273,6 @@ void annotate_data(const std::vector<std::string> &files,
 void annotate_coordinates(const std::vector<std::string> &files,
                           AnnotatedDBG *anno_graph,
                           bool reverse,
-                          size_t filter_k,
-                          size_t max_unreliable_abundance,
-                          size_t unreliable_kmers_threshold,
                           size_t genome_bin_size,
                           bool verbose) {
     size_t total_seqs = 0;
@@ -349,12 +338,7 @@ void annotate_coordinates(const std::vector<std::string> &files,
                     if (reverse)
                         forward_strand = !forward_strand;
                 },
-                reverse,
-                get_filter_filename(
-                    file, filter_k,
-                    max_unreliable_abundance,
-                    unreliable_kmers_threshold
-                )
+                reverse
             );
         } else {
             std::cerr << "ERROR: the type of file "
@@ -421,15 +405,10 @@ void execute_query(std::string seq_name,
 }
 
 
-std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
+std::unique_ptr<Annotator> initialize_annotation(Config::AnnotationType anno_type,
                                                  const Config &config,
-                                                 uint64_t num_rows = 0) {
+                                                 uint64_t num_rows) {
     std::unique_ptr<Annotator> annotation;
-
-    Config::AnnotationType anno_type = parse_annotation_extension(filename);
-
-    if (anno_type == Config::AnnotationType::Invalid)
-        anno_type = config.anno_type;
 
     switch (anno_type) {
         case Config::ColumnCompressed: {
@@ -464,25 +443,22 @@ std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
             annotation.reset(new annotate::RainbowfishAnnotator());
             break;
         }
-        case Config::Invalid: {
-            throw std::runtime_error("Unknown annotator");
-            break;
-        }
     }
 
     return annotation;
 }
 
+std::unique_ptr<Annotator> initialize_annotation(const std::string &filename,
+                                                 const Config &config) {
+    return initialize_annotation(parse_annotation_type(filename), config, 0);
+}
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
                                                        const Config &config) {
-    auto annotation_temp = initialize_annotation(
-        config.infbase_annotators.size()
-            ? config.infbase_annotators.at(0)
-            : "",
-        config,
-        graph->num_nodes()
-    );
+    auto annotation_temp = config.infbase_annotators.size()
+            ? initialize_annotation(parse_annotation_type(config.infbase_annotators.at(0)), config, 0)
+            : initialize_annotation(config.anno_type, config, graph->num_nodes());
+
     if (config.infbase_annotators.size()
             && !annotation_temp->load(config.infbase_annotators.at(0))) {
         std::cerr << "ERROR: can't load annotations for graph "
@@ -507,6 +483,69 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(const Config &config) {
     return initialize_annotated_dbg(load_critical_dbg(config.infbase), config);
+}
+
+std::unique_ptr<MaskedDeBruijnGraph>
+mask_graph(const AnnotatedDBG &anno_graph,
+           const Config &config) {
+    auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
+
+    if (!graph.get())
+        throw std::runtime_error("Masking only supported for DeBruijnGraph");
+
+    std::vector<std::string> mask_in, mask_out;
+
+    // Remove non-present labels
+    std::copy_if(config.label_mask_in.begin(),
+                 config.label_mask_in.end(),
+                 std::back_inserter(mask_in),
+                 [&](const auto &label) {
+                     bool exists = anno_graph.label_exists(label);
+                     if (!exists && config.verbose)
+                         std::cout << "Removing mask-in label " << label << std::endl;
+
+                     return exists;
+                 });
+
+    std::copy_if(config.label_mask_out.begin(),
+                 config.label_mask_out.end(),
+                 std::back_inserter(mask_out),
+                 [&](const auto &label) {
+                     bool exists = anno_graph.label_exists(label);
+                     if (!exists && config.verbose)
+                         std::cout << "Removing mask-out label " << label << std::endl;
+
+                     return exists;
+                 });
+
+    if (config.verbose) {
+        std::cout << "Masked in:";
+        for (const auto &in : mask_in) {
+            std::cout << " " << in;
+        }
+        std::cout << std::endl;
+        std::cout << "Masked out:";
+        for (const auto &out : mask_out) {
+            std::cout << " " << out;
+        }
+        std::cout << std::endl;
+    }
+
+    return std::make_unique<MaskedDeBruijnGraph>(
+        std::move(graph),
+        annotated_graph_algorithm::mask_nodes_by_label(
+            anno_graph,
+            mask_in, mask_out,
+            [&](UInt64Callback counter_in, UInt64Callback counter_out) {
+                auto count_in = counter_in();
+                if (count_in != mask_in.size())
+                    return false;
+
+                auto count_out = counter_out();
+                return count_out <= config.label_mask_out_fraction * (count_in + count_out);
+            }
+        ).release()
+    );
 }
 
 
@@ -580,18 +619,20 @@ void print_stats(const DeBruijnGraph &graph) {
     std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
     std::cout << "canonical mode: " << (graph.is_canonical_mode() ? "yes" : "no") << std::endl;
 
-    if (dynamic_cast<const WeightedDBG<> *>(&graph)) {
-        const auto &weighted_dbg = dynamic_cast<const WeightedDBG<> &>(graph);
+    if (dynamic_cast<const IWeighted<DeBruijnGraph::node_index>*>(&graph)) {
+        const auto &weighted = dynamic_cast<const IWeighted<DeBruijnGraph::node_index>&>(graph);
         double sum_weights = 0;
-        for (uint64_t i = 1; i <= weighted_dbg.num_nodes(); ++i) {
-            sum_weights += weighted_dbg.get_weight(i);
+        for (uint64_t i = 1; i <= graph.num_nodes(); ++i) {
+            sum_weights += weighted.get_weight(i);
         }
         std::cout << "sum weights: " << sum_weights << std::endl;
 
-        for (uint64_t i = 1; i <= weighted_dbg.num_nodes(); ++i) {
-            std::cout << weighted_dbg.get_weight(i) << " ";
+        if (utils::get_verbose()) {
+            for (uint64_t i = 1; i <= graph.num_nodes(); ++i) {
+                std::cout << weighted.get_weight(i) << " ";
+            }
+            std::cout << std::endl;
         }
-        std::cout << std::endl;
     }
 
     std::cout << "========================================================" << std::endl;
@@ -643,33 +684,27 @@ void parse_sequences(const std::vector<std::string> &files,
                      Callback call_read,
                      Loop call_reads) {
     // iterate over input files
-    for (unsigned int f = 0; f < files.size(); ++f) {
+    for (const auto &file : files) {
         if (config.verbose) {
-            std::cout << std::endl << "Parsing " << files[f] << std::endl;
+            std::cout << std::endl << "Parsing " << file << std::endl;
         }
 
         Timer data_reading_timer;
 
-        if (utils::get_filetype(files[f]) == "VCF") {
-            //assume VCF contains no noise
-            read_vcf_file_critical(
-                files[f], config.refpath, config.k, NULL,
-                [&](std::string &seq, auto *) {
-                    call_read(std::string(seq));
-                    if (config.reverse) {
-                        reverse_complement(seq.begin(), seq.end());
-                        call_read(std::string(seq));
-                    }
-                }
-            );
-        } else if (config.use_kmc) {
+        if (utils::get_filetype(file) == "VCF") {
+            read_vcf_file_critical(file,
+                                   config.refpath,
+                                   config.k,
+                                   call_read,
+                                   config.reverse);
+        } else if (utils::get_filetype(file) == "KMC") {
             bool warning_different_k = false;
             kmc::read_kmers(
-                files[f],
+                file,
                 [&](std::string&& sequence) {
                     if (!warning_different_k && sequence.size() != config.k) {
                         std::cerr << "Warning: k-mers parsed from KMC database "
-                                  << files[f] << " have length " << sequence.size()
+                                  << file << " have length " << sequence.size()
                                   << " but graph is constructed for k=" << config.k
                                   << std::endl;
                         warning_different_k = true;
@@ -679,40 +714,34 @@ void parse_sequences(const std::vector<std::string> &files,
                 config.min_count,
                 config.max_count
             );
-        } else if (utils::get_filetype(files[f]) == "FASTA"
-                    || utils::get_filetype(files[f]) == "FASTQ") {
-            std::string filter_filename = get_filter_filename(
-                files[f], config.filter_k,
-                config.min_count - 1,
-                config.unreliable_kmers_threshold
-            );
-
+        } else if (utils::get_filetype(file) == "FASTA"
+                    || utils::get_filetype(file) == "FASTQ") {
             if (files.size() >= config.parallel) {
                 auto reverse = config.reverse;
-                auto file = files[f];
+                auto file_copy = file;
 
                 // capture all required values by copying to be able
                 // to run task from other threads
                 call_reads([=](auto callback) {
-                    read_fasta_file_critical(file, [=](kseq_t *read_stream) {
+                    read_fasta_file_critical(file_copy, [=](kseq_t *read_stream) {
                         // add read to the graph constructor as a callback
                         callback(read_stream->seq.s);
-                    }, reverse, filter_filename);
+                    }, reverse);
                 });
             } else {
-                read_fasta_file_critical(files[f], [&](kseq_t *read_stream) {
+                read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                     // add read to the graph constructor as a callback
                     call_read(read_stream->seq.s);
-                }, config.reverse, filter_filename);
+                }, config.reverse);
             }
         } else {
             std::cerr << "ERROR: Filetype unknown for file "
-                      << files[f] << std::endl;
+                      << file << std::endl;
             exit(1);
         }
 
         if (config.verbose) {
-            std::cout << "Finished extracting sequences from file " << files[f]
+            std::cout << "Finished extracting sequences from file " << file
                       << " in " << timer.elapsed() << "sec" << std::endl;
         }
         if (config.verbose) {
@@ -838,6 +867,13 @@ int main(int argc, const char *argv[]) {
 
             Timer timer;
 
+            if (config->count_kmers &&
+                    !(config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic)) {
+                std::cerr << "Error: Only static succinct graph can be built"
+                          << " with kmer counting" << std::endl;
+                exit(1);
+            }
+
             if (config->complete) {
                 if (config->graph_type != Config::GraphType::BITMAP) {
                     std::cerr << "Error: Only bitmap-graph can be built"
@@ -910,10 +946,12 @@ int main(int argc, const char *argv[]) {
                 if (config->count_kmers) {
                     sdsl::int_vector<> kmer_counts;
                     graph_data.initialize_boss(boss_graph.get(), &kmer_counts);
-                    graph.reset(new WeightedDBG<>(
-                        std::make_shared<DBGSuccinct>(boss_graph.release(), config->canonical),
-                        std::move(kmer_counts)
-                    ));
+                    auto weighted_graph = std::make_unique<WeightedDBGSuccinct>(
+                        boss_graph.release(),
+                        config->canonical
+                    );
+                    weighted_graph->set_weights(std::move(kmer_counts));
+                    graph.reset(weighted_graph.release());
                 } else {
                     graph_data.initialize_boss(boss_graph.get());
                     graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
@@ -1168,212 +1206,6 @@ int main(int argc, const char *argv[]) {
 
             return 0;
         }
-        case Config::FILTER: {
-            if (config->verbose) {
-                std::cout << "Filter out reads with rare k-mers" << std::endl;
-                std::cout << "Start reading data and extracting k-mers" << std::endl;
-            }
-
-            ThreadPool thread_pool_files(kMaxNumParallelReadFiles);
-            ThreadPool thread_pool(std::max(1u, config->parallel) - 1,
-                                   std::max(1u, config->parallel));
-            Timer timer;
-
-            // iterate over input files
-            for (const auto &file : files) {
-                if (utils::get_filetype(file) != "FASTA"
-                        && utils::get_filetype(file) != "FASTQ") {
-                    std::cerr << "ERROR: Filetype unknown for file "
-                              << file << std::endl;
-                    exit(1);
-                }
-
-                Timer data_reading_timer;
-
-                if (config->generate_filtered_fasta || config->generate_filtered_fastq) {
-                    thread_pool.enqueue([=](size_t k,
-                                            size_t max_unreliable_abundance,
-                                            size_t unreliable_kmers_threshold,
-                                            bool out_fasta,
-                                            bool out_fastq) {
-                        assert(out_fasta || out_fastq);
-
-                        auto filter_filename = get_filter_filename(
-                            file, k, max_unreliable_abundance, unreliable_kmers_threshold
-                        );
-
-                        std::string filtered_reads_fasta = get_filter_filename(
-                            utils::remove_suffix(file, ".gz", ".fasta", ".fastq"),
-                            k, max_unreliable_abundance, unreliable_kmers_threshold, false
-                        ) + ".fasta.gz";
-                        std::string filtered_reads_fastq = get_filter_filename(
-                            utils::remove_suffix(file, ".gz", ".fasta", ".fastq"),
-                            k, max_unreliable_abundance, unreliable_kmers_threshold, false
-                        ) + ".fastq.gz";
-
-                        gzFile out_fasta_gz = Z_NULL;
-                        gzFile out_fastq_gz = Z_NULL;
-
-                        if (out_fasta) {
-                            out_fasta_gz = gzopen(filtered_reads_fasta.c_str(), "w");
-                            if (out_fasta_gz == Z_NULL) {
-                                std::cerr << "ERROR: Can't write to "
-                                          << filtered_reads_fasta << std::endl;
-                                exit(1);
-                            }
-                        }
-                        if (out_fastq) {
-                            out_fastq_gz = gzopen(filtered_reads_fastq.c_str(), "w");
-                            if (out_fastq_gz == Z_NULL) {
-                                std::cerr << "ERROR: Can't write to "
-                                          << filtered_reads_fastq << std::endl;
-                                exit(1);
-                            }
-                        }
-
-                        read_fasta_file_critical(file,
-                            [&](kseq_t *read_stream) {
-                                if (out_fasta_gz != Z_NULL
-                                        && !write_fasta(out_fasta_gz, *read_stream)) {
-                                    std::cerr << "ERROR: Can't write filtered reads to "
-                                              << filtered_reads_fasta << std::endl;
-                                    exit(1);
-                                }
-                                if (out_fastq_gz != Z_NULL
-                                        && !write_fastq(out_fastq_gz, *read_stream)) {
-                                    std::cerr << "ERROR: Can't write filtered reads to "
-                                              << filtered_reads_fastq << std::endl;
-                                    exit(1);
-                                }
-                            },
-                            false, filter_filename
-                        );
-
-                        if (out_fasta_gz != Z_NULL)
-                            gzclose(out_fasta_gz);
-                        if (out_fastq_gz != Z_NULL)
-                            gzclose(out_fastq_gz);
-
-                    },
-                    config->filter_k,
-                    config->min_count - 1,
-                    config->unreliable_kmers_threshold,
-                    config->generate_filtered_fasta,
-                    config->generate_filtered_fastq);
-
-                    if (config->verbose) {
-                        std::cout << "File processed in "
-                                  << data_reading_timer.elapsed()
-                                  << "sec, current mem usage: "
-                                  << (get_curr_RSS() >> 20) << " MiB"
-                                  << ", total time: " << timer.elapsed()
-                                  << "sec" << std::endl;
-                    }
-
-                    continue;
-                }
-
-                auto *thread_pool_ptr = &thread_pool;
-                // capture all required values by copying to be able
-                // to run task from other threads
-                thread_pool_files.enqueue([=](size_t k,
-                                              size_t max_unreliable_abundance,
-                                              size_t unreliable_kmers_threshold,
-                                              bool verbose,
-                                              bool reverse,
-                                              bool use_kmc) {
-                        // compute read filter, bit vector indicating filtered reads
-                        std::vector<bool> filter = filter_reads([=](auto callback) {
-                                read_fasta_file_critical(file, [=](kseq_t *read_stream) {
-                                    // add read to the graph constructor as a callback
-                                    callback(read_stream->seq.s);
-                                }, reverse);
-                            },
-                            k, max_unreliable_abundance, unreliable_kmers_threshold,
-                            verbose, thread_pool_ptr,
-                            (use_kmc && max_unreliable_abundance) ? file + ".kmc" : ""
-                        );
-                        if (reverse) {
-                            assert(filter.size() % 2 == 0);
-
-                            std::vector<bool> forward_filter(filter.size() / 2);
-                            for (size_t i = 0; i < forward_filter.size(); ++i) {
-                                forward_filter[i] = filter[i * 2] | filter[i * 2 + 1];
-                            }
-                            filter.swap(forward_filter);
-                        }
-
-                        // dump filter
-                        std::ofstream outstream(
-                            get_filter_filename(
-                                file, k, max_unreliable_abundance, unreliable_kmers_threshold, false
-                            ),
-                            std::ios::binary
-                        );
-                        serialize_number_vector(outstream, filter, 1);
-                    },
-                    config->filter_k,
-                    config->min_count - 1,
-                    config->unreliable_kmers_threshold,
-                    config->verbose, config->reverse, config->use_kmc
-                );
-
-                if (config->verbose) {
-                    std::cout << "File processed in "
-                              << data_reading_timer.elapsed()
-                              << "sec, current mem usage: "
-                              << (get_curr_RSS() >> 20) << " MiB"
-                              << ", total time: " << timer.elapsed()
-                              << "sec" << std::endl;
-                }
-            }
-            thread_pool_files.join();
-            thread_pool.join();
-
-            return 0;
-        }
-        case Config::FILTER_STATS: {
-            if (!config->verbose) {
-                std::cout << "File\tTotalReads\tRemainingReads\tRemainingRatio" << std::endl;
-            }
-
-            for (const auto &file : files) {
-                auto filter_filename = get_filter_filename(
-                    file,
-                    config->filter_k,
-                    config->min_count - 1,
-                    config->unreliable_kmers_threshold,
-                    true
-                );
-
-                std::ifstream instream(filter_filename, std::ios::binary);
-                try {
-                    auto filter = load_number_vector<bool>(instream);
-                    size_t num_remaining = std::count(filter.begin(), filter.end(), true);
-
-                    if (config->verbose) {
-                        std::cout << "Statistics for filter file " << filter_filename << "\n"
-                                  << "Total reads: " << filter.size() << "\n"
-                                  << "Remaining reads: " << num_remaining << "\n"
-                                  << "Remaining ratio: "
-                                  << static_cast<double>(num_remaining) / filter.size()
-                                  << std::endl;
-                    } else {
-                        std::cout << filter_filename << "\t"
-                                  << filter.size() << "\t"
-                                  << num_remaining << "\t"
-                                  << static_cast<double>(num_remaining) / filter.size()
-                                  << std::endl;
-                    }
-                } catch (...) {
-                    std::cerr << "ERROR: Filter file " << filter_filename
-                              << " is corrupted" << std::endl;
-                    exit(1);
-                }
-            }
-
-            return 0;
-        }
         case Config::ANNOTATE: {
             assert(config->infbase_annotators.size() <= 1);
 
@@ -1384,11 +1216,8 @@ int main(int argc, const char *argv[]) {
                               config->refpath,
                               anno_graph.get(),
                               config->reverse,
-                              config->use_kmc,
-                              config->filter_k,
                               config->min_count,
                               config->max_count,
-                              config->unreliable_kmers_threshold,
                               config->filename_anno,
                               config->fasta_anno,
                               config->fasta_header_delimiter,
@@ -1413,11 +1242,8 @@ int main(int argc, const char *argv[]) {
                                           config->refpath,
                                           anno_graph.get(),
                                           config->reverse,
-                                          config->use_kmc,
-                                          config->filter_k,
                                           config->min_count,
                                           config->max_count,
-                                          config->unreliable_kmers_threshold,
                                           config->filename_anno,
                                           config->fasta_anno,
                                           config->fasta_header_delimiter,
@@ -1463,9 +1289,6 @@ int main(int argc, const char *argv[]) {
             annotate_coordinates(files,
                                  &anno_graph,
                                  config->reverse,
-                                 config->filter_k,
-                                 config->min_count - 1,
-                                 config->unreliable_kmers_threshold,
                                  config->genome_binsize_anno,
                                  config->verbose);
 
@@ -1488,7 +1311,7 @@ int main(int argc, const char *argv[]) {
             std::vector<std::string> stream_files;
 
             for (const auto &filename : files) {
-                auto anno_file_type = parse_annotation_extension(filename);
+                auto anno_file_type = parse_annotation_type(filename);
                 if (anno_file_type == Config::AnnotationType::RowCompressed) {
                     stream_files.push_back(filename);
                 } else {
@@ -1555,10 +1378,7 @@ int main(int argc, const char *argv[]) {
                             std::ref(std::cout)
                         );
                     },
-                    config->reverse,
-                    get_filter_filename(file, config->filter_k,
-                                        config->min_count - 1,
-                                        config->unreliable_kmers_threshold)
+                    config->reverse
                 );
                 if (config->verbose) {
                     std::cout << "Finished extracting sequences from file " << file
@@ -1801,40 +1621,147 @@ int main(int argc, const char *argv[]) {
 
             return 0;
         }
+        case Config::CLEAN: {
+            assert(files.size() == 1);
+            assert(config->outfbase.size());
+
+            Timer timer;
+            if (config->verbose)
+                std::cout << "Graph loading...\t" << std::flush;
+
+            auto graph = load_critical_dbg(files.at(0));
+
+            auto node_weights = std::dynamic_pointer_cast<const IWeighted<DeBruijnGraph::node_index>>(graph);
+            std::unique_ptr<MaskedDeBruijnGraph> subgraph;
+
+            // TODO: fix unitig extraction from subgraph in order for this
+            // to work properly when k-mers are filtered
+            const DeBruijnGraph *graph_with_unitigs = graph.get();
+
+            if (config->min_count > 1
+                    || config->max_count < std::numeric_limits<unsigned int>::max()
+                    || config->min_unitig_median_kmer_abundance != 1) {
+
+                if (!node_weights.get()) {
+                    std::cerr << "ERROR: Cannot load weighted graph from "
+                              << files.at(0) << std::endl;
+                    exit(1);
+                }
+
+                subgraph.reset(new MaskedDeBruijnGraph(graph,
+                    [&](auto i) { return node_weights->get_weight(i) >= config->min_count
+                                        && node_weights->get_weight(i) <= config->max_count; }
+                ));
+
+                graph_with_unitigs = subgraph.get();
+            }
+
+            if (config->verbose)
+                std::cout << timer.elapsed() << "sec" << std::endl;
+
+            if (config->verbose)
+                std::cout << "Extracting sequences from subgraph..." << std::endl;
+
+            timer.reset();
+
+            auto out_filename
+                = utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz";
+
+            gzFile out_fasta_gz = gzopen(out_filename.c_str(), "w");
+
+            if (out_fasta_gz == Z_NULL) {
+                std::cerr << "ERROR: Can't write to " << out_filename << std::endl;
+                exit(1);
+            }
+
+            uint64_t counter = 0;
+            const auto &dump_sequence = [&](const auto &sequence) {
+                if (!write_fasta(out_fasta_gz,
+                                 utils::join_strings({ config->header,
+                                                        std::to_string(counter) },
+                                                     ".",
+                                                     true),
+                                 sequence)) {
+                    std::cerr << "ERROR: Can't write extracted sequences to "
+                              << out_filename << std::endl;
+                    exit(1);
+                }
+                counter++;
+            };
+
+            // TODO: if DBGSuccinct is used, make sure it doesn't contain
+            // any redundant dummy k-mers. Otherwise, it will split
+            // the unitigs and the result will be incorrect.
+            // TODO: Alternatively, double check implementation of call_unitigs in BOSS
+            // and make it call proper unitigs even if it contains redundant dummy k-mers.
+
+            if (config->min_unitig_median_kmer_abundance != 1) {
+
+                assert(node_weights.get());
+
+                if (config->min_unitig_median_kmer_abundance == 0) {
+                    config->min_unitig_median_kmer_abundance
+                        = estimate_min_kmer_abundance(subgraph->get_mask(), *node_weights,
+                                                      config->fallback_abundance_cutoff);
+                }
+
+                assert(subgraph->num_nodes() == graph->num_nodes());
+
+                if (config->verbose)
+                    std::cout << "Threshold for median k-mer abundance in unitigs: "
+                              << config->min_unitig_median_kmer_abundance << std::endl;
+
+                // subgraph->call_unitigs(
+                graph_with_unitigs->call_unitigs(
+                    [&](const auto &sequence) {
+                        if (!is_unreliable_unitig(sequence, *graph, *node_weights,
+                                                  config->min_unitig_median_kmer_abundance))
+                            dump_sequence(sequence);
+                    },
+                    config->min_tip_size
+                );
+
+            } else if (config->unitigs) {
+                // subgraph->call_unitigs(dump_sequence);
+                graph_with_unitigs->call_unitigs(dump_sequence, config->min_tip_size);
+
+            } else {
+                // subgraph->call_sequences(dump_sequence);
+                graph_with_unitigs->call_sequences(dump_sequence);
+            }
+
+            gzclose(out_fasta_gz);
+
+            if (config->verbose)
+                std::cout << "Graph cleaning finished in "
+                          << timer.elapsed() << "sec" << std::endl;
+
+            return 0;
+        }
         case Config::STATS: {
             for (const auto &file : files) {
-                auto graph = load_critical_dbg(file);
-                if (config->count_kmers) {
-                    graph = std::make_unique<WeightedDBG<>>(
-                        graph,
-                        sdsl::int_vector<>(graph->num_nodes(), 0, 1)
-                    );
-                    if (!graph->load(file)) {
-                        std::cerr << "Can't load weighted graph from file "
-                                  << file << std::endl;
-                        exit(1);
-                    }
-                }
+                std::shared_ptr<DeBruijnGraph> graph;
+
+                graph = load_critical_dbg(file);
 
                 std::cout << "Statistics for graph " << file << std::endl;
 
                 print_stats(*graph);
 
-                if (!dynamic_cast<DBGSuccinct*>(graph.get()))
-                    continue;
+                if (dynamic_cast<DBGSuccinct*>(graph.get())) {
+                    const auto &boss_graph = dynamic_cast<DBGSuccinct&>(*graph).get_boss();
 
-                const auto &boss_graph = dynamic_cast<DBGSuccinct&>(*graph).get_boss();
+                    print_boss_stats(boss_graph,
+                                     config->count_dummy,
+                                     config->parallel,
+                                     config->verbose);
 
-                print_boss_stats(boss_graph,
-                                 config->count_dummy,
-                                 config->parallel,
-                                 config->verbose);
-
-                if (config->print_graph_internal_repr)
-                    boss_graph.print_internal_representation(std::cout);
+                    if (config->print_graph_internal_repr)
+                        boss_graph.print_internal_representation(std::cout);
+                }
 
                 if (config->print_graph)
-                    std::cout << boss_graph;
+                    std::cout << *graph;
             }
 
             for (const auto &file : config->infbase_annotators) {
@@ -1889,88 +1816,187 @@ int main(int argc, const char *argv[]) {
 
             Timer timer;
 
-            const Config::AnnotationType anno_file_type = parse_annotation_extension(files.at(0));
+            /********************************************************/
+            /***************** rename column labels *****************/
+            /********************************************************/
 
-            std::unique_ptr<Annotator> annotation;
-
-            if (anno_file_type != Config::RowCompressed || config->rename_instructions_file.size()) {
-                // Load annotation from disk
-
-                annotation = initialize_annotation(files.at(0), *config);
+            if (config->rename_instructions_file.size()) {
+                auto annotation = initialize_annotation(files.at(0), *config);
 
                 if (config->verbose)
-                    std::cout << "Loading annotator...\t" << std::flush;
+                    std::cout << "Loading annotation..." << std::endl;
 
+                // Load annotation from disk
                 if (!annotation->load(files.at(0))) {
                     std::cerr << "ERROR: can't load annotation from file "
                               << files.at(0) << std::endl;
                     exit(1);
                 }
+                if (config->verbose) {
+                    std::cout << "Annotation loaded in "
+                              << timer.elapsed() << "sec" << std::endl;
+                }
+
                 if (config->verbose)
-                    std::cout << timer.elapsed() << "sec" << std::endl;
+                    std::cout << "Renaming...\t" << std::flush;
 
-                if (config->rename_instructions_file.size()) {
-                    if (config->verbose)
-                        std::cout << "Renaming...\t" << std::flush;
-
-                    std::unordered_map<std::string, std::string> dict;
-                    std::ifstream instream(config->rename_instructions_file);
-                    if (!instream.is_open()) {
-                        std::cerr << "ERROR: Can't open file "
+                std::unordered_map<std::string, std::string> dict;
+                std::ifstream instream(config->rename_instructions_file);
+                if (!instream.is_open()) {
+                    std::cerr << "ERROR: Can't open file "
+                              << config->rename_instructions_file << std::endl;
+                    exit(1);
+                }
+                std::string old_name;
+                std::string new_name;
+                while (instream.good() && !(instream >> old_name).eof()) {
+                    instream >> new_name;
+                    if (instream.fail() || instream.eof()) {
+                        std::cerr << "ERROR: wrong format of the rules for"
+                                  << " renaming annotation columns passed in file "
                                   << config->rename_instructions_file << std::endl;
                         exit(1);
                     }
-                    std::string old_name;
-                    std::string new_name;
-                    while (instream.good() && !(instream >> old_name).eof()) {
-                        instream >> new_name;
-                        if (instream.fail() || instream.eof()) {
-                            std::cerr << "ERROR: wrong format of the rules for"
-                                      << " renaming annotation columns passed in file "
-                                      << config->rename_instructions_file << std::endl;
-                            exit(1);
-                        }
-                        dict[old_name] = new_name;
-                    }
-                    //TODO: could be made to work with streaming
-                    annotation->rename_labels(dict);
-
-                    annotation->serialize(config->outfbase);
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-
-                    return 0;
+                    dict[old_name] = new_name;
                 }
+                //TODO: could be made to work with streaming
+                annotation->rename_labels(dict);
+
+                annotation->serialize(config->outfbase);
+                if (config->verbose)
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+
+                return 0;
             }
 
-            // TODO: clean this stuff up, simplify logic and move to annotation_converters.hpp/cpp
-            if (anno_file_type == Config::ColumnCompressed) {
+            /********************************************************/
+            /****************** convert annotation ******************/
+            /********************************************************/
+
+            const Config::AnnotationType input_anno_type
+                = parse_annotation_type(files.at(0));
+
+            if (config->anno_type == input_anno_type) {
+                std::cerr << "Skipping conversion: same input and target type: "
+                          << Config::annotype_to_string(Config::RowCompressed)
+                          << std::endl;
+                exit(1);
+            }
+
+            if (config->verbose) {
+                std::cout << "Converting to " << Config::annotype_to_string(config->anno_type)
+                          << " annotator..." << std::endl;
+            }
+
+            if (input_anno_type == Config::RowCompressed) {
+
+                std::unique_ptr<const Annotator> target_annotator;
+
+                switch (config->anno_type) {
+                    case Config::RowFlat: {
+                        auto annotator = annotate::convert<annotate::RowFlatAnnotator>(files.at(0));
+                        target_annotator = std::move(annotator);
+                        break;
+                    }
+                    case Config::RBFish: {
+                        auto annotator = annotate::convert<annotate::RainbowfishAnnotator>(files.at(0));
+                        target_annotator = std::move(annotator);
+                        break;
+                    }
+                    case Config::BinRelWT_sdsl: {
+                        auto annotator = annotate::convert<annotate::BinRelWT_sdslAnnotator>(files.at(0));
+                        target_annotator = std::move(annotator);
+                        break;
+                    }
+                    case Config::BinRelWT: {
+                        auto annotator = annotate::convert<annotate::BinRelWTAnnotator>(files.at(0));
+                        target_annotator = std::move(annotator);
+                        break;
+                    }
+                    default:
+                        std::cerr << "Error: Streaming conversion from RowCompressed annotation"
+                                  << " is not implemented for the requested target type: "
+                                  << Config::annotype_to_string(config->anno_type)
+                                  << std::endl;
+                        exit(1);
+                }
+
+                if (config->verbose) {
+                    std::cout << "Annotation converted in "
+                              << timer.elapsed() << "sec" << std::endl;
+                }
+
+                if (config->verbose) {
+                    std::cout << "Serializing to " << config->outfbase
+                              << "...\t" << std::flush;
+                }
+
+                target_annotator->serialize(config->outfbase);
+
+                if (config->verbose) {
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+                }
+
+            } else if (input_anno_type == Config::ColumnCompressed) {
+                auto annotation = initialize_annotation(files.at(0), *config);
+
+                if (config->verbose)
+                    std::cout << "Loading annotation..." << std::endl;
+
+                // Load annotation from disk
+                if (!annotation->load(files.at(0))) {
+                    std::cerr << "ERROR: can't load annotation from file "
+                              << files.at(0) << std::endl;
+                    exit(1);
+                }
+                if (config->verbose) {
+                    std::cout << "Annotation loaded in "
+                              << timer.elapsed() << "sec" << std::endl;
+                }
+
                 std::unique_ptr<annotate::ColumnCompressed<>> annotator {
                     dynamic_cast<annotate::ColumnCompressed<> *>(annotation.release())
                 };
                 assert(annotator.get());
 
                 switch (config->anno_type) {
-                    case Config::ColumnCompressed:
+                    case Config::ColumnCompressed: {
+                        assert(false);
                         break;
+                    }
                     case Config::RowCompressed: {
-                        if (config->verbose)
-                            std::cout << "Converting...\t" << std::flush;
+                        if (config->fast) {
+                            annotate::RowCompressed<> row_annotator(0);
+                            annotator->convert_to_row_annotator(&row_annotator,
+                                                                config->parallel);
+                            annotator.reset();
 
-                        annotate::RowCompressed<> row_annotator(0);
-                        annotator->convert_to_row_annotator(&row_annotator,
-                                                            config->parallel);
-                        annotator.reset();
+                            if (config->verbose) {
+                                std::cout << "Annotation converted in "
+                                          << timer.elapsed() << "sec" << std::endl;
+                            }
 
-                        row_annotator.serialize(config->outfbase);
-                        if (config->verbose)
-                            std::cout << timer.elapsed() << "sec" << std::endl;
+                            if (config->verbose) {
+                                std::cout << "Serializing to " << config->outfbase
+                                          << "...\t" << std::flush;
+                            }
+
+                            row_annotator.serialize(config->outfbase);
+
+                            if (config->verbose) {
+                                std::cout << timer.elapsed() << "sec" << std::endl;
+                            }
+
+                        } else {
+                            annotator->convert_to_row_annotator(config->outfbase);
+                            if (config->verbose) {
+                                std::cout << "Annotation converted and serialized in "
+                                          << timer.elapsed() << "sec" << std::endl;
+                            }
+                        }
                         break;
                     }
                     case Config::BRWT: {
-                        if (config->verbose)
-                            std::cout << "Converting...\t" << std::flush;
-
                         auto brwt_annotator = config->greedy_brwt
                             ? annotate::convert_to_greedy_BRWT<annotate::BRWTCompressed<>>(
                                 std::move(*annotator),
@@ -1982,9 +2008,21 @@ int main(int argc, const char *argv[]) {
 
                         annotator.reset();
 
+                        if (config->verbose) {
+                            std::cout << "Annotation converted in "
+                                      << timer.elapsed() << "sec" << std::endl;
+                        }
+
+                        if (config->verbose) {
+                            std::cout << "Serializing to " << config->outfbase
+                                      << "...\t" << std::flush;
+                        }
+
                         brwt_annotator->serialize(config->outfbase);
-                        if (config->verbose)
+
+                        if (config->verbose) {
                             std::cout << timer.elapsed() << "sec" << std::endl;
+                        }
                         break;
                     }
                     case Config::BinRelWT_sdsl: {
@@ -2003,110 +2041,13 @@ int main(int argc, const char *argv[]) {
                         convert<annotate::RainbowfishAnnotator>(std::move(annotator), *config, timer);
                         break;
                     }
-                    case Config::Invalid: {
-                        throw std::runtime_error("Unknown annotator");
-                        break;
-                    }
-                }
-
-            } else if (anno_file_type == Config::RowCompressed) {
-
-                if (annotation.get()) {
-                    // not streaming because labels were renamed
-                    std::unique_ptr<annotate::RowCompressed<>> annotator {
-                        dynamic_cast<annotate::RowCompressed<> *>(annotation.release())
-                    };
-
-                    switch (config->anno_type) {
-                        case Config::RowCompressed: {
-                            break;
-                        }
-                        case Config::BinRelWT_sdsl: {
-                            convert<annotate::BinRelWT_sdslAnnotator>(std::move(annotator), *config, timer);
-                            break;
-                        }
-                        case Config::BinRelWT: {
-                            convert<annotate::BinRelWTAnnotator>(std::move(annotator), *config, timer);
-                            break;
-                        }
-                        case Config::RowFlat: {
-                            convert<annotate::RowFlatAnnotator>(std::move(annotator), *config, timer);
-                            break;
-                        }
-                        case Config::RBFish: {
-                            convert<annotate::RainbowfishAnnotator>(std::move(annotator), *config, timer);
-                            break;
-                        }
-                        default:
-                            std::cerr << "Error: Conversion to other representation"
-                                      << " is implemented only for ColumnCompressed annotation."
-                                      << std::endl;
-                            exit(1);
-                    }
-                } else {
-                    // streaming input
-
-                    if (config->anno_type == Config::RowCompressed) {
-                        std::cerr << "Skipping conversion: same input and target type: "
-                                  << Config::annotype_to_string(Config::RowCompressed)
-                                  << std::endl;
-                        exit(1);
-                    }
-
-                    if (config->verbose)
-                        std::cout << "Converting to " << Config::annotype_to_string(config->anno_type)
-                                  << " annotator...\t" << std::flush;
-
-                    std::unique_ptr<const Annotator> target_annotator;
-
-                    switch (config->anno_type) {
-                        case Config::RowFlat: {
-                            auto annotator = annotate::convert<annotate::RowFlatAnnotator>(files.at(0));
-                            target_annotator = std::move(annotator);
-                            break;
-                        }
-                        case Config::RBFish: {
-                            auto annotator = annotate::convert<annotate::RainbowfishAnnotator>(files.at(0));
-                            target_annotator = std::move(annotator);
-                            break;
-                        }
-                        case Config::BinRelWT_sdsl: {
-                            auto annotator = annotate::convert<annotate::BinRelWT_sdslAnnotator>(files.at(0));
-                            target_annotator = std::move(annotator);
-                            break;
-                        }
-                        case Config::BinRelWT: {
-                            auto annotator = annotate::convert<annotate::BinRelWTAnnotator>(files.at(0));
-                            target_annotator = std::move(annotator);
-                            break;
-                        }
-                        default:
-                            std::cerr << "Error: Streaming conversion from RowCompressed annotation"
-                                      << " is not implemented for the requested target type: "
-                                      << Config::annotype_to_string(config->anno_type)
-                                      << std::endl;
-                            exit(1);
-                    }
-
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-
-                    if (config->verbose)
-                        std::cout << "Serializing to " << config->outfbase
-                                  << "...\t" << std::flush;
-
-                    target_annotator->serialize(config->outfbase);
-
-                    if (config->verbose)
-                        std::cout << timer.elapsed() << "sec" << std::endl;
-
                 }
 
             } else {
-                //TODO: error message is wrong?
-                std::cerr << "Error: Conversion to other representation"
-                          << " is implemented only for ColumnCompressed annotation."
-                          << std::endl;
+                std::cerr << "Error: Conversion to other representations"
+                          << " is not implemented for "
+                          << Config::annotype_to_string(input_anno_type)
+                          << " annotator." << std::endl;
                 exit(1);
             }
 
@@ -2114,17 +2055,21 @@ int main(int argc, const char *argv[]) {
         }
         case Config::TRANSFORM: {
             assert(files.size() == 1);
+            assert(config->outfbase.size());
 
             Timer timer;
-            if (config->verbose) {
+            if (config->verbose)
                 std::cout << "Graph loading...\t" << std::flush;
-            }
-            auto dbg = load_critical_graph_from_file<DBGSuccinct>(files.at(0));
-            auto *graph = &dbg->get_boss();
 
-            if (config->verbose) {
+            auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(
+                load_critical_dbg(files.at(0))
+            );
+
+            if (config->verbose)
                 std::cout << timer.elapsed() << "sec" << std::endl;
-            }
+
+            if (!dbg_succ.get())
+                throw std::runtime_error("Only implemented for DBGSuccinct");
 
             if (config->clear_dummy) {
                 if (config->verbose) {
@@ -2133,78 +2078,27 @@ int main(int argc, const char *argv[]) {
                 timer.reset();
 
                 // remove redundant dummy edges and mark all other dummy edges
-                dbg->mask_dummy_kmers(config->parallel, true);
+                dbg_succ->mask_dummy_kmers(config->parallel, true);
 
-                if (config->verbose) {
+                if (config->verbose)
                     std::cout << "Done in " << timer.elapsed() << "sec" << std::endl;
-                }
+
                 timer.reset();
-            }
-
-            if (config->to_fasta) {
-                if (config->verbose) {
-                    std::cout << "Extracting sequences from graph...\t" << std::flush;
-                }
-                timer.reset();
-                if (!config->outfbase.size()) {
-                    std::cerr << "Error: no output file provided" << std::endl;
-                    exit(1);
-                }
-
-                auto out_filename
-                    = utils::remove_suffix(config->outfbase, ".gz", ".fasta")
-                        + ".fasta.gz";
-
-                gzFile out_fasta_gz = gzopen(out_filename.c_str(), "w");
-
-                if (out_fasta_gz == Z_NULL) {
-                    std::cerr << "ERROR: Can't write to " << out_filename << std::endl;
-                    exit(1);
-                }
-
-                uint64_t counter = 0;
-                const auto &dump_sequence = [&](const auto &sequence) {
-                    if (!write_fasta(out_fasta_gz,
-                                     utils::join_strings({ config->header,
-                                                            std::to_string(counter) },
-                                                         ".",
-                                                         true),
-                                     sequence)) {
-                        std::cerr << "ERROR: Can't write extracted sequences to "
-                                  << out_filename << std::endl;
-                        exit(1);
-                    }
-                    counter++;
-                };
-
-                if (config->unitigs || config->pruned_dead_end_size > 0) {
-                    graph->call_unitigs(dump_sequence, config->pruned_dead_end_size);
-                } else {
-                    graph->call_sequences(dump_sequence);
-                }
-
-                gzclose(out_fasta_gz);
-
-                if (config->verbose) {
-                    std::cout << timer.elapsed() << "sec" << std::endl;
-                }
-                return 0;
             }
 
             if (config->to_adj_list) {
-                if (config->verbose) {
+                if (config->verbose)
                     std::cout << "Converting graph to adjacency list...\t" << std::flush;
-                }
+
+                auto *boss = &dbg_succ->get_boss();
                 timer.reset();
-                if (config->outfbase.size()) {
-                    std::ofstream outstream(config->outfbase + ".adjlist");
-                    graph->print_adj_list(outstream);
-                } else {
-                    graph->print_adj_list(std::cout);
-                }
-                if (config->verbose) {
+
+                std::ofstream outstream(config->outfbase + ".adjlist");
+                boss->print_adj_list(outstream);
+
+                if (config->verbose)
                     std::cout << timer.elapsed() << "sec" << std::endl;
-                }
+
                 return 0;
             }
 
@@ -2215,27 +2109,96 @@ int main(int argc, const char *argv[]) {
                 timer.reset();
             }
 
-            dbg->switch_state(config->state);
+            dbg_succ->switch_state(config->state);
 
+            if (config->verbose)
+                std::cout << timer.elapsed() << "sec" << std::endl;
+
+            if (config->verbose) {
+                std::cout << "Serializing transformed graph...\t" << std::flush;
+                timer.reset();
+            }
+            dbg_succ->serialize(config->outfbase);
             if (config->verbose) {
                 std::cout << timer.elapsed() << "sec" << std::endl;
             }
 
-            if (config->outfbase.size()) {
+            return 0;
+        }
+        case Config::ASSEMBLE: {
+            assert(files.size() == 1);
+            assert(config->outfbase.size());
+
+            Timer timer;
+            if (config->verbose)
+                std::cout << "Graph loading...\t" << std::flush;
+
+            auto graph = load_critical_dbg(files.at(0));
+
+            if (config->verbose)
+                std::cout << timer.elapsed() << "sec" << std::endl;
+
+            if (config->infbase_annotators.size()) {
+                auto anno_graph = initialize_annotated_dbg(graph, *config);
+
                 if (config->verbose) {
-                    std::cout << "Serializing transformed graph...\t" << std::flush;
-                    timer.reset();
+                    std::cout << "Masking graph...\t" << std::flush;
                 }
-                dbg->serialize(config->outfbase);
+
+                graph = mask_graph(*anno_graph, *config);
+
                 if (config->verbose) {
                     std::cout << timer.elapsed() << "sec" << std::endl;
                 }
             }
 
+            if (config->verbose)
+                std::cout << "Extracting sequences from graph...\t" << std::flush;
+
+            timer.reset();
+
+            auto out_filename
+                = utils::remove_suffix(config->outfbase, ".gz", ".fasta")
+                    + ".fasta.gz";
+
+            gzFile out_fasta_gz = gzopen(out_filename.c_str(), "w");
+
+            if (out_fasta_gz == Z_NULL) {
+                std::cerr << "ERROR: Can't write to " << out_filename << std::endl;
+                exit(1);
+            }
+
+            uint64_t counter = 0;
+            const auto &dump_sequence = [&](const auto &sequence) {
+                if (!write_fasta(out_fasta_gz,
+                                 utils::join_strings({ config->header,
+                                                        std::to_string(counter) },
+                                                     ".",
+                                                     true),
+                                 sequence)) {
+                    std::cerr << "ERROR: Can't write extracted sequences to "
+                              << out_filename << std::endl;
+                    exit(1);
+                }
+                counter++;
+            };
+
+            if (config->unitigs || config->min_tip_size > 1) {
+                graph->call_unitigs(dump_sequence, config->min_tip_size);
+            } else {
+                graph->call_sequences(dump_sequence);
+            }
+
+            gzclose(out_fasta_gz);
+
+            if (config->verbose)
+                std::cout << timer.elapsed() << "sec" << std::endl;
+
             return 0;
         }
         case Config::RELAX_BRWT: {
             assert(files.size() == 1);
+            assert(config->outfbase.size());
 
             Timer timer;
 
@@ -2396,7 +2359,7 @@ int main(int argc, const char *argv[]) {
                     }
 
                     if (config->count_kmers) {
-                        std::cout << num_discovered << "/" << num_kmers << "\n";
+                        std::cout << "Kmers matched (discovered/total): " << num_discovered << "/" << num_kmers << "\n";
                         return;
                     }
 
@@ -2405,11 +2368,7 @@ int main(int argc, const char *argv[]) {
                         std::cout << std::string(read_stream->seq.s + i, config->alignment_length);
                         std::cout << ": " << graphindices[i] << "\n";
                     }
-                }, config->reverse,
-                    get_filter_filename(file, config->filter_k,
-                                        config->min_count - 1,
-                                        config->unreliable_kmers_threshold)
-                );
+                }, config->reverse);
 
                 if (config->verbose) {
                     std::cout << "File processed in "
@@ -2421,6 +2380,144 @@ int main(int argc, const char *argv[]) {
                 }
             }
 
+            return 0;
+        }
+        case Config::CALL_VARIANTS: {
+            assert(config->infbase_annotators.size() == 1);
+
+            std::unique_ptr<TaxIDMapper> taxid_mapper;
+            if (config->taxonomy_map.length()) {
+                taxid_mapper.reset(new TaxIDMapper());
+                std::ifstream taxid_mapper_in(config->taxonomy_map, std::ios::binary);
+                if (!taxid_mapper->load(taxid_mapper_in)) {
+                    std::cerr << "ERROR: failed to read accession2taxid map" << std::endl;
+                    exit(1);
+                }
+            }
+
+            auto anno_graph = initialize_annotated_dbg(*config);
+            auto masked_graph = mask_graph(*anno_graph, *config);
+
+            if (config->verbose) {
+                std::cout << "Filter out:";
+                for (const auto &out : config->label_filter) {
+                    std::cout << " " << out;
+                }
+                std::cout << std::endl;
+            }
+
+            std::sort(config->label_filter.begin(), config->label_filter.end());
+
+            ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
+            std::mutex print_label_mutex;
+            std::atomic_uint64_t num_calls = 0;
+
+            auto print_index_ref_var_label =
+                [&](const auto &first, const auto &ref, const auto &var, auto&& labels) {
+                    std::lock_guard<std::mutex> lock(print_label_mutex);
+
+                    std::sort(labels.begin(), labels.end());
+
+                    auto it = config->label_filter.begin();
+                    for (const auto &label : labels) {
+                        while (it != config->label_filter.end() && *it < label)
+                            ++it;
+
+                        if (it == config->label_filter.end())
+                            break;
+
+                        if (*it == label)
+                            return;
+                    }
+
+                    num_calls += labels.size();
+
+                    std::cout << first
+                              << "\t" << ref
+                              << "\t" << var
+                              << "\t" << utils::join_strings(labels, ",");
+
+                    if (taxid_mapper.get()) {
+                        std::transform(
+                            labels.begin(), labels.end(),
+                            labels.begin(),
+                            [&](const auto &label) {
+                                return std::to_string(taxid_mapper->gb_to_taxid(label));
+                            }
+                        );
+
+                        std::cout << "\t" << utils::join_strings(labels, ",");
+                    }
+
+                    std::cout << std::endl;
+                };
+
+            if (config->call_bubbles) {
+                std::cout << "Index"
+                          << "\t" << "Ref"
+                          << "\t" << "Var"
+                          << "\t" << "Label";
+
+                if (taxid_mapper.get())
+                    std::cout << "\t" << "TaxID";
+
+                std::cout << std::endl;
+
+                annotated_graph_algorithm::call_bubbles(*masked_graph,
+                                                        *anno_graph,
+                                                        print_index_ref_var_label,
+                                                        &thread_pool);
+                thread_pool.join();
+
+                if (config->verbose) {
+                    std::cout << "# nodes checked: " << masked_graph->num_nodes()
+                              << std::endl
+                              << "# bubbles called: " << num_calls
+                              << std::endl;
+                }
+            } else {
+                std::cout << "Index"
+                          << "\t" << "Node"
+                          << "\t" << "Edge"
+                          << "\t" << "Label";
+
+                if (taxid_mapper.get())
+                    std::cout << "\t" << "TaxID";
+
+                std::cout << std::endl;
+
+                annotated_graph_algorithm::call_breakpoints(*masked_graph,
+                                                            *anno_graph,
+                                                            print_index_ref_var_label,
+                                                            &thread_pool);
+                thread_pool.join();
+
+                if (config->verbose) {
+                    std::cout << "# nodes checked: " << masked_graph->num_nodes()
+                              << std::endl
+                              << "# breakpoints called: " << num_calls
+                              << std::endl;
+                }
+            }
+
+            return 0;
+        }
+        case Config::PARSE_TAXONOMY: {
+            TaxIDMapper taxid_mapper;
+            if (config->accession2taxid.length()
+                && !taxid_mapper.parse_accession2taxid(config->accession2taxid)) {
+                std::cerr << "ERROR: failed to read accession2taxid file" << std::endl;
+                exit(1);
+            }
+
+            if (config->taxonomy_nodes.length()
+                && !taxid_mapper.parse_nodes(config->taxonomy_nodes)) {
+                std::cerr << "ERROR: failed to read nodes.dmp file" << std::endl;
+                exit(1);
+            }
+
+            std::ofstream out(config->outfbase + ".taxonomy.map", std::ios::binary);
+            taxid_mapper.serialize(out);
             return 0;
         }
         case Config::NO_IDENTITY: {

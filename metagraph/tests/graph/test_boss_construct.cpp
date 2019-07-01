@@ -29,14 +29,14 @@ class BOSSConstruct : public ::testing::Test { };
 template <typename Kmer>
 class CollectKmers : public ::testing::Test { };
 
-typedef ::testing::Types<KMerBOSS<uint64_t, KmerExtractor::kLogSigma>,
-                         KMerBOSS<sdsl::uint128_t, KmerExtractor::kLogSigma>,
-                         KMerBOSS<sdsl::uint256_t, KmerExtractor::kLogSigma>> KmerTypes;
+typedef ::testing::Types<KMerBOSS<uint64_t, KmerExtractor::bits_per_char>,
+                         KMerBOSS<sdsl::uint128_t, KmerExtractor::bits_per_char>,
+                         KMerBOSS<sdsl::uint256_t, KmerExtractor::bits_per_char>> KmerTypes;
 
 TYPED_TEST_CASE(BOSSConstruct, KmerTypes);
 TYPED_TEST_CASE(CollectKmers, KmerTypes);
 
-#define kMaxK ( sizeof(TypeParam) * 8 / KmerExtractor::kLogSigma )
+#define kMaxK ( sizeof(TypeParam) * 8 / KmerExtractor::bits_per_char )
 
 
 TYPED_TEST(BOSSConstruct, ConstructionEQAppendingSimplePath) {
@@ -209,8 +209,42 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunks) {
     }
 }
 
+TYPED_TEST(BOSSConstruct, ConstructionFromChunksParallel) {
+    const uint64_t num_threads = 4;
 
-using TAlphabet = KmerExtractor::TAlphabet;
+    for (size_t k = 1; k < kMaxK; k += 6) {
+        BOSS boss_dynamic(k);
+        boss_dynamic.add_sequence(std::string(100, 'A'));
+        boss_dynamic.add_sequence(std::string(100, 'C'));
+        boss_dynamic.add_sequence(std::string(100, 'T') + "A"
+                                        + std::string(100, 'G'));
+
+        for (size_t suffix_len = 0; suffix_len < k && suffix_len <= 5u; ++suffix_len) {
+            BOSS::Chunk graph_data(KmerExtractor::alphabet.size(), k);
+
+            for (const std::string &suffix : KmerExtractor::generate_suffixes(suffix_len)) {
+                std::unique_ptr<IBOSSChunkConstructor> constructor(
+                    IBOSSChunkConstructor::initialize(k, false, false, suffix, num_threads)
+                );
+
+                constructor->add_sequence(std::string(100, 'A'));
+                constructor->add_sequence(std::string(100, 'C'));
+                constructor->add_sequence(std::string(100, 'T') + "A"
+                                                + std::string(100, 'G'));
+
+                auto next_block = constructor->build_chunk();
+                graph_data.extend(*next_block);
+                delete next_block;
+            }
+
+            BOSS boss;
+            graph_data.initialize_boss(&boss);
+
+            EXPECT_EQ(boss_dynamic, boss);
+        }
+    }
+}
+
 
 typedef std::function<void(const std::string&)> CallbackString;
 
@@ -219,7 +253,7 @@ void extract_kmers(std::function<void(CallbackString)> generate_reads,
                    size_t k,
                    bool canonical_mode,
                    SortedSet<TypeParam> *kmers,
-                   const std::vector<TAlphabet> &suffix,
+                   const std::vector<typename KmerExtractor::TAlphabet> &suffix,
                    bool remove_redundant = true);
 
 // TODO: k is node length
@@ -227,7 +261,7 @@ template <typename TypeParam>
 void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t k,
                                         SortedSet<TypeParam> *kmers,
-                                        const std::vector<TAlphabet> &suffix,
+                                        const std::vector<KmerExtractor::TAlphabet> &suffix,
                                         bool remove_redundant,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
@@ -266,13 +300,21 @@ TYPED_TEST(CollectKmers, CollectKmersAppendParallelReserved) {
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
         2, &result, {}, false, 100'000
     );
+#if _DNA_GRAPH
+    ASSERT_EQ(3u, result.data().size());
+#else
     ASSERT_EQ(6u, result.data().size());
+#endif
 
     sequence_to_kmers_parallel_wrapper(
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
         2, &result, { 1, }, false, 100'000
     );
+#if _DNA_GRAPH
+    ASSERT_EQ(3u, result.data().size());
+#else
     ASSERT_EQ(6u, result.data().size());
+#endif
 }
 
 TYPED_TEST(CollectKmers, CollectKmersAppendParallel) {
@@ -301,7 +343,11 @@ TYPED_TEST(CollectKmers, CollectKmersAppendParallel) {
         new std::vector<std::string>(5, std::string(sequence_size, 'B')),
         2, &result, { 1, }, false, 0
     );
+#if _DNA_GRAPH
+    ASSERT_EQ(3u, result.data().size());
+#else
     ASSERT_EQ(6u, result.data().size());
+#endif
 }
 
 TYPED_TEST(CollectKmers, CollectKmersParallelRemoveRedundantReserved) {

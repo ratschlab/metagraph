@@ -31,7 +31,7 @@ bsub -J contigs_k15[1-4173]%600 \
     -W 20:00 -n 1 -R "rusage[mem=22000] span[hosts=1]" \
     "kmc_file=\"\$(sed -n \${LSB_JOBINDEX}p metasub_kmc.txt)\"; \
         x=\"\$(echo \$kmc_file | xargs -n 1 basename)\"; \
-        $METAGRAPH transform --to-fasta \
+        $METAGRAPH assemble \
             -o ~/big_graph/metasub/metasub_k15/\${x%.kmc_suf}.k15.sequences \
             \${kmc_file%.kmc_suf}.k15.dbg"
 ```

@@ -68,19 +68,7 @@ bool write_fastq(gzFile gz_out, const kseq_t &kseq) {
 
 void read_fasta_file_critical(gzFile input_p,
                               std::function<void(kseq_t*)> callback,
-                              bool with_reverse,
-                              const std::string &filter_filename) {
-    std::vector<bool> filter;
-    if (filter_filename.size()) {
-        std::ifstream instream(filter_filename, std::ios::binary);
-        try {
-            filter = load_number_vector<bool>(instream);
-        } catch (...) {
-            std::cerr << "ERROR: Filter file " << filter_filename
-                      << " is corrupted" << std::endl;
-            exit(1);
-        }
-    }
+                              bool with_reverse) {
     size_t seq_count = 0;
 
     if (input_p == Z_NULL) {
@@ -95,26 +83,13 @@ void read_fasta_file_critical(gzFile input_p,
     }
 
     while (kseq_read(read_stream) >= 0) {
-        if (filter_filename.size() && filter.size() <= seq_count) {
-            std::cerr << "ERROR: Filter file " << filter_filename
-                      << " has fewer sequences" << std::endl;
-            exit(1);
-        }
-
-        if (!filter_filename.size() || filter[seq_count]) {
+        callback(read_stream);
+        if (with_reverse) {
+            reverse_complement(read_stream->seq);
             callback(read_stream);
-            if (with_reverse) {
-                reverse_complement(read_stream->seq);
-                callback(read_stream);
-            }
         }
 
         seq_count++;
-    }
-    if (filter_filename.size() && filter.size() != seq_count) {
-        std::cerr << "ERROR: Filter file " << filter_filename
-                  << " has more sequences" << std::endl;
-        exit(1);
     }
 
     kseq_destroy(read_stream);
@@ -122,15 +97,14 @@ void read_fasta_file_critical(gzFile input_p,
 
 void read_fasta_file_critical(const std::string &filename,
                               std::function<void(kseq_t*)> callback,
-                              bool with_reverse,
-                              const std::string &filter_filename) {
+                              bool with_reverse) {
     gzFile input_p = gzopen(filename.c_str(), "r");
     if (input_p == Z_NULL) {
         std::cerr << "ERROR: Cannot read file " << filename << std::endl;
         exit(1);
     }
 
-    read_fasta_file_critical(input_p, callback, with_reverse, filter_filename);
+    read_fasta_file_critical(input_p, callback, with_reverse);
 
     gzclose(input_p);
 }
@@ -161,7 +135,7 @@ void read_fasta_from_string(const std::string &fasta_flat,
         exit(1);
     }
 
-    read_fasta_file_critical(input_p, callback, with_reverse, "");
+    read_fasta_file_critical(input_p, callback, with_reverse);
 
     gzclose(input_p);
     close(p[0]);
@@ -171,25 +145,51 @@ void read_fasta_from_string(const std::string &fasta_flat,
 void read_vcf_file_critical(const std::string &filename,
                             const std::string &ref_filename,
                             size_t k,
-                            std::vector<std::string> *annotation,
-                            std::function<void(std::string &,
-                                               std::vector<std::string> *)> callback) {
+                            std::function<void(std::string&&)> callback,
+                            bool with_reverse) {
+    VCFParser vcf(ref_filename, filename, k);
+
+    if (with_reverse) {
+        vcf.call_sequences(
+            [&](auto&& sequence) {
+                callback(std::string(sequence.begin(), sequence.end()));
+                reverse_complement(sequence.begin(), sequence.end());
+                callback(std::move(sequence));
+            }
+        );
+    } else {
+        vcf.call_sequences(callback);
+    }
+}
+
+void read_vcf_file_with_annotations_critical(
+      const std::string &filename,
+      const std::string &ref_filename,
+      size_t k,
+      std::function<void(std::string&&,
+                         const std::vector<std::string>&)> callback,
+      bool with_reverse
+    ) {
     //TODO: make this a configurable option
     //default list of tokens to extract as annotations
     //TODO: extract these guys directly from vcf parsed
     const std::vector<std::string> annots = {
-      "AC_AFR", "AC_EAS", "AC_AMR", "AC_ASJ",
-      "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"
+        "AC_AFR", "AC_EAS", "AC_AMR", "AC_ASJ",
+        "AC_FIN", "AC_NFE", "AC_SAS", "AC_OTH"
     };
 
-    vcf_parser vcf;
-    if (!vcf.init(ref_filename, filename, k)) {
-        std::cerr << "ERROR reading VCF " << filename << std::endl;
-        exit(1);
-    }
-    size_t seq_count = 0;
-    while (vcf.get_seq(annots, annotation)) {
-        callback(vcf.seq, annotation);
-        seq_count++;
+    VCFParser vcf(ref_filename, filename, k);
+
+    if (with_reverse) {
+        vcf.call_annotated_sequences(
+            [&](auto&& sequence, const auto &annotation) {
+                callback(std::string(sequence.begin(), sequence.end()), annotation);
+                reverse_complement(sequence.begin(), sequence.end());
+                callback(std::move(sequence), annotation);
+            },
+            annots
+        );
+    } else {
+        vcf.call_annotated_sequences(callback, annots);
     }
 }

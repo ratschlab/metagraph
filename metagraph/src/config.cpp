@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <iostream>
+#include <unordered_set>
 
 #include "utils.hpp"
 #include "threading.hpp"
@@ -17,6 +18,8 @@ Config::Config(int argc, const char *argv[]) {
     // parse identity from first command line argument
     if (!strcmp(argv[1], "build")) {
         identity = BUILD;
+    } else if (!strcmp(argv[1], "clean")) {
+        identity = CLEAN;
     } else if (!strcmp(argv[1], "merge")) {
         identity = MERGE;
     } else if (!strcmp(argv[1], "extend")) {
@@ -27,10 +30,6 @@ Config::Config(int argc, const char *argv[]) {
         identity = COMPARE;
     } else if (!strcmp(argv[1], "align")) {
         identity = ALIGN;
-    } else if (!strcmp(argv[1], "filter")) {
-        identity = FILTER;
-    } else if (!strcmp(argv[1], "filter_stats")) {
-        identity = FILTER_STATS;
     } else if (!strcmp(argv[1], "experiment")) {
         identity = EXPERIMENT;
     } else if (!strcmp(argv[1], "stats")) {
@@ -49,8 +48,14 @@ Config::Config(int argc, const char *argv[]) {
         identity = TRANSFORM;
     } else if (!strcmp(argv[1], "transform_anno")) {
         identity = TRANSFORM_ANNOTATION;
+    } else if (!strcmp(argv[1], "assemble")) {
+        identity = ASSEMBLE;
     } else if (!strcmp(argv[1], "relax_brwt")) {
         identity = RELAX_BRWT;
+    } else if (!strcmp(argv[1], "call_variants")) {
+        identity = CALL_VARIANTS;
+    } else if (!strcmp(argv[1], "parse_taxonomy")) {
+        identity = PARSE_TAXONOMY;
     } else {
         print_usage(argv[0]);
         exit(-1);
@@ -113,21 +118,10 @@ Config::Config(int argc, const char *argv[]) {
             min_count = std::max(atoi(argv[++i]), 1);
         } else if (!strcmp(argv[i], "--max-count")) {
             max_count = atoi(argv[++i]);
-        } else if (!strcmp(argv[i], "--filter-thres")) {
-            unreliable_kmers_threshold = atoi(argv[++i]);
-        } else if (!strcmp(argv[i], "--filter-k")) {
-            filter_k = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
             memory_available = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--dump-raw-anno")) {
             dump_raw_anno = true;
-        } else if (!strcmp(argv[i], "--generate-fasta")) {
-            generate_filtered_fasta = true;
-        } else if (!strcmp(argv[i], "--generate-fastq")) {
-            generate_filtered_fastq = true;
-        } else if (!strcmp(argv[i], "--kmc")) {
-            //TODO: add into some USAGE description
-            use_kmc = true;
         } else if (!strcmp(argv[i], "--discovery-fraction")) {
             discovery_fraction = std::stof(argv[++i]);
         } else if (!strcmp(argv[i], "--query-presence")) {
@@ -177,15 +171,16 @@ Config::Config(int argc, const char *argv[]) {
             infbase = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "--to-adj-list")) {
             to_adj_list = true;
-        } else if (!strcmp(argv[i], "--to-fasta")) {
-            to_fasta = true;
         } else if (!strcmp(argv[i], "--unitigs")) {
-            to_fasta = true;
             unitigs = true;
         } else if (!strcmp(argv[i], "--header")) {
             header = std::string(argv[++i]);
-        } else if (!strcmp(argv[i], "--prune-end")) {
-            pruned_dead_end_size = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--prune-tips")) {
+            min_tip_size = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--prune-unitigs")) {
+            min_unitig_median_kmer_abundance = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--fallback")) {
+            fallback_abundance_cutoff = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--count-dummy")) {
             count_dummy = true;
         } else if (!strcmp(argv[i], "--clear-dummy")) {
@@ -207,6 +202,22 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             print_usage(argv[0], identity);
             exit(0);
+        } else if (!strcmp(argv[i], "--label-mask-in")) {
+            label_mask_in.emplace_back(argv[++i]);
+        } else if (!strcmp(argv[i], "--label-mask-out")) {
+            label_mask_out.emplace_back(argv[++i]);
+        } else if (!strcmp(argv[i], "--label-mask-out-fraction")) {
+            label_mask_out_fraction = std::stof(argv[++i]);
+        } else if (!strcmp(argv[i], "--label-filter")) {
+            label_filter.emplace_back(argv[++i]);
+        } else if (!strcmp(argv[i], "--call-bubbles")) {
+            call_bubbles = true;
+        } else if (!strcmp(argv[i], "--accession")) {
+            accession2taxid = std::string(argv[++i]);
+        } else if (!strcmp(argv[i], "--taxonomy")) {
+            taxonomy_nodes = std::string(argv[++i]);
+        } else if (!strcmp(argv[i], "--taxonomy-map")) {
+            taxonomy_map = std::string(argv[++i]);
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
             print_usage(argv[0], identity);
@@ -216,11 +227,23 @@ Config::Config(int argc, const char *argv[]) {
         }
     }
 
+    // given kmc_pre and kmc_suf pair, only include one
+    // this still allows for the same file to be included multiple times
+    std::unordered_set<std::string> kmc_file_set;
+
+    for (auto it = fname.begin(); it != fname.end(); ++it) {
+        if (utils::get_filetype(*it) == "KMC"
+                && !kmc_file_set.insert(utils::remove_suffix(*it, ".kmc_pre", ".kmc_suf")).second)
+            fname.erase(it--);
+    }
+
     utils::set_verbose(verbose);
 
     if (!fname.size() && identity != STATS
                       && identity != SERVER_QUERY
                       && !(identity == BUILD && complete)
+                      && !(identity == CALL_VARIANTS)
+                      && !(identity == PARSE_TAXONOMY)
                       && !(identity == CONCATENATE && !infbase.empty())) {
         std::string line;
         while (std::getline(std::cin, line)) {
@@ -235,6 +258,8 @@ Config::Config(int argc, const char *argv[]) {
             && identity != STATS
             && identity != SERVER_QUERY
             && !(identity == BUILD && complete)
+            && !(identity == CALL_VARIANTS)
+            && !(identity == PARSE_TAXONOMY)
             && !fname.size())
         print_usage_and_exit = true;
 
@@ -243,12 +268,6 @@ Config::Config(int argc, const char *argv[]) {
                   << " or use the -i and -l options" << std::endl;
         print_usage_and_exit = true;
     }
-
-    if (identity == CONCATENATE && outfbase.empty())
-        print_usage_and_exit = true;
-
-    if (identity == FILTER)
-        filter_k = k;
 
     if (identity == ALIGN && infbase.empty())
         print_usage_and_exit = true;
@@ -279,28 +298,37 @@ Config::Config(int argc, const char *argv[]) {
             && outfbase.empty())
         outfbase = utils::remove_suffix(infbase, ".orhashdbg", ".bitmapdbg", ".dbg");
 
-    if (identity == EXTEND && (outfbase.empty() || infbase.empty()))
-        print_usage_and_exit = true;
-
-    if (identity == MERGE_ANNOTATIONS && outfbase.empty())
+    if (identity == EXTEND && infbase.empty())
         print_usage_and_exit = true;
 
     if ((identity == QUERY || identity == SERVER_QUERY) && infbase_annotators.size() != 1)
         print_usage_and_exit = true;
 
     if ((identity == TRANSFORM
+            || identity == CLEAN
             || identity == TRANSFORM_ANNOTATION
+            || identity == ASSEMBLE
             || identity == RELAX_BRWT)
                     && fname.size() != 1)
         print_usage_and_exit = true;
 
-    if (identity == TRANSFORM_ANNOTATION && outfbase.empty())
+    if ((identity == TRANSFORM
+            || identity == CONCATENATE
+            || identity == EXTEND
+            || identity == MERGE
+            || identity == CLEAN
+            || identity == TRANSFORM_ANNOTATION
+            || identity == MERGE_ANNOTATIONS
+            || identity == ASSEMBLE
+            || identity == RELAX_BRWT)
+                    && outfbase.empty())
+        print_usage_and_exit = true;
+
+    if (identity == PARSE_TAXONOMY &&
+            ((accession2taxid == "" && taxonomy_nodes == "") || outfbase == ""))
         print_usage_and_exit = true;
 
     if (identity == MERGE && fname.size() < 2)
-        print_usage_and_exit = true;
-
-    if (identity == MERGE && outfbase.empty())
         print_usage_and_exit = true;
 
     if (identity == COMPARE && fname.size() != 2)
@@ -335,6 +363,8 @@ std::string Config::state_to_string(StateType state) {
             return "dynamic";
         case SMALL:
             return "small";
+        case FAST:
+            return "faster";
         default:
             assert(false);
             return "Never happens";
@@ -348,6 +378,8 @@ Config::StateType Config::string_to_state(const std::string &string) {
         return StateType::DYN;
     } else if (string == "small") {
         return StateType::SMALL;
+    } else if (string == "faster") {
+        return StateType::FAST;
     } else {
         throw std::runtime_error("Error: unknown graph state");
     }
@@ -422,12 +454,12 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available commands:\n");
 
-            fprintf(stderr, "\tfilter\t\tfilter out reads with rare k-mers and dump\n");
-            fprintf(stderr, "\t\t\tfilters to disk\n\n");
-
             fprintf(stderr, "\tbuild\t\tconstruct a graph object from input sequence\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats or integrate sequence\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats into a given graph\n\n");
+
+            fprintf(stderr, "\tclean\t\tclean an existing graph and extract sequences from it\n");
+            fprintf(stderr, "\t\t\tin fast[a|q] formats\n\n");
 
             fprintf(stderr, "\textend\t\textend an existing graph with new sequences from\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats or integrate sequence\n");
@@ -446,8 +478,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s)\n\n");
 
-            fprintf(stderr, "\tfilter_stats\tget statistics for filters\n\n");
-
             fprintf(stderr, "\tannotate\tgiven a graph and a fast[a|q] file, annotate\n");
             fprintf(stderr, "\t\t\tthe respective kmers\n\n");
 
@@ -460,47 +490,31 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "\ttransform_anno\tchange representation of the graph annotation\n\n");
 
+            fprintf(stderr, "\tassemble\tgiven a graph, extract sequences from it\n\n");
+
             fprintf(stderr, "\trelax_brwt\toptimize the tree structure in brwt annotator\n\n");
 
             fprintf(stderr, "\tquery\t\tannotate sequences from fast[a|q] files\n\n");
             fprintf(stderr, "\tserver_query\tannotate received sequences and send annotations back\n\n");
+
+            fprintf(stderr, "\tcall_variants\tgenerate a masked annotated graph and call variants\n");
+            fprintf(stderr, "\t\t\trelative to unmasked graph\n\n");
+
+            fprintf(stderr, "\tparse_taxonomy\tgenerate NCBI Accession ID to Taxonomy ID mapper\n\n");
 
             return;
         }
         case EXPERIMENT: {
             fprintf(stderr, "Usage: %s experiment ???\n\n", prog_name.c_str());
         } break;
-        case FILTER: {
-            fprintf(stderr, "Usage: %s filter [options] --min-count <cutoff> FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for filter:\n");
-            fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC counters\n");
-            fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
-            fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
-            fprintf(stderr, "\n");
-            fprintf(stderr, "\t-k --kmer-length [INT] \tlength of the k-mer to use [3]\n");
-            fprintf(stderr, "\t   --generate-fasta \twrite filtered reads to disk in FASTA format [off]\n");
-            fprintf(stderr, "\t   --generate-fastq \twrite filtered reads to disk in FASTQ format [off]\n");
-            fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
-        } break;
-        case FILTER_STATS: {
-            fprintf(stderr, "Usage: %s filter_stats [options] --min-count <cutoff> FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for filter:\n");
-            fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
-        } break;
         case BUILD: {
             fprintf(stderr, "Usage: %s build [options] FILE1 [[FILE2] ...]\n"
-                            "\tEach input file is given in FASTA, FASTQ, or VCF format.\n\n", prog_name.c_str());
+                            "\tEach input file is given in FASTA, FASTQ, or VCF format.\n"
+                            "\tNote that VCF files must be in plain text or bgzip format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for build:\n");
-            fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC counters\n");
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
             fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
             fprintf(stderr, "\n");
@@ -517,16 +531,29 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --no-shrink \t\tdo not build mask for dummy k-mers (only for Succinct graph) [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
+        case CLEAN: {
+            fprintf(stderr, "Usage: %s clean -o <outfile-base> [options] GRAPH.\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for build:\n");
+            fprintf(stderr, "\t   --min-count [INT] \t\tmin k-mer abundance, including [1]\n");
+            fprintf(stderr, "\t   --max-count [INT] \t\tmax k-mer abundance, excluding [inf]\n");
+            fprintf(stderr, "\t   --prune-tips [INT] \t\tprune all dead ends shorter than this value [1]\n");
+            fprintf(stderr, "\t   --prune-unitigs [INT] \tprune all unitigs with median k-mer counts smaller than\n"
+                            "\t                         \t\tthis value (0: auto) [1]\n");
+            fprintf(stderr, "\t   --fallback [INT] \t\tfallback threshold if the automatic one cannot be determined [1]\n");
+            // fprintf(stderr, "\n");
+            // fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
+            fprintf(stderr, "\t   --unitigs \t\t\textract unitigs instead of contigs [off]\n");
+            // fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+        } break;
         case EXTEND: {
             fprintf(stderr, "Usage: %s extend -i <GRAPH> -o <extended_graph_basename> [options] FILE1 [[FILE2] ...]\n"
-                            "\tEach input file is given in FASTA, FASTQ, or VCF format.\n\n", prog_name.c_str());
+                            "\tEach input file is given in FASTA, FASTQ, or VCF format.\n"
+                            "\tNote that VCF files must be in plain text or bgzip format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for extend:\n");
-            fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC counters\n");
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
             fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
             fprintf(stderr, "\n");
@@ -574,17 +601,31 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case TRANSFORM: {
-            fprintf(stderr, "Usage: %s transform [options] GRAPH\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s transform -o <outfile-base> [options] GRAPH\n\n", prog_name.c_str());
 
-            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
+            // fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges [off]\n");
-            fprintf(stderr, "\t   --prune-end [INT] \tprune all dead ends of this length and shorter [0]\n");
-            fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: fast / dynamic / small [fast]\n");
+            fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends of this length and shorter [0]\n");
+            fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: fast / faster / dynamic / small [fast]\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
-            fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and write to compressed FASTA file [off]\n");
-            fprintf(stderr, "\t   --unitigs \t\textract all unitigs from graph and write to compressed FASTA file [off]\n");
             fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
+        } break;
+        case ASSEMBLE: {
+            fprintf(stderr, "Usage: %s assemble -o <outfile-base> [options] GRAPH\n"
+                            "\tAssemble contigs from de Bruijn graph and dump to compressed FASTA file.\n\n", prog_name.c_str());
+
+            // fprintf(stderr, "\t-o --outfile-base [STR] \t\tbasename of output file []\n");
+            fprintf(stderr, "\t   --prune-tips [INT] \t\t\tprune all dead ends of this length and shorter [0]\n");
+            fprintf(stderr, "\t   --unitigs \t\t\t\textract unitigs [off]\n");
+            fprintf(stderr, "\t   --header [STR] \t\t\theader for sequences in FASTA output []\n");
+            fprintf(stderr, "\t-p --parallel [INT] \t\t\tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t-a --annotator [STR] \t\t\tannotator to load []\n");
+            fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph\n");
+            fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph\n");
+            fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of\n");
+            fprintf(stderr, "\t                                     \tall matching mask-in and mask-out labels [0.0]\n");
         } break;
         case STATS: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
@@ -599,19 +640,16 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         } break;
         case ANNOTATE: {
             fprintf(stderr, "Usage: %s annotate -i <GRAPH> [options] FILE1 [[FILE2] ...]\n"
-                            "\tEach file is given in FASTA, FASTQ, or VCF format.\n\n", prog_name.c_str());
+                            "\tEach file is given in FASTA, FASTQ, or VCF format.\n"
+                            "\tNote that VCF files must be in plain text or bgzip format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
-            fprintf(stderr, "\t   --kmc \t\tparse k-mers from precomputed KMC counters\n");
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
-            fprintf(stderr, "\t   --filter-k [INT] \tlength of k-mers used for counting and filtering [3]\n");
-            fprintf(stderr, "\t   --filter-thres [INT] max allowed number of unreliable kmers in reliable reads [0]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
             fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation representation [column]\n");
-            fprintf(stderr, "\t\t"); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation representation: column / row [column]\n");
             fprintf(stderr, "\t-a --annotator [STR] \tannotator to update []\n");
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file [<GRAPH>]\n");
@@ -637,7 +675,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case MERGE_ANNOTATIONS: {
-            fprintf(stderr, "Usage: %s merge_anno [options] -o <annotator_basename> ANNOT1 [[ANNOT2] ...]\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s merge_anno -o <annotator_basename> [options] ANNOT1 [[ANNOT2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
             fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation representation [column]\n");
@@ -646,7 +684,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case TRANSFORM_ANNOTATION: {
-            fprintf(stderr, "Usage: %s transform_anno [options] -o <annotator_basename> ANNOTATOR\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s transform_anno -o <annotator_basename> [options] ANNOTATOR\n\n", prog_name.c_str());
 
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --rename-cols [STR]\tfile with rules for renaming annotation labels []\n");
@@ -658,10 +696,11 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t\t"); fprintf(stderr, annotation_list); fprintf(stderr, "\n");
             fprintf(stderr, "\t   --arity  \t\tarity in the brwt tree [2]\n");
             fprintf(stderr, "\t   --greedy  \t\tuse greedy column partitioning in brwt construction [off]\n");
+            fprintf(stderr, "\t   --fast  \t\ttransform annotation in memory without streaming [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case RELAX_BRWT: {
-            fprintf(stderr, "Usage: %s relax_brwt [options] -o <annotator_basename> ANNOTATOR\n\n", prog_name.c_str());
+            fprintf(stderr, "Usage: %s relax_brwt -o <annotator_basename> [options] ANNOTATOR\n\n", prog_name.c_str());
 
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
             fprintf(stderr, "\t   --relax-arity [INT] \trelax brwt tree to optimize arity limited to this number [10]\n");
@@ -693,6 +732,27 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             // fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file []\n");
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
+        } break;
+        case CALL_VARIANTS: {
+            fprintf(stderr, "Usage: %s call_variants -a <annotation> [options]\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for call_variants:\n");
+            fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph []\n");
+            fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph []\n");
+            fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of\n");
+            fprintf(stderr, "\t                                     \tall matching mask-in and mask-out labels [0.0]\n");
+            fprintf(stderr, "\n");
+            fprintf(stderr, "\t   --call-bubbles \t\t\tcall labels from bubbles\n");
+            fprintf(stderr, "\t   --label-filter [STR] \t\tdiscard variants with this label []\n");
+            fprintf(stderr, "\t   --taxonomy-map [STR] \t\tfilename of taxonomy map file []\n");
+        } break;
+        case PARSE_TAXONOMY: {
+            fprintf(stderr, "Usage: %s parse_taxonomy -o <OUTBASE> [options]\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for parse_taxonomy:\n");
+            fprintf(stderr, "\t-o --outfile-base [STR] basename of output file []\n");
+            fprintf(stderr, "\t   --accession [STR] \tfilename of the accession2taxid.gz file []\n");
+            fprintf(stderr, "\t   --taxonomy [STR] \tfilename of the nodes.dmp file []\n");
         } break;
     }
 

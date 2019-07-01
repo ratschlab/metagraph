@@ -19,6 +19,10 @@ const std::string BinRelWT_sdslAnnotator::kExtension = kBinRelWT_sdslExtension;
 template <>
 const std::string BinRelWTAnnotator::kExtension = kBinRelWTExtension;
 
+template <class BinaryMatrixType, typename Label>
+std::string
+StaticBinRelAnnotator<BinaryMatrixType, Label>
+::file_extension() const { return kExtension; }
 
 template <class BinaryMatrixType, typename Label>
 bool

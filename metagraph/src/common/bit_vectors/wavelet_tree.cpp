@@ -1,6 +1,8 @@
 #include "wavelet_tree.hpp"
 
 #include <cassert>
+#include "serialization.hpp"
+
 
 // TODO: run benchmarks and optimize these parameters
 const size_t MAX_ITER_WAVELET_TREE_STAT = 1000;
@@ -62,6 +64,8 @@ WaveletTree wavelet_tree::convert_to() {
         if (dynamic_cast<wavelet_tree_stat*>(this)) {
             vector = std::move(dynamic_cast<wavelet_tree_stat*>(this)->int_vector_);
             vector.resize(dynamic_cast<wavelet_tree_stat*>(this)->n_);
+        } else if (dynamic_cast<wavelet_tree_fast*>(this)) {
+            vector = std::move(dynamic_cast<wavelet_tree_fast*>(this)->int_vector_);
         } else {
             vector = to_vector();
         }
@@ -74,6 +78,7 @@ WaveletTree wavelet_tree::convert_to() {
 template wavelet_tree_dyn wavelet_tree::convert_to<wavelet_tree_dyn>();
 template wavelet_tree_stat wavelet_tree::convert_to<wavelet_tree_stat>();
 template wavelet_tree_small wavelet_tree::convert_to<wavelet_tree_small>();
+template wavelet_tree_fast wavelet_tree::convert_to<wavelet_tree_fast>();
 
 
 template <typename Vector>
@@ -162,7 +167,7 @@ wavelet_tree_stat::wavelet_tree_stat(const wavelet_tree_stat &other) {
     *this = other;
 }
 
-wavelet_tree_stat::wavelet_tree_stat(wavelet_tree_stat&& other) {
+wavelet_tree_stat::wavelet_tree_stat(wavelet_tree_stat&& other) noexcept {
     *this = std::move(other);
 }
 
@@ -176,7 +181,7 @@ wavelet_tree_stat& wavelet_tree_stat::operator=(const wavelet_tree_stat &other) 
     return *this;
 }
 
-wavelet_tree_stat& wavelet_tree_stat::operator=(wavelet_tree_stat&& other) {
+wavelet_tree_stat& wavelet_tree_stat::operator=(wavelet_tree_stat&& other) noexcept {
     int_vector_ = std::move(other.int_vector_);
     n_ = other.n_;
     if (!other.requires_update_) {
@@ -335,7 +340,6 @@ template wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const std::vector<uint8_t> 
 template wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const std::vector<int> &);
 template wavelet_tree_dyn::wavelet_tree_dyn(uint8_t, const std::vector<uint64_t> &);
 
-
 uint64_t wavelet_tree_dyn::rank(uint64_t c, uint64_t i) const {
     return size() > 0
             ? dwt_.rank(std::min(i + 1, size()), c)
@@ -464,14 +468,17 @@ uint64_t wavelet_tree_small::prev(uint64_t pos, uint64_t value) const {
 }
 
 void wavelet_tree_small::set(uint64_t, uint64_t) {
+    assert(false);
     throw std::runtime_error("Not supported");
 }
 
 void wavelet_tree_small::insert(uint64_t, uint64_t) {
+    assert(false);
     throw std::runtime_error("Not supported");
 }
 
 void wavelet_tree_small::remove(uint64_t) {
+    assert(false);
     throw std::runtime_error("Not supported");
 }
 
@@ -498,4 +505,160 @@ sdsl::int_vector<> wavelet_tree_small::to_vector() const {
     sdsl::int_vector<> vector(wwt_.size(), 0, logsigma_);
     std::copy(wwt_.begin(), wwt_.end(), vector.begin());
     return vector;
+}
+
+
+////////////////////////////////////////////////////
+// wavelet_tree_fast based on bit_vectors, static //
+////////////////////////////////////////////////////
+
+wavelet_tree_fast::wavelet_tree_fast(uint8_t logsigma, uint64_t size, uint64_t value)
+      : int_vector_(size, value, logsigma), bitmaps_(1 << logsigma) {
+    bitmaps_.at(value) = bit_vector_stat(size, 1);
+}
+
+template <class Vector>
+wavelet_tree_fast::wavelet_tree_fast(uint8_t logsigma, const Vector &vector)
+      : int_vector_(pack_vector(vector, logsigma)), bitmaps_(1 << logsigma) {
+
+    for (size_t i = 0; i < vector.size(); ++i) {
+
+        uint64_t value = vector[i];
+
+        assert(value < static_cast<uint64_t>(bitmaps_.size()));
+
+        if (!bitmaps_[value].size())
+            bitmaps_[value] = bit_vector_stat(vector.size(), 0);
+
+        bitmaps_[value].set(i, 1);
+    }
+}
+
+template wavelet_tree_fast::wavelet_tree_fast(uint8_t logsigma, const sdsl::int_vector<> &vector);
+template wavelet_tree_fast::wavelet_tree_fast(uint8_t logsigma, const std::vector<uint8_t> &vector);
+template wavelet_tree_fast::wavelet_tree_fast(uint8_t logsigma, const std::vector<uint64_t> &vector);
+template wavelet_tree_fast::wavelet_tree_fast(uint8_t logsigma, const std::vector<int> &vector);
+
+uint64_t wavelet_tree_fast::rank(uint64_t c, uint64_t i) const {
+    assert(c < bitmaps_.size());
+    return bitmaps_[c].size() ? bitmaps_[c].rank1(i) : 0;
+}
+
+uint64_t wavelet_tree_fast::select(uint64_t c, uint64_t i) const {
+    assert(i > 0 && size() > 0);
+    assert(c < bitmaps_.size());
+    assert(i <= rank(c, size() - 1));
+    return bitmaps_[c].select1(i);
+}
+
+uint64_t wavelet_tree_fast::operator[](uint64_t id) const {
+    assert(id < size());
+    return int_vector_[id];
+}
+
+uint64_t wavelet_tree_fast::next(uint64_t pos, uint64_t value) const {
+    assert(pos < size());
+
+    return ::next(*this, pos, value, MAX_ITER_WAVELET_TREE_STAT);
+}
+
+uint64_t wavelet_tree_fast::prev(uint64_t pos, uint64_t value) const {
+    assert(pos < size());
+
+    return ::prev(*this, pos, value, MAX_ITER_WAVELET_TREE_STAT);
+}
+
+void wavelet_tree_fast::set(uint64_t id, uint64_t val) {
+    assert(id < int_vector_.size());
+
+    if (int_vector_[id] == val)
+        return;
+
+    int_vector_[id] = val;
+
+    for (size_t c = 0; c < bitmaps_.size(); ++c) {
+        if (c != val && bitmaps_[c].size())
+            bitmaps_[c].set(id, 0);
+    }
+
+    if (!bitmaps_[val].size())
+        bitmaps_[val] = bit_vector_stat(int_vector_.size(), 0);
+
+    bitmaps_[val].set(id, 1);
+}
+
+void wavelet_tree_fast::insert(uint64_t id, uint64_t val) {
+    assert(id <= int_vector_.size());
+
+    int_vector_.resize(int_vector_.size() + 1);
+
+    std::copy_backward(int_vector_.begin() + id,
+                       int_vector_.end() - 1,
+                       int_vector_.end());
+    int_vector_[id] = val;
+
+    assert(val < bitmaps_.size());
+
+    for (size_t c = 0; c < bitmaps_.size(); ++c) {
+        if (c != val && bitmaps_[c].size())
+            bitmaps_[c].insert_bit(id, 0);
+    }
+
+    if (!bitmaps_[val].size()) {
+        bitmaps_[val] = bit_vector_stat(int_vector_.size(), 0);
+        bitmaps_[val].set(id, 1);
+    } else {
+        bitmaps_[val].insert_bit(id, 1);
+    }
+}
+
+void wavelet_tree_fast::remove(uint64_t id) {
+    assert(id < int_vector_.size());
+
+    std::copy(int_vector_.begin() + id + 1,
+              int_vector_.end(),
+              int_vector_.begin() + id);
+
+    int_vector_.resize(int_vector_.size() - 1);
+
+    for (size_t c = 0; c < bitmaps_.size(); ++c) {
+        if (bitmaps_[c].size())
+            bitmaps_[c].delete_bit(id);
+    }
+}
+
+void wavelet_tree_fast::serialize(std::ostream &out) const {
+    int_vector_.serialize(out);
+    for (const auto &v : bitmaps_) {
+        v.serialize(out);
+    }
+}
+
+bool wavelet_tree_fast::load(std::istream &in) {
+    if (!in.good())
+        return false;
+
+    try {
+        int_vector_.load(in);
+
+        bitmaps_.resize(1 << logsigma());
+
+        for (auto &v : bitmaps_) {
+            if (!v.load(in))
+                return false;
+        }
+
+        return true;
+
+    } catch (const std::bad_alloc &exception) {
+        std::cerr << "ERROR: Not enough memory to load wavelet_tree_fast" << std::endl;
+        return false;
+    } catch (...) {
+        return false;
+    }
+}
+
+void wavelet_tree_fast::clear() {
+    int_vector_.resize(0);
+    bitmaps_.assign(bitmaps_.size(), bit_vector_stat());
 }

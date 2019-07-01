@@ -87,7 +87,7 @@ popd
 - `-DPYTHON_INTERFACE=[ON|OFF]` -- compile python interface (requires shared libraries, `OFF` by default)
 - `-DBUILD_KMC=[ON|OFF]` -- compile the KMC executable (`ON` by default)
 - `-DWITH_AVX=[ON|OFF]` -- compile with support for the avx instructions (`ON` by default)
-- `-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA4|DNA_CASE_SENSITIVE]` -- alphabet to use (`DNA` by default)
+- `-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA5|DNA_CASE_SENSITIVE]` -- alphabet to use (`DNA` by default)
 
 ## Typical workflow
 1. Build de Bruijn graph from Fasta files, FastQ files, or [KMC k-mer counters](https://github.com/refresh-bio/KMC/):\
@@ -111,7 +111,7 @@ DATA="../tests/data/transcripts_1000.fa"
 
 ./metagengraph query -i transcripts_1000 -a transcripts_1000.column.annodbg $DATA
 
-./metagengraph stats -a transcripts_1000 transcripts_1000
+./metagengraph stats -a transcripts_1000.column.annodbg transcripts_1000
 ```
 
 For real examples, see [scripts](./metagraph/scripts).
@@ -143,30 +143,12 @@ done
 ./metagengraph concatenate -l 2 -i <GRAPH_DIR>/graph -o <GRAPH_DIR>/graph
 ```
 
-#### Build with filtering k-mers using KMC
+#### Build from k-mers filtered with KMC
 ```bash
 CUTOFF=5
 K=20
 ./KMC/kmc -ci$CUTOFF -t30 -k$K -m5 -fq -b <FILE>.fasta.gz <FILE>.kmc_$CUTOFF ./KMC
 ./metagengraph build -v -p 30 -k $K --mem-cap-gb 10 --kmc -o graph <FILE>.kmc_$CUTOFF
-```
-
-#### Build from filtered reads
-1) Filter reads
-  * using filtering in blocks
-```bash
-./metagengraph filter -v --parallel 30 -k 20 --min-count 4 <DATA_DIR>/*.fasta.gz
-```
-  * using KMC
-```bash
-./KMC/kmc -k21 -m5 -fq -t30 <FILE>.fasta.gz <FILE>.fasta.gz.kmc ./KMC
-./metagengraph filter -v --parallel 30 -k 20 --min-count 4 --kmc <FILE>.fasta.gz
-```
-2) Build graph
-```bash
-./metagengraph build -v --parallel 30 -k 20 --mem-cap-gb 100 --min-count 4 \
-                        -o <GRAPH_DIR>/graph \
-                        <DATA_DIR>/*.fasta.gz
 ```
 
 #### Distributed build
@@ -190,8 +172,9 @@ bsub -J StackChunks -W 12:00 -n 30 -R "rusage[mem=15000]" "/usr/bin/time -v \
 
 ### Annotate graph
 ```bash
-./metagengraph annotate -v --row-annotator --fasta-anno \
+./metagengraph annotate -v --anno-type row --fasta-anno \
                            -i primates.dbg \
+                           -o primates \
                            ~/fasta_zurich/refs_chimpanzee_primates.fa
 ```
 

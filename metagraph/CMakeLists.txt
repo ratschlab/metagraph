@@ -12,6 +12,8 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "RELEASE")
 endif()
 
+string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE)
+
 set(JSONCPP_WITH_TESTS FALSE)
 add_subdirectory(
   external-libraries/jsoncpp
@@ -23,8 +25,8 @@ endif()
 
 if(CMAKE_DBG_ALPHABET STREQUAL "DNA")
   string(APPEND CMAKE_CXX_FLAGS " -D_DNA_GRAPH")
-elseif(CMAKE_DBG_ALPHABET STREQUAL "DNA4")
-  string(APPEND CMAKE_CXX_FLAGS " -D_DNA4_GRAPH")
+elseif(CMAKE_DBG_ALPHABET STREQUAL "DNA5")
+  string(APPEND CMAKE_CXX_FLAGS " -D_DNA5_GRAPH")
 elseif(CMAKE_DBG_ALPHABET STREQUAL "DNA_CASE_SENSITIVE")
   string(APPEND CMAKE_CXX_FLAGS " -D_DNA_CASE_SENSITIVE_GRAPH")
 else()
@@ -63,11 +65,6 @@ if(WITH_MMAP)
 message(STATUS "Enabling boost iostreams for mmapped reader")
 string(APPEND CMAKE_CXX_FLAGS " -D_USE_MMAP")
 set(METALIBS ${METALIBS} -lboost_iostreams)
-endif()
-
-if(WITH_DEATH_TESTS)
-message(STATUS "Enabling death tests in gtest")
-string(APPEND CMAKE_CXX_FLAGS " -D_DEATH_TEST")
 endif()
 
 #-------------------
@@ -364,6 +361,16 @@ add_subdirectory(
 )
 endif()
 
+if(NOT DEFINED DEATH_TEST)
+  set(DEATH_TEST TRUE)
+endif()
+if(DEATH_TEST AND ${CMAKE_BUILD_TYPE} MATCHES DEBUG)
+  set(DEATH_TEST_FLAG "")
+else()
+  message(STATUS "Disabling death tests in gtest")
+  set(DEATH_TEST_FLAG -D_NO_DEATH_TEST)
+endif()
+
 file(GLOB unit_tests_files
   "tests/*.cpp"
   "tests/*/*.cpp"
@@ -390,7 +397,7 @@ target_link_libraries(unit_tests gtest_main gtest
   ${METALIBS}
 )
 
-target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template)
+target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template ${DEATH_TEST_FLAG})
 
 add_test(NAME unit_tests COMMAND unit_tests)
 

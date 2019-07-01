@@ -324,7 +324,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
             exit(1);
 
         } else if (weights && weights->width() != graph_chunk.weights_.width()) {
-            std::cerr << "ERROR: trying to concatenate chunks with incostistent weights"
+            std::cerr << "ERROR: trying to concatenate chunks with inconsistent weights"
                       << std::endl;
             exit(1);
         }
@@ -386,9 +386,20 @@ bool BOSS::Chunk::load(const std::string &infbase) {
                                                                 + kFileExtension,
                                std::ios::binary);
 
-        W_ = load_number_vector<TAlphabet>(instream);
-        last_ = load_number_vector<bool>(instream);
-        F_ = load_number_vector<uint64_t>(instream);
+        if (!load_number_vector(instream, &W_)) {
+            std::cerr << "ERROR: failed to load W vector" << std::endl;
+            return false;
+        }
+
+        if (!load_number_vector(instream, &last_)) {
+            std::cerr << "ERROR: failed to load L vector" << std::endl;
+            return false;
+        }
+
+        if (!load_number_vector(instream, &F_)) {
+            std::cerr << "ERROR: failed to load F vector" << std::endl;
+            return false;
+        }
 
         weights_.load(instream);
 

@@ -40,6 +40,8 @@ class BOSSConstructor : public IGraphConstructor<BOSS> {
         delete chunk;
     }
 
+    uint64_t get_k() const { return constructor_->get_k(); }
+
     static BOSS* build_graph_from_chunks(const std::vector<std::string> &chunk_filenames,
                                          bool verbose = false,
                                          sdsl::int_vector<> *weights = nullptr) {

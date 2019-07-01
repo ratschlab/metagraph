@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <functional>
+#include <iostream>
 
 #include <sdsl/int_vector.hpp>
 
@@ -84,13 +85,15 @@ class DeBruijnGraph : public SequenceGraph {
 
     // TODO: move to graph_algorithm.hpp
     virtual void call_sequences(const std::function<void(const std::string&)> &callback) const;
+    /**
+     * Call all unitigs except short tips.
+     * Def. Tips are the unitigs with InDegree(first) + OutDegree(last) < 2.
+     */
     virtual void call_unitigs(const std::function<void(const std::string&)> &callback,
-                              size_t max_pruned_dead_end_size = 0) const;
+                              size_t min_tip_size = 1) const;
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const;
-
-    virtual void
-    call_nodes(const std::function<void(const node_index&)> &callback,
-               const std::function<bool()> &stop_early = [](){ return false; }) const;
+    virtual void call_nodes(const std::function<void(node_index)> &callback,
+                            const std::function<bool()> &stop_early = [](){ return false; }) const;
 
     virtual size_t outdegree(node_index) const = 0;
     virtual size_t indegree(node_index) const = 0;
@@ -116,15 +119,9 @@ class DeBruijnGraph : public SequenceGraph {
 
     virtual const std::string& alphabet() const = 0;
 
-  private:
-    virtual void call_sequences_from(node_index start,
-                                     const std::function<void(const std::string&)> &callback,
-                                     sdsl::bit_vector *visited,
-                                     sdsl::bit_vector *discovered,
-                                     std::stack<std::tuple<node_index, node_index, std::string, char>> *paths,
-                                     std::vector<std::pair<node_index, char>> *targets,
-                                     bool split_to_contigs = false,
-                                     uint64_t max_pruned_dead_end_size = 0) const;
+    virtual void print(std::ostream &out) const;
+
+    friend std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph);
 };
 
 #endif // __SEQUENCE_GRAPH_HPP__

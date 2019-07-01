@@ -1,15 +1,8 @@
 #include "gtest/gtest.h"
+#include "test_helpers.hpp"
 
 #include "bit_vector.hpp"
 #include "threading.hpp"
-
-// Disable death tests
-#ifndef _DEATH_TEST
-#ifdef ASSERT_DEATH
-#undef ASSERT_DEATH
-#define ASSERT_DEATH(a, b) (void)0
-#endif
-#endif
 
 
 const std::string test_data_dir = "../tests/data";

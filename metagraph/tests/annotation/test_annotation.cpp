@@ -4,9 +4,6 @@
 
 #include "gtest/gtest.h"
 
-#define protected public
-#define private public
-
 #include "annotate_column_compressed.hpp"
 #include "annotate_row_compressed.hpp"
 #include "static_annotators_def.hpp"
@@ -825,9 +822,9 @@ TYPED_TEST(AnnotatorDynamicNoSparseTest, insert_empty_rows_many) {
 
 TYPED_TEST(AnnotatorPresetTest, SerializationAndLoad) {
     std::filesystem::remove(test_dump_basename_vec_good);
-    std::filesystem::remove(test_dump_basename_vec_good + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_good + this->annotation->file_extension());
     std::filesystem::remove(test_dump_basename_vec_bad);
-    std::filesystem::remove(test_dump_basename_vec_bad + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_bad + this->annotation->file_extension());
 
     this->annotation->serialize(test_dump_basename_vec_good);
     ASSERT_FALSE(this->annotation->load(test_dump_basename_vec_bad));
@@ -842,14 +839,14 @@ TYPED_TEST(AnnotatorPresetTest, SerializationAndLoad) {
 
 TYPED_TEST(AnnotatorPresetTest, SerializationAndLoadExtension1) {
     std::filesystem::remove(test_dump_basename_vec_good);
-    std::filesystem::remove(test_dump_basename_vec_good + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_good + this->annotation->file_extension());
     std::filesystem::remove(test_dump_basename_vec_bad);
-    std::filesystem::remove(test_dump_basename_vec_bad + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_bad + this->annotation->file_extension());
 
-    this->annotation->serialize(test_dump_basename_vec_good + this->annotation->kExtension);
+    this->annotation->serialize(test_dump_basename_vec_good + this->annotation->file_extension());
     this->annotation.reset(new TypeParam());
-    ASSERT_FALSE(this->annotation->load(test_dump_basename_vec_bad + this->annotation->kExtension));
-    ASSERT_TRUE(this->annotation->load(test_dump_basename_vec_good + this->annotation->kExtension));
+    ASSERT_FALSE(this->annotation->load(test_dump_basename_vec_bad + this->annotation->file_extension()));
+    ASSERT_TRUE(this->annotation->load(test_dump_basename_vec_good + this->annotation->file_extension()));
 
     EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
     EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get_labels(1)));
@@ -860,11 +857,11 @@ TYPED_TEST(AnnotatorPresetTest, SerializationAndLoadExtension1) {
 
 TYPED_TEST(AnnotatorPresetTest, SerializationAndLoadExtension2) {
     std::filesystem::remove(test_dump_basename_vec_good);
-    std::filesystem::remove(test_dump_basename_vec_good + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_good + this->annotation->file_extension());
     std::filesystem::remove(test_dump_basename_vec_bad);
-    std::filesystem::remove(test_dump_basename_vec_bad + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_bad + this->annotation->file_extension());
 
-    this->annotation->serialize(test_dump_basename_vec_good + this->annotation->kExtension);
+    this->annotation->serialize(test_dump_basename_vec_good + this->annotation->file_extension());
     this->annotation.reset(new TypeParam());
     ASSERT_FALSE(this->annotation->load(test_dump_basename_vec_bad));
     ASSERT_TRUE(this->annotation->load(test_dump_basename_vec_good));
@@ -878,14 +875,14 @@ TYPED_TEST(AnnotatorPresetTest, SerializationAndLoadExtension2) {
 
 TYPED_TEST(AnnotatorPresetTest, SerializationAndLoadExtension3) {
     std::filesystem::remove(test_dump_basename_vec_good);
-    std::filesystem::remove(test_dump_basename_vec_good + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_good + this->annotation->file_extension());
     std::filesystem::remove(test_dump_basename_vec_bad);
-    std::filesystem::remove(test_dump_basename_vec_bad + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_bad + this->annotation->file_extension());
 
     this->annotation->serialize(test_dump_basename_vec_good);
     this->annotation.reset(new TypeParam());
-    ASSERT_FALSE(this->annotation->load(test_dump_basename_vec_bad + this->annotation->kExtension));
-    ASSERT_TRUE(this->annotation->load(test_dump_basename_vec_good + this->annotation->kExtension));
+    ASSERT_FALSE(this->annotation->load(test_dump_basename_vec_bad + this->annotation->file_extension()));
+    ASSERT_TRUE(this->annotation->load(test_dump_basename_vec_good + this->annotation->file_extension()));
 
     EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
     EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get_labels(1)));
@@ -896,9 +893,9 @@ TYPED_TEST(AnnotatorPresetTest, SerializationAndLoadExtension3) {
 
 TYPED_TEST(AnnotatorPreset2Test, SerializationAndLoad) {
     std::filesystem::remove(test_dump_basename_vec_bad);
-    std::filesystem::remove(test_dump_basename_vec_bad + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_bad + this->annotation->file_extension());
     std::filesystem::remove(test_dump_basename_vec_good);
-    std::filesystem::remove(test_dump_basename_vec_good + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_good + this->annotation->file_extension());
 
     this->annotation->serialize(test_dump_basename_vec_good);
     ASSERT_FALSE(this->annotation->load(test_dump_basename_vec_bad));
@@ -913,9 +910,9 @@ TYPED_TEST(AnnotatorPreset2Test, SerializationAndLoad) {
 
 TYPED_TEST(AnnotatorPreset2Test, SerializationAndLoadExtension1) {
     std::filesystem::remove(test_dump_basename_vec_bad);
-    std::filesystem::remove(test_dump_basename_vec_bad + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_bad + this->annotation->file_extension());
     std::filesystem::remove(test_dump_basename_vec_good);
-    std::filesystem::remove(test_dump_basename_vec_good + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_good + this->annotation->file_extension());
 
     this->annotation->serialize(test_dump_basename_vec_good);
     ASSERT_FALSE(this->annotation->load(test_dump_basename_vec_bad));
@@ -930,9 +927,9 @@ TYPED_TEST(AnnotatorPreset2Test, SerializationAndLoadExtension1) {
 
 TYPED_TEST(AnnotatorPreset2Test, SerializationAndLoadExtension2) {
     std::filesystem::remove(test_dump_basename_vec_bad);
-    std::filesystem::remove(test_dump_basename_vec_bad + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_bad + this->annotation->file_extension());
     std::filesystem::remove(test_dump_basename_vec_good);
-    std::filesystem::remove(test_dump_basename_vec_good + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_good + this->annotation->file_extension());
 
     this->annotation->serialize(test_dump_basename_vec_good);
     ASSERT_FALSE(this->annotation->load(test_dump_basename_vec_bad));
@@ -947,9 +944,9 @@ TYPED_TEST(AnnotatorPreset2Test, SerializationAndLoadExtension2) {
 
 TYPED_TEST(AnnotatorPreset2Test, SerializationAndLoadExtension3) {
     std::filesystem::remove(test_dump_basename_vec_bad);
-    std::filesystem::remove(test_dump_basename_vec_bad + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_bad + this->annotation->file_extension());
     std::filesystem::remove(test_dump_basename_vec_good);
-    std::filesystem::remove(test_dump_basename_vec_good + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_good + this->annotation->file_extension());
 
     this->annotation->serialize(test_dump_basename_vec_good);
     ASSERT_FALSE(this->annotation->load(test_dump_basename_vec_bad));
@@ -964,9 +961,9 @@ TYPED_TEST(AnnotatorPreset2Test, SerializationAndLoadExtension3) {
 
 TYPED_TEST(AnnotatorDynamicNoSparseTest, MergeLoadDisjoint) {
     std::filesystem::remove(test_dump_basename_vec_good + "_1");
-    std::filesystem::remove(test_dump_basename_vec_good + "_1" + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_good + "_1" + this->annotation->file_extension());
     std::filesystem::remove(test_dump_basename_vec_good + "_2");
-    std::filesystem::remove(test_dump_basename_vec_good + "_2" + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_good + "_2" + this->annotation->file_extension());
 
     {
         TypeParam annotation(5);
@@ -1000,9 +997,9 @@ TYPED_TEST(AnnotatorDynamicNoSparseTest, MergeLoadDisjoint) {
 
 TYPED_TEST(AnnotatorDynamicNoSparseTest, MergeLoad) {
     std::filesystem::remove(test_dump_basename_vec_good + "_1");
-    std::filesystem::remove(test_dump_basename_vec_good + "_1" + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_good + "_1" + this->annotation->file_extension());
     std::filesystem::remove(test_dump_basename_vec_good + "_2");
-    std::filesystem::remove(test_dump_basename_vec_good + "_2" + this->annotation->kExtension);
+    std::filesystem::remove(test_dump_basename_vec_good + "_2" + this->annotation->file_extension());
 
     this->annotation->serialize(test_dump_basename_vec_good + "_1");
 

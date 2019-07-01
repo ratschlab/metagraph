@@ -74,7 +74,7 @@ KMer<G, L>::KMer(const V &arr, size_t k) : seq_(0) {
     }
 
     for (int i = k - 1; i >= 0; --i) {
-        assert(static_cast<uint64_t>(arr[i]) <= kFirstCharMask
+        assert(static_cast<CharType>(arr[i]) <= kFirstCharMask
                  && "Too small Digit size for representing the character");
 
         seq_ = seq_ << kBitsPerChar;
@@ -84,6 +84,7 @@ KMer<G, L>::KMer(const V &arr, size_t k) : seq_(0) {
 
 template <typename G, int L>
 void KMer<G, L>::to_next(size_t k, CharType edge_label) {
+    assert(edge_label <= kFirstCharMask);
     seq_ = seq_ >> kBitsPerChar;
     seq_ |= WordType(edge_label) << static_cast<int>(kBitsPerChar * (k - 1));
 }

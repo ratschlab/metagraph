@@ -5,7 +5,6 @@
 #include <tsl/hopscotch_map.h>
 
 #include "sequence_graph.hpp"
-#include "kmer_extractor.hpp"
 
 
 class DBGHashString : public DeBruijnGraph {
@@ -83,7 +82,7 @@ class DBGHashString : public DeBruijnGraph {
 
     bool operator==(const DeBruijnGraph &other) const;
 
-    const std::string& alphabet() const { return seq_encoder_.alphabet; }
+    const std::string& alphabet() const { return alphabet_; }
 
   private:
     std::string encode_sequence(const std::string &sequence) const;
@@ -91,7 +90,7 @@ class DBGHashString : public DeBruijnGraph {
     size_t k_;
     tsl::hopscotch_map<std::string, uint64_t> indices_;
     std::vector<std::string> kmers_;
-    KmerExtractor2Bit seq_encoder_;
+    const std::string alphabet_ = "ACGTN";
 
     static constexpr auto kExtension = ".hashstrdbg";
 };

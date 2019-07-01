@@ -61,12 +61,9 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual void call_sequences(const std::function<void(const std::string&)> &callback) const override final;
 
     virtual void call_unitigs(const std::function<void(const std::string&)> &callback,
-                              size_t max_pruned_dead_end_size) const override final;
+                              size_t min_tip_size = 1) const override final;
 
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override final;
-
-    virtual void call_nodes(const std::function<void(const node_index&)> &callback,
-                            const std::function<bool()> &stop_early = [](){ return false; }) const override final;
 
     virtual void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const override final;
 
@@ -82,8 +79,8 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual void mask_dummy_kmers(size_t num_threads, bool with_pruning) final;
 
     virtual bool load_without_mask(const std::string &filename_base) final;
-    virtual bool load(const std::string &filename_base) override final;
-    virtual void serialize(const std::string &filename_base) const override final;
+    virtual bool load(const std::string &filename_base) override;
+    virtual void serialize(const std::string &filename_base) const override;
     virtual std::string file_extension() const override final { return kExtension; }
 
     virtual void switch_state(Config::StateType new_state) final;
@@ -98,6 +95,9 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual bool operator==(const DeBruijnGraph &other) const override final;
 
     virtual const std::string& alphabet() const override final;
+
+    virtual void print(std::ostream &out) const override final;
+
 
   private:
     void add_seq(const std::string &sequence, bit_vector_dyn *nodes_inserted);

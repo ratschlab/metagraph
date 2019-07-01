@@ -1,53 +1,52 @@
 #include "weighted_graph.hpp"
-
-#include <cassert>
+#include "dbg_succinct.hpp"
+#include "dbg_hash_ordered.hpp"
+#include "dbg_hash_string.hpp"
+#include "dbg_bitmap.hpp"
 
 #include "utils.hpp"
-#include "dbg_succinct.hpp"
 
 
-template <typename Weights>
-WeightedDBG<Weights>::WeightedDBG(std::shared_ptr<DeBruijnGraph> graph, Weights&& weights)
-      : graph_(std::move(graph)), weights_(std::move(weights)) {
-    assert(graph_.get());
-    assert(graph_->num_nodes() + 1 == weights_.size());
-}
+template <class DBG, typename Weights>
+bool WeightedDBG<DBG, Weights>::load(const std::string &filename) {
 
-template <typename Weights>
-bool WeightedDBG<Weights>::load(const std::string &filename) {
-    assert(graph_.get());
-
-    if (dynamic_cast<DBGSuccinct*>(graph_.get())
-            && !dynamic_cast<DBGSuccinct&>(*graph_).load_without_mask(filename))
+    if constexpr (std::is_same<DBG, DBGSuccinct>::value) {
+        if (!DBG::load_without_mask(filename))
+            return false;
+    } else if (!DBG::load(filename)) {
         return false;
+    }
 
-    if (!graph_->load(filename))
-        return false;
-
+    const auto weights_filename = utils::remove_suffix(filename, DBG::file_extension())
+                                        + DBG::file_extension()
+                                        + kWeightsExtension;
     try {
-        std::ifstream instream(utils::remove_suffix(filename, graph_->file_extension())
-                                    + graph_->file_extension()
-                                    + kWeightsExtension,
-                               std::ios::binary);
-        weights_.load(instream);
-        return graph_->num_nodes() == weights_.size();
+        std::ifstream instream(weights_filename, std::ios::binary);
+        this->weights_.load(instream);
+        return DBG::num_nodes() + 1 == this->weights_.size();
     } catch (...) {
         std::cerr << "ERROR: Cannot load graph weights from file "
-                  << filename + kWeightsExtension << std::endl;
+                  << weights_filename << std::endl;
         return false;
     }
 }
 
-template <typename Weights>
-void WeightedDBG<Weights>::serialize(const std::string &filename) const {
-    graph_->serialize(filename);
 
-    std::ofstream outstream(utils::remove_suffix(filename, graph_->file_extension())
-                                + graph_->file_extension()
+template <class DBG, typename Weights>
+void WeightedDBG<DBG, Weights>::serialize(const std::string &filename) const {
+
+    DBG::serialize(filename);
+
+    std::ofstream outstream(utils::remove_suffix(filename, DBG::file_extension())
+                                + DBG::file_extension()
                                 + kWeightsExtension,
                             std::ios::binary);
 
-    weights_.serialize(outstream);
+    this->weights_.serialize(outstream);
 }
 
-template class WeightedDBG<sdsl::int_vector<>>;
+
+template class WeightedDBG<DBGSuccinct>;
+template class WeightedDBG<DBGHashOrdered>;
+template class WeightedDBG<DBGHashString>;
+template class WeightedDBG<DBGBitmap>;

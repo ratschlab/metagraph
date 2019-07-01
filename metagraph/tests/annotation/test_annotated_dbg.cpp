@@ -11,6 +11,8 @@
 #include "boss.hpp"
 #include "annotated_dbg.hpp"
 #include "annotate_column_compressed.hpp"
+#include "annotation_converters.hpp"
+#include "static_annotators_def.hpp"
 
 
 void check_labels(const AnnotatedDBG &anno_graph,
@@ -143,10 +145,95 @@ TEST(AnnotatedDBG, ExtendGraphAddPath) {
         EXPECT_TRUE(anno_graph.label_exists("Second"));
         EXPECT_FALSE(anno_graph.label_exists("Third"));
 
+#if _DNA_GRAPH
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_second, 1));
+        EXPECT_EQ(std::vector<std::string> { "Second" },
+                  anno_graph.get_labels(seq_second, 1. * (seq_second.size() - (k + 1) + 1 - 2)
+                                                            / (seq_second.size() - (k + 1) + 1)));
+#else
         EXPECT_EQ(std::vector<std::string> { "Second" },
                   anno_graph.get_labels(seq_second, 1));
 
         check_labels(anno_graph, seq_second, { "Second" }, { "First", "Third" });
+#endif
+    }
+}
+
+TEST(AnnotatedDBG, Transform) {
+    for (size_t k = 1; k < 10; ++k) {
+
+        std::string seq_first = std::string(100, 'A')
+                                    + std::string(100, 'C');
+
+        std::string seq_second = std::string(100, 'T')
+                                    + std::string(2, 'G')
+                                    + std::string(2, 'N');
+
+        auto graph = std::make_shared<DBGSuccinct>(k + 1);
+        graph->add_sequence(seq_first);
+
+        uint64_t num_nodes = graph->num_nodes();
+        auto anno_graph = std::make_unique<AnnotatedDBG>(
+            graph,
+            std::make_unique<annotate::ColumnCompressed<>>(num_nodes)
+        );
+        EXPECT_EQ(num_nodes, anno_graph->get_graph().num_nodes());
+
+        EXPECT_FALSE(anno_graph->label_exists("First"));
+        EXPECT_FALSE(anno_graph->label_exists("Second"));
+        EXPECT_FALSE(anno_graph->label_exists("Third"));
+
+        anno_graph->annotate_sequence(seq_first, { "First" });
+
+        ASSERT_EQ(std::vector<std::string> { "First" },
+                  anno_graph->get_labels(seq_first, 1));
+
+        EXPECT_TRUE(anno_graph->label_exists("First"));
+        EXPECT_FALSE(anno_graph->label_exists("Second"));
+        EXPECT_FALSE(anno_graph->label_exists("Third"));
+
+        check_labels(*anno_graph, seq_first, { "First" }, { "Second", "Third" });
+
+        bit_vector_dyn inserted_edges(anno_graph->get_graph().num_nodes() + 1, 0);
+
+        anno_graph->graph_->add_sequence(seq_second, &inserted_edges);
+        AnnotatedDBG::insert_zero_rows(anno_graph->annotator_.get(), inserted_edges);
+
+        ASSERT_EQ(std::vector<std::string> { "First" },
+                  anno_graph->get_labels(seq_first, 1));
+
+        check_labels(*anno_graph, seq_first, { "First" }, { "Second", "Third" });
+
+        anno_graph->annotate_sequence(seq_second, { "Second" });
+
+        anno_graph = std::make_unique<AnnotatedDBG>(
+            std::move(anno_graph->graph_),
+            std::unique_ptr<AnnotatedDBG::Annotator>(
+                annotate::convert<annotate::RowFlatAnnotator>(
+                    std::move(dynamic_cast<annotate::ColumnCompressed<>&>(
+                        *anno_graph->annotator_
+                    )
+                )).release()
+            )
+        );
+
+        EXPECT_TRUE(anno_graph->label_exists("First"));
+        EXPECT_TRUE(anno_graph->label_exists("Second"));
+        EXPECT_FALSE(anno_graph->label_exists("Third"));
+
+#if _DNA_GRAPH
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph->get_labels(seq_second, 1));
+        EXPECT_EQ(std::vector<std::string> { "Second" },
+                  anno_graph->get_labels(seq_second, 1. * (seq_second.size() - (k + 1) + 1 - 2)
+                                                            / (seq_second.size() - (k + 1) + 1)));
+#else
+        EXPECT_EQ(std::vector<std::string> { "Second" },
+                  anno_graph->get_labels(seq_second, 1));
+
+        check_labels(*anno_graph, seq_second, { "Second" }, { "First", "Third" });
+#endif
     }
 }
 
@@ -213,10 +300,29 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
 
         EXPECT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
+#if _DNA_GRAPH
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_second, 1));
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_second, 1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                            / (seq_second.size() - (k + 1) + 1) + 1e-9));
+        EXPECT_EQ(std::vector<std::string> { "Second" },
+                  anno_graph.get_labels(seq_second, 1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                            / (seq_second.size() - (k + 1) + 1) - 1e-9));
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_third, 1));
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_third, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                            / (seq_third.size() - (k + 1) + 1) + 1e-9));
+        EXPECT_EQ(std::vector<std::string> { "Third" },
+                  anno_graph.get_labels(seq_third, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                            / (seq_third.size() - (k + 1) + 1) - 1e-9));
+#else
         EXPECT_EQ(std::vector<std::string> { "Second" },
                   anno_graph.get_labels(seq_second, 1));
         EXPECT_EQ(std::vector<std::string> { "Third" },
                   anno_graph.get_labels(seq_third, 1));
+#endif
 
         check_labels(anno_graph, std::string(100, 'A'), { "First", "Third" }, { "Second" });
         check_labels(anno_graph, std::string(100, 'C'), { "First" }, { "Second", "Third" });
@@ -227,9 +333,11 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
+#ifndef _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
+#endif
     }
 }
 
@@ -293,10 +401,29 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
 
         EXPECT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
+#if _DNA_GRAPH
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_second, 1));
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_second, 1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                            / (seq_second.size() - (k + 1) + 1) + 1e-9));
+        EXPECT_EQ(std::vector<std::string> { "Second" },
+                  anno_graph.get_labels(seq_second, 1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                            / (seq_second.size() - (k + 1) + 1) - 1e-9));
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_third, 1));
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_third, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                            / (seq_third.size() - (k + 1) + 1) + 1e-9));
+        EXPECT_EQ(std::vector<std::string> { "Third" },
+                  anno_graph.get_labels(seq_third, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                            / (seq_third.size() - (k + 1) + 1) - 1e-9));
+#else
         EXPECT_EQ(std::vector<std::string> { "Second" },
                   anno_graph.get_labels(seq_second, 1));
         EXPECT_EQ(std::vector<std::string> { "Third" },
                   anno_graph.get_labels(seq_third, 1));
+#endif
 
         check_labels(anno_graph, std::string(100, 'A'), { "First", "Third" }, { "Second" });
         check_labels(anno_graph, std::string(100, 'C'), { "First" }, { "Second", "Third" });
@@ -307,9 +434,11 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
+#ifndef _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
+#endif
     }
 }
 
@@ -386,10 +515,29 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
 
         EXPECT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
+#if _DNA_GRAPH
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_second, 1));
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_second, 1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                            / (seq_second.size() - (k + 1) + 1) + 1e-9));
+        EXPECT_EQ(std::vector<std::string> { "Second" },
+                  anno_graph.get_labels(seq_second, 1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                            / (seq_second.size() - (k + 1) + 1) - 1e-9));
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_third, 1));
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_third, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                            / (seq_third.size() - (k + 1) + 1) + 1e-9));
+        EXPECT_EQ(std::vector<std::string> { "Third" },
+                  anno_graph.get_labels(seq_third, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                            / (seq_third.size() - (k + 1) + 1) - 1e-9));
+#else
         EXPECT_EQ(std::vector<std::string> { "Second" },
                   anno_graph.get_labels(seq_second, 1));
         EXPECT_EQ(std::vector<std::string> { "Third" },
                   anno_graph.get_labels(seq_third, 1));
+#endif
 
         check_labels(anno_graph, std::string(100, 'A'), { "First", "Third" }, { "Second" });
         check_labels(anno_graph, std::string(100, 'C'), { "First" }, { "Second", "Third" });
@@ -400,9 +548,11 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
+#ifndef _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
+#endif
     }
 }
 
@@ -475,10 +625,29 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
 
         EXPECT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
+#if _DNA_GRAPH
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_second, 1));
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_second, 1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                            / (seq_second.size() - (k + 1) + 1) + 1e-9));
+        EXPECT_EQ(std::vector<std::string> { "Second" },
+                  anno_graph.get_labels(seq_second, 1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                            / (seq_second.size() - (k + 1) + 1) - 1e-9));
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_third, 1));
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_third, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                            / (seq_third.size() - (k + 1) + 1) + 1e-9));
+        EXPECT_EQ(std::vector<std::string> { "Third" },
+                  anno_graph.get_labels(seq_third, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                            / (seq_third.size() - (k + 1) + 1) - 1e-9));
+#else
         EXPECT_EQ(std::vector<std::string> { "Second" },
                   anno_graph.get_labels(seq_second, 1));
         EXPECT_EQ(std::vector<std::string> { "Third" },
                   anno_graph.get_labels(seq_third, 1));
+#endif
 
         check_labels(anno_graph, std::string(100, 'A'), { "First", "Third" }, { "Second" });
         check_labels(anno_graph, std::string(100, 'C'), { "First" }, { "Second", "Third" });
@@ -489,9 +658,11 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
+#ifndef _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
+#endif
     }
 }
 
@@ -567,10 +738,29 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
 
         EXPECT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
+#if _DNA_GRAPH
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_second, 1));
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_second, 1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                            / (seq_second.size() - (k + 1) + 1) + 1e-9));
+        EXPECT_EQ(std::vector<std::string> { "Second" },
+                  anno_graph.get_labels(seq_second, 1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                            / (seq_second.size() - (k + 1) + 1) - 1e-9));
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_third, 1));
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_third, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                            / (seq_third.size() - (k + 1) + 1) + 1e-9));
+        EXPECT_EQ(std::vector<std::string> { "Third" },
+                  anno_graph.get_labels(seq_third, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                            / (seq_third.size() - (k + 1) + 1) - 1e-9));
+#else
         EXPECT_EQ(std::vector<std::string> { "Second" },
                   anno_graph.get_labels(seq_second, 1));
         EXPECT_EQ(std::vector<std::string> { "Third" },
                   anno_graph.get_labels(seq_third, 1));
+#endif
 
         check_labels(anno_graph, std::string(100, 'A'), { "First", "Third" }, { "Second" });
         check_labels(anno_graph, std::string(100, 'T'), { "Second" }, { "First", "Third" });
@@ -580,9 +770,11 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
+#ifndef _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
+#endif
     }
 }
 
@@ -655,10 +847,29 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
 
         EXPECT_EQ(std::vector<std::string> { "First" },
                   anno_graph.get_labels(seq_first, 1));
+#if _DNA_GRAPH
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_second, 1));
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_second, 1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                            / (seq_second.size() - (k + 1) + 1) + 1e-9));
+        EXPECT_EQ(std::vector<std::string> { "Second" },
+                  anno_graph.get_labels(seq_second, 1. * (seq_second.size() - (k + 1) + 1 - 100)
+                                                            / (seq_second.size() - (k + 1) + 1) - 1e-9));
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_third, 1));
+        EXPECT_EQ(std::vector<std::string> {},
+                  anno_graph.get_labels(seq_third, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                            / (seq_third.size() - (k + 1) + 1) + 1e-9));
+        EXPECT_EQ(std::vector<std::string> { "Third" },
+                  anno_graph.get_labels(seq_third, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
+                                                            / (seq_third.size() - (k + 1) + 1) - 1e-9));
+#else
         EXPECT_EQ(std::vector<std::string> { "Second" },
                   anno_graph.get_labels(seq_second, 1));
         EXPECT_EQ(std::vector<std::string> { "Third" },
                   anno_graph.get_labels(seq_third, 1));
+#endif
 
         check_labels(anno_graph, std::string(100, 'A'), { "First", "Third" }, { "Second" });
         check_labels(anno_graph, std::string(100, 'T'), { "Second" }, { "First", "Third" });
@@ -668,8 +879,10 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Third" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Second" });
 
+#ifndef _DNA_GRAPH
         check_labels(anno_graph, std::string(100, 'N'),
                      k == 1 ? std::vector<std::string>{ "Second", "Third" } : std::vector<std::string>{ "Second" },
                      k == 1 ? std::vector<std::string>{ "First" } : std::vector<std::string>{ "First", "Third" });
+#endif
     }
 }

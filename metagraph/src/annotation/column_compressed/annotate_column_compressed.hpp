@@ -4,6 +4,7 @@
 
 #include <cache.hpp>
 #include <lru_cache_policy.hpp>
+#include <progress_bar.hpp>
 
 #include "annotate.hpp"
 #include "bit_vector.hpp"
@@ -70,6 +71,7 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     void call_objects(const Label &label,
                       std::function<void(Index)> callback) const override;
 
+    void convert_to_row_annotator(const std::string &outfbase) const;
     void convert_to_row_annotator(RowCompressed<Label> *annotator,
                                   size_t num_threads = 1) const;
 
@@ -79,6 +81,10 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     std::unique_ptr<IterateRows> iterator() const override;
 
+    const bitmap& get_column(const Label &label) const;
+
+    std::string file_extension() const override { return kExtension; }
+
   private:
     void set(Index i, size_t j, bool value);
     bool is_set(Index i, size_t j) const;
@@ -86,7 +92,8 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     count_labels(const std::vector<Index> &indices) const override;
 
     void add_labels(uint64_t begin, uint64_t end,
-                    RowCompressed<Label> *annotator) const;
+                    RowCompressed<Label> *annotator,
+                    ProgressBar *progress_bar) const;
     void release();
     void flush() const;
     void flush(size_t j, const bitmap &annotation_curr);
