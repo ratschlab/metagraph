@@ -15,7 +15,7 @@ void call_nonzeros(const sdsl::int_vector<> &vector,
 
     for (size_t i = begin_word; i < end_word; ++i) {
         // TODO: if the last word of vector.data() is not fully initialized
-        //       this may incorrecly evaluate to true. Though this shouldn't be
+        //       this may incorrectly evaluate to true. Though this shouldn't be
         //       a problem since the rest of the code computes the correct bounds
         if (vector.data()[i]) {
             // iterate until end, or until the next common multiple of word
