@@ -12,5 +12,5 @@ outbase=${basedir}/output_k${K}_merged.anno
 logfile==${basedir}/output_k${K}_merged.column.lsf
 if [ ! -f ${outbase}.column.annodbg ]
 then
-    echo "/usr/bin/time -v $(pwd)/../../../metagraph/build/metagengraph merge_anno -o $outbase ${datadir}/all_merged_k${K}.*.column.annodbg" | bsub -M $mem -n 1 -R "rusage[mem=${mem}]" -We 48:00 -J annoGTEx -o $logfile
+    echo "/usr/bin/time -v $(pwd)/../../../metagraph/build/metagraph merge_anno -o $outbase ${datadir}/all_merged_k${K}.*.column.annodbg" | bsub -M $mem -n 1 -R "rusage[mem=${mem}]" -We 48:00 -J annoGTEx -o $logfile
 fi

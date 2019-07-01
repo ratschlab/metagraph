@@ -5,7 +5,7 @@
 1. Compile metagraph
 2. Run this
 ```
-exe=../../metagraph/build/metagengraph
+exe=../../metagraph/build/metagraph
 
 input_fasta="../../metagraph/tests/data/transcripts_1000.fa"
 geo_fasta="data/random_seq_locations.fa"
@@ -24,7 +24,7 @@ open world_data.html
 
 1. Run server
 ```
-../../metagraph/build/metagengraph server_query -i data/test_graph -a data/test_annotation.column.annodbg --count-labels
+../../metagraph/build/metagraph server_query -i data/test_graph -a data/test_annotation.column.annodbg --count-labels
 ```
 2. Run client
 ```

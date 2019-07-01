@@ -2,7 +2,7 @@
 
 home="/cluster/home/mikhaika"
 
-exe="$home/metagengraph_DNA"
+exe="$home/metagraph_DNA"
 
 dir="$home/big_graph/gut_WGS_k31_30_4"
 graph="$dir/graph_gut_WGS_30_4_k31.dbg"

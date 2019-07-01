@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 
-exe="$(dirname ${BASH_SOURCE[0]})/../build/metagengraph"
+exe="$(dirname ${BASH_SOURCE[0]})/../build/metagraph"
 
 
 if [ $# -ne 2 ] || [[ ${1: -8} != '.kmc_suf' ]]; then

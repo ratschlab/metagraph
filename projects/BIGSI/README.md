@@ -34,7 +34,7 @@ for F in {\\\$,A,C,G,T,N}{\\\$,A,C,G,T,N}; do \
          -W 24:00 \
          -n 15 -R "rusage[mem=23000] span[hosts=1]" \
         "find ~/metagenome/data/BIGSI/ -name \"*fasta.gz\" \
-            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_release/metagengraph build -v \
+            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build_release/metagraph build -v \
                 -k 31 \
                 --reverse \
                 --parallel 30 \
@@ -58,7 +58,7 @@ for list in x*; do
          -W 96:00 \
          -n 15 -R "rusage[mem=23000] span[hosts=1]" \
         "cat ${list} \
-            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build/metagengraph annotate -v \
+            | /usr/bin/time -v ~/projects/projects2014-metagenome/metagraph/build/metagraph annotate -v \
                 -i ~/metagenome/data/BIGSI/graph \
                 --parallel 15 \
                 --anno-filename \

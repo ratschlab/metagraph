@@ -3,7 +3,7 @@
 set -e
 
 basedir=/cluster/work/grlab/projects/metagenome/data
-metagraph=/cluster/home/akahles/git/projects/2014/metagenome/metagraph/build/metagengraph
+metagraph=/cluster/home/akahles/git/projects/2014/metagenome/metagraph/build/metagraph
 K=41
 mem=50000
 threads=80

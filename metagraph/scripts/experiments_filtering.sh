@@ -2,7 +2,7 @@
 
 
 KMC="$(dirname ${BASH_SOURCE[0]})/../build/KMC/kmc"
-Metagraph="$(dirname ${BASH_SOURCE[0]})/../build/metagengraph"
+Metagraph="$(dirname ${BASH_SOURCE[0]})/../build/metagraph"
 
 if [ $# -ne 4 ]; then
     echo -e "Usage:\n$0 <fastq.gz> <trim_param> <abundance> <threshold>" >&2

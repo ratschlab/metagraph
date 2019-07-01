@@ -20,7 +20,7 @@ do
     fbase=${fbase%.sequences.fasta.gz}
     if [ ! -f ${outbase}.column.annodbg ]
     then
-        echo "/usr/bin/time -v $(pwd)/../../../metagraph/build/metagengraph annotate -i $graph -o $outbase --anno-label $fbase $fname" | bsub -M $mem -n 1 -R "rusage[mem=${mem}]" -We 24:00 -J annoGTEx -o $logfile
+        echo "/usr/bin/time -v $(pwd)/../../../metagraph/build/metagraph annotate -i $graph -o $outbase --anno-label $fbase $fname" | bsub -M $mem -n 1 -R "rusage[mem=${mem}]" -We 24:00 -J annoGTEx -o $logfile
     else
         echo "$sample already processed"
     fi

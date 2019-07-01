@@ -17,7 +17,7 @@ outbase=${outbase%.kmc_suf}
 tmp=${out_dir}/tmp.${outbase}.${RANDOM}
 mkdir -p $tmp
 
-metagraph=/cluster/home/akahles/git/software/metagraph/metagraph/build/metagengraph
+metagraph=/cluster/home/akahles/git/software/metagraph/metagraph/build/metagraph
 
 lower_bounds=(2 3 5 17 255)
 upper_bounds=(2 4 16 254 10000)

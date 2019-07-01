@@ -2,7 +2,7 @@
 
 home="/cluster/home/mikhaika"
 
-exe="$home/metagengraph_DNA"
+exe="$home/metagraph_DNA"
 
 log_dir="$home/big_graph/gut_amplicon_k31_8_4"
 graph="$home/big_graph/gut_amplicon_k31_8_4/graph_gut_AMPLICON_8_4_k31.dbg"

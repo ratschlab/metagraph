@@ -218,8 +218,8 @@ list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
 
 add_library(metagraph STATIC ${src_files})
-add_executable(metagengraph "src/main.cpp")
-set_target_properties(metagengraph PROPERTIES OUTPUT_NAME "metagengraph_${CMAKE_DBG_ALPHABET}")
+add_executable(metagraph-bin "src/main.cpp")
+set_target_properties(metagraph-bin PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
 
 set(METALIBS ${METALIBS}
   -lKMC
@@ -280,14 +280,14 @@ target_link_libraries(
 )
 
 target_link_libraries(
-  metagengraph metagraph ${METALIBS}
+  metagraph-bin metagraph ${METALIBS}
 )
 
 add_custom_target(link_target ALL
   COMMAND ${CMAKE_COMMAND} -E
   create_symlink
-    "metagengraph_${CMAKE_DBG_ALPHABET}"
-    "metagengraph"
+    "metagraph_${CMAKE_DBG_ALPHABET}"
+    "metagraph"
 )
 
 

@@ -43,7 +43,7 @@ fi
 logfile=${outdir}/output_k${K}_merged.collapse_anno.lsf
 if [ "$1" == "local" ]
 then
-    /usr/bin/time -v $(pwd)/../../../metagraph/build/metagengraph transform_anno -v -o ${outdir}/output_k${K}_merged.collapsed --rename-cols $label_file ${basedir}/output_k${K}_merged.anno.column.annodbg > $logfile 2>&1
+    /usr/bin/time -v $(pwd)/../../../metagraph/build/metagraph transform_anno -v -o ${outdir}/output_k${K}_merged.collapsed --rename-cols $label_file ${basedir}/output_k${K}_merged.anno.column.annodbg > $logfile 2>&1
 else
-    echo "/usr/bin/time -v $(pwd)/../../../metagraph/build/metagengraph transform_anno -v -o ${outdir}/output_k${K}_merged.collapsed --rename-cols $label_file ${basedir}/output_k${K}_merged.anno.column.annodbg > $logfile 2>&1" | bsub -M $mem -n 1 -R "rusage[mem=${mem}]" -We 4:00 -J annoGTEx -o /dev/null
+    echo "/usr/bin/time -v $(pwd)/../../../metagraph/build/metagraph transform_anno -v -o ${outdir}/output_k${K}_merged.collapsed --rename-cols $label_file ${basedir}/output_k${K}_merged.anno.column.annodbg > $logfile 2>&1" | bsub -M $mem -n 1 -R "rusage[mem=${mem}]" -We 4:00 -J annoGTEx -o /dev/null
 fi

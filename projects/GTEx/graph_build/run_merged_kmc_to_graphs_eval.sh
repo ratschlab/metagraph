@@ -18,6 +18,6 @@ do
         then
             continue
         fi  
-        echo "$(pwd)/../../metagraph/build/metagengraph build -p $threads -k $K -o ${outdir}/merged.${c}.t${t} --kmc ${outdir}/merged.${c}.t${t}.kmc_suf" | bsub -J kmc2dbg -o ${outdir}/merged.${c}.t${t}.kmc2dbg.log -We 20:00 -n $threads -R "rusage[mem=${mem}]" -R "span[hosts=1]"
+        echo "$(pwd)/../../metagraph/build/metagraph build -p $threads -k $K -o ${outdir}/merged.${c}.t${t} --kmc ${outdir}/merged.${c}.t${t}.kmc_suf" | bsub -J kmc2dbg -o ${outdir}/merged.${c}.t${t}.kmc2dbg.log -We 20:00 -n $threads -R "rusage[mem=${mem}]" -R "span[hosts=1]"
     done
 done

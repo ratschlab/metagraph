@@ -61,7 +61,7 @@ k=17; for i in {1..90}; do \
         "for line in \$(cat refseq_subsets/subset_$i); do \
             echo $data_root/refseq_k$k/\${line}.contigs.fasta.gz; \
         done \
-        | gtime -v ../../metagraph/build/metagengraph build -v \
+        | gtime -v ../../metagraph/build/metagraph build -v \
             --mem-cap-gb 600 -k $k -p 36 \
             -o $data_root/subgraphs_k$k/subset_${i}"; \
 done
@@ -75,7 +75,7 @@ k=29; for i in {1..55}; do \
         "for line in \$(cat refseq_subsets/subset_$i); do \
             echo $data_root/refseq_k$k/\${line}.contigs.fasta.gz; \
         done \
-        | gtime -v ../../metagraph/build/metagengraph build -v \
+        | gtime -v ../../metagraph/build/metagraph build -v \
             --mem-cap-gb 220 -k $k -p 36 -s 40 \
             -o $data_root/subgraphs_k$k/subset_${i}"; \
 done
@@ -89,7 +89,7 @@ k=35; for i in {1..55}; do \
         "for line in \$(cat refseq_subsets/subset_$i); do \
             echo $data_root/refseq_k$k/\${line}.contigs.fasta.gz; \
         done \
-        | gtime -v ../../metagraph/build/metagengraph build -v \
+        | gtime -v ../../metagraph/build/metagraph build -v \
             --mem-cap-gb 220 -k $k -p 36 -s 40 \
             -o $data_root/subgraphs_k$k/subset_${i}"; \
 done
@@ -103,7 +103,7 @@ k=71; for i in {1..50}; do \
         "for line in \$(cat refseq_subsets/subset_$i); do \
             echo $data_root/refseq_k$k/\${line}.contigs.fasta.gz; \
         done \
-        | gtime -v ../../metagraph/build/metagengraph build -v \
+        | gtime -v ../../metagraph/build/metagraph build -v \
             --mem-cap-gb 280 -k $k -p 36 -s 40 \
             -o $data_root/subgraphs_k$k/subset_${i}"; \
 done
@@ -120,7 +120,7 @@ k=17; for i in {1..90}; do \
         "for line in \$(cat refseq_subsets/subset_$i); do \
             echo $data_root/refseq_k$k/\${line}.contigs.fasta.gz; \
         done \
-        | gtime -v ../../metagraph/build/metagengraph build -v \
+        | gtime -v ../../metagraph/build/metagraph build -v \
             --graph bitmap \
             --mem-cap-gb 180 -k $k -p 36 -s 4 \
             -o $data_root/subgraphs_k$k/subset_${i}_bitmap"; \
@@ -135,7 +135,7 @@ k=29; for i in {1..55}; do \
         "for line in \$(cat refseq_subsets/subset_$i); do \
             echo $data_root/refseq_k$k/\${line}.contigs.fasta.gz; \
         done \
-        | gtime -v ../../metagraph/build/metagengraph build -v \
+        | gtime -v ../../metagraph/build/metagraph build -v \
             --graph bitmap \
             --mem-cap-gb 180 -k $k -p 36 -s 16 \
             -o $data_root/subgraphs_k$k/subset_${i}_bitmap"; \
@@ -153,7 +153,7 @@ k=17; for i in {1..20}; do \
         "for line in \$(cat refseq_subsets/subset_$i); do \
             echo $data_root/refseq_k$k/\${line}.contigs.fasta.gz; \
         done \
-        | gtime -v ../../metagraph/build/metagengraph build -v \
+        | gtime -v ../../metagraph/build/metagraph build -v \
             --graph hash \
             -k $k \
             -o $data_root/subgraphs_k$k/subset_${i}_hash"; \
@@ -168,7 +168,7 @@ k=29; for i in {1..20}; do \
         "for line in \$(cat refseq_subsets/subset_$i); do \
             echo $data_root/refseq_k$k/\${line}.contigs.fasta.gz; \
         done \
-        | gtime -v ../../metagraph/build/metagengraph build -v \
+        | gtime -v ../../metagraph/build/metagraph build -v \
             --graph hash \
             -k $k \
             -o $data_root/subgraphs_k$k/subset_${i}_hash"; \
@@ -183,7 +183,7 @@ k=35; for i in {1..20}; do \
         "for line in \$(cat refseq_subsets/subset_$i); do \
             echo $data_root/refseq_k$k/\${line}.contigs.fasta.gz; \
         done \
-        | gtime -v ../../metagraph/build/metagengraph build -v \
+        | gtime -v ../../metagraph/build/metagraph build -v \
             --graph hash \
             -k $k \
             -o $data_root/subgraphs_k$k/subset_${i}_hash"; \
@@ -198,7 +198,7 @@ k=71; for i in {1..20}; do \
         "for line in \$(cat refseq_subsets/subset_$i); do \
             echo $data_root/refseq_k$k/\${line}.contigs.fasta.gz; \
         done \
-        | gtime -v ../../metagraph/build/metagengraph build -v \
+        | gtime -v ../../metagraph/build/metagraph build -v \
             --graph hash \
             -k $k \
             -o $data_root/subgraphs_k$k/subset_${i}_hash"; \
@@ -213,7 +213,7 @@ ls -1aS $HOME/metagenome/data/refseq/refseq_var_k/subgraphs_k*/subset_*.dbg \
         'memcap="$(($(du --block-size=1M % | cut -f1) * 5 / 4 + 100))"; \
         bsub -J "stats_succinct" -W 3:00 -n 1 -R "rusage[mem=$memcap] span[hosts=1]" \
              -oo %.stats \
-            "gtime -v ../../metagraph/build/metagengraph stats %"'
+            "gtime -v ../../metagraph/build/metagraph stats %"'
 ```
 
 ```bash
@@ -222,7 +222,7 @@ ls -1aS $HOME/metagenome/data/refseq/refseq_var_k/subgraphs_k*/subset_*.bitmapdb
         'memcap="$(($(du --block-size=1M % | cut -f1) * 5 / 4 + 100))"; \
         bsub -J "stats_bitmap" -W 3:00 -n 1 -R "rusage[mem=$memcap] span[hosts=1]" \
              -oo %.stats \
-            "gtime -v ../../metagraph/build/metagengraph stats %"'
+            "gtime -v ../../metagraph/build/metagraph stats %"'
 ```
 
 ```bash
@@ -231,7 +231,7 @@ ls -1aS $HOME/metagenome/data/refseq/refseq_var_k/subgraphs_k*/subset_*.orhashdb
         'memcap="$(($(du --block-size=1M % | cut -f1) * 6))"; \
         bsub -J "stats_hash" -W 3:00 -n 1 -R "rusage[mem=$memcap] span[hosts=1]" \
              -oo %.stats \
-            "gtime -v ../../metagraph/build/metagengraph stats %"'
+            "gtime -v ../../metagraph/build/metagraph stats %"'
 ```
 
 
@@ -286,7 +286,7 @@ for k in {10..31}; do \
     bsub -J build_bitmap_k${k} \
          -oo $data_root/graph_bitmap.lsf \
          -W 20:00 -n 6 -R "rusage[mem=10000] span[hosts=1]" \
-        "gtime -v ../../metagraph/build_release/metagengraph build -v \
+        "gtime -v ../../metagraph/build_release/metagraph build -v \
             --graph bitmap \
             --mem-cap-gb 40 -k $k -p 12 \
             -o $data_root/graph_bitmap \
@@ -302,7 +302,7 @@ for k in {10..85}; do \
     bsub -J build_hash_k${k} \
          -oo $data_root/graph_hash.lsf \
          -W 20:00 -n 1 -R "rusage[mem=100000] span[hosts=1]" \
-        "gtime -v ../../metagraph/build_release/metagengraph build -v \
+        "gtime -v ../../metagraph/build_release/metagraph build -v \
             --graph hash \
             -k $k \
             -o $data_root/graph_hash \
@@ -315,7 +315,7 @@ for k in {10..85}; do \
     bsub -J build_hashstr_k${k} \
          -oo $data_root/graph_hashstr.lsf \
          -W 20:00 -n 1 -R "rusage[mem=180000] span[hosts=1]" \
-        "gtime -v ../../metagraph/build_release/metagengraph build -v \
+        "gtime -v ../../metagraph/build_release/metagraph build -v \
             --graph hashstr \
             -k $k \
             -o $data_root/graph_hashstr \
@@ -332,7 +332,7 @@ ls -1aS $HOME/metagenome/data/refseq/refseq_var_k/complete.1161.1.genomic.fna.gz
         'memcap="$(($(du --block-size=1M % | cut -f1) * 5 / 4 + 100))"; \
         bsub -J "stats_succinct" -W 3:00 -n 1 -R "rusage[mem=$memcap] span[hosts=1]" \
              -oo %.stats \
-            "gtime -v ../../metagraph/build/metagengraph stats %"'
+            "gtime -v ../../metagraph/build/metagraph stats %"'
 ```
 
 ```bash
@@ -341,7 +341,7 @@ ls -1aS $HOME/metagenome/data/refseq/refseq_var_k/complete.1161.1.genomic.fna.gz
         'memcap="$(($(du --block-size=1M % | cut -f1) * 5 / 4 + 100))"; \
         bsub -J "stats_bitmap" -W 3:00 -n 1 -R "rusage[mem=$memcap] span[hosts=1]" \
              -oo %.stats \
-            "gtime -v ../../metagraph/build/metagengraph stats %"'
+            "gtime -v ../../metagraph/build/metagraph stats %"'
 ```
 
 ```bash
@@ -350,7 +350,7 @@ ls -1aS $HOME/metagenome/data/refseq/refseq_var_k/complete.1161.1.genomic.fna.gz
         'memcap="$(($(du --block-size=1M % | cut -f1) * 6))"; \
         bsub -J "stats_hash" -W 3:00 -n 1 -R "rusage[mem=$memcap] span[hosts=1]" \
              -oo %.stats \
-            "gtime -v ../../metagraph/build/metagengraph stats %"'
+            "gtime -v ../../metagraph/build/metagraph stats %"'
 ```
 
 ```bash
@@ -359,5 +359,5 @@ ls -1aS $HOME/metagenome/data/refseq/refseq_var_k/complete.1161.1.genomic.fna.gz
         'memcap="$(($(du --block-size=1M % | cut -f1) * 30))"; \
         bsub -J "stats_hashstr" -W 3:00 -n 1 -R "rusage[mem=$memcap] span[hosts=1]" \
              -oo %.stats \
-            "gtime -v ../../metagraph/build/metagengraph stats %"'
+            "gtime -v ../../metagraph/build/metagraph stats %"'
 ```

@@ -5,10 +5,10 @@ DATA="$DATA_PATH/*[^s].fasta.gz"
 
 NUM_THREADS=5
 
-if [ -f metagengraph ]; then
-  exe="./metagengraph"
+if [ -f metagraph ]; then
+  exe="./metagraph"
 else
-  exe="$(dirname ${BASH_SOURCE[0]})/../build/metagengraph"
+  exe="$(dirname ${BASH_SOURCE[0]})/../build/metagraph"
 fi
 
 echo Test $exe

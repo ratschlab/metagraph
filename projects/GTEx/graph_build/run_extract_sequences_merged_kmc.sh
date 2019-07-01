@@ -17,6 +17,6 @@ do
     fbase=$(basename $fname)
     if [ ! -f ${kmcdir}/${fbase%.dbg}.fasta.gz ]
     then
-        echo "$(pwd)/../../../metagraph/build/metagengraph transform --to-fasta -v -o ${kmcdir}/${fbase%.dbg}.sequences ${fname}" | bsub -M $mem -n $threads -R "rusage[mem=${pmem}]" -We 12:00 -n 1 -J gtex_seq -o /dev/null
+        echo "$(pwd)/../../../metagraph/build/metagraph transform --to-fasta -v -o ${kmcdir}/${fbase%.dbg}.sequences ${fname}" | bsub -M $mem -n $threads -R "rusage[mem=${pmem}]" -We 12:00 -n 1 -J gtex_seq -o /dev/null
     fi
 done

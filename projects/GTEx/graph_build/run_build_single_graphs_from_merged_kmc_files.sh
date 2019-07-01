@@ -13,6 +13,6 @@ do
     fbase=$(basename $fname)
     if [ ! -f ${kmcdir}/${fbase%.kmc_suf}.dbg ]
     then
-        ../../../metagraph/build/metagengraph build -p $threads -v -k $K -o ${kmcdir}/${fbase%.kmc_suf} --kmc ${fname} >> ${kmcdir}/all_merged_k${K}.run.log
+        ../../../metagraph/build/metagraph build -p $threads -v -k $K -o ${kmcdir}/${fbase%.kmc_suf} --kmc ${fname} >> ${kmcdir}/all_merged_k${K}.run.log
     fi
 done

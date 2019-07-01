@@ -45,8 +45,8 @@ do
     if [ "$1" == "local" ]
     then
         echo processing $tissue, writing log to $logfile
-        /usr/bin/time -v $(pwd)/../../../metagraph/build/metagengraph merge_anno -v -o ${outdir}/output_k${K}_merged.${tissue} $files > $logfile 2>&1
+        /usr/bin/time -v $(pwd)/../../../metagraph/build/metagraph merge_anno -v -o ${outdir}/output_k${K}_merged.${tissue} $files > $logfile 2>&1
     else
-        echo "/usr/bin/time -v $(pwd)/../../../metagraph/build/metagengraph merge_anno -v -o ${outdir}/output_k${K}_merged.${tissue} $files > $logfile 2>&1" | bsub -M $mem -n 1 -R "rusage[mem=${mem}]" -We 4:00 -J annoGTEx -o /dev/null
+        echo "/usr/bin/time -v $(pwd)/../../../metagraph/build/metagraph merge_anno -v -o ${outdir}/output_k${K}_merged.${tissue} $files > $logfile 2>&1" | bsub -M $mem -n 1 -R "rusage[mem=${mem}]" -We 4:00 -J annoGTEx -o /dev/null
     fi
 done

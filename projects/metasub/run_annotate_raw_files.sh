@@ -17,7 +17,7 @@ do
     fname2=${fname%_1.fastq.gz}_2.fastq.gz
     if [ ! -f ${outbase}.column.annodbg ]
     then
-        echo "/usr/bin/time -v $(pwd)/../../metagraph/build/metagengraph annotate -i $graph -o $outbase --anno-filename $fname $name2 > $logfile 2>&1" | bsub -M $mem -n 1 -R "rusage[mem=${mem}]" -We 4:00 -J anno -o /dev/null
+        echo "/usr/bin/time -v $(pwd)/../../metagraph/build/metagraph annotate -i $graph -o $outbase --anno-filename $fname $name2 > $logfile 2>&1" | bsub -M $mem -n 1 -R "rusage[mem=${mem}]" -We 4:00 -J anno -o /dev/null
     else
         echo "$sample already processed"
     fi

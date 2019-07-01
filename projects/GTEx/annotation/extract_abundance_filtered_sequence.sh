@@ -18,7 +18,7 @@ tmp=${out_dir}/tmp.${outbase}.${RANDOM}
 mkdir -p $tmp
 
 module load kmc
-metagraph=../../metagraph/build/metagengraph
+metagraph=../../metagraph/build/metagraph
 
 lower_bounds=(2 3 5 17 255)
 upper_bounds=(2 4 16 254 10000)
