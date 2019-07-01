@@ -1,5 +1,17 @@
 #include "int_vector.hpp"
 
+template <typename Int, class Callback>
+void call_range(const uint64_t* data,
+                uint64_t begin, uint64_t end,
+                Callback callback) {
+    auto end_it = reinterpret_cast<const Int*>(data) + end;
+
+    for (auto it = reinterpret_cast<const Int*>(data) + begin; it < end_it; ++it, ++begin) {
+        if (*it)
+            callback(begin, *it);
+    }
+}
+
 void call_nonzeros(const sdsl::int_vector<> &vector,
                    uint64_t begin, uint64_t end,
                    std::function<void(uint64_t, uint64_t)> callback) {
@@ -11,23 +23,34 @@ void call_nonzeros(const sdsl::int_vector<> &vector,
     assert((end_word << 6) >= end * vector.width());
     assert(begin_word < end_word);
 
-    size_t lcm = std::lcm(64, vector.width());
+    switch (vector.width()) {
+        case 64: { call_range<uint64_t>(vector.data(), begin, end, callback); } break;
+        case 32: { call_range<uint32_t>(vector.data(), begin, end, callback); } break;
+        case 16: { call_range<uint16_t>(vector.data(), begin, end, callback); } break;
+        case 8: { call_range<uint8_t>(vector.data(), begin, end, callback); } break;
+        default: {
+            // vector.width() is not a power of two
+            auto it = begin;
+            size_t lcm = std::lcm(64, vector.width());
+            for (size_t i = begin_word; i < end_word; ++i) {
+                if (vector.data()[i]) {
+                    it = std::max(it, (i << 6) / vector.width());
 
-    for (size_t i = begin_word; i < end_word; ++i) {
-        // TODO: if the last word of vector.data() is not fully initialized
-        //       this may incorrectly evaluate to true. Though this shouldn't be
-        //       a problem since the rest of the code computes the correct bounds
-        if (vector.data()[i]) {
-            // iterate until end, or until the next common multiple of word
-            // size and vector width
-            auto it = std::max(begin, (i << 6) / vector.width());
-            auto end_it = (((it + 1) * vector.width() + lcm - 1) / lcm) * lcm / vector.width();
-            i = ((end_it * vector.width()) >> 6) - 1;
+                    // set end iterator to next common multiple of vector.width() and 64
+                    auto end_it = ((it + 1) * vector.width() + lcm - 1)
+                        / lcm * lcm / vector.width();
+                    end_it = std::min(end, end_it);
 
-            end_it = std::min(end_it, end);
-            for (; it < end_it; ++it) {
-                if (vector[it] != 0)
-                    callback(it, vector[it]);
+                    for (; it < end_it; ++it) {
+                        if (vector[it] != 0)
+                            callback(it, vector[it]);
+                    }
+
+                    if (it == end)
+                        break;
+
+                    i = ((it * vector.width()) >> 6) - 1;
+                }
             }
         }
     }
