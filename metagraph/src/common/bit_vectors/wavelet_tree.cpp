@@ -2,16 +2,13 @@
 
 #include <cassert>
 #include "serialization.hpp"
+#include "utils.hpp"
 
 
 // TODO: run benchmarks and optimize these parameters
 const size_t MAX_ITER_WAVELET_TREE_STAT = 1000;
 const size_t MAX_ITER_WAVELET_TREE_DYN = 0;
 const size_t MAX_ITER_WAVELET_TREE_SMALL = 10;
-
-namespace utils {
-    uint32_t code_length(uint64_t a);
-}
 
 
 /////////////////////////////////
