@@ -129,10 +129,15 @@ BRWTBottomUpBuilder::merge(std::vector<NodeBRWT> &&nodes,
         }, i));
     }
 
+    std::unique_ptr<bit_vector_small> parent_index_compressed;
+
+    results.push_back(thread_pool.enqueue([&]() {
+        parent_index_compressed.reset(new bit_vector_small(parent_index));
+    }));
+
     std::for_each(results.begin(), results.end(), [](auto &res) { res.wait(); });
 
-    return { std::move(parent),
-                std::make_unique<bit_vector_small>(std::move(parent_index)) };
+    return { std::move(parent), std::move(parent_index_compressed) };
 }
 
 template <typename T>
