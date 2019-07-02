@@ -557,7 +557,7 @@ void DBGSuccinct::print(std::ostream &out) const {
 
     uint64_t valid_count = 0;
 
-    for (uint64_t i = 1; i < boss.num_edges(); i++) {
+    for (uint64_t i = 1; i <= boss.num_edges(); i++) {
         out << i << "\t" << boss.get_last(i)
                  << "\t" << boss.get_node_str(i)
                  << "\t" << boss.decode(boss.get_W(i) % boss.alph_size)
