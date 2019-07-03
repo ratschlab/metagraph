@@ -358,8 +358,8 @@ public:
         is_bifurcation = decltype(is_join)(graph.num_nodes() + 1);
 
         #pragma omp parallel for num_threads(get_num_threads())
-        for (uint64_t node = 0; node <= graph.num_nodes(); node += 8) {
-            for (int64_t i = node; i < node + 8 && i <= graph.num_nodes(); ++i) {
+        for (uint64_t node = 0; node <= graph.num_nodes(); node += 64) {
+            for (int64_t i = node; i < node + 64 && i <= graph.num_nodes(); ++i) {
                 if (!i)
                     continue;
                 is_split[i] = node_is_split_raw(i);
