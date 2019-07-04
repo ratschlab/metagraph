@@ -7,7 +7,7 @@
 
 bool is_unreliable_unitig(const std::string &sequence,
                           const DeBruijnGraph &graph,
-                          const IWeighted<DeBruijnGraph::node_index> &node_weights,
+                          const DBGWeights<> &node_weights,
                           uint64_t min_median_abundance) {
     assert(sequence.size() >= graph.get_k());
 
@@ -42,7 +42,7 @@ int cleaning_pick_kmer_threshold(const uint64_t *kmer_covg, size_t arrlen,
                                  double *false_pos_ptr, double *false_neg_ptr);
 
 uint64_t estimate_min_kmer_abundance(const bitmap &node_mask,
-                                     const IWeighted<DeBruijnGraph::node_index> &node_weights,
+                                     const DBGWeights<> &node_weights,
                                      uint64_t fallback_cutoff) {
     std::vector<uint64_t> hist;
     node_mask.call_ones([&](auto i) {

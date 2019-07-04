@@ -45,7 +45,7 @@ TEST(kmc_parser, OpenBadFile) {
     bool exception_happened = false;
     try {
         ASSERT_FALSE(exception_happened);
-        read_kmers(kTestDumpBothStrandsBasename + "_invalid", {});
+        read_kmers(kTestDumpBothStrandsBasename + "_invalid", [&](std::string&&) {});
         ASSERT_TRUE(exception_happened);
     } catch (...) {
         exception_happened = true;

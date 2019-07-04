@@ -81,39 +81,25 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     }
 }
 
-bool graph_has_weights_file(const std::string &filename) {
-    std::ifstream f(filename + ".weights");
-    return f.good();
-}
-
 std::string remove_graph_extension(const std::string &filename) {
     return utils::remove_suffix(filename, ".dbg", ".orhashdbg", ".bitmapdbg");
 }
 
 template <class Graph = BOSS>
 std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
-    Graph *graph;
+    Graph *graph = new Graph(2);
 
-    if constexpr(std::is_same<BOSS, Graph>::value) {
-        graph = new Graph(2);
-
-    } else if constexpr(!std::is_base_of<DeBruijnGraph, Graph>::value) {
-        // TODO What if there were many graph mixins and any number of them could be present?
-        //   Consider an Entity Component System or boost.mixin (options for runtime/dynamic mixin)
-        static_assert(std::is_base_of<IWeighted<DeBruijnGraph::node_index>, Graph>::value);
-        graph = new Graph(2);
-
-    } else {
-        if (graph_has_weights_file(filename)) {
-            graph = new WeightedDBG<Graph>(2);
-        } else {
-            graph = new Graph(2);
-        }
-    }
     if (!graph->load(filename)) {
         std::cerr << "ERROR: can't load graph from file " << filename << std::endl;
         delete graph;
         exit(1);
+    }
+    if constexpr (std::is_base_of<DeBruijnGraph, Graph>::value) {
+        if (!graph->load_extensions(filename)) {
+            std::cerr << "ERROR: can't load graph extensions for " << filename << std::endl;
+            delete graph;
+            exit(1);
+        }
     }
     return std::shared_ptr<Graph> { graph };
 }
@@ -618,17 +604,16 @@ void print_stats(const DeBruijnGraph &graph) {
     std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
     std::cout << "canonical mode: " << (graph.is_canonical_mode() ? "yes" : "no") << std::endl;
 
-    if (dynamic_cast<const IWeighted<DeBruijnGraph::node_index>*>(&graph)) {
-        const auto &weighted = dynamic_cast<const IWeighted<DeBruijnGraph::node_index>&>(graph);
+    if (auto weighted = graph.get_extension<DBGWeights<>>()) {
         double sum_weights = 0;
         for (uint64_t i = 1; i <= graph.num_nodes(); ++i) {
-            sum_weights += weighted.get_weight(i);
+            sum_weights += weighted->get_weight(i);
         }
         std::cout << "sum weights: " << sum_weights << std::endl;
 
         if (utils::get_verbose()) {
             for (uint64_t i = 1; i <= graph.num_nodes(); ++i) {
-                std::cout << weighted.get_weight(i) << " ";
+                std::cout << weighted->get_weight(i) << " ";
             }
             std::cout << std::endl;
         }
@@ -945,12 +930,8 @@ int main(int argc, const char *argv[]) {
                 if (config->count_kmers) {
                     sdsl::int_vector<> kmer_counts;
                     graph_data.initialize_boss(boss_graph.get(), &kmer_counts);
-                    auto weighted_graph = std::make_unique<WeightedDBGSuccinct>(
-                        boss_graph.release(),
-                        config->canonical
-                    );
-                    weighted_graph->set_weights(std::move(kmer_counts));
-                    graph.reset(weighted_graph.release());
+                    graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
+                    graph->add_extension(std::make_shared<DBGWeights<>>(std::move(kmer_counts)));
                 } else {
                     graph_data.initialize_boss(boss_graph.get());
                     graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
@@ -1079,6 +1060,29 @@ int main(int argc, const char *argv[]) {
                 );
             }
 
+            //TODO kmer_to_node is slow for DBGSuccinct--
+            //     accumulate counts in KMC-order and then sort (sorted_multiset)
+            if (!config->kmc_counts.empty()) {
+                sdsl::int_vector<> kmer_counts;
+                kmer_counts.resize(graph->num_nodes() + 1);
+
+                if (!std::ifstream(config->kmc_counts).good()) {
+                    std::cerr << "Error: kmc counts file " << config->kmc_counts
+                              << " not found" << std::endl;
+                    exit(1);
+                }
+                kmc::read_kmers(
+                    config->kmc_counts,
+                    [&](std::string&& kmer, uint32_t count) {
+                        kmer_counts[graph->kmer_to_node(kmer)] = count;
+                    },
+                    1ull,
+                    std::numeric_limits<uint64_t>::max()
+                );
+
+                graph->add_extension(std::make_shared<DBGWeights<>>(std::move(kmer_counts)));
+            }
+
             if (config->verbose)
                 std::cout << "Graph construction finished in "
                           << timer.elapsed() << "sec" << std::endl;
@@ -1096,6 +1100,7 @@ int main(int argc, const char *argv[]) {
                 }
 
                 graph->serialize(config->outfbase);
+                graph->serialize_extensions(config->outfbase);
             }
 
             return 0;
@@ -1633,7 +1638,7 @@ int main(int argc, const char *argv[]) {
 
             auto graph = load_critical_dbg(files.at(0));
 
-            auto node_weights = std::dynamic_pointer_cast<const IWeighted<DeBruijnGraph::node_index>>(graph);
+            auto node_weights = graph->get_extension<DBGWeights<>>();
             std::unique_ptr<MaskedDeBruijnGraph> subgraph;
 
             // TODO: fix unitig extraction from subgraph in order for this

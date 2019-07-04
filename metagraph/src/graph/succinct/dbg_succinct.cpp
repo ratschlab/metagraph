@@ -399,6 +399,7 @@ bool DBGSuccinct::load(const std::string &filename) {
         return false;
     }
 
+    //TODO call load/serialize extensions from all load/serialize methods (?)
     return true;
 }
 

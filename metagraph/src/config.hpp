@@ -85,6 +85,7 @@ class Config {
     std::string accession2taxid;
     std::string taxonomy_nodes;
     std::string taxonomy_map;
+    std::string kmc_counts;
 
     enum IdentityType {
         NO_IDENTITY = -1,

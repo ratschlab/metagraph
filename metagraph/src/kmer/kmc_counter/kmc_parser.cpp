@@ -9,9 +9,21 @@ namespace kmc {
 
 const auto kFileSuffixes = { ".kmc_suf", ".kmc_pre" };
 
-
 void read_kmers(const std::string &kmc_filename,
                 const std::function<void(std::string&&)> &callback,
+                uint64_t min_count,
+                uint64_t max_count) {
+    read_kmers(kmc_filename,
+               [&](std::string&& sequence, uint32_t count) {
+                    (void)count;
+                    callback(std::move(sequence));
+               },
+               min_count,
+               max_count);
+}
+
+void read_kmers(const std::string &kmc_filename,
+                const std::function<void(std::string&&, uint32_t)> &callback,
                 uint64_t min_count,
                 uint64_t max_count) {
     std::string kmc_base_filename = kmc_filename;
@@ -34,10 +46,10 @@ void read_kmers(const std::string &kmc_filename,
     uint64 count;
 
     while (kmc_database.ReadNextKmer(kmer, count)) {
-        callback(kmer.to_string());
+        callback(kmer.to_string(), count);
         if (kmc_database.GetBothStrands()) {
             kmer.reverse();
-            callback(kmer.to_string());
+            callback(kmer.to_string(), count);
         }
     }
     kmc_database.Close();

@@ -429,6 +429,50 @@ namespace utils {
 
     template<class T> struct dependent_false : std::false_type {};
 
+    // class for managing a collection of generic extensions to some object
+    template <class T>
+    class Extension {
+      public:
+        virtual bool load(const T&, const std::string &filename_base) = 0;
+        virtual void serialize(const T&, const std::string &filename_base) const = 0;
+    };
+
+    template <class T>
+    class Extensions {
+      public:
+        virtual ~Extensions() {};
+
+        template <class ExtensionType>
+        std::shared_ptr<ExtensionType> get_extension() const {
+            static_assert(std::is_base_of<Extension<T>, ExtensionType>::value);
+            for (auto extension : extensions_) {
+                if (auto match = std::dynamic_pointer_cast<ExtensionType>(extension))
+                    return match;
+            }
+            return nullptr;
+        };
+
+        void add_extension(std::shared_ptr<Extension<T>> extension) {
+            extensions_.push_back(extension);
+        };
+
+        bool load_extensions(const std::string &filename_base) const {
+            for (auto extension : extensions_) {
+                if (!extension->load(*dynamic_cast<const T*>(this), filename_base))
+                    return false;
+            }
+            return true;
+        };
+        void serialize_extensions(const std::string &filename_base) const {
+            for (auto extension : extensions_) {
+                extension->serialize(*dynamic_cast<const T*>(this), filename_base);
+            }
+        };
+
+      private:
+        std::vector<std::shared_ptr<Extension<T>>> extensions_;
+    };
+
 } // namespace utils
 
 template <typename T>

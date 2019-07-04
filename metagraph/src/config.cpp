@@ -87,6 +87,8 @@ Config::Config(int argc, const char *argv[]) {
             print_graph_internal_repr = true;
         } else if (!strcmp(argv[i], "--count-kmers")) {
             count_kmers = true;
+        } else if (!strcmp(argv[i], "--kmc-counts")) {
+            kmc_counts = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--reverse")) {
             reverse = true;
         } else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--canonical")) {
@@ -552,9 +554,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case CLEAN: {
-            fprintf(stderr, "Usage: %s clean -o <outfile-base> [options] GRAPH.\n\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for build:\n");
+            fprintf(stderr, "Usage: %s clean -o <outfile-base> [options] GRAPH\n\n", prog_name.c_str());
+            fprintf(stderr, "Available options for clean:\n");
             fprintf(stderr, "\t   --min-count [INT] \t\tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \t\tmax k-mer abundance, excluding [inf]\n");
             fprintf(stderr, "\t   --prune-tips [INT] \t\tprune all dead ends shorter than this value [1]\n");
@@ -662,7 +663,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         } break;
         case ANNOTATE: {
             fprintf(stderr, "Usage: %s annotate -i <GRAPH> [options] FILE1 [[FILE2] ...]\n"
-                            "\tEach file is given in FASTA, FASTQ, or VCF format.\n"
+                            "\tEach file is given in FASTA, FASTQ, VCF, or KMC format.\n"
                             "\tNote that VCF files must be in plain text or bgzip format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
