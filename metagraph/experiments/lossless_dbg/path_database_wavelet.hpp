@@ -164,6 +164,7 @@ public:
 #ifndef FULL_INCOMING_TABLE
                 if (current_table_size > 1) {
                     incoming_table_builder.pop_back();
+                    delimiter_vector.pop_back();
                 }
         #endif
             }
@@ -233,7 +234,14 @@ public:
         db.incoming_table.graph = graph;
         db.routing_table.load(routing_table_file);
         db.incoming_table.joins.load(joins_file);
-        assert(db.incoming_table.joins.rank0(db.incoming_table.joins.size()));
+
+        assert((db.incoming_table.joins.rank0(db.incoming_table.joins.size()) ==
+               db.incoming_table.edge_multiplicity_table.size() || [&](){
+            PRINT_VAR(db.incoming_table.joins.rank1(db.incoming_table.joins.size()));
+            PRINT_VAR(db.incoming_table.joins.rank0(db.incoming_table.joins.size()));
+            PRINT_VAR(db.incoming_table.edge_multiplicity_table.size());
+            return false;
+        }()));
         return db;
     }
 
