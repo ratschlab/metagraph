@@ -15,6 +15,7 @@
 #include "dynamic_routing_table.hpp"
 #include "dynamic_incoming_table.hpp"
 #include "utils.hpp"
+#include "utilities.hpp"
 #include "unix_tools.hpp"
 #include "threading.hpp"
 
@@ -89,13 +90,16 @@ public:
     }
 
     vector<string> decode_all_reads() const {
+        VerboseTimer decompression_timer("decompressing reads");
         auto reads = vector<string>();
+        #pragma omp parallel for reduction(append: reads)
         for(node_index node=1;node<=this->graph.num_nodes();node++) {
             auto count = number_of_reads_starting_at_node(node);
             for(auto relative_index=0;relative_index<count;relative_index++) {
                 reads.push_back(decode({node,relative_index}));
             }
         }
+        this->statistics["decompression_time"] = decompression_timer.finished();
         return reads;
     }
 

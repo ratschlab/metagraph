@@ -45,22 +45,36 @@ int main_decompressor(int argc, char *argv[]) {
                                          "Folder where to store the compressed files.",
                                          true,
                                          "",
-                                         "string");
+                                         "string",cmd);
     TCLAP::ValueArg<std::string> outputArg("o",
                                           "output",
                                           "FASTA/Q file that should be compressed",
                                           true,
                                           "",
-                                          "string");
-    cmd.add(inputArg);
-    cmd.add(outputArg);
+                                          "string",cmd);
+    TCLAP::ValueArg<std::string> statisticsArg("s",
+                                               "statistics",
+                                               "Filename of json file that will output statistics about compressed file.",
+                                               false,
+                                               "statistics.json",
+                                               "filename",cmd);
+    TCLAP::ValueArg<int> numThreadsArg("p",
+                                       "threads",
+                                       "Number of threads to use for parallel computation.",
+                                       false,
+                                       1,
+                                       "int",cmd);
     cmd.parse(argc, argv);
     auto input_folder = inputArg.getValue();
     auto output_filename = outputArg.getValue();
+    omp_set_num_threads(numThreadsArg.getValue());
+    set_num_threads(numThreadsArg.getValue());
+    auto statistics_filename = statisticsArg.getValue();
     auto db = PathDatabaseWavelet<>::deserialize(input_folder);
-    //auto reads = db.decode_all_reads();
-    //write_reads_to_fasta(reads,output_filename);
-    throw "Fixme";
+    auto reads = db.decode_all_reads();
+    auto statistics = db.get_statistics(0);
+    save_string(statistics.dump(4),statistics_filename);
+    write_reads_to_fasta(reads,output_filename);
 
     return 0;
 }

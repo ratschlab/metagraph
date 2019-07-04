@@ -1,4 +1,3 @@
-#pragma clang diagnostic push
 #pragma ide diagnostic ignored "openmp-use-default-none"
 //
 //  path_database_baseline.hpp
@@ -218,7 +217,7 @@ public:
         cerr << "Finished serializing the path encoder in " << timer.elapsed() << " sec." << endl;
     }
 
-    static PathDatabaseWaveletCore deserialize(const fs::path& folder) {
+    static auto deserialize(const fs::path& folder) {
         ifstream edge_multiplicity_file(folder / "edge_multiplicity.bin");
         ifstream routing_table_file(folder / "routing_table.bin");
         ifstream joins_file(folder / "joins.bin");
@@ -228,7 +227,7 @@ public:
                 new DBGSuccinct(21)
                 };
         graph->load(graph_filename);
-        auto db = PathDatabaseWaveletCore(graph);
+        auto db = QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableT,IncomingTableT>>>(graph);
         db.incoming_table.edge_multiplicity_table.load(edge_multiplicity_file);
         db.routing_table.load(routing_table_file);
         db.incoming_table.joins.load(joins_file);
@@ -289,7 +288,7 @@ public:
 
 
 //protected:
-    json statistics;
+    mutable json statistics;
     RoutingTableT routing_table;
     IncomingTableT incoming_table;
 
@@ -304,4 +303,3 @@ using PathDatabaseWaveletWithtoutTransformation = QueryEnabler<DecodeEnabler<Pat
 
 #endif /* path_database_baseline_hpp */
 
-#pragma clang diagnostic pop

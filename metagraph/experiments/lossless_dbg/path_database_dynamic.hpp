@@ -31,19 +31,7 @@ using namespace std;
 // say to Mikhail that "de_bruijn_graph" instead of "metagraph/de_bruijn_graph" is the same violation as this
 using node_index = DeBruijnGraph::node_index;
 
-class VerboseTimer {
-public:
-    VerboseTimer(string procedure_name) : procedure_name(procedure_name) {
-        cerr << "Started " << procedure_name << endl;
-    }
-    double finished() {
-        double elapsed = timer.elapsed();
-        cerr << "Finished " << procedure_name << " in " << elapsed << " sec." << endl;
-        return elapsed;
-    }
-    string procedure_name;
-    Timer timer;
-};
+
 
 
 using DefaultDynamicRoutingTable = DynamicRoutingTable<>;

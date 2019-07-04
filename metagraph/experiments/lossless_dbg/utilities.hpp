@@ -122,6 +122,10 @@ inline void append_vectors(std::vector<T>& output,std::vector<T>& input)
 }
 
 #pragma omp declare reduction(append : \
+    std::vector<string> : \
+    append_vectors(omp_out, omp_in))
+
+#pragma omp declare reduction(append : \
     std::vector<char> : \
     append_vectors(omp_out, omp_in))
 
@@ -510,6 +514,20 @@ public:
 
 
     Test t;
+};
+
+class VerboseTimer {
+public:
+    VerboseTimer(string procedure_name) : procedure_name(procedure_name) {
+        cerr << "Started " << procedure_name << endl;
+    }
+    double finished() {
+        double elapsed = timer.elapsed();
+        cerr << "Finished " << procedure_name << " in " << elapsed << " sec." << endl;
+        return elapsed;
+    }
+    string procedure_name;
+    Timer timer;
 };
 
 inline BOSS* dbg_succ_graph_constructor(const vector<string> &reads,
