@@ -39,10 +39,10 @@ using node_index = SequenceGraph::node_index;
 
 template <typename DB>
 vector<string> decompress(fs::path input_folder, const fs::path& output_filename, fs::path statistics_filename) {
-    auto db = PathDatabaseWavelet<>::deserialize(input_folder);
+    auto db = DB::template deserialize<DB>(input_folder);
+    auto reads = db.decode_all_reads();
     auto statistics = db.get_statistics(0);
     save_string(statistics.dump(4),statistics_filename);
-    auto reads = db.decode_all_reads();
     write_reads_to_fasta(reads,output_filename);
     return reads;
 }
