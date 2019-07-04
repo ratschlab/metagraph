@@ -64,6 +64,12 @@ int main_decompressor(int argc, char *argv[]) {
                                        false,
                                        1,
                                        "int",cmd);
+    TCLAP::ValueArg<std::string> graphArg("g",
+                                          "graph",
+                                          "Graph to use as a reference in decompression",
+                                          false,
+                                          "",
+                                          "string",cmd);
     cmd.parse(argc, argv);
     auto input_folder = inputArg.getValue();
     auto output_filename = outputArg.getValue();
