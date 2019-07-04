@@ -63,7 +63,7 @@ public:
 #endif
             }
             else {
-                assert(this->graph.outdegree(node) == 1);
+                assert((this->graph.outdegree(node) == 1 || [&]() { PRINT_VAR(this->graph.outdegree(node)); return false;}()));
                 this->graph.call_outgoing_kmers(node,[&base](node_index node,char edge_label ) { base = edge_label;});
                 encoded_base = base; // same
             }
