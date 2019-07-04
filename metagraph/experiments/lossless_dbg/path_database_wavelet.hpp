@@ -227,10 +227,13 @@ public:
                 new DBGSuccinct(21)
                 };
         graph->load(graph_filename);
+        assert(graph->num_nodes());
         auto db = Database(graph);
         db.incoming_table.edge_multiplicity_table.load(edge_multiplicity_file);
+        db.incoming_table.graph = graph;
         db.routing_table.load(routing_table_file);
         db.incoming_table.joins.load(joins_file);
+        assert(db.incoming_table.joins.rank0(db.incoming_table.joins.size()));
         return db;
     }
 
