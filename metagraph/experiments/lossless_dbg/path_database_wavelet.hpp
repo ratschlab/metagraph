@@ -216,8 +216,8 @@ public:
         this->graph.serialize(graph_filename);
         cerr << "Finished serializing the path encoder in " << timer.elapsed() << " sec." << endl;
     }
-
-    static auto deserialize(const fs::path& folder) {
+    template <typename Database=QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableT,IncomingTableT>>>>
+    static Database deserialize(const fs::path& folder) {
         ifstream edge_multiplicity_file(folder / "edge_multiplicity.bin");
         ifstream routing_table_file(folder / "routing_table.bin");
         ifstream joins_file(folder / "joins.bin");
@@ -227,7 +227,7 @@ public:
                 new DBGSuccinct(21)
                 };
         graph->load(graph_filename);
-        auto db = QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableT,IncomingTableT>>>(graph);
+        auto db = Database(graph);
         db.incoming_table.edge_multiplicity_table.load(edge_multiplicity_file);
         db.routing_table.load(routing_table_file);
         db.incoming_table.joins.load(joins_file);

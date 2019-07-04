@@ -37,6 +37,15 @@ using namespace std::string_literals;
 
 using node_index = SequenceGraph::node_index;
 
+template <typename DB>
+vector<string> decompress(fs::path input_folder, const fs::path& output_filename, fs::path statistics_filename) {
+    auto db = PathDatabaseWavelet<>::deserialize(input_folder);
+    auto statistics = db.get_statistics(0);
+    save_string(statistics.dump(4),statistics_filename);
+    auto reads = db.decode_all_reads();
+    write_reads_to_fasta(reads,output_filename);
+    return reads;
+}
 
 int main_decompressor(int argc, char *argv[]) {
     TCLAP::CmdLine cmd("Decompress reads",' ', "0.1");
@@ -76,17 +85,25 @@ int main_decompressor(int argc, char *argv[]) {
                                    false,
                                    DefaultChunks,
                                    "int",cmd);
+    TCLAP::ValueArg<std::string> pathReroutingArg("r",
+                                                  "path-rerouting",
+                                                  "Was path rerouting used for compression?",
+                                                  false,
+                                                  "yes",
+                                                  "<yes|no>",
+                                                  cmd);
     cmd.parse(argc, argv);
     auto input_folder = inputArg.getValue();
     auto output_filename = outputArg.getValue();
     omp_set_num_threads(numThreadsArg.getValue());
     set_num_threads(numThreadsArg.getValue());
     auto statistics_filename = statisticsArg.getValue();
-    auto db = PathDatabaseWavelet<>::deserialize(input_folder);
-    auto reads = db.decode_all_reads();
-    auto statistics = db.get_statistics(0);
-    save_string(statistics.dump(4),statistics_filename);
-    write_reads_to_fasta(reads,output_filename);
+    if (pathReroutingArg.getValue() == "yes") {
+        decompress<PathDatabaseWavelet<>>(input_folder, output_filename,statistics_filename);
+    }
+    else {
+        decompress<PathDatabaseWaveletWithtoutTransformation<>>(input_folder, output_filename,statistics_filename);
+    }
 
     return 0;
 }
