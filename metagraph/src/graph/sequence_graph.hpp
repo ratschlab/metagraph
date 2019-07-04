@@ -8,6 +8,8 @@
 
 #include <sdsl/int_vector.hpp>
 
+#include "utils.hpp"
+
 class bit_vector_dyn;
 
 
@@ -60,7 +62,7 @@ class SequenceGraph {
 };
 
 
-class DeBruijnGraph : public SequenceGraph {
+class DeBruijnGraph : public SequenceGraph, public utils::Extensions<DeBruijnGraph> {
   public:
     virtual ~DeBruijnGraph() {}
 
