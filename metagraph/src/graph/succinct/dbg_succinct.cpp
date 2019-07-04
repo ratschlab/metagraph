@@ -173,7 +173,8 @@ void DBGSuccinct::add_seq(const std::string &sequence,
         for (auto i : inserted_indexes) {
             if (valid_edges_.get())
                 valid_edges_->insert_bit(i, true);
-            nodes_inserted->insert_bit(boss_to_kmer_index(i), true);
+            if (nodes_inserted)
+                nodes_inserted->insert_bit(boss_to_kmer_index(i), true);
         }
     } else {
         boss_graph_->add_sequence(sequence, true);

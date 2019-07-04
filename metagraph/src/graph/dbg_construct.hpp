@@ -12,7 +12,7 @@ class IGraphChunkConstructor {
   public:
     virtual ~IGraphChunkConstructor() {}
 
-    virtual void add_sequence(std::string&& sequence) = 0;
+    virtual void add_sequence(std::string&& sequence, uint64_t count = 1) = 0;
     virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;
 
     virtual GraphChunk* build_chunk() = 0;
@@ -24,7 +24,7 @@ class IGraphConstructor {
   public:
     virtual ~IGraphConstructor() {}
 
-    virtual void add_sequence(std::string&& sequence) = 0;
+    virtual void add_sequence(std::string&& sequence, uint64_t count = 1) = 0;
     virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;
 
     virtual void build_graph(Graph *graph) = 0;

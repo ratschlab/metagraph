@@ -142,20 +142,20 @@ std::string get_filetype(const std::string &fname) {
 
 /**
  * Given a minimum number of splits,
- * generate a list of suffices from the alphabet.
+ * generate a list of suffixes from the alphabet.
  */
 std::deque<std::string> generate_strings(const std::string &alphabet,
                                          size_t length) {
 
-    std::deque<std::string> suffices = { "" };
-    while (suffices[0].length() < length) {
+    std::deque<std::string> suffixes = { "" };
+    while (suffixes[0].length() < length) {
         for (const char c : alphabet) {
-            suffices.push_back(c + suffices[0]);
+            suffixes.push_back(c + suffixes[0]);
         }
-        suffices.pop_front();
+        suffixes.pop_front();
     }
-    assert(suffices.size() == std::pow(alphabet.size(), length));
-    return suffices;
+    assert(suffixes.size() == std::pow(alphabet.size(), length));
+    return suffixes;
 }
 
 // indexes - positions of inserted elements in the final vector

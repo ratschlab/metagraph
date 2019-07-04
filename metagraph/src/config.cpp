@@ -529,7 +529,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         } break;
         case BUILD: {
             fprintf(stderr, "Usage: %s build [options] FILE1 [[FILE2] ...]\n"
-                            "\tEach input file is given in FASTA, FASTQ, or VCF format.\n"
+                            "\tEach input file is given in FASTA, FASTQ, VCF, or KMC format.\n"
                             "\tNote that VCF files must be in plain text or bgzip format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for build:\n");
@@ -552,9 +552,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case CLEAN: {
-            fprintf(stderr, "Usage: %s clean -o <outfile-base> [options] GRAPH.\n\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for build:\n");
+            fprintf(stderr, "Usage: %s clean -o <outfile-base> [options] GRAPH\n\n", prog_name.c_str());
+            fprintf(stderr, "Available options for clean:\n");
             fprintf(stderr, "\t   --min-count [INT] \t\tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \t\tmax k-mer abundance, excluding [inf]\n");
             fprintf(stderr, "\t   --prune-tips [INT] \t\tprune all dead ends shorter than this value [1]\n");
@@ -568,7 +567,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         } break;
         case EXTEND: {
             fprintf(stderr, "Usage: %s extend -i <GRAPH> -o <extended_graph_basename> [options] FILE1 [[FILE2] ...]\n"
-                            "\tEach input file is given in FASTA, FASTQ, or VCF format.\n"
+                            "\tEach input file is given in FASTA, FASTQ, VCF, or KMC format.\n"
                             "\tNote that VCF files must be in plain text or bgzip format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for extend:\n");
@@ -616,7 +615,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for merge:\n");
             fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap [succinct]\n");
             fprintf(stderr, "\t-i --infile-base [STR] \tload graph chunks from files '<infile-base>.<suffix>.<type>.chunk' []\n");
-            fprintf(stderr, "\t-l --len-suffix [INT] \titerate all possible suffices of the length given [0]\n");
+            fprintf(stderr, "\t-l --len-suffix [INT] \titerate all possible suffixes of the length given [0]\n");
             fprintf(stderr, "\t-c --canonical \t\tcanonical graph mode (e.g. for read sets) [off]\n");
             // fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
@@ -662,7 +661,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         } break;
         case ANNOTATE: {
             fprintf(stderr, "Usage: %s annotate -i <GRAPH> [options] FILE1 [[FILE2] ...]\n"
-                            "\tEach file is given in FASTA, FASTQ, or VCF format.\n"
+                            "\tEach file is given in FASTA, FASTQ, VCF, or KMC format.\n"
                             "\tNote that VCF files must be in plain text or bgzip format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");

@@ -32,6 +32,7 @@
 typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
 const size_t kNumCachedColumns = 10;
+const size_t kBitsPerCount = 8;
 
 
 Config::GraphType parse_graph_extension(const std::string &filename) {
@@ -676,11 +677,12 @@ void print_stats(const Annotator &annotation) {
 }
 
 
-template <class Callback, class Loop>
+template <class Callback, class CountedKmer, class Loop>
 void parse_sequences(const std::vector<std::string> &files,
                      const Config &config,
                      const Timer &timer,
                      Callback call_read,
+                     CountedKmer call_kmer,
                      Loop call_reads) {
     // iterate over input files
     for (const auto &file : files) {
@@ -694,13 +696,15 @@ void parse_sequences(const std::vector<std::string> &files,
             read_vcf_file_critical(file,
                                    config.refpath,
                                    config.k,
-                                   call_read,
+                                   [&](std::string&& sequence) {
+                                       call_read(std::move(sequence));
+                                   },
                                    config.reverse);
         } else if (utils::get_filetype(file) == "KMC") {
             bool warning_different_k = false;
             kmc::read_kmers(
                 file,
-                [&](std::string&& sequence) {
+                [&](std::string&& sequence, uint32_t count) {
                     if (!warning_different_k && sequence.size() != config.k) {
                         std::cerr << "Warning: k-mers parsed from KMC database "
                                   << file << " have length " << sequence.size()
@@ -708,7 +712,7 @@ void parse_sequences(const std::vector<std::string> &files,
                                   << std::endl;
                         warning_different_k = true;
                     }
-                    call_read(std::move(sequence));
+                    call_kmer(std::move(sequence), count);
                 },
                 config.min_count,
                 config.max_count
@@ -843,7 +847,7 @@ std::string form_client_reply(const std::string &received_message,
 
 
 int main(int argc, const char *argv[]) {
-    std::unique_ptr<Config> config { new Config(argc, argv) };
+    auto config = std::make_unique<Config>(argc, argv);
 
     if (config->verbose) {
         std::cout << "#############################\n"
@@ -866,13 +870,6 @@ int main(int argc, const char *argv[]) {
 
             Timer timer;
 
-            if (config->count_kmers &&
-                    !(config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic)) {
-                std::cerr << "Error: Only static succinct graph can be built"
-                          << " with kmer counting" << std::endl;
-                exit(1);
-            }
-
             if (config->complete) {
                 if (config->graph_type != Config::GraphType::BITMAP) {
                     std::cerr << "Error: Only bitmap-graph can be built"
@@ -888,22 +885,22 @@ int main(int argc, const char *argv[]) {
                 if (config->verbose) {
                     std::cout << "Start reading data and extracting k-mers" << std::endl;
                 }
-                //enumerate all suffices
+                //enumerate all suffixes
                 assert(boss_graph->alph_size > 1);
-                std::vector<std::string> suffices;
+                std::vector<std::string> suffixes;
                 if (config->suffix.size()) {
-                    suffices = { config->suffix };
+                    suffixes = { config->suffix };
                 } else {
-                    suffices = KmerExtractor::generate_suffixes(config->suffix_len);
+                    suffixes = KmerExtractor::generate_suffixes(config->suffix_len);
                 }
 
                 BOSS::Chunk graph_data(KmerExtractor::alphabet.size(), boss_graph->get_k());
 
                 //one pass per suffix
-                for (const std::string &suffix : suffices) {
+                for (const std::string &suffix : suffixes) {
                     timer.reset();
 
-                    if (suffix.size() > 0 || suffices.size() > 1) {
+                    if (suffix.size() > 0 || suffixes.size() > 1) {
                         std::cout << "\nSuffix: " << suffix << std::endl;
                     }
 
@@ -919,6 +916,7 @@ int main(int argc, const char *argv[]) {
 
                     parse_sequences(files, *config, timer,
                         [&](std::string&& read) { constructor->add_sequence(std::move(read)); },
+                        [&](std::string&& kmer, uint32_t count) { constructor->add_sequence(std::move(kmer), count); },
                         [&](const auto &loop) { constructor->add_sequences(loop); }
                     );
 
@@ -968,23 +966,23 @@ int main(int argc, const char *argv[]) {
                 if (config->verbose) {
                     std::cout << "Start reading data and extracting k-mers" << std::endl;
                 }
-                //enumerate all suffices
+                //enumerate all suffixes
                 assert(bitmap_graph->alphabet().size() > 1);
-                std::vector<std::string> suffices;
+                std::vector<std::string> suffixes;
                 if (config->suffix.size()) {
-                    suffices = { config->suffix };
+                    suffixes = { config->suffix };
                 } else {
-                    suffices = KmerExtractor2Bit().generate_suffixes(config->suffix_len);
+                    suffixes = KmerExtractor2Bit().generate_suffixes(config->suffix_len);
                 }
 
                 std::unique_ptr<DBGBitmapConstructor> constructor;
                 std::vector<std::string> chunk_filenames;
 
                 //one pass per suffix
-                for (const std::string &suffix : suffices) {
+                for (const std::string &suffix : suffixes) {
                     timer.reset();
 
-                    if (config->verbose && (suffix.size() > 0 || suffices.size() > 1)) {
+                    if (config->verbose && (suffix.size() > 0 || suffixes.size() > 1)) {
                         std::cout << "\nSuffix: " << suffix << std::endl;
                     }
 
@@ -992,6 +990,7 @@ int main(int argc, const char *argv[]) {
                         new DBGBitmapConstructor(
                             bitmap_graph->get_k(),
                             config->canonical,
+                            config->count_kmers,
                             suffix,
                             config->parallel,
                             static_cast<uint64_t>(config->memory_available) << 30,
@@ -1001,15 +1000,24 @@ int main(int argc, const char *argv[]) {
 
                     parse_sequences(files, *config, timer,
                         [&](std::string&& read) { constructor->add_sequence(std::move(read)); },
+                        [&](std::string&& kmer, uint32_t count) { constructor->add_sequence(std::move(kmer), count); },
                         [&](const auto &loop) { constructor->add_sequences(loop); }
                     );
 
                     if (!suffix.size()) {
-                        assert(suffices.size() == 1);
+                        assert(suffixes.size() == 1);
 
-                        auto bitmap_graph = std::make_unique<DBGBitmap>(config->k);
-                        constructor->build_graph(bitmap_graph.get());
-                        graph.reset(bitmap_graph.release());
+                        if (config->count_kmers) {
+                            auto weighted_bitmap_graph = std::make_unique<WeightedDBGBitmap>(config->k);
+                            constructor->build_graph(weighted_bitmap_graph.get());
+                            weighted_bitmap_graph->set_weights(constructor->get_weights(kBitsPerCount));
+                            graph.reset(weighted_bitmap_graph.release());
+                        } else {
+                            auto bitmap_graph = std::make_unique<DBGBitmap>(config->k);
+                            constructor->build_graph(bitmap_graph.get());
+                            graph.reset(bitmap_graph.release());
+                        }
+
                     } else {
                         std::unique_ptr<DBGBitmap::Chunk> chunk { constructor->build_chunk() };
                         if (config->verbose) {
@@ -1036,23 +1044,34 @@ int main(int argc, const char *argv[]) {
                         return 0;
                 }
 
-                if (suffices.size() > 1) {
+                if (suffixes.size() > 1) {
                     assert(chunk_filenames.size());
                     timer.reset();
                     graph.reset(constructor->build_graph_from_chunks(chunk_filenames,
                                                                      config->canonical,
                                                                      config->verbose));
                 }
+
             } else {
                 //slower method
-
                 switch (config->graph_type) {
+
                     case Config::GraphType::SUCCINCT:
-                        graph.reset(new DBGSuccinct(config->k, config->canonical));
+                        if (config->count_kmers) {
+                            graph.reset(new WeightedDBGSuccinct(config->k, config->canonical));
+                        } else {
+                            graph.reset(new DBGSuccinct(config->k, config->canonical));
+                        }
                         break;
+
                     case Config::GraphType::HASH:
-                        graph.reset(new DBGHashOrdered(config->k, config->canonical));
+                        if (config->count_kmers) {
+                            graph.reset(new WeightedDBGHashOrdered(config->k, config->canonical));
+                        } else {
+                            graph.reset(new DBGHashOrdered(config->k, config->canonical));
+                        }
                         break;
+
                     case Config::GraphType::HASH_STR:
                         if (config->canonical) {
                             std::cerr << "Warning: string hash-based de Bruijn graph"
@@ -1060,8 +1079,13 @@ int main(int argc, const char *argv[]) {
                                       << " Normal mode will be used instead." << std::endl;
                         }
                         // TODO: implement canonical mode
-                        graph.reset(new DBGHashString(config->k));
+                        if (config->count_kmers) {
+                            graph.reset(new WeightedDBGHashString(config->k/*, config->canonical*/));
+                        } else {
+                            graph.reset(new DBGHashString(config->k/*, config->canonical*/));
+                        }
                         break;
+
                     case Config::GraphType::BITMAP:
                         std::cerr << "Error: Bitmap-graph construction"
                                   << " in dynamic regime is not supported" << std::endl;
@@ -1073,10 +1097,44 @@ int main(int argc, const char *argv[]) {
 
                 parse_sequences(files, *config, timer,
                     [&graph](std::string&& seq) { graph->add_sequence(seq); },
+                    [&graph](std::string&& kmer, uint32_t /*count*/) { graph->add_sequence(kmer); },
                     [&graph](const auto &loop) {
                         loop([&graph](const auto &seq) { graph->add_sequence(seq); });
                     }
                 );
+
+                sdsl::int_vector<> kmer_counts(graph->num_nodes() + 1, 0, kBitsPerCount);
+
+                parse_sequences(files, *config, timer,
+                    [&graph,&kmer_counts](std::string&& seq) {
+                        graph->map_to_nodes(seq, [&](uint64_t i) {
+                            if (i > 0) {
+                                assert(i <= graph->num_nodes());
+                                kmer_counts[i]++;
+                            }
+                        });
+                    },
+                    [&graph,&kmer_counts](std::string&& kmer, uint32_t count) {
+                        graph->map_to_nodes(kmer, [&](uint64_t i) {
+                            if (i > 0) {
+                                assert(i <= graph->num_nodes());
+                                kmer_counts[i] += count;
+                            }
+                        });
+                    },
+                    [&graph,&kmer_counts](const auto &loop) {
+                        loop([&graph,&kmer_counts](const auto &seq) {
+                            graph->map_to_nodes(seq, [&](uint64_t i) {
+                                if (i > 0) {
+                                    assert(i <= graph->num_nodes());
+                                    kmer_counts[i]++;
+                                }
+                            });
+                        });
+                    }
+                );
+
+                dynamic_cast<IWeighted<uint64_t, sdsl::int_vector<>>&>(*graph).set_weights(std::move(kmer_counts));
             }
 
             if (config->verbose)
@@ -1138,10 +1196,12 @@ int main(int argc, const char *argv[]) {
             if (config->verbose)
                 std::cout << "Start graph extension" << std::endl;
 
-            // Insert new k-mers
             parse_sequences(files, *config, timer,
                 [&graph,&inserted_edges](std::string&& seq) {
                     graph->add_sequence(seq, inserted_edges.get());
+                },
+                [&graph,&inserted_edges](std::string&& kmer, uint32_t /*count*/) {
+                    graph->add_sequence(kmer, inserted_edges.get());
                 },
                 [&graph,&inserted_edges](const auto &loop) {
                     loop([&graph,&inserted_edges](const auto &seq) {
@@ -1479,11 +1539,11 @@ int main(int argc, const char *argv[]) {
             if (!files.size()) {
                 assert(config->infbase.size());
 
-                const auto sorted_suffices = config->graph_type == Config::GraphType::SUCCINCT
+                const auto sorted_suffixes = config->graph_type == Config::GraphType::SUCCINCT
                         ? KmerExtractor().generate_suffixes(config->suffix_len)
                         : KmerExtractor2Bit().generate_suffixes(config->suffix_len);
 
-                for (const std::string &suffix : sorted_suffices) {
+                for (const std::string &suffix : sorted_suffixes) {
                     assert(suffix.size() == config->suffix_len);
                     chunk_files.push_back(config->infbase + "." + suffix);
                 }

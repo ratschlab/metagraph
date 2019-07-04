@@ -8,6 +8,7 @@
 #include "sorted_multiset.hpp"
 
 typedef std::function<void(const std::string&)> CallString;
+typedef std::function<void(const std::string&, uint64_t)> CallStringCount;
 
 
 template <typename KMER, class KmerExtractor, class Container>
@@ -20,6 +21,8 @@ class KmerStorage {
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
 
   public:
+    using Key = typename Container::key_type;
+    using Value = typename Container::value_type;
     using Data = typename Container::storage_type;
 
     KmerStorage(size_t k,
@@ -34,9 +37,12 @@ class KmerStorage {
 
     inline size_t suffix_length() const { return filter_suffix_encoded_.size(); }
 
-    void add_sequence(std::string&& sequence);
+    void add_sequence(std::string&& sequence, uint64_t count = 1);
 
     void add_sequences(const std::function<void(CallString)> &generate_sequences);
+    void add_sequences(const std::function<void(CallStringCount)> &generate_sequences);
+
+    void insert_dummy(const KMER &dummy_kmer);
 
     inline Data& data() { join(); return kmers_.data(); }
 
@@ -57,7 +63,7 @@ class KmerStorage {
     size_t num_threads_;
     ThreadPool thread_pool_;
 
-    std::vector<std::string> sequences_storage_;
+    std::vector<std::pair<std::string, uint64_t>> buffered_sequences_;
     size_t stored_sequences_size_;
 
     bool verbose_;
