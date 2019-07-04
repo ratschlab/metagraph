@@ -53,7 +53,8 @@ public:
             incoming_table(graph_),
             routing_table(graph_),// weak
             chunk_size(chunk_size)
-            {}
+            {
+            }
 
 
     explicit PathDatabaseDynamicCore(const vector<string> &reads,

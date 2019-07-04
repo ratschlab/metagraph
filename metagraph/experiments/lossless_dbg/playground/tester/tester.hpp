@@ -1,4 +1,11 @@
 //
+// Created by Jan Studený on 2019-07-04.
+//
+
+#ifndef METAGRAPH_TESTER_HPP
+#define METAGRAPH_TESTER_HPP
+
+//
 // Created by Jan Studený on 2019-03-11.
 //
 #include <iostream>
@@ -21,14 +28,14 @@ using node_index = SequenceGraph::node_index;
 
 
 
-int main(int argc, char *argv[]) {
+int main_tester(int argc, char *argv[]) {
     TCLAP::CmdLine cmd("Compress reads",' ', "0.1");
     TCLAP::ValueArg<std::string> leftArg("l",
-                                          "left_hand_side",
-                                          "FASTA/Q file that should be compressed",
-                                          true,
-                                          "",
-                                          "string");
+                                         "left_hand_side",
+                                         "FASTA/Q file that should be compressed",
+                                         true,
+                                         "",
+                                         "string");
     TCLAP::ValueArg<std::string> rightArg("r",
                                           "right_hand_side",
                                           "FASTA/Q file that should be compressed",
@@ -54,3 +61,6 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 }
+
+
+#endif //METAGRAPH_TESTER_HPP

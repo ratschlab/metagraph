@@ -25,7 +25,7 @@ class RoutingTableCore {
 public:
     RoutingTableCore() = default;
     RoutingTableCore(const shared_ptr<const DBGSuccinct> graph) :
-        graph(graph), delimiter_encoded(graph->get_boss().alph_size)
+        graph(graph)
     {};
 
     template<class Container>
@@ -41,7 +41,7 @@ public:
     }
 
     template<class Container>
-    explicit RoutingTableCore(const shared_ptr<const DBGSuccinct> graph,const Container& routing_table_array) :
+    explicit RoutingTableCore(const shared_ptr<const DBGSuccinct> graph, const Container& routing_table_array) :
         RoutingTableCore(graph)
      {
         initialize_content(routing_table_array);

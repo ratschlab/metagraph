@@ -21,6 +21,7 @@ using TCLAP::ValuesConstraint;
 #include "playground/compressor/compressor.hpp"
 #include "playground/decompressor/decompressor.hpp"
 #include "playground/statistics/statistics.hpp"
+#include "playground/tester/tester.hpp"
 
 #pragma clang diagnostic pop
 
@@ -35,7 +36,8 @@ int main(int argc, char *argv[]) {
             "sample",
             "compress",
             "decompress",
-            "statistics"
+            "statistics",
+            "identity",
     };
 
     ValuesConstraint<std::string> regime_constraint(regimes);
@@ -62,5 +64,8 @@ int main(int argc, char *argv[]) {
     }
     else if (regime == "statistics") {
         main_statistics(new_argv.size(), new_argv.data());
+    }
+    else if (regime == "identity") {
+        main_tester(new_argv.size(), new_argv.data());
     }
 }

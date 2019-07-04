@@ -88,6 +88,7 @@ public:
         // convert dynamic_(routing_table/incoming_table) to routing_table/incoming_table
         construct_routing_table();
         construct_incoming_table();
+        check_invariants();
         return encoded;
     }
 
@@ -228,6 +229,7 @@ public:
                 new DBGSuccinct(21)
                 };
         graph->load(graph_filename);
+        graph->mask_dummy_kmers(1,false);
         assert(graph->num_nodes());
         auto db = Database(graph);
         db.incoming_table.edge_multiplicity_table.load(edge_multiplicity_file);
@@ -235,15 +237,34 @@ public:
         db.routing_table.load(routing_table_file);
         db.incoming_table.joins.load(joins_file);
 
-        assert((db.incoming_table.joins.rank0(db.incoming_table.joins.size()) ==
-               db.incoming_table.edge_multiplicity_table.size() || [&](){
-            PRINT_VAR(db.incoming_table.joins.rank1(db.incoming_table.joins.size()));
-            PRINT_VAR(db.incoming_table.joins.rank0(db.incoming_table.joins.size()));
-            PRINT_VAR(db.incoming_table.edge_multiplicity_table.size());
-            return false;
-        }()));
+        db.check_invariants();
+
         return db;
     }
+
+    void check_invariants() {
+        assert((incoming_table.joins.rank0(incoming_table.joins.size()) ==
+                incoming_table.edge_multiplicity_table.size() || [&](){
+            PRINT_VAR(incoming_table.joins.rank1(incoming_table.joins.size()));
+            PRINT_VAR(incoming_table.joins.rank0(incoming_table.joins.size()));
+            PRINT_VAR(incoming_table.edge_multiplicity_table.size());
+            return false;
+        }()));
+
+#pragma omp parallel for num_threads(get_num_threads())
+        for (node_index node = 1; node <= this->graph.num_nodes(); node++) {
+            assert(this->graph.outdegree(node) < 2 || node_is_split(node) || [&](){
+                PRINT_VAR(this->graph.outdegree(node));
+                PRINT_VAR(node);
+                routing_table.print_content(node);
+                PRINT_VAR(this->graph.get_node_sequence(node));
+                PRINT_VAR(routing_table.size(node));
+                return true;
+            }());
+        }
+
+    }
+
 
     json get_statistics(uint64_t verbosity = ~0u) const {
         json result = PathDatabaseDynamicCore<DRT,DIT>::get_statistics(verbosity);
