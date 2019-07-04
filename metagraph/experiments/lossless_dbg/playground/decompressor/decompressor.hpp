@@ -70,6 +70,12 @@ int main_decompressor(int argc, char *argv[]) {
                                           false,
                                           "",
                                           "string",cmd);
+    TCLAP::ValueArg<int> chunksArg("u",
+                                   "chunks",
+                                   "Number of chunks for routing and incoming table (less chunks decreases memory consumption but increases compression time) -1 = inf disables chunking.",
+                                   false,
+                                   DefaultChunks,
+                                   "int",cmd);
     cmd.parse(argc, argv);
     auto input_folder = inputArg.getValue();
     auto output_filename = outputArg.getValue();
