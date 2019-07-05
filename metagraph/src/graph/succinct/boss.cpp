@@ -1929,7 +1929,7 @@ void BOSS::call_paths(Call<const std::vector<edge_index>,
         }
     }
 
-    // process all the cycles left that have not beed traversed
+    // process all the cycles left that have not been traversed
     for (uint64_t i = last_source; i < W_->size(); ++i) {
         if (!visited[i])
             callback_from(i);
