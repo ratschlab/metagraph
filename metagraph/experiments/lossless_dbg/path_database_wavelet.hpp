@@ -96,15 +96,18 @@ public:
         Timer timer;
         cerr << "Started transforming routing_table." << endl;
         vector<char> routing_table_array;
-        //#pragma omp parallel for reduction(append: routing_table_array)
+        #pragma omp parallel for reduction(append: routing_table_array)
         for(int64_t node=1;node<=this->graph.num_nodes();node++) {
             routing_table_array.push_back('#');// to always start a block with #
             if (PathDatabaseDynamicCore<DRT,DIT>::node_is_split(node)) {
                 auto& dynamic_table = PathDatabaseDynamicCore<DRT,DIT>::routing_table;
                 alt_assert(dynamic_table.size(node));
+                int encoded = 0;
                 for(int64_t i=0;i<dynamic_table.size(node);i++) {
                     routing_table_array.push_back(dynamic_table.get(node,i));
+                    encoded++;
                 }
+                alt_assert(encoded);
             }
         }
         routing_table_array.push_back('#'); // to also always end a block with #
@@ -124,33 +127,38 @@ public:
         vector<bool> delimiter_vector;
 
 
-        #pragma omp parallel for reduction(append: incoming_table_builder, delimiter_vector)
+#pragma omp parallel
+        {
+
+            vector<int64_t> incoming_table_builder_local;
+            vector<bool> delimiter_vector_local;
+        #pragma omp parallel for
         for(int64_t node=1;node<=this->graph.num_nodes();node++) {
             delimiter_vector.push_back(true);
             if (PathDatabaseDynamicCore<DRT,DIT>::node_is_join(node)) {
                 auto new_reads = PathDatabaseDynamicCore<DRT,DIT>::incoming_table.branch_size(node,'$');
                 int current_table_size = 0;
                 if (new_reads) {
-                    incoming_table_builder.push_back(new_reads);
+                    incoming_table_builder_local.push_back(new_reads);
                     current_table_size++;
-                    delimiter_vector.push_back(false);
+                    delimiter_vector_local.push_back(false);
                 }
 #ifdef ALL_EDGES_COVERED
                 for(auto& base : "ACGTN") {
                     auto branch_size = PathDatabaseDynamicCore<DRT,DIT>::incoming_table.branch_size(node,base);
                     if (branch_size) {
                         // so it is an actual edge in a this->graph (because all edges are covered)
-                        incoming_table_builder.push_back(branch_size);
+                        incoming_table_builder_local.push_back(branch_size);
                         current_table_size++;
-                        delimiter_vector.push_back(false);
+                        delimiter_vector_local.push_back(false);
                     }
                 }
 #else
                 this->graph.call_incoming_kmers_mine(node,[&,this](node_index prev_node,char c) {
                     auto branch_size = PathDatabaseDynamicCore<DRT,DIT>::incoming_table.branch_size(node,c);
-                    incoming_table_builder.push_back(branch_size);
+                    incoming_table_builder_local.push_back(branch_size);
                     current_table_size++;
-                    delimiter_vector.push_back(false);
+                    delimiter_vector_local.push_back(false);
                 });
 #endif
                 assert((current_table_size>0 || [&](){
@@ -165,12 +173,23 @@ public:
 
 #ifndef FULL_INCOMING_TABLE
                 if (current_table_size > 1) {
-                    incoming_table_builder.pop_back();
-                    delimiter_vector.pop_back();
+                    incoming_table_builder_local.pop_back();
+                    delimiter_vector_local.pop_back();
                 }
         #endif
             }
         }
+
+            for (int t = 0; t < omp_get_num_threads(); t++) {
+                #pragma omp barrier
+                if (t == omp_get_thread_num()) {
+                    incoming_table_builder.insert(all(incoming_table_builder_local));
+
+                }
+            }
+
+
+        };
         delimiter_vector.push_back(true);
         sdsl::bit_vector temporary_representation(delimiter_vector.size());
         for(int64_t i=0; i <delimiter_vector.size();i++) {
