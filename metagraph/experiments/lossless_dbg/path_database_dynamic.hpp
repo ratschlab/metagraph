@@ -135,6 +135,7 @@ public:
 
 
         statistics["preprocessing_time"] = preprocessing_timer.finished();
+        statistics["preprocessing_ram"] = get_used_memory();
 
         cerr << "Cumulative sizes in bytes" << endl;
         PRINT_VAR(is_join.size()/8);
@@ -304,6 +305,7 @@ public:
 #endif
         encoded_paths += encoded.size();
         statistics["routing_time"] = routing_timer.finished();
+        statistics["routing_ram"] = get_used_memory();
         encoding_timer.finished();
 
         return encoded;

@@ -86,9 +86,12 @@ public:
         auto encoded = PathDatabaseDynamicCore<DRT,DIT>::encode(sequences);
 
         // convert dynamic_(routing_table/incoming_table) to routing_table/incoming_table
+        VerboseTimer transformation_timer("transforming representations");
         construct_routing_table();
         construct_incoming_table();
         check_invariants();
+        statistics["transforming_time"] = transformation_timer.finished();
+        statistics["transforming_ram"] = get_used_memory();
         return encoded;
     }
 

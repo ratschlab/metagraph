@@ -231,6 +231,12 @@ struct has_member {
     static bool const value = sizeof(f<Alias>(0)) == 2;
 };
 
+inline int64_t get_used_memory() {
+    struct rusage my_rusage{};
+    int succ = getrusage(RUSAGE_SELF,&my_rusage);
+    return my_rusage.ru_maxrss;
+}
+
 //Check for function with given name, any signature.
 //Check for any member with given name, whether var, func, class, union, enum.
 #define CREATE_MEMBER_CHECK(member)                                         \
