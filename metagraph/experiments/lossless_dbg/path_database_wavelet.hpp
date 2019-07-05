@@ -101,6 +101,7 @@ public:
             routing_table_array.push_back('#');// to always start a block with #
             if (PathDatabaseDynamicCore<DRT,DIT>::node_is_split(node)) {
                 auto& dynamic_table = PathDatabaseDynamicCore<DRT,DIT>::routing_table;
+                alt_assert(dynamic_table.size(node));
                 for(int64_t i=0;i<dynamic_table.size(node);i++) {
                     routing_table_array.push_back(dynamic_table.get(node,i));
                 }

@@ -36,6 +36,22 @@ namespace fs = std::filesystem;
 //template<typename POD>
 //std::istream& deserialize(std::istream& is, std::vector<POD>& v);
 
+#ifndef RELEASE_MODE
+#include <cassert>
+#define alt_assert(condition) \
+{\
+if(!(condition))\
+{\
+std::cerr << "Assertion failed at " << __FILE__ << ":" << __LINE__;\
+std::cerr << " inside " << __FUNCTION__ << std::endl;\
+std::cerr << "Condition: " << #condition;\
+abort();\
+}\
+}
+#else
+#define alt_assert(condition) (condition)
+#endif
+
 struct d_t {
     template<typename T>
     d_t operator,(const T &first) {
