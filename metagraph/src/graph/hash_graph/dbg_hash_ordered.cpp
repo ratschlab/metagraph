@@ -152,18 +152,16 @@ void DBGHashOrderedImpl<KMER>::map_to_nodes_sequentially(
                               const std::function<void(node_index)> &callback,
                               const std::function<bool()> &terminate) const {
     std::string sequence(begin, end);
-    auto kmers = sequence_to_kmers(sequence);
+    const auto &kmers = sequence_to_kmers(sequence);
     auto it = kmers.begin();
     for (bool is_valid : seq_encoder_.valid_kmers(sequence, k_)) {
+
+        assert(it != kmers.end() || !is_valid);
+
         if (terminate())
             return;
 
-        if (is_valid) {
-            assert(it != kmers.end());
-            callback(get_index(*it++));
-        } else {
-            callback(npos);
-        }
+        callback(is_valid ? get_index(*it++) : npos);
     }
     assert(it == kmers.end());
 }
@@ -174,18 +172,16 @@ template <typename KMER>
 void DBGHashOrderedImpl<KMER>::map_to_nodes(const std::string &sequence,
                                             const std::function<void(node_index)> &callback,
                                             const std::function<bool()> &terminate) const {
-    auto kmers = sequence_to_kmers(sequence, canonical_mode_);
+    const auto &kmers = sequence_to_kmers(sequence, canonical_mode_);
     auto it = kmers.begin();
     for (bool is_valid : seq_encoder_.valid_kmers(sequence, k_)) {
+
+        assert(it != kmers.end() || !is_valid);
+
         if (terminate())
             return;
 
-        if (is_valid) {
-            assert(it != kmers.end());
-            callback(get_index(*it++));
-        } else {
-            callback(npos);
-        }
+        callback(is_valid ? get_index(*it++) : npos);
     }
     assert(it == kmers.end());
 }

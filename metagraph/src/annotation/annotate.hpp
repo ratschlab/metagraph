@@ -82,13 +82,6 @@ class MultiLabelAnnotation
     virtual bool has_label(Index i, const Label &label) const = 0;
     virtual bool has_labels(Index i, const VLabels &labels) const = 0;
 
-    // For each index i in indices, check of i has the label. Return
-    // true if the finished callback evaluates true during execution.
-    virtual bool call_indices_until(const std::vector<Index> &indices,
-                                    const Label &label,
-                                    std::function<void(Index)> index_callback,
-                                    std::function<bool()> finished = []() { return false; }) const = 0;
-
     virtual void insert_rows(const std::vector<Index> &rows) = 0;
 
     // For each pair (L, L') in the dictionary, replaces label |L| with |L'|
@@ -96,14 +89,6 @@ class MultiLabelAnnotation
     virtual void rename_labels(const std::unordered_map<Label, Label> &dict) = 0;
 
     /*********************** Special queries **********************/
-
-    // For each Index in indices, call row_callback on the vector of its
-    // corresponding label indices. Terminate early if terminate returns true.
-    virtual void call_rows(const std::vector<Index> &indices,
-                           std::function<void(std::vector<uint64_t>&&)> row_callback,
-                           std::function<bool()> terminate = []() { return false; }) const = 0;
-
-    virtual void call_labels(std::function<void(const Label&)> callback) const = 0;
 
     virtual void call_objects(const Label &label,
                               std::function<void(Index)> callback) const = 0;
@@ -113,6 +98,7 @@ class MultiLabelAnnotation
     virtual uint64_t num_objects() const = 0;
     virtual size_t num_labels() const = 0;
     virtual uint64_t num_relations() const = 0;
+    virtual const VLabels& get_all_labels() const = 0;
 
     virtual bool label_exists(const Label &label) const = 0;
 
@@ -145,6 +131,8 @@ class LabelEncoder {
      * Throws an exception if a bad code is passed.
      */
     const Label& decode(size_t code) const { return decode_label_.at(code); }
+
+    const std::vector<Label>& get_labels() const { return decode_label_; }
 
     size_t size() const { return decode_label_.size(); }
 
@@ -179,7 +167,7 @@ class MultiLabelEncoded
     virtual ~MultiLabelEncoded() {}
 
     virtual std::unique_ptr<IterateRows> iterator() const;
-    virtual std::vector<uint64_t> get_label_indices(Index i) const = 0;
+    virtual std::vector<uint64_t> get_label_codes(Index i) const = 0;
 
     virtual const LabelEncoder<Label>& get_label_encoder() const final { return label_encoder_; }
 
@@ -189,30 +177,19 @@ class MultiLabelEncoded
     // and merges all relations (*, L') with matching labels L', if supported.
     virtual void rename_labels(const std::unordered_map<Label, Label> &dict) override;
 
-    /*********************** Special queries **********************/
-
     // For each Index in indices, call row_callback on the vector of its
     // corresponding label indices. Terminate early if terminate returns true.
     virtual void call_rows(const std::vector<Index> &indices,
-                           std::function<void(std::vector<uint64_t>&&)> row_callback,
-                           std::function<bool()> terminate = []() { return false; }) const override;
+                           const std::function<void(std::vector<uint64_t>&&)> &row_callback,
+                           const std::function<bool()> &terminate = []() { return false; }) const;
 
     virtual bool label_exists(const Label &label) const override final {
         return label_encoder_.label_exists(label);
     }
 
-    virtual void call_labels(std::function<void(const Label&)> callback) const override final {
-        for (size_t i = 0; i < label_encoder_.size(); ++i) {
-            callback(label_encoder_.decode(i));
-        }
+    virtual const VLabels& get_all_labels() const override final {
+        return label_encoder_.get_labels();
     }
-
-    // For each index i in indices, check of i has the label. Return
-    // true if the finished callback evaluates true during execution.
-    virtual bool call_indices_until(const std::vector<Index> &indices,
-                                    const Label &label,
-                                    std::function<void(Index)> index_callback,
-                                    std::function<bool()> finished = []() { return false; }) const override;
 
     virtual std::string file_extension() const override = 0;
 

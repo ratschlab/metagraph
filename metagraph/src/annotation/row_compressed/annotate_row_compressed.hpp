@@ -98,7 +98,7 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
                            const LabelEncoder<Label> &label_encoder,
                            const std::function<void(BinaryMatrix::RowCallback&)> &call_rows);
 
-    std::vector<uint64_t> get_label_indices(Index i) const {
+    std::vector<uint64_t> get_label_codes(Index i) const {
         return matrix_->get_row(i);
     }
 

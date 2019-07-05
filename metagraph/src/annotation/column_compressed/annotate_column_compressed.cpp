@@ -63,14 +63,14 @@ ColumnCompressed<Label>::get_labels(Index i) const {
     assert(i < num_rows_);
 
     VLabels labels;
-    for (auto label_index : get_label_indices(i)) {
+    for (auto label_index : get_label_codes(i)) {
         labels.push_back(label_encoder_.decode(label_index));
     }
     return labels;
 }
 
 template <typename Label>
-std::vector<uint64_t> ColumnCompressed<Label>::get_label_indices(Index i) const {
+std::vector<uint64_t> ColumnCompressed<Label>::get_label_codes(Index i) const {
     assert(i < num_rows_);
 
     std::vector<uint64_t> label_indices;
@@ -79,31 +79,6 @@ std::vector<uint64_t> ColumnCompressed<Label>::get_label_indices(Index i) const 
             label_indices.push_back(j);
     }
     return label_indices;
-}
-
-template <typename Label>
-void ColumnCompressed<Label>
-::call_rows(const std::vector<Index> &indices,
-            std::function<void(std::vector<uint64_t>&&)> row_callback,
-            std::function<bool()> terminate) const {
-    std::vector<std::vector<uint64_t>> rows(indices.size());
-    for (auto &row : rows) {
-        row.reserve(label_encoder_.size());
-    }
-
-    for (size_t j = 0; j < label_encoder_.size(); ++j) {
-        for (size_t ii = 0; ii < indices.size(); ++ii) {
-            if (is_set(indices[ii], j))
-                rows[ii].push_back(j);
-        }
-    }
-
-    for (auto&& row : rows) {
-        if (terminate())
-            break;
-
-        row_callback(std::move(row));
-    }
 }
 
 template <typename Label>
@@ -141,25 +116,26 @@ bool ColumnCompressed<Label>::has_label(Index i, const Label &label) const {
 
 template <typename Label>
 bool ColumnCompressed<Label>
-::call_indices_until(const std::vector<Index> &indices,
-                     const Label &label,
-                     std::function<void(Index)> index_callback,
-                     std::function<bool()> finished) const {
+::call_relations(const std::vector<Index> &indices,
+                 const Label &label,
+                 std::function<void(Index)> object_callback,
+                 std::function<bool()> terminate) const {
+    size_t label_code;
     try {
-        auto encoding = label_encoder_.encode(label);
-        for (Index i : indices) {
-            if (finished())
-                return true;
+        label_code = label_encoder_.encode(label);
+    } catch (...) {
+        return terminate();
+    }
 
-            if (is_set(i, encoding))
-                index_callback(i);
-        }
-
-        if (finished())
+    for (Index i : indices) {
+        if (terminate())
             return true;
-    } catch (...) { }
 
-    return false;
+        if (is_set(i, label_code))
+            object_callback(i);
+    }
+
+    return terminate();
 }
 
 template <typename Label>

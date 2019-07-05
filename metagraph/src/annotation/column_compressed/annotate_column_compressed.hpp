@@ -50,10 +50,12 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     bool has_label(Index i, const Label &label) const override;
 
-    bool call_indices_until(const std::vector<Index> &indices,
-                            const Label &label,
-                            std::function<void(Index)> index_callback,
-                            std::function<bool()> finished = []() { return false; }) const override;
+    // For each index i in indices, check if i has the label. Return
+    // true if the finished callback evaluates true during execution.
+    bool call_relations(const std::vector<Index> &indices,
+                        const Label &label,
+                        std::function<void(Index)> object_callback,
+                        std::function<bool()> terminate = []() { return false; }) const;
 
     bool has_labels(Index i, const VLabels &labels) const override;
 
@@ -71,12 +73,6 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     uint64_t num_relations() const override;
     void call_objects(const Label &label,
                       std::function<void(Index)> callback) const override;
-
-    // For each Index in indices, call row_callback on the vector of its
-    // corresponding label indices. Terminate early if terminate returns true.
-    void call_rows(const std::vector<Index> &indices,
-                   std::function<void(std::vector<uint64_t>&&)> row_callback,
-                   std::function<bool()> terminate = []() { return false; }) const override;
 
     void convert_to_row_annotator(const std::string &outfbase) const;
     void convert_to_row_annotator(RowCompressed<Label> *annotator,
@@ -105,7 +101,7 @@ class ColumnCompressed : public MultiLabelEncoded<uint64_t, Label> {
     bitmap_dyn& decompress(size_t j);
     const bitmap& get_column(size_t j) const;
 
-    std::vector<uint64_t> get_label_indices(Index i) const override;
+    std::vector<uint64_t> get_label_codes(Index i) const override;
 
     uint64_t num_rows_;
 

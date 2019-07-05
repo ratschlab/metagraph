@@ -42,13 +42,6 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
     void add_labels(const std::vector<Index> &, const VLabels &) override { except_dyn(); }
     void insert_rows(const std::vector<Index> &) override { except_dyn(); }
 
-    // For each index i in indices, check of i has the label. Return
-    // true if the finished callback evaluates true during execution.
-    bool call_indices_until(const std::vector<Index> &indices,
-                            const Label &label,
-                            std::function<void(Index)> index_callback,
-                            std::function<bool()> finished = []() { return false; }) const override;
-
     const BinaryMatrixType& data() const { return *matrix_; }
 
     void call_objects(const Label &label,
@@ -67,7 +60,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
         MultiLabelEncoded<uint64_t, Label>::label_encoder_
     };
 
-    std::vector<uint64_t> get_label_indices(Index i) const override;
+    std::vector<uint64_t> get_label_codes(Index i) const override;
 
     typedef caches::fixed_sized_cache<Index,
                                       std::vector<uint64_t>,

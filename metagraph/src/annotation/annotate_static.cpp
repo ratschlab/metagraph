@@ -51,7 +51,7 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
         return false;
     }
     std::set<size_t> encoded_labels;
-    for (auto col : get_label_indices(i)) {
+    for (auto col : get_label_codes(i)) {
         encoded_labels.insert(col);
     }
     return std::includes(encoded_labels.begin(), encoded_labels.end(),
@@ -64,7 +64,7 @@ auto StaticBinRelAnnotator<BinaryMatrixType, Label>::get_labels(Index i) const
     assert(i < num_objects());
 
     VLabels labels;
-    for (auto col : get_label_indices(i)) {
+    for (auto col : get_label_codes(i)) {
         labels.push_back(label_encoder_.decode(col));
     }
     return labels;
@@ -144,41 +144,17 @@ void StaticBinRelAnnotator<BinaryMatrixType, Label>::except_dyn() {
 
 template <class BinaryMatrixType, typename Label>
 std::vector<uint64_t> StaticBinRelAnnotator<BinaryMatrixType, Label>
-::get_label_indices(Index i) const {
-    if (cached_rows_.get()) {
-        try {
-            return cached_rows_->Get(i);
-        } catch (...) {
-            auto row = matrix_->get_row(i);
-            cached_rows_->Put(i, row);
-            return row;
-        }
-    } else {
+::get_label_codes(Index i) const {
+    if (!cached_rows_.get())
         return matrix_->get_row(i);
+
+    try {
+        return cached_rows_->Get(i);
+    } catch (...) {
+        auto row = matrix_->get_row(i);
+        cached_rows_->Put(i, row);
+        return row;
     }
-}
-
-// For each index i in indices, check of i has the label. Return
-// true if the finished callback evaluates true during execution.
-template <class BinaryMatrixType, typename Label>
-bool StaticBinRelAnnotator<BinaryMatrixType, Label>
-::call_indices_until(const std::vector<Index> &indices,
-                     const Label &label,
-                     std::function<void(Index)> index_callback,
-                     std::function<bool()> finished) const {
-    auto column = matrix_->get_column(label_encoder_.encode(label));
-
-    std::unordered_set<Index> column_set(column.begin(), column.end());
-    for (Index i : indices) {
-        if (column_set.find(i) != column_set.end()) {
-            index_callback(i);
-
-            if (finished())
-                return true;
-        }
-    }
-
-    return false;
 }
 
 template <class BinaryMatrixType, typename Label>
@@ -188,18 +164,18 @@ void StaticBinRelAnnotator<BinaryMatrixType, Label>
 }
 
 template <class BinaryMatrixType, typename Label>
-StaticBinRelAnnotator<BinaryMatrixType, Label>::StaticBinRelAnnotator(size_t row_cache_size)
-      : matrix_(new BinaryMatrixType()),
-        cached_rows_({ row_cache_size ? new RowCacheType(row_cache_size) : nullptr }) {}
+StaticBinRelAnnotator<BinaryMatrixType, Label>
+::StaticBinRelAnnotator(size_t row_cache_size) : matrix_(new BinaryMatrixType()) {
+    reset_row_cache(row_cache_size);
+}
 
 template <class BinaryMatrixType, typename Label>
 StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::StaticBinRelAnnotator(std::unique_ptr<BinaryMatrixType>&& matrix,
                         const LabelEncoder<Label> &label_encoder,
-                        size_t row_cache_size)
-      : cached_rows_({ row_cache_size ? new RowCacheType(row_cache_size) : nullptr }) {
-    assert(matrix.get());
-    matrix_ = std::move(matrix);
+                        size_t row_cache_size) : matrix_(std::move(matrix)) {
+    assert(matrix_.get());
+    reset_row_cache(row_cache_size);
     label_encoder_ = label_encoder;
 }
 

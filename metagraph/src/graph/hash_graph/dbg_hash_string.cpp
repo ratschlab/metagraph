@@ -28,8 +28,7 @@ void DBGHashString::add_sequence(const std::string &sequence,
     assert(!nodes_inserted || nodes_inserted->size() == num_nodes());
 
     for (const auto &seq_encoded : encode_sequence(sequence)) {
-        if (sequence.size() < k_)
-            continue;
+        assert(sequence.size() >= k_);
 
         for (size_t i = 0; i + k_ - 1 < seq_encoded.size(); ++i) {
             auto index_insert = indices_.emplace(seq_encoded.substr(i, k_),
@@ -264,7 +263,7 @@ std::vector<std::string> DBGHashString::encode_sequence(const std::string &seque
                                    [&](char c) {
                                        return alphabet_.find(c) == std::string::npos;
                                    });
-            if (jt != it)
+            if (jt - it >= static_cast<int>(k_))
                 results.emplace_back(it, jt);
 
             if (jt == sequence.end())
