@@ -473,29 +473,35 @@ TYPED_TEST(AnnotatorPresetTest, call_rows_get_labels) {
               convert_to_set(get_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 1)));
 }
 
+std::vector<std::pair<std::string, size_t>>
+count_labels(const annotate::ColumnCompressed<> &annotation,
+             const std::unordered_map<uint64_t, size_t> &index_counts,
+             std::function<bool(size_t /* label_count */)> stop_counting_for_label);
+
+std::vector<std::pair<std::string, size_t>>
+count_labels(const annotate::MultiLabelEncoded<uint64_t, std::string> &annotation,
+             const std::unordered_map<uint64_t, size_t> &index_counts,
+             std::function<bool(size_t /* smallest_label_count */)> /*stop_counting_labels*/);
+
 template <typename Annotator>
 std::vector<std::string> get_labels_by_label(const Annotator &annotator,
                                              const std::vector<uint64_t> &indices,
                                              double min_label_frequency = 0.0) {
-    const auto& label_encoder = annotator.get_label_encoder();
+    std::unordered_map<uint64_t, size_t> index_counts;
+    for (auto i : indices) {
+        index_counts[i] = 1;
+    }
+
     const size_t min_count = std::max(1.0,
                                       std::ceil(min_label_frequency * indices.size()));
 
-    std::vector<std::pair<std::string, size_t>> label_counts;
-    std::vector<bool> label_check;
-    for (size_t j = 0; j < label_encoder.size(); ++j) {
-        label_counts.emplace_back(label_encoder.decode(j), 0);
-        label_check.push_back(annotator.call_indices_until(
-            indices,
-            label_encoder.decode(j),
-            [&](auto) { label_counts.back().second++; },
-            [&]() { return label_counts.back().second >= min_count; }
-        ));
-    }
+    auto label_counts = count_labels(annotator, index_counts,
+                                     [&](size_t label_count) {
+                                         return label_count >= min_count;
+                                     });
 
     std::vector<std::string> labels;
     for (size_t i = 0; i < label_counts.size(); ++i) {
-        EXPECT_EQ(label_check[i], label_counts[i].second >= min_count);
         if (label_counts[i].second >= min_count)
             labels.emplace_back(std::move(label_counts[i].first));
     }
@@ -660,20 +666,16 @@ get_top_labels_by_label(const Annotator &annotator,
                         const std::vector<uint64_t> &indices,
                         size_t num_top_labels = static_cast<size_t>(-1),
                         double min_label_frequency = 0.0) {
-    const auto& label_encoder = annotator.get_label_encoder();
     const size_t min_count = std::max(1.0,
                                       std::ceil(min_label_frequency * indices.size()));
 
-    std::vector<std::pair<std::string, size_t>> label_counts;
-    std::vector<bool> label_check;
-    for (size_t j = 0; j < label_encoder.size(); ++j) {
-        label_counts.emplace_back(label_encoder.decode(j), 0);
-        label_check.push_back(annotator.call_indices_until(
-            indices,
-            label_encoder.decode(j),
-            [&](auto) { label_counts.back().second++; }
-        ));
+    std::unordered_map<uint64_t, size_t> index_counts;
+    for (auto i : indices) {
+        index_counts[i] = 1;
     }
+
+    auto label_counts = count_labels(annotator, index_counts,
+                                     [](size_t /* label_count */) { return false; });
 
     std::sort(label_counts.begin(), label_counts.end(),
               [](const auto &first, const auto &second) {

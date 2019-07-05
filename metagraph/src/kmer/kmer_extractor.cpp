@@ -231,29 +231,28 @@ inline sdsl::bit_vector valid_kmers(const std::string &sequence,
     if (sequence.size() < k)
         return sdsl::bit_vector();
 
-    sdsl::bit_vector valid(sequence.size() - k + 1);
+    sdsl::bit_vector valid(sequence.size() - k + 1, true);
 
-    auto is_valid = [&](char c) { return encode(c) >= alphabet.size(); };
+    auto is_char_invalid = [&](char c) { return encode(c) >= alphabet.size(); };
     uint64_t invalid_counter = std::count_if(sequence.begin(),
                                              sequence.begin() + k,
-                                             is_valid);
+                                             is_char_invalid);
     auto it = valid.begin();
     *it++ = !invalid_counter;
 
-    for (auto jt = sequence.begin() + k; jt != sequence.end(); ++jt) {
-        if (is_valid(*jt))
+    for (auto jt = sequence.begin() + k; jt != sequence.end(); ++jt, ++it) {
+        if (is_char_invalid(*jt))
             invalid_counter++;
 
-        if (is_valid(*(jt - k))) {
+        if (is_char_invalid(*(jt - k))) {
             assert(invalid_counter);
             invalid_counter--;
         }
 
         assert(it != valid.end());
-        if (!invalid_counter)
-            *it = true;
 
-        ++it;
+        if (invalid_counter)
+            *it = false;
     }
 
     assert(it == valid.end());

@@ -95,33 +95,14 @@ void MultiLabelEncoded<IndexType, LabelType>
 template <typename IndexType, typename LabelType>
 void MultiLabelEncoded<IndexType, LabelType>
 ::call_rows(const std::vector<Index> &indices,
-            std::function<void(std::vector<uint64_t>&&)> row_callback,
-            std::function<bool()> terminate) const {
+            const std::function<void(std::vector<uint64_t>&&)> &row_callback,
+            const std::function<bool()> &terminate) const {
     for (Index i : indices) {
         if (terminate())
             break;
 
-        row_callback(get_label_indices(i));
+        row_callback(get_label_codes(i));
     }
-}
-
-// For each index i in indices, check of i has the label. Return
-// true if the finished callback evaluates true during execution.
-template <typename IndexType, typename LabelType>
-bool MultiLabelEncoded<IndexType, LabelType>
-::call_indices_until(const std::vector<Index> &indices,
-                     const Label &label,
-                     std::function<void(Index)> index_callback,
-                     std::function<bool()> finished) const {
-    for (Index i : indices) {
-        if (finished())
-            return true;
-
-        if (this->has_label(i, label))
-            index_callback(i);
-    }
-
-    return finished();
 }
 
 template <typename Annotator>
@@ -131,7 +112,7 @@ class IterateRowsByIndex : public IterateRows {
           : annotator_(annotator) {};
 
     std::vector<uint64_t> next_row() override final {
-        return annotator_.get_label_indices(i_++);
+        return annotator_.get_label_codes(i_++);
     };
 
   private:

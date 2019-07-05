@@ -203,13 +203,10 @@ call_paths_from_branch(const MaskedDeBruijnGraph &masked_graph,
                         break;
                 }
 
-                if (!(stop = terminate())) {
-                    callback(std::get<0>(path),
-                             std::get<1>(path),
-                             std::move(std::get<2>(path)));
-                } else {
+                if ((stop = terminate()))
                     break;
-                }
+
+                std::apply(callback, std::move(path));
             }
         },
         [&]() { return stop; }
@@ -241,17 +238,14 @@ void call_breakpoints(const MaskedDeBruijnGraph &masked_graph,
             background.call_outgoing_kmers(
                 first,
                 [&](const auto &next_index, char c) {
-                    if (stop)
-                        return;
-
-                    if (!(stop = terminate()))
+                    if (!stop && !(stop = terminate()))
                         callback(first,
                                  std::move(sequence), std::string(1, c),
                                  anno_graph.get_labels(next_index));
                 }
             );
         },
-        [&](auto, auto, const auto&) { return true; },
+        [&](const auto&...) { return true; },
         [&]() { return stop; }
     );
 
