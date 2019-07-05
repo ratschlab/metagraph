@@ -153,6 +153,12 @@ void KmerStorage<KMER, KmerExtractor, Container>
 }
 
 template <typename KMER, class KmerExtractor, class Container>
+void KmerStorage<KMER, KmerExtractor, Container>::insert_dummy(KMER dummy_kmer) {
+    Vector<KMER> dummy_kmers = { dummy_kmer };
+    kmers_.insert(dummy_kmers.begin(), dummy_kmers.end());
+};
+
+template <typename KMER, class KmerExtractor, class Container>
 void KmerStorage<KMER, KmerExtractor, Container>::release_task_to_pool() {
     auto *current_sequences_storage = new std::vector<std::string>();
     current_sequences_storage->swap(sequences_storage_);

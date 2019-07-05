@@ -195,8 +195,7 @@ encode_filter_suffix_boss(const std::string &filter_suffix) {
     return filter_suffix_encoded;
 }
 
-
-template <typename KMER>
+template <typename KmerStorage>
 class BOSSChunkConstructor : public IBOSSChunkConstructor {
     friend IBOSSChunkConstructor;
 
@@ -207,134 +206,61 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
                          size_t num_threads = 1,
                          double memory_preallocated = 0,
                          bool verbose = false)
-          : kmer_collector_(k + 1,
-                            canonical_mode,
-                            encode_filter_suffix_boss<KmerExtractor>(filter_suffix),
-                            num_threads,
-                            memory_preallocated,
-                            verbose,
-                            filter_suffix.empty() ? erase_redundant_dummy_kmers<KMER>
-                                                  : dont_erase_redundant_dummy_kmers<KMER>) {
-        if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
-            kmer_collector_.data().emplace_back(
-                std::vector<KmerExtractor::TAlphabet>(k + 1, BOSS::kSentinelCode)
-            );
-        }
-    }
-
-    void add_sequence(std::string&& sequence) {
-        kmer_collector_.add_sequence(std::move(sequence));
-    }
-
-    void add_sequences(std::function<void(CallString)> generate_sequences) {
-        kmer_collector_.add_sequences(generate_sequences);
-    }
-
-    BOSS::Chunk* build_chunk() {
-        auto &kmers = kmer_collector_.data();
-
-        if (!kmer_collector_.suffix_length()) {
-            if (kmer_collector_.verbose()) {
-                std::cout << "Reconstructing all required dummy source k-mers..."
-                          << std::endl;
-            }
-            Timer timer;
-
-            // kmer_collector stores (BOSS::k_ + 1)-mers
-            recover_source_dummy_nodes(kmer_collector_.get_k() - 1,
-                                       &kmers,
-                                       kmer_collector_.num_threads(),
-                                       kmer_collector_.verbose());
-
-            if (kmer_collector_.verbose())
-                std::cout << "Dummy source k-mers were reconstructed in "
-                          << timer.elapsed() << "sec" << std::endl;
-        }
-
-        // kmer_collector stores (BOSS::k_ + 1)-mers
-        BOSS::Chunk *result = new BOSS::Chunk(kmer_collector_.alphabet_size(),
-                                              kmer_collector_.get_k() - 1,
-                                              kmers);
-        kmer_collector_.clear();
-
-        return result;
-    }
-
-    uint64_t get_k() const { return kmer_collector_.get_k() - 1; }
-
-    KmerCollector<KMER, KmerExtractor> kmer_collector_;
-};
-
-
-template <typename KMER, typename COUNT = uint8_t>
-class WeightedBOSSChunkConstructor : public IBOSSChunkConstructor {
-    friend IBOSSChunkConstructor;
-
-  private:
-    WeightedBOSSChunkConstructor(size_t k,
-                                 bool canonical_mode = false,
-                                 const std::string &filter_suffix = "",
-                                 size_t num_threads = 1,
-                                 double memory_preallocated = 0,
-                                 bool verbose = false)
-          : kmer_counter_(k + 1,
+          : kmer_storage_(k + 1,
                           canonical_mode,
                           encode_filter_suffix_boss<KmerExtractor>(filter_suffix),
                           num_threads,
                           memory_preallocated,
                           verbose,
-                          filter_suffix.empty() ? erase_redundant_dummy_kmers<std::pair<KMER, COUNT>>
-                                                : dont_erase_redundant_dummy_kmers<std::pair<KMER, COUNT>>) {
+                          filter_suffix.empty() ? erase_redundant_dummy_kmers<typename KmerStorage::Value>
+                                                : dont_erase_redundant_dummy_kmers<typename KmerStorage::Value>) {
         if (filter_suffix == std::string(filter_suffix.size(), BOSS::kSentinel)) {
-            kmer_counter_.data().emplace_back(
-                std::vector<KmerExtractor::TAlphabet>(k + 1, BOSS::kSentinelCode), 0
-            );
+            kmer_storage_.insert_dummy(std::vector<KmerExtractor::TAlphabet>(k + 1, BOSS::kSentinelCode));
         }
     }
 
     void add_sequence(std::string&& sequence) {
-        kmer_counter_.add_sequence(std::move(sequence));
+        kmer_storage_.add_sequence(std::move(sequence));
     }
 
     void add_sequences(std::function<void(CallString)> generate_sequences) {
-        kmer_counter_.add_sequences(generate_sequences);
+        kmer_storage_.add_sequences(generate_sequences);
     }
 
     BOSS::Chunk* build_chunk() {
-        auto &kmers = kmer_counter_.data();
+        auto &kmers = kmer_storage_.data();
 
-        if (!kmer_counter_.suffix_length()) {
-            if (kmer_counter_.verbose()) {
+        if (!kmer_storage_.suffix_length()) {
+            if (kmer_storage_.verbose()) {
                 std::cout << "Reconstructing all required dummy source k-mers..."
                           << std::endl;
             }
             Timer timer;
 
             // kmer_collector stores (BOSS::k_ + 1)-mers
-            recover_source_dummy_nodes(kmer_counter_.get_k() - 1,
+            recover_source_dummy_nodes(kmer_storage_.get_k() - 1,
                                        &kmers,
-                                       kmer_counter_.num_threads(),
-                                       kmer_counter_.verbose());
+                                       kmer_storage_.num_threads(),
+                                       kmer_storage_.verbose());
 
-            if (kmer_counter_.verbose())
+            if (kmer_storage_.verbose())
                 std::cout << "Dummy source k-mers were reconstructed in "
                           << timer.elapsed() << "sec" << std::endl;
         }
 
         // kmer_collector stores (BOSS::k_ + 1)-mers
-        BOSS::Chunk *result = new BOSS::Chunk(kmer_counter_.alphabet_size(),
-                                              kmer_counter_.get_k() - 1,
+        BOSS::Chunk *result = new BOSS::Chunk(kmer_storage_.alphabet_size(),
+                                              kmer_storage_.get_k() - 1,
                                               kmers);
-        kmer_counter_.clear();
+        kmer_storage_.clear();
 
         return result;
     }
 
-    uint64_t get_k() const { return kmer_counter_.get_k() - 1; }
+    uint64_t get_k() const { return kmer_storage_.get_k() - 1; }
 
-    KmerCounter<KMER, KmerExtractor, COUNT> kmer_counter_;
+    KmerStorage kmer_storage_;
 };
-
 
 std::unique_ptr<IBOSSChunkConstructor>
 IBOSSChunkConstructor
@@ -350,19 +276,19 @@ IBOSSChunkConstructor
     if (count_kmers) {
         if ((k + 1) * Extractor::bits_per_char <= 64) {
             return std::unique_ptr<IBOSSChunkConstructor>(
-                new WeightedBOSSChunkConstructor<typename Extractor::Kmer64>(
+                new BOSSChunkConstructor<KmerCounter<typename Extractor::Kmer64, Extractor, uint8_t>>(
                     k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
                 )
             );
         } else if ((k + 1) * Extractor::bits_per_char <= 128) {
             return std::unique_ptr<IBOSSChunkConstructor>(
-                new WeightedBOSSChunkConstructor<typename Extractor::Kmer128>(
+                new BOSSChunkConstructor<KmerCounter<typename Extractor::Kmer128, Extractor, uint8_t>>(
                     k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
                 )
             );
         } else {
             return std::unique_ptr<IBOSSChunkConstructor>(
-                new WeightedBOSSChunkConstructor<typename Extractor::Kmer256>(
+                new BOSSChunkConstructor<KmerCounter<typename Extractor::Kmer256, Extractor, uint8_t>>(
                     k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
                 )
             );
@@ -370,19 +296,19 @@ IBOSSChunkConstructor
     } else {
         if ((k + 1) * Extractor::bits_per_char <= 64) {
             return std::unique_ptr<IBOSSChunkConstructor>(
-                new BOSSChunkConstructor<typename Extractor::Kmer64>(
+                new BOSSChunkConstructor<KmerCollector<typename Extractor::Kmer64, Extractor>>(
                     k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
                 )
             );
         } else if ((k + 1) * Extractor::bits_per_char <= 128) {
             return std::unique_ptr<IBOSSChunkConstructor>(
-                new BOSSChunkConstructor<typename Extractor::Kmer128>(
+                new BOSSChunkConstructor<KmerCollector<typename Extractor::Kmer128, Extractor>>(
                     k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
                 )
             );
         } else {
             return std::unique_ptr<IBOSSChunkConstructor>(
-                new BOSSChunkConstructor<typename Extractor::Kmer256>(
+                new BOSSChunkConstructor<KmerCollector<typename Extractor::Kmer256, Extractor>>(
                     k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
                 )
             );

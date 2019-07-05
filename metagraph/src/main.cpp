@@ -1061,8 +1061,6 @@ int main(int argc, const char *argv[]) {
                 );
             }
 
-            //TODO kmer_to_node is slow for DBGSuccinct--
-            //     accumulate counts in KMC-order and then sort (sorted_multiset)
             if (!config->kmc_counts.empty()) {
                 sdsl::int_vector<> kmer_counts;
                 kmer_counts.resize(graph->num_nodes() + 1);
@@ -1072,14 +1070,28 @@ int main(int argc, const char *argv[]) {
                               << " not found" << std::endl;
                     exit(1);
                 }
-                kmc::read_kmers(
-                    config->kmc_counts,
-                    [&](std::string&& kmer, uint32_t count) {
-                        kmer_counts[graph->kmer_to_node(kmer)] = count;
-                    },
-                    1ull,
-                    std::numeric_limits<uint64_t>::max()
-                );
+                if (dynamic_cast<DBGSuccinct*>(graph.get())) {
+                     kmc::read_kmers(
+                        config->kmc_counts,
+                        [&](std::string&& kmer, uint32_t count) {
+                            //TODO sorted multiset add counts
+                            (void)kmer;
+                            (void)count;
+                        },
+                        1ull,
+                        std::numeric_limits<uint64_t>::max()
+                    );
+                    //TODO sort
+                } else {
+                    kmc::read_kmers(
+                        config->kmc_counts,
+                        [&](std::string&& kmer, uint32_t count) {
+                            kmer_counts[graph->kmer_to_node(kmer)] = count;
+                        },
+                        1ull,
+                        std::numeric_limits<uint64_t>::max()
+                    );
+                }
 
                 graph->add_extension(std::make_shared<DBGWeights<>>(std::move(kmer_counts)));
             }
