@@ -33,9 +33,7 @@ public:
         // can't use int_vector<3> as the construction of routing table fails (routing table is malformed)
         sdsl::int_vector<> routing_table_array_encoded(routing_table_array.size());
         for(int64_t i=0;i<routing_table_array.size();i++) {
-            routing_table_array_encoded[i] = routing_table_array[i] == '#' ? 
-                                             delimiter_encoded : 
-                                             encode(routing_table_array[i]);
+            routing_table_array_encoded[i] = encode(routing_table_array[i]);
         }
         construct_im(routing_table,routing_table_array_encoded,0);
     }
