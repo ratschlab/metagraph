@@ -146,7 +146,7 @@ public:
             vector<bool> delimiter_vector_local;
         #pragma omp for
         for(int64_t node=1;node<=this->graph.num_nodes();node++) {
-            delimiter_vector.push_back(true);
+            delimiter_vector_local.push_back(true);
             if (PathDatabaseDynamicCore<DRT,DIT>::node_is_join(node)) {
                 auto new_reads = PathDatabaseDynamicCore<DRT,DIT>::incoming_table.branch_size(node,'$');
                 int current_table_size = 0;
