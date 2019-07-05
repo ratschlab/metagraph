@@ -96,20 +96,32 @@ public:
         Timer timer;
         cerr << "Started transforming routing_table." << endl;
         vector<char> routing_table_array;
-        #pragma omp parallel for reduction(append: routing_table_array)
-        for(int64_t node=1;node<=this->graph.num_nodes();node++) {
-            routing_table_array.push_back('#');// to always start a block with #
-            if (PathDatabaseDynamicCore<DRT,DIT>::node_is_split(node)) {
-                auto& dynamic_table = PathDatabaseDynamicCore<DRT,DIT>::routing_table;
-                alt_assert(dynamic_table.size(node));
-                int encoded = 0;
-                for(int64_t i=0;i<dynamic_table.size(node);i++) {
-                    routing_table_array.push_back(dynamic_table.get(node,i));
-                    encoded++;
+#pragma omp parallel
+        {
+            vector<char> routing_table_array_local;
+            #pragma omp for
+            for (int64_t node = 1; node <= this->graph.num_nodes(); node++) {
+                routing_table_array_local.push_back('#');// to always start a block with #
+                if (PathDatabaseDynamicCore<DRT, DIT>::node_is_split(node)) {
+                    auto &dynamic_table = PathDatabaseDynamicCore<DRT, DIT>::routing_table;
+                    alt_assert(dynamic_table.size(node));
+                    int encoded = 0;
+                    for (int64_t i = 0; i < dynamic_table.size(node); i++) {
+                        routing_table_array_local.push_back(dynamic_table.get(node, i));
+                        encoded++;
+                    }
+                    alt_assert(encoded);
                 }
-                alt_assert(encoded);
             }
-        }
+
+            for (int t = 0; t < omp_get_num_threads(); t++) {
+                #pragma omp barrier
+                if (t == omp_get_thread_num()) {
+                    routing_table_array.insert(routing_table_array.end(),all(routing_table_array_local));
+                }
+            }
+
+        };
         routing_table_array.push_back('#'); // to also always end a block with #
         routing_table.initialize_content(routing_table_array);
         if constexpr (std::is_base_of<TransformationsEnabler<RoutingTableCore<>>,RoutingTableT>::value) {
@@ -132,7 +144,7 @@ public:
 
             vector<int64_t> incoming_table_builder_local;
             vector<bool> delimiter_vector_local;
-        #pragma omp parallel for
+        #pragma omp for
         for(int64_t node=1;node<=this->graph.num_nodes();node++) {
             delimiter_vector.push_back(true);
             if (PathDatabaseDynamicCore<DRT,DIT>::node_is_join(node)) {
@@ -183,8 +195,8 @@ public:
             for (int t = 0; t < omp_get_num_threads(); t++) {
                 #pragma omp barrier
                 if (t == omp_get_thread_num()) {
-                    incoming_table_builder.insert(all(incoming_table_builder_local));
-
+                    incoming_table_builder.insert(incoming_table_builder.end(),all(incoming_table_builder_local));
+                    delimiter_vector.insert(delimiter_vector.end(),all(delimiter_vector_local));
                 }
             }
 
