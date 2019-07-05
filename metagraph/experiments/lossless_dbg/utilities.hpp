@@ -105,14 +105,16 @@ inline string decode_from_input(const vector<string>& input,const pair<string,in
 
 inline void save_string(const string &to_save, const string &filename) {
     ofstream myfile;
-    myfile.open (filename);
+    myfile.open(filename);
+    if (not myfile) { throw "can't open "s + filename + "for writing"; }
     myfile << to_save;
     myfile.close();
 }
 
 inline void transform_to_fasta(const string &filename, const vector <string> &reads) {
     ofstream myfile;
-    myfile.open (filename);
+    myfile.open(filename);
+    if (not myfile) { throw "can't open "s + filename + "for reading"; }
     for(auto& read : reads) {
         myfile << ">" << endl;
         myfile << read << endl;

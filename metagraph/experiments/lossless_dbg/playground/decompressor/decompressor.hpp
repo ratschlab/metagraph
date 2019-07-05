@@ -57,7 +57,7 @@ int main_decompressor(int argc, char *argv[]) {
                                          "string",cmd);
     TCLAP::ValueArg<std::string> outputArg("o",
                                           "output",
-                                          "FASTA/Q file that should be compressed",
+                                          "FASTA file to write the output to",
                                           true,
                                           "",
                                           "string",cmd);
