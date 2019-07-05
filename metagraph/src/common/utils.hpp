@@ -433,44 +433,38 @@ namespace utils {
     template <class T>
     class Extension {
       public:
-        virtual bool load(const T&, const std::string &filename_base) = 0;
-        virtual void serialize(const T&, const std::string &filename_base) const = 0;
+        virtual ~Extension() {};
     };
 
-    template <class T>
+    template <class ExtensionType>
     class Extensions {
       public:
         virtual ~Extensions() {};
 
-        template <class ExtensionType>
-        std::shared_ptr<ExtensionType> get_extension() const {
-            static_assert(std::is_base_of<Extension<T>, ExtensionType>::value);
+        template <class ExtensionSubtype>
+        std::shared_ptr<ExtensionSubtype> get_extension() const {
+            static_assert(std::is_base_of<ExtensionType, ExtensionSubtype>::value);
             for (auto extension : extensions_) {
-                if (auto match = std::dynamic_pointer_cast<ExtensionType>(extension))
+                if (auto match = std::dynamic_pointer_cast<ExtensionSubtype>(extension))
                     return match;
             }
             return nullptr;
         };
 
-        void add_extension(std::shared_ptr<Extension<T>> extension) {
+        void add_extension(std::shared_ptr<ExtensionType> extension) {
             extensions_.push_back(extension);
         };
 
-        bool load_extensions(const std::string &filename_base) const {
+        template <class ExtensionSubtype>
+        void each(std::function<void(const ExtensionType &extension)> callback) {
             for (auto extension : extensions_) {
-                if (!extension->load(*dynamic_cast<const T*>(this), filename_base))
-                    return false;
-            }
-            return true;
-        };
-        void serialize_extensions(const std::string &filename_base) const {
-            for (auto extension : extensions_) {
-                extension->serialize(*dynamic_cast<const T*>(this), filename_base);
+                if (auto match = std::dynamic_pointer_cast<ExtensionSubtype>(extension))
+                    callback(match);
             }
         };
 
-      private:
-        std::vector<std::shared_ptr<Extension<T>>> extensions_;
+      protected:
+        std::vector<std::shared_ptr<ExtensionType>> extensions_;
     };
 
 } // namespace utils

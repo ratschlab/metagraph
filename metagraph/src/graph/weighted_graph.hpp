@@ -10,7 +10,7 @@
 
 
 template <typename Weights = sdsl::int_vector<>>
-class DBGWeights : public utils::Extension<DeBruijnGraph> {
+class DBGWeights : public DBGExtension<DeBruijnGraph> {
   public:
     using node_index = typename DeBruijnGraph::node_index;
     using weight = typename Weights::value_type;

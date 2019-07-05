@@ -61,8 +61,31 @@ class SequenceGraph {
     virtual std::string get_node_sequence(node_index node_index) const = 0;
 };
 
+template <class DBG>
+class DBGExtension : public utils::Extension<DBG> {
+  public:
+    virtual bool load(const DBG&, const std::string &filename_base) = 0;
+    virtual void serialize(const DBG&, const std::string &filename_base) const = 0;
+};
 
-class DeBruijnGraph : public SequenceGraph, public utils::Extensions<DeBruijnGraph> {
+template <class DBG>
+class DBGExtensions : public utils::Extensions<DBGExtension<DBG>> {
+  public:
+    bool load_extensions(const std::string &filename_base) const {
+        for (auto extension : this->extensions_) {
+            if (!extension->load(*dynamic_cast<const DBG*>(this), filename_base))
+                return false;
+        }
+        return true;
+    };
+    void serialize_extensions(const std::string &filename_base) const {
+        for (auto extension : this->extensions_) {
+            extension->serialize(*dynamic_cast<const DBG*>(this), filename_base);
+        }
+    };
+};
+
+class DeBruijnGraph : public SequenceGraph, public DBGExtensions<DeBruijnGraph> {
   public:
     virtual ~DeBruijnGraph() {}
 
