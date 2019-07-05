@@ -74,6 +74,11 @@ class DBGAligner {
 
     float get_match_score() const { return match_score_; }
     long long get_num_merge_paths() const { return merged_paths_counter_; }
+    long long get_num_explored_paths() const { return explored_paths_counter_; }
+    long long get_num_explored_seeds() const { return explored_seeds_counter_; }
+
+    // Priority function for path extension phase.
+    static std::function<bool(const AlignedPath&, const AlignedPath&)> priority_function_;
 
   private:
     std::shared_ptr<DeBruijnGraph> graph_;
@@ -115,6 +120,8 @@ class DBGAligner {
     StripedSmithWaterman::Aligner cssw_aligner_;
 
     long long merged_paths_counter_;
+    long long explored_paths_counter_;
+    long long explored_seeds_counter_;
     size_t k_;
 
     // Smith-Waterman method related fields.
@@ -128,12 +135,13 @@ class DBGAligner {
     // Seed the paths. In case of no exact seed, run suffix seeding. To find the size of suffix to seed based on,
     // Perform binary search and report a value of suffix seeding lead to more than 0, but limited number of seeds.
     // If too many seeds are extractable, it is possible that some seeds are discarded which leads to possible poor alignment.
-    void suffix_seed(BoundedPriorityQueue<AlignedPath>& queue, const std::string::const_iterator &sequence_begin,
+    void suffix_seed(BoundedPriorityQueue<AlignedPath, std::vector<AlignedPath>, decltype(priority_function_)> &queue,
+                     const std::string::const_iterator &sequence_begin,
                      const std::string::const_iterator &sequence_end) const;
 
     // Align part of a sequence to the graph in the case of no exact map
     // based on internal strategy. Calls callback for every possible alternative path.
-    bool inexact_map(AlignedPath &path, BoundedPriorityQueue<AlignedPath> &queue,
+    bool inexact_map(AlignedPath &path, BoundedPriorityQueue<AlignedPath, std::vector<AlignedPath>, decltype(priority_function_)> &queue,
                      std::map<DPAlignmentKey, DPAlignmentValue> &dp_alignment,
                      const std::function<bool(node_index, const std::string::const_iterator& query_it)>& terminate
                          = [](node_index, const std::string::const_iterator&) { return false; });

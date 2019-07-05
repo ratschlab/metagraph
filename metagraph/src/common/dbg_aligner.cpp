@@ -7,6 +7,8 @@
 
 typedef std::pair<uint64_t, std::vector<DBGAligner::AlignedPath>::iterator> ScoredPathIt;
 
+std::function<bool(const DBGAligner::AlignedPath&, const DBGAligner::AlignedPath&)> DBGAligner::priority_function_;
+
 DBGAligner::DBGAligner(std::shared_ptr<DeBruijnGraph> graph, DBGAlignerConfig dbg_aligner_config) :
                             graph_(graph),
                             num_top_paths_(dbg_aligner_config.num_top_paths),
@@ -20,7 +22,7 @@ DBGAligner::DBGAligner(std::shared_ptr<DeBruijnGraph> graph, DBGAlignerConfig db
                             deletion_penalty_(dbg_aligner_config.deletion_penalty),
                             gap_opening_penalty_(dbg_aligner_config.gap_opening_penalty),
                             gap_extension_penalty_(dbg_aligner_config.gap_extension_penalty),
-                            merged_paths_counter_(0) {
+                            merged_paths_counter_(0), explored_paths_counter_(0), explored_seeds_counter_(0) {
     k_ = graph_->get_k();
     match_score_ = 2;
     mm_transition_ = -1;
@@ -30,6 +32,23 @@ DBGAligner::DBGAligner(std::shared_ptr<DeBruijnGraph> graph, DBGAlignerConfig db
     // Substitution score for each pair of nucleotides.
     // Transition and transversion mutations have different score values.
     fill_score_matrix(128*128);
+
+    assert(path_comparison_code_ >= 0 && path_comparison_code_ <= 2);
+    switch (path_comparison_code_) {
+        case 0:
+            DBGAligner::priority_function_ = AlignedPath::total_score_less_than;
+            break;
+        case 1:
+            DBGAligner::priority_function_ = AlignedPath::normalized_score_less_than;
+            break;
+        case 2:
+            DBGAligner::priority_function_ = AlignedPath::num_matches_less_than;
+            break;
+        default:
+            std::cout << "Warning: Priority function is not set properly in path construction."
+                      << std::endl << "Setting it to default (total score comparison)." << std::endl;
+            DBGAligner::priority_function_ = AlignedPath::total_score_less_than;
+    }
 
     // score for the following chars respectively:
     // A  C  G  T   N (or other ambiguous code)
@@ -63,12 +82,11 @@ DBGAligner::AlignedPath DBGAligner::map_to_nodes_forward_reverse_complement(cons
     reverse_complement(std::begin(reverse_complement_sequence),
                        std::end(reverse_complement_sequence));
     std::vector<AlignedPath> alternative_paths;
-    AlignedPath path(k_, std::begin(sequence), std::end(sequence), path_comparison_code_);
+    AlignedPath path(k_, std::begin(sequence), std::end(sequence));
     if (map_to_nodes(sequence, alternative_paths))
         path = std::move(alternative_paths.front());
-
     alternative_paths.clear();
-    AlignedPath reverse_path(k_, std::begin(sequence), std::end(sequence), path_comparison_code_);
+    AlignedPath reverse_path(k_, std::begin(sequence), std::end(sequence));
     if  (map_to_nodes(reverse_complement_sequence, alternative_paths, path.get_total_score()))
         reverse_path = std::move(alternative_paths.front());
     return path.get_total_score() > reverse_path.get_total_score() ? path : reverse_path;
@@ -91,12 +109,12 @@ bool DBGAligner::map_to_nodes(const std::string &sequence,
                                        [] (DBGAligner::node_index node) { return node != 0; });
 
     // If no kmer has mapped.
-//    if (std::find_if(nodes_begin, nodes_end, [] (DBGAligner::node_index node) { return node != 0; }) == nodes_end) {
-//        std::cerr << "No kmer not mapped for " << sequence << std::endl;
-//    }
+    if (std::find_if(nodes_begin, nodes_end, [] (DBGAligner::node_index node) { return node != 0; }) == nodes_end) {
+        std::cerr << "No kmer not mapped for " << sequence << std::endl;
+    }
     // Seed the path and extend exactly as long as there is no branching points
     // and nodes are exactly mapped.
-    AlignedPath stitched_path(k_, sequence_begin, sequence_begin, path_comparison_code_);
+    AlignedPath stitched_path(k_, sequence_begin, sequence_begin);
     if (*last_mapped_it != 0) {
         stitched_path.seed(*nodes_begin, {}, graph_->get_node_sequence(*nodes_begin), k_ * match_score_);
         for (auto it = nodes_begin + 1; it <= last_mapped_it; ++it) {
@@ -107,11 +125,13 @@ bool DBGAligner::map_to_nodes(const std::string &sequence,
             }
         }
     }
-//    else {
-//        std::cerr << "First kmer not mapped for " << sequence << std::endl;
-//    }
+    else {
+        std::cerr << "First kmer not mapped for " << sequence << std::endl;
+    }
 
-    BoundedPriorityQueue<AlignedPath> alternative_paths(num_alternative_paths_);
+    BoundedPriorityQueue<AlignedPath, std::vector<AlignedPath>,
+                         decltype(&AlignedPath::total_score_less_than)>
+                            alternative_paths(AlignedPath::total_score_less_than, num_alternative_paths_);
 //    std::cerr << "map_to_nodes called for " << sequence << std::endl;
     // Continue alignment and fill in the zeros in nodes.
     while (last_mapped_it + 1 < nodes_end) {
@@ -142,7 +162,7 @@ bool DBGAligner::map_to_nodes(const std::string &sequence,
         // which is the score from either forward or reverse_complement of the sequence. Or in the case that
         // seeding was not possible.
         if (re_mapped_paths.size() == 0) {
-            std::cerr << "Terminating early because of poor alignment compared to forward sequence" << std::endl;
+            //std::cerr << "Terminating early because of poor alignment compared to forward sequence" << std::endl;
             break;
         }
         auto path_before_graph_exploration(stitched_path);
@@ -157,27 +177,31 @@ bool DBGAligner::map_to_nodes(const std::string &sequence,
                                      - (alternative_partial_path.get_query_begin_it() - sequence_begin);
             int64_t updated_score = stitched_path.get_total_score()
                                  + alternative_partial_path.get_total_score()
-                                 - overlap_length * match_score_;
+                                 - (overlap_length + k_ - 1)  * match_score_;
             // This case shouldn't normally happen.
             if (overlap_length < 0) {
-                stitched_path = AlignedPath(k_, sequence_begin, sequence_begin, path_comparison_code_);
+                stitched_path = AlignedPath(k_, sequence_begin, sequence_begin);
                 std::cerr << "Negative overlap when appending a re_mapped path" << std::endl;
                 break;
             }
             stitched_path.append_path(alternative_partial_path, overlap_length, updated_score);
             target_node_it = nodes_begin + stitched_path.num_kmers_in_query() + stitched_path_offset;
             last_mapped_it = std::find(target_node_it + 1, nodes_end, 0) - 1;
-            // In case all zeros were filled with the graph exploration call, continue with a single nice long
-            // path and discard alternative alignments for the zero region for now.
-            if (*target_node_it != 0)
-                break;
             // If re_mapped_path wasn't able to fill in all the zeros in nodes, report a partial path
             // and continue from the next exact map.
             if (stitched_path.size() + alternative_partial_path.size() < sw_threshold_for_stitched_path_) {
                 smith_waterman_score(stitched_path);
                 trim(stitched_path);
             }
+            // In case all zeros were filled with the graph exploration call, continue with a single nice long
+            // path and discard alternative alignments for the zero region for now.
+            if (*target_node_it != 0)
+                break;
+            // If all zeros were not filled with graph exploration call, report stitched path so far
+            // as an alternative path.
+//            std::cerr << "Pushing stitched path" << std::endl;
             alternative_paths.push(std::move(stitched_path));
+//            std::cerr << "Pushed stitched path" << std::endl;
             stitched_path = path_before_graph_exploration;
         }
         if (stitched_path.size() == 0) {
@@ -193,7 +217,7 @@ bool DBGAligner::map_to_nodes(const std::string &sequence,
                 break;
             auto next_kmer_it = non_zero_target_node_it - nodes_begin + sequence_begin;
             // first exact mapped kmer is added to the path as seed.
-            stitched_path = AlignedPath(k_, next_kmer_it, next_kmer_it, path_comparison_code_);
+            stitched_path = AlignedPath(k_, next_kmer_it, next_kmer_it);
             stitched_path.seed(*non_zero_target_node_it, {},
                                graph_->get_node_sequence(*non_zero_target_node_it),
                                k_ * match_score_);
@@ -231,6 +255,7 @@ bool DBGAligner::map_to_nodes(const std::string &sequence,
         trim(stitched_path);
     }
     alternative_paths.push(std::move(stitched_path));
+//    std::cerr << "Pushed stitched path" << std::endl;
 
     while(!alternative_paths.empty() && alternative_paths_vec.size() < num_alternative_paths_) {
         alternative_paths_vec.push_back(std::move(alternative_paths.top()));
@@ -248,26 +273,29 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::align_by_graph_exploration(
         return std::vector<AlignedPath>();
 
     std::map<DPAlignmentKey, DPAlignmentValue> dp_alignment;
-    BoundedPriorityQueue<AlignedPath> alternative_paths(num_alternative_paths_);
+    BoundedPriorityQueue<AlignedPath, std::vector<AlignedPath>,
+                         decltype(&AlignedPath::total_score_less_than)>
+                            alternative_paths(AlignedPath::total_score_less_than, num_alternative_paths_);
 
-    BoundedPriorityQueue<AlignedPath> queue(num_top_paths_);
-    AlignedPath path(k_, sequence_begin, sequence_begin, path_comparison_code_);
+    BoundedPriorityQueue<AlignedPath, std::vector<AlignedPath>, decltype(priority_function_)> queue(priority_function_, num_top_paths_);
+    AlignedPath path(k_, sequence_begin, sequence_begin);
 
     suffix_seed(queue, sequence_begin, sequence_end);
+    explored_seeds_counter_ += queue.get_num_items_pushed();
     // Graph exploration process.
     while (!queue.empty() && alternative_paths.size() < num_alternative_paths_) {
         path = std::move(queue.top());
         queue.pop();
-//        std::cerr << "popping path (#matches, size, seq) : " << path.get_num_matches()
+//        std::cerr << "popping path (#matches, size, cigar, seq) : " << path.get_num_matches()
 //                  << " " << path.size() + k_ - 1
-//                  << " cigar " << path.get_cigar()
+//                  << " " << path.get_cigar()
 //                  << " " << path.get_sequence() << std::endl;
         if (path.get_query_it() + k_ > sequence_end) {
-            if (path.size() != 0) {
+            if (path.size() != 0 && path.size() < sw_threshold_for_stitched_path_) {
                 smith_waterman_score(path);
                 trim(path);
-                alternative_paths.push(path);
             }
+            alternative_paths.push(std::move(path));
             continue;
         }
         if (early_discard_path(path))
@@ -275,21 +303,20 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::align_by_graph_exploration(
 //        std::cerr << "calling exact map" << std::endl;
 
         if (!exact_map(path, sequence_end, dp_alignment, terminate_mapping)) {
-            if (path.size() != 0) {
+            if (path.size() != 0 && path.size() < sw_threshold_for_stitched_path_) {
                 smith_waterman_score(path);
                 trim(path);
-                alternative_paths.push(path);
             }
-//            std::cerr << "Aligned and trim after exact map: " << path.get_sequence() << std::endl;
+            alternative_paths.push(std::move(path));
             break;
         }
 
         if (path.get_query_it() + k_ > sequence_end) {
-            if (path.size() != 0) {
+            if (path.size() != 0 && path.size() < sw_threshold_for_stitched_path_) {
                 smith_waterman_score(path);
                 trim(path);
-                alternative_paths.push(path);
             }
+            alternative_paths.push(std::move(path));
             continue;
         }
 
@@ -300,12 +327,11 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::align_by_graph_exploration(
 
         if (!inexact_map(path, queue, dp_alignment, terminate_mapping) || queue.empty()) {
 //            std::cerr << "Aligning and trim after inexact map: " << path.get_sequence() << " " << path.get_cigar() << std::endl;
-            if (path.size() != 0) {
+            if (path.size() != 0 && path.size() < sw_threshold_for_stitched_path_) {
                 smith_waterman_score(path);
                 trim(path);
-                alternative_paths.push(path);
             }
-//            std::cerr << "Aligning and trim after inexact map: " << path.get_sequence() << " " << path.get_cigar() << std::endl;
+            alternative_paths.push(std::move(path));
             break;
         }
     }
@@ -316,14 +342,15 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::align_by_graph_exploration(
         alternative_paths_vec.push_back(std::move(alternative_paths.top()));
         alternative_paths.pop();
     }
+    explored_paths_counter_ += queue.get_num_items_pushed();
     return alternative_paths_vec;
 }
 
-void DBGAligner::suffix_seed(BoundedPriorityQueue<AlignedPath>& queue,
+void DBGAligner::suffix_seed(BoundedPriorityQueue<AlignedPath, std::vector<AlignedPath>, decltype(priority_function_)>& queue,
                              const std::string::const_iterator &sequence_begin,
                              const std::string::const_iterator &sequence_end) const {
 
-    AlignedPath path(k_, sequence_begin, sequence_begin, path_comparison_code_);
+    AlignedPath path(k_, sequence_begin, sequence_begin);
 
     // TODO: perform inexact seeding in case of DBGs other than BOSS by skipping ahead.
     auto seed = graph_->kmer_to_node(std::string(sequence_begin, sequence_begin + k_));
@@ -420,7 +447,7 @@ bool DBGAligner::exact_map(AlignedPath &path, const std::string::const_iterator 
 }
 
 bool DBGAligner::inexact_map(AlignedPath& path,
-                             BoundedPriorityQueue<AlignedPath> &queue,
+                             BoundedPriorityQueue<AlignedPath, std::vector<AlignedPath>, decltype(priority_function_)> &queue,
                              std::map<DPAlignmentKey, DPAlignmentValue> &dp_alignment,
                              const std::function<bool(node_index, const std::string::const_iterator& query_it)>& terminate) {
     bool continue_alignment = true;
@@ -435,7 +462,8 @@ bool DBGAligner::inexact_map(AlignedPath& path,
         }
 //        std::cerr << "Computing sw score" << std::endl;
         // Approximate Smith-Waterman score by assuming either match/mismatch for the next character.
-        if (use_cssw_lib_ || (queue.size() > 0 && queue.back() < alternative_path)) {
+        if (use_cssw_lib_ //|| (queue.size() > 0 && queue.back() < alternative_path)
+            || path.size() > sw_threshold_for_stitched_path_) {
         alternative_path.extend(node, {}, extension,
             single_char_score(*(alternative_path.get_query_it() +
                 k_ - 1), extension));

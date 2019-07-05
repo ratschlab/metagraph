@@ -14,8 +14,7 @@ class Path {
 
   public:
     Path(uint64_t k, std::string::const_iterator query_begin_it,
-         std::string::const_iterator query_it,
-         uint8_t prioritizing_function_code) :
+         std::string::const_iterator query_it) :
             k_(k),
             query_begin_it_(query_begin_it),
             query_it_(query_it) {
@@ -25,24 +24,7 @@ class Path {
         is_score_updated_ = false;
         sw_num_rows_stored_ = 0;
         sw_num_cols_stored_ = 0;
-
-        assert(prioritizing_function_code >= 0 && prioritizing_function_code <= 2);
-        switch (prioritizing_function_code) {
-            case 0:
-                prioritizing_function = total_score_less_than;
-                break;
-            case 1:
-                prioritizing_function = normalized_score_less_than;
-                break;
-            case 2:
-                prioritizing_function = num_matches_less_than;
-                break;
-            default:
-                std::cout << "Warning: Prioritizing function is not set properly in path construction."
-                          << std::endl << "Setting it to default (total score comparison)." << std::endl;
-                prioritizing_function = total_score_less_than;
-            }
-        }
+    }
 
     Path(const Path&) = default;
     Path(Path&&) = default;
@@ -167,10 +149,16 @@ class Path {
     bool is_score_updated() const { return is_score_updated_; }
     StripedSmithWaterman::Alignment get_alignment() { return alignment_; }
 
-    bool operator< (const Path &other) const {
-        return prioritizing_function(*this, other);
-    }
-
+    // Functions to Prioritize paths.
+    static bool total_score_less_than (const Path& first, const Path& second) {
+//        std::cerr << "Using func 0 for path: " << first.get_sequence() << std::endl;
+        return (first.score_ < second.score_); }
+    static bool normalized_score_less_than (const Path& first, const Path& second) {
+//        std::cerr << "Using func 1 for path: " << first.get_sequence() << std::endl;
+        return (first.score_/float(first.query_size()) < second.score_/float(second.query_size())); }
+    static bool num_matches_less_than (const Path& first, const Path& second) {
+//        std::cerr << "Using func 2 for path: " << first.get_sequence() << std::endl;
+        return (first.num_matches_ < second.num_matches_); }
   private:
     float score_;
     uint64_t k_;
@@ -191,8 +179,6 @@ class Path {
     size_t sw_num_rows_stored_;
     size_t sw_num_cols_stored_;
 
-    std::function<bool(const Path&, const Path&)> prioritizing_function;
-
     void push_back(NodeType node, const VLabels &labels, float score=0) {
         nodes_.push_back(node);
         score_ += score;
@@ -201,13 +187,6 @@ class Path {
         ++ query_it_;
     }
 
-    // Functions to Prioritize paths.
-    static bool total_score_less_than (const Path& first, const Path& second) {
-        return (first.score_ < second.score_); }
-    static bool normalized_score_less_than (const Path& first, const Path& second) {
-        return (first.score_/float(first.size()) < second.score_/float(second.size())); }
-    static bool num_matches_less_than (const Path& first, const Path& second) {
-        return (first.num_matches_ < second.num_matches_); }
 
 };
 

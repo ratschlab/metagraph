@@ -2409,6 +2409,8 @@ int main(int argc, const char *argv[]) {
                 );
 
                 std::cout << "Number of merged paths = " << aligner.get_num_merge_paths() << std::endl;
+                std::cout << "Number of explored paths = " << aligner.get_num_explored_paths() << std::endl;
+                std::cout << "Number of explored seeds = " << aligner.get_num_explored_seeds() << std::endl;
                 if (config->verbose) {
                     std::cout << "File processed in "
                               << data_reading_timer.elapsed()
