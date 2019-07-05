@@ -20,6 +20,7 @@ class KmerStorage {
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
 
   public:
+    using Value = typename Container::value_type;
     using Data = typename Container::storage_type;
 
     KmerStorage(size_t k,
@@ -38,6 +39,9 @@ class KmerStorage {
 
     void add_sequences(const std::function<void(CallString)> &generate_sequences);
 
+    void insert_dummy(KMER dummy_kmer);
+
+    //TODO possible to get rid of this or make interface more formal?
     inline Data& data() { join(); return kmers_.data(); }
 
     void clear() { join(); kmers_.clear(); }
