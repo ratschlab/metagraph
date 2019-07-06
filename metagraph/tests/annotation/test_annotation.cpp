@@ -499,7 +499,7 @@ std::vector<std::string> get_labels_by_label(const Annotator &annotator,
                                       std::ceil(min_label_frequency * indices.size()));
 
     auto label_counts
-        = dynamic_cast<const annotate::ColumnCompressed<>*>(&annotator)
+        = std::is_same<annotate::ColumnCompressed<>, Annotator>::value
             // Iterate by column instead of by row for column-major annotators
             ? count_labels(dynamic_cast<const annotate::ColumnCompressed<>&>(annotator),
                            index_counts,
@@ -689,7 +689,7 @@ get_top_labels_by_label(const Annotator &annotator,
     }
 
     auto label_counts
-        = dynamic_cast<const annotate::ColumnCompressed<>*>(&annotator)
+        = std::is_same<annotate::ColumnCompressed<>, Annotator>::value
             // Iterate by column instead of by row for column-major annotators
             ? count_labels(dynamic_cast<const annotate::ColumnCompressed<>&>(annotator),
                            index_counts,
