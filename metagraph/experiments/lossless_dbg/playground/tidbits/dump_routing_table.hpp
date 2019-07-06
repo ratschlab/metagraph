@@ -13,6 +13,7 @@ int main_dumprt(int argc, char *argv[]) {
     for(int64_t i=0;i<wt.size();i++) {
         cout << decode(wt[i]);
     }
+    return 0;
 }
 
 #endif //METAGRAPH_DUMP_ROUTING_TABLE_HPP
