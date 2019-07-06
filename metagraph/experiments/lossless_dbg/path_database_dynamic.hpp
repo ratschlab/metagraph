@@ -71,6 +71,7 @@ public:
 
 
     std::vector<path_id> encode(const std::vector<std::string> &sequences) {
+        statistics["encode_initial_ram"] = get_used_memory();
         VerboseTimer encoding_timer("encoding reads");
         VerboseTimer preprocessing_timer("preprocessing step");
         // improvement
@@ -102,6 +103,7 @@ public:
         routing_table = decltype(routing_table)(graph_,&is_bifurcation,&rank_is_bifurcation,chunk_size);
         incoming_table = decltype(incoming_table)(graph_,&is_bifurcation,&rank_is_bifurcation,chunk_size);
         alloc_routing_table.finished();
+
 
         #pragma omp parallel for num_threads(get_num_threads())
         for (node_index node = 1; node <= graph.num_nodes(); node++) {
@@ -339,7 +341,8 @@ public:
         additional_splits = decltype(additional_splits)(additional_splits_vec.begin(),
                                                         additional_splits_vec.end());
         additional_splits_vec.clear();
-        additional_splits_t.finished();
+        statistics["additional_joins_time"] = additional_splits_t.finished();
+        statistics["additional_joins_ram"] = get_used_memory();
     }
 
     void populate_bifurcation_bitvectors() {
@@ -363,7 +366,8 @@ public:
         rank_is_join = decltype(rank_is_join)(&is_join);
         rank_is_bifurcation = decltype(rank_is_bifurcation)(&is_bifurcation);
 
-        bifurcation_timer.finished();
+        statistics["bifurcations_time"] = bifurcation_timer.finished();
+        statistics["bifurcations_ram"] = get_used_memory();
     }
 
 
