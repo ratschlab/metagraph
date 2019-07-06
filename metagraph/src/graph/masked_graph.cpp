@@ -126,6 +126,8 @@ void MaskedDeBruijnGraph
     const auto *succ = dynamic_cast<const DBGSuccinct*>(graph_.get());
     if (succ) {
         sdsl::bit_vector checked(graph_->num_nodes() + 1, false);
+
+        // First, check all nodes whose indegree == 0 in unmasked graph
         succ->call_start_nodes(
             [&](const auto &i) {
                 if (in_graph(i)) {
@@ -134,6 +136,8 @@ void MaskedDeBruijnGraph
                 }
             }
         );
+
+        // then check nodes whose indegree > 0 in unmasked graph
         call_nodes([&](const auto &i) {
             if (!checked[i] && !indegree(i))
                 callback(i);
