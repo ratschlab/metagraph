@@ -115,27 +115,30 @@ bool ColumnCompressed<Label>::has_label(Index i, const Label &label) const {
 }
 
 template <typename Label>
-bool ColumnCompressed<Label>
+void ColumnCompressed<Label>
 ::call_relations(const std::vector<Index> &indices,
                  const Label &label,
-                 std::function<void(Index)> object_callback,
+                 std::function<void(Index, bool)> callback,
                  std::function<bool()> terminate) const {
-    size_t label_code;
     try {
-        label_code = label_encoder_.encode(label);
+        size_t label_code = label_encoder_.encode(label);
+
+        for (Index i : indices) {
+            if (terminate())
+                return;
+
+            callback(i, is_set(i, label_code));
+        }
+
     } catch (...) {
-        return terminate();
+
+        for (Index i : indices) {
+            if (terminate())
+                return;
+
+            callback(i, false);
+        }
     }
-
-    for (Index i : indices) {
-        if (terminate())
-            return true;
-
-        if (is_set(i, label_code))
-            object_callback(i);
-    }
-
-    return terminate();
 }
 
 template <typename Label>

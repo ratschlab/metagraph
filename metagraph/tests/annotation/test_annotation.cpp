@@ -476,12 +476,15 @@ TYPED_TEST(AnnotatorPresetTest, call_rows_get_labels) {
 std::vector<std::pair<std::string, size_t>>
 count_labels(const annotate::ColumnCompressed<> &annotation,
              const std::unordered_map<uint64_t, size_t> &index_counts,
-             std::function<bool(size_t /* label_count */)> stop_counting_for_label);
+             std::function<bool(size_t /* checked */,
+                                size_t /* matched */)> stop_counting_for_label);
 
 std::vector<std::pair<std::string, size_t>>
 count_labels(const annotate::MultiLabelEncoded<uint64_t, std::string> &annotation,
              const std::unordered_map<uint64_t, size_t> &index_counts,
-             std::function<bool(size_t /* smallest_label_count */)> /*stop_counting_labels*/);
+             std::function<bool(size_t /* checked */,
+                                size_t /* min_matched */,
+                                size_t /* max_matched */)> /* stop_counting_labels */);
 
 template <typename Annotator>
 std::vector<std::string> get_labels_by_label(const Annotator &annotator,
@@ -495,10 +498,21 @@ std::vector<std::string> get_labels_by_label(const Annotator &annotator,
     const size_t min_count = std::max(1.0,
                                       std::ceil(min_label_frequency * indices.size()));
 
-    auto label_counts = count_labels(annotator, index_counts,
-                                     [&](size_t label_count) {
-                                         return label_count >= min_count;
-                                     });
+    auto label_counts
+        = dynamic_cast<const annotate::ColumnCompressed<>*>(&annotator)
+            // Iterate by column instead of by row for column-major annotators
+            ? count_labels(dynamic_cast<const annotate::ColumnCompressed<>&>(annotator),
+                           index_counts,
+                           [&](size_t checked, size_t matched) {
+                               return matched >= min_count
+                                        || matched + (indices.size() - checked) < min_count;
+                           })
+            : count_labels(annotator,
+                           index_counts,
+                           [&](size_t checked, size_t min_matched, size_t max_matched) {
+                               return min_matched >= min_count
+                                        || max_matched + (indices.size() - checked) < min_count;
+                           });
 
     std::vector<std::string> labels;
     for (size_t i = 0; i < label_counts.size(); ++i) {
@@ -674,8 +688,19 @@ get_top_labels_by_label(const Annotator &annotator,
         index_counts[i] = 1;
     }
 
-    auto label_counts = count_labels(annotator, index_counts,
-                                     [](size_t /* label_count */) { return false; });
+    auto label_counts
+        = dynamic_cast<const annotate::ColumnCompressed<>*>(&annotator)
+            // Iterate by column instead of by row for column-major annotators
+            ? count_labels(dynamic_cast<const annotate::ColumnCompressed<>&>(annotator),
+                           index_counts,
+                           [&](size_t checked, size_t matched) {
+                               return matched + (indices.size() - checked) < min_count;
+                           })
+            : count_labels(annotator,
+                           index_counts,
+                           [&](size_t checked, size_t /* min_matched */, size_t max_matched) {
+                               return max_matched + (indices.size() - checked) < min_count;
+                           });
 
     std::sort(label_counts.begin(), label_counts.end(),
               [](const auto &first, const auto &second) {
