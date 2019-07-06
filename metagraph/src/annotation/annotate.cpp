@@ -92,53 +92,17 @@ void MultiLabelEncoded<IndexType, LabelType>
     }
 }
 
-
-// Count all labels collected from the given rows
-// and return top |num_top| with the their counts.
 template <typename IndexType, typename LabelType>
-auto MultiLabelEncoded<IndexType, LabelType>
-::get_top_labels(const std::vector<Index> &indices,
-                 size_t num_top,
-                 double min_label_frequency) const
--> std::vector<std::pair<Label, size_t>> {
-    // TODO: use |min_label_frequency|
-    // auto counter = count_labels(indices, min_label_frequency);
-    auto counter = count_labels(indices);
+void MultiLabelEncoded<IndexType, LabelType>
+::call_rows(const std::vector<Index> &indices,
+            const std::function<void(std::vector<uint64_t>&&)> &row_callback,
+            const std::function<bool()> &terminate) const {
+    for (Index i : indices) {
+        if (terminate())
+            break;
 
-    const uint64_t min_count = min_label_frequency * indices.size();
-
-    std::vector<std::pair<size_t, size_t>> counts;
-    for (size_t j = 0; j < counter.size(); ++j) {
-        if (counter[j] && counter[j] >= min_count)
-            counts.emplace_back(j, counter[j]);
+        row_callback(get_label_codes(i));
     }
-    // sort in decreasing order
-    std::sort(counts.begin(), counts.end(),
-              [](const auto &first, const auto &second) {
-                  return first.second > second.second;
-              });
-
-    counts.resize(std::min(counts.size(), num_top));
-
-    std::vector<std::pair<Label, size_t>> top_counts;
-    for (const auto &encoded_pair : counts) {
-        top_counts.emplace_back(label_encoder_.decode(encoded_pair.first),
-                                encoded_pair.second);
-    }
-
-    return top_counts;
-}
-
-template <typename IndexType, typename LabelType>
-std::vector<uint64_t>
-MultiLabelEncoded<IndexType, LabelType>::get_label_indexes(Index i) const {
-    VLabels labels = this->get_labels(i);
-    std::vector<uint64_t> indexes;
-    indexes.reserve(labels.size());
-    for (const auto &label : labels) {
-        indexes.push_back(label_encoder_.encode(label));
-    }
-    return indexes;
 }
 
 template <typename Annotator>
@@ -148,7 +112,7 @@ class IterateRowsByIndex : public IterateRows {
           : annotator_(annotator) {};
 
     std::vector<uint64_t> next_row() override final {
-        return annotator_.get_label_indexes(i_++);
+        return annotator_.get_label_codes(i_++);
     };
 
   private:

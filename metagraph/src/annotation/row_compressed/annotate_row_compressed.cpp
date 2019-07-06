@@ -237,47 +237,6 @@ void RowCompressed<Label>
     }
 }
 
-// Get labels that occur at least in |presence_ratio| rows.
-// If |presence_ratio| = 0, return all occurring labels.
-template <typename Label>
-typename RowCompressed<Label>::VLabels
-RowCompressed<Label>::get_labels(const std::vector<Index> &indices,
-                                 double presence_ratio) const {
-    assert(presence_ratio >= 0 && presence_ratio <= 1);
-
-    const size_t min_labels_discovered =
-                        presence_ratio == 0
-                            ? 1
-                            : std::ceil(indices.size() * presence_ratio);
-    // const size_t max_labels_missing = indices.size() - min_labels_discovered;
-
-    auto counts = count_labels(indices);
-
-    VLabels filtered_labels;
-
-    for (size_t i = 0; i < counts.size(); ++i) {
-        if (counts[i] && counts[i] >= min_labels_discovered)
-            filtered_labels.push_back(label_encoder_.decode(i));
-    }
-
-    return filtered_labels;
-}
-
-// Count all labels collected from the given rows.
-template <typename Label>
-std::vector<uint64_t>
-RowCompressed<Label>::count_labels(const std::vector<Index> &indices) const {
-    std::vector<uint64_t> counter(num_labels(), 0);
-
-    for (Index i : indices) {
-        for (auto col : matrix_->get_row(i)) {
-            counter[col]++;
-        }
-    }
-
-    return counter;
-}
-
 template <typename Label>
 uint64_t RowCompressed<Label>::num_objects() const {
     return matrix_->num_rows();

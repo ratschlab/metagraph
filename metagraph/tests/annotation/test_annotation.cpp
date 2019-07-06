@@ -4,16 +4,17 @@
 
 #include "gtest/gtest.h"
 
+#define private public
+
 #include "annotate_column_compressed.hpp"
 #include "annotate_row_compressed.hpp"
 #include "static_annotators_def.hpp"
 #include "annotation_converters.hpp"
 #include "utils.hpp"
+#include "test_matrix_helpers.hpp"
+#include "unix_tools.hpp"
 
-const std::string test_data_dir = "../tests/data";
-const std::string test_dump_basename = test_data_dir + "/dump_test";
-const std::string test_dump_basename_vec_bad = test_dump_basename + "_bad_filename";
-const std::string test_dump_basename_vec_good = test_dump_basename + "_annotation";
+#include "../test_helpers.hpp"
 
 
 template <typename... Args>
@@ -108,6 +109,9 @@ template <typename Annotator>
 class AnnotatorStaticTest : public AnnotatorTest<Annotator> { };
 
 template <typename Annotator>
+class AnnotatorStaticLargeTest : public AnnotatorStaticTest<Annotator> { };
+
+template <typename Annotator>
 class AnnotatorPresetTest : public AnnotatorTest<Annotator> {
   public:
     virtual void SetUp() override {
@@ -163,6 +167,7 @@ typedef ::testing::Types<annotate::BinRelWTAnnotator,
 typedef ::testing::Types<annotate::BinRelWTAnnotator,
                          annotate::BinRelWT_sdslAnnotator,
                          annotate::BRWTCompressed<>> AnnotatorStaticTypes;
+typedef ::testing::Types<annotate::BRWTCompressed<>> AnnotatorStaticLargeTypes;
 typedef ::testing::Types<annotate::ColumnCompressed<>,
                          annotate::RowCompressed<>,
                          RowCompressedParallel<>,
@@ -178,6 +183,7 @@ TYPED_TEST_CASE(AnnotatorPresetTest, AnnotatorTypes);
 TYPED_TEST_CASE(AnnotatorPreset2Test, AnnotatorTypes);
 TYPED_TEST_CASE(AnnotatorPreset3Test, AnnotatorTypes);
 TYPED_TEST_CASE(AnnotatorStaticTest, AnnotatorStaticTypes);
+TYPED_TEST_CASE(AnnotatorStaticLargeTest, AnnotatorStaticLargeTypes);
 TYPED_TEST_CASE(AnnotatorDynamicTest, AnnotatorDynamicTypes);
 TYPED_TEST_CASE(AnnotatorDynamicNoSparseTest, AnnotatorDynamicNoSparseTypes);
 
@@ -369,112 +375,395 @@ TYPED_TEST(AnnotatorPreset3Test, LabelExists) {
     EXPECT_TRUE(this->annotation->label_exists("Label8"));
 }
 
-TYPED_TEST(AnnotatorPresetTest, get_labels) {
-    EXPECT_EQ(std::vector<std::string>({}),
-              this->annotation->get_labels({}, 1));
 
-    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
-              convert_to_set(this->annotation->get_labels({ 2 }, 1)));
+template <typename Annotator>
+std::vector<std::string> get_labels(const Annotator &annotator,
+                                    const std::vector<uint64_t> &indices,
+                                    double min_label_frequency = 0.0) {
+    const auto& label_encoder = annotator.get_label_encoder();
+    const size_t min_count = std::max(1.0,
+                                      std::ceil(min_label_frequency * indices.size()));
 
-    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
-              convert_to_set(this->annotation->get_labels({ 2 }, 0)));
+    std::vector<std::pair<std::string, size_t>> label_counts;
+    for (size_t j = 0; j < label_encoder.size(); ++j) {
+        label_counts.emplace_back(label_encoder.decode(j), 0);
+    }
 
-    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
-              convert_to_set(this->annotation->get_labels({ 2 }, 1)));
+    annotator.call_rows(
+        indices,
+        [&](auto&& label_indices) {
+            for (auto j : label_indices) {
+                label_counts[j].second++;
+            }
+        },
+        [&]() {
+            return std::all_of(label_counts.begin(), label_counts.end(),
+                               [&](const auto &pair) { return pair.second >= min_count; });
+        }
+    );
 
-    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
-              convert_to_set(this->annotation->get_labels({ 2 }, 1)));
+    std::vector<std::string> labels;
+    for (auto&& pair : label_counts) {
+        if (pair.second >= min_count)
+            labels.emplace_back(std::move(pair.first));
+    }
 
-    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
-              convert_to_set(this->annotation->get_labels({ 2 }, 0.5)));
-
-    EXPECT_EQ(convert_to_set({"Label2"}),
-              convert_to_set(this->annotation->get_labels({ 2, 4 }, 1)));
-
-    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
-              convert_to_set(this->annotation->get_labels({ 2, 4 }, 0)));
-
-    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
-              convert_to_set(this->annotation->get_labels({ 2, 4 }, 0.5)));
-
-    EXPECT_EQ(convert_to_set({"Label2"}),
-              convert_to_set(this->annotation->get_labels({ 2, 4 }, 0.501)));
-
-    EXPECT_EQ(convert_to_set({"Label2"}),
-              convert_to_set(this->annotation->get_labels({ 2, 4 }, 1)));
-
-    EXPECT_EQ(convert_to_set({}),
-              convert_to_set(this->annotation->get_labels({ 0, 1, 2, 3, 4 }, 1)));
-
-    EXPECT_EQ(convert_to_set({"Label0", "Label1", "Label2", "Label8"}),
-              convert_to_set(this->annotation->get_labels({ 0, 1, 2, 3, 4 }, 0)));
-
-    EXPECT_EQ(convert_to_set({"Label0", "Label1", "Label2", "Label8"}),
-              convert_to_set(this->annotation->get_labels({ 0, 1, 2, 3, 4 }, 0.2)));
-
-    EXPECT_EQ(convert_to_set({"Label1", "Label2", "Label8"}),
-              convert_to_set(this->annotation->get_labels({ 0, 1, 2, 3, 4 }, 0.201)));
-
-    EXPECT_EQ(convert_to_set({"Label1", "Label2", "Label8"}),
-              convert_to_set(this->annotation->get_labels({ 0, 1, 2, 3, 4 }, 0.4)));
-
-    EXPECT_EQ(convert_to_set({"Label2"}),
-              convert_to_set(this->annotation->get_labels({ 0, 1, 2, 3, 4 }, 0.401)));
-
-    EXPECT_EQ(convert_to_set({"Label2"}),
-              convert_to_set(this->annotation->get_labels({ 0, 1, 2, 3, 4 }, 0.8)));
-
-    EXPECT_EQ(convert_to_set({}),
-              convert_to_set(this->annotation->get_labels({ 0, 1, 2, 3, 4 }, 0.801)));
-
-    EXPECT_EQ(convert_to_set({}),
-              convert_to_set(this->annotation->get_labels({ 0, 1, 2, 3, 4 }, 1)));
+    return labels;
 }
 
-TYPED_TEST(AnnotatorPreset3Test, get_top_labels) {
+TYPED_TEST(AnnotatorPresetTest, call_rows_get_labels) {
+    EXPECT_EQ(std::vector<std::string>({}),
+              get_labels(*this->annotation, {}, 1));
+
+    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
+              convert_to_set(get_labels(*this->annotation, { 2 }, 1)));
+
+    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
+              convert_to_set(get_labels(*this->annotation, { 2 }, 0)));
+
+    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
+              convert_to_set(get_labels(*this->annotation, { 2 }, 1)));
+
+    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
+              convert_to_set(get_labels(*this->annotation, { 2 }, 1)));
+
+    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
+              convert_to_set(get_labels(*this->annotation, { 2 }, 0.5)));
+
+    EXPECT_EQ(convert_to_set({"Label2"}),
+              convert_to_set(get_labels(*this->annotation, { 2, 4 }, 1)));
+
+    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
+              convert_to_set(get_labels(*this->annotation, { 2, 4 }, 0)));
+
+    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
+              convert_to_set(get_labels(*this->annotation, { 2, 4 }, 0.5)));
+
+    EXPECT_EQ(convert_to_set({"Label2"}),
+              convert_to_set(get_labels(*this->annotation, { 2, 4 }, 0.501)));
+
+    EXPECT_EQ(convert_to_set({"Label2"}),
+              convert_to_set(get_labels(*this->annotation, { 2, 4 }, 1)));
+
+    EXPECT_EQ(convert_to_set({}),
+              convert_to_set(get_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 1)));
+
+    EXPECT_EQ(convert_to_set({"Label0", "Label1", "Label2", "Label8"}),
+              convert_to_set(get_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 0)));
+
+    EXPECT_EQ(convert_to_set({"Label0", "Label1", "Label2", "Label8"}),
+              convert_to_set(get_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 0.2)));
+
+    EXPECT_EQ(convert_to_set({"Label1", "Label2", "Label8"}),
+              convert_to_set(get_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 0.201)));
+
+    EXPECT_EQ(convert_to_set({"Label1", "Label2", "Label8"}),
+              convert_to_set(get_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 0.4)));
+
+    EXPECT_EQ(convert_to_set({"Label2"}),
+              convert_to_set(get_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 0.401)));
+
+    EXPECT_EQ(convert_to_set({"Label2"}),
+              convert_to_set(get_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 0.8)));
+
+    EXPECT_EQ(convert_to_set({}),
+              convert_to_set(get_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 0.801)));
+
+    EXPECT_EQ(convert_to_set({}),
+              convert_to_set(get_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 1)));
+}
+
+std::vector<std::pair<std::string, size_t>>
+count_labels(const annotate::ColumnCompressed<> &annotation,
+             const std::unordered_map<uint64_t, size_t> &index_counts,
+             std::function<bool(size_t /* checked */,
+                                size_t /* matched */)> stop_counting_for_label);
+
+std::vector<std::pair<std::string, size_t>>
+count_labels(const annotate::MultiLabelEncoded<uint64_t, std::string> &annotation,
+             const std::unordered_map<uint64_t, size_t> &index_counts,
+             std::function<bool(size_t /* checked */,
+                                size_t /* min_matched */,
+                                size_t /* max_matched */)> /* stop_counting_labels */);
+
+template <typename Annotator>
+std::vector<std::string> get_labels_by_label(const Annotator &annotator,
+                                             const std::vector<uint64_t> &indices,
+                                             double min_label_frequency = 0.0) {
+    std::unordered_map<uint64_t, size_t> index_counts;
+    for (auto i : indices) {
+        index_counts[i] = 1;
+    }
+
+    const size_t min_count = std::max(1.0,
+                                      std::ceil(min_label_frequency * indices.size()));
+
+    auto label_counts
+        = std::is_same<annotate::ColumnCompressed<>, Annotator>::value
+            // Iterate by column instead of by row for column-major annotators
+            ? count_labels(dynamic_cast<const annotate::ColumnCompressed<>&>(annotator),
+                           index_counts,
+                           [&](size_t checked, size_t matched) {
+                               return matched >= min_count
+                                        || matched + (indices.size() - checked) < min_count;
+                           })
+            : count_labels(annotator,
+                           index_counts,
+                           [&](size_t checked, size_t min_matched, size_t max_matched) {
+                               return min_matched >= min_count
+                                        || max_matched + (indices.size() - checked) < min_count;
+                           });
+
+    std::vector<std::string> labels;
+    for (size_t i = 0; i < label_counts.size(); ++i) {
+        if (label_counts[i].second >= min_count)
+            labels.emplace_back(std::move(label_counts[i].first));
+    }
+
+    return labels;
+}
+
+TYPED_TEST(AnnotatorPresetTest, call_rows_get_labels_by_label) {
+    EXPECT_EQ(std::vector<std::string>({}),
+              get_labels(*this->annotation, {}, 1));
+
+    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
+              convert_to_set(get_labels_by_label(*this->annotation, { 2 }, 1)));
+
+    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
+              convert_to_set(get_labels_by_label(*this->annotation, { 2 }, 0)));
+
+    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
+              convert_to_set(get_labels_by_label(*this->annotation, { 2 }, 1)));
+
+    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
+              convert_to_set(get_labels_by_label(*this->annotation, { 2 }, 1)));
+
+    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
+              convert_to_set(get_labels_by_label(*this->annotation, { 2 }, 0.5)));
+
+    EXPECT_EQ(convert_to_set({"Label2"}),
+              convert_to_set(get_labels_by_label(*this->annotation, { 2, 4 }, 1)));
+
+    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
+              convert_to_set(get_labels_by_label(*this->annotation, { 2, 4 }, 0)));
+
+    EXPECT_EQ(convert_to_set({"Label1", "Label2"}),
+              convert_to_set(get_labels_by_label(*this->annotation, { 2, 4 }, 0.5)));
+
+    EXPECT_EQ(convert_to_set({"Label2"}),
+              convert_to_set(get_labels_by_label(*this->annotation, { 2, 4 }, 0.501)));
+
+    EXPECT_EQ(convert_to_set({"Label2"}),
+              convert_to_set(get_labels_by_label(*this->annotation, { 2, 4 }, 1)));
+
+    EXPECT_EQ(convert_to_set({}),
+              convert_to_set(get_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }, 1)));
+
+    EXPECT_EQ(convert_to_set({"Label0", "Label1", "Label2", "Label8"}),
+              convert_to_set(get_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }, 0)));
+
+    EXPECT_EQ(convert_to_set({"Label0", "Label1", "Label2", "Label8"}),
+              convert_to_set(get_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }, 0.2)));
+
+    EXPECT_EQ(convert_to_set({"Label1", "Label2", "Label8"}),
+              convert_to_set(get_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }, 0.201)));
+
+    EXPECT_EQ(convert_to_set({"Label1", "Label2", "Label8"}),
+              convert_to_set(get_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }, 0.4)));
+
+    EXPECT_EQ(convert_to_set({"Label2"}),
+              convert_to_set(get_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }, 0.401)));
+
+    EXPECT_EQ(convert_to_set({"Label2"}),
+              convert_to_set(get_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }, 0.8)));
+
+    EXPECT_EQ(convert_to_set({}),
+              convert_to_set(get_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }, 0.801)));
+
+    EXPECT_EQ(convert_to_set({}),
+              convert_to_set(get_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }, 1)));
+}
+
+
+template <typename Annotator>
+std::vector<std::pair<std::string, size_t>>
+get_top_labels(const Annotator &annotator,
+               const std::vector<uint64_t> &indices,
+               size_t num_top_labels = static_cast<size_t>(-1),
+               double min_label_frequency = 0.0) {
+    const auto& label_encoder = annotator.get_label_encoder();
+    const size_t min_count = std::max(1.0,
+                                      std::ceil(min_label_frequency * indices.size()));
+
+    std::vector<std::pair<std::string, size_t>> label_counts;
+    for (size_t i = 0; i < label_encoder.size(); ++i) {
+        label_counts.emplace_back(label_encoder.decode(i), 0);
+    }
+
+    annotator.call_rows(
+        indices,
+        [&](auto&& label_indices) {
+            for (auto j : label_indices) {
+                label_counts[j].second++;
+            }
+        }
+    );
+
+    std::sort(label_counts.begin(), label_counts.end(),
+              [](const auto &first, const auto &second) {
+                  return first.second > second.second;
+              });
+
+    // remove labels which don't meet num_top_labels and min_label_frequency criteria
+    label_counts.erase(std::find_if(label_counts.begin(),
+                                    num_top_labels < label_counts.size()
+                                        ? label_counts.begin() + num_top_labels
+                                        : label_counts.end(),
+                                    [&](const auto &pair) {
+                                        return pair.second < min_count;
+                                    }),
+                       label_counts.end());
+
+    return label_counts;
+}
+
+TYPED_TEST(AnnotatorPreset3Test, call_rows_get_top_labels) {
     typedef std::vector<std::pair<std::string, size_t>> VectorCounts;
     EXPECT_EQ(VectorCounts({}),
-              this->annotation->get_top_labels({ 0, 1, 2, 3, 4 }, 0));
+              get_top_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 0));
 
     EXPECT_EQ(VectorCounts({}),
-              this->annotation->get_top_labels({}));
+              get_top_labels(*this->annotation, {}));
 
     EXPECT_EQ(VectorCounts({ std::make_pair("Label2", 4),
                              std::make_pair("Label8", 3),
                              std::make_pair("Label1", 2),
                              std::make_pair("Label0", 1) }),
-              this->annotation->get_top_labels({ 0, 1, 2, 3, 4 }));
+              get_top_labels(*this->annotation, { 0, 1, 2, 3, 4 }));
 
     EXPECT_EQ(to_set(VectorCounts({ std::make_pair("Label1", 1),
                                     std::make_pair("Label2", 1) })),
-              to_set(this->annotation->get_top_labels({ 2 })));
+              to_set(get_top_labels(*this->annotation, { 2 })));
 
     EXPECT_EQ(VectorCounts({}),
-              this->annotation->get_top_labels({ 0, 1, 2, 3, 4 }, 0));
+              get_top_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 0));
 
     EXPECT_EQ(VectorCounts({ std::make_pair("Label2", 4) }),
-              this->annotation->get_top_labels({ 0, 1, 2, 3, 4 }, 1));
+              get_top_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 1));
 
     EXPECT_EQ(VectorCounts({ std::make_pair("Label2", 4),
                              std::make_pair("Label8", 3) }),
-              this->annotation->get_top_labels({ 0, 1, 2, 3, 4 }, 2));
+              get_top_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 2));
 
     EXPECT_EQ(VectorCounts({ std::make_pair("Label2", 4),
                              std::make_pair("Label8", 3),
                              std::make_pair("Label1", 2) }),
-              this->annotation->get_top_labels({ 0, 1, 2, 3, 4 }, 3));
+              get_top_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 3));
 
     EXPECT_EQ(VectorCounts({ std::make_pair("Label2", 4),
                              std::make_pair("Label8", 3),
                              std::make_pair("Label1", 2),
                              std::make_pair("Label0", 1) }),
-              this->annotation->get_top_labels({ 0, 1, 2, 3, 4 }, 4));
+              get_top_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 4));
 
     EXPECT_EQ(VectorCounts({ std::make_pair("Label2", 4),
                              std::make_pair("Label8", 3),
                              std::make_pair("Label1", 2),
                              std::make_pair("Label0", 1) }),
-              this->annotation->get_top_labels({ 0, 1, 2, 3, 4 }, 1000));
+              get_top_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 1000));
+}
+
+template <typename Annotator>
+std::vector<std::pair<std::string, size_t>>
+get_top_labels_by_label(const Annotator &annotator,
+                        const std::vector<uint64_t> &indices,
+                        size_t num_top_labels = static_cast<size_t>(-1),
+                        double min_label_frequency = 0.0) {
+    const size_t min_count = std::max(1.0,
+                                      std::ceil(min_label_frequency * indices.size()));
+
+    std::unordered_map<uint64_t, size_t> index_counts;
+    for (auto i : indices) {
+        index_counts[i] = 1;
+    }
+
+    auto label_counts
+        = std::is_same<annotate::ColumnCompressed<>, Annotator>::value
+            // Iterate by column instead of by row for column-major annotators
+            ? count_labels(dynamic_cast<const annotate::ColumnCompressed<>&>(annotator),
+                           index_counts,
+                           [&](size_t checked, size_t matched) {
+                               return matched + (indices.size() - checked) < min_count;
+                           })
+            : count_labels(annotator,
+                           index_counts,
+                           [&](size_t checked, size_t /* min_matched */, size_t max_matched) {
+                               return max_matched + (indices.size() - checked) < min_count;
+                           });
+
+    std::sort(label_counts.begin(), label_counts.end(),
+              [](const auto &first, const auto &second) {
+                  return first.second > second.second;
+              });
+
+    // remove labels which don't meet num_top_labels and min_label_frequency criteria
+    label_counts.erase(std::find_if(label_counts.begin(),
+                                    num_top_labels < label_counts.size()
+                                        ? label_counts.begin() + num_top_labels
+                                        : label_counts.end(),
+                                    [&](const auto &pair) {
+                                        return pair.second < min_count;
+                                    }),
+                       label_counts.end());
+
+    return label_counts;
+}
+
+TYPED_TEST(AnnotatorPreset3Test, call_rows_get_top_labels_by_label) {
+    typedef std::vector<std::pair<std::string, size_t>> VectorCounts;
+    EXPECT_EQ(VectorCounts({}),
+              get_top_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }, 0));
+
+    EXPECT_EQ(VectorCounts({}),
+              get_top_labels_by_label(*this->annotation, {}));
+
+    EXPECT_EQ(VectorCounts({ std::make_pair("Label2", 4),
+                             std::make_pair("Label8", 3),
+                             std::make_pair("Label1", 2),
+                             std::make_pair("Label0", 1) }),
+              get_top_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }));
+
+    EXPECT_EQ(to_set(VectorCounts({ std::make_pair("Label1", 1),
+                                    std::make_pair("Label2", 1) })),
+              to_set(get_top_labels_by_label(*this->annotation, { 2 })));
+
+    EXPECT_EQ(VectorCounts({}),
+              get_top_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }, 0));
+
+    EXPECT_EQ(VectorCounts({ std::make_pair("Label2", 4) }),
+              get_top_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }, 1));
+
+    EXPECT_EQ(VectorCounts({ std::make_pair("Label2", 4),
+                             std::make_pair("Label8", 3) }),
+              get_top_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }, 2));
+
+    EXPECT_EQ(VectorCounts({ std::make_pair("Label2", 4),
+                             std::make_pair("Label8", 3),
+                             std::make_pair("Label1", 2) }),
+              get_top_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }, 3));
+
+    EXPECT_EQ(VectorCounts({ std::make_pair("Label2", 4),
+                             std::make_pair("Label8", 3),
+                             std::make_pair("Label1", 2),
+                             std::make_pair("Label0", 1) }),
+              get_top_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }, 4));
+
+    EXPECT_EQ(VectorCounts({ std::make_pair("Label2", 4),
+                             std::make_pair("Label8", 3),
+                             std::make_pair("Label1", 2),
+                             std::make_pair("Label0", 1) }),
+              get_top_labels_by_label(*this->annotation, { 0, 1, 2, 3, 4 }, 1000));
 }
 
 TYPED_TEST(AnnotatorPresetTest, Sparsity) {
@@ -1086,3 +1375,97 @@ TYPED_TEST(AnnotatorStaticTest, RenameColumnsMergeAll) {
         ""
     );
 }
+
+TYPED_TEST(AnnotatorStaticLargeTest, CheckCache) {
+    size_t num_rows = 20000;
+    size_t num_columns = 200;
+    BitVectorPtrArray columns, copy;
+    annotate::LabelEncoder label_encoder;
+
+    for (size_t j = 0; j < num_columns; ++j) {
+
+        columns.emplace_back(new bit_vector_stat(num_rows));
+
+        for (size_t i = 0; i < num_rows; ++i) {
+            columns.back()->set(i, (i + 2 * j) % 1000);
+        }
+        copy.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
+
+        label_encoder.insert_and_encode(std::to_string(j));
+    }
+
+    auto annotator = TypeParam(
+        std::make_unique<typename TypeParam::binary_matrix_type>(
+            build_matrix_from_columns<typename TypeParam::binary_matrix_type>(
+                std::move(copy), num_rows
+            )
+        ),
+        label_encoder,
+        1000000
+    );
+
+    std::vector<std::vector<std::string>> rows;
+    for (size_t i = 0; i < num_rows; i += 1000) {
+        rows.emplace_back(annotator.get_labels(i));
+    }
+
+    auto it = rows.begin();
+    for (size_t i = 0; i < num_rows; i += 1000) {
+        ASSERT_NE(rows.end(), it);
+        EXPECT_EQ(*it++, annotator.get_labels(i));
+    }
+}
+
+// This can be run with --gtest_also_run_disabled_tests
+TYPED_TEST(AnnotatorStaticLargeTest, DISABLED_QueryRowsCached_LONG_TEST) {
+    size_t num_rows = 2000000;
+    size_t num_columns = 200;
+    BitVectorPtrArray columns, copy;
+    annotate::LabelEncoder label_encoder;
+
+    for (size_t j = 0; j < num_columns; ++j) {
+
+        columns.emplace_back(new bit_vector_stat(num_rows));
+
+        for (size_t i = 0; i < num_rows; ++i) {
+            columns.back()->set(i, (i + 2 * j) % 1000);
+        }
+        copy.emplace_back(new bit_vector_stat(columns.back()->to_vector()));
+
+        label_encoder.insert_and_encode(std::to_string(j));
+    }
+
+    auto annotator = TypeParam(
+        std::make_unique<typename TypeParam::binary_matrix_type>(
+            build_matrix_from_columns<typename TypeParam::binary_matrix_type>(
+                std::move(copy), num_rows
+            )
+        ),
+        label_encoder
+    );
+
+    for (size_t cache_size : { 0, 1000, 10000, 100000, 1000000, 10000000 }) {
+        annotator.reset_row_cache(cache_size);
+        Timer timer;
+        for (size_t i = 0; i < num_rows; ++i) {
+            annotator.get_labels(i);
+        }
+        TEST_COUT << "Query all rows\t"
+                  << "Cache size:\t" << cache_size << "\t\t"
+                  << "Time:\t" << timer.elapsed();
+    }
+
+    for (size_t cache_size : { 0, 1000, 10000, 100000, 1000000, 10000000 }) {
+        annotator.reset_row_cache(cache_size);
+        Timer timer;
+        for (size_t j = 0; j < 1000; ++j) {
+            for (size_t i = 0; i < num_rows; i += 1000) {
+                annotator.get_labels(i);
+            }
+        }
+        TEST_COUT << "Query some rows repeatedly\t"
+                  << "Cache size:\t" << cache_size << "\t\t"
+                  << "Time:\t" << timer.elapsed();
+    }
+}
+

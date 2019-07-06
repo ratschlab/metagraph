@@ -55,6 +55,7 @@ class Config {
     unsigned int kmer_mapping_mode = 0;
     unsigned int arity_brwt = 2;
     unsigned int relax_arity_brwt = 10;
+    unsigned int row_cache_size = 0;
     unsigned int min_tip_size = 1;
     unsigned int min_unitig_median_kmer_abundance = 1;
     unsigned int fallback_abundance_cutoff = 1;

@@ -82,6 +82,7 @@ TEST(ExtractKmers, encode_decode_string) {
         Vector<KmerExtractor::Kmer256> kmers;
 
         encoder.sequence_to_kmers(sequence, k, {}, &kmers);
+        auto valid = encoder.valid_kmers(sequence, k);
         EXPECT_EQ(kmers, encoder.sequence_to_kmers<KmerExtractor::Kmer256>(sequence, k));
 #if _DNA_GRAPH
         ASSERT_EQ(k <= last_part.size()
@@ -89,32 +90,52 @@ TEST(ExtractKmers, encode_decode_string) {
                     : (k <= first_part.size() ? first_part.size() - k + 1 + 2 : 0),
                   kmers.size()) << k;
 
-        if (!kmers.size())
+        if (!kmers.size()) {
+            EXPECT_EQ(0u, sdsl::util::cnt_one_bits(valid));
             continue;
+        }
 
         std::string reconstructed = encoder.kmer_to_sequence(kmers[0], k);
         uint64_t i;
         for (i = 1; i <= first_part.size() - k + 2; ++i) {
             reconstructed.push_back(encoder.kmer_to_sequence(kmers[i], k)[k - 1]);
+            if (i < first_part.size() - k + 2) {
+                ASSERT_GT(valid.size(), i - 1);
+                EXPECT_TRUE(valid[i - 1]);
+            }
         }
         EXPECT_EQ('$' + first_part + '$', reconstructed);
 
         if (k > last_part.size())
             continue;
 
+        for (uint64_t j = 0; j < k; ++j) {
+            ASSERT_GT(valid.size(), i + j - 2);
+            EXPECT_FALSE(valid[i + j - 2]);
+        }
+
         reconstructed = encoder.kmer_to_sequence(kmers[i], k);
         while (++i < kmers.size()) {
             reconstructed.push_back(encoder.kmer_to_sequence(kmers[i], k)[k - 1]);
+            if (i + 1 < kmers.size()) {
+                ASSERT_GT(valid.size(), i + k - 3);
+                EXPECT_TRUE(valid[i + k - 3]);
+            }
         }
+        EXPECT_EQ(valid.size(), i + k - 4);
         EXPECT_EQ('$' + last_part + '$', reconstructed);
 #else
         ASSERT_LT(2u, kmers.size());
         kmers.erase(kmers.begin());
         kmers.erase(kmers.end() - 1);
 
+        EXPECT_EQ(kmers.size(), sdsl::util::cnt_one_bits(valid));
+
         std::string reconstructed = encoder.kmer_to_sequence(kmers[0], k);
+        EXPECT_TRUE(valid[0]);
         for (uint64_t i = 1; i < kmers.size(); ++i) {
             reconstructed.push_back(encoder.kmer_to_sequence(kmers[i], k)[k - 1]);
+            EXPECT_TRUE(valid[i]);
         }
 
         EXPECT_EQ(sequence, reconstructed);
