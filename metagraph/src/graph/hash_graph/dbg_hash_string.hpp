@@ -86,7 +86,6 @@ class DBGHashString : public DeBruijnGraph {
 
   private:
     std::vector<std::string> encode_sequence(const std::string &sequence) const;
-    std::string encode_sequence(const std::string &sequence) const;
 
     void call_start_nodes(const std::function<void(node_index)> &callback) const;
 
