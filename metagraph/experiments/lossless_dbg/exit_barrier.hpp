@@ -166,7 +166,7 @@ ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chun
     }
 }
 
-    int64_t exit(int64_t node, int tid) {
+    int64_t exit(uint64_t node, int tid) {
         tid++;
         auto waiting_queue_lock = waiting_queue_locks.ptr_to(node);
         omp_set_lock(waiting_queue_lock);
@@ -182,7 +182,7 @@ ReferenceExitBarrier(BitVector* is_element,RankSupport* rank_is_element,int chun
         return result;
     }
 
-    void enter(int64_t node, char traversed_edge, int64_t relative_position, int tid) {
+    void enter(uint64_t node, char traversed_edge, int64_t relative_position, int tid) {
         tid++;
         auto waiting_queue_lock = waiting_queue_locks.ptr_to(node);
         omp_set_lock(waiting_queue_lock);

@@ -38,6 +38,7 @@ int main(int argc, char *argv[]) {
             "decompress",
             "statistics",
             "identity",
+            "dumprt",
     };
 
     ValuesConstraint<std::string> regime_constraint(regimes);
@@ -67,5 +68,8 @@ int main(int argc, char *argv[]) {
     }
     else if (regime == "identity") {
         main_tester(new_argv.size(), new_argv.data());
+    }
+    else if (regime == "dumprt") {
+        main_dumprt(new_argv.size(),new_argv.data());
     }
 }
