@@ -157,6 +157,12 @@ int main_compressor(int argc, char *argv[]) {
 			false,
 			"",
 			"filename",cmd);
+    TCLAP::ValueArg<int> reducedCoverageArg("c",
+                                               "reduced-coverage",
+                                               "Enable / disable reduced coverage technique",
+                                               false,
+                                               1,
+                                               "filename",cmd);
 	TCLAP::ValueArg<int> numThreadsArg("p",
 			"threads",
 			"Number of threads to use for parallel computation.",
@@ -215,7 +221,13 @@ int main_compressor(int argc, char *argv[]) {
         }
 	    else {
 	    	if (chunks > 0) {
-				compress_store_reads<PathDatabaseWaveletWithtoutTransformation<>>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph, chunks);
+	    	    if (reducedCoverageArg.getValue()) {
+                    compress_store_reads<PathDatabaseWaveletWithtoutTransformation<true>>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph, chunks);
+	    	    }
+	    	    else {
+                    compress_store_reads<PathDatabaseWaveletWithtoutTransformation<false>>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph, chunks);
+	    	    }
+
 	    	}
 			else {
 				if (compressedArg.isSet()) { cerr << "!!! Warning : only constructing the transformation, not saving it !!!" << endl; }

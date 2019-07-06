@@ -65,7 +65,7 @@ public:
 using DefaultRoutingTable = RoutingTable<>;
 using DefaultIncomingTable = IncomingTable<>;
 //template <class Wavelet = sdsl::wt_rlmn<sdsl::sd_vector<>>
-template<class RoutingTableT = DefaultRoutingTable,class IncomingTableT=DefaultIncomingTable>
+template<class RoutingTableT = DefaultRoutingTable,class IncomingTableT=DefaultIncomingTable,bool reduced_coverage=true>
 class PathDatabaseWaveletCore : public PathDatabaseDynamicCore<typename DynamicVersion<RoutingTableT>::Type,typename DynamicVersion<IncomingTableT>::Type> {
 public:
     using DRT = typename DynamicVersion<RoutingTableT>::Type;
@@ -186,12 +186,12 @@ public:
                 }()));
 
 
-#ifndef FULL_INCOMING_TABLE
-                if (current_table_size > 1) {
-                    incoming_table_builder_local.pop_back();
-                    delimiter_vector_local.pop_back();
+                if constexpr (reduced_coverage) {
+                    if (current_table_size > 1) {
+                        incoming_table_builder_local.pop_back();
+                        delimiter_vector_local.pop_back();
+                    }
                 }
-        #endif
             }
         }
 
@@ -302,15 +302,17 @@ public:
 
 
     json get_statistics(uint64_t verbosity = ~0u) const {
+        VerboseTimer statistics_timer("computing statistics");
         json result = PathDatabaseDynamicCore<DRT,DIT>::get_statistics(verbosity);
         json routing_table_stats = routing_table.get_statistics(verbosity);
         result.update(statistics);
         result.update(routing_table_stats);
         int64_t added_joins = 0;
         int64_t added_splits = 0;
-        std::map<int64_t, int64_t> joins_diff_symbols_histogram;
+        std::map<int64_t, int64_t> joins_size_histogram;
+        std::map<int64_t, int64_t> joins_values_histogram;
         std::map<int64_t, int64_t> splits_size_histogram;
-        std::map<int64_t, int64_t> splits_diff_symbols_histogram;
+//        std::map<int64_t, int64_t> splits_diff_symbols_histogram;
 
         for (int64_t node = 1; node <= this->graph.num_nodes();node++) {
             if (node_is_join(node)) {
@@ -319,7 +321,10 @@ public:
                 }
                 if (verbosity & STATS_JOINS_HISTOGRAM) {
                     int64_t cardinality = incoming_table.size(node);
-                    joins_diff_symbols_histogram[cardinality]++;
+                    joins_size_histogram[cardinality]++;
+                    for(int i=0;i<cardinality;i++) {
+                        joins_values_histogram[incoming_table.branch_size_rank(node,i)]++;
+                    }
                 }
             }
             if (node_is_split(node)) {
@@ -347,8 +352,10 @@ public:
             result["splits_size_histogram"] = splits_size_histogram;
         }
         if (verbosity & STATS_JOINS_HISTOGRAM) {
-            result["joins_diff_symbols_histogram"] = joins_diff_symbols_histogram;
+            result["joins_size_histogram"] = joins_size_histogram;
+            result["joins_values_histogram"] = joins_values_histogram;
         }
+        result["statistics_time"] = statistics_timer.finished();
         return result;
     }
 
@@ -365,8 +372,8 @@ public:
 template<class RoutingTableT = DefaultRoutingTable,class IncomingTableT=DefaultIncomingTable>
 using PathDatabaseWavelet = QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableT,IncomingTableT>>>;
 
-template<typename DummyT=int64_t>
-using PathDatabaseWaveletWithtoutTransformation = QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableCore<>,DefaultIncomingTable>>>;
+template<bool reduced_coverage=true>
+using PathDatabaseWaveletWithtoutTransformation = QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableCore<>,DefaultIncomingTable,reduced_coverage>>>;
 
 #endif /* path_database_baseline_hpp */
 

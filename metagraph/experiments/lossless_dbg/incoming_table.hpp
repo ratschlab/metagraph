@@ -5,7 +5,6 @@
 #ifndef METAGRAPH_INCOMING_TABLE_HPP
 #define METAGRAPH_INCOMING_TABLE_HPP
 
-
 #include <sdsl/enc_vector.hpp>
 
 using default_bit_vector = bit_vector_small;
@@ -100,21 +99,5 @@ public:
 
     shared_ptr<const GraphT> graph;
 };
-
-#include <iostream>
-#include <set>
-#include <functional>
-#include <map>
-#include <sdsl/wt_rlmn.hpp>
-#include <sdsl/sd_vector.hpp>
-#include <sdsl/enc_vector.hpp>
-#include "graph_patch.hpp"
-#include "path_database.hpp"
-#include "path_database_dynamic.hpp"
-#include "cxx-prettyprint.hpp"
-#include "utils.hpp"
-#include "utilities.hpp"
-#include "alphabets.hpp"
-#include "routing_table.hpp"
 
 #endif //METAGRAPH_INCOMING_TABLE_HPP
