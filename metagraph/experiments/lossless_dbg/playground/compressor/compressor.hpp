@@ -157,7 +157,7 @@ int main_compressor(int argc, char *argv[]) {
 			false,
 			"",
 			"filename",cmd);
-    TCLAP::ValueArg<int> reducedCoverageArg("c",
+    TCLAP::ValueArg<int> reducedCoverageArg("v",
                                                "reduced-coverage",
                                                "Enable / disable reduced coverage technique",
                                                false,
