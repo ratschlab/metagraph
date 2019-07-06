@@ -16,7 +16,7 @@
 
 struct DBGAlignerConfig {
    size_t num_top_paths = 10;
-   size_t num_alternative_paths = 1;
+   size_t num_alternative_paths = 20;
    uint8_t path_comparison_code = 0;
    bool verbose = false;
    bool discard_similar_paths = false;
@@ -137,7 +137,7 @@ class DBGAligner {
     // If too many seeds are extractable, it is possible that some seeds are discarded which leads to possible poor alignment.
     void suffix_seed(BoundedPriorityQueue<AlignedPath, std::vector<AlignedPath>, decltype(priority_function_)> &queue,
                      const std::string::const_iterator &sequence_begin,
-                     const std::string::const_iterator &sequence_end) const;
+                     const std::string::const_iterator &sequence_end);
 
     // Align part of a sequence to the graph in the case of no exact map
     // based on internal strategy. Calls callback for every possible alternative path.
@@ -158,7 +158,7 @@ class DBGAligner {
 
     // Compute the edit distance between the query sequence and the aligned path
     // according to score parameters in this class.
-    void smith_waterman_core(AlignedPath& path, SWDpCell& global_sw);
+    void smith_waterman_core(AlignedPath& path, SWDpCell& global_sw, bool clip);
 
     // Perform one dynamic programming step consisting of making a choice among insertion, deletion, map and mismatch
     // for a single cell in the dynamic programming table.
@@ -166,7 +166,8 @@ class DBGAligner {
 
     // Compute Smith-Waterman score based on either CSSW library or our implementation
     // and set cigar and score in path accordingly.
-    bool smith_waterman_score(AlignedPath &path);
+    // Clip can only be true for the case of using CSSW.
+    bool smith_waterman_score(AlignedPath &path, bool clip=true);
 
     // Trim the path to remove unmapped regions from the tail using CSSW lib clipping.
     void trim(AlignedPath &path) const;

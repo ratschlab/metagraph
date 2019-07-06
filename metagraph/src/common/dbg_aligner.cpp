@@ -162,7 +162,7 @@ bool DBGAligner::map_to_nodes(const std::string &sequence,
         // which is the score from either forward or reverse_complement of the sequence. Or in the case that
         // seeding was not possible.
         if (re_mapped_paths.size() == 0) {
-            //std::cerr << "Terminating early because of poor alignment compared to forward sequence" << std::endl;
+            std::cerr << "Terminating early because of poor alignment compared to forward sequence" << std::endl;
             break;
         }
         auto path_before_graph_exploration(stitched_path);
@@ -199,9 +199,7 @@ bool DBGAligner::map_to_nodes(const std::string &sequence,
                 break;
             // If all zeros were not filled with graph exploration call, report stitched path so far
             // as an alternative path.
-//            std::cerr << "Pushing stitched path" << std::endl;
             alternative_paths.push(std::move(stitched_path));
-//            std::cerr << "Pushed stitched path" << std::endl;
             stitched_path = path_before_graph_exploration;
         }
         if (stitched_path.size() == 0) {
@@ -255,7 +253,6 @@ bool DBGAligner::map_to_nodes(const std::string &sequence,
         trim(stitched_path);
     }
     alternative_paths.push(std::move(stitched_path));
-//    std::cerr << "Pushed stitched path" << std::endl;
 
     while(!alternative_paths.empty() && alternative_paths_vec.size() < num_alternative_paths_) {
         alternative_paths_vec.push_back(std::move(alternative_paths.top()));
@@ -286,7 +283,7 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::align_by_graph_exploration(
     while (!queue.empty() && alternative_paths.size() < num_alternative_paths_) {
         path = std::move(queue.top());
         queue.pop();
-//        std::cerr << "popping path (#matches, size, cigar, seq) : " << path.get_num_matches()
+//        std::cerr << "popping path (score, size, cigar, seq) : " << path.get_total_score()
 //                  << " " << path.size() + k_ - 1
 //                  << " " << path.get_cigar()
 //                  << " " << path.get_sequence() << std::endl;
@@ -348,7 +345,7 @@ std::vector<DBGAligner::AlignedPath> DBGAligner::align_by_graph_exploration(
 
 void DBGAligner::suffix_seed(BoundedPriorityQueue<AlignedPath, std::vector<AlignedPath>, decltype(priority_function_)>& queue,
                              const std::string::const_iterator &sequence_begin,
-                             const std::string::const_iterator &sequence_end) const {
+                             const std::string::const_iterator &sequence_end) {
 
     AlignedPath path(k_, sequence_begin, sequence_begin);
 
@@ -380,13 +377,18 @@ void DBGAligner::suffix_seed(BoundedPriorityQueue<AlignedPath, std::vector<Align
             else
                 k_for_seeding_r = k_for_seeding_m;
         }
+        std::vector<AlignedPath> alternative_paths;
         // Seed by suffix with the k range after the binary search.
         graph_->suffix_seeding(begin + k_ - k_for_seeding_l, begin + k_, [&] (node_index node) {
             auto alternative_path(path);
 //            std::cerr << "seeding alternative: " << graph_->get_node_sequence(node) << std::endl;
             alternative_path.seed(node, {}, graph_->get_node_sequence(node));
-            queue.push(std::move(alternative_path));
+            alternative_paths.push_back(std::move(alternative_path));
             });
+        for (auto alternative_path : alternative_paths) {
+            smith_waterman_score(alternative_path, false);
+            queue.push(std::move(alternative_path));
+        }
         if (queue.size() > 0)
             return;
 //        std::cerr << "Continue alignment with l and r: " << k_for_seeding_l << ", " << k_for_seeding_r << std::endl;
@@ -469,7 +471,7 @@ bool DBGAligner::inexact_map(AlignedPath& path,
                 k_ - 1), extension));
         } else {
             alternative_path.extend(node, {}, extension);
-            smith_waterman_score(alternative_path);
+            smith_waterman_score(alternative_path, false);
         }
         // Merge Similar paths.
         if (discard_similar_paths_) {
@@ -503,7 +505,7 @@ int8_t DBGAligner::single_char_score(char char_in_query, char char_in_graph) con
     return score_matrix_[int8_t(char_in_query)][int8_t(char_in_graph)];
 }
 
-bool DBGAligner::smith_waterman_score(AlignedPath &path) {
+bool DBGAligner::smith_waterman_score(AlignedPath &path, bool clip) {
     if (path.is_score_updated())
         return true;
 
@@ -511,14 +513,14 @@ bool DBGAligner::smith_waterman_score(AlignedPath &path) {
     // Calculate and set the alignment properties according to the smith_waterman_core function.
     if (!use_cssw_lib_) {
         SWDpCell optimum_alignment;
-        smith_waterman_core(path, optimum_alignment);
+        smith_waterman_core(path, optimum_alignment, clip);
         if (optimum_alignment.score >= 0) {
             alignment.cigar_string = optimum_alignment.cigar.to_string();
             alignment.sw_score = optimum_alignment.score;
             alignment.ref_begin = optimum_alignment.cigar.get_ref_begin();
             alignment.query_begin = optimum_alignment.cigar.get_query_begin();
-            alignment.ref_end = path.get_sequence().size() - 1 - optimum_alignment.cigar.get_ref_end();
-            alignment.query_end = path.get_query_sequence().size() - 1 - optimum_alignment.cigar.get_ref_end();
+            alignment.ref_end = path.get_sequence().size() - 1 - optimum_alignment.cigar.get_ref_end_offset();
+            alignment.query_end = path.get_query_sequence().size() - 1 - optimum_alignment.cigar.get_query_end_offset();
         } else {
             std::cerr << "Warning: Negative Smith Waterman score!" << std::endl;
             alignment.cigar_string = "";
@@ -590,7 +592,7 @@ void DBGAligner::smith_waterman_dp_step(size_t i, size_t j, const std::string& p
 //    std::cerr << "max: " << sw_cur_row_->operator[](j).cigar.to_string() << ", " << sw_cur_row_->operator[](j).score << std::endl;
 }
 
-void DBGAligner::smith_waterman_core(AlignedPath& path, SWDpCell& optimum_alignment) {
+void DBGAligner::smith_waterman_core(AlignedPath& path, SWDpCell& optimum_alignment, bool clip) {
     auto path_sequence = path.get_sequence();
     std::string query_sequence(path.get_query_begin_it(), path.get_query_it() + k_ - 1);
     auto num_cols = path_sequence.size() + 1;
@@ -610,7 +612,7 @@ void DBGAligner::smith_waterman_core(AlignedPath& path, SWDpCell& optimum_alignm
     auto num_cols_stored = path.get_sw_num_cols_stored();
 
     assert(sw_cur_row_->size() == sw_prev_row_->size());
-    assert(num_rows_stored < sw_cur_row_->size());
+    assert(num_rows_stored <= sw_cur_row_->size());
     // Fill the first row with trivial values. Note the swap action in the beginning of the loops.
     for (size_t i = 0; i < num_cols; ++i)
         sw_cur_row_->operator[](i) = SWDpCell{};
@@ -640,8 +642,10 @@ void DBGAligner::smith_waterman_core(AlignedPath& path, SWDpCell& optimum_alignm
     }
     optimum_alignment = sw_cur_row_->operator[](path_sequence.size());
 //    std::cerr << "optimum_alignment with score " << optimum_alignment.score << " and cigar: " << optimum_alignment.cigar.to_string() << std::endl;
-    auto updated_score_delta = optimum_alignment.cigar.clip(gap_opening_penalty_, gap_extension_penalty_, -1 * mm_transition_, -1 * mm_transversion_);
-    optimum_alignment.score += updated_score_delta;
+    if (clip) {
+        auto updated_score_delta = optimum_alignment.cigar.clip(match_score_, gap_opening_penalty_, gap_extension_penalty_, -1 * mm_transition_, -1 * mm_transversion_);
+        optimum_alignment.score += updated_score_delta;
+    }
     path.store_sw_intermediate_info(sw_cur_row_->begin(), path_sequence.size() + 1, std::begin(sw_last_column_), query_sequence.size() + 1);
 //    std::cerr << "optimum alinment after clipping: " << optimum_alignment.score << " " << optimum_alignment.cigar.to_string() << std::endl;
 }
@@ -651,15 +655,8 @@ void DBGAligner::trim(AlignedPath &path) const {
     auto cigar = path.get_cigar();
     // Trim path if reference end in cigar is not according to reference end in path.
     uint64_t path_trim_length = path.get_sequence().size() - path.get_alignment().ref_end - 1;
-    // Trim query if marked by S in cigar.
-    uint64_t query_trim_length = 0;
-    if (cigar.back() == 'S') {
-        std::smatch match;
-        std::regex_search(cigar, match, std::regex("[0-9]+S$"));
-        std::string position_str = match.str();
-        position_str.pop_back();
-        query_trim_length += atoi(position_str.c_str());
-    }
+    uint64_t query_trim_length = path.get_query_sequence().size() - path.get_alignment().query_end - 1;
+
     path.trim(query_trim_length, path_trim_length);
 }
 

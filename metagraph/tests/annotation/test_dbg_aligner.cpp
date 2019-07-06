@@ -311,8 +311,8 @@ TYPED_TEST(DBGAlignerTest, map_to_nodes_insert_non_existent) {
 
 TYPED_TEST(DBGAlignerTest, map_to_nodes_delete) {
     size_t k = 4;
-    std::string reference = "TTCGA" "T" "TGGC";
-    std::string query =     "TTCGA"     "TGGC";
+    std::string reference = "TTCGA" "T" "TGGCCT";
+    std::string query =     "TTCGA"     "TGGCCT";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAligner aligner(graph);
@@ -397,7 +397,7 @@ TEST(DBGAlignerTest, map_to_nodes_inexact_seed_snp) {
 
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference.substr(3), path.get_sequence());
-    EXPECT_EQ("1=1X13=", path.get_cigar());
+    EXPECT_EQ("2S13=", path.get_cigar());
 }
 // TODO: Back to typed test when inexact seeding with graphs other than BOSS is handled.
 TEST(DBGAlignerTest, map_to_nodes_reverse_complement) {
@@ -416,4 +416,15 @@ TEST(DBGAlignerTest, map_to_nodes_reverse_complement) {
     EXPECT_EQ(rev_comp_query.size() - k + 1, path.size());
     EXPECT_EQ(query, path.get_sequence());
     EXPECT_EQ(rev_comp_query.size() * aligner.get_match_score(), path.get_total_score());
+}
+
+TEST(AlignerCigarTest, clip) {
+    Cigar cigar;
+    cigar.append(Cigar::Operator::MATCH, 3);
+    cigar.append(Cigar::Operator::INSERTION, 6);
+    cigar.append(Cigar::Operator::MATCH, 27);
+    cigar.append(Cigar::Operator::MISMATCH_TRANSVERSION, 2);
+    cigar.append(Cigar::Operator::MATCH, 1);
+    cigar.clip(2, 3, 1, 1, 2);
+    EXPECT_EQ("9S27=3S", cigar.to_string());
 }

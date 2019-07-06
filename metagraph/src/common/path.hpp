@@ -94,8 +94,10 @@ class Path {
     void update_alignment(const StripedSmithWaterman::Alignment& alignment) {
         alignment_ = alignment;
         score_ = alignment.sw_score;
-        is_score_updated_ = true;
         cigar_ = alignment.cigar_string;
+        // Set is_score_updated_ only if the cigar string is clipped.
+        if (cigar_.back() != 'D' && cigar_.back() != 'I' &&  cigar_.back() != 'X')
+            is_score_updated_ = true;
         // Extracting the number of matches.
         num_matches_ = 0;
         std::regex match_regex("[0-9]+[M=]");
