@@ -22,6 +22,7 @@ using TCLAP::ValuesConstraint;
 #include "playground/decompressor/decompressor.hpp"
 #include "playground/statistics/statistics.hpp"
 #include "playground/tester/tester.hpp"
+#include "playground/tidbits/dump_routing_table.hpp"
 
 #pragma clang diagnostic pop
 
