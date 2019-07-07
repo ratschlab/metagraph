@@ -131,6 +131,7 @@ public:
             routing_table.transformations = PathDatabaseDynamicCore< DRT, DIT>::routing_table.transformations;
         }
         statistics["transformation_routing_table_time"] = timer.elapsed();
+        statistics["transformation_routing_table_ram"] = get_used_memory();
         cerr << "Transformation finished in " << statistics["transformation_routing_table_time"] << endl;
     }
 
@@ -213,6 +214,7 @@ public:
         using joins_type = typename decltype(incoming_table)::BitVector;
         incoming_table = decltype(incoming_table)(this->graph_,joins_type(temporary_representation),incoming_table_builder);
         statistics["transformation_incoming_table_time"] = timer.elapsed();
+        statistics["transformation_incoming_table_ram"] = get_used_memory();
         cerr << "Transformation finished in " << statistics["transformation_incoming_table_time"] << endl;
     }
 
