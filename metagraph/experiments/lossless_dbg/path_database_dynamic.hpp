@@ -322,6 +322,9 @@ public:
         auto additional_splits_t = VerboseTimer("computing additional splits and joins");
         vector<node_index> additional_joins_vec(transformed_sequences.size());
         vector<node_index> additional_splits_vec(transformed_sequences.size());
+        //
+        // uint64_t chunk_size = nodes / chunks + 64ull
+        // chunk_size &= ~63ull
         #pragma omp parallel for num_threads(get_num_threads())
         for (size_t i = 0; i < transformed_sequences.size(); ++i) {
             auto& transformed_sequence = transformed_sequences[i];
