@@ -93,7 +93,7 @@ public:
                 transform_sequence_inplace(transformed_sequences[i]);
             }
         }
-
+        statistics["transform_sequences_ram"] = get_used_memory();
         populate_additional_joins(transformed_sequences);
 
 // Mark split and join-nodes in graph for faster queries and construction

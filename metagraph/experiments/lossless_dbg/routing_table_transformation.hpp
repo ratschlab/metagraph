@@ -106,7 +106,16 @@ public:
         return transformation.first == base ? transformation.second : base;
     }
     json get_statistics(int64_t verbosity=0) const {
-        return {{"transformations", transformations.size()}}; 
+        vector<string> transformed_nodes;
+        for (auto&[node,transformation] : transformations) {
+            if (this->graph) {
+                transformed_nodes.push_back(this->graph->get_node_sequence(node));
+            }
+        }
+        return {
+            {"transformations", transformations.size()},
+            {"transformed_nodes", transformed_nodes}
+        };
     }
 
      transformations_t transformations;
