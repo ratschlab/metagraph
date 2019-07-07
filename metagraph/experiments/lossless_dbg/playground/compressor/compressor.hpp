@@ -203,6 +203,7 @@ int main_compressor(int argc, char *argv[]) {
 	auto compressor = compressor_type.getValue();
 	auto chunks = chunksArg.getValue();
     auto graph = std::make_shared<DBGSuccinct>(21);
+    fs::create_directories(compressedArg.getValue() / "path_encoder.flag");
     if (compressor == "wavelet_debug") {
         compress_store_reads<PathDatabaseDynamicCore<
                 IdentityComparator<DynamicRoutingTable<>,ReferenceDynamicRoutingTable<>>,
