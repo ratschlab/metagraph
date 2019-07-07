@@ -148,7 +148,11 @@ TEST(IntVector, call_nonzeros_sparse) {
                     EXPECT_EQ(it++, i);
                 });
                 for (; it < end; ++it) {
-                    EXPECT_EQ(0u, vector[it]);
+                    EXPECT_EQ(0u, vector[it]) << vector.size()
+                                              << "\n" << begin
+                                              << " " << end
+                                              << "\n" << w
+                                              << "\n" << vector;
                 }
             }
         }
