@@ -126,6 +126,8 @@ public:
 
         };
         routing_table_array.push_back('#'); // to also always end a block with #
+        statistics["routing_table_to_vector_time"] = timer.elapsed();
+        statistics["routing_table_to_vector_ram"] = get_used_memory();
         routing_table.initialize_content(routing_table_array);
         if constexpr (std::is_base_of<TransformationsEnabler<RoutingTableCore<>>,RoutingTableT>::value) {
             routing_table.transformations = PathDatabaseDynamicCore< DRT, DIT>::routing_table.transformations;
