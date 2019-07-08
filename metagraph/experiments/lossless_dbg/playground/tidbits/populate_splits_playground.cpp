@@ -12,7 +12,7 @@ using namespace std;
 
 class Graph {
 public:
-    static const ll bits = 1'000'000;
+    static const ll bits = 1'000;
      ll num_nodes() {
         return bits;
     }
