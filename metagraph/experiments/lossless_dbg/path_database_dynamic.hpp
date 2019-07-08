@@ -102,11 +102,6 @@ public:
         alloc_routing_table.finished();
 
 
-        #pragma omp parallel for num_threads(get_num_threads())
-        for (node_index node = 1; node <= graph.num_nodes(); node++) {
-            assert(is_split[node] == node_is_split_raw(node));
-            assert(is_join[node] == node_is_join_raw(node));
-        }
 
         vector<path_id> encoded(sequences.size());
 
@@ -392,14 +387,6 @@ public:
     }
 
 
-    bool node_is_join_raw(node_index node) const {
-        return graph.indegree(node) > 1 or additional_joins.count(node);
-    }
-
-    bool node_is_split_raw(node_index node) const {
-        return graph.outdegree(node) > 1 or additional_splits.count(node);
-    }
-
     bool node_is_join(node_index node) const {
         return is_join[node];
     }
@@ -462,9 +449,6 @@ public:
     int64_t encoded_paths = 0;
     // denote where the reads should go ($ATCGN) ($ denodes the end of particular read)
 
-
-    tsl::hopscotch_set<node_index> additional_joins;
-    tsl::hopscotch_set<node_index> additional_splits;
 
     sdsl::bit_vector is_join;
     sdsl::bit_vector is_split;

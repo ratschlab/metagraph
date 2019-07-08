@@ -182,9 +182,6 @@ public:
                 assert((current_table_size>0 || [&](){
                     PathDatabaseDynamicCore<DRT,DIT>::incoming_table.print_content(node);
                     PRINT_VAR(PathDatabaseDynamicCore<DRT,DIT>::node_is_join(node));
-#ifdef MEMOIZE
-                    PRINT_VAR(PathDatabaseDynamicCore<DRT,DIT>::node_is_join_raw(node));
-#endif
                     return false;
                 }()));
 
