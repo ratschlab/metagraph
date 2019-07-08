@@ -52,7 +52,7 @@ public:
             graph(*graph_),
             incoming_table(graph_),
             routing_table(graph_),// weak
-            chunk_size(chunk_size)
+            chunks(chunk_size)
             {
             }
 
@@ -63,7 +63,7 @@ public:
             graph(*graph_),
             incoming_table(graph_),
             routing_table(graph_),
-            chunk_size(DefaultChunks)
+            chunks(DefaultChunks)
             {}
 
     virtual ~PathDatabaseDynamicCore() {}
@@ -100,8 +100,8 @@ public:
         populate_bifurcation_bitvectors();
 
         auto alloc_routing_table = VerboseTimer("allocation of routing & incoming table");
-        routing_table = decltype(routing_table)(graph_,&is_bifurcation,&rank_is_bifurcation,chunk_size);
-        incoming_table = decltype(incoming_table)(graph_,&is_bifurcation,&rank_is_bifurcation,chunk_size);
+        routing_table = decltype(routing_table)(graph_,&is_bifurcation,&rank_is_bifurcation,chunks);
+        incoming_table = decltype(incoming_table)(graph_,&is_bifurcation,&rank_is_bifurcation,chunks);
         alloc_routing_table.finished();
 
 
@@ -116,7 +116,7 @@ public:
 #ifndef DISABLE_PARALELIZATION
 
         auto alloc_lock_t = VerboseTimer("memory allocation of locks");
-        ChunkedDenseHashMap<omp_lock_t,decltype(is_bifurcation), decltype(rank_is_bifurcation),false> node_locks(&is_bifurcation,&rank_is_bifurcation,chunk_size);
+        ChunkedDenseHashMap<omp_lock_t,decltype(is_bifurcation), decltype(rank_is_bifurcation),false> node_locks(&is_bifurcation,&rank_is_bifurcation,chunks);
         alloc_lock_t.finished();
 
 
@@ -132,7 +132,7 @@ public:
 #endif
         auto threads_map_t = VerboseTimer("memory allocation of exit barriers");
 
-        auto exit_barrier = ExitBarrierT(&is_bifurcation,&rank_is_bifurcation,chunk_size);
+        auto exit_barrier = ExitBarrierT(&is_bifurcation,&rank_is_bifurcation,chunks);
         threads_map_t.finished();
 
 
@@ -319,52 +319,73 @@ public:
 #endif
 
     void populate_additional_joins(const vector<std::string> &transformed_sequences) {
-        auto additional_splits_t = VerboseTimer("computing additional splits and joins");
-        vector<node_index> additional_joins_vec(transformed_sequences.size());
-        vector<node_index> additional_splits_vec(transformed_sequences.size());
-        //
-        // uint64_t chunk_size = nodes / chunks + 64ull
-        // chunk_size &= ~63ull
-        #pragma omp parallel for num_threads(get_num_threads())
-        for (size_t i = 0; i < transformed_sequences.size(); ++i) {
-            auto& transformed_sequence = transformed_sequences[i];
-            // add additional bifurcation
-            additional_joins_vec[i] = graph.kmer_to_node(
-                    transformed_sequence.substr(0, graph.get_k())
-            );
-            assert(additional_joins_vec[i]); // node has to be in graph
-            additional_splits_vec[i] = graph.kmer_to_node(
-                    transformed_sequence.substr(transformed_sequence.length() - graph.get_k())
-            );
-            assert(additional_splits_vec[i]); // node has to be in graph
-        }
-        additional_joins = decltype(additional_joins)(additional_joins_vec.begin(),
-                                                      additional_joins_vec.end());
-        additional_joins_vec.clear();
-        additional_splits = decltype(additional_splits)(additional_splits_vec.begin(),
-                                                        additional_splits_vec.end());
-        additional_splits_vec.clear();
-        statistics["additional_joins_time"] = additional_splits_t.finished();
-        statistics["additional_joins_ram"] = get_used_memory();
-    }
+        // change
+        ll bits_to_set = transformed_sequences.size();
 
-    void populate_bifurcation_bitvectors() {
+        //vector<node_index> debug_join_ids(bits_to_set);
+        //vector<node_index> debug_split_ids(bits_to_set);
         auto bifurcation_timer = VerboseTimer("construction of bifurcation bit_vectors");
+
+        auto additional_bifurcations_timer = VerboseTimer("computing additional splits and joins");
         is_split = decltype(is_split)(graph.num_nodes() + 1); // bit
         is_join = decltype(is_join)(graph.num_nodes() + 1);
         is_bifurcation = decltype(is_join)(graph.num_nodes() + 1);
+        uint64_t chunk_size = (graph.num_nodes() + 1)/ chunks + 64ull;
+        chunk_size &= ~63ull;
+        vector<omp_lock_t> node_locks(chunks);
+        for(int i = 0; i < node_locks.size(); i++) {
+            omp_init_lock(&node_locks[i]);
+        }
+#pragma omp parallel for
+        for (size_t i = 0; i < bits_to_set; ++i) {
+            auto& transformed_sequence = transformed_sequences[i];
+            omp_lock_t* lock_ptr;
+            ll start_node =  graph.kmer_to_node(
+                    transformed_sequence.substr(0,graph.get_k());
+            );
+            assert(start_node);
+            lock_ptr = &node_locks[start_node / chunk_size];
+            omp_set_lock(lock_ptr);
+            is_join[start_node] = true;
+            omp_unset_lock(lock_ptr);
+            //debug_join_ids[i] = start_node;
 
-        #pragma omp parallel for num_threads(get_num_threads())
-        for (uint64_t node = 0; node <= graph.num_nodes(); node += 64) {
-            for (int64_t i = node; i < node + 64 && i <= graph.num_nodes(); ++i) {
-                if (!i)
+            ll end_node = graph.kmer_to_node(
+                    transformed_sequence.substr(transformed_sequence.length() - graph.get_k());
+            );
+            assert(end_node);
+            lock_ptr = &node_locks[end_node / chunk_size];
+            omp_set_lock(lock_ptr);
+            is_split[end_node] = true;
+            omp_unset_lock(lock_ptr);
+            //debug_split_ids[i] = end_node;
+
+        }
+        for(int i = 0; i < node_locks.size(); i++) {
+            omp_destroy_lock(&node_locks[i]);
+        }
+        statistics["additional_bifurcations_time"] = additional_bifurcations_timer.finished();
+        statistics["additional_bifurcations_ram"] = get_used_memory();
+
+//#pragma omp parallel for reduction(append : debug_join_ids, debug_split_ids)
+#pragma omp parallel for
+        for (uint64_t id = 0; id <= graph.num_nodes(); id += 64) {
+            for (int64_t node = id; node < id + 64 && node <= graph.num_nodes(); ++node) {
+                if (!node)
                     continue;
-                is_split[i] = node_is_split_raw(i);
-                is_join[i] = node_is_join_raw(i);
-                is_bifurcation[i] = is_split[i] || is_join[i];
+                auto outdegree = graph.outdegree(node);
+                is_split[node] = is_split[node] or outdegree > 1;
+//            if (outdegree > 1) {
+//                debug_split_ids.push_back(node);
+//            }
+                auto indegree = graph.indegree(node);
+                is_join[node] = is_join[node] or indegree > 1;
+//            if (indegree > 1) {
+//                debug_join_ids.push_back(node);
+//            }
+                is_bifurcation[node] = is_split[node] || is_join[node];
             }
         }
-
         rank_is_split = decltype(rank_is_split)(&is_split);
         rank_is_join = decltype(rank_is_join)(&is_join);
         rank_is_bifurcation = decltype(rank_is_bifurcation)(&is_bifurcation);
@@ -459,7 +480,7 @@ public:
     const GraphT& graph;
     RoutingTableT routing_table;
     IncomingTableT incoming_table;
-    int64_t chunk_size;
+    int64_t chunks;
 
     static DBGSuccinct* buildGraph(PathDatabaseDynamicCore* self,vector<string> reads,int64_t kmer_length) {
         Timer timer;

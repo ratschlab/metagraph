@@ -16,7 +16,7 @@ public:
      ll num_nodes() {
         return bits;
     }
-    node_index kmer_to_node(string dummy="A") {
+    node_index kmer_to_node(const string& dummy="A") {
         return rand()%bits + 1;
     }
     int outdegree(node_index node) {
@@ -35,9 +35,11 @@ sdsl::bit_vector is_bifurcation;
 int main(int argc, char** argv) {
     omp_set_num_threads(10);
 
+    // change
     ll bits_to_set = graph.num_nodes()/10;
-    vector<node_index> debug_join_ids(bits_to_set);
-    vector<node_index> debug_split_ids(bits_to_set);
+
+    //vector<node_index> debug_join_ids(bits_to_set);
+    //vector<node_index> debug_split_ids(bits_to_set);
 
     auto additional_splits_t = VerboseTimer("computing additional splits and joins");
     is_split = decltype(is_split)(graph.num_nodes() + 1); // bit
@@ -60,7 +62,7 @@ int main(int argc, char** argv) {
         omp_set_lock(lock_ptr);
         is_join[start_node] = true;
         omp_unset_lock(lock_ptr);
-        debug_join_ids[i] = start_node;
+        //debug_join_ids[i] = start_node;
 
         ll end_node = graph.kmer_to_node(
 
@@ -70,50 +72,54 @@ int main(int argc, char** argv) {
         omp_set_lock(lock_ptr);
         is_split[end_node] = true;
         omp_unset_lock(lock_ptr);
-        debug_split_ids[i] = end_node;
+        //debug_split_ids[i] = end_node;
 
+    }
+    for(int i = 0; i < node_locks.size(); i++) {
+        omp_destroy_lock(&node_locks[i]);
     }
     auto bifurcation_timer = VerboseTimer("construction of bifurcation bit_vectors");
 
-#pragma omp parallel for reduction(append : debug_join_ids, debug_split_ids)
+//#pragma omp parallel for reduction(append : debug_join_ids, debug_split_ids)
+#pragma omp parallel for
     for (uint64_t id = 0; id <= graph.num_nodes(); id += 64) {
         for (int64_t node = id; node < id + 64 && node <= graph.num_nodes(); ++node) {
             if (!node)
                 continue;
             auto outdegree = graph.outdegree(node);
             is_split[node] = is_split[node] or outdegree > 1;
-            if (outdegree > 1) {
-                debug_split_ids.push_back(node);
-            }
+//            if (outdegree > 1) {
+//                debug_split_ids.push_back(node);
+//            }
             auto indegree = graph.indegree(node);
             is_join[node] = is_join[node] or indegree > 1;
-            if (indegree > 1) {
-                debug_join_ids.push_back(node);
-            }
-//            is_bifurcation[i] = is_split[i] || is_join[i];
+//            if (indegree > 1) {
+//                debug_join_ids.push_back(node);
+//            }
+            is_bifurcation[node] = is_split[node] || is_join[node];
         }
     }
-    sort(all(debug_join_ids));
-    sort(all(debug_split_ids));
-    int debug_join_i = 0;
-    int debug_split_i = 0;
-    for(ll node=0; node <= graph.num_nodes(); node++) {
-        while(debug_join_ids[debug_join_i] < node && debug_join_i < debug_join_ids.size()) debug_join_i++;
-        if (debug_join_ids[debug_join_i] == node) {
-            assert(is_join[node]);
-        }
-        else {
-            assert(!is_join[node]);
-        }
-        while(debug_split_ids[debug_split_i] < node && debug_split_i < debug_split_ids.size()) debug_split_i++;
-        if (debug_split_ids[debug_split_i] == node) {
-            assert(is_split[node]);
-        }
-        else {
-            assert(!is_split[node]);
-        }
-
-    }
+//    sort(all(debug_join_ids));
+//    sort(all(debug_split_ids));
+//    int debug_join_i = 0;
+//    int debug_split_i = 0;
+//    for(ll node=0; node <= graph.num_nodes(); node++) {
+//        while(debug_join_ids[debug_join_i] < node && debug_join_i < debug_join_ids.size()) debug_join_i++;
+//        if (debug_join_ids[debug_join_i] == node) {
+//            assert(is_join[node]);
+//        }
+//        else {
+//            assert(!is_join[node]);
+//        }
+//        while(debug_split_ids[debug_split_i] < node && debug_split_i < debug_split_ids.size()) debug_split_i++;
+//        if (debug_split_ids[debug_split_i] == node) {
+//            assert(is_split[node]);
+//        }
+//        else {
+//            assert(!is_split[node]);
+//        }
+//
+//    }
 
 
 //cout << get_used_memory();
