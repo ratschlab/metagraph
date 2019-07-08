@@ -76,10 +76,10 @@ int main(int argc, char** argv) {
     for(ll node=0; node <= graph.num_nodes(); node++) {
         while(debug_join_ids[debug_i] < node && debug_i < debug_join_ids.size()) debug_i++;
         if (debug_join_ids[debug_i] == node) {
-            assert(is_split[node]);
+            assert(is_join[node]);
         }
         else {
-            assert(!is_split[node]);
+            assert(!is_join[node]);
         }
 
     }
