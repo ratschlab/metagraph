@@ -20,7 +20,7 @@
 #include "utilities.hpp"
 #include "routing_table_transformation.hpp"
 
-using DefaultUnderlyingWaveletBV = sdsl::hyb_vector<>;
+using DefaultUnderlyingWaveletBV = sdsl::rrr_vector<>;
 using DefaultWavelet = sdsl::wt_rlmn<DefaultUnderlyingWaveletBV,DefaultUnderlyingWaveletBV::rank_1_type,DefaultUnderlyingWaveletBV::select_1_type,sdsl::wt_huff<>>;
 template<class Wavelet = DefaultWavelet>
 class RoutingTableCore {
