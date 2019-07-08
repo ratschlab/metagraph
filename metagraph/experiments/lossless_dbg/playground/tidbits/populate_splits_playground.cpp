@@ -16,8 +16,14 @@ public:
      ll num_nodes() {
         return bits;
     }
-     node_index kmer_to_node(string dummy="A") {
+    node_index kmer_to_node(string dummy="A") {
         return rand()%bits + 1;
+    }
+    int outdegree(node_index node) {
+         return rand()%5;
+    }
+    int indegree(node_index node) {
+         return rand()%5;
     }
 } graph;
 
@@ -61,16 +67,20 @@ int main(int argc, char** argv) {
     }
     auto bifurcation_timer = VerboseTimer("construction of bifurcation bit_vectors");
 
-//#pragma omp parallel for num_threads(get_num_threads())
-//    for (uint64_t node = 0; node <= graph.num_nodes(); node += 64) {
-//        for (int64_t i = node; i < node + 64 && i <= graph.num_nodes(); ++i) {
-//            if (!i)
-//                continue;
+#pragma omp parallel for reduction(append : debug_join_ids)
+    for (uint64_t id = 0; id <= graph.num_nodes(); id += 64) {
+        for (int64_t node = id; node < id + 64 && node <= graph.num_nodes(); ++node) {
+            if (!node)
+                continue;
 //            is_split[i] = is_split[i] or graph.outdegree(i) > 1;
-//            is_join[i] = is_join[i] or graph.indegree(i) > 1;
+            auto indegree = graph.indegree(node);
+            is_join[node] = is_join[node] or indegree > 1;
+            if (indegree > 1) {
+                debug_join_ids.push_back(node);
+            }
 //            is_bifurcation[i] = is_split[i] || is_join[i];
-//        }
-//    }
+        }
+    }
     sort(all(debug_join_ids));
     int debug_i = 0;
     for(ll node=0; node <= graph.num_nodes(); node++) {

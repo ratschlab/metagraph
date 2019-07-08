@@ -152,6 +152,10 @@ inline void append_vectors(std::vector<T>& output,std::vector<T>& input)
     append_vectors(omp_out, omp_in))
 
 #pragma omp declare reduction(append : \
+    std::vector<uint64_t> : \
+    append_vectors(omp_out, omp_in))
+
+#pragma omp declare reduction(append : \
     std::vector<bool> : \
     append_vectors(omp_out, omp_in))
 
