@@ -10,13 +10,13 @@ using node_index = uint64_t;
 using namespace std;
 
 
-class graph {
+class Graph {
 public:
     static const ll bits = 1'000'000;
     static ll num_nodes() {
         return bits;
     }
-};
+} graph;
 
 sdsl::bit_vector is_join;
 sdsl::bit_vector is_split;
