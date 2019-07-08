@@ -1,3 +1,5 @@
+#include <utility>
+
 //
 // Created by Jan Studený on 2019-05-06.
 //
@@ -9,6 +11,7 @@
 
 using default_bit_vector = bit_vector_small;
 
+using MultiplicityT = sdsl::int_vector<>;
 template <typename BitVector_=default_bit_vector,typename GraphT=DBGSuccinct>
 class IncomingTable {
 public:
@@ -16,11 +19,11 @@ public:
     using BitVector = BitVector_;
     IncomingTable() = default;
     explicit IncomingTable(shared_ptr<const GraphT> graph, BitVector joins,
-                           sdsl::enc_vector<> edge_multiplicity_table) :
-                                            graph(graph), joins(joins), edge_multiplicity_table(edge_multiplicity_table) {}
+                           MultiplicityT edge_multiplicity_table) :
+                                            graph(graph), joins(joins), edge_multiplicity_table(std::move(edge_multiplicity_table)) {}
     using bit_vector_t = BitVector;
     BitVector joins;
-    sdsl::enc_vector<> edge_multiplicity_table;
+    MultiplicityT edge_multiplicity_table;
     int64_t branch_offset(node_index node,node_index prev_node) const {
         int64_t branch_offset = relative_offset(node,prev_node);
         int64_t result = 0;

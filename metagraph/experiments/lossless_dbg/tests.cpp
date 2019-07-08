@@ -227,7 +227,7 @@ TEST(PathDatabase,RightDecode) {
 TEST(PathDatabase,IncomingTable) {
     auto graph = make_shared<DBGSuccinct>(21);
     vector<int> v = {1,2,3,4};
-    IncomingTable<> table(graph,IncomingTable<>::bit_vector_t({1,0,0,1,0,1,1,0,1}),sdsl::enc_vector<>(v));
+    IncomingTable<> table(graph,IncomingTable<>::bit_vector_t({1,0,0,1,0,1,1,0,1}),MultiplicityT(v));
     ASSERT_EQ(table.branch_size_rank(1,0),1);
     ASSERT_EQ(table.branch_size_rank(1,1),2);
     ASSERT_EQ(table.branch_size_rank(2,0),3);

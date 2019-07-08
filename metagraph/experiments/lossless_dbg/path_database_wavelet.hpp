@@ -206,11 +206,15 @@ public:
         };
         delimiter_vector.push_back(true);
         sdsl::bit_vector temporary_representation(delimiter_vector.size());
+        sdsl::int_vector<> int_representation(incoming_table_builder.size());
+        for(int64_t i=0; i < int_representation.size(); i++) {
+            int_representation[i] = incoming_table_builder[i];
+        }
         for(int64_t i=0; i <delimiter_vector.size();i++) {
             temporary_representation[i] = delimiter_vector[i];
         }
         using joins_type = typename decltype(incoming_table)::BitVector;
-        incoming_table = decltype(incoming_table)(this->graph_,joins_type(temporary_representation),incoming_table_builder);
+        incoming_table = decltype(incoming_table)(this->graph_,joins_type(temporary_representation),int_representation);
         statistics["transformation_incoming_table_time"] = timer.elapsed();
         statistics["transformation_incoming_table_ram"] = get_used_memory();
         cerr << "Transformation finished in " << statistics["transformation_incoming_table_time"] << endl;
@@ -238,7 +242,7 @@ public:
 
 
 
-    void serialize(const fs::path& folder) const {
+    void serialize(const fs::path& folder) {
         Timer timer;
         cerr << "Started serializing the path encoder." << endl;
         fs::create_directories(folder / "path_encoder.flag");
@@ -247,10 +251,12 @@ public:
         ofstream joins_file(folder / "joins.bin", ios_base::trunc | ios_base::out);
         string graph_filename = folder / "graph.bin";
 
+        sdsl::util::bit_compress(incoming_table.edge_multiplicity_table);
         incoming_table.edge_multiplicity_table.serialize(edge_multiplicity_file);
         routing_table.serialize(routing_table_file);
         incoming_table.joins.serialize(joins_file);
         // boss - switch_state
+        const_cast<DBGSuccinct&>(this->graph).get_boss().switch_state(Config::SMALL);
         this->graph.serialize(graph_filename);
         cerr << "Finished serializing the path encoder in " << timer.elapsed() << " sec." << endl;
     }
