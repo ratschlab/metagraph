@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
     }
     auto bifurcation_timer = VerboseTimer("construction of bifurcation bit_vectors");
 
-#pragma omp parallel for reduction(append : debug_join_ids)
+#pragma omp parallel for reduction(append : debug_join_ids, debug_split_ids)
     for (uint64_t id = 0; id <= graph.num_nodes(); id += 64) {
         for (int64_t node = id; node < id + 64 && node <= graph.num_nodes(); ++node) {
             if (!node)
