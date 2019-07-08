@@ -96,9 +96,6 @@ public:
         statistics["transform_sequences_ram"] = get_used_memory();
         populate_additional_joins(transformed_sequences);
 
-// Mark split and join-nodes in graph for faster queries and construction
-        populate_bifurcation_bitvectors();
-
         auto alloc_routing_table = VerboseTimer("allocation of routing & incoming table");
         routing_table = decltype(routing_table)(graph_,&is_bifurcation,&rank_is_bifurcation,chunks);
         incoming_table = decltype(incoming_table)(graph_,&is_bifurcation,&rank_is_bifurcation,chunks);
@@ -341,7 +338,7 @@ public:
             auto& transformed_sequence = transformed_sequences[i];
             omp_lock_t* lock_ptr;
             ll start_node =  graph.kmer_to_node(
-                    transformed_sequence.substr(0,graph.get_k());
+                    transformed_sequence.substr(0,graph.get_k())
             );
             assert(start_node);
             lock_ptr = &node_locks[start_node / chunk_size];
@@ -351,7 +348,7 @@ public:
             //debug_join_ids[i] = start_node;
 
             ll end_node = graph.kmer_to_node(
-                    transformed_sequence.substr(transformed_sequence.length() - graph.get_k());
+                    transformed_sequence.substr(transformed_sequence.length() - graph.get_k())
             );
             assert(end_node);
             lock_ptr = &node_locks[end_node / chunk_size];
