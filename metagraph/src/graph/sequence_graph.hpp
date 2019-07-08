@@ -124,4 +124,10 @@ class DeBruijnGraph : public SequenceGraph {
     friend std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph);
 };
 
+
+// returns the edge rank, starting from zero
+size_t incoming_edge_rank(const DeBruijnGraph &graph,
+                          DeBruijnGraph::node_index source,
+                          DeBruijnGraph::node_index target);
+
 #endif // __SEQUENCE_GRAPH_HPP__
