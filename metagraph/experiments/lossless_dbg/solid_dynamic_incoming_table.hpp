@@ -9,7 +9,6 @@
 #include <set>
 #include <functional>
 #include <map>
-#include <sdsl/wt_rlmn.hpp>
 #include <sdsl/sd_vector.hpp>
 #include <sdsl/enc_vector.hpp>
 #include <tsl/hopscotch_map.h>

@@ -64,7 +64,6 @@ public:
 
 using DefaultRoutingTable = RoutingTable<>;
 using DefaultIncomingTable = IncomingTable<>;
-//template <class Wavelet = sdsl::wt_rlmn<sdsl::sd_vector<>>
 template<class RoutingTableT = DefaultRoutingTable,class IncomingTableT=DefaultIncomingTable,bool reduced_coverage=true>
 class PathDatabaseWaveletCore : public PathDatabaseDynamicCore<typename DynamicVersion<RoutingTableT>::Type,typename DynamicVersion<IncomingTableT>::Type> {
 public:
@@ -251,6 +250,7 @@ public:
         incoming_table.edge_multiplicity_table.serialize(edge_multiplicity_file);
         routing_table.serialize(routing_table_file);
         incoming_table.joins.serialize(joins_file);
+        // boss - switch_state
         this->graph.serialize(graph_filename);
         cerr << "Finished serializing the path encoder in " << timer.elapsed() << " sec." << endl;
     }

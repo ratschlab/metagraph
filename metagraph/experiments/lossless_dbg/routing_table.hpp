@@ -9,6 +9,7 @@
 #include <set>
 #include <map>
 #include <sdsl/wt_rlmn.hpp>
+#include <sdsl/hyb_vector.hpp>
 #include <sdsl/sd_vector.hpp>
 #include <sdsl/enc_vector.hpp>
 #include <boost/range/size_type.hpp>
@@ -19,8 +20,9 @@
 #include "utilities.hpp"
 #include "routing_table_transformation.hpp"
 
-
-template<class Wavelet = sdsl::wt_rlmn<>>
+using DefaultUnderlyingWaveletBV = sdsl::hyb_vector<>;
+using DefaultWavelet = sdsl::wt_rlmn<DefaultUnderlyingWaveletBV,DefaultUnderlyingWaveletBV::rank_1_type,DefaultUnderlyingWaveletBV::select_1_type,sdsl::wt_huff<>>;
+template<class Wavelet = DefaultWavelet>
 class RoutingTableCore {
 public:
     RoutingTableCore() = default;
@@ -118,7 +120,7 @@ public:
     const shared_ptr<const DBGSuccinct> graph;
 };
 
-template <typename Wavelet=sdsl::wt_rlmn<>>
+template <typename Wavelet=DefaultWavelet>
 using RoutingTable = TransformationsEnabler<RoutingTableCore<Wavelet>>;
 
 #endif //METAGRAPH_ROUTING_TABLE_HPP

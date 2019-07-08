@@ -10,7 +10,6 @@
 #include <iostream>
 #include <set>
 #include <map>
-#include <sdsl/wt_rlmn.hpp>
 #include <sdsl/sd_vector.hpp>
 #include <sdsl/enc_vector.hpp>
 #include <boost/range/size_type.hpp>
