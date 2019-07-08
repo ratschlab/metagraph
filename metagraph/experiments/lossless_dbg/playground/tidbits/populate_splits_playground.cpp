@@ -37,6 +37,7 @@ int main(int argc, char** argv) {
 
     ll bits_to_set = graph.num_nodes()/10;
     vector<node_index> debug_join_ids(bits_to_set);
+    vector<node_index> debug_split_ids(bits_to_set);
 
     auto additional_splits_t = VerboseTimer("computing additional splits and joins");
     is_split = decltype(is_split)(graph.num_nodes() + 1); // bit
@@ -50,20 +51,27 @@ int main(int argc, char** argv) {
     }
     #pragma omp parallel for
     for (size_t i = 0; i < bits_to_set; ++i) {
+        omp_lock_t* lock_ptr;
         ll start_node =  graph.kmer_to_node(
 
         );
         assert(start_node);
-        auto lock_ptr = &node_locks[start_node / chunk_size];
+        lock_ptr = &node_locks[start_node / chunk_size];
         omp_set_lock(lock_ptr);
         is_join[start_node] = true;
         omp_unset_lock(lock_ptr);
         debug_join_ids[i] = start_node;
 
-        //ll end_node = graph.kmer_to_node(
-        //
-        //);
-        //assert(end_node);
+        ll end_node = graph.kmer_to_node(
+
+        );
+        assert(end_node);
+        lock_ptr = &node_locks[end_node / chunk_size];
+        omp_set_lock(lock_ptr);
+        is_split[end_node] = true;
+        omp_unset_lock(lock_ptr);
+        debug_split_ids[i] = end_node;
+
     }
     auto bifurcation_timer = VerboseTimer("construction of bifurcation bit_vectors");
 
@@ -72,7 +80,11 @@ int main(int argc, char** argv) {
         for (int64_t node = id; node < id + 64 && node <= graph.num_nodes(); ++node) {
             if (!node)
                 continue;
-//            is_split[i] = is_split[i] or graph.outdegree(i) > 1;
+            auto outdegree = graph.outdegree(node);
+            is_split[node] = is_split[node] or outdegree > 1;
+            if (outdegree > 1) {
+                debug_split_ids.push_back(node);
+            }
             auto indegree = graph.indegree(node);
             is_join[node] = is_join[node] or indegree > 1;
             if (indegree > 1) {
@@ -82,14 +94,23 @@ int main(int argc, char** argv) {
         }
     }
     sort(all(debug_join_ids));
-    int debug_i = 0;
+    sort(all(debug_split_ids));
+    int debug_join_i = 0;
+    int debug_split_i = 0;
     for(ll node=0; node <= graph.num_nodes(); node++) {
-        while(debug_join_ids[debug_i] < node && debug_i < debug_join_ids.size()) debug_i++;
-        if (debug_join_ids[debug_i] == node) {
+        while(debug_join_ids[debug_join_i] < node && debug_join_i < debug_join_ids.size()) debug_join_i++;
+        if (debug_join_ids[debug_join_i] == node) {
             assert(is_join[node]);
         }
         else {
             assert(!is_join[node]);
+        }
+        while(debug_split_ids[debug_split_i] < node && debug_split_i < debug_split_ids.size()) debug_split_i++;
+        if (debug_split_ids[debug_split_i] == node) {
+            assert(is_split[node]);
+        }
+        else {
+            assert(!is_split[node]);
         }
 
     }
