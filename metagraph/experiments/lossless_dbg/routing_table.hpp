@@ -33,7 +33,7 @@ public:
     template<class Container>
     void initialize_content(const Container& routing_table_array) {
         // can't use int_vector<3> as the construction of routing table fails (routing table is malformed)
-        sdsl::int_vector<> routing_table_array_encoded(routing_table_array.size());
+        sdsl::int_vector<> routing_table_array_encoded(routing_table_array.size(),0,3);
         for(int64_t i=0;i<routing_table_array.size();i++) {
             routing_table_array_encoded[i] = encode(routing_table_array[i]);
         }
