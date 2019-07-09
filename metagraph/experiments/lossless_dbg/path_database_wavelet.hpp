@@ -67,8 +67,8 @@ using DefaultIncomingTable = IncomingTable<>;
 template<class RoutingTableT = DefaultRoutingTable,class IncomingTableT=DefaultIncomingTable,bool reduced_coverage=true, class DynamicRoutingTableT = typename DynamicVersion<RoutingTableT>::Type, class DynamicIncomingTableT = typename DynamicVersion<IncomingTableT>::Type>
 class PathDatabaseWaveletCore : public PathDatabaseDynamicCore<DynamicRoutingTableT,DynamicIncomingTableT> {
 public:
-    using DRT = typename DynamicVersion<RoutingTableT>::Type;
-    using DIT = typename DynamicVersion<IncomingTableT>::Type;
+    using DRT = DynamicRoutingTableT;
+    using DIT = DynamicIncomingTableT;
     // implicit assumptions
     // graph contains all reads
     // sequences are of size at least k

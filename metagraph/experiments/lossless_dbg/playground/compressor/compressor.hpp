@@ -238,8 +238,7 @@ int main_compressor(int argc, char *argv[]) {
 	    	}
 			else {
 			    if (not reducedCoverageArg.getValue()) { throw "Not implemented"; }
-			    using Database = PathDatabaseWaveletWithtoutTransformation<DefaultRoutingTable,DefaultIncomingTable,true,ReferenceDynamicRoutingTable<>,ReferenceDynamicIncomingTable<>>;
-				compress_store_reads<Database>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph, chunks, stat_verbosity);
+				compress_store_reads<PathDatabaseWaveletWithtoutTransformation<true,ReferenceDynamicRoutingTable<>,ReferenceDynamicIncomingTable<>>>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph, chunks, stat_verbosity);
 			}
 	    }
     }
