@@ -123,7 +123,6 @@ class DeBruijnGraph : public SequenceGraph {
 
     friend std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph);
 
-  private:
     // Call all nodes that have no incoming edges
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
 };

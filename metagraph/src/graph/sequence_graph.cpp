@@ -63,7 +63,6 @@ void call_sequences_from(const DeBruijnGraph &graph,
                          const std::function<void(const std::string&)> &callback,
                          sdsl::bit_vector *visited,
                          sdsl::bit_vector *discovered,
-                         bool is_start,
                          bool call_unitigs = false,
                          uint64_t min_tip_size = 0) {
     assert((min_tip_size <= 1 || call_unitigs)
@@ -72,22 +71,20 @@ void call_sequences_from(const DeBruijnGraph &graph,
     assert(discovered);
     assert(!(*visited)[start]);
 
-    std::stack<std::tuple<node_index, std::string, char, bool>> paths;
+    std::stack<std::tuple<node_index, std::string, char>> paths;
     std::vector<std::pair<node_index, char>> targets;
 
     (*discovered)[start] = true;
     auto cur_node_seq = graph.get_node_sequence(start);
     paths.emplace(start,
                   cur_node_seq.substr(0, graph.get_k() - 1),
-                  cur_node_seq.back(),
-                  is_start);
+                  cur_node_seq.back());
 
     // keep traversing until we have worked off all branches from the queue
     while (paths.size()) {
-        auto [node, sequence, next_char, is_start] = std::move(paths.top());
+        auto [node, sequence, next_char] = std::move(paths.top());
         paths.pop();
         start = node;
-        assert(is_start != static_cast<bool>(graph.indegree(start)));
 
         // traverse simple path until we reach its tail or
         // the first edge that has been already visited
@@ -125,7 +122,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
                     next_char = c;
                 } else if (!(*discovered)[next]) {
                     (*discovered)[next] = true;
-                    paths.emplace(next, new_seq, c, false);
+                    paths.emplace(next, new_seq, c);
                 }
             }
 
@@ -139,114 +136,81 @@ void call_sequences_from(const DeBruijnGraph &graph,
               && (!call_unitigs
                   // check if long
                   || sequence.size() >= graph.get_k() + min_tip_size - 1
-                  || (is_start && graph.outdegree(node) >= 2)
-                  || (!is_start && (graph.outdegree(node)
-                                        || graph.indegree(start) >= 2)))) {
+                  // check if not tip
+                  || graph.indegree(start) + graph.outdegree(node) >= 2)) {
             callback(sequence);
         }
     }
 }
 
-void DeBruijnGraph
-::call_sequences(const std::function<void(const std::string&)> &callback) const {
-    sdsl::bit_vector discovered(num_nodes() + 1, false);
-    sdsl::bit_vector visited(num_nodes() + 1, false);
+void call_sequences(const DeBruijnGraph &graph,
+                    const std::function<void(const std::string&)> &callback,
+                    bool call_unitigs,
+                    uint64_t min_tip_size = 0) {
+    sdsl::bit_vector discovered(graph.num_nodes() + 1, false);
+    sdsl::bit_vector visited(graph.num_nodes() + 1, false);
 
-    auto callback_from = [&](const auto &node, bool is_start) {
-        call_sequences_from(*this,
+    auto callback_from = [&](const auto &node) {
+        call_sequences_from(graph,
                             node,
                             callback,
                             &visited,
                             &discovered,
-                            is_start);
+                            call_unitigs,
+                            min_tip_size);
     };
 
-    call_source_nodes([&](const auto &start) {
-        assert(!visited[start]);
-        callback_from(start, true);
+    // start with the source nodes (those with indegree == 0)
+    //  .____  or  .____
+    //              \___
+    //
+    graph.call_source_nodes([&](const auto &node) {
+        assert(!visited[node]);
+        assert(!graph.indegree(node));
+
+        callback_from(node);
     });
 
-    // then merges
-    //  ____.____
-    //  ___/
+    // then merges and forks
+    //  ____.____       ____.____
+    //  ___/                 \___
     //
-    call_nodes([&](const auto &node) {
-        if (!visited[node] && outdegree(node) == 1 && indegree(node) > 1)
-            callback_from(node, false);
-    });
+    graph.call_nodes([&](const auto &node) {
 
-    // then forks
-    //  ____.____
-    //       \---
-    //
-    call_nodes([&](const auto &node) {
-        if (outdegree(node) > 1) {
-            call_outgoing_kmers(node, [&](const auto &next, char) {
-                if (!visited[next] && outdegree(next) == 1)
-                    callback_from(next, false);
+        if (visited[node])
+            return;
+
+        size_t outdeg = graph.outdegree(node);
+
+        if (outdeg > 1) {
+            // fork
+            graph.call_outgoing_kmers(node, [&](const auto &next, char) {
+                if (!visited[next] && graph.outdegree(next) == 1)
+                    callback_from(next);
             });
+
+        } else if (outdeg == 1 && graph.indegree(node) > 1) {
+            // merge
+            callback_from(node);
         }
     });
 
     // then the rest
-    call_nodes([&](const auto &node) {
+    graph.call_nodes([&](const auto &node) {
         if (!visited[node])
-            callback_from(node, false);
+            callback_from(node);
     });
+}
+
+void DeBruijnGraph
+::call_sequences(const std::function<void(const std::string&)> &callback) const {
+    ::call_sequences(*this, callback, false);
 }
 
 void DeBruijnGraph
 ::call_unitigs(const std::function<void(const std::string&)> &callback,
                size_t min_tip_size) const {
-    sdsl::bit_vector discovered(num_nodes() + 1, false);
-    sdsl::bit_vector visited(num_nodes() + 1, false);
-    std::stack<std::tuple<node_index, node_index, std::string, char>> paths;
-    std::vector<std::pair<node_index, char>> targets;
-
-    auto callback_from = [&](const auto &node, bool is_start) {
-        call_sequences_from(*this,
-                            node,
-                            callback,
-                            &visited,
-                            &discovered,
-                            is_start,
-                            true,
-                            min_tip_size);
-    };
-
-    // first start nodes (those with indegree == 0)
-    call_source_nodes([&](const auto &start) {
-        assert(!visited[start]);
-        callback_from(start, true);
-    });
-
-    // then merges
-    //  ____.____
-    //  ___/
-    //
-    call_nodes([&](const auto &node) {
-        if (!visited[node] && outdegree(node) == 1 && indegree(node) > 1)
-            callback_from(node, false);
-    });
-
-    // then forks
-    //  ____.____
-    //       \___
-    //
-    call_nodes([&](const auto &node) {
-        if (outdegree(node) > 1) {
-            call_outgoing_kmers(node, [&](const auto &next, char) {
-                if (!visited[next] && outdegree(next) == 1)
-                    callback_from(next, false);
-            });
-        }
-    });
-
-    // then the rest
-    call_nodes([&](const auto &node) {
-        if (!visited[node])
-            callback_from(node, false);
-    });
+    ::call_sequences(*this, callback, true, min_tip_size);
 }
 
 /**
