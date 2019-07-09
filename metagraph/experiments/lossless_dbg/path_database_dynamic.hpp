@@ -322,6 +322,9 @@ public:
         is_split = decltype(is_split)(graph.num_nodes() + 1); // bit
         is_join = decltype(is_join)(graph.num_nodes() + 1);
         is_bifurcation = decltype(is_join)(graph.num_nodes() + 1);
+        if (chunks == 0) {
+            chunks = 1000; // todo: make proper fix
+        }
         uint64_t chunk_size = (graph.num_nodes() + 1)/ chunks + 64ull;
         chunk_size &= ~63ull;
         vector<omp_lock_t> node_locks(chunks);
