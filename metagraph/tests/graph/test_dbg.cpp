@@ -1452,7 +1452,7 @@ TYPED_TEST(DeBruijnGraphTest, indegree_identity_traverse_back_incoming) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphTest, call_start_nodes) {
+TYPED_TEST(DeBruijnGraphTest, call_source_nodes) {
     const std::vector<std::string> sequences {
         "ATGCGATCGATATGCGAGA",
         "ATGCGATCGAGACTACGAG",
@@ -1470,7 +1470,7 @@ TYPED_TEST(DeBruijnGraphTest, call_start_nodes) {
         };
 
         std::multiset<std::string> obs_start_nodes;
-        graph->call_start_nodes([&](auto start) {
+        graph->call_source_nodes([&](auto start) {
             obs_start_nodes.emplace(graph->get_node_sequence(start));
         });
 
@@ -1531,7 +1531,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(2, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>(), nodes);
@@ -1539,7 +1539,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(3, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>(), nodes);
@@ -1547,7 +1547,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(4, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>({ "AAAC" }), nodes);
@@ -1555,7 +1555,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(5, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>({ "AAACA", "AACGA" }), nodes);
@@ -1563,7 +1563,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(6, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>({ "AAACAC", "AACGAC" }), nodes);
@@ -1577,7 +1577,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(2, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>(), nodes);
@@ -1585,7 +1585,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(3, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>({ "AGA" }), nodes);
@@ -1593,7 +1593,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(4, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>({ "AGAC" }), nodes);
@@ -1601,7 +1601,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(5, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>({ "AGACA", "GACTA" }), nodes);
@@ -1609,7 +1609,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(6, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>({ "AGACAC", "GACTAC", "ACTAAC" }), nodes);
@@ -1617,7 +1617,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(7, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>({ "AGACACT", "GACTACG", "ACTAACG" }), nodes);
@@ -1631,7 +1631,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(2, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>(), nodes);
@@ -1639,7 +1639,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(3, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>(), nodes);
@@ -1647,7 +1647,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(4, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>({ "AGAC" }), nodes);
@@ -1655,7 +1655,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(5, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>({ "AGACA", "GACTT", "ACTAG" }), nodes);
@@ -1663,7 +1663,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(6, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>({ "AGACAC", "GACTTG", "ACTAGT" }), nodes);
@@ -1677,7 +1677,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(2, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>(), nodes);
@@ -1685,7 +1685,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(3, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>(), nodes);
@@ -1693,7 +1693,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(4, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>({ "AAAC", "AAAT" }), nodes);
@@ -1701,7 +1701,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
             {
                 std::multiset<std::string> nodes;
                 auto graph = build_graph_batch<TypeParam>(5, sequences);
-                graph->call_start_nodes([&](const auto &node) {
+                graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
                 EXPECT_EQ(std::multiset<std::string>({ "AAACT", "AAATG" }), nodes);

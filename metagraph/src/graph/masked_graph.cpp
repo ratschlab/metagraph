@@ -55,7 +55,7 @@ size_t MaskedDeBruijnGraph::indegree(node_index node) const {
     auto dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get());
     if (dbg_succ) {
         // avoid calls to indegree computation for DBGSuccinct
-        const auto& boss = dbg_succ->get_boss();
+        const auto &boss = dbg_succ->get_boss();
         auto prev_boss_edge = boss.bwd(dbg_succ->kmer_to_boss_index(node));
 
         if (boss.is_single_incoming(prev_boss_edge))
@@ -119,35 +119,6 @@ void MaskedDeBruijnGraph
                 callback(index, c);
         }
     );
-}
-
-void MaskedDeBruijnGraph
-::call_start_nodes(const std::function<void(node_index)> &callback) const {
-    const auto *succ = dynamic_cast<const DBGSuccinct*>(graph_.get());
-    if (succ) {
-        sdsl::bit_vector checked(graph_->num_nodes() + 1, false);
-
-        // First, check all nodes whose indegree == 0 in unmasked graph
-        succ->call_start_nodes(
-            [&](const auto &i) {
-                if (in_graph(i)) {
-                    callback(i);
-                    checked[i] = true;
-                }
-            }
-        );
-
-        // then check nodes whose indegree > 0 in unmasked graph
-        call_nodes([&](const auto &i) {
-            if (!checked[i] && !indegree(i))
-                callback(i);
-        });
-    } else {
-        call_nodes([&](const auto &i) {
-            if (!indegree(i))
-                callback(i);
-        });
-    }
 }
 
 uint64_t MaskedDeBruijnGraph

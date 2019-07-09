@@ -98,13 +98,6 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
 
     const std::string& alphabet() const { return seq_encoder_.alphabet; }
 
-    void call_start_nodes(const std::function<void(node_index)> &callback) const {
-        call_nodes([&](node_index i) {
-            if (!indegree(i))
-                callback(i);
-        });
-    }
-
   private:
     Vector<Kmer> sequence_to_kmers(const std::string &sequence, bool canonical = false) const {
         return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical);

@@ -108,6 +108,7 @@ class BOSS {
     // traverse all nodes in graph except for the dummy source of sink ones
     void call_kmers(Call<node_index, const std::string&> callback) const;
 
+    // call all non-dummy edges without other adjacent incoming non-dummy edges
     void call_start_edges(Call<edge_index> callback) const;
 
     void call_edges(Call<edge_index, const std::vector<TAlphabet>&> callback) const;

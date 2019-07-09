@@ -111,8 +111,6 @@ class DBGBitmap : public DeBruijnGraph {
     Kmer node_to_kmer(node_index node) const;
     node_index to_node(const Kmer &kmer) const;
 
-    void call_start_nodes(const std::function<void(node_index)> &callback) const;
-
     size_t k_;
     bool canonical_mode_;
     KmerExtractor2Bit seq_encoder_;

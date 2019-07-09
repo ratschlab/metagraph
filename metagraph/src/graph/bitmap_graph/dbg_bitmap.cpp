@@ -353,11 +353,3 @@ void DBGBitmap::print(std::ostream &out) const {
             << get_node_sequence(node) << std::endl;
     }
 }
-
-void DBGBitmap
-::call_start_nodes(const std::function<void(node_index)> &callback) const {
-    call_nodes([&](node_index i) {
-        if (!indegree(i))
-            callback(i);
-    });
-}

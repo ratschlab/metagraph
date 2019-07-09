@@ -97,8 +97,6 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
   private:
     std::shared_ptr<const DeBruijnGraph> graph_;
     std::unique_ptr<bitmap> is_target_mask_;
-
-    virtual void call_start_nodes(const std::function<void(node_index)> &callback) const override;
 };
 
 

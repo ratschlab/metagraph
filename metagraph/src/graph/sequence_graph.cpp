@@ -161,7 +161,7 @@ void DeBruijnGraph
                             is_start);
     };
 
-    call_start_nodes([&](const auto &start) {
+    call_source_nodes([&](const auto &start) {
         assert(!visited[start]);
         callback_from(start, true);
     });
@@ -215,7 +215,7 @@ void DeBruijnGraph
     };
 
     // first start nodes (those with indegree == 0)
-    call_start_nodes([&](const auto &start) {
+    call_source_nodes([&](const auto &start) {
         assert(!visited[start]);
         callback_from(start, true);
     });
@@ -314,6 +314,15 @@ void DeBruijnGraph::print(std::ostream &out) const {
             << std::endl;
     });
 }
+
+void DeBruijnGraph
+::call_source_nodes(const std::function<void(node_index)> &callback) const {
+    call_nodes([&](node_index i) {
+        if (!indegree(i))
+            callback(i);
+    });
+}
+
 
 std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph) {
     graph.print(out);

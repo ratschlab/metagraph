@@ -124,7 +124,8 @@ class DeBruijnGraph : public SequenceGraph {
     friend std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph);
 
   private:
-    virtual void call_start_nodes(const std::function<void(node_index)> &callback) const = 0;
+    // Call all nodes that have no incoming edges
+    virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
 };
 
 
