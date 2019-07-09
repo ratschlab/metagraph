@@ -64,8 +64,8 @@ public:
 
 using DefaultRoutingTable = RoutingTable<>;
 using DefaultIncomingTable = IncomingTable<>;
-template<class RoutingTableT = DefaultRoutingTable,class IncomingTableT=DefaultIncomingTable,bool reduced_coverage=true>
-class PathDatabaseWaveletCore : public PathDatabaseDynamicCore<typename DynamicVersion<RoutingTableT>::Type,typename DynamicVersion<IncomingTableT>::Type> {
+template<class RoutingTableT = DefaultRoutingTable,class IncomingTableT=DefaultIncomingTable,bool reduced_coverage=true, class DynamicRoutingTableT = typename DynamicVersion<RoutingTableT>::Type, class DynamicIncomingTableT = typename DynamicVersion<IncomingTableT>::Type>
+class PathDatabaseWaveletCore : public PathDatabaseDynamicCore<DynamicRoutingTableT,DynamicIncomingTableT> {
 public:
     using DRT = typename DynamicVersion<RoutingTableT>::Type;
     using DIT = typename DynamicVersion<IncomingTableT>::Type;
@@ -378,11 +378,11 @@ public:
 
 };
 
-template<class RoutingTableT = DefaultRoutingTable,class IncomingTableT=DefaultIncomingTable>
-using PathDatabaseWavelet = QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableT,IncomingTableT>>>;
+template<class RoutingTableT = DefaultRoutingTable,class IncomingTableT=DefaultIncomingTable,bool reduced_coverage=true, class DynamicRoutingTableT = typename DynamicVersion<RoutingTableT>::Type, class DynamicIncomingTableT = typename DynamicVersion<IncomingTableT>::Type>
+using PathDatabaseWavelet = QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableT,IncomingTableT,reduced_coverage,DynamicRoutingTableT,DynamicIncomingTableT>>>;
 
-template<bool reduced_coverage=true>
-using PathDatabaseWaveletWithtoutTransformation = QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableCore<>,DefaultIncomingTable,reduced_coverage>>>;
+template<bool reduced_coverage=true,class DynamicRoutingTableT = typename DynamicVersion<RoutingTableCore<>>::Type, class DynamicIncomingTableT = typename DynamicVersion<DefaultIncomingTable>::Type>
+using PathDatabaseWaveletWithtoutTransformation = QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableCore<>,DefaultIncomingTable,reduced_coverage,DynamicRoutingTableT,DynamicIncomingTableT>>>;
 
 #endif /* path_database_baseline_hpp */
 
