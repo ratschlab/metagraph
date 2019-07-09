@@ -1170,6 +1170,33 @@ TYPED_TEST(DeBruijnGraphTest, IncomingAdjacent) {
     }
 }
 
+TYPED_TEST(DeBruijnGraphTest, RankIncomingEdge) {
+    for (size_t k = 2; k <= 20; ++k) {
+        auto graph = build_graph<TypeParam>(k, { std::string(100, 'A')
+                                               + std::string(100, 'C')
+                                               + std::string(100, 'G') });
+
+        EXPECT_EQ(0u, incoming_edge_rank(*graph,
+                                         graph->kmer_to_node(std::string(k, 'A')),
+                                         graph->kmer_to_node(std::string(k, 'A'))));
+        EXPECT_EQ(0u, incoming_edge_rank(*graph,
+                                         graph->kmer_to_node(std::string(k, 'A')),
+                                         graph->kmer_to_node(std::string(k - 1, 'A') + 'C')));
+        EXPECT_EQ(0u, incoming_edge_rank(*graph,
+                                         graph->kmer_to_node('A' + std::string(k - 1, 'C')),
+                                         graph->kmer_to_node(std::string(k, 'C'))));
+        EXPECT_EQ(1u, incoming_edge_rank(*graph,
+                                         graph->kmer_to_node(std::string(k, 'C')),
+                                         graph->kmer_to_node(std::string(k, 'C'))));
+        EXPECT_EQ(0u, incoming_edge_rank(*graph,
+                                         graph->kmer_to_node('C' + std::string(k - 1, 'G')),
+                                         graph->kmer_to_node(std::string(k, 'G'))));
+        EXPECT_EQ(1u, incoming_edge_rank(*graph,
+                                         graph->kmer_to_node(std::string(k, 'G')),
+                                         graph->kmer_to_node(std::string(k, 'G'))));
+    }
+}
+
 TYPED_TEST(DeBruijnGraphTest, map_to_nodes) {
     for (size_t k = 2; k <= 10; ++k) {
         auto graph = build_graph<TypeParam>(k, { std::string(100, 'A')

@@ -886,8 +886,8 @@ void BOSS::map_to_nodes(const std::string &sequence,
     auto seq_encoded = encode(sequence);
 
     for (size_t i = 0; i + k_ - 1 < seq_encoded.size() && !terminate(); ++i) {
-        auto node = map_to_node(&seq_encoded[i], &seq_encoded[i + k_]);
-
+        auto node = map_to_node(seq_encoded.data() + i,
+                                seq_encoded.data() + i + k_);
         callback(node);
 
         if (!node)
@@ -921,8 +921,8 @@ std::vector<node_index> BOSS::map_to_nodes(const std::string &sequence,
     std::vector<node_index> indices;
 
     for (size_t i = 0; i + kmer_size <= seq_encoded.size(); ++i) {
-        edge_index edge = index_range(&seq_encoded[i],
-                                      &seq_encoded[i + kmer_size]).second;
+        edge_index edge = index_range(seq_encoded.data() + i,
+                                      seq_encoded.data() + i + kmer_size).second;
         node_index node = edge ? get_source_node(edge) : npos;
         indices.push_back(node);
 
@@ -953,8 +953,8 @@ void BOSS::map_to_edges(const std::string &sequence,
     auto seq_encoded = encode(sequence);
 
     for (size_t i = 0; i + k_ + 1 <= seq_encoded.size() && !terminate(); ++i) {
-        auto edge = map_to_edge(&seq_encoded[i], &seq_encoded[i + k_ + 1]);
-
+        auto edge = map_to_edge(seq_encoded.data() + i,
+                                seq_encoded.data() + i + k_ + 1);
         callback(edge);
 
         while (edge && i + k_ + 1 < seq_encoded.size()) {
@@ -1029,7 +1029,8 @@ bool BOSS::find(const std::string &sequence,
     skipped_kmers.reserve(seq_encoded.size());
 
     for (size_t i = 0; i < seq_encoded.size() - kmer_size + 1; ++i) {
-        auto edge = map_to_edge(&seq_encoded[i], &seq_encoded[i + kmer_size]);
+        auto edge = map_to_edge(seq_encoded.data() + i,
+                                seq_encoded.data() + i + kmer_size);
         if (edge) {
             num_kmers_discovered++;
         } else {
@@ -1075,7 +1076,8 @@ bool BOSS::find(const std::string &sequence,
     for (size_t j = 0; j < skipped_kmers.size(); ++j) {
         size_t i = skipped_kmers[j];
 
-        auto edge = map_to_edge(&seq_encoded[i], &seq_encoded[i + kmer_size]);
+        auto edge = map_to_edge(seq_encoded.data() + i,
+                                seq_encoded.data() + i + kmer_size);
         if (edge) {
             num_kmers_discovered++;
         } else {

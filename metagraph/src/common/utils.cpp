@@ -445,7 +445,7 @@ TempFile::TempFile(const std::string &tmp_dir)
                           : std::filesystem::temp_directory_path().string())
                                                 + std::string("/tmp.XXXXXX")) {
     // create a file
-    int fd = mkstemp(const_cast<char*>(tmp_file_name_.c_str()));
+    int fd = mkstemp(tmp_file_name_.data());
     if (fd == -1)
         throw std::runtime_error("Error: temp file "
                                     + tmp_file_name_ + " creation failed");

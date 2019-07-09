@@ -46,7 +46,8 @@ void DBGHashString::map_to_nodes(const std::string &sequence,
                                  const std::function<void(node_index)> &callback,
                                  const std::function<bool()> &terminate) const {
     for (size_t i = 0; i + k_ <= sequence.size() && !terminate(); ++i) {
-        callback(kmer_to_node(std::string(&sequence[i], &sequence[i + k_])));
+        callback(kmer_to_node(std::string(sequence.data() + i,
+                                          sequence.data() + i + k_)));
     }
 }
 

@@ -82,12 +82,12 @@ class wavelet_tree_stat : public wavelet_tree {
     sdsl::int_vector<> to_vector() const;
 
   private:
-    void init_wt();
+    void init_wt() const;
 
-    sdsl::int_vector<> int_vector_;
-    sdsl::wt_huff<> wwt_;
-    std::atomic_bool requires_update_ { true };
-    std::mutex mu_;
+    mutable sdsl::int_vector<> int_vector_;
+    mutable sdsl::wt_huff<> wwt_;
+    mutable std::atomic_bool requires_update_ { true };
+    mutable std::mutex mu_;
     uint64_t n_;
 };
 

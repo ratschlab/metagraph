@@ -2,6 +2,8 @@
 
 #include "annotate_column_compressed.hpp"
 #include "utils.hpp"
+#include "progress_bar.hpp"
+#include "int_vector.hpp"
 
 namespace annotated_graph_algorithm {
 
@@ -36,6 +38,47 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     );
 }
 
+void fill_count_vector(const AnnotatedDBG &anno_graph,
+                       const std::vector<AnnotatedDBG::Annotator::Label> &mask_in,
+                       const std::vector<AnnotatedDBG::Annotator::Label> &mask_out,
+                       sdsl::int_vector<>* counts,
+                       std::vector<AnnotatedDBG::Annotator::Label>* mask_in_dense,
+                       std::vector<AnnotatedDBG::Annotator::Label>* mask_out_dense,
+                       const std::function<bool(const std::string&)> &pick_label
+                           = [](const std::string&) { return true; }) {
+    // in the beginning, counts is the correct size, but double width
+    assert(!(counts->width() & 1));
+    uint64_t width = counts->width() >> 1;
+
+    for (const auto &label_in : mask_in) {
+        if (pick_label(label_in)) {
+            anno_graph.call_annotated_nodes(
+                label_in,
+                [&](const auto &i) { (*counts)[i]++; }
+            );
+        } else {
+            mask_in_dense->push_back(label_in);
+        }
+    }
+
+    // correct the width of counts, making it double-length
+    counts->width(width);
+
+    for (const auto &label_out : mask_out) {
+        if (pick_label(label_out)) {
+            anno_graph.call_annotated_nodes(
+                label_out,
+                [&](const auto &i) { (*counts)[(i << 1) + 1]++; }
+            );
+        } else {
+            mask_out_dense->push_back(label_out);
+        }
+    }
+
+    // set the width to be double again
+    counts->width(width * 2);
+}
+
 std::unique_ptr<bitmap>
 mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const std::vector<AnnotatedDBG::Annotator::Label> &mask_in,
@@ -51,52 +94,57 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     if (mask_in.empty())
         return mask;
 
-    // store counts interleaved
+    // at this stage, the width of counts is twice what it should be, since
+    // the intention is to store the in label and out label counts interleaved
+    // in the beginning, it's the correct size, but double width
     size_t width = utils::code_length(std::max(mask_in.size(), mask_out.size()));
     size_t int_mask = (size_t(1) << width) - 1;
+
     sdsl::int_vector<> counts(mask->size(), 0, width * 2);
+    std::vector<AnnotatedDBG::Annotator::Label> mask_in_dense, mask_out_dense;
 
     const auto *columns = dynamic_cast<const annotate::ColumnCompressed<>*>(
         &anno_graph.get_annotation()
     );
 
     if (columns) {
-        // Pick how to query annotation based on column density
-
-        std::vector<AnnotatedDBG::Annotator::Label> mask_in_dense, mask_out_dense;
-        size_t density_cutoff_count = mask->size() * density_cutoff;
-
-        for (const auto &label_in : mask_in) {
-            if (columns->get_column(label_in).num_set_bits() < density_cutoff_count) {
-                anno_graph.call_annotated_nodes(
-                    label_in,
-                    [&](const auto &i) { counts[i]++; }
-                );
-            } else {
-                mask_in_dense.push_back(label_in);
+        fill_count_vector(
+            anno_graph,
+            mask_in, mask_out,
+            &counts,
+            &mask_in_dense, &mask_out_dense,
+            [&, density_cutoff_count = mask->size() * density_cutoff](const std::string &label) {
+                return columns->get_column(label).num_set_bits() < density_cutoff_count;
             }
-        }
+        );
+    } else {
+        // TODO: make this more efficient for row-major annotations
+        fill_count_vector(anno_graph,
+                          mask_in, mask_out,
+                          &counts,
+                          &mask_in_dense, &mask_out_dense);
+    }
 
-        counts.width(width);
-        assert(counts.size() == mask->size() * 2);
+    if (utils::get_verbose())
+        std::cerr << "Generating mask" << std::endl;
 
-        for (const auto &label_out : mask_out) {
-            if (columns->get_column(label_out).num_set_bits() < density_cutoff_count) {
-                anno_graph.call_annotated_nodes(
-                    label_out,
-                    [&](const auto &i) { counts[(i << 1) + 1]++; }
-                );
-            } else {
-                mask_out_dense.push_back(label_out);
+    if (mask_in_dense.empty() && mask_out_dense.empty()) {
+        call_nonzeros(counts,
+            [&](auto i, auto count) {
+                if (keep_node([&]() { return count & int_mask; },
+                              [&]() { return count >> width; }))
+                    mask->set(i, true);
             }
-        }
-
-        counts.width(width * 2);
-        assert(counts.size() == mask->size());
+        );
+    } else {
+        ProgressBar progress_bar(counts.size(),
+                                 "Generating mask",
+                                 std::cerr,
+                                 !utils::get_verbose());
+        progress_bar.SetFrequencyUpdate(100000);
 
         for (size_t i = 1; i < counts.size(); ++i) {
-            size_t count = counts[i];
-
+            auto count = counts[i];
             if (keep_node(
                     [&]() {
                         return (count & int_mask)
@@ -108,38 +156,12 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     }
                 ))
                 mask->set(i, true);
-        }
-    } else {
-        // TODO: make this more efficient for row-major annotations
-        for (const auto &label_in : mask_in) {
-            anno_graph.call_annotated_nodes(
-                label_in,
-                [&](const auto &i) { counts[i]++; }
-            );
-        }
 
-        counts.width(width);
-        assert(counts.size() == mask->size() * 2);
-
-        for (const auto &label_out : mask_out) {
-            anno_graph.call_annotated_nodes(
-                label_out,
-                [&](const auto &i) { counts[(i << 1) + 1]++; }
-            );
-        }
-
-        counts.width(width * 2);
-        assert(counts.size() == mask->size());
-
-        for (size_t i = 1; i < counts.size(); ++i) {
-            size_t count = counts[i];
-            if (keep_node([&]() { return count & int_mask; },
-                          [&]() { return count >> width; }))
-                mask->set(i, true);
+            ++progress_bar;
         }
     }
 
-    return std::unique_ptr<bitmap>(mask.release());
+    return mask;
 }
 
 void
