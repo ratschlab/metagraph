@@ -71,7 +71,7 @@ Database compressReadsDeprecated(ValueArg<string> &compressedArg,
 template<class DatabaseT>
 void compress_store_reads(ValueArg<std::string> &graphArg, const ValueArg<std::string> &statisticsArg,
                     ValueArg<std::string> &compressedArg, const string &statistics_filename,
-                    const vector<string> &reads, int64_t kmer_length, shared_ptr<BetterDBGSuccinct> &graph, int chunks) {
+                    const vector<string> &reads, int64_t kmer_length, shared_ptr<BetterDBGSuccinct> &graph, int chunks, uint64_t stat_verbosity) {
     unique_ptr<DatabaseT> pd;
         Timer timer;
         cerr << "Started loading the graph" << endl;
@@ -87,7 +87,7 @@ void compress_store_reads(ValueArg<std::string> &graphArg, const ValueArg<std::s
         pd->serialize(compress_folder);
     }
     if (statisticsArg.isSet()) {
-        auto statistics = pd->get_statistics();
+        auto statistics = pd->get_statistics(stat_verbosity);
         save_string(statistics.dump(4),statistics_filename);
     }
 }
@@ -95,7 +95,7 @@ void compress_store_reads(ValueArg<std::string> &graphArg, const ValueArg<std::s
 template<class DatabaseT>
 void compress_reads(ValueArg<std::string> &graphArg, const ValueArg<std::string> &statisticsArg,
 					const string &statistics_filename,
-					const vector<string> &reads, int64_t kmer_length, shared_ptr<BetterDBGSuccinct> &graph) {
+					const vector<string> &reads, int64_t kmer_length, shared_ptr<BetterDBGSuccinct> &graph, uint64_t stat_verbosity) {
 	unique_ptr<DatabaseT> pd;
 		Timer timer;
 		cerr << "Started loading the graph" << endl;
@@ -107,7 +107,7 @@ void compress_reads(ValueArg<std::string> &graphArg, const ValueArg<std::string>
 		pd.reset(new DatabaseT(graph));
 	pd->encode(reads);
 	if (statisticsArg.isSet()) {
-		auto statistics = pd->get_statistics();
+		auto statistics = pd->get_statistics(stat_verbosity);
 		save_string(statistics.dump(4),statistics_filename);
 	}
 }
@@ -151,6 +151,12 @@ int main_compressor(int argc, char *argv[]) {
 			false,
 			"statistics.json",
         "filename",cmd);
+    TCLAP::ValueArg<int> verbosityArg("x",
+                                      "statistics-verbosity",
+                                      "Level of detail of the statistics",
+                                      false,
+                                      0u,
+                                      "int64_t",cmd);
 	TCLAP::ValueArg<std::string> compressedArg("o",
 			"output",
 			"Folder where to store the compressed files.",
@@ -202,6 +208,7 @@ int main_compressor(int argc, char *argv[]) {
 	auto kmer_length = kmerLengthArg.getValue();
 	auto compressor = compressor_type.getValue();
 	auto chunks = chunksArg.getValue();
+	auto stat_verbosity = verbosityArg.getValue();
     auto graph = std::make_shared<DBGSuccinct>(21);
     fs::create_directories(fs::path(compressedArg.getValue()) / "path_encoder.flag");
     if (compressor == "wavelet_debug") {
@@ -209,12 +216,12 @@ int main_compressor(int argc, char *argv[]) {
                 IdentityComparator<DynamicRoutingTable<>,ReferenceDynamicRoutingTable<>>,
                 IdentityComparator<DynamicIncomingTable<>,ReferenceDynamicIncomingTable<>>,
                 IdentityComparator<ExitBarrier<>,ReferenceExitBarrier<>>
-                >>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph, chunks);
+                >>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph, chunks, stat_verbosity);
     }
 	if (compressor == "wavelet") {
 	    if (use_transformations) {
 	    	if (chunks > 0) {
-				compress_store_reads<PathDatabaseWavelet<>>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph, chunks);
+				compress_store_reads<PathDatabaseWavelet<>>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph, chunks, stat_verbosity);
 	    	}
             else {
             	throw "Using transformation is not implemented yet";
@@ -223,16 +230,16 @@ int main_compressor(int argc, char *argv[]) {
 	    else {
 	    	if (chunks > 0) {
 	    	    if (reducedCoverageArg.getValue()) {
-                    compress_store_reads<PathDatabaseWaveletWithtoutTransformation<true>>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph, chunks);
+                    compress_store_reads<PathDatabaseWaveletWithtoutTransformation<true>>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph, chunks, stat_verbosity);
 	    	    }
 	    	    else {
-                    compress_store_reads<PathDatabaseWaveletWithtoutTransformation<false>>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph, chunks);
+                    compress_store_reads<PathDatabaseWaveletWithtoutTransformation<false>>(graphArg, statisticsArg, compressedArg, statistics_filename, reads, kmer_length, graph, chunks, stat_verbosity);
 	    	    }
 
 	    	}
 			else {
 				if (compressedArg.isSet()) { cerr << "!!! Warning : only constructing the transformation, not saving it !!!" << endl; }
-				compress_reads<PathDatabaseDynamic<ReferenceDynamicRoutingTable<>,ReferenceDynamicIncomingTable<>>>(graphArg, statisticsArg, statistics_filename, reads, kmer_length, graph);
+				compress_reads<PathDatabaseDynamic<ReferenceDynamicRoutingTable<>,ReferenceDynamicIncomingTable<>>>(graphArg, statisticsArg, statistics_filename, reads, kmer_length, graph, stat_verbosity);
 			}
 	    }
     }
