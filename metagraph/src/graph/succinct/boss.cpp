@@ -1842,30 +1842,33 @@ void BOSS::merge(const BOSS &other) {
 }
 
 void BOSS::call_start_edges(Call<edge_index> callback) const {
-    std::stack<std::pair<edge_index, size_t>> edges;
+    // start traversal in the main dummy source node and traverse the tree
+    // of source dummy k-mers to depth k + 1
 
-    auto last = succ_last(1);
-    for (size_t i = 2; i <= last; ++i) {
-        edges.emplace(i, 1);
-    }
+    // check if the dummy tree is not empty
+    if (is_single_outgoing(1))
+        return;
 
-    while (edges.size()) {
-        auto edge = edges.top();
-        edges.pop();
+    // run traversal for subtree
+    uint64_t root = 2;
+    size_t depth = 0;
+    do {
+        edge_DFT(root,
+            [&](edge_index) { depth++; },
+            [&](edge_index) { depth--; },
+            [&](edge_index edge) {
+                if (depth < k_)
+                    return false;
 
-        if (edge.second == k_ + 1) {
-            if (is_single_incoming(bwd(edge.first)))
-                callback(edge.first);
+                if (depth == k_)
+                    return !is_single_incoming(edge);
 
-            continue;
-        }
-
-        auto last = fwd(edge.first);
-        auto first = pred_last(last - 1) + 1;
-        for (auto i = first; i <= last; ++i) {
-            edges.emplace(i, edge.second + 1);
-        }
-    }
+                callback(edge);
+                return true;
+            }
+        );
+        assert(!depth);
+    } while (!get_last(root++));
 }
 
 /**

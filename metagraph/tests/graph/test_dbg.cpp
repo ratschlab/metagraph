@@ -1474,7 +1474,7 @@ TYPED_TEST(DeBruijnGraphTest, call_source_nodes) {
             obs_start_nodes.emplace(graph->get_node_sequence(start));
         });
 
-        EXPECT_EQ(start_nodes, obs_start_nodes) << k;
+        EXPECT_EQ(start_nodes, obs_start_nodes) << *graph;
     }
 }
 
@@ -1588,7 +1588,7 @@ TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
                 graph->call_source_nodes([&](const auto &node) {
                     nodes.insert(graph->get_node_sequence(node));
                 });
-                EXPECT_EQ(std::multiset<std::string>({ "AGA" }), nodes);
+                EXPECT_EQ(std::multiset<std::string>({ "AGA" }), nodes) << *graph;
             }
             {
                 std::multiset<std::string> nodes;
