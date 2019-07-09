@@ -32,12 +32,14 @@ int main(int argc,char** argv) {
     //  fill with random numbers that use <=12 bits
     long mx = 0;
     for(int_vector<32>::size_type i=0;i<vec.size();i++) {
-        //vec[i] = rand() % 4096;
-        long val = ran_expo(0.01);
+        long val = rand() % 10;
+        //long val = ran_expo(0.01);
         vec[i] = val;
         mx = max(val,mx);
     }
     cout << "MX" << mx << endl;
+    enc_vector<> enc0(vec);
+    print_size(enc0,"<>");
     enc_vector<coder::elias_delta,128999, 12> enc(vec);
     print_size(enc,"12");
     enc_vector<coder::elias_delta,128, 12> enc2(vec);
@@ -46,37 +48,17 @@ int main(int argc,char** argv) {
     print_size(enc2,"8");
     enc_vector<coder::fibonacci,128, 12> enc4(vec);
     print_size(enc4,"fib");
-
-
-
-    // bit compress
+    print_size(vec,"orig");
     util::bit_compress(vec);
-    std::cout << "vec uses " << size_in_mega_bytes(vec) << " MB." << std::endl;
-
-    // create a second int vector with specified int width and default value 5
-    int_vector<17> vec_17(size,5);
-    std::cout << "vec_17 uses " << size_in_mega_bytes(vec_17) << " MB." << std::endl;
-
-    // create default vector and resize to 17 bits
-    int_vector<> vec_res(size);
-    std::cout << "vec_res uses " << size_in_mega_bytes(vec_res) << " MB." << std::endl;
-    // data is lost here
-    vec_res.width(17);
-    vec_res.resize(size);
-    std::cout << "vec_res uses " << size_in_mega_bytes(vec_res) << " MB." << std::endl;
-
-    // use the stl sort function to sort an int_vector
-    std::sort(vec.begin(), vec.end());
-
-    // print out content:
-    int_vector<>::iterator it;
-    std::cout << "vec contains:";
-    for (it=vec.begin(); it!=vec.end(); ++it) std::cout << " " << *it;
-
-    // clear up memory used by bv
-    clear(vec);
-    clear(vec_17);
-    clear(vec_res);
-
+    print_size(vec,"comp");
+//Output:
+//MX255
+//<> uses 5.19851 MB.
+//12 uses 5.19095 MB.
+//12 uses 5.19851 MB.
+//8 uses 5.19851 MB.
+//fib uses 6.14244 MB.
+//orig uses 7.6294 MB.
+//comp uses 0.953683 MB.
     return EXIT_SUCCESS;
 }

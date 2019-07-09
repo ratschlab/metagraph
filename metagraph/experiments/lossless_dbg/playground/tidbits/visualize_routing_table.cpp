@@ -35,7 +35,7 @@ int main(int argc, char *argv[]) {
     // ifstream joins_file(inputArg.getValue());
     sdsl::wt_rlmn<> wt;
     wt.load(cin);
-    sdsl::write_structure<JSON_FORMAT>(wt, cout);
+    sdsl::write_structure<HTML_FORMAT>(wt, cout);
     return 0;
 }
 
