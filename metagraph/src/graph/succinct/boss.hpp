@@ -115,8 +115,8 @@ class BOSS {
 
     // call paths (or simple paths if |split_to_contigs| is true) that cover
     // exactly all edges in graph
-    void call_paths(Call<const std::vector<edge_index>,
-                         const std::vector<TAlphabet>&> callback,
+    void call_paths(Call<std::vector<edge_index>&&,
+                         std::vector<TAlphabet>&&> callback,
                     bool split_to_contigs = false) const;
 
     void call_sequences(Call<const std::string&> callback) const;
@@ -432,11 +432,11 @@ class BOSS {
     // traverse graph from the specified (k+1)-mer/edge and call
     // all paths reachable from it
     void call_paths(edge_index starting_kmer,
-                    Call<const std::vector<edge_index>,
-                         const std::vector<TAlphabet>&> callback,
+                    Call<std::vector<edge_index>&&,
+                         std::vector<TAlphabet>&&> callback,
                     bool split_to_contigs,
-                    std::vector<bool> *discovered_ptr,
-                    std::vector<bool> *visited_ptr,
+                    sdsl::bit_vector *discovered_ptr,
+                    sdsl::bit_vector *visited_ptr,
                     ProgressBar &progress_bar) const;
 
     /**

@@ -1875,13 +1875,13 @@ void BOSS::call_start_edges(Call<edge_index> callback) const {
  * Traverse graph and extract directed paths covering the graph
  * edge, edge -> edge, edge -> ... -> edge, ... (k+1 - mer, k+...+1 - mer, ...)
  */
-void BOSS::call_paths(Call<const std::vector<edge_index>,
-                           const std::vector<TAlphabet>&> callback,
+void BOSS::call_paths(Call<std::vector<edge_index>&&,
+                           std::vector<TAlphabet>&&> callback,
                       bool split_to_contigs) const {
     // keep track of reached edges
-    std::vector<bool> discovered(W_->size(), false);
+    sdsl::bit_vector discovered(W_->size(), false);
     // keep track of edges that are already included in covering paths
-    std::vector<bool> visited(W_->size(), false);
+    sdsl::bit_vector visited(W_->size(), false);
 
     ProgressBar progress_bar(W_->size() - 1, "Traverse BOSS", std::cerr, !utils::get_verbose());
 
@@ -1941,35 +1941,32 @@ struct Edge {
 };
 
 void BOSS::call_paths(edge_index starting_kmer,
-                      Call<const std::vector<edge_index>,
-                           const std::vector<TAlphabet>&> callback,
+                      Call<std::vector<edge_index>&&,
+                           std::vector<TAlphabet>&&> callback,
                       bool split_to_contigs,
-                      std::vector<bool> *discovered_ptr,
-                      std::vector<bool> *visited_ptr,
+                      sdsl::bit_vector *discovered_ptr,
+                      sdsl::bit_vector *visited_ptr,
                       ProgressBar &progress_bar) const {
     assert(discovered_ptr && visited_ptr);
 
     auto &discovered = *discovered_ptr;
     auto &visited = *visited_ptr;
     // store all branch nodes on the way
-    std::vector<uint64_t> path;
     std::vector<TAlphabet> kmer;
-
     discovered[starting_kmer] = true;
     std::deque<Edge> edges { { starting_kmer, get_node_seq(starting_kmer) } };
 
     // keep traversing until we have worked off all branches from the queue
     while (!edges.empty()) {
+        std::vector<uint64_t> path;
         uint64_t edge = edges.front().id;
         auto sequence = std::move(edges.front().source_kmer);
-        path.clear();
         edges.pop_front();
 
         // traverse simple path until we reach its tail or
         // the first edge that has been already visited
         while (!visited[edge]) {
             assert(edge > 0 && discovered[edge]);
-
 
             // visit the edge
             sequence.push_back(get_W(edge) % alph_size);
@@ -2020,14 +2017,14 @@ void BOSS::call_paths(edge_index starting_kmer,
         }
 
         if (path.size())
-            callback(path, sequence);
+            callback(std::move(path), std::move(sequence));
     }
 }
 
 void BOSS::call_sequences(Call<const std::string&> callback) const {
     std::string sequence;
 
-    call_paths([&](const auto&, const auto &path) {
+    call_paths([&](auto&&, auto&& path) {
         sequence.clear();
 
         for (TAlphabet c : path) {
@@ -2091,7 +2088,7 @@ void BOSS::call_unitigs(Call<const std::string&> callback,
 }
 
 void BOSS::call_edges(Call<edge_index, const std::vector<TAlphabet>&> callback) const {
-    call_paths([&](const auto &indices, const auto &path) {
+    call_paths([&](auto&& indices, auto&& path) {
         assert(path.size() == indices.size() + k_);
 
         for (size_t i = 0; i < indices.size(); ++i) {
@@ -2111,8 +2108,8 @@ struct Node {
  * Traverse graph and iterate over all nodes
  */
 void BOSS::call_kmers(Call<node_index, const std::string&> callback) const {
-    // std::vector<bool> discovered(W_->size(), false);
-    std::vector<bool> visited(W_->size(), false);
+    // sdsl::bit_vector discovered(W_->size(), false);
+    sdsl::bit_vector visited(W_->size(), false);
 
     // store all branch nodes on the way
     std::queue<Node> branchnodes;
