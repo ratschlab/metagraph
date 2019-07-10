@@ -15,17 +15,19 @@
 #include "aligner_helper.hpp"
 
 struct DBGAlignerConfig {
-   size_t num_top_paths = 10;
-   size_t num_alternative_paths = 20;
-   uint8_t path_comparison_code = 0;
-   bool verbose = false;
-   bool discard_similar_paths = false;
-   bool use_cssw_lib = false;
-   size_t sw_threshold_for_stitched_path = 200;
-   float insertion_penalty = 3;
-   float deletion_penalty = 3;
-   float gap_opening_penalty = 3;
-   float gap_extension_penalty = 1;
+    size_t num_top_paths = 10;
+    size_t num_alternative_paths = 1;
+    uint8_t path_comparison_code = 0;
+    bool verbose = false;
+    bool discard_similar_paths = true;
+    bool use_cssw_lib = false;
+    bool disable_cssw_speedup = false;
+    size_t sw_threshold_for_stitched_path = 200;
+    float gap_opening_penalty = 3;
+    float gap_extension_penalty = 1;
+    float  mm_transition = -1;
+    float mm_transversion = -2;
+    float match_score = 2;
 };
 
 class DBGAligner {
@@ -88,13 +90,15 @@ class DBGAligner {
     .num_alternative_paths = 1,
     .path_comparison_code = 0,
     .verbose = false,
-    .discard_similar_paths = false,
+    .discard_similar_paths = true,
     .use_cssw_lib = false,
+    .disable_cssw_speedup = false,
     .sw_threshold_for_stitched_path = 200,
-    .insertion_penalty = 3,
-    .deletion_penalty = 3,
     .gap_opening_penalty = 3,
-    .gap_extension_penalty = 1};
+    .gap_extension_penalty = 1,
+    .mm_transition = -1,
+    .mm_transversion = -2,
+    .match_score = 2};
 
     // Substitution score for each pair of nucleotides.
     //std::map<char, std::map<char, int8_t>> sub_score_;
@@ -109,11 +113,10 @@ class DBGAligner {
     bool verbose_;
     bool discard_similar_paths_;
     bool use_cssw_lib_;
+    bool disable_cssw_speedup_;
     size_t sw_threshold_for_stitched_path_;
 
     int8_t match_score_;
-    float insertion_penalty_;
-    float deletion_penalty_;
     float gap_opening_penalty_;
     float gap_extension_penalty_;
 

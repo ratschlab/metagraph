@@ -50,7 +50,8 @@ class Path {
     void append_path(const Path& path, int64_t overlap_length, float score) {
         assert(overlap_length >= 0);
         assert(path.nodes_.size() >= unsigned(overlap_length));
-
+        if (path.size() == 0)
+            return;
         if (size() == 0) {
             this->seed(path.front(), {}, path.sequence_.substr(0, k_));
             overlap_length += 1;

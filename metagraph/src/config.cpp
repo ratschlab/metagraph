@@ -144,6 +144,18 @@ Config::Config(int argc, const char *argv[]) {
             alignment_length = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--align-num-paths")) {
             alignment_num_top_paths = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--align-match-score")) {
+            alignment_match_score = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--align-mm-transition-penalty")) {
+            alignment_mm_transition = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--align-mm-transversion-penalty")) {
+            alignment_mm_transversion = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--align-gap-open-penalty")) {
+            alignment_gap_opening_penalty = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--align-gap-extension-penalty")) {
+            alignment_gap_extension_penalty = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--align-num-first-alternative-paths")) {
+            alignment_num_alternative_paths = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--align-path-comparison-function")) {
             aligner_path_comparison_code = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
@@ -164,6 +176,8 @@ Config::Config(int argc, const char *argv[]) {
             discard_similar_paths = true;
         } else if (!strcmp(argv[i], "--align-using-cssw-library")) {
             align_using_cssw_library = true;
+        } else if (!strcmp(argv[i], "--disable-cssw-speedup")) {
+            disable_cssw_speedup = true;
         } else if (!strcmp(argv[i], "--kmer-mapping-mode")) {
             kmer_mapping_mode = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--num-top-labels")) {
@@ -290,6 +304,13 @@ Config::Config(int argc, const char *argv[]) {
         filter_k = k;
 
     if (identity == ALIGN && infbase.empty())
+        print_usage_and_exit = true;
+
+    if (identity == ALIGN &&
+            (alignment_mm_transition < 0
+            || alignment_mm_transversion < 0
+            || alignment_gap_opening_penalty < 0
+            || alignment_gap_extension_penalty < 0))
         print_usage_and_exit = true;
 
     if ((identity == QUERY || identity == SERVER_QUERY) && infbase.empty())
@@ -600,9 +621,16 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --count-kmers \t\tquery the number of k-mers discovered [off]\n");
             fprintf(stderr, "\t   --align-length [INT]\t\tlength of subsequences to align [k]\n");
             fprintf(stderr, "\t   --align-num-paths [INT]\t\tnumber of parallel paths to explore at any point [10]\n");
-            fprintf(stderr, "\t   --align-path-comparison-function [INT]\t\tthe function to compare paths while aligning. Set to 0, 1 or to for total path score, normalized path score and number of exactly mapped basepairs comparison respectively [0]\n");
+            fprintf(stderr, "\t   --align-match-score [INT]\t\tPositive match score [2]\n");
+            fprintf(stderr, "\t   --align-mm-transition-penalty [INT]\t\tPositive mismatch transition penalty [1]\n");
+            fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\t\tPositive mismatch transversion penalty [2]\n");
+            fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tPositive gap opening penalty [3]\n");
+            fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tPositive gap extension penalty [1]\n");
+            fprintf(stderr, "\t   --align-path-comparison-function [INT]\t\tthe function to compare paths while aligning. Set to 0, 1 or 2 for total path score, normalized path score and number of exactly mapped basepairs comparison respectively [0]\n");
             fprintf(stderr, "\t   --discard-similar-paths \t\tearly discard any path if a similar path with higher score was observed before. Similar paths that begin from same node, diverge and meet again such as two paths with a SNP in same location and meet before and after the SNP. [off]\n");
             fprintf(stderr, "\t   --align-using-cssw-library \t\tuse cssw library for Smith Waterman algorithm score computation. [off]\n");
+            fprintf(stderr, "\t   --align-num-first-alternative-paths \t\tthe number of the first discovered alternative paths for each query. [1]\n");
+            fprintf(stderr, "\t   --disable-cssw-speedup \t\tdisable the option to speed up when using cssw lib in path extension phase. The speed up limits the number of calls to cssw library and approximates alignment score by considering each base pair to be either match or mismatch. Suggested for long reads, but not short reads. [off]\n");
             fprintf(stderr, "\t-d --distance [INT] \t\tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\t-d --distance [INT] \t\tmax allowed alignment distance [0]\n");
         } break;

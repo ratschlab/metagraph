@@ -41,6 +41,7 @@ class Config {
     bool call_bubbles = false;
     bool discard_similar_paths = false;
     bool align_using_cssw_library = false;
+    bool disable_cssw_speedup = false;
 
     uint8_t aligner_path_comparison_code = 0;
 
@@ -55,6 +56,8 @@ class Config {
     unsigned int frequency = 1;
     unsigned int alignment_length = 0;
     unsigned int alignment_num_top_paths = 10;
+    unsigned int alignment_num_alternative_paths = 1;
+    unsigned int alignment_match_score = 2;
     unsigned int memory_available = 0;
     unsigned int min_count = 1;
     unsigned int max_count = std::numeric_limits<unsigned int>::max();
@@ -66,6 +69,11 @@ class Config {
     unsigned int relax_arity_brwt = 10;
     unsigned int pruned_dead_end_size = 0;
     unsigned int port = 5555;
+
+    int alignment_mm_transition = 1;
+    int alignment_mm_transversion = 2;
+    int alignment_gap_opening_penalty = 3;
+    int alignment_gap_extension_penalty = 1;
 
     double discovery_fraction = 1.0;
     double label_mask_out_fraction = 0.0;

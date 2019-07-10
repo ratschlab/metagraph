@@ -2368,10 +2368,18 @@ int main(int argc, const char *argv[]) {
             // Set configuration values.
             DBGAlignerConfig aligner_config;
             aligner_config.num_top_paths = config->alignment_num_top_paths;
+            aligner_config.num_alternative_paths = config->alignment_num_alternative_paths;
             aligner_config.path_comparison_code = config->aligner_path_comparison_code;
             aligner_config.verbose = config->verbose;
             aligner_config.discard_similar_paths = config->discard_similar_paths;
             aligner_config.use_cssw_lib = config->align_using_cssw_library;
+            aligner_config.disable_cssw_speedup = config->disable_cssw_speedup;
+            // mismatch scores are negative and other scores/penalties are positive.
+            aligner_config.match_score = config->alignment_match_score;
+            aligner_config.mm_transition = -1 * config->alignment_mm_transition;
+            aligner_config.mm_transversion = -1 * config->alignment_mm_transversion;
+            aligner_config.gap_opening_penalty = config->alignment_gap_opening_penalty;
+            aligner_config.gap_extension_penalty = config->alignment_gap_extension_penalty;
 
             DBGAligner aligner(dbg_succinct_graph, aligner_config);
             Timer timer;
