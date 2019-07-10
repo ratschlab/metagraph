@@ -2040,50 +2040,67 @@ void BOSS::call_sequences(Call<const std::string&> callback) const {
 
 void BOSS::call_unitigs(Call<const std::string&> callback,
                         size_t min_tip_size) const {
-    std::string sequence;
-
-    call_paths([&](const auto &edges, const auto &path) {
-        sequence.clear();
-
+    call_paths([&](auto&& edges, auto&& path) {
         assert(path.size());
 
         auto begin = std::find_if(path.begin(), path.end(),
-                                  [&](auto i) { return i != kSentinelCode; });
-        auto end = path.back() == kSentinelCode ? path.end() - 1 : path.end();
+                                  [&](auto c) { return c != kSentinelCode; });
+        auto end = path.end() - (path.back() == kSentinelCode);
 
-        if (begin > end)
+        if (begin + k_ + 1 > end)
             return;
 
-        std::transform(begin, end, std::back_inserter(sequence),
-                       [&](auto c) -> char { return BOSS::decode(c % alph_size); });
+        assert(std::all_of(begin, end, [](auto c) { return c != kSentinelCode; }));
 
-        if (sequence.size() <= k_)
-            return;
+        std::string sequence(end - begin, '\0');
+        std::transform(begin, end, sequence.begin(),
+                       [&](auto c) { return BOSS::decode(c % alph_size); });
 
+        // always call long unitigs
         if (sequence.size() >= k_ + min_tip_size) {
-            // long tip
             callback(sequence);
             return;
         }
 
-        if (begin != path.begin() && end != path.end())
-            return;
+        // this is a short unitig that must be skipped if it is a tip
 
-        if (end != path.end() || !get_W(fwd(edges.back()))) {
-            // outdegree == 0
-            if (!is_single_incoming(bwd(edges.front()))) {
-                // indegree > 1
-                callback(sequence);
-            }
+        /**
+         * Paths are sequences of edges!
+         *
+         * dead end:
+         *          _._._._$
+         *
+         * both 1 and 2 are dead ends:
+         *          1 ..._._._$
+         *          2 ..._._./
+         *
+         * both 1 and 2 are dead ends:
+         *          1 ..._._._._$
+         *          2 ..._._./
+         *
+         * neither 1 nor 2 is a dead end:
+         *          1 ..._._._._._$
+         *          2 ..._._./
+         */
+        bool outgoing_dead_end = path.back() == kSentinelCode
+                                    || !get_W(fwd(edges.back()));
 
-            return;
-        }
+        bool incoming_dead_end = path.front() == kSentinelCode
+                                    || !get_minus_k_value(edges.front(), k_).first;
 
-        if (!is_single_outgoing(fwd(edges.back())) // outdegree > 1
-                // outdegree == 1 && indegree >= 1
-                || get_minus_k_value(edges.front(), k_).first) {
+        if ((!outgoing_dead_end && !incoming_dead_end)
+                // this is a short dead-end
+                // ...check if not a source tip
+                || (incoming_dead_end
+                        && !outgoing_dead_end
+                        && !is_single_outgoing(fwd(edges.back())))
+                // this is a short dead-end but not a source tip
+                // ...check if not a sink tip
+                || (outgoing_dead_end
+                        && !incoming_dead_end
+                        && !is_single_incoming(bwd(edges.front()))))
             callback(sequence);
-        }
+
     }, true);
 }
 
