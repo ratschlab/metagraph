@@ -874,22 +874,22 @@ int main(int argc, const char *argv[]) {
                 if (config->verbose) {
                     std::cout << "Start reading data and extracting k-mers" << std::endl;
                 }
-                //enumerate all suffices
+                //enumerate all suffixes
                 assert(boss_graph->alph_size > 1);
-                std::vector<std::string> suffices;
+                std::vector<std::string> suffixes;
                 if (config->suffix.size()) {
-                    suffices = { config->suffix };
+                    suffixes = { config->suffix };
                 } else {
-                    suffices = KmerExtractor::generate_suffixes(config->suffix_len);
+                    suffixes = KmerExtractor::generate_suffixes(config->suffix_len);
                 }
 
                 BOSS::Chunk graph_data(KmerExtractor::alphabet.size(), boss_graph->get_k());
 
                 //one pass per suffix
-                for (const std::string &suffix : suffices) {
+                for (const std::string &suffix : suffixes) {
                     timer.reset();
 
-                    if (suffix.size() > 0 || suffices.size() > 1) {
+                    if (suffix.size() > 0 || suffixes.size() > 1) {
                         std::cout << "\nSuffix: " << suffix << std::endl;
                     }
 
@@ -950,23 +950,23 @@ int main(int argc, const char *argv[]) {
                 if (config->verbose) {
                     std::cout << "Start reading data and extracting k-mers" << std::endl;
                 }
-                //enumerate all suffices
+                //enumerate all suffixes
                 assert(bitmap_graph->alphabet().size() > 1);
-                std::vector<std::string> suffices;
+                std::vector<std::string> suffixes;
                 if (config->suffix.size()) {
-                    suffices = { config->suffix };
+                    suffixes = { config->suffix };
                 } else {
-                    suffices = KmerExtractor2Bit().generate_suffixes(config->suffix_len);
+                    suffixes = KmerExtractor2Bit().generate_suffixes(config->suffix_len);
                 }
 
                 std::unique_ptr<DBGBitmapConstructor> constructor;
                 std::vector<std::string> chunk_filenames;
 
                 //one pass per suffix
-                for (const std::string &suffix : suffices) {
+                for (const std::string &suffix : suffixes) {
                     timer.reset();
 
-                    if (config->verbose && (suffix.size() > 0 || suffices.size() > 1)) {
+                    if (config->verbose && (suffix.size() > 0 || suffixes.size() > 1)) {
                         std::cout << "\nSuffix: " << suffix << std::endl;
                     }
 
@@ -987,7 +987,7 @@ int main(int argc, const char *argv[]) {
                     );
 
                     if (!suffix.size()) {
-                        assert(suffices.size() == 1);
+                        assert(suffixes.size() == 1);
 
                         auto bitmap_graph = std::make_unique<DBGBitmap>(config->k);
                         constructor->build_graph(bitmap_graph.get());
@@ -1018,7 +1018,7 @@ int main(int argc, const char *argv[]) {
                         return 0;
                 }
 
-                if (suffices.size() > 1) {
+                if (suffixes.size() > 1) {
                     assert(chunk_filenames.size());
                     timer.reset();
                     graph.reset(constructor->build_graph_from_chunks(chunk_filenames,
@@ -1494,11 +1494,11 @@ int main(int argc, const char *argv[]) {
             if (!files.size()) {
                 assert(config->infbase.size());
 
-                const auto sorted_suffices = config->graph_type == Config::GraphType::SUCCINCT
+                const auto sorted_suffixes = config->graph_type == Config::GraphType::SUCCINCT
                         ? KmerExtractor().generate_suffixes(config->suffix_len)
                         : KmerExtractor2Bit().generate_suffixes(config->suffix_len);
 
-                for (const std::string &suffix : sorted_suffices) {
+                for (const std::string &suffix : sorted_suffixes) {
                     assert(suffix.size() == config->suffix_len);
                     chunk_files.push_back(config->infbase + "." + suffix);
                 }

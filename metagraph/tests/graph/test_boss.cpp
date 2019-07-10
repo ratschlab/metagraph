@@ -1793,10 +1793,10 @@ TEST(BOSS, PredKmerRandomTest) {
 
         auto all_kmer_str = utils::generate_strings("ACGT", k);
         for (size_t i = 1; i < k; ++i) {
-            auto kmer_str_suffices = utils::generate_strings("ACGT", i);
-            for (size_t j = 0; j < kmer_str_suffices.size(); ++j) {
+            auto kmer_str_suffixes = utils::generate_strings("ACGT", i);
+            for (size_t j = 0; j < kmer_str_suffixes.size(); ++j) {
                 all_kmer_str.push_back(std::string(k - i, '$')
-                                        + kmer_str_suffices[j]);
+                                        + kmer_str_suffixes[j]);
             }
         }
 
