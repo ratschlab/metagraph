@@ -130,7 +130,7 @@ next_bit(const t_int_vec &v,
         return idx + std::min(max_steps, static_cast<uint64_t>(sdsl::bits::lo(node)));
     } else {
         ++pos;
-        uint64_t end = std::min(max_steps, v.bit_size());
+        uint64_t end = std::min(idx + max_steps, v.bit_size());
         while ((pos << 6) < end) {
             if (v.data()[pos]) {
                 return std::min((pos << 6) | sdsl::bits::lo(v.data()[pos]), end);

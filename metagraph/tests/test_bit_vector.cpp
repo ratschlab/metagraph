@@ -15,7 +15,7 @@ void test_next_subvector(const bit_vector &vector, uint64_t idx) {
 
     uint64_t count = idx ? vector.rank1(idx - 1) : 0;
 
-    for (size_t t = 0; t < 10 && idx < vector.size(); ++t) {
+    for (size_t t = 0; t < 1100 && idx < vector.size(); ++t) {
         auto next = vector.next1(idx);
         ASSERT_TRUE(next <= vector.size());
 
@@ -49,7 +49,7 @@ void test_prev_subvector(const bit_vector &vector, uint64_t idx) {
 
     uint64_t count = vector.rank1(idx);
 
-    for (size_t t = 0; t < 10; ++t) {
+    for (size_t t = 0; t < 1100; ++t) {
         auto prev = vector.prev1(idx);
         ASSERT_TRUE(prev <= vector.size());
 
@@ -166,6 +166,17 @@ void test_bit_vector_queries() {
     vector.reset(new T(numbers));
     ASSERT_TRUE(vector);
     reference_based_test(*vector, numbers);
+
+    // set to 2 * max_step_size of bit_vector_stat
+    sdsl::bit_vector large(2000, 0);
+    large[0] = 1;
+    large[1002] = 1;
+    large[1999] = 1;
+    vector.reset(new T(large));
+
+    ASSERT_TRUE(vector);
+    reference_based_test(*vector, large);
+    EXPECT_EQ(2000u, vector->size());
 }
 
 
