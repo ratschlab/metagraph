@@ -131,9 +131,6 @@ next_bit(const t_int_vec &v,
     } else {
         ++pos;
         uint64_t end = std::min(idx + max_steps, v.bit_size());
-        if (end < idx)
-            end = v.bit_size();
-
         while ((pos << 6) < end) {
             if (v.data()[pos]) {
                 return std::min((pos << 6) | sdsl::bits::lo(v.data()[pos]), end);
@@ -429,8 +426,7 @@ uint64_t bit_vector_stat::next1(uint64_t pos) const {
     assert(pos < size());
 
     auto next = next_bit(vector_, pos, MAX_ITER_BIT_VECTOR_STAT);
-    // check if in MAX_ITER or if it overflowed
-    if (next < pos + MAX_ITER_BIT_VECTOR_STAT || pos + MAX_ITER_BIT_VECTOR_STAT < pos)
+    if (next < pos + MAX_ITER_BIT_VECTOR_STAT)
         return next;
 
     uint64_t rk = rank1(pos) + 1;
@@ -441,10 +437,7 @@ uint64_t bit_vector_stat::prev1(uint64_t pos) const {
     assert(pos < size());
 
     auto next = prev_bit(vector_, pos, MAX_ITER_BIT_VECTOR_STAT);
-
-    // check if in MAX_ITER or if it underflowed
-    if (next < vector_.size() && (next > pos - MAX_ITER_BIT_VECTOR_STAT
-                                    || pos - MAX_ITER_BIT_VECTOR_STAT > pos))
+    if (next < vector_.size() && next > pos - MAX_ITER_BIT_VECTOR_STAT)
         return next;
 
     uint64_t rk = rank1(pos);
