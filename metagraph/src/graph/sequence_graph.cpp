@@ -116,7 +116,9 @@ void call_sequences_from(const DeBruijnGraph &graph,
             //  _____.___
             //      \.___
             for (const auto& [next, c] : targets) {
-                if (next_node == DeBruijnGraph::npos && !call_unitigs && !(*visited)[next]) {
+                if (next_node == DeBruijnGraph::npos
+                        && !call_unitigs
+                        && !(*visited)[next]) {
                     (*discovered)[next] = true;
                     next_node = next;
                     next_char = c;
@@ -150,7 +152,7 @@ void call_sequences(const DeBruijnGraph &graph,
     sdsl::bit_vector discovered(graph.num_nodes() + 1, false);
     sdsl::bit_vector visited(graph.num_nodes() + 1, false);
 
-    auto callback_from = [&](const auto &node) {
+    auto call_paths_from = [&](const auto &node) {
         call_sequences_from(graph,
                             node,
                             callback,
@@ -168,37 +170,26 @@ void call_sequences(const DeBruijnGraph &graph,
         assert(!visited[node]);
         assert(!graph.indegree(node));
 
-        callback_from(node);
+        call_paths_from(node);
     });
 
-    // then merges and forks
-    //  ____.____       ____.____
-    //  ___/                 \___
+    // then forks
+    //  ____.____
+    //       \___
     //
     graph.call_nodes([&](const auto &node) {
-
-        if (visited[node])
-            return;
-
-        size_t outdeg = graph.outdegree(node);
-
-        if (outdeg > 1) {
-            // fork
+        if (!visited[node] && graph.outdegree(node) > 1) {
             graph.call_outgoing_kmers(node, [&](const auto &next, char) {
                 if (!visited[next] && graph.outdegree(next) == 1)
-                    callback_from(next);
+                    call_paths_from(next);
             });
-
-        } else if (outdeg == 1 && graph.indegree(node) > 1) {
-            // merge
-            callback_from(node);
         }
     });
 
     // then the rest
     graph.call_nodes([&](const auto &node) {
         if (!visited[node])
-            callback_from(node);
+            call_paths_from(node);
     });
 }
 
@@ -229,7 +220,7 @@ void DeBruijnGraph
         while (nodes.size()) {
             // FYI: structured binding is a new thing that often
             // leads to issues, so avoid using it.
-            // https://stackoverflow.com/questions/50799719/reference-to-local-binding-declared-in-enclosing-function?noredirect=1&lq=1
+            // https://bit.ly/2JI6oci
             auto [node, sequence] = std::move(nodes.top());
             nodes.pop();
 

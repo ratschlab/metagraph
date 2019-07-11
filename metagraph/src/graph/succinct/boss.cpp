@@ -1885,53 +1885,28 @@ void BOSS::call_paths(Call<std::vector<edge_index>&&,
 
     ProgressBar progress_bar(W_->size() - 1, "Traverse BOSS", std::cerr, !utils::get_verbose());
 
-    auto callback_from = [&](uint64_t start) {
-        call_paths(start,
-                   callback,
-                   split_to_contigs,
-                   &discovered,
-                   &visited,
-                   progress_bar);
-    };
-
-    // process start nodes first
+    // process source dummy edges first
     //
     //  .____
     //
-    callback_from(1);
-
     auto last_source = succ_last(1);
-    for (uint64_t i = 2; i <= last_source; ++i) {
-        callback_from(i);
+    for (uint64_t i = 1; i <= last_source; ++i) {
+        call_paths(i, callback, split_to_contigs, &discovered, &visited, progress_bar);
     }
 
-    last_source++;
-
-    // then merges
-    //  ____.____
-    //  ___/
-    //
-    for (uint64_t i = last_source; i < W_->size(); ++i) {
-        if (!visited[i] && is_single_outgoing(i) && !is_single_incoming(bwd(i)))
-            callback_from(i);
-    }
-
-    // then forks
+    // then all forks
     //  ____.____
     //       \___
     //
-    for (uint64_t i = last_source; i < W_->size(); ++i) {
-        if (!is_single_outgoing(i)) {
-            auto start = fwd(i);
-            if (!visited[start] && is_single_outgoing(start))
-                callback_from(start);
-        }
+    for (uint64_t i = 1; i < W_->size(); ++i) {
+        if (!visited[i] && !is_single_outgoing(i))
+            call_paths(i, callback, split_to_contigs, &discovered, &visited, progress_bar);
     }
 
     // process all the cycles left that have not been traversed
-    for (uint64_t i = last_source; i < W_->size(); ++i) {
+    for (uint64_t i = 1; i < W_->size(); ++i) {
         if (!visited[i])
-            callback_from(i);
+            call_paths(i, callback, split_to_contigs, &discovered, &visited, progress_bar);
     }
 }
 
