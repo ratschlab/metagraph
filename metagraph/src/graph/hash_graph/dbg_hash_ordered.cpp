@@ -102,6 +102,7 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     Vector<Kmer> sequence_to_kmers(const std::string &sequence, bool canonical = false) const {
         return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical);
     }
+
     node_index get_index(const Kmer &kmer) const;
     Kmer get_kmer(node_index node) const;
 

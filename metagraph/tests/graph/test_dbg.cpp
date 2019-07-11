@@ -1,5 +1,8 @@
 #include "gtest/gtest.h"
 
+#define private public
+#define protected public
+
 #include "test_dbg_helpers.hpp"
 #include "utils.hpp"
 #include "reverse_complement.hpp"
@@ -324,83 +327,83 @@ TYPED_TEST(DeBruijnGraphTest, CallUnitigsFourLoops) {
 TYPED_TEST(DeBruijnGraphTest, CallPaths) {
     for (size_t k = 2; k <= 10; ++k) {
         {
-            auto graph = build_graph<TypeParam>(k, { "AAACACTAG",
-                                                     "AACGACATG" });
+            auto graph = build_graph_batch<TypeParam>(k, { "AAACACTAG",
+                                                           "AACGACATG" });
 
             std::vector<std::string> reconst;
 
             graph->call_sequences([&](const auto &sequence) {
                 reconst.push_back(sequence);
             });
-            auto reconstructed = build_graph<TypeParam>(k, reconst);
+            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
 
             EXPECT_EQ(*graph, *reconstructed);
         }
         {
-            auto graph = build_graph<TypeParam>(k, { "AGACACTGA",
-                                                     "GACTACGTA",
-                                                     "ACTAACGTA" });
+            auto graph = build_graph_batch<TypeParam>(k, { "AGACACTGA",
+                                                           "GACTACGTA",
+                                                           "ACTAACGTA" });
 
             std::vector<std::string> reconst;
 
             graph->call_sequences([&](const auto &sequence) {
                 reconst.push_back(sequence);
             });
-            auto reconstructed = build_graph<TypeParam>(k, reconst);
+            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
 
             EXPECT_EQ(*graph, *reconstructed);
         }
         {
-            auto graph = build_graph<TypeParam>(k, { "AGACACAGT",
-                                                     "GACTTGCAG",
-                                                     "ACTAGTCAG" });
+            auto graph = build_graph_batch<TypeParam>(k, { "AGACACAGT",
+                                                           "GACTTGCAG",
+                                                           "ACTAGTCAG" });
 
             std::vector<std::string> reconst;
 
             graph->call_sequences([&](const auto &sequence) {
                 reconst.push_back(sequence);
             });
-            auto reconstructed = build_graph<TypeParam>(k, reconst);
+            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
 
             EXPECT_EQ(*graph, *reconstructed);
         }
         {
-            auto graph = build_graph<TypeParam>(k, { "AAACTCGTAGC",
-                                                     "AAATGCGTAGC" });
+            auto graph = build_graph_batch<TypeParam>(k, { "AAACTCGTAGC",
+                                                           "AAATGCGTAGC" });
 
             std::vector<std::string> reconst;
 
             graph->call_sequences([&](const auto &sequence) {
                 reconst.push_back(sequence);
             });
-            auto reconstructed = build_graph<TypeParam>(k, reconst);
+            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
 
             EXPECT_EQ(*graph, *reconstructed);
         }
         {
-            auto graph = build_graph<TypeParam>(k, { "AAACT",
-                                                     "AAATG" });
+            auto graph = build_graph_batch<TypeParam>(k, { "AAACT",
+                                                           "AAATG" });
 
             std::vector<std::string> reconst;
 
             graph->call_sequences([&](const auto &sequence) {
                 reconst.push_back(sequence);
             });
-            auto reconstructed = build_graph<TypeParam>(k, reconst);
+            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
 
             EXPECT_EQ(*graph, *reconstructed);
         }
         {
-            auto graph = build_graph<TypeParam>(k, { "ATGCAGTACTCAG",
-                                                     "ATGCAGTAGTCAG",
-                                                     "GGGGGGGGGGGGG" });
+            auto graph = build_graph_batch<TypeParam>(k, { "ATGCAGTACTCAG",
+                                                           "ATGCAGTAGTCAG",
+                                                           "GGGGGGGGGGGGG" });
 
             std::vector<std::string> reconst;
 
             graph->call_sequences([&](const auto &sequence) {
                 reconst.push_back(sequence);
             });
-            auto reconstructed = build_graph<TypeParam>(k, reconst);
+            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
 
             EXPECT_EQ(*graph, *reconstructed);
         }
@@ -410,69 +413,69 @@ TYPED_TEST(DeBruijnGraphTest, CallPaths) {
 TYPED_TEST(DeBruijnGraphTest, CallUnitigs) {
     for (size_t k = 2; k <= 10; ++k) {
         {
-            auto graph = build_graph<TypeParam>(k, { "AAACACTAG",
-                                                     "AACGACATG" });
+            auto graph = build_graph_batch<TypeParam>(k, { "AAACACTAG",
+                                                           "AACGACATG" });
 
             std::vector<std::string> reconst;
 
             graph->call_unitigs([&](const auto &sequence) {
                 reconst.push_back(sequence);
             });
-            auto reconstructed = build_graph<TypeParam>(k, reconst);
+            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
 
             EXPECT_EQ(*graph, *reconstructed);
         }
         {
-            auto graph = build_graph<TypeParam>(k, { "AGACACTGA",
-                                                     "GACTACGTA",
-                                                     "ACTAACGTA" });
+            auto graph = build_graph_batch<TypeParam>(k, { "AGACACTGA",
+                                                           "GACTACGTA",
+                                                           "ACTAACGTA" });
 
             std::vector<std::string> reconst;
 
             graph->call_unitigs([&](const auto &sequence) {
                 reconst.push_back(sequence);
             });
-            auto reconstructed = build_graph<TypeParam>(k, reconst);
+            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
 
             EXPECT_EQ(*graph, *reconstructed);
         }
         {
-            auto graph = build_graph<TypeParam>(k, { "AGACACAGT",
-                                                     "GACTTGCAG",
-                                                     "ACTAGTCAG" });
+            auto graph = build_graph_batch<TypeParam>(k, { "AGACACAGT",
+                                                           "GACTTGCAG",
+                                                           "ACTAGTCAG" });
 
             std::vector<std::string> reconst;
 
             graph->call_unitigs([&](const auto &sequence) {
                 reconst.push_back(sequence);
             });
-            auto reconstructed = build_graph<TypeParam>(k, reconst);
+            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
 
             EXPECT_EQ(*graph, *reconstructed);
         }
         {
-            auto graph = build_graph<TypeParam>(k, { "AAACTCGTAGC",
-                                                     "AAATGCGTAGC" });
+            auto graph = build_graph_batch<TypeParam>(k, { "AAACTCGTAGC",
+                                                           "AAATGCGTAGC" });
 
             std::vector<std::string> reconst;
 
             graph->call_unitigs([&](const auto &sequence) {
                 reconst.push_back(sequence);
             });
-            auto reconstructed = build_graph<TypeParam>(k, reconst);
+            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
 
             EXPECT_EQ(*graph, *reconstructed);
         }
         {
-            auto graph = build_graph<TypeParam>(k, { "AAACT",
-                                                     "AAATG" });
+            auto graph = build_graph_batch<TypeParam>(k, { "AAACT",
+                                                           "AAATG" });
 
             std::vector<std::string> reconst;
 
             graph->call_unitigs([&](const auto &sequence) {
                 reconst.push_back(sequence);
             });
-            auto reconstructed = build_graph<TypeParam>(k, reconst);
+            auto reconstructed = build_graph_batch<TypeParam>(k, reconst);
 
             EXPECT_EQ(*graph, *reconstructed);
         }
@@ -657,6 +660,64 @@ TYPED_TEST(DeBruijnGraphTest, CallKmersTwoLoops) {
         });
         EXPECT_EQ(1u, num_kmers);
     }
+}
+
+TYPED_TEST(DeBruijnGraphTest, CallUnitigsCheckDegree) {
+    std::vector<std::string> sequences {
+        "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGG",
+        "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGC",
+        "CCAAAATGAAACCTTCAGTTTTAACTCTTAATCAGACATAACTGGAAAA",
+        "CCGAACTAGTGAAACTGCAACAGACATACGCTGCTCTGAACTCTAAGGC",
+        "CCAGGTGCAGGGTGGACTCTTTCTGGATGTTGTAGTCAGACAGGGTGCG",
+        "ATCGGAAGAGCACACGTCTGAACTCCAGACACTAAGGCATCTCGTATGC",
+        "CGGAGGGAAAAATATTTACACAGAGTAGGAGACAAATTGGCTGAAAAGC",
+        "CCAGAGTCTCGTTCGTTATCGGAATTAACCAGACAAATCGCTCCACCAA"
+    };
+
+    auto graph = build_graph_batch<TypeParam>(9, sequences);
+
+    std::multiset<std::string> unitigs {
+        "AGACAAATCGCTCCACCAA",
+        "AGACAAATTGGCTGAAAAGC",
+        "ATCGGAAGAGCACACGTCTGAACT",
+        "CAGACATAACTGGAAAA",
+        "CAGACATACGCTGCTCTGAACT",
+        "CCAAAATGAAACCTTCAGTTTTAACTCTTAATCAGACATA",
+        "CCAGAGTCTCGTTCGTTATCGGAATTAACCAGACAAAT",
+        "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCG",
+        "CCAGGTGCAGGGTGGACTCTTTCTGGATGTTGTAGTCAGACAGGGTGCG",
+        "CCGAACTAGTGAAACTGCAACAGACATA",
+        "CGGAGGGAAAAATATTTACACAGAGTAGGAGACAAAT",
+        "CTGAACTCCAGACACTAAGGCATCTCGTATGC",
+        "CTGAACTCTAAGGC",
+        "TCTGAACTC"
+    };
+
+    std::multiset<std::string> obs_unitigs;
+    graph->call_unitigs([&](const auto &unitig) { obs_unitigs.insert(unitig); }, 2);
+
+    EXPECT_EQ(unitigs, obs_unitigs);
+}
+
+TYPED_TEST(DeBruijnGraphTest, CallUnitigsIndegreeFirstNodeIsZero) {
+    std::vector<std::string> sequences {
+        "AGAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
+        "AGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCAGGTGTGGTGAC",
+        "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAATTAG"
+    };
+
+    auto graph = build_graph_batch<TypeParam>(31, sequences);
+
+    std::multiset<std::string> unitigs {
+        "GAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
+        "AGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCAGGTGTGGTGAC",
+        "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAAT"
+    };
+
+    std::multiset<std::string> obs_unitigs;
+    graph->call_unitigs([&](const auto &unitig) { obs_unitigs.insert(unitig); }, 2);
+
+    EXPECT_EQ(unitigs, obs_unitigs);
 }
 
 TYPED_TEST(DeBruijnGraphTest, CallKmersFourLoops) {
@@ -1391,6 +1452,32 @@ TYPED_TEST(DeBruijnGraphTest, indegree_identity_traverse_back_incoming) {
     }
 }
 
+TYPED_TEST(DeBruijnGraphTest, call_source_nodes) {
+    const std::vector<std::string> sequences {
+        "ATGCGATCGATATGCGAGA",
+        "ATGCGATCGAGACTACGAG",
+        "GTACGATAGACATGACGAG",
+        "ACTGACGAGACACAGATGC",
+        "AAAAAAAAAAAAAAAAAAA"
+    };
+    for (int k = 8; k < 10; ++k) {
+        auto graph = build_graph<TypeParam>(k, sequences);
+
+        std::multiset<std::string> start_nodes {
+            sequences[0].substr(0, k),
+            sequences[2].substr(0, k),
+            sequences[3].substr(0, k)
+        };
+
+        std::multiset<std::string> obs_start_nodes;
+        graph->call_source_nodes([&](auto start) {
+            obs_start_nodes.emplace(graph->get_node_sequence(start));
+        });
+
+        EXPECT_EQ(start_nodes, obs_start_nodes) << *graph;
+    }
+}
+
 TYPED_TEST(DeBruijnGraphTest, get_node_sequence) {
     size_t k = 4;
     std::string reference = "AGCTTCGAGGCCAA";
@@ -1434,4 +1521,191 @@ TYPED_TEST(DeBruijnGraphTest, is_single_outgoing_for_multiple_valid_edges) {
     }
 
     EXPECT_EQ(1u, single_outgoing_counter);
+}
+
+TYPED_TEST(DeBruijnGraphTest, CallStartNodes) {
+        {
+            std::vector<std::string> sequences = { "AAACACTAG",
+                                                   "AACGACATG" };
+
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(2, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>(), nodes);
+            }
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(3, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>(), nodes);
+            }
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(4, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>({ "AAAC" }), nodes);
+            }
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(5, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>({ "AAACA", "AACGA" }), nodes);
+            }
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(6, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>({ "AAACAC", "AACGAC" }), nodes);
+            }
+        }
+        {
+            std::vector<std::string> sequences = { "AGACACTGA",
+                                                   "GACTACGTA",
+                                                   "ACTAACGTA" };
+
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(2, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>(), nodes);
+            }
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(3, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>({ "AGA" }), nodes) << *graph;
+            }
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(4, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>({ "AGAC" }), nodes);
+            }
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(5, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>({ "AGACA", "GACTA" }), nodes);
+            }
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(6, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>({ "AGACAC", "GACTAC", "ACTAAC" }), nodes);
+            }
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(7, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>({ "AGACACT", "GACTACG", "ACTAACG" }), nodes);
+            }
+        }
+        {
+            std::vector<std::string> sequences = { "AGACACAGT",
+                                                   "GACTTGCAG",
+                                                   "ACTAGTCAG" };
+
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(2, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>(), nodes);
+            }
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(3, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>(), nodes);
+            }
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(4, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>({ "AGAC" }), nodes);
+            }
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(5, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>({ "AGACA", "GACTT", "ACTAG" }), nodes);
+            }
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(6, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>({ "AGACAC", "GACTTG", "ACTAGT" }), nodes);
+            }
+
+        }
+        {
+            std::vector<std::string> sequences = { "AAACTCGTAGC",
+                                                   "AAATGCGTAGC" };
+
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(2, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>(), nodes);
+            }
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(3, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>(), nodes);
+            }
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(4, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>({ "AAAC", "AAAT" }), nodes);
+            }
+            {
+                std::multiset<std::string> nodes;
+                auto graph = build_graph_batch<TypeParam>(5, sequences);
+                graph->call_source_nodes([&](const auto &node) {
+                    nodes.insert(graph->get_node_sequence(node));
+                });
+                EXPECT_EQ(std::multiset<std::string>({ "AAACT", "AAATG" }), nodes);
+            }
+
+        }
 }

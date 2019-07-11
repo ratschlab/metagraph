@@ -4,6 +4,7 @@
 
 #include "sequence_graph.hpp"
 #include "serialization.hpp"
+#include "dbg_succinct.hpp"
 
 
 MaskedDeBruijnGraph
@@ -51,6 +52,16 @@ size_t MaskedDeBruijnGraph::outdegree(node_index node) const {
 }
 
 size_t MaskedDeBruijnGraph::indegree(node_index node) const {
+    auto dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get());
+    if (dbg_succ) {
+        // avoid calls to indegree computation for DBGSuccinct
+        const auto &boss = dbg_succ->get_boss();
+        auto prev_boss_edge = boss.bwd(dbg_succ->kmer_to_boss_index(node));
+
+        if (boss.is_single_incoming(prev_boss_edge))
+            return in_graph(dbg_succ->boss_to_kmer_index(prev_boss_edge));
+    }
+
     std::vector<node_index> incoming;
     graph_->adjacent_incoming_nodes(node, &incoming);
     return std::count_if(incoming.begin(), incoming.end(),

@@ -18,13 +18,13 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
                         size_t num_set_bits = -1);
 
     virtual void add_sequence(const std::string &sequence,
-                              bit_vector_dyn *nodes_inserted = NULL);
+                              bit_vector_dyn *nodes_inserted = NULL) override;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
     virtual void map_to_nodes(const std::string &sequence,
                               const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate = [](){ return false; }) const;
+                              const std::function<bool()> &terminate = [](){ return false; }) const override;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied.
@@ -32,48 +32,48 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     virtual void map_to_nodes_sequentially(std::string::const_iterator begin,
                                            std::string::const_iterator end,
                                            const std::function<void(node_index)> &callback,
-                                           const std::function<bool()> &terminate = [](){ return false; }) const;
+                                           const std::function<bool()> &terminate = [](){ return false; }) const override;
 
     // Given a node index and a pointer to a vector of node indices, iterates
     // over all the outgoing edges and pushes back indices of their target nodes.
     virtual void adjacent_outgoing_nodes(node_index node,
-                                         std::vector<node_index> *target_nodes) const;
+                                         std::vector<node_index> *target_nodes) const override;
 
     virtual void call_outgoing_kmers(node_index kmer,
-                                     const OutgoingEdgeCallback &callback) const;
+                                     const OutgoingEdgeCallback &callback) const override;
 
     virtual void call_incoming_kmers(node_index kmer,
-                                     const IncomingEdgeCallback &callback) const;
+                                     const IncomingEdgeCallback &callback) const override;
 
     // Given a node index and a pointer to a vector of node indices, iterates
     // over all the incoming edges and pushes back indices of their source nodes.
     virtual void adjacent_incoming_nodes(node_index node,
-                                         std::vector<node_index> *source_nodes) const;
+                                         std::vector<node_index> *source_nodes) const override;
 
-    virtual uint64_t num_nodes() const;
+    virtual uint64_t num_nodes() const override;
 
-    virtual bool load(const std::string &filename_base);
-    virtual void serialize(const std::string &filename_base) const;
-    virtual std::string file_extension() const { return graph_->file_extension(); }
+    virtual bool load(const std::string &filename_base) override;
+    virtual void serialize(const std::string &filename_base) const override;
+    virtual std::string file_extension() const override { return graph_->file_extension(); }
 
-    virtual const std::string& alphabet() const { return graph_->alphabet(); }
+    virtual const std::string& alphabet() const override { return graph_->alphabet(); }
 
     // Get string corresponding to |node_index|.
     // Note: Not efficient if sequences in nodes overlap. Use sparingly.
-    virtual std::string get_node_sequence(node_index index) const;
+    virtual std::string get_node_sequence(node_index index) const override;
 
-    virtual size_t get_k() const { return graph_->get_k(); }
+    virtual size_t get_k() const override { return graph_->get_k(); }
 
     // Traverse the outgoing edge
-    virtual node_index traverse(node_index node, char next_char) const;
+    virtual node_index traverse(node_index node, char next_char) const override;
     // Traverse the incoming edge
-    virtual node_index traverse_back(node_index node, char prev_char) const;
+    virtual node_index traverse_back(node_index node, char prev_char) const override;
 
-    virtual size_t outdegree(node_index node) const;
-    virtual size_t indegree(node_index) const;
+    virtual size_t outdegree(node_index node) const override;
+    virtual size_t indegree(node_index) const override;
 
     virtual void call_nodes(const std::function<void(node_index)> &callback,
-                            const std::function<bool()> &stop_early = [](){ return false; }) const;
+                            const std::function<bool()> &stop_early = [](){ return false; }) const override;
 
     virtual const DeBruijnGraph& get_graph() const { return *graph_; }
     std::shared_ptr<const DeBruijnGraph> get_graph_ptr() const { return graph_; }
@@ -88,7 +88,7 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     }
 
     virtual bool operator==(const MaskedDeBruijnGraph &other) const;
-    virtual bool operator==(const DeBruijnGraph &other) const;
+    virtual bool operator==(const DeBruijnGraph &other) const override;
 
     virtual void set_mask(bitmap *mask) { is_target_mask_.reset(mask); }
 
