@@ -35,7 +35,33 @@ public:
         return base;
     }
 
+    size_t incoming_edge_rank(DeBruijnGraph::node_index source,
+                             DeBruijnGraph::node_index target) const {
+        assert(source && source <= num_nodes());
+        assert(target && target <= num_nodes());
+
+        assert(get_node_sequence(source).substr(1)
+               == get_node_sequence(target).substr(0, get_k() - 1));
+
+        std::vector<node_index> adjacent_nodes;
+        adjacent_nodes.reserve(10);
+
+        adjacent_incoming_nodes(target, &adjacent_nodes);
+
+        uint64_t edge_rank = 0;
+
+        for (node_index node : adjacent_nodes) {
+            if (node == source)
+                return edge_rank;
+
+            edge_rank++;
+        }
+
+        throw std::runtime_error("the edge does not exist in graph");
+    }
+
     int64_t branch_id(node_index node,node_index prev_node) const {
+        return incoming_edge_rank(prev_node, node);
         int64_t result = INT_MIN;
         int64_t i = 0;
         call_incoming_kmers_mine(node,[&i,&result,&prev_node](node_index node,char base) {
