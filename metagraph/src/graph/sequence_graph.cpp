@@ -186,7 +186,7 @@ void call_sequences(const DeBruijnGraph &graph,
         }
     });
 
-    // then the rest
+    // then the rest (loops)
     graph.call_nodes([&](const auto &node) {
         if (!visited[node])
             call_paths_from(node);
