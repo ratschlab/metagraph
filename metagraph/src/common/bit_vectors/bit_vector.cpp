@@ -130,7 +130,7 @@ next_bit(const t_int_vec &v,
         return idx + std::min(max_steps, static_cast<uint64_t>(sdsl::bits::lo(node)));
     } else {
         ++pos;
-        uint64_t end = std::min(idx + max_steps, v.bit_size());
+        uint64_t end = idx + std::min(max_steps, v.bit_size() - idx);
         while ((pos << 6) < end) {
             if (v.data()[pos]) {
                 return std::min((pos << 6) | sdsl::bits::lo(v.data()[pos]), end);
@@ -156,7 +156,10 @@ prev_bit(const t_int_vec &v,
                         sdsl::bits::hi(node) + (pos << 6) - (63 - (idx & 0x3F)));
     } else {
         --pos;
-        uint64_t end = std::min(idx - max_steps, v.bit_size());
+        uint64_t end = max_steps > idx
+            ? v.bit_size()
+            : idx - max_steps;
+
         while ((pos << 6) < end) {
             if (v.data()[pos]) {
                 return (pos << 6) | sdsl::bits::hi(v.data()[pos]);
@@ -426,7 +429,7 @@ uint64_t bit_vector_stat::next1(uint64_t pos) const {
     assert(pos < size());
 
     auto next = next_bit(vector_, pos, MAX_ITER_BIT_VECTOR_STAT);
-    if (next < pos + MAX_ITER_BIT_VECTOR_STAT)
+    if (next - pos < MAX_ITER_BIT_VECTOR_STAT)
         return next;
 
     uint64_t rk = rank1(pos) + 1;
@@ -436,9 +439,9 @@ uint64_t bit_vector_stat::next1(uint64_t pos) const {
 uint64_t bit_vector_stat::prev1(uint64_t pos) const {
     assert(pos < size());
 
-    auto next = prev_bit(vector_, pos, MAX_ITER_BIT_VECTOR_STAT);
-    if (next < vector_.size() && next > pos - MAX_ITER_BIT_VECTOR_STAT)
-        return next;
+    auto prev = prev_bit(vector_, pos, MAX_ITER_BIT_VECTOR_STAT);
+    if (prev < vector_.size() && prev > pos - MAX_ITER_BIT_VECTOR_STAT)
+        return prev;
 
     uint64_t rk = rank1(pos);
     return rk ? select1(rk) : size();
