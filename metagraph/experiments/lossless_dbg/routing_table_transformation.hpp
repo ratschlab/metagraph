@@ -34,14 +34,20 @@ template<typename RoutingTable>
 class TransformationsEnabler : public RoutingTable {
 public:
 
-    explicit TransformationsEnabler(const shared_ptr<const DBGSuccinct> graph) : RoutingTable(graph) {
-#ifndef DISABLE_TRANSFORMATIONS
-        transformations = GraphPreprocessor(*graph).find_weak_splits();
-#endif
-    }
-    using RoutingTable::RoutingTable;
+//    explicit TransformationsEnabler(const shared_ptr<const DBGSuccinct> graph) : RoutingTable(graph) {
+//#ifndef DISABLE_TRANSFORMATIONS
+//        transformations = GraphPreprocessor(*graph).find_weak_splits();
+//#endif
+//    }
 
-//    template <typename Container>
+    template<typename ...Args>
+    TransformationsEnabler(shared_ptr<const DBGSuccinct> graph, Args... args) : RoutingTable(graph,args...){
+        transformations = GraphPreprocessor(*graph).find_weak_splits();
+    }
+
+    //using RoutingTable::RoutingTable;
+
+    //    template <typename Container>
 //    TransformationsEnabler(const shared_ptr<const DBGSuccinct> graph,const Container& routing_table_array) :
 //                                            RoutingTable(graph,routing_table_array) {
 //        transformations = GraphPreprocessor(graph).find_weak_splits();

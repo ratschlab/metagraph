@@ -97,6 +97,7 @@ public:
         populate_additional_joins(transformed_sequences);
 
         auto alloc_routing_table = VerboseTimer("allocation of routing & incoming table");
+
         routing_table = decltype(routing_table)(graph_,&is_bifurcation,&rank_is_bifurcation,chunks);
         incoming_table = decltype(incoming_table)(graph_,&is_bifurcation,&rank_is_bifurcation,chunks);
         alloc_routing_table.finished();
