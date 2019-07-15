@@ -66,6 +66,8 @@ class DBGExtension : public utils::Extension<DBG> {
   public:
     virtual bool load(const DBG&, const std::string &filename_base) = 0;
     virtual void serialize(const DBG&, const std::string &filename_base) const = 0;
+
+    static bool has_file(const DBG&, const std::string &filename_base);
 };
 
 template <class DBG>

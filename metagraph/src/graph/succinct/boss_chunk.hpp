@@ -10,7 +10,7 @@ class BOSS::Chunk {
   public:
     typedef uint8_t TAlphabet;
 
-    // Aslphabet size without extra characters
+    // Alphabet size without extra characters
     Chunk(uint64_t alph_size, size_t k);
 
     /**

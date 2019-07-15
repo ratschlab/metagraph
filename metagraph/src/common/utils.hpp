@@ -456,10 +456,10 @@ namespace utils {
         };
 
         template <class ExtensionSubtype>
-        void each(std::function<void(const ExtensionType &extension)> callback) {
+        void each_extension(std::function<void(ExtensionSubtype &extension)> callback) {
             for (auto extension : extensions_) {
                 if (auto match = std::dynamic_pointer_cast<ExtensionSubtype>(extension))
-                    callback(match);
+                    callback(*match);
             }
         };
 

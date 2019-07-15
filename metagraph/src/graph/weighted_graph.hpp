@@ -25,6 +25,8 @@ class DBGWeights : public DBGExtension<DeBruijnGraph> {
     virtual bool load(const DeBruijnGraph &graph, const std::string &filename_base);
     virtual void serialize(const DeBruijnGraph &graph, const std::string &filename_base) const;
 
+    static bool has_file(const DeBruijnGraph &graph, const std::string &filename_base);
+
   private:
     Weights weights_;
 
@@ -57,6 +59,15 @@ void DBGWeights<Weights>::serialize(const DeBruijnGraph &graph, const std::strin
                             std::ios::binary);
 
     this->weights_.serialize(outstream);
+}
+
+template <typename Weights>
+bool DBGWeights<Weights>::has_file(const DeBruijnGraph &graph, const std::string &filename_base) {
+    const auto weights_filename = utils::remove_suffix(filename_base, graph.file_extension())
+                                        + graph.file_extension()
+                                        + kWeightsExtension;
+    std::ifstream instream(weights_filename, std::ios::binary);
+    return instream.good();
 }
 
 #endif // __WEIGHTED_GRAPH_HPP__
