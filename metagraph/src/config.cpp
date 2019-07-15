@@ -87,8 +87,6 @@ Config::Config(int argc, const char *argv[]) {
             print_graph_internal_repr = true;
         } else if (!strcmp(argv[i], "--count-kmers")) {
             count_kmers = true;
-        } else if (!strcmp(argv[i], "--kmc-counts")) {
-            kmc_counts = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "-r") || !strcmp(argv[i], "--reverse")) {
             reverse = true;
         } else if (!strcmp(argv[i], "-c") || !strcmp(argv[i], "--canonical")) {
@@ -531,7 +529,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         } break;
         case BUILD: {
             fprintf(stderr, "Usage: %s build [options] FILE1 [[FILE2] ...]\n"
-                            "\tEach input file is given in FASTA, FASTQ, or VCF format.\n"
+                            "\tEach input file is given in FASTA, FASTQ, VCF, or KMC format.\n"
                             "\tNote that VCF files must be in plain text or bgzip format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for build:\n");
@@ -569,7 +567,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         } break;
         case EXTEND: {
             fprintf(stderr, "Usage: %s extend -i <GRAPH> -o <extended_graph_basename> [options] FILE1 [[FILE2] ...]\n"
-                            "\tEach input file is given in FASTA, FASTQ, or VCF format.\n"
+                            "\tEach input file is given in FASTA, FASTQ, VCF, or KMC format.\n"
                             "\tNote that VCF files must be in plain text or bgzip format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for extend:\n");

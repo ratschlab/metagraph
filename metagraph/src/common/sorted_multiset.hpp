@@ -26,7 +26,7 @@ class SortedMultiset {
     ~SortedMultiset() {}
 
     template <class Iterator>
-    void insert(Iterator begin, Iterator end) {
+    void insert(Iterator begin, Iterator end, C *counts = nullptr) {
         assert(begin <= end);
 
         uint64_t batch_size = end - begin;
@@ -62,9 +62,15 @@ class SortedMultiset {
             if constexpr(std::is_base_of<value_type, decltype(*begin)>::value) {
                 data_[offset++] = *begin;
             } else {
-                data_[offset++] = { *begin, 1 };
+                if (counts) {
+                    data_[offset++] = { *begin, *counts };
+                } else {
+                    data_[offset++] = { *begin, 1 };
+                }
             }
             ++begin;
+            if (counts)
+                ++counts;
         }
     }
 

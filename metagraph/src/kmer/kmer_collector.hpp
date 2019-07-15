@@ -20,6 +20,7 @@ class KmerStorage {
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
 
   public:
+    using Key = typename Container::key_type;
     using Value = typename Container::value_type;
     using Data = typename Container::storage_type;
 
@@ -35,13 +36,14 @@ class KmerStorage {
 
     inline size_t suffix_length() const { return filter_suffix_encoded_.size(); }
 
+    void add_kmer(std::string&& kmer, uint32_t count);
+
     void add_sequence(std::string&& sequence);
 
     void add_sequences(const std::function<void(CallString)> &generate_sequences);
 
     void insert_dummy(KMER dummy_kmer);
 
-    //TODO possible to get rid of this or make interface more formal?
     inline Data& data() { join(); return kmers_.data(); }
 
     void clear() { join(); kmers_.clear(); }

@@ -118,6 +118,23 @@ KmerStorage<KMER, KmerExtractor, Container>
 
 template <typename KMER, class KmerExtractor, class Container>
 void KmerStorage<KMER, KmerExtractor, Container>
+::add_kmer(std::string&& kmer, uint32_t count) {
+    assert(kmer.size() == k_);
+    KmerExtractor kmer_extractor;
+    Vector<KMER> temp_storage;
+    kmer_extractor.sequence_to_kmers(kmer, k_, filter_suffix_encoded_, &temp_storage);
+    assert(temp_storage.size() == 1);
+    if constexpr(std::is_base_of<SortedSet<KMER>, Container>::value) {
+        (void)count;
+        kmers_.insert(temp_storage.begin(), temp_storage.end());
+    } else {
+        typename Container::count_type c = count;
+        kmers_.insert(temp_storage.begin(), temp_storage.end(), &c);
+    }
+}
+
+template <typename KMER, class KmerExtractor, class Container>
+void KmerStorage<KMER, KmerExtractor, Container>
 ::add_sequence(std::string&& sequence) {
     if (sequence.size() < k_)
         return;

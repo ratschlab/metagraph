@@ -94,7 +94,11 @@ std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename
         delete graph;
         exit(1);
     }
+
     if constexpr (std::is_base_of<DeBruijnGraph, Graph>::value) {
+        if (DBGWeights<>::has_file(*graph, filename) && !graph->template get_extension<DBGWeights<>>())
+            graph->add_extension(std::make_shared<DBGWeights<>>());
+
         if (!graph->load_extensions(filename)) {
             std::cerr << "ERROR: can't load graph extensions for " << filename << std::endl;
             delete graph;
@@ -661,11 +665,12 @@ void print_stats(const Annotator &annotation) {
 }
 
 
-template <class Callback, class Loop>
+template <class Callback, class CountedKmer, class Loop>
 void parse_sequences(const std::vector<std::string> &files,
                      const Config &config,
                      const Timer &timer,
                      Callback call_read,
+                     CountedKmer call_kmer,
                      Loop call_reads) {
     // iterate over input files
     for (const auto &file : files) {
@@ -679,13 +684,15 @@ void parse_sequences(const std::vector<std::string> &files,
             read_vcf_file_critical(file,
                                    config.refpath,
                                    config.k,
-                                   call_read,
+                                   [&](std::string&& sequence) {
+                                       call_read(std::move(sequence));
+                                   },
                                    config.reverse);
         } else if (utils::get_filetype(file) == "KMC") {
             bool warning_different_k = false;
             kmc::read_kmers(
                 file,
-                [&](std::string&& sequence) {
+                [&](std::string&& sequence, uint32_t count) {
                     if (!warning_different_k && sequence.size() != config.k) {
                         std::cerr << "Warning: k-mers parsed from KMC database "
                                   << file << " have length " << sequence.size()
@@ -693,7 +700,7 @@ void parse_sequences(const std::vector<std::string> &files,
                                   << std::endl;
                         warning_different_k = true;
                     }
-                    call_read(std::move(sequence));
+                    call_kmer(std::move(sequence), count);
                 },
                 config.min_count,
                 config.max_count
@@ -851,13 +858,6 @@ int main(int argc, const char *argv[]) {
 
             Timer timer;
 
-            if (config->count_kmers &&
-                    !(config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic)) {
-                std::cerr << "Error: Only static succinct graph can be built"
-                          << " with kmer counting" << std::endl;
-                exit(1);
-            }
-
             if (config->complete) {
                 if (config->graph_type != Config::GraphType::BITMAP) {
                     std::cerr << "Error: Only bitmap-graph can be built"
@@ -904,6 +904,7 @@ int main(int argc, const char *argv[]) {
 
                     parse_sequences(files, *config, timer,
                         [&](std::string&& read) { constructor->add_sequence(std::move(read)); },
+                        [&](std::string&& kmer, uint32_t count) { constructor->add_kmer(std::move(kmer), count); },
                         [&](const auto &loop) { constructor->add_sequences(loop); }
                     );
 
@@ -973,6 +974,7 @@ int main(int argc, const char *argv[]) {
                         new DBGBitmapConstructor(
                             bitmap_graph->get_k(),
                             config->canonical,
+                            config->count_kmers,
                             suffix,
                             config->parallel,
                             static_cast<uint64_t>(config->memory_available) << 30,
@@ -982,6 +984,7 @@ int main(int argc, const char *argv[]) {
 
                     parse_sequences(files, *config, timer,
                         [&](std::string&& read) { constructor->add_sequence(std::move(read)); },
+                        [&](std::string&& kmer, uint32_t count) { constructor->add_kmer(std::move(kmer), count); },
                         [&](const auto &loop) { constructor->add_sequences(loop); }
                     );
 
@@ -1052,47 +1055,24 @@ int main(int argc, const char *argv[]) {
                 }
                 assert(graph.get());
 
+                std::unique_ptr<sdsl::int_vector<>> weights;
+                if (config->count_kmers)
+                   weights.reset(new sdsl::int_vector<>(0, 0, 8));
+
                 parse_sequences(files, *config, timer,
                     [&graph](std::string&& seq) { graph->add_sequence(seq); },
+                    [&graph, &weights](std::string&& kmer, uint32_t count) {
+                        graph->add_sequence(std::move(kmer));
+                        if (weights)
+                            (*weights)[graph->kmer_to_node(kmer)] = count;
+                    },
                     [&graph](const auto &loop) {
                         loop([&graph](const auto &seq) { graph->add_sequence(seq); });
                     }
                 );
-            }
 
-            if (!config->kmc_counts.empty()) {
-                sdsl::int_vector<> kmer_counts;
-                kmer_counts.resize(graph->num_nodes() + 1);
-
-                if (!std::ifstream(config->kmc_counts).good()) {
-                    std::cerr << "Error: kmc counts file " << config->kmc_counts
-                              << " not found" << std::endl;
-                    exit(1);
-                }
-                if (dynamic_cast<DBGSuccinct*>(graph.get())) {
-                     kmc::read_kmers(
-                        config->kmc_counts,
-                        [&](std::string&& kmer, uint32_t count) {
-                            //TODO sorted multiset add counts
-                            (void)kmer;
-                            (void)count;
-                        },
-                        1ull,
-                        std::numeric_limits<uint64_t>::max()
-                    );
-                    //TODO sort
-                } else {
-                    kmc::read_kmers(
-                        config->kmc_counts,
-                        [&](std::string&& kmer, uint32_t count) {
-                            kmer_counts[graph->kmer_to_node(kmer)] = count;
-                        },
-                        1ull,
-                        std::numeric_limits<uint64_t>::max()
-                    );
-                }
-
-                graph->add_extension(std::make_shared<DBGWeights<>>(std::move(kmer_counts)));
+                if (weights)
+                    graph->add_extension(std::make_shared<DBGWeights<>>(std::move(*weights)));
             }
 
             if (config->verbose)
@@ -1118,6 +1098,14 @@ int main(int argc, const char *argv[]) {
             return 0;
         }
         case Config::EXTEND: {
+            //TODO handle count_kmers option and KMC input
+            //  graph not already weighted:
+            //      if count-kmers = True; warn and exit
+            //      if count-kmers unset and KMC file provided; don't warn or exit
+            //  if weighted:
+            //      if count-kmers and uncounted input file; add to existing counts
+            //      if counted (KMC) input file, count-kmers flag has no effect; add to existing counts
+
             assert(config->infbase_annotators.size() <= 1);
 
             Timer timer;
@@ -1155,10 +1143,14 @@ int main(int argc, const char *argv[]) {
             if (config->verbose)
                 std::cout << "Start graph extension" << std::endl;
 
-            // Insert new k-mers
             parse_sequences(files, *config, timer,
                 [&graph,&inserted_edges](std::string&& seq) {
                     graph->add_sequence(seq, inserted_edges.get());
+                },
+                //TODO apply counts if relevant
+                [&graph,&inserted_edges](std::string&& kmer, uint32_t count) {
+                    graph->add_sequence(kmer, inserted_edges.get());
+                    (void)count;
                 },
                 [&graph,&inserted_edges](const auto &loop) {
                     loop([&graph,&inserted_edges](const auto &seq) {
