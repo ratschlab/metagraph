@@ -122,6 +122,21 @@ class DBGHashOrdered : public DeBruijnGraph {
         const std::string& alphabet() const = 0;
     };
 
+    template <class ExtensionSubtype>
+    std::shared_ptr<ExtensionSubtype> get_extension() const {
+        return hash_dbg_->get_extension<ExtensionSubtype>();
+    };
+
+    template <class ExtensionType>
+    void add_extension(std::shared_ptr<ExtensionType> extension) {
+        hash_dbg_->add_extension(extension);
+    };
+
+    template <class ExtensionSubtype>
+    void each_extension(std::function<void(ExtensionSubtype &extension)> callback) {
+        hash_dbg_->each_extension(callback);
+    };
+
   private:
     static std::unique_ptr<DBGHashOrderedInterface>
     initialize_graph(size_t k, bool canonical_mode);

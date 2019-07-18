@@ -17,8 +17,8 @@ class IBitmapChunkConstructor : public IGraphChunkConstructor<DBGBitmap::Chunk> 
                                                double memory_preallocated = 0,
                                                bool verbose = false);
 
-    virtual void add_kmer(std::string&& kmer, uint32_t count) = 0;
-    virtual void add_sequence(std::string&& sequence) = 0;
+    virtual void add_kmer(const std::string&& kmer, uint32_t count) = 0;
+    virtual void add_sequence(const std::string&& sequence) = 0;
     virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;
 
     virtual DBGBitmap::Chunk* build_chunk() = 0;
@@ -40,12 +40,12 @@ class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
                          double memory_preallocated = 0,
                          bool verbose = false);
 
-    void add_kmer(std::string&& kmer, uint32_t count) {
+    void add_kmer(const std::string&& kmer, uint32_t count) {
         assert(kmer.size() == get_k());
         constructor_->add_kmer(std::move(kmer), count);
     }
 
-    void add_sequence(std::string&& sequence) {
+    void add_sequence(const std::string&& sequence) {
         constructor_->add_sequence(std::move(sequence));
     }
 

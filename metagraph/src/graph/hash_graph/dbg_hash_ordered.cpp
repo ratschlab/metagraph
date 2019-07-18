@@ -5,6 +5,7 @@
 #include "serialization.hpp"
 #include "bit_vector.hpp"
 #include "utils.hpp"
+#include "weighted_graph.hpp"
 
 
 template <typename KMER = KmerExtractor2Bit::Kmer64>
@@ -123,12 +124,20 @@ void DBGHashOrderedImpl<KMER>::add_sequence(const std::string &sequence,
                                             bit_vector_dyn *nodes_inserted) {
     assert(!nodes_inserted || nodes_inserted->size() == num_nodes() + 1);
 
+    auto weights = this->get_extension<DBGWeights<>>();
+
     for (const auto &kmer : sequence_to_kmers(sequence)) {
         auto index_insert = kmers_.insert(kmer);
 
         if (index_insert.second && nodes_inserted)
             nodes_inserted->insert_bit(kmers_.size() - 1, true);
+
+        if (index_insert.second && weights && !nodes_inserted)
+            weights->insert_node(kmers_.size());
     }
+
+    if (weights)
+        weights->add_sequence(*this, std::move(sequence), nodes_inserted);
 
     if (!canonical_mode_)
         return;
@@ -138,7 +147,13 @@ void DBGHashOrderedImpl<KMER>::add_sequence(const std::string &sequence,
 
         if (index_insert.second && nodes_inserted)
             nodes_inserted->insert_bit(kmers_.size() - 1, true);
+
+        if (index_insert.second && weights && !nodes_inserted)
+            weights->insert_node(kmers_.size());
     }
+
+    if (weights)
+        weights->add_sequence(*this, std::move(seq_encoder_.reverse_complement(sequence)), nodes_inserted);
 }
 
 // Traverse graph mapping sequence to the graph nodes
