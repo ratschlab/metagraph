@@ -12,7 +12,7 @@ class BOSSConstructor : public IGraphConstructor<BOSS> {
     BOSSConstructor(const Args&... args)
       : constructor_(IBOSSChunkConstructor::initialize(args...)) {}
 
-    void add_sequence(std::string&& sequence) {
+    void add_sequence(const std::string&& sequence) {
         constructor_->add_sequence(std::move(sequence));
     }
 

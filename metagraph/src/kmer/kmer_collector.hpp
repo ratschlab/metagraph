@@ -36,9 +36,9 @@ class KmerStorage {
 
     inline size_t suffix_length() const { return filter_suffix_encoded_.size(); }
 
-    void add_kmer(std::string&& kmer, uint32_t count);
+    void add_kmer(const std::string&& kmer, uint32_t count);
 
-    void add_sequence(std::string&& sequence);
+    void add_sequence(const std::string&& sequence);
 
     void add_sequences(const std::function<void(CallString)> &generate_sequences);
 

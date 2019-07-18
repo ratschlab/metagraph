@@ -8,14 +8,22 @@
 #include "dbg_hash_ordered.hpp"
 #include "dbg_bitmap.hpp"
 #include "dbg_bitmap_construct.hpp"
+#include "weighted_graph.hpp"
 
 
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph(uint64_t k,
             const std::vector<std::string> &sequences,
-            bool canonical) {
+            bool canonical,
+            bool count_kmers) {
     std::shared_ptr<DeBruijnGraph> graph { new Graph(k, canonical) };
+
+    if (count_kmers)
+        graph->add_extension(std::make_shared<DBGWeights<>>());
+
+    auto weights = graph->get_extension<DBGWeights<>>();
+
     for (const auto &sequence : sequences) {
         graph->add_sequence(sequence);
     }
@@ -23,16 +31,39 @@ build_graph(uint64_t k,
     return graph;
 }
 
-template
+//TODO this (nearly) dupe specialization is needed b/c of DBGHashOrdered overriding
+//concrete methods on DBG with non-virtual forwarding methods
+template <>
 std::shared_ptr<DeBruijnGraph>
-build_graph<DBGHashOrdered>(uint64_t, const std::vector<std::string> &, bool);
+build_graph<DBGHashOrdered>(uint64_t k,
+                            const std::vector<std::string> &sequences,
+                            bool canonical,
+                            bool count_kmers) {
+    std::shared_ptr<DBGHashOrdered> graph { new DBGHashOrdered(k, canonical) };
+
+    if (count_kmers)
+        graph->add_extension(std::make_shared<DBGWeights<>>());
+
+    auto weights = graph->get_extension<DBGWeights<>>();
+
+    for (const auto &sequence : sequences) {
+        graph->add_sequence(sequence);
+    }
+
+    return graph;
+}
 
 template <>
 std::shared_ptr<DeBruijnGraph>
 build_graph<DBGHashString>(uint64_t k,
             const std::vector<std::string> &sequences,
-            bool) {
+            bool,
+            bool count_kmers) {
     std::shared_ptr<DeBruijnGraph> graph { new DBGHashString(k) };
+
+    if (count_kmers)
+        graph->add_extension(std::make_shared<DBGWeights<>>());
+
     for (const auto &sequence : sequences) {
         graph->add_sequence(sequence);
     }
@@ -44,12 +75,12 @@ template <>
 std::shared_ptr<DeBruijnGraph>
 build_graph<DBGBitmap>(uint64_t k,
                        const std::vector<std::string> &sequences,
-                       bool canonical) {
-    DBGBitmapConstructor constructor(k, canonical);
+                       bool canonical,
+                       bool count_kmers) {
+    DBGBitmapConstructor constructor(k, canonical, count_kmers);
     for (const auto &sequence : sequences) {
         constructor.add_sequence(std::string(sequence));
     }
-
     return std::shared_ptr<DeBruijnGraph>(new DBGBitmap(&constructor));
 }
 
@@ -57,8 +88,13 @@ template <>
 std::shared_ptr<DeBruijnGraph>
 build_graph<DBGSuccinct>(uint64_t k,
                          const std::vector<std::string> &sequences,
-                         bool canonical) {
+                         bool canonical,
+                         bool count_kmers) {
     std::shared_ptr<DeBruijnGraph> graph { new DBGSuccinct(k, canonical) };
+
+    if (count_kmers)
+        throw std::runtime_error("Not implemented");
+
     for (const auto &sequence : sequences) {
         graph->add_sequence(std::string(sequence));
     }

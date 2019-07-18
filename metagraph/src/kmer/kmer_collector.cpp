@@ -118,7 +118,7 @@ KmerStorage<KMER, KmerExtractor, Container>
 
 template <typename KMER, class KmerExtractor, class Container>
 void KmerStorage<KMER, KmerExtractor, Container>
-::add_kmer(std::string&& kmer, uint32_t count) {
+::add_kmer(const std::string&& kmer, uint32_t count) {
     assert(kmer.size() == k_);
     KmerExtractor kmer_extractor;
     Vector<KMER> temp_storage;
@@ -135,7 +135,7 @@ void KmerStorage<KMER, KmerExtractor, Container>
 
 template <typename KMER, class KmerExtractor, class Container>
 void KmerStorage<KMER, KmerExtractor, Container>
-::add_sequence(std::string&& sequence) {
+::add_sequence(const std::string&& sequence) {
     if (sequence.size() < k_)
         return;
 

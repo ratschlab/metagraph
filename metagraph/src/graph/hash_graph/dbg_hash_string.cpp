@@ -5,6 +5,7 @@
 #include "serialization.hpp"
 #include "bit_vector.hpp"
 #include "utils.hpp"
+#include "weighted_graph.hpp"
 #include "alphabets.hpp"
 
 
@@ -23,9 +24,12 @@
     );
 #endif
 
+
 void DBGHashString::add_sequence(const std::string &sequence,
                                  bit_vector_dyn *nodes_inserted) {
     assert(!nodes_inserted || nodes_inserted->size() == num_nodes());
+
+    auto weights = get_extension<DBGWeights<>>();
 
     for (const auto &seq_encoded : encode_sequence(sequence)) {
         assert(sequence.size() >= k_);
@@ -37,9 +41,15 @@ void DBGHashString::add_sequence(const std::string &sequence,
                 kmers_.push_back(index_insert.first->first);
                 if (nodes_inserted)
                     nodes_inserted->insert_bit(kmers_.size() - 1, true);
+                if (weights && !nodes_inserted) {
+                    weights->insert_node(kmers_.size());
+                }
             }
         }
     }
+
+    if (weights)
+        weights->add_sequence(*this, std::move(sequence), nodes_inserted);
 }
 
 void DBGHashString::map_to_nodes(const std::string &sequence,

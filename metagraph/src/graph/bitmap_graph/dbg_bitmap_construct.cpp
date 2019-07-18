@@ -21,12 +21,12 @@ class BitmapChunkConstructor : public IBitmapChunkConstructor {
                            double memory_preallocated = 0,
                            bool verbose = false);
 
-    void add_kmer(std::string&& kmer, uint32_t count) {
+    void add_kmer(const std::string&& kmer, uint32_t count) {
         assert(kmer.size() == get_k());
         kmer_collector_.add_kmer(std::move(kmer), count);
     }
 
-    void add_sequence(std::string&& sequence) {
+    void add_sequence(const std::string&& sequence) {
         kmer_collector_.add_sequence(std::move(sequence));
     }
 
@@ -105,8 +105,8 @@ void BitmapChunkConstructor<KmerStorage>
         weights.resize(kmers.size() + 1);
         max_count = ~uint64_t(0) >> (64 - weights.width());
 
-        for (size_t i = 1; i < kmers.size(); ++i) {
-            weights[i] = std::min(static_cast<uint64_t>(kmers[i].second), max_count);
+        for (size_t i = 0; i < kmers.size(); ++i) {
+            weights[i + 1] = std::min(static_cast<uint64_t>(kmers[i].second), max_count);
         }
 
         if (auto graph_weights = graph->get_extension<DBGWeights<>>()) {

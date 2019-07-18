@@ -6,6 +6,7 @@
 #include "test_dbg_helpers.hpp"
 #include "utils.hpp"
 #include "reverse_complement.hpp"
+#include "weighted_graph.hpp"
 
 const std::string test_data_dir = "../tests/data";
 const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
@@ -92,6 +93,37 @@ TYPED_TEST(DeBruijnGraphTest, InsertSequence) {
     EXPECT_TRUE(graph->find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
     EXPECT_TRUE(graph->find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
     EXPECT_FALSE(graph->find("CATGTTTTTTTAATATATATATTTTTAGC"));
+}
+
+TYPED_TEST(DeBruijnGraphTest, Weighted) {
+    for (size_t k = 1; k < 10; ++k) {
+        if constexpr (std::is_base_of<DBGSuccinct, TypeParam>::value) {
+            //TODO this fails for DBGSuccinct even with count_kmers = false for some reason
+            EXPECT_THROW(auto graph = build_graph<TypeParam>(k, {
+                std::string(100, 'A'),
+                std::string(k, 'G'),
+                std::string(50, 'C')
+            }, false, true), std::runtime_error);
+        } else {
+            auto graph = build_graph<TypeParam>(k, {
+                std::string(100, 'A'),
+                std::string(k, 'G'),
+                std::string(50, 'C')
+            }, false, true);
+
+            auto weights = dynamic_pointer_cast<TypeParam>(graph)->template get_extension<DBGWeights<>>();
+            EXPECT_NE(weights, nullptr);
+
+            auto node_idx = graph->kmer_to_node(std::string(k, 'A'));
+            EXPECT_EQ(100u - k + 1, weights->get_weight(node_idx));
+
+            node_idx = graph->kmer_to_node(std::string(k, 'C'));
+            EXPECT_EQ(50u - k + 1, weights->get_weight(node_idx));
+
+            node_idx = graph->kmer_to_node(std::string(k, 'G'));
+            EXPECT_EQ(1u, weights->get_weight(node_idx));
+        }
+    }
 }
 
 TYPED_TEST(DeBruijnGraphTest, ReverseComplement) {

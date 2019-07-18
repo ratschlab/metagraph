@@ -19,8 +19,61 @@ class DBGWeights : public DBGExtension<DeBruijnGraph> {
     DBGWeights(Weights&& weights) : weights_(std::move(weights)) {};
     DBGWeights(const DeBruijnGraph &graph, const std::string &filename_base) { load(graph, filename_base); };
 
+    virtual void add_kmer(const DeBruijnGraph &graph, const std::string&& kmer, uint32_t count) {
+        auto node = graph.kmer_to_node(kmer);
+        add_weight(node, count);
+    };
+
+    virtual void add_sequence(const DeBruijnGraph &graph,
+                              const std::string&& sequence,
+                              bit_vector_dyn *nodes_inserted = nullptr) {
+        if (nodes_inserted) {
+            node_index curpos = weights_.size() - 1;
+            assert(nodes_inserted->size() - weights_.size() == nodes_inserted->num_set_bits());
+            weights_.resize(nodes_inserted->size());
+            node_index i = weights_.size() - 1;
+
+            while (i >= 0) {
+                if ((*nodes_inserted)[i]) {
+                    weights_[i] = 1;
+                } else {
+                    assert(curpos < weights_.size());
+                    weights_[i] = weights_[curpos];
+                    curpos--;
+                }
+                i--;
+            }
+        }
+
+        auto k = graph.get_k();
+        for (size_t i = 0; i < sequence.size() - k; ++i) {
+            add_kmer(graph, sequence.substr(i, k), 1);
+        }
+    };
+
+    virtual void insert_node(node_index i) {
+        if (0 == weights_.size()) {
+            weights_.resize(1);
+            weights_[0] = 0;
+        }
+
+        assert(i <= weights_.size());
+        weights_.resize(weights_.size() + 1);
+        node_index j = weights_.size() - 1;
+
+        while (j > i) {
+            weights_[j + 1] = weights_[j];
+            j--;
+        }
+        weights_[j] = 1;
+    };
+
     virtual void set_weights(Weights&& weights) { weights_ = std::move(weights); };
-    virtual weight get_weight(node_index i) const { return weights_[i]; };
+
+    virtual weight get_weight(node_index i) const {
+        assert(i < weights_.size());
+        return weights_[i];
+    };
 
     virtual bool load(const DeBruijnGraph &graph, const std::string &filename_base);
     virtual void serialize(const DeBruijnGraph &graph, const std::string &filename_base) const;
@@ -29,6 +82,11 @@ class DBGWeights : public DBGExtension<DeBruijnGraph> {
 
   private:
     Weights weights_;
+
+    virtual void add_weight(node_index i, weight w) {
+        assert(i < weights_.size());
+        weights_[i] += w;
+    };
 
     static constexpr auto kWeightsExtension = ".weights";
 };

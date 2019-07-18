@@ -18,8 +18,8 @@ class IBOSSChunkConstructor : public IGraphChunkConstructor<BOSS::Chunk> {
                double memory_preallocated = 0,
                bool verbose = false);
 
-    virtual void add_kmer(std::string&& kmer, uint32_t count) = 0;
-    virtual void add_sequence(std::string&& sequence) = 0;
+    virtual void add_kmer(const std::string&& kmer, uint32_t count) = 0;
+    virtual void add_sequence(const std::string&& sequence) = 0;
     virtual void add_sequences(std::function<void(CallString)> generate_sequences) = 0;
 
     virtual BOSS::Chunk* build_chunk() = 0;
