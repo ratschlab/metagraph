@@ -31,28 +31,6 @@ build_graph(uint64_t k,
     return graph;
 }
 
-//TODO this (nearly) dupe specialization is needed b/c of DBGHashOrdered overriding
-//concrete methods on DBG with non-virtual forwarding methods
-template <>
-std::shared_ptr<DeBruijnGraph>
-build_graph<DBGHashOrdered>(uint64_t k,
-                            const std::vector<std::string> &sequences,
-                            bool canonical,
-                            bool count_kmers) {
-    std::shared_ptr<DBGHashOrdered> graph { new DBGHashOrdered(k, canonical) };
-
-    if (count_kmers)
-        graph->add_extension(std::make_shared<DBGWeights<>>());
-
-    auto weights = graph->get_extension<DBGWeights<>>();
-
-    for (const auto &sequence : sequences) {
-        graph->add_sequence(sequence);
-    }
-
-    return graph;
-}
-
 template <>
 std::shared_ptr<DeBruijnGraph>
 build_graph<DBGHashString>(uint64_t k,
