@@ -3,6 +3,7 @@
 #include <cstring>
 #include <iostream>
 #include <unordered_set>
+#include <filesystem>
 
 #include "utils.hpp"
 #include "threading.hpp"
@@ -352,7 +353,10 @@ Config::Config(int argc, const char *argv[]) {
         print_usage(argv[0], identity);
     }
 
-    if (outfbase.size() && !utils::check_if_writable(outfbase)) {
+    if (outfbase.size()
+            && !(utils::check_if_writable(outfbase)
+                    || (separately
+                        && std::filesystem::is_directory(std::filesystem::status(outfbase))))) {
         std::cerr << "Error: Can't write to " << outfbase << std::endl
                   << "Check if the path is correct" << std::endl;
         exit(1);

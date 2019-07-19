@@ -1234,7 +1234,7 @@ int main(int argc, const char *argv[]) {
                 config->parallel = 1;
 
                 for (const auto &file : files) {
-                    thread_pool.enqueue([](auto graph, auto filename, const Config *config) {
+                    thread_pool.enqueue([](auto graph, auto filename, auto outfilename, const Config *config) {
                             auto anno_graph = initialize_annotated_dbg(graph, *config);
 
                             annotate_data({ filename },
@@ -1248,10 +1248,13 @@ int main(int argc, const char *argv[]) {
                                           config->fasta_header_delimiter,
                                           config->anno_labels,
                                           config->verbose);
-                            anno_graph->get_annotation().serialize(filename);
+                            anno_graph->get_annotation().serialize(outfilename);
                         },
                         graph,
                         file,
+                        config->outfbase.size()
+                            ? config->outfbase + "/" + utils::split_string(file, "/").back()
+                            : file,
                         config.get()
                     );
                 }
