@@ -2357,3 +2357,27 @@ TEST(BOSS, is_single_outgoing_for_multiple_valid_edges) {
     // and 'GGGG' have a single outgoing edge.
     EXPECT_EQ(reference.size() - 2, single_outgoing_counter);
 }
+
+TEST(BOSS, call_outgoing_kmers_source) {
+    size_t k = 4;
+    std::vector<std::string> sequences {
+        "AATGG", "CCGAA"
+    };
+
+    auto graph = std::make_unique<DBGSuccinct>(k);
+    graph->add_sequence(sequences[0]);
+    graph->add_sequence(sequences[1]);
+
+    std::multiset<std::pair<DBGSuccinct::node_index, char>> ref {
+        { 2, 'A' }, { 3, 'C' }
+    };
+
+    std::multiset<std::pair<DBGSuccinct::node_index, char>> obs;
+
+    graph->call_outgoing_kmers(
+        1,
+        [&](auto node, char c) { obs.emplace(node, c); }
+    );
+
+    EXPECT_EQ(ref, obs);
+}
