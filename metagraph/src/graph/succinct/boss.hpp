@@ -381,8 +381,8 @@ class BOSS {
     const TAlphabet alph_size;
     const std::string &alphabet;
 
-    static const size_t kSentinelCode = 0;
-    static const size_t kSentinel = '$';
+    static constexpr size_t kSentinelCode = 0;
+    static constexpr size_t kSentinel = '$';
 
   private:
     // file dump extension
