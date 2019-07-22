@@ -404,7 +404,6 @@ void execute_query(std::string seq_name,
     output_stream << oss.str();
 }
 
-
 std::unique_ptr<Annotator> initialize_annotation(Config::AnnotationType anno_type,
                                                  const Config &config,
                                                  uint64_t num_rows) {
@@ -1826,12 +1825,22 @@ int main(int argc, const char *argv[]) {
                 if (config->verbose)
                     std::cout << "Loading annotation..." << std::endl;
 
-                // Load annotation from disk
-                if (!annotation->load(files.at(0))) {
-                    std::cerr << "ERROR: can't load annotation from file "
+                if (config->anno_type == Config::ColumnCompressed) {
+                    if (!annotation->merge_load(files)) {
+                        std::cerr << "ERROR: can't load annotations" << std::endl;
+                        exit(1);
+                    } else {
+                        std::cout << annotation->num_objects() << " " << annotation->num_labels() << "\n";
+                    }
+                } else {
+                    // Load annotation from disk
+                    if (!annotation->load(files.at(0))) {
+                        std::cerr << "ERROR: can't load annotation from file "
                               << files.at(0) << std::endl;
-                    exit(1);
+                        exit(1);
+                    }
                 }
+
                 if (config->verbose) {
                     std::cout << "Annotation loaded in "
                               << timer.elapsed() << "sec" << std::endl;
@@ -1880,6 +1889,11 @@ int main(int argc, const char *argv[]) {
                 std::cerr << "Skipping conversion: same input and target type: "
                           << Config::annotype_to_string(Config::RowCompressed)
                           << std::endl;
+                exit(1);
+            }
+
+            if (input_anno_type == Config::ColumnCompressed && files.size() > 1) {
+                std::cerr << "ERROR: conversion of multiple annotators only supported for ColumnCompressed" << std::endl;
                 exit(1);
             }
 
@@ -1944,11 +1958,11 @@ int main(int argc, const char *argv[]) {
                     std::cout << "Loading annotation..." << std::endl;
 
                 // Load annotation from disk
-                if (!annotation->load(files.at(0))) {
-                    std::cerr << "ERROR: can't load annotation from file "
-                              << files.at(0) << std::endl;
+                if (!annotation->merge_load(files)) {
+                    std::cerr << "ERROR: can't load annotations" << std::endl;
                     exit(1);
                 }
+
                 if (config->verbose) {
                     std::cout << "Annotation loaded in "
                               << timer.elapsed() << "sec" << std::endl;

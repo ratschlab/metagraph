@@ -315,7 +315,6 @@ Config::Config(int argc, const char *argv[]) {
 
     if ((identity == TRANSFORM
             || identity == CLEAN
-            || identity == TRANSFORM_ANNOTATION
             || identity == ASSEMBLE
             || identity == RELAX_BRWT)
                     && fname.size() != 1)

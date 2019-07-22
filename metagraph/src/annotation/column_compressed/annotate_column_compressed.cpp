@@ -201,6 +201,9 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
             if (!label_encoder_load.load(instream))
                 throw std::ifstream::failure("can't load label encoder");
 
+            if (!label_encoder_load.size())
+                std::cerr << "No labels in " << filename << "\n" << std::flush;
+
             // update the existing and add some new columns
             for (size_t c = 0; c < label_encoder_load.size(); ++c) {
                 std::unique_ptr<bit_vector> new_column { new bit_vector_smart() };
