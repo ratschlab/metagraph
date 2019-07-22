@@ -1101,14 +1101,13 @@ int main(int argc, const char *argv[]) {
             return 0;
         }
         case Config::EXTEND: {
-            //TODO handle count_kmers option and KMC input
-            //  graph not already weighted:
-            //      if count-kmers = True; warn and exit
-            //      if count-kmers unset and KMC file provided; don't warn or exit
-            //  if weighted:
-            //      if count-kmers and uncounted input file; add to existing counts
-            //      if counted (KMC) input file, count-kmers flag has no effect; add to existing counts
-
+            //TODO updating weights should now happen automatically-- weights extension will be loaded
+            // and graph add_sequence method will call add_sequence on weights extension. only things:
+            // - still need a add_counted_sequence or add_kmer(..., count) method on graph
+            // - communicate that count_kmers flag has no effect (if unweighted graph, doesn't make sense
+            // to start counting, and if weighted, doesn't make sense to stop counting)
+            // - maybe add a trivial command somewhere (TRANSFORM) to drop weights, or to add weights &
+            // default all to 1? the former is as simple as deleting the weights file.
             assert(config->infbase_annotators.size() <= 1);
 
             Timer timer;

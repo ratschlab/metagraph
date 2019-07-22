@@ -61,11 +61,22 @@ class DBGWeights : public DBGExtension<DeBruijnGraph> {
         weights_.resize(weights_.size() + 1);
         node_index j = weights_.size() - 1;
 
-        while (j > i) {
+        while (j >= i) {
             weights_[j + 1] = weights_[j];
             j--;
         }
-        weights_[j] = 1;
+        weights_[i] = 1;
+    };
+
+    template <class Vector>
+    void remove_masked_weights(const Vector &mask) {
+        node_index curpos = 1;
+        assert(mask.size() == weights_.size());
+        for (node_index i = 1; i < mask.size(); ++i) {
+            if (mask[i])
+                weights_[curpos++] = weights_[i];
+        }
+        weights_.resize(curpos);
     };
 
     virtual void set_weights(Weights&& weights) { weights_ = std::move(weights); };
