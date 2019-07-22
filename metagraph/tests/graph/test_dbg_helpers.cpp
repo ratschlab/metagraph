@@ -70,8 +70,11 @@ build_graph<DBGSuccinct>(uint64_t k,
                          bool count_kmers) {
     std::shared_ptr<DeBruijnGraph> graph { new DBGSuccinct(k, canonical) };
 
-    if (count_kmers)
-        throw std::runtime_error("Not implemented");
+    if (count_kmers) {
+        auto weights = std::make_shared<DBGWeights<>>();
+        graph->add_extension(weights);
+        weights->insert_node(1);
+    }
 
     for (const auto &sequence : sequences) {
         graph->add_sequence(std::string(sequence));
