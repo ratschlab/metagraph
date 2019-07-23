@@ -406,10 +406,10 @@ TEST(CollectKmers2Bit, ExtractKmersParallelRemoveRedundant) {
 TEST(DBGBitmapMergeChunks, DumpedChunked) {
     for (size_t k = 2; k < 11; ++k) {
         std::vector<std::unique_ptr<IBitmapChunkConstructor>> constructors;
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "A"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "C"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "G"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, "T"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "A"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "C"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "G"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, false, false, "T"));
 
         for (auto &constructor : constructors) {
             constructor->add_sequence("AAACT");
@@ -464,10 +464,10 @@ TEST(DBGBitmapMergeChunks, DumpedChunked) {
 TEST(DBGBitmapMergeChunks, DumpedChunkedCanonical) {
     for (size_t k = 2; k < 11; ++k) {
         std::vector<std::unique_ptr<IBitmapChunkConstructor>> constructors;
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "A"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "C"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "G"));
-        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, "T"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "A"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "C"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "G"));
+        constructors.emplace_back(IBitmapChunkConstructor::initialize(k, true, false, "T"));
 
         for (auto &constructor : constructors) {
             constructor->add_sequence("AAACT");
