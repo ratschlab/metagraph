@@ -96,7 +96,13 @@ class DBGWeights : public DBGExtension<DeBruijnGraph> {
 
     virtual void add_weight(node_index i, weight w) {
         assert(i < weights_.size());
+        weight prev = weights_[i];
         weights_[i] += w;
+        if (weights_[i] < prev) {
+            std::cerr << "Warning: weighted graph entry " << i << " has"
+                      << " overflowed:" << prev << " + " << w << " = "
+                      << weights_[i] << std::endl;
+        }
     };
 
     static constexpr auto kWeightsExtension = ".weights";
@@ -122,11 +128,11 @@ bool DBGWeights<Weights>::load(const DeBruijnGraph &graph, const std::string &fi
 template <typename Weights>
 void DBGWeights<Weights>::serialize(const DeBruijnGraph &graph, const std::string &filename_base) const {
 
-    std::ofstream outstream(utils::remove_suffix(filename_base, graph.file_extension())
-                                + graph.file_extension()
-                                + kWeightsExtension,
-                            std::ios::binary);
+    const auto weights_filename = utils::remove_suffix(filename_base, graph.file_extension())
+                                        + graph.file_extension()
+                                        + kWeightsExtension;
 
+    std::ofstream outstream(weights_filename, std::ios::binary);
     this->weights_.serialize(outstream);
 }
 

@@ -1,4 +1,5 @@
 #include "sequence_graph.hpp"
+#include "weighted_graph.hpp"
 
 #include <cassert>
 
@@ -322,3 +323,27 @@ std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph) {
     graph.print(out);
     return out;
 }
+
+template <class DBG>
+bool DBGExtensions<DBG>::load_extensions(const std::string &filename_base) {
+    auto graph = static_cast<DBG*>(this);
+
+    // any new graph extension types should be added explicitly here
+    if (DBGWeights<>::has_file(*graph, filename_base) && !this->template get_extension<DBGWeights<>>())
+        this->add_extension(std::make_shared<DBGWeights<>>());
+
+    for (auto extension : this->extensions_) {
+        if (!extension->load(*dynamic_cast<const DBG*>(this), filename_base))
+            return false;
+    }
+    return true;
+};
+
+template <class DBG>
+void DBGExtensions<DBG>::serialize_extensions(const std::string &filename_base) const {
+    for (auto extension : this->extensions_) {
+        extension->serialize(*dynamic_cast<const DBG*>(this), filename_base);
+    }
+};
+
+template class DBGExtensions<DeBruijnGraph>;

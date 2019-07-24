@@ -220,7 +220,7 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
     }
 
     void add_kmer(const std::string&& kmer, uint32_t count) {
-        assert(kmer.size() == get_k());
+        assert(kmer.size() == get_k() + 1);
         kmer_storage_.add_kmer(std::move(kmer), count);
     }
 
