@@ -336,6 +336,7 @@ void DBGHashOrderedImpl<KMER>::serialize(const std::string &filename) const {
     std::ofstream out(utils::remove_suffix(filename, kExtension) + kExtension,
                       std::ios::binary);
     serialize(out);
+    serialize_extensions(filename);
 }
 
 template <typename KMER>
@@ -368,7 +369,7 @@ template <typename KMER>
 bool DBGHashOrderedImpl<KMER>::load(const std::string &filename) {
     std::ifstream in(utils::remove_suffix(filename, kExtension) + kExtension,
                      std::ios::binary);
-    return load(in);
+    return load(in) && load_extensions(filename);
 }
 
 template <typename KMER>

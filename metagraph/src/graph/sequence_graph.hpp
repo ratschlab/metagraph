@@ -73,18 +73,8 @@ class DBGExtension : public utils::Extension<DBG> {
 template <class DBG>
 class DBGExtensions : public utils::Extensions<DBGExtension<DBG>> {
   public:
-    bool load_extensions(const std::string &filename_base) const {
-        for (auto extension : this->extensions_) {
-            if (!extension->load(*dynamic_cast<const DBG*>(this), filename_base))
-                return false;
-        }
-        return true;
-    };
-    void serialize_extensions(const std::string &filename_base) const {
-        for (auto extension : this->extensions_) {
-            extension->serialize(*dynamic_cast<const DBG*>(this), filename_base);
-        }
-    };
+    bool load_extensions(const std::string &filename_base);
+    void serialize_extensions(const std::string &filename_base) const;
 };
 
 class DeBruijnGraph : public SequenceGraph, public DBGExtensions<DeBruijnGraph> {

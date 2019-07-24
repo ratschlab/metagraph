@@ -95,16 +95,6 @@ std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename
         exit(1);
     }
 
-    if constexpr (std::is_base_of<DeBruijnGraph, Graph>::value) {
-        if (DBGWeights<>::has_file(*graph, filename) && !graph->template get_extension<DBGWeights<>>())
-            graph->add_extension(std::make_shared<DBGWeights<>>());
-
-        if (!graph->load_extensions(filename)) {
-            std::cerr << "ERROR: can't load graph extensions for " << filename << std::endl;
-            delete graph;
-            exit(1);
-        }
-    }
     return std::shared_ptr<Graph> { graph };
 }
 
@@ -693,6 +683,7 @@ void parse_sequences(const std::vector<std::string> &files,
             kmc::read_kmers(
                 file,
                 [&](std::string&& sequence, uint32_t count) {
+                    //TODO doesn't make sense to use config.k when extending
                     if (!warning_different_k && sequence.size() != config.k) {
                         std::cerr << "Warning: k-mers parsed from KMC database "
                                   << file << " have length " << sequence.size()
@@ -1102,11 +1093,13 @@ int main(int argc, const char *argv[]) {
         case Config::EXTEND: {
             //TODO updating weights should now happen automatically-- weights extension will be loaded
             // and graph add_sequence method will call add_sequence on weights extension. only things:
-            // - still need a add_counted_sequence or add_kmer(..., count) method on graph
             // - communicate that count_kmers flag has no effect (if unweighted graph, doesn't make sense
             // to start counting, and if weighted, doesn't make sense to stop counting)
             // - maybe add a trivial command somewhere (TRANSFORM) to drop weights, or to add weights &
             // default all to 1? the former is as simple as deleting the weights file.
+
+            //TODO technically could "extend" bitmap graph by incrementing weights of existing kmers;
+            // currently throws "not implemented" because of calling add_sequence
             assert(config->infbase_annotators.size() <= 1);
 
             Timer timer;
@@ -1148,10 +1141,10 @@ int main(int argc, const char *argv[]) {
                 [&graph,&inserted_edges](std::string&& seq) {
                     graph->add_sequence(seq, inserted_edges.get());
                 },
-                //TODO apply counts if relevant
                 [&graph,&inserted_edges](std::string&& kmer, uint32_t count) {
                     graph->add_sequence(kmer, inserted_edges.get());
-                    (void)count;
+                    if (auto weighted = graph->get_extension<DBGWeights<>>())
+                        weighted->add_kmer(*graph, std::move(kmer), count);
                 },
                 [&graph,&inserted_edges](const auto &loop) {
                     loop([&graph,&inserted_edges](const auto &seq) {

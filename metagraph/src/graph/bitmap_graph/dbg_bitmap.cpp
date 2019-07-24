@@ -228,6 +228,7 @@ void DBGBitmap::serialize(const std::string &filename) const {
     std::ofstream out(utils::remove_suffix(filename, kExtension) + kExtension,
                       std::ios::binary);
     serialize(out);
+    serialize_extensions(filename);
 }
 
 bool DBGBitmap::load(std::istream &in) {
@@ -272,7 +273,7 @@ bool DBGBitmap::load(std::istream &in) {
 bool DBGBitmap::load(const std::string &filename) {
     std::ifstream in(utils::remove_suffix(filename, kExtension) + kExtension,
                      std::ios::binary);
-    return load(in);
+    return load(in) && load_extensions(filename);
 }
 
 Vector<DBGBitmap::Kmer> DBGBitmap::sequence_to_kmers(const std::string &sequence,
