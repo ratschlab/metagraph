@@ -61,9 +61,8 @@ class DBGWeights : public DBGExtension<DeBruijnGraph> {
         weights_.resize(weights_.size() + 1);
         node_index j = weights_.size() - 1;
 
-        while (j >= i) {
+        while (--j >= i) {
             weights_[j + 1] = weights_[j];
-            j--;
         }
         weights_[i] = 1;
     };
