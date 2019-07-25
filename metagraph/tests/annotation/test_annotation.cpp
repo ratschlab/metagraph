@@ -163,6 +163,8 @@ class AnnotatorDynamicNoSparseTest : public AnnotatorPreset2Test<Annotator> { };
 typedef ::testing::Types<annotate::BinRelWTAnnotator,
                          annotate::BinRelWT_sdslAnnotator,
                          annotate::BRWTCompressed<>,
+                         annotate::RainbowfishAnnotator,
+                         annotate::RowFlatAnnotator,
                          annotate::ColumnCompressed<>,
                          annotate::RowCompressed<>,
                          RowCompressedParallel<>,
@@ -170,6 +172,8 @@ typedef ::testing::Types<annotate::BinRelWTAnnotator,
                          RowCompressedSparse<>> AnnotatorTypes;
 typedef ::testing::Types<annotate::BinRelWTAnnotator,
                          annotate::BinRelWT_sdslAnnotator,
+                         annotate::RainbowfishAnnotator,
+                         annotate::RowFlatAnnotator,
                          annotate::BRWTCompressed<>> AnnotatorStaticTypes;
 typedef ::testing::Types<annotate::BRWTCompressed<>> AnnotatorStaticLargeTypes;
 typedef ::testing::Types<annotate::ColumnCompressed<>,
