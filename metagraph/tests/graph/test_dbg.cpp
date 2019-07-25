@@ -92,6 +92,12 @@ TYPED_TEST(DeBruijnGraphTest, InsertSequence) {
     EXPECT_FALSE(graph->find("CATGTTTTTTTAATATATATATTTTTAGC"));
 }
 
+//TODO with -O0:
+//Undefined symbols for architecture x86_64:
+//  "BOSS::kSentinelCode", referenced from:
+//      BOSS::add_sequence(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, bool, std::vector<unsigned long long, std::allocator<unsigned long long> >*) in libmetagraph.a(boss.cpp.o)
+//ld: symbol(s) not found for architecture x86_64
+
 TYPED_TEST(DeBruijnGraphTest, Weighted) {
     //TODO Index   L               W
     //     1       0               $
@@ -105,11 +111,6 @@ TYPED_TEST(DeBruijnGraphTest, Weighted) {
     // Fails because map_to_edge("G") returns 0 (when calling kmer_to_node("G"))
 
     for (size_t k = 2; k < 10; ++k) {
-        //TODO debug build fails with
-        //Assertion failed: (idx < this->size()), function operator[], file
-        // metagraph/external-libraries/sdsl-lite/include/sdsl/int_vector.hpp, line 1360.
-        //Abort trap: 6
-
         auto graph = build_graph<TypeParam>(k, {
             std::string(100, 'A'),
             std::string(k, 'G'),
