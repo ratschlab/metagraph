@@ -530,9 +530,12 @@ template <typename Label>
 void ColumnCompressed<Label>
 ::dump_columns(const std::string &prefix) const {
     for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
-        std::ofstream outstream(remove_suffix(prefix, kExtension)
+        std::ofstream outstream(
+            remove_suffix(prefix, kExtension)
                 + "." + std::to_string(i)
-                + ".raw" + kExtension);
+                + ".raw.annodbg",
+            std::ios::binary
+        );
 
         if (!outstream.good())
             throw std::ofstream::failure("Bad stream");

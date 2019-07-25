@@ -705,6 +705,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --arity  \t\tarity in the brwt tree [2]\n");
             fprintf(stderr, "\t   --greedy  \t\tuse greedy column partitioning in brwt construction [off]\n");
             fprintf(stderr, "\t   --fast  \t\ttransform annotation in memory without streaming [off]\n");
+            fprintf(stderr, "\t   --dump-raw-anno  \tdump the columns of the annotator as separate files in binary [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case RELAX_BRWT: {

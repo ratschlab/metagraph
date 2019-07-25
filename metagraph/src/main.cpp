@@ -1816,6 +1816,61 @@ int main(int argc, const char *argv[]) {
             Timer timer;
 
             /********************************************************/
+            /***************** dump labels to text ******************/
+            /********************************************************/
+
+            if (config->dump_raw_anno) {
+                const Config::AnnotationType input_anno_type
+                    = parse_annotation_type(files.at(0));
+
+                auto annotation = initialize_annotation(files.at(0), *config);
+
+                if (config->verbose)
+                    std::cout << "Loading annotation..." << std::endl;
+
+                if (config->anno_type == Config::ColumnCompressed) {
+                    if (!annotation->merge_load(files)) {
+                        std::cerr << "ERROR: can't load annotations" << std::endl;
+                        exit(1);
+                    }
+                } else {
+                    // Load annotation from disk
+                    if (!annotation->load(files.at(0))) {
+                        std::cerr << "ERROR: can't load annotation from file "
+                              << files.at(0) << std::endl;
+                        exit(1);
+                    }
+                }
+
+                if (config->verbose) {
+                    std::cout << "Annotation loaded in "
+                              << timer.elapsed() << "sec" << std::endl;
+                }
+
+                if (config->verbose)
+                    std::cout << "Dumping to text...\t" << std::flush;
+
+                if (input_anno_type == Config::ColumnCompressed) {
+                    assert(dynamic_cast<annotate::ColumnCompressed<>*>(annotation.get()));
+                    dynamic_cast<annotate::ColumnCompressed<>*>(
+                        annotation.get()
+                    )->dump_columns(config->outfbase);
+                } else if (input_anno_type == Config::BRWT) {
+                    assert(dynamic_cast<annotate::BRWTCompressed<>*>(annotation.get()));
+                    dynamic_cast<annotate::BRWTCompressed<>*>(
+                        annotation.get()
+                    )->dump_columns(config->outfbase);
+                } else {
+                    throw std::runtime_error("Dumping columns for this type not implemented");
+                }
+
+                if (config->verbose)
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+
+                return 0;
+            }
+
+            /********************************************************/
             /***************** rename column labels *****************/
             /********************************************************/
 

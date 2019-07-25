@@ -164,6 +164,30 @@ void StaticBinRelAnnotator<BinaryMatrixType, Label>
 }
 
 template <class BinaryMatrixType, typename Label>
+void StaticBinRelAnnotator<BinaryMatrixType, Label>
+::dump_columns(const std::string &prefix) const {
+    size_t m = num_labels();
+    for (uint64_t i = 0; i < m; ++i) {
+        std::ofstream outstream(
+            remove_suffix(prefix, kExtension)
+                + "." + std::to_string(i)
+                + ".raw.annodbg",
+            std::ios::binary
+        );
+
+        if (!outstream.good())
+            throw std::ofstream::failure("Bad stream");
+
+        auto column = matrix_->get_column(i);
+
+        serialize_number(outstream, column.size());
+        for (auto pos : column) {
+            serialize_number(outstream, pos);
+        }
+    }
+}
+
+template <class BinaryMatrixType, typename Label>
 StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::StaticBinRelAnnotator(size_t row_cache_size) : matrix_(new BinaryMatrixType()) {
     reset_row_cache(row_cache_size);
