@@ -33,7 +33,7 @@ class DBGWeights : public DBGExtension<DeBruijnGraph> {
             weights_.resize(nodes_inserted->size());
             node_index i = weights_.size() - 1;
 
-            while (i >= 0) {
+            while (true) {
                 if ((*nodes_inserted)[i]) {
                     weights_[i] = 1;
                 } else {
@@ -41,6 +41,8 @@ class DBGWeights : public DBGExtension<DeBruijnGraph> {
                     weights_[i] = weights_[curpos];
                     curpos--;
                 }
+                if (0 == i)
+                    break;
                 i--;
             }
         }
