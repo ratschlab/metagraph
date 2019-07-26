@@ -684,7 +684,6 @@ void parse_sequences(const std::vector<std::string> &files,
             kmc::read_kmers(
                 file,
                 [&](std::string&& sequence, uint32_t count) {
-                    //TODO doesn't make sense to use config.k when extending
                     if (!warning_different_k && sequence.size() != config.k) {
                         std::cerr << "Warning: k-mers parsed from KMC database "
                                   << file << " have length " << sequence.size()
@@ -851,8 +850,6 @@ int main(int argc, const char *argv[]) {
             Timer timer;
 
             if (config->complete) {
-                //TODO handle/warn-ignore count_kmers flag
-
                 if (config->graph_type != Config::GraphType::BITMAP) {
                     std::cerr << "Error: Only bitmap-graph can be built"
                               << " in complete mode" << std::endl;
@@ -1092,21 +1089,14 @@ int main(int argc, const char *argv[]) {
             return 0;
         }
         case Config::EXTEND: {
-            //TODO updating weights should now happen automatically-- weights extension will be loaded
-            // and graph add_sequence method will call add_sequence on weights extension. only things:
-            // - communicate that count_kmers flag has no effect (if unweighted graph, doesn't make sense
-            // to start counting, and if weighted, doesn't make sense to stop counting)
-            // - maybe add a trivial command somewhere (TRANSFORM) to drop weights, or to add weights &
-            // default all to 1? the former is as simple as deleting the weights file.
-
-            //TODO technically could "extend" bitmap graph by incrementing weights of existing kmers;
-            // currently throws "not implemented" because of calling add_sequence
             assert(config->infbase_annotators.size() <= 1);
 
             Timer timer;
 
             // load graph
             auto graph = load_critical_dbg(config->infbase);
+
+            config->k = graph->get_k();
 
             if (config->verbose) {
                 std::cout << "De Bruijn graph with k-mer size k="
