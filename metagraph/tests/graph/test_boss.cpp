@@ -1199,9 +1199,7 @@ TEST(BOSS, CallUnitigs1) {
                                 "ACTCT" });
     BOSS graph(&constructor);
 
-    size_t num_contigs = 0;
-
-    std::set<std::string> contigs {
+    std::multiset<std::string> contigs {
         "$$$$",
         "$$$ACT",
         "ACTCT$",
@@ -1209,16 +1207,15 @@ TEST(BOSS, CallUnitigs1) {
         "CTAGCTA",
     };
 
+    std::multiset<std::string> obs_contigs;
     graph.call_paths(
         [&](const auto &, const auto &seq) {
-            auto str = graph.decode(seq);
-            EXPECT_TRUE(contigs.count(str)) << str;
-            num_contigs++;
+            obs_contigs.insert(graph.decode(seq));
         },
         true
     );
 
-    EXPECT_EQ(contigs.size(), num_contigs);
+    EXPECT_EQ(contigs, obs_contigs) << graph;
 }
 
 TEST(BOSS, CallUnitigsDisconnected1) {
@@ -1228,9 +1225,7 @@ TEST(BOSS, CallUnitigsDisconnected1) {
                                 "ATCATCATCATCATCATCAT" });
     BOSS graph(&constructor);
 
-    size_t num_contigs = 0;
-
-    std::set<std::string> contigs {
+    std::multiset<std::string> contigs {
         "$$$$",
         "$$$ACT",
         "ACTCT$",
@@ -1239,16 +1234,16 @@ TEST(BOSS, CallUnitigsDisconnected1) {
         "TCATCA",
     };
 
+    std::multiset<std::string> obs_contigs;
+
     graph.call_paths(
         [&](const auto &, const auto &seq) {
-            auto str = graph.decode(seq);
-            EXPECT_TRUE(contigs.count(str)) << str;
-            num_contigs++;
+            obs_contigs.insert(graph.decode(seq));
         },
         true
     );
 
-    EXPECT_EQ(contigs.size(), num_contigs);
+    EXPECT_EQ(contigs, obs_contigs);
 }
 
 #ifndef _DNA_GRAPH
@@ -1260,9 +1255,7 @@ TEST(BOSS, CallUnitigsDisconnected2) {
                                 "ATNATNATNATNATNATNAT" });
     BOSS graph(&constructor);
 
-    size_t num_contigs = 0;
-
-    std::set<std::string> contigs {
+    std::multiset<std::string> contigs {
         "$$$$",
         "$$$ACT",
         "ACTCT$",
@@ -1272,16 +1265,16 @@ TEST(BOSS, CallUnitigsDisconnected2) {
         "TNATNA",
     };
 
+    std::multiset<std::string> obs_contigs;
+
     graph.call_paths(
         [&](const auto &, const auto &seq) {
-            auto str = graph.decode(seq);
-            EXPECT_TRUE(contigs.count(str)) << str;
-            num_contigs++;
+            obs_contigs.insert(graph.decode(seq));
         },
         true
     );
 
-    EXPECT_EQ(contigs.size(), num_contigs);
+    EXPECT_EQ(contigs, obs_contigs);
 }
 
 TEST(BOSS, CallUnitigsTwoComponents) {
@@ -1293,9 +1286,7 @@ TEST(BOSS, CallUnitigsTwoComponents) {
                                 "ATCNATCNATCNATCNATCNATCNAT" });
     BOSS graph(&constructor);
 
-    size_t num_contigs = 0;
-
-    std::set<std::string> contigs {
+    std::multiset<std::string> contigs {
         "$$$$",
         "$$$ACT",
         "ACTCT$",
@@ -1307,16 +1298,16 @@ TEST(BOSS, CallUnitigsTwoComponents) {
         "ATCATC",
     };
 
+    std::multiset<std::string> obs_contigs;
+
     graph.call_paths(
         [&](const auto &, const auto &seq) {
-            auto str = graph.decode(seq);
-            EXPECT_TRUE(contigs.count(str)) << str;
-            num_contigs++;
+            obs_contigs.insert(graph.decode(seq));
         },
         true
     );
 
-    EXPECT_EQ(contigs.size(), num_contigs);
+    EXPECT_EQ(contigs, obs_contigs);
 }
 #endif
 
@@ -1419,6 +1410,70 @@ TEST(BOSS, CallUnitigsWithPruning) {
         , 6);
         EXPECT_EQ(contigs.size(), num_contigs);
     }
+}
+
+TEST(BOSS, CallUnitigsCheckDegree) {
+    std::vector<std::string> sequences {
+        "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGG",
+        "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCGC",
+        "CCAAAATGAAACCTTCAGTTTTAACTCTTAATCAGACATAACTGGAAAA",
+        "CCGAACTAGTGAAACTGCAACAGACATACGCTGCTCTGAACTCTAAGGC",
+        "CCAGGTGCAGGGTGGACTCTTTCTGGATGTTGTAGTCAGACAGGGTGCG",
+        "ATCGGAAGAGCACACGTCTGAACTCCAGACACTAAGGCATCTCGTATGC",
+        "CGGAGGGAAAAATATTTACACAGAGTAGGAGACAAATTGGCTGAAAAGC",
+        "CCAGAGTCTCGTTCGTTATCGGAATTAACCAGACAAATCGCTCCACCAA"
+    };
+
+    BOSSConstructor constructor(8);
+    constructor.add_sequences(sequences);
+    BOSS graph(&constructor);
+    ASSERT_EQ(8u, graph.get_k());
+
+    std::multiset<std::string> unitigs {
+        "AGACAAATCGCTCCACCAA",
+        "AGACAAATTGGCTGAAAAGC",
+        "ATCGGAAGAGCACACGTCTGAACT",
+        "CAGACATAACTGGAAAA",
+        "CAGACATACGCTGCTCTGAACT",
+        "CCAAAATGAAACCTTCAGTTTTAACTCTTAATCAGACATA",
+        "CCAGAGTCTCGTTCGTTATCGGAATTAACCAGACAAAT",
+        "CCAGGGTGTGCTTGTCAAAGAGATATTCCGCCAAGCCAGATTCGGGCG",
+        "CCAGGTGCAGGGTGGACTCTTTCTGGATGTTGTAGTCAGACAGGGTGCG",
+        "CCGAACTAGTGAAACTGCAACAGACATA",
+        "CGGAGGGAAAAATATTTACACAGAGTAGGAGACAAAT",
+        "CTGAACTCCAGACACTAAGGCATCTCGTATGC",
+        "CTGAACTCTAAGGC",
+        "TCTGAACTC"
+    };
+
+    std::multiset<std::string> obs_unitigs;
+    graph.call_unitigs([&](const auto &unitig) { obs_unitigs.insert(unitig); }, 2);
+
+    EXPECT_EQ(unitigs, obs_unitigs);
+}
+
+TEST(BOSS, CallUnitigsIndegreeFirstNodeIsZero) {
+    std::vector<std::string> sequences {
+        "AGAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
+        "AGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCAGGTGTGGTGAC",
+        "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAATTAG"
+    };
+
+    BOSSConstructor constructor(30);
+    constructor.add_sequences(sequences);
+    BOSS graph(&constructor);
+    ASSERT_EQ(30u, graph.get_k());
+
+    std::multiset<std::string> unitigs {
+        "GAAACCCCGTCTCTACTAAAAATACAAAATTAGCCGGGAGTGGTGGCG",
+        "AGAAACCCCGTCTCTACTAAAAATACAAAAATTAGCCAGGTGTGGTGAC",
+        "GCCTGACCAGCATGGTGAAACCCCGTCTCTACTAAAAATACAAAAT"
+    };
+
+    std::multiset<std::string> obs_unitigs;
+    graph.call_unitigs([&](const auto &unitig) { obs_unitigs.insert(unitig); }, 2);
+
+    EXPECT_EQ(unitigs, obs_unitigs);
 }
 
 TEST(BOSS, CallEdgesEmptyGraph) {

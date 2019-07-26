@@ -114,6 +114,18 @@ DATA="../tests/data/transcripts_1000.fa"
 ./metagraph stats -a transcripts_1000.column.annodbg transcripts_1000
 ```
 
+### Graph cleaning
+```
+DATA="../tests/data/transcripts_1000.fa"
+K=12
+
+./metagraph build -k $K --count-kmers -o transcripts_1000 $DATA
+
+./metagraph clean --prune-tips $((2*K)) --prune-unitigs 0 --fallback 2 -o transcripts_1000_clean_contigs transcripts_1000.dbg
+
+zless transcripts_1000_clean_contigs.fasta.gz | tail
+```
+
 For real examples, see [scripts](./metagraph/scripts).
 
 ### Print usage

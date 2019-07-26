@@ -82,15 +82,16 @@ class DBGHashString : public DeBruijnGraph {
 
     bool operator==(const DeBruijnGraph &other) const;
 
-    const std::string& alphabet() const { return alphabet_; }
+    const std::string& alphabet() const;
 
   private:
-    std::string encode_sequence(const std::string &sequence) const;
+    std::vector<std::string> encode_sequence(const std::string &sequence) const;
 
     size_t k_;
     tsl::hopscotch_map<std::string, uint64_t> indices_;
     std::vector<std::string> kmers_;
-    const std::string alphabet_ = "ACGTN";
+
+    static const std::string alphabet_;
 
     static constexpr auto kExtension = ".hashstrdbg";
 };

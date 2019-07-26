@@ -34,7 +34,7 @@ build_graph_iterative(uint64_t k,
                       bool canonical = false);
 
 template <class Graph>
-bool check_graph(const std::string &alphabet, bool canonical);
+bool check_graph(const std::string &alphabet, bool canonical, bool check_sequence = false);
 
 
 template <typename Graph>

@@ -103,6 +103,7 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     Vector<Kmer> sequence_to_kmers(const std::string &sequence, bool canonical = false) const {
         return seq_encoder_.sequence_to_kmers<Kmer>(sequence, k_, canonical);
     }
+
     node_index get_index(const Kmer &kmer) const;
     Kmer get_kmer(node_index node) const;
 
@@ -166,13 +167,19 @@ void DBGHashOrderedImpl<KMER>::map_to_nodes_sequentially(
                               std::string::const_iterator end,
                               const std::function<void(node_index)> &callback,
                               const std::function<bool()> &terminate) const {
-    std::string str(begin, end);
-    for (const auto &kmer : sequence_to_kmers(std::string(begin, end))) {
-        callback(get_index(kmer));
+    std::string sequence(begin, end);
+    const auto &kmers = sequence_to_kmers(sequence);
+    auto it = kmers.begin();
+    for (bool is_valid : seq_encoder_.valid_kmers(sequence, k_)) {
+
+        assert(it != kmers.end() || !is_valid);
 
         if (terminate())
             return;
+
+        callback(is_valid ? get_index(*it++) : npos);
     }
+    assert(it == kmers.end());
 }
 
 // Traverse graph mapping sequence to the graph nodes
@@ -181,12 +188,18 @@ template <typename KMER>
 void DBGHashOrderedImpl<KMER>::map_to_nodes(const std::string &sequence,
                                             const std::function<void(node_index)> &callback,
                                             const std::function<bool()> &terminate) const {
-    for (const auto &kmer : sequence_to_kmers(sequence, canonical_mode_)) {
-        callback(get_index(kmer));
+    const auto &kmers = sequence_to_kmers(sequence, canonical_mode_);
+    auto it = kmers.begin();
+    for (bool is_valid : seq_encoder_.valid_kmers(sequence, k_)) {
+
+        assert(it != kmers.end() || !is_valid);
 
         if (terminate())
             return;
+
+        callback(is_valid ? get_index(*it++) : npos);
     }
+    assert(it == kmers.end());
 }
 
 template <typename KMER>

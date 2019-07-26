@@ -6,9 +6,12 @@
 #include "config.hpp"
 #include "boss.hpp"
 
+class MaskedDeBruijnGraph;
 
 class DBGSuccinct : public DeBruijnGraph {
   public:
+    friend MaskedDeBruijnGraph;
+
     explicit DBGSuccinct(size_t k, bool canonical_mode = false);
     explicit DBGSuccinct(BOSS *boss_graph, bool canonical_mode = false);
 
@@ -67,10 +70,7 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void call_outgoing_kmers(node_index, const OutgoingEdgeCallback&) const override final;
 
-    virtual void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const override final {
-        // TODO: Implement
-        throw std::runtime_error("Not implemented");
-    }
+    virtual void call_incoming_kmers(node_index, const IncomingEdgeCallback&) const override final;
 
     virtual size_t outdegree(node_index node) const override final;
     virtual size_t indegree(node_index node) const override final;
@@ -98,6 +98,8 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void print(std::ostream &out) const override final;
 
+  protected:
+    virtual void call_source_nodes(const std::function<void(node_index)> &callback) const override final;
 
   private:
     void add_seq(const std::string &sequence, bit_vector_dyn *nodes_inserted);

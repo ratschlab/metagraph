@@ -57,6 +57,8 @@ class KmerExtractor {
                                           bool canonical_mode = false,
                                           const std::vector<TAlphabet> &suffix = {});
 
+    static sdsl::bit_vector valid_kmers(const std::string &sequence, size_t k);
+
     template <class KMER>
     static std::string kmer_to_sequence(const KMER &kmer, size_t k) {
         return kmer.to_string(k, alphabet);
@@ -118,6 +120,8 @@ class KmerExtractor2BitT {
                                    size_t k,
                                    bool canonical_mode = false,
                                    const std::vector<TAlphabet> &suffix = {}) const;
+
+    sdsl::bit_vector valid_kmers(const std::string &sequence, size_t k) const;
 
     template <class T>
     std::string kmer_to_sequence(const Kmer<T> &kmer, size_t k) const {

@@ -63,11 +63,22 @@ ColumnCompressed<Label>::get_labels(Index i) const {
     assert(i < num_rows_);
 
     VLabels labels;
-    for (size_t j = 0; j < num_labels(); ++j) {
-        if (is_set(i, j))
-            labels.push_back(label_encoder_.decode(j));
+    for (auto label_index : get_label_codes(i)) {
+        labels.push_back(label_encoder_.decode(label_index));
     }
     return labels;
+}
+
+template <typename Label>
+std::vector<uint64_t> ColumnCompressed<Label>::get_label_codes(Index i) const {
+    assert(i < num_rows_);
+
+    std::vector<uint64_t> label_indices;
+    for (size_t j = 0; j < num_labels(); ++j) {
+        if (is_set(i, j))
+            label_indices.push_back(j);
+    }
+    return label_indices;
 }
 
 template <typename Label>
@@ -100,6 +111,33 @@ bool ColumnCompressed<Label>::has_label(Index i, const Label &label) const {
         return is_set(i, label_encoder_.encode(label));
     } catch (...) {
         return false;
+    }
+}
+
+template <typename Label>
+void ColumnCompressed<Label>
+::call_relations(const std::vector<Index> &indices,
+                 const Label &label,
+                 std::function<void(Index, bool)> callback,
+                 std::function<bool()> terminate) const {
+    try {
+        size_t label_code = label_encoder_.encode(label);
+
+        for (Index i : indices) {
+            if (terminate())
+                return;
+
+            callback(i, is_set(i, label_code));
+        }
+
+    } catch (...) {
+
+        for (Index i : indices) {
+            if (terminate())
+                return;
+
+            callback(i, false);
+        }
     }
 }
 
@@ -299,41 +337,6 @@ void ColumnCompressed<Label>
     }
 }
 
-// Get labels that occur at least in |presence_ratio| rows.
-// If |presence_ratio| = 0, return all occurring labels.
-template <typename Label>
-typename ColumnCompressed<Label>::VLabels
-ColumnCompressed<Label>::get_labels(const std::vector<Index> &indices,
-                                    double presence_ratio) const {
-    assert(presence_ratio >= 0 && presence_ratio <= 1);
-
-    const size_t min_labels_discovered =
-                        presence_ratio == 0
-                            ? 1
-                            : std::ceil(indices.size() * presence_ratio);
-    const size_t max_labels_missing = indices.size() - min_labels_discovered;
-
-    VLabels filtered_labels;
-
-    for (size_t j = 0; j < bitmatrix_.size(); ++j) {
-        uint64_t discovered = 0;
-        uint64_t missing = 0;
-
-        for (Index i : indices) {
-            if (is_set(i, j)) {
-                if (++discovered >= min_labels_discovered) {
-                    filtered_labels.push_back(label_encoder_.decode(j));
-                    break;
-                }
-            } else if (++missing > max_labels_missing) {
-                break;
-            }
-        }
-    }
-
-    return filtered_labels;
-}
-
 template <typename Label>
 uint64_t ColumnCompressed<Label>::num_objects() const {
     return num_rows_;
@@ -364,21 +367,6 @@ void ColumnCompressed<Label>::set(Index i, size_t j, bool value) {
 template <typename Label>
 bool ColumnCompressed<Label>::is_set(Index i, size_t j) const {
     return get_column(j)[i];
-}
-
-template <typename Label>
-std::vector<uint64_t>
-ColumnCompressed<Label>::count_labels(const std::vector<Index> &indices) const {
-    std::vector<uint64_t> counter(num_labels(), 0);
-
-    for (size_t j = 0; j < num_labels(); ++j) {
-        for (Index i : indices) {
-            if (is_set(i, j))
-                counter[j]++;
-        }
-    }
-
-    return counter;
 }
 
 template <typename Label>

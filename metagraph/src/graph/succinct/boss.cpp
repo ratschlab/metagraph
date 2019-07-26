@@ -28,8 +28,6 @@ using TAlphabet = BOSS::TAlphabet;
     assert(idx > 0)
 
 const BOSS::node_index BOSS::npos = 0;
-const size_t BOSS::kSentinelCode = 0;
-const char BOSS::kSentinel = '$';
 
 typedef BOSS::node_index node_index;
 typedef BOSS::edge_index edge_index;
@@ -887,13 +885,10 @@ void BOSS::map_to_nodes(const std::string &sequence,
                         const std::function<bool()> &terminate) const {
     auto seq_encoded = encode(sequence);
 
-    for (size_t i = 0; i + k_ - 1 < seq_encoded.size(); ++i) {
-        auto node = map_to_node(&seq_encoded[i], &seq_encoded[i + k_]);
-
+    for (size_t i = 0; i + k_ - 1 < seq_encoded.size() && !terminate(); ++i) {
+        auto node = map_to_node(seq_encoded.data() + i,
+                                seq_encoded.data() + i + k_);
         callback(node);
-
-        if (terminate())
-            return;
 
         if (!node)
             continue;
@@ -903,10 +898,10 @@ void BOSS::map_to_nodes(const std::string &sequence,
             if (!node)
                 break;
 
-            callback(node);
-
             if (terminate())
                 return;
+
+            callback(node);
 
             i++;
         }
@@ -926,8 +921,8 @@ std::vector<node_index> BOSS::map_to_nodes(const std::string &sequence,
     std::vector<node_index> indices;
 
     for (size_t i = 0; i + kmer_size <= seq_encoded.size(); ++i) {
-        edge_index edge = index_range(&seq_encoded[i],
-                                      &seq_encoded[i + kmer_size]).second;
+        edge_index edge = index_range(seq_encoded.data() + i,
+                                      seq_encoded.data() + i + kmer_size).second;
         node_index node = edge ? get_source_node(edge) : npos;
         indices.push_back(node);
 
@@ -957,22 +952,19 @@ void BOSS::map_to_edges(const std::string &sequence,
                         const std::function<bool()> &terminate) const {
     auto seq_encoded = encode(sequence);
 
-    for (size_t i = 0; i + k_ + 1 <= seq_encoded.size(); ++i) {
-        auto edge = map_to_edge(&seq_encoded[i], &seq_encoded[i + k_ + 1]);
-
+    for (size_t i = 0; i + k_ + 1 <= seq_encoded.size() && !terminate(); ++i) {
+        auto edge = map_to_edge(seq_encoded.data() + i,
+                                seq_encoded.data() + i + k_ + 1);
         callback(edge);
-
-        if (terminate())
-            return;
 
         while (edge && i + k_ + 1 < seq_encoded.size()) {
             edge = fwd(edge);
             edge = pick_edge(edge, get_source_node(edge), seq_encoded[i + k_ + 1]);
 
-            callback(edge);
-
             if (terminate())
                 return;
+
+            callback(edge);
 
             i++;
         }
@@ -1037,7 +1029,8 @@ bool BOSS::find(const std::string &sequence,
     skipped_kmers.reserve(seq_encoded.size());
 
     for (size_t i = 0; i < seq_encoded.size() - kmer_size + 1; ++i) {
-        auto edge = map_to_edge(&seq_encoded[i], &seq_encoded[i + kmer_size]);
+        auto edge = map_to_edge(seq_encoded.data() + i,
+                                seq_encoded.data() + i + kmer_size);
         if (edge) {
             num_kmers_discovered++;
         } else {
@@ -1083,7 +1076,8 @@ bool BOSS::find(const std::string &sequence,
     for (size_t j = 0; j < skipped_kmers.size(); ++j) {
         size_t i = skipped_kmers[j];
 
-        auto edge = map_to_edge(&seq_encoded[i], &seq_encoded[i + kmer_size]);
+        auto edge = map_to_edge(seq_encoded.data() + i,
+                                seq_encoded.data() + i + kmer_size);
         if (edge) {
             num_kmers_discovered++;
         } else {
@@ -1847,26 +1841,69 @@ void BOSS::merge(const BOSS &other) {
     });
 }
 
+void BOSS::call_start_edges(Call<edge_index> callback) const {
+    // start traversal in the main dummy source node and traverse the tree
+    // of source dummy k-mers to depth k + 1
+
+    // check if the dummy tree is not empty
+    if (is_single_outgoing(1))
+        return;
+
+    // run traversal for subtree
+    uint64_t root = 2;
+    size_t depth = 0;
+    do {
+        edge_DFT(root,
+            [&](edge_index) { depth++; },
+            [&](edge_index) { depth--; },
+            [&](edge_index edge) {
+                if (depth < k_)
+                    return false;
+
+                if (depth == k_)
+                    return !is_single_incoming(edge);
+
+                callback(edge);
+                return true;
+            }
+        );
+        assert(!depth);
+    } while (!get_last(root++));
+}
+
 /**
  * Traverse graph and extract directed paths covering the graph
  * edge, edge -> edge, edge -> ... -> edge, ... (k+1 - mer, k+...+1 - mer, ...)
  */
-void BOSS::call_paths(Call<const std::vector<edge_index>,
-                           const std::vector<TAlphabet>&> callback,
+void BOSS::call_paths(Call<std::vector<edge_index>&&,
+                           std::vector<TAlphabet>&&> callback,
                       bool split_to_contigs) const {
     // keep track of reached edges
-    std::vector<bool> discovered(W_->size(), false);
+    sdsl::bit_vector discovered(W_->size(), false);
     // keep track of edges that are already included in covering paths
-    std::vector<bool> visited(W_->size(), false);
+    sdsl::bit_vector visited(W_->size(), false);
 
     ProgressBar progress_bar(W_->size() - 1, "Traverse BOSS", std::cerr, !utils::get_verbose());
-    // start at all nodes with more than one outgoing edges
+
+    // process source dummy edges first
+    //
+    //  .____
+    //
+    auto last_source = succ_last(1);
+    for (uint64_t i = 1; i <= last_source; ++i) {
+        call_paths(i, callback, split_to_contigs, &discovered, &visited, progress_bar);
+    }
+
+    // then all forks
+    //  ____.____
+    //       \___
+    //
     for (uint64_t i = 1; i < W_->size(); ++i) {
         if (!visited[i] && !is_single_outgoing(i))
             call_paths(i, callback, split_to_contigs, &discovered, &visited, progress_bar);
     }
 
-    // process all the cycles left that have not beed traversed
+    // process all the cycles left that have not been traversed
     for (uint64_t i = 1; i < W_->size(); ++i) {
         if (!visited[i])
             call_paths(i, callback, split_to_contigs, &discovered, &visited, progress_bar);
@@ -1879,28 +1916,26 @@ struct Edge {
 };
 
 void BOSS::call_paths(edge_index starting_kmer,
-                      Call<const std::vector<edge_index>,
-                           const std::vector<TAlphabet>&> callback,
+                      Call<std::vector<edge_index>&&,
+                           std::vector<TAlphabet>&&> callback,
                       bool split_to_contigs,
-                      std::vector<bool> *discovered_ptr,
-                      std::vector<bool> *visited_ptr,
+                      sdsl::bit_vector *discovered_ptr,
+                      sdsl::bit_vector *visited_ptr,
                       ProgressBar &progress_bar) const {
     assert(discovered_ptr && visited_ptr);
 
     auto &discovered = *discovered_ptr;
     auto &visited = *visited_ptr;
     // store all branch nodes on the way
-    std::vector<uint64_t> path;
     std::vector<TAlphabet> kmer;
-
     discovered[starting_kmer] = true;
     std::deque<Edge> edges { { starting_kmer, get_node_seq(starting_kmer) } };
 
     // keep traversing until we have worked off all branches from the queue
     while (!edges.empty()) {
+        std::vector<uint64_t> path;
         uint64_t edge = edges.front().id;
         auto sequence = std::move(edges.front().source_kmer);
-        path.clear();
         edges.pop_front();
 
         // traverse simple path until we reach its tail or
@@ -1957,14 +1992,14 @@ void BOSS::call_paths(edge_index starting_kmer,
         }
 
         if (path.size())
-            callback(path, sequence);
+            callback(std::move(path), std::move(sequence));
     }
 }
 
 void BOSS::call_sequences(Call<const std::string&> callback) const {
     std::string sequence;
 
-    call_paths([&](const auto&, const auto &path) {
+    call_paths([&](auto&&, auto&& path) {
         sequence.clear();
 
         for (TAlphabet c : path) {
@@ -1980,32 +2015,64 @@ void BOSS::call_sequences(Call<const std::string&> callback) const {
 
 void BOSS::call_unitigs(Call<const std::string&> callback,
                         size_t min_tip_size) const {
-    std::string sequence;
-
-    call_paths([&](const auto &edges, const auto &path) {
-        sequence.clear();
-
+    call_paths([&](auto&& edges, auto&& path) {
         assert(path.size());
 
-        for (TAlphabet c : path) {
-            if (c != kSentinelCode) {
-                sequence.push_back(BOSS::decode(c));
-            }
-        }
+        auto begin = std::find_if(path.begin(), path.end(),
+                                  [&](auto c) { return c != kSentinelCode; });
+        auto end = path.end() - (path.back() == kSentinelCode);
 
-        if (sequence.size() <= k_)
+        if (begin + k_ + 1 > end)
             return;
 
-        if ((path.front() != kSentinelCode && path.back() != kSentinelCode)
-                // ceck if long
-                || sequence.size() >= k_ + min_tip_size
-                // check if not a source tip
-                || (path.front() == kSentinelCode
-                        && path.back() != kSentinelCode
+        assert(std::all_of(begin, end, [](auto c) { return c != kSentinelCode; }));
+
+        std::string sequence(end - begin, '\0');
+        std::transform(begin, end, sequence.begin(),
+                       [&](auto c) { return BOSS::decode(c % alph_size); });
+
+        // always call long unitigs
+        if (sequence.size() >= k_ + min_tip_size) {
+            callback(sequence);
+            return;
+        }
+
+        // this is a short unitig that must be skipped if it is a tip
+
+        /**
+         * Paths are sequences of edges!
+         *
+         * dead end:
+         *          _._._._$
+         *
+         * both 1 and 2 are dead ends:
+         *          1 ..._._._$
+         *          2 ..._._./
+         *
+         * both 1 and 2 are dead ends:
+         *          1 ..._._._._$
+         *          2 ..._._./
+         *
+         * neither 1 nor 2 is a dead end:
+         *          1 ..._._._._._$
+         *          2 ..._._./
+         */
+        bool outgoing_dead_end = path.back() == kSentinelCode
+                                    || !get_W(fwd(edges.back()));
+
+        bool incoming_dead_end = path.front() == kSentinelCode
+                                    || !get_minus_k_value(edges.front(), k_).first;
+
+        if ((!outgoing_dead_end && !incoming_dead_end)
+                // this is a short dead-end
+                // ...check if not a source tip
+                || (incoming_dead_end
+                        && !outgoing_dead_end
                         && !is_single_outgoing(fwd(edges.back())))
-                // check if not a sink tip
-                || (path.back() == kSentinelCode
-                        && path.front() != kSentinelCode
+                // this is a short dead-end but not a source tip
+                // ...check if not a sink tip
+                || (outgoing_dead_end
+                        && !incoming_dead_end
                         && !is_single_incoming(bwd(edges.front()))))
             callback(sequence);
 
@@ -2013,7 +2080,7 @@ void BOSS::call_unitigs(Call<const std::string&> callback,
 }
 
 void BOSS::call_edges(Call<edge_index, const std::vector<TAlphabet>&> callback) const {
-    call_paths([&](const auto &indices, const auto &path) {
+    call_paths([&](auto&& indices, auto&& path) {
         assert(path.size() == indices.size() + k_);
 
         for (size_t i = 0; i < indices.size(); ++i) {
@@ -2033,8 +2100,8 @@ struct Node {
  * Traverse graph and iterate over all nodes
  */
 void BOSS::call_kmers(Call<node_index, const std::string&> callback) const {
-    // std::vector<bool> discovered(W_->size(), false);
-    std::vector<bool> visited(W_->size(), false);
+    // sdsl::bit_vector discovered(W_->size(), false);
+    sdsl::bit_vector visited(W_->size(), false);
 
     // store all branch nodes on the way
     std::queue<Node> branchnodes;
