@@ -111,6 +111,11 @@ TYPED_TEST(DeBruijnGraphTest, Weighted) {
 
         node_idx = graph->kmer_to_node(std::string(k, 'G'));
         EXPECT_EQ(1u, weights->get_weight(node_idx));
+
+        if constexpr (!std::is_base_of<TypeParam, DBGBitmap>::value) {
+            bit_vector_dyn nodes_inserted(graph->num_nodes() + 1, 0);
+            graph->add_sequence(std::string(25, 'T'), &nodes_inserted);
+        }
     }
 }
 
