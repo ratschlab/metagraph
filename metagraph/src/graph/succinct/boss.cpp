@@ -28,6 +28,8 @@ using TAlphabet = BOSS::TAlphabet;
     assert(idx > 0)
 
 const BOSS::node_index BOSS::npos = 0;
+const size_t BOSS::kSentinelCode = 0;
+const char BOSS::kSentinel = '$';
 
 typedef BOSS::node_index node_index;
 typedef BOSS::edge_index edge_index;
