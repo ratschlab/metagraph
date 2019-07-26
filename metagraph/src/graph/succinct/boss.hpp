@@ -26,7 +26,7 @@ class BOSSConstructor;
  */
 class BOSS {
   public:
-    static const uint64_t npos;
+    static constexpr uint64_t npos = 0;
     // in [1,...,num_nodes], 0 = npos (invalid index)
     typedef uint64_t node_index;
     // in [1,...,num_edges], 0 = npos (invalid index)

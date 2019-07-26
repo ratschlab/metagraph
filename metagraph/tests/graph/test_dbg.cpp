@@ -95,24 +95,7 @@ TYPED_TEST(DeBruijnGraphTest, InsertSequence) {
     EXPECT_FALSE(graph->find("CATGTTTTTTTAATATATATATTTTTAGC"));
 }
 
-//TODO with -O0:
-//Undefined symbols for architecture x86_64:
-//  "BOSS::kSentinelCode", referenced from:
-//      BOSS::add_sequence(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, bool, std::vector<unsigned long long, std::allocator<unsigned long long> >*) in libmetagraph.a(boss.cpp.o)
-//ld: symbol(s) not found for architecture x86_64
-
 TYPED_TEST(DeBruijnGraphTest, Weighted) {
-    //TODO Index   L               W
-    //     1       0               $
-    //     2       0               A
-    //     3       0               C
-    //     4       1               G
-    //     5       1               A-
-    //     6       1               C-
-    //     7       1               $
-    // (k = 1)
-    // Fails because map_to_edge("G") returns 0 (when calling kmer_to_node("G"))
-
     for (size_t k = 2; k < 10; ++k) {
         auto graph = build_graph<TypeParam>(k, {
             std::string(100, 'A'),

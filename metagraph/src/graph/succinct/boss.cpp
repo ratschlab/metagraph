@@ -27,8 +27,6 @@ using TAlphabet = BOSS::TAlphabet;
     assert(idx <= num_nodes()); \
     assert(idx > 0)
 
-const BOSS::node_index BOSS::npos = 0;
-
 typedef BOSS::node_index node_index;
 typedef BOSS::edge_index edge_index;
 
