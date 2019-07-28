@@ -38,8 +38,6 @@ using namespace std;
 const uint64_t STATS_JOINS_HISTOGRAM (1u << 0u);
 const uint64_t STATS_SPLITS_HISTOGRAM (1u << 1u);
 
-using alphabets::log2;
-
 // todo find a tool that removes this relative namespacing issue
 // say to Mikhail that "de_bruijn_graph" instead of "metagraph/de_bruijn_graph" is the same violation as this
 
