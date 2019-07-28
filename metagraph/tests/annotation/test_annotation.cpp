@@ -1264,8 +1264,41 @@ TYPED_TEST(AnnotatorPreset2Test, SerializationAndLoadExtension3) {
     EXPECT_EQ(convert_to_set({ "Label8" }),                     convert_to_set(this->annotation->get(4)));
 }
 
-TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoad) {
+TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadText) {
     this->annotation->dump_columns(test_dump_basename_vec_good);
+
+    annotate::ColumnCompressed<> loaded(this->annotation->num_objects());
+
+    std::vector<std::string> labels;
+    const auto& label_encoder = this->annotation->get_label_encoder();
+    for (size_t i = 0; i < label_encoder.size(); ++i) {
+        labels.emplace_back(label_encoder.decode(i));
+    }
+
+    uint64_t size, pos;
+    for (size_t i = 0; i < this->annotation->num_labels(); ++i) {
+        std::ifstream fin(test_dump_basename_vec_good
+                            + "." + std::to_string(i) + ".text.annodbg");
+        ASSERT_TRUE(fin.good());
+
+        fin >> size;
+
+        while (size--) {
+            fin >> pos;
+            ASSERT_GT(this->annotation->num_objects(), pos);
+            loaded.add_labels(pos, { labels[i] });
+        }
+    }
+
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(loaded.get(0)));
+    EXPECT_EQ(convert_to_set({}),                               convert_to_set(loaded.get(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(loaded.get(2)));
+    EXPECT_EQ(convert_to_set({}),                               convert_to_set(loaded.get(3)));
+    EXPECT_EQ(convert_to_set({ "Label8" }),                     convert_to_set(loaded.get(4)));
+}
+
+TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadBinary) {
+    this->annotation->dump_columns(test_dump_basename_vec_good, true);
 
     annotate::ColumnCompressed<> loaded(this->annotation->num_objects());
 

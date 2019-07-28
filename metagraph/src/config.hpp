@@ -26,6 +26,7 @@ class Config {
     bool query_presence = false;
     bool filter_present = false;
     bool dump_raw_anno = false;
+    bool dump_text_anno = false;
     bool sparse = false;
     bool fast = false;
     bool count_labels = false;

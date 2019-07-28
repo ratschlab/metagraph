@@ -31,7 +31,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
 
     void serialize(const std::string &filename) const override;
     bool merge_load(const std::vector<std::string> &filenames) override;
-    void dump_columns(const std::string &prefix) const;
+    void dump_columns(const std::string &prefix, bool binary = false) const;
 
     uint64_t num_objects() const override;
     size_t num_labels() const override;

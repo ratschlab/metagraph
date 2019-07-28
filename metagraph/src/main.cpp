@@ -1819,7 +1819,7 @@ int main(int argc, const char *argv[]) {
             /***************** dump labels to text ******************/
             /********************************************************/
 
-            if (config->dump_raw_anno) {
+            if (config->dump_raw_anno || config->dump_text_anno) {
                 const Config::AnnotationType input_anno_type
                     = parse_annotation_type(files.at(0));
 
@@ -1837,7 +1837,7 @@ int main(int argc, const char *argv[]) {
                     // Load annotation from disk
                     if (!annotation->load(files.at(0))) {
                         std::cerr << "ERROR: can't load annotation from file "
-                              << files.at(0) << std::endl;
+                                  << files.at(0) << std::endl;
                         exit(1);
                     }
                 }
@@ -1845,21 +1845,36 @@ int main(int argc, const char *argv[]) {
                 if (config->verbose) {
                     std::cout << "Annotation loaded in "
                               << timer.elapsed() << "sec" << std::endl;
-                }
 
-                if (config->verbose)
-                    std::cout << "Dumping to text...\t" << std::flush;
+                    std::cout << "Dumping annotators...\t" << std::flush;
+                }
 
                 if (input_anno_type == Config::ColumnCompressed) {
                     assert(dynamic_cast<annotate::ColumnCompressed<>*>(annotation.get()));
-                    dynamic_cast<annotate::ColumnCompressed<>*>(
-                        annotation.get()
-                    )->dump_columns(config->outfbase);
+                    if (config->dump_raw_anno) {
+                        dynamic_cast<annotate::ColumnCompressed<>*>(
+                            annotation.get()
+                        )->dump_columns(config->outfbase, true);
+                    }
+
+                    if (config->dump_text_anno) {
+                        dynamic_cast<annotate::ColumnCompressed<>*>(
+                            annotation.get()
+                        )->dump_columns(config->outfbase);
+                    }
                 } else if (input_anno_type == Config::BRWT) {
                     assert(dynamic_cast<annotate::BRWTCompressed<>*>(annotation.get()));
-                    dynamic_cast<annotate::BRWTCompressed<>*>(
-                        annotation.get()
-                    )->dump_columns(config->outfbase);
+                    if (config->dump_raw_anno) {
+                        dynamic_cast<annotate::BRWTCompressed<>*>(
+                            annotation.get()
+                        )->dump_columns(config->outfbase, true);
+                    }
+
+                    if (config->dump_text_anno) {
+                        dynamic_cast<annotate::BRWTCompressed<>*>(
+                            annotation.get()
+                        )->dump_columns(config->outfbase);
+                    }
                 } else {
                     throw std::runtime_error("Dumping columns for this type not implemented");
                 }
