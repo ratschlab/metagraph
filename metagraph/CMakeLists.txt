@@ -20,7 +20,7 @@ add_subdirectory(
 )
 
 if(NOT CMAKE_DBG_ALPHABET)
-  set(CMAKE_DBG_ALPHABET "DNA")
+  set(CMAKE_DBG_ALPHABET "DNA5") # keep legacy
 endif()
 
 if(CMAKE_DBG_ALPHABET STREQUAL "DNA")

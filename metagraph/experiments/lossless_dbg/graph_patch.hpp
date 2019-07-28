@@ -41,9 +41,8 @@ public:
             return false; }()));
 #endif
         if (count != indegree(node)) {
-
+            //PRINT_VAR("has dummy input kmer",node,this->get_node_sequence(node),traverse_back(node,'$'));
             callback(0,'$'); // TODO: 0 is false node index (find the right one)
-
         }
     }
 
