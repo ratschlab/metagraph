@@ -402,12 +402,12 @@ void DBGSuccinct::serialize(const std::string &filename) const {
     if (!valid_edges_.get())
         return;
 
-    assert((boss_graph_->get_state() == Config::StateType::STAT
-                && dynamic_cast<const bit_vector_stat*>(valid_edges_.get()))
-        || (boss_graph_->get_state() == Config::StateType::DYN
-                && dynamic_cast<const bit_vector_dyn*>(valid_edges_.get()))
-        || (boss_graph_->get_state() == Config::StateType::SMALL
-                && dynamic_cast<const bit_vector_small*>(valid_edges_.get())));
+//    assert((boss_graph_->get_state() == Config::StateType::STAT
+//                && dynamic_cast<const bit_vector_stat*>(valid_edges_.get()))
+//        || (boss_graph_->get_state() == Config::StateType::DYN
+//                && dynamic_cast<const bit_vector_dyn*>(valid_edges_.get()))
+//        || (boss_graph_->get_state() == Config::StateType::SMALL
+//                && dynamic_cast<const bit_vector_small*>(valid_edges_.get())));
 
     const auto out_filename = remove_suffix(filename, kExtension) + kDummyMaskExtension;
     std::ofstream outstream(out_filename, std::ios::binary);

@@ -19,6 +19,7 @@ using json = nlohmann::json;
 
 
 #define MEMOIZE
+//#define MASK_DUMMY_KMERS
 //#define ALL_EDGES_COVERED
 //#define DISABLE_PARALELIZATION
 
@@ -29,6 +30,7 @@ using json = nlohmann::json;
 #include "samplers.hpp"
 #include "utilities.hpp"
 #include "threading.hpp"
+#include "configuration.hpp"
 
 
 
@@ -78,7 +80,12 @@ void compress_store_reads(ValueArg<std::string> &graphArg, const ValueArg<std::s
         if (not graph->load(graphArg.getValue())) {
             throw "Error loading graph";
         }
-        graph->mask_dummy_kmers(1, false);
+#ifdef MASK_DUMMY_KMERS
+    cerr << "Masking dummy kmers" << endl;
+    graph->mask_dummy_kmers(1, false);
+#else
+    alt_assert(graph->get_node_sequence(1) == std::string(graph->get_k(), '$'));
+#endif
         cerr << "Finished loading the graph in " << timer.elapsed() << " sec." << endl;
         pd.reset(new DatabaseT(graph,chunks));
     pd->encode(reads);
@@ -102,8 +109,12 @@ void compress_reads(ValueArg<std::string> &graphArg, const ValueArg<std::string>
         if (not graph->load(graphArg.getValue())) {
             throw "Error loading graph";
         }
-        graph->mask_dummy_kmers(1, false);
-		cerr << "Finished loading the graph in " << timer.elapsed() << " sec." << endl;
+#ifdef MASK_DUMMY_KMERS
+    graph->mask_dummy_kmers(1, false);
+#else
+    alt_assert(graph->get_node_sequence(1) == std::string(graph->get_k(), '$'));
+#endif
+        cerr << "Finished loading the graph in " << timer.elapsed() << " sec." << endl;
 		pd.reset(new DatabaseT(graph));
 	pd->encode(reads);
 	if (statisticsArg.isSet()) {

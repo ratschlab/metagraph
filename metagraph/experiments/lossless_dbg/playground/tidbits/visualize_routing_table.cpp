@@ -11,6 +11,8 @@
 #include <sdsl/io.hpp>
 #include <sdsl/wt_rlmn.hpp>
 
+#include "configuration.hpp"
+
 using TCLAP::ValueArg;
 using TCLAP::MultiArg;
 using TCLAP::UnlabeledValueArg;
@@ -23,17 +25,9 @@ using namespace sdsl;
 using namespace nlohmann;
 using namespace std::string_literals;
 
+
 int main(int argc, char *argv[]) {
-    // TCLAP::CmdLine cmd("Compress reads",' ', "0.1");
-    // TCLAP::ValueArg<std::string> inputArg("i",
-    //                                       "input",
-    //                                       "Graph to use as a reference in compression",
-    //                                       true,
-    //                                       "",
-    //                                       "string",cmd);
-    // cmd.parse(argc, argv);
-    // ifstream joins_file(inputArg.getValue());
-    sdsl::wt_rlmn<> wt;
+    DefaultWavelet wt;
     wt.load(cin);
     sdsl::write_structure<HTML_FORMAT>(wt, cout);
     return 0;

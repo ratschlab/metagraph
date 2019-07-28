@@ -73,4 +73,7 @@ int main(int argc, char *argv[]) {
     else if (regime == "dumprt") {
         main_dumprt(new_argv.size(),new_argv.data());
     }
+    else if (regime == "test") {
+       // main_compressor()
+    }
 }

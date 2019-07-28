@@ -15,13 +15,12 @@
 #include <boost/range/size_type.hpp>
 
 #include "utils.hpp"
+#include "configuration.hpp"
 #include "alphabets.hpp"
 
 #include "utilities.hpp"
 #include "routing_table_transformation.hpp"
 
-using DefaultUnderlyingWaveletBV = sdsl::rrr_vector<>;
-using DefaultWavelet = sdsl::wt_rlmn<DefaultUnderlyingWaveletBV,DefaultUnderlyingWaveletBV::rank_1_type,DefaultUnderlyingWaveletBV::select_1_type,sdsl::wt_huff<>>;
 template<class Wavelet = DefaultWavelet>
 class RoutingTableCore {
 public:
@@ -59,6 +58,7 @@ public:
         auto routing_table_block = offset(node);
         auto occurrences_of_symbol_before_block = routing_table.rank(routing_table_block,encode(symbol));
         if (occurrence > rank(node,size(node)+1,symbol)) {
+            PRINT_VAR(graph->get_node_sequence(node));
             PRINT_VAR(node,occurrence,symbol);
             print_content(node);
         }

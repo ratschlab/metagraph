@@ -27,6 +27,7 @@
 #include "incoming_table.hpp"
 #include "utilities.hpp"
 #include "query_enabler.hpp"
+#include "configuration.hpp"
 
 #include "graph_patch.hpp"
 //#define CHECK_CORECTNESS 1
@@ -173,7 +174,7 @@ public:
                 }
 #else
                 this->graph.call_incoming_kmers_mine(node,[&,this](node_index prev_node,char c) {
-                    auto branch_size = PathDatabaseDynamicCore<DRT,DIT>::incoming_table.branch_size(node,c);
+                    auto branch_size = c == '$' ? 0 : PathDatabaseDynamicCore<DRT,DIT>::incoming_table.branch_size(node,c); // if dummy kmers (fix proper test)
                     incoming_table_builder_local.push_back(branch_size);
                     current_table_size++;
                     delimiter_vector_local.push_back(false);
@@ -257,8 +258,14 @@ public:
         routing_table.serialize(routing_table_file);
         incoming_table.joins.serialize(joins_file);
         // boss - switch_state
+#if defined(MASK_DUMMY_KMERS)
+        alt_assert(this->graph_->get_node_sequence(1) != std::string(this->graph_->get_k(), '$'));
+#else
+        alt_assert(this->graph_->get_node_sequence(1) == std::string(this->graph_->get_k(), '$'));
+#endif
         const_cast<DBGSuccinct&>(this->graph).get_boss().switch_state(Config::SMALL);
         this->graph.serialize(graph_filename);
+
         cerr << "Finished serializing the path encoder in " << timer.elapsed() << " sec." << endl;
     }
     template <typename Database=QueryEnabler<DecodeEnabler<PathDatabaseWaveletCore<RoutingTableT,IncomingTableT>>>>
@@ -272,7 +279,11 @@ public:
                 new DBGSuccinct(21)
                 };
         graph->load(graph_filename);
+#if defined(MASK_DUMMY_KMERS)
         graph->mask_dummy_kmers(1,false);
+#else
+        alt_assert(graph->get_node_sequence(1) == std::string(graph->get_k(), '$'));
+#endif
         assert(graph->num_nodes());
         auto db = Database(graph);
         db.incoming_table.edge_multiplicity_table.load(edge_multiplicity_file);
@@ -293,7 +304,6 @@ public:
             PRINT_VAR(incoming_table.edge_multiplicity_table.size());
             return false;
         }()));
-
 #pragma omp parallel for num_threads(get_num_threads())
         for (node_index node = 1; node <= this->graph.num_nodes(); node++) {
             assert(this->graph.outdegree(node) < 2 || node_is_split(node) || [&](){
@@ -302,7 +312,7 @@ public:
                 routing_table.print_content(node);
                 PRINT_VAR(this->graph.get_node_sequence(node));
                 PRINT_VAR(routing_table.size(node));
-                return true;
+                return true; // fix -> assert only if graph has full coverage (implies no dummy kmers; also be )
             }());
         }
 

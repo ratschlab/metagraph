@@ -42,7 +42,9 @@ public:
 
     template<typename ...Args>
     TransformationsEnabler(shared_ptr<const DBGSuccinct> graph, Args... args) : RoutingTable(graph,args...){
+        #ifndef DISABLE_TRANSFORMATIONS
         transformations = GraphPreprocessor(*graph).find_weak_splits();
+        #endif
     }
 
     //using RoutingTable::RoutingTable;

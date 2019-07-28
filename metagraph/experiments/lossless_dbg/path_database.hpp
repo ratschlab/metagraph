@@ -16,6 +16,7 @@
 #include "sequence_graph.hpp"
 #include "boss_construct.hpp"
 #include "utilities.hpp"
+#include "configuration.hpp"
 
 #include "graph_patch.hpp"
 
@@ -31,7 +32,9 @@ class PathDatabase {
         Timer timer;
         cerr << "Started building the graph" << endl;
         auto graph = std::make_unique<GraphT>(dbg_succ_graph_constructor(reads, kmer_length));
+#ifdef MASK_DUMMY_KMERS
         graph->mask_dummy_kmers(1, false);
+#endif
         graph_.reset(graph.release());
         auto elapsed = timer.elapsed();
         cerr << "Building finished in " << elapsed << " sec." << endl;

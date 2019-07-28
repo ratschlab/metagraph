@@ -20,18 +20,39 @@ public:
     using DBGSuccinct::DBGSuccinct;
 
     void call_incoming_kmers_mine(node_index node,const std::function<void(node_index, char)>& callback) const {
+        int count = 0;
         for(auto c : "ACGTN"s) {
             auto new_node = traverse_back(node,c);
             if (new_node) {
                 callback(new_node,c);
+                count++;
             }
+        }
+#ifdef MASK_DUMMY_KMERS
+        alt_assert((count == indegree(node) || [&]() {
+            PRINT_VAR(node,count,this->indegree(node));
+            std::vector<node_index> adjacent_nodes;
+            adjacent_nodes.reserve(10);
+
+            this->adjacent_incoming_nodes(node, &adjacent_nodes);
+            for(auto& e : adjacent_nodes) {
+                cout << this->get_node_sequence(e) << endl;
+            }
+            return false; }()));
+#endif
+        if (count != indegree(node)) {
+
+            callback(0,'$'); // TODO: 0 is false node index (find the right one)
+
         }
     }
 
     char get_outgoing_base(node_index node) const {
         char base;
         assert(outdegree(node) == 1);
-        call_outgoing_kmers(node,[&base](node_index node,char edge_label ) { base = edge_label;});
+        call_outgoing_kmers(node,[&base](node_index node,char edge_label ) {
+            PRINT_VAR(node,edge_label);
+            base = edge_label;});
         return base;
     }
 

@@ -110,6 +110,7 @@ public:
             for(auto read_index=0;read_index<count;read_index++) {
                 auto relative_index = this->routing_table.select(node,read_index+1,'$');
                 auto id = get_global_path_id(node,relative_index);
+                PRINT_VAR("done");
                 reads.push_back(decode(id));
             }
         }
@@ -135,11 +136,18 @@ public:
     path_id get_global_path_id(node_index node, int64_t relative_position) const {
         node_index prev_node = 0;
         int64_t prev_offset = 0;
+//#ifdef VERBOSE_DEBUG
+        PRINT_VAR(this->graph_->get_node_sequence(node),node,relative_position);
+
+//#endif
         if (this->node_is_join(node)) {
             this->graph.call_incoming_kmers_mine(node,[&](node_index possible_node,char c) {
+                if (c == '$') return;
                 auto offset = use_char ?
                         this->incoming_table.branch_offset(node,c) :
                               this->incoming_table.branch_offset(node,possible_node);
+                this->incoming_table.print_content(node);
+                PRINT_VAR(c,offset);
                 if (offset <= relative_position && offset >= prev_offset) {
                     prev_node = possible_node;
                     prev_offset = offset;

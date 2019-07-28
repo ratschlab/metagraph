@@ -51,6 +51,7 @@ int main_tester(int argc, char *argv[]) {
     auto right_reads_ordered = read_reads_from_fasta(right);
     auto left_reads = multiset<string>(all(left_reads_ordered));
     auto right_reads = multiset<string>(all(right_reads_ordered));
+
     if (left_reads == right_reads) {
         cout << "Reads are identical up to ordering." << endl;
         return 0;
@@ -58,6 +59,24 @@ int main_tester(int argc, char *argv[]) {
     else {
         cout << "Files differ!!!" << endl;
         cerr << "Files differ!!!" << endl;
+        cout << "l: " << left_reads.size() << endl;
+        cout << "r: " << right_reads.size() << endl;
+        std::multiset<string> only_in_left;
+        std::set_difference(all(left_reads),
+                            all(right_reads),
+                            std::inserter(only_in_left, only_in_left.begin()));
+        std::multiset<string> only_in_right;
+        std::set_difference(all(right_reads),
+                            all(left_reads),
+                            std::inserter(only_in_right, only_in_right.begin()));
+        cout << "----- Only in left -----" << endl;
+        for(auto &e : only_in_left) {
+            cout << e << endl;
+        }
+        cout << "----- Only in right -----" << endl;
+        for(auto &e : only_in_right) {
+            cout << e << endl;
+        }
         return -1;
     }
 }

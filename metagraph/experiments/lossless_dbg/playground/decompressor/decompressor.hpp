@@ -23,6 +23,8 @@ using json = nlohmann::json;
 
 #include "samplers.hpp"
 #include "utilities.hpp"
+#include "configuration.hpp"
+
 
 #pragma clang diagnostic pop
 

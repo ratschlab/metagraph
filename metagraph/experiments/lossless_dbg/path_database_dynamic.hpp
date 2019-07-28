@@ -471,7 +471,9 @@ public:
         Timer timer;
         cerr << "Started building the graph" << endl;
         auto graph = new DBGSuccinct(dbg_succ_graph_constructor(reads, kmer_length));
+#if defined(MASK_DUMMY_KMERS)
         graph->mask_dummy_kmers(1, false);
+#endif
         auto elapsed = timer.elapsed();
         cerr << "Building finished in " << elapsed << " sec." << endl;
         self->statistics["graph_build_time"] = elapsed;
