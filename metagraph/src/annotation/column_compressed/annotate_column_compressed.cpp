@@ -11,7 +11,7 @@
 
 using utils::remove_suffix;
 
-size_t kNumRowsInBlock = 5'000'000;
+size_t kNumRowsInBlock = 50'000;
 
 
 namespace annotate {
@@ -63,11 +63,22 @@ ColumnCompressed<Label>::get_labels(Index i) const {
     assert(i < num_rows_);
 
     VLabels labels;
-    for (size_t j = 0; j < num_labels(); ++j) {
-        if (is_set(i, j))
-            labels.push_back(label_encoder_.decode(j));
+    for (auto label_index : get_label_codes(i)) {
+        labels.push_back(label_encoder_.decode(label_index));
     }
     return labels;
+}
+
+template <typename Label>
+std::vector<uint64_t> ColumnCompressed<Label>::get_label_codes(Index i) const {
+    assert(i < num_rows_);
+
+    std::vector<uint64_t> label_indices;
+    for (size_t j = 0; j < num_labels(); ++j) {
+        if (is_set(i, j))
+            label_indices.push_back(j);
+    }
+    return label_indices;
 }
 
 template <typename Label>
@@ -100,6 +111,33 @@ bool ColumnCompressed<Label>::has_label(Index i, const Label &label) const {
         return is_set(i, label_encoder_.encode(label));
     } catch (...) {
         return false;
+    }
+}
+
+template <typename Label>
+void ColumnCompressed<Label>
+::call_relations(const std::vector<Index> &indices,
+                 const Label &label,
+                 std::function<void(Index, bool)> callback,
+                 std::function<bool()> terminate) const {
+    try {
+        size_t label_code = label_encoder_.encode(label);
+
+        for (Index i : indices) {
+            if (terminate())
+                return;
+
+            callback(i, is_set(i, label_code));
+        }
+
+    } catch (...) {
+
+        for (Index i : indices) {
+            if (terminate())
+                return;
+
+            callback(i, false);
+        }
     }
 }
 
@@ -162,6 +200,9 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
             LabelEncoder<Label> label_encoder_load;
             if (!label_encoder_load.load(instream))
                 throw std::ifstream::failure("can't load label encoder");
+
+            if (!label_encoder_load.size())
+                std::cerr << "No labels in " << filename << "\n" << std::flush;
 
             // update the existing and add some new columns
             for (size_t c = 0; c < label_encoder_load.size(); ++c) {
@@ -299,41 +340,6 @@ void ColumnCompressed<Label>
     }
 }
 
-// Get labels that occur at least in |presence_ratio| rows.
-// If |presence_ratio| = 0, return all occurring labels.
-template <typename Label>
-typename ColumnCompressed<Label>::VLabels
-ColumnCompressed<Label>::get_labels(const std::vector<Index> &indices,
-                                    double presence_ratio) const {
-    assert(presence_ratio >= 0 && presence_ratio <= 1);
-
-    const size_t min_labels_discovered =
-                        presence_ratio == 0
-                            ? 1
-                            : std::ceil(indices.size() * presence_ratio);
-    const size_t max_labels_missing = indices.size() - min_labels_discovered;
-
-    VLabels filtered_labels;
-
-    for (size_t j = 0; j < bitmatrix_.size(); ++j) {
-        uint64_t discovered = 0;
-        uint64_t missing = 0;
-
-        for (Index i : indices) {
-            if (is_set(i, j)) {
-                if (++discovered >= min_labels_discovered) {
-                    filtered_labels.push_back(label_encoder_.decode(j));
-                    break;
-                }
-            } else if (++missing > max_labels_missing) {
-                break;
-            }
-        }
-    }
-
-    return filtered_labels;
-}
-
 template <typename Label>
 uint64_t ColumnCompressed<Label>::num_objects() const {
     return num_rows_;
@@ -364,21 +370,6 @@ void ColumnCompressed<Label>::set(Index i, size_t j, bool value) {
 template <typename Label>
 bool ColumnCompressed<Label>::is_set(Index i, size_t j) const {
     return get_column(j)[i];
-}
-
-template <typename Label>
-std::vector<uint64_t>
-ColumnCompressed<Label>::count_labels(const std::vector<Index> &indices) const {
-    std::vector<uint64_t> counter(num_labels(), 0);
-
-    for (size_t j = 0; j < num_labels(); ++j) {
-        for (Index i : indices) {
-            if (is_set(i, j))
-                counter[j]++;
-        }
-    }
-
-    return counter;
 }
 
 template <typename Label>
@@ -442,6 +433,53 @@ const bitmap& ColumnCompressed<Label>::get_column(size_t j) const {
 }
 
 template <typename Label>
+const bitmap& ColumnCompressed<Label>::get_column(const Label &label) const {
+    return get_column(label_encoder_.encode(label));
+}
+
+template <typename Label>
+void ColumnCompressed<Label>
+::convert_to_row_annotator(const std::string &outfbase) const {
+    flush();
+
+    ProgressBar progress_bar(num_rows_, "Serialized rows", std::cerr, !utils::get_verbose());
+
+    RowCompressed<Label>::write_rows(
+        outfbase,
+        label_encoder_,
+        [&](BinaryMatrix::RowCallback write_row) {
+
+            #pragma omp parallel for ordered schedule(dynamic) num_threads(get_num_threads())
+            for (uint64_t i = 0; i < num_rows_; i += kNumRowsInBlock) {
+
+                uint64_t begin = i;
+                uint64_t end = std::min(i + kNumRowsInBlock, num_rows_);
+
+                std::vector<std::vector<uint64_t>> rows(end - begin);
+
+                assert(begin <= end);
+                assert(end <= num_rows_);
+
+                // TODO: use RowsFromColumnsTransformer
+                for (size_t j = 0; j < bitmatrix_.size(); ++j) {
+                    bitmatrix_[j]->call_ones_in_range(begin, end,
+                        [&](uint64_t idx) { rows[idx - begin].push_back(j); }
+                    );
+                }
+
+                #pragma omp ordered
+                {
+                    for (const auto &row : rows) {
+                        write_row(row);
+                        ++progress_bar;
+                    }
+                }
+            }
+        }
+    );
+}
+
+template <typename Label>
 void ColumnCompressed<Label>
 ::convert_to_row_annotator(RowCompressed<Label> *annotator,
                            size_t num_threads) const {
@@ -449,11 +487,13 @@ void ColumnCompressed<Label>
 
     flush();
 
+    ProgressBar progress_bar(num_rows_, "Processed rows", std::cerr, !utils::get_verbose());
+
     annotator->reinitialize(num_rows_);
     annotator->label_encoder_ = label_encoder_;
 
     if (num_threads <= 1) {
-        add_labels(0, num_rows_, annotator);
+        add_labels(0, num_rows_, annotator, &progress_bar);
         return;
     }
 
@@ -462,7 +502,8 @@ void ColumnCompressed<Label>
         thread_pool.enqueue(
             [this](auto... args) { this->add_labels(args...); },
             i, std::min(i + kNumRowsInBlock, num_rows_),
-            annotator
+            annotator,
+            &progress_bar
         );
     }
     thread_pool.join();
@@ -470,7 +511,8 @@ void ColumnCompressed<Label>
 
 template <typename Label>
 void ColumnCompressed<Label>::add_labels(uint64_t begin, uint64_t end,
-                                         RowCompressed<Label> *annotator) const {
+                                         RowCompressed<Label> *annotator,
+                                         ProgressBar *progress_bar) const {
     assert(begin <= end);
     assert(end <= annotator->matrix_->num_rows());
 
@@ -480,25 +522,46 @@ void ColumnCompressed<Label>::add_labels(uint64_t begin, uint64_t end,
             [&](uint64_t idx) { annotator->matrix_->set(idx, j); }
         );
     }
+    if (progress_bar)
+        *progress_bar += end - begin;
 }
 
 template <typename Label>
 void ColumnCompressed<Label>
-::dump_columns(const std::string &prefix) const {
-    for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
-        std::ofstream outstream(remove_suffix(prefix, kExtension)
-                + "." + std::to_string(i)
-                + ".raw" + kExtension);
+::dump_columns(const std::string &prefix, bool binary) const {
+    if (binary) {
+        for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
+            std::ofstream outstream(
+                remove_suffix(prefix, kExtension)
+                    + "." + std::to_string(i)
+                    + ".raw.annodbg",
+                std::ios::binary
+            );
 
-        if (!outstream.good())
-            throw std::ofstream::failure("Bad stream");
+            if (!outstream.good())
+                throw std::ofstream::failure("Bad stream");
 
-        const auto &column = get_column(i);
+            const auto &column = get_column(i);
 
-        serialize_number(outstream, column.num_set_bits());
-        column.call_ones([&](const auto &pos) {
-            serialize_number(outstream, pos);
-        });
+            serialize_number(outstream, column.num_set_bits());
+            column.call_ones([&](const auto &pos) { serialize_number(outstream, pos); });
+        }
+    } else {
+        for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
+            std::ofstream outstream(
+                remove_suffix(prefix, kExtension)
+                    + "." + std::to_string(i)
+                    + ".text.annodbg"
+            );
+
+            if (!outstream.good())
+                throw std::ofstream::failure("Bad stream");
+
+            const auto &column = get_column(i);
+
+            outstream << column.num_set_bits() << std::endl;
+            column.call_ones([&](const auto &pos) { outstream << pos << std::endl; });
+        }
     }
 }
 

@@ -36,12 +36,18 @@ DBGBitmap::DBGBitmap(DBGBitmapConstructor *builder) : DBGBitmap(2) {
 void DBGBitmap::map_to_nodes(const std::string &sequence,
                              const std::function<void(node_index)> &callback,
                              const std::function<bool()> &terminate) const {
-    for (const auto &kmer : sequence_to_kmers(sequence, canonical_mode_)) {
-        callback(to_node(kmer));
+    const auto &kmers = sequence_to_kmers(sequence, canonical_mode_);
+    auto it = kmers.begin();
+    for (bool is_valid : seq_encoder_.valid_kmers(sequence, k_)) {
+
+        assert(it != kmers.end() || !is_valid);
 
         if (terminate())
             return;
+
+        callback(is_valid ? to_node(*it++) : npos);
     }
+    assert(it == kmers.end());
 }
 
 // Traverse graph mapping sequence to the graph nodes
@@ -52,12 +58,19 @@ void DBGBitmap::map_to_nodes_sequentially(std::string::const_iterator begin,
                                           std::string::const_iterator end,
                                           const std::function<void(node_index)> &callback,
                                           const std::function<bool()> &terminate) const {
-    for (const auto &kmer : sequence_to_kmers(std::string(begin, end))) {
-        callback(to_node(kmer));
+    std::string sequence(begin, end);
+    const auto &kmers = sequence_to_kmers(sequence);
+    auto it = kmers.begin();
+    for (bool is_valid : seq_encoder_.valid_kmers(sequence, k_)) {
+
+        assert(it != kmers.end() || !is_valid);
 
         if (terminate())
             return;
+
+        callback(is_valid ? to_node(*it++) : npos);
     }
+    assert(it == kmers.end());
 }
 
 DBGBitmap::node_index
@@ -319,18 +332,24 @@ bool DBGBitmap::equals(const DBGBitmap &other, bool verbose) const {
     return false;
 }
 
-std::ostream& operator<<(std::ostream &out, const DBGBitmap &graph) {
-    out << "k: " << graph.k_ << std::endl
-        << "complete: " << graph.complete_ << std::endl
-        << "canonical: " << graph.canonical_mode_ << std::endl
-        << "nodes:" << std::endl;
-
-    uint64_t nnodes = graph.num_nodes();
-
-    for (size_t node = 1; node <= nnodes; ++node) {
-        auto i = graph.node_to_index(node);
-        if (graph.kmers_[i])
-            out << i << "\t" << graph.get_node_sequence(node) << std::endl;
+void DBGBitmap::print(std::ostream &out) const {
+    if (complete_) {
+        out << "Complete graph" << std::endl;
+        return;
     }
-    return out;
+
+    auto vertex_header = std::string("Vertex");
+    vertex_header.resize(get_k(), ' ');
+
+    out << "Index"
+        << "\t" << "Repr"
+        << "\t" << vertex_header
+        << std::endl;
+
+    uint64_t nnodes = num_nodes();
+    for (size_t node = 1; node <= nnodes; ++node) {
+        out << node << "\t"
+            << node_to_index(node) << "\t"
+            << get_node_sequence(node) << std::endl;
+    }
 }

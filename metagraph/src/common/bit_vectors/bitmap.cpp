@@ -362,3 +362,56 @@ void bitmap_adaptive::to_set() {
         bitmap_.reset(new bitmap_set(bitmap_->size(), std::move(bits)));
     }
 }
+
+
+////////////////////////////////////////////////////////////////
+//                         bitmap_lazy                        //
+////////////////////////////////////////////////////////////////
+
+bitmap_lazy::bitmap_lazy(size_t size, bool value)
+      : bitmap_lazy([value](auto) { return value; }, size, size * value) {}
+
+bitmap_lazy::bitmap_lazy(BoolCallback callback,
+                         size_t size,
+                         size_t num_set_bits) noexcept
+      : in_bitmap_(callback),
+        size_(size),
+        num_set_bits_(num_set_bits) {}
+
+uint64_t bitmap_lazy::get_int(uint64_t id, uint32_t width) const {
+    assert(width <= sizeof(uint64_t) * 8);
+
+    uint64_t word = 0;
+    if (!width)
+        return word;
+
+    uint64_t i = id + width - 1;
+    while (i != id) {
+        word = (word << 1) | operator[](i--);
+    }
+
+    return (word << 1) | operator[](id);
+}
+
+uint64_t bitmap_lazy::size() const {
+    if (size_ == static_cast<size_t>(-1)) {
+        throw std::runtime_error("Size not predefined");
+    }
+
+    return size_;
+}
+uint64_t bitmap_lazy::num_set_bits() const {
+    if (num_set_bits_ == static_cast<size_t>(-1)) {
+        throw std::runtime_error("Number of set bits not predefined");
+    }
+
+    return num_set_bits_;
+}
+
+void bitmap_lazy::call_ones_in_range(uint64_t begin, uint64_t end,
+                                     const VoidCall<uint64_t> &callback) const {
+    for (uint64_t i = begin; i < end; ++i) {
+        if (operator[](i))
+            callback(i);
+    }
+}

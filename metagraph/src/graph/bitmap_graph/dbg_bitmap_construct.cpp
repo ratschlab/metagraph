@@ -129,9 +129,9 @@ DBGBitmap* DBGBitmapConstructor
     graph->canonical_mode_ = canonical_mode;
     graph->complete_ = false;
 
-    assert(!(sdsl::bits::hi(graph->kmers_.size()) % KmerExtractor2Bit::kLogSigma));
+    assert(!(sdsl::bits::hi(graph->kmers_.size()) % KmerExtractor2Bit::bits_per_char));
 
-    graph->k_ = sdsl::bits::hi(graph->kmers_.size()) / KmerExtractor2Bit::kLogSigma;
+    graph->k_ = sdsl::bits::hi(graph->kmers_.size()) / KmerExtractor2Bit::bits_per_char;
 
     return graph.release();
 }
@@ -213,11 +213,11 @@ IBitmapChunkConstructor
              bool verbose) {
     using Extractor = KmerExtractor2Bit;
 
-    if (k * Extractor::kLogSigma <= 64) {
+    if (k * Extractor::bits_per_char <= 64) {
         return new BitmapChunkConstructor<typename Extractor::Kmer64>(
             k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
         );
-    } else if (k * Extractor::kLogSigma <= 128) {
+    } else if (k * Extractor::bits_per_char <= 128) {
         return new BitmapChunkConstructor<typename Extractor::Kmer128>(
             k, canonical_mode, filter_suffix, num_threads, memory_preallocated, verbose
         );

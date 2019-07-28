@@ -17,7 +17,7 @@ class KmerStorage {
     Extractor kmer_extractor_;
 
     static_assert(std::is_base_of<typename Container::key_type, KMER>::value);
-    static_assert(KMER::kBitsPerChar == KmerExtractor::kLogSigma);
+    static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
 
   public:
     using Data = typename Container::storage_type;

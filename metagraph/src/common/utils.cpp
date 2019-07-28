@@ -6,7 +6,6 @@
 #include <cstdlib>
 #include <filesystem>
 
-#include <boost/multiprecision/integer.hpp>
 #include <boost/functional/hash/hash.hpp>
 
 #include "binary_matrix.hpp"
@@ -115,6 +114,9 @@ std::string get_filetype(const std::string &fname) {
 
     std::string ext = fname.substr(dotind);
 
+    if (ext == ".kmc_pre" || ext == ".kmc_suf")
+        return "KMC";
+
     if (ext == ".gz") {
         size_t nextind = fname.substr(0, dotind - 1).rfind(".");
         if (nextind == std::string::npos)
@@ -124,10 +126,13 @@ std::string get_filetype(const std::string &fname) {
     }
 
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
     if (ext == ".vcf") {
         return "VCF";
+
     } else if ((ext == ".fq") || (ext == ".fastq")) {
         return "FASTQ";
+
     } else {
         return "FASTA";
     }
@@ -149,10 +154,6 @@ std::deque<std::string> generate_strings(const std::string &alphabet,
     }
     assert(suffices.size() == std::pow(alphabet.size(), length));
     return suffices;
-}
-
-uint32_t code_length(uint64_t a) {
-    return a ? boost::multiprecision::msb(a) + 1 : 1;
 }
 
 // indexes - positions of inserted elements in the final vector
@@ -444,7 +445,7 @@ TempFile::TempFile(const std::string &tmp_dir)
                           : std::filesystem::temp_directory_path().string())
                                                 + std::string("/tmp.XXXXXX")) {
     // create a file
-    int fd = mkstemp(const_cast<char*>(tmp_file_name_.c_str()));
+    int fd = mkstemp(tmp_file_name_.data());
     if (fd == -1)
         throw std::runtime_error("Error: temp file "
                                     + tmp_file_name_ + " creation failed");
@@ -565,15 +566,12 @@ bool RangePartition::load(std::istream &in) {
     if (!in.good())
         return false;
 
-    try {
-        partition_.assign(load_number(in), {});
-        for (auto &group : partition_) {
-            group = load_number_vector<T>(in);
-        }
-        return initialize_groups_and_ranks();
-    } catch (...) {
-        return false;
+    partition_.assign(load_number(in), {});
+    for (auto &group : partition_) {
+        if (!load_number_vector(in, &group))
+            return false;
     }
+    return initialize_groups_and_ranks();
 }
 
 void RangePartition::serialize(std::ostream &out) const {

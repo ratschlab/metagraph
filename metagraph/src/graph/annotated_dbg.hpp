@@ -8,9 +8,10 @@
 #include "threading.hpp"
 
 
+// TODO: rename to AnnotatedSequenceGraph
 class AnnotatedDBG {
   public:
-    typedef annotate::MultiLabelAnnotation<uint64_t, std::string> Annotator;
+    typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
     using node_index = SequenceGraph::node_index;
     using row_index = Annotator::Index;
 
@@ -23,16 +24,6 @@ class AnnotatedDBG {
 
     bool has_label(node_index index,
                    const std::string &label) const;
-
-    // return labels that occur at least in |presence_ratio| k-mers
-    std::vector<std::string> get_labels(const std::string &sequence,
-                                        double presence_ratio) const;
-
-    // return top |num_top_labels| labels with their counts
-    std::vector<std::pair<std::string, size_t>>
-    get_top_labels(const std::string &sequence,
-                   size_t num_top_labels,
-                   double min_label_frequency = 0.0) const;
 
     void annotate_sequence(const std::string &sequence,
                            const std::vector<std::string> &labels);
@@ -47,20 +38,32 @@ class AnnotatedDBG {
     bool check_compatibility() const;
 
     const SequenceGraph& get_graph() const { return *graph_; }
+    std::shared_ptr<const SequenceGraph> get_graph_ptr() const { return graph_; }
+
     const Annotator& get_annotation() const { return *annotator_; }
 
+    // TODO: remove this method from here
     static void insert_zero_rows(Annotator *annotator,
                                  const bit_vector_dyn &inserted_edges);
 
+    /*********************** Special queries **********************/
+
+    // return labels that occur at least in |presence_ratio| k-mers
+    std::vector<std::string> get_labels(const std::string &sequence,
+                                        double presence_ratio) const;
+
+    // return top |num_top_labels| labels with their counts
+    std::vector<std::pair<std::string, size_t>>
+    get_top_labels(const std::string &sequence,
+                   size_t num_top_labels,
+                   double min_label_frequency = 0.0) const;
+
   private:
-    static row_index
-    graph_to_anno_index(node_index kmer_index);
+    static row_index graph_to_anno_index(node_index kmer_index);
+    static node_index anno_to_graph_index(row_index anno_index);
 
-    static node_index
-    anno_to_graph_index(row_index anno_index);
-
-    void annotate_sequence_thread_safe(std::string sequence,
-                                       std::vector<std::string> labels);
+    void annotate_sequence_thread_safe(const std::string &sequence,
+                                       const std::vector<std::string> &labels);
 
     std::shared_ptr<SequenceGraph> graph_;
     std::unique_ptr<Annotator> annotator_;

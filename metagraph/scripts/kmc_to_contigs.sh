@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 
-exe="$(dirname ${BASH_SOURCE[0]})/../build/metagengraph"
+exe="$(dirname ${BASH_SOURCE[0]})/../build/metagraph"
 
 
 if [ $# -ne 2 ] || [[ ${1: -8} != '.kmc_suf' ]]; then
@@ -18,4 +18,4 @@ K=$2
 num_threads=4
 
 /usr/bin/time -v $exe build -v -p $num_threads -k $K -o $FILE --kmc $FILE
-/usr/bin/time -v $exe transform -v --to-fasta --unitigs -p $num_threads -o ${FILE}.k$K.contigs $FILE
+/usr/bin/time -v $exe assemble -v --unitigs -p $num_threads -o ${FILE}.k$K.contigs $FILE

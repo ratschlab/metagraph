@@ -87,43 +87,55 @@ popd
 - `-DPYTHON_INTERFACE=[ON|OFF]` -- compile python interface (requires shared libraries, `OFF` by default)
 - `-DBUILD_KMC=[ON|OFF]` -- compile the KMC executable (`ON` by default)
 - `-DWITH_AVX=[ON|OFF]` -- compile with support for the avx instructions (`ON` by default)
-- `-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA4|DNA_CASE_SENSITIVE]` -- alphabet to use (`DNA` by default)
+- `-DCMAKE_DBG_ALPHABET=[Protein|DNA|DNA5|DNA_CASE_SENSITIVE]` -- alphabet to use (`DNA` by default)
 
 ## Typical workflow
 1. Build de Bruijn graph from Fasta files, FastQ files, or [KMC k-mer counters](https://github.com/refresh-bio/KMC/):\
-`./metagengraph build`
+`./metagraph build`
 2. Annotate graph using the column compressed annotation:\
-`./metagengraph annotate`
+`./metagraph annotate`
 3. Transform the built annotation to a different annotation scheme:\
-`./metagengraph transform_anno`
+`./metagraph transform_anno`
 4. Merge annotations (optional):\
-`./metagengraph merge_anno`
+`./metagraph merge_anno`
 5. Query annotated graph\
-`./metagengraph query`
+`./metagraph query`
 
 ### Example
 ```
 DATA="../tests/data/transcripts_1000.fa"
 
-./metagengraph build -k 12 -o transcripts_1000 $DATA
+./metagraph build -k 12 -o transcripts_1000 $DATA
 
-./metagengraph annotate -i transcripts_1000 --anno-filename -o transcripts_1000 $DATA
+./metagraph annotate -i transcripts_1000 --anno-filename -o transcripts_1000 $DATA
 
-./metagengraph query -i transcripts_1000 -a transcripts_1000.column.annodbg $DATA
+./metagraph query -i transcripts_1000 -a transcripts_1000.column.annodbg $DATA
 
-./metagengraph stats -a transcripts_1000 transcripts_1000
+./metagraph stats -a transcripts_1000.column.annodbg transcripts_1000
+```
+
+### Graph cleaning
+```
+DATA="../tests/data/transcripts_1000.fa"
+K=12
+
+./metagraph build -k $K --count-kmers -o transcripts_1000 $DATA
+
+./metagraph clean --prune-tips $((2*K)) --prune-unitigs 0 --fallback 2 -o transcripts_1000_clean_contigs transcripts_1000.dbg
+
+zless transcripts_1000_clean_contigs.fasta.gz | tail
 ```
 
 For real examples, see [scripts](./metagraph/scripts).
 
 ### Print usage
-`./metagengraph`
+`./metagraph`
 
 ### Build graph
 
 * #### Simple build
 ```bash
-./metagengraph build -v --parallel 30 -k 20 --mem-cap-gb 10 \
+./metagraph build -v --parallel 30 -k 20 --mem-cap-gb 10 \
                         -o <GRAPH_DIR>/graph <DATA_DIR>/*.fasta.gz \
 2>&1 | tee <LOG_DIR>/log.txt
 ```
@@ -132,7 +144,7 @@ For real examples, see [scripts](./metagraph/scripts).
 1) Build chunks
 ```bash
 for F in {\$,A,C,G,T,N}{\$,A,C,G,T,N}; do \
-    ./metagengraph build -v --parallel 30 -k 20 --mem-cap-gb 100 \
+    ./metagraph build -v --parallel 30 -k 20 --mem-cap-gb 100 \
                             -o <GRAPH_DIR>/graph --suffix $F \
                             <DATA_DIR>/*.fasta.gz \
     2>&1 | tee <LOG_DIR>/log_$F.txt; \
@@ -140,33 +152,15 @@ done
 ```
 2) Concatenate chunks
 ```bash
-./metagengraph concatenate -l 2 -i <GRAPH_DIR>/graph -o <GRAPH_DIR>/graph
+./metagraph concatenate -l 2 -i <GRAPH_DIR>/graph -o <GRAPH_DIR>/graph
 ```
 
-#### Build with filtering k-mers using KMC
+#### Build from k-mers filtered with KMC
 ```bash
 CUTOFF=5
 K=20
 ./KMC/kmc -ci$CUTOFF -t30 -k$K -m5 -fq -b <FILE>.fasta.gz <FILE>.kmc_$CUTOFF ./KMC
-./metagengraph build -v -p 30 -k $K --mem-cap-gb 10 --kmc -o graph <FILE>.kmc_$CUTOFF
-```
-
-#### Build from filtered reads
-1) Filter reads
-  * using filtering in blocks
-```bash
-./metagengraph filter -v --parallel 30 -k 20 --min-count 4 <DATA_DIR>/*.fasta.gz
-```
-  * using KMC
-```bash
-./KMC/kmc -k21 -m5 -fq -t30 <FILE>.fasta.gz <FILE>.fasta.gz.kmc ./KMC
-./metagengraph filter -v --parallel 30 -k 20 --min-count 4 --kmc <FILE>.fasta.gz
-```
-2) Build graph
-```bash
-./metagengraph build -v --parallel 30 -k 20 --mem-cap-gb 100 --min-count 4 \
-                        -o <GRAPH_DIR>/graph \
-                        <DATA_DIR>/*.fasta.gz
+./metagraph build -v -p 30 -k $K --mem-cap-gb 10 --kmc -o graph <FILE>.kmc_$CUTOFF
 ```
 
 #### Distributed build
@@ -174,7 +168,7 @@ K=20
 ```bash
 for F in {\\\$,A,C,G,T,N}{\\\$,A,C,G,T,N}{\\\$,A,C,G,T,N}; do \
     bsub -J assemble$F -W 8:00 -n 30 -R "rusage[mem=15000]" \
-        "ls -1a <DATA_DIR>/*.fasta.gz | /usr/bin/time -v ./metagengraph build -v \
+        "ls -1a <DATA_DIR>/*.fasta.gz | /usr/bin/time -v ./metagraph build -v \
             --parallel 30 -k 24 --mem-cap-gb 350 --suffix $F -o <GRAPH_DIR>/graph \
         2>&1 | tee <LOG_DIR>/log_$F"; \
 done
@@ -182,7 +176,7 @@ done
 2) Concatenate chunks
 ```bash
 bsub -J StackChunks -W 12:00 -n 30 -R "rusage[mem=15000]" "/usr/bin/time -v \
-    ~/metagengraph concatenate -v -l 3 \
+    ~/metagraph concatenate -v -l 3 \
                                   -i <GRAPH_DIR>/graph \
                                   -o <GRAPH_DIR>/graph \
     2>&1 | tee <LOG_DIR>/log_stack.txt"
@@ -190,14 +184,15 @@ bsub -J StackChunks -W 12:00 -n 30 -R "rusage[mem=15000]" "/usr/bin/time -v \
 
 ### Annotate graph
 ```bash
-./metagengraph annotate -v --row-annotator --fasta-anno \
+./metagraph annotate -v --anno-type row --fasta-anno \
                            -i primates.dbg \
+                           -o primates \
                            ~/fasta_zurich/refs_chimpanzee_primates.fa
 ```
 
 ### Query graph
 ```bash
-./metagengraph query -v -i <GRAPH_DIR>/graph.dbg \
+./metagraph query -v -i <GRAPH_DIR>/graph.dbg \
                         -a <GRAPH_DIR>/annotation.column.annodbg \
                         --discovery-fraction 0.8 --labels-delimiter ", " \
                         query_seq.fa
@@ -206,13 +201,13 @@ bsub -J StackChunks -W 12:00 -n 30 -R "rusage[mem=15000]" "/usr/bin/time -v \
 ### Get stats
 Stats for graph
 ```bash
-./metagengraph stats graph.dbg
+./metagraph stats graph.dbg
 ```
 Stats for annotation
 ```bash
-./metagengraph stats -a annotation.column.annodbg
+./metagraph stats -a annotation.column.annodbg
 ```
 Stats for both
 ```bash
-./metagengraph stats -a annotation.column.annodbg graph.dbg
+./metagraph stats -a annotation.column.annodbg graph.dbg
 ```

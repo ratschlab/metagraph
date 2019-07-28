@@ -19,6 +19,10 @@ const std::string BinRelWT_sdslAnnotator::kExtension = kBinRelWT_sdslExtension;
 template <>
 const std::string BinRelWTAnnotator::kExtension = kBinRelWTExtension;
 
+template <class BinaryMatrixType, typename Label>
+std::string
+StaticBinRelAnnotator<BinaryMatrixType, Label>
+::file_extension() const { return kExtension; }
 
 template <class BinaryMatrixType, typename Label>
 bool
@@ -47,7 +51,7 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
         return false;
     }
     std::set<size_t> encoded_labels;
-    for (auto col : matrix_->get_row(i)) {
+    for (auto col : get_label_codes(i)) {
         encoded_labels.insert(col);
     }
     return std::includes(encoded_labels.begin(), encoded_labels.end(),
@@ -60,37 +64,10 @@ auto StaticBinRelAnnotator<BinaryMatrixType, Label>::get_labels(Index i) const
     assert(i < num_objects());
 
     VLabels labels;
-    for (auto col : matrix_->get_row(i)) {
+    for (auto col : get_label_codes(i)) {
         labels.push_back(label_encoder_.decode(col));
     }
     return labels;
-}
-
-// Get labels that occur at least in |presence_ratio| rows.
-// If |presence_ratio| = 0, return all occurring labels.
-template <class BinaryMatrixType, typename Label>
-auto
-StaticBinRelAnnotator<BinaryMatrixType, Label>
-::get_labels(const std::vector<Index> &indices,
-             double presence_ratio) const -> VLabels {
-    assert(presence_ratio >= 0 && presence_ratio <= 1);
-
-    const size_t min_labels_discovered =
-                        presence_ratio == 0
-                            ? 1
-                            : std::ceil(indices.size() * presence_ratio);
-    // const size_t max_labels_missing = indices.size() - min_labels_discovered;
-
-    auto counts = count_labels(indices);
-
-    VLabels filtered_labels;
-
-    for (size_t i = 0; i < counts.size(); ++i) {
-        if (counts[i] && counts[i] >= min_labels_discovered)
-            filtered_labels.push_back(label_encoder_.decode(i));
-    }
-
-    return filtered_labels;
 }
 
 template <class BinaryMatrixType, typename Label>
@@ -143,22 +120,6 @@ uint64_t StaticBinRelAnnotator<BinaryMatrixType, Label>::num_relations() const {
     return matrix_->num_relations();
 }
 
-// Count all labels collected from the given rows.
-template <class BinaryMatrixType, typename Label>
-std::vector<uint64_t>
-StaticBinRelAnnotator<BinaryMatrixType, Label>
-::count_labels(const std::vector<Index> &indices) const {
-    std::vector<uint64_t> counter(num_labels(), 0);
-
-    for (Index i : indices) {
-        for (auto col : matrix_->get_row(i)) {
-            counter[col]++;
-        }
-    }
-
-    return counter;
-}
-
 template <class BinaryMatrixType, typename Label>
 void StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::call_objects(const Label &label,
@@ -182,11 +143,83 @@ void StaticBinRelAnnotator<BinaryMatrixType, Label>::except_dyn() {
 }
 
 template <class BinaryMatrixType, typename Label>
+std::vector<uint64_t> StaticBinRelAnnotator<BinaryMatrixType, Label>
+::get_label_codes(Index i) const {
+    if (!cached_rows_.get())
+        return matrix_->get_row(i);
+
+    try {
+        return cached_rows_->Get(i);
+    } catch (...) {
+        auto row = matrix_->get_row(i);
+        cached_rows_->Put(i, row);
+        return row;
+    }
+}
+
+template <class BinaryMatrixType, typename Label>
+void StaticBinRelAnnotator<BinaryMatrixType, Label>
+::reset_row_cache(size_t size) {
+    cached_rows_.reset(size ? new RowCacheType(size) : nullptr);
+}
+
+template <class BinaryMatrixType, typename Label>
+void StaticBinRelAnnotator<BinaryMatrixType, Label>
+::dump_columns(const std::string &prefix, bool binary) const {
+    size_t m = num_labels();
+    if (binary) {
+        for (uint64_t i = 0; i < m; ++i) {
+            std::ofstream outstream(
+                remove_suffix(prefix, kExtension)
+                    + "." + std::to_string(i)
+                    + ".raw.annodbg",
+                std::ios::binary
+            );
+
+            if (!outstream.good())
+                throw std::ofstream::failure("Bad stream");
+
+            auto column = matrix_->get_column(i);
+
+            serialize_number(outstream, column.size());
+            for (auto pos : column) {
+                serialize_number(outstream, pos);
+            }
+        }
+    } else {
+        for (uint64_t i = 0; i < m; ++i) {
+            std::ofstream outstream(
+                remove_suffix(prefix, kExtension)
+                    + "." + std::to_string(i)
+                    + ".text.annodbg"
+            );
+
+            if (!outstream.good())
+                throw std::ofstream::failure("Bad stream");
+
+            auto column = matrix_->get_column(i);
+
+            outstream << column.size() << std::endl;
+            for (auto pos : column) {
+                outstream << pos << std::endl;
+            }
+        }
+    }
+}
+
+template <class BinaryMatrixType, typename Label>
+StaticBinRelAnnotator<BinaryMatrixType, Label>
+::StaticBinRelAnnotator(size_t row_cache_size) : matrix_(new BinaryMatrixType()) {
+    reset_row_cache(row_cache_size);
+}
+
+template <class BinaryMatrixType, typename Label>
 StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::StaticBinRelAnnotator(std::unique_ptr<BinaryMatrixType>&& matrix,
-                        const LabelEncoder<Label> &label_encoder) {
-    assert(matrix.get());
-    matrix_ = std::move(matrix);
+                        const LabelEncoder<Label> &label_encoder,
+                        size_t row_cache_size) : matrix_(std::move(matrix)) {
+    assert(matrix_.get());
+    reset_row_cache(row_cache_size);
     label_encoder_ = label_encoder;
 }
 

@@ -44,7 +44,7 @@ class SequenceAnnotator():
 
 
 if __name__ == '__main__':
-    executable = '../../metagraph/build/metagengraph'
+    executable = '../../metagraph/build/metagraph'
     if len(sys.argv) != 3:
         print("Usage: {} <graph> <annotation>".format(sys.argv[0]))
         exit(1)

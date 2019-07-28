@@ -6,9 +6,6 @@
 #include <htslib/kseq.h>
 #include "gtest/gtest.h"
 
-#define protected public
-#define private public
-
 #include "boss.hpp"
 #include "boss_merge.hpp"
 #include "boss_construct.hpp"

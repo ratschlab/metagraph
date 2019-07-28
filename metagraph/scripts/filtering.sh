@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 
 KMC="$(dirname ${BASH_SOURCE[0]})/../build/KMC/kmc"
-exe="$(dirname ${BASH_SOURCE[0]})/../build/metagengraph"
+exe="$(dirname ${BASH_SOURCE[0]})/../build/metagraph"
 
 
 if [ $# -ne 3 ]; then

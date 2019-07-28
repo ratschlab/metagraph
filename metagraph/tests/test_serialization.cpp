@@ -20,7 +20,8 @@ TEST(Serialization, SerializationVectorBool) {
     outstream.close();
 
     std::ifstream instream(test_dump_basename, std::ios::binary);
-    auto loaded_vector = load_number_vector<bool>(instream);
+    std::vector<bool> loaded_vector;
+    ASSERT_TRUE(load_number_vector(instream, &loaded_vector));
 
     ASSERT_EQ(numbers, loaded_vector);
 }
@@ -35,7 +36,8 @@ TEST(Serialization, SerializationVectorUInt8) {
     outstream.close();
 
     std::ifstream instream(test_dump_basename, std::ios::binary);
-    auto loaded_vector = load_number_vector<uint8_t>(instream);
+    std::vector<uint8_t> loaded_vector;
+    ASSERT_TRUE(load_number_vector(instream, &loaded_vector));
 
     ASSERT_EQ(numbers, loaded_vector);
 }
@@ -50,7 +52,8 @@ TEST(Serialization, SerializationVectorUInt64) {
     outstream.close();
 
     std::ifstream instream(test_dump_basename, std::ios::binary);
-    auto loaded_vector = load_number_vector<uint64_t>(instream);
+    std::vector<uint64_t> loaded_vector;
+    ASSERT_TRUE(load_number_vector(instream, &loaded_vector));
 
     ASSERT_EQ(numbers, loaded_vector);
 }
@@ -65,7 +68,8 @@ TEST(Serialization, SerializationVectorUInt64Effective1Bit) {
     outstream.close();
 
     std::ifstream instream(test_dump_basename, std::ios::binary);
-    auto loaded_vector = load_number_vector<uint64_t>(instream);
+    std::vector<uint64_t> loaded_vector;
+    ASSERT_TRUE(load_number_vector(instream, &loaded_vector));
 
     ASSERT_EQ(numbers, loaded_vector);
 }
@@ -85,12 +89,14 @@ void test_random_vector(size_t length) {
         {
             std::ifstream instream(test_dump_basename, std::ios::binary);
             ASSERT_EQ(numbers.size(), get_number_vector_size(instream));
-            auto loaded_vector = load_number_vector<uint8_t>(instream);
+            std::vector<uint8_t> loaded_vector;
+            ASSERT_TRUE(load_number_vector(instream, &loaded_vector));
             ASSERT_EQ(numbers, loaded_vector);
         }
         {
             std::ifstream instream(test_dump_basename, std::ios::binary);
-            auto loaded_vector = load_number_vector<uint8_t>(instream);
+            std::vector<uint8_t> loaded_vector;
+            ASSERT_TRUE(load_number_vector(instream, &loaded_vector));
             ASSERT_EQ(numbers, loaded_vector);
         }
     }

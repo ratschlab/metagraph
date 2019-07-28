@@ -3,7 +3,7 @@
 home="/cluster/home/mikhaika"
 
 KMC="$home/projects2014-metagenome/metagraph/build/KMC/kmc"
-exe="$home/projects2014-metagenome/metagraph/build/metagengraph_DNA"
+exe="$home/projects2014-metagenome/metagraph/build/metagraph_DNA"
 
 
 if [ $# -ne 1 ]; then

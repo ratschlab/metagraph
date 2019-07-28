@@ -58,11 +58,6 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
 
     void insert_rows(const std::vector<Index> &rows);
 
-    // Get labels that occur at least in |presence_ratio| rows.
-    // If |presence_ratio| = 0, return all occurring labels.
-    VLabels get_labels(const std::vector<Index> &indices,
-                       double presence_ratio) const;
-
     void call_objects(const Label &label,
                       std::function<void(Index)> callback) const;
 
@@ -70,10 +65,10 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
     size_t num_labels() const;
     uint64_t num_relations() const;
 
+    std::string file_extension() const { return kExtension; }
+
   private:
     void reinitialize(uint64_t num_rows);
-
-    std::vector<uint64_t> count_labels(const std::vector<Index> &indices) const;
 
     std::unique_ptr<BinaryMatrixRowDynamic> matrix_;
 
@@ -103,7 +98,7 @@ class RowCompressed : public MultiLabelEncoded<uint64_t, Label> {
                            const LabelEncoder<Label> &label_encoder,
                            const std::function<void(BinaryMatrix::RowCallback&)> &call_rows);
 
-    std::vector<uint64_t> get_label_indexes(Index i) const {
+    std::vector<uint64_t> get_label_codes(Index i) const {
         return matrix_->get_row(i);
     }
 

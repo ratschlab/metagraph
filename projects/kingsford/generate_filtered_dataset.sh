@@ -2,7 +2,7 @@
 
 home="/cluster/home/mikhaika"
 
-exe="$home/metagengraph"
+exe="$home/metagraph"
 
 
 for file in $(ls /cluster/work/grlab/projects/metagenome/benchmark_kingsford/data_fasta/SRR*.fasta.gz); do

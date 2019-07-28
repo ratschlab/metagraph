@@ -1,21 +1,13 @@
 #include <random>
 
 #include "gtest/gtest.h"
+#include "test_helpers.hpp"
 
-#define protected public
-#define private public
-
-#include "bitmap.hpp"
-#include "bit_vector.hpp"
 #include "threading.hpp"
 
-// Disable death tests
-#ifndef _DEATH_TEST
-#ifdef ASSERT_DEATH
-#undef ASSERT_DEATH
-#define ASSERT_DEATH(a, b) (void)0
-#endif
-#endif
+#define private public
+#include "bitmap.hpp"
+#include "bit_vector.hpp"
 
 
 const std::string test_data_dir = "../tests/data";
@@ -24,9 +16,6 @@ const std::string test_dump_basename = test_data_dir + "/bitmap_dump_test";
 
 void reference_based_test(const bitmap &vector,
                           const sdsl::bit_vector &reference) {
-    ASSERT_DEATH(vector[vector.size()], "");
-    ASSERT_DEATH(vector[vector.size() + 1], "");
-
     EXPECT_EQ(reference.size(), vector.size());
     EXPECT_EQ(sdsl::util::cnt_one_bits(reference), vector.num_set_bits());
 
@@ -112,19 +101,6 @@ void test_bitmap_queries() {
 }
 
 
-TEST(bitmap_set, queries) {
-    test_bitmap_queries<bitmap_set>();
-}
-
-TEST(bitmap_vector, queries) {
-    test_bitmap_queries<bitmap_vector>();
-}
-
-TEST(bitmap_adaptive, queries) {
-    test_bitmap_queries<bitmap_adaptive>();
-}
-
-
 void test_bitmap_set(bitmap *vector, std::vector<bool> *numbers) {
     reference_based_test(*vector, *numbers);
 
@@ -152,45 +128,187 @@ void test_bitmap_set(bitmap *vector, std::vector<bool> *numbers) {
     }
 }
 
+template <class Bitmap, class Data>
+std::unique_ptr<bitmap> build_bitmap(size_t size, const Data &data) {
+    return std::unique_ptr<bitmap>(new Bitmap(size, data));
+}
 
-TEST(bitmap_vector, set) {
+template <>
+std::unique_ptr<bitmap>
+build_bitmap<bitmap_vector, sdsl::bit_vector>(size_t, const sdsl::bit_vector &data) {
+    return std::unique_ptr<bitmap>(new bitmap_vector(data));
+}
+
+template <>
+std::unique_ptr<bitmap>
+build_bitmap<bitmap_vector,
+             std::initializer_list<bool>>(size_t,
+                                          const std::initializer_list<bool> &data) {
+    return std::unique_ptr<bitmap>(new bitmap_vector(data));
+}
+
+template <>
+std::unique_ptr<bitmap>
+build_bitmap<bitmap_vector, std::set<uint64_t>>(size_t size,
+                                                const std::set<uint64_t> &data) {
+    sdsl::bit_vector vector(size, false);
+    for (uint64_t i : data) {
+        vector[i] = true;
+    }
+
+    return std::unique_ptr<bitmap>(new bitmap_vector(vector));
+}
+
+template <>
+std::unique_ptr<bitmap>
+build_bitmap<bitmap_vector, std::initializer_list<uint64_t>>(
+      size_t size,
+      const std::initializer_list<uint64_t> &data) {
+    return build_bitmap<bitmap_vector>(size, std::set<uint64_t>(data));
+}
+
+template <>
+std::unique_ptr<bitmap>
+build_bitmap<bitmap_set, sdsl::bit_vector>(size_t size, const sdsl::bit_vector &data) {
+    assert(size == data.size());
+
+    std::set<uint64_t> bits;
+    uint64_t i = 0;
+    for (bool b : data) {
+        if (b)
+            bits.insert(i);
+
+        ++i;
+    }
+
+    return std::unique_ptr<bitmap>(new bitmap_set(size, bits));
+}
+
+template <>
+std::unique_ptr<bitmap>
+build_bitmap<bitmap_set,
+             std::initializer_list<bool>>(size_t size,
+                                          const std::initializer_list<bool> &data) {
+    assert(size == data.size());
+
+    return build_bitmap<bitmap_set>(size, sdsl::bit_vector(data));
+}
+
+template <>
+std::unique_ptr<bitmap>
+build_bitmap<bitmap_adaptive, sdsl::bit_vector>(size_t, const sdsl::bit_vector &data) {
+    return std::unique_ptr<bitmap>(new bitmap_adaptive(data));
+}
+
+template <>
+std::unique_ptr<bitmap>
+build_bitmap<bitmap_adaptive,
+             std::initializer_list<bool>>(size_t,
+                                          const std::initializer_list<bool> &data) {
+    return std::unique_ptr<bitmap>(new bitmap_adaptive(data));
+}
+
+template <>
+std::unique_ptr<bitmap>
+build_bitmap<bitmap_lazy, sdsl::bit_vector>(size_t size, const sdsl::bit_vector &data) {
+    assert(size == data.size());
+
+    return std::unique_ptr<bitmap>(new bitmap_lazy(
+        [data](auto i) { return data[i]; },
+        size,
+        std::accumulate(data.begin(), data.end(), 0u)
+    ));
+}
+
+template <>
+std::unique_ptr<bitmap>
+build_bitmap<bitmap_lazy,
+             std::initializer_list<bool>>(size_t size,
+                                          const std::initializer_list<bool> &data) {
+    return build_bitmap<bitmap_lazy>(size, sdsl::bit_vector(data));
+}
+
+template <>
+std::unique_ptr<bitmap>
+build_bitmap<bitmap_lazy,
+             std::set<uint64_t>>(size_t size, const std::set<uint64_t> &data) {
+    return std::unique_ptr<bitmap>(new bitmap_lazy(
+        [data](auto i) { return data.find(i) != data.end(); },
+        size,
+        data.size()
+    ));
+}
+
+template <>
+std::unique_ptr<bitmap>
+build_bitmap<bitmap_lazy, std::initializer_list<uint64_t>>(
+      size_t size,
+      const std::initializer_list<uint64_t> &data) {
+    return build_bitmap<bitmap_lazy>(size, std::set<uint64_t>(data));
+}
+
+
+template <typename Bitmap>
+class BitmapTest : public ::testing::Test { };
+
+template <typename Bitmap>
+class BitmapDynTest : public BitmapTest<Bitmap> { };
+
+typedef ::testing::Types<bitmap_vector,
+                         bitmap_set,
+                         bitmap_adaptive,
+                         bitmap_lazy> BitmapTypes;
+
+typedef ::testing::Types<bitmap_vector,
+                         bitmap_set,
+                         bitmap_adaptive> BitmapDynTypes;
+
+TYPED_TEST_CASE(BitmapTest, BitmapTypes);
+TYPED_TEST_CASE(BitmapDynTest, BitmapDynTypes);
+
+
+TYPED_TEST(BitmapTest, queries) {
+    test_bitmap_queries<TypeParam>();
+}
+
+
+TYPED_TEST(BitmapTest, list) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
-    std::unique_ptr<bitmap> vector{ new bitmap_vector(init_list) };
+    auto vector = build_bitmap<TypeParam>(init_list.size(), init_list);
     std::vector<bool> numbers(init_list);
     ASSERT_TRUE(vector.get());
 
-    test_bitmap_set(vector.get(), &numbers);
+    reference_based_test(*vector, numbers);
 }
 
-TEST(bitmap_adaptive, set_list) {
-    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
-                                              0, 1, 0, 0, 0, 0, 1, 1 };
-    std::unique_ptr<bitmap> vector{ new bitmap_adaptive(init_list) };
-    std::vector<bool> numbers(init_list);
-    ASSERT_TRUE(vector.get());
-
-    test_bitmap_set(vector.get(), &numbers);
-}
-
-TEST(bitmap_set, set) {
+TYPED_TEST(BitmapTest, bits) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
     std::initializer_list<uint64_t> init_bits = { 1, 3, 4, 5, 6, 9, 14, 15 };
-    std::unique_ptr<bitmap> vector{ new bitmap_set(init_list.size(), init_bits) };
+    auto vector = build_bitmap<TypeParam>(init_list.size(), init_bits);
+    std::vector<bool> numbers(init_list);
+    ASSERT_TRUE(vector.get());
+
+    reference_based_test(*vector, numbers);
+}
+
+
+TYPED_TEST(BitmapDynTest, set_list) {
+    std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
+                                              0, 1, 0, 0, 0, 0, 1, 1 };
+    auto vector = build_bitmap<TypeParam>(init_list.size(), init_list);
     std::vector<bool> numbers(init_list);
     ASSERT_TRUE(vector.get());
 
     test_bitmap_set(vector.get(), &numbers);
 }
 
-TEST(bitmap_adaptive, set_bits) {
+TYPED_TEST(BitmapDynTest, set_bits) {
     std::initializer_list<bool> init_list = { 0, 1, 0, 1, 1, 1, 1, 0,
                                               0, 1, 0, 0, 0, 0, 1, 1 };
     std::initializer_list<uint64_t> init_bits = { 1, 3, 4, 5, 6, 9, 14, 15 };
-    std::unique_ptr<bitmap> vector{
-        new bitmap_adaptive(init_list.size(), init_bits)
-    };
+    auto vector = build_bitmap<TypeParam>(init_list.size(), init_bits);
     std::vector<bool> numbers(init_list);
     ASSERT_TRUE(vector.get());
 
@@ -198,9 +316,40 @@ TEST(bitmap_adaptive, set_bits) {
 }
 
 
-TEST(bitmap_set, concurrent_reading) {
+TYPED_TEST(BitmapTest, concurrent_reading) {
     ThreadPool thread_pool(3);
-    bitmap_set vector(100'000, false);
+    sdsl::bit_vector bv(100'000, false);
+
+    std::vector<bool> bits;
+
+    for (size_t i = 0; i < bv.size(); ++i) {
+        bits.push_back((i + (i * i) % 31) % 2);
+        if (bits.back())
+            bv[i] = true;
+    }
+
+    auto vector = build_bitmap<TypeParam>(bv.size(), bv);
+
+    std::vector<uint64_t> indices(vector->size());
+    std::iota(indices.begin(), indices.end(), 0);
+
+    std::mt19937 g(1);
+    std::shuffle(indices.begin(), indices.end(), g);
+
+    reference_based_test(*vector, bits);
+
+    for (auto i : indices) {
+        thread_pool.enqueue([&](auto i) {
+            ASSERT_EQ(bits[i], (*vector)[i]);
+        }, i);
+    }
+
+    thread_pool.join();
+}
+
+TYPED_TEST(BitmapDynTest, concurrent_reading) {
+    ThreadPool thread_pool(3);
+    TypeParam vector(100'000, false);
 
     std::vector<bool> bits;
 
@@ -227,67 +376,9 @@ TEST(bitmap_set, concurrent_reading) {
     thread_pool.join();
 }
 
-TEST(bitmap_vector, concurrent_reading) {
+TYPED_TEST(BitmapTest, concurrent_reading_all_zero) {
     ThreadPool thread_pool(3);
-    bitmap_vector vector(100'000, false);
-
-    std::vector<bool> bits;
-
-    for (size_t i = 0; i < vector.size(); ++i) {
-        bits.push_back((i + (i * i) % 31) % 2);
-        if (bits.back())
-            vector.set(i, true);
-    }
-
-    std::vector<uint64_t> indices(vector.size());
-    std::iota(indices.begin(), indices.end(), 0);
-
-    std::mt19937 g(1);
-    std::shuffle(indices.begin(), indices.end(), g);
-
-    reference_based_test(vector, bits);
-
-    for (auto i : indices) {
-        thread_pool.enqueue([&](auto i) {
-            ASSERT_EQ(bits[i], vector[i]);
-        }, i);
-    }
-
-    thread_pool.join();
-}
-
-TEST(bitmap_adaptive, concurrent_reading) {
-    ThreadPool thread_pool(3);
-    bitmap_adaptive vector(100'000, false);
-
-    std::vector<bool> bits;
-
-    for (size_t i = 0; i < vector.size(); ++i) {
-        bits.push_back((i + (i * i) % 31) % 2);
-        if (bits.back())
-            vector.set(i, true);
-    }
-
-    std::vector<uint64_t> indices(vector.size());
-    std::iota(indices.begin(), indices.end(), 0);
-
-    std::mt19937 g(1);
-    std::shuffle(indices.begin(), indices.end(), g);
-
-    reference_based_test(vector, bits);
-
-    for (auto i : indices) {
-        thread_pool.enqueue([&](auto i) {
-            ASSERT_EQ(bits[i], vector[i]);
-        }, i);
-    }
-
-    thread_pool.join();
-}
-
-TEST(bitmap_adaptive, concurrent_reading_all_zero) {
-    ThreadPool thread_pool(3);
-    bitmap_adaptive vector(100'000, false);
+    TypeParam vector(100'000, false);
 
     std::vector<bool> bits(vector.size(), false);
 
@@ -308,9 +399,9 @@ TEST(bitmap_adaptive, concurrent_reading_all_zero) {
     thread_pool.join();
 }
 
-TEST(bitmap_adaptive, concurrent_reading_all_ones) {
+TYPED_TEST(BitmapTest, concurrent_reading_all_ones) {
     ThreadPool thread_pool(3);
-    bitmap_adaptive vector(100'000, true);
+    TypeParam vector(100'000, true);
 
     std::vector<bool> bits(vector.size(), true);
 
@@ -347,67 +438,39 @@ void test_operator_OR() {
     reference_based_test(vector, other.to_vector());
 }
 
-TEST(bitmap_set, or_with_stat) {
-    test_operator_OR<bitmap_set, bit_vector_stat>();
-}
-TEST(bitmap_set, or_with_dyn) {
-    test_operator_OR<bitmap_set, bit_vector_dyn>();
-}
-TEST(bitmap_set, or_with_sd) {
-    test_operator_OR<bitmap_set, bit_vector_sd>();
-}
-TEST(bitmap_set, or_with_smart) {
-    test_operator_OR<bitmap_set, bit_vector_smart>();
-}
-TEST(bitmap_set, or_with_small) {
-    test_operator_OR<bitmap_set, bit_vector_small>();
+TYPED_TEST(BitmapDynTest, or_with_stat) {
+    test_operator_OR<TypeParam, bit_vector_stat>();
 }
 
-TEST(bitmap_vector, or_with_stat) {
-    test_operator_OR<bitmap_vector, bit_vector_stat>();
-}
-TEST(bitmap_vector, or_with_dyn) {
-    test_operator_OR<bitmap_vector, bit_vector_dyn>();
-}
-TEST(bitmap_vector, or_with_sd) {
-    test_operator_OR<bitmap_vector, bit_vector_sd>();
-}
-TEST(bitmap_vector, or_with_smart) {
-    test_operator_OR<bitmap_vector, bit_vector_smart>();
-}
-TEST(bitmap_vector, or_with_small) {
-    test_operator_OR<bitmap_vector, bit_vector_small>();
+TYPED_TEST(BitmapDynTest, or_with_dyn) {
+    test_operator_OR<TypeParam, bit_vector_dyn>();
 }
 
-TEST(bitmap_adaptive, or_with_stat) {
-    test_operator_OR<bitmap_adaptive, bit_vector_stat>();
+TYPED_TEST(BitmapDynTest, or_with_sd) {
+    test_operator_OR<TypeParam, bit_vector_sd>();
 }
-TEST(bitmap_adaptive, or_with_dyn) {
-    test_operator_OR<bitmap_adaptive, bit_vector_dyn>();
+
+TYPED_TEST(BitmapDynTest, or_with_smart) {
+    test_operator_OR<TypeParam, bit_vector_smart>();
 }
-TEST(bitmap_adaptive, or_with_sd) {
-    test_operator_OR<bitmap_adaptive, bit_vector_sd>();
-}
-TEST(bitmap_adaptive, or_with_smart) {
-    test_operator_OR<bitmap_adaptive, bit_vector_smart>();
-}
-TEST(bitmap_adaptive, or_with_small) {
-    test_operator_OR<bitmap_adaptive, bit_vector_small>();
+
+TYPED_TEST(BitmapDynTest, or_with_small) {
+    test_operator_OR<TypeParam, bit_vector_small>();
 }
 
 
-TEST(bitmap_vector, call_ones_dense) {
+TYPED_TEST(BitmapTest, call_ones_dense_vector) {
     sdsl::bit_vector vector(50, true);
     for (uint64_t i = 0; i < 10; ++i) {
         vector[i] = i % 3;
-        bitmap_vector bmd(vector);
+        auto bmd = build_bitmap<TypeParam>(vector.size(), vector);
         sdsl::bit_vector copy(vector.size(), false);
-        bmd.call_ones([&copy](auto i) { copy[i] = true; });
+        bmd->call_ones([&copy](auto i) { copy[i] = true; });
         ASSERT_EQ(copy, vector);
     }
 }
 
-TEST(bitmap_set, call_ones_dense) {
+TYPED_TEST(BitmapTest, call_ones_dense_set) {
     sdsl::bit_vector vector(50, true);
     std::set<uint64_t> bits;
     for (uint64_t i = 0; i < 50; ++i) {
@@ -419,55 +482,25 @@ TEST(bitmap_set, call_ones_dense) {
         if (!vector[i])
             bits.erase(i);
 
-        bitmap_set bmd(vector.size(), bits);
+        auto bmd = build_bitmap<TypeParam>(vector.size(), bits);
         sdsl::bit_vector copy(vector.size(), false);
-        bmd.call_ones([&copy](auto i) { copy[i] = true; });
+        bmd->call_ones([&copy](auto i) { copy[i] = true; });
         ASSERT_EQ(copy, vector);
     }
 }
 
-TEST(bitmap_adaptive, call_ones_dense_vector) {
-    sdsl::bit_vector vector(50, true);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = i % 3;
-        bitmap_adaptive bmd(vector);
-        sdsl::bit_vector copy(vector.size(), false);
-        bmd.call_ones([&copy](auto i) { copy[i] = true; });
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bitmap_set, call_ones_dense_set) {
-    sdsl::bit_vector vector(50, true);
-    std::set<uint64_t> bits;
-    for (uint64_t i = 0; i < 50; ++i) {
-        bits.emplace_hint(bits.end(), i);
-    }
-
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = i % 3;
-        if (!vector[i])
-            bits.erase(i);
-
-        bitmap_adaptive bmd(vector.size(), bits);
-        sdsl::bit_vector copy(vector.size(), false);
-        bmd.call_ones([&copy](auto i) { copy[i] = true; });
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bitmap_vector, call_ones_sparse) {
+TYPED_TEST(BitmapTest, call_ones_sparse_vector) {
     sdsl::bit_vector vector(50);
     for (uint64_t i = 0; i < 10; ++i) {
         vector[i] = i % 3 == 0;
-        bitmap_vector bms(vector);
+        auto bms = build_bitmap<TypeParam>(vector.size(), vector);
         sdsl::bit_vector copy(vector.size(), false);
-        bms.call_ones([&copy](auto i) { copy[i] = true; });
+        bms->call_ones([&copy](auto i) { copy[i] = true; });
         ASSERT_EQ(copy, vector);
     }
 }
 
-TEST(bitmap_set, call_ones_sparse) {
+TYPED_TEST(BitmapTest, call_ones_sparse_set) {
     sdsl::bit_vector vector(50);
     std::set<uint64_t> bits;
     for (uint64_t i = 0; i < 10; ++i) {
@@ -475,40 +508,14 @@ TEST(bitmap_set, call_ones_sparse) {
         if (vector[i])
             bits.emplace_hint(bits.end(), i);
 
-        bitmap_set bms(vector.size(), bits);
+        auto bms = build_bitmap<TypeParam>(vector.size(), bits);
         sdsl::bit_vector copy(vector.size(), false);
-        bms.call_ones([&copy](auto i) { copy[i] = true; });
+        bms->call_ones([&copy](auto i) { copy[i] = true; });
         ASSERT_EQ(copy, vector);
     }
 }
 
-TEST(bitmap_adaptive, call_ones_sparse_vector) {
-    sdsl::bit_vector vector(50);
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = i % 3 == 0;
-        bitmap_adaptive bms(vector);
-        sdsl::bit_vector copy(vector.size(), false);
-        bms.call_ones([&copy](auto i) { copy[i] = true; });
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bitmap_adaptive, call_ones_sparse_set) {
-    sdsl::bit_vector vector(50);
-    std::set<uint64_t> bits;
-    for (uint64_t i = 0; i < 10; ++i) {
-        vector[i] = i % 3 == 0;
-        if (vector[i])
-            bits.emplace_hint(bits.end(), i);
-
-        bitmap_adaptive bms(vector.size(), bits);
-        sdsl::bit_vector copy(vector.size(), false);
-        bms.call_ones([&copy](auto i) { copy[i] = true; });
-        ASSERT_EQ(copy, vector);
-    }
-}
-
-TEST(bitmap_adaptive, switch_type) {
+TEST(BitmapAdaptiveTest, switch_type) {
     bitmap_adaptive bm(bitmap_adaptive::kRowCutoff - 2);
 
     uint64_t i = 0;

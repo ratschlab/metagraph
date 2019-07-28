@@ -70,6 +70,10 @@ void DBGSuccinct::call_outgoing_kmers(node_index node,
 
     auto boss_edge = kmer_to_boss_index(node);
 
+    // no outgoing edges from the sink dummy nodes
+    if (!boss_graph_->get_W(boss_edge))
+        return;
+
     auto last = boss_graph_->fwd(boss_edge);
     auto first = boss_graph_->pred_last(last - 1) + 1;
 
@@ -79,8 +83,27 @@ void DBGSuccinct::call_outgoing_kmers(node_index node,
 
         auto next = boss_to_kmer_index(i);
         if (next != npos)
-            callback(next, boss_graph_->decode(boss_graph_->get_W(i)));
+            callback(next, boss_graph_->decode(boss_graph_->get_W(i) % boss_graph_->alph_size));
     }
+}
+
+void DBGSuccinct::call_incoming_kmers(node_index node,
+                                      const IncomingEdgeCallback &callback) const {
+    assert(node);
+
+    auto edge = kmer_to_boss_index(node);
+
+    boss_graph_->call_adjacent_incoming_edges(edge,
+        [&](BOSS::edge_index incoming_boss_edge) {
+            assert(boss_graph_->get_W(incoming_boss_edge) % boss_graph_->alph_size
+                    == boss_graph_->get_node_last_value(edge));
+
+            auto prev = boss_to_kmer_index(incoming_boss_edge);
+            if (prev != npos)
+                callback(prev, boss_graph_->get_minus_k_value(incoming_boss_edge,
+                                                              get_k() - 2).first);
+        }
+    );
 }
 
 void DBGSuccinct::adjacent_outgoing_nodes(node_index node,
@@ -89,6 +112,10 @@ void DBGSuccinct::adjacent_outgoing_nodes(node_index node,
     assert(target_nodes);
 
     auto boss_edge = kmer_to_boss_index(node);
+
+    // no outgoing edges from the sink dummy nodes
+    if (!boss_graph_->get_W(boss_edge))
+        return;
 
     auto last = boss_graph_->fwd(boss_edge);
     auto first = boss_graph_->pred_last(last - 1) + 1;
@@ -166,7 +193,7 @@ std::string DBGSuccinct::get_node_sequence(node_index node) const {
     auto boss_edge = kmer_to_boss_index(node);
 
     return boss_graph_->get_node_str(boss_edge)
-            + boss_graph_->decode(boss_graph_->get_W(boss_edge));
+            + boss_graph_->decode(boss_graph_->get_W(boss_edge) % boss_graph_->alph_size);
 }
 
 // Traverse graph mapping sequence to the graph nodes
@@ -231,9 +258,9 @@ void DBGSuccinct
 
 void DBGSuccinct
 ::call_unitigs(const std::function<void(const std::string&)> &callback,
-               size_t max_pruned_dead_end_size) const {
+               size_t min_tip_size) const {
     assert(boss_graph_.get());
-    boss_graph_->call_unitigs(callback, max_pruned_dead_end_size);
+    boss_graph_->call_unitigs(callback, min_tip_size);
 }
 
 void DBGSuccinct
@@ -248,30 +275,18 @@ void DBGSuccinct
 
             auto node = boss_to_kmer_index(index);
             if (node != npos)
-                callback(node, seq + boss_graph_->decode(cur_W));
+                callback(node, seq + boss_graph_->decode(cur_W % boss_graph_->alph_size));
         } while (!boss_graph_->get_last(--index));
     });
 }
 
 void DBGSuccinct
-::call_nodes(const std::function<void(const node_index&)> &callback,
-             const std::function<bool()> &stop_early) const {
-    auto nnodes = num_nodes();
-    if (!canonical_mode_) {
-        for (node_index i = 1; i <= nnodes; ++i) {
-            callback(i);
-            if (stop_early())
-                return;
-        }
-        return;
-    }
-
-    call_kmers([&](auto i, const auto &kmer) {
-        if (stop_early())
-            return;
-
-        if (i == kmer_to_node(kmer))
-            callback(i);
+::call_source_nodes(const std::function<void(node_index)> &callback) const {
+    boss_graph_->call_start_edges([&](auto boss_edge) {
+        auto index = boss_to_kmer_index(boss_edge);
+        assert(index != npos);
+        assert(!indegree(index));
+        callback(index);
     });
 }
 
@@ -364,6 +379,10 @@ bool DBGSuccinct::load(const std::string &filename) {
             valid_edges_.reset(new bit_vector_stat());
             break;
         }
+        case Config::FAST: {
+            valid_edges_.reset(new bit_vector_stat());
+            break;
+        }
         case Config::DYN: {
             valid_edges_.reset(new bit_vector_dyn());
             break;
@@ -402,12 +421,14 @@ void DBGSuccinct::serialize(const std::string &filename) const {
     if (!valid_edges_.get())
         return;
 
-//    assert((boss_graph_->get_state() == Config::StateType::STAT
-//                && dynamic_cast<const bit_vector_stat*>(valid_edges_.get()))
-//        || (boss_graph_->get_state() == Config::StateType::DYN
-//                && dynamic_cast<const bit_vector_dyn*>(valid_edges_.get()))
-//        || (boss_graph_->get_state() == Config::StateType::SMALL
-//                && dynamic_cast<const bit_vector_small*>(valid_edges_.get())));
+    assert((boss_graph_->get_state() == Config::StateType::STAT
+                && dynamic_cast<const bit_vector_stat*>(valid_edges_.get()))
+        || (boss_graph_->get_state() == Config::StateType::FAST
+                && dynamic_cast<const bit_vector_stat*>(valid_edges_.get()))
+        || (boss_graph_->get_state() == Config::StateType::DYN
+                && dynamic_cast<const bit_vector_dyn*>(valid_edges_.get()))
+        || (boss_graph_->get_state() == Config::StateType::SMALL
+                && dynamic_cast<const bit_vector_small*>(valid_edges_.get())));
 
     const auto out_filename = remove_suffix(filename, kExtension) + kDummyMaskExtension;
     std::ofstream outstream(out_filename, std::ios::binary);
@@ -424,6 +445,12 @@ void DBGSuccinct::switch_state(Config::StateType new_state) {
     if (valid_edges_.get()) {
         switch (new_state) {
             case Config::STAT: {
+                valid_edges_ = std::make_unique<bit_vector_stat>(
+                    valid_edges_->convert_to<bit_vector_stat>()
+                );
+                break;
+            }
+            case Config::FAST: {
                 valid_edges_ = std::make_unique<bit_vector_stat>(
                     valid_edges_->convert_to<bit_vector_stat>()
                 );
@@ -452,6 +479,9 @@ Config::StateType DBGSuccinct::get_state() const {
                 || boss_graph_->get_state() != Config::StateType::STAT
                 || dynamic_cast<const bit_vector_stat*>(valid_edges_.get()));
     assert(!valid_edges_.get()
+                || boss_graph_->get_state() != Config::StateType::FAST
+                || dynamic_cast<const bit_vector_stat*>(valid_edges_.get()));
+    assert(!valid_edges_.get()
                 || boss_graph_->get_state() != Config::StateType::DYN
                 || dynamic_cast<const bit_vector_dyn*>(valid_edges_.get()));
     assert(!valid_edges_.get()
@@ -474,6 +504,10 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
 
     switch (get_state()) {
         case Config::STAT: {
+            valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector));
+            break;
+        }
+        case Config::FAST: {
             valid_edges_ = std::make_unique<bit_vector_stat>(std::move(vector));
             break;
         }
@@ -530,6 +564,43 @@ bool DBGSuccinct::operator==(const DeBruijnGraph &other) const {
     return false;
 }
 
+
 const std::string& DBGSuccinct::alphabet() const {
     return boss_graph_->alphabet;
+}
+
+void DBGSuccinct::print(std::ostream &out) const {
+    auto vertex_header = std::string("Vertex");
+    vertex_header.resize(get_k() - 1, ' ');
+
+    out << "BOSS" << "\t" << "L"
+                  << "\t" << vertex_header
+                  << "\t" << "W";
+
+    if (valid_edges_.get())
+        out << "\t" << "Index" << "\t" << "Valid";
+
+    out << std::endl;
+
+    const auto &boss = get_boss();
+
+    uint64_t valid_count = 0;
+
+    for (uint64_t i = 1; i <= boss.num_edges(); i++) {
+        out << i << "\t" << boss.get_last(i)
+                 << "\t" << boss.get_node_str(i)
+                 << "\t" << boss.decode(boss.get_W(i) % boss.alph_size)
+                         << (boss.get_W(i) >= boss.alph_size
+                                 ? "-"
+                                 : "");
+
+        if (valid_edges_.get()) {
+            bool valid = (*valid_edges_)[i];
+            valid_count += valid;
+            out << "\t" << (valid ? valid_count : 0)
+                << "\t" << valid;
+        }
+
+        out << std::endl;
+    }
 }

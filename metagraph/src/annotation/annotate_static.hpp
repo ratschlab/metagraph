@@ -4,6 +4,9 @@
 #include <memory>
 #include <vector>
 
+#include <cache.hpp>
+#include <lru_cache_policy.hpp>
+
 #include "annotate.hpp"
 
 
@@ -16,21 +19,19 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
     using Index = typename MultiLabelEncoded<uint64_t, Label>::Index;
     using VLabels = typename MultiLabelEncoded<uint64_t, Label>::VLabels;
 
-    StaticBinRelAnnotator() : matrix_(new BinaryMatrixType()) {}
+    StaticBinRelAnnotator(size_t row_cache_size = 0);
     StaticBinRelAnnotator(std::unique_ptr<BinaryMatrixType>&& matrix,
-                          const LabelEncoder<Label> &label_encoder);
+                          const LabelEncoder<Label> &label_encoder,
+                          size_t row_cache_size = 0);
 
     bool has_label(Index i, const Label &label) const override;
     bool has_labels(Index i, const VLabels &labels) const override;
 
     VLabels get_labels(Index i) const override;
-    // Get labels that occur at least in |presence_ratio| rows.
-    // If |presence_ratio| = 0, return all occurring labels.
-    VLabels get_labels(const std::vector<Index> &indices,
-                       double presence_ratio) const override;
 
     void serialize(const std::string &filename) const override;
     bool merge_load(const std::vector<std::string> &filenames) override;
+    void dump_columns(const std::string &prefix, bool binary = false) const;
 
     uint64_t num_objects() const override;
     size_t num_labels() const override;
@@ -47,9 +48,11 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
     void call_objects(const Label &label,
                       std::function<void(Index)> callback) const override;
 
-  private:
-    std::vector<uint64_t> count_labels(const std::vector<Index> &indices) const override;
+    void reset_row_cache(size_t size);
 
+    std::string file_extension() const override;
+
+  private:
     void except_dyn();
 
     std::unique_ptr<BinaryMatrixType> matrix_;
@@ -58,9 +61,12 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<uint64_t, Label> {
         MultiLabelEncoded<uint64_t, Label>::label_encoder_
     };
 
-    std::vector<uint64_t> get_label_indexes(Index i) const override {
-        return matrix_->get_row(i);
-    }
+    std::vector<uint64_t> get_label_codes(Index i) const override;
+
+    typedef caches::fixed_sized_cache<Index,
+                                      std::vector<uint64_t>,
+                                      caches::LRUCachePolicy<Index>> RowCacheType;
+    mutable std::unique_ptr<RowCacheType> cached_rows_;
 
     static const std::string kExtension;
 };

@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 
-exe="$(dirname ${BASH_SOURCE[0]})/../build/metagengraph"
+exe="$(dirname ${BASH_SOURCE[0]})/../build/metagraph"
 
 
 if [ $# -ne 2 ] || [[ ${1: -8} != '.kmc_suf' ]]; then
@@ -24,5 +24,5 @@ then
 fi
 if [ ! -f ${FILE}.k$K.contigs.fa.gz ]
 then
-    echo "/usr/bin/time -v $exe transform -v --to-fasta --unitigs -p 1 -o ${FILE}.k$K.contigs ${FILE}.k$K" | bsub -M $mem -n 1 -We 12:00 -R "rusage[mem=${mem}]" -J kmc_msub2 -o ${FILE}.kmc2contS2.k${K}.cluster.log
+    echo "/usr/bin/time -v $exe assemble -v --unitigs -p 1 -o ${FILE}.k$K.contigs ${FILE}.k$K" | bsub -M $mem -n 1 -We 12:00 -R "rusage[mem=${mem}]" -J kmc_msub2 -o ${FILE}.kmc2contS2.k${K}.cluster.log
 fi

@@ -90,19 +90,6 @@ class MultiLabelAnnotation
 
     /*********************** Special queries **********************/
 
-    // Get labels that occur at least in |presence_ratio| rows.
-    // If |presence_ratio| = 0, return all occurring labels.
-    virtual VLabels get_labels(const std::vector<Index> &indices,
-                               double presence_ratio) const = 0;
-
-    // Count all labels collected from the given rows
-    // and return top |num_top| with the their counts.
-    // Skip labels with count frequency smaller than |min_label_frequency|.
-    virtual std::vector<std::pair<Label, size_t>>
-    get_top_labels(const std::vector<Index> &indices,
-                   size_t num_top = static_cast<size_t>(-1),
-                   double min_label_frequency = 0.0) const = 0;
-
     virtual void call_objects(const Label &label,
                               std::function<void(Index)> callback) const = 0;
 
@@ -111,8 +98,11 @@ class MultiLabelAnnotation
     virtual uint64_t num_objects() const = 0;
     virtual size_t num_labels() const = 0;
     virtual uint64_t num_relations() const = 0;
+    virtual const VLabels& get_all_labels() const = 0;
 
     virtual bool label_exists(const Label &label) const = 0;
+
+    virtual std::string file_extension() const = 0;
 };
 
 
@@ -141,6 +131,8 @@ class LabelEncoder {
      * Throws an exception if a bad code is passed.
      */
     const Label& decode(size_t code) const { return decode_label_.at(code); }
+
+    const std::vector<Label>& get_labels() const { return decode_label_; }
 
     size_t size() const { return decode_label_.size(); }
 
@@ -175,7 +167,7 @@ class MultiLabelEncoded
     virtual ~MultiLabelEncoded() {}
 
     virtual std::unique_ptr<IterateRows> iterator() const;
-    virtual std::vector<uint64_t> get_label_indexes(Index i) const;
+    virtual std::vector<uint64_t> get_label_codes(Index i) const = 0;
 
     virtual const LabelEncoder<Label>& get_label_encoder() const final { return label_encoder_; }
 
@@ -185,25 +177,23 @@ class MultiLabelEncoded
     // and merges all relations (*, L') with matching labels L', if supported.
     virtual void rename_labels(const std::unordered_map<Label, Label> &dict) override;
 
-    /*********************** Special queries **********************/
-
-    // Count all labels collected from the given rows
-    // and return top |num_top| with the their counts.
-    // Skip labels with count frequency smaller than |min_label_frequency|.
-    virtual std::vector<std::pair<Label, size_t>>
-    get_top_labels(const std::vector<Index> &indices,
-                   size_t num_top = static_cast<size_t>(-1),
-                   double min_label_frequency = 0.0) const override final;
+    // For each Index in indices, call row_callback on the vector of its
+    // corresponding label indices. Terminate early if terminate returns true.
+    virtual void call_rows(const std::vector<Index> &indices,
+                           const std::function<void(std::vector<uint64_t>&&)> &row_callback,
+                           const std::function<bool()> &terminate = []() { return false; }) const;
 
     virtual bool label_exists(const Label &label) const override final {
         return label_encoder_.label_exists(label);
     }
 
-  protected:
-    // TODO: add |min_label_frequency| parameter: return only frequent labels
-    virtual std::vector<uint64_t>
-    count_labels(const std::vector<Index> &indices) const = 0;
+    virtual const VLabels& get_all_labels() const override final {
+        return label_encoder_.get_labels();
+    }
 
+    virtual std::string file_extension() const override = 0;
+
+  protected:
     LabelEncoder<Label> label_encoder_;
 };
 

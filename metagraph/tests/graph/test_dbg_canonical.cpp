@@ -1,12 +1,6 @@
 #include "gtest/gtest.h"
 
 #include "test_dbg_helpers.hpp"
-#include "test_dbg_helpers.hpp"
-#include "dbg_succinct.hpp"
-#include "boss.hpp"
-#include "dbg_hash_string.hpp"
-#include "dbg_hash_ordered.hpp"
-#include "dbg_bitmap.hpp"
 #include "utils.hpp"
 #include "reverse_complement.hpp"
 
@@ -15,14 +9,34 @@ const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 
 
 template <typename Graph>
-class DeBruijnGraphCanonicalTest : public ::testing::Test { };
-typedef ::testing::Types<DBGBitmap, DBGHashOrdered, DBGSuccinct> CanonicalGraphTypes;
+class DeBruijnGraphCanonicalTest : public DeBruijnGraphTest<Graph> { };
+typedef ::testing::Types<DBGBitmap,
+                         DBGHashOrdered,
+                         DBGSuccinct> CanonicalGraphTypes;
 TYPED_TEST_CASE(DeBruijnGraphCanonicalTest, CanonicalGraphTypes);
 
 template <typename Graph>
-class DeBruijnGraphWithNTest : public ::testing::Test { };
-typedef ::testing::Types<DBGBitmap, DBGHashOrdered> NoNGraphTypes;
-TYPED_TEST_CASE(DeBruijnGraphWithNTest, NoNGraphTypes);
+class DeBruijnGraphWithNTest : public DeBruijnGraphTest<Graph> { };
+#ifndef _DNA_GRAPH
+typedef ::testing::Types<DBGSuccinct,
+                         DBGHashString> WithNGraphTypes;
+#else
+typedef ::testing::Types<> WithNGraphTypes;
+#endif
+TYPED_TEST_CASE(DeBruijnGraphWithNTest, WithNGraphTypes);
+
+template <typename Graph>
+class DeBruijnGraphNoNTest : public DeBruijnGraphTest<Graph> { };
+#ifndef _DNA_GRAPH
+typedef ::testing::Types<DBGBitmap,
+                         DBGHashOrdered> NoNGraphTypes;
+#else
+typedef ::testing::Types<DBGSuccinct,
+                         DBGHashString,
+                         DBGHashOrdered,
+                         DBGBitmap> NoNGraphTypes;
+#endif
+TYPED_TEST_CASE(DeBruijnGraphNoNTest, NoNGraphTypes);
 
 
 TYPED_TEST(DeBruijnGraphCanonicalTest, CheckGraph) {
@@ -33,8 +47,33 @@ TYPED_TEST(DeBruijnGraphWithNTest, CheckGraph) {
     EXPECT_TRUE(check_graph<TypeParam>("ACGTN", false));
 }
 
-TYPED_TEST(DeBruijnGraphWithNTest, CheckGraphCanonical) {
-    EXPECT_TRUE(check_graph<TypeParam>("ACGTN", true));
+TYPED_TEST(DeBruijnGraphNoNTest, CheckGraph) {
+    EXPECT_TRUE(check_graph<TypeParam>("ACGTN", false));
+}
+
+TEST(DeBruijnGraphWithNTest, CheckGraphCanonical) {
+    EXPECT_TRUE(check_graph<DBGSuccinct>("ACGTN", true));
+}
+
+TYPED_TEST(DeBruijnGraphCanonicalTest, CheckGraphSequence) {
+    EXPECT_TRUE(check_graph<TypeParam>("ACGT", true, true));
+}
+
+TYPED_TEST(DeBruijnGraphWithNTest, CheckGraphSequence) {
+    EXPECT_TRUE(check_graph<TypeParam>("ACGTN", false, true));
+}
+
+TYPED_TEST(DeBruijnGraphNoNTest, CheckGraphSequence) {
+    EXPECT_TRUE(check_graph<TypeParam>("ACGT", false, true));
+    EXPECT_FALSE(check_graph<TypeParam>("ACGTN", false, true));
+}
+
+TEST(DeBruijnGraphWithNTest, CheckGraphSequenceCanonical) {
+#if _DNA_GRAPH
+    EXPECT_FALSE(check_graph<DBGSuccinct>("ACGTN", true, true));
+#else
+    EXPECT_TRUE(check_graph<DBGSuccinct>("ACGTN", true, true));
+#endif
 }
 
 

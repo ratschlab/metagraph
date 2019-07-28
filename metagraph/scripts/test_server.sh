@@ -2,10 +2,10 @@
 
 file_small="$(dirname ${BASH_SOURCE[0]})/../tests/data/transcripts_100.fa"
 
-if [ -f metagengraph ]; then
-  exe="./metagengraph"
+if [ -f metagraph ]; then
+  exe="./metagraph"
 else
-  exe="$(dirname ${BASH_SOURCE[0]})/../build/metagengraph"
+  exe="$(dirname ${BASH_SOURCE[0]})/../build/metagraph"
 fi
 
 $exe build -k 12 -o test_server_graph $file_small

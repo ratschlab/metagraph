@@ -12,6 +12,8 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "RELEASE")
 endif()
 
+string(TOUPPER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE)
+
 set(JSONCPP_WITH_TESTS FALSE)
 add_subdirectory(
   external-libraries/jsoncpp
@@ -23,8 +25,8 @@ endif()
 
 if(CMAKE_DBG_ALPHABET STREQUAL "DNA")
   string(APPEND CMAKE_CXX_FLAGS " -D_DNA_GRAPH")
-elseif(CMAKE_DBG_ALPHABET STREQUAL "DNA4")
-  string(APPEND CMAKE_CXX_FLAGS " -D_DNA4_GRAPH")
+elseif(CMAKE_DBG_ALPHABET STREQUAL "DNA5")
+  string(APPEND CMAKE_CXX_FLAGS " -D_DNA5_GRAPH")
 elseif(CMAKE_DBG_ALPHABET STREQUAL "DNA_CASE_SENSITIVE")
   string(APPEND CMAKE_CXX_FLAGS " -D_DNA_CASE_SENSITIVE_GRAPH")
 else()
@@ -70,11 +72,6 @@ if(WITH_MMAP)
 message(STATUS "Enabling boost iostreams for mmapped reader")
 string(APPEND CMAKE_CXX_FLAGS " -D_USE_MMAP")
 set(METALIBS ${METALIBS} -lboost_iostreams)
-endif()
-
-if(WITH_DEATH_TESTS)
-message(STATUS "Enabling death tests in gtest")
-string(APPEND CMAKE_CXX_FLAGS " -D_DEATH_TEST")
 endif()
 
 #-------------------
@@ -127,7 +124,7 @@ if(LINK_OPT)
 endif()
 
 # Thread sanitizer build type
-set(CMAKE_CXX_FLAGS_THREADS "-O2 -g -fsanitize=thread")
+set(CMAKE_CXX_FLAGS_THREADS "-DNDEBUG -O2 -g -fsanitize=thread")
 set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 
@@ -166,7 +163,6 @@ include_directories(
   external-libraries/eigen
   external-libraries/caches/include
   external-libraries/sparsepp
-  external-libraries/sparsepp/sparsepp
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/binrel_wt/include
@@ -235,8 +231,8 @@ list(FILTER src_files EXCLUDE REGEX ".*\\._.*")
 list(FILTER src_files EXCLUDE REGEX ".*main.cpp")
 
 add_library(metagraph STATIC ${src_files})
-add_executable(metagengraph "src/main.cpp")
-set_target_properties(metagengraph PROPERTIES OUTPUT_NAME "metagengraph_${CMAKE_DBG_ALPHABET}")
+add_executable(metagraph-bin "src/main.cpp")
+set_target_properties(metagraph-bin PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
 
 set(METALIBS ${METALIBS}
   -lKMC
@@ -297,14 +293,14 @@ target_link_libraries(
 )
 
 target_link_libraries(
-  metagengraph metagraph ${METALIBS}
+  metagraph-bin metagraph ${METALIBS}
 )
 
 add_custom_target(link_target ALL
   COMMAND ${CMAKE_COMMAND} -E
   create_symlink
-    "metagengraph_${CMAKE_DBG_ALPHABET}"
-    "metagengraph"
+    "metagraph_${CMAKE_DBG_ALPHABET}"
+    "metagraph"
 )
 
 
@@ -353,7 +349,7 @@ file(GLOB header_files
 
 install(TARGETS metagraph DESTINATION lib)
 install(FILES ${header_files} DESTINATION include/metagraph)
-install(TARGETS metagengraph DESTINATION bin)
+install(TARGETS metagraph-bin DESTINATION bin)
 # install also metagengraph
 
 #-------------------
@@ -387,6 +383,16 @@ add_subdirectory(
 )
 endif()
 
+if(NOT DEFINED DEATH_TEST)
+  set(DEATH_TEST TRUE)
+endif()
+if(DEATH_TEST AND ${CMAKE_BUILD_TYPE} MATCHES DEBUG)
+  set(DEATH_TEST_FLAG "")
+else()
+  message(STATUS "Disabling death tests in gtest")
+  set(DEATH_TEST_FLAG -D_NO_DEATH_TEST)
+endif()
+
 file(GLOB unit_tests_files
   "tests/*.cpp"
   "tests/*/*.cpp"
@@ -413,7 +419,7 @@ target_link_libraries(unit_tests gtest_main gtest
   ${METALIBS}
 )
 
-target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template)
+target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template ${DEATH_TEST_FLAG})
 
 add_test(NAME unit_tests COMMAND unit_tests)
 

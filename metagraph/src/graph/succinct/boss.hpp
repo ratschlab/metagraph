@@ -108,12 +108,15 @@ class BOSS {
     // traverse all nodes in graph except for the dummy source of sink ones
     void call_kmers(Call<node_index, const std::string&> callback) const;
 
+    // call all non-dummy edges without other adjacent incoming non-dummy edges
+    void call_start_edges(Call<edge_index> callback) const;
+
     void call_edges(Call<edge_index, const std::vector<TAlphabet>&> callback) const;
 
     // call paths (or simple paths if |split_to_contigs| is true) that cover
     // exactly all edges in graph
-    void call_paths(Call<const std::vector<edge_index>,
-                         const std::vector<TAlphabet>&> callback,
+    void call_paths(Call<std::vector<edge_index>&&,
+                         std::vector<TAlphabet>&&> callback,
                     bool split_to_contigs = false) const;
 
     void call_sequences(Call<const std::string&> callback) const;
@@ -290,6 +293,8 @@ class BOSS {
      */
     bool get_last(uint64_t i) const { return (*last_)[i]; }
 
+    const bit_vector& get_last() const { return *last_; }
+
     /**
      * Uses the object's array last and a position and
      * returns the number of set bits up to that postion.
@@ -350,6 +355,7 @@ class BOSS {
      * The index is over the alphabet!
      */
     uint64_t get_F(TAlphabet k) const { return F_.at(k); }
+    const std::vector<uint64_t>& get_F() const { return F_; }
 
     /**
      * This functions gets a position i reflecting the r-th occurence of the corresponding
@@ -375,8 +381,8 @@ class BOSS {
     const TAlphabet alph_size;
     const std::string &alphabet;
 
-    static const size_t kSentinelCode = 0;
-    static const size_t kSentinel = '$';
+    static constexpr size_t kSentinelCode = 0;
+    static constexpr size_t kSentinel = '$';
 
   private:
     // file dump extension
@@ -426,11 +432,11 @@ class BOSS {
     // traverse graph from the specified (k+1)-mer/edge and call
     // all paths reachable from it
     void call_paths(edge_index starting_kmer,
-                    Call<const std::vector<edge_index>,
-                         const std::vector<TAlphabet>&> callback,
+                    Call<std::vector<edge_index>&&,
+                         std::vector<TAlphabet>&&> callback,
                     bool split_to_contigs,
-                    std::vector<bool> *discovered_ptr,
-                    std::vector<bool> *visited_ptr,
+                    sdsl::bit_vector *discovered_ptr,
+                    sdsl::bit_vector *visited_ptr,
                     ProgressBar &progress_bar) const;
 
     /**
@@ -491,6 +497,10 @@ class BOSS {
 
         assert(end > begin);
         assert(end <= begin + k_);
+
+        // check if all characters belong to the alphabet
+        if (std::any_of(begin, end, [&](TAlphabet c) { return c >= alph_size; }))
+            return std::make_pair(0, 0);
 
         // get first
         TAlphabet s = *begin;
