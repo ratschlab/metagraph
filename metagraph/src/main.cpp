@@ -1857,26 +1857,26 @@ int main(int argc, const char *argv[]) {
                     if (config->dump_raw_anno) {
                         dynamic_cast<annotate::ColumnCompressed<>*>(
                             annotation.get()
-                        )->dump_columns(config->outfbase, true, config->parallel);
+                        )->dump_columns(config->outfbase, true, get_num_threads());
                     }
 
                     if (config->dump_text_anno) {
                         dynamic_cast<annotate::ColumnCompressed<>*>(
                             annotation.get()
-                        )->dump_columns(config->outfbase, false, config->parallel);
+                        )->dump_columns(config->outfbase, false, get_num_threads());
                     }
                 } else if (input_anno_type == Config::BRWT) {
                     assert(dynamic_cast<annotate::BRWTCompressed<>*>(annotation.get()));
                     if (config->dump_raw_anno) {
                         dynamic_cast<annotate::BRWTCompressed<>*>(
                             annotation.get()
-                        )->dump_columns(config->outfbase, true, config->parallel);
+                        )->dump_columns(config->outfbase, true, get_num_threads());
                     }
 
                     if (config->dump_text_anno) {
                         dynamic_cast<annotate::BRWTCompressed<>*>(
                             annotation.get()
-                        )->dump_columns(config->outfbase, false, config->parallel);
+                        )->dump_columns(config->outfbase, false, get_num_threads());
                     }
                 } else {
                     throw std::runtime_error("Dumping columns for this type not implemented");
