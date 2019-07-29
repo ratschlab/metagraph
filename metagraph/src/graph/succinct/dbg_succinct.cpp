@@ -64,27 +64,35 @@ node_index DBGSuccinct::traverse_back(node_index node, char prev_char) const {
     );
 }
 
+template <class Callback>
+inline void call_outgoing(const BOSS &boss,
+                          uint64_t boss_edge,
+                          const Callback &callback) {
+    // no outgoing edges from the sink dummy nodes
+    if (boss_edge > 1 && !boss.get_W(boss_edge))
+        return;
+
+    auto last = boss.fwd(boss_edge);
+    auto first = boss.pred_last(last - 1) + 1;
+
+    for (auto i = std::max(uint64_t(2), first); i <= last; ++i) {
+        assert(boss.get_W(boss_edge) % boss.alph_size
+                == boss.get_node_last_value(i));
+
+        callback(i);
+    }
+}
+
 void DBGSuccinct::call_outgoing_kmers(node_index node,
                                       const OutgoingEdgeCallback &callback) const {
     assert(node);
 
-    auto boss_edge = kmer_to_boss_index(node);
-
-    // no outgoing edges from the sink dummy nodes
-    if (boss_edge > 1 && !boss_graph_->get_W(boss_edge))
-        return;
-
-    auto last = boss_graph_->fwd(boss_edge);
-    auto first = boss_graph_->pred_last(last - 1) + 1;
-
-    for (auto i = std::max(uint64_t(2), first); i <= last; ++i) {
-        assert(boss_graph_->get_W(boss_edge) % boss_graph_->alph_size
-                == boss_graph_->get_node_last_value(i));
-
+    call_outgoing(*boss_graph_, kmer_to_boss_index(node), [&](auto i) {
         auto next = boss_to_kmer_index(i);
         if (next != npos)
-            callback(next, boss_graph_->decode(boss_graph_->get_W(i) % boss_graph_->alph_size));
-    }
+            callback(next, boss_graph_->decode(boss_graph_->get_W(i)
+                                % boss_graph_->alph_size));
+    });
 }
 
 void DBGSuccinct::call_incoming_kmers(node_index node,
@@ -111,23 +119,11 @@ void DBGSuccinct::adjacent_outgoing_nodes(node_index node,
     assert(node);
     assert(target_nodes);
 
-    auto boss_edge = kmer_to_boss_index(node);
-
-    // no outgoing edges from the sink dummy nodes
-    if (boss_edge > 1 && !boss_graph_->get_W(boss_edge))
-        return;
-
-    auto last = boss_graph_->fwd(boss_edge);
-    auto first = boss_graph_->pred_last(last - 1) + 1;
-
-    for (auto i = std::max(uint64_t(2), first); i <= last; ++i) {
-        assert(boss_graph_->get_W(boss_edge) % boss_graph_->alph_size
-                == boss_graph_->get_node_last_value(i));
-
+    call_outgoing(*boss_graph_, kmer_to_boss_index(node), [&](auto i) {
         auto next = boss_to_kmer_index(i);
         if (next != npos)
             target_nodes->emplace_back(next);
-    }
+    });
 }
 
 void DBGSuccinct::adjacent_incoming_nodes(node_index node,
