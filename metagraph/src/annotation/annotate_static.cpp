@@ -2,6 +2,7 @@
 
 #include "utils.hpp"
 #include "static_annotators_def.hpp"
+#include "threading.hpp"
 
 using utils::remove_suffix;
 
@@ -165,46 +166,59 @@ void StaticBinRelAnnotator<BinaryMatrixType, Label>
 
 template <class BinaryMatrixType, typename Label>
 void StaticBinRelAnnotator<BinaryMatrixType, Label>
-::dump_columns(const std::string &prefix, bool binary) const {
+::dump_columns(const std::string &prefix, bool binary, uint64_t num_threads) const {
     size_t m = num_labels();
+
+    ThreadPool thread_pool(num_threads);
+
     if (binary) {
         for (uint64_t i = 0; i < m; ++i) {
-            std::ofstream outstream(
-                remove_suffix(prefix, kExtension)
-                    + "." + std::to_string(i)
-                    + ".raw.annodbg",
-                std::ios::binary
+            thread_pool.enqueue(
+                [&](uint64_t i) {
+                    std::ofstream outstream(
+                        remove_suffix(prefix, kExtension)
+                            + "." + std::to_string(i)
+                            + ".raw.annodbg",
+                        std::ios::binary
+                    );
+
+                    if (!outstream.good())
+                        throw std::ofstream::failure("Bad stream");
+
+                    auto column = matrix_->get_column(i);
+
+                    serialize_number(outstream, column.size());
+                    for (auto pos : column) {
+                        serialize_number(outstream, pos);
+                    }
+                }, i
             );
-
-            if (!outstream.good())
-                throw std::ofstream::failure("Bad stream");
-
-            auto column = matrix_->get_column(i);
-
-            serialize_number(outstream, column.size());
-            for (auto pos : column) {
-                serialize_number(outstream, pos);
-            }
         }
     } else {
         for (uint64_t i = 0; i < m; ++i) {
-            std::ofstream outstream(
-                remove_suffix(prefix, kExtension)
-                    + "." + std::to_string(i)
-                    + ".text.annodbg"
+            thread_pool.enqueue(
+                [&](uint64_t i) {
+                    std::ofstream outstream(
+                        remove_suffix(prefix, kExtension)
+                            + "." + std::to_string(i)
+                            + ".text.annodbg"
+                    );
+
+                    if (!outstream.good())
+                        throw std::ofstream::failure("Bad stream");
+
+                    auto column = matrix_->get_column(i);
+
+                    outstream << column.size() << std::endl;
+                    for (auto pos : column) {
+                        outstream << pos << std::endl;
+                    }
+                }, i
             );
-
-            if (!outstream.good())
-                throw std::ofstream::failure("Bad stream");
-
-            auto column = matrix_->get_column(i);
-
-            outstream << column.size() << std::endl;
-            for (auto pos : column) {
-                outstream << pos << std::endl;
-            }
         }
     }
+
+    thread_pool.join();
 }
 
 template <class BinaryMatrixType, typename Label>

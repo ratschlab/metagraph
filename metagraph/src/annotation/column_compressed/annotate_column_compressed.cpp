@@ -528,41 +528,57 @@ void ColumnCompressed<Label>::add_labels(uint64_t begin, uint64_t end,
 
 template <typename Label>
 void ColumnCompressed<Label>
-::dump_columns(const std::string &prefix, bool binary) const {
+::dump_columns(const std::string &prefix, bool binary, uint64_t num_threads) const {
+    ThreadPool thread_pool(num_threads);
+
     if (binary) {
         for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
-            std::ofstream outstream(
-                remove_suffix(prefix, kExtension)
-                    + "." + std::to_string(i)
-                    + ".raw.annodbg",
-                std::ios::binary
+            thread_pool.enqueue(
+                [&](uint64_t i) {
+                    std::ofstream outstream(
+                        remove_suffix(prefix, kExtension)
+                            + "." + std::to_string(i)
+                            + ".raw.annodbg",
+                        std::ios::binary
+                    );
+
+                    if (!outstream.good())
+                        throw std::ofstream::failure("Bad stream");
+
+                    const auto &column = get_column(i);
+
+                    serialize_number(outstream, column.num_set_bits());
+                    column.call_ones([&](const auto &pos) {
+                        serialize_number(outstream, pos);
+                    });
+                }, i
             );
-
-            if (!outstream.good())
-                throw std::ofstream::failure("Bad stream");
-
-            const auto &column = get_column(i);
-
-            serialize_number(outstream, column.num_set_bits());
-            column.call_ones([&](const auto &pos) { serialize_number(outstream, pos); });
         }
     } else {
         for (uint64_t i = 0; i < bitmatrix_.size(); ++i) {
-            std::ofstream outstream(
-                remove_suffix(prefix, kExtension)
-                    + "." + std::to_string(i)
-                    + ".text.annodbg"
+            thread_pool.enqueue(
+                [&](uint64_t i) {
+                    std::ofstream outstream(
+                        remove_suffix(prefix, kExtension)
+                            + "." + std::to_string(i)
+                            + ".text.annodbg"
+                    );
+
+                    if (!outstream.good())
+                        throw std::ofstream::failure("Bad stream");
+
+                    const auto &column = get_column(i);
+
+                    outstream << column.num_set_bits() << std::endl;
+                    column.call_ones([&](const auto &pos) {
+                        outstream << pos << std::endl;
+                    });
+                }, i
             );
-
-            if (!outstream.good())
-                throw std::ofstream::failure("Bad stream");
-
-            const auto &column = get_column(i);
-
-            outstream << column.num_set_bits() << std::endl;
-            column.call_ones([&](const auto &pos) { outstream << pos << std::endl; });
         }
     }
+
+    thread_pool.join();
 }
 
 template <class RowIterator>
