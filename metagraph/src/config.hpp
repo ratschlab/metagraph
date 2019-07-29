@@ -21,6 +21,7 @@ class Config {
     bool filename_anno = false;
     bool fasta_anno = false;
     bool to_adj_list = false;
+    bool to_fasta = false;
     bool unitigs = false;
     bool count_kmers = false;
     bool query_presence = false;

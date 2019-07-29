@@ -181,7 +181,10 @@ Config::Config(int argc, const char *argv[]) {
             infbase = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "--to-adj-list")) {
             to_adj_list = true;
+        } else if (!strcmp(argv[i], "--to-fasta")) {
+            to_fasta = true;
         } else if (!strcmp(argv[i], "--unitigs")) {
+            to_fasta = true;
             unitigs = true;
         } else if (!strcmp(argv[i], "--header")) {
             header = std::string(argv[++i]);
@@ -238,6 +241,9 @@ Config::Config(int argc, const char *argv[]) {
             fname.push_back(argv[i]);
         }
     }
+
+    if (identity == TRANSFORM && to_fasta)
+        identity = ASSEMBLE;
 
     // given kmc_pre and kmc_suf pair, only include one
     // this still allows for the same file to be included multiple times
@@ -622,6 +628,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends of this length and shorter [0]\n");
             fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: fast / faster / dynamic / small [fast]\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
+            fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and dump to compressed FASTA file [off]\n");
+            fprintf(stderr, "\t   --unitigs \t\textract all unitigs from graph and dump to compressed FASTA file [off]\n");
             fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
