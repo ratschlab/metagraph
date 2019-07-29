@@ -2228,7 +2228,7 @@ TEST(BOSS, get_degree_with_source_dummy) {
 
         // dummy source k-mer: '$$$$$'
         EXPECT_EQ(std::string(k, '$'), graph->get_node_sequence(1));
-        EXPECT_EQ(2ull, graph->outdegree(1));
+        EXPECT_EQ(1ull, graph->outdegree(1));
         EXPECT_EQ(1ull, graph->indegree(1));
 
         // 'AAAAA'
@@ -2273,7 +2273,7 @@ TEST(BOSS, get_degree_with_source_and_sink_dummy) {
 
         // dummy source k-mer: '$$$$$'
         EXPECT_EQ(std::string(k, '$'), graph->get_node_sequence(1));
-        EXPECT_EQ(2ull, graph->outdegree(1));
+        EXPECT_EQ(1ull, graph->outdegree(1));
         EXPECT_EQ(1ull, graph->indegree(1));
 
         // 'AAAAA'
@@ -2284,7 +2284,7 @@ TEST(BOSS, get_degree_with_source_and_sink_dummy) {
 
         auto node_T = graph->kmer_to_node('G' + std::string(k - 1, 'T'));
         ASSERT_NE(DBGSuccinct::npos, node_T);
-        EXPECT_EQ(1ull, graph->outdegree(node_T));
+        EXPECT_EQ(0ull, graph->outdegree(node_T));
         EXPECT_EQ(1ull, graph->indegree(node_T));
 
 

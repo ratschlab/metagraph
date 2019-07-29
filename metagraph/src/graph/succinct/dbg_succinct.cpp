@@ -70,23 +70,14 @@ void DBGSuccinct::call_outgoing_kmers(node_index node,
 
     auto boss_edge = kmer_to_boss_index(node);
 
-    BOSS::edge_index first, last;
-    if (boss_edge > 1) {
-        // no outgoing edges from the sink dummy nodes
-        if (!boss_graph_->get_W(boss_edge))
-            return;
+    // no outgoing edges from the sink dummy nodes
+    if (boss_edge > 1 && !boss_graph_->get_W(boss_edge))
+        return;
 
-        last = boss_graph_->fwd(boss_edge);
-        first = boss_graph_->pred_last(last - 1) + 1;
-    } else {
-        if (boss_graph_->get_last(node))
-            return;
+    auto last = boss_graph_->fwd(boss_edge);
+    auto first = boss_graph_->pred_last(last - 1) + 1;
 
-        last = boss_graph_->succ_last(node);
-        first = node + 1;
-    }
-
-    for (auto i = first; i <= last; ++i) {
+    for (auto i = std::max(uint64_t(2), first); i <= last; ++i) {
         assert(boss_graph_->get_W(boss_edge) % boss_graph_->alph_size
                 == boss_graph_->get_node_last_value(i));
 
@@ -123,13 +114,13 @@ void DBGSuccinct::adjacent_outgoing_nodes(node_index node,
     auto boss_edge = kmer_to_boss_index(node);
 
     // no outgoing edges from the sink dummy nodes
-    if (!boss_graph_->get_W(boss_edge))
+    if (boss_edge > 1 && !boss_graph_->get_W(boss_edge))
         return;
 
     auto last = boss_graph_->fwd(boss_edge);
     auto first = boss_graph_->pred_last(last - 1) + 1;
 
-    for (auto i = first; i <= last; ++i) {
+    for (auto i = std::max(uint64_t(2), first); i <= last; ++i) {
         assert(boss_graph_->get_W(boss_edge) % boss_graph_->alph_size
                 == boss_graph_->get_node_last_value(i));
 
@@ -304,7 +295,10 @@ size_t DBGSuccinct::outdegree(node_index node) const {
 
     auto boss_edge = kmer_to_boss_index(node);
 
-    if (boss_edge > 1 && !boss_graph_->get_W(boss_edge)) {
+    if (boss_edge == 1)
+        return boss_graph_->succ_last(1) - 1;
+
+    if (!boss_graph_->get_W(boss_edge)) {
         // |node| is a sink dummy boss edge, hence has no outgoing edges
         return 0;
     }
@@ -312,13 +306,9 @@ size_t DBGSuccinct::outdegree(node_index node) const {
     auto last_target_kmer = boss_graph_->fwd(boss_edge);
 
     if (!boss_graph_->get_W(last_target_kmer)) {
-        // There is a sunk dummy target, hence this is the only outgoing edge
-        if (valid_edges_.get()) {
-            // if mask is defined, skip boss dummy sink edges
-            return 0;
-        } else {
-            return 1;
-        }
+        // There is a sink dummy target, hence this is the only outgoing edge
+        // skip boss dummy sink edges
+        return 0;
     }
 
     return last_target_kmer - boss_graph_->pred_last(last_target_kmer - 1);
