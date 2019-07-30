@@ -22,7 +22,7 @@ build_graph(uint64_t k,
     if (count_kmers)
         graph->add_extension(std::make_shared<DBGWeights<>>());
 
-    auto weights = graph->get_extension<DBGWeights<>>();
+    const auto &weights = graph->get_extension<DBGWeights<>>();
 
     for (const auto &sequence : sequences) {
         graph->add_sequence(sequence);

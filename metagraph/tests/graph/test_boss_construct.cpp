@@ -17,6 +17,7 @@
 #include "reverse_complement.hpp"
 #include "sorted_set.hpp"
 #include "sorted_multiset.hpp"
+#include "kmer_collector.hpp"
 
 KSEQ_INIT(gzFile, gzread);
 
@@ -268,10 +269,8 @@ TYPED_TEST(BOSSConstruct, ConstructionFromChunksParallel) {
 }
 
 
-typedef std::function<void(const std::string&)> CallbackString;
-
 template <typename KMER, class KmerExtractor>
-void extract_kmers(std::function<void(CallbackString)> generate_reads,
+void extract_kmers(std::function<void(CallString)> generate_reads,
                    size_t k,
                    bool canonical_mode,
                    SortedSet<KMER> *kmers,
@@ -288,7 +287,7 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
     extract_kmers<KMER, KmerExtractor>(
-        [reads](CallbackString callback) {
+        [reads](CallString callback) {
             std::for_each(reads->begin(), reads->end(), callback);
         },
         k, false, kmers, suffix, remove_redundant
@@ -475,7 +474,7 @@ TYPED_TEST(CollectKmers, CollectKmersParallelRemoveRedundant) {
 }
 
 template <typename KMER, class KmerExtractor, typename KmerCount>
-void count_kmers(std::function<void(CallString)> generate_reads,
+void count_kmers(std::function<void(CallStringCount)> generate_reads,
                  size_t k,
                  bool both_strands_mode,
                  SortedMultiset<KMER, KmerCount> *kmers,
@@ -490,8 +489,10 @@ void sequence_to_kmers_parallel_wrapper(std::vector<std::string> *reads,
                                         size_t reserved_capacity) {
     kmers->try_reserve(reserved_capacity);
     count_kmers<TypeParam, KmerExtractor, KmerCount>(
-        [reads](CallbackString callback) {
-            std::for_each(reads->begin(), reads->end(), callback);
+        [reads](CallStringCount callback) {
+            for (const auto &read : *reads) {
+                callback(read, 1);
+            }
         },
         k, false, kmers, suffix
     );

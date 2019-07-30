@@ -25,8 +25,10 @@ class SortedMultiset {
 
     ~SortedMultiset() {}
 
+    static uint64_t max_count() { return std::numeric_limits<count_type>::max(); }
+
     template <class Iterator>
-    void insert(Iterator begin, Iterator end, C *counts = nullptr) {
+    void insert(Iterator begin, Iterator end) {
         assert(begin <= end);
 
         uint64_t batch_size = end - begin;
@@ -59,18 +61,14 @@ class SortedMultiset {
         resize_lock.unlock();
 
         while (begin != end) {
-            if constexpr(std::is_base_of<value_type, decltype(*begin)>::value) {
-                data_[offset++] = *begin;
+            if constexpr(std::is_same<key_type, std::remove_cv_t<
+                                                std::remove_reference_t<
+                                                    decltype(*begin)>>>::value) {
+                data_[offset++] = { *begin, 1 };
             } else {
-                if (counts) {
-                    data_[offset++] = { *begin, *counts };
-                } else {
-                    data_[offset++] = { *begin, 1 };
-                }
+                data_[offset++] = *begin;
             }
             ++begin;
-            if (counts)
-                ++counts;
         }
     }
 
@@ -138,10 +136,10 @@ class SortedMultiset {
 
         while (++first != last) {
             if (first->first == dest->first) {
-                if (first->second < std::numeric_limits<count_type>::max() - dest->second) {
+                if (first->second < max_count() - dest->second) {
                     dest->second += first->second;
                 } else {
-                    dest->second = std::numeric_limits<count_type>::max();
+                    dest->second = max_count();
                 }
             } else {
                 *++dest = std::move(*first);;

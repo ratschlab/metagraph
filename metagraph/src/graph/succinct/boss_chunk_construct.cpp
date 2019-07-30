@@ -219,13 +219,8 @@ class BOSSChunkConstructor : public IBOSSChunkConstructor {
         }
     }
 
-    void add_kmer(const std::string&& kmer, uint32_t count) {
-        assert(kmer.size() == get_k() + 1);
-        kmer_storage_.add_kmer(std::move(kmer), count);
-    }
-
-    void add_sequence(const std::string&& sequence) {
-        kmer_storage_.add_sequence(std::move(sequence));
+    void add_sequence(std::string&& sequence, uint64_t count) {
+        kmer_storage_.add_sequence(std::move(sequence), count);
     }
 
     void add_sequences(std::function<void(CallString)> generate_sequences) {
