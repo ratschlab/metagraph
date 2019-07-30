@@ -54,7 +54,7 @@ void extract_kmers(std::function<void(CallString)> generate_reads,
 }
 
 template <typename KMER, class KmerExtractor, typename KmerCount>
-void count_kmers(std::function<void(CallString)> generate_reads,
+void count_kmers(std::function<void(CallStringCount)> generate_reads,
                  size_t k,
                  bool both_strands_mode,
                  SortedMultiset<KMER, KmerCount> *kmers,
@@ -62,11 +62,14 @@ void count_kmers(std::function<void(CallString)> generate_reads,
     static_assert(KMER::kBitsPerChar == KmerExtractor::bits_per_char);
 
     Vector<KMER> temp_storage;
-    temp_storage.reserve(1.1 * kMaxKmersChunkSize);
+    Vector<std::pair<KMER, KmerCount>> temp_storage_with_counts;
+    temp_storage_with_counts.reserve(1.1 * kMaxKmersChunkSize);
 
     KmerExtractor kmer_extractor;
 
-    generate_reads([&](const std::string &read) {
+    generate_reads([&](const std::string &read, uint64_t count) {
+        count = std::min(count, kmers->max_count());
+
         kmer_extractor.sequence_to_kmers(read, k, suffix, &temp_storage);
         if (both_strands_mode) {
             auto rev_read = read;
@@ -74,14 +77,21 @@ void count_kmers(std::function<void(CallString)> generate_reads,
             kmer_extractor.sequence_to_kmers(rev_read, k, suffix, &temp_storage);
         }
 
-        if (temp_storage.size() > kMaxKmersChunkSize) {
-            kmers->insert(temp_storage.begin(), temp_storage.end());
-            temp_storage.resize(0);
+        for (const KMER &kmer : temp_storage) {
+            temp_storage_with_counts.emplace_back(kmer, count);
+        }
+        temp_storage.resize(0);
+
+        if (temp_storage_with_counts.size() > kMaxKmersChunkSize) {
+            kmers->insert(temp_storage_with_counts.begin(),
+                          temp_storage_with_counts.end());
+            temp_storage_with_counts.resize(0);
         }
     });
 
-    if (temp_storage.size()) {
-        kmers->insert(temp_storage.begin(), temp_storage.end());
+    if (temp_storage_with_counts.size()) {
+        kmers->insert(temp_storage_with_counts.begin(),
+                      temp_storage_with_counts.end());
     }
 }
 
@@ -118,29 +128,13 @@ KmerStorage<KMER, KmerExtractor, Container>
 
 template <typename KMER, class KmerExtractor, class Container>
 void KmerStorage<KMER, KmerExtractor, Container>
-::add_kmer(const std::string&& kmer, uint32_t count) {
-    assert(kmer.size() == k_);
-    KmerExtractor kmer_extractor;
-    Vector<KMER> temp_storage;
-    kmer_extractor.sequence_to_kmers(kmer, k_, filter_suffix_encoded_, &temp_storage);
-    if constexpr(std::is_base_of<SortedSet<KMER>, Container>::value) {
-        (void)count;
-        kmers_.insert(temp_storage.begin(), temp_storage.end());
-    } else {
-        typename Container::count_type c = count;
-        kmers_.insert(temp_storage.begin(), temp_storage.end(), &c);
-    }
-}
-
-template <typename KMER, class KmerExtractor, class Container>
-void KmerStorage<KMER, KmerExtractor, Container>
-::add_sequence(const std::string&& sequence) {
+::add_sequence(std::string&& sequence, uint64_t count) {
     if (sequence.size() < k_)
         return;
 
     // put read into temporary storage
     stored_sequences_size_ += sequence.size();
-    sequences_storage_.push_back(std::move(sequence));
+    buffered_sequences_.emplace_back(std::move(sequence), count);
 
     if (stored_sequences_size_ < kMaxKmersChunkSize)
         return;
@@ -149,7 +143,7 @@ void KmerStorage<KMER, KmerExtractor, Container>
     release_task_to_pool();
 
     assert(!stored_sequences_size_);
-    assert(!sequences_storage_.size());
+    assert(!buffered_sequences_.size());
 }
 
 template <typename KMER, class KmerExtractor, class Container>
@@ -162,6 +156,31 @@ void KmerStorage<KMER, KmerExtractor, Container>
                              true);
     } else {
         thread_pool_.enqueue(count_kmers<KMER, Extractor, typename Container::count_type>,
+                             [generate_sequences](CallStringCount callback) {
+                                 generate_sequences([&](const std::string &seq) {
+                                     callback(seq, 1);
+                                 });
+                             },
+                             k_, both_strands_mode_, &kmers_,
+                             filter_suffix_encoded_);
+    }
+}
+
+template <typename KMER, class KmerExtractor, class Container>
+void KmerStorage<KMER, KmerExtractor, Container>
+::add_sequences(const std::function<void(CallStringCount)> &generate_sequences) {
+    if constexpr(std::is_base_of<SortedSet<KMER>, Container>::value) {
+        thread_pool_.enqueue(extract_kmers<KMER, Extractor>,
+                             [generate_sequences](CallString callback) {
+                                 generate_sequences([&](const std::string &seq, uint64_t) {
+                                     callback(seq);
+                                 });
+                             },
+                             k_, both_strands_mode_, &kmers_,
+                             filter_suffix_encoded_,
+                             true);
+    } else {
+        thread_pool_.enqueue(count_kmers<KMER, Extractor, typename Container::count_type>,
                              generate_sequences,
                              k_, both_strands_mode_, &kmers_,
                              filter_suffix_encoded_);
@@ -169,21 +188,21 @@ void KmerStorage<KMER, KmerExtractor, Container>
 }
 
 template <typename KMER, class KmerExtractor, class Container>
-void KmerStorage<KMER, KmerExtractor, Container>::insert_dummy(KMER dummy_kmer) {
-    Vector<KMER> dummy_kmers = { dummy_kmer };
-    kmers_.insert(dummy_kmers.begin(), dummy_kmers.end());
+void KmerStorage<KMER, KmerExtractor, Container>
+::insert_dummy(const KMER &dummy_kmer) {
+    kmers_.insert(&dummy_kmer, &dummy_kmer + 1);
 };
 
 template <typename KMER, class KmerExtractor, class Container>
 void KmerStorage<KMER, KmerExtractor, Container>::release_task_to_pool() {
-    auto *current_sequences_storage = new std::vector<std::string>();
-    current_sequences_storage->swap(sequences_storage_);
+    auto *buffered_sequences = new std::vector<std::pair<std::string, uint64_t>>();
+    buffered_sequences->swap(buffered_sequences_);
 
-    add_sequences([current_sequences_storage](CallString callback) {
-        for (auto &&sequence : *current_sequences_storage) {
-            callback(std::move(sequence));
+    add_sequences([buffered_sequences](CallStringCount callback) {
+        for (const auto& [sequence, count] : *buffered_sequences) {
+            callback(sequence, count);
         }
-        delete current_sequences_storage;
+        delete buffered_sequences;
     });
 
     stored_sequences_size_ = 0;

@@ -894,7 +894,7 @@ int main(int argc, const char *argv[]) {
 
                     parse_sequences(files, *config, timer,
                         [&](std::string&& read) { constructor->add_sequence(std::move(read)); },
-                        [&](std::string&& kmer, uint32_t count) { constructor->add_kmer(std::move(kmer), count); },
+                        [&](std::string&& kmer, uint32_t count) { constructor->add_sequence(std::move(kmer), count); },
                         [&](const auto &loop) { constructor->add_sequences(loop); }
                     );
 
@@ -974,7 +974,7 @@ int main(int argc, const char *argv[]) {
 
                     parse_sequences(files, *config, timer,
                         [&](std::string&& read) { constructor->add_sequence(std::move(read)); },
-                        [&](std::string&& kmer, uint32_t count) { constructor->add_kmer(std::move(kmer), count); },
+                        [&](std::string&& kmer, uint32_t count) { constructor->add_sequence(std::move(kmer), count); },
                         [&](const auto &loop) { constructor->add_sequences(loop); }
                     );
 
