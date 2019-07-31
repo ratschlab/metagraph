@@ -125,9 +125,9 @@ class DBGHashOrdered : public DeBruijnGraph {
 
   protected:
     virtual std::vector<std::shared_ptr<DBGExtension<DeBruijnGraph>>>&
-    get_extensions_() { return hash_dbg_->get_extensions_(); };
+    get_extensions() { return hash_dbg_->get_extensions(); };
     virtual const std::vector<std::shared_ptr<DBGExtension<DeBruijnGraph>>>&
-    get_extensions_const_() const { return hash_dbg_->get_extensions_const_(); };
+    get_extensions() const { return hash_dbg_->get_extensions(); };
 
   private:
     static std::unique_ptr<DBGHashOrderedInterface>
