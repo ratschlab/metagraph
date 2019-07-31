@@ -97,6 +97,9 @@ class DBGHashOrdered : public DeBruijnGraph {
     virtual bool load(std::istream &in);
     virtual bool load(const std::string &filename);
 
+    virtual bool load_extensions(const std::string &filename_base);
+    virtual void serialize_extensions(const std::string &filename_base) const;
+
     virtual std::string file_extension() const { return kExtension; }
 
     virtual bool operator==(const DeBruijnGraph &other) const {
@@ -125,9 +128,9 @@ class DBGHashOrdered : public DeBruijnGraph {
 
   protected:
     virtual std::vector<std::shared_ptr<DBGExtension<DeBruijnGraph>>>&
-    get_extensions_() { return hash_dbg_->get_extensions_(); };
+    get_extensions() { return hash_dbg_->get_extensions(); };
     virtual const std::vector<std::shared_ptr<DBGExtension<DeBruijnGraph>>>&
-    get_extensions_const_() const { return hash_dbg_->get_extensions_const_(); };
+    get_extensions() const { return hash_dbg_->get_extensions(); };
 
   private:
     static std::unique_ptr<DBGHashOrderedInterface>

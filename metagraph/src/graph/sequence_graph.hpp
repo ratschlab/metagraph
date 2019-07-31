@@ -70,14 +70,8 @@ class DBGExtension : public utils::Extension<DBG> {
     static bool has_file(const DBG&, const std::string &filename_base);
 };
 
-template <class DBG>
-class DBGExtensions : public utils::Extensions<DBGExtension<DBG>> {
-  public:
-    bool load_extensions(const std::string &filename_base);
-    void serialize_extensions(const std::string &filename_base) const;
-};
-
-class DeBruijnGraph : public SequenceGraph, public DBGExtensions<DeBruijnGraph> {
+class DeBruijnGraph : public SequenceGraph,
+                      public utils::Extensions<DBGExtension<DeBruijnGraph>> {
   public:
     virtual ~DeBruijnGraph() {}
 
@@ -142,6 +136,9 @@ class DeBruijnGraph : public SequenceGraph, public DBGExtensions<DeBruijnGraph> 
 
     // Call all nodes that have no incoming edges
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
+
+    virtual bool load_extensions(const std::string &filename_base);
+    virtual void serialize_extensions(const std::string &filename_base) const;
 };
 
 

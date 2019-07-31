@@ -435,3 +435,11 @@ bool DBGHashOrdered::load(const std::string &filename) {
                      std::ios::binary);
     return load(in);
 }
+
+bool DBGHashOrdered::load_extensions(const std::string &filename_base) {
+    return hash_dbg_->load_extensions(filename_base);
+}
+
+void DBGHashOrdered::serialize_extensions(const std::string &filename_base) const {
+    hash_dbg_->serialize_extensions(filename_base);
+}

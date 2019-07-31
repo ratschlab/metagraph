@@ -444,7 +444,7 @@ namespace utils {
         template <class ExtensionSubtype>
         std::shared_ptr<ExtensionSubtype> get_extension() const {
             static_assert(std::is_base_of<ExtensionType, ExtensionSubtype>::value);
-            for (auto extension : get_extensions_const_()) {
+            for (auto extension : get_extensions()) {
                 if (auto match = std::dynamic_pointer_cast<ExtensionSubtype>(extension))
                     return match;
             }
@@ -452,12 +452,12 @@ namespace utils {
         };
 
         void add_extension(std::shared_ptr<ExtensionType> extension) {
-            get_extensions_().push_back(extension);
+            get_extensions().push_back(extension);
         };
 
         template <class ExtensionSubtype>
         void each_extension(std::function<void(ExtensionSubtype &extension)> callback) {
-            for (auto extension : get_extensions_()) {
+            for (auto extension : get_extensions()) {
                 if (auto match = std::dynamic_pointer_cast<ExtensionSubtype>(extension))
                     callback(*match);
             }
@@ -468,9 +468,9 @@ namespace utils {
 
         // a workaround because template methods can't be virtual
         virtual std::vector<std::shared_ptr<ExtensionType>>&
-        get_extensions_() { return extensions_; };
+        get_extensions() { return extensions_; };
         virtual const std::vector<std::shared_ptr<ExtensionType>>&
-        get_extensions_const_() const { return extensions_; };
+        get_extensions() const { return extensions_; };
     };
 
 } // namespace utils

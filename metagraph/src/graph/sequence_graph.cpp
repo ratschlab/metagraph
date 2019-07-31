@@ -279,6 +279,23 @@ void DeBruijnGraph
     });
 }
 
+bool DeBruijnGraph::load_extensions(const std::string &filename_base) {
+    // any new graph extension types should be added explicitly here
+    if (DBGWeights<>::has_file(*this, filename_base) && !this->template get_extension<DBGWeights<>>())
+        this->add_extension(std::make_shared<DBGWeights<>>());
+
+    for (auto extension : this->extensions_) {
+        if (!extension->load(*this, filename_base))
+            return false;
+    }
+    return true;
+}
+
+void DeBruijnGraph::serialize_extensions(const std::string &filename_base) const {
+    for (auto extension : this->extensions_) {
+        extension->serialize(*this, filename_base);
+    }
+}
 
 std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph) {
     graph.print(out);
@@ -311,27 +328,3 @@ size_t incoming_edge_rank(const DeBruijnGraph &graph,
 
     throw std::runtime_error("the edge does not exist in graph");
 }
-
-template <class DBG>
-bool DBGExtensions<DBG>::load_extensions(const std::string &filename_base) {
-    auto graph = static_cast<DBG*>(this);
-
-    // any new graph extension types should be added explicitly here
-    if (DBGWeights<>::has_file(*graph, filename_base) && !this->template get_extension<DBGWeights<>>())
-        this->add_extension(std::make_shared<DBGWeights<>>());
-
-    for (auto extension : this->extensions_) {
-        if (!extension->load(*dynamic_cast<const DBG*>(this), filename_base))
-            return false;
-    }
-    return true;
-};
-
-template <class DBG>
-void DBGExtensions<DBG>::serialize_extensions(const std::string &filename_base) const {
-    for (auto extension : this->extensions_) {
-        extension->serialize(*dynamic_cast<const DBG*>(this), filename_base);
-    }
-};
-
-template class DBGExtensions<DeBruijnGraph>;

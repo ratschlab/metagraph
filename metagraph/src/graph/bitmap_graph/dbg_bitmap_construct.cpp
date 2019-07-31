@@ -11,8 +11,6 @@ template <typename KmerStorage>
 class BitmapChunkConstructor : public IBitmapChunkConstructor {
     friend IBitmapChunkConstructor;
 
-    using KMER = typename KmerStorage::Key;
-
   private:
     BitmapChunkConstructor(size_t k,
                            bool canonical_mode = false,
@@ -120,6 +118,8 @@ void BitmapChunkConstructor<KmerStorage>
 template <typename KmerStorage>
 DBGBitmap::Chunk* BitmapChunkConstructor<KmerStorage>
 ::build_chunk() {
+    using KMER = typename KmerStorage::Key;
+
     const auto &kmers = kmer_collector_.data();
     std::unique_ptr<DBGBitmap::Chunk> chunk {
         new DBGBitmap::Chunk(
