@@ -82,6 +82,8 @@ std::vector<std::string> split_string(const std::string &string,
     if (current_pos < string.size()) {
         result.push_back(string.substr(current_pos));
     }
+
+    assert(result.size());
     return result;
 }
 

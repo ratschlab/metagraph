@@ -32,6 +32,7 @@
 typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
 const size_t kNumCachedColumns = 10;
+const size_t kBitsPerCount = 8;
 
 
 Config::GraphType parse_graph_extension(const std::string &filename) {
@@ -382,7 +383,6 @@ void execute_query(std::string seq_name,
 
     output_stream << oss.str();
 }
-
 
 std::unique_ptr<Annotator> initialize_annotation(Config::AnnotationType anno_type,
                                                  const Config &config,
@@ -981,9 +981,6 @@ int main(int argc, const char *argv[]) {
                     if (!suffix.size()) {
                         assert(suffixes.size() == 1);
 
-                        auto bitmap_graph = std::make_unique<DBGBitmap>(config->k);
-                        constructor->build_graph(bitmap_graph.get());
-                        graph.reset(bitmap_graph.release());
                     } else {
                         std::unique_ptr<DBGBitmap::Chunk> chunk { constructor->build_chunk() };
                         if (config->verbose) {
@@ -1017,16 +1014,19 @@ int main(int argc, const char *argv[]) {
                                                                      config->canonical,
                                                                      config->verbose));
                 }
+
             } else {
                 //slower method
-
                 switch (config->graph_type) {
+
                     case Config::GraphType::SUCCINCT:
                         graph.reset(new DBGSuccinct(config->k, config->canonical));
                         break;
+
                     case Config::GraphType::HASH:
                         graph.reset(new DBGHashOrdered(config->k, config->canonical));
                         break;
+
                     case Config::GraphType::HASH_STR:
                         if (config->canonical) {
                             std::cerr << "Warning: string hash-based de Bruijn graph"
@@ -1034,8 +1034,9 @@ int main(int argc, const char *argv[]) {
                                       << " Normal mode will be used instead." << std::endl;
                         }
                         // TODO: implement canonical mode
-                        graph.reset(new DBGHashString(config->k));
+                        graph.reset(new DBGHashString(config->k/*, config->canonical*/));
                         break;
+
                     case Config::GraphType::BITMAP:
                         std::cerr << "Error: Bitmap-graph construction"
                                   << " in dynamic regime is not supported" << std::endl;
@@ -1227,7 +1228,7 @@ int main(int argc, const char *argv[]) {
                 config->parallel = 1;
 
                 for (const auto &file : files) {
-                    thread_pool.enqueue([](auto graph, auto filename, const Config *config) {
+                    thread_pool.enqueue([](auto graph, auto filename, auto outfilename, const Config *config) {
                             auto anno_graph = initialize_annotated_dbg(graph, *config);
 
                             annotate_data({ filename },
@@ -1241,10 +1242,13 @@ int main(int argc, const char *argv[]) {
                                           config->fasta_header_delimiter,
                                           config->anno_labels,
                                           config->verbose);
-                            anno_graph->get_annotation().serialize(filename);
+                            anno_graph->get_annotation().serialize(outfilename);
                         },
                         graph,
                         file,
+                        config->outfbase.size()
+                            ? config->outfbase + "/" + utils::split_string(file, "/").back()
+                            : file,
                         config.get()
                     );
                 }
@@ -1809,6 +1813,76 @@ int main(int argc, const char *argv[]) {
             Timer timer;
 
             /********************************************************/
+            /***************** dump labels to text ******************/
+            /********************************************************/
+
+            if (config->dump_raw_anno || config->dump_text_anno) {
+                const Config::AnnotationType input_anno_type
+                    = parse_annotation_type(files.at(0));
+
+                auto annotation = initialize_annotation(files.at(0), *config);
+
+                if (config->verbose)
+                    std::cout << "Loading annotation..." << std::endl;
+
+                if (config->anno_type == Config::ColumnCompressed) {
+                    if (!annotation->merge_load(files)) {
+                        std::cerr << "ERROR: can't load annotations" << std::endl;
+                        exit(1);
+                    }
+                } else {
+                    // Load annotation from disk
+                    if (!annotation->load(files.at(0))) {
+                        std::cerr << "ERROR: can't load annotation from file "
+                                  << files.at(0) << std::endl;
+                        exit(1);
+                    }
+                }
+
+                if (config->verbose) {
+                    std::cout << "Annotation loaded in "
+                              << timer.elapsed() << "sec" << std::endl;
+
+                    std::cout << "Dumping annotators...\t" << std::flush;
+                }
+
+                if (input_anno_type == Config::ColumnCompressed) {
+                    assert(dynamic_cast<annotate::ColumnCompressed<>*>(annotation.get()));
+                    if (config->dump_raw_anno) {
+                        dynamic_cast<annotate::ColumnCompressed<>*>(
+                            annotation.get()
+                        )->dump_columns(config->outfbase, true, get_num_threads());
+                    }
+
+                    if (config->dump_text_anno) {
+                        dynamic_cast<annotate::ColumnCompressed<>*>(
+                            annotation.get()
+                        )->dump_columns(config->outfbase, false, get_num_threads());
+                    }
+                } else if (input_anno_type == Config::BRWT) {
+                    assert(dynamic_cast<annotate::BRWTCompressed<>*>(annotation.get()));
+                    if (config->dump_raw_anno) {
+                        dynamic_cast<annotate::BRWTCompressed<>*>(
+                            annotation.get()
+                        )->dump_columns(config->outfbase, true, get_num_threads());
+                    }
+
+                    if (config->dump_text_anno) {
+                        dynamic_cast<annotate::BRWTCompressed<>*>(
+                            annotation.get()
+                        )->dump_columns(config->outfbase, false, get_num_threads());
+                    }
+                } else {
+                    throw std::runtime_error("Dumping columns for this type not implemented");
+                }
+
+                if (config->verbose)
+                    std::cout << timer.elapsed() << "sec" << std::endl;
+
+                return 0;
+            }
+
+            /********************************************************/
             /***************** rename column labels *****************/
             /********************************************************/
 
@@ -1818,12 +1892,22 @@ int main(int argc, const char *argv[]) {
                 if (config->verbose)
                     std::cout << "Loading annotation..." << std::endl;
 
-                // Load annotation from disk
-                if (!annotation->load(files.at(0))) {
-                    std::cerr << "ERROR: can't load annotation from file "
+                if (config->anno_type == Config::ColumnCompressed) {
+                    if (!annotation->merge_load(files)) {
+                        std::cerr << "ERROR: can't load annotations" << std::endl;
+                        exit(1);
+                    } else {
+                        std::cout << annotation->num_objects() << " " << annotation->num_labels() << "\n";
+                    }
+                } else {
+                    // Load annotation from disk
+                    if (!annotation->load(files.at(0))) {
+                        std::cerr << "ERROR: can't load annotation from file "
                               << files.at(0) << std::endl;
-                    exit(1);
+                        exit(1);
+                    }
                 }
+
                 if (config->verbose) {
                     std::cout << "Annotation loaded in "
                               << timer.elapsed() << "sec" << std::endl;
@@ -1872,6 +1956,11 @@ int main(int argc, const char *argv[]) {
                 std::cerr << "Skipping conversion: same input and target type: "
                           << Config::annotype_to_string(Config::RowCompressed)
                           << std::endl;
+                exit(1);
+            }
+
+            if (input_anno_type == Config::ColumnCompressed && files.size() > 1) {
+                std::cerr << "ERROR: conversion of multiple annotators only supported for ColumnCompressed" << std::endl;
                 exit(1);
             }
 
@@ -1936,11 +2025,11 @@ int main(int argc, const char *argv[]) {
                     std::cout << "Loading annotation..." << std::endl;
 
                 // Load annotation from disk
-                if (!annotation->load(files.at(0))) {
-                    std::cerr << "ERROR: can't load annotation from file "
-                              << files.at(0) << std::endl;
+                if (!annotation->merge_load(files)) {
+                    std::cerr << "ERROR: can't load annotations" << std::endl;
                     exit(1);
                 }
+
                 if (config->verbose) {
                     std::cout << "Annotation loaded in "
                               << timer.elapsed() << "sec" << std::endl;

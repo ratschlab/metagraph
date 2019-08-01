@@ -21,11 +21,13 @@ class Config {
     bool filename_anno = false;
     bool fasta_anno = false;
     bool to_adj_list = false;
+    bool to_fasta = false;
     bool unitigs = false;
     bool count_kmers = false;
     bool query_presence = false;
     bool filter_present = false;
     bool dump_raw_anno = false;
+    bool dump_text_anno = false;
     bool sparse = false;
     bool fast = false;
     bool count_labels = false;

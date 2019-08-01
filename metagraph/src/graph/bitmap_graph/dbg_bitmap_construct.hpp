@@ -67,6 +67,8 @@ class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
                                               const std::function<DBGBitmap::Chunk(void)> &next_chunk,
                                               bool canonical_mode = false);
 
+    sdsl::int_vector<> get_weights(uint8_t bits_per_count = 8);
+
   private:
     std::unique_ptr<IBitmapChunkConstructor> constructor_;
 };
