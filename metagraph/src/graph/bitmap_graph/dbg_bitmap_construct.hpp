@@ -25,7 +25,7 @@ class IBitmapChunkConstructor : public IGraphChunkConstructor<DBGBitmap::Chunk> 
     virtual size_t get_k() const = 0;
     virtual bool is_canonical_mode() const = 0;
 
-    virtual void set_weights(DBGBitmap *graph, uint8_t bits_per_count = 8) = 0;
+    virtual sdsl::int_vector<> get_weights(uint8_t bits_per_count = 8) = 0;
 };
 
 
@@ -66,6 +66,8 @@ class DBGBitmapConstructor : public IGraphConstructor<DBGBitmap> {
                                               uint64_t num_kmers,
                                               const std::function<DBGBitmap::Chunk(void)> &next_chunk,
                                               bool canonical_mode = false);
+
+    sdsl::int_vector<> get_weights(uint8_t bits_per_count = 8);
 
   private:
     std::unique_ptr<IBitmapChunkConstructor> constructor_;

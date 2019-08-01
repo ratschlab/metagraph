@@ -1,5 +1,4 @@
 #include "sequence_graph.hpp"
-#include "weighted_graph.hpp"
 
 #include <cassert>
 
@@ -279,23 +278,6 @@ void DeBruijnGraph
     });
 }
 
-bool DeBruijnGraph::load_extensions(const std::string &filename_base) {
-    // any new graph extension types should be added explicitly here
-    if (DBGWeights<>::has_file(*this, filename_base) && !this->template get_extension<DBGWeights<>>())
-        this->add_extension(std::make_shared<DBGWeights<>>());
-
-    for (auto extension : this->extensions_) {
-        if (!extension->load(*this, filename_base))
-            return false;
-    }
-    return true;
-}
-
-void DeBruijnGraph::serialize_extensions(const std::string &filename_base) const {
-    for (auto extension : this->extensions_) {
-        extension->serialize(*this, filename_base);
-    }
-}
 
 std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph) {
     graph.print(out);

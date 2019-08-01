@@ -8,8 +8,6 @@
 
 #include <sdsl/int_vector.hpp>
 
-#include "utils.hpp"
-
 class bit_vector_dyn;
 
 
@@ -61,17 +59,8 @@ class SequenceGraph {
     virtual std::string get_node_sequence(node_index node_index) const = 0;
 };
 
-template <class DBG>
-class DBGExtension : public utils::Extension<DBG> {
-  public:
-    virtual bool load(const DBG&, const std::string &filename_base) = 0;
-    virtual void serialize(const DBG&, const std::string &filename_base) const = 0;
 
-    static bool has_file(const DBG&, const std::string &filename_base);
-};
-
-class DeBruijnGraph : public SequenceGraph,
-                      public utils::Extensions<DBGExtension<DeBruijnGraph>> {
+class DeBruijnGraph : public SequenceGraph {
   public:
     virtual ~DeBruijnGraph() {}
 
@@ -136,9 +125,6 @@ class DeBruijnGraph : public SequenceGraph,
 
     // Call all nodes that have no incoming edges
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
-
-    virtual bool load_extensions(const std::string &filename_base);
-    virtual void serialize_extensions(const std::string &filename_base) const;
 };
 
 

@@ -81,20 +81,41 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     }
 }
 
+bool graph_has_weights_file(const std::string &filename) {
+    std::ifstream f(filename + ".weights");
+    return f.good();
+}
+
 std::string remove_graph_extension(const std::string &filename) {
     return utils::remove_suffix(filename, ".dbg", ".orhashdbg", ".bitmapdbg");
 }
 
 template <class Graph = BOSS>
 std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
-    auto graph = std::make_shared<Graph>(2);
+    Graph *graph;
 
+    if constexpr(std::is_same<BOSS, Graph>::value) {
+        graph = new Graph(2);
+
+    } else if constexpr(!std::is_base_of<DeBruijnGraph, Graph>::value) {
+        // TODO What if there were many graph mixins and any number of them could be present?
+        //   Consider an Entity Component System or boost.mixin (options for runtime/dynamic mixin)
+        static_assert(std::is_base_of<IWeighted<DeBruijnGraph::node_index>, Graph>::value);
+        graph = new Graph(2);
+
+    } else {
+        if (graph_has_weights_file(filename)) {
+            graph = new WeightedDBG<Graph>(2);
+        } else {
+            graph = new Graph(2);
+        }
+    }
     if (!graph->load(filename)) {
         std::cerr << "ERROR: can't load graph from file " << filename << std::endl;
+        delete graph;
         exit(1);
     }
-
-    return graph;
+    return std::shared_ptr<Graph> { graph };
 }
 
 template <class DefaultGraphType = DBGSuccinct>
@@ -597,16 +618,17 @@ void print_stats(const DeBruijnGraph &graph) {
     std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
     std::cout << "canonical mode: " << (graph.is_canonical_mode() ? "yes" : "no") << std::endl;
 
-    if (auto weighted = graph.get_extension<DBGWeights<>>()) {
+    if (dynamic_cast<const IWeighted<DeBruijnGraph::node_index>*>(&graph)) {
+        const auto &weighted = dynamic_cast<const IWeighted<DeBruijnGraph::node_index>&>(graph);
         double sum_weights = 0;
         for (uint64_t i = 1; i <= graph.num_nodes(); ++i) {
-            sum_weights += weighted->get_weight(i);
+            sum_weights += weighted.get_weight(i);
         }
         std::cout << "sum weights: " << sum_weights << std::endl;
 
         if (utils::get_verbose()) {
             for (uint64_t i = 1; i <= graph.num_nodes(); ++i) {
-                std::cout << weighted->get_weight(i) << " ";
+                std::cout << weighted.get_weight(i) << " ";
             }
             std::cout << std::endl;
         }
@@ -847,6 +869,14 @@ int main(int argc, const char *argv[]) {
 
             Timer timer;
 
+            if (config->count_kmers
+                    && !(config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic)
+                    && config->graph_type != Config::GraphType::BITMAP) {
+                std::cerr << "Error: Only static succinct or bitmap graph can be built"
+                          << " with kmer counting" << std::endl;
+                exit(1);
+            }
+
             if (config->complete) {
                 if (config->graph_type != Config::GraphType::BITMAP) {
                     std::cerr << "Error: Only bitmap-graph can be built"
@@ -920,8 +950,12 @@ int main(int argc, const char *argv[]) {
                 if (config->count_kmers) {
                     sdsl::int_vector<> kmer_counts;
                     graph_data.initialize_boss(boss_graph.get(), &kmer_counts);
-                    graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
-                    graph->add_extension(std::make_shared<DBGWeights<>>(std::move(kmer_counts)));
+                    auto weighted_graph = std::make_unique<WeightedDBGSuccinct>(
+                        boss_graph.release(),
+                        config->canonical
+                    );
+                    weighted_graph->set_weights(std::move(kmer_counts));
+                    graph.reset(weighted_graph.release());
                 } else {
                     graph_data.initialize_boss(boss_graph.get());
                     graph.reset(new DBGSuccinct(boss_graph.release(), config->canonical));
@@ -980,9 +1014,17 @@ int main(int argc, const char *argv[]) {
                     if (!suffix.size()) {
                         assert(suffixes.size() == 1);
 
-                        auto bitmap_graph = std::make_unique<DBGBitmap>(config->k);
-                        constructor->build_graph(bitmap_graph.get());
-                        graph.reset(bitmap_graph.release());
+                        if (config->count_kmers) {
+                            auto weighted_bitmap_graph = std::make_unique<WeightedDBGBitmap>(config->k);
+                            constructor->build_graph(weighted_bitmap_graph.get());
+                            weighted_bitmap_graph->set_weights(constructor->get_weights());
+                            graph.reset(weighted_bitmap_graph.release());
+                        } else {
+                            auto bitmap_graph = std::make_unique<DBGBitmap>(config->k);
+                            constructor->build_graph(bitmap_graph.get());
+                            graph.reset(bitmap_graph.release());
+                        }
+
                     } else {
                         std::unique_ptr<DBGBitmap::Chunk> chunk { constructor->build_chunk() };
                         if (config->verbose) {
@@ -1044,24 +1086,13 @@ int main(int argc, const char *argv[]) {
                 }
                 assert(graph.get());
 
-                std::unique_ptr<sdsl::int_vector<>> weights;
-                if (config->count_kmers)
-                   weights.reset(new sdsl::int_vector<>(0, 0, 8));
-
                 parse_sequences(files, *config, timer,
                     [&graph](std::string&& seq) { graph->add_sequence(seq); },
-                    [&graph, &weights](std::string&& kmer, uint32_t count) {
-                        graph->add_sequence(std::move(kmer));
-                        if (weights)
-                            (*weights)[graph->kmer_to_node(kmer)] = count;
-                    },
+                    [&graph](std::string&& kmer, uint32_t /*count*/) { graph->add_sequence(kmer); },
                     [&graph](const auto &loop) {
                         loop([&graph](const auto &seq) { graph->add_sequence(seq); });
                     }
                 );
-
-                if (weights)
-                    graph->add_extension(std::make_shared<DBGWeights<>>(std::move(*weights)));
             }
 
             if (config->verbose)
@@ -1081,7 +1112,6 @@ int main(int argc, const char *argv[]) {
                 }
 
                 graph->serialize(config->outfbase);
-                graph->serialize_extensions(config->outfbase);
             }
 
             return 0;
@@ -1093,8 +1123,6 @@ int main(int argc, const char *argv[]) {
 
             // load graph
             auto graph = load_critical_dbg(config->infbase);
-
-            config->k = graph->get_k();
 
             if (config->verbose) {
                 std::cout << "De Bruijn graph with k-mer size k="
@@ -1130,10 +1158,8 @@ int main(int argc, const char *argv[]) {
                 [&graph,&inserted_edges](std::string&& seq) {
                     graph->add_sequence(seq, inserted_edges.get());
                 },
-                [&graph,&inserted_edges](std::string&& kmer, uint32_t count) {
+                [&graph,&inserted_edges](std::string&& kmer, uint32_t /*count*/) {
                     graph->add_sequence(kmer, inserted_edges.get());
-                    if (auto weighted = graph->get_extension<DBGWeights<>>())
-                        weighted->add_kmer(*graph, std::move(kmer), count);
                 },
                 [&graph,&inserted_edges](const auto &loop) {
                     loop([&graph,&inserted_edges](const auto &seq) {
@@ -1625,7 +1651,7 @@ int main(int argc, const char *argv[]) {
 
             auto graph = load_critical_dbg(files.at(0));
 
-            auto node_weights = graph->get_extension<DBGWeights<>>();
+            auto node_weights = std::dynamic_pointer_cast<const IWeighted<DeBruijnGraph::node_index>>(graph);
             std::unique_ptr<MaskedDeBruijnGraph> subgraph;
 
             // TODO: fix unitig extraction from subgraph in order for this

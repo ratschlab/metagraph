@@ -1,149 +1,65 @@
 #ifndef __WEIGHTED_GRAPH_HPP__
 #define __WEIGHTED_GRAPH_HPP__
 
-#include <string>
-#include <memory>
-#include <vector>
-
 #include "sequence_graph.hpp"
-#include "utils.hpp"
+#include "dbg_succinct.hpp"
+#include "dbg_hash_ordered.hpp"
+#include "dbg_hash_string.hpp"
+#include "dbg_bitmap.hpp"
 
 
-template <typename Weights = sdsl::int_vector<>>
-class DBGWeights : public DBGExtension<DeBruijnGraph> {
+template <typename index, typename Weights = sdsl::int_vector<>>
+class IWeighted {
   public:
-    using node_index = typename DeBruijnGraph::node_index;
     using weight = typename Weights::value_type;
 
-    DBGWeights() = default;
-    DBGWeights(Weights&& weights) : weights_(std::move(weights)) {};
-    DBGWeights(const DeBruijnGraph &graph, const std::string &filename_base) { load(graph, filename_base); };
+    virtual void set_weights(Weights&& weights) = 0;
+    virtual weight get_weight(index i) const = 0;
+};
 
-    virtual void add_kmer(const DeBruijnGraph &graph, const std::string&& kmer, uint32_t count) {
-        auto node = graph.kmer_to_node(kmer);
-        add_weight(node, count);
-    };
 
-    virtual void add_sequence(const DeBruijnGraph &graph,
-                              const std::string&& sequence,
-                              bit_vector_dyn *nodes_inserted = nullptr) {
-        if (nodes_inserted) {
-            node_index curpos = weights_.size() - 1;
-            assert(nodes_inserted->size() - weights_.size() == nodes_inserted->num_set_bits());
-            weights_.resize(nodes_inserted->size());
-            node_index i = weights_.size() - 1;
+template <class DBG, typename Weights = sdsl::int_vector<>>
+class IWeightedDBG : public DBG,
+                     public IWeighted<typename DBG::node_index, Weights> {
+    static_assert(std::is_base_of<DeBruijnGraph, DBG>::value);
 
-            while (true) {
-                if ((*nodes_inserted)[i]) {
-                    weights_[i] = 1;
-                } else {
-                    assert(curpos < weights_.size());
-                    weights_[i] = weights_[curpos];
-                    curpos--;
-                }
-                if (0 == i)
-                    break;
-                i--;
-            }
-        }
+  public:
+    using typename DBG::node_index;
+    using IW = IWeighted<node_index, Weights>;
+    using typename IW::weight;
 
-        auto k = graph.get_k();
-        for (size_t i = 0; i < sequence.size() - k; ++i) {
-            add_kmer(graph, sequence.substr(i, k), 1);
-        }
-    };
-
-    virtual void insert_node(node_index i) {
-        if (weights_.empty()) {
-            weights_.resize(1);
-            weights_[0] = 0;
-        }
-
-        assert(i <= weights_.size());
-        weights_.resize(weights_.size() + 1);
-        node_index j = weights_.size() - 1;
-
-        while (--j >= i) {
-            weights_[j + 1] = weights_[j];
-        }
-        weights_[i] = 1;
-    };
-
-    template <class Vector>
-    void remove_masked_weights(const Vector &mask) {
-        node_index curpos = 1;
-        assert(mask.size() == weights_.size());
-        for (node_index i = 1; i < mask.size(); ++i) {
-            if (mask[i])
-                weights_[curpos++] = weights_[i];
-        }
-        weights_.resize(curpos);
-    };
+    using DBG::DBG;
 
     virtual void set_weights(Weights&& weights) { weights_ = std::move(weights); };
+    virtual weight get_weight(node_index i) const { return weights_[i]; };
 
-    virtual weight get_weight(node_index i) const {
-        assert(i < weights_.size());
-        return weights_[i];
-    };
+    virtual bool load(const std::string &filename_base) = 0;
+    virtual void serialize(const std::string &filename_base) const = 0;
 
-    virtual bool load(const DeBruijnGraph &graph, const std::string &filename_base);
-    virtual void serialize(const DeBruijnGraph &graph, const std::string &filename_base) const;
+  protected:
+    Weights weights_;
+};
 
-    static bool has_file(const DeBruijnGraph &graph, const std::string &filename_base);
+
+template <class DBG, typename Weights = sdsl::int_vector<>>
+class WeightedDBG : public IWeightedDBG<DBG, Weights> {
+  public:
+    using IW = IWeightedDBG<DBG, Weights>;
+    using typename IW::weight;
+    using typename IW::node_index;
+
+    using IW::IWeightedDBG;
+
+    virtual bool load(const std::string &filename_base);
+    virtual void serialize(const std::string &filename_base) const;
 
   private:
-    Weights weights_;
-
-    virtual void add_weight(node_index i, weight w) {
-        assert(i < weights_.size());
-        weight prev = weights_[i];
-        weights_[i] += w;
-        if (weights_[i] < prev) {
-            std::cerr << "Warning: weighted graph entry " << i << " has"
-                      << " overflowed:" << prev << " + " << w << " = "
-                      << weights_[i] << std::endl;
-        }
-    };
-
     static constexpr auto kWeightsExtension = ".weights";
 };
 
-template <typename Weights>
-bool DBGWeights<Weights>::load(const DeBruijnGraph &graph, const std::string &filename_base) {
-
-    const auto weights_filename = utils::remove_suffix(filename_base, graph.file_extension())
-                                        + graph.file_extension()
-                                        + kWeightsExtension;
-    try {
-        std::ifstream instream(weights_filename, std::ios::binary);
-        this->weights_.load(instream);
-        return graph.num_nodes() + 1 == this->weights_.size();
-    } catch (...) {
-        std::cerr << "ERROR: Cannot load graph weights from file "
-                  << weights_filename << std::endl;
-        return false;
-    }
-}
-
-template <typename Weights>
-void DBGWeights<Weights>::serialize(const DeBruijnGraph &graph, const std::string &filename_base) const {
-
-    const auto weights_filename = utils::remove_suffix(filename_base, graph.file_extension())
-                                        + graph.file_extension()
-                                        + kWeightsExtension;
-
-    std::ofstream outstream(weights_filename, std::ios::binary);
-    this->weights_.serialize(outstream);
-}
-
-template <typename Weights>
-bool DBGWeights<Weights>::has_file(const DeBruijnGraph &graph, const std::string &filename_base) {
-    const auto weights_filename = utils::remove_suffix(filename_base, graph.file_extension())
-                                        + graph.file_extension()
-                                        + kWeightsExtension;
-    std::ifstream instream(weights_filename, std::ios::binary);
-    return instream.good();
-}
+typedef WeightedDBG<DBGSuccinct> WeightedDBGSuccinct;
+typedef WeightedDBG<DBGHashOrdered> WeightedDBGHashOrdered;
+typedef WeightedDBG<DBGHashString> WeightedDBGHashString;
+typedef WeightedDBG<DBGBitmap> WeightedDBGBitmap;
 
 #endif // __WEIGHTED_GRAPH_HPP__

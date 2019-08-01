@@ -429,50 +429,6 @@ namespace utils {
 
     template<class T> struct dependent_false : std::false_type {};
 
-    // class for managing a collection of generic extensions to some object
-    template <class T>
-    class Extension {
-      public:
-        virtual ~Extension() {};
-    };
-
-    template <class ExtensionType>
-    class Extensions {
-      public:
-        virtual ~Extensions() {};
-
-        template <class ExtensionSubtype>
-        std::shared_ptr<ExtensionSubtype> get_extension() const {
-            static_assert(std::is_base_of<ExtensionType, ExtensionSubtype>::value);
-            for (auto extension : get_extensions()) {
-                if (auto match = std::dynamic_pointer_cast<ExtensionSubtype>(extension))
-                    return match;
-            }
-            return nullptr;
-        };
-
-        void add_extension(std::shared_ptr<ExtensionType> extension) {
-            get_extensions().push_back(extension);
-        };
-
-        template <class ExtensionSubtype>
-        void each_extension(std::function<void(ExtensionSubtype &extension)> callback) {
-            for (auto extension : get_extensions()) {
-                if (auto match = std::dynamic_pointer_cast<ExtensionSubtype>(extension))
-                    callback(*match);
-            }
-        };
-
-      protected:
-        std::vector<std::shared_ptr<ExtensionType>> extensions_;
-
-        // a workaround because template methods can't be virtual
-        virtual std::vector<std::shared_ptr<ExtensionType>>&
-        get_extensions() { return extensions_; };
-        virtual const std::vector<std::shared_ptr<ExtensionType>>&
-        get_extensions() const { return extensions_; };
-    };
-
 } // namespace utils
 
 template <typename T>
