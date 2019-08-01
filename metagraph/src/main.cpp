@@ -32,6 +32,7 @@
 typedef annotate::MultiLabelEncoded<uint64_t, std::string> Annotator;
 
 const size_t kNumCachedColumns = 10;
+const size_t kBitsPerCount = 8;
 
 
 Config::GraphType parse_graph_extension(const std::string &filename) {
@@ -869,14 +870,6 @@ int main(int argc, const char *argv[]) {
 
             Timer timer;
 
-            if (config->count_kmers
-                    && !(config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic)
-                    && config->graph_type != Config::GraphType::BITMAP) {
-                std::cerr << "Error: Only static succinct or bitmap graph can be built"
-                          << " with kmer counting" << std::endl;
-                exit(1);
-            }
-
             if (config->complete) {
                 if (config->graph_type != Config::GraphType::BITMAP) {
                     std::cerr << "Error: Only bitmap-graph can be built"
@@ -1017,7 +1010,7 @@ int main(int argc, const char *argv[]) {
                         if (config->count_kmers) {
                             auto weighted_bitmap_graph = std::make_unique<WeightedDBGBitmap>(config->k);
                             constructor->build_graph(weighted_bitmap_graph.get());
-                            weighted_bitmap_graph->set_weights(constructor->get_weights());
+                            weighted_bitmap_graph->set_weights(constructor->get_weights(kBitsPerCount));
                             graph.reset(weighted_bitmap_graph.release());
                         } else {
                             auto bitmap_graph = std::make_unique<DBGBitmap>(config->k);
@@ -1058,16 +1051,27 @@ int main(int argc, const char *argv[]) {
                                                                      config->canonical,
                                                                      config->verbose));
                 }
+
             } else {
                 //slower method
-
                 switch (config->graph_type) {
+
                     case Config::GraphType::SUCCINCT:
-                        graph.reset(new DBGSuccinct(config->k, config->canonical));
+                        if (config->count_kmers) {
+                            graph.reset(new WeightedDBGSuccinct(config->k, config->canonical));
+                        } else {
+                            graph.reset(new DBGSuccinct(config->k, config->canonical));
+                        }
                         break;
+
                     case Config::GraphType::HASH:
-                        graph.reset(new DBGHashOrdered(config->k, config->canonical));
+                        if (config->count_kmers) {
+                            graph.reset(new WeightedDBGHashOrdered(config->k, config->canonical));
+                        } else {
+                            graph.reset(new DBGHashOrdered(config->k, config->canonical));
+                        }
                         break;
+
                     case Config::GraphType::HASH_STR:
                         if (config->canonical) {
                             std::cerr << "Warning: string hash-based de Bruijn graph"
@@ -1075,8 +1079,13 @@ int main(int argc, const char *argv[]) {
                                       << " Normal mode will be used instead." << std::endl;
                         }
                         // TODO: implement canonical mode
-                        graph.reset(new DBGHashString(config->k));
+                        if (config->count_kmers) {
+                            graph.reset(new WeightedDBGHashString(config->k/*, config->canonical*/));
+                        } else {
+                            graph.reset(new DBGHashString(config->k/*, config->canonical*/));
+                        }
                         break;
+
                     case Config::GraphType::BITMAP:
                         std::cerr << "Error: Bitmap-graph construction"
                                   << " in dynamic regime is not supported" << std::endl;
@@ -1093,6 +1102,39 @@ int main(int argc, const char *argv[]) {
                         loop([&graph](const auto &seq) { graph->add_sequence(seq); });
                     }
                 );
+
+                sdsl::int_vector<> kmer_counts(graph->num_nodes() + 1, 0, kBitsPerCount);
+
+                parse_sequences(files, *config, timer,
+                    [&graph,&kmer_counts](std::string&& seq) {
+                        graph->map_to_nodes(seq, [&](uint64_t i) {
+                            if (i > 0) {
+                                assert(i <= graph->num_nodes());
+                                kmer_counts[i]++;
+                            }
+                        });
+                    },
+                    [&graph,&kmer_counts](std::string&& kmer, uint32_t count) {
+                        graph->map_to_nodes(kmer, [&](uint64_t i) {
+                            if (i > 0) {
+                                assert(i <= graph->num_nodes());
+                                kmer_counts[i] += count;
+                            }
+                        });
+                    },
+                    [&graph,&kmer_counts](const auto &loop) {
+                        loop([&graph,&kmer_counts](const auto &seq) {
+                            graph->map_to_nodes(seq, [&](uint64_t i) {
+                                if (i > 0) {
+                                    assert(i <= graph->num_nodes());
+                                    kmer_counts[i]++;
+                                }
+                            });
+                        });
+                    }
+                );
+
+                dynamic_cast<IWeighted<uint64_t, sdsl::int_vector<>>&>(*graph).set_weights(std::move(kmer_counts));
             }
 
             if (config->verbose)
