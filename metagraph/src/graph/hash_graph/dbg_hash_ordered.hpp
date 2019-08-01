@@ -97,6 +97,9 @@ class DBGHashOrdered : public DeBruijnGraph {
     virtual bool load(std::istream &in);
     virtual bool load(const std::string &filename);
 
+    virtual bool load_extensions(const std::string &filename_base);
+    virtual void serialize_extensions(const std::string &filename_base) const;
+
     virtual std::string file_extension() const { return kExtension; }
 
     virtual bool operator==(const DeBruijnGraph &other) const {

@@ -25,7 +25,7 @@ class SortedMultiset {
 
     ~SortedMultiset() {}
 
-    static uint64_t max_count() { return std::numeric_limits<count_type>::max(); }
+    static constexpr uint64_t max_count() { return std::numeric_limits<C>::max(); }
 
     template <class Iterator>
     void insert(Iterator begin, Iterator end) {
@@ -60,15 +60,13 @@ class SortedMultiset {
 
         resize_lock.unlock();
 
-        while (begin != end) {
-            if constexpr(std::is_same<key_type, std::remove_cv_t<
-                                                std::remove_reference_t<
-                                                    decltype(*begin)>>>::value) {
-                data_[offset++] = { *begin, 1 };
-            } else {
-                data_[offset++] = *begin;
-            }
-            ++begin;
+        if constexpr(std::is_same<T, std::remove_cv_t<
+                                     std::remove_reference_t<
+                                        decltype(*begin)>>>::value) {
+            std::transform(begin, end, data_.begin() + offset,
+                [](const T &value) { return std::make_pair(value, C(1)); });
+        } else {
+            std::copy(begin, end, data_.begin() + offset);
         }
     }
 
