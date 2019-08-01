@@ -54,7 +54,7 @@ class DBGWeights : public DBGExtension<DeBruijnGraph> {
     };
 
     virtual void insert_node(node_index i) {
-        if (0 == weights_.size()) {
+        if (weights_.empty()) {
             weights_.resize(1);
             weights_[0] = 0;
         }
