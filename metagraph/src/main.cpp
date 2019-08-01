@@ -87,15 +87,14 @@ std::string remove_graph_extension(const std::string &filename) {
 
 template <class Graph = BOSS>
 std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
-    Graph *graph = new Graph(2);
+    auto graph = std::make_shared<Graph>(2);
 
     if (!graph->load(filename)) {
         std::cerr << "ERROR: can't load graph from file " << filename << std::endl;
-        delete graph;
         exit(1);
     }
 
-    return std::shared_ptr<Graph> { graph };
+    return graph;
 }
 
 template <class DefaultGraphType = DBGSuccinct>
@@ -826,7 +825,7 @@ std::string form_client_reply(const std::string &received_message,
 
 
 int main(int argc, const char *argv[]) {
-    std::unique_ptr<Config> config { new Config(argc, argv) };
+    auto config = std::make_unique<Config>(argc, argv);
 
     if (config->verbose) {
         std::cout << "#############################\n"
