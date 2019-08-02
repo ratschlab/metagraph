@@ -75,6 +75,19 @@ Config::Config(int argc, const char *argv[]) {
         row_cache_size = 1000000;
     }
 
+    const auto get_value = [&](int i) {
+        assert(i > 0);
+        assert(i < argc);
+
+        if (i + 1 == argc) {
+            std::cerr << "Error: no value provided for option "
+                      << argv[i] << std::endl;
+            print_usage(argv[0], identity);
+            exit(-1);
+        }
+        return argv[i + 1];
+    };
+
     // parse remaining command line items
     for (int i = 2; i < argc; ++i) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
@@ -102,11 +115,11 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "--anno-header")) {
             fasta_anno = true;
         } else if (!strcmp(argv[i], "--header-comment-delim")) {
-            fasta_anno_comment_delim = std::string(argv[++i]);
+            fasta_anno_comment_delim = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--anno-label")) {
-            anno_labels.emplace_back(argv[++i]);
+            anno_labels.emplace_back(get_value(i++));
         } else if (!strcmp(argv[i], "--coord-binsize")) {
-            genome_binsize_anno = atoi(argv[++i]);
+            genome_binsize_anno = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--suppress-unlabeled")) {
             suppress_unlabeled = true;
         } else if (!strcmp(argv[i], "--sparse")) {
@@ -114,28 +127,28 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "--fast")) {
             fast = true;
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
-            parallel = atoi(argv[++i]);
+            parallel = atoi(get_value(i++));
             set_num_threads(parallel);
         } else if (!strcmp(argv[i], "--parts-total")) {
-            parts_total = atoi(argv[++i]);
+            parts_total = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--part-idx")) {
-            part_idx = atoi(argv[++i]);
+            part_idx = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-b") || !strcmp(argv[i], "--bins-per-thread")) {
-            num_bins_per_thread = atoi(argv[++i]);
+            num_bins_per_thread = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-k") || !strcmp(argv[i], "--kmer-length")) {
-            k = atoi(argv[++i]);
+            k = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--min-count")) {
-            min_count = std::max(atoi(argv[++i]), 1);
+            min_count = std::max(atoi(get_value(i++)), 1);
         } else if (!strcmp(argv[i], "--max-count")) {
-            max_count = atoi(argv[++i]);
+            max_count = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
-            memory_available = atoi(argv[++i]);
+            memory_available = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--dump-raw-anno")) {
             dump_raw_anno = true;
         } else if (!strcmp(argv[i], "--dump-text-anno")) {
             dump_text_anno = true;
         } else if (!strcmp(argv[i], "--discovery-fraction")) {
-            discovery_fraction = std::stof(argv[++i]);
+            discovery_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--query-presence")) {
             query_presence = true;
         } else if (!strcmp(argv[i], "--filter-present")) {
@@ -143,44 +156,44 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "--count-labels")) {
             count_labels = true;
         } else if (!strcmp(argv[i], "--align-length")) {
-            alignment_length = atoi(argv[++i]);
+            alignment_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-f") || !strcmp(argv[i], "--frequency")) {
-            frequency = atoi(argv[++i]);
+            frequency = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-d") || !strcmp(argv[i], "--distance")) {
-            distance = atoi(argv[++i]);
+            distance = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-o") || !strcmp(argv[i], "--outfile-base")) {
-            outfbase = std::string(argv[++i]);
+            outfbase = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--reference")) {
-            refpath = std::string(argv[++i]);
+            refpath = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--header-delimiter")) {
-            fasta_header_delimiter = std::string(argv[++i]);
+            fasta_header_delimiter = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--labels-delimiter")) {
-            anno_labels_delimiter = std::string(argv[++i]);
+            anno_labels_delimiter = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--separately")) {
             separately = true;
         } else if (!strcmp(argv[i], "--kmer-mapping-mode")) {
-            kmer_mapping_mode = atoi(argv[++i]);
+            kmer_mapping_mode = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--num-top-labels")) {
-            num_top_labels = atoi(argv[++i]);
+            num_top_labels = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--port")) {
-            port = atoi(argv[++i]);
+            port = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--suffix")) {
-            suffix = argv[++i];
+            suffix = get_value(i++);
         } else if (!strcmp(argv[i], "--state")) {
-            state = string_to_state(argv[++i]);
+            state = string_to_state(get_value(i++));
 
         } else if (!strcmp(argv[i], "--anno-type")) {
-            anno_type = string_to_annotype(argv[++i]);
+            anno_type = string_to_annotype(get_value(i++));
         } else if (!strcmp(argv[i], "--graph")) {
-            graph_type = string_to_graphtype(argv[++i]);
+            graph_type = string_to_graphtype(get_value(i++));
         } else if (!strcmp(argv[i], "--rename-cols")) {
-            rename_instructions_file = std::string(argv[++i]);
+            rename_instructions_file = std::string(get_value(i++));
         //} else if (!strcmp(argv[i], "--db-path")) {
-        //    dbpath = std::string(argv[++i]);
+        //    dbpath = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--annotator")) {
-            infbase_annotators.emplace_back(argv[++i]);
+            infbase_annotators.emplace_back(get_value(i++));
         } else if (!strcmp(argv[i], "-i") || !strcmp(argv[i], "--infile-base")) {
-            infbase = std::string(argv[++i]);
+            infbase = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--to-adj-list")) {
             to_adj_list = true;
         } else if (!strcmp(argv[i], "--to-fasta")) {
@@ -189,13 +202,13 @@ Config::Config(int argc, const char *argv[]) {
             to_fasta = true;
             unitigs = true;
         } else if (!strcmp(argv[i], "--header")) {
-            header = std::string(argv[++i]);
+            header = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--prune-tips")) {
-            min_tip_size = atoi(argv[++i]);
+            min_tip_size = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--prune-unitigs")) {
-            min_unitig_median_kmer_abundance = atoi(argv[++i]);
+            min_unitig_median_kmer_abundance = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--fallback")) {
-            fallback_abundance_cutoff = atoi(argv[++i]);
+            fallback_abundance_cutoff = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--count-dummy")) {
             count_dummy = true;
         } else if (!strcmp(argv[i], "--clear-dummy")) {
@@ -203,38 +216,38 @@ Config::Config(int argc, const char *argv[]) {
         } else if (!strcmp(argv[i], "--internal")) {
             internal = true;
         } else if (!strcmp(argv[i], "-l") || !strcmp(argv[i], "--len-suffix")) {
-            suffix_len = atoi(argv[++i]);
+            suffix_len = atoi(get_value(i++));
         //} else if (!strcmp(argv[i], "-t") || !strcmp(argv[i], "--threads")) {
-        //    num_threads = atoi(argv[++i]);
+        //    num_threads = atoi(get_value(i++));
         //} else if (!strcmp(argv[i], "--debug")) {
         //    debug = true;
         } else if (!strcmp(argv[i], "--greedy")) {
             greedy_brwt = true;
         } else if (!strcmp(argv[i], "--arity")) {
-            arity_brwt = atoi(argv[++i]);
+            arity_brwt = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--relax-arity")) {
-            relax_arity_brwt = atoi(argv[++i]);
+            relax_arity_brwt = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--cache-size")) {
-            row_cache_size = atoi(argv[++i]);
+            row_cache_size = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             print_usage(argv[0], identity);
             exit(0);
         } else if (!strcmp(argv[i], "--label-mask-in")) {
-            label_mask_in.emplace_back(argv[++i]);
+            label_mask_in.emplace_back(get_value(i++));
         } else if (!strcmp(argv[i], "--label-mask-out")) {
-            label_mask_out.emplace_back(argv[++i]);
+            label_mask_out.emplace_back(get_value(i++));
         } else if (!strcmp(argv[i], "--label-mask-out-fraction")) {
-            label_mask_out_fraction = std::stof(argv[++i]);
+            label_mask_out_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--label-filter")) {
-            label_filter.emplace_back(argv[++i]);
+            label_filter.emplace_back(get_value(i++));
         } else if (!strcmp(argv[i], "--call-bubbles")) {
             call_bubbles = true;
         } else if (!strcmp(argv[i], "--accession")) {
-            accession2taxid = std::string(argv[++i]);
+            accession2taxid = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--taxonomy")) {
-            taxonomy_nodes = std::string(argv[++i]);
+            taxonomy_nodes = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--taxonomy-map")) {
-            taxonomy_map = std::string(argv[++i]);
+            taxonomy_map = std::string(get_value(i++));
         } else if (argv[i][0] == '-') {
             fprintf(stderr, "\nERROR: Unknown option %s\n\n", argv[i]);
             print_usage(argv[0], identity);
