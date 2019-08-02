@@ -9,6 +9,8 @@ class Config {
   public:
     Config(int argc, const char *argv[]);
 
+    static constexpr auto UNINITIALIZED_STR = "\0";
+
     bool verbose = false;
     bool print_graph = false;
     bool print_graph_internal_repr = false;
@@ -80,6 +82,7 @@ class Config {
     std::string suffix;
     std::string fasta_header_delimiter;
     std::string anno_labels_delimiter = ":";
+    std::string fasta_anno_comment_delim = UNINITIALIZED_STR;
     std::string annotation_label = "";
     std::string header = "";
     std::string accession2taxid;

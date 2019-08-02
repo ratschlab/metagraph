@@ -101,6 +101,8 @@ Config::Config(int argc, const char *argv[]) {
             filename_anno = true;
         } else if (!strcmp(argv[i], "--anno-header")) {
             fasta_anno = true;
+        } else if (!strcmp(argv[i], "--header-comment-delim")) {
+            fasta_anno_comment_delim = std::string(argv[++i]);
         } else if (!strcmp(argv[i], "--anno-label")) {
             anno_labels.emplace_back(argv[++i]);
         } else if (!strcmp(argv[i], "--coord-binsize")) {
@@ -678,6 +680,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --anno-filename \t\tinclude filenames as annotation labels [off]\n");
             fprintf(stderr, "\t   --anno-header \t\textract annotation labels from headers of sequences in files [off]\n");
+            fprintf(stderr, "\t   --header-comment-delim [STR]\tdelimiter for joining fasta header with comment [off]\n");
             fprintf(stderr, "\t   --header-delimiter [STR]\tdelimiter for splitting annotation header into multiple labels [off]\n");
             fprintf(stderr, "\t   --anno-label [STR]\t\tadd label to annotation for all sequences from the files passed []\n");
             fprintf(stderr, "\n");

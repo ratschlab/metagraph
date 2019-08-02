@@ -153,6 +153,7 @@ void annotate_data(const std::vector<std::string> &files,
                    size_t max_count,
                    bool filename_anno,
                    bool fasta_anno,
+                   const std::string &fasta_anno_comment_delim,
                    const std::string &fasta_header_delimiter,
                    const std::vector<std::string> &anno_labels,
                    bool verbose) {
@@ -224,8 +225,16 @@ void annotate_data(const std::vector<std::string> &files,
                     std::vector<std::string> labels;
 
                     if (fasta_anno) {
-                        labels = utils::split_string(read_stream->name.s,
-                                                     fasta_header_delimiter);
+                        labels = utils::split_string(
+                            fasta_anno_comment_delim != Config::UNINITIALIZED_STR
+                                && read_stream->comment.l
+                                    ? utils::join_strings(
+                                        { read_stream->name.s, read_stream->comment.s },
+                                        fasta_anno_comment_delim,
+                                        true)
+                                    : read_stream->name.s,
+                            fasta_header_delimiter
+                        );
                     }
                     if (filename_anno) {
                         labels.push_back(file);
@@ -816,10 +825,8 @@ std::string form_client_reply(const std::string &received_message,
             read_fasta_from_string(
                 fasta.asString(),
                 [&](kseq_t *read_stream) {
-                    execute_server_query(
-                        std::string(read_stream->name.s),
-                        std::string(read_stream->seq.s)
-                    );
+                    execute_server_query(read_stream->name.s,
+                                         read_stream->seq.s);
                 }
             );
         } else {
@@ -1279,6 +1286,7 @@ int main(int argc, const char *argv[]) {
                               config->max_count,
                               config->filename_anno,
                               config->fasta_anno,
+                              config->fasta_anno_comment_delim,
                               config->fasta_header_delimiter,
                               config->anno_labels,
                               config->verbose);
@@ -1305,6 +1313,7 @@ int main(int argc, const char *argv[]) {
                                           config->max_count,
                                           config->filename_anno,
                                           config->fasta_anno,
+                                          config->fasta_anno_comment_delim,
                                           config->fasta_header_delimiter,
                                           config->anno_labels,
                                           config->verbose);
@@ -1429,7 +1438,7 @@ int main(int argc, const char *argv[]) {
                     [&](kseq_t *read_stream) {
                         thread_pool.enqueue(execute_query,
                             std::to_string(seq_count++) + "\t"
-                                + std::string(read_stream->name.s),
+                                + read_stream->name.s,
                             std::string(read_stream->seq.s),
                             config->count_labels,
                             config->suppress_unlabeled,
@@ -2423,7 +2432,7 @@ int main(int argc, const char *argv[]) {
 
                         // since we set aln_len = read_stream->seq.l, we only get a single hit vector
                         auto graphindices = graph->align_fuzzy(
-                            std::string(read_stream->seq.s, read_stream->seq.l),
+                            read_stream->seq.s,
                             aln_len,
                             config->distance
                         );
