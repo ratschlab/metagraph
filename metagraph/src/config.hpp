@@ -67,6 +67,8 @@ class Config {
 
     double discovery_fraction = 1.0;
     double label_mask_out_fraction = 0.0;
+    double min_count_quantile = 0.;
+    double max_count_quantile = 1.;
 
     std::vector<std::string> fname;
     std::vector<std::string> anno_labels;

@@ -685,7 +685,6 @@ void print_stats(const Annotator &annotation) {
     std::cout << "========================================================" << std::endl;
 }
 
-
 template <class Callback, class CountedKmer, class Loop>
 void parse_sequences(const std::vector<std::string> &files,
                      const Config &config,
@@ -711,6 +710,30 @@ void parse_sequences(const std::vector<std::string> &files,
                                    config.reverse);
         } else if (utils::get_filetype(file) == "KMC") {
             bool warning_different_k = false;
+
+            auto min_count = config.min_count;
+            auto max_count = config.max_count;
+
+            if (config.min_count_quantile > 0 || config.max_count_quantile < 1) {
+                std::unordered_map<uint64_t, uint64_t> count_hist;
+                kmc::read_kmers(
+                    file,
+                    [&](std::string&&, uint32_t count) {
+                        count_hist[count]++;
+                    }
+                );
+
+                if (config.min_count_quantile > 0)
+                    min_count = get_quantile(count_hist, config.min_count_quantile);
+                if (config.max_count_quantile < 1)
+                    max_count = get_quantile(count_hist, config.max_count_quantile) + 1;
+
+                if (verbose)
+                    std::cout << "Calculated k-mer count quantiles:\n"
+                              << "min: " << min_count << "\n"
+                              << "max: " << max_count << std::endl;
+            }
+
             kmc::read_kmers(
                 file,
                 [&](std::string&& sequence, uint32_t count) {
@@ -723,8 +746,8 @@ void parse_sequences(const std::vector<std::string> &files,
                     }
                     call_kmer(std::move(sequence), count);
                 },
-                config.min_count,
-                config.max_count
+                min_count,
+                max_count
             );
         } else if (utils::get_filetype(file) == "FASTA"
                     || utils::get_filetype(file) == "FASTQ") {
