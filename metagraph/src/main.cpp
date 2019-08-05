@@ -739,10 +739,9 @@ void parse_sequences(const std::vector<std::string> &files,
                 if (config.max_count_quantile < 1)
                     max_count = utils::get_quantile(count_hist_v, config.max_count_quantile) + 1;
 
-                if (config.verbose)
-                    std::cout << "Calculated k-mer count quantiles:\n"
-                              << "min: " << min_count << "\n"
-                              << "max: " << max_count << std::endl;
+                std::cout << "Calculated k-mer count quantiles:\n"
+                          << "min: " << min_count << "\n"
+                          << "max: " << max_count << std::endl;
             }
 
             kmc::read_kmers(
