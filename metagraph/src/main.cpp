@@ -1,4 +1,5 @@
 #include <json/json.h>
+#include <ips4o.hpp>
 
 #include "unix_tools.hpp"
 #include "config.hpp"
@@ -723,12 +724,22 @@ void parse_sequences(const std::vector<std::string> &files,
                     }
                 );
 
-                if (config.min_count_quantile > 0)
-                    min_count = get_quantile(count_hist, config.min_count_quantile);
-                if (config.max_count_quantile < 1)
-                    max_count = get_quantile(count_hist, config.max_count_quantile) + 1;
+                std::vector<std::pair<uint64_t, uint64_t>> count_hist_v(count_hist.begin(),
+                                                                        count_hist.end());
 
-                if (verbose)
+                ips4o::parallel::sort(count_hist_v.begin(), count_hist_v.end(),
+                    [](const auto &first, const auto &second) {
+                        return first.first < second.first;
+                    },
+                    config.parallel
+                );
+
+                if (config.min_count_quantile > 0)
+                    min_count = utils::get_quantile(count_hist_v, config.min_count_quantile);
+                if (config.max_count_quantile < 1)
+                    max_count = utils::get_quantile(count_hist_v, config.max_count_quantile) + 1;
+
+                if (config.verbose)
                     std::cout << "Calculated k-mer count quantiles:\n"
                               << "min: " << min_count << "\n"
                               << "max: " << max_count << std::endl;

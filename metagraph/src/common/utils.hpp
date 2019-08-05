@@ -445,7 +445,7 @@ namespace utils {
             sum += pair.second;
         }
 
-        uint64_t threshold = q * sum;
+        double threshold = q * sum;
         uint64_t partial_sum = 0;
 
         for (const auto &pair : count_hist) {
