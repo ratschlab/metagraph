@@ -23,6 +23,12 @@ using Vector = std::vector<T>;
 typedef std::vector<uint32_t> SmallVector;
 #endif
 
+// Branch prediction helper macros
+#ifndef LIKELY
+#define LIKELY(condition) __builtin_expect(static_cast<bool>(condition), 1)
+#define UNLIKELY(condition) __builtin_expect(static_cast<bool>(condition), 0)
+#endif
+
 #include "serialization.hpp"
 #include "binary_matrix.hpp"
 
