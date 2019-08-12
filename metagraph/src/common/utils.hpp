@@ -437,7 +437,7 @@ namespace utils {
 
         assert(std::is_sorted(count_hist.begin(), count_hist.end(),
                               [](const auto &first, const auto &second) {
-                                    return first.first < second.first;
+                                  return first.first < second.first;
                               }));
 
         uint64_t sum = 0;
@@ -445,7 +445,7 @@ namespace utils {
             sum += pair.second;
         }
 
-        double threshold = q * sum;
+        const double threshold = q * sum;
         uint64_t partial_sum = 0;
 
         for (const auto &pair : count_hist) {
