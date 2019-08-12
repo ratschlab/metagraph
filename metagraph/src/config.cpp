@@ -141,6 +141,10 @@ Config::Config(int argc, const char *argv[]) {
             min_count = std::max(atoi(get_value(i++)), 1);
         } else if (!strcmp(argv[i], "--max-count")) {
             max_count = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--min-count-q")) {
+            min_count_quantile = std::max(std::stod(get_value(i++)), 0.);
+        } else if (!strcmp(argv[i], "--max-count-q")) {
+            max_count_quantile = std::min(std::stod(get_value(i++)), 1.);
         } else if (!strcmp(argv[i], "--mem-cap-gb")) {
             memory_available = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--dump-raw-anno")) {
@@ -550,6 +554,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for build:\n");
             fprintf(stderr, "\t   --min-count [INT] \tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \tmax k-mer abundance, excluding [inf]\n");
+            fprintf(stderr, "\t   --min-count-q [INT] \tmin k-mer abundance quantile (min-count is used by default) [0.0]\n");
+            fprintf(stderr, "\t   --max-count-q [INT] \tmax k-mer abundance quantile (max-count is used by default) [1.0]\n");
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
             fprintf(stderr, "\t-r --reverse \t\tprocess reverse complement sequences as well [off]\n");
             fprintf(stderr, "\n");

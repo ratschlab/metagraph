@@ -429,6 +429,35 @@ namespace utils {
 
     template<class T> struct dependent_false : std::false_type {};
 
+
+    template <typename T>
+    T get_quantile(const std::vector<std::pair<T, uint64_t>> &count_hist, double q) {
+        assert(q >= 0.0);
+        assert(q <= 1.0);
+
+        assert(std::is_sorted(count_hist.begin(), count_hist.end(),
+                              [](const auto &first, const auto &second) {
+                                  return first.first < second.first;
+                              }));
+
+        uint64_t sum = 0;
+        for (const auto &pair : count_hist) {
+            sum += pair.second;
+        }
+
+        const double threshold = q * sum;
+        uint64_t partial_sum = 0;
+
+        for (const auto &pair : count_hist) {
+            partial_sum += pair.second;
+            if (partial_sum >= threshold)
+                return pair.first;
+        }
+
+        assert(false);
+        return count_hist.back().first;
+    }
+
 } // namespace utils
 
 template <typename T>

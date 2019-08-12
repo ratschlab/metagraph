@@ -1,4 +1,5 @@
 #include <json/json.h>
+#include <ips4o.hpp>
 
 #include "unix_tools.hpp"
 #include "config.hpp"
@@ -685,7 +686,6 @@ void print_stats(const Annotator &annotation) {
     std::cout << "========================================================" << std::endl;
 }
 
-
 template <class Callback, class CountedKmer, class Loop>
 void parse_sequences(const std::vector<std::string> &files,
                      const Config &config,
@@ -711,6 +711,41 @@ void parse_sequences(const std::vector<std::string> &files,
                                    config.reverse);
         } else if (utils::get_filetype(file) == "KMC") {
             bool warning_different_k = false;
+
+            auto min_count = config.min_count;
+            auto max_count = config.max_count;
+
+            if (config.min_count_quantile > 0 || config.max_count_quantile < 1) {
+                std::unordered_map<uint64_t, uint64_t> count_hist;
+                kmc::read_kmers(
+                    file,
+                    [&](std::string&&, uint32_t count) {
+                        count_hist[count]++;
+                    }
+                );
+
+                if (count_hist.size()) {
+                    std::vector<std::pair<uint64_t, uint64_t>> count_hist_v(count_hist.begin(),
+                                                                            count_hist.end());
+
+                    ips4o::parallel::sort(count_hist_v.begin(), count_hist_v.end(),
+                        [](const auto &first, const auto &second) {
+                            return first.first < second.first;
+                        },
+                        config.parallel
+                    );
+
+                    if (config.min_count_quantile > 0)
+                        min_count = utils::get_quantile(count_hist_v, config.min_count_quantile);
+                    if (config.max_count_quantile < 1)
+                        max_count = utils::get_quantile(count_hist_v, config.max_count_quantile);
+
+                    std::cout << "Used k-mer count thresholds:\n"
+                              << "min (including): " << min_count << "\n"
+                              << "max (excluding): " << max_count << std::endl;
+                }
+            }
+
             kmc::read_kmers(
                 file,
                 [&](std::string&& sequence, uint32_t count) {
@@ -723,8 +758,8 @@ void parse_sequences(const std::vector<std::string> &files,
                     }
                     call_kmer(std::move(sequence), count);
                 },
-                config.min_count,
-                config.max_count
+                min_count,
+                max_count
             );
         } else if (utils::get_filetype(file) == "FASTA"
                     || utils::get_filetype(file) == "FASTQ") {
