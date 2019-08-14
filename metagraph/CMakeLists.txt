@@ -401,6 +401,15 @@ target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template ${DEATH_TE
 
 add_test(NAME unit_tests COMMAND unit_tests)
 
+# A trick to compile everything in parallel even before linking
+if(${CMAKE_BUILD_TYPE} MATCHES DEBUG)
+  add_library(everything
+    ${src_files}
+    "src/main.cpp"
+    ${unit_tests_files}
+    ${experiment_files}
+  )
+endif()
 
 #-------------------
 # Python interfaces
