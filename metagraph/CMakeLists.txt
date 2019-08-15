@@ -91,10 +91,31 @@ if(result)
 endif()
 
 
-# Profile build type
+# Profile with gprof
 set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O1 -g")
 set(CMAKE_EXE_LINKER_FLAGS_PROFILE "-pg -g")
 set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "-pg -g")
+
+# Profile with gperftools
+set(CMAKE_CXX_FLAGS_GPROFILE "-fno-omit-frame-pointer -DNDEBUG -O2 -g")
+set(CMAKE_EXE_LINKER_FLAGS_GPROFILE "-g")
+set(CMAKE_SHARED_LINKER_FLAGS_GPROFILE "-g")
+
+set(PROFILER_LIBRARIES PROFILER_LIBRARIES-NOTFOUND)
+find_library(PROFILER_LIBRARIES
+  NAMES profiler
+  HINTS
+  ENV LD_LIBRARY_PATH
+  PATHS
+    ~/.linuxbrew/lib
+)
+if(${CMAKE_BUILD_TYPE} MATCHES GPROFILE)
+  if(PROFILER_LIBRARIES)
+    set(METALIBS ${METALIBS} -lprofiler)
+  else()
+    message(FATAL_ERROR "Could not find -lprofiler installed")
+  endif()
+endif()
 
 # Debug build type
 set(CMAKE_CXX_FLAGS_DEBUG "-O2 -g")
