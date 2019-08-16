@@ -620,6 +620,108 @@ align_sequences(const DeBruijnGraph &graph,
     );
 }
 
+void map_sequences_in_file(const std::string &file,
+                           const DeBruijnGraph &graph,
+                           std::shared_ptr<DBGSuccinct> dbg,
+                           const Config &config,
+                           const Timer &timer,
+                           ThreadPool *thread_pool = nullptr,
+                           std::mutex *print_mutex = nullptr) {
+    // TODO: multithreaded
+    std::ignore = std::tie(thread_pool, print_mutex);
+
+    Timer data_reading_timer;
+
+    std::function<bool(std::string)> map_kmers;
+    if (dbg) {
+        map_kmers = [&](std::string sequence) {
+            return dbg->get_boss().find(sequence,
+                                        config.discovery_fraction,
+                                        config.kmer_mapping_mode);
+        };
+    } else {
+        map_kmers = [&](std::string sequence) {
+            return graph.find(sequence,
+                              config.discovery_fraction);
+        };
+    }
+
+    read_fasta_file_critical(file, [&](kseq_t *read_stream) {
+        if (config.verbose)
+            std::cout << "Sequence: " << read_stream->seq.s << "\n";
+
+        if (config.query_presence
+                && config.alignment_length == graph.get_k()) {
+            if (config.filter_present) {
+                if (map_kmers(std::string(read_stream->seq.s)))
+                    std::cout << ">" << read_stream->name.s << "\n"
+                                     << read_stream->seq.s << "\n";
+            } else {
+                std::cout << map_kmers(std::string(read_stream->seq.s)) << "\n";
+            }
+            return;
+        }
+
+        assert(config.alignment_length <= graph.get_k());
+
+        std::vector<uint64_t> graphindices;
+        if (config.alignment_length == graph.get_k()) {
+            graph.map_to_nodes(
+                read_stream->seq.s,
+                [&](const auto &node) { graphindices.emplace_back(node); }
+            );
+        } else {
+            graphindices = dbg->get_boss().map_to_nodes(
+                read_stream->seq.s,
+                config.alignment_length
+            );
+        }
+
+        size_t num_discovered = std::count_if(
+            graphindices.begin(), graphindices.end(),
+            [](const auto &x) { return x > 0; }
+        );
+
+        const size_t num_kmers = graphindices.size();
+
+        if (config.query_presence) {
+            const size_t min_kmers_discovered =
+                num_kmers - num_kmers * (1 - config.discovery_fraction);
+            if (config.filter_present) {
+                if (num_discovered >= min_kmers_discovered)
+                    std::cout << ">" << read_stream->name.s << "\n"
+                                     << read_stream->seq.s << "\n";
+            } else {
+                std::cout << (num_discovered >= min_kmers_discovered) << "\n";
+            }
+            return;
+        }
+
+        if (config.count_kmers) {
+            std::cout << "Kmers matched (discovered/total): "
+                      << num_discovered << "/"
+                      << num_kmers << "\n";
+            return;
+        }
+
+        for (size_t i = 0; i < graphindices.size(); ++i) {
+            assert(i + config.alignment_length <= read_stream->seq.l);
+            std::cout << std::string(read_stream->seq.s + i,
+                                     config.alignment_length);
+            std::cout << ": " << graphindices[i] << "\n";
+        }
+    }, config.reverse);
+
+    if (config.verbose) {
+        std::cout << "File processed in "
+                  << data_reading_timer.elapsed()
+                  << "sec, current mem usage: "
+                  << (get_curr_RSS() >> 20) << " MiB"
+                  << ", total time: " << timer.elapsed()
+                  << "sec" << std::endl;
+    }
+}
+
 
 void print_boss_stats(const BOSS &boss_graph,
                       bool count_dummy = false,
@@ -2470,6 +2572,10 @@ int main(int argc, const char *argv[]) {
             if (dbg)
                 dbg->reset_mask();
 
+            Timer timer;
+            ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
+            std::mutex print_mutex;
+
             if (config->map_sequences) {
                 if (!config->alignment_length) {
                     config->alignment_length = graph->get_k();
@@ -2485,8 +2591,6 @@ int main(int argc, const char *argv[]) {
                     exit(1);
                 }
 
-                Timer timer;
-
                 if (utils::get_verbose()) {
                     std::cout << "Map sequences against the de Bruijn graph with "
                               << "k = " << graph->get_k() << "\n"
@@ -2495,107 +2599,22 @@ int main(int argc, const char *argv[]) {
                 }
 
                 for (const auto &file : files) {
-                    std::cout << "Map sequences from file " << file << std::endl;
+                    if (utils::get_verbose())
+                        std::cout << "Map sequences from file " << file << std::endl;
 
-                    Timer data_reading_timer;
-
-                    std::function<bool(std::string)> map_kmers;
-                    if (dbg) {
-                        map_kmers = [&](std::string sequence) {
-                            return dbg->get_boss().find(sequence,
-                                                        config->discovery_fraction,
-                                                        config->kmer_mapping_mode);
-                        };
-                    } else {
-                        map_kmers = [&](std::string sequence) {
-                            return graph->find(sequence,
-                                               config->discovery_fraction);
-                        };
-                    }
-
-                    read_fasta_file_critical(file, [&](kseq_t *read_stream) {
-                        if (config->verbose)
-                            std::cout << "Sequence: " << read_stream->seq.s << "\n";
-
-                        if (config->query_presence
-                                && config->alignment_length == graph->get_k()) {
-                            if (config->filter_present) {
-                                if (map_kmers(std::string(read_stream->seq.s)))
-                                    std::cout << ">" << read_stream->name.s << "\n"
-                                                     << read_stream->seq.s << "\n";
-                            } else {
-                                std::cout << map_kmers(std::string(read_stream->seq.s)) << "\n";
-                            }
-                            return;
-                        }
-
-                        assert(config->alignment_length <= graph->get_k());
-
-                        std::vector<uint64_t> graphindices;
-                        if (config->alignment_length == graph->get_k()) {
-                            graph->map_to_nodes(
-                                read_stream->seq.s,
-                                [&](const auto &node) { graphindices.emplace_back(node); }
-                            );
-                        } else {
-                            graphindices = dbg->get_boss().map_to_nodes(
-                                read_stream->seq.s,
-                                config->alignment_length
-                            );
-                        }
-
-                        size_t num_discovered = std::count_if(
-                            graphindices.begin(), graphindices.end(),
-                            [](const auto &x) { return x > 0; }
-                        );
-
-                        const size_t num_kmers = graphindices.size();
-
-                        if (config->query_presence) {
-                            const size_t min_kmers_discovered =
-                                num_kmers - num_kmers * (1 - config->discovery_fraction);
-                            if (config->filter_present) {
-                                if (num_discovered >= min_kmers_discovered)
-                                    std::cout << ">" << read_stream->name.s << "\n"
-                                                     << read_stream->seq.s << "\n";
-                            } else {
-                                std::cout << (num_discovered >= min_kmers_discovered) << "\n";
-                            }
-                            return;
-                        }
-
-                        if (config->count_kmers) {
-                            std::cout << "Kmers matched (discovered/total): "
-                                      << num_discovered << "/"
-                                      << num_kmers << "\n";
-                            return;
-                        }
-
-                        for (size_t i = 0; i < graphindices.size(); ++i) {
-                            assert(i + config->alignment_length <= read_stream->seq.l);
-                            std::cout << std::string(read_stream->seq.s + i,
-                                                     config->alignment_length);
-                            std::cout << ": " << graphindices[i] << "\n";
-                        }
-                    }, config->reverse);
-
-                    if (config->verbose) {
-                        std::cout << "File processed in "
-                                  << data_reading_timer.elapsed()
-                                  << "sec, current mem usage: "
-                                  << (get_curr_RSS() >> 20) << " MiB"
-                                  << ", total time: " << timer.elapsed()
-                                  << "sec" << std::endl;
-                    }
+                    map_sequences_in_file(file,
+                                          *graph,
+                                          dbg,
+                                          *config,
+                                          timer,
+                                          &thread_pool,
+                                          &print_mutex);
                 }
+
+                thread_pool.join();
 
                 return 0;
             }
-
-            ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
-            std::mutex print_mutex;
-
-            Timer timer;
 
             // fix seed length bounds
             if (!config->alignment_min_seed_length || config->alignment_seed_unimems)
@@ -2656,18 +2675,18 @@ int main(int argc, const char *argv[]) {
                                     true)
                                 : std::string(read_stream->name.s)
                     );
+
+                    if (config->verbose) {
+                        std::cout << "File processed in "
+                                  << data_reading_timer.elapsed()
+                                  << "sec, current mem usage: "
+                                  << (get_curr_RSS() >> 20) << " MiB"
+                                  << ", total time: " << timer.elapsed()
+                                  << "sec" << std::endl;
+                    }
                 });
 
                 thread_pool.join();
-
-                if (config->verbose) {
-                    std::cout << "File processed in "
-                              << data_reading_timer.elapsed()
-                              << "sec, current mem usage: "
-                              << (get_curr_RSS() >> 20) << " MiB"
-                              << ", total time: " << timer.elapsed()
-                              << "sec" << std::endl;
-                }
             }
 
             return 0;
