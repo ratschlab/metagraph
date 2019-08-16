@@ -661,9 +661,10 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-kmers \t\tfor each sequence, report the number of k-mers discovered in graph [off]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --query-presence \t\ttest sequences for presence [off]\n");
+            fprintf(stderr, "\t   --query-presence \t\ttest sequences for presence, report as 0 or 1 [off]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of k-mers required to count sequence [1.0]\n");
             fprintf(stderr, "\t   --kmer-mapping-mode \t\tlevel of heuristics to use for mapping k-mers (0, 1, or 2) [0]\n");
+            fprintf(stderr, "\t   --filter-present \t\treport only present input sequences as FASTA [off]\n");
             fprintf(stderr, "\n");
             // fprintf(stderr, "\t-d --distance [INT] \t\tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\n");

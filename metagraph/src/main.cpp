@@ -2466,15 +2466,11 @@ int main(int argc, const char *argv[]) {
             auto graph = load_critical_dbg(config->infbase);
             auto dbg = std::dynamic_pointer_cast<DBGSuccinct>(graph);
 
+            // This speeds up mapping, and allows for node suffix matching
+            if (dbg)
+                dbg->reset_mask();
+
             if (config->map_sequences) {
-                if (!dbg) {
-                    std::cerr << "Error: this mode is only supported for DBGSuccinct"
-                              << std::endl;
-                    exit(1);
-                }
-
-                const auto& boss = dbg->get_boss();
-
                 if (!config->alignment_length) {
                     config->alignment_length = graph->get_k();
                 } else if (config->alignment_length > graph->get_k()) {
@@ -2483,17 +2479,39 @@ int main(int argc, const char *argv[]) {
                     config->alignment_length = graph->get_k();
                 }
 
+                if (!dbg && config->alignment_length != graph->get_k()) {
+                    std::cerr << "Error: matching k-mers shorter than k only supported for DBGSuccinct"
+                              << std::endl;
+                    exit(1);
+                }
+
                 Timer timer;
 
-                std::cout << "Map sequences against the de Bruijn graph with ";
-                std::cout << "k=" << graph->get_k() << "\n"
-                          << "Length of mapped k-mers: "
-                          << config->alignment_length << std::endl;
+                if (utils::get_verbose()) {
+                    std::cout << "Map sequences against the de Bruijn graph with "
+                              << "k = " << graph->get_k() << "\n"
+                              << "Length of mapped k-mers: "
+                              << config->alignment_length << std::endl;
+                }
 
                 for (const auto &file : files) {
                     std::cout << "Map sequences from file " << file << std::endl;
 
                     Timer data_reading_timer;
+
+                    std::function<bool(std::string)> map_kmers;
+                    if (dbg) {
+                        map_kmers = [&](std::string sequence) {
+                            return dbg->get_boss().find(sequence,
+                                                        config->discovery_fraction,
+                                                        config->kmer_mapping_mode);
+                        };
+                    } else {
+                        map_kmers = [&](std::string sequence) {
+                            return graph->find(sequence,
+                                               config->discovery_fraction);
+                        };
+                    }
 
                     read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                         if (config->verbose)
@@ -2502,15 +2520,11 @@ int main(int argc, const char *argv[]) {
                         if (config->query_presence
                                 && config->alignment_length == graph->get_k()) {
                             if (config->filter_present) {
-                                if (boss.find(read_stream->seq.s,
-                                              config->discovery_fraction,
-                                              config->kmer_mapping_mode))
+                                if (map_kmers(std::string(read_stream->seq.s)))
                                     std::cout << ">" << read_stream->name.s << "\n"
                                                      << read_stream->seq.s << "\n";
                             } else {
-                                std::cout << boss.find(read_stream->seq.s,
-                                                       config->discovery_fraction,
-                                                       config->kmer_mapping_mode) << "\n";
+                                std::cout << map_kmers(std::string(read_stream->seq.s)) << "\n";
                             }
                             return;
                         }
@@ -2518,12 +2532,16 @@ int main(int argc, const char *argv[]) {
                         assert(config->alignment_length <= graph->get_k());
 
                         std::vector<uint64_t> graphindices;
-
                         if (config->alignment_length == graph->get_k()) {
-                            graphindices = boss.map_to_edges(read_stream->seq.s);
+                            graph->map_to_nodes(
+                                read_stream->seq.s,
+                                [&](const auto &node) { graphindices.emplace_back(node); }
+                            );
                         } else {
-                            graphindices = boss.map_to_nodes(read_stream->seq.s,
-                                                             config->alignment_length);
+                            graphindices = dbg->get_boss().map_to_nodes(
+                                read_stream->seq.s,
+                                config->alignment_length
+                            );
                         }
 
                         size_t num_discovered = std::count_if(
@@ -2573,10 +2591,6 @@ int main(int argc, const char *argv[]) {
 
                 return 0;
             }
-
-            // Reset mask to allow for seeding to dummy k-mers
-            if (dbg)
-                dbg->reset_mask();
 
             ThreadPool thread_pool(std::max(1u, config->parallel) - 1);
             std::mutex print_mutex;

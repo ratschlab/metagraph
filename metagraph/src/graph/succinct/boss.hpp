@@ -6,7 +6,6 @@
 #include <progress_bar.hpp>
 
 #include "sequence_graph.hpp"
-#include "datatypes.hpp"
 #include "config.hpp"
 #include "wavelet_tree.hpp"
 #include "bit_vector.hpp"
@@ -75,8 +74,6 @@ class BOSS {
      * k-mer in the graph. Returns these indices.
      * Default: kmer_size = k
      */
-    // TODO: remove parameter kmer_size and implement the arbitrary k-mer size
-    // functionality in align_fuzzy()
     std::vector<node_index> map_to_nodes(const std::string &sequence,
                                          size_t kmer_size = 0) const;
 
@@ -96,11 +93,6 @@ class BOSS {
     bool find(const std::string &sequence,
               double kmer_discovery_fraction,
               size_t kmer_mapping_mode) const;
-
-    // TODO: revise the implementation, write unit tests
-    std::vector<std::vector<HitInfo>> align_fuzzy(const std::string &sequence,
-                                                  size_t max_distance = 0,
-                                                  size_t alignment_length = 0) const;
 
     template <class... T>
     using Call = typename std::function<void(T...)>;
@@ -543,12 +535,6 @@ class BOSS {
 
         return std::get<2>(match) == end ? std::get<1>(match) : 0;
     }
-
-  private:
-
-    // TODO: revise the implementation, write unit tests
-    std::vector<HitInfo> index_fuzzy(const std::string &str,
-                                     size_t max_distance) const;
 
     void verbose_cout() const {}
 
